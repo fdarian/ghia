@@ -21,6 +21,8 @@ cd packages/native/examples/webview-e2e && bun run e2e         # <webview> on re
 - Tests that need the native addon are `describe.skip` when it is missing (`hasNativeTestRenderer`), so a green run without the addon proves little.
 - Almost none of the tests needs a real window: the test renderer (`createTestRoot`) draws offscreen. The macOS-only pieces (pointer lock, Metal effects, the OS reduced-motion read, the real window drag) were therefore checked against a simulated platform, not a live one. The exceptions open a real window: zed's `native_surface` test and the `<webview>` e2e below.
 
+CI (`.github/workflows/ci.yml`, GitHub's shared `macos-latest` runner) runs a smaller bar than a local run. With `CI` set, `packages/react/vitest.config.ts` skips `font-smoothing`, `transform-text` and `motion-waapi`, whose Chrome references were captured on the development machine's fonts and wall-clock times, and runs `filter-motion`, `events`, `animation-frame-work` and `retained-frame-sources` with two retries and a 15 s test timeout, because they wait on real time. `frame-loop-yields.test.ts`'s slow-frames test is skipped too. Without `CI`, every test runs once with vitest's defaults, and that full run stays the bar before landing.
+
 The perf pass has a guard per issue, each failing on the bug it was written for and not on a clock:
 
 ```bash
