@@ -18,22 +18,7 @@ const realTime = [
 export default defineConfig({
   test: process.env.CI
     ? {
-        projects: [
-          {
-            test: {
-              name: "steady",
-              exclude: [...configDefaults.exclude, ...referencedToThisMachine, ...realTime],
-            },
-          },
-          {
-            test: {
-              name: "real-time",
-              include: realTime,
-              retry: 2,
-              testTimeout: 15_000,
-            },
-          },
-        ],
+        exclude: [...configDefaults.exclude, ...referencedToThisMachine, ...realTime],
       }
     : {},
 })
