@@ -71,6 +71,7 @@ jobs:
       - if: ${{ !cancelled() && steps.build-react.outcome == 'success' }}
         run: bun run test
         working-directory: packages/react
+        timeout-minutes: 45
       - if: ${{ !cancelled() && steps.build-react.outcome == 'success' }}
         run: bun run test
         working-directory: examples
