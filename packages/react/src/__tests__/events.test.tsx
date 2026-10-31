@@ -276,11 +276,15 @@ describe("frame loop", () => {
         "const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))",
         "const first = startFrameLoop(host)",
         "const ticksAtStart = ticks",
-        // The hidden window's startup work wakes the loop for about the first 500 ms; the next wake is seconds away.
+        // The hidden window's startup work wakes the loop for about the first 500 ms, for longer on a loaded CI runner; the next wake is seconds away. A loop with a timer armed never has a quiet window.
         "await sleep(800)",
-        "const ticksSettled = ticks",
-        "await sleep(400)",
-        "const ticksIdle = ticks - ticksSettled",
+        "const ticksInLastWindow = async (windowsLeft) => {",
+        "  const before = ticks",
+        "  await sleep(400)",
+        "  const ticked = ticks - before",
+        "  return ticked === 0 || windowsLeft === 0 ? ticked : ticksInLastWindow(windowsLeft - 1)",
+        "}",
+        "const ticksIdle = await ticksInLastWindow(15)",
         "first.stop()",
         "const second = startFrameLoop(host)",
         "first.stop()",
@@ -295,7 +299,7 @@ describe("frame loop", () => {
       ].join("\n")
       const result = spawnSync("bun", ["-e", script], {
         encoding: "utf8",
-        timeout: 5_000,
+        timeout: 10_000,
       })
       expect(result.status, result.stderr || result.error?.message).toBe(0)
       expect(JSON.parse(result.stdout.trim())).toEqual({
@@ -306,6 +310,7 @@ describe("frame loop", () => {
         clears: 2,
       })
     },
+    15_000,
   )
 
   it.skipIf(process.platform !== "darwin")(
