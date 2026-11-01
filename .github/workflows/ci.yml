@@ -16,9 +16,11 @@ on:
       - LICENSE
       - NOTICE
       - '.changeset/**'
+  # Runs the React tests, which push and pull_request leave out (see react-tests).
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -26,8 +28,12 @@ permissions:
 
 jobs:
   check:
+    # Version Packages PRs only change versions and changelogs.
+    if: github.head_ref != 'changeset-release/main'
     runs-on: macos-latest
     timeout-minutes: 180
+    outputs:
+      build-react: ${{ steps.build-react.outcome }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -60,6 +66,22 @@ jobs:
         run: bun run build
         working-directory: packages/react
 
+      # react-tests runs on other runners and needs what the builds generated.
+      - if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: build
+          path: |
+            packages/native/index.js
+            packages/native/index.cjs
+            packages/native/index.d.ts
+            packages/native/gpuix-native.darwin-arm64.node
+            packages/native/dist
+            packages/solid/dist
+            packages/react/dist
+          retention-days: 1
+          if-no-files-found: error
+
       # A failing suite must not hide the ones after it, but a failed build stops the job:
       # a step after a failure is skipped, so react's build succeeding means all three did.
       - if: ${{ !cancelled() && steps.build-react.outcome == 'success' }}
@@ -70,8 +92,31 @@ jobs:
         working-directory: packages/solid
       - if: ${{ !cancelled() && steps.build-react.outcome == 'success' }}
         run: bun run test
-        working-directory: packages/react
-        timeout-minutes: 45
-      - if: ${{ !cancelled() && steps.build-react.outcome == 'success' }}
-        run: bun run test
         working-directory: examples
+
+  # The React suite is too slow for every push, so it runs on demand only.
+  # A runner has 3 vCPUs and fits two test files at a time; three shards split the suite across runners.
+  # It runs even when a check suite failed, as long as the builds it needs succeeded.
+  react-tests:
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.check.outputs.build-react == 'success' }}
+    needs: check
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      # fonts-option.test.tsx reads a font from zed/assets.
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/setup
+        with: { cache: true }
+      # The artifact's common root is packages/.
+      - uses: actions/download-artifact@v8
+        with:
+          name: build
+          path: packages
+      - run: bun run test -- --shard=${{ matrix.shard }}/3
+        working-directory: packages/react
+        timeout-minutes: 30
