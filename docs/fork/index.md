@@ -43,6 +43,8 @@ Patches 1 and 2 fix two of the three causes of the slow scrolling. Upstream land
 
 ## Documentation map
 
+This covers the fork. Everything else in `docs/` is listed in [docs/index.md](../index.md).
+
 | File | Holds |
 |---|---|
 | [docs/reference.md](../reference.md) | The API contract: the behaviour an app author sees. |
