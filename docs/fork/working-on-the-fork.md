@@ -382,8 +382,12 @@ keeps its own build script for them.
 ## CI and releases
 
 `ci.yml` runs on pushes to `main` and on pull requests (not for changes that only touch Markdown, `docs/`, `LICENSE`, `NOTICE` or
-`.changeset/`) as one `check` job on `macos-latest`: the native build, the Solid and React builds, then `bun run test` in
-`packages/native`, `packages/solid`, `packages/react` and `examples`. A failing suite does not skip the ones after it. The `*.perf.test.tsx` files and the e2e apps are not run.
+`.changeset/`, and not for the `Version Packages` PR, which only changes versions and changelogs) as one `check` job on
+`macos-latest`: the native build, the Solid and React builds, then `bun run test` in `packages/native`, `packages/solid` and
+`examples`. A failing suite does not skip the ones after it. The React suite is not part of that run. Start it on a branch with
+`gh workflow run ci.yml -R fdarian/ghia --ref <branch>`: `check` runs as above and uploads the build output, and the
+`react-tests` job then runs the suite on three runners, a third of the files each, even if a `check` suite failed. Running the
+React suite locally is still the bar before landing ([testing.md](testing.md#test-commands)). The `*.perf.test.tsx` files and the e2e apps are not run.
 There is no format job and no Turbo: a format commit over upstream-derived code would conflict with every pick.
 
 A user-visible change adds a changeset with `pnpm changeset`. Pushing it to `main` runs `release.yml`, where the changesets
