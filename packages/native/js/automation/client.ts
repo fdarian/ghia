@@ -60,41 +60,48 @@ abstract class ValidatedAutomationBackend implements AutomationBackend {
   abstract close(): Promise<void>
 }
 
+/**
+ * What a simulated input returns. The test renderer has delivered every event
+ * when it returns; the live renderer's queued events arrive on a later turn of
+ * the event loop, so it returns a promise that settles once they have.
+ */
+type InputDone = void | Promise<void>
+
 export interface TestAutomationRenderer {
   nativeSimulateClick(
     x: number,
     y: number,
     button?: number,
     modifiers?: string
-  ): void
+  ): InputDone
   nativeSimulateMouseDown(
     x: number,
     y: number,
     button?: number,
     modifiers?: string
-  ): void
+  ): InputDone
   nativeSimulateMouseUp(
     x: number,
     y: number,
     button?: number,
     modifiers?: string
-  ): void
-  nativeSimulateMouseMove(x: number, y: number, modifiers?: string): void
+  ): InputDone
+  nativeSimulateMouseMove(x: number, y: number, modifiers?: string): InputDone
   nativeSimulateScrollWheel(
     x: number,
     y: number,
     deltaX: number,
     deltaY: number,
     modifiers?: string
-  ): void
-  simulateKeystrokes(keystrokes: string): void
-  nativeSimulateKeystrokes(elementId: number, keystrokes: string): void
+  ): InputDone
+  simulateKeystrokes(keystrokes: string): InputDone
+  nativeSimulateKeystrokes(elementId: number, keystrokes: string): InputDone
   nativeSimulateKeyDown(
     elementId: number,
     keystroke: string,
     isHeld?: boolean
-  ): void
-  nativeSimulateKeyUp(elementId: number, keystroke: string): void
+  ): InputDone
+  nativeSimulateKeyUp(elementId: number, keystroke: string): InputDone
   scrollTo(elementId: number, x: number, y: number): void
   getScrollOffset(elementId: number): [number, number] | null
   getAllText(): string[]
@@ -147,8 +154,8 @@ export class InProcessBackend extends ValidatedAutomationBackend {
       })(),
     }),
     cancel: () => ({ ok: true as const }),
-    click: (params) => {
-      this.renderer.nativeSimulateClick(
+    click: async (params) => {
+      await this.renderer.nativeSimulateClick(
         params.x,
         params.y,
         params.button,
@@ -156,8 +163,8 @@ export class InProcessBackend extends ValidatedAutomationBackend {
       )
       return { ok: true as const }
     },
-    mouseDown: (params) => {
-      this.renderer.nativeSimulateMouseDown(
+    mouseDown: async (params) => {
+      await this.renderer.nativeSimulateMouseDown(
         params.x,
         params.y,
         params.button,
@@ -165,8 +172,8 @@ export class InProcessBackend extends ValidatedAutomationBackend {
       )
       return { ok: true as const }
     },
-    mouseUp: (params) => {
-      this.renderer.nativeSimulateMouseUp(
+    mouseUp: async (params) => {
+      await this.renderer.nativeSimulateMouseUp(
         params.x,
         params.y,
         params.button,
@@ -174,12 +181,12 @@ export class InProcessBackend extends ValidatedAutomationBackend {
       )
       return { ok: true as const }
     },
-    mouseMove: (params) => {
-      this.renderer.nativeSimulateMouseMove(params.x, params.y, params.modifiers)
+    mouseMove: async (params) => {
+      await this.renderer.nativeSimulateMouseMove(params.x, params.y, params.modifiers)
       return { ok: true as const }
     },
-    scrollWheel: (params) => {
-      this.renderer.nativeSimulateScrollWheel(
+    scrollWheel: async (params) => {
+      await this.renderer.nativeSimulateScrollWheel(
         params.x,
         params.y,
         params.deltaX,
@@ -188,24 +195,24 @@ export class InProcessBackend extends ValidatedAutomationBackend {
       )
       return { ok: true as const }
     },
-    keystrokes: (params) => {
+    keystrokes: async (params) => {
       if (params.elementId == null) {
-        this.renderer.simulateKeystrokes(params.keys)
+        await this.renderer.simulateKeystrokes(params.keys)
       } else {
-        this.renderer.nativeSimulateKeystrokes(params.elementId, params.keys)
+        await this.renderer.nativeSimulateKeystrokes(params.elementId, params.keys)
       }
       return { ok: true as const }
     },
-    keyDown: (params) => {
-      this.renderer.nativeSimulateKeyDown(
+    keyDown: async (params) => {
+      await this.renderer.nativeSimulateKeyDown(
         params.elementId ?? 0,
         params.key,
         params.isHeld
       )
       return { ok: true as const }
     },
-    keyUp: (params) => {
-      this.renderer.nativeSimulateKeyUp(params.elementId ?? 0, params.key)
+    keyUp: async (params) => {
+      await this.renderer.nativeSimulateKeyUp(params.elementId ?? 0, params.key)
       return { ok: true as const }
     },
     focus: (params) => {
@@ -782,11 +789,18 @@ export interface LiveAutomationRenderer {
   clockResume(): number
 }
 
+const nextLoopTurn = (): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, 0))
+
 export function liveRendererAsTest(
   renderer: LiveAutomationRenderer
 ): TestAutomationRenderer {
-  const afterInput = (): void => {
+  // The live renderer delivers a press or release to JS inside the call but queues a move
+  // until the event loop turns, so a drag stepped without yielding would hear its release
+  // before its moves.
+  const afterInput = async (): Promise<void> => {
     renderer.tick?.()
+    await nextLoopTurn()
   }
   // The live renderer's move takes the held button as an argument; the buttons held by
   // simulated presses are kept here so that every move reports them, as the test renderer's does.
@@ -795,33 +809,33 @@ export function liveRendererAsTest(
     nativeSimulateClick(x, y, button, modifiers) {
       held.delete(button ?? 0)
       renderer.simulateClick(x, y, button, modifiers)
-      afterInput()
+      return afterInput()
     },
     nativeSimulateMouseDown(x, y, button, modifiers) {
       held.add(button ?? 0)
       renderer.simulateMouseDown(x, y, button, modifiers)
-      afterInput()
+      return afterInput()
     },
     nativeSimulateMouseUp(x, y, button, modifiers) {
       held.delete(button ?? 0)
       renderer.simulateMouseUp(x, y, button, modifiers)
-      afterInput()
+      return afterInput()
     },
     nativeSimulateMouseMove(x, y, modifiers) {
       const pressedButton = held.size === 0 ? undefined : Math.min(...held)
       renderer.simulateMouseMove(x, y, pressedButton, modifiers)
-      afterInput()
+      return afterInput()
     },
     nativeSimulateScrollWheel(x, y, deltaX, deltaY, modifiers) {
       renderer.simulateScrollWheel(x, y, deltaX, deltaY, modifiers)
-      afterInput()
+      return afterInput()
     },
     simulateKeystrokes(keys) {
       if (!renderer.simulateKeystrokes) {
         throw new AutomationError("Unsupported", "keystrokes are not live yet")
       }
       renderer.simulateKeystrokes(keys)
-      afterInput()
+      return afterInput()
     },
     nativeSimulateKeystrokes(elementId, keys) {
       if (!renderer.simulateKeystrokes) {
@@ -829,7 +843,7 @@ export function liveRendererAsTest(
       }
       renderer.focusElement(elementId)
       renderer.simulateKeystrokes(keys)
-      afterInput()
+      return afterInput()
     },
     nativeSimulateKeyDown(elementId, key, isHeld) {
       if (!renderer.simulateKeyDown) {
@@ -837,7 +851,7 @@ export function liveRendererAsTest(
       }
       if (elementId > 0) renderer.focusElement(elementId)
       renderer.simulateKeyDown(key, isHeld)
-      afterInput()
+      return afterInput()
     },
     nativeSimulateKeyUp(elementId, key) {
       if (!renderer.simulateKeyUp) {
@@ -845,7 +859,7 @@ export function liveRendererAsTest(
       }
       if (elementId > 0) renderer.focusElement(elementId)
       renderer.simulateKeyUp(key)
-      afterInput()
+      return afterInput()
     },
     scrollTo: (id, x, y) => renderer.scrollTo(id, x, y),
     getScrollOffset: (id) => {

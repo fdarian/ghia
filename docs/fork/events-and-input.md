@@ -51,6 +51,8 @@ A press, a wheel and the file-drag events reach JS synchronously. On macOS and i
 - `preventDefault` on a `mousedown` cancels the focus default and the input editor's focus (it calls `window.prevent_default()`). `pointerdown` does not, as in Chrome.
 - `preventDefault` on a wheel cancels that input's scroll.
 
+A move is not on that list: it is deferred past the input and queued to JS like any other event, so it arrives on a later turn of the event loop than the press before it and the release after it. Input from the OS has time between events and keeps its order. A driver that simulates a whole drag in one synchronous burst would deliver the release before the moves, so `liveRendererAsTest` waits one event-loop turn after every input it simulates (the in-process `dragBy`, `dragTo` and `mouse.drag` on a live window). The test renderer delivers everything inside the call and needs no wait.
+
 The input does not lease the root view (GPUI's input callback is `AnyWindowHandle::update`, and the test renderer dispatches the same way), so every renderer call works from a handler and reads current values, and `document.activeElement` is the focused element. Only a call that starts another input or drives the test app (`simulate*`, `advanceTime`, `captureScreenshot`) cannot run from a handler. A new napi method goes through `sync_dispatch::route` and the `update_*` helpers. See [frames-and-wakes.md](frames-and-wakes.md) for how JS is woken on the other path.
 
 ### Pointer capture
