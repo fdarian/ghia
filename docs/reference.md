@@ -7160,7 +7160,11 @@ so that animation starts at `0`.
   `lineHeight`, `whiteSpace`, `tabSize`, `cursor`, `visibility`, `userSelect`) passes to the
   children, as it shows in each frame: a `motion`, a CSS transition or a keyframes
   animation of one of those on the element moves the children's text, and one of a
-  property that needs a box (`opacity`, `backgroundColor`, a size) does nothing. `getElementBounds` returns `null` for it. As a root, or as a
+  property that needs a box (`opacity`, `backgroundColor`, a size) does nothing. So
+  `opacity: 0` on it hides nothing, as in Chrome, since there is no box to fade and
+  `opacity` does not inherit; `visibility: "hidden"` on it hides its children, which
+  can show themselves again with `visibility: "visible"`. To fade a group of children,
+  give them a wrapper with a box. `getElementBounds` returns `null` for it. As a root, or as a
   `<virtual-list>` row (a list lays out one measured item per row), it has no
   parent to splice into, so its children lay out in an anonymous block in its
   place. Its own listeners still hear every event that passes through it, with

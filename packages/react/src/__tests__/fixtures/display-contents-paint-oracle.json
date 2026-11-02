@@ -1,0 +1,22 @@
+{
+  "opacity 0 on contents": [
+    255,
+    0,
+    0
+  ],
+  "visibility hidden on contents": [
+    255,
+    255,
+    255
+  ],
+  "visible child of hidden contents": [
+    255,
+    0,
+    0
+  ],
+  "opacity 0 on a block": [
+    255,
+    255,
+    255
+  ]
+}

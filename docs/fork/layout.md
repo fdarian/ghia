@@ -141,7 +141,7 @@ Cost: a steady frame pays one comparison per read container. A flip of 500 conta
 
 **Ordering inside a build.** A block is evaluated where the element is built, while hit testing, stacking and observers read the painted style. The `display` a block gives is settled before the paragraph planner and the table role read it (`settle_children`). `order` is settled the same way (`RetainedElement::container_order`, set by `container::settle` and read through `order()`), so a flex or grid parent sorts by the folded order in the frame that lays it out, both when a container shrinks past a query and when it grows back. `display: contents` is the exception for `display`, since the parent splices a child in before it is built.
 
-`display: contents` wrappers hand a container declaration and custom properties to the children spliced out of them (`contents_levels`). The wrapper's style serial is in the child's `contents_key`, so a change in the wrapper is a change in the key of each spliced child. A wrapper that toggles `display: contents` re-tracks the focusable elements below it (`track_focusable_subtree`).
+`opacity` on a `display: contents` wrapper does nothing, since there is no box to fade, and `visibility` passes down to its children; both are as in Chrome (`display-contents-paint-oracle`, pinned in `display-contents.test.tsx`). `display: contents` wrappers hand a container declaration and custom properties to the children spliced out of them (`contents_levels`). The wrapper's style serial is in the child's `contents_key`, so a change in the wrapper is a change in the key of each spliced child. A wrapper that toggles `display: contents` re-tracks the focusable elements below it (`track_focusable_subtree`).
 
 ## Baselines
 

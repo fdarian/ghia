@@ -17,6 +17,11 @@ const oracle = JSON.parse(
   fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "fixtures/display-contents-oracle.json"), "utf8")
 )
 
+/** What Chrome paints for `opacity` and `visibility` on a wrapper: `fixtures/display-contents-paint-oracle.html`, an RGB per case. */
+const paintOracle: Record<string, number[]> = JSON.parse(
+  fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "fixtures/display-contents-paint-oracle.json"), "utf8")
+)
+
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 const RED = "#ff0000"
@@ -435,6 +440,34 @@ describeNative("display: contents", () => {
       expect(ink("word")).toMatchObject({ red: 255, blue: 0 })
       after(600)
       expect(ink("word")).toMatchObject({ red: 255, blue: 0 })
+    })
+
+    describe("a static opacity or visibility, as Chrome paints them", () => {
+      /** On a white page, so what is faded or hidden reads as white. */
+      const onWhite = (wrapper: React.ReactNode) => <div style={{ backgroundColor: "#ffffff", width: 400, height: 200 }}>{wrapper}</div>
+      const paintsLikeChrome = (name: string) => {
+        expect(ink("word").blue).toBe(paintOracle[name][2])
+      }
+
+      it("ignores opacity: 0, which has no box to fade, where a block fades its children", () => {
+        testRoot.render(onWhite(<div style={{ display: "contents", opacity: 0 }}>{word({ color: RED })}</div>))
+        paintsLikeChrome("opacity 0 on contents")
+        expect(ink("word")).toMatchObject({ red: 255, blue: 0 })
+
+        testRoot.render(onWhite(<div style={{ opacity: 0 }}>{word({ color: RED })}</div>))
+        paintsLikeChrome("opacity 0 on a block")
+        expect(ink("word").blue).toBe(255)
+      })
+
+      it("passes visibility: hidden down to its children, and a child can show itself again", () => {
+        testRoot.render(onWhite(<div style={{ display: "contents", visibility: "hidden" }}>{word({ color: RED })}</div>))
+        paintsLikeChrome("visibility hidden on contents")
+        expect(ink("word").blue).toBe(255)
+
+        testRoot.render(onWhite(<div style={{ display: "contents", visibility: "hidden" }}>{word({ color: RED, visibility: "visible" })}</div>))
+        paintsLikeChrome("visible child of hidden contents")
+        expect(ink("word")).toMatchObject({ red: 255, blue: 0 })
+      })
     })
   })
 })
