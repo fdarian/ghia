@@ -643,6 +643,7 @@ terminal.
 | `windowBackground` | `"opaque"` (default), `"transparent"`, `"blurred"` | Window fill. `"blurred"` is the macOS vibrancy backdrop |
 | `trafficLightX` / `trafficLightY` | pixels | Traffic-light origin. The chat example uses `(16, 17)` |
 | `appearance` | `"system"` (default), `"light"`, `"dark"` | Force the app light or dark, or follow the OS. See [Appearance](#appearance) |
+| `kind` | `"normal"` (default), `"panel"` | `"panel"` is a normal window that can be the key window without activating the app, for appearance captures: see [A key window that does not activate the app](#a-key-window-that-does-not-activate-the-app). Anything else throws. `TestRenderer` validates it and opens its offscreen window with it, which is never key either way |
 | `transparent` | boolean | Same as `windowBackground: "transparent"` when that option is unset |
 | `appName` | string | Name inside the macOS `Hide X` and `Quit X` items. Defaults to `title` |
 | `focus` | boolean, default `true` | `false` opens the window behind the active app, like `open -g` |
@@ -651,6 +652,29 @@ terminal.
 | `fonts` | string[] | Font files (`.ttf`, `.otf`) read and passed to [`registerFont()`](#custom-fonts) right after the window opens, so `fontFamily: "Inter"` resolves without a system-wide install. Ghia ships no fonts: the app supplies its own files. Paths resolve against the process's current working directory, so pass absolute ones, e.g. `fileURLToPath(new URL("./fonts/Inter-Regular.ttf", import.meta.url))`. An unreadable path makes `render()` throw. On macOS a variable font follows `fontWeight` and `fontVariationSettings`; elsewhere it only renders its default instance, so pass one static file per weight |
 
 Call it again after a save and it remounts the tree on the same window.
+
+### A key window that does not activate the app
+
+Glass tints, accent colours and the traffic lights look different in a window that is not key, and a window opened
+with `focus: false` is not key, so a capture of it cannot check the key look. `kind: 'panel'` opens the window as a
+non-activating panel (an `NSPanel`): it can be key while another app stays frontmost.
+
+```tsx
+render(<App />, { kind: 'panel', focus: true, windowBackground: 'blurred' })
+```
+
+- **It is a normal window otherwise.** The same titlebar, `resizable`, close and minimise buttons, `appearance`,
+  `windowBackground`, `titlebarTransparent` and traffic-light options, at the normal window level (a panel is not
+  raised above other windows, and it is not an overlay or a popup).
+- **`focus: true` makes it key and does not activate the app.** The frontmost app stays frontmost. The panel then
+  receives the keyboard like any key window, **whatever the owner types**, so open it only for a capture, close it
+  right after, and never leave one open while the owner works. Focus tests use `GPUIX_BACKGROUND=1` instead
+  ([Driving a live window](fork/testing.md#driving-a-live-window)).
+- **`renderer.isWindowKey()`** is whether AppKit reports the window as the key window. `GPUIX_BACKGROUND=1` and
+  `setWindowActive` do not change it. macOS only; it throws elsewhere.
+- **`activateWindow()`** still activates the app, since that is what it asks for.
+- An unknown `kind` makes `render()` (and `createTestRoot()`) throw. On Windows and Linux a panel is a normal window.
+
 
 ### The macOS menu bar
 

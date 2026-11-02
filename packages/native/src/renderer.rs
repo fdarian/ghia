@@ -1942,7 +1942,11 @@ impl GpuixRenderer {
         let app_name = options.app_name.clone().unwrap_or_else(|| title.clone());
         // `focus: false` must also skip `cx.activate`: the window flag only
         // decides key status inside the app, activation is what steals focus.
-        let activate = options.focus.unwrap_or(true);
+        let window_kind = crate::window_kind::window_kind(&options).map_err(Error::from_reason)?;
+        let activate = crate::window_kind::activates_application(
+            &window_kind,
+            options.focus.unwrap_or(true),
+        );
         let window_options = options.clone();
         let appearance = appearance_override(&options).map_err(Error::from_reason)?;
         let displays = crate::screen::all_displays()?;
@@ -1976,7 +1980,7 @@ impl GpuixRenderer {
             );
 
             match cx.open_window(
-                to_gpui_window_options(&window_options, bounds, &displays),
+                to_gpui_window_options(&window_options, window_kind, bounds, &displays),
                 |window, cx| {
                     cx.new(|cx| {
                         let mut view = GpuixView::new(
@@ -2090,7 +2094,11 @@ impl GpuixRenderer {
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
         // `focus: false` must also skip `cx.activate`: the window flag only
         // decides key status inside the app, activation is what steals focus.
-        let activate = options.focus.unwrap_or(true);
+        let window_kind = crate::window_kind::window_kind(&options).map_err(Error::from_reason)?;
+        let activate = crate::window_kind::activates_application(
+            &window_kind,
+            options.focus.unwrap_or(true),
+        );
         let window_options = options.clone();
         let appearance = appearance_override(&options).map_err(Error::from_reason)?;
         let tree = self.tree.clone();
@@ -2130,7 +2138,7 @@ impl GpuixRenderer {
                                 gpui::Bounds::centered(None, size, cx)
                             };
                             let window = match cx.open_window(
-                                to_gpui_window_options(&window_options, bounds, &[]),
+                                to_gpui_window_options(&window_options, window_kind, bounds, &[]),
                                 |window, cx| {
                                     cx.new(|cx| {
                                         let mut view = GpuixView::new(
@@ -2568,6 +2576,19 @@ impl GpuixRenderer {
 
         #[cfg(not(target_os = "macos"))]
         Err(Error::from_reason("getPatchCounters needs macOS"))
+    }
+
+    /// Whether AppKit reports this window as the key window. A `kind: "panel"` window opened
+    /// with `focus: true` is key while another app stays frontmost. Unlike `setWindowActive` and
+    /// `GPUIX_BACKGROUND=1` focus emulation, which change what the page sees, this is the
+    /// platform's answer.
+    #[napi]
+    pub fn is_window_key(&self) -> Result<bool> {
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(|window, _cx| crate::window_key::is_key(window))?;
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason("isWindowKey needs macOS"))
     }
 
     /// Bring the window forward and give it focus. This is how a window opened
@@ -14313,6 +14334,14 @@ pub struct WindowOptions {
     /// Open the window as a Wayland `wlr-layer-shell` surface instead of a
     /// normal window. Linux/Wayland only; ignored elsewhere.
     pub layer_shell: Option<LayerShellOptions>,
+    /// `"normal"` (default) | `"panel"`. A panel is a normal window that can be key without
+    /// activating the app, for captures that need the key look while another app stays
+    /// frontmost. macOS only; elsewhere it is a normal window. Anything else throws.
+    #[cfg_attr(
+        not(all(target_arch = "wasm32", target_os = "unknown")),
+        napi(ts_type = "'normal' | 'panel'")
+    )]
+    pub kind: Option<String>,
 }
 
 impl WindowOptions {
@@ -14345,6 +14374,7 @@ impl Default for WindowOptions {
             show: Some(true),
             app_id: None,
             layer_shell: None,
+            kind: None,
         }
     }
 }
@@ -14454,8 +14484,11 @@ pub(crate) fn appearance_override(
 /// window opens on the display that contains the point (else the nearest), at the point's offset
 /// from that display's top-left, which is what GPUI reads `window_bounds.origin` as when
 /// `display_id` is set. With no displays to place it on (`displays` empty) the origin is the point.
+/// `kind` is `window_kind::window_kind(options)`, which the renderer's constructor has already
+/// checked.
 pub(crate) fn to_gpui_window_options(
     options: &WindowOptions,
+    kind: gpui::WindowKind,
     centred: gpui::Bounds<gpui::Pixels>,
     displays: &[crate::screen::Display],
 ) -> gpui::WindowOptions {
@@ -14520,6 +14553,7 @@ pub(crate) fn to_gpui_window_options(
         is_resizable: options.resizable.unwrap_or(true),
         window_background,
         window_min_size,
+        kind,
         // A visible window that is not key animates at the display rate. A hidden one gets no
         // frames because its display link is stopped.
         inactive_frame_interval: None,
@@ -15232,7 +15266,45 @@ mod window_options_tests {
             origin: gpui::point(gpui::px(0.0), gpui::px(0.0)),
             size: gpui::size(gpui::px(800.0), gpui::px(600.0)),
         };
-        to_gpui_window_options(&options, bounds, displays)
+        let kind = crate::window_kind::window_kind(&options).expect("a valid kind");
+        to_gpui_window_options(&options, kind, bounds, displays)
+    }
+
+    #[test]
+    fn the_kind_option_is_the_gpui_window_kind() {
+        let kind = |value: Option<&str>| {
+            mapped(WindowOptions {
+                kind: value.map(str::to_string),
+                ..WindowOptions::default()
+            })
+            .kind
+        };
+        assert_eq!(kind(None), gpui::WindowKind::Normal);
+        assert_eq!(kind(Some("normal")), gpui::WindowKind::Normal);
+        assert_eq!(kind(Some("panel")), gpui::WindowKind::Panel);
+    }
+
+    #[test]
+    fn a_panel_keeps_the_titlebar_and_sizing_options_of_a_normal_window() {
+        let options = |kind: Option<&str>| WindowOptions {
+            kind: kind.map(str::to_string),
+            title: Some("T".to_string()),
+            resizable: Some(false),
+            titlebar_transparent: Some(true),
+            window_background: Some("blurred".to_string()),
+            ..WindowOptions::default()
+        };
+        let normal = mapped(options(None));
+        let panel = mapped(options(Some("panel")));
+        assert_eq!(panel.is_resizable, normal.is_resizable);
+        assert_eq!(panel.is_minimizable, normal.is_minimizable);
+        assert_eq!(panel.window_background, normal.window_background);
+        assert_eq!(
+            panel.titlebar.as_ref().map(|titlebar| titlebar.appears_transparent),
+            normal.titlebar.as_ref().map(|titlebar| titlebar.appears_transparent)
+        );
+        assert_eq!(panel.app_owns_titlebar_drag, normal.app_owns_titlebar_drag);
+        assert_eq!(panel.focus, normal.focus);
     }
 
     #[test]

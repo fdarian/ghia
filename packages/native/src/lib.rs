@@ -53,6 +53,9 @@ mod syntax;
 mod text;
 mod theme;
 mod universal_style;
+mod window_kind;
+#[cfg(target_os = "macos")]
+mod window_key;
 // Desktop only. HTTP goes through reqwest_client, not crates.io reqwest.
 #[cfg(not(target_family = "wasm"))]
 mod updater;

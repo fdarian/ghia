@@ -437,6 +437,7 @@ fn unset_window_options() -> WindowOptions {
         show: None,
         app_id: None,
         layer_shell: None,
+        kind: None,
     }
 }
 
@@ -690,6 +691,7 @@ impl TestGpuixRenderer {
         );
         let appearance =
             crate::renderer::appearance_override(&options).map_err(Error::from_reason)?;
+        let window_kind = crate::window_kind::window_kind(&options).map_err(Error::from_reason)?;
         let scale_factor = window_scale_factor(scale_factor.unwrap_or(DEFAULT_SCALE_FACTOR))?;
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
         let frameless = options.frameless();
@@ -737,6 +739,7 @@ impl TestGpuixRenderer {
                 y: None,
                 ..options
             },
+            window_kind,
             bounds,
             &[],
         );

@@ -1,8 +1,8 @@
 # Window
 
 What an app sets on the window itself: the system appearance, bundled fonts, `appRegion` drag regions for a frameless
-window, and where a window opens (`x` / `y` and the `screen` displays). All four are small, independent of the rest of
-the fork, and exist because the apps this fork ports already use Electron's equivalents.
+window, where a window opens (`x` / `y` and the `screen` displays) and the panel kind. All five are small, independent of
+the rest of the fork, and exist because the apps this fork ports already use Electron's equivalents.
 
 ## Appearance
 
@@ -112,6 +112,91 @@ exercised in a live window. `performWindowDragWithEvent:` hands the drag to the 
 nothing runs nested inside GPUI's mouse dispatch, and starting the move there is what Chromium, winit, tao, Qt and Zed's
 own title bar do. Whether the mouse-up arrives is unverified, and the bookkeeping reset is right either way. Windows and
 Linux were written, not compiled.
+
+## The panel kind
+
+A window that is not key looks different (the traffic lights go grey, the title dims, glass tints and accent colours
+lose their emphasis), and a window opened with `focus: false` is not key, so a capture of it never shows the key look.
+`GPUIX_BACKGROUND=1` ([testing.md](testing.md#driving-a-live-window)) emulates focus for the page but changes none of that.
+A `GPUIWindow` cannot be made key while the app is inactive (the report: `makeKeyWindow`, an `isKeyWindow` override and
+`_setPreventsActivation:` had no effect, and swapping the class to `NSPanel` afterwards crashed Bun), so the window has to
+be created as the right class: `kind: 'panel'` is `WindowKind::Panel` in zed.
+
+### What it is
+
+- **An `NSPanel` with `NSWindowStyleMaskNonactivatingPanel`,** gpui's own `GPUIPanel` class (the one `PopUp`, `Floating` and
+  `Dialog` use), so it can be key while its application is not active, and clicking it does not activate the
+  application. `window/kind.rs` in `gpui_macos` maps each `WindowKind` to its class, that style bit and its level (a pure
+  function, unit tested).
+- **The level is `NSNormalWindowLevel`.** It is not an overlay: it is not above other apps' windows, it has no popup level,
+  and it is not `isFloatingPanel` (`false`, as `NSPanel`'s default).
+- **Otherwise it is `WindowKind::Normal`:** the same titlebar, `resizable`, close and miniaturize buttons from the
+  options, the same `NSTrackingActiveInKeyWindow` tracking area and `acceptsMouseMovedEvents`, and the same appearance,
+  background, transparency and traffic-light handling, because those are all read from the same options.
+- **`canBecomeKeyWindow` answers yes** (the class builder's method, shared by both classes), where `NSPanel` alone answers
+  yes only for a titled or resizable window.
+- **`hidesOnDeactivate` is set to `NO`.** `NSPanel`'s default is `YES`, which would hide the panel whenever its app is not
+  active, and a panel exists to be shown while another app is the active one. `becomesKeyOnlyIfNeeded` stays at its
+  default (`NO`).
+- **No tabbing:** `tabbingMode` is disallowed and the tabbing identifier is not set, so a panel is never a tab of another
+  window. The collection behaviour is the default, not the popup's `CanJoinAllSpaces` and full-screen auxiliary, so it stays
+  on its own Space like a normal window; Mission Control was not driven (that needs input to another app).
+- **The application is not activated.** `focus: true` makes the panel key (`makeKeyAndOrderFront:`), and the live renderer
+  skips `cx.activate` for a panel (`window_kind::activates_application`), which is what would take the keyboard from the
+  frontmost app. `activateWindow()` still activates the app, since it asks for that.
+- **`focus: false` keeps it not key.** AppKit makes an ordered-front non-activating panel the key window of an inactive app
+  by itself (measured: `isKeyWindow` was true after `orderFront:` alone, with `NSRunningApplication.isActive` false).
+  `gpui_macos` refuses key through `canBecomeKeyWindow` for the length of that call (`REFUSES_KEY_IVAR`), so the option keeps
+  its meaning.
+- **On other platforms it is `Normal`:** Windows and Linux compare kinds with `==` and treat any other kind as a regular
+  window, and the one exhaustive `match` in `gpui_web` lists it with `Normal`.
+- **`GpuixRenderer.isWindowKey()`** (`src/window_key.rs`) reads `-[NSWindow isKeyWindow]` of the window, the platform's
+  answer, which neither emulation nor `setWindowActive` changes.
+- **The test renderer** validates `kind` and passes it to the same `to_gpui_window_options`; its window is real but
+  offscreen and opened with `focus` false, so it is never key and nothing observable differs.
+
+`active_window()` and `ordered_windows()` in `gpui_macos` still test `isKindOfClass: GPUIWindow`, so a panel is not in them,
+as before for `PopUp`, `Floating` and `Dialog`. gpuix has one window and does not read either.
+
+### Proving it
+
+A panel receives whatever the owner types while it is key (see the hazard in [testing.md](testing.md#driving-a-live-window)),
+so the proof is one short run: build and test everything else first, keep the key period under about 2 s, close the window
+right after, and do not loop it. The recipe, in one process with the app's own window and nothing sent to any other app:
+
+1. Read the frontmost application (`lsappinfo front`, a read) and `NSRunningApplication.currentApplication.isActive`.
+2. `render(<App />, { kind: 'panel', focus: true, windowBackground: 'blurred', title })` and wait about 700 ms for a frame.
+3. Read `renderer.isWindowKey()`, the window's class, style mask, level and `hidesOnDeactivate`, the frontmost application again
+   and `isActive`.
+4. Capture the composited window with `CGWindowListCreateImage` on the window's own number (needs no screen-recording
+   permission; `captureScreenshot` is the Metal frame alone and shows no titlebar). Through `bun:ffi`, the window is
+   `[NSApp windows]`'s visible one.
+5. Make it not key by the window's own API: `orderOut:`, wait 100 ms, `orderFront:` (it is visible and not key again, since
+   `orderFront:` does not make a window key). Capture again.
+6. `close` the window.
+
+Measured on macOS 27, a 420 x 260 window at scale 2, `windowBackground: 'blurred'`, with Helium frontmost:
+
+| | before | while key | after not key |
+|---|---|---|---|
+| frontmost application | Helium | Helium | Helium |
+| `NSRunningApplication.isActive` | false | false | false |
+| `isWindowKey()` / `isKeyWindow` | n/a | true / true | false / false |
+
+The window was a `GPUIPanel` with style mask `0x8f` (titled, closable, miniaturizable, resizable, non-activating), level 0,
+`hidesOnDeactivate` false, `isFloatingPanel` false, `becomesKeyOnlyIfNeeded` false, `canBecomeKeyWindow` true. Key to not
+key, in device pixels (840 x 584), a pixel counting as changed when a channel moved by more than 8:
+
+| region (points) | changed | mean channel change | max |
+|---|---|---|---|
+| traffic lights (0..80 x 0..28) | 2267 of 8960 (25.3%) | 19.2 | 211 |
+| the rest of the titlebar strip (title text) | 1538 of 38080 (4.0%) | 3.1 | 96 |
+| below the titlebar | 0 of 443520 | 0 | 0 |
+
+What differs is the titlebar: the red, yellow and green buttons become grey and the title goes from dark to light grey.
+The accent block and the page below the titlebar do not move, because gpuix paints them itself; a `<nativeview>` holding a
+control that follows the key state would show there too. The key period measured about 1.16 s from `render()` to
+`orderOut:`.
 
 ## The macOS menu bar
 

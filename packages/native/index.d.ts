@@ -116,6 +116,13 @@ export declare class GpuixRenderer {
    */
   getPatchCounters(): PatchCounters
   /**
+   * Whether AppKit reports this window as the key window. A `kind: "panel"` window opened
+   * with `focus: true` is key while another app stays frontmost. Unlike `setWindowActive` and
+   * `GPUIX_BACKGROUND=1` focus emulation, which change what the page sees, this is the
+   * platform's answer.
+   */
+  isWindowKey(): boolean
+  /**
    * Bring the window forward and give it focus. This is how a window opened
    * with `show: false` or `focus: false` is revealed later.
    */
@@ -2595,6 +2602,12 @@ export interface WindowOptions {
    * normal window. Linux/Wayland only; ignored elsewhere.
    */
   layerShell?: LayerShellOptions
+  /**
+   * `"normal"` (default) | `"panel"`. A panel is a normal window that can be key without
+   * activating the app, for captures that need the key look while another app stays
+   * frontmost. macOS only; elsewhere it is a normal window. Anything else throws.
+   */
+  kind?: 'normal' | 'panel'
 }
 
 export interface WindowSize {

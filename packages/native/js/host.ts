@@ -2843,6 +2843,7 @@ export type NativeRenderer = MutationHost &
       | "supportsEyeDropper"
       | "openEyeDropper"
       | "activateWindow"
+      | "isWindowKey"
       | "minimizeWindow"
       | "zoomWindow"
       | "toggleFullscreen"

@@ -60,6 +60,24 @@ describeNative("test window options", () => {
   })
 })
 
+describeNative("the kind window option", () => {
+  it("opens a test window for each kind, and renders in it", () => {
+    for (const kind of ["normal", "panel"] as const) {
+      const { renderer, render, unmount } = createTestRoot({ kind, width: 320, height: 240 })
+      render(<text>{`in ${kind}`}</text>)
+      renderer.flush()
+      expect(renderer.getAllText()).toEqual([`in ${kind}`])
+      expect(renderer.getWindowSize()).toEqual({ width: 320, height: 240 })
+      unmount()
+    }
+  })
+
+  it("throws for a kind it does not know, naming the value and the choices", () => {
+    // @ts-expect-error not one of the two kinds
+    expect(() => createTestRoot({ kind: "popup" })).toThrow(/Invalid window kind "popup".*"normal" or "panel"/)
+  })
+})
+
 describeRegions("titlebarTransparent", () => {
   function Bar() {
     const [pressed, setPressed] = React.useState(0)

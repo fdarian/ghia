@@ -213,6 +213,11 @@ A new deviation goes in the section of its topic, as a bullet with a bold lead p
 - **A double click is decided on the second mouse-down**, where Electron and AppKit decide on the second click.
 - **`appRegion` is not a DOM or CSS property.** It is Electron's `-webkit-app-region`, and the standards-track `window-drag` has a different value set; the exception to the DOM/CSS principle is taken because a web port needs it and nothing in the DOM does the job.
 
+### The panel window kind, from Electron
+
+- **`kind: 'panel'` is Electron's `type: 'panel'`, not a DOM or CSS thing.** The exception to the DOM/CSS principle is taken because a capture needs a key window without the app being activated and nothing in the DOM says that. Unlike Electron's, it is at the normal window level and does not stay above other apps' windows.
+- **The test renderer validates `kind` and builds its window with it, but nothing observable differs.** Its window is a real one at an offscreen position, opened with `focus` false, so it is never key either way.
+
 ### Window placement and displays, from Electron
 
 - **The test renderer ignores `x` / `y`.** Its window stays offscreen (origin -10000), so the options are forced to `None`.
