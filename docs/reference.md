@@ -5090,7 +5090,10 @@ trigger. `onPlacement` fires with `{ side, align, availableWidth,
 availableHeight, anchorWidth, anchorHeight }` (whole pixels, the last two being
 the trigger's border box) when any of them changes. Placement is recomputed on
 every layout, so the side changes live as the trigger scrolls, the window
-resizes or the layer's content changes size. A direct child of `<anchored>` can
+resizes or the layer's content changes size. `onPlacement` reaches JS after the
+frame it was measured in, so a `maxHeight` set from it applies a frame later and
+the popup's first frame is laid out at its full content height; use
+`constrainToAvailable` (below) for a cap that holds from the first frame. A direct child of `<anchored>` can
 size or offset itself from the trigger with `width`, `minWidth`, `maxWidth`,
 `height`, `minHeight`, `maxHeight`, any `margin*` or `top` / `right` / `bottom`
 / `left` set to `"anchor-size(width)"` or `"anchor-size(height)"`, resolved

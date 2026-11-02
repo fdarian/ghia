@@ -10,7 +10,7 @@ Also supported: `aspectRatio` (an `<img>` is sized like a replaced element), `or
 
 Animatable properties take the dimension margins and insets of this area and its aspect ratio type.
 
-**Anchored popups** (a gpuix component, not DOM) place like floating-ui, and a deferred one is sized as a portal into `body` (`width: fit-content(<window width>)`, since taffy would size an absolute child in the box of its parent, the trigger's wrapper): `align="center"` is offset once, flip clears the trigger and re-flips live, `onPlacement` reports the available size and the anchor size, and `anchor-size()` is supported.
+**Anchored popups** (a gpuix component, not DOM) place like floating-ui, and a deferred one is sized as a portal into `body` (`width: fit-content(<window width>)`, since taffy would size an absolute child in the box of its parent, the trigger's wrapper): `align="center"` is offset once, flip clears the trigger and re-flips live, `onPlacement` reports the available size and the anchor size (it reaches JS a frame after the placement, so a `maxHeight` set from it applies a frame late; `constrainToAvailable` caps the layer natively in the frame itself, pinned in `anchored-placement.test.tsx`), and `anchor-size()` is supported.
 
 ### Clip and scroll follow the containing block (C2)
 

@@ -1,6 +1,9 @@
+import React from "react"
 import { describe, expect, it } from "vitest"
 import type { AnchoredPlacementEvent } from "@ghia/native/host"
+import { ResizeObserver } from "../index"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
+import type { PublicInstance } from "../types/host.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -149,6 +152,63 @@ describeNative("<anchored> placement", () => {
         expect(box(renderer, "layer")).toMatchObject({ y: 8, height: 388 })
       }
     )
+  })
+
+  it("constrainToAvailable caps the layer in the first frame it is drawn, with no JS round trip", () => {
+    const { render, renderer, unmount } = createTestRoot(WINDOW)
+    try {
+      renderer.setInlineDraws(false)
+      let layer: PublicInstance | null = null
+      render(
+        <div style={{ position: "absolute", left: 100, top: 400, width: 100, height: 30 }}>
+          <anchored
+            gap={4}
+            snapMargin={8}
+            constrainToAvailable
+            ref={(instance: PublicInstance | null) => {
+              layer = instance
+            }}
+          >
+            <div style={{ width: 80, height: 2000 }} />
+          </anchored>
+        </div>
+      )
+      const heights: number[] = []
+      new ResizeObserver((entries) => heights.push(...entries.map((entry) => entry.borderBoxSize[0]!.blockSize))).observe(layer!)
+      for (let frame = 0; frame < 4; frame++) {
+        renderer.drawFrame()
+        renderer.dispatchNativeEvents()
+      }
+      // 388px above the trigger. A first frame laid out at the content's 2000 would show up as an entry.
+      expect(heights).toEqual([388])
+    } finally {
+      unmount()
+    }
+  })
+
+  it("a maxHeight set from onPlacement reaches the layer a frame after the first", () => {
+    const { render, renderer, unmount } = createTestRoot(WINDOW)
+    try {
+      const Popup = () => {
+        const [maxHeight, setMaxHeight] = React.useState<number | undefined>(undefined)
+        return (
+          <div style={{ position: "absolute", left: 100, top: 400, width: 100, height: 30 }}>
+            <anchored gap={4} snapMargin={8} testId="layer" onPlacement={(event) => setMaxHeight(event.availableHeight)}>
+              <div testId="popup" style={{ width: 80, height: 2000, maxHeight }} />
+            </anchored>
+          </div>
+        )
+      }
+      render(<Popup />)
+      const first = box(renderer, "popup").height
+      renderer.flush()
+      renderer.dispatchNativeEvents()
+      renderer.flush()
+      const settled = box(renderer, "popup").height
+      expect({ first, settled }).toEqual({ first: 2000, settled: 388 })
+    } finally {
+      unmount()
+    }
   })
 
   describe("re-places on every layout", () => {
