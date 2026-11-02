@@ -2359,6 +2359,17 @@ impl TestGpuixRenderer {
             .map_err(Error::from_reason)
     }
 
+    /// The size of the content view of a `<nativeview>` when `attach` was delivered to JS, null
+    /// before that.
+    #[napi]
+    pub fn get_nativeview_attach_size(
+        &self,
+        element_id: f64,
+    ) -> Result<Option<crate::custom_elements::nativeview::test_api::NativeviewSize>> {
+        let id = to_element_id(element_id)?;
+        update_view(move |view, _window, _cx| view.nativeview_attach_size(id))?.map_err(Error::from_reason)
+    }
+
     /// Makes the window refuse native surfaces (`false`), as a platform that cannot compose does.
     #[napi]
     pub fn set_native_surfaces_available(&self, available: bool) -> Result<()> {

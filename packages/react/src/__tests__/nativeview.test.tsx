@@ -40,8 +40,10 @@ describeNative("custom element: nativeview", () => {
   const onDetach = () => {
     log.push("detach")
   }
-  /** The queued `attach` reaches JS, as the frame loop delivers it. */
+  /** A queued `attach` reaches JS, as the frame loop delivers it: only one that could not be told in its frame. */
   const deliver = () => renderer().dispatchNativeEvents()
+  const withoutSyncHandler = () =>
+    (renderer() as unknown as { native: { setSyncEventHandler(handler: null): void } }).native.setSyncEventHandler(null)
   /** What native sends when a window closes: a `detach` with no unmount. */
   const detachFromNative = (elementId: number) =>
     (
@@ -102,10 +104,8 @@ describeNative("custom element: nativeview", () => {
   })
 
   describe("attach", () => {
-    it("calls onAttach once with a bigint after the first frame", () => {
+    it("calls onAttach once with a bigint, in the frame that makes the surface", () => {
       testRoot.render(<App attach={onAttach} detach={onDetach} />)
-      expect(log).toEqual([])
-      deliver()
       expect(log).toEqual(["attach"])
       expect(typeof views[0]).toBe("bigint")
       expect(String(views[0])).toBe(String(renderer().getNativeviewSurface(idOf("n"))!.handle))
@@ -113,6 +113,80 @@ describeNative("custom element: nativeview", () => {
       renderer().drawFrame()
       deliver()
       expect(log).toEqual(["attach"])
+    })
+
+    it("hands onAttach a content view that has the size of the element's box", () => {
+      testRoot.render(<App attach={onAttach} style={{ width: 200, height: 100, padding: 10 }} />)
+      expect(renderer().getNativeviewAttachSize(idOf("n"))).toEqual({ width: 200, height: 100 })
+    })
+
+    it("tells a listener that is added after the surface exists in the next frame", () => {
+      testRoot.render(<App />)
+      expect(log).toEqual([])
+      testRoot.render(<App attach={onAttach} />)
+      expect(log).toEqual(["attach"])
+      renderer().drawFrame()
+      expect(log).toEqual(["attach"])
+    })
+
+    it("queues the attach as an event when no sync handler can take it", () => {
+      withoutSyncHandler()
+      testRoot.render(<App attach={onAttach} detach={onDetach} />)
+      expect(log).toEqual([])
+      deliver()
+      expect(log).toEqual(["attach"])
+      expect(typeof views[0]).toBe("bigint")
+    })
+
+    it("lets onAttach write state: the write is a later render and not an error, and the children it shows follow", async () => {
+      const Gated = () => {
+        const [ready, setReady] = React.useState(false)
+        return (
+          <nativeview
+            testId="n"
+            style={{ width: 200, height: 100 }}
+            onAttach={(view) => {
+              onAttach(view)
+              setReady(true)
+            }}
+          >
+            {ready ? <div testId="child" style={{ width: 10, height: 10 }} /> : null}
+          </nativeview>
+        )
+      }
+      testRoot.render(<Gated />)
+      expect(log).toEqual(["attach"])
+      expect(errors).toEqual([])
+      expect(renderer().findByTestId("child")).toBeFalsy()
+      for (let wait = 0; wait < 50 && !renderer().findByTestId("child"); wait++) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      expect(renderer().findByTestId("child")).toBeTruthy()
+      expect(errors).toEqual([])
+    })
+
+    it("cannot call the renderer from onAttach: the call fails as nested, and the surface stays", () => {
+      const failures: unknown[] = []
+      testRoot.render(
+        <App
+          attach={(view) => {
+            onAttach(view)
+            try {
+              renderer().getNativeviewWarnings(0)
+            } catch (error) {
+              failures.push(error)
+            }
+          }}
+          detach={onDetach}
+        />
+      )
+      expect(log).toEqual(["attach"])
+      expect(failures).toHaveLength(1)
+      expect(String(failures[0])).toMatch(/cannot be nested|cannot run inside/)
+      expect(errors).toEqual([])
+      expect(renderer().getNativeviewSurface(idOf("n"))).not.toBeNull()
+      testRoot.render(<App show={false} detach={onDetach} />)
+      expect(log).toEqual(["attach", "detach"])
     })
 
     it("hands each nativeview its own view", () => {
@@ -160,7 +234,15 @@ describeNative("custom element: nativeview", () => {
       expect(log).toEqual(["attach", "detach"])
     })
 
-    it("is not called for an unmount that came before the attach was delivered, and the attach is dropped", () => {
+    it("follows the attach that was told in the frame", () => {
+      testRoot.render(<App attach={onAttach} detach={onDetach} />)
+      testRoot.render(<App show={false} attach={onAttach} detach={onDetach} />)
+      expect(log).toEqual(["attach", "detach"])
+      expect(errors).toEqual([])
+    })
+
+    it("is not called for an unmount that came before a queued attach was delivered, and the attach is dropped", () => {
+      withoutSyncHandler()
       testRoot.render(<App attach={onAttach} detach={onDetach} />)
       testRoot.render(<App show={false} attach={onAttach} detach={onDetach} />)
       deliver()
@@ -168,7 +250,8 @@ describeNative("custom element: nativeview", () => {
       expect(errors).toEqual([])
     })
 
-    it("drops an attach a detach overtook while the element stays", () => {
+    it("drops a queued attach that a detach overtook while the element stays", () => {
+      withoutSyncHandler()
       testRoot.render(<App attach={onAttach} detach={onDetach} />)
       detachFromNative(idOf("n"))
       deliver()
@@ -205,7 +288,7 @@ describeNative("custom element: nativeview", () => {
   })
 
   describe("handlers", () => {
-    it("a new function replaces the old without a second native listener", () => {
+    it("a new function replaces the old without a second native listener, and gets a queued attach", () => {
       const batches: string[] = []
       const native = renderer() as unknown as { applyBatch(batch: string): unknown }
       const applyBatch = native.applyBatch.bind(native)
@@ -215,15 +298,25 @@ describeNative("custom element: nativeview", () => {
       }
       const first: string[] = []
       const second: string[] = []
+      withoutSyncHandler()
       testRoot.render(<App attach={() => first.push("attach")} detach={() => first.push("detach")} />)
       const sent = batches.length
       testRoot.render(<App attach={() => second.push("attach")} detach={() => second.push("detach")} />)
       expect(batches.slice(sent).filter((batch) => batch.includes("setEventListener"))).toEqual([])
 
       deliver()
-      testRoot.render(<App show={false} attach={() => second.push("attach")} />)
       expect(first).toEqual([])
-      expect(second).toEqual(["attach", "detach"])
+      expect(second).toEqual(["attach"])
+    })
+
+    it("a function that replaces the old after the attach was told gets what follows", () => {
+      const first: string[] = []
+      const second: string[] = []
+      testRoot.render(<App attach={() => first.push("attach")} detach={() => first.push("detach")} />)
+      testRoot.render(<App attach={() => second.push("attach")} detach={() => second.push("detach")} />)
+      testRoot.render(<App show={false} />)
+      expect(first).toEqual(["attach"])
+      expect(second).toEqual(["detach"])
     })
 
     it("removing both takes the listeners off native", () => {
@@ -232,9 +325,8 @@ describeNative("custom element: nativeview", () => {
       testRoot.render(<App />)
       expect(events("n").has("attach")).toBe(false)
       expect(events("n").has("detach")).toBe(false)
-      deliver()
       testRoot.render(<App show={false} />)
-      expect(log).toEqual([])
+      expect(log).toEqual(["attach"])
     })
 
     it("removing one keeps both listeners", () => {
@@ -260,9 +352,9 @@ describeNative("custom element: nativeview", () => {
           detach={onDetach}
         />
       )
-      deliver()
       expect(errors).toHaveLength(1)
       expect((errors[0] as Error).message).toBe("attach failed")
+      expect(renderer().getNativeviewSurface(idOf("n"))).not.toBeNull()
       testRoot.render(<App show={false} />)
       expect(log).toEqual(["attach", "detach"])
     })

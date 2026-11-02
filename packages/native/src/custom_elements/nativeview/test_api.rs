@@ -15,6 +15,12 @@ pub struct NativeviewRect {
     pub height: f64,
 }
 
+#[napi(object)]
+pub struct NativeviewSize {
+    pub width: f64,
+    pub height: f64,
+}
+
 /// Where the last composed frame put the native view of a `<nativeview>`, in window pixels.
 #[napi(object)]
 pub struct NativeviewSurfaceReading {
@@ -98,6 +104,14 @@ impl GpuixView {
 
     pub(crate) fn nativeview_warnings(&mut self, id: u64) -> Result<usize, String> {
         Ok(self.nativeview_shared(id)?.borrow().warnings())
+    }
+
+    /// The size of the content view at the moment `attach` was delivered; `None` before that.
+    pub(crate) fn nativeview_attach_size(&mut self, id: u64) -> Result<Option<NativeviewSize>, String> {
+        Ok(self.nativeview_shared(id)?.borrow().attach_size().map(|size| NativeviewSize {
+            width: f64::from(size.width.as_f32()),
+            height: f64::from(size.height.as_f32()),
+        }))
     }
 
     /// The element of every `<nativeview>` that has a surface, by the surface.

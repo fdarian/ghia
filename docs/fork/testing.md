@@ -12,6 +12,7 @@ cd packages/solid && bun run test               # builds, then bun test
 cd examples && bun run test                     # the examples suite; *.perf.test.tsx is excluded
 cd zed && cargo test -p gpui --lib --features test-support   # GPUI's own tests, where the zed commits are tested
 cd zed && cargo test -p gpui_macos --test native_surface       # window composition in a real window (needs an unoccluded display)
+cd zed && cargo test -p gpui_macos --test native_surface_present # a surface's size before its first frame and which frames present with a transaction (a window that is never shown)
 cd packages/native/examples/webview-e2e && bun run e2e         # <webview> on real WKWebViews in a real window
 ```
 

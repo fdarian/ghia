@@ -1120,6 +1120,11 @@ export declare class TestGpuixRenderer {
   getNativeSurfaceEvents(): Array<NativeSurfaceEventReading>
   /** How many warnings a `<nativeview>` has issued. */
   getNativeviewWarnings(elementId: number): number
+  /**
+   * The size of the content view of a `<nativeview>` when `attach` was delivered to JS, null
+   * before that.
+   */
+  getNativeviewAttachSize(elementId: number): NativeviewSize | null
   /** Makes the window refuse native surfaces (`false`), as a platform that cannot compose does. */
   setNativeSurfacesAvailable(available: boolean): void
   /** Make the fonts in a TrueType or OpenType file usable by `fontFamily`. */
@@ -2151,6 +2156,11 @@ export interface NativeSurfaceEventReading {
 export interface NativeviewRect {
   x: number
   y: number
+  width: number
+  height: number
+}
+
+export interface NativeviewSize {
   width: number
   height: number
 }

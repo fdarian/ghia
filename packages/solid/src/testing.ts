@@ -4,6 +4,7 @@ import {
   hasNativeTestRenderer,
   type TestWindowOptions,
 } from "@ghia/native/testing"
+import { createRendererState } from "@ghia/native/host"
 import { createRoot, type Root } from "./root.js"
 
 export * from "@ghia/native/testing"
@@ -21,7 +22,12 @@ export function createTestRoot(options: TestWindowOptions = {}): TestRoot {
   const renderer = new TestRenderer({
     ...options,
     dispatchEvent: (event) => root.dispatch(event),
-    dispatchSyncEvent: (event) => root.dispatchSync(event),
+    dispatchSyncEvent: (event) =>
+      // `attach` runs inside the frame, where no renderer call can be made (see `<nativeview>`): a state write
+      // in `onAttach` is a later batch, as with the live renderer, and not flushed at the end of the event.
+      event.eventType === "attach"
+        ? createRendererState(renderer).dispatchSync(event)
+        : root.dispatchSync(event),
   })
   root = createRoot(renderer, {
     onKeyDown: options.onKeyDown,

@@ -56,10 +56,11 @@ function asHandler<Handler extends (...args: never[]) => void>(
  * whichever handler is present: native sends `detach` only after an `attach` it
  * emitted, and the state that pairs them has to see both.
  *
- * `attach` comes through the event queue and `detach` synchronously, so a
- * teardown can overtake the queued `attach`. Such an `attach` is dropped:
- * handing out the pointer of a surface that is already gone would be a crash.
- * `onDetach` runs only when `onAttach` ran, or always when there is no `onAttach`.
+ * Both arrive synchronously, `attach` in the frame that makes the surface. Where
+ * native cannot call JS from inside a frame it queues `attach` instead, and a
+ * teardown can overtake it. Such an `attach` is dropped: handing out the pointer
+ * of a surface that is already gone would be a crash. `onDetach` runs only when
+ * `onAttach` ran, or always when there is no `onAttach`.
  */
 function listeners(
   onAttach: ((view: bigint) => void) | undefined,

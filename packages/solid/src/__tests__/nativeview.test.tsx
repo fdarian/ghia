@@ -30,9 +30,13 @@ const onDetach = () => {
   log.push("detach")
 }
 
-function mounted(view: () => any) {
+/** `withoutSyncHandler`: native has no way to call JS inside the frame, so `attach` is queued. */
+function mounted(view: () => any, options: { withoutSyncHandler?: boolean } = {}) {
   const app = createTestRoot({ width: 800, height: 600, onError: (error) => errors.push(error) })
   open = app
+  if (options.withoutSyncHandler) {
+    ;(app.renderer as unknown as { native: { setSyncEventHandler(handler: null): void } }).native.setSyncEventHandler(null)
+  }
   app.render(view)
   const renderer = app.renderer
   const idOf = (testId: string) => {
@@ -45,7 +49,7 @@ function mounted(view: () => any) {
     renderer,
     idOf,
     events: (testId: string) => renderer.getElement(idOf(testId))!.events,
-    /** The queued `attach` reaches JS, as the frame loop delivers it. */
+    /** A queued `attach` reaches JS, as the frame loop delivers it: only one that could not be told in its frame. */
     deliver: () => renderer.dispatchNativeEvents(),
     /** What native sends when a window closes: a `detach` with no unmount. */
     detachFromNative: (elementId: number) =>
@@ -101,12 +105,10 @@ describe.skipIf(!hasNativeTestRenderer)("Solid <nativeview>", () => {
   })
 
   describe("attach", () => {
-    it("calls onAttach once with a bigint after the first frame", () => {
+    it("calls onAttach once with a bigint, in the frame that makes the surface", () => {
       const { renderer, idOf, deliver } = mounted(() => (
         <nativeview testId="n" style={{ width: 200, height: 100 }} onAttach={onAttach} onDetach={onDetach} />
       ))
-      expect(log).toEqual([])
-      deliver()
       expect(log).toEqual(["attach"])
       expect(typeof views[0]).toBe("bigint")
       expect(String(views[0])).toBe(String(renderer.getNativeviewSurface(idOf("n"))!.handle))
@@ -114,6 +116,63 @@ describe.skipIf(!hasNativeTestRenderer)("Solid <nativeview>", () => {
       renderer.drawFrame()
       deliver()
       expect(log).toEqual(["attach"])
+    })
+
+    it("hands onAttach a content view that has the size of the element's box", () => {
+      const { renderer, idOf } = mounted(() => (
+        <nativeview testId="n" style={{ width: 200, height: 100, padding: 10 }} onAttach={onAttach} />
+      ))
+      expect(renderer.getNativeviewAttachSize(idOf("n"))).toEqual({ width: 200, height: 100 })
+    })
+
+    it("lets onAttach write state: the write is a later batch, and the children it shows follow", () => {
+      const [ready, setReady] = createSignal(false)
+      const { renderer, app } = mounted(() => (
+        <nativeview
+          style={{ width: 200, height: 100 }}
+          onAttach={(view) => {
+            onAttach(view)
+            setReady(true)
+          }}
+        >
+          <Show when={ready()}>
+            <div testId="child" style={{ width: 10, height: 10 }} />
+          </Show>
+        </nativeview>
+      ))
+      app.flushSync(() => {})
+      expect(log).toEqual(["attach"])
+      expect(errors).toEqual([])
+      expect(renderer.findByTestId("child")).toBeDefined()
+    })
+
+    it("cannot call the renderer from onAttach: the call fails as nested, and the surface stays", () => {
+      const failures: unknown[] = []
+      const [show, setShow] = createSignal(true)
+      const { app, renderer, idOf } = mounted(() => (
+        <Show when={show()}>
+          <nativeview
+            testId="n"
+            style={{ width: 200, height: 100 }}
+            onAttach={(view) => {
+              onAttach(view)
+              try {
+                open!.renderer.getNativeviewWarnings(0)
+              } catch (error) {
+                failures.push(error)
+              }
+            }}
+            onDetach={onDetach}
+          />
+        </Show>
+      ))
+      expect(log).toEqual(["attach"])
+      expect(failures).toHaveLength(1)
+      expect(String(failures[0])).toMatch(/cannot be nested|cannot run inside/)
+      expect(errors).toEqual([])
+      expect(renderer.getNativeviewSurface(idOf("n"))).not.toBeNull()
+      app.flushSync(() => setShow(false))
+      expect(log).toEqual(BOTH)
     })
 
     it("hands each nativeview its own view", () => {
@@ -193,25 +252,41 @@ describe.skipIf(!hasNativeTestRenderer)("Solid <nativeview>", () => {
       expect(log).toEqual(BOTH)
     })
 
-    it("is not called for an unmount that came before the attach was delivered, and the attach is dropped", () => {
+    it("follows the attach that was told in the frame", () => {
       const [show, setShow] = createSignal(true)
-      const { app, deliver } = mounted(() => (
+      const { app } = mounted(() => (
         <Show when={show()}>
           <nativeview style={{ width: 200, height: 100 }} onAttach={onAttach} onDetach={onDetach} />
         </Show>
       ))
+      app.flushSync(() => setShow(false))
+      expect(log).toEqual(BOTH)
+      expect(errors).toEqual([])
+    })
+
+    it("is not called for an unmount that came before a queued attach was delivered, and the attach is dropped", () => {
+      const [show, setShow] = createSignal(true)
+      const { app, deliver } = mounted(
+        () => (
+          <Show when={show()}>
+            <nativeview style={{ width: 200, height: 100 }} onAttach={onAttach} onDetach={onDetach} />
+          </Show>
+        ),
+        { withoutSyncHandler: true }
+      )
       app.flushSync(() => setShow(false))
       deliver()
       expect(log).toEqual([])
       expect(errors).toEqual([])
     })
 
-    it("drops an attach a detach overtook while the element stays", () => {
+    it("drops a queued attach that a detach overtook while the element stays", () => {
       const [attach, setAttach] = createSignal<typeof onAttach | undefined>(onAttach)
       const [detach, setDetach] = createSignal<typeof onDetach | undefined>(onDetach)
-      const { app, idOf, deliver, detachFromNative } = mounted(() => (
-        <nativeview testId="n" style={{ width: 200, height: 100 }} onAttach={attach()} onDetach={detach()} />
-      ))
+      const { app, idOf, deliver, detachFromNative } = mounted(
+        () => <nativeview testId="n" style={{ width: 200, height: 100 }} onAttach={attach()} onDetach={detach()} />,
+        { withoutSyncHandler: true }
+      )
       detachFromNative(idOf("n"))
       deliver()
       expect(log).toEqual([])
@@ -264,17 +339,20 @@ describe.skipIf(!hasNativeTestRenderer)("Solid <nativeview>", () => {
   })
 
   describe("handlers", () => {
-    it("a new function replaces the old without a second native listener", () => {
+    it("a new function replaces the old without a second native listener, and gets a queued attach", () => {
       const first: string[] = []
       const second: string[] = []
       const [attach, setAttach] = createSignal<(view: bigint) => void>(() => first.push("attach"))
       const [detach, setDetach] = createSignal<() => void>(() => first.push("detach"))
       const [show, setShow] = createSignal(true)
-      const { app, renderer, deliver } = mounted(() => (
-        <Show when={show()}>
-          <nativeview style={{ width: 200, height: 100 }} onAttach={attach()} onDetach={detach()} />
-        </Show>
-      ))
+      const { app, renderer, deliver } = mounted(
+        () => (
+          <Show when={show()}>
+            <nativeview style={{ width: 200, height: 100 }} onAttach={attach()} onDetach={detach()} />
+          </Show>
+        ),
+        { withoutSyncHandler: true }
+      )
       const batches: string[] = []
       const native = renderer as unknown as { applyBatch(batch: string): unknown }
       const applyBatch = native.applyBatch.bind(native)
@@ -289,9 +367,8 @@ describe.skipIf(!hasNativeTestRenderer)("Solid <nativeview>", () => {
       expect(batches.filter((batch) => batch.includes("setEventListener"))).toEqual([])
 
       deliver()
-      app.flushSync(() => setShow(false))
       expect(first).toEqual([])
-      expect(second).toEqual(BOTH)
+      expect(second).toEqual(["attach"])
     })
 
     it("removing both takes the listeners off native", () => {
@@ -312,7 +389,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid <nativeview>", () => {
       expect(events("n").has("detach")).toBe(false)
       deliver()
       app.flushSync(() => setShow(false))
-      expect(log).toEqual([])
+      expect(log).toEqual(["attach"])
     })
 
     it("removing one keeps both listeners", () => {
@@ -340,9 +417,10 @@ describe.skipIf(!hasNativeTestRenderer)("Solid <nativeview>", () => {
 
     it("a throw in onAttach is reported and onDetach still follows", () => {
       const [show, setShow] = createSignal(true)
-      const { app, deliver } = mounted(() => (
+      const { app, renderer, deliver } = mounted(() => (
         <Show when={show()}>
           <nativeview
+            testId="n"
             style={{ width: 200, height: 100 }}
             onAttach={() => {
               log.push("attach")
@@ -355,6 +433,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid <nativeview>", () => {
       deliver()
       expect(errors).toHaveLength(1)
       expect((errors[0] as Error).message).toBe("attach failed")
+      expect(renderer.getNativeviewSurface(renderer.findByTestId("n")!.id)).not.toBeNull()
       app.flushSync(() => setShow(false))
       expect(log).toEqual(BOTH)
     })

@@ -12,6 +12,8 @@
 //! The registry holds a [`NativeviewElement`] per element for its state (`nativeEvents`, the
 //! surface and its lifecycle), because a host container has none. The surface is made when the
 //! canvas is first prepainted, and `attach` and `detach` tell JS about it (`lifecycle.rs`).
+//! `attach` is told in that prepaint, sized to the box, so the library's view is in the container
+//! when the frame places it and the two are presented together.
 use std::{cell::RefCell, rc::Rc};
 
 use gpui::prelude::*;
@@ -93,6 +95,9 @@ pub(crate) struct Shared {
     availability: Availability,
     /// The tree and element id `teardown` finds this by.
     tracked: Option<(u64, u64)>,
+    /// The size of the content view when `attach` was delivered, kept where the test renderer
+    /// reads it (a window with a [`SurfaceLog`]).
+    attach_size: Option<gpui::Size<gpui::Pixels>>,
 }
 
 impl Shared {
@@ -105,12 +110,23 @@ impl Shared {
             lifecycle: Lifecycle::default(),
             availability: Availability::default(),
             tracked: None,
+            attach_size: None,
         }
     }
 
-    /// Makes the surface the first time, and tells JS `attach` once it exists and JS listens
-    /// (`listens`). Whether there is a surface to paint.
-    fn prepare(&mut self, window: &mut gpui::Window, cx: &gpui::App, listens: bool) -> bool {
+    /// Makes the surface the first time, sized to `bounds`, and tells JS `attach` once it exists
+    /// and JS listens (`listens`). Whether there is a surface to paint.
+    ///
+    /// `attach` is delivered here, in the prepaint of the frame that makes the surface, so the view
+    /// the library adds is in the container before that frame places it and presents. Like `detach`
+    /// it is delivered without a window or app (`emit_without_window`), since the frame holds them.
+    fn prepare(
+        &mut self,
+        bounds: gpui::Bounds<gpui::Pixels>,
+        window: &mut gpui::Window,
+        cx: &gpui::App,
+        listens: bool,
+    ) -> bool {
         if self.lifecycle.is_closed() {
             return false;
         }
@@ -118,7 +134,7 @@ impl Shared {
             if !self.availability.may_try() {
                 return false;
             }
-            match Self::create_surface(window, cx) {
+            match Self::create_surface(bounds, window, cx) {
                 Ok(attached) => self.attached = Some(attached),
                 Err(reason) => {
                     if let Some(reason) = self.availability.refused(reason) {
@@ -128,16 +144,26 @@ impl Shared {
                 }
             }
         }
-        let handle = self.attached.as_ref().expect("the surface was made above").handle;
+        let attached = self.attached.as_ref().expect("the surface was made above");
+        let (handle, window_id) = (attached.handle, attached.window);
         if self.lifecycle.offer(handle, listens) {
-            crate::renderer::emit_event_full(&self.callback, self.id, "attach", |payload| {
-                payload.native_handle = Some(handle.to_string());
-            });
+            self.attach_size = attached.log.is_some().then(|| attached.surface.content_size()).flatten();
+            let payload = EventPayload {
+                element_id: self.id as f64,
+                event_type: "attach".to_string(),
+                native_handle: Some(handle.to_string()),
+                ..Default::default()
+            };
+            crate::events::sync_dispatch::emit_without_window(window_id, &self.callback, payload);
         }
         true
     }
 
-    fn create_surface(window: &mut gpui::Window, cx: &gpui::App) -> Result<Attached, String> {
+    fn create_surface(
+        bounds: gpui::Bounds<gpui::Pixels>,
+        window: &mut gpui::Window,
+        cx: &gpui::App,
+    ) -> Result<Attached, String> {
         if cx.has_global::<SurfacesRefused>() && cx.global::<SurfacesRefused>().0 {
             return Err("the test renderer refuses native surfaces".to_string());
         }
@@ -147,6 +173,7 @@ impl Shared {
             .map_err(|error| error.to_string())?
             .downcast::<usize>()
             .map_err(|_| "the surface of this window has no content view".to_string())?;
+        window.size_native_surface(&surface, bounds);
         let log = cx.has_global::<SurfaceLog>().then(|| cx.global::<SurfaceLog>().clone());
         if let Some(log) = &log {
             log.0.borrow_mut().push(SurfaceEvent::Created(*handle));
@@ -181,6 +208,10 @@ impl Shared {
 
     pub(crate) fn warnings(&self) -> usize {
         self.availability.warnings()
+    }
+
+    pub(crate) fn attach_size(&self) -> Option<gpui::Size<gpui::Pixels>> {
+        self.attach_size
     }
 }
 
@@ -302,7 +333,7 @@ pub(crate) fn layer(request: LayerRequest) -> gpui::AnyElement {
     let painted = shared;
     gpui::canvas(
         move |bounds, window, cx| {
-            let ready = prepainted.borrow_mut().prepare(window, cx, listens);
+            let ready = prepainted.borrow_mut().prepare(bounds, window, cx, listens);
             ready.then(|| window.insert_hitbox(bounds, hitbox_behavior))
         },
         move |bounds, hitbox, window, _| {

@@ -132,6 +132,7 @@ function calls(r, ids) {
     getMotionValuePlayback: () => r.getMotionValuePlayback(910),
     getNativeSurfaceEvents: () => r.getNativeSurfaceEvents(),
     getNativeviewSurface: () => r.getNativeviewSurface(ids.nativeview),
+    getNativeviewAttachSize: () => r.getNativeviewAttachSize(ids.nativeview),
     getNativeviewWarnings: () => r.getNativeviewWarnings(ids.nativeview),
     getMotionValueVelocity: () => r.getMotionValueVelocity(910),
     getPaintedFrameCount: () => r.getPaintedFrameCount(),

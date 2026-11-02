@@ -32,6 +32,9 @@ export function createTestRoot(
       flushSync(() => handleGpuixEvent(event, renderer))
     },
     dispatchSyncEvent: (event: EventPayload) => {
+      // `attach` runs inside the frame, where no renderer call can be made (see `<nativeview>`): a state write
+      // in `onAttach` is a later render, as with the live renderer, and not flushed at the end of the event.
+      if (event.eventType === "attach") return createRendererState(renderer).dispatchSync(event)
       let result: SyncDispatchResult | undefined
       flushSync(() => {
         result = createRendererState(renderer).dispatchSync(event)

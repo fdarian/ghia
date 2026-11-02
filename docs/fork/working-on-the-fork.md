@@ -303,7 +303,7 @@ invariants below.
 
 - **Files that are the fork's alone** (a conflict there is upstream editing around them): `crates/gpui/src/composition.rs` and
   `composition/{tree,present,hit,tests}.rs`, `crates/gpui/examples/native_surface.rs`, `crates/gpui_apple/src/composition.rs`,
-  `crates/gpui_macos/src/window/composition.rs`, `crates/gpui_macos/tests/native_surface.rs`; in gpuix
+  `crates/gpui_macos/src/window/composition.rs`, `crates/gpui_macos/tests/native_surface{,_present}.rs`; in gpuix
   `src/custom_elements/webview/`, `src/platform/webview_{macos,pulse,url}.rs`, `js/webview.ts`, `examples/webview-e2e/`.
 - **`scene.rs`.** `PaintOperation::NativeSurface` must be recorded (`self.record(...)` in `insert_native_surface`) and replayed in
   both the plain replay and the translated one (`translate` of the placeholder, then `clip_mask` when the replay is clipped), and
@@ -320,7 +320,9 @@ invariants below.
   shut the page out of the pointer.
 - **`platform.rs`.** `PlatformWindow::draw_composed` (default: `draw` the whole scene), `create_native_surface` (default: error),
   and under `test-support` `composition_frame(s)`; `platform/test/window.rs` records composed frames and surface events. A new
-  platform window implementation compiles through the defaults.
+  platform window implementation compiles through the defaults. `PlatformSurfaceAttachment::size_before_placement` (default: nothing)
+  is what `Window::size_native_surface` calls so that a surface made in a prepaint has its box's size before the frame places it;
+  the macOS attachment ignores it once a frame placed the surface.
 - **`gpui_macos` `window/composition.rs`** and its hooks in `window.rs`. Invariants: the window class has `sendEvent:` routed by
   `register_window_input` (and `COMPOSITION_INPUT_IVAR` set once a surface exists, so other windows pay nothing); a pointer event
   bound for a native container is shown to GPUI first and marked `pre_dispatched_event` so `dispatch_view_event` returns `None` the

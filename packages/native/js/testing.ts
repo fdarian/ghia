@@ -421,6 +421,7 @@ interface NativeTestRendererApi
   getNativeviewSurface(elementId: number): NativeviewSurface | null
   getNativeSurfaceEvents(): NativeSurfaceEvent[]
   getNativeviewWarnings(elementId: number): number
+  getNativeviewAttachSize(elementId: number): { width: number; height: number } | null
   setNativeSurfacesAvailable(available: boolean): void
   /** Make a TrueType or OpenType font usable by `fontFamily`. */
   registerFont(bytes: Buffer | Uint8Array): void
@@ -1938,6 +1939,13 @@ export class TestRenderer implements NativeRenderer {
   getNativeviewWarnings(elementId: number): number {
     this.native.flush()
     return this.native.getNativeviewWarnings(elementId)
+  }
+
+  /** The size of the content view of the `<nativeview>` at the moment `onAttach` was called;
+   *  null before that. */
+  getNativeviewAttachSize(elementId: number): { width: number; height: number } | null {
+    this.native.flush()
+    return this.native.getNativeviewAttachSize(elementId)
   }
 
   /** `false` makes the window refuse native surfaces, as a platform that cannot compose does:

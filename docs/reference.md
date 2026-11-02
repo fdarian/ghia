@@ -6469,17 +6469,22 @@ It is a `div` in every other respect: sized, laid out, styled, scrolled and
 hit-tested like one, and its children are ordinary children.
 
 - **`onAttach(view: bigint)`**: the native surface exists; `view` is the address of
-  its content `NSView`. The library adds its own view to it, filling it. Called once
-  per element, asynchronously (after the first frame that shows the surface), and not
-  at all if the element is gone by then.
+  its content `NSView`, already the size of the element's padding box. The library
+  adds its own view to it, filling it (`autoresizingMask` width and height sizable).
+  Called once per element, synchronously, inside the frame that makes the surface:
+  before that frame is presented, so the view and the content around it appear
+  together. Not called at all if the element is gone before its first frame. Like
+  `onDetach` it cannot call Ghia (see below); the state it writes in a component is a
+  later batch, so children that wait for `onAttach` show one frame after the view:
+  render them from the first frame instead.
 - **`onDetach()`**: the surface is about to be taken down. Called synchronously, on
   unmount (inside the update that removes the element) and on window close, exactly
   once for every `onAttach`. `display: none` hides the surface and does not detach; a
   keyed reorder does not detach.
 - **The library must remove and release its view in `onDetach`.** The pointer is
   valid from `onAttach` until `onDetach` returns; using it afterwards is undefined
-  and can crash. Ghia calls from inside `onDetach` fail ("A renderer call cannot be
-  nested…"): touch only your view.
+  and can crash. Ghia calls from inside `onAttach` or `onDetach` fail ("A renderer
+  call cannot be nested…"): touch only your view.
 - **`nativeEvents`** (default off): see Pointer below.
 
 ### Layers and geometry

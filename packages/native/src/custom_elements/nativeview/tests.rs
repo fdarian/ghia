@@ -47,6 +47,16 @@ impl Page {
 
     /// `setup` runs before the first frame.
     fn with_setup(cx: &mut gpui::TestAppContext, elements: Vec<El>, setup: impl FnOnce(&mut gpui::TestAppContext)) -> Self {
+        Self::with_frames(cx, elements, setup, 4)
+    }
+
+    /// A page that has drawn `frames` frames, none presented.
+    fn with_frames(
+        cx: &mut gpui::TestAppContext,
+        elements: Vec<El>,
+        setup: impl FnOnce(&mut gpui::TestAppContext),
+        frames: usize,
+    ) -> Self {
         cx.update(|cx| cx.set_global(super::SurfaceLog::default()));
         setup(cx);
         let tree = Arc::new(Mutex::new(RetainedTree::new()));
@@ -90,10 +100,21 @@ impl Page {
             view
         });
         let page = Self { tree, window, told };
-        for _ in 0..4 {
+        for _ in 0..frames {
             page.draw(cx);
         }
         page
+    }
+
+    fn presented_frames(&self, cx: &mut gpui::TestAppContext) -> usize {
+        cx.update_window(self.window.into(), |_, window, _| window.composition_frames().len()).unwrap()
+    }
+
+    fn attach_size(&self, cx: &mut gpui::TestAppContext, id: u64) -> Option<(f32, f32)> {
+        self.window
+            .update(cx, |view, _, _| view.nativeview_attach_size(id).unwrap())
+            .unwrap()
+            .map(|size| (size.width as f32, size.height as f32))
     }
 
     /// A frame of a view that notified, then the check that nothing judged unchanged was built
@@ -370,6 +391,35 @@ fn attach_is_told_once_with_the_content_view(cx: &mut gpui::TestAppContext) {
     page.draw(cx);
     assert_eq!(page.told("attach"), ["2 0"]);
     assert!(page.told("detach").is_empty());
+}
+
+/// A window draws once as it opens, which presents nothing: with no frame after it, what JS was told is
+/// what that draw told.
+#[gpui::test]
+fn attach_is_told_in_the_draw_that_makes_the_surface_before_any_frame_is_presented(cx: &mut gpui::TestAppContext) {
+    let page = Page::with_frames(cx, vec![el(1, None, "div", ROOT), nativeview(BOX).listening("attach")], |_| {}, 0);
+    assert_eq!(page.surface_events(cx), ["created 0"]);
+    assert_eq!(page.told("attach"), ["2 0"]);
+    assert_eq!(page.presented_frames(cx), 0);
+    page.settle(cx);
+    assert_eq!(page.told("attach"), ["2 0"], "once");
+}
+
+#[gpui::test]
+fn the_content_view_has_the_size_of_the_padding_box_when_attach_is_told(cx: &mut gpui::TestAppContext) {
+    let page = Page::with_frames(cx, vec![el(1, None, "div", ROOT), nativeview(BOX).listening("attach")], |_| {}, 0);
+    assert_eq!(page.attach_size(cx, 2), Some((112., 72.)));
+}
+
+#[gpui::test]
+fn a_listener_added_after_the_surface_exists_is_told_in_a_later_frame(cx: &mut gpui::TestAppContext) {
+    let page = nativeview_page(cx, nativeview(BOX));
+    assert!(page.told("attach").is_empty());
+    assert_eq!(page.attach_size(cx, 2), None);
+    page.listen(2, "attach", true);
+    page.settle(cx);
+    assert_eq!(page.told("attach"), ["2 0"]);
+    assert_eq!(page.attach_size(cx, 2), Some((112., 72.)));
 }
 
 #[gpui::test]
