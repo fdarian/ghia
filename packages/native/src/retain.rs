@@ -45,6 +45,7 @@ use std::sync::Arc;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 mod debug;
+pub(crate) mod gate;
 mod patch;
 
 pub(crate) use patch::Patching;
@@ -779,7 +780,7 @@ pub(crate) struct Sources<'a> {
     pub pass: usize,
     /// How many subtrees gpui has built late (it could not use the recording it had of them) and
     /// how many it has put elsewhere than they were recorded, since the window was made.
-    pub lazy_builds: u64,
+    pub tally: gate::Tally,
     pub relocations: u64,
     /// The frame is built again to be compared with the one that was shown: it is the same frame,
     /// and its roots are planned as that one's were.
@@ -963,6 +964,7 @@ pub(crate) struct Retain {
     planning_wanted: bool,
     backoff: Backoff,
     relocation: Relocation,
+    gate: gate::Gate,
     /// A subtree gpui asked for is being built inside one that is recorded to move: what is in it
     /// is built, since the recording of a subtree in another cannot be put elsewhere on its own.
     inside_relocatable: bool,
@@ -1128,6 +1130,7 @@ enum Kept {
     Shape,
     LiftRun,
     Unmoved,
+    Gated,
 }
 
 impl Kept {
@@ -1150,6 +1153,7 @@ impl Kept {
             Self::Shape => "enter-shape",
             Self::LiftRun => "lift-run",
             Self::Unmoved => "no-longer-moved",
+            Self::Gated => "gated",
         }
     }
 }
@@ -1171,6 +1175,7 @@ impl Retain {
             planning_wanted: !cfg!(test),
             backoff: Backoff::default(),
             relocation: Relocation::default(),
+            gate: gate::Gate::default(),
             inside_relocatable: false,
             pass: 1,
             elements: 0,
@@ -1272,6 +1277,7 @@ impl Retain {
         self.release_dormant(false);
         self.plan.recorded = false;
         self.backoff = Backoff::default();
+        self.gate.forget();
     }
 
     /// Counts as if the exclusions named here, by `Exclusion::name`, were lifted.
@@ -1358,7 +1364,10 @@ impl Retain {
             };
         }
         if sources.pass == 1 && !sources.reference {
-            self.learn_relocation(sources.lazy_builds, sources.relocations);
+            self.learn_relocation(sources.tally.lazy_builds, sources.relocations);
+            if !sources.layout_only && self.gate.learn(sources.tally, self.backs_off()) == gate::Change::Opened {
+                self.records.retain(|id, _| self.gate.sampled(*id));
+            }
         }
         self.elements = sources.tree.elements.len();
         self.backoff.resting = self.enabled && self.rests(&sources);
@@ -2078,6 +2087,7 @@ impl Retain {
             custom_reads_at: 0,
             reads_custom: false,
             records: self.planning
+                && self.gate.samples(entry.id)
                 && self.lifted == 0
                 && self.unit.is_none()
                 && !self.deferred
@@ -2224,6 +2234,9 @@ impl Retain {
             && !(node.scroller.is_some_and(|scroller| scroller.holds(node.id)) && !record.lifts)
         {
             return Err(Kept::Unmoved);
+        }
+        if !self.layout_only && !self.gate.samples(node.id) {
+            return Err(Kept::Gated);
         }
         Ok(record)
     }
@@ -2642,6 +2655,7 @@ impl Retain {
         let candidates = self.finish_session();
         if recorded && self.backs_off() && self.pass == 1 {
             self.back_off(candidates);
+            self.gate.note_roots(self.summary.roots.len(), self.summary.elements_in_roots);
         }
     }
 
@@ -3101,7 +3115,7 @@ mod tests {
             verdicts: 0,
             selection: 0,
             pass: 1,
-            lazy_builds: 0,
+            tally: Default::default(),
             relocations: 0,
             reference: false,
             layout_only: false,
@@ -3179,7 +3193,7 @@ mod tests {
             verdicts: 0,
             selection: 0,
             pass: 1,
-            lazy_builds: 0,
+            tally: Default::default(),
             relocations: 0,
             reference: false,
             layout_only: false,
@@ -3252,7 +3266,7 @@ mod tests {
             verdicts: 0,
             selection: 0,
             pass: 1,
-            lazy_builds: 0,
+            tally: Default::default(),
             relocations: 0,
             reference: false,
             layout_only: false,
@@ -3336,7 +3350,7 @@ mod tests {
             verdicts: 0,
             selection: changes.selection,
             pass: 1,
-            lazy_builds: 0,
+            tally: Default::default(),
             relocations: 0,
             reference: false,
             layout_only: false,
@@ -3472,7 +3486,7 @@ mod tests {
             verdicts: 0,
             selection: 0,
             pass: 1,
-            lazy_builds: 0,
+            tally: Default::default(),
             relocations: 0,
             reference: false,
             layout_only: false,
@@ -3590,7 +3604,7 @@ mod tests {
             verdicts: 0,
             selection: 0,
             pass: 1,
-            lazy_builds: 0,
+            tally: Default::default(),
             relocations: 0,
             reference: false,
             layout_only: false,
@@ -4768,7 +4782,7 @@ mod tests {
             verdicts: 0,
             selection: 0,
             pass: 1,
-            lazy_builds: 0,
+            tally: Default::default(),
             relocations: 0,
             reference: false,
             layout_only,

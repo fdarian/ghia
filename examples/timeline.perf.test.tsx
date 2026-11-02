@@ -181,7 +181,8 @@ describeNative('timeline performance', () => {
       p95Max: BUDGET.noCullP95Ms,
       maxMax: BUDGET.noCullMaxMs,
     })
-  })
+    // 45 frames of a few hundred ms each outlast vitest's 5 s default, which fails the test after the budgets passed.
+  }, 60_000)
 
   it('drags a clip across the timeline', () => {
     const root = mount(true)

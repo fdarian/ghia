@@ -592,6 +592,10 @@ describeNative("a skipped root keeps what its last build lifted", () => {
     // R is relocatable or not by the record of its last build, so a scroll shows which it was: the
     // same one however many frames came before it.
     it(`takes a scroll the same way after any number of idle frames ${name}`, () => {
+      // The retention gate closes on a scroll that replays nothing and opens on the idle frame after it, which
+      // changes what the next scroll builds: this test is of the record, not of the gate.
+      const gateOff = process.env.GPUIX_RETAIN_GATE_OFF
+      process.env.GPUIX_RETAIN_GATE_OFF = "1"
       const kit = setup(<LiftedRows tick={0} rounded={rounded} />)
       try {
         kit.settle()
@@ -616,6 +620,8 @@ describeNative("a skipped root keeps what its last build lifted", () => {
         }
       } finally {
         kit.unmount()
+        if (gateOff === undefined) delete process.env.GPUIX_RETAIN_GATE_OFF
+        else process.env.GPUIX_RETAIN_GATE_OFF = gateOff
       }
     })
   }

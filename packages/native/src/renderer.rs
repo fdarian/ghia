@@ -9225,7 +9225,7 @@ impl GpuixView {
             verdicts: self.dormancy_verdicts(&tree, window),
             selection: self.selection.lock().identity(),
             pass: window.draw_pass(),
-            lazy_builds: window.retained_counters().lazy_builds,
+            tally: crate::retain::gate::Tally::of(&window.retained_counters()),
             relocations: window.retained_counters().relocations,
             reference: false,
             layout_only: false,
@@ -9797,7 +9797,7 @@ impl gpui::Render for GpuixView {
             verdicts: self.dormancy_verdicts(&tree, window),
             selection: self.selection.lock().identity(),
             pass: window.draw_pass(),
-            lazy_builds: window.retained_counters().lazy_builds,
+            tally: crate::retain::gate::Tally::of(&window.retained_counters()),
             relocations: window.retained_counters().relocations,
             reference: window.is_retention_reference(),
             layout_only: window.is_layout_pass(),
@@ -11002,7 +11002,6 @@ fn build_element_unpumped(
         &ctx.inherited.lengths,
     );
     tree.resolved.borrow_mut().record(id, resolved);
-    let (colors, lengths) = (&ctx.inherited.colors, &ctx.inherited.lengths);
     ctx.retain.lift_run(
         style.is_some_and(|style| style.animating_opacity)
             || transform_runs(element, ctx.css_animations, ctx.css_transitions, ctx.motion_states, ctx.motion_values, ctx.now),
@@ -11010,7 +11009,10 @@ fn build_element_unpumped(
     ctx.retain.stacking(|| {
         (
             crate::layout::stacking::lift_z(&resolved, stacking_item),
-            crate::layout::stacking::forms_context(focus_folded.as_deref(), stacking_root, colors, lengths),
+            stacking_root
+                || focus_folded
+                    .as_deref()
+                    .is_some_and(|style| crate::layout::stacking::creates_context(&resolved, style.flex_or_grid_item)),
         )
     });
     // The table this is a part of reads these to share the edges of its grid, and it was built first.
