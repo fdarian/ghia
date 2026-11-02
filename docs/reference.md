@@ -6491,6 +6491,10 @@ paints a first child. An inset `boxShadow` is under the view, which covers it. T
 the element's padding box (the border stays visible around it) and follows the box
 through scroll, resize, `translate` / `scale` transforms and `opacity`;
 `display: none`, `visibility: hidden` and skipped `contentVisibility` hide it.
+An ancestor's `opacity` (held or animating) fades the view with the rest of its subtree
+and the children stay above it; the opacities of all the ancestors multiply, and a
+`filter`, `mask` or `clip-path` ancestor applies to the content around the view, not
+to the view (see [the deviations](./fork/deviations.md#nativeview)).
 
 ### Clipping follows `overflow`
 
