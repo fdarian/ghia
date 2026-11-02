@@ -115,6 +115,16 @@ fn read_drag(source: &Value, values: &MotionValueStore) -> Drag {
     }
 }
 
+/// Whether the drag values of a `layout` prop are held down or were written since the last
+/// frame sampled them. Values that are not bound yet or do not parse are not known not to.
+fn drag_moves(source: &Value, values: &MotionValueStore) -> bool {
+    match drag_ids(source) {
+        Ok(None) => false,
+        Ok(Some(ids)) => read_drag(source, values).active || values.any_written(&ids),
+        Err(_) => true,
+    }
+}
+
 /// What a `layout` prop asks for.
 #[derive(Clone, Debug, PartialEq)]
 struct Config {
@@ -621,14 +631,16 @@ impl LayoutFlips {
     }
 
     /// Whether a frame has to carry a `layout` box on: a glide that has not ended, events that
-    /// the next render sends, or a box JS can drag, whose values nothing else tells a tick about.
+    /// the next render sends, or a drag: one in progress, or whose values were written since the
+    /// last frame sampled them (they reach a box that is not bound to them, and nothing else
+    /// tells a tick that a drag started, moved or ended). A box that is not dragged asks for nothing.
     /// `visible` says whether the element has a box, since none is stepped without one.
-    pub(crate) fn needs_frames(&self, visible: impl Fn(u64) -> bool) -> bool {
+    pub(crate) fn needs_frames(&self, values: &MotionValueStore, visible: impl Fn(u64) -> bool) -> bool {
         let store = self.0.borrow();
         !store.events.is_empty()
             || store.flips.iter().any(|(id, flip)| {
                 flip.config.is_some()
-                    && (flip.track.is_some() || matches!(drag_ids(&flip.source), Ok(Some(_))))
+                    && (flip.track.is_some() || flip.dragged.is_some() || drag_moves(&flip.source, values))
                     && visible(*id)
             })
     }
@@ -1199,28 +1211,53 @@ mod tests {
         render(&flips, &[1]);
         mount(&flips, 1, &json!({ "mode": true, "transition": { "duration": 1.0, "ease": "linear" } }));
         flips.step(1, rect([0.0, 0.0]), [0.0; 2], Drag::default(), true, start).unwrap();
-        assert!(!flips.needs_frames(shown), "a box that never moved asks for nothing");
+        assert!(!flips.needs_frames(&MotionValueStore::default(), shown), "a box that never moved asks for nothing");
 
         render(&flips, &[1]);
         flips.step(1, rect([100.0, 0.0]), [0.0; 2], Drag::default(), true, at(start, 16)).unwrap();
-        assert!(flips.needs_frames(shown), "the glide and its start event");
+        assert!(flips.needs_frames(&MotionValueStore::default(), shown), "the glide and its start event");
         flips.take_events();
-        assert!(flips.needs_frames(shown), "the glide goes on");
-        assert!(!flips.needs_frames(|_| false), "a box with no box of its own is stepped by nobody");
+        assert!(flips.needs_frames(&MotionValueStore::default(), shown), "the glide goes on");
+        assert!(!flips.needs_frames(&MotionValueStore::default(), |_| false), "a box with no box of its own is stepped by nobody");
 
         let done = flips.step(1, rect([100.0, 0.0]), [0.0; 2], Drag::default(), true, at(start, 1100)).unwrap();
         assert!(done.completed);
-        assert!(flips.needs_frames(shown), "the complete event is sent by the next render");
+        assert!(flips.needs_frames(&MotionValueStore::default(), shown), "the complete event is sent by the next render");
         flips.take_events();
-        assert!(!flips.needs_frames(shown), "idle again");
+        assert!(!flips.needs_frames(&MotionValueStore::default(), shown), "idle again");
     }
 
     #[test]
-    fn a_box_that_can_be_dragged_always_needs_frames() {
+    fn a_box_that_can_be_dragged_needs_frames_only_while_it_is_dragged() {
+        let start = Instant::now();
         let flips = LayoutFlips::default();
+        let mut values = MotionValueStore::default();
+        for id in [4.0, 5.0, 6.0] {
+            values.create_source(id, &json!(0)).unwrap();
+        }
+        let sample = |values: &mut MotionValueStore| {
+            values.frame(std::iter::empty(), &[4.0, 5.0, 6.0], start);
+        };
         render(&flips, &[1]);
         mount(&flips, 1, &json!({ "mode": true, "dragOffset": { "x": 4, "y": 5, "active": 6 } }));
-        assert!(flips.needs_frames(|_| true));
+        sample(&mut values);
+        flips.step(1, rect([0.0, 0.0]), [0.0; 2], read_drag(&json!({ "mode": true, "dragOffset": { "x": 4, "y": 5, "active": 6 } }), &values), true, start).unwrap();
+        assert!(!flips.needs_frames(&values, |_| true), "a box nobody holds asks for nothing");
+
+        values.jump(6.0, &json!(1), start).unwrap();
+        assert!(flips.needs_frames(&values, |_| true), "the press is a write the next frame has to see");
+        assert!(!flips.needs_frames(&values, |_| false), "no box, no step");
+        sample(&mut values);
+        flips.step(1, rect([0.0, 0.0]), [0.0; 2], Drag { active: true, offset: [3.0, 0.0] }, true, start).unwrap();
+        assert!(flips.needs_frames(&values, |_| true), "held");
+
+        values.jump(6.0, &json!(0), start).unwrap();
+        sample(&mut values);
+        flips.step(1, rect([0.0, 0.0]), [0.0; 2], Drag::default(), true, at(start, 16)).unwrap();
+        assert!(flips.needs_frames(&values, |_| true), "the glide back to the slot");
+        flips.step(1, rect([0.0, 0.0]), [0.0; 2], Drag::default(), true, at(start, 2000)).unwrap();
+        flips.take_events();
+        assert!(!flips.needs_frames(&values, |_| true), "dropped and settled");
     }
 
     #[test]

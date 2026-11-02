@@ -338,8 +338,9 @@ reasons:
   the box existed, whether or not a glide ran. The glide is not a property of the build: it starts in prepaint, at a frame that finds
   the tree changed and the box moved, and a tick (whose revision is the plan's) can never start one. So a plan no longer carries it.
   `Retain::preview` is told whether a glide is in flight (`LayoutFlips::needs_frames`): a box with a track that has not run out, an
-  event not yet sent, or a `dragOffset` (its values reach a box that is not bound to them, and nothing else tells a tick that a drag
-  moved). The tick is then `Gliding` and is drawn whole, which builds the box and steps its track. The frame that steps the glide to its
+  event not yet sent, or a drag (a `dragOffset` box with the pointer on it, or with one of its values written since the last
+  frame sampled them: they reach a box that is not bound to them, and nothing else tells a tick that a drag started, moved or ended;
+  see [a `dragOffset` box](#a-dragoffset-box-beside-a-loop)). The tick is then `Gliding` and is drawn whole, which builds the box and steps its track. The frame that steps the glide to its
   end puts `layoutAnimationComplete` in the store, and a render sends it, so the next tick is whole as well (`events` not empty), and the
   one after patches. A box with no box of its own (`display: none`) is stepped by nobody and does not count. A box that glides later
   starts as it always did: the commit that moves it is a tree edit (`Edited`), that whole frame builds it (it is excluded, so it is
@@ -354,6 +355,22 @@ reasons:
 
 A box that is itself animated (`layout` and `animate` on one element) is not a unit, as before (`Excluded:layout-animation`), and an
 ancestor of a `layout` box is not one either (`ExcludedBelow:layout-animation`); only the neighbours stopped paying.
+
+### A `dragOffset` box beside a loop
+
+A `Reorder.Item` (a `layout` box with `dragOffset`) beside a looping animation drew every tick whole, held or not (150 whole and
+0 patched in 150 ticks, 0.80 ms a tick against 0.52 for the same page patched), because `needs_frames` counted every such box as
+dragged for as long as it existed. It now asks about the drag itself (`drag_moves`):
+
+- the box was last shown dragged (`Flip::dragged`), or its `active` value read above one half at the last frame that sampled it, or
+- a script wrote one of its three values, or a value they follow, since the last frame sampled them (`MotionValueStore::any_written`).
+  The press, the moves and the release are all writes, so the tick that follows one is whole and steps the box with the new values;
+  the tick after a press that no frame has sampled yet cannot show a stale box.
+
+A box nobody holds asks for nothing, and the loop beside it is patched as on a page without the box (150 of 150). While the box is held
+the ticks are whole (the drag is not patched: the box is a translation of its projection, built by every frame, and its values are not
+bound to it, so there is no source a tick could carry), 0.69 ms a tick; the release frame is whole, the glide back to the slot is
+`Gliding`, and the ticks patch again after its `layoutAnimationComplete` has been sent.
 
 ## What a patched tick still walks
 
@@ -619,7 +636,8 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   `onLayoutAnimationStart` once), and the ticks patch again once `onLayoutAnimationComplete` has been sent (at most 3 whole of 150); a glide
   after it starts from where the box is shown, also when it retargets one half way. Red before #117 for the three `layout` variants (150 whole, `NoFrame`). `retain.rs`: a layout box leaves a tick alone, `Gliding` says no, a page with a loop and
   nothing to skip is recorded at every frame; `layout_flip.rs`: `needs_frames` from the commit that moved a box until its events are
-  sent, and for a box with `dragOffset`. `examples/layout-idle.perf.test.tsx` (`bun run test:perf:layout-idle`) is the guard.
+  sent, and for a box with `dragOffset` only while it is held or its values were written. `examples/layout-idle.perf.test.tsx` (`bun run test:perf:layout-idle`) is the guard; its `drag` variant is patched at every tick of the loop, and whole at every tick while the box is held (0 of 150 patched), patched again after the release.
+- `layout-drag-patches.test.tsx` (react): a `Reorder.Item` beside a loop over 200 bars: 150 of 150 ticks patched before the press, none patched while it is held (also between moves), the glide back whole, patched again after; the picture, the boxes, the text and the accessibility tree equal a build at the press, a move, ticks while held, the release, the glide and the rest, also under `GPUIX_RETAIN_VERIFY=1`.
 - `offscreen-animation-work.test.tsx`: 200 cards with a stroke loop on a small and on a more than 4 KB `<svg>`, below the window
   and clipped; iterations and ends of five loops of other lengths come at the ticks of a shown one; a card scrolled into view has
   the pixels of a build with retention off; the dormant-tick, wake and skipped-content counts above. "A native spring that nobody sees" and "a spring

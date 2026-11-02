@@ -298,6 +298,12 @@ impl MotionValueStore {
         })
     }
 
+    /// Whether a script wrote one of the values, or one they are computed from, since the last frame
+    /// sampled. An id that is no value id is not known not to have been.
+    pub(crate) fn any_written(&self, ids: &[f64]) -> bool {
+        ids.iter().any(|id| value_id(*id).map_or(true, |id| self.graph.follows_any(id, &self.written)))
+    }
+
     /// [`Self::binding_due`] for the binding of `element`, as `index` parsed it.
     pub(crate) fn element_due(&self, index: &BindingIndex, element: u64) -> bool {
         match index.by_element.get(&element) {

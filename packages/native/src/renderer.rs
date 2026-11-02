@@ -9230,7 +9230,7 @@ impl GpuixView {
             reference: false,
             layout_only: false,
         };
-        let gliding = self.layout_flips.needs_frames(|id| {
+        let gliding = self.layout_flips.needs_frames(&self.motion_values, |id| {
             tree.elements.get(&id).is_some_and(|element| !crate::layout::box_generation::is_hidden(&tree, element))
         });
         self.retain

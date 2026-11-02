@@ -12,7 +12,7 @@
 
 import React from 'react'
 import { describe, expect, it } from 'vitest'
-import { motion } from '@ghia/react'
+import { motion, Reorder } from '@ghia/react'
 import { createTestRoot, hasNativeTestRenderer } from '@ghia/react/testing'
 import { sample, summarize } from './perf-harness'
 import { C, CardGrid } from './perf-fixtures'
@@ -24,7 +24,7 @@ const SETTLE = 60
 const TICKS = 150
 const patching = process.env.GPUIX_RETAIN_OFF === undefined && process.env.GPUIX_PATCH_OFF === undefined
 
-type Variant = 'none' | 'position' | 'layout' | 'size'
+type Variant = 'none' | 'position' | 'layout' | 'size' | 'drag'
 
 function Page({ variant }: { variant: Variant }) {
   return (
@@ -34,10 +34,16 @@ function Page({ variant }: { variant: Variant }) {
         transition={{ duration: 1, repeat: Number.POSITIVE_INFINITY }}
         style={{ width: 40, height: 40, backgroundColor: '#6B97FF' }}
       />
-      <motion.div
-        layout={variant === 'none' ? undefined : variant === 'layout' ? true : variant}
-        style={{ width: 120, height: 24, backgroundColor: '#999999' }}
-      />
+      {variant === 'drag' ? (
+        <Reorder.Group axis="y" values={['a']} onReorder={() => {}}>
+          <Reorder.Item value="a" testId="held" style={{ width: 120, height: 24, backgroundColor: '#999999' }} />
+        </Reorder.Group>
+      ) : (
+        <motion.div
+          layout={variant === 'none' ? undefined : variant === 'layout' ? true : variant}
+          style={{ width: 120, height: 24, backgroundColor: '#999999' }}
+        />
+      )}
       <CardGrid cards={30} />
     </div>
   )
@@ -66,7 +72,7 @@ function ticksOf(renderer: ReturnType<typeof createTestRoot>['renderer'], count:
 
 describeNative('an idle layout box beside a loop', () => {
   const costs: Partial<Record<Variant, number>> = {}
-  for (const variant of ['none', 'position', 'layout', 'size'] as const) {
+  for (const variant of ['none', 'position', 'layout', 'size', 'drag'] as const) {
     it(`${variant}: every tick of the loop is patched`, () => {
       const root = createTestRoot(WINDOW)
       try {
@@ -91,10 +97,42 @@ describeNative('an idle layout box beside a loop', () => {
     if (!patching) return
     const none = costs.none
     expect(none).toBeDefined()
-    for (const variant of ['position', 'layout', 'size'] as const) {
+    for (const variant of ['position', 'layout', 'size', 'drag'] as const) {
       expect(costs[variant], variant).toBeDefined()
       // Whole frames of this page cost several times a patched tick; the bound leaves room for a noisy machine.
       expect(costs[variant]!, variant).toBeLessThan(none! * 2.5 + 0.2)
     }
   })
+
+  it('drag: ticks are whole while the box is held and patched again after it has glided back', () => {
+    const root = createTestRoot(WINDOW)
+    try {
+      root.render(<Page variant="drag" />)
+      const renderer = root.renderer
+      renderer.flush()
+      ticksOf(renderer, SETTLE)
+      const box = renderer.getElementBounds(renderer.findByTestId('held').id)
+      const x = box.x + box.width / 2
+      const y = box.y + box.height / 2
+      renderer.nativeSimulateMouseDown(x, y)
+      renderer.nativeSimulateMouseMove(x, y + 8)
+      renderer.drawFrame()
+      const held = ticksOf(renderer, TICKS)
+      renderer.nativeSimulateMouseUp(x, y + 8, 0)
+      renderer.drawFrame()
+      ticksOf(renderer, 90)
+      const after = ticksOf(renderer, TICKS)
+      console.log(
+        `[layout-idle.perf] drag held patched=${held.patched} whole=${held.whole} tick=${held.cpuP50.toFixed(3)}ms; ` +
+          `after patched=${after.patched} whole=${after.whole}`,
+      )
+      if (patching) {
+        expect(held.patched).toBe(0)
+        expect(held.whole).toBe(TICKS)
+        expect(after.patched).toBeGreaterThanOrEqual(TICKS - 3)
+      }
+    } finally {
+      root.unmount()
+    }
+  }, 120_000)
 })
