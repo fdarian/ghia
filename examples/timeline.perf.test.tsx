@@ -108,6 +108,21 @@ function mount(cull: boolean): TestRoot {
   return root
 }
 
+/**
+ * One sample is one frame, drawn the way a display link draws it. The test renderer otherwise draws
+ * inline whenever effects flush, which draws a wheel's frame about three times and measures that instead.
+ */
+function oneFrame(root: TestRoot, input: () => void): number {
+  const painted = root.renderer.getPaintedFrameCount()
+  const started = performance.now()
+  input()
+  root.renderer.flush()
+  root.renderer.drawFrame()
+  const elapsed = performance.now() - started
+  expect(root.renderer.getPaintedFrameCount() - painted, 'a sample draws one frame').toBe(1)
+  return elapsed
+}
+
 /** Wheel deltas that keep the pan inside the content on both axes. */
 function panSamples(root: TestRoot): number[] {
   const samples: number[] = []
@@ -115,17 +130,11 @@ function panSamples(root: TestRoot): number[] {
     // Alternate direction so the pan never parks against a clamp, which would
     // measure a no-op render instead of a real one.
     const direction = Math.floor(index / 8) % 2 === 0 ? 1 : -1
-    const started = performance.now()
-    root.renderer.dispatchScrollWheel(
-      WHEEL_AT.x,
-      WHEEL_AT.y,
-      direction * 24,
-      direction * 12
-    )
-    // The wheel only marks the view dirty. Without this the sample is the
+    // The wheel only marks the view dirty. Without the flush and the frame the sample is the
     // React update and none of the GPUI build, layout or paint that follows.
-    root.renderer.flush()
-    const elapsed = performance.now() - started
+    const elapsed = oneFrame(root, () =>
+      root.renderer.dispatchScrollWheel(WHEEL_AT.x, WHEEL_AT.y, direction * 24, direction * 12)
+    )
     if (index >= WARMUP) samples.push(elapsed)
   }
   return samples
@@ -149,6 +158,7 @@ describeNative('timeline performance', () => {
   it('pans with culling on', () => {
     const root = mount(true)
     root.renderer.flush()
+    root.renderer.setInlineDraws(false)
     expectBudget({
       label: 'pan cull=on',
       samples: panSamples(root),
@@ -164,6 +174,7 @@ describeNative('timeline performance', () => {
     // why a pannable surface has to cull: memo fixes the JS half only.
     const root = mount(false)
     root.renderer.flush()
+    root.renderer.setInlineDraws(false)
     expectBudget({
       label: 'pan cull=off',
       samples: panSamples(root),
@@ -175,6 +186,7 @@ describeNative('timeline performance', () => {
   it('drags a clip across the timeline', () => {
     const root = mount(true)
     root.renderer.flush()
+    root.renderer.setInlineDraws(false)
 
     const clip = root.renderer
       .findByType('div')
@@ -190,11 +202,8 @@ describeNative('timeline performance', () => {
 
     const samples: number[] = []
     for (let index = 0; index < WARMUP + SAMPLES; index += 1) {
-      const started = performance.now()
-      // One flush per sample, same as the pan, so the two are comparable.
-      root.renderer.dispatchMouseMove(startX + index * 3, startY)
-      root.renderer.flush()
-      const elapsed = performance.now() - started
+      // One frame per sample, same as the pan, so the two are comparable.
+      const elapsed = oneFrame(root, () => root.renderer.dispatchMouseMove(startX + index * 3, startY))
       if (index >= WARMUP) samples.push(elapsed)
     }
     root.renderer.nativeSimulateMouseUp(startX + 120, startY)

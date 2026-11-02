@@ -331,7 +331,10 @@ The gpui fuzzers run inside `cargo test -p gpui --lib --features test-support`.
 
 ### Known failing budgets
 
-`timeline.perf.test.tsx` (a 3259-clip pan) fails its budgets on `poc` too, before the retention work, so its failure is not a regression. With culling on, p95 is 44.7 ms on `poc` and 34.1 ms with the retention (the budget is 18 ms); with culling off it is 708 ms against 683 ms (the budget is 400 ms). A drag of a clip, p50, is 13.9 ms against 4.7 ms.
+`timeline.perf.test.tsx` (a 3259-clip pan) fails its cull-on and cull-off pan budgets. It did not always: at `555fa30a`, which set them, pan p50 was 9.4 to 10.5 ms, p95 11 to 14 ms (budget 18) and cull-off p95 about 170 ms (budget 400), measured back to back with main on the same machine. Two things moved since, both before the retention work:
+
+- **The harness drew a pan several times.** The test renderer draws inline whenever effects flush. `c3b70041` (a wheel is a DOM event through the dispatcher, a handler runs inside the dispatch) and `530194f6` (bounds and scroll reads from a handler draw as the live renderer does) took a sample from one draw to 2.75, +9 ms and +10 ms of p50. A live window draws once per display link, so each sample is now one frame (`setInlineDraws(false)`, `flush()`, `drawFrame()`), asserted by the painted-frame count.
+- **A pan frame is about 2x what it was, and retention is part of it.** One frame, p50, cull-on: 20.6 ms with retention (1047 elements built, 541 skipped) against 14.1 ms with `GPUIX_RETAIN_OFF=1` (1249 built), against about 10 ms at `555fa30a`; cull-off 404 ms against 227 ms (`555fa30a`: 144 ms). It is all in the draw (`dispatchScrollWheel` 0.9 ms, `flush` 0.01 ms). A pan moves every clip, so the frame reuses about 10% of its primitives and pays the recording of the rest: about 670 retainable roots a frame, each keeping the start of its build, and about 300 lazy builds. Cull-off p95 is 435 ms, cull-on p95 24 ms, drag 7.6 ms (passes). The budgets are kept: this cost is real and not yet fixed.
 
 ## Driving a live window
 
