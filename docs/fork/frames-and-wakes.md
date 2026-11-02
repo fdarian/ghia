@@ -224,11 +224,36 @@ visible, so a cover that matches the window's top-left edge does not occlude it;
 
 ### Waking JS for a webview
 
-WebKit answers the UI process with `CFRunLoopWakeUp`, which the run-loop watch above does not see (its ports are the main dispatch queue's, not the loop's wake). With nothing else going on, `did-start-loading`, `did-navigate`, `did-stop-loading`, `page-title-updated`, `did-fail-load` and the result of `executeJavaScript` of a `<webview>` waited for the next input or frame; nothing arrived for 1.5 s after a `reload()`, then everything at once when something else ticked.
+WebKit answers the UI process from its IPC thread with `CFRunLoopWakeUp(CFRunLoopGetMain())`. CoreFoundation returns from that without sending the wake message while the main run loop is not inside a run, which is always the case here (JS owns the main thread and the loop is only pumped), so the run-loop watch above never hears of it. `did-start-loading`, `did-navigate`, `did-stop-loading`, `page-title-updated`, `did-fail-load` and the result of `executeJavaScript` of a `<webview>` then wait for the next input or frame.
 
-`packages/native/src/platform/webview_pulse.rs` keeps one repeating `CFRunLoopTimer` on the main run loop (common modes) while any page exists, and a timer does wake the watch. The period is 16 ms for 1.5 s after anything asked a page for work (a load, a script, a key, a click, a wheel, a focus change, an event the page sent) and 250 ms otherwise, which catches what a page does by itself. The last page removed invalidates the timer.
+`CFRunLoopWakeUp` reads the run depth `d` (a byte of the `__CFRunLoop` object) and sends only if the byte at `run_loop + d + 0x153` is zero. CoreFoundation sets the depth-0 byte (the loop's "ignore wake-ups") when it makes the loop and never clears it at depth 0; the byte of depth 1 is set on every run exit. `gpui_macos::main_run_loop_wakeups::enable` clears the depth-0 byte while a page exists (`webview_pulse.rs` calls it for the first page and `disable` for the last), so the wake sends its message to the loop's wake port, which the watch's knote on the default-mode port set already sees.
 
-**Cost:** an app with a `<webview>` is not idle: about 4 wakes a second at rest and about 60 in the 1.5 s after an action. Don't remove the timer; see [webview.md](webview.md) for the page and [deviations.md](deviations.md#webview-and-window-composition) for the listed cost.
+Memory layout that is not API, so `enable` refuses (an `Error`, and nothing is written) unless all of these hold:
+
+- aarch64;
+- the two offsets are read from the machine code of this machine's `CFRunLoopWakeUp` (`decode_wake_up_layout`: `ldrb Wd,[Xrl,#depth]; add Xa,Xrl,Xd; ldrb Wf,[Xa,#flag]; cbz Wf` in its first 100 instructions, exactly one match, both offsets inside the object);
+- the object is that large, and the byte is 0 or 1;
+- on a run loop of its own that no thread has run (the check cannot be made on the main loop, because `enable` is called while a frame is drawn, inside a run, where the byte that decides is the one of depth 1), a wake from another thread sends no message, and does send one once that loop's byte is cleared. The messages are counted on its port set (`mach_port_get_attributes`), not received.
+
+Where it refuses, `webview_pulse.rs` logs the reason once and keeps the repeating `CFRunLoopTimer` it used before (16 ms for 1.5 s after anything asked a page for work, 250 ms otherwise); that timer exists only as this fallback.
+
+A run of the loop that returns after one source (`CFRunLoopRunInMode(.., 0.0, returnAfterSourceHandled)`) handles one source and receives the wake message in the same iteration, so another source that is signalled stays signalled and nothing wakes for it. `pump_app_nonblocking` therefore runs it until an iteration handles nothing. With one source per run, a `reload()` after a few idle seconds delivered `did-start-loading` and then nothing for seconds.
+
+**Numbers** (release addon, one machine, runs of the two addons back to back in one lock hold; load average 3 to 7 unless noted; `examples/webview-wake/`):
+
+| | timer (before) | wake byte (now) |
+|---|---|---|
+| wakes in 15 s at rest, loaded page, 2 s after the load | 62 to 65 (6 runs), 4 Hz | 2 to 5 (5 of 6 runs) |
+| same, 20 s after the load | 63, 63, 64 | 2, 2, 2, 3 |
+| `reload()`: `did-start-loading` / `did-navigate` / `did-stop-loading`, median | 52 to 54 / 70 to 74 / 70 to 74 ms | 4 to 5 / 6 to 8 / 7 to 8 ms |
+| `executeJavaScript("1 + 1")`, median | 17 ms | 0.7 to 0.9 ms |
+| `did-fail-load` of `loadURL`, median | 70 to 72 ms | 5 to 8 ms |
+| title the page sets by itself, median | 5 to 16 ms | 1 to 3 ms |
+| bare window, wakes in 15 s | 0 to 1 (3 runs) | 0 to 5 (3 runs) |
+
+The bare window enables nothing, so it is the same code; the 5 are the first half second of one run.
+
+**Bursts.** Some runs of either addon see a burst: 100 to 550 wakes at about 100 a second for 0.6 to 2.8 s, at any time from 3 to 36 s after launch (2 of 12 runs of the wake byte, 3 of 12 of the timer, and a bare window too, 45 wakes in 15 s once; the instrumented build of the wake byte saw them in 5 of 12). Each wake there is a message on the main dispatch queue's port, on the loop's wake port or on a third port of the default-mode set, in about equal parts. They are not the page's (a bare window has them) and not the timer's; the source was not found. Apple's launch measurement (see Known above) explains the ones in the first seconds, not those 20 s and more after launch.
 
 ## Memory footprint of a window (#79)
 

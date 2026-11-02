@@ -62,7 +62,7 @@ Tab stops: a `<webview>` is focusable like a text control (`needs_focus`); `tabI
 
 ## Waking JS for WebKit
 
-WebKit's replies reach the main run loop with a wake that gpuix's run-loop watch does not see, so for an idle app the events of a load and the results of `executeJavaScript` would wait for the next input or frame. `platform/webview_pulse.rs` keeps a repeating timer while a page exists (16 ms for 1.5 s after anything asked a page for work, 250 ms otherwise). An app with a `<webview>` is therefore not idle: about 4 wakes a second at rest. The mechanism, the numbers and the reproduction are in [frames-and-wakes.md](frames-and-wakes.md#waking-js-for-a-webview).
+WebKit's replies reach the main run loop as `CFRunLoopWakeUp` calls from its IPC thread, which CoreFoundation drops while nothing runs the loop. `gpui_macos::main_run_loop_wakeups::enable` clears the byte that makes it drop them, so the wake sends its message to the port the run-loop watch holds, for as long as a page exists (`platform/webview_pulse.rs`). An app with a `<webview>` is idle at rest: 2 to 5 wakes in 15 s, and a load event or the result of `executeJavaScript` reaches JS in 1 to 9 ms. Where `enable` refuses (it checks the private layout against the machine code of `CFRunLoopWakeUp` and with a wake on a run loop of its own), `webview_pulse.rs` keeps a timer instead: 4 wakes a second at rest, 50 to 75 ms for an event. The mechanism, the guard and the numbers are in [frames-and-wakes.md](frames-and-wakes.md#waking-js-for-a-webview).
 
 ## Events and promises
 
