@@ -24,6 +24,7 @@ mod dormant_wake;
 mod element_tree;
 pub mod events;
 mod focus;
+mod focus_emulation;
 mod forms;
 mod layout;
 mod markdown;

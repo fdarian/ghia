@@ -1169,10 +1169,10 @@ await app.screenshot({ path: 'tmp/after-click.png' })
 await app.close()
 ```
 
-Focus is the only thing that changes. **Automation does not need focus.**
-`click()` hits the last painted bounds and `screenshot()` reads the GPU
-surface, so both work while the window sits behind your editor, and even on a
-`show: false` window that is not on screen at all.
+**Automation does not need the window to be key.** `click()` hits the last
+painted bounds and `screenshot()` reads the GPU surface, so both work while the
+window sits behind your editor, and even on a `show: false` window that is not
+on screen at all.
 
 ```
   agent ──►  launch({ env: { GPUIX_BACKGROUND: '1' } })
@@ -1180,17 +1180,43 @@ surface, so both work while the window sits behind your editor, and even on a
                 ▼
            GPU window renders and paints without activation
                 │
-                ├──►  getByTestId(..).click()   ✓  hits the last painted bounds
+                ├──►  getByTestId(..).click()   ✓  hits the last painted bounds, focuses the input
                 ├──►  screenshot({ path })      ✓  reads the GPU surface
-                ├──►  fill() / press()          ✓  uses the live input pipeline
+                ├──►  fill() / press()          ✓  uses the live input pipeline, onFocus fires
                 └──►  close()
 
   you   ──►  keep typing, your editor stays frontmost the whole time
 ```
 
-`fill()` and `press()` use the live GPUI window input pipeline. They work
-without activating the desktop window. **Linux ignores `focus`**, so an agent
-there still gets a focused window.
+**`GPUIX_BACKGROUND=1` is read by the library, not only by your entry file.** A
+window that is not the active window fires no focus events, as in Chrome: no
+`onFocus`, no `:focus-visible`, no caret, and `focusElement(id)` focuses nothing
+visible, until the window is activated. An agent cannot activate the window
+without taking your keyboard, so a window opened while the variable is `1`
+emulates focus, as Chrome does with CDP's `Emulation.setFocusEmulationEnabled`.
+The window behaves as active for focus:
+
+- `onFocus`, `onBlur`, `focusin` and `focusout` fire on a click, on `focusElement`,
+  `focus()`, `autoFocus` and Tab, and `:focus`, `:focus-visible` and the
+  `focus`, `focusVisible` and `focusWithin` styles apply;
+- an `<input>` and a `<textarea>` draw and blink their caret;
+- text from `fill()` and `press()` arrives together with the focus events, in a
+  window that is not key as in one that is.
+
+It changes nothing else. The window is still not the key window and the app is
+not activated, so the appearance things that follow the key state (glass tints,
+accent colours, the cursor, tracking areas that exist only while the window is
+key) keep their inactive look. Frame throttling and `inactive_frame_interval`
+(`None`, see [frames-and-wakes.md](fork/frames-and-wakes.md#windows-that-are-not-key-78))
+follow the real state too. There is no window-level `focus` or `blur` event
+(nor `document.hasFocus()`); the first frame of an emulating window is the page
+loading with focus emulation on, so an element focused before it (`autoFocus`)
+fires its `onFocus` then, and `blur()` blurs the focused element as in any
+window. Activating the window while emulating fires nothing again, and
+`setWindowActive(false)` on a test window does not blur anything.
+
+The variable is read once when the window opens; setting it later changes no
+window. Unset (or any value but `1`) a window behaves as before.
 
 Prefer `createTestRoot()` when you can. It opens **no window at all**, so
 nothing can steal focus and keyboard input works. Reach for `launch()` plus
@@ -9184,7 +9210,9 @@ await app.close()
 ```
 
 Every live-app check must set `GPUIX_BACKGROUND=1`, and the app entry must map
-that flag to `focus: false`. On macOS and Windows, automation uses the real
+that flag to `focus: false`. The library reads the same variable and makes the
+window behave as active for focus, so the page sees focus events and a caret
+without the window becoming key. On macOS and Windows, automation uses the real
 window input and paint pipelines without making the window active, so taking
 the user's keyboard has no test benefit. Linux currently ignores `focus`.
 
@@ -9235,7 +9263,7 @@ const text = renderer.getAllText()
 | `transparent`, `windowBackground` | Set on the native window. |
 | `trafficLightX`, `trafficLightY`, `resizable`, `minWidth`, `minHeight` | Set on the native window, which the test renderer cannot observe: it has no way to resize the window or to read the traffic lights back, so a test sees no difference. |
 | `show` | `false` never orders the window front. |
-| `focus` | `true` makes the offscreen window key and takes the OS's keyboard focus, which is why it defaults to `false`. Focus events come from `setWindowActive`, not from this. |
+| `focus` | `true` makes the offscreen window key and takes the OS's keyboard focus, which is why it defaults to `false`. Focus events come from `setWindowActive`, not from this, or from `GPUIX_BACKGROUND=1` in the environment when the window opens, which makes the window behave as active for focus whatever `setWindowActive` says ([Let an agent drive the app](#let-an-agent-drive-the-app)). |
 | `fullscreen` | **Ignored.** A fullscreen window would leave its offscreen position. |
 | `x`, `y` | **Ignored.** The test window stays offscreen. |
 | `scaleFactor` | Device pixels per CSS px, `1` when unset, whatever the display. |
