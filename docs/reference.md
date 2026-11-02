@@ -6484,8 +6484,10 @@ hit-tested like one, and its children are ordinary children.
 
 ### Layers and geometry
 
-The element's own background and border are painted first, then the native view,
-then its children, then later siblings, as DOM paints a first child. The view fills
+The element's own paint (background, border, outline and every `boxShadow`, as a
+`div` paints them, the outer shadow and the outline not cut by its own `overflow`) is
+painted first, then the native view, then its children, then later siblings, as DOM
+paints a first child. An inset `boxShadow` is under the view, which covers it. The view fills
 the element's padding box (the border stays visible around it) and follows the box
 through scroll, resize, `translate` / `scale` transforms and `opacity`;
 `display: none`, `visibility: hidden` and skipped `contentVisibility` hide it.
