@@ -743,8 +743,6 @@ pub(crate) struct Sources<'a> {
     pub active: &'a [u64],
     pub focus: &'a crate::focus::FocusStyles,
     pub focusable: &'a HashMap<u64, gpui::FocusHandle>,
-    /// Whether the last input was the keyboard's, which `:focus-visible` follows.
-    pub keyboard: bool,
     pub scrolls: &'a HashMap<u64, gpui::ScrollHandle>,
     /// The elements whose measurement changed since the frame before.
     pub measured: Vec<u64>,
@@ -798,7 +796,6 @@ struct Seen {
     within: Arc<[u64]>,
     visible: Option<u64>,
     dim: Option<Arc<[u64]>>,
-    keyboard: bool,
     scrolls: FxHashMap<u64, (u32, u32)>,
     customs: FxHashMap<u64, Option<u64>>,
     motion: FxHashSet<u64>,
@@ -1514,9 +1511,6 @@ impl Retain {
         if seen.visible != sources.focus.visible {
             changed.extend(seen.visible.into_iter().chain(sources.focus.visible));
         }
-        if seen.keyboard != sources.keyboard {
-            changed.extend(sources.focus.within.first());
-        }
         match (&seen.dim, &sources.focus.dim_path) {
             (None, None) => {}
             (Some(before), Some(now)) => differ(before, now, &mut changed),
@@ -1635,7 +1629,6 @@ impl Retain {
         seen.within = sources.focus.within.clone();
         seen.visible = sources.focus.visible;
         seen.dim = sources.focus.dim_path.clone();
-        seen.keyboard = sources.keyboard;
         seen.scrolls = scrolls;
         seen.customs = customs;
         seen.motion = motion;
@@ -2549,13 +2542,6 @@ impl Retain {
         }
     }
 
-    /// A focused handle that `:focus-visible` follows the keyboard for.
-    pub(crate) fn focus_visible_own(&mut self, own: bool) {
-        if let Some(node) = self.top() {
-            node.vol.focus |= u16::from(own) << 8;
-        }
-    }
-
     pub(crate) fn scroll(&mut self, offset: gpui::Point<gpui::Pixels>) {
         if let Some(node) = self.top() {
             let mut fp = Fingerprint::new();
@@ -3102,7 +3088,6 @@ mod tests {
             active: &[],
             focus: &focus,
             focusable: &handles,
-            keyboard: false,
             scrolls: &scrolls,
             measured: Vec::new(),
             links: Vec::new(),
@@ -3180,7 +3165,6 @@ mod tests {
             active: &[],
             focus: &focus,
             focusable: &handles,
-            keyboard: false,
             scrolls: &scrolls,
             measured: Vec::new(),
             links: Vec::new(),
@@ -3253,7 +3237,6 @@ mod tests {
             active: &[],
             focus: &focus,
             focusable: &handles,
-            keyboard: false,
             scrolls: &scrolls,
             measured: Vec::new(),
             links: Vec::new(),
@@ -3337,7 +3320,6 @@ mod tests {
             active: &changes.active,
             focus: &focus,
             focusable: &handles,
-            keyboard: false,
             scrolls: &scrolls,
             measured: changes.measured,
             links: changes.links,
@@ -3473,7 +3455,6 @@ mod tests {
             active: &[],
             focus: &focus,
             focusable: &handles,
-            keyboard: false,
             scrolls: &scrolls,
             measured: Vec::new(),
             links: Vec::new(),
@@ -3591,7 +3572,6 @@ mod tests {
             active: &[],
             focus: &focus,
             focusable: &handles,
-            keyboard: false,
             scrolls: &scrolls,
             measured: Vec::new(),
             links: Vec::new(),
@@ -4769,7 +4749,6 @@ mod tests {
             active: &[],
             focus,
             focusable: handles,
-            keyboard: false,
             scrolls,
             measured: Vec::new(),
             links: Vec::new(),

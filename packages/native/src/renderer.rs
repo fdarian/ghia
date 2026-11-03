@@ -9206,7 +9206,6 @@ impl GpuixView {
             active: pointer.chains().1,
             focus: &focus_styles,
             focusable: &self.focus_handles,
-            keyboard: window.last_input_was_keyboard(),
             scrolls: &self.scroll_handles,
             measured: self.measurements.peek_changed(),
             links: crate::accessibility::links::peek_changed(),
@@ -9778,7 +9777,6 @@ impl gpui::Render for GpuixView {
             active: pointer.chains().1,
             focus: &focus_styles,
             focusable: &self.focus_handles,
-            keyboard: window.last_input_was_keyboard(),
             scrolls: &self.scroll_handles,
             measured: self.measurements.take_changed(),
             links: crate::accessibility::links::take_changed(),
@@ -10378,7 +10376,6 @@ struct Animated {
     /// Whether the element is measured (and wrapped to be).
     measured: bool,
     measurement: Option<crate::motion::measure::Measurement>,
-    focus_visible_own: Option<bool>,
     /// What runs on the element now, as `retain::Dynamic` bits.
     dynamic: u8,
 }
@@ -10501,17 +10498,11 @@ fn animate_style_at(
     if animations_wanted {
         dynamic |= Dynamic::Animation as u8;
     }
-    let mut focus_visible_own = None;
     let transitioned = (transitions_wanted || animations_wanted).then(|| {
         let focus_visible = crate::motion::FocusVisible {
-            own: ctx
-                .focus_handles
-                .get(&id)
-                .is_some_and(|handle| handle.is_focused(window))
-                && window.last_input_was_keyboard(),
+            own: ctx.focus_handles.contains_key(&id) && ctx.focus_styles.is_focus_visible(id),
             descendant: ctx.focus_styles.has_focus_visible(id),
         };
-        focus_visible_own = Some(focus_visible.own);
         Box::new(crate::motion::resolve_declared_style(
             transitions_wanted.then_some(&mut *ctx.css_transitions),
             animations_wanted.then_some((&mut *ctx.css_animations, ctx.keyframes)),
@@ -10547,7 +10538,6 @@ fn animate_style_at(
             svg_css: Vec::new(),
             measured,
             measurement,
-            focus_visible_own,
             dynamic,
         };
     }
@@ -10641,7 +10631,6 @@ fn animate_style_at(
         svg_css,
         measured,
         measurement,
-        focus_visible_own,
         dynamic,
     }
 }
@@ -10898,9 +10887,6 @@ fn build_element_unpumped(
     }
     if layout_source.is_some() {
         ctx.retain.exclude(crate::retain::Exclusion::LayoutAnimation);
-    }
-    if let Some(own) = animated.focus_visible_own {
-        ctx.retain.focus_visible_own(own);
     }
     if animated.hidden {
         tree.resolved.borrow_mut().forget(id);

@@ -4895,6 +4895,9 @@ mouse press it shows the ring too, so a script-focused button on a fresh window
 has one, as in Chrome. After a mouse press, `focus()` from a mouse-focused
 element shows none.
 
+The same holds on an element with a `transition`: `focusVisible`, `hasFocusVisible`
+and the pointer states match exactly as without one, and the style transitions in.
+
 ## Headless controls
 
 The built-in controls are **unstyled primitives**, not a fixed component

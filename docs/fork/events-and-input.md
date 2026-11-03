@@ -76,7 +76,7 @@ On macOS the OS drop operation of dragged-in files follows `dragover`. A `dragov
 ## Focus
 
 - **Order and events.** DOM order: `blur`, `focusout`, `focus`, `focusin`. `focusin`/`focusout` bubble and carry `relatedTarget`.
-- **`:focus-visible`** uses the browser's keyboard-modality heuristic and is readable with `matches(':focus-visible')`. A `focusWithin` state style exists too.
+- **`:focus-visible`** uses the browser's keyboard-modality heuristic and is readable with `matches(':focus-visible')`. A `focusWithin` state style exists too. Whether it matches never depends on `transition`.
 - **`tabIndex` as in the DOM.** `-1` is focusable by script only, positive values follow DOM order. A listener for a key or focus event no longer makes an element focusable; give it a `tabIndex`. A disabled input is never focusable.
 - **`focus({ preventScroll })` and `blur()`.** `focusNext()` and `focusPrevious()` scroll the new focus into view with `nearest`, as Tab does.
 - **Timing.** The focus events of a press, of `autoFocus` and of a frame reach JS before the call that caused them returns (`settle_focus`, macOS and the test renderer), so `document.activeElement` is current in the next handler. `autoFocus` focuses in the commit that mounts the element.
