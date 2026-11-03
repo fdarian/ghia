@@ -19,17 +19,30 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          submodules: recursive
       # No cache: a release job must not restore a cache an untrusted run wrote.
       - uses: ./.github/actions/setup
         with: { registry-url: 'https://registry.npmjs.org' }
 
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      # changesets/action only publishes (and so builds) when no changeset is pending;
+      # otherwise it just updates the version PR, which needs neither zed nor Rust.
+      - id: mode
+        run: |
+          if [ -n "$(find .changeset -maxdepth 1 -name '*.md' ! -name README.md -print -quit)" ]; then
+            echo publish=false >> "$GITHUB_OUTPUT"
+          else
+            echo publish=true >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.mode.outputs.publish == 'true'
+        run: git submodule update --init --recursive
+
+      - if: steps.mode.outputs.publish == 'true'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: aarch64-apple-darwin
           cache: false
           rustflags: ''
-      - run: xcodebuild -downloadComponent MetalToolchain
+      - if: steps.mode.outputs.publish == 'true'
+        run: xcodebuild -downloadComponent MetalToolchain
 
       - id: changesets
         uses: changesets/action@v2
