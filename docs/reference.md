@@ -4889,11 +4889,13 @@ buttonRef.current.matches(':focus-visible')
 `:active`; any other selector throws. Removing `tabIndex` removes the element from the focus order and
 blurs it if it was focused.
 
-Programmatic focus is the one place `:focus-visible` is inherited: `focus()`
-shows the ring when the element focus leaves was showing one. Before any key or
-mouse press it shows the ring too, so a script-focused button on a fresh window
-has one, as in Chrome. After a mouse press, `focus()` from a mouse-focused
-element shows none.
+`:focus-visible` follows Chrome's heuristic (see [Focus styles](#focus-styles)).
+A script focus (`focus()`, `autoFocus`, `focusElement`) changes nothing in it and
+reads it: it matches unless the mouse was the last to focus an element and no key
+has gone down since. A fresh window, a Tab, or a press on blank body leave it
+matching, so a script-focused button on a fresh window has the ring, as in Chrome.
+After a click on a button, `focus()` on another shows none, even if the click
+landed on a text field in between.
 
 The same holds on an element with a `transition`: `focusVisible`, `hasFocusVisible`
 and the pointer states match exactly as without one, and the style transitions in.
@@ -8556,16 +8558,22 @@ wrapping `<div>`.
 `focusWithin` while it or any descendant has focus, like `:focus-within`, on
 focusable and plain elements alike. There is no separate `focus` key.
 
-`:focus-visible` follows the browser heuristic, tracked per focus change rather
-than from the live input device:
+`:focus-visible` follows Chrome's heuristic, which keeps two facts for the whole
+window instead of asking the element focus left:
 
 - A text field (`<input>`, `<textarea>`) always matches while focused, mouse or
   keyboard
-- Focus moved by Tab (or any keyboard input) matches
-- Focus moved by a mouse press does not match, until a key goes down while the
-  element is focused
-- Focus moved by script (`focus()`, `autoFocus`) matches only if the element it
-  left matched
+- Any other element matches, unless the last focus a mouse press gave an element
+  is still the last one and no key has gone down since
+- A mouse press whose `mousedown` is not cancelled and that moves focus (to an
+  element, or off one onto nothing) clears the key and, when it lands on an
+  element, marks that focus as the mouse's. A press that moves nothing, or whose
+  `mousedown` calls `preventDefault()`, changes neither
+- A key down sets the key, and with it the element that has focus matches at once.
+  A key with Ctrl, Alt or Cmd held does not count, Shift on its own does
+- Tab moves focus without marking it as the mouse's
+- A script focus (`focus()`, `autoFocus`) changes neither, so it matches in a
+  fresh window, after Tab, and after a key; it does not after a click, until a key
 
 ```tsx
 <div
@@ -9347,6 +9355,10 @@ a character key the US character on it (`"a"`, `"A"` with Shift), whatever
 layout the machine has; a press that names a key (`"a"`, `"Enter"`) derives
 `code` from it for a US QWERTY layout. The browser (wasm) automation path
 passes the names through to the page without checking them.
+`nativeSimulateModifiersChanged("shift")` reports the held modifiers changing, the
+way the platform does for a modifier pressed or released on its own (a `Shift`
+press sends a key event instead); Shift on its own counts as a key for
+`:focus-visible`, Ctrl, Alt and Meta do not.
 
 `simulateComposition(id, steps)` focuses an `<input>` or `<textarea>` and runs an
 input method composition in it, one step per key the input method takes. A step
