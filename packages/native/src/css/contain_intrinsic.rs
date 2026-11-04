@@ -14,7 +14,7 @@ use super::dimension::parse_definite_length;
 use super::length::{LengthContext, LinearLength};
 
 /// The value of one axis. The default is `none`.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct IntrinsicAxis {
     /// `auto <length>` or `auto none`.
     pub auto: bool,
@@ -27,14 +27,14 @@ const RULE: &str = "`none`, a non-negative length or `auto` followed by one of t
 impl IntrinsicAxis {
     /// The size in px the axis falls back to when there is no remembered size: 0 for `none`.
     pub(crate) fn fallback(&self, lengths: &LengthContext) -> f64 {
-        self.length.map_or(0.0, |length| lengths.resolve(&length, 0.0).max(0.0))
+        self.length.as_ref().map_or(0.0, |length| lengths.resolve(length, 0.0).max(0.0))
     }
 
     /// The content-box size the axis gives a box that is contained in it and is skipped, given the
     /// size it was last laid out at (when it has one). `None` leaves the box at the size of an
     /// empty one.
     pub(crate) fn skipped_size(&self, remembered: Option<f64>, lengths: &LengthContext) -> Option<f64> {
-        match (self.auto, remembered, self.length) {
+        match (self.auto, remembered, &self.length) {
             (true, Some(remembered), _) => Some(remembered),
             (_, _, None) if !self.auto => None,
             _ => Some(self.fallback(lengths)),
@@ -57,7 +57,7 @@ impl IntrinsicAxis {
     fn parse(text: &str) -> Option<Self> {
         let axes = parse_axes(text)?;
         match axes.as_slice() {
-            [axis] => Some(*axis),
+            [axis] => Some(axis.clone()),
             _ => None,
         }
     }
@@ -95,7 +95,7 @@ fn parse_axes(text: &str) -> Option<Vec<IntrinsicAxis>> {
 }
 
 /// `contain-intrinsic-size`: the width, then the height. One value is both.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct IntrinsicSize {
     pub width: IntrinsicAxis,
     pub height: IntrinsicAxis,
@@ -104,8 +104,8 @@ pub struct IntrinsicSize {
 impl IntrinsicSize {
     fn parse(text: &str) -> Option<Self> {
         match parse_axes(text)?.as_slice() {
-            [both] => Some(Self { width: *both, height: *both }),
-            [width, height] => Some(Self { width: *width, height: *height }),
+            [both] => Some(Self { width: both.clone(), height: both.clone() }),
+            [width, height] => Some(Self { width: width.clone(), height: height.clone() }),
             _ => None,
         }
     }
@@ -114,15 +114,17 @@ impl IntrinsicSize {
 /// What the style says of the axes, the longhands over the shorthand. The logical longhands are
 /// the physical ones: the writing mode is horizontal.
 pub(crate) fn axes(style: &crate::style::StyleDesc) -> IntrinsicSize {
-    let shorthand = style.contain_intrinsic_size.unwrap_or_default();
+    let shorthand = style.contain_intrinsic_size.clone().unwrap_or_default();
     IntrinsicSize {
         width: style
             .contain_intrinsic_width
-            .or(style.contain_intrinsic_inline_size)
+            .clone()
+            .or_else(|| style.contain_intrinsic_inline_size.clone())
             .unwrap_or(shorthand.width),
         height: style
             .contain_intrinsic_height
-            .or(style.contain_intrinsic_block_size)
+            .clone()
+            .or_else(|| style.contain_intrinsic_block_size.clone())
             .unwrap_or(shorthand.height),
     }
 }
@@ -186,13 +188,14 @@ deserialize_number_or_text!(IntrinsicAxis, "containIntrinsicWidth", IntrinsicAxi
 deserialize_number_or_text!(
     IntrinsicSize,
     "containIntrinsicSize",
-    |value| IntrinsicAxis::px(value).map(|axis| IntrinsicSize { width: axis, height: axis }),
+    |value| IntrinsicAxis::px(value).map(|axis| IntrinsicSize { width: axis.clone(), height: axis }),
     IntrinsicSize::parse
 );
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::css::length::LengthUnit;
 
     fn axis(json: &str) -> Result<IntrinsicAxis, serde_json::Error> {
         serde_json::from_str(json)
@@ -213,7 +216,7 @@ mod tests {
         assert_eq!(axis("\"40px\"").unwrap(), IntrinsicAxis { auto: false, length: px(40.0) });
         assert_eq!(axis("\"auto 60px\"").unwrap(), IntrinsicAxis { auto: true, length: px(60.0) });
         assert_eq!(axis("\"AUTO none\"").unwrap(), IntrinsicAxis { auto: true, length: None });
-        assert_eq!(axis("\"2em\"").unwrap().length.unwrap().em, 2.0);
+        assert_eq!(axis("\"2em\"").unwrap().length.unwrap().term(LengthUnit::Em), 2.0);
         for bad in ["\"auto\"", "\"-1px\"", "\"10%\"", "\"1px 2px\"", "\"auto auto\"", "\"\"", "-4", "\"3\""] {
             assert!(axis(bad).is_err(), "{bad}");
         }

@@ -32,8 +32,8 @@ pub(crate) fn parse_border_radius(value: &str) -> Result<Corners<CornerRadiusVal
     let tokens = split_slash_tokens(value);
     let radii = parse_radii(&tokens, parse_radius_length).map_err(|reason| invalid("border-radius", value, &reason))?;
     let corner = |index: usize| CornerRadiusValue {
-        x: radii.horizontal[index],
-        y: radii.vertical.map(|vertical| vertical[index]),
+        x: radii.horizontal[index].clone(),
+        y: radii.vertical.as_ref().map(|vertical| vertical[index].clone()),
     };
     Ok(Corners {
         top_left: corner(0),
@@ -51,9 +51,9 @@ pub(crate) fn parse_corner(value: &str) -> Result<CornerRadiusValue, String> {
         .map(|token| parse_radius_length(token))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|reason| invalid("border-radius", value, &reason))?;
-    match lengths[..] {
-        [x] => Ok(CornerRadiusValue { x, y: None }),
-        [x, y] => Ok(CornerRadiusValue { x, y: Some(y) }),
+    match lengths.as_slice() {
+        [x] => Ok(CornerRadiusValue { x: x.clone(), y: None }),
+        [x, y] => Ok(CornerRadiusValue { x: x.clone(), y: Some(y.clone()) }),
         _ => Err(invalid("border-radius", value, "expected a horizontal radius and an optional vertical one")),
     }
 }
@@ -112,8 +112,8 @@ impl CornerRadiusValue {
 
     /// The px of a circular corner of plain px, which is what motion moves.
     pub(crate) fn circular_px(&self) -> Option<f64> {
-        match self.y {
-            Some(y) if y != self.x => None,
+        match &self.y {
+            Some(y) if *y != self.x => None,
             _ => self.x.as_px(),
         }
     }
@@ -127,8 +127,8 @@ impl CornerRadiusValue {
     }
 
     fn to_css(&self) -> String {
-        match self.y {
-            Some(y) if y != self.x => format!("{} {y}", self.x),
+        match &self.y {
+            Some(y) if *y != self.x => format!("{} {y}", self.x),
             _ => self.x.to_string(),
         }
     }
@@ -159,15 +159,15 @@ fn is_zero(length: DefiniteLength) -> bool {
 /// The value a style object sends back out for `borderRadius`: a number for a circular px
 /// radius on every corner, else the CSS text.
 pub(crate) fn border_radius_to_json(corners: &Corners<CornerRadiusValue>) -> serde_json::Value {
-    let all = [corners.top_left, corners.top_right, corners.bottom_right, corners.bottom_left];
+    let all = [&corners.top_left, &corners.top_right, &corners.bottom_right, &corners.bottom_left];
     if let Some(first) = all[0].circular_px() {
         if all.iter().all(|corner| corner.circular_px() == Some(first)) {
             return serde_json::json!(first);
         }
     }
     let horizontal: Vec<String> = all.iter().map(|corner| corner.x.to_string()).collect();
-    let vertical: Vec<String> = all.iter().map(|corner| corner.y.unwrap_or(corner.x).to_string()).collect();
-    let circular = all.iter().all(|corner| corner.y.is_none_or(|y| y == corner.x));
+    let vertical: Vec<String> = all.iter().map(|corner| corner.y.as_ref().unwrap_or(&corner.x).to_string()).collect();
+    let circular = all.iter().all(|corner| corner.y.as_ref().is_none_or(|y| *y == corner.x));
     serde_json::Value::String(if circular {
         horizontal.join(" ")
     } else {

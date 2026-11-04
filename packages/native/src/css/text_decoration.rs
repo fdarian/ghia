@@ -8,7 +8,7 @@
 use gpui::TextDecorationStyle;
 
 use super::dimension::{parse_linear_length, MAX_LENGTH};
-use super::length::{LengthContext, LinearLength};
+use super::length::{LengthContext, LengthUnit, LinearLength};
 use super::syntax::split_whitespace;
 use super::text_underline_offset::TextUnderlineOffset;
 use crate::style::StyleDesc;
@@ -17,7 +17,7 @@ use crate::style::StyleDesc;
 const MIN_THICKNESS: f64 = 1e-3;
 
 /// `text-decoration-thickness`.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) enum Thickness {
     #[default]
     Auto,
@@ -118,7 +118,7 @@ pub fn is_patterned(style: gpui::TextDecorationStyle) -> bool {
 }
 
 impl Thickness {
-    fn kind(self) -> gpui::DecorationThickness {
+    fn kind(&self) -> gpui::DecorationThickness {
         match self {
             Thickness::Auto => gpui::DecorationThickness::Auto,
             Thickness::FromFont => gpui::DecorationThickness::FromFont,
@@ -129,14 +129,14 @@ impl Thickness {
     /// What gpui draws when it has no font thickness to use. Chrome's `auto` is a
     /// tenth of the font size of the box that declares the line, unrounded until
     /// the line is painted.
-    fn fallback(self, lengths: &LengthContext) -> gpui::Pixels {
+    fn fallback(&self, lengths: &LengthContext) -> gpui::Pixels {
         match self {
             Thickness::Auto | Thickness::FromFont => gpui::px(lengths.font_size as f32 / 10.0),
             // Chrome fills a device pixel for a thickness of zero too, which gpui does for
             // any thickness that is not exactly none.
             Thickness::Length(length) => gpui::px(
                 lengths
-                    .resolve(&length, 0.0)
+                    .resolve(length, 0.0)
                     .clamp(MIN_THICKNESS, MAX_LENGTH) as f32,
             ),
         }
@@ -172,7 +172,7 @@ pub(crate) fn of(style: &StyleDesc) -> Option<TextDecoration> {
     {
         decoration.get_or_insert_with(TextDecoration::default).color = Some(color.trim().to_owned());
     }
-    if let Some(declared) = style.text_underline_offset {
+    if let Some(declared) = style.text_underline_offset.clone() {
         if let Some(decoration) = decoration.as_mut() {
             decoration.underline_offset = declared;
         }
@@ -297,11 +297,8 @@ pub(crate) fn parse_thickness(token: &str) -> Option<Thickness> {
         "from-font" => Some(Thickness::FromFont),
         _ => parse_linear_length(token)
             .map(|length| {
-                Thickness::Length(LinearLength {
-                    em: length.em + length.percent,
-                    percent: 0.0,
-                    ..length
-                })
+                let em = length.term(LengthUnit::Em) + length.term(LengthUnit::Percent);
+                Thickness::Length(length.with_term(LengthUnit::Em, em).with_term(LengthUnit::Percent, 0.0))
             }),
     }
 }
@@ -320,7 +317,7 @@ mod tests {
     }
 
     fn em_thickness(em: f64) -> Thickness {
-        Thickness::Length(LinearLength { em, ..LinearLength::default() })
+        Thickness::Length(LinearLength::of(LengthUnit::Em, em))
     }
 
     /// `1em` is 20px and `1rem` 10px.
@@ -408,11 +405,11 @@ mod tests {
         assert_eq!(parse_thickness("0%"), Some(em_thickness(0.0)));
         assert_eq!(
             parse_thickness("1rem"),
-            Some(Thickness::Length(LinearLength { rem: 1.0, ..LinearLength::default() }))
+            Some(Thickness::Length(LinearLength::from_pairs(&[(LengthUnit::Rem, 1.0)])))
         );
         assert_eq!(
             parse_thickness("calc(50% + 1px)"),
-            Some(Thickness::Length(LinearLength { em: 0.5, px: 1.0, ..LinearLength::default() }))
+            Some(Thickness::Length(LinearLength::from_pairs(&[(LengthUnit::Em, 0.5), (LengthUnit::Px, 1.0)])))
         );
     }
 

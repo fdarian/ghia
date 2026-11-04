@@ -954,6 +954,7 @@ fn parse_position(tokens: &[&str], lengths: &LengthContext) -> Option<Position2d
 
 #[cfg(test)]
 mod tests {
+    use crate::css::length::LengthUnit;
 
     #[test]
     fn the_computed_text_keeps_the_functions_a_value_was_written_with() {
@@ -1024,7 +1025,7 @@ mod tests {
         };
         assert_ne!(resolved(&base), resolved(&large));
         assert_eq!(resolved(&large)[0], TransformFunction::Translate(px(40.0), px(10.0 * base_viewport_width() / 100.0)));
-        let rem = crate::css::length::LinearLength { rem: 2.0, ..Default::default() };
+        let rem = LinearLength::from_pairs(&[(LengthUnit::Rem, 2.0)]);
         assert_eq!(list("translate(2rem, 0)")[0], TransformFunction::Translate(px(base.resolve(&rem, 0.0) as f32), px(0.0)));
     }
 

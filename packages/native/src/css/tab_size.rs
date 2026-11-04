@@ -7,7 +7,7 @@ use super::dimension;
 use super::length::{LengthContext, LinearLength};
 
 /// A number is that many times the width of a space, a length is that distance.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TabSize {
     Spaces(f64),
     /// A length without a percentage, unresolved until the element's font size is known.
@@ -18,11 +18,11 @@ pub enum TabSize {
 pub const DEFAULT: gpui::TabSize = gpui::TabSize::Spaces(8.0);
 
 impl TabSize {
-    pub fn to_gpui(self, lengths: &LengthContext) -> gpui::TabSize {
+    pub fn to_gpui(&self, lengths: &LengthContext) -> gpui::TabSize {
         match self {
-            Self::Spaces(spaces) => gpui::TabSize::Spaces(spaces as f32),
+            Self::Spaces(spaces) => gpui::TabSize::Spaces(*spaces as f32),
             Self::Length(length) => {
-                let px = lengths.resolve(&length, 0.0).clamp(0.0, dimension::MAX_LENGTH);
+                let px = lengths.resolve(length, 0.0).clamp(0.0, dimension::MAX_LENGTH);
                 gpui::TabSize::Length(gpui::px(px as f32))
             }
         }
@@ -93,6 +93,7 @@ impl<'de> Deserialize<'de> for TabSize {
 
 #[cfg(test)]
 mod tests {
+    use crate::css::length::LengthUnit;
     use super::*;
 
     fn parse(json: &str) -> Result<TabSize, serde_json::Error> {
@@ -161,7 +162,7 @@ mod tests {
 
     #[test]
     fn survives_a_round_trip() {
-        for size in [TabSize::Spaces(4.0), TabSize::Length(LinearLength::px(40.0)), TabSize::Length(LinearLength { em: 2.0, ..LinearLength::default() })] {
+        for size in [TabSize::Spaces(4.0), TabSize::Length(LinearLength::px(40.0)), TabSize::Length(LinearLength::from_pairs(&[(LengthUnit::Em, 2.0)]))] {
             let json = serde_json::to_string(&size).unwrap();
             assert_eq!(parse(&json).unwrap(), size);
         }

@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use super::dimension::parse_linear_length;
 use super::length::{LengthContext, LinearLength};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum VerticalAlign {
     Baseline,
     /// Lowers the baseline to the parent's subscript position.

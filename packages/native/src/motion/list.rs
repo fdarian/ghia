@@ -70,7 +70,7 @@ impl ListValue {
                 AnimValue::Color(color) => text.push_str(&color.to_css()),
                 item => {
                     let [px, percent, em, rem] = item.as_terms().ok_or_else(|| format!("a list cannot hold {item:?}"))?;
-                    text.push_str(&LinearLength { px, percent, em, rem, ..Default::default() }.to_string());
+                    text.push_str(&LinearLength::from_px_percent_em_rem(px, percent, em, rem).to_string());
                 }
             }
         }

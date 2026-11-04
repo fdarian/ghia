@@ -288,6 +288,7 @@ fn gutter_width(line_count: usize, m: &Metrics) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use crate::css::length::LengthUnit;
     use super::*;
 
     #[test]
@@ -376,7 +377,7 @@ mod tests {
         assert_eq!(line_height_of(&style(r#""24px""#)), 24.0);
         assert_eq!(line_height_of(&style(r#""1.5em""#)), 15.0);
         assert_eq!(line_height_of(&style(r#""150%""#)), 15.0);
-        let unsized_style = StyleDesc { line_height: Some(LineHeight::Length(LinearLength { em: 1.5, ..Default::default() })), ..Default::default() };
+        let unsized_style = StyleDesc { line_height: Some(LineHeight::Length(LinearLength::from_pairs(&[(LengthUnit::Em, 1.5)]))), ..Default::default() };
         assert_eq!(line_height_of(&unsized_style), theme.metrics.code_text_size * 1.5);
     }
 

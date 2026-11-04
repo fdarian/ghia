@@ -2371,6 +2371,7 @@ impl CssAnimations {
 
 #[cfg(test)]
 mod tests {
+    use crate::css::length::{LengthUnit, LinearLength};
     use super::*;
     use super::super::effect::EffectInfo;
 
@@ -3863,7 +3864,7 @@ mod tests {
         let middle = frames.frame_measured(500, &animated, Some(&measurement)).width;
         assert_eq!(
             middle,
-            Some(DimensionValue::Calc(crate::css::length::LinearLength { px: 10.0, percent: 0.25, ..Default::default() }))
+            Some(DimensionValue::Calc(LinearLength::from_pairs(&[(LengthUnit::Px, 10.0), (LengthUnit::Percent, 0.25)])))
         );
         assert_eq!(
             frames.frame_measured(2000, &animated, Some(&measurement)).width,
@@ -3881,7 +3882,7 @@ mod tests {
         let animated = fading("grow 1s linear forwards");
         frames.frame(0, &animated);
         let calc = |px: f64, percent: f64| {
-            Some(DimensionValue::Calc(crate::css::length::LinearLength { px, percent, ..Default::default() }))
+            Some(DimensionValue::Calc(LinearLength::from_pairs(&[(LengthUnit::Px, px), (LengthUnit::Percent, percent)])))
         };
         assert_eq!(frames.frame(250, &animated).width, calc(-2.0, 0.75));
         assert_eq!(frames.frame(500, &animated).width, calc(16.0, 0.5));

@@ -86,7 +86,7 @@ keyword!(
 /// `border-spacing`: the gap between cells and between the cells and the table's
 /// edge. One length is both, two are the horizontal and then the vertical one.
 /// A percentage is not a length here.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BorderSpacing {
     pub horizontal: LinearLength,
     pub vertical: LinearLength,
@@ -120,7 +120,7 @@ impl BorderSpacing {
         let horizontal = length(first)?;
         let vertical = match second {
             Some(token) => length(token)?,
-            None => horizontal,
+            None => horizontal.clone(),
         };
         Some(Self { horizontal, vertical })
     }
@@ -180,7 +180,7 @@ impl<'de> Deserialize<'de> for BorderSpacing {
                     return Err(E::custom(format!("invalid borderSpacing {value}: {RULE}")));
                 }
                 let length = LinearLength::px(value).clamped();
-                Ok(BorderSpacing { horizontal: length, vertical: length })
+                Ok(BorderSpacing { horizontal: length.clone(), vertical: length })
             }
 
             fn visit_i64<E: de::Error>(self, value: i64) -> Result<BorderSpacing, E> {

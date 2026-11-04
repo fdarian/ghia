@@ -191,7 +191,7 @@ fn linear_length(value: AnimValue) -> LinearLength {
 }
 
 fn length_of((px, percent): (f64, f64)) -> LinearLength {
-    LinearLength { px, percent, ..LinearLength::default() }
+    LinearLength::from_px_percent(px, percent)
 }
 
 impl Field for Option<f64> {
@@ -238,19 +238,19 @@ trait ShorthandCorners {
 
 impl ShorthandCorners for Option<BorderRadiusValue> {
     fn top_left(&self) -> Option<CornerRadiusValue> {
-        self.map(|radii| radii.0.top_left)
+        self.as_ref().map(|radii| radii.0.top_left.clone())
     }
 
     fn top_right(&self) -> Option<CornerRadiusValue> {
-        self.map(|radii| radii.0.top_right)
+        self.as_ref().map(|radii| radii.0.top_right.clone())
     }
 
     fn bottom_left(&self) -> Option<CornerRadiusValue> {
-        self.map(|radii| radii.0.bottom_left)
+        self.as_ref().map(|radii| radii.0.bottom_left.clone())
     }
 
     fn bottom_right(&self) -> Option<CornerRadiusValue> {
-        self.map(|radii| radii.0.bottom_right)
+        self.as_ref().map(|radii| radii.0.bottom_right.clone())
     }
 }
 
@@ -327,7 +327,7 @@ trait ShorthandOutline {
 
 impl ShorthandOutline for Option<Outline> {
     fn width(&self) -> Option<LinearLength> {
-        self.as_ref().map(|outline| outline.width)
+        self.as_ref().map(|outline| outline.width.clone())
     }
 
     fn color(&self) -> Option<String> {
@@ -342,11 +342,11 @@ trait ShorthandAxes {
 
 impl ShorthandAxes for Option<Gap> {
     fn row(&self) -> Option<LinearLength> {
-        self.map(|gap| gap.row)
+        self.as_ref().map(|gap| gap.row.clone())
     }
 
     fn column(&self) -> Option<LinearLength> {
-        self.map(|gap| gap.column)
+        self.as_ref().map(|gap| gap.column.clone())
     }
 }
 
@@ -785,7 +785,7 @@ fn shadows_from(
     layers: &[BoxShadowValue],
     colors: &ColorContext,
 ) -> Result<Vec<Shadow>, String> {
-    let px = |length: LinearLength| {
+    let px = |length: &LinearLength| {
         length.as_px().ok_or_else(|| {
             format!(
                 "motion cannot animate {name} to or from a CSS length: only a number of px, \
@@ -800,10 +800,10 @@ fn shadows_from(
             let color = Color::parse(&layer.color, colors)
                 .ok_or_else(|| format!("motion {name} has an invalid colour: {}", layer.color))?;
             Ok(Shadow {
-                offset_x: px(layer.offset_x)?,
-                offset_y: px(layer.offset_y)?,
-                blur: px(layer.blur_radius)?,
-                spread: px(layer.spread_radius)?,
+                offset_x: px(&layer.offset_x)?,
+                offset_y: px(&layer.offset_y)?,
+                blur: px(&layer.blur_radius)?,
+                spread: px(&layer.spread_radius)?,
                 color,
                 inset: layer.inset,
             })
@@ -1395,7 +1395,7 @@ impl AnimProp {
             Some(if em == 0.0 && rem == 0.0 {
                 text::length(px, percent)
             } else {
-                LinearLength { px, percent, em, rem, ..Default::default() }.to_string()
+                LinearLength::from_px_percent_em_rem(px, percent, em, rem).to_string()
             })
         };
         match (self.kind(), value) {
@@ -1613,9 +1613,9 @@ impl AnimProp {
             Initial::NoShadows => Some(AnimValue::Shadows(Vec::new())),
             Initial::Keyword(keyword) => Some(AnimValue::Keyword(Some(keyword.to_string()))),
             Initial::Unset => Some(AnimValue::Keyword(None)),
-            Initial::InheritedUnderlineOffset => Some(match colors.inherited.underline_offset {
+            Initial::InheritedUnderlineOffset => Some(match &colors.inherited.underline_offset {
                 TextUnderlineOffset::Auto => AnimValue::auto_keyword(),
-                TextUnderlineOffset::Length(length) => resolved(&length, &colors.lengths),
+                TextUnderlineOffset::Length(length) => resolved(length, &colors.lengths),
             }),
             Initial::InheritedSpacing => {
                 let spacing = colors.inherited.table.spacing;
@@ -2046,6 +2046,7 @@ fn parse_number(name: &str, value: &Value) -> Result<f64, String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::css::length::LengthUnit;
 
     fn text(prop: AnimProp, json: serde_json::Value, of: Text) -> Vec<(String, String)> {
         let value = prop.parse(&json, &Colors::root()).unwrap();
@@ -2188,7 +2189,7 @@ mod tests {
         AnimProp::MotionRotate.write(&mut style, AnimValue::Number(30.0));
         AnimProp::MotionScale.write(&mut style, AnimValue::Number(2.0));
         AnimProp::OriginX.write(&mut style, AnimValue::Percent(0.25));
-        assert_eq!(style.x.map(|x| (x.px, x.percent)), Some((4.0, 0.5)));
+        assert_eq!(style.x.as_ref().map(|x| (x.term(LengthUnit::Px), x.term(LengthUnit::Percent))), Some((4.0, 0.5)));
         assert_eq!((style.motion_rotate, style.motion_scale), (Some(30.0), Some(2.0)));
         assert_eq!(AnimProp::X.read(&style, &colors), Some(AnimValue::Calc { px: 4.0, percent: 0.5 }));
         assert_eq!(AnimProp::OriginX.read(&style, &colors), Some(AnimValue::Percent(0.25)));
@@ -2385,7 +2386,7 @@ mod tests {
         let mut style = StyleDesc::default();
         AnimProp::ScaleZ.write(&mut style, AnimValue::Number(2.0));
         AnimProp::OriginZ.write(&mut style, AnimValue::Number(30.0));
-        assert_eq!((style.scale_z, style.origin_z.map(|length| length.px)), (Some(2.0), Some(30.0)));
+        assert_eq!((style.scale_z, style.origin_z.as_ref().map(|length| length.term(LengthUnit::Px))), (Some(2.0), Some(30.0)));
     }
 
     #[test]
@@ -2633,7 +2634,7 @@ mod tests {
         AnimProp::RowGap.write(&mut style, AnimValue::Number(3.0));
         AnimProp::ColumnGap.write(&mut style, AnimValue::Calc { px: 3.0, percent: 0.5 });
         assert_eq!(style.row_gap, Some(LinearLength::px(3.0)));
-        assert_eq!(style.column_gap, Some(LinearLength { px: 3.0, percent: 0.5, ..LinearLength::default() }));
+        assert_eq!(style.column_gap, Some(LinearLength::from_pairs(&[(LengthUnit::Px, 3.0), (LengthUnit::Percent, 0.5)])));
     }
     #[test]
     fn padding_is_a_length_a_percentage_or_a_mix() {
@@ -2669,7 +2670,7 @@ mod tests {
         AnimProp::PaddingRight.write(&mut style, AnimValue::Calc { px: 4.0, percent: 0.5 });
         assert_eq!(style.padding_top, Some(LinearLength::px(9.0)));
         assert_eq!(style.padding_left, Some(LinearLength::percent(0.5)));
-        assert_eq!(style.padding_right, Some(LinearLength { px: 4.0, percent: 0.5, ..LinearLength::default() }));
+        assert_eq!(style.padding_right, Some(LinearLength::from_pairs(&[(LengthUnit::Px, 4.0), (LengthUnit::Percent, 0.5)])));
     }
     #[test]
     fn the_percentage_axis_of_padding_is_the_width_and_of_flex_basis_the_main_axis() {
@@ -2755,7 +2756,7 @@ mod tests {
         AnimProp::FlexBasis.write(&mut style, AnimValue::Calc { px: 3.0, percent: 0.5 });
         assert_eq!(
             style.flex_basis,
-            Some(DimensionValue::Calc(LinearLength { px: 3.0, percent: 0.5, ..LinearLength::default() }))
+            Some(DimensionValue::Calc(LinearLength::from_pairs(&[(LengthUnit::Px, 3.0), (LengthUnit::Percent, 0.5)])))
         );
     }
     #[test]
@@ -2895,7 +2896,7 @@ mod tests {
         AnimProp::BorderTopLeftRadius.write(&mut style, ellipse);
         assert_eq!(
             style.border_top_left_radius,
-            Some(CornerRadiusValue { x: LinearLength::px(10.0), y: Some(LinearLength { px: 2.0, percent: 0.5, ..Default::default() }) })
+            Some(CornerRadiusValue { x: LinearLength::px(10.0), y: Some(LinearLength::from_pairs(&[(LengthUnit::Px, 2.0), (LengthUnit::Percent, 0.5)])) })
         );
         assert_eq!(
             AnimProp::BorderTopLeftRadius.clamp_value(AnimValue::Ellipse { x: (-4.0, 0.0), y: (5.0, 0.0) }),

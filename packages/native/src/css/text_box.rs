@@ -206,13 +206,13 @@ enum Side {
 }
 
 fn padding_is_zero(style: &StyleDesc, side: Side, lengths: &LengthContext) -> bool {
-    let length: Option<LinearLength> = match side {
-        Side::Top => style.padding_top.or(style.padding.as_ref().map(|sides| sides.top)),
-        Side::Bottom => style.padding_bottom.or(style.padding.as_ref().map(|sides| sides.bottom)),
+    let length: Option<&LinearLength> = match side {
+        Side::Top => style.padding_top.as_ref().or(style.padding.as_ref().map(|sides| &sides.top)),
+        Side::Bottom => style.padding_bottom.as_ref().or(style.padding.as_ref().map(|sides| &sides.bottom)),
     };
     // A percentage resolves against a width that is not known here; it is zero only
     // when it is written as zero.
-    length.is_none_or(|length| lengths.resolve(&length, 100.0) == 0.0)
+    length.is_none_or(|length| lengths.resolve(length, 100.0) == 0.0)
 }
 
 #[cfg(test)]

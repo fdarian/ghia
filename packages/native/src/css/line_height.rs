@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use super::dimension::{parse_linear_length, MAX_LENGTH};
 use super::length::{LengthContext, LinearLength};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LineHeight {
     /// The font's default leading, which is also what an element that sets no
     /// line height gets.

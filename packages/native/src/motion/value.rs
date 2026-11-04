@@ -637,7 +637,7 @@ impl AnimValue {
         let Self::Relative { px, percent, em, rem } = self else {
             return self.clone();
         };
-        let (px, percent) = lengths.split(&LinearLength { px: *px, percent: *percent, em: *em, rem: *rem, ..Default::default() });
+        let (px, percent) = lengths.split(&LinearLength::from_px_percent_em_rem(*px, *percent, *em, *rem));
         Self::length(px, percent)
     }
 

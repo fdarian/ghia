@@ -277,8 +277,9 @@ pub(crate) fn outline(style: &StyleDesc, colors: &ColorContext, lengths: &Length
         .painted()?;
     let width = style
         .outline_width
-        .or(shorthand.map(|shorthand| shorthand.width))
-        .map_or_else(|| resolve_width(&MEDIUM, lengths), |width| resolve_width(&width, lengths));
+        .as_ref()
+        .or(shorthand.map(|shorthand| &shorthand.width))
+        .map_or_else(|| resolve_width(&MEDIUM, lengths), |width| resolve_width(width, lengths));
     let color = style
         .outline_color
         .as_deref()
@@ -345,7 +346,7 @@ struct Declared {
 
 fn declare(style: &StyleDesc, colors: &ColorContext) -> Declared {
     let mut declared = Declared {
-        widths: [None; 4],
+        widths: [None, None, None, None],
         styles: [None; 4],
     };
     for (value, sides) in shorthands(style) {
@@ -353,12 +354,12 @@ fn declare(style: &StyleDesc, colors: &ColorContext) -> Declared {
             continue;
         };
         for side in sides {
-            declared.widths[*side as usize] = Some(parsed.width);
+            declared.widths[*side as usize] = Some(parsed.width.clone());
             declared.styles[*side as usize] = Some(parsed.style);
         }
     }
     if let Some(widths) = &style.border_width {
-        declared.widths = widths.values().map(|width| Some(*width));
+        declared.widths = widths.values().map(|width| Some(width.clone()));
     }
     if let Some(sides) = style.border_style.as_deref().and_then(parse_style_sides) {
         for (index, keyword) in sides.into_iter().enumerate() {
@@ -366,10 +367,10 @@ fn declare(style: &StyleDesc, colors: &ColorContext) -> Declared {
         }
     }
     for (value, side) in [
-        (style.border_top_width, Side::Top),
-        (style.border_right_width, Side::Right),
-        (style.border_bottom_width, Side::Bottom),
-        (style.border_left_width, Side::Left),
+        (style.border_top_width.clone(), Side::Top),
+        (style.border_right_width.clone(), Side::Right),
+        (style.border_bottom_width.clone(), Side::Bottom),
+        (style.border_left_width.clone(), Side::Left),
     ] {
         if value.is_some() {
             declared.widths[side as usize] = value;
@@ -395,7 +396,7 @@ impl Declared {
     fn used_width(&self, side: Side, lengths: &LengthContext) -> gpui::Pixels {
         match self.styles[side as usize] {
             None | Some(LineStyle::None | LineStyle::Hidden) => gpui::px(0.0),
-            Some(_) => resolve_width(&self.widths[side as usize].unwrap_or(MEDIUM), lengths),
+            Some(_) => resolve_width(self.widths[side as usize].as_ref().unwrap_or(&MEDIUM), lengths),
         }
     }
 
@@ -446,7 +447,7 @@ pub(crate) fn sides(style: &StyleDesc, colors: &ColorContext, lengths: &LengthCo
 /// zeroes the width of a `none` or `hidden` side where it is used, so a transition does not start when
 /// a style appears, and an animation under `none` already runs from `medium`.
 pub(crate) fn computed_width(style: &StyleDesc, colors: &ColorContext, lengths: &LengthContext, side: Side) -> f64 {
-    let width = declare(style, colors).widths[side as usize].unwrap_or(MEDIUM);
+    let width = declare(style, colors).widths[side as usize].take().unwrap_or(MEDIUM);
     f64::from(resolve_width(&width, lengths))
 }
 

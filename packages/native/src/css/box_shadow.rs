@@ -63,16 +63,16 @@ fn parse_layer(layer: &str) -> Option<BoxShadowValue> {
     };
     let (blur_radius, spread_radius) = match rest {
         [] => (LinearLength::px(0.0), LinearLength::px(0.0)),
-        [blur] => (*blur, LinearLength::px(0.0)),
-        [blur, spread] => (*blur, *spread),
+        [blur] => (blur.clone(), LinearLength::px(0.0)),
+        [blur, spread] => (blur.clone(), spread.clone()),
         _ => return None,
     };
     if blur_radius.is_negative() {
         return None;
     }
     Some(BoxShadowValue {
-        offset_x: *offset_x,
-        offset_y: *offset_y,
+        offset_x: offset_x.clone(),
+        offset_y: offset_y.clone(),
         blur_radius,
         spread_radius,
         color: color.unwrap_or(DEFAULT_COLOR).to_owned(),
@@ -219,11 +219,11 @@ mod tests {
     fn relative_units_stay_unresolved_until_the_element_is_known() {
         let parsed = parse("1em calc(1rem + 2px) 10vw -1vh red").unwrap();
         let lengths = LengthContext::for_tests();
-        let px = |length: LinearLength| lengths.resolve_definite(&length).unwrap();
-        assert_eq!(px(parsed[0].offset_x), 20.0);
-        assert_eq!(px(parsed[0].offset_y), 12.0);
-        assert_eq!(px(parsed[0].blur_radius), 80.0);
-        assert_eq!(px(parsed[0].spread_radius), -6.0);
+        let px = |length: &LinearLength| lengths.resolve_definite(length).unwrap();
+        assert_eq!(px(&parsed[0].offset_x), 20.0);
+        assert_eq!(px(&parsed[0].offset_y), 12.0);
+        assert_eq!(px(&parsed[0].blur_radius), 80.0);
+        assert_eq!(px(&parsed[0].spread_radius), -6.0);
         assert!(parsed[0].offset_x.as_px().is_none());
     }
 

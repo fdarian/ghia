@@ -349,7 +349,7 @@ mod tests {
                 &ColorContext::root(Scheme::Light),
                 &LengthContext::initial(800.0, 600.0),
                 &FontFeatureState::default(),
-                Default::default(),
+                &Default::default(),
                 &|_, _| PointerStates::default(),
                 styles,
             )
@@ -363,7 +363,7 @@ mod tests {
                 &ColorContext::root(Scheme::Light),
                 &LengthContext::initial(800.0, 600.0),
                 &FontFeatureState::default(),
-                Default::default(),
+                &Default::default(),
                 &|_, _| PointerStates::default(),
                 styles,
             )
@@ -1051,7 +1051,7 @@ mod tests {
         page.gesture(3, Default::default(), 1000);
         let styles = page.frame(1500);
         assert!(
-            page.shown(&styles, 3).padding_left.is_some_and(|left| left.px < 2.5),
+            page.shown(&styles, 3).padding_left.is_some_and(|left| left.term(crate::css::length::LengthUnit::Px) < 2.5),
             "it goes back with the transition of the element"
         );
     }

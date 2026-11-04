@@ -7,11 +7,47 @@
 //! known.
 
 use std::fmt;
+use std::sync::Arc;
 
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::dimension::{parse_linear_length, MAX_LENGTH};
+
+/// One term of a [`LinearLength`], in the order its terms are fingerprinted.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LengthUnit {
+    Px,
+    Percent,
+    Em,
+    Rem,
+    Vw,
+    Vh,
+    Vmin,
+    Vmax,
+    Cqw,
+    Cqh,
+    Cqmin,
+    Cqmax,
+}
+
+impl LengthUnit {
+    pub(crate) const ALL: [LengthUnit; 12] = [
+        Self::Px,
+        Self::Percent,
+        Self::Em,
+        Self::Rem,
+        Self::Vw,
+        Self::Vh,
+        Self::Vmin,
+        Self::Vmax,
+        Self::Cqw,
+        Self::Cqh,
+        Self::Cqmin,
+        Self::Cqmax,
+    ];
+}
 
 /// `px + percent * basis + em * font-size + ...`. The relative terms are
 /// fractions or multipliers: `50%` and `50vw` are `0.5`, `2em` is `2.0`.
@@ -19,90 +55,118 @@ use super::dimension::{parse_linear_length, MAX_LENGTH};
 /// only known against a window; `cqmin` and `cqmax` because which side of the
 /// query container is smaller is only known against a container. `cqi` and
 /// `cqb` are `cqw` and `cqh`: gpuix has no vertical writing mode.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct LinearLength {
-    pub(crate) px: f64,
-    pub(crate) percent: f64,
-    pub(crate) em: f64,
-    pub(crate) rem: f64,
-    pub(crate) vw: f64,
-    pub(crate) vh: f64,
-    pub(crate) vmin: f64,
-    pub(crate) vmax: f64,
-    pub(crate) cqw: f64,
-    pub(crate) cqh: f64,
-    pub(crate) cqmin: f64,
-    pub(crate) cqmax: f64,
+///
+/// Stored the way Chrome stores a `Length`: one `(unit, value)` term, or a shared
+/// array of all twelve for a mixed-unit `calc()`. Canonical: a value with at most
+/// one non-zero term is always the single-term case, and zero is `px 0`, so the
+/// derived equality is equality of the expression.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinearLength(Repr);
+
+#[derive(Debug, Clone, PartialEq)]
+enum Repr {
+    Single { unit: LengthUnit, value: f64 },
+    Mixed(Arc<[f64; 12]>),
+}
+
+impl Default for LinearLength {
+    fn default() -> Self {
+        Self::px(0.0)
+    }
 }
 
 impl LinearLength {
     /// Every term of the length, for the key of a retained subtree.
     pub(crate) fn fingerprint(&self, fp: &mut crate::retain::Fingerprint) {
-        for term in [
-            self.px, self.percent, self.em, self.rem, self.vw, self.vh, self.vmin, self.vmax,
-            self.cqw, self.cqh, self.cqmin, self.cqmax,
-        ] {
+        for term in self.terms() {
             fp.f64(term);
         }
     }
 
     pub(crate) const fn px(px: f64) -> Self {
-        Self {
-            px,
-            percent: 0.0,
-            em: 0.0,
-            rem: 0.0,
-            vw: 0.0,
-            vh: 0.0,
-            vmin: 0.0,
-            vmax: 0.0,
-            cqw: 0.0,
-            cqh: 0.0,
-            cqmin: 0.0,
-            cqmax: 0.0,
-        }
+        Self(Repr::Single { unit: LengthUnit::Px, value: px })
     }
 
     /// `fraction` is `0.5` for `50%`.
     pub(crate) fn percent(fraction: f64) -> Self {
-        Self { percent: fraction, ..Self::default() }
+        Self::of(LengthUnit::Percent, fraction)
     }
 
-    fn terms(&self) -> [f64; 12] {
-        [
-            self.px,
-            self.percent,
-            self.em,
-            self.rem,
-            self.vw,
-            self.vh,
-            self.vmin,
-            self.vmax,
-            self.cqw,
-            self.cqh,
-            self.cqmin,
-            self.cqmax,
-        ]
+    /// `value` of one `unit`, in the units' own scale (a fraction for `%` and the viewport units).
+    pub(crate) fn of(unit: LengthUnit, value: f64) -> Self {
+        let mut terms = [0.0; 12];
+        terms[unit as usize] = value;
+        Self::from_terms(terms)
     }
 
-    fn from_terms(terms: [f64; 12]) -> Self {
-        Self {
-            px: terms[0],
-            percent: terms[1],
-            em: terms[2],
-            rem: terms[3],
-            vw: terms[4],
-            vh: terms[5],
-            vmin: terms[6],
-            vmax: terms[7],
-            cqw: terms[8],
-            cqh: terms[9],
-            cqmin: terms[10],
-            cqmax: terms[11],
+    #[cfg(test)]
+    pub(crate) fn from_pairs(pairs: &[(LengthUnit, f64)]) -> Self {
+        let mut terms = [0.0; 12];
+        for (unit, value) in pairs {
+            terms[*unit as usize] = *value;
+        }
+        Self::from_terms(terms)
+    }
+
+    pub(crate) fn from_px_percent(px: f64, percent: f64) -> Self {
+        let mut terms = [0.0; 12];
+        terms[LengthUnit::Px as usize] = px;
+        terms[LengthUnit::Percent as usize] = percent;
+        Self::from_terms(terms)
+    }
+
+    pub(crate) fn from_px_percent_em_rem(px: f64, percent: f64, em: f64, rem: f64) -> Self {
+        let mut terms = [0.0; 12];
+        terms[LengthUnit::Px as usize] = px;
+        terms[LengthUnit::Percent as usize] = percent;
+        terms[LengthUnit::Em as usize] = em;
+        terms[LengthUnit::Rem as usize] = rem;
+        Self::from_terms(terms)
+    }
+
+    /// The term of `unit`.
+    pub(crate) fn term(&self, unit: LengthUnit) -> f64 {
+        match &self.0 {
+            Repr::Single { unit: own, value } => {
+                if *own == unit {
+                    *value
+                } else {
+                    0.0
+                }
+            }
+            Repr::Mixed(terms) => terms[unit as usize],
         }
     }
 
-    pub(crate) fn plus(self, other: Self) -> Self {
+    /// The same length with the term of `unit` replaced.
+    pub(crate) fn with_term(&self, unit: LengthUnit, value: f64) -> Self {
+        let mut terms = self.terms();
+        terms[unit as usize] = value;
+        Self::from_terms(terms)
+    }
+
+    pub(crate) fn terms(&self) -> [f64; 12] {
+        match &self.0 {
+            Repr::Single { unit, value } => {
+                let mut terms = [0.0; 12];
+                terms[*unit as usize] = *value;
+                terms
+            }
+            Repr::Mixed(terms) => **terms,
+        }
+    }
+
+    /// The canonical length of `terms`: with at most one non-zero term, that term alone.
+    pub(crate) fn from_terms(terms: [f64; 12]) -> Self {
+        let mut non_zero = terms.iter().enumerate().filter(|(_, term)| **term != 0.0);
+        match (non_zero.next(), non_zero.next()) {
+            (None, _) => Self::px(terms[LengthUnit::Px as usize]),
+            (Some((index, value)), None) => Self(Repr::Single { unit: LengthUnit::ALL[index], value: *value }),
+            _ => Self(Repr::Mixed(Arc::new(terms))),
+        }
+    }
+
+    pub(crate) fn plus(&self, other: &Self) -> Self {
         let mut terms = self.terms();
         for (term, addend) in terms.iter_mut().zip(other.terms()) {
             *term += addend;
@@ -110,51 +174,69 @@ impl LinearLength {
         Self::from_terms(terms)
     }
 
-    pub(crate) fn minus(self, other: Self) -> Self {
-        self.plus(other.map(|term| -term))
+    pub(crate) fn minus(&self, other: &Self) -> Self {
+        self.plus(&other.map(|term| -term))
     }
 
-    pub(crate) fn map(self, apply: impl FnMut(f64) -> f64) -> Self {
+    pub(crate) fn map(&self, apply: impl FnMut(f64) -> f64) -> Self {
         Self::from_terms(self.terms().map(apply))
     }
 
     /// Every term clamped to [`MAX_LENGTH`], the way a lone px length is.
-    pub(crate) fn clamped(self) -> Self {
+    pub(crate) fn clamped(&self) -> Self {
         self.map(|term| term.clamp(-MAX_LENGTH, MAX_LENGTH))
     }
 
     pub(crate) fn is_finite(&self) -> bool {
-        self.terms().iter().all(|term| term.is_finite())
+        match &self.0 {
+            Repr::Single { value, .. } => value.is_finite(),
+            Repr::Mixed(terms) => terms.iter().all(|term| term.is_finite()),
+        }
     }
 
     pub(crate) fn is_zero(&self) -> bool {
-        self.terms().iter().all(|term| *term == 0.0)
+        match &self.0 {
+            Repr::Single { value, .. } => *value == 0.0,
+            Repr::Mixed(_) => false,
+        }
     }
 
     /// Negative in any context: every unit is a non-negative quantity, so a length
     /// with no positive term and a negative one cannot come out positive.
     pub(crate) fn is_negative(&self) -> bool {
-        let terms = self.terms();
-        terms.iter().all(|term| *term <= 0.0) && terms.iter().any(|term| *term < 0.0)
+        match &self.0 {
+            Repr::Single { value, .. } => *value < 0.0,
+            Repr::Mixed(terms) => terms.iter().all(|term| *term <= 0.0) && terms.iter().any(|term| *term < 0.0),
+        }
     }
 
     /// Whether the px of this length depend on the font size, the viewport or a query container.
     pub(crate) fn is_relative(&self) -> bool {
-        self.terms()[2..].iter().any(|term| *term != 0.0)
+        match &self.0 {
+            Repr::Single { unit, value } => *unit as usize >= LengthUnit::Em as usize && *value != 0.0,
+            Repr::Mixed(terms) => terms[LengthUnit::Em as usize..].iter().any(|term| *term != 0.0),
+        }
     }
 
     pub(crate) fn has_percent(&self) -> bool {
-        self.percent != 0.0
+        self.term(LengthUnit::Percent) != 0.0
     }
 
     /// The px, when no other term contributes.
     pub(crate) fn as_px(&self) -> Option<f64> {
-        self.terms()[1..].iter().all(|term| *term == 0.0).then_some(self.px)
+        match &self.0 {
+            Repr::Single { unit: LengthUnit::Px, value } => Some(*value),
+            _ => None,
+        }
     }
 
     /// The percentage as a fraction, when no other term contributes.
     pub(crate) fn as_percent(&self) -> Option<f64> {
-        (self.px == 0.0 && self.terms()[2..].iter().all(|term| *term == 0.0)).then_some(self.percent)
+        match &self.0 {
+            Repr::Single { unit: LengthUnit::Percent, value } => Some(*value),
+            Repr::Single { unit: LengthUnit::Px, value } if *value == 0.0 => Some(0.0),
+            _ => None,
+        }
     }
 }
 
@@ -264,27 +346,39 @@ impl LengthContext {
 
     /// `percent_basis` is the px a `100%` stands for.
     pub(crate) fn resolve(&self, length: &LinearLength, percent_basis: f64) -> f64 {
-        let (min_side, max_side) = if self.viewport_width < self.viewport_height {
-            (self.viewport_width, self.viewport_height)
-        } else {
-            (self.viewport_height, self.viewport_width)
+        match &length.0 {
+            Repr::Single { unit, value } => value * self.px_per(*unit, percent_basis),
+            Repr::Mixed(terms) => LengthUnit::ALL
+                .iter()
+                .zip(terms.iter())
+                .map(|(unit, term)| term * self.px_per(*unit, percent_basis))
+                .reduce(|sum, term| sum + term)
+                .expect("a length has twelve terms"),
+        }
+    }
+
+    /// The px one whole `unit` stands for.
+    fn px_per(&self, unit: LengthUnit, percent_basis: f64) -> f64 {
+        let container = || {
+            (
+                self.container_width.unwrap_or(self.viewport_width),
+                self.container_height.unwrap_or(self.viewport_height),
+            )
         };
-        let (container_width, container_height) = (
-            self.container_width.unwrap_or(self.viewport_width),
-            self.container_height.unwrap_or(self.viewport_height),
-        );
-        length.px
-            + length.percent * percent_basis
-            + length.em * self.font_size
-            + length.rem * self.root_font_size
-            + length.vw * self.viewport_width
-            + length.vh * self.viewport_height
-            + length.vmin * min_side
-            + length.vmax * max_side
-            + length.cqw * container_width
-            + length.cqh * container_height
-            + length.cqmin * container_width.min(container_height)
-            + length.cqmax * container_width.max(container_height)
+        match unit {
+            LengthUnit::Px => 1.0,
+            LengthUnit::Percent => percent_basis,
+            LengthUnit::Em => self.font_size,
+            LengthUnit::Rem => self.root_font_size,
+            LengthUnit::Vw => self.viewport_width,
+            LengthUnit::Vh => self.viewport_height,
+            LengthUnit::Vmin => self.viewport_width.min(self.viewport_height),
+            LengthUnit::Vmax => self.viewport_width.max(self.viewport_height),
+            LengthUnit::Cqw => container().0,
+            LengthUnit::Cqh => container().1,
+            LengthUnit::Cqmin => container().0.min(container().1),
+            LengthUnit::Cqmax => container().0.max(container().1),
+        }
     }
 
     /// The px of a length that does not depend on a containing block.
@@ -295,7 +389,7 @@ impl LengthContext {
     /// Everything that is px once the context is known, and the percent
     /// fraction that still needs a containing block.
     pub(crate) fn split(&self, length: &LinearLength) -> (f64, f64) {
-        (self.resolve(&LinearLength { percent: 0.0, ..*length }, 0.0), length.percent)
+        (self.resolve(&length.with_term(LengthUnit::Percent, 0.0), 0.0), length.term(LengthUnit::Percent))
     }
 }
 
@@ -399,19 +493,21 @@ impl LengthContext {
 
 impl fmt::Display for LinearLength {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let own = self.terms();
+        let term = |unit: LengthUnit| own[unit as usize];
         let terms: Vec<(f64, &str)> = [
-            (self.percent * 100.0, "%"),
-            (self.em, "em"),
-            (self.rem, "rem"),
-            (self.vw * 100.0, "vw"),
-            (self.vh * 100.0, "vh"),
-            (self.vmin * 100.0, "vmin"),
-            (self.vmax * 100.0, "vmax"),
-            (self.cqw * 100.0, "cqw"),
-            (self.cqh * 100.0, "cqh"),
-            (self.cqmin * 100.0, "cqmin"),
-            (self.cqmax * 100.0, "cqmax"),
-            (self.px, "px"),
+            (term(LengthUnit::Percent) * 100.0, "%"),
+            (term(LengthUnit::Em), "em"),
+            (term(LengthUnit::Rem), "rem"),
+            (term(LengthUnit::Vw) * 100.0, "vw"),
+            (term(LengthUnit::Vh) * 100.0, "vh"),
+            (term(LengthUnit::Vmin) * 100.0, "vmin"),
+            (term(LengthUnit::Vmax) * 100.0, "vmax"),
+            (term(LengthUnit::Cqw) * 100.0, "cqw"),
+            (term(LengthUnit::Cqh) * 100.0, "cqh"),
+            (term(LengthUnit::Cqmin) * 100.0, "cqmin"),
+            (term(LengthUnit::Cqmax) * 100.0, "cqmax"),
+            (term(LengthUnit::Px), "px"),
         ]
         .into_iter()
         .filter(|(value, _)| *value != 0.0)
@@ -503,6 +599,21 @@ pub(crate) fn deserialize_with<'de, D: Deserializer<'de>>(
 mod tests {
     use super::*;
 
+    // Every length field of every style carries this, so its size is most of a `StyleDesc`'s.
+    #[test]
+    fn a_length_and_an_optional_one_are_two_words() {
+        assert_eq!(std::mem::size_of::<LinearLength>(), 16);
+        assert_eq!(std::mem::size_of::<Option<LinearLength>>(), 16);
+    }
+
+    #[test]
+    fn a_length_with_one_term_is_stored_as_that_term() {
+        assert_eq!(LinearLength::of(LengthUnit::Em, 2.0).0, Repr::Single { unit: LengthUnit::Em, value: 2.0 });
+        assert_eq!(LinearLength::of(LengthUnit::Vw, 0.0), LinearLength::px(0.0));
+        assert_eq!(LinearLength::from_px_percent(10.0, 0.5).plus(&LinearLength::px(-10.0)), LinearLength::percent(0.5));
+        assert!(matches!(LinearLength::from_px_percent(10.0, 0.5).0, Repr::Mixed(_)));
+    }
+
     fn parse(text: &str) -> LinearLength {
         parse_linear_length(text).unwrap_or_else(|| panic!("{text} should parse"))
     }
@@ -572,8 +683,9 @@ mod tests {
             let json = serde_json::to_string(&length).unwrap();
             let back: LinearLength = serde_json::from_str(&json).unwrap();
             assert_eq!(back.to_string(), length.to_string(), "{json}");
-            assert!((back.percent - length.percent).abs() < 1e-9, "{json}");
-            assert!((back.vmin - length.vmin).abs() < 1e-9, "{json}");
+            for unit in LengthUnit::ALL {
+                assert!((back.term(unit) - length.term(unit)).abs() < 1e-9, "{json}");
+            }
         }
     }
 

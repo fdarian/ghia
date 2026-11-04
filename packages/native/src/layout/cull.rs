@@ -125,7 +125,7 @@ pub(crate) fn ink_outset(
 /// declared far below its text sits outside the box of the line.
 pub(crate) fn line_reach(
     style: &StyleDesc,
-    offset: crate::css::text_underline_offset::TextUnderlineOffset,
+    offset: &crate::css::text_underline_offset::TextUnderlineOffset,
     lengths: &LengthContext,
 ) -> f32 {
     std::iter::once(style)
@@ -230,7 +230,7 @@ mod tests {
     fn an_underline_reaches_by_its_offset_and_thickness() {
         let lengths = LengthContext::for_tests();
         let auto = crate::css::text_underline_offset::TextUnderlineOffset::Auto;
-        let reach = |json: &str| line_reach(&style(json), auto, &lengths);
+        let reach = |json: &str| line_reach(&style(json), &auto, &lengths);
         assert_eq!(reach(r#"{"width": 20}"#), 0.0);
         assert_eq!(reach(r#"{"textDecorationLine": "underline", "textDecorationThickness": "3px", "textUnderlineOffset": 40}"#), 43.0);
         assert_eq!(reach(r#"{"textUnderlineOffset": -25}"#), 25.0);
@@ -241,7 +241,7 @@ mod tests {
         let inherited = crate::css::text_underline_offset::TextUnderlineOffset::Length(
             crate::css::length::LinearLength::px(50.0),
         );
-        assert_eq!(line_reach(&style(r#"{"textDecorationLine": "underline"}"#), inherited, &lengths), 52.0);
+        assert_eq!(line_reach(&style(r#"{"textDecorationLine": "underline"}"#), &inherited, &lengths), 52.0);
     }
 
     #[test]

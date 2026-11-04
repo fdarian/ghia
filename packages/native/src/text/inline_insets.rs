@@ -269,7 +269,8 @@ impl InsetSpec {
                     motion
                         .declared(*id, base, states(*id, base))
                         .vertical_align
-                        .is_some_and(|align| align != crate::css::vertical_align::VerticalAlign::Baseline)
+                        .as_ref()
+                        .is_some_and(|align| *align != crate::css::vertical_align::VerticalAlign::Baseline)
                 })
             })
             .map(|(id, _)| *id)
@@ -452,8 +453,8 @@ fn space_of(
 ) -> BoxSpace {
     let padding_below = style.padding_below_longhands();
     let margin_below = style.margin_below_longhands();
-    let padding = |side: Option<LinearLength>, shorthand: Option<LinearLength>| {
-        side.or(shorthand).map_or_else(Extent::default, |length| Extent::of(&length, lengths))
+    let padding = |side: Option<&LinearLength>, shorthand: Option<&LinearLength>| {
+        side.or(shorthand).map_or_else(Extent::default, |length| Extent::of(length, lengths))
     };
     let margin = |side: &Option<DimensionValue>, shorthand: &Option<DimensionValue>| {
         Extent::of_margin(side.as_ref().or(shorthand.as_ref()), lengths)
@@ -463,10 +464,10 @@ fn space_of(
         range: range.clone(),
         margin_start: margin(&style.margin_left, &margin_below.left),
         margin_end: margin(&style.margin_right, &margin_below.right),
-        padding_start: padding(style.padding_left, padding_below.left),
-        padding_end: padding(style.padding_right, padding_below.right),
-        padding_top: padding(style.padding_top, padding_below.top),
-        padding_bottom: padding(style.padding_bottom, padding_below.bottom),
+        padding_start: padding(style.padding_left.as_ref(), padding_below.left.as_ref()),
+        padding_end: padding(style.padding_right.as_ref(), padding_below.right.as_ref()),
+        padding_top: padding(style.padding_top.as_ref(), padding_below.top.as_ref()),
+        padding_bottom: padding(style.padding_bottom.as_ref(), padding_below.bottom.as_ref()),
         border: border_widths(style, colors, lengths),
     }
 }

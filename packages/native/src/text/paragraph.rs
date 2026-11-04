@@ -187,7 +187,7 @@ pub fn run_styles(
     colors: &ColorContext,
     lengths: &LengthContext,
     font_state: &FontFeatureState,
-    underline_offset: TextUnderlineOffset,
+    underline_offset: &TextUnderlineOffset,
     states: &dyn Fn(u64, &StyleDesc) -> PointerStates,
     motion: &InlineStyles,
 ) -> Vec<RunStyle> {
@@ -235,7 +235,7 @@ pub fn styles(
     colors: &ColorContext,
     lengths: &LengthContext,
     font_state: &FontFeatureState,
-    underline_offset: TextUnderlineOffset,
+    underline_offset: &TextUnderlineOffset,
     states: &dyn Fn(u64, &StyleDesc) -> PointerStates,
     motion: &InlineStyles,
 ) -> Styles {
@@ -251,7 +251,7 @@ pub fn styles(
         let mut colors = *colors;
         let mut lengths = *lengths;
         let mut font_state = font_state.clone();
-        let mut underline_offset = underline_offset;
+        let mut underline_offset = underline_offset.clone();
         let mut group = 0;
         let mut parent = None;
         let mut wraps = None;
@@ -324,7 +324,7 @@ pub fn styles(
             // take it off, so `none` on a box adds nothing and removes nothing.
             if has_box {
                 if let Some(mut decoration) = text_decoration::of(declared) {
-                    decoration.underline_offset = underline_offset;
+                    decoration.underline_offset = underline_offset.clone();
                     let color = decoration.resolve_color(&colors);
                     style.add_decoration(&decoration, color, &lengths, *id, piece_ix as u32 + 1);
                     decorates = decoration.underline;
@@ -956,7 +956,7 @@ mod tests {
             &ColorContext::root(Scheme::Light),
             &container_lengths(),
             &FontFeatureState::default(),
-                Default::default(),
+                &Default::default(),
             states,
             &InlineStyles::default(),
         )
@@ -999,7 +999,7 @@ mod tests {
             &ColorContext::root(Scheme::Light),
             &container_lengths(),
             &FontFeatureState::default(),
-                Default::default(),
+                &Default::default(),
             &|_, _| PointerStates::default(),
             &InlineStyles::default(),
         );
@@ -1612,7 +1612,7 @@ mod tests {
             &ColorContext::root(Scheme::Light),
             &container_lengths(),
             &FontFeatureState::default(),
-            Default::default(),
+            &Default::default(),
             &|_, _| PointerStates::default(),
             &InlineStyles::default(),
         )

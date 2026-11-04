@@ -24,7 +24,7 @@ use crate::color::{ColorContext, Scheme};
 use crate::css::dimension::parse_linear_length;
 use crate::css::angle::parse_degrees;
 use crate::css::transform::{format_list, parse_transform, Value as TransformValue};
-use crate::css::length::{LengthContext, LinearLength};
+use crate::css::length::{LengthContext, LengthUnit, LinearLength};
 use crate::css::font_variations::VariationSettings;
 use crate::css::syntax::split_slash_tokens;
 use crate::dormant_wake::Wake;
@@ -738,7 +738,7 @@ impl MotionValueStore {
             };
             let value = match value {
                 AnimValue::Relative { px, percent, em, rem } => {
-                    let declared = LinearLength { px: *px, percent: *percent, em: *em, rem: *rem, ..Default::default() };
+                    let declared = LinearLength::from_px_percent_em_rem(*px, *percent, *em, *rem);
                     AnimValue::Number(parent.lengths.descend(Some(&declared), parent.above_root).font_size)
                 }
                 other => other.clone(),
@@ -934,12 +934,12 @@ fn parse_component(text: &str, context: &ValueContext) -> Result<Option<AnimValu
         return Ok(Some(AnimValue::Percent(check_finite(NAME, percent / 100.0)?)));
     }
     if let Some(length) = parse_linear_length(text) {
-        let (px, percent) = context.lengths.split(&LinearLength { em: 0.0, rem: 0.0, ..length });
+        let (px, percent) = context.lengths.split(&length.with_term(LengthUnit::Em, 0.0).with_term(LengthUnit::Rem, 0.0));
         return Ok(Some(AnimValue::relative(
             check_finite(NAME, px)?,
             check_finite(NAME, percent)?,
-            check_finite(NAME, length.em)?,
-            check_finite(NAME, length.rem)?,
+            check_finite(NAME, length.term(LengthUnit::Em))?,
+            check_finite(NAME, length.term(LengthUnit::Rem))?,
         )));
     }
     Ok(Color::parse(text, &context.colors).map(AnimValue::Color))
@@ -994,10 +994,10 @@ fn to_json(value: &AnimValue) -> Result<Value, String> {
         AnimValue::Number(value) => number(*value),
         AnimValue::Percent(fraction) => Ok(Value::String(format!("{}%", fraction * 100.0))),
         AnimValue::Calc { px, percent } => Ok(Value::String(
-            LinearLength { px: *px, percent: *percent, ..Default::default() }.to_string(),
+            LinearLength::from_px_percent(*px, *percent).to_string(),
         )),
         AnimValue::Relative { px, percent, em, rem } => Ok(Value::String(
-            LinearLength { px: *px, percent: *percent, em: *em, rem: *rem, ..Default::default() }.to_string(),
+            LinearLength::from_px_percent_em_rem(*px, *percent, *em, *rem).to_string(),
         )),
         AnimValue::Color(color) => Ok(Value::String(color.to_css())),
         AnimValue::List(list) => list.to_css().map(Value::String),
@@ -1875,7 +1875,7 @@ mod tests {
             assert_eq!(style.margin_left, Some(crate::style::DimensionValue::Pixels(margin)), "{own}px");
             assert_eq!(
                 style.padding_top,
-                Some(LinearLength { px: padding, percent: 0.5, ..Default::default() }),
+                Some(LinearLength::from_pairs(&[(LengthUnit::Px, padding), (LengthUnit::Percent, 0.5)])),
                 "{own}px, root {root}px"
             );
         }
@@ -1979,9 +1979,9 @@ mod tests {
         store.frame([&binding], &[], clock.at(0));
         let mut style = StyleDesc::default();
         store.apply(&binding, &mut style, &ParentValues::initial());
-        let calc = LinearLength { px: -20.0, percent: 1.0, ..Default::default() };
-        assert_eq!(style.width, Some(crate::style::DimensionValue::Calc(calc)));
-        assert_eq!(style.margin_left, Some(crate::style::DimensionValue::Calc(calc)));
+        let calc = LinearLength::from_pairs(&[(LengthUnit::Px, -20.0), (LengthUnit::Percent, 1.0)]);
+        assert_eq!(style.width, Some(crate::style::DimensionValue::Calc(calc.clone())));
+        assert_eq!(style.margin_left, Some(crate::style::DimensionValue::Calc(calc.clone())));
 
         store.set(1.0, &json!("calc(-100% - 20px)"), clock.at(10)).unwrap();
         store.frame([&binding], &[], clock.at(10));

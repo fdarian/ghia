@@ -7852,7 +7852,7 @@ impl Inherited {
             weight: self.font_weight,
             variations: self.computed_variations.clone(),
             inheritable: crate::motion::Inheritable {
-                underline_offset: self.underline_offset,
+                underline_offset: self.underline_offset.clone(),
                 table: self.table,
                 pointer_events_none: self.pointer_events_none,
                 visibility_hidden: self.visibility_hidden,
@@ -7981,7 +7981,7 @@ impl Inherited {
         }
         self.underline_reach = self.underline_reach.max(crate::layout::cull::line_reach(
             style,
-            self.underline_offset,
+            &self.underline_offset,
             &self.lengths,
         ));
         if let Some(weight) = &style.font_weight {
@@ -10932,7 +10932,7 @@ fn build_element_unpumped(
     // An underline sits where the box that declares it says, and that box inherits
     // its offset.
     let offset_style = style.and_then(|style| {
-        crate::css::text_underline_offset::with_inherited(style, ctx.inherited.underline_offset)
+        crate::css::text_underline_offset::with_inherited(style, ctx.inherited.underline_offset.clone())
     });
     let style = offset_style.as_ref().or(style);
     let contained_style = style.and_then(crate::layout::content_visibility::contained);
@@ -12399,7 +12399,7 @@ fn paragraph_content(
             &ctx.inherited.colors,
             &ctx.inherited.lengths,
             &ctx.inherited.font_state,
-            ctx.inherited.underline_offset,
+            &ctx.inherited.underline_offset,
             &ctx.inline_states(),
             &motion,
         )
@@ -12595,8 +12595,8 @@ fn build_atomics(
                 .descend(declared.as_ref().and_then(|style| style.font_size.as_ref()), false);
             let line_height = declared
                 .as_ref()
-                .and_then(|style| style.line_height)
-                .or(overlay.as_ref().and_then(|overlay| overlay.line_height));
+                .and_then(|style| style.line_height.clone())
+                .or(overlay.as_ref().and_then(|overlay| overlay.line_height.clone()));
             let align = declared
                 .as_ref()
                 .and_then(|style| style.vertical_align.as_ref())
@@ -12956,7 +12956,7 @@ fn apply_styles_taking_borders_from<E: gpui::Styled>(
     {
         el = el.white_space(white_space);
     }
-    if let Some(tab_size) = style.tab_size {
+    if let Some(tab_size) = &style.tab_size {
         el.text_style().tab_size = Some(tab_size.to_gpui(lengths));
     }
     if let Some(edge) = crate::css::text_box::of(style).edge {
@@ -12990,7 +12990,7 @@ fn apply_styles_taking_borders_from<E: gpui::Styled>(
     if let Some(line_height) = &style.line_height {
         el.text_style().line_height = Some(line_height.text_style_value(lengths));
     }
-    if let Some(radii) = style.border_radius {
+    if let Some(radii) = &style.border_radius {
         el = el
             .rounded_tl(radii.0.top_left.resolve(lengths))
             .rounded_tr(radii.0.top_right.resolve(lengths))
@@ -12998,16 +12998,16 @@ fn apply_styles_taking_borders_from<E: gpui::Styled>(
             .rounded_bl(radii.0.bottom_left.resolve(lengths));
     }
     // Apply corner longhands after the shorthand so the explicit corner wins.
-    if let Some(radius) = style.border_top_left_radius {
+    if let Some(radius) = &style.border_top_left_radius {
         el = el.rounded_tl(radius.resolve(lengths));
     }
-    if let Some(radius) = style.border_top_right_radius {
+    if let Some(radius) = &style.border_top_right_radius {
         el = el.rounded_tr(radius.resolve(lengths));
     }
-    if let Some(radius) = style.border_bottom_left_radius {
+    if let Some(radius) = &style.border_bottom_left_radius {
         el = el.rounded_bl(radius.resolve(lengths));
     }
-    if let Some(radius) = style.border_bottom_right_radius {
+    if let Some(radius) = &style.border_bottom_right_radius {
         el = el.rounded_br(radius.resolve(lengths));
     }
     el = crate::css::border::apply_colors(el, style, colors);

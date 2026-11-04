@@ -136,7 +136,7 @@ pub fn strip(
     let width = match &style.width {
         Some(DimensionValue::Percentage(fraction)) => Some(gpui::relative(*fraction as f32)),
         Some(DimensionValue::Calc(length)) if length.has_percent() => {
-            crate::layout::style::definite(&DimensionValue::Calc(*length), lengths)
+            crate::layout::style::definite(&DimensionValue::Calc(length.clone()), lengths)
         }
         _ => None,
     };

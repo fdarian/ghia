@@ -3169,7 +3169,7 @@ mod tests {
             serde_json::json!({ "borderRadius": "10px / 20px" }),
         );
         let ellipse = crate::style::CornerRadiusValue { x: LinearLength::px(20.0), y: Some(LinearLength::px(30.0)) };
-        assert_eq!(style.border_top_left_radius, Some(ellipse));
+        assert_eq!(style.border_top_left_radius, Some(ellipse.clone()));
         assert_eq!(style.border_bottom_right_radius, Some(ellipse));
 
         let style = halfway(
@@ -4637,7 +4637,7 @@ mod tests {
         }
 
         fn calc(px: f64, percent: f64) -> Option<DimensionValue> {
-            Some(DimensionValue::Calc(LinearLength { px, percent, ..LinearLength::default() }))
+            Some(DimensionValue::Calc(LinearLength::from_pairs(&[(crate::css::length::LengthUnit::Px, px), (crate::css::length::LengthUnit::Percent, percent)])))
         }
 
         #[test]
@@ -5609,7 +5609,7 @@ mod tests {
                 let Some(DimensionValue::Calc(length)) = value else {
                     panic!("expected a calc, got {value:?}");
                 };
-                assert!((length.px - px).abs() < 1e-9 && (length.percent - percent).abs() < 1e-9, "{length:?}");
+                assert!((length.term(crate::css::length::LengthUnit::Px) - px).abs() < 1e-9 && (length.term(crate::css::length::LengthUnit::Percent) - percent).abs() < 1e-9, "{length:?}");
             };
             assert_eq!(width(0.5), Some(DimensionValue::Percentage(0.25)));
             assert_eq!(width(1.0), Some(DimensionValue::Percentage(0.5)));
@@ -5938,7 +5938,7 @@ mod tests {
             assert_eq!(font_at(at(started, 1.0)), (Some(AnimValue::Number(40.0)), Some(AnimValue::Number(300.0))));
 
             // A declared `em` size is relative to the parent's, whatever the style says.
-            let base = StyleDesc { font_size: Some(crate::css::length::LinearLength { em: 2.0, ..Default::default() }), ..Default::default() };
+            let base = StyleDesc { font_size: Some(LinearLength::from_pairs(&[(crate::css::length::LengthUnit::Em, 2.0)])), ..Default::default() };
             let colors = Colors::inheriting(&ColorContext::root(Scheme::Light), &parent_font, Some(&base));
             let state = MotionState::new(&description, Some(&base), colors.clone(), None, 0, started).unwrap();
             assert_eq!(AnimProp::FontSize.read(&style_at(&state, started), &colors), Some(AnimValue::Number(40.0)));

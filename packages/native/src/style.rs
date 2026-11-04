@@ -136,7 +136,7 @@ fn deserialize_origin<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Opti
     }
 
     Ok(Option::<Origin>::deserialize(deserializer)?.map(|origin| match origin {
-        Origin::Fraction(fraction) => LinearLength { percent: fraction, ..LinearLength::default() },
+        Origin::Fraction(fraction) => LinearLength::percent(fraction),
         Origin::Length(length) => length,
     }))
 }
@@ -268,12 +268,12 @@ impl BoxShadowValues {
 /// `borderRadius`: a number of px or a CSS string, parsed when the style arrives
 /// so an invalid one is an error at the commit and not a missing corner. The lengths
 /// resolve when the style is applied ([`CornerRadiusValue::resolve`]).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BorderRadiusValue(pub gpui::Corners<CornerRadiusValue>);
 
 /// A corner longhand such as `borderTopLeftRadius`: the horizontal radius and, for an
 /// elliptical corner, the vertical one. A percentage is of the border box on its own axis.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct CornerRadiusValue {
     pub x: LinearLength,
     /// `None` is the same as `x`.
@@ -305,18 +305,18 @@ impl StyleDesc {
     /// The four corners once the corner longhands are laid over `borderRadius`;
     /// a corner neither sets is square.
     pub(crate) fn corner_radii(&self) -> gpui::Corners<CornerRadiusValue> {
-        let mut corners = self.border_radius.map(|radii| radii.0).unwrap_or_default();
-        if let Some(radius) = self.border_top_left_radius {
-            corners.top_left = radius;
+        let mut corners = self.border_radius.clone().map(|radii| radii.0).unwrap_or_default();
+        if let Some(radius) = &self.border_top_left_radius {
+            corners.top_left = radius.clone();
         }
-        if let Some(radius) = self.border_top_right_radius {
-            corners.top_right = radius;
+        if let Some(radius) = &self.border_top_right_radius {
+            corners.top_right = radius.clone();
         }
-        if let Some(radius) = self.border_bottom_right_radius {
-            corners.bottom_right = radius;
+        if let Some(radius) = &self.border_bottom_right_radius {
+            corners.bottom_right = radius.clone();
         }
-        if let Some(radius) = self.border_bottom_left_radius {
-            corners.bottom_left = radius;
+        if let Some(radius) = &self.border_bottom_left_radius {
+            corners.bottom_left = radius.clone();
         }
         corners
     }
@@ -354,7 +354,7 @@ impl CornerRadiusValue {
     }
 
     fn on_all_corners(self) -> gpui::Corners<Self> {
-        gpui::Corners { top_left: self, top_right: self, bottom_right: self, bottom_left: self }
+        gpui::Corners { top_left: self.clone(), top_right: self.clone(), bottom_right: self.clone(), bottom_left: self }
     }
 }
 
@@ -1348,9 +1348,9 @@ impl StyleDesc {
             painted.perspective = other.perspective.clone();
             painted.perspective_origin = other.perspective_origin.clone();
             painted.transform_style = other.transform_style.clone();
-            painted.z = other.z;
-            painted.translate_z = other.translate_z;
-            painted.transform_perspective = other.transform_perspective;
+            painted.z = other.z.clone();
+            painted.translate_z = other.translate_z.clone();
+            painted.transform_perspective = other.transform_perspective.clone();
             painted.rotate_x = other.rotate_x;
             painted.rotate_y = other.rotate_y;
             painted.transform = other.transform.clone();
@@ -1358,10 +1358,10 @@ impl StyleDesc {
             painted.rotate = other.rotate.clone();
             painted.scale = other.scale.clone();
             painted.transform_origin = other.transform_origin.clone();
-            painted.x = other.x;
-            painted.y = other.y;
-            painted.translate_x = other.translate_x;
-            painted.translate_y = other.translate_y;
+            painted.x = other.x.clone();
+            painted.y = other.y.clone();
+            painted.translate_x = other.translate_x.clone();
+            painted.translate_y = other.translate_y.clone();
             painted.motion_scale = other.motion_scale;
             painted.scale_x = other.scale_x;
             painted.scale_y = other.scale_y;
@@ -1371,9 +1371,9 @@ impl StyleDesc {
             painted.skew = other.skew;
             painted.skew_x = other.skew_x;
             painted.skew_y = other.skew_y;
-            painted.origin_x = other.origin_x;
-            painted.origin_y = other.origin_y;
-            painted.origin_z = other.origin_z;
+            painted.origin_x = other.origin_x.clone();
+            painted.origin_y = other.origin_y.clone();
+            painted.origin_z = other.origin_z.clone();
             painted.motion_transform = other.motion_transform.clone();
         }
         painted == *other
@@ -1791,6 +1791,13 @@ pub fn cursor_name(style: gpui::CursorStyle) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Every interned style, every transitioning element's before-change style and every
+    // animated frame is one of these: 16 KB before lengths were stored as one term.
+    #[test]
+    fn a_style_stays_under_seven_kilobytes() {
+        assert!(std::mem::size_of::<StyleDesc>() < 7 * 1024, "{}", std::mem::size_of::<StyleDesc>());
+    }
 
     fn light() -> ColorContext {
         ColorContext::root(crate::color::Scheme::Light)
@@ -2560,13 +2567,13 @@ mod tests {
     #[test]
     fn padding_takes_one_to_four_values_and_fills_the_missing_sides_like_css() {
         let (a, b, c, d) = (length("1px"), length("2px"), length("3px"), length("4px"));
-        assert_eq!(style_of(r#"{"padding": "1px"}"#).padding, sides(a, a, a, a));
-        assert_eq!(style_of(r#"{"padding": "1px 2px"}"#).padding, sides(a, b, a, b));
-        assert_eq!(style_of(r#"{"padding": "1px 2px 3px"}"#).padding, sides(a, b, c, b));
-        assert_eq!(style_of(r#"{"padding": "1px 2px 3px 4px"}"#).padding, sides(a, b, c, d));
+        assert_eq!(style_of(r#"{"padding": "1px"}"#).padding, sides(a.clone(), a.clone(), a.clone(), a.clone()));
+        assert_eq!(style_of(r#"{"padding": "1px 2px"}"#).padding, sides(a.clone(), b.clone(), a.clone(), b.clone()));
+        assert_eq!(style_of(r#"{"padding": "1px 2px 3px"}"#).padding, sides(a.clone(), b.clone(), c.clone(), b.clone()));
+        assert_eq!(style_of(r#"{"padding": "1px 2px 3px 4px"}"#).padding, sides(a.clone(), b.clone(), c.clone(), d.clone()));
         assert_eq!(style_of(r#"{"padding": 6}"#).padding, Some(Sides::all(length("6px"))));
         assert_eq!(style_of(r#"{"padding": "  0.5em   0.75em "}"#).padding, sides(length("0.5em"), length("0.75em"), length("0.5em"), length("0.75em")));
-        assert_eq!(style_of(r#"{"padding": "0 1px"}"#).padding, sides(length("0"), a, length("0"), a));
+        assert_eq!(style_of(r#"{"padding": "0 1px"}"#).padding, sides(length("0"), a.clone(), length("0"), a.clone()));
         assert_eq!(style_of(r#"{"padding": null}"#).padding, None);
     }
 
@@ -2683,11 +2690,11 @@ mod tests {
     fn border_width_takes_one_to_four_values_with_the_keywords_per_side() {
         let (a, b, c, d) = (length("1px"), length("2px"), length("3px"), length("4px"));
         let style = |json: &str| style_of(json).border_width;
-        assert_eq!(style(r#"{"borderWidth": "1px 2px 3px 4px"}"#), sides(a, b, c, d));
-        assert_eq!(style(r#"{"borderWidth": "1px 2px"}"#), sides(a, b, a, b));
-        assert_eq!(style(r#"{"borderWidth": "1px 2px 3px"}"#), sides(a, b, c, b));
-        assert_eq!(style(r#"{"borderWidth": "thin medium thick"}"#), sides(a, c, length("5px"), c));
-        assert_eq!(style(r#"{"borderWidth": "thick 1px"}"#), sides(length("5px"), a, length("5px"), a));
+        assert_eq!(style(r#"{"borderWidth": "1px 2px 3px 4px"}"#), sides(a.clone(), b.clone(), c.clone(), d));
+        assert_eq!(style(r#"{"borderWidth": "1px 2px"}"#), sides(a.clone(), b.clone(), a.clone(), b.clone()));
+        assert_eq!(style(r#"{"borderWidth": "1px 2px 3px"}"#), sides(a.clone(), b.clone(), c.clone(), b.clone()));
+        assert_eq!(style(r#"{"borderWidth": "thin medium thick"}"#), sides(a.clone(), c.clone(), length("5px"), c.clone()));
+        assert_eq!(style(r#"{"borderWidth": "thick 1px"}"#), sides(length("5px"), a.clone(), length("5px"), a.clone()));
         assert_eq!(style(r#"{"borderWidth": "0.5em calc(1px + 1rem)"}"#).unwrap().right, length("calc(1px + 1rem)"));
         assert_eq!(style(r#"{"borderWidth": 2}"#), Some(Sides::all(length("2px"))));
         assert_eq!(style(r#"{"borderWidth": "medium"}"#), Some(Sides::all(c)));

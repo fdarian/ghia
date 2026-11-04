@@ -380,7 +380,7 @@ pub(crate) fn split_border_all_sides(base: &mut StyleDesc, covered_sides: [bool;
         }
         // A side's own longhand already beats the all-sides value.
         if let Some(all_width) = &all_width {
-            width.get_or_insert(*all_width.values()[index]);
+            width.get_or_insert(all_width.values()[index].clone());
         }
         if let Some(all_colors) = &all_colors {
             color.get_or_insert_with(|| all_colors[index].clone());

@@ -17,7 +17,7 @@ use super::dimension::{parse_linear_length, MAX_LENGTH};
 use super::length::{LengthContext, LinearLength};
 use crate::style::StyleDesc;
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum TextUnderlineOffset {
     /// A gap below the baseline that grows with the underline's thickness.
     #[default]
@@ -38,13 +38,13 @@ impl TextUnderlineOffset {
     /// The value an element with `lengths` passes to its descendants, when it
     /// declares `declared` (`None` inherits `self`). What depends on the element is
     /// px from here on; the percentage waits for the box that draws the line.
-    pub(crate) fn inherit(self, declared: Option<&Self>, lengths: &LengthContext) -> Self {
+    pub(crate) fn inherit(&self, declared: Option<&Self>, lengths: &LengthContext) -> Self {
         match declared {
-            None => self,
+            None => self.clone(),
             Some(Self::Auto) => Self::Auto,
             Some(Self::Length(length)) => {
                 let (px, percent) = lengths.split(length);
-                Self::Length(LinearLength { px, percent, ..LinearLength::default() })
+                Self::Length(LinearLength::from_px_percent(px, percent))
             }
         }
     }
@@ -62,11 +62,11 @@ impl TextUnderlineOffset {
 
     /// The offset in px for a line drawn by the box that has `lengths`; `None` is
     /// `auto`.
-    pub(crate) fn resolve(self, lengths: &LengthContext) -> Option<gpui::Pixels> {
+    pub(crate) fn resolve(&self, lengths: &LengthContext) -> Option<gpui::Pixels> {
         match self {
             Self::Auto => None,
             Self::Length(length) => {
-                let px = lengths.resolve(&length, lengths.font_size).clamp(-MAX_LENGTH, MAX_LENGTH);
+                let px = lengths.resolve(length, lengths.font_size).clamp(-MAX_LENGTH, MAX_LENGTH);
                 Some(gpui::px(px as f32))
             }
         }
@@ -107,12 +107,12 @@ fn filled_state(state: &StyleDesc, below: &StyleDesc, below_offset: TextUnderlin
 /// nothing.
 pub(crate) fn with_inherited(style: &StyleDesc, inherited: TextUnderlineOffset) -> Option<StyleDesc> {
     let base = (declares_decoration(style) && style.text_underline_offset.is_none() && inherited != TextUnderlineOffset::Auto)
-        .then(|| StyleDesc { text_underline_offset: Some(inherited), ..style.clone() });
+        .then(|| StyleDesc { text_underline_offset: Some(inherited.clone()), ..style.clone() });
     if style.focus_within.is_none() && style.focus_visible.is_none() {
         return base;
     }
     let mut filled = base.unwrap_or_else(|| style.clone());
-    let offset_of = |style: &StyleDesc| style.text_underline_offset.unwrap_or(inherited);
+    let offset_of = |style: &StyleDesc| style.text_underline_offset.clone().unwrap_or_else(|| inherited.clone());
     // `focusVisible` sits on `focusWithin`, which sits on the element's own style.
     let mut below = filled.clone();
     if let Some(within) = filled.focus_within.as_deref() {
@@ -185,6 +185,7 @@ impl<'de> Deserialize<'de> for TextUnderlineOffset {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::css::length::LengthUnit;
 
     fn parse(json: &str) -> Result<TextUnderlineOffset, serde_json::Error> {
         serde_json::from_str(json)
@@ -210,17 +211,17 @@ mod tests {
         assert_eq!(length("\"4px\""), LinearLength::px(4.0));
         assert_eq!(length("\"1in\""), LinearLength::px(96.0));
         assert_eq!(length("\"0\""), LinearLength::default());
-        assert_eq!(length("\"0.25em\"").em, 0.25);
-        assert_eq!(length("\"25%\"").percent, 0.25);
+        assert_eq!(length("\"0.25em\"").term(LengthUnit::Em), 0.25);
+        assert_eq!(length("\"25%\"").term(LengthUnit::Percent), 0.25);
         let calc = length("\"calc(25% + 1px)\"");
-        assert_eq!((calc.px, calc.percent), (1.0, 0.25));
+        assert_eq!((calc.term(LengthUnit::Px), calc.term(LengthUnit::Percent)), (1.0, 0.25));
     }
 
     #[test]
     fn a_negative_offset_is_valid() {
         assert_eq!(length("-3"), LinearLength::px(-3.0));
-        assert_eq!(length("\"-0.1em\"").em, -0.1);
-        assert_eq!(length("\"-10%\"").percent, -0.1);
+        assert_eq!(length("\"-0.1em\"").term(LengthUnit::Em), -0.1);
+        assert_eq!(length("\"-10%\"").term(LengthUnit::Percent), -0.1);
     }
 
     #[test]
@@ -267,13 +268,13 @@ mod tests {
     fn a_style_that_declares_a_decoration_takes_the_inherited_offset() {
         let inherited = TextUnderlineOffset::Length(LinearLength::px(4.0));
         let style = |json: &str| serde_json::from_str::<StyleDesc>(json).unwrap();
-        let filled = with_inherited(&style(r#"{"textDecoration": "underline"}"#), inherited).unwrap();
-        assert_eq!(filled.text_underline_offset, Some(inherited));
-        assert!(with_inherited(&style(r#"{"textDecorationLine": "underline"}"#), inherited).is_some());
-        assert!(with_inherited(&style(r#"{"color": "red"}"#), inherited).is_none());
+        let filled = with_inherited(&style(r#"{"textDecoration": "underline"}"#), inherited.clone()).unwrap();
+        assert_eq!(filled.text_underline_offset, Some(inherited.clone()));
+        assert!(with_inherited(&style(r#"{"textDecorationLine": "underline"}"#), inherited.clone()).is_some());
+        assert!(with_inherited(&style(r#"{"color": "red"}"#), inherited.clone()).is_none());
         assert!(with_inherited(&style(r#"{"textDecoration": "underline"}"#), TextUnderlineOffset::Auto).is_none());
         assert!(
-            with_inherited(&style(r#"{"textDecoration": "underline", "textUnderlineOffset": 2}"#), inherited)
+            with_inherited(&style(r#"{"textDecoration": "underline", "textUnderlineOffset": 2}"#), inherited.clone())
                 .is_none(),
             "its own offset wins"
         );
@@ -288,9 +289,9 @@ mod tests {
         let inherited = TextUnderlineOffset::Length(LinearLength::px(4.0));
         for state in ["focusWithin", "focusVisible"] {
             let style = state_of(&format!(r#"{{"{state}": {{"textDecoration": "underline"}}}}"#));
-            let filled = with_inherited(&style, inherited).unwrap_or_else(|| panic!("{state}"));
+            let filled = with_inherited(&style, inherited.clone()).unwrap_or_else(|| panic!("{state}"));
             let state = filled.focus_within.as_deref().or(filled.focus_visible.as_deref()).unwrap();
-            assert_eq!(state.text_underline_offset, Some(inherited));
+            assert_eq!(state.text_underline_offset, Some(inherited.clone()));
             assert_eq!(filled.text_underline_offset, None, "the element declares no line");
         }
     }

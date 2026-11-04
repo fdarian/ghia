@@ -7,7 +7,7 @@
 //! element's [`LengthContext`] and resolve to px, and treat a percentage as
 //! invalid where the consumer has no basis for one.
 
-use super::length::{LengthContext, LinearLength};
+use super::length::{LengthContext, LengthUnit, LinearLength};
 
 /// The largest length a value may take. Browsers clamp an out-of-range length
 /// instead of rejecting it (Chrome's `LayoutUnit` saturates here), and gpui
@@ -15,7 +15,7 @@ use super::length::{LengthContext, LinearLength};
 pub(crate) const MAX_LENGTH: f64 = 33_554_431.0;
 
 /// What a token or a `calc()` expression evaluates to.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Quantity {
     Number(f64),
     Linear(LinearLength, Units),
@@ -61,16 +61,16 @@ fn quantity(value: f64, unit: &str) -> Option<Quantity> {
     match unit {
         "" => Some(Quantity::Number(value)),
         "%" => linear(LinearLength::percent(fraction), Units::PERCENT),
-        "em" => linear(LinearLength { em: value, ..LinearLength::default() }, Units::RELATIVE),
-        "rem" => linear(LinearLength { rem: value, ..LinearLength::default() }, Units::RELATIVE),
-        "vw" => linear(LinearLength { vw: fraction, ..LinearLength::default() }, Units::RELATIVE),
-        "vh" => linear(LinearLength { vh: fraction, ..LinearLength::default() }, Units::RELATIVE),
-        "vmin" => linear(LinearLength { vmin: fraction, ..LinearLength::default() }, Units::RELATIVE),
-        "vmax" => linear(LinearLength { vmax: fraction, ..LinearLength::default() }, Units::RELATIVE),
-        "cqw" | "cqi" => linear(LinearLength { cqw: fraction, ..LinearLength::default() }, Units::RELATIVE),
-        "cqh" | "cqb" => linear(LinearLength { cqh: fraction, ..LinearLength::default() }, Units::RELATIVE),
-        "cqmin" => linear(LinearLength { cqmin: fraction, ..LinearLength::default() }, Units::RELATIVE),
-        "cqmax" => linear(LinearLength { cqmax: fraction, ..LinearLength::default() }, Units::RELATIVE),
+        "em" => linear(LinearLength::of(LengthUnit::Em, value), Units::RELATIVE),
+        "rem" => linear(LinearLength::of(LengthUnit::Rem, value), Units::RELATIVE),
+        "vw" => linear(LinearLength::of(LengthUnit::Vw, fraction), Units::RELATIVE),
+        "vh" => linear(LinearLength::of(LengthUnit::Vh, fraction), Units::RELATIVE),
+        "vmin" => linear(LinearLength::of(LengthUnit::Vmin, fraction), Units::RELATIVE),
+        "vmax" => linear(LinearLength::of(LengthUnit::Vmax, fraction), Units::RELATIVE),
+        "cqw" | "cqi" => linear(LinearLength::of(LengthUnit::Cqw, fraction), Units::RELATIVE),
+        "cqh" | "cqb" => linear(LinearLength::of(LengthUnit::Cqh, fraction), Units::RELATIVE),
+        "cqmin" => linear(LinearLength::of(LengthUnit::Cqmin, fraction), Units::RELATIVE),
+        "cqmax" => linear(LinearLength::of(LengthUnit::Cqmax, fraction), Units::RELATIVE),
         _ => linear(LinearLength::px(value * px_per(unit)?), Units::ABSOLUTE),
     }
 }
@@ -111,7 +111,7 @@ pub(crate) fn parse_definite_length(token: &str) -> Option<LinearLength> {
 }
 
 /// A value that a range comparison (`--x > 5px`) can order: the kinds do not mix.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Comparable {
     Number(f64),
     Length(LinearLength),
@@ -123,7 +123,7 @@ pub(crate) enum Comparable {
 pub(crate) fn parse_comparable(token: &str) -> Option<Comparable> {
     match parse_quantity(token)? {
         Quantity::Number(value) => Some(Comparable::Number(value)),
-        Quantity::Linear(length, units) if units == Units::PERCENT => Some(Comparable::Percentage(length.percent)),
+        Quantity::Linear(length, units) if units == Units::PERCENT => Some(Comparable::Percentage(length.term(LengthUnit::Percent))),
         Quantity::Linear(length, units) if !units.percent => Some(Comparable::Length(length.clamped())),
         Quantity::Linear(..) => None,
     }
@@ -311,7 +311,7 @@ fn evaluate(args: &str) -> Option<Quantity> {
     let tokens = tokenize(args)?;
     let mut parser = Parser { tokens: &tokens, index: 0 };
     let result = parser.sum()?;
-    let finite = match result {
+    let finite = match &result {
         Quantity::Number(value) => value.is_finite(),
         Quantity::Linear(length, _) => length.is_finite(),
     };
@@ -343,7 +343,7 @@ impl Parser<'_> {
                     Quantity::Number(if subtract { left - right } else { left + right })
                 }
                 (Quantity::Linear(left, left_units), Quantity::Linear(right, right_units)) => {
-                    let length = if subtract { left.minus(right) } else { left.plus(right) };
+                    let length = if subtract { left.minus(&right) } else { left.plus(&right) };
                     Quantity::Linear(length, left_units.union(right_units))
                 }
                 _ => return None,
@@ -362,8 +362,8 @@ impl Parser<'_> {
             self.index += 1;
             let right = self.factor()?;
             left = match (left, right, divide) {
-                (_, Quantity::Number(divisor), true) if divisor != 0.0 && divisor.is_finite() => {
-                    map_quantity(left, |value| value / divisor)
+                (other, Quantity::Number(divisor), true) if divisor != 0.0 && divisor.is_finite() => {
+                    map_quantity(other, |value| value / divisor)
                 }
                 (Quantity::Number(factor), other, false) => map_quantity(other, |value| value * factor),
                 (other, Quantity::Number(factor), false) => map_quantity(other, |value| value * factor),
@@ -376,7 +376,7 @@ impl Parser<'_> {
         let token = self.tokens.get(self.index)?;
         self.index += 1;
         match token {
-            Token::Quantity(quantity) => Some(*quantity),
+            Token::Quantity(quantity) => Some(quantity.clone()),
             Token::Open => self.group(),
             _ => None,
         }
@@ -402,6 +402,7 @@ fn map_quantity(quantity: Quantity, mut apply: impl FnMut(f64) -> f64) -> Quanti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::css::length::LengthUnit;
 
     #[test]
     fn splits_numbers_signs_exponents_and_units() {
@@ -555,12 +556,12 @@ mod tests {
         assert_eq!(linear("72pt"), LinearLength::px(96.0));
         assert_eq!(linear("6pc"), LinearLength::px(96.0));
         assert_eq!(linear("50%"), LinearLength::percent(0.5));
-        assert_eq!(linear("1.5em"), LinearLength { em: 1.5, ..LinearLength::default() });
-        assert_eq!(linear("2rem"), LinearLength { rem: 2.0, ..LinearLength::default() });
-        assert_eq!(linear("50vw"), LinearLength { vw: 0.5, ..LinearLength::default() });
-        assert_eq!(linear("25vh"), LinearLength { vh: 0.25, ..LinearLength::default() });
-        assert_eq!(linear("10vmin"), LinearLength { vmin: 0.1, ..LinearLength::default() });
-        assert_eq!(linear("75vmax"), LinearLength { vmax: 0.75, ..LinearLength::default() });
+        assert_eq!(linear("1.5em"), LinearLength::from_pairs(&[(LengthUnit::Em, 1.5)]));
+        assert_eq!(linear("2rem"), LinearLength::from_pairs(&[(LengthUnit::Rem, 2.0)]));
+        assert_eq!(linear("50vw"), LinearLength::from_pairs(&[(LengthUnit::Vw, 0.5)]));
+        assert_eq!(linear("25vh"), LinearLength::from_pairs(&[(LengthUnit::Vh, 0.25)]));
+        assert_eq!(linear("10vmin"), LinearLength::from_pairs(&[(LengthUnit::Vmin, 0.1)]));
+        assert_eq!(linear("75vmax"), LinearLength::from_pairs(&[(LengthUnit::Vmax, 0.75)]));
     }
 
     #[test]
@@ -568,8 +569,8 @@ mod tests {
         assert_eq!(linear("1EM"), linear("1em"));
         assert_eq!(linear("5VMIN"), linear("5vmin"));
         assert_eq!(linear("  12Px "), LinearLength::px(12.0));
-        assert_eq!(linear("-3rem"), LinearLength { rem: -3.0, ..LinearLength::default() });
-        assert_eq!(linear("+.5em"), LinearLength { em: 0.5, ..LinearLength::default() });
+        assert_eq!(linear("-3rem"), LinearLength::from_pairs(&[(LengthUnit::Rem, -3.0)]));
+        assert_eq!(linear("+.5em"), LinearLength::from_pairs(&[(LengthUnit::Em, 0.5)]));
         assert_eq!(linear("CALC( 1PX  +  2Px )"), LinearLength::px(3.0));
         assert_eq!(linear("0"), LinearLength::px(0.0));
         assert_eq!(linear("-0.0"), LinearLength::px(0.0));
@@ -579,33 +580,33 @@ mod tests {
     #[test]
     fn vmin_and_vmax_stay_separate_from_vw_and_vh() {
         let length = linear("calc(10vmin + 20vmax + 30vw + 40vh)");
-        assert_eq!(length.vmin, 0.1);
-        assert_eq!(length.vmax, 0.2);
-        assert_eq!(length.vw, 0.3);
-        assert_eq!(length.vh, 0.4);
-        assert_eq!(linear("calc(10vmin - 10vmin)").vmin, 0.0);
+        assert_eq!(length.term(LengthUnit::Vmin), 0.1);
+        assert_eq!(length.term(LengthUnit::Vmax), 0.2);
+        assert_eq!(length.term(LengthUnit::Vw), 0.3);
+        assert_eq!(length.term(LengthUnit::Vh), 0.4);
+        assert_eq!(linear("calc(10vmin - 10vmin)").term(LengthUnit::Vmin), 0.0);
     }
 
     #[test]
     fn calc_mixes_every_unit_with_plus_and_minus() {
         let length = linear("calc(100% - 20px)");
-        assert_eq!((length.percent, length.px), (1.0, -20.0));
+        assert_eq!((length.term(LengthUnit::Percent), length.term(LengthUnit::Px)), (1.0, -20.0));
         let length = linear("calc(1em + 2rem - 3vw)");
-        assert_eq!((length.em, length.rem, length.vw, length.px), (1.0, 2.0, -0.03, 0.0));
+        assert_eq!((length.term(LengthUnit::Em), length.term(LengthUnit::Rem), length.term(LengthUnit::Vw), length.term(LengthUnit::Px)), (1.0, 2.0, -0.03, 0.0));
         assert_eq!(linear("calc(1px + 1em - 1em)").as_px(), Some(1.0));
     }
 
     #[test]
     fn calc_scales_a_mixed_length_by_numbers() {
         let length = linear("calc(2 * (1em + 4px))");
-        assert_eq!((length.em, length.px), (2.0, 8.0));
+        assert_eq!((length.term(LengthUnit::Em), length.term(LengthUnit::Px)), (2.0, 8.0));
         let length = linear("calc((1em + 4px) * 2)");
-        assert_eq!((length.em, length.px), (2.0, 8.0));
-        assert_eq!(linear("calc(100% / 3)").percent, 1.0 / 3.0);
+        assert_eq!((length.term(LengthUnit::Em), length.term(LengthUnit::Px)), (2.0, 8.0));
+        assert_eq!(linear("calc(100% / 3)").term(LengthUnit::Percent), 1.0 / 3.0);
         assert_eq!(linear("calc((2em + 6px) / 2)"), linear("calc(1em + 3px)"));
         assert_eq!(linear("calc(2 * 3 * 1px)"), LinearLength::px(6.0));
         assert_eq!(linear("calc(calc(1em + calc(2px * 2)) * 2)"), linear("calc(2em + 8px)"));
-        assert_eq!(linear("calc((1 + 2) * 1rem)").rem, 3.0);
+        assert_eq!(linear("calc((1 + 2) * 1rem)").term(LengthUnit::Rem), 3.0);
     }
 
     #[test]
@@ -644,8 +645,8 @@ mod tests {
         assert_eq!(parse_length("calc(1e300px * 1e300)", &lengths), None);
         assert_eq!(parse_linear_length("calc(1e300px * 1e300)"), None);
         let huge = linear("calc(1e300% + 1e300em - 1e300vw)");
-        assert_eq!((huge.percent, huge.em, huge.vw), (MAX_LENGTH, MAX_LENGTH, -MAX_LENGTH));
-        assert_eq!(linear("1e999rem").rem, MAX_LENGTH);
+        assert_eq!((huge.term(LengthUnit::Percent), huge.term(LengthUnit::Em), huge.term(LengthUnit::Vw)), (MAX_LENGTH, MAX_LENGTH, -MAX_LENGTH));
+        assert_eq!(linear("1e999rem").term(LengthUnit::Rem), MAX_LENGTH);
         assert!(f64::from(parse_length("1e300px", &lengths).unwrap() as f32).is_finite());
     }
 

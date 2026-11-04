@@ -3121,7 +3121,7 @@ mod tests {
         assert_eq!(clock.events().len(), 2, "run and start");
         assert_eq!(
             clock.frame(510, &percent).width,
-            Some(DimensionValue::Calc(LinearLength { px: 5.0, percent: 0.25, ..LinearLength::default() }))
+            Some(DimensionValue::Calc(LinearLength::from_pairs(&[(crate::css::length::LengthUnit::Px, 5.0), (crate::css::length::LengthUnit::Percent, 0.25)])))
         );
         let auto = style(r#"{ "width": "auto", "transition": "all 1s linear" }"#);
         assert_eq!(clock.frame(20, &auto).width, Some(DimensionValue::Auto));
@@ -3772,7 +3772,7 @@ mod tests {
             let after = clock.frame_measured(500, &sized(r#""50%""#), None, Some(&wide)).width;
             assert_eq!(
                 before,
-                Some(DimensionValue::Calc(LinearLength { px: 10.0, percent: 0.25, ..LinearLength::default() }))
+                Some(DimensionValue::Calc(LinearLength::from_pairs(&[(crate::css::length::LengthUnit::Px, 10.0), (crate::css::length::LengthUnit::Percent, 0.25)])))
             );
             assert_eq!(after, before, "the percentage is still a share of whatever the parent is");
         }
@@ -3787,7 +3787,7 @@ mod tests {
         }
 
         fn calc(px: f64, percent: f64) -> Option<DimensionValue> {
-            Some(DimensionValue::Calc(LinearLength { px, percent, ..LinearLength::default() }))
+            Some(DimensionValue::Calc(LinearLength::from_pairs(&[(crate::css::length::LengthUnit::Px, px), (crate::css::length::LengthUnit::Percent, percent)])))
         }
 
         /// `from` to `to` for a second, linear, read at `millis`.
@@ -3959,7 +3959,7 @@ mod tests {
         fn an_elliptical_border_radius_blends_both_radii() {
             let middle = blended("borderRadius", "10px / 20px", "30px / 40px");
             let ellipse = CornerRadiusValue { x: LinearLength::px(20.0), y: Some(LinearLength::px(30.0)) };
-            assert_eq!(middle.border_top_left_radius, Some(ellipse));
+            assert_eq!(middle.border_top_left_radius, Some(ellipse.clone()));
             assert_eq!(middle.border_bottom_right_radius, Some(ellipse));
         }
 

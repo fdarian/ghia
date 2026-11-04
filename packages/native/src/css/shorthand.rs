@@ -60,7 +60,7 @@ impl<T> Sides<T> {
 }
 
 /// `gap`: the row gap (between rows) and the column gap (between columns).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Gap {
     pub row: LinearLength,
     pub column: LinearLength,
@@ -68,7 +68,7 @@ pub struct Gap {
 
 impl Gap {
     pub fn all(length: LinearLength) -> Self {
-        Self { row: length, column: length }
+        Self { row: length.clone(), column: length }
     }
 }
 
@@ -272,9 +272,9 @@ mod tests {
     #[test]
     fn one_to_four_values_fill_in_like_css() {
         let (a, b, c, d) = (length("1px"), length("2px"), length("3px"), length("4px"));
-        assert_eq!(sides("1px"), Ok(Sides::all(a)));
-        assert_eq!(sides("1px 2px"), Ok(Sides { top: a, right: b, bottom: a, left: b }));
-        assert_eq!(sides("1px 2px 3px"), Ok(Sides { top: a, right: b, bottom: c, left: b }));
+        assert_eq!(sides("1px"), Ok(Sides::all(a.clone())));
+        assert_eq!(sides("1px 2px"), Ok(Sides { top: a.clone(), right: b.clone(), bottom: a.clone(), left: b.clone() }));
+        assert_eq!(sides("1px 2px 3px"), Ok(Sides { top: a.clone(), right: b.clone(), bottom: c.clone(), left: b.clone() }));
         assert_eq!(sides("1px 2px 3px 4px"), Ok(Sides { top: a, right: b, bottom: c, left: d }));
         assert_eq!(sides("  1px \t 2px\n"), sides("1px 2px"));
     }
