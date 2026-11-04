@@ -278,7 +278,8 @@ One window and one text, 1x display, footprint: 70 to 65 MB with fonts, 68 to 63
 - **The JavaScriptCore heap** (App-Specific Tag 1, 17 to 20 MB). It is there with no window: it is the JS that was loaded.
 - **ColorSync transform tables**, about 11 MB in Malloc Small, from AppKit and CoreAnimation colour matching (the Dock
   icon draw, `CGColor` conversion on commit).
-- **gpui's instance buffer** (2 MB) and **A8 glyph atlas** (1 MB).
+- **gpui's instance buffers**, one per frame in flight, 256 KiB each until a frame needs more (the pool then keeps the
+  larger size), and the **A8 glyph atlas** (1 MB).
 - **The Objective-C and AppKit runtime**, under 4 MB.
 
 Floors measured for comparison: a bare `bun` 4.4 MB, with the addon loaded 7.8 MB, a compiled app with its JS and no
@@ -347,10 +348,79 @@ IOSurface 11 MB, graphics 11 MB, stacks 7.5 MB, JIT 6 MB. Ranked:
    caches, `StyleTable` (about 3000 distinct styles at 1.6 KB each at the showcase) and the interned strings hold most of
    it, and none of it shrinks. About 5 MB of the showcase's is the style table, whose `Arc<StyleDesc>` and raw JSON kept for collision
    checks could be one.
-4. **A transition state is 15.5 KB** while it runs: a page with 5000 transitioning elements holds 77 MB of them. Making
-   `previous: StyleDesc` an `Arc` takes most of that off; the demo never has more than a few hundred.
+4. **A transition state is about 7 KB** while it runs, nearly all of it the 6.3 KB `previous: StyleDesc`: a page with
+   5000 transitioning elements holds 35 MB of them. The `after` style it copies is built fresh for every element
+   (`fold_state_styles` and `with_vars`), so an `Arc` saves nothing until that build hands back the interned style when
+   it has nothing to fold.
 5. **`CAMetalLayer` drawables** (11 MB of IOSurface at 1x, about 30 MB on a Retina display) and ColorSync tables: the floor
    listed above.
+
+### Where an app's memory goes (round 49)
+
+Three apps built on Ghia, measured in November 2026: the ghia-swiftui demo (960 x 640), its Apple Music clone (1298 x 838,
+15 album covers) and the ghia-fluid-functionalism gallery (1236 x 778), each from a copy of its checkout, on a 2x display,
+window opened in the background (`GPUIX_BACKGROUND=1`). Footprint is `phys_footprint` through `proc_pid_rusage` 15 s after
+the first window shows; buckets are dirty + swapped MB from `vmmap --summary`; the malloc split is `MallocStackLogging=lite`
+with `malloc_history -allBySize`, grouped by the first addon or framework frame. Builds are compared back to back in one
+session: the footprint of one build moves by 1 to 5 MB between runs, and IOSurface by one drawable (2 at rest, 3 while
+animating).
+
+| footprint MB (two runs) | demo | music | fluid |
+| --- | --- | --- | --- |
+| published 0.11.1 (Babel loaded at every launch) | 186, 192 | 316, 315 | 259, 256 |
+| main's addon, Solid transform cache warm | 131, 131 | 261, 260 | 195, 195 |
+| round 49 | 116, 116 | 211, 212 | 178, 178 |
+
+| dirty + swapped MB, round 49 | demo | music | fluid |
+| --- | --- | --- | --- |
+| App-Specific Tag 1 (Bun's mimalloc: the JS heap, 8 / 7 / 20 MB of it live objects) | 30 | 26 | 53 |
+| Malloc Small (the addon and the system frameworks) | 36 | 42 | 78 |
+| Malloc Small (empty) | 0 | 25 | 0 |
+| IOSurface (`CAMetalLayer` drawables: 4, 5 and 1 layers) | 19 | 65 | 11 |
+| IOAccelerator (atlas textures, instance buffers, driver state) | 9 | 31 | 9 |
+| owned unmapped (graphics), Metal driver | 8 | 8 | 4 |
+| stacks, `__DATA`, page tables and the rest | 15 | 14 | 25 |
+
+What each item is, largest first:
+
+- **Babel** (55 to 73 MB per app, all in Tag 1). `@ghia/solid`'s preload imports Babel only for a file that misses
+  the transform cache in `~/Library/Caches/ghia/solid-transform/`, so a warm launch never loads it. A compiled app
+  (`bun build --compile`) carries no Babel either.
+- **Album covers in the atlas** (music: 43 MB of IOAccelerator). A tile wider or taller than 512 px gets a texture
+  of exactly its size (zed `metal_atlas.rs`), so the 15 covers take the 21.6 MB their pixels need; a padded
+  1024 x 1024 texture each is 60.5 MB.
+- **Decoded images held twice** (music: 20.8 MB of malloc). gpui's asset cache keeps every `RenderImage` for the life
+  of the app. On an Apple GPU, where atlas textures are shared with the CPU, a single-frame image keeps its pixels only
+  in the atlas it was first uploaded to and reads them back when another atlas or `as_bytes` needs them (zed
+  `image_pixels.rs`). The freed frames stay in malloc as 25 MB of empty-but-dirty small regions: the system allocator
+  gives them back under memory pressure, and `malloc_zone_pressure_relief` returns 0 bytes on this macOS.
+- **Instance buffers** (3 to 5 MB). One per frame in flight; they start at 256 KiB and the pool keeps whatever size the
+  heaviest frame needed.
+- **`StyleDesc`** (fluid: 8 MB of the style table, transition states and stacks). A `LinearLength` is one
+  `(unit, value)` term or a shared array for a mixed `calc()`, as Chrome's `Length` is, so a style is 6.3 KB (16 KB
+  with twelve `f64` terms per length). A build keeps styles on the main thread's stack, which is 2.5 to 3.5 MB smaller
+  for it.
+- **Motion tracks** (fluid: 1.7 MB). A `MotionState`'s tracks are boxed, so a state with one track holds a small
+  B-tree node, not an eleven-slot 16 KB one.
+
+**Left, and why.** In malloc allocated MB (demo / music / fluid) the addon's share is 15 / 15 / 42 and the system's 18 /
+22 / 14:
+
+1. **`CAMetalLayer` drawables**, 19 / 65 / 11 MB, three times width x height x 4 per layer. Every overlay layer (a layer
+   above a native view) has its own; the music clone has four. Fewer or smaller overlay layers is the layer model's
+   call. `maximumDrawableCount` stays 3 (see [above](#memory-footprint-of-a-window-79)).
+2. **The JS heap and Bun's allocator**, 26 to 53 MB: the app's own modules and data (Solid, base-ui, the app). Ghia's JS
+   per element is about 0.45 KB; zod, loaded by the automation protocol, is 1.8 MB.
+3. **The addon's live data**, in fluid: the layout engine's node store (6.4 MB allocated, one `SlotMap` of taffy
+   `NodeData`, plus its keyed-layout tables), motion and transition state (6.3 MB, 2 MB of it transition states at about
+   7 KB each, see item 4 of the list above), the style table (5.4 MB), scene and frame arenas (4.4 MB), element frame
+   state, text shaping and retain records (3.3 to 3.6 MB each). The demo and the music clone hold 15 MB in all, a third
+   of it gpui's arenas.
+4. **ColorSync tables** (5 to 7 MB), from CoreAnimation colour-matching AppKit's layer contents on commit, and AppKit,
+   Metal and CoreText (5 to 8 MB together): the same in any AppKit app.
+5. **Metal driver memory**, 4 to 8 MB of owned unmapped graphics: per device and pipeline, not per frame.
+6. **The polychrome atlas** starts at 1024 x 1024 (4 MiB) and the glyph atlas at 1 MiB. A smaller first texture would
+   split sprites across textures and break batching, for 3 MB.
 
 ## API
 
