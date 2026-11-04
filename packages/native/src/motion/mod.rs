@@ -535,13 +535,17 @@ pub(crate) enum GestureBase<'a> {
     Svg(&'a HashMap<String, Value>),
 }
 
+/// Boxed because a [`Track`] is over a kilobyte and a B-tree leaf holds eleven entries inline: a state with
+/// one track carried a 16 KB node.
+type Tracks = BTreeMap<PropKey, Box<Track>>;
+
 pub(crate) struct MotionState {
     source: Value,
     /// What the targets were resolved in. A new one resolves them again, so an
     /// appearance change or a new `color` on a parent moves a `currentColor` or
     /// `light-dark()` target.
     colors: Colors,
-    tracks: BTreeMap<PropKey, Track>,
+    tracks: Tracks,
     pending: BTreeMap<PropKey, Pending>,
     valid: bool,
     needs_settle: bool,
@@ -615,7 +619,7 @@ impl MotionState {
             colors: base.colors().clone(),
             needs_settle: description.is_exit
                 || !pending.is_empty()
-                || tracks.values().any(Track::has_motion),
+                || tracks.values().any(|track| track.has_motion()),
             tracks,
             pending,
             valid: true,
@@ -743,7 +747,7 @@ impl MotionState {
             self.retarget_tracks(&description, base, measurement, painted, now)
         } else {
             mount_tracks(&description, base, measurement, painted, now).map(|(tracks, pending)| {
-                let moving = !pending.is_empty() || tracks.values().any(Track::has_motion);
+                let moving = !pending.is_empty() || tracks.values().any(|track| track.has_motion());
                 (tracks, pending, moving)
             })
         };
@@ -822,7 +826,7 @@ impl MotionState {
     /// Puts `tracks` in place of the ones the state has. The animation of a track that is replaced or
     /// dropped is cancelled, and the tracks that are new get the animations Motion would make of them,
     /// in the order Motion makes them: that of the keys of `animate`.
-    fn install(&mut self, mut tracks: BTreeMap<PropKey, Track>, source: &Value, now: Instant) {
+    fn install(&mut self, mut tracks: Tracks, source: &Value, now: Instant) {
         screen_tracks(&mut tracks, source, now);
         let kept: Vec<u64> = tracks.values().filter_map(|track| track.animation().map(Script::id)).collect();
         for track in self.tracks.values_mut() {
@@ -843,7 +847,7 @@ impl MotionState {
         measurement: Option<&Measurement>,
         painted: u64,
         now: Instant,
-    ) -> Result<(BTreeMap<PropKey, Track>, BTreeMap<PropKey, Pending>, bool), String> {
+    ) -> Result<(Tracks, BTreeMap<PropKey, Pending>, bool), String> {
         let mut tracks = self.tracks.clone();
         let mut pending = self.pending.clone();
         let mut moving = false;
@@ -874,7 +878,7 @@ impl MotionState {
                         next.carry_velocity(previous, now);
                     }
                     moving |= next.has_motion();
-                    tracks.insert(*prop, next);
+                    tracks.insert(*prop, Box::new(next));
                 }
                 Begun::Wait(waiting) => {
                     moving = true;
@@ -927,7 +931,7 @@ impl MotionState {
                 waiting.started,
             ) {
                 Ok(Begun::Track(track)) => {
-                    self.tracks.insert(prop, track);
+                    self.tracks.insert(prop, Box::new(track));
                 }
                 Ok(Begun::Wait(_)) => unreachable!("a measurement or a jump never waits"),
                 Err(error) => {
@@ -967,7 +971,7 @@ impl MotionState {
                     .and_then(|resolved| track.follow_keyframes(prop.name(), &resolved))
             };
             match followed {
-                Ok(Some(next)) => *track = next,
+                Ok(Some(next)) => **track = next,
                 Ok(None) => {}
                 Err(error) => {
                     self.valid = false;
@@ -1183,7 +1187,7 @@ impl MotionState {
         now: Instant,
         events: &mut Vec<web_animation::ApiEvent>,
     ) -> Option<Result<(), String>> {
-        if let Some(script) = self.tracks.values_mut().filter_map(Track::animation_mut).find(|script| script.id() == id) {
+        if let Some(script) = self.tracks.values_mut().filter_map(|track| track.animation_mut()).find(|script| script.id() == id) {
             return Some(script.command(element, command, now, events));
         }
         let track = self.tracks.values_mut().find(|track| track.idle_animation().is_some_and(|script| script.id() == id))?;
@@ -1229,12 +1233,12 @@ impl MotionState {
 
     /// The animations of the tracks, the ones that were cancelled and are kept last.
     fn animations(&self) -> impl Iterator<Item = (PropKey, &Track, &Script)> {
-        self.tracks.iter().filter_map(|(key, track)| Some((*key, track, track.animation()?)))
+        self.tracks.iter().filter_map(|(key, track)| Some((*key, &**track, track.animation()?)))
     }
 
     fn every_animation(&self) -> impl Iterator<Item = (PropKey, &Track, &Script)> {
         self.animations().chain(
-            self.tracks.iter().filter_map(|(key, track)| Some((*key, track, track.idle_animation()?))),
+            self.tracks.iter().filter_map(|(key, track)| Some((*key, &**track, track.idle_animation()?))),
         )
     }
 
@@ -1756,7 +1760,7 @@ fn mount_tracks(
     measurement: Option<&Measurement>,
     painted: u64,
     now: Instant,
-) -> Result<(BTreeMap<PropKey, Track>, BTreeMap<PropKey, Pending>), String> {
+) -> Result<(Tracks, BTreeMap<PropKey, Pending>), String> {
     let mut tracks = BTreeMap::new();
     let mut pending = BTreeMap::new();
     for (prop, goal) in &description.animate {
@@ -1768,7 +1772,7 @@ fn mount_tracks(
         let transition = description.transition.for_prop(*prop, goal);
         match begin(*prop, start, goal, &transition, measurement, painted, now)? {
             Begun::Track(track) => {
-                tracks.insert(*prop, track);
+                tracks.insert(*prop, Box::new(track));
             }
             Begun::Wait(waiting) => {
                 pending.insert(*prop, waiting);
@@ -1783,14 +1787,14 @@ fn mount_tracks(
             } else {
                 Track::new(prop.name(), value, value.clone(), Transition::default(), now)?
             };
-            tracks.insert(*prop, track);
+            tracks.insert(*prop, Box::new(track));
         }
     }
     Ok((tracks, pending))
 }
 
 /// Asks, for every track that is new, whether Motion would hand the value to the browser.
-fn screen_tracks(tracks: &mut BTreeMap<PropKey, Track>, source: &Value, now: Instant) {
+fn screen_tracks(tracks: &mut Tracks, source: &Value, now: Instant) {
     let written: Vec<&str> = source
         .get("animate")
         .and_then(Value::as_object)
