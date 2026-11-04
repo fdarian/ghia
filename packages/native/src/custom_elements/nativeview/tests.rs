@@ -107,7 +107,7 @@ impl Page {
     }
 
     fn presented_frames(&self, cx: &mut gpui::TestAppContext) -> usize {
-        cx.update_window(self.window.into(), |_, window, _| window.composition_frames().len()).unwrap()
+        cx.update_window(self.window.into(), |_, window, _| window.composed_frame_count()).unwrap()
     }
 
     fn attach_size(&self, cx: &mut gpui::TestAppContext, id: u64) -> Option<(f32, f32)> {
