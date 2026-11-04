@@ -410,7 +410,8 @@ What each item is, largest first:
    above a native view) has its own; the music clone has four. Fewer or smaller overlay layers is the layer model's
    call. `maximumDrawableCount` stays 3 (see [above](#memory-footprint-of-a-window-79)).
 2. **The JS heap and Bun's allocator**, 26 to 53 MB: the app's own modules and data (Solid, base-ui, the app). Ghia's JS
-   per element is about 0.45 KB; zod, loaded by the automation protocol, is 1.8 MB.
+   per element is about 0.45 KB. zod, which the automation protocol needs and which is 1.8 MB, loads only when automation
+   is turned on (the client is a dynamic import in `runtime.ts`), so an app without it never holds it.
 3. **The addon's live data**, in fluid: the layout engine's node store (6.4 MB allocated, one `SlotMap` of taffy
    `NodeData`, plus its keyed-layout tables), motion and transition state (6.3 MB, 2 MB of it transition states at about
    7 KB each, see item 4 of the list above), the style table (5.4 MB), scene and frame arenas (4.4 MB), element frame

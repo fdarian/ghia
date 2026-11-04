@@ -9110,8 +9110,11 @@ connectTest(renderer)      globalThis.gpuix                child stdin / stdout
 ### Browser apps
 
 Every browser render installs the automation `App` as **`globalThis.gpuix`**.
-It is always available after `render()` returns. No setup flag or separate
-transport is required.
+No setup flag or separate transport is required. The automation client is a
+separate chunk (it carries zod), loaded on demand: `globalThis.gpuix` is set once
+that chunk has loaded, a moment after `render()` returns rather than inside it.
+A driver that evaluates in the page afterwards, as below, finds it. A native
+app that runs without automation never loads the client or zod.
 
 ```ts
 await page.evaluate(async () => {

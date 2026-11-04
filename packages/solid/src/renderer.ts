@@ -101,7 +101,12 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
     host.renderer instanceof GpuixRenderer &&
     !Reflect.has(globalThis, "gpuix")
   ) {
-    Reflect.set(globalThis, "gpuix", installBrowserAutomation(host.renderer))
+    installBrowserAutomation(host.renderer).then(
+      (automation) => {
+        if (!Reflect.has(globalThis, "gpuix")) Reflect.set(globalThis, "gpuix", automation)
+      },
+      (error) => console.error("[gpuix-solid] automation failed", error)
+    )
   }
   if (debugFrameOverlay) host.renderer.setDebugFrameOverlay?.(debugFrameOverlay)
   host.root.render(code)

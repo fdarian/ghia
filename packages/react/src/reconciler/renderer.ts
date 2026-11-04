@@ -1,7 +1,6 @@
 import React, { type ReactNode } from "react"
 import { GpuixRenderer } from "@ghia/native"
 import type { EventPayload, WindowOptions } from "@ghia/native"
-import { App as AutomationApp } from "@ghia/native/automation"
 import {
   createNativeRenderer,
   enableAutomation as enableNativeAutomation,
@@ -15,7 +14,7 @@ import type {
   NativeRenderer,
   WindowKeyEventHandlers,
 } from "../types/host.js"
-import type { LiveAutomationRenderer } from "@ghia/native/automation"
+import type { App as AutomationApp, LiveAutomationRenderer } from "@ghia/native/automation"
 
 export { createRoot, flushSync, reconciler } from "./reconciler.js"
 export type { Root } from "./reconciler.js"
@@ -71,7 +70,7 @@ export interface FrameLoop {
   stop: () => void
 }
 
-export const enableAutomation: (renderer: LiveAutomationRenderer) => void =
+export const enableAutomation: (renderer: LiveAutomationRenderer) => Promise<void> =
   enableNativeAutomation
 
 /**
@@ -98,15 +97,17 @@ declare global {
   var gpuix: AutomationApp | undefined
 }
 
-export function installBrowserAutomation(
+export async function installBrowserAutomation(
   renderer: LiveAutomationRenderer
-): AutomationApp {
+): Promise<AutomationApp> {
+  const client = await import("@ghia/native/automation")
+  const created = await installNativeBrowserAutomation(renderer)
+  // Another call may have finished while this one awaited the imports.
   const existing = Reflect.get(globalThis, BROWSER_AUTOMATION_KEY)
-  if (existing instanceof AutomationApp) return existing
+  if (existing instanceof client.App) return existing
 
-  const automation = installNativeBrowserAutomation(renderer)
-  Reflect.set(globalThis, BROWSER_AUTOMATION_KEY, automation)
-  return automation
+  Reflect.set(globalThis, BROWSER_AUTOMATION_KEY, created)
+  return created
 }
 
 type RenderSlot = {
@@ -414,7 +415,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     host instanceof GpuixRenderer &&
     !Reflect.has(globalThis, BROWSER_AUTOMATION_KEY)
   ) {
-    installBrowserAutomation(host)
+    installBrowserAutomation(host).catch((error) => scheduleRuntimeError(thrownToError(error)))
   }
   if (debugFrameOverlay) {
     host.setDebugFrameOverlay?.(debugFrameOverlay)

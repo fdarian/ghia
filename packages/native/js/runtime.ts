@@ -1,14 +1,7 @@
 import * as native from "@ghia/native"
 import { GpuixRenderer } from "@ghia/native"
 import type { EventPayload, WindowOptions } from "@ghia/native"
-import {
-  App,
-  browserRendererAsTest,
-  InProcessBackend,
-  liveRendererAsTest,
-  serveAutomationStdio,
-  type LiveAutomationRenderer,
-} from "./automation/client.js"
+import type { App, LiveAutomationRenderer } from "./automation/client.js"
 import { bindClipboard } from "./clipboard.js"
 import { bindEyeDropper } from "./eyedropper.js"
 import { forgetWindowSource } from "./events/window-target.js"
@@ -94,7 +87,9 @@ export function createNativeRenderer(
     for (const font of fonts) renderer.registerFont(font)
     // The web renderer has no motion engine, so nothing to define keyframes on.
     if (typeof renderer.defineKeyframes === "function") registerKeyframesHost(renderer)
-    if (automated) enableAutomation(renderer)
+    if (automated) {
+      enableAutomation(renderer).catch((error) => state.reportError(error))
+    }
   }
   renderer.tick = () => {
     const running = tick()
@@ -178,16 +173,18 @@ export function startFrameLoop(
   return { stop }
 }
 
-export function enableAutomation(renderer: LiveAutomationRenderer): void {
-  serveAutomationStdio(new InProcessBackend(liveRendererAsTest(renderer)))
+// The client pulls in zod and eventsource-parser, so an app that never turns
+// automation on must not load it.
+export async function enableAutomation(renderer: LiveAutomationRenderer): Promise<void> {
+  const client = await import("./automation/client.js")
+  client.serveAutomationStdio(new client.InProcessBackend(client.liveRendererAsTest(renderer)))
 }
 
-export function installBrowserAutomation(
+export async function installBrowserAutomation(
   renderer: LiveAutomationRenderer,
   existing?: App
-): App {
+): Promise<App> {
   if (existing) return existing
-  return new App(
-    new InProcessBackend(browserRendererAsTest(renderer))
-  )
+  const client = await import("./automation/client.js")
+  return new client.App(new client.InProcessBackend(client.browserRendererAsTest(renderer)))
 }
