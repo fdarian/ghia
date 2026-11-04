@@ -16,6 +16,7 @@
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use web_time::Instant;
 
@@ -177,13 +178,13 @@ fn step(
         now,
     );
     let moved = motion.and_then(|state| state.visible_style(now)).map(|values| {
-        let mut moved = declared.style.clone();
+        let mut moved = StyleDesc::clone(&declared.style);
         values.apply_to(&mut moved);
         moved
     });
     // Motion values are inline style as well, and come after `motion`.
     let bound = binding.map(|binding| {
-        let mut bound = moved.clone().unwrap_or_else(|| declared.style.clone());
+        let mut bound = moved.clone().unwrap_or_else(|| StyleDesc::clone(&declared.style));
         values.apply_in(binding, &mut bound, font, Scope::InlineBox);
         bound
     });
@@ -210,7 +211,7 @@ fn step(
             values.apply_to(&mut resolved, declared.transitions.as_ref());
             resolved
         }
-        None => moved.unwrap_or(declared.style),
+        None => moved.unwrap_or_else(|| Arc::unwrap_or_clone(declared.style)),
     }
 }
 

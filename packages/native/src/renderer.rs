@@ -10348,6 +10348,8 @@ fn enter_contents(ctx: &mut BuildCtx) -> Option<Inherited> {
 struct StyleInputs<'a> {
     /// The style with the `@container` blocks folded in: what the stages ask whether they apply to.
     declared: Option<&'a StyleDesc>,
+    /// `declared` as the style table's own `Arc`, when no `@container` block changed it.
+    shared: Option<&'a Arc<StyleDesc>>,
     /// `declared` with the state styles (`hover`, `focus`, ...) folded in.
     base: Option<&'a StyleDesc>,
     before_transition: Option<&'a StyleDesc>,
@@ -10385,7 +10387,7 @@ struct Animated {
 impl Animated {
     /// The style before `motion`, motion values and keyframes.
     fn declared<'s>(&'s self, base: Option<&'s StyleDesc>) -> Option<&'s StyleDesc> {
-        self.transitioned.as_ref().map(|declared| &declared.style).or(base)
+        self.transitioned.as_ref().map(|declared| &*declared.style).or(base)
     }
 
     fn current<'s>(&'s self, base: Option<&'s StyleDesc>) -> Option<&'s StyleDesc> {
@@ -10516,7 +10518,9 @@ fn animate_style_at(
             input.pointer_states,
             ctx.motion_states.get(&id),
             id,
-            input.declared.unwrap_or(&EMPTY_STYLE),
+            input
+                .shared
+                .map_or_else(|| input.declared.unwrap_or(&EMPTY_STYLE).into(), crate::motion::StyleRef::from),
             focus_visible,
             measurement.as_ref(),
             ctx.inherited.interpolate_size,
@@ -10546,7 +10550,7 @@ fn animate_style_at(
     if transitioned.as_ref().is_some_and(|declared| declared.transitions.is_some()) {
         dynamic |= Dynamic::Transition as u8;
     }
-    let declared_style = transitioned.as_ref().map(|declared| &declared.style).or(input.base);
+    let declared_style = transitioned.as_ref().map(|declared| &*declared.style).or(input.base);
     let moved = if has_motion {
         ctx.motion_states
             .get(&id)
@@ -10617,7 +10621,7 @@ fn animate_style_at(
                 .as_deref_mut()
                 .or(bound.as_deref_mut())
                 .or(moved.as_deref_mut())
-                .or(transitioned.as_deref_mut().map(|declared| &mut declared.style))
+                .or_else(|| transitioned.as_deref_mut().map(|declared| Arc::make_mut(&mut declared.style)))
                 .expect("an animation that runs has the style it runs on");
             current.animating_opacity |= opacity;
             current.animating_transform |= transform;
@@ -10758,6 +10762,7 @@ fn contents_frame(
         wrapper,
         StyleInputs {
             declared,
+            shared: wrapper.style.as_ref(),
             base: declared,
             before_transition: wrapper.style_before_transition(),
             pointer_states: Default::default(),
@@ -10863,6 +10868,7 @@ fn build_element_unpumped(
         element,
         StyleInputs {
             declared,
+            shared: element.style.as_ref().filter(|_| container_style.is_none()),
             base: base_style,
             before_transition: before_transition.as_ref().or(element.style_before_transition()),
             pointer_states,

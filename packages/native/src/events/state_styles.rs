@@ -126,6 +126,27 @@ pub fn resolve_state_styles(style: &StyleDesc, hovered: bool, active: bool) -> S
     )
 }
 
+/// Whether `resolve_pointer_states` with no state applying would return `style` as it is:
+/// it holds nothing that `overlay` clears. Keep in step with the fields `overlay_fields!` resets.
+pub(crate) fn is_overlay_fixed_point(style: &StyleDesc) -> bool {
+    style.hover.is_none()
+        && style.active.is_none()
+        && style.group_hover.is_none()
+        && style.group_active.is_none()
+        && style.group_focus_within.is_none()
+        && style.has_hover.is_none()
+        && style.has_active.is_none()
+        && style.has_focus.is_none()
+        && style.disabled.is_none()
+        && style.enabled.is_none()
+        && style.has_disabled.is_none()
+        && style.has_enabled.is_none()
+        && style.container_rules.is_none()
+        && style.contents_levels.is_none()
+        && !style.measure_natural_width
+        && !style.atomic_inline
+}
+
 /// `style` with the refinements of `states` folded in and every state style
 /// cleared. Later wins: `groupHover`, `hasHover`, `hover`, `groupActive`,
 /// `hasActive`, `active`, `hasEnabled`, `hasDisabled`, `enabled`, `disabled`,
@@ -1678,5 +1699,24 @@ mod tests {
         assert_eq!((hovered.row_gap, hovered.column_gap), (None, None));
         let at_rest = resolve_state_styles(&base, false, false);
         assert_eq!(at_rest.padding_left, Some(style(r#"{"paddingLeft": "1rem"}"#).padding_left.unwrap()));
+    }
+
+    #[test]
+    fn what_overlay_leaves_alone_is_what_the_fixed_point_check_accepts() {
+        let plain = style(r##"{ "color": "#000000", "opacity": 0.5, "focusWithin": { "color": "#111111" } }"##);
+        assert!(is_overlay_fixed_point(&plain));
+        assert_eq!(overlay(&plain, &StyleDesc::default()), plain);
+        for json in [
+            r##"{ "hover": { "color": "#111111" } }"##,
+            r##"{ "active": { "color": "#111111" } }"##,
+            r##"{ "groupHover": { "color": "#111111" } }"##,
+            r##"{ "disabled": { "color": "#111111" } }"##,
+            r##"{ "hasFocus": { "color": "#111111" } }"##,
+            r##"{ "@container": { "(min-width: 1px)": { "color": "#111111" } } }"##,
+        ] {
+            let held = style(json);
+            assert!(!is_overlay_fixed_point(&held), "{json}");
+            assert_ne!(overlay(&held, &StyleDesc::default()), held, "{json}");
+        }
     }
 }

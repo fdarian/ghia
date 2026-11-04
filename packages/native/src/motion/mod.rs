@@ -20,6 +20,7 @@ mod list;
 pub(crate) mod measure;
 mod property;
 mod script;
+mod style_ref;
 mod svg_attr;
 pub(crate) mod text;
 mod track;
@@ -30,6 +31,7 @@ pub(crate) mod web_animation;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 use serde_json::{Map, Value};
 use web_time::Instant;
 
@@ -47,6 +49,7 @@ pub(crate) use css_transition::{
     declares_transitions, validate_transitions, CssTransitions, InterpolateSize, Svg, TransitionEvent,
     TransitionStyle,
 };
+pub(crate) use style_ref::StyleRef;
 pub(crate) use bindings::{BindingIndex, Demand, MotionValueEvent, MotionValueFrame, MotionValueStore};
 pub(crate) use values::{PlaybackInfo, StartTime};
 
@@ -1374,7 +1377,7 @@ pub(crate) struct FocusVisible {
 /// `animations` is the element's CSS animations when it has any: they advance
 /// here, as the first half of their frame, because a property they drive starts no
 /// transition. `CssAnimations::update` finishes the frame.
-pub(crate) fn resolve_declared_style(
+pub(crate) fn resolve_declared_style<'a>(
     mut transitions: Option<&mut CssTransitions>,
     animations: Option<(&mut CssAnimations, &KeyframesRegistry)>,
     before: Option<&StyleDesc>,
@@ -1385,7 +1388,7 @@ pub(crate) fn resolve_declared_style(
     pointer: crate::events::state_styles::PointerStates,
     motion: Option<&MotionState>,
     id: u64,
-    style: &StyleDesc,
+    style: impl Into<StyleRef<'a>>,
     focus_visible: FocusVisible,
     measurement: Option<&Measurement>,
     interpolate_size: InterpolateSize,
@@ -1421,7 +1424,7 @@ pub(crate) fn resolve_declared_style(
         )
     });
     if let Some(running) = &running {
-        running.apply_to(&mut after);
+        running.apply_to(Arc::make_mut(&mut after));
     }
     DeclaredStyle {
         style: after,
@@ -1431,7 +1434,9 @@ pub(crate) fn resolve_declared_style(
 
 /// What [`resolve_declared_style`] resolved.
 pub(crate) struct DeclaredStyle {
-    pub(crate) style: StyleDesc,
+    /// Shared with the style table, and with the transition's before-change style, until a
+    /// running transition is applied to it.
+    pub(crate) style: Arc<StyleDesc>,
     /// The transitions running on `style`. A CSS animation on the same
     /// properties does not apply: a transition beats an animation in the
     /// cascade.
@@ -1442,28 +1447,40 @@ pub(crate) struct DeclaredStyle {
 /// element computes to. Transitions and animations compare and blend computed values, so they are
 /// given the style after this: a `--p` that changes is a change of the transform, from the value
 /// the last style computed to the one this does.
-fn with_vars(style: StyleDesc, parent_font: &ParentValues) -> StyleDesc {
+fn with_vars(style: Arc<StyleDesc>, parent_font: &ParentValues) -> Arc<StyleDesc> {
     if !crate::css::transform::reads_vars(&style) {
         return style;
     }
     crate::css::custom_properties::reads::note();
-    crate::css::transform::resolve_vars(&style, &parent_font.custom_of(&style)).unwrap_or(style)
+    crate::css::transform::resolve_vars(&style, &parent_font.custom_of(&style)).map_or(style, Arc::new)
 }
 
-fn fold_state_styles(
-    style: &StyleDesc,
+/// The style as `style` has it after the state styles that apply. Shared with `style` when it
+/// is a table style and nothing folds into it, the case of nearly every element in nearly every
+/// frame.
+fn fold_state_styles<'a>(
+    style: impl Into<StyleRef<'a>>,
     focus_visible: FocusVisible,
     pointer: crate::events::state_styles::PointerStates,
-) -> StyleDesc {
-    use crate::events::state_styles::{resolve_pointer_states, PointerStates};
+) -> Arc<StyleDesc> {
+    use crate::events::state_styles::{is_overlay_fixed_point, resolve_pointer_states, PointerStates};
 
+    let style = style.into();
     let applies = (focus_visible.own && style.focus_visible.is_some())
         || (focus_visible.descendant && style.has_focus_visible.is_some());
+    if !applies
+        && !pointer.any()
+        && is_overlay_fixed_point(&style)
+        && style.focus_visible.is_none()
+        && style.has_focus_visible.is_none()
+    {
+        return style.share();
+    }
     let focused = if applies {
         // The focus layers go in first and the pointer ones come back for the
         // second pass, so a hovered or pressed element is above them.
         let mut folded = resolve_pointer_states(
-            style,
+            &style,
             PointerStates {
                 has_focus_visible: focus_visible.descendant,
                 focus_visible: focus_visible.own,
@@ -1486,12 +1503,12 @@ fn fold_state_styles(
     } else {
         // Borrowed: `resolve_pointer_states` copies the style itself, so cloning
         // it here too paid for a second copy of a ~3.5 kB struct on every frame.
-        std::borrow::Cow::Borrowed(style)
+        std::borrow::Cow::Borrowed(&*style)
     };
     let mut after = resolve_pointer_states(&focused, pointer);
     after.focus_visible = None;
     after.has_focus_visible = None;
-    after
+    Arc::new(after)
 }
 
 /// What an animation starts from when `initial` does not name the property:
@@ -2030,6 +2047,14 @@ mod tests {
     use super::*;
     use crate::css::length::LinearLength;
     use crate::style::{DimensionValue, IntrinsicKeyword};
+
+    fn fold_owned(
+        style: &StyleDesc,
+        focus_visible: FocusVisible,
+        pointer: crate::events::state_styles::PointerStates,
+    ) -> StyleDesc {
+        Arc::unwrap_or_clone(fold_state_styles(style, focus_visible, pointer))
+    }
 
     /// The values a frame would lay over the element's style.
     struct Applied {
@@ -3686,6 +3711,68 @@ mod tests {
         assert!(state.frame(at(started, 1.0)).just_settled);
     }
     #[test]
+    fn a_style_with_nothing_to_fold_is_shared_not_copied() {
+        let plain = Arc::new(serde_json::from_str::<StyleDesc>(r##"{ "color": "#000000", "opacity": 1 }"##).unwrap());
+        let rest = fold_state_styles(&plain, FocusVisible::default(), Default::default());
+        assert!(Arc::ptr_eq(&rest, &plain));
+        // `focusVisible` is declared but the element is not focus-visible.
+        let focusable = Arc::new(
+            serde_json::from_str::<StyleDesc>(r##"{ "color": "#000000", "focusVisible": { "color": "#111111" } }"##).unwrap(),
+        );
+        let unfocused = fold_state_styles(&focusable, FocusVisible::default(), Default::default());
+        assert!(!Arc::ptr_eq(&unfocused, &focusable), "the style still holds a state style to clear");
+        assert_eq!(unfocused.focus_visible, None);
+        assert_eq!(unfocused.color.as_deref(), Some("#000000"));
+    }
+
+    #[test]
+    fn a_style_with_a_state_style_that_does_not_apply_loses_it_in_a_copy() {
+        let hoverable = Arc::new(
+            serde_json::from_str::<StyleDesc>(r##"{ "color": "#000000", "hover": { "color": "#222222" } }"##).unwrap(),
+        );
+        let rest = fold_state_styles(&hoverable, FocusVisible::default(), Default::default());
+        assert!(!Arc::ptr_eq(&rest, &hoverable));
+        assert_eq!((rest.hover.as_ref(), rest.color.as_deref()), (None, Some("#000000")));
+        assert!(hoverable.hover.is_some(), "the table's style is not written to");
+    }
+
+    #[test]
+    fn a_style_with_a_state_style_that_applies_is_folded_into_a_new_one() {
+        let plain = Arc::new(
+            serde_json::from_str::<StyleDesc>(r##"{ "color": "#000000", "hover": { "color": "#222222" } }"##).unwrap(),
+        );
+        let hovered = crate::events::state_styles::PointerStates { hovered: true, ..Default::default() };
+        let folded = fold_state_styles(&plain, FocusVisible::default(), hovered);
+        assert!(!Arc::ptr_eq(&folded, &plain));
+        assert_eq!(folded.color.as_deref(), Some("#222222"));
+        assert_eq!(plain.color.as_deref(), Some("#000000"));
+    }
+
+    #[test]
+    fn a_declared_style_with_no_transition_running_is_the_shared_style() {
+        let plain = Arc::new(serde_json::from_str::<StyleDesc>(r##"{ "color": "#000000", "opacity": 1 }"##).unwrap());
+        let declared = resolve_declared_style(
+            None,
+            None,
+            None,
+            None,
+            None,
+            &crate::color::ColorContext::root(crate::color::Scheme::Light),
+            &ParentValues::initial(),
+            Default::default(),
+            None,
+            1,
+            &plain,
+            FocusVisible::default(),
+            None,
+            InterpolateSize::default(),
+            Scope::Element,
+            Instant::now(),
+        );
+        assert!(Arc::ptr_eq(&declared.style, &plain));
+    }
+
+    #[test]
     fn state_styles_fold_in_gpui_order_and_leave_none_behind() {
         let style: StyleDesc = serde_json::from_str(
             r##"{
@@ -3696,14 +3783,14 @@ mod tests {
             }"##,
         )
         .unwrap();
-        let rest = fold_state_styles(&style, FocusVisible::default(), Default::default());
+        let rest = fold_owned(&style, FocusVisible::default(), Default::default());
         assert_eq!(rest.color.as_deref(), Some("#000000"));
 
-        let focused = fold_state_styles(&style, FocusVisible { own: true, descendant: false }, Default::default());
+        let focused = fold_owned(&style, FocusVisible { own: true, descendant: false }, Default::default());
         assert_eq!(focused.color.as_deref(), Some("#111111"));
         assert_eq!(focused.opacity, Some(0.9));
 
-        let both = fold_state_styles(
+        let both = fold_owned(
             &style,
             FocusVisible { own: true, descendant: false },
             crate::events::state_styles::PointerStates {
@@ -3748,14 +3835,14 @@ mod tests {
             hovered: true,
             ..Default::default()
         };
-        let folded = fold_state_styles(&style, FocusVisible::default(), states);
+        let folded = fold_owned(&style, FocusVisible::default(), states);
         assert_eq!(folded.color.as_deref(), Some("#333333"), "hover beats groupHover");
         assert_eq!(folded.opacity, Some(0.2), "hasHover beats groupHover");
 
         let descendant = FocusVisible { own: false, descendant: true };
-        let focused = fold_state_styles(&style, descendant, Default::default());
+        let focused = fold_owned(&style, descendant, Default::default());
         assert_eq!((focused.color.as_deref(), focused.opacity), (Some("#222222"), Some(0.3)));
-        let both = fold_state_styles(&style, FocusVisible { own: true, descendant: true }, Default::default());
+        let both = fold_owned(&style, FocusVisible { own: true, descendant: true }, Default::default());
         assert_eq!(both.opacity, Some(0.4), "focusVisible beats hasFocusVisible");
         assert!(focused.has_focus_visible.is_none() && both.focus_visible.is_none());
     }
@@ -3774,12 +3861,12 @@ mod tests {
         .unwrap();
         let own = FocusVisible { own: true, descendant: false };
         let states = PointerStates { has_enabled: true, disabled: true, ..Default::default() };
-        let folded = fold_state_styles(&style, own, states);
+        let folded = fold_owned(&style, own, states);
         assert_eq!(folded.opacity, Some(0.6), "disabled comes after the focus layer it sits over");
         assert_eq!(folded.color.as_deref(), Some("#444444"));
         assert_eq!(folded.width, style.has_enabled.as_ref().unwrap().width);
         assert!(folded.disabled.is_none() && folded.has_enabled.is_none());
-        let focus_only = fold_state_styles(&style, own, Default::default());
+        let focus_only = fold_owned(&style, own, Default::default());
         assert_eq!(focus_only.opacity, Some(0.4), "the control layers do not apply unless their state does");
     }
 
@@ -3798,7 +3885,7 @@ mod tests {
             group_hovered: true,
             ..Default::default()
         };
-        let folded = fold_state_styles(&style, FocusVisible::default(), states);
+        let folded = fold_owned(&style, FocusVisible::default(), states);
         assert_eq!(folded.color.as_deref(), Some("#111111"));
         assert_eq!(folded.opacity, Some(0.8), "hover beats groupHover");
         assert_eq!(folded.group, None, "the followed group is not declared");
@@ -6152,7 +6239,7 @@ mod tests {
                 let tick = frame(&mut with_var, started, millis, &var, &[("--p", "0.9")]);
                 let want = frame(&mut literal, started, millis, &read("translateX(calc(100px * 0.9))"), &[]);
                 let text = |style: StyleDesc| style.transform.map(|text| text.replace(' ', ""));
-                assert_eq!(text(tick.style), text(want.style), "at {millis}");
+                assert_eq!(text(Arc::unwrap_or_clone(tick.style)), text(Arc::unwrap_or_clone(want.style)), "at {millis}");
             }
         }
     }

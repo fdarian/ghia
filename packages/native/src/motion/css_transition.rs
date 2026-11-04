@@ -13,6 +13,7 @@
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 use web_time::Instant;
 
@@ -25,7 +26,7 @@ use super::svg_attr::{attribute_text, SvgAttr};
 use super::text::{pixels, Text};
 use super::value::{pair_in, AnimValue, Colors, Interpolation, Pair, ParentValues};
 use super::web_animation::{next_seq, ApiEvent, Command, Info, Kind, Playback, Status};
-use super::{MotionState, PropKey};
+use super::{MotionState, PropKey, StyleRef};
 use crate::color::ColorContext;
 use crate::dormant_wake::Wake;
 use crate::retained_tree::RetainedTree;
@@ -1032,7 +1033,7 @@ impl Frame<'_> {
 struct ElementState {
     /// The previous frame's after-change style: the before-change style of the
     /// next style change.
-    previous: StyleDesc,
+    previous: Arc<StyleDesc>,
     /// The SVG properties of the previous frame.
     previous_svg: SvgValues,
     /// What the last frame's after-change style resolved its colours in.
@@ -1184,14 +1185,14 @@ fn parse_config(id: u64, style: &StyleDesc) -> TransitionList {
 pub(crate) type Svg<'a> = Option<(&'a SvgSource<'a>, PropTarget)>;
 
 impl ElementState {
-    fn new(id: u64, after: &StyleDesc, colors: Colors, svg: Svg) -> Self {
+    fn new(id: u64, after: StyleRef, colors: Colors, svg: Svg) -> Self {
         let target = svg.map_or(PropTarget::Element, |(_, target)| target);
         Self {
-            previous: after.clone(),
+            previous: after.share(),
             previous_svg: svg.map_or_else(SvgValues::default, |(source, target)| SvgValues::read(source, target, &colors)),
             colors,
-            config: config_key(after),
-            list: parse_config(id, after),
+            config: config_key(&after),
+            list: parse_config(id, &after),
             target,
             running: BTreeMap::new(),
             generation: 0,
@@ -1237,7 +1238,7 @@ impl ElementState {
     fn step(
         &mut self,
         id: u64,
-        after: &StyleDesc,
+        shared: StyleRef,
         svg: Svg,
         parent_colors: &ColorContext,
         parent_font: &ParentValues,
@@ -1249,6 +1250,7 @@ impl ElementState {
         drawing: bool,
         events: &mut Events,
     ) {
+        let after: &StyleDesc = &shared;
         self.generation += 1;
         events.drawing = drawing;
         self.target = svg.map_or(PropTarget::Element, |(_, target)| target);
@@ -1278,7 +1280,7 @@ impl ElementState {
         let colors = Colors::inheriting(parent_colors, parent_font, Some(after));
         let previous_colors = std::mem::replace(&mut self.colors, colors.clone());
         let colors_changed = colors != previous_colors;
-        let style_changed = self.previous != *after;
+        let style_changed = !shared.is(&self.previous) && *self.previous != *after;
         let after_svg = svg.map_or_else(SvgValues::default, |(source, target)| SvgValues::read(source, target, &colors));
         let svg_changed = self.previous_svg != after_svg;
         if style_changed || config_changed || colors_changed || svg_changed {
@@ -1308,7 +1310,7 @@ impl ElementState {
                 );
             }
             if style_changed {
-                self.previous = after.clone();
+                self.previous = shared.share();
             }
             self.previous_svg = after_svg;
         }
@@ -1798,16 +1800,17 @@ impl CssTransitions {
     /// declared a transition. The transitions of a change come from the style
     /// after it, so a change that also adds the declaration must not be the
     /// first style the element is seen with.
-    pub(crate) fn seed(
+    pub(crate) fn seed<'a>(
         &mut self,
         id: u64,
-        before: &StyleDesc,
+        before: impl Into<StyleRef<'a>>,
         svg: Svg,
         parent_colors: &ColorContext,
         parent_font: &ParentValues,
     ) {
+        let before = before.into();
         if let std::collections::hash_map::Entry::Vacant(slot) = self.states.entry(id) {
-            let colors = Colors::inheriting(parent_colors, parent_font, Some(before));
+            let colors = Colors::inheriting(parent_colors, parent_font, Some(&before));
             slot.insert(Box::new(ElementState::new(id, before, colors, svg)));
         }
     }
@@ -1818,10 +1821,10 @@ impl CssTransitions {
     /// `covered` are the properties a CSS animation drives right now. `svg` is where the SVG properties
     /// of an `<svg>` or of a shape in one come from.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn update(
+    pub(crate) fn update<'a>(
         &mut self,
         id: u64,
-        after: &StyleDesc,
+        after: impl Into<StyleRef<'a>>,
         svg: Svg,
         parent_colors: &ColorContext,
         parent_font: &ParentValues,
@@ -1832,12 +1835,13 @@ impl CssTransitions {
         covered: &[PropKey],
         now: Instant,
     ) -> Option<TransitionStyle> {
+        let after = after.into();
         let Some(state) = self.states.get_mut(&id) else {
-            let colors = Colors::inheriting(parent_colors, parent_font, Some(after));
+            let colors = Colors::inheriting(parent_colors, parent_font, Some(&after));
             self.states.insert(id, Box::new(ElementState::new(id, after, colors, svg)));
             return None;
         };
-        let interpolate_size = InterpolateSize::declared(after).unwrap_or(inherited);
+        let interpolate_size = InterpolateSize::declared(&after).unwrap_or(inherited);
         state.step(
             id,
             after,
@@ -2786,6 +2790,36 @@ mod tests {
         assert_eq!(width_of(&clock.frame(0, &sized(100.0, "width 1s linear"))), 0.0);
         assert_eq!(clock.events(), [(Run, "width".to_string(), 0.0), (Start, "width".to_string(), 0.0)]);
         assert_eq!(width_of(&clock.frame(500, &sized(100.0, "width 1s linear"))), 50.0);
+    }
+
+    #[test]
+    fn the_before_change_style_is_the_shared_style_it_came_from() {
+        let mut clock = Clock::new();
+        let first = Arc::new(sized(0.0, "width 1s linear"));
+        let second = Arc::new(sized(100.0, "width 1s linear"));
+        let mut step = |clock: &mut Clock, millis, after: &Arc<StyleDesc>| {
+            let (colors, font) = (clock.parent_colors.clone(), clock.parent_font.clone());
+            clock.transitions.update(
+                1,
+                after,
+                None,
+                &colors,
+                &font,
+                None,
+                None,
+                InterpolateSize::default(),
+                Scope::Element,
+                &[],
+                clock.at(millis),
+            );
+        };
+        step(&mut clock, 0, &first);
+        assert!(Arc::ptr_eq(&clock.transitions.states[&1].previous, &first));
+        step(&mut clock, 0, &second);
+        assert!(Arc::ptr_eq(&clock.transitions.states[&1].previous, &second), "a change keeps the new style, not a copy");
+        step(&mut clock, 500, &second);
+        assert!(Arc::ptr_eq(&clock.transitions.states[&1].previous, &second));
+        assert_eq!(width_of(&first), 0.0, "the table's style is not written to");
     }
 
     #[test]

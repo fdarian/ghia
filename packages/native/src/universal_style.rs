@@ -317,6 +317,7 @@ mod tests {
             )
             .style
             .background_color
+            .clone()
             .expect("a background")
         }
     }
