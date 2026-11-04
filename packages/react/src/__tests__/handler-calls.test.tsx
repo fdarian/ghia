@@ -55,6 +55,7 @@ const NOT_CALLABLE_FROM_A_HANDLER = new Set([
   "nativeSimulateKeyDown",
   "nativeSimulateKeyUp",
   "nativeSimulateKeystrokes",
+  "nativeSimulateModifiersChanged",
   "nativeSimulateMouseDown",
   "nativeSimulateMouseExit",
   "nativeSimulateMouseMove",

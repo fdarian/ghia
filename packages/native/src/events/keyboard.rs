@@ -202,7 +202,9 @@ pub(crate) fn install_key_down(
         if window.window_handle().window_id() != window_id {
             return;
         }
-        routing.modality().note_key_down(&event.keystroke.modifiers);
+        if routing.modality().note_key_down(&event.keystroke.modifiers) {
+            redraw_for_focus_visible(window, cx);
+        }
         if event.keystroke.key == "escape" && pointer.borrow().element_drag_active() {
             return;
         }
@@ -234,7 +236,9 @@ pub(crate) fn install_key_down(
         if window.window_handle().window_id() != window_id {
             return;
         }
-        ime_routing.modality().note_key_down(&event.keystroke.modifiers);
+        if ime_routing.modality().note_key_down(&event.keystroke.modifiers) {
+            redraw_for_focus_visible(window, cx);
+        }
         let Some(mut payload) = key_payload(
             &ime_routing,
             &ime_tree,
@@ -266,10 +270,20 @@ pub(crate) fn install_key_down(
 pub(crate) fn note_modifiers(
     routing: InputRouting,
 ) -> impl Fn(&gpui::ModifiersChangedEvent, &mut Window, &mut App) + 'static {
-    move |event, window, _| {
+    move |event, window, cx| {
         if routing.modality().note_modifiers(&event.modifiers) {
-            window.refresh();
+            redraw_for_focus_visible(window, cx);
         }
+    }
+}
+
+/// A key can make the focused element match `:focus-visible` with no focus change, and the frame
+/// that shows it has to be asked for. gpui's own modality refresh does not cover a second key
+/// after a Ctrl chord, and the test renderer draws only a dirty view.
+fn redraw_for_focus_visible(window: &Window, cx: &mut App) {
+    match sync_dispatch::root_view(window) {
+        Ok(view) => cx.notify(view.entity_id()),
+        Err(error) => sync_dispatch::report_deferred_error(error),
     }
 }
 

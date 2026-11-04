@@ -162,23 +162,18 @@ struct ModalityCells {
 
 impl FocusModality {
     /// A keydown. Chrome ignores one with Ctrl, Alt or Meta held, so a shortcut
-    /// does not make focus visible.
-    pub fn note_key_down(&self, modifiers: &gpui::Modifiers) {
+    /// does not make focus visible. Returns whether it made the key newly down,
+    /// which can change what matches without any focus change to draw for.
+    pub fn note_key_down(&self, modifiers: &gpui::Modifiers) -> bool {
         self.0.press.set(false);
-        if !(modifiers.control || modifiers.alt || modifiers.platform) {
-            self.0.key_down.set(true);
-        }
+        !(modifiers.control || modifiers.alt || modifiers.platform) && !self.0.key_down.replace(true)
     }
 
     /// Shift on its own is a keydown in Chrome, though gpui reports it only as a modifier change.
-    /// Returns whether it went down.
+    /// Returns whether it made the key newly down.
     pub fn note_modifiers(&self, modifiers: &gpui::Modifiers) -> bool {
         let was_down = self.0.shift.replace(modifiers.shift);
-        let went_down = modifiers.shift && !was_down;
-        if went_down {
-            self.note_key_down(modifiers);
-        }
-        went_down
+        modifiers.shift && !was_down && self.note_key_down(modifiers)
     }
 
     /// A press whose `mousedown` was not cancelled: whatever focus change it
@@ -874,8 +869,12 @@ mod tests {
         fn run(&mut self, steps: &[Step]) {
             for (index, step) in steps.iter().enumerate() {
                 match *step {
-                    Key => self.state.modality().note_key_down(&gpui::Modifiers::default()),
-                    Shortcut => self.state.modality().note_key_down(&gpui::Modifiers::command()),
+                    Key => {
+                        self.state.modality().note_key_down(&gpui::Modifiers::default());
+                    }
+                    Shortcut => {
+                        self.state.modality().note_key_down(&gpui::Modifiers::command());
+                    }
                     Tab(id) => {
                         self.state.modality().note_key_down(&gpui::Modifiers::default());
                         self.state.observe(Some(id), &self.tree, true, true);
@@ -964,6 +963,8 @@ mod tests {
         page.run(&[Press(Some(2))]);
         assert!(modality.note_modifiers(&shift));
         assert!(!modality.note_modifiers(&shift), "held, not pressed again");
+        assert!(!modality.note_modifiers(&gpui::Modifiers::default()));
+        assert!(!modality.note_modifiers(&shift), "pressed again, but the key is already down");
         page.run(&[Script(Some(1)), Check(1, true)]);
 
         // Shift stays down through a press, and the press clears the key.
