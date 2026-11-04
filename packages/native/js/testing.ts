@@ -269,6 +269,7 @@ interface NativeTestRendererApi
   ): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
+  simulateModifiersChanged(modifiers?: string): void
   simulateImeKeyDown(keystroke: string, action: string, text?: string): void
   simulateClick(x: number, y: number, button?: number, modifiers?: string): void
   simulateScrollWheel(
@@ -850,6 +851,14 @@ export class TestRenderer implements NativeRenderer {
     // focus handlers run first, as in a browser.
     this.dispatchNativeEvents()
     this.native.simulateKeystrokes(keystrokes)
+    this.dispatchNativeEvents()
+  }
+
+  /** The held modifier keys change, as the platform reports one pressed or released on its own
+   *  (`"shift"`, `"cmd-shift"`, none for all released). */
+  nativeSimulateModifiersChanged(modifiers?: string): void {
+    this.native.flushIfDirty()
+    this.native.simulateModifiersChanged(modifiers)
     this.dispatchNativeEvents()
   }
 

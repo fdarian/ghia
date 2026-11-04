@@ -36,8 +36,7 @@ struct RoutingState {
     /// Weak: the view owns the handles, and a strong one kept here would
     /// outlive the app at teardown.
     focusables: RefCell<HashMap<u64, WeakFocusHandle>>,
-    /// A key or a mouse button has been pressed in this window.
-    user_input: Cell<bool>,
+    modality: crate::focus::FocusModality,
 }
 
 /// What the input listeners read from `GpuixView`, shared so they never have to
@@ -66,12 +65,8 @@ impl InputRouting {
         focusables.extend(handles);
     }
 
-    pub fn note_user_input(&self) {
-        self.0.user_input.set(true);
-    }
-
-    pub fn user_input_seen(&self) -> bool {
-        self.0.user_input.get()
+    pub fn modality(&self) -> &crate::focus::FocusModality {
+        &self.0.modality
     }
 
     fn focused_element(&self, window: &Window, cx: &App) -> Option<u64> {
@@ -207,7 +202,7 @@ pub(crate) fn install_key_down(
         if window.window_handle().window_id() != window_id {
             return;
         }
-        routing.note_user_input();
+        routing.modality().note_key_down(&event.keystroke.modifiers);
         if event.keystroke.key == "escape" && pointer.borrow().element_drag_active() {
             return;
         }
@@ -239,7 +234,7 @@ pub(crate) fn install_key_down(
         if window.window_handle().window_id() != window_id {
             return;
         }
-        ime_routing.note_user_input();
+        ime_routing.modality().note_key_down(&event.keystroke.modifiers);
         let Some(mut payload) = key_payload(
             &ime_routing,
             &ime_tree,
@@ -264,6 +259,18 @@ pub(crate) fn install_key_down(
         sync_dispatch::emit(window, cx, &ime_callback, payload);
     });
     gpui::Subscription::join(interception, ime_keys)
+}
+
+/// Shift pressed alone is a keydown to Chrome's `:focus-visible`. Registered on the root element,
+/// which every dispatch path passes through.
+pub(crate) fn note_modifiers(
+    routing: InputRouting,
+) -> impl Fn(&gpui::ModifiersChangedEvent, &mut Window, &mut App) + 'static {
+    move |event, window, _| {
+        if routing.modality().note_modifiers(&event.modifiers) {
+            window.refresh();
+        }
+    }
 }
 
 /// The window-level listeners: `keyup`. The focus default of a mouse press is

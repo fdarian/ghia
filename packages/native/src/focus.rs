@@ -7,7 +7,9 @@
 //! subscription order, so per-element listeners fired in whatever order the
 //! elements were created rather than blur(old) before focus(new).
 
+use std::cell::Cell;
 use std::collections::VecDeque;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{App, Window};
@@ -135,16 +137,67 @@ pub(crate) struct FocusChange {
     to_visible: bool,
 }
 
+/// What Chrome keeps for the document to decide `:focus-visible`, not per
+/// element: whether the last focus a mouse press gave an element is still the
+/// last one, and whether a key went down since a press last moved focus. The
+/// key and mouse listeners write it from inside input dispatch, which is why it
+/// is shared (`InputRouting`) instead of living in the view.
+///
+/// A script focus reads these and changes neither, so it matches only when the
+/// mouse has not been the last to focus something, or a key has been pressed
+/// since. A text control matches whatever they say.
+#[derive(Clone, Default)]
+pub(crate) struct FocusModality(Rc<ModalityCells>);
+
+#[derive(Default)]
+struct ModalityCells {
+    /// The last non-script focus change to an element was a mouse press's.
+    mouse_focused: Cell<bool>,
+    /// A key went down, and no press has moved focus since.
+    key_down: Cell<bool>,
+    /// A press `mousedown` did not cancel, waiting for the focus change it causes.
+    press: Cell<bool>,
+    shift: Cell<bool>,
+}
+
+impl FocusModality {
+    /// A keydown. Chrome ignores one with Ctrl, Alt or Meta held, so a shortcut
+    /// does not make focus visible.
+    pub fn note_key_down(&self, modifiers: &gpui::Modifiers) {
+        self.0.press.set(false);
+        if !(modifiers.control || modifiers.alt || modifiers.platform) {
+            self.0.key_down.set(true);
+        }
+    }
+
+    /// Shift on its own is a keydown in Chrome, though gpui reports it only as a modifier change.
+    /// Returns whether it went down.
+    pub fn note_modifiers(&self, modifiers: &gpui::Modifiers) -> bool {
+        let was_down = self.0.shift.replace(modifiers.shift);
+        let went_down = modifiers.shift && !was_down;
+        if went_down {
+            self.note_key_down(modifiers);
+        }
+        went_down
+    }
+
+    /// A press whose `mousedown` was not cancelled: whatever focus change it
+    /// causes is a mouse one.
+    pub fn note_press(&self) {
+        self.0.press.set(true);
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct FocusState {
     focused: Option<u64>,
-    visible: bool,
+    modality: FocusModality,
     /// The next focus change is a script call (`focus()`, `autoFocus`), which
-    /// inherits `:focus-visible` from the element it leaves.
+    /// leaves the modality as it is.
     programmatic: bool,
-    /// The element that held focus when the window went inactive, and whether it
-    /// matched `:focus-visible`. Window focus comes back to it as it was.
-    suspended: Option<(u64, bool)>,
+    /// The element that held focus when the window went inactive. Window focus
+    /// comes back to it with the modality it had.
+    suspended: Option<u64>,
     /// Focus events noticed but not yet sent. See `settle_focus`.
     outbox: VecDeque<EventPayload>,
     /// Keyboard handoffs to and from the page of a `<webview>` that a noticed move calls for,
@@ -166,6 +219,15 @@ pub(crate) struct PageMove {
 }
 
 impl FocusState {
+    pub fn with_modality(modality: FocusModality) -> Self {
+        Self { modality, ..Self::default() }
+    }
+
+    #[cfg(test)]
+    fn modality(&self) -> &FocusModality {
+        &self.modality
+    }
+
     pub fn focused(&self) -> Option<u64> {
         self.focused
     }
@@ -204,11 +266,12 @@ impl FocusState {
 
     /// Record where window focus is now, and report the move if there was one.
     ///
-    /// `:focus-visible` follows the browser heuristic. A text control always
-    /// matches. Otherwise focus matches when the keyboard moved it, or when a
-    /// script moved it off an element that matched, or before the user has
-    /// pressed any key or mouse button at all. A key pressed while an element is
-    /// focused makes it match, whatever moved focus there.
+    /// `:focus-visible` follows Chrome. A text control always matches. Any other
+    /// element matches unless the mouse was the last to focus an element
+    /// (`FocusModality`), and a key pressed since makes it match again, whatever
+    /// element has focus. What moved focus decides those two facts: a mouse press
+    /// sets the first and clears the second, a Tab sets neither, a script focus
+    /// leaves both. A press that moves focus to nothing clears the second too.
     ///
     /// While the window is inactive nothing is focused, but the element that was
     /// keeps its `:focus-visible` for when the window comes back, and a script
@@ -218,7 +281,6 @@ impl FocusState {
         current: Option<u64>,
         tree: &RetainedTree,
         keyboard_modality: bool,
-        user_input_seen: bool,
         window_active: bool,
     ) -> Option<FocusChange> {
         let programmatic = if window_active {
@@ -227,46 +289,53 @@ impl FocusState {
             self.programmatic
         };
         if current == self.focused {
-            if current.is_some() && keyboard_modality {
-                self.visible = true;
-            }
             if window_active {
                 self.suspended = None;
+                self.modality.0.press.set(false);
             }
             return None;
         }
         let from = self.focused;
-        let from_visible = self.visible;
+        let from_visible = self.is_visible(from, tree);
         if !window_active {
-            self.suspended = from.map(|id| (id, from_visible)).or(self.suspended);
+            self.suspended = from.or(self.suspended);
         }
-        let resumed_visible = match (current, self.suspended) {
-            (Some(now), Some((before, visible))) if window_active && now == before => visible,
-            _ => false,
-        };
-        // What a script focus inherits from: the element it left, or the one the
-        // window left when it went inactive.
-        let left_visible = from_visible || self.suspended.is_some_and(|(_, visible)| visible);
+        let resumed = window_active && current.is_some() && current == self.suspended;
         if window_active {
             self.suspended = None;
         }
-        let to_is_text_control = current
-            .and_then(|id| tree.elements.get(&id))
-            .is_some_and(|element| is_text_control(&element.element_type));
+        let cells = &self.modality.0;
+        let by_press = cells.press.replace(false);
+        if !programmatic {
+            if by_press {
+                cells.key_down.set(false);
+                if current.is_some() {
+                    cells.mouse_focused.set(true);
+                }
+            } else if !resumed && current.is_some() {
+                cells.mouse_focused.set(!keyboard_modality);
+            }
+        }
         self.focused = current;
-        self.visible = current.is_some()
-            && (to_is_text_control
-                || keyboard_modality
-                || resumed_visible
-                || (programmatic && (left_visible || !user_input_seen)));
         // A removed element loses focus without an event, like a removed DOM node.
         let from_alive = from.is_some_and(|id| tree.elements.contains_key(&id));
         Some(FocusChange {
             from: from.filter(|_| from_alive),
             to: current,
             from_visible,
-            to_visible: self.visible,
+            to_visible: self.is_visible(current, tree),
         })
+    }
+
+    fn is_visible(&self, element: Option<u64>, tree: &RetainedTree) -> bool {
+        let Some(element) = element else {
+            return false;
+        };
+        let is_text_control = tree
+            .elements
+            .get(&element)
+            .is_some_and(|element| is_text_control(&element.element_type));
+        is_text_control || !self.modality.0.mouse_focused.get() || self.modality.0.key_down.get()
     }
 
     pub fn styles(&self, tree: &RetainedTree, keyboard_focus_dim: bool) -> FocusStyles {
@@ -281,12 +350,12 @@ impl FocusState {
             .elements
             .get(&focused)
             .is_some_and(|element| is_text_control(&element.element_type));
+        let visible = self.is_visible(Some(focused), tree);
         FocusStyles {
             // Typing is keyboard input too, and dimming the window while someone
             // types is noise.
-            dim_path: (self.visible && keyboard_focus_dim && !is_text_control)
-                .then(|| within.clone()),
-            visible: self.visible.then_some(focused),
+            dim_path: (visible && keyboard_focus_dim && !is_text_control).then(|| within.clone()),
+            visible: visible.then_some(focused),
             within,
         }
     }
@@ -295,7 +364,7 @@ impl FocusState {
     pub fn matches(&self, tree: &RetainedTree, id: u64, selector: &str) -> Result<bool, String> {
         match selector.trim() {
             ":focus" => Ok(self.focused == Some(id)),
-            ":focus-visible" => Ok(self.focused == Some(id) && self.visible),
+            ":focus-visible" => Ok(self.focused == Some(id) && self.is_visible(Some(id), tree)),
             ":focus-within" => Ok(std::iter::successors(self.focused, |id| {
                 tree.elements.get(id).and_then(|element| element.parent)
             })
@@ -528,7 +597,6 @@ pub(crate) fn defer_mouse_down_default(
     routing: &InputRouting,
     target_path: Vec<u64>,
 ) {
-    routing.note_user_input();
     let routing = routing.clone();
     window.defer(cx, move |window, cx| {
         if !window.default_prevented() {
@@ -677,7 +745,6 @@ impl GpuixView {
             current,
             tree,
             window.last_input_was_keyboard(),
-            self.routing.user_input_seen(),
             window.is_window_active(),
         ) {
             self.focus.push_change(tree, &change);
@@ -773,110 +840,194 @@ mod tests {
         assert!(gpui_tab_stop(5).1);
     }
 
+    /// A page of `div`s 1 and 2, a text input 3 and a `div` 4 whose child a press may land on, driven
+    /// the way the window drives `FocusState`.
+    struct Page {
+        state: FocusState,
+        tree: RetainedTree,
+    }
+
+    #[derive(Clone, Copy)]
+    enum Step {
+        /// A keydown with no Ctrl, Alt or Meta held.
+        Key,
+        /// Ctrl+key.
+        Shortcut,
+        /// Tab lands on the element.
+        Tab(u64),
+        /// A mouse press whose target focuses the element, or nothing (`None`).
+        Press(Option<u64>),
+        /// `element.focus()`, or `blur()` for `None`.
+        Script(Option<u64>),
+        Check(u64, bool),
+    }
+    use Step::*;
+
+    impl Page {
+        fn new() -> Self {
+            Self {
+                state: FocusState::default(),
+                tree: tree_with(&[(1, "div"), (2, "div"), (3, "input"), (4, "div")]),
+            }
+        }
+
+        fn run(&mut self, steps: &[Step]) {
+            for (index, step) in steps.iter().enumerate() {
+                match *step {
+                    Key => self.state.modality().note_key_down(&gpui::Modifiers::default()),
+                    Shortcut => self.state.modality().note_key_down(&gpui::Modifiers::command()),
+                    Tab(id) => {
+                        self.state.modality().note_key_down(&gpui::Modifiers::default());
+                        self.state.observe(Some(id), &self.tree, true, true);
+                    }
+                    Press(target) => {
+                        self.state.modality().note_press();
+                        self.state.observe(target, &self.tree, false, true);
+                    }
+                    Script(target) => {
+                        self.state.note_programmatic();
+                        self.state.observe(target, &self.tree, false, true);
+                    }
+                    Check(id, expected) => assert_eq!(
+                        self.state.matches(&self.tree, id, ":focus-visible").unwrap(),
+                        expected,
+                        "step {index}: element {id}"
+                    ),
+                }
+            }
+        }
+    }
+
+    /// Chrome's answers, from `~/.cache/ghia-round48/fv2.py` (Playwright, headless shell, fresh
+    /// profile), each sequence replayed here step for step.
     #[test]
-    fn keyboard_focus_is_visible_and_mouse_focus_is_not() {
-        let tree = tree_with(&[(1, "div"), (2, "div")]);
-        let mut state = FocusState::default();
-        state.observe(Some(1), &tree, false, true, true);
-        assert!(!state.matches(&tree, 1, ":focus-visible").unwrap());
-        state.observe(Some(2), &tree, true, true, true);
-        assert!(state.matches(&tree, 2, ":focus-visible").unwrap());
+    fn focus_visible_follows_chromes_document_flags() {
+        let table: &[(&str, &[Step])] = &[
+            ("script focus before any input", &[Script(Some(1)), Check(1, true)]),
+            ("press on blank body, then script focus", &[Press(None), Script(Some(1)), Check(1, true)]),
+            ("click, then script focus", &[Press(Some(1)), Check(1, false), Script(Some(2)), Check(2, false)]),
+            ("Tab, then script focus", &[Tab(1), Check(1, true), Script(Some(2)), Check(2, true)]),
+            ("Tab, click blank body, script focus", &[Tab(1), Press(None), Script(Some(2)), Check(2, true)]),
+            ("Tab, click b, script focus a", &[Tab(1), Press(Some(2)), Check(2, false), Script(Some(1)), Check(1, false)]),
+            ("click text", &[Press(Some(3)), Check(3, true)]),
+            ("click, Shift (a key), script focus", &[Press(Some(2)), Key, Script(Some(1)), Check(1, true)]),
+            ("click, Ctrl+key, script focus", &[Press(Some(2)), Shortcut, Script(Some(1)), Check(1, false)]),
+            ("click, key, script focus", &[Press(Some(2)), Key, Script(Some(1)), Check(1, true)]),
+            ("click, key: the clicked element itself", &[Press(Some(2)), Key, Check(2, true)]),
+            (
+                "click, script focus text, script focus b",
+                &[Press(Some(1)), Script(Some(3)), Check(3, true), Script(Some(2)), Check(2, false)],
+            ),
+            ("click, key, click blank body, script focus", &[Press(Some(1)), Key, Press(None), Script(Some(2)), Check(2, false)]),
+            ("Tab, click the focused element, script focus", &[Tab(1), Press(Some(1)), Check(1, true), Script(Some(2)), Check(2, true)]),
+            ("click a child of a focusable element", &[Press(Some(4)), Check(4, false), Script(Some(2)), Check(2, false)]),
+            ("Tab, click a disabled button (blur), script focus", &[Tab(1), Press(None), Script(Some(2)), Check(2, true)]),
+            ("click, key, click a disabled button, script focus", &[Press(Some(1)), Key, Press(None), Script(Some(2)), Check(2, false)]),
+            (
+                "Tab, click text, script focus",
+                &[Tab(1), Press(Some(3)), Check(3, true), Script(Some(2)), Check(2, false)],
+            ),
+            (
+                "click, Tab, click blank body, script focus",
+                &[Press(Some(1)), Tab(2), Check(2, true), Press(None), Script(Some(1)), Check(1, true)],
+            ),
+            ("click, key, click blank body, script focus, click", &[Press(Some(1)), Key, Press(None), Script(Some(2)), Check(2, false), Press(Some(2)), Check(2, false)]),
+            ("click, key, click b, script focus a", &[Press(Some(1)), Key, Press(Some(2)), Check(2, false), Script(Some(1)), Check(1, false)]),
+            ("click, script focus, key: the script-focused element", &[Press(Some(1)), Script(Some(2)), Check(2, false), Key, Check(2, true)]),
+            ("click twice, key", &[Press(Some(1)), Press(Some(1)), Key, Check(1, true)]),
+            ("click, click blank body, script focus", &[Press(Some(1)), Press(None), Script(Some(2)), Check(2, false)]),
+            ("click, script blur, script focus", &[Press(Some(1)), Script(None), Script(Some(2)), Check(2, false)]),
+            (
+                "key, script focus, click b, script focus a",
+                &[Key, Script(Some(1)), Press(Some(2)), Script(Some(1)), Check(1, false)],
+            ),
+            ("click, key, click the focused element, script focus", &[Press(Some(1)), Key, Press(Some(1)), Script(Some(2)), Check(2, true)]),
+            ("click, key, blur, click blank body (nothing to blur), script focus", &[Press(Some(1)), Key, Script(None), Press(None), Script(Some(2)), Check(2, true)]),
+            ("key, click blank body (nothing focused), script focus", &[Key, Press(None), Script(Some(2)), Check(2, true)]),
+            ("click, key, click text, script focus", &[Press(Some(1)), Key, Press(Some(3)), Check(3, true), Script(Some(2)), Check(2, false)]),
+            ("click text, key, click text, script focus", &[Press(Some(3)), Key, Press(Some(3)), Script(Some(2)), Check(2, true)]),
+            ("click, key, click a child, script focus", &[Press(Some(1)), Key, Press(Some(4)), Script(Some(2)), Check(2, false)]),
+            ("click a child, key, click it again, script focus", &[Press(Some(4)), Key, Press(Some(4)), Script(Some(2)), Check(2, true)]),
+        ];
+        for (name, steps) in table {
+            let mut page = Page::new();
+            println!("{name}");
+            page.run(steps);
+        }
     }
 
     #[test]
-    fn a_key_while_focused_makes_focus_visible() {
-        let tree = tree_with(&[(1, "div")]);
-        let mut state = FocusState::default();
-        state.observe(Some(1), &tree, false, true, true);
-        assert!(!state.matches(&tree, 1, ":focus-visible").unwrap());
-        assert!(state.observe(Some(1), &tree, true, true, true).is_none());
-        assert!(state.matches(&tree, 1, ":focus-visible").unwrap());
-    }
+    fn shift_on_its_own_is_a_key_and_a_modifier_held_through_a_press_is_not() {
+        let mut page = Page::new();
+        let modality = page.state.modality().clone();
+        let shift = gpui::Modifiers::shift();
+        page.run(&[Press(Some(2))]);
+        assert!(modality.note_modifiers(&shift));
+        assert!(!modality.note_modifiers(&shift), "held, not pressed again");
+        page.run(&[Script(Some(1)), Check(1, true)]);
 
-    #[test]
-    fn text_controls_are_always_focus_visible() {
-        let tree = tree_with(&[(1, "input")]);
-        let mut state = FocusState::default();
-        state.observe(Some(1), &tree, false, true, true);
-        assert!(state.matches(&tree, 1, ":focus-visible").unwrap());
-    }
+        // Shift stays down through a press, and the press clears the key.
+        page.run(&[Press(Some(2)), Check(2, false)]);
+        assert!(!modality.note_modifiers(&shift));
+        page.run(&[Script(Some(1)), Check(1, false)]);
 
-    #[test]
-    fn script_focus_inherits_visibility_from_the_element_it_leaves() {
-        let tree = tree_with(&[(1, "div"), (2, "div"), (3, "div")]);
-        let mut state = FocusState::default();
-        state.observe(Some(1), &tree, true, true, true);
-        state.note_programmatic();
-        state.observe(Some(2), &tree, false, true, true);
-        assert!(state.matches(&tree, 2, ":focus-visible").unwrap());
-
-        let mut state = FocusState::default();
-        state.observe(Some(1), &tree, false, true, true);
-        state.note_programmatic();
-        state.observe(Some(3), &tree, false, true, true);
-        assert!(!state.matches(&tree, 3, ":focus-visible").unwrap());
+        assert!(!modality.note_modifiers(&gpui::Modifiers::default()));
+        let mut chord = gpui::Modifiers::shift();
+        chord.control = true;
+        page.run(&[Press(Some(2))]);
+        modality.note_modifiers(&chord);
+        page.run(&[Script(Some(1)), Check(1, false)]);
     }
 
     #[test]
     fn focus_visible_survives_the_window_going_inactive() {
-        let tree = tree_with(&[(1, "div")]);
-        let mut state = FocusState::default();
-        state.observe(Some(1), &tree, true, true, true);
-        let blurred = state.observe(None, &tree, false, true, false).unwrap();
+        let mut page = Page::new();
+        page.run(&[Tab(1)]);
+        let blurred = page.state.observe(None, &page.tree, false, false).unwrap();
         assert_eq!((blurred.from, blurred.to), (Some(1), None));
-        let back = state.observe(Some(1), &tree, false, true, true).unwrap();
+        let back = page.state.observe(Some(1), &page.tree, false, true).unwrap();
         assert!(back.to_visible);
-        assert!(state.matches(&tree, 1, ":focus-visible").unwrap());
+        page.run(&[Check(1, true)]);
     }
 
     #[test]
     fn mouse_focus_stays_not_visible_across_inactivity() {
-        let tree = tree_with(&[(1, "div")]);
-        let mut state = FocusState::default();
-        state.observe(Some(1), &tree, false, true, true);
-        state.observe(None, &tree, false, true, false);
-        state.observe(Some(1), &tree, false, true, true);
-        assert!(!state.matches(&tree, 1, ":focus-visible").unwrap());
+        let mut page = Page::new();
+        page.run(&[Press(Some(1))]);
+        page.state.observe(None, &page.tree, false, false);
+        page.state.observe(Some(1), &page.tree, false, true);
+        page.run(&[Check(1, false)]);
     }
 
     #[test]
-    fn script_focus_requested_while_inactive_is_still_one_when_seen() {
-        let tree = tree_with(&[(1, "div"), (2, "div")]);
-        let mut state = FocusState::default();
-        state.observe(Some(1), &tree, true, true, true);
-        state.observe(None, &tree, false, true, false);
-        state.note_programmatic();
+    fn a_script_focus_requested_while_inactive_is_still_one_when_seen() {
+        let mut page = Page::new();
+        page.run(&[Press(Some(1)), Script(None)]);
+        page.state.note_programmatic();
         // The request is observed while the window is still inactive.
-        assert!(state.observe(None, &tree, false, true, false).is_none());
-        state.observe(Some(2), &tree, false, true, true);
-        assert!(state.matches(&tree, 2, ":focus-visible").unwrap());
+        assert!(page.state.observe(None, &page.tree, false, false).is_none());
+        page.state.observe(Some(2), &page.tree, false, true);
+        page.run(&[Check(2, false)]);
 
-        let mut state = FocusState::default();
-        state.note_programmatic();
-        assert!(state.observe(None, &tree, false, false, false).is_none());
-        state.observe(Some(1), &tree, false, false, true);
-        assert!(state.matches(&tree, 1, ":focus-visible").unwrap());
-    }
-
-    #[test]
-    fn script_focus_before_any_user_input_is_focus_visible() {
-        let tree = tree_with(&[(1, "div")]);
-        let mut state = FocusState::default();
-        state.note_programmatic();
-        state.observe(Some(1), &tree, false, false, true);
-        assert!(state.matches(&tree, 1, ":focus-visible").unwrap());
+        let mut page = Page::new();
+        page.run(&[Press(Some(1)), Key]);
+        page.state.observe(None, &page.tree, false, false);
+        page.state.note_programmatic();
+        assert!(page.state.observe(None, &page.tree, false, false).is_none());
+        page.state.observe(Some(2), &page.tree, false, true);
+        page.run(&[Check(2, true)]);
     }
 
     #[test]
     fn a_change_reports_both_ends_and_a_removed_element_is_silent() {
         let mut tree = tree_with(&[(1, "div"), (2, "div")]);
         let mut state = FocusState::default();
-        state.observe(Some(1), &tree, false, true, true);
-        let change = state.observe(Some(2), &tree, false, true, true).unwrap();
+        state.observe(Some(1), &tree, false, true);
+        let change = state.observe(Some(2), &tree, false, true).unwrap();
         assert_eq!((change.from, change.to), (Some(1), Some(2)));
 
         tree.destroy_element(2);
-        let change = state.observe(None, &tree, false, true, true).unwrap();
+        let change = state.observe(None, &tree, false, true).unwrap();
         assert_eq!((change.from, change.to), (None, None));
     }
 
@@ -965,15 +1116,15 @@ mod tests {
         let mut state = FocusState::default();
         assert!(!state.has_unsent_events());
 
-        let change = state.observe(Some(1), &tree, false, true, true).unwrap();
+        let change = state.observe(Some(1), &tree, false, true).unwrap();
         state.push_change(&tree, &change);
         assert!(state.has_unsent_events());
 
         // Noticing the same focus again adds nothing, so a later frame cannot
         // send a move twice.
-        assert!(state.observe(Some(1), &tree, false, true, true).is_none());
+        assert!(state.observe(Some(1), &tree, false, true).is_none());
 
-        let change = state.observe(Some(2), &tree, false, true, true).unwrap();
+        let change = state.observe(Some(2), &tree, false, true).unwrap();
         state.push_change(&tree, &change);
         let types: Vec<_> = std::iter::from_fn(|| state.pop_event())
             .map(|event| event.event_type)

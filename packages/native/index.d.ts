@@ -835,6 +835,12 @@ export declare class TestGpuixRenderer {
    * it with the text it has; `text` is ignored). Pairs with `simulate_key_up`.
    */
   simulateImeKeyDown(keystroke: string, action: string, text?: string | undefined | null): void
+  /**
+   * The modifier keys held change, as the platform reports a modifier pressed or released on its
+   * own (`"shift"`, `"cmd-shift"`, none for all released). `simulate_keystrokes` sends a key
+   * event for `Shift`, which the platform does not.
+   */
+  simulateModifiersChanged(modifiers?: string | undefined | null): void
   /** Dispatch one keyup (one press in the `simulate_keystrokes` grammar). */
   simulateKeyUp(keystroke: string): void
   /**

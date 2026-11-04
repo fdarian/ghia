@@ -209,6 +209,8 @@ impl PointerDispatch {
         }
         if mouse_down_prevented {
             window.prevent_default();
+        } else {
+            self.activation.routing.modality().note_press();
         }
         let position = gpui::point(gpui::px(sample.position.0 as f32), gpui::px(sample.position.1 as f32));
         if withholds_press(press_stopped, window.native_surface_at(position).is_some()) {

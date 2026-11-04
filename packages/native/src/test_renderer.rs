@@ -1361,6 +1361,24 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// The modifier keys held change, as the platform reports a modifier pressed or released on its
+    /// own (`"shift"`, `"cmd-shift"`, none for all released). `simulate_keystrokes` sends a key
+    /// event for `Shift`, which the platform does not.
+    #[napi]
+    pub fn simulate_modifiers_changed(&self, modifiers: Option<String>) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        with_test_state(|cx, window, _view| {
+            cx.simulate_event(
+                window,
+                gpui::ModifiersChangedEvent {
+                    modifiers,
+                    capslock: gpui::Capslock { on: false },
+                },
+            );
+            Ok(())
+        })
+    }
+
     /// Dispatch one keyup (one press in the `simulate_keystrokes` grammar).
     #[napi]
     pub fn simulate_key_up(&self, keystroke: String) -> Result<()> {

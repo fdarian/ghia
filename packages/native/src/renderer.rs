@@ -6805,11 +6805,12 @@ impl GpuixView {
         selection: SharedSelection,
         pointer_requests: crate::events::state::PointerRequests,
     ) -> Self {
+        let routing = crate::events::keyboard::InputRouting::default();
         Self {
             tree,
             event_callback,
             window_title,
-            routing: Default::default(),
+            routing: routing.clone(),
             key_down_interception: None,
             window_selection_change: false,
             window_selection_event_id: 0,
@@ -6831,7 +6832,7 @@ impl GpuixView {
             reported_selection: None,
             focus_handles: HashMap::new(),
             pending_focus_element: None,
-            focus: crate::focus::FocusState::default(),
+            focus: crate::focus::FocusState::with_modality(routing.modality().clone()),
             custom_registry: CustomElementRegistry::with_defaults(),
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
@@ -9880,6 +9881,7 @@ impl gpui::Render for GpuixView {
             let drag_end_view = drag_move_view.clone();
             let mut root = gpui::div()
                 .size_full()
+                .on_modifiers_changed(crate::events::keyboard::note_modifiers(self.routing.clone()))
                 .on_painted(self.measurements.frame_counter());
             root.text_style().tab_size = Some(crate::css::tab_size::DEFAULT);
             crate::css::word_break::set_defaults(root.text_style());
