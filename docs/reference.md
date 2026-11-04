@@ -546,6 +546,13 @@ bun app.tsx
 bun --hot app.tsx
 ```
 
+The compiled output of each source file is cached in
+`~/Library/Caches/ghia/solid-transform/`, one entry per source path, and is
+reused while the file, `@ghia/solid`, Babel and the Solid preset are unchanged.
+A run with a warm cache never loads Babel, which saves 55-73 MB of memory per
+app. The cache needs no setup, and deleting the directory only costs one slow
+launch. `Bun.build` with the plugin below shares it.
+
 For production `Bun.build`, pass the exported plugin:
 
 ```ts
