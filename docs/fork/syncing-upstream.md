@@ -21,6 +21,30 @@ Skips worth remembering, with the reason (a commit that looks wanted but breaks 
 
 - none yet
 
+## Engine patches we carry
+
+The `zed/` fork changes GPUI only for what Ghia needs (DOM semantics, composing with native views, retention, things Ghia
+cannot do without); the engine otherwise stays as upstream ships it, and upstream picks go in as upstream wrote them (see
+[AGENTS.md](../../AGENTS.md) step 3 of "Do not invent behaviour on top of GPUI"). Any other engine change
+needs the owner's explicit permission and an entry here: the decision, the considerations and the reasoning. A sync keeps
+each entry or applies it again.
+
+### Atlas tile sizing (zed `13f5c1d1b7`, `gpui_apple/src/metal_atlas.rs`)
+
+- **Decision.** A tile wider or taller than 512 px (`DEDICATED_TEXTURE_THRESHOLD`) gets an atlas texture of exactly its
+  size, clamped to 16384. Smaller tiles stay in the shared 1024 x 1024 textures. The owner chose to carry this as a
+  fork patch, not to send it upstream.
+- **Considerations.** Upstream GPUI sizes every new atlas texture to `max(request, 1024 x 1024)`, so a tile over 512 px
+  gets a padded 1024 x 1024 texture that no second tile of its size can share. The patch is a general engine change, which
+  the rule above allows only by permission. A dedicated texture goes through the existing remove path (its last tile frees
+  the slot), and allocation still tries the existing textures first. The patch lives in `push_texture`, so a pick that
+  touches it, or a sync that replaces `metal_atlas.rs`, has to keep the threshold; the tests
+  `test_large_tile_gets_a_texture_of_its_own_size` and its neighbours in `metal_atlas.rs` fail when it is lost.
+- **Reasoning.** The Apple Music clone's 15 album covers (about 600 x 600) took 60.5 MB of IOAccelerator for 21.6 MB of
+  pixels; with the patch IOAccelerator went from 73.7 to 30.9 MB, 43 MB off an app of about 260 MB
+  ([round 49](frames-and-wakes.md#where-an-apps-memory-goes-round-49)). The cost is a texture per large tile instead of
+  sharing, which only matters for many large tiles of different sizes.
+
 ## Procedure
 
 1. Fetch both upstreams: `git fetch upstream` in the repo root and in `zed/`.

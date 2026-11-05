@@ -279,8 +279,9 @@ One window and one text, 1x display, footprint: 70 to 65 MB with fonts, 68 to 63
 - **The JavaScriptCore heap** (App-Specific Tag 1, 17 to 20 MB). It is there with no window: it is the JS that was loaded.
 - **ColorSync transform tables**, about 11 MB in Malloc Small, from AppKit and CoreAnimation colour matching (the Dock
   icon draw, `CGColor` conversion on commit).
-- **gpui's instance buffers**, one per frame in flight, 256 KiB each until a frame needs more (the pool then keeps the
-  larger size), and the **A8 glyph atlas** (1 MB).
+- **gpui's instance buffers**, one per frame in flight, 2 MiB each as in gpui (the pool grows when a frame needs more),
+  and the **A8 glyph atlas** (1 MB). A 256 KiB start was tried in round 49 and
+  [reverted](#engine-tweaks-tried-in-round-49-and-reverted).
 - **The Objective-C and AppKit runtime**, under 4 MB.
 
 Floors measured for comparison: a bare `bun` 4.4 MB, with the addon loaded 7.8 MB, a compiled app with its JS and no
@@ -373,7 +374,7 @@ animating).
 | --- | --- | --- | --- |
 | published 0.11.1 (Babel loaded at every launch) | 186, 192 | 316, 315 | 259, 256 |
 | main's addon, Solid transform cache warm | 131, 131 | 261, 260 | 195, 195 |
-| round 49 | 116, 116 | 211, 212 | 178, 178 |
+| round 49 (measured with the two tweaks [reverted below](#engine-tweaks-tried-in-round-49-and-reverted); not measured again) | 116, 116 | 211, 212 | 178, 178 |
 
 | dirty + swapped MB, round 49 | demo | music | fluid |
 | --- | --- | --- | --- |
@@ -392,18 +393,12 @@ What each item is, largest first:
   (`bun build --compile`) carries no Babel either.
 - **Album covers in the atlas** (music: IOAccelerator 73.7 to 30.9 MB, -42.8, nearly all of the music clone's
   -50 MB). A tile wider or taller than 512 px gets a texture of exactly its size (zed `metal_atlas.rs`), so the 15
-  covers take the 21.6 MB their pixels need; a padded 1024 x 1024 texture each is 60.5 MB.
-- **Decoded images held once** (music: 22 MB less allocated malloc, 0 MB of footprint). gpui's asset cache keeps every
-  `RenderImage` for the life of the app. On an Apple GPU, where atlas textures are shared with the CPU, a single-frame
-  image keeps its pixels only in the atlas it was first uploaded to and reads them back when another atlas or
-  `as_bytes` needs them (zed `image_pixels.rs`). The default zone's allocated bytes go from 56.8 to 34.8 MB, but its
-  dirty pages stay at 68 to 70 MB: the freed frames are 25 MB of empty-but-dirty small regions, which the system
-  allocator gives back only under memory pressure (`malloc_zone_pressure_relief` returns 0 bytes on this macOS).
+  covers take the 21.6 MB their pixels need; a padded 1024 x 1024 texture each is 60.5 MB. This one stays, as an
+  [engine patch we carry](syncing-upstream.md#engine-patches-we-carry).
 - **Drawables are noise in the demo's -15 MB.** Its IOSurface went from 25.8 to 18.8 MB, three drawables of 2.3 MB,
   and nothing in the round touches drawables: a layer holds 2 at rest and 3 after an animation, so about half of the
-  demo's drop is when the window last animated. The rest is instance buffers (IOAccelerator 13.2 to 9.3) and malloc.
-- **Instance buffers** (3 to 5 MB). One per frame in flight; they start at 256 KiB and the pool keeps whatever size the
-  heaviest frame needed.
+  demo's drop is when the window last animated. The rest is instance buffers (IOAccelerator 13.2 to 9.3, from the
+  reverted 256 KiB start) and malloc.
 - **`StyleDesc`** (fluid: 8 MB of the style table, transition states and stacks). A `LinearLength` is one
   `(unit, value)` term or a shared array for a mixed `calc()`, as Chrome's `Length` is, so a style is 6.3 KB (16 KB
   with twelve `f64` terms per length). A build keeps styles on the main thread's stack, which is 2.5 to 3.5 MB smaller
@@ -434,12 +429,27 @@ What each item is, largest first:
 5. **Metal driver memory**, 4 to 8 MB of owned unmapped graphics: per device and pipeline, not per frame.
 6. **The polychrome atlas** starts at 1024 x 1024 (4 MiB) and the glyph atlas at 1 MiB. A smaller first texture would
    split sprites across textures and break batching, for 3 MB.
-7. **Malloc fragmentation**, (dirty + swapped) - allocated in the default zone: about 34 MB on music (the freed image
-   frames above) and 28 on fluid, 4.5 on the demo. Sending blocks of 256 KiB or more to `mach_vm_allocate`, so that a
+7. **Malloc fragmentation**, (dirty + swapped) - allocated in the default zone: about 34 MB on music (the decoded images
+   gpui's asset cache keeps) and 28 on fluid, 4.5 on the demo. Sending blocks of 256 KiB or more to `mach_vm_allocate`, so that a
    free unmaps them, was tried in round 51 and is not in the tree: it cost 7 to 30 % on the layout- and mount-heavy perf
    rows (`layout-idle` tick 0.51 to 0.64 ms, `css-values` p50 13.6 to 15.1 ms, `cq` container flip 124 to 132 ms, in
    every one of three rotated rounds), since a frame's large vectors then take a system call and fresh zero pages each
    time. Its footprint gain was not measured. mimalloc for the addon was not tried.
+
+#### Engine tweaks tried in round 49 and reverted
+
+The `zed/` fork carries only what Ghia needs. Two round 49 changes were general GPUI tweaks and were reverted:
+
+- **Image pixels kept only in the atlas.** A single-frame image handed its pixels to the atlas it was first uploaded to
+  and read them back on demand (`as_bytes` returned an `ImageBytes`). It was reverted because it saved no footprint: on
+  the music clone the default zone's allocated bytes went from 56.8 to 34.8 MB, but the freed frames stayed in the
+  process as dirty pages (footprint 0 MB), which the system allocator gives back only under memory pressure. It was
+  also not something Ghia needed. An image is kept as CPU frames again, in the asset cache for the life of the app.
+- **Instance buffer pool starting at 256 KiB.** Reverted as a general engine tweak; the pool starts at 2 MiB, as in
+  gpui. It had saved 3 to 5 MB of IOAccelerator per app.
+
+The footprint rows above were measured with both in the tree and were not measured again, so the music clone is up to
+5 MB above its row.
 
 ### Overlay layers and the composition record (round 51)
 
