@@ -2968,6 +2968,8 @@ The sum of that height cache is the scroll length, so a rough estimate only affe
 
 When a retained descendant changes, Ghia marks its direct row for remeasurement, so a streaming row grows correctly. Appending, removing, or reordering keyed rows keeps measurements for rows whose IDs did not change.
 
+With `itemCount`, lowering the count keeps every measurement and the scroll position and costs as much as the rows it drops, however long the list is. Raising it makes a new height cache: rows measured so far are measured again as they come into view, and the scroll position stays. (Changing `alignment`, `followTail`, `overdraw` or `estimatedItemHeight` does the same.)
+
 `estimatedItemHeight` is optional in children mode, where every row exists and can be measured. It is **required** with `itemCount`, because React never mounts the rows outside the window and native has no element to measure. Those indexes render as an empty box of the estimated height until React mounts the real row.
 
 ### Row boundaries

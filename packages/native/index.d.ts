@@ -1439,6 +1439,10 @@ export interface BuildCounters {
    * whole, the ones that move or were written in a tick that is patched.
    */
   motionValuesSampled: number
+  /** Virtual list states made: a list's first, and each rebuild of one. */
+  listStatesCreated: number
+  /** Items a change of a list's item count spliced out of or into its state. */
+  listItemsSpliced: number
   /**
    * A JSON object: elements by the reason they are, or are not, in a retainable subtree, for
    * the builds since the reset. `retained` is the share that is; every built element is counted

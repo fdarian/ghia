@@ -58,6 +58,10 @@ pub struct BuildCounters {
     /// Motion values sampled for the elements that bind them: every value bound in a frame built
     /// whole, the ones that move or were written in a tick that is patched.
     pub motion_values_sampled: f64,
+    /// Virtual list states made: a list's first, and each rebuild of one.
+    pub list_states_created: f64,
+    /// Items a change of a list's item count spliced out of or into its state.
+    pub list_items_spliced: f64,
     /// A JSON object: elements by the reason they are, or are not, in a retainable subtree, for
     /// the builds since the reset. `retained` is the share that is; every built element is counted
     /// once.
@@ -954,6 +958,8 @@ impl TestGpuixRenderer {
             units_oversized: counts.units_oversized as f64,
             motions_synced: counts.motions_synced as f64,
             motion_values_sampled: counts.motion_values_sampled as f64,
+            list_states_created: counts.list_states_created as f64,
+            list_items_spliced: counts.list_items_spliced as f64,
             retain_reasons: serde_json::Value::Object(
                 crate::perf_counters::retain_reasons()
                     .into_iter()

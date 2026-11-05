@@ -8143,16 +8143,27 @@ impl VirtualListConfig {
         self.item_count.unwrap_or(child_len)
     }
 
+    /// Both are windowed lists and `other` has the same state settings but another count.
+    fn differs_only_in_count(self, other: Self) -> bool {
+        self.item_count.is_some()
+            && other.item_count.is_some()
+            && Self {
+                item_count: other.item_count,
+                ..self
+            } == other
+    }
+
     fn make_state(
         self,
         item_count: usize,
         focus_handles: &[Option<gpui::FocusHandle>],
     ) -> gpui::ListState {
+        crate::perf_counters::list_state_created();
         let mut state = gpui::ListState::new(item_count, self.alignment, gpui::px(self.overdraw));
+        // `new` already holds `item_count` rows without a handle. A windowed list has handles for
+        // its window only, which `VirtualListEntry::new` splices in.
         if focus_handles.len() == item_count {
             state.splice_focusable(0..item_count, focus_handles.iter().cloned());
-        } else {
-            state.splice_focusable(0..item_count, (0..item_count).map(|_| None));
         }
         if let Some(height) = self.estimated_item_height {
             state = state.with_uniform_item_height(gpui::px(height));
@@ -8264,6 +8275,20 @@ impl VirtualListEntry {
                 })
             })
             .collect();
+        if self.config != config && self.config.differs_only_in_count(config) {
+            let new_count = config.logical_count(child_ids.len());
+            if let crate::list_resize::CountChange::Shrink(removed) =
+                crate::list_resize::plan(self.state.item_count(), new_count)
+            {
+                for (offset, id) in self.child_ids.iter().enumerate() {
+                    if removed.contains(&(self.window_start + offset)) {
+                        self.seen_rows.remove(id);
+                    }
+                }
+                crate::list_resize::remove_tail(&self.state, removed);
+                self.config = config;
+            }
+        }
         if self.config != config {
             let scroll_top = self.state.logical_scroll_top();
             let should_follow =
@@ -8341,7 +8366,7 @@ impl VirtualListEntry {
             let focusability_changed = old_rows
                 .get(&id)
                 .is_some_and(|(_, old_handle)| old_handle.is_some() != focus_handle.is_some());
-            if focusability_changed {
+            if focusability_changed && logical < self.state.item_count() {
                 self.state
                     .splice_focusable(logical..logical + 1, std::iter::once(focus_handle.clone()));
             }
@@ -8356,15 +8381,14 @@ impl VirtualListEntry {
             match (changed_start, changed) {
                 (None, true) => changed_start = Some(logical),
                 (Some(start), false) => {
-                    self.state.remeasure_items(start..logical);
+                    self.remeasure(start..logical);
                     changed_start = None;
                 }
                 _ => {}
             }
         }
         if let Some(start) = changed_start {
-            self.state
-                .remeasure_items(start..window_start + child_ids.len());
+            self.remeasure(start..window_start + child_ids.len());
         }
         self.remeasure_unknown_rows(window_start, &child_ids, &old_rows);
         if was_pinned_to_top {
@@ -8375,6 +8399,14 @@ impl VirtualListEntry {
         self.child_ids = child_ids;
         self.child_revisions = child_revisions;
         self.row_focus_handles = row_focus_handles;
+    }
+
+    /// A window that is still showing rows past a shrunk count has none of them in the state.
+    fn remeasure(&self, rows: std::ops::Range<usize>) {
+        let rows = rows.start..rows.end.min(self.state.item_count());
+        if rows.start < rows.end {
+            self.state.remeasure_items(rows);
+        }
     }
 
     fn remeasure_unknown_rows(
@@ -8390,15 +8422,14 @@ impl VirtualListEntry {
             match (range_start, is_new) {
                 (None, true) => range_start = Some(logical),
                 (Some(start), false) => {
-                    self.state.remeasure_items(start..logical);
+                    self.remeasure(start..logical);
                     range_start = None;
                 }
                 _ => {}
             }
         }
         if let Some(start) = range_start {
-            self.state
-                .remeasure_items(start..window_start + child_ids.len());
+            self.remeasure(start..window_start + child_ids.len());
         }
     }
 }

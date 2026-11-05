@@ -27,6 +27,7 @@ mod focus;
 mod focus_emulation;
 mod forms;
 mod layout;
+mod list_resize;
 mod markdown;
 mod media;
 mod motion;

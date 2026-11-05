@@ -75,6 +75,8 @@ export interface BuildCounters {
   unitsOversized: number
   motionsSynced: number
   motionValuesSampled: number
+  listStatesCreated: number
+  listItemsSpliced: number
   retainReasons: string
 }
 
