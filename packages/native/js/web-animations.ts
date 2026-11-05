@@ -1280,8 +1280,10 @@ function keptByNative(renderer: NativeRenderer, state: State): boolean {
 export function cancelAnimationsOfElements(renderer: object, elementIds: readonly number[]): void {
   const registry = registryOf(renderer)
   for (const elementId of elementIds) {
+    const running = registry.byElement.get(elementId)
+    if (running === undefined) continue
     // Chrome cancels the last of an element's animations first.
-    for (const animation of [...(registry.byElement.get(elementId) ?? [])].reverse()) {
+    for (const animation of [...running].reverse()) {
       const state = stateOf(animation)
       const wasIdle = state.mode === "gone" || state.last.playState === "idle"
       lose(animation)

@@ -25,7 +25,7 @@ type BlobImageCallbacks = {
  * dropped. A revoked URL fails the fetch and reports `error`, as in a browser.
  */
 export function createBlobImageLoader(host: BlobImageHost, callbacks: BlobImageCallbacks) {
-  const types = new Map<number, string>()
+  const images = new Set<number>()
   const latest = new Map<number, number>()
   let counter = 0
 
@@ -47,15 +47,15 @@ export function createBlobImageLoader(host: BlobImageHost, callbacks: BlobImageC
 
   return {
     created(id: number, elementType: string) {
-      types.set(id, elementType)
+      if (elementType === "img") images.add(id)
     },
     destroyed(id: number) {
-      types.delete(id)
-      latest.delete(id)
+      images.delete(id)
+      if (latest.size > 0) latest.delete(id)
     },
     /** Call for every `setCustomProp`, before it is queued. */
     prop(id: number, key: string, value: unknown) {
-      if (key !== "src" || types.get(id) !== "img") return
+      if (key !== "src" || !images.has(id)) return
       const ticket = ++counter
       latest.set(id, ticket)
       if (typeof value === "string" && value.trim().startsWith("blob:")) {

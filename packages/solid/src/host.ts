@@ -554,7 +554,7 @@ function mount(root: HostRoot, node: HostNode): void {
   } else {
     node.sent.reset()
     node.writeStyle()
-    syncMotionBindings(root, root.mutations, node.id, node.motionValues, node.kind === "element" ? node.type : undefined)
+    if (node.motionValues) syncMotionBindings(root, root.mutations, node.id, node.motionValues, node.type)
     for (const [name, value] of node.props) {
       const eventType = eventTypeFor(name)
       if (eventType && isEventHandler(value)) {
@@ -567,7 +567,7 @@ function mount(root: HostRoot, node: HostNode): void {
     if (node.type === "nativeview") syncNativeviewProps(root, node)
   }
   if (node.kind === "element") {
-    for (const listener of [...node.mountListeners]) listener()
+    if (node.mountListeners.size > 0) for (const listener of [...node.mountListeners]) listener()
   }
   for (const child of node.children) {
     mount(root, child)
@@ -621,7 +621,7 @@ function markUnmounted(node: HostNode): void {
     }
     // Retired now, released after the batch: an element mounted again before
     // the flush binds its values afresh, and a shared value is never freed between.
-    retireMotionBindings(node.root, [node.id])
+    if (node.root.motionBindings.size > 0) retireMotionBindings(node.root, [node.id])
   }
   for (const child of node.children) markUnmounted(child)
 }
