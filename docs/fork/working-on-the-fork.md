@@ -398,6 +398,19 @@ version. Merging that PR runs the action again: `bun run ci:release` builds the 
 `changeset publish` publishes the three packages with provenance, through npm trusted publishing (OIDC, no token). Each
 package's `prepublishOnly` refuses to run without `CI`, so nothing is published from a laptop by accident.
 
+After a version is published, record its benchmark in [ghia-bench](https://github.com/fdarian/ghia-bench), whose history of
+Ghia versions is in `history/ghia/`. From a checkout of it:
+
+```bash
+bun harness/src/bench.ts history record <version>
+bun harness/src/bench.ts history report
+```
+
+Then commit `history/` and push. `GHIA_HEAVY=<script>` runs the native builds through a lock script, for a machine shared with
+other builds. The input phases need Accessibility for the shell; without Screen Recording, add `--capture off`. A merged fix
+can be recorded before its release as a snapshot: `history record <git-sha>`, with `GHIA_SRC` set to a Ghia checkout that has
+the commit.
+
 `@ghia/native` ships its addon in its own tarball (`gpuix-native.darwin-arm64.node`) and has no platform packages; only
 `aarch64-apple-darwin` is built.
 
