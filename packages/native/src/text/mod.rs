@@ -10,6 +10,7 @@
 
 pub mod atomic;
 pub mod empty_box;
+mod in_place;
 pub mod inline;
 pub mod inline_bounds;
 pub mod inline_cursor;

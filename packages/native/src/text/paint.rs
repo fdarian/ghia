@@ -32,6 +32,7 @@ use gpui::{
 
 use crate::automation::{moved_matrix, window_point_in};
 
+use super::in_place::InPlace;
 use super::selection::{self, SelectionState};
 use crate::tape::{Kind, Layered};
 
@@ -594,8 +595,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     let inline_boxes = std::rc::Rc::new(inline_boxes);
     let layout_of_boxes = layout.clone();
     let boxes_to_record = inline_boxes.clone();
-    let wrapper = div().relative().unlifted();
-    let underlay = canvas(
+    let mut underlay = canvas(
         move |_, window, _| {
             // Numbers the find matches in document order, which needs every run's matches
             // before the first one paints. See `search::wash`.
@@ -703,26 +703,26 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
             }
         },
     )
-    .keeps_no_position()
-    .absolute()
-    .unlifted()
-    .size_full();
+    .keeps_no_position();
+    InPlace::new(&mut underlay).absolute().unlifted().size_full();
 
     // Positioned only to hold the underlay. Lifted, every text run would rise above the
     // later boxes of its context.
-    let wrapper = match cull_outset {
-        Some(outset) => wrapper.cullable(outset),
-        None => wrapper,
+    let mut wrapper = div();
+    let wrapper_in_place = InPlace::new(&mut wrapper).relative().unlifted();
+    let wrapper_in_place = match cull_outset {
+        Some(outset) => wrapper_in_place.cullable(outset),
+        None => wrapper_in_place,
     };
-    wrapper
+    wrapper_in_place
         .child(underlay)
         .child(glyphs)
         .children(decorations)
         .children(groups)
         .children(cursor_hitboxes)
         .children(region_hitboxes)
-        .children(super::inline_focus::anchors(inline_focus))
-        .into_any_element()
+        .children(super::inline_focus::anchors(inline_focus));
+    wrapper.into_any_element()
 }
 
 /// Paints every opacity group of a paragraph, after its glyphs and rings: CSS paints a box with
