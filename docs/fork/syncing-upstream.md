@@ -26,8 +26,8 @@ chose the picks and left the other rows undecided, and a SHA means everything at
 
 ### Taken ahead of the ledger
 
-Picked from `zed-industries/main`, oldest first, with `cherry-pick -x`. The zed SHA is the commit on `poc`; `poc` was
-fast-forwarded to the picks, so the SHAs are the ones of the branch they were made on.
+Picked from `zed-industries/main`, oldest first, with `cherry-pick -x`. The zed SHA is the commit on `poc`; the picks
+were made on a branch that `poc` is fast-forwarded to, so the SHAs are the same on both.
 
 | Upstream | Subject | How | zed |
 |---|---|---|---|
