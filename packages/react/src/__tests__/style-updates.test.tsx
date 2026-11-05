@@ -43,6 +43,33 @@ describeNative("style and custom prop updates", () => {
     }
   })
 
+  it("queues only the ops of the two rows that changed when a list of 50 rows re-renders", () => {
+    const { render, renderer, unmount } = createTestRoot()
+    const view = (selected: number) => (
+      <div>
+        {Array.from({ length: 50 }, (_, index) => (
+          <div
+            key={index}
+            style={{ height: 20, borderBottom: "1px solid #eee", backgroundColor: selected === index ? "#dbeafe" : undefined }}
+          >
+            <text style={{ color: selected === index ? "#000" : "#111" }}>row {index}</text>
+          </div>
+        ))}
+      </div>
+    )
+    try {
+      render(view(0))
+      const sent = recordBatches(renderer)
+
+      render(view(7))
+
+      expect(sent.ops("setStyle")).toHaveLength(4)
+      expect(sent.batches.flat()).toHaveLength(4)
+    } finally {
+      unmount()
+    }
+  })
+
   it("sends only the element whose style changed", () => {
     const { render, renderer, unmount } = createTestRoot()
     const view = (hovered: string) => (
