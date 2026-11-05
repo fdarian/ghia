@@ -563,6 +563,8 @@ await app.screenshot({ path: 'tmp/after-click.png' })
 await app.close()
 ```
 
+`launch()` sets `GPUIX_AUTOMATION=1` in the app's environment; the app serves automation on stdin only when it is set.
+
 ```ts
 import { createTestRoot } from '@ghia/solid/testing'
 import { connectTest } from '@ghia/solid/automation'

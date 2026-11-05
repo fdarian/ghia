@@ -20,6 +20,7 @@ import {
   type ResultOf,
   type TreeNode,
 } from "./protocol.js"
+import { AUTOMATION_ENV } from "./env.js"
 import { matchableText } from "../text-match.js"
 
 function importNodeModule<T>(specifier: string): Promise<T> {
@@ -1077,6 +1078,7 @@ export async function launch(options: {
       env: {
         ...process.env,
         ...options.env,
+        [AUTOMATION_ENV]: "1",
       },
       stdio: ["pipe", "pipe", "pipe"],
     }

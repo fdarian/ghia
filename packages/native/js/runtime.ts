@@ -2,6 +2,7 @@ import * as native from "@ghia/native"
 import { GpuixRenderer } from "@ghia/native"
 import type { EventPayload, WindowOptions } from "@ghia/native"
 import type { App, LiveAutomationRenderer } from "./automation/client.js"
+import { automationRequested } from "./automation/env.js"
 import { bindClipboard } from "./clipboard.js"
 import { bindEyeDropper } from "./eyedropper.js"
 import { forgetWindowSource } from "./events/window-target.js"
@@ -78,7 +79,7 @@ export function createNativeRenderer(
     return getElementsAt(x, y)
   }
   const automated =
-    typeof process !== "undefined" && process.stdin && !process.stdin.isTTY
+    typeof process !== "undefined" && automationRequested(process.env)
   const init = renderer.init.bind(renderer)
   const tick = renderer.tick.bind(renderer)
   renderer.init = (windowOptions?: WindowOptions & WindowFontsOption | null) => {

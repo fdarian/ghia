@@ -9246,9 +9246,11 @@ await app.captureFrames('review/sidebar', [
 ### Live apps
 
 `launch({ command, args })` starts the app and speaks the same commands
-over stdin as SSE `data:` lines. The app listens only when stdin is a **pipe**,
-so a normal terminal run is unchanged. Lines without a `data:` prefix are
-ignored; `console.log` cannot break a message.
+over stdin as SSE `data:` lines. The app listens only when the environment has
+`GPUIX_AUTOMATION=1`, which `launch()` sets in the child, so a run without it
+(a terminal, Finder, a harness with stdin closed or piped) is unchanged. A driver
+that starts the app some other way sets the variable itself. Lines without a
+`data:` prefix are ignored; `console.log` cannot break a message.
 
 ```ts
 import { launch } from '@ghia/react/automation'

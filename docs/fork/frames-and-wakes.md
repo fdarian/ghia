@@ -422,8 +422,8 @@ What each item is, largest first:
 2. **The JS heap and Bun's allocator**, 26 to 53 MB: the app's own modules and data (Solid, base-ui, the app). Ghia's JS
    per element is about 0.45 KB. JavaScriptCore's heap is about half of it (13 / 11 / 30 MB). zod (1.8 MB, 95 modules)
    and eventsource-parser, which the automation protocol needs, load only when automation is on (the client is a
-   dynamic import in `runtime.ts`). Automation is on whenever stdin is not a terminal, which includes an app started
-   from Finder or by a harness with stdin closed; an app started from a terminal loads neither.
+   dynamic import in `runtime.ts`). Automation is on only when the environment has `GPUIX_AUTOMATION=1` (`launch()` sets it), so an app started
+   from a terminal, from Finder or by a harness with a pipe for stdin loads neither.
 3. **The addon's live data**, in fluid: the layout engine's node store (6.4 MB allocated, one `SlotMap` of taffy
    `NodeData`, plus its keyed-layout tables), motion and transition state (6.3 MB, 2 MB of it transition states at about
    7 KB each, see item 4 of the list above), the style table (5.4 MB), scene and frame arenas (4.4 MB), element frame
