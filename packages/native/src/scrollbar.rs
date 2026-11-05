@@ -5,6 +5,9 @@
 //! after a second without movement. While the pointer is over the bar it stays, and the thumb
 //! thickens over 150 ms and a faint track shows. The bar takes no layout space.
 //!
+//! The second it stays costs no frames: one timer is armed for its end, and the frames come only
+//! with the 200 ms fade and the thickening, which a frame at a time samples.
+//!
 //! With it on Always (`ScrollerStyle::Classic`, which macOS also picks while a mouse is
 //! attached), the bar is always there: an opaque track and a thumb that does not change, in a
 //! gutter the container reserves out of its own box, so `clientWidth` and the content box shrink
@@ -423,6 +426,14 @@ pub(crate) struct State {
     hitboxes: [Option<gpui::Hitbox>; 2],
     grow: [Grow; 2],
     alpha: f32,
+    /// What the last paint drew, which a tick that leaves the bar as it was has to find true of
+    /// the clock it is at ([`stale_at`]).
+    painted: Painted,
+    /// The alpha does not follow the clock: a classic bar, or one the pointer holds.
+    pinned: bool,
+    was_held: bool,
+    /// Wakes the window when the hold ends, so the fade starts without a frame having asked.
+    hold_timer: Option<HoldTimer>,
     seen: u64,
     /// Per axis, whether the content scrolled when last laid out. An `overflow: auto` scroller
     /// reserves its gutter from it.
@@ -439,8 +450,21 @@ pub(crate) struct State {
     /// draw, as Blink keeps a bar that appeared during a layout, so a gutter that shrinks the
     /// content until it fits cannot make the passes of one draw take it away again.
     frozen: [Option<u64>; 2],
-    /// The last paint asked for another frame: the bar fades, grows or settles its gutter.
-    animating: bool,
+    /// The last prepaint asked for another frame: the bar fades, grows or settles its gutter.
+    needs_frames: bool,
+}
+
+#[derive(Clone, Copy, Default)]
+struct Painted {
+    alpha: f32,
+    grow: [f32; 2],
+}
+
+struct HoldTimer {
+    /// The end of the hold it waits for.
+    at: Instant,
+    /// Dropping it cancels the wait.
+    _task: gpui::Task<()>,
 }
 
 thread_local! {
@@ -448,14 +472,21 @@ thread_local! {
     static FRAME: Cell<u64> = const { Cell::new(0) };
     static DRAW: Cell<u64> = const { Cell::new(0) };
     static NOW: Cell<Option<Instant>> = const { Cell::new(None) };
+    static CLOCK: RefCell<Option<crate::automation::AutomationClock>> = const { RefCell::new(None) };
     static SCROLLER: Cell<ScrollerStyle> = const { Cell::new(ScrollerStyle::Overlay) };
 }
 
-/// Call before building a frame, with the time its animations run on, the style the bars take
-/// and the pass of the draw it is (1 for the first build). Drops the bars of scrollers that were
-/// not built last frame.
-pub(crate) fn begin_frame(now: Instant, scroller: ScrollerStyle, pass: usize) {
+/// Call before building a frame, with the time its animations run on and the clock that time came
+/// from, the style the bars take and the pass of the draw it is (1 for the first build). Drops the
+/// bars of scrollers that were not built last frame, and with them the timers they waited on.
+pub(crate) fn begin_frame(
+    now: Instant,
+    clock: &crate::automation::AutomationClock,
+    scroller: ScrollerStyle,
+    pass: usize,
+) {
     NOW.set(Some(now));
+    CLOCK.with(|cell| *cell.borrow_mut() = Some(clock.clone()));
     SCROLLER.set(scroller);
     if pass <= 1 {
         DRAW.set(DRAW.get() + 1);
@@ -474,8 +505,75 @@ fn now() -> Instant {
 }
 
 /// Whether a bar of the last frame asked for another frame: it fades, grows or settles its gutter.
-pub(crate) fn animating() -> bool {
-    STATES.with(|states| states.borrow().values().any(|state| state.borrow().animating))
+pub(crate) fn needs_frames() -> bool {
+    STATES.with(|states| states.borrow().values().any(|state| state.borrow().needs_frames))
+}
+
+/// Whether a bar of the last frame was painted at an alpha or a thickness that the clock has since
+/// changed: its hold ended, or the pointer's thickening ran on. A tick that built only a unit would
+/// leave the bar as the frame before drew it.
+pub(crate) fn stale_at(now: Instant) -> bool {
+    let frame = FRAME.get();
+    STATES.with(|states| {
+        states.borrow().values().any(|state| {
+            let st = state.borrow();
+            st.seen == frame && st.stale_at(now)
+        })
+    })
+}
+
+/// How visible an overlay bar is, given when it last moved or was held: whole for [`IDLE`], then
+/// fading over [`FADE`].
+fn alpha_at(last_active: Option<Instant>, now: Instant) -> f32 {
+    let Some(active) = last_active else {
+        return 0.0;
+    };
+    let elapsed = now.saturating_duration_since(active);
+    if elapsed < IDLE {
+        1.0
+    } else if elapsed < IDLE + FADE {
+        1.0 - (elapsed - IDLE).as_secs_f32() / FADE.as_secs_f32()
+    } else {
+        0.0
+    }
+}
+
+impl State {
+    fn stale_at(&self, now: Instant) -> bool {
+        let alpha = if self.pinned { 1.0 } else { alpha_at(self.last_active, now) };
+        alpha != self.painted.alpha
+            || (0..2).any(|axis| self.grow[axis].value(now) != self.painted.grow[axis])
+    }
+
+    /// Has one timer wait for `ends`, the end of the hold, and none when there is no hold. A timer
+    /// already waiting for it is left alone: prepaint runs again in the culled, the multi-pass and
+    /// the reference passes of a draw.
+    fn wake_at(&mut self, ends: Option<Instant>, window: &gpui::Window, cx: &gpui::App) {
+        let Some(at) = ends else {
+            self.hold_timer = None;
+            return;
+        };
+        if self.hold_timer.as_ref().is_some_and(|timer| timer.at == at) {
+            return;
+        }
+        let view = window.current_view();
+        let clock = CLOCK
+            .with(|cell| cell.borrow().clone())
+            .expect("a frame began before its bars are prepainted");
+        // The clock the bar samples is not the executor's, which is what the timer counts: a timer
+        // that fires before the clock got to `at` waits for the rest.
+        let task = window.spawn(cx, async move |cx| {
+            loop {
+                let remaining = at.saturating_duration_since(clock.now());
+                if remaining.is_zero() {
+                    break;
+                }
+                cx.background_executor().timer(remaining).await;
+            }
+            cx.update(|_, cx| cx.notify_paint_only(view)).ok();
+        });
+        self.hold_timer = Some(HoldTimer { at, _task: task });
+    }
 }
 
 pub(crate) fn state_for(id: u64) -> Rc<RefCell<State>> {
@@ -526,7 +624,7 @@ fn overlay<E: gpui::StatefulInteractiveElement>(
 ) -> E {
     el.prepaint_overlay({
         let (state, source) = (state.clone(), source.clone());
-        move |bounds, window, _| prepaint(&state, &source, look, bounds, window)
+        move |bounds, window, cx| prepaint(&state, &source, look, bounds, window, cx)
     })
     .paint_overlay(move |bounds, window, cx| paint(&state, &source, look, bounds, window, cx))
 }
@@ -594,6 +692,7 @@ fn prepaint(
     look: Look,
     bounds: gpui::Bounds<gpui::Pixels>,
     window: &mut gpui::Window,
+    cx: &gpui::App,
 ) {
     let mut st = state.borrow_mut();
     st.seen = FRAME.get();
@@ -678,26 +777,21 @@ fn prepaint(
     }
 
     let held = st.hover.iter().any(|hovered| *hovered) || st.drag.is_some();
-    if held {
+    // The hold starts when the pointer lets go, not when a frame last saw it there: no frame is
+    // asked for while it stays.
+    if held || st.was_held {
         st.last_active = Some(now);
     }
-    let alpha = if classic {
-        1.0
-    } else {
-        match st.last_active {
-            None => 0.0,
-            Some(active) => {
-                let elapsed = now.saturating_duration_since(active);
-                if elapsed <= IDLE {
-                    1.0
-                } else if elapsed < IDLE + FADE {
-                    1.0 - (elapsed - IDLE).as_secs_f32() / FADE.as_secs_f32()
-                } else {
-                    0.0
-                }
-            }
-        }
-    };
+    st.was_held = held;
+    st.pinned = classic || held;
+    let alpha = if classic { 1.0 } else { alpha_at(st.last_active, now) };
+    let holding = !st.pinned && st.last_active.is_some_and(|active| now < active + IDLE);
+    let fading = !st.pinned && alpha > 0.0 && !holding;
+    let hold_ends = st
+        .last_active
+        .filter(|_| holding)
+        .map(|active| active + IDLE);
+    st.wake_at(hold_ends, window, cx);
 
     st.layout = layout;
     st.empty_tracks = empty_tracks;
@@ -733,8 +827,8 @@ fn prepaint(
     // The draw ran out of passes: what it presents has the old gutter, and the next frame builds
     // with the new one.
     let unsettled = settling && crate::layout::container::last_pass(window);
-    st.animating = (alpha > 0.0 && !classic) || growing || unsettled;
-    if st.animating {
+    st.needs_frames = fading || growing || unsettled;
+    if st.needs_frames {
         window.request_animation_frame();
     }
 }
@@ -775,6 +869,8 @@ fn paint(
                 st.hover[index] = hitbox.is_hovered(window);
             }
         }
+        let now = now();
+        st.painted = Painted { alpha: st.alpha, grow: [st.grow[0].value(now), st.grow[1].value(now)] };
         (st.layout, st.empty_tracks.clone(), st.hitboxes.clone(), st.alpha)
     };
     if alpha <= 0.0 {
@@ -1059,6 +1155,50 @@ mod tests {
         grow.aim(0.0, at(75));
         assert!((grow.value(at(75)) - 0.5).abs() < 0.001);
         assert_eq!(grow.value(at(225)), 0.0);
+    }
+
+    #[test]
+    fn a_bar_is_whole_for_a_second_then_fades_over_200_ms() {
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        assert_eq!(alpha_at(None, at(0)), 0.0);
+        assert_eq!(alpha_at(Some(start), at(0)), 1.0);
+        assert_eq!(alpha_at(Some(start), at(999)), 1.0);
+        assert_eq!(alpha_at(Some(start), at(1000)), 1.0);
+        assert!((alpha_at(Some(start), at(1100)) - 0.5).abs() < 0.001);
+        assert_eq!(alpha_at(Some(start), at(1200)), 0.0);
+        assert_eq!(alpha_at(Some(start), at(60_000)), 0.0);
+    }
+
+    #[test]
+    fn a_bar_is_stale_once_the_clock_has_changed_what_it_painted() {
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        let mut st = State {
+            last_active: Some(start),
+            painted: Painted { alpha: 1.0, grow: [0.0; 2] },
+            ..State::default()
+        };
+        assert!(!st.stale_at(at(0)));
+        assert!(!st.stale_at(at(999)), "the hold changes nothing on screen");
+        assert!(st.stale_at(at(1001)), "the fade has begun");
+        st.pinned = true;
+        assert!(!st.stale_at(at(60_000)), "a bar the pointer holds or a classic one stays");
+        st.pinned = false;
+        st.painted.alpha = 0.0;
+        assert!(!st.stale_at(at(60_000)), "a bar that is gone stays gone");
+    }
+
+    #[test]
+    fn a_bar_that_thickens_is_stale_until_it_has_painted_the_end_of_the_ease() {
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        let mut st = State { pinned: true, painted: Painted { alpha: 1.0, grow: [0.0; 2] }, ..State::default() };
+        st.grow[1].aim(1.0, start);
+        assert!(!st.stale_at(at(0)));
+        assert!(st.stale_at(at(75)));
+        st.painted.grow = [0.0, st.grow[1].value(at(150))];
+        assert!(!st.stale_at(at(5000)));
     }
 
     #[test]

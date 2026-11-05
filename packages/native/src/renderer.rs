@@ -9234,7 +9234,11 @@ impl GpuixView {
             tree.elements.get(&id).is_some_and(|element| !crate::layout::box_generation::is_hidden(&tree, element))
         });
         self.retain
-            .preview(&sources, crate::scroll::animating() || crate::scrollbar::animating(), gliding)
+            .preview(
+                &sources,
+                crate::scroll::animating() || crate::scrollbar::needs_frames() || crate::scrollbar::stale_at(now),
+                gliding,
+            )
     }
 
     /// Everything `Dormancy::holds` reads that a build of the element is not the only way to move,
@@ -9706,6 +9710,7 @@ impl gpui::Render for GpuixView {
         crate::scroll::begin_frame(|id| tree.elements.contains_key(&id));
         crate::scrollbar::begin_frame(
             now,
+            &self.clock,
             self.scroller_style
                 .unwrap_or_else(|| crate::scrollbar::ScrollerStyle::of_system(cx)),
             window.draw_pass(),

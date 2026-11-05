@@ -111,8 +111,10 @@ paint repaints those roots in the frame that is shown and leaves the rest as it 
 
 Installed once per window from `render`. For a tick it takes `now` from the clock and asks `Retain::preview`, which changes nothing.
 A tick is patchable when, since the last frame built whole: only time-driven ids changed (running `dynamic`, motion that runs or
-ended, not yet built), each in a unit or dormant; the root revision is the same; no layout-only pass ran; no scroll animation or
-scrollbar fade is active; no `layout` box has a glide in flight or events to send (`LayoutFlips::needs_frames`, asked of the live
+ended, not yet built), each in a unit or dormant; the root revision is the same; no layout-only pass ran; no scroll animation runs;
+no scrollbar is fading or thickening (`scrollbar::needs_frames`) or was painted at an alpha or thickness that the clock has since
+changed, which is what the end of its hold is (`scrollbar::stale_at(now)`: the hold itself is steady, so a tick in it is patched);
+no `layout` box has a glide in flight or events to send (`LayoutFlips::needs_frames`, asked of the live
 flips and not recorded); and that frame built no element that follows the clock (`Exclusion::varies_with_time`). An element with no
 box (`display: none` or below one, `box_generation::is_hidden`) is skipped as a dormant one is.
 
@@ -120,7 +122,7 @@ The reasons it says no are `Unpatchable`:
 
 | Key | Meaning |
 |---|---|
-| `NoFrame`, `LayoutPass`, `Unsteady`, `Gliding`, `ScrollAnimation`, `Edited`, `Everything` | no frame to patch, a layout-only pass ran, the last frame held an element that follows the clock, a `layout` glide is in flight or its events are to be sent, a scroll animation or fade runs, the tree was edited, everything changed |
+| `NoFrame`, `LayoutPass`, `Unsteady`, `Gliding`, `ScrollAnimation`, `Edited`, `Everything` | no frame to patch, a layout-only pass ran, the last frame held an element that follows the clock, a `layout` glide is in flight or its events are to be sent, a scroll animation runs, a scrollbar fades or thickens or its hold has ended since it was painted, the tree was edited, everything changed |
 | `Sourced` | the pointer, focus, a scroll, a custom element, a measurement, a link or a command changed |
 | `Outside` | a time-driven change outside every unit that is not dormant, on an element that has a box and the last build gives no reason for |
 | `Refused` | the element is no unit: `Excluded:<kind>` (`Excluded:fixed` for `position: fixed`; gpui has no root placed by the viewport, `Escape::Viewport` is declined `Surroundings`), `ExcludedBelow:<kind>`, `Escapes`, `Lifts`, `Scrolls`, `LayoutAnimation`, `TooLarge`. What runs on the element is looked at first, so an absolute element whose `top` runs is `LayoutAnimation`, and so is a tick made `Sourced` by the measurement of a layout animation |
@@ -205,6 +207,7 @@ of them arrives late). The input's measure was a keyless request, which made eve
   notes the focus coming. An input scrolled back into view arms again in the frame that moves it.
 - **`<code>`, `<markdown>` and `<diff>` left `varies_with_time`.** Nothing else read it for custom elements.
 - **A virtual list and its rows left `varies_with_time` too (r52).** A `<virtual-list>` beside the input (the search box of a mail client) made the frame before it unsteady, so every blink was a whole frame that rebuilt the visible rows (2.4 ms in a `sample` profile). A list is painted as the frame that built it left it: its rows are measured in that frame, and a scroll, a new window of rows or an animation in a row is a source of its own (an animation in a row is `Outside`, since no unit holds it). Test: `animation-frame-work` "blinks in patched frames that build the input alone beside a virtual list".
+- **A list that was scrolled, and a row under the pointer (r53).** A scroll asked for a frame at every vsync of the scrollbar's hold and fade, which queued the view dirty and made gpui decline every blink (`PendingView`); the hold asks for none now ([scroll.md](scroll.md#scrollbars)). A row the pointer was over was `Outside` at every tick: the hover that changed it put the row on the spine of the frame, and no build ever enters a row (the list builds them in its layout, whatever the window holds), so it stayed in `unbuilt` for good. `RetainedElement::is_built_by_ancestor` is true below a `<virtual-list>`, so a row is not kept there. Tests: `animation-frame-work` "blinks in patched frames that build the input alone beside a virtual list scrolled by a wheel / scrollTo, while the scrollbar holds / after the scrollbar has faded"; `retain.rs` `a_changed_row_of_a_virtual_list_is_not_left_unbuilt`.
 
 A loop beside a focused or unfocused `input`, a `textarea` or an input out of the clip went from 4.0 ms and 27.5% of a core
 (`Unsteady` 67.5 a second) to 0.8 to 0.95 ms and 6% at 7.8k elements, the same as the page without an input (0.97 in the same run),
@@ -590,7 +593,7 @@ after.
 
 - **A tick that gpui or gpuix cannot patch is a full frame, and says why.** A subtree of more than 256 elements is built whole
   (`unitsOversized`, `TooLarge`). A `position: fixed` element is no unit (`Excluded:fixed`), where an absolute one is. A loop on an
-  element that holds an absolute box against a block outside it is `Escapes`. A scroll animation or scrollbar fade, a layout-only
+  element that holds an absolute box against a block outside it is `Escapes`. A scroll animation, a scrollbar fade (not its hold), a layout-only
   pass since the last full frame, the pointer, focus, a scroll, a measurement or any change that is not the clock make the tick a
   full frame (`getPatchCounters().unpatchable`). A scroll animation is always asked for as `request_animation_frame` and drawn
   whole. The run of an `opacity` or transform animation starts and ends with a whole frame.

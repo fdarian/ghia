@@ -1886,7 +1886,8 @@ impl Retain {
     /// nothing that follows the clock outside the units. Changes nothing: a tick that is not drawn
     /// this way is drawn whole, and finds the same changes.
     ///
-    /// `scroll_animating` says whether a scroll animation (or a scrollbar fading) has frames to run,
+    /// `scroll_animating` says whether a scroll animation has frames to run, or a scrollbar has
+    /// (it fades or thickens) or is not as the clock has it (its hold ended),
     /// and `gliding` whether a `layout` box has a glide or events that a frame has to carry on.
     /// `sources` is what the tick would be built from, with the peeks of the sources that are taken
     /// when read (`Measurements::peek_changed`, `links::peek_changed`, `take_commanded`'s peek).
@@ -3527,6 +3528,23 @@ mod tests {
         // The walk from 4 used to stop at 3, which the frame before had left in `unbuilt`.
         frame_of(&mut retain, &tree, &[4], &[1, 2]);
         assert_eq!(sorted(&retain.deltas.spine), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn a_changed_row_of_a_virtual_list_is_not_left_unbuilt() {
+        // 1 > 2 (virtual-list) > 3 (a row) > 4, the one the pointer is over. The list builds its rows
+        // in its layout and never skips one, so a tick has nothing of them to look for.
+        let tree = tree_of(&[
+            (1, None, "div", None),
+            (2, Some(1), "virtual-list", None),
+            (3, Some(2), "div", None),
+            (4, Some(3), "div", None),
+        ]);
+        let mut retain = Retain::new();
+        retain.set_planning(true);
+        frame_of(&mut retain, &tree, &[4], &[1, 2]);
+        assert_eq!(sorted(&retain.deltas.spine), vec![1, 2, 3, 4]);
+        assert!(retain.unbuilt.is_empty(), "{:?}", sorted(&retain.unbuilt));
     }
 
     #[test]

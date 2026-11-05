@@ -643,11 +643,11 @@ describeNative("a change of what is near", { timeout: 120_000 }, () => {
     if (verifying) return
     expect(scrollRun(0, 120), "the sidebar is replayed: its 60 rows add no build").toEqual(moved)
     expect(moved.builds[0], "the scroll costs what it costs without a change").toBe(still.builds[0])
-    // The frame that shows the three entries builds them, and records their roots in that frame (a root built whole is
-    // recorded by the build that makes it): their roots are the only builds it adds, and no frame after it builds them again.
-    const added = moved.builds[1] - still.builds[1]
-    expect(added, "the roots of the three entries are built once, in the frame that shows them").toBeGreaterThan(0)
-    expect(added).toBeLessThanOrEqual(3 * 8)
+    // A scroll that shows nothing new leaves the frames after it idle: the scrollbar that it shows asks for none while it holds.
+    expect(still.builds, "nothing is built after a scroll that changes nothing near").toEqual([0, 0, 0, 0])
+    // The frame that shows the three entries builds the roots above them and the entries, and records their roots in that frame (a
+    // root built whole is recorded by the build that makes it): no frame after it builds them again.
+    expect(moved.builds[1], "the roots of the three entries are built once, in the frame that shows them").toBeGreaterThan(0)
     expect(moved.builds.slice(2), "and the frames after that build nothing").toEqual([0, 0])
   })
 })

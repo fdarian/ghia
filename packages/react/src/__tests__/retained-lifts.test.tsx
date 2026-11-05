@@ -609,6 +609,9 @@ describeNative("a skipped root keeps what its last build lifted", () => {
           kit.renderer.flush()
           const after = kit.counters()
           scrolls.push({ builds: after.builds - before.builds, relocations: after.relocations - before.relocations })
+          // Idle frames between the scrolls, as many as the back-off of recording counts in a stretch and one more (`BACKOFF_CAP`):
+          // the scrollbar that a scroll shows used to ask for them, and now asks for none while it holds.
+          for (let idle = 0; idle < 9; idle++) kit.renderer.flush()
         }
         expect(kit.counters().mismatches, kit.renderer.getRetentionMismatches().slice(0, 3).join("\n")).toBe(0)
         // Under verify every replayed frame is built a second time, which these counts include.

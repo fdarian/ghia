@@ -118,6 +118,13 @@ function work(renderer, change: () => void): Work {
 /** A tick: the clock moves, without the window being told, and the frame is drawn. */
 const tick = (renderer, ms = 16) => work(renderer, () => renderer.clockAdvance(ms))
 
+/** Time passes for the window and the executor alike, as it does in a live window: the timer of a scrollbar's hold fires. */
+const elapse = (renderer, ms: number) =>
+  work(renderer, () => {
+    renderer.clockAdvance(ms)
+    renderer.advanceTime(ms)
+  })
+
 async function settle(renderer, frames = 12) {
   for (let frame = 0; frame < frames; frame++) {
     renderer.flush()
@@ -1279,6 +1286,62 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
       }
   })
 
+  // r53: a list that was scrolled asked for a frame at every vsync while its scrollbar held and faded, which queued its view
+  // dirty, so gpui declined every tick of the blink (`PendingView`) and the page was built whole. The hold now asks for none.
+  const SCROLLS = {
+    "a wheel": (renderer) => renderer.nativeSimulateScrollWheel(100, 80, 0, 40),
+    "scrollTo": (renderer) => renderer.scrollTo(renderer.findByTestId("list")!.id, 0, 90),
+  }
+
+  for (const [how, scroll] of Object.entries(SCROLLS)) {
+    for (const when of ["while the scrollbar holds", "after the scrollbar has faded"]) {
+      counted(`blinks in patched frames that build the input alone beside a virtual list scrolled by ${how}, ${when}`, async () => {
+        const run = async (head: React.ReactNode, scrolled: boolean) => {
+          const page = await mount(head, 500)
+          try {
+            const renderer = page.renderer
+            await focusProbe(renderer)
+            wholeFrame(renderer)
+            if (scrolled) {
+              scroll(renderer)
+              // The wheel puts the pointer over the list, and the hover it brings is found by the frame after the first.
+              wholeFrame(renderer)
+              wholeFrame(renderer)
+              if (when === "after the scrollbar has faded") {
+                // The hold ends and the fade runs a frame at a time, as the display link would deliver them.
+                for (let vsync = 0; vsync < 100; vsync++) {
+                  renderer.clockAdvance(16)
+                  renderer.advanceTime(16)
+                  renderer.drawFrame()
+                }
+                wholeFrame(renderer)
+                wholeFrame(renderer)
+              }
+            }
+            const before = renderer.getPatchCounters()
+            const done: Work[] = []
+            for (let phase = 0; phase < 6; phase++) done.push(work(renderer, () => renderer.advanceTime(500)))
+            const after = renderer.getPatchCounters()
+            expect(after.patchedFrames - before.patchedFrames, "a patched frame for every change of phase").toBe(6)
+            expect(gained(after.declines, before.declines)).toEqual({})
+            expect(gained(after.unpatchable, before.unpatchable), "the scrollbar does not make a tick unpatchable").toEqual({})
+            if (verifying) expect(renderer.getRetainedCounters().mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
+            return done
+          } finally {
+            page.root.unmount()
+          }
+        }
+        const alone = await run(blinking("some text"), false)
+        for (const done of [await run(beside(40), true), await run(beside(4000), true)])
+          for (let phase = 0; phase < 6; phase++) {
+            expect(done[phase].patchedFrames, `phase ${phase}`).toBe(1)
+            expect(done[phase].elementsBuilt, `phase ${phase} builds what an input alone does`).toBe(alone[phase].elementsBuilt)
+            expect(done[phase].hits + done[phase].replays + done[phase].builds, `phase ${phase}`).toBe(0)
+          }
+      })
+    }
+  }
+
   it.skipIf(!patching)("shows the picture of a frame built whole in both phases beside a virtual list", async () => {
     const page = await mount(beside(40), 500)
     try {
@@ -1397,7 +1460,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
       const scrollTo = (top: number) => {
         renderer.scrollTo(scroller, 0, top)
         wholeFrame(renderer)
-        tick(renderer, 2000)
+        elapse(renderer, 2000)
         tick(renderer)
         wholeFrame(renderer)
         wholeFrame(renderer)
@@ -2207,7 +2270,7 @@ describeNative("a motion value bound to an element that is culled", { timeout: T
       renderer.scrollTo(scroller, 0, 400)
       // The scrollbar that a scroll shows fades out by itself, in frames of its own.
       tick(renderer)
-      tick(renderer, 2000)
+      elapse(renderer, 2000)
       for (let index = 0; index < 4; index++) tick(renderer)
       const before = renderer.getPatchCounters()
       for (let index = 0; index < TICKS; index++) expect(tick(renderer).patchedFrames, `tick ${index}`).toBe(1)
