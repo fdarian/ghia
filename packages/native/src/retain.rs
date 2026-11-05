@@ -229,12 +229,14 @@ impl Exclusion {
     ];
 
     /// Whether what the element paints or lays out follows the clock or the arrival of something
-    /// (a raster, an image, rows measured late), so that a tick which builds only what runs on a
-    /// clock would leave it as it was. A custom element that has no `retain_state` (`<code>`,
-    /// `<markdown>`, `<diff>`) does not: it is rebuilt by every frame that builds its page and
-    /// paints the same in a tick.
+    /// (a raster, an image), so that a tick which builds only what runs on a clock would leave it
+    /// as it was. A custom element that has no `retain_state` (`<code>`, `<markdown>`, `<diff>`)
+    /// does not: it is rebuilt by every frame that builds its page and paints the same in a tick.
+    /// Nor does a virtual list: its rows are measured in the frame that builds them, and what
+    /// changes them afterwards (a scroll, a new window of rows, an animation in a row) is a source
+    /// of its own, so a tick leaves the list as that frame painted it.
     pub(crate) fn varies_with_time(self) -> bool {
-        matches!(self, Self::Highlight | Self::Svg | Self::VirtualList | Self::VirtualRow)
+        matches!(self, Self::Highlight | Self::Svg)
     }
 
     fn name(self) -> &'static str {
@@ -5546,7 +5548,12 @@ mod tests {
         build(&mut page, Exclusion::CustomElement);
         build(&mut page, Exclusion::CustomElement);
         assert_eq!(page.preview(&[], false), Ok(vec![2]), "a code block is rebuilt by its frame, and paints the same in a tick");
-        for varies in [Exclusion::Highlight, Exclusion::Svg, Exclusion::VirtualList] {
+        for steady in [Exclusion::VirtualList, Exclusion::VirtualRow] {
+            build(&mut page, steady);
+            build(&mut page, steady);
+            assert_eq!(page.preview(&[], false), Ok(vec![2]), "{steady:?}: a list is painted as its frame made it, a tick leaves it alone");
+        }
+        for varies in [Exclusion::Highlight, Exclusion::Svg] {
             build(&mut page, varies);
             assert_eq!(page.preview(&[], false), Err(Unpatchable::Unsteady), "{varies:?}");
         }

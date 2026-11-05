@@ -1235,6 +1235,115 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
     }
   })
 
+  // r52: a `<virtual-list>` anywhere on the page made the frame unsteady, so the blink of an input beside it (the search box
+  // of a mail client) was a frame built whole twice a second, however small the caret.
+  const beside = (rows: number) => (
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      {blinking("some text")}
+      <virtual-list testId="list" itemCount={rows} estimatedItemHeight={30} style={{ width: 300, height: 150, flexShrink: 0 }}>
+        {Array.from({ length: rows }, (_, index) => (
+          <div key={index} style={{ height: 30 }}>
+            <text style={{ fontSize: 12, color: "#333333" }}>{`row ${index}`}</text>
+          </div>
+        ))}
+      </virtual-list>
+    </div>
+  )
+
+  counted("blinks in patched frames that build the input alone beside a virtual list", async () => {
+    const run = async (head: React.ReactNode) => {
+      const page = await mount(head, 500)
+      try {
+        const renderer = page.renderer
+        await focusProbe(renderer)
+        wholeFrame(renderer)
+        const before = renderer.getPatchCounters()
+        const done: Work[] = []
+        for (let phase = 0; phase < 6; phase++) done.push(work(renderer, () => renderer.advanceTime(500)))
+        const after = renderer.getPatchCounters()
+        expect(after.patchedFrames - before.patchedFrames, "a patched frame for every change of phase").toBe(6)
+        expect(gained(after.declines, before.declines)).toEqual({})
+        expect(gained(after.unpatchable, before.unpatchable), "the list does not make a tick unpatchable").toEqual({})
+        if (verifying) expect(renderer.getRetainedCounters().mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
+        return done
+      } finally {
+        page.root.unmount()
+      }
+    }
+    const alone = await run(blinking("some text"))
+    for (const done of [await run(beside(40)), await run(beside(4000))])
+      for (let phase = 0; phase < 6; phase++) {
+        expect(done[phase].patchedFrames, `phase ${phase}`).toBe(1)
+        expect(done[phase].elementsBuilt, `phase ${phase} builds what an input alone does`).toBe(alone[phase].elementsBuilt)
+        expect(done[phase].hits + done[phase].replays + done[phase].builds, `phase ${phase}`).toBe(0)
+      }
+  })
+
+  it.skipIf(!patching)("shows the picture of a frame built whole in both phases beside a virtual list", async () => {
+    const page = await mount(beside(40), 500)
+    try {
+      const renderer = page.renderer
+      renderer.scrollTo(renderer.findByTestId("list")!.id, 0, 90)
+      wholeFrame(renderer)
+      await focusProbe(renderer)
+      wholeFrame(renderer)
+      const same = (name: string) => {
+        const patched = shot(renderer, `list-${name}-patched`)
+        renderer.setPatchEnabled(false)
+        tick(renderer, 0)
+        const whole = shot(renderer, `list-${name}-whole`)
+        renderer.setPatchEnabled(true)
+        expect(patched.equals(whole), name).toBe(true)
+        return patched
+      }
+      const lit = same("lit")
+      work(renderer, () => renderer.advanceTime(500))
+      expect(same("dark").equals(lit), "the caret went out").toBe(false)
+      work(renderer, () => renderer.advanceTime(500))
+      expect(same("lit again").equals(lit)).toBe(true)
+    } finally {
+      page.root.unmount()
+    }
+  })
+
+  // A list is painted as its frame left it, so the ticks of the caret must not freeze a loop in one of its rows.
+  it.skipIf(!patching)("keeps a loop in a row of a virtual list running beside a blinking input", async () => {
+    const page = await mount(
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {blinking("some text")}
+        <virtual-list testId="list" itemCount={20} estimatedItemHeight={30} style={{ width: 300, height: 150, flexShrink: 0 }}>
+          {Array.from({ length: 20 }, (_, index) => (
+            <div key={index} style={{ height: 30 }}>
+              <text style={{ fontSize: 14, color: "#000000", animation: index === 1 ? "afw-pulse 1.5s linear infinite" : undefined }}>{`row ${index}`}</text>
+            </div>
+          ))}
+        </virtual-list>
+      </div>,
+      500,
+    )
+    try {
+      const renderer = page.renderer
+      await focusProbe(renderer)
+      wholeFrame(renderer)
+      let last: Buffer | undefined
+      for (let step = 0; step < 6; step++) {
+        renderer.clockAdvance(250)
+        renderer.advanceTime(250)
+        renderer.drawFrame()
+        const patched = shot(renderer, `row-loop-${step}-patched`)
+        renderer.setPatchEnabled(false)
+        tick(renderer, 0)
+        const whole = shot(renderer, `row-loop-${step}-whole`)
+        renderer.setPatchEnabled(true)
+        expect(patched.equals(whole), `step ${step}`).toBe(true)
+        if (last) expect(patched.equals(last), `step ${step} moved on`).toBe(false)
+        last = patched
+      }
+    } finally {
+      page.root.unmount()
+    }
+  })
+
   // Chrome paints a caret again when it blinks, and a loop elsewhere does not blink it: the ticks of the loop leave the
   // input as it was painted, and the tick of the phase builds it once.
   counted("is built by the tick of its phase and by no tick of a loop elsewhere", async () => {

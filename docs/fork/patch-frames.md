@@ -204,6 +204,7 @@ of them arrives late). The input's measure was a keyless request, which made eve
   only while the window is key, the caret is shown and its box meets the content mask and the bounds of the editor; `render` only
   notes the focus coming. An input scrolled back into view arms again in the frame that moves it.
 - **`<code>`, `<markdown>` and `<diff>` left `varies_with_time`.** Nothing else read it for custom elements.
+- **A virtual list and its rows left `varies_with_time` too (r52).** A `<virtual-list>` beside the input (the search box of a mail client) made the frame before it unsteady, so every blink was a whole frame that rebuilt the visible rows (2.4 ms in a `sample` profile). A list is painted as the frame that built it left it: its rows are measured in that frame, and a scroll, a new window of rows or an animation in a row is a source of its own (an animation in a row is `Outside`, since no unit holds it). Test: `animation-frame-work` "blinks in patched frames that build the input alone beside a virtual list".
 
 A loop beside a focused or unfocused `input`, a `textarea` or an input out of the clip went from 4.0 ms and 27.5% of a core
 (`Unsteady` 67.5 a second) to 0.8 to 0.95 ms and 6% at 7.8k elements, the same as the page without an input (0.97 in the same run),
