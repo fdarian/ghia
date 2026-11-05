@@ -432,3 +432,215 @@ describeNative("a layout pass a read forces", () => {
     }
   })
 })
+
+/** What a page whose content changes in the same task as the writes holds: the scroller or list, a way to
+ *  change its row count, and its row count's bearing on the largest offset. */
+function ScrollerPage(props: { list: boolean; page: { setCount: (count: number) => void; target: PublicInstance | null } }) {
+  const [count, setCount] = useState(25)
+  props.page.setCount = setCount
+  const ref = (instance: PublicInstance | null) => {
+    props.page.target = instance
+  }
+  return props.list ? (
+    <virtual-list ref={ref} overdraw={0} estimatedItemHeight={ROW} style={{ width: WIDTH, height: HEIGHT }}>
+      <ListRows count={count} />
+    </virtual-list>
+  ) : (
+    <div ref={ref} style={{ width: WIDTH, height: HEIGHT, overflowY: "scroll", flexDirection: "column" }}>
+      <Rows count={count} />
+    </div>
+  )
+}
+
+describeNative.each([{ list: false }, { list: true }])("scroll writes while the layout is behind the tree (list: $list)", (variant) => {
+  function open() {
+    const page = { setCount: (_count: number) => {}, target: null as PublicInstance | null }
+    const mounted = mount(<ScrollerPage list={variant.list} page={page} />)
+    return { ...mounted, page }
+  }
+
+  it("lays out nothing for any number of writes to the start, and the frame after them lays out once", () => {
+    const { renderer, unmount, page } = open()
+    try {
+      page.target!.scrollTop = 5 * ROW
+      renderer.drawFrame()
+      const layoutPasses = renderer.getLayoutPassCount()
+      const passes = renderer.getLayoutCounters().passes
+      const painted = renderer.getPaintedFrameCount()
+
+      flushSync(() => page.setCount(100))
+      for (let index = 0; index < 5; index++) {
+        page.target!.scrollTo({ top: 0 })
+        page.target!.scrollTop = 0
+        page.target!.scrollLeft = 0
+        page.target!.scrollTo({ left: 0 })
+        page.target!.scrollTo(0, 0)
+      }
+      expect(renderer.getLayoutPassCount() - layoutPasses, "no layout-only pass").toBe(0)
+      expect(renderer.getLayoutCounters().passes - passes, "no pass at all").toBe(0)
+      expect(renderer.getPaintedFrameCount() - painted, "no frame").toBe(0)
+
+      renderer.drawFrame()
+      expect(renderer.getPaintedFrameCount() - painted, "one frame follows").toBe(1)
+      expect(renderer.getLayoutPassCount() - layoutPasses, "which is not a layout-only pass").toBe(0)
+      // A verified frame builds the page a second time, whole, and that build is a pass of its own.
+      if (!verifying) expect(renderer.getLayoutCounters().passes - passes, "and has the one layout").toBe(1)
+      expect(page.target!.scrollTop, "the scroller is at the start").toBe(0)
+      expect(renderer.getLayoutPassCount() - layoutPasses, "the read after the frame lays out nothing").toBe(0)
+    } finally {
+      renderer.setInlineDraws(true)
+      unmount()
+    }
+  })
+
+  it("lays out once for the first write of a div to another position, and not for the writes after it", () => {
+    const { renderer, unmount, page } = open()
+    try {
+      renderer.drawFrame()
+      expect(page.target!.scrollTop).toBe(0)
+      const layoutPasses = renderer.getLayoutPassCount()
+      const painted = renderer.getPaintedFrameCount()
+
+      flushSync(() => page.setCount(100))
+      page.target!.scrollTop = 1e6
+      // A list has no anchoring: it is written again when the frame has spliced its rows.
+      const first = variant.list ? 0 : 1
+      expect(renderer.getLayoutPassCount() - layoutPasses, "the layout scroll anchoring needs before the write").toBe(first)
+      for (let index = 0; index < 5; index++) {
+        page.target!.scrollTo({ top: 200 + index * ROW })
+        page.target!.scrollTop = 400 + index * ROW
+      }
+      expect(renderer.getLayoutPassCount() - layoutPasses, "and none for the writes after it").toBe(first)
+      expect(renderer.getPaintedFrameCount() - painted, "no frame yet").toBe(0)
+      renderer.drawFrame()
+      expect(renderer.getPaintedFrameCount() - painted, "one frame follows").toBe(1)
+      expect(page.target!.scrollTop).toBe(400 + 4 * ROW)
+    } finally {
+      renderer.setInlineDraws(true)
+      unmount()
+    }
+  })
+
+  it("reads the clamped value after content that grew and shrank in the same task", () => {
+    const { renderer, unmount, page } = open()
+    try {
+      renderer.drawFrame()
+      const layoutPasses = renderer.getLayoutPassCount()
+
+      flushSync(() => page.setCount(200))
+      page.target!.scrollTop = 1e6
+      expect(page.target!.scrollTop, "clamped to the rows that grew").toBe(200 * ROW - HEIGHT)
+      expect(renderer.getLayoutPassCount() - layoutPasses, "the read laid out for the change").toBe(1)
+
+      flushSync(() => page.setCount(10))
+      page.target!.scrollTop = 1e6
+      expect(page.target!.scrollTop, "and to the rows that shrank").toBe(10 * ROW - HEIGHT)
+
+      flushSync(() => page.setCount(300))
+      flushSync(() => page.setCount(30))
+      page.target!.scrollTop = 1e6
+      expect(page.target!.scrollTop, "grown and shrunk before the write").toBe(30 * ROW - HEIGHT)
+      page.target!.scrollTop = -20
+      expect(page.target!.scrollTop, "below the start").toBe(0)
+
+      flushSync(() => page.setCount(100))
+      page.target!.scrollTop = 17 * ROW
+      expect(page.target!.scrollTop, "inside the range").toBe(17 * ROW)
+    } finally {
+      renderer.setInlineDraws(true)
+      unmount()
+    }
+  })
+
+  it("serves every read from the last layout when nothing is dirty", () => {
+    const { renderer, unmount, page } = open()
+    try {
+      // The test renderer applies the first read's mutations when it is made, which is a pass the
+      // live window has had by the time of its first frame.
+      expect(page.target!.scrollTop).toBe(0)
+      renderer.drawFrame()
+      const layoutPasses = renderer.getLayoutPassCount()
+      const passes = renderer.getLayoutCounters().passes
+      const painted = renderer.getPaintedFrameCount()
+      for (let index = 0; index < 5; index++) {
+        expect(page.target!.scrollTop).toBe(0)
+        expect(page.target!.scrollLeft).toBe(0)
+        expect(page.target!.clientHeight).toBe(HEIGHT)
+        expect(page.target!.scrollHeight).toBe(25 * ROW)
+      }
+      page.target!.scrollTop = 3 * ROW
+      expect(page.target!.scrollTop, "a write then a read").toBe(3 * ROW)
+      page.target!.scrollTo({ top: 1e6 })
+      expect(page.target!.scrollTop, "clamped").toBe(25 * ROW - HEIGHT)
+      page.target!.scrollBy({ top: -ROW })
+      expect(page.target!.scrollTop, "a relative write reads first, and still lays out nothing").toBe(25 * ROW - HEIGHT - ROW)
+      expect(renderer.getLayoutPassCount() - layoutPasses).toBe(0)
+      expect(renderer.getLayoutCounters().passes - passes).toBe(0)
+      expect(renderer.getPaintedFrameCount() - painted).toBe(0)
+    } finally {
+      renderer.setInlineDraws(true)
+      unmount()
+    }
+  })
+})
+
+describeNative("a scroll write to a list while the layout is behind the tree", () => {
+  it("lands at the logical position a write after a frame lands at", () => {
+    let list: PublicInstance | null = null
+    let setCount!: (count: number) => void
+    function Page() {
+      const [count, set] = useState(100)
+      setCount = set
+      return (
+        <virtual-list
+          ref={(instance: PublicInstance | null) => {
+            list = instance
+          }}
+          overdraw={0}
+          estimatedItemHeight={ROW}
+          style={{ width: WIDTH, height: HEIGHT }}
+        >
+          <ListRows count={count} />
+        </virtual-list>
+      )
+    }
+    const { renderer, unmount } = mount(<Page />)
+    try {
+      const listId = renderer.findByType("virtual-list")[0]!.id
+      // Both orders end at the position a write that came after the layout gives.
+      const landing = (top: number, behind: boolean) => {
+        flushSync(() => setCount(100))
+        list!.scrollTop = 0
+        renderer.drawFrame()
+        flushSync(() => setCount(200))
+        if (!behind) renderer.drawFrame()
+        list!.scrollTo({ top })
+        renderer.drawFrame()
+        return renderer.getListScrollTop(listId)
+      }
+      for (const top of [0, 1000, 17 * ROW + 5, 150 * ROW, 1e6]) {
+        expect(landing(top, true), `a write to ${top} in the task of the change`).toEqual(landing(top, false))
+      }
+      flushSync(() => setCount(100))
+      list!.scrollTop = 0
+      renderer.drawFrame()
+      list!.scrollTop = 1000
+      renderer.drawFrame()
+      expect(renderer.getListScrollTop(listId), "row 27, 28 px into it").toEqual([27, 28, HEIGHT])
+
+      flushSync(() => setCount(200))
+      list!.scrollTop = 500
+      renderer.scrollToItem(listId, 60, 0)
+      renderer.drawFrame()
+      expect(renderer.getListScrollTop(listId), "the later write, a row").toEqual([60, 0, HEIGHT])
+      flushSync(() => setCount(201))
+      renderer.scrollToItem(listId, 80, 0)
+      list!.scrollTop = 40 * ROW
+      renderer.drawFrame()
+      expect(renderer.getListScrollTop(listId), "the later write, a pixel position").toEqual([40, 0, HEIGHT])
+    } finally {
+      renderer.setInlineDraws(true)
+      unmount()
+    }
+  })
+})

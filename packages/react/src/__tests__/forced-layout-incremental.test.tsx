@@ -492,7 +492,7 @@ describeNative("a scroll write that leaves the scroller where it is", { timeout:
     }
   })
 
-  it("lays out only what it needs when the tree is dirty, and invalidates nothing more", () => {
+  it("lays out nothing for it when the tree is dirty, and the read after it lays out what the change needs", () => {
     const { root, renderer, page, events } = mount()
     try {
       page.scroller!.scrollTop = 150
@@ -504,8 +504,9 @@ describeNative("a scroll write that leaves the scroller where it is", { timeout:
 
       flushSync(() => page.setHeight(1200))
       page.scroller!.scrollTop = 150
-      const read = work(renderer)
-      expect(read.passes - start.passes, "the layout the write needs").toBe(1)
+      expect(work(renderer).passes - start.passes, "the write lays nothing out").toBe(0)
+      expect(page.scroller!.scrollTop).toBe(150)
+      expect(work(renderer).passes - start.passes, "the layout the read needs").toBe(1)
 
       renderer.drawFrame()
       renderer.dispatchNativeEvents()
@@ -703,7 +704,7 @@ function Mounting(props: { page: Mounting }) {
 const ROUNDS = 11
 const WATCHED = ["list", "probe", "entry-0", "entry-1", "entry-250", "entry-498", "entry-499"]
 
-/** A page that mounts its entries and then changes one small subtree of them, with a scroll write after each
+/** A page that mounts its entries and then changes one small subtree of them, with a scroll read after each
  *  step and no frame drawn since the entries mounted, as a page does while it mounts: what each round
  *  built, and the boxes it read after it. */
 function mountWithoutAFrame(entries: number, retention: boolean, icons = false) {
@@ -728,7 +729,7 @@ function mountWithoutAFrame(entries: number, retention: boolean, icons = false) 
         page.setWidth(20 + round)
         page.setExtra(round % 3 === 1)
       })
-      page.scroller!.scrollTop = 0
+      expect(page.scroller!.scrollTop).toBe(0)
       const built = renderer.getBuildCounters().elementsBuilt
       const watched = icons ? [...WATCHED, "icon"] : WATCHED
       if (round === 0) ids = new Map(watched.map((testId) => [testId, renderer.findByTestId(testId)!.id]))
@@ -777,7 +778,7 @@ function Appearing(props: { page: Appearing; entries: number }) {
 }
 
 /** The scroller mounts in the first round and a probe in its first entry changes in each round after it, with a scroll
- *  write after each step and no frame drawn since the scroller mounted: what each round built, and the boxes read after it. */
+ *  read after each step and no frame drawn since the scroller mounted: what each round built, and the boxes read after it. */
 function appearWithoutAFrame(entries: number, retention: boolean) {
   const page: Appearing = { setShown: () => {}, setWidth: () => {}, scroller: null }
   const root = createTestRoot({ width: 900, height: 780 })
@@ -798,7 +799,7 @@ function appearWithoutAFrame(entries: number, retention: boolean) {
         if (round === 0) page.setShown(true)
         page.setWidth(20 + round)
       })
-      page.scroller!.scrollTop = 0
+      expect(page.scroller!.scrollTop).toBe(0)
       const built = renderer.getBuildCounters().elementsBuilt
       if (round === 0) for (const testId of ["list", "probe", "entry-0", `entry-${entries - 1}`]) ids.set(testId, renderer.findByTestId(testId)!.id)
       rounds.push({ built, boxes: [...ids.values()].map((id) => renderer.getElementBounds(id)) })

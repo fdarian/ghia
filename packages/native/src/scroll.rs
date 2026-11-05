@@ -319,7 +319,7 @@ fn set_smooth_by_default(id: u64, smooth: bool) {
     });
 }
 
-fn is_smooth(id: u64, behavior: Behavior) -> bool {
+pub(crate) fn is_smooth(id: u64, behavior: Behavior) -> bool {
     match behavior {
         Behavior::Smooth => true,
         Behavior::Instant => false,
@@ -359,13 +359,20 @@ fn snap_to_device(position: f64, scale: Option<f32>) -> f64 {
 /// `offset` held to a whole device pixel: the offset whose [`dom_position`] is the position it
 /// would be written back as. A write is rounded here before it is clamped, as Chrome snaps the
 /// offset a script asks for.
-fn snapped_offset(offset: gpui::Point<gpui::Pixels>, scale: Option<f32>) -> gpui::Point<gpui::Pixels> {
+pub(crate) fn snapped_offset(offset: gpui::Point<gpui::Pixels>, scale: Option<f32>) -> gpui::Point<gpui::Pixels> {
     let position = dom_position(offset, scale);
     gpui_offset(position[0], position[1])
 }
 
-/// The DOM scroll position of a scroll container.
+/// The DOM scroll position of a scroll container, held to the range of the last layout: a write
+/// that was recorded before the layout that clamps it reads back clamped.
 pub(crate) fn handle_position(handle: &gpui::ScrollHandle) -> [f64; 2] {
+    dom_position(clamp_offset(handle.offset(), handle.max_offset()), handle.scale_factor())
+}
+
+/// The DOM scroll position of a scroll container as it is stored, which a write that was not clamped
+/// yet has out of the range.
+pub(crate) fn stored_position(handle: &gpui::ScrollHandle) -> [f64; 2] {
     dom_position(handle.offset(), handle.scale_factor())
 }
 
@@ -391,8 +398,9 @@ pub(crate) fn scroll_list_to(state: &gpui::ListState, target: gpui::Point<gpui::
 /// whether the scroller moved or will.
 ///
 /// `target` is rounded to a device pixel and then held to the range of the last layout, as
-/// `scrollTop = n` is in a browser, which lays out first when the tree changed: a caller that has just changed the content lays out
-/// before it calls (`draw_if_dirty`), and a scroller that shrinks later is clamped by the layout
+/// `scrollTop = n` is in a browser, which lays out first when the tree changed: a caller whose
+/// layout is older than the tree lays out before it calls, or records the write for the layout
+/// that comes next (see `scroll_write`), and a scroller that shrinks later is clamped by the layout
 /// that shrank it.
 pub(crate) fn scroll_to(
     id: u64,
@@ -401,7 +409,21 @@ pub(crate) fn scroll_to(
     behavior: Behavior,
 ) -> bool {
     let target = clamp_offset(snapped_offset(target, handle.scale_factor()), handle.max_offset());
+    move_to(id, handle, target, behavior)
+}
+
+/// Ends the smooth scroll of `id` in flight, which any other write to it does.
+pub(crate) fn end_smooth_scroll(id: u64) {
     ANIMATIONS.with(|animations| animations.borrow_mut().remove(&id));
+}
+
+fn move_to(
+    id: u64,
+    handle: &gpui::ScrollHandle,
+    target: gpui::Point<gpui::Pixels>,
+    behavior: Behavior,
+) -> bool {
+    end_smooth_scroll(id);
     if target == handle.offset() {
         return false;
     }
@@ -943,6 +965,14 @@ mod tests {
         assert_eq!(dom_position(written, Some(1.0)), [13.0, 7.0]);
         let written = snapped_offset(gpui_offset(12.5, 7.25), Some(2.0));
         assert_eq!(dom_position(written, Some(2.0)), [12.5, 7.5]);
+    }
+
+    #[test]
+    fn an_offset_stored_beyond_the_range_reads_clamped_and_is_kept_as_stored() {
+        let handle = gpui::ScrollHandle::new();
+        handle.set_offset(gpui_offset(0.0, 500.0));
+        assert_eq!(stored_position(&handle), [0.0, 500.0]);
+        assert_eq!(handle_position(&handle), [0.0, 0.0]);
     }
 
     fn style(overflow: Option<&str>, x: Option<&str>, y: Option<&str>) -> StyleDesc {

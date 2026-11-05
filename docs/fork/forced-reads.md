@@ -69,7 +69,7 @@ A scroll write or a bounds read after any mutation, a colour included, used to r
 
 ### A layout-only pass leaves a layout record
 
-A layout-only pass could skip a retained subtree only with the painted recording of a presented frame. On a tree that had not been presented since it changed (a page that mounts with a `scrollTop` write or a bounds read after each step and no frame between; FF mounts 11 lists that way) every pass built every element from the JS tree and threw it away: about 28 ms a pass at 5000 elements, 5 us per element against 0.3 warm.
+A layout-only pass could skip a retained subtree only with the painted recording of a presented frame. On a tree that had not been presented since it changed (a page that mounts with a `scrollTop` read or a bounds read after each step and no frame between; FF mounts 11 lists that way) every pass built every element from the JS tree and threw it away: about 28 ms a pass at 5000 elements, 5 us per element against 0.3 warm.
 
 - **The record.** zed's `LayoutRecord` on `RetainedState` sits next to the painted `Recorded` and never touches it. It holds the gpuix token, the engine and root of the build, the entities it read, the `ReplayKey` and the layout generation of the root after prepaint, `rendered_serial` when it was made, and a flag the last publication of the build sets. The next layout-only pass skips with it (`RetainedLayout::SkippedLaidOut`) under the conditions of a recording (same token, no notified entity, node alive, same engine, `shapes_layout_like`). When the generation or the place differs it puts the build on the nodes it has (`SkipBasis::LaidOut`), and it republishes with `RetainedPhase::LayoutRecorded`. A pass that is abandoned, or whose prepaint a `List` rolls back, never runs the last publication, so its records are not skipped with.
 - **A draw ignores layout records.** It ends the records it visits (`rendered_serial` moves; a draw that hits drops the record, a draw that builds makes the state anew), builds what it has no painted recording of and records that. The exception is content a read forced inside a skipped `content-visibility` host (below).
@@ -80,7 +80,7 @@ A layout-only pass could skip a retained subtree only with the painted recording
 
 ### A layout-only pass wraps what it builds
 
-The planner used to wrap a node only in a pass that paints (`Node::records` had `!layout_only`). The first build of a cold or changed subtree in a layout-only pass ran inline, outside any gpui `Retained`, and left no layout record: the second pass wrapped it and built it again, and only the third skipped. A node built in a layout-only pass is now wrapped with the token `finish_session` records for it, gpui leaves the layout record under that key, and the next layout-only pass skips it. `Plan::recorded` (the patch preview) and `begin_unit` still ignore a layout-only pass. A cold tree is built once, in its first pass: a page of 5500 elements that mounts its list and writes `scrollTop` 11 times with no frame builds 5502, 14, then 13 elements a round (the changed entry and the spine from the second pass on), where it was 5500, 5500, then 13.
+The planner used to wrap a node only in a pass that paints (`Node::records` had `!layout_only`). The first build of a cold or changed subtree in a layout-only pass ran inline, outside any gpui `Retained`, and left no layout record: the second pass wrapped it and built it again, and only the third skipped. A node built in a layout-only pass is now wrapped with the token `finish_session` records for it, gpui leaves the layout record under that key, and the next layout-only pass skips it. `Plan::recorded` (the patch preview) and `begin_unit` still ignore a layout-only pass. A cold tree is built once, in its first pass: a page of 5500 elements that mounts its list and reads `scrollTop` 11 times with no frame builds 5502, 14, then 13 elements a round (the changed entry and the spine from the second pass on), where it was 5500, 5500, then 13.
 
 Four things refused the second pass at first. Don't undo any of them:
 
@@ -230,7 +230,7 @@ Test renderer unless noted.
 | Write then read on the 1000-element page, one move per frame | 6.7 ms | 1.6 ms |
 | A forced read after a one-leaf change, list of 8000 elements | a pass over the whole retained tree (0.46 ms at 1k elements, 3.5 ms at 8k) | 7 nodes laid out, as in a list of 100 |
 | A bounds read after a colour write | a pass | none |
-| A page of 5500 elements mounting its list, 11 `scrollTop` writes with no frame | 5500, 5500, then 13 elements a round (about 28 ms a pass at 5000 elements) | 5502, 14, then 13 |
+| A page of 5500 elements mounting its list, 11 `scrollTop` reads with no frame | 5500, 5500, then 13 elements a round (about 28 ms a pass at 5000 elements) | 5502, 14, then 13 |
 | Read of a line in a hidden element of 300 cards (1203 elements) after a paint-only write and a draw | 1203 elements, 6 to 27 ms | 3 elements, 0.5 to 0.8 ms; after a paint-only write and a drawn frame, 0 passes and under 0.01 ms (3.21 ms median before) |
 | Read in the hidden element of 8 cards (`firstReadKept`) | 36 elements | 4 elements, 8 layout skips |
 | A line that grows in a card, read in the cards after it | 28 elements | 8 elements, 7 skips |

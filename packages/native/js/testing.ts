@@ -345,7 +345,7 @@ interface NativeTestRendererApi
   getRootId(): number | null
   getWindowSize(): { width: number; height: number }
   getAllText(): string[]
-  scrollTo(elementId: number, x: number, y: number, behavior?: string): void
+  scrollTo(elementId: number, x: number | undefined, y: number | undefined, behavior?: string): void
   scrollToItem(elementId: number, index: number, offsetInItem?: number): void
   scrollIntoView(
     elementId: number,
@@ -1568,9 +1568,10 @@ export class TestRenderer implements NativeRenderer {
 
   /** Scroll an element (overflow: "scroll", or a `<virtual-list>`) to a DOM scroll
    *  position: `left` and `top` are `scrollLeft` and `scrollTop`, zero or more, so
-   *  scrolling down is a larger `top`. Like a browser's, the write forces a layout only if
-   *  one is pending, and the window draws the new offset with its next frame. */
-  scrollTo(elementId: number, left: number, top: number, behavior?: string): void {
+   *  scrolling down is a larger `top`. An axis left out stays where it is. The write lays
+   *  nothing out: a position beyond the range is clamped by the layout that comes next (a read
+   *  of the position lays out first), and the window draws the new offset with its next frame. */
+  scrollTo(elementId: number, left: number | undefined, top: number | undefined, behavior?: string): void {
     this.native.scrollTo(elementId, left, top, behavior)
   }
 

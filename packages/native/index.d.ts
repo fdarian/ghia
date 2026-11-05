@@ -390,12 +390,13 @@ export declare class GpuixRenderer {
   clearSelection(): void
   /**
    * Scroll an element to a DOM scroll position: `left` and `top` are `scrollLeft` and
-   * `scrollTop`, zero or more, so scrolling down is a larger `top`.
+   * `scrollTop`, zero or more, so scrolling down is a larger `top`. An axis left out stays where
+   * it is.
    *
    * `behavior` is `"instant"`, `"smooth"` or `"auto"` (the default), which follows the
    * element's `scrollBehavior` style. A smooth scroll animates over the next frames.
    */
-  scrollTo(elementId: number, left: number, top: number, behavior?: string | undefined | null): void
+  scrollTo(elementId: number, left?: number | undefined | null, top?: number | undefined | null, behavior?: string | undefined | null): void
   /**
    * Scroll a child into view by its index in the children list.
    *
@@ -993,11 +994,13 @@ export declare class TestGpuixRenderer {
   dragSelect(x1: number, y1: number, x2: number, y2: number): void
   /**
    * Scroll an element to a DOM scroll position: `left` and `top` are `scrollLeft` and
-   * `scrollTop`, zero or more, so scrolling down is a larger `top`.
-   * The offset is clamped to the layout of the tree as it is, which is laid out first if
-   * it changed. The window draws it with the next frame.
+   * `scrollTop`, zero or more, so scrolling down is a larger `top`. An axis left out stays
+   * where it is.
+   * Nothing is laid out for the write: it is clamped to the layout when that is the tree's,
+   * and by the layout that comes next when it is not (see `scroll_write`). The window draws it
+   * with the next frame.
    */
-  scrollTo(elementId: number, left: number, top: number, behavior?: string | undefined | null): void
+  scrollTo(elementId: number, left?: number | undefined | null, top?: number | undefined | null, behavior?: string | undefined | null): void
   /**
    * Scroll a child into view by its index in the children list.
    * Call flush() after to apply and re-render. For a `<virtual-list>` the

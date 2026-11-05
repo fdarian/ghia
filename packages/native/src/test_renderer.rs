@@ -1896,36 +1896,49 @@ impl TestGpuixRenderer {
     // ── Scroll API ─────────────────────────────────────────────────────
 
     /// Scroll an element to a DOM scroll position: `left` and `top` are `scrollLeft` and
-    /// `scrollTop`, zero or more, so scrolling down is a larger `top`.
-    /// The offset is clamped to the layout of the tree as it is, which is laid out first if
-    /// it changed. The window draws it with the next frame.
+    /// `scrollTop`, zero or more, so scrolling down is a larger `top`. An axis left out stays
+    /// where it is.
+    /// Nothing is laid out for the write: it is clamped to the layout when that is the tree's,
+    /// and by the layout that comes next when it is not (see `scroll_write`). The window draws it
+    /// with the next frame.
     #[napi]
     pub fn scroll_to(
         &self,
         element_id: f64,
-        left: f64,
-        top: f64,
+        left: Option<f64>,
+        top: Option<f64>,
         behavior: Option<String>,
     ) -> Result<()> {
         let id = to_element_id(element_id)?;
         let behavior =
             crate::scroll::Behavior::parse(behavior.as_deref()).map_err(Error::from_reason)?;
-        let offset = crate::scroll::gpui_offset(left, top);
-        // A browser's setter lays out what is dirty first, so the offset is clamped to the
-        // tree as it is. A scroll write is not a layout invalidation for a metrics read.
+        // The mutations a bounds read has not drawn yet are invalidations the live window got
+        // when they were applied.
         let unflushed = take_unflushed();
         if unflushed != Dirty::Clean {
             self.flush_for(unflushed)?;
         }
-        window_call(|window, cx| window.draw_if_scroll_metrics_dirty(cx))?;
-        update_view_or_defer(move |view, _window, cx| {
-            let moved = view.set_virtual_list_offset(id, offset).unwrap_or_else(|| {
-                view.scrollable_handle(id)
-                    .is_some_and(|handle| crate::scroll::scroll_to(id, handle, offset, behavior))
+        let lays_out_first = update_view(move |view, window, _cx| {
+            let state = match view.scrollable_handle(id) {
+                _ if view.virtual_list_position(id).is_some() => crate::scroll_write::ScrollerState::List,
+                Some(handle) => crate::scroll_write::ScrollerState::Container(handle),
+                None => crate::scroll_write::ScrollerState::Unbuilt,
+            };
+            crate::scroll_write::lays_out_first(crate::scroll_write::metrics_current(window), id, state, top, behavior)
+        })?;
+        if lays_out_first {
+            window_call(|window, cx| window.draw_if_scroll_metrics_dirty(cx))?;
+        }
+        update_view_or_defer(move |view, window, cx| {
+            let was_current = crate::scroll_write::metrics_current(window);
+            let moved = view.write_virtual_list(was_current, id, top).unwrap_or_else(|| {
+                view.scrollable_handle(id).is_some_and(|handle| {
+                    crate::scroll_write::write_container(was_current, id, handle, left, top, behavior)
+                })
             });
             if moved {
                 let entity = cx.entity_id();
-                crate::renderer::invalidate_after_scroll(cx, entity);
+                crate::scroll_write::finish_write(window, cx, entity, was_current);
             }
         })
     }
@@ -2484,6 +2497,9 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_scroll_offset(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
         let id = to_element_id(element_id)?;
+        if crate::scroll_write::has_pending_container(id) {
+            window_call(|window, cx| window.draw_if_scroll_metrics_dirty(cx))?;
+        }
         update_view(|view, _window, _cx| {
             view.virtual_list_position(id)
                 .or_else(|| view.scrollable_handle(id).map(crate::scroll::handle_position))

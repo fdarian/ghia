@@ -139,16 +139,18 @@ function scrollTo(
   if (!renderer.scrollTo) throw new Error("This renderer cannot scroll")
   const requestedLeft = options.left === undefined ? undefined : finiteOffset(options.left)
   const requestedTop = options.top === undefined ? undefined : finiteOffset(options.top)
-  if (!relative && requestedLeft !== undefined && requestedTop !== undefined) {
-    // Both axes are named, so there is nothing to read back. Native lays out what is dirty
-    // before it clamps, as a browser's setter does.
+  if (!relative) {
+    // A write reads nothing and native lays nothing out for it: an axis left out stays where it is
+    // there, and a position beyond the range is clamped by the layout that comes next.
     flushPendingMutations(renderer)
     renderer.scrollTo(id, requestedLeft, requestedTop, options.behavior)
     return
   }
+  // A relative write needs the position it is relative to, which is a read: it lays out if
+  // something it reads is dirty and nothing otherwise.
   const current = readScrollMetrics(renderer, id)
-  const left = requestedLeft === undefined ? current.scrollLeft : requestedLeft + (relative ? current.scrollLeft : 0)
-  const top = requestedTop === undefined ? current.scrollTop : requestedTop + (relative ? current.scrollTop : 0)
+  const left = (requestedLeft ?? 0) + current.scrollLeft
+  const top = (requestedTop ?? 0) + current.scrollTop
   renderer.scrollTo(id, left, top, options.behavior)
 }
 

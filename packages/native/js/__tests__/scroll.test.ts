@@ -24,10 +24,10 @@ class FakeScroller {
     return [this.left, this.top, 1000, 500, 200, 100]
   }
 
-  scrollTo = (id: number, left: number, top: number, behavior?: string) => {
+  scrollTo = (id: number, left: number | undefined, top: number | undefined, behavior?: string) => {
     this.calls.push(`scrollTo ${id} ${left} ${top} ${behavior}`)
-    this.left = left
-    this.top = top
+    this.left = left ?? this.left
+    this.top = top ?? this.top
   }
 
   scrollIntoView = (id: number, block?: string, inline?: string, behavior?: string) => {
@@ -132,19 +132,34 @@ describe("readScrollMetrics", () => {
 })
 
 describe("scroll members", () => {
-  it("sets scrollTop as an instant scroll that keeps the other axis", () => {
+  it("sets scrollTop as an instant scroll that names no other axis", () => {
     const scroller = new FakeScroller()
     scroller.left = 25
     element(scroller).scrollTop = 80
-    expect(scroller.calls.at(-1)).toBe("scrollTo 7 25 80 instant")
+    expect(scroller.calls).toEqual(["scrollTo 7 undefined 80 instant"])
+    expect(scroller.left, "native keeps the axis").toBe(25)
   })
 
-  it("keeps the axis scrollTo does not name, and passes the behavior", () => {
+  it("names only the axis scrollTo is given, and passes the behavior", () => {
     const scroller = new FakeScroller()
     scroller.left = 25
     scroller.top = 10
     element(scroller).scrollTo({ top: 60, behavior: "smooth" })
-    expect(scroller.calls.at(-1)).toBe("scrollTo 7 25 60 smooth")
+    expect(scroller.calls).toEqual(["scrollTo 7 undefined 60 smooth"])
+  })
+
+  it("makes no metrics call for a write, whichever way it is spelled", () => {
+    const scroller = new FakeScroller()
+    const target = element(scroller)
+    target.scrollTop = 5
+    target.scrollLeft = 6
+    target.scrollTo({ top: 7 })
+    target.scrollTo({ left: 8 })
+    target.scrollTo({ left: 1, top: 2 })
+    target.scrollTo(3, 4)
+    target.scrollTo({})
+    expect(scroller.calls.filter((call) => call.startsWith("metrics"))).toEqual([])
+    expect(scroller.calls).toHaveLength(7)
   })
 
   it("takes scrollTo(x, y) and rejects half a coordinate pair", () => {

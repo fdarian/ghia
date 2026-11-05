@@ -227,6 +227,7 @@ fn list_local_pointer(
 /// negative: gpui then anchors the viewport top above the item, which is what
 /// keeps a row pixel-stable while unmeasured rows are spliced in above it.
 pub(crate) fn queue_virtual_list_scroll(id: u64, index: usize, offset_in_item: f32) {
+    crate::scroll_write::forget_list_write(id);
     PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| {
         cell.borrow_mut().insert(
             id,
@@ -238,6 +239,11 @@ pub(crate) fn queue_virtual_list_scroll(id: u64, index: usize, offset_in_item: f
     });
 }
 
+/// A pixel write to the list `id` supersedes the scroll to a row queued before it.
+pub(crate) fn cancel_queued_list_scroll(id: u64) {
+    PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().remove(&id));
+}
+
 /// The DOM scroll position `[scrollLeft, scrollTop]` of the virtual list or scroll container
 /// `id`, or `None` for anything else.
 fn scroll_element_position(id: u64) -> Option<[f64; 2]> {
@@ -246,23 +252,55 @@ fn scroll_element_position(id: u64) -> Option<[f64; 2]> {
         .or_else(|| SCROLL_HANDLES.with(|cell| cell.borrow().get(&id).map(crate::scroll::handle_position)))
 }
 
-/// Scrolls the virtual list or scroll container `id` to the DOM scroll position `left`, `top`,
-/// clamped to the range of the layout, which the caller made current first. Returns whether it
-/// moved or will (a smooth scroll); the caller invalidates the window with
-/// [`invalidate_after_scroll`] then and does nothing for a write that leaves the scroller where it
-/// is, as a browser's setter does.
-fn scroll_element_to(id: u64, left: f64, top: f64, behavior: crate::scroll::Behavior) -> bool {
-    let offset = crate::scroll::gpui_offset(left, top);
-    let list = VIRTUAL_LIST_STATES
-        .with(|cell| cell.borrow().get(&id).map(|state| crate::scroll::scroll_list_to(state, offset)));
+/// Scrolls the virtual list or scroll container `id` to the DOM scroll position `left`, `top`, an
+/// axis left out staying where it is. See `scroll_write` for what range a write is held to, which
+/// `metrics_current` says. Returns whether it moved or will (a smooth scroll); the caller
+/// invalidates the window with [`invalidate_after_scroll`] then and does nothing for a write that
+/// leaves the scroller where it is, as a browser's setter does.
+fn scroll_element_to(
+    metrics_current: bool,
+    id: u64,
+    left: Option<f64>,
+    top: Option<f64>,
+    behavior: crate::scroll::Behavior,
+) -> bool {
+    let list = VIRTUAL_LIST_STATES.with(|cell| {
+        cell.borrow()
+            .get(&id)
+            .map(|state| crate::scroll_write::write_list(metrics_current, id, state, top))
+    });
     if let Some(moved) = list {
         return moved;
     }
     SCROLL_HANDLES.with(|cell| {
         cell.borrow()
             .get(&id)
-            .is_some_and(|handle| crate::scroll::scroll_to(id, handle, offset, behavior))
+            .is_some_and(|handle| crate::scroll_write::write_container(metrics_current, id, handle, left, top, behavior))
     })
+}
+
+fn scroll_write_lays_out_first(
+    metrics_current: bool,
+    id: u64,
+    top: Option<f64>,
+    behavior: crate::scroll::Behavior,
+) -> bool {
+    use crate::scroll_write::ScrollerState;
+    let is_list = VIRTUAL_LIST_STATES.with(|cell| cell.borrow().contains_key(&id));
+    SCROLL_HANDLES.with(|cell| {
+        let handles = cell.borrow();
+        let state = match handles.get(&id) {
+            _ if is_list => ScrollerState::List,
+            Some(handle) => ScrollerState::Container(handle),
+            None => ScrollerState::Unbuilt,
+        };
+        crate::scroll_write::lays_out_first(metrics_current, id, state, top, behavior)
+    })
+}
+
+/// Makes the scroll writes recorded since the last render, before it builds (see `scroll_write`).
+fn settle_scroll_writes() {
+    SCROLL_HANDLES.with(|cell| crate::scroll_write::settle_containers(&cell.borrow()));
 }
 
 /// The room `id` reserves for classic scrollbars as of its last layout: the width on its right and
@@ -777,8 +815,8 @@ enum UiCommand {
     ResetDebugFrameOverlayStats,
     ScrollTo {
         id: u64,
-        left: f64,
-        top: f64,
+        left: Option<f64>,
+        top: Option<f64>,
         behavior: crate::scroll::Behavior,
     },
     ScrollToItem {
@@ -1006,10 +1044,13 @@ async fn run_ui_commands(
                 top,
                 behavior,
             } => window.update(cx, move |_view, window, cx| {
-                window.draw_if_scroll_metrics_dirty(cx);
-                if scroll_element_to(id, left, top, behavior) {
+                if scroll_write_lays_out_first(crate::scroll_write::metrics_current(window), id, top, behavior) {
+                    window.draw_if_scroll_metrics_dirty(cx);
+                }
+                let was_current = crate::scroll_write::metrics_current(window);
+                if scroll_element_to(was_current, id, left, top, behavior) {
                     let view = cx.entity_id();
-                    invalidate_after_scroll(cx, view);
+                    crate::scroll_write::finish_write(window, cx, view, was_current);
                 }
             }),
             UiCommand::ScrollToItem { id, index, offset } => {
@@ -3598,7 +3639,8 @@ impl GpuixRenderer {
     // GpuixView syncs scroll handles and virtual list states to thread-local maps.
 
     /// Scroll an element to a DOM scroll position: `left` and `top` are `scrollLeft` and
-    /// `scrollTop`, zero or more, so scrolling down is a larger `top`.
+    /// `scrollTop`, zero or more, so scrolling down is a larger `top`. An axis left out stays where
+    /// it is.
     ///
     /// `behavior` is `"instant"`, `"smooth"` or `"auto"` (the default), which follows the
     /// element's `scrollBehavior` style. A smooth scroll animates over the next frames.
@@ -3606,8 +3648,8 @@ impl GpuixRenderer {
     pub fn scroll_to(
         &self,
         element_id: f64,
-        left: f64,
-        top: f64,
+        left: Option<f64>,
+        top: Option<f64>,
         behavior: Option<String>,
     ) -> Result<()> {
         let id = to_element_id(element_id)?;
@@ -3615,12 +3657,15 @@ impl GpuixRenderer {
             crate::scroll::Behavior::parse(behavior.as_deref()).map_err(Error::from_reason)?;
         #[cfg(target_os = "macos")]
         return update_window_without_view(move |window, cx| {
-            // Like a browser's setter: lay out what is dirty so the range is the tree's, then
-            // clamp and write. The write itself invalidates the draw and nothing a read lays out for.
-            window.draw_if_scroll_metrics_dirty(cx);
-            if scroll_element_to(id, left, top, behavior) {
+            // Nothing is laid out for most writes (see `scroll_write`): a write the layout is behind
+            // is clamped by the layout that comes next, and a read after it lays out first.
+            if scroll_write_lays_out_first(crate::scroll_write::metrics_current(window), id, top, behavior) {
+                window.draw_if_scroll_metrics_dirty(cx);
+            }
+            let was_current = crate::scroll_write::metrics_current(window);
+            if scroll_element_to(was_current, id, left, top, behavior) {
                 let view = crate::events::sync_dispatch::root_view(window).map_err(Error::from_reason)?;
-                invalidate_after_scroll(cx, view.entity_id());
+                crate::scroll_write::finish_write(window, cx, view.entity_id(), was_current);
             }
             Ok(())
         })?;
@@ -3737,7 +3782,14 @@ impl GpuixRenderer {
     pub fn get_scroll_offset(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return Ok(scroll_element_position(id).map(|position| position.to_vec()));
+        {
+            if crate::scroll_write::has_pending_container(id) {
+                update_window_without_view(|window, cx| {
+                    window.draw_if_scroll_metrics_dirty(cx);
+                })?;
+            }
+            return Ok(scroll_element_position(id).map(|position| position.to_vec()));
+        }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
@@ -5252,14 +5304,14 @@ impl WebGpuixRenderer {
     pub fn scroll_to(
         &self,
         element_id: f64,
-        x: f64,
-        y: f64,
+        x: Option<f64>,
+        y: Option<f64>,
         behavior: Option<String>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
         let behavior = crate::scroll::Behavior::parse(behavior.as_deref())
             .map_err(|message| wasm_bindgen::JsValue::from_str(&message))?;
-        if scroll_element_to(id, x, y, behavior) {
+        if scroll_element_to(false, id, x, y, behavior) {
             notify_web();
         }
         Ok(())
@@ -7460,14 +7512,15 @@ impl GpuixView {
         crate::scroll::has_scrolling_box(&self.tree.lock().unwrap(), id).then_some(handle)
     }
 
-    /// Scrolls the list `id` to `offset`: whether it moved, or `None` if `id` is not a list.
-    pub(crate) fn set_virtual_list_offset(
+    /// Writes the scroll position of the list `id`: whether it moved, or `None` if `id` is not a list.
+    pub(crate) fn write_virtual_list(
         &self,
+        metrics_current: bool,
         id: u64,
-        offset: gpui::Point<gpui::Pixels>,
+        top: Option<f64>,
     ) -> Option<bool> {
         let entry = self.virtual_lists.get(&id)?;
-        Some(crate::scroll::scroll_list_to(&entry.state, offset))
+        Some(crate::scroll_write::write_list(metrics_current, id, &entry.state, top))
     }
 
     pub(crate) fn virtual_list_position(&self, id: u64) -> Option<[f64; 2]> {
@@ -9607,6 +9660,7 @@ impl gpui::Render for GpuixView {
         use gpui::IntoElement;
 
         window.set_window_title(&self.window_title);
+        settle_scroll_writes();
         self.note_pass(window);
         self.apply_pointer_lock(window, cx);
         self.install_patcher(window, cx);
@@ -9964,6 +10018,8 @@ impl gpui::Render for GpuixView {
         // would otherwise fire on some later frame, against child indices that
         // no longer match what JS meant.
         PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().clear());
+        VIRTUAL_LIST_STATES.with(|cell| crate::scroll_write::settle_lists(&cell.borrow()));
+        crate::scroll_write::note_metrics_current(window);
 
         let motion_value_demand = motion_value_demand(&tree, &self.motion_values, &self.retain);
         if motion_active
