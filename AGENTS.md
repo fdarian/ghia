@@ -18,7 +18,7 @@ Ghia brings DOM compatibility to desktop apps without a browser engine: React an
 - [docs/fork/index.md](./docs/fork/index.md) - overview of what changed from gpuix, one topic doc per mechanism (events, scroll, layout, text, paint, motion, retention, patch frames, forced reads, observers, webview, nativeview, window), and "Where notes go": behaviour and design go into the topic doc, merged into the section about that mechanism, with no round narration.
 - [docs/fork/working-on-the-fork.md](./docs/fork/working-on-the-fork.md) - repos and branches, commit rules, where new code goes, the invariants a cherry-pick has to keep, building. Read before touching `renderer.rs`, `style.rs`, `host.ts` or `zed/`.
 - [docs/fork/testing.md](./docs/fork/testing.md) - test commands, Chrome oracles, the test renderer, perf measurement, driving a live window.
-- [docs/fork/syncing-upstream.md](./docs/fork/syncing-upstream.md) - the ledger of what is reviewed from `remorses/gpuix` and `remorses/zed`, and the take/adapt/skip procedure.
+- [docs/fork/syncing-upstream.md](./docs/fork/syncing-upstream.md) - the ledger of what is reviewed from `remorses/gpuix`, `remorses/zed` and `zed-industries/zed`, and the take/adapt/skip procedure.
 - [docs/solid.md](./docs/solid.md) - the Solid adapter guide. [docs/serialization-benchmark.md](./docs/serialization-benchmark.md) - why the mutation batch is shaped as it is.
 
 ## Rules

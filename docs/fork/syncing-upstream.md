@@ -1,11 +1,14 @@
 # Syncing with upstream
 
-Ghia takes commits from gpuix and zed one at a time. There is no mirror branch and no rebase: `main` and zed `poc` only
+Ghia takes commits from gpuix, from remorses' zed fork and from zed itself one at a time. There is no mirror branch and no rebase: `main` and zed `poc` only
 grow (see [Repos and branches](working-on-the-fork.md#repos-and-branches)), and a ledger below records how far each upstream
 has been reviewed.
 
 - gpuix upstream is `upstream/main` (`remorses/gpuix`).
 - zed upstream is `upstream/gpuix` (`remorses/zed`), in the `zed/` submodule.
+- Zed itself is `zed-industries/main` (`zed-industries/zed`), a remote named `zed-industries` in `zed/`. Fetch it from
+  GitHub (`git remote add zed-industries https://github.com/zed-industries/zed.git`, then `git fetch zed-industries main`).
+  Do not fetch it from another local clone: that failed with "bad pack header".
 
 ## Ledger
 
@@ -16,10 +19,49 @@ merge bases of the fork and upstream when the ledger began.
 |---|---|
 | gpuix (`upstream/main`) | `515df198fef2685f5ed7dd120bf0db638eb5c360` |
 | zed (`upstream/gpuix`) | `2565b8a3e33537c3d3f56d0d45f11e50a17e512d` |
+| zed itself (`zed-industries/main`) | `1d7e5f1d014`, the merge base with the fork (2026-08-26) |
 
-Skips worth remembering, with the reason (a commit that looks wanted but breaks something):
+The zed-industries row is not advanced by the picks below. A survey of the 197 commits since that point that touch `gpui`
+chose the picks and left the other rows undecided, and a SHA means everything at or before it was decided.
 
-- none yet
+### Taken ahead of the ledger
+
+Picked from `zed-industries/main`, oldest first, with `cherry-pick -x`. The zed SHA is the commit on `poc`; `poc` was
+fast-forwarded to the picks, so the SHAs are the ones of the branch they were made on.
+
+| Upstream | Subject | How | zed |
+|---|---|---|---|
+| `0eda7703f6` | gpui_macos: Release the accessibility adapter when a window is dropped | taken | `96ddb37da51` |
+| `96e95edac4` | gpui: Skip sprites whose atlas texture was released instead of panicking | adapted: Metal only | `49adb9798f1` |
+| `e71963a599` | gpui: Fix panic when hit testing past a wrapped line's width | taken | `5eac4c7d6d8` |
+| `382ff7a64b` | gpui: Stop synthetic mouse drags after button release on macOS | taken | `27834e929c5` |
+| `90d8514059` | gpui_macos: Fix blurred window backgrounds on macOS 27 | taken | `0f1867d64ad` |
+| `e18de65b75` | gpui: Composite translucent layers with source-over alpha | adapted: the root pipelines take the fork's `destination_alpha` parameter | `d8eeb34ca1f` |
+| `e4a3732b94` | gpui: Fix text system reference cycle through pooled line wrappers | adapted: by hand, the fork's `LineWrapper` has a third width cache | `8971cc9eec7` |
+| `2529740084` | gpui: Wrap arena in an Rc to prevent UB | taken | `30354096279` |
+| `8fa085e397` | gpui: Repaint cached views when inherited opacity changes | adapted: only the `view.rs` part | `feb7dfe73a1` |
+| `decd2399b1` | gpui: Keep subscriptions for entities read by reused cached views | adapted: by hand, on the fork's `detect_accessed_entities` | `32da8eec054` |
+| `c7bea34383` | gpui: Fix cursor reverting when a drag starts | adapted: the drag-area arrow keeps priority | `316529b49c3` |
+| `d01f125837` | gpui: Fix key equivalents for 'backspace' and 'delete' on macOS | adapted: the fork's older cocoa imports | `1d7be50b162` |
+
+An adapted pick says in its commit body what changed and why.
+
+### Skips
+
+Worth remembering, with the reason (a commit that looks wanted but breaks something):
+
+- `db7f9ceed7` + `f6838a7c4a` (zed-industries): macOS mouse tracking moves mouse-moved events from the window to a view
+  tracking area. A moved event over a `<webview>` or `<nativeview>` then bypasses `NSWindow sendEvent:`, where
+  `window/composition.rs` hands it to the native container, so hover would stop working over pages. It also splits
+  `Floating` out of the arm Normal, Floating and Panel share. Needs a look over a live webview before it can be taken.
+- `abd9b3cbd2` + `79fe6a645f` (zed-industries): a cancelled keychain prompt becomes an error, and
+  `write_credentials_if_not_exists`. Both edit `gpui_apple/src/keychain.rs`, which the fork does not have (the keychain code
+  is still in `gpui_macos/src/platform.rs`), so the pick is not mechanical. Nothing in Ghia reads credentials.
+- `f0d8b0b0cd` (zed-industries): a hover listener mode that keeps hover after a keypress. Opt-in with an unchanged
+  default, and Ghia builds `:hover` and `mouseenter` from its own pointer state, which a keypress does not clear; it never
+  calls GPUI's `on_hover`.
+- The wgpu and DirectX hunks of `96e95edac4`: their atlases are restructured in the fork, the fork is macOS-only, and the
+  Windows code cannot be compiled here. The wgpu atlas still panics on a missing texture.
 
 ## Engine patches we carry
 
@@ -47,11 +89,12 @@ each entry or applies it again.
 
 ## Procedure
 
-1. Fetch both upstreams: `git fetch upstream` in the repo root and in `zed/`.
+1. Fetch the upstreams: `git fetch upstream` in the repo root and in `zed/`, and `git fetch zed-industries main` in `zed/`.
 2. List what is new, oldest first: `git log --reverse <ledger>..upstream/main`, and the same in `zed/` against
-   `upstream/gpuix`.
+   `upstream/gpuix` and `zed-industries/main`.
 3. Decide per commit: **take** it, **adapt** it, or **skip** it.
-   - Take with `git cherry-pick -x`, so `git log --grep 'cherry picked from'` finds what came from upstream.
+   - Take with `git cherry-pick -x`, so `git log --grep 'cherry picked from'` finds what came from upstream. Picks from
+     `zed-industries/main` go in oldest first too, and a pair that belongs together goes in or stays out together.
    - Adapt when the pick conflicts or does not fit; the invariants to keep are the conflict notes in
      [working-on-the-fork.md](working-on-the-fork.md#resolving-conflicts).
    - Skip release and version commits, Windows-only and Linux-only work, paths the fork removed, and anything against the
