@@ -18,6 +18,7 @@ import {
   readBoundingClientRect,
   toBoundingClientRect,
   retireMotionBindings,
+  SentWrites,
   serializeCustomProp,
   splitMotionStyle,
   syncMotionBindings,
@@ -130,6 +131,7 @@ export class HostElement {
   readonly mountListeners = new Set<() => void>()
   /** The `style` entries that are motion values, bound while the element is mounted. */
   motionValues: Record<string, MotionValue> | undefined
+  readonly sent = new SentWrites()
 
   constructor(readonly type: ElementType) {}
 
@@ -140,7 +142,14 @@ export class HostElement {
 
   setPin(pin: StyleDesc | undefined): void {
     this.pin = pin
-    if (this.root && this.mounted) this.root.mutations.setStyle(this.id, this.appliedStyle())
+    this.writeStyle()
+  }
+
+  /** Queues the applied style unless native already has it. */
+  writeStyle(): void {
+    if (!this.root || !this.mounted) return
+    const style = this.appliedStyle()
+    if (this.sent.writesStyle(style)) this.root.mutations.setStyle(this.id, style)
   }
 
   setPointerCapture(pointerId: number): void {
@@ -484,7 +493,7 @@ export function setHostProperty(
     node.style = split.style ?? {}
     node.motionValues = split.motionValues
     if (node.root && node.mounted) {
-      node.root.mutations.setStyle(node.id, node.appliedStyle())
+      node.writeStyle()
       syncMotionBindings(node.root, node.root.mutations, node.id, node.motionValues, node.kind === "element" ? node.type : undefined)
     }
     return
@@ -516,11 +525,8 @@ export function setHostProperty(
   if (value === undefined) node.props.delete(name)
   else node.props.set(name, value)
   if (!node.root || !node.mounted || !customPropAllowed(node, name)) return
-  node.root.mutations.setCustomProp(
-    node.id,
-    name,
-    serializeCustomProp(value)
-  )
+  const serialized = serializeCustomProp(value)
+  if (node.sent.writesProp(name, serialized)) node.root.mutations.setCustomProp(node.id, name, serialized)
 }
 
 function syncNativeviewProps(root: HostRoot, node: HostElement): void {
@@ -546,19 +552,16 @@ function mount(root: HostRoot, node: HostNode): void {
   if (node.kind === "text") {
     root.mutations.setText(node.id, node.text)
   } else {
-    const style = node.appliedStyle()
-    if (Object.keys(style).length > 0) root.mutations.setStyle(node.id, style)
+    node.sent.reset()
+    node.writeStyle()
     syncMotionBindings(root, root.mutations, node.id, node.motionValues, node.kind === "element" ? node.type : undefined)
     for (const [name, value] of node.props) {
       const eventType = eventTypeFor(name)
       if (eventType && isEventHandler(value)) {
         registerEventListener(root.eventHandlers, root.mutations, node.id, eventType, value)
       } else if (!EVENT_PROP_NAMES.has(name) && customPropAllowed(node, name)) {
-        root.mutations.setCustomProp(
-          node.id,
-          name,
-          serializeCustomProp(value)
-        )
+        const serialized = serializeCustomProp(value)
+        if (node.sent.writesProp(name, serialized)) root.mutations.setCustomProp(node.id, name, serialized)
       }
     }
     if (node.type === "nativeview") syncNativeviewProps(root, node)
