@@ -273,8 +273,9 @@ One window and one text, 1x display, footprint: 70 to 65 MB with fonts, 68 to 63
 **Left, and why.**
 
 - **`CAMetalLayer` drawables**: 2 at rest, 3 while animating. At 1280 x 780 BGRA each is 3.9 MB at 1x and 15.2 MiB at 2x,
-  so about 30 MB on a Retina display. `maximumDrawableCount` stays 3, because with 2 `nextDrawable` blocks when the GPU
-  and the compositor together take longer than a vsync.
+  so about 30 MB on a Retina display. The window's layer keeps a `maximumDrawableCount` of 3, because with 2
+  `nextDrawable` blocks when the GPU and the compositor together take longer than a vsync. An overlay layer keeps 2
+  (see [round 51](#overlay-layers-and-the-composition-record-round-51)).
 - **The JavaScriptCore heap** (App-Specific Tag 1, 17 to 20 MB). It is there with no window: it is the JS that was loaded.
 - **ColorSync transform tables**, about 11 MB in Malloc Small, from AppKit and CoreAnimation colour matching (the Dock
   icon draw, `CGColor` conversion on commit).
@@ -348,18 +349,21 @@ IOSurface 11 MB, graphics 11 MB, stacks 7.5 MB, JIT 6 MB. Ranked:
    caches, `StyleTable` (about 3000 distinct styles at 1.6 KB each at the showcase) and the interned strings hold most of
    it, and none of it shrinks. About 5 MB of the showcase's is the style table, whose `Arc<StyleDesc>` and raw JSON kept for collision
    checks could be one.
-4. **A transition state is about 7 KB** while it runs, nearly all of it the 6.3 KB `previous: StyleDesc`: a page with
-   5000 transitioning elements holds 35 MB of them. The `after` style it copies is built fresh for every element
-   (`fold_state_styles` and `with_vars`), so an `Arc` saves nothing until that build hands back the interned style when
-   it has nothing to fold.
+4. **A transition state's before-change style** is an `Arc<StyleDesc>` shared with the style table when
+   `fold_state_styles` has nothing to fold (no state style applies and the style holds none), so it costs a pointer.
+   An element that declares a `:hover`, `:active` or other state style, or `@container` rules, still gets a 6.3 KB
+   cleaned copy on every build, applied or not: handing on the table's style would carry the state styles' boxes into
+   every animated frame's clones. A cleaned `Arc` cached in the style table would remove it.
 5. **`CAMetalLayer` drawables** (11 MB of IOSurface at 1x, about 30 MB on a Retina display) and ColorSync tables: the floor
    listed above.
 
 ### Where an app's memory goes (round 49)
 
 Three apps built on Ghia, measured in November 2026: the ghia-swiftui demo (960 x 640), its Apple Music clone (1298 x 838,
-15 album covers) and the ghia-fluid-functionalism gallery (1236 x 778), each from a copy of its checkout, on a 2x display,
-window opened in the background (`GPUIX_BACKGROUND=1`). Footprint is `phys_footprint` through `proc_pid_rusage` 15 s after
+15 album covers) and the ghia-fluid-functionalism gallery (1236 x 778), each from a copy of its checkout, on a 1x display
+(an LG 1920 x 1080, the only one attached: IOSurface is an exact multiple of width x height x 4), window opened in the
+background (`GPUIX_BACKGROUND=1`). On a Retina display every drawable is four times the size, so the IOSurface row below
+would read about 76 / 250 / 46 MB. Footprint is `phys_footprint` through `proc_pid_rusage` 15 s after
 the first window shows; buckets are dirty + swapped MB from `vmmap --summary`; the malloc split is `MallocStackLogging=lite`
 with `malloc_history -allBySize`, grouped by the first addon or framework frame. Builds are compared back to back in one
 session: the footprint of one build moves by 1 to 5 MB between runs, and IOSurface by one drawable (2 at rest, 3 while
@@ -373,7 +377,7 @@ animating).
 
 | dirty + swapped MB, round 49 | demo | music | fluid |
 | --- | --- | --- | --- |
-| App-Specific Tag 1 (Bun's mimalloc: the JS heap, 8 / 7 / 20 MB of it live objects) | 30 | 26 | 53 |
+| App-Specific Tag 1 (Bun's mimalloc: JavaScriptCore's heap is 13 / 11 / 30 MB of it, capacity plus extra memory, 8 / 7 / 20 MB of that live objects; the rest is Bun's own) | 30 | 26 | 53 |
 | Malloc Small (the addon and the system frameworks) | 36 | 42 | 78 |
 | Malloc Small (empty) | 0 | 25 | 0 |
 | IOSurface (`CAMetalLayer` drawables: 4, 5 and 1 layers) | 19 | 65 | 11 |
@@ -386,14 +390,18 @@ What each item is, largest first:
 - **Babel** (55 to 73 MB per app, all in Tag 1). `@ghia/solid`'s preload imports Babel only for a file that misses
   the transform cache in `~/Library/Caches/ghia/solid-transform/`, so a warm launch never loads it. A compiled app
   (`bun build --compile`) carries no Babel either.
-- **Album covers in the atlas** (music: 43 MB of IOAccelerator). A tile wider or taller than 512 px gets a texture
-  of exactly its size (zed `metal_atlas.rs`), so the 15 covers take the 21.6 MB their pixels need; a padded
-  1024 x 1024 texture each is 60.5 MB.
-- **Decoded images held twice** (music: 20.8 MB of malloc). gpui's asset cache keeps every `RenderImage` for the life
-  of the app. On an Apple GPU, where atlas textures are shared with the CPU, a single-frame image keeps its pixels only
-  in the atlas it was first uploaded to and reads them back when another atlas or `as_bytes` needs them (zed
-  `image_pixels.rs`). The freed frames stay in malloc as 25 MB of empty-but-dirty small regions: the system allocator
-  gives them back under memory pressure, and `malloc_zone_pressure_relief` returns 0 bytes on this macOS.
+- **Album covers in the atlas** (music: IOAccelerator 73.7 to 30.9 MB, -42.8, nearly all of the music clone's
+  -50 MB). A tile wider or taller than 512 px gets a texture of exactly its size (zed `metal_atlas.rs`), so the 15
+  covers take the 21.6 MB their pixels need; a padded 1024 x 1024 texture each is 60.5 MB.
+- **Decoded images held once** (music: 22 MB less allocated malloc, 0 MB of footprint). gpui's asset cache keeps every
+  `RenderImage` for the life of the app. On an Apple GPU, where atlas textures are shared with the CPU, a single-frame
+  image keeps its pixels only in the atlas it was first uploaded to and reads them back when another atlas or
+  `as_bytes` needs them (zed `image_pixels.rs`). The default zone's allocated bytes go from 56.8 to 34.8 MB, but its
+  dirty pages stay at 68 to 70 MB: the freed frames are 25 MB of empty-but-dirty small regions, which the system
+  allocator gives back only under memory pressure (`malloc_zone_pressure_relief` returns 0 bytes on this macOS).
+- **Drawables are noise in the demo's -15 MB.** Its IOSurface went from 25.8 to 18.8 MB, three drawables of 2.3 MB,
+  and nothing in the round touches drawables: a layer holds 2 at rest and 3 after an animation, so about half of the
+  demo's drop is when the window last animated. The rest is instance buffers (IOAccelerator 13.2 to 9.3) and malloc.
 - **Instance buffers** (3 to 5 MB). One per frame in flight; they start at 256 KiB and the pool keeps whatever size the
   heaviest frame needed.
 - **`StyleDesc`** (fluid: 8 MB of the style table, transition states and stacks). A `LinearLength` is one
@@ -406,12 +414,16 @@ What each item is, largest first:
 **Left, and why.** In malloc allocated MB (demo / music / fluid) the addon's share is 15 / 15 / 42 and the system's 18 /
 22 / 14:
 
-1. **`CAMetalLayer` drawables**, 19 / 65 / 11 MB, three times width x height x 4 per layer. Every overlay layer (a layer
-   above a native view) has its own; the music clone has four. Fewer or smaller overlay layers is the layer model's
-   call. `maximumDrawableCount` stays 3 (see [above](#memory-footprint-of-a-window-79)).
+1. **`CAMetalLayer` drawables**, 19 / 65 / 11 MB at 1x (76 / 250 / 46 on Retina), up to three times width x height x 4
+   per layer. Every overlay layer (a layer above a native view) has its own; the music clone has four. Round 51 cuts
+   an overlay to two drawables and an overlay with nothing to draw to none
+   ([below](#overlay-layers-and-the-composition-record-round-51)); fewer or smaller overlay layers is the layer model's
+   call.
 2. **The JS heap and Bun's allocator**, 26 to 53 MB: the app's own modules and data (Solid, base-ui, the app). Ghia's JS
-   per element is about 0.45 KB. zod, which the automation protocol needs and which is 1.8 MB, loads only when automation
-   is turned on (the client is a dynamic import in `runtime.ts`), so an app without it never holds it.
+   per element is about 0.45 KB. JavaScriptCore's heap is about half of it (13 / 11 / 30 MB). zod (1.8 MB, 95 modules)
+   and eventsource-parser, which the automation protocol needs, load only when automation is on (the client is a
+   dynamic import in `runtime.ts`). Automation is on whenever stdin is not a terminal, which includes an app started
+   from Finder or by a harness with stdin closed; an app started from a terminal loads neither.
 3. **The addon's live data**, in fluid: the layout engine's node store (6.4 MB allocated, one `SlotMap` of taffy
    `NodeData`, plus its keyed-layout tables), motion and transition state (6.3 MB, 2 MB of it transition states at about
    7 KB each, see item 4 of the list above), the style table (5.4 MB), scene and frame arenas (4.4 MB), element frame
@@ -422,6 +434,40 @@ What each item is, largest first:
 5. **Metal driver memory**, 4 to 8 MB of owned unmapped graphics: per device and pipeline, not per frame.
 6. **The polychrome atlas** starts at 1024 x 1024 (4 MiB) and the glyph atlas at 1 MiB. A smaller first texture would
    split sprites across textures and break batching, for 3 MB.
+7. **Malloc fragmentation**, (dirty + swapped) - allocated in the default zone: about 34 MB on music (the freed image
+   frames above) and 28 on fluid, 4.5 on the demo. Sending blocks of 256 KiB or more to `mach_vm_allocate`, so that a
+   free unmaps them, was tried in round 51 and is not in the tree: it cost 7 to 30 % on the layout- and mount-heavy perf
+   rows (`layout-idle` tick 0.51 to 0.64 ms, `css-values` p50 13.6 to 15.1 ms, `cq` container flip 124 to 132 ms, in
+   every one of three rotated rounds), since a frame's large vectors then take a system call and fresh zero pages each
+   time. Its footprint gain was not measured. mimalloc for the addon was not tried.
+
+### Overlay layers and the composition record (round 51)
+
+Same apps, display and method as round 49. Most runs of this round could not complete: the app's window is parked at
+the edge of the display, and once another window covers that strip AppKit reports the window occluded, gpui stops its
+display link and the app draws nothing, so its drawables are not resident. The numbers below are the runs whose window
+drew.
+
+- **A window keeps its last composed frame and a count.** A test-support build (the published addon is one) recorded
+  a `CompositionFrame`, with the overlay hitboxes cloned, for every composed frame, for the life of the window. With
+  the music clone's list scrolled by stdio automation at 75 Hz for 120 s (about 372 presents a second over five
+  layers), main's addon grew 52 MB/min (228 to 334 MB footprint, 2.4 MB per 1000 presents; the default zone held 135 MB
+  allocated at the end, 36 with the fix); with the fix it stays within 186 to 200 MB (+2.7 and -3.3 MB/min in two runs).
+- **Overlays share the window renderer's device state**: its pipelines, command queue, `CVMetalTextureCache`, unit
+  vertices, atlas and path intermediate (zed `gpui_apple/src/metal_renderer/device_state.rs`). Owned unmapped graphics
+  memory goes from 8.3 to 5.0 MB on the demo and 8.2 to 3.8 on the music clone at rest, 16.7 to 7.7 after the scroll.
+  The one queue is also what makes the atlas's wait for the last submission cover every layer before it writes a tile.
+- **An overlay layer keeps two drawables**, the window's layer three. After the scroll the music clone held 15
+  drawables (64.5 MB IOSurface at 1x) and holds 11 (47.3 MB); at rest the demo holds 8 or 9 (18.8 to 21.1 MB) instead of
+  12 (28.1). Over the 120 s scroll, slots with no present (a gap over 1.5 x 13.3 ms) were 50 on main and 27 and 11 with
+  two drawables, of about 8960; a `nextDrawable` wait over 1 ms went from 9.5 % to 19.5 % of layer draws, over 5 ms
+  from 248 to 391 and 130, over a vsync from 29 to 20 and 12. The waits are longer more often but short, and fewer
+  slots went without a present.
+- **An overlay with nothing to draw** in its order range (`Scene::is_empty_in`) is not drawn: its `CAMetalLayer` is
+  hidden and gives its drawables back (`MetalRenderer::release_drawables`: a 1 x 1 drawable presented, then another
+  taken, since neither hiding nor shrinking frees the one on screen or the idle one in the pool). Its view stays, so
+  AppKit's hit test still reaches its hitboxes and the stack order does not change. Not measured on the three apps.
+- Fluid has no overlay, so none of this moves it (180 / 166 MB on main, 168 / 182 with the round, at rest).
 
 ## API
 
@@ -449,6 +495,15 @@ What each item is, largest first:
   `on_next_frame` schedules and wakes. The idle count of the link is not tested (a window needs a display); the
   measurements above cover it.
 - gpuix `window_options_tests` has the unfocused case (an unfocused window is not throttled).
+- Round 51: gpui `composition::tests` `the_window_counts_composed_frames_and_holds_only_the_last` (5 frames, count 5, the
+  last held) and `a_range_is_empty_when_no_order_of_any_kind_is_in_it`; gpui_apple `composition.rs` tests (an overlay
+  shares the base's device state, queue, atlas, pipelines and path intermediate, both render a scene, an overlay layer
+  has 2 drawables and the window's 3); zed `gpui_macos/tests/native_surface_present.rs` (an overlay with only a hitbox
+  claims it and never draws, painted content shows and draws its layer, gone content hides it and stops its draws while
+  the hit test still claims); gpuix `motion/style_ref.rs` and `state_styles.rs` tests (the no-fold path is the table's
+  `Arc`, a state style that applies or not still folds or cleans in a copy, the fixed-point check matches `overlay`);
+  `packages/native/js/__tests__/lazy-automation.test.ts` (zod and eventsource-parser are not statically reachable from
+  the runtime, host, screen, testing, cpu-throttle or idle-gc entries; the client entry reaches them).
 - The webview wake timer is checked by the e2e only (events of a real page arriving at an idle app, [testing.md](testing.md#the-webview-e2e)); the test renderer's pages report from the test.
 - Input wakes need a way to post events without the OS: the test-support `GpuixRenderer.postNativeEvent(kind, x?, y?)`
   (`packages/native/src/native_event.rs`) builds the NSEvent for the window and posts it from NSEventThread with
