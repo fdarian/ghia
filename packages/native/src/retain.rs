@@ -186,9 +186,9 @@ pub(crate) enum Exclusion {
     /// An `<svg>` that has not been painted yet, whose raster is still being made, or whose document
     /// changed and is too big to be rasterised in paint.
     Svg,
+    /// The list and the boxes around it are built by every frame, so no recording holds a list. Its
+    /// rows are roots of their own, built in sessions of theirs (`Retain::begin_row`).
     VirtualList,
-    /// Built by a virtual list in layout, after the render.
-    VirtualRow,
     /// Inside a table with collapsed borders, which the table paints over its cells.
     CollapsedTable,
     DisplayContents,
@@ -210,13 +210,12 @@ pub(crate) enum Exclusion {
 }
 
 impl Exclusion {
-    const ALL: [Exclusion; 15] = [
+    const ALL: [Exclusion; 14] = [
         Self::PaintReporter,
         Self::Highlight,
         Self::CustomElement,
         Self::Svg,
         Self::VirtualList,
-        Self::VirtualRow,
         Self::CollapsedTable,
         Self::DisplayContents,
         Self::Anchored,
@@ -246,7 +245,6 @@ impl Exclusion {
             Self::CustomElement => "custom-element",
             Self::Svg => "svg",
             Self::VirtualList => "virtual-list",
-            Self::VirtualRow => "virtual-row",
             Self::CollapsedTable => "collapsed-table",
             Self::DisplayContents => "display-contents",
             Self::Anchored => "anchored",
@@ -613,6 +611,17 @@ impl Scroller {
             (true, true) => viewport.width.max(viewport.height),
         };
         Some(Self { window, viewport, reach })
+    }
+
+    /// The scroller a virtual list is for its rows: it always scrolls, by its height. Before its
+    /// first layout it has the window for a viewport, as `of` does.
+    pub(crate) fn of_list(
+        window: gpui::WindowId,
+        viewport: gpui::Size<gpui::Pixels>,
+        window_size: gpui::Size<gpui::Pixels>,
+    ) -> Self {
+        let viewport = if viewport.width <= gpui::px(0.0) || viewport.height <= gpui::px(0.0) { window_size } else { viewport };
+        Self { window, viewport, reach: viewport.height }
     }
 
     /// Whether the element's last box is small enough to be recorded to move: one that has no box
@@ -995,8 +1004,24 @@ pub(crate) struct Retain {
     /// The node a unit began at, while it is being built: nothing inside it is skipped.
     unit: Option<u32>,
     plan: Plan,
-    /// Above zero while a virtual list builds a row, which is outside any render.
-    rows: u32,
+    /// A virtual list's row is being built, in a session of its own (`begin_row`): the list builds
+    /// its rows in layout, after the render that entered the list closed the page's session.
+    row: bool,
+    /// The shape of the list the row is a child of, which the row's key takes where an element
+    /// takes the shape of its parent.
+    row_parent_shape: u64,
+    /// The row being built.
+    row_id: u64,
+    /// The rows built since the last frame that looked, whose dynamic elements are still wanted.
+    rows_seen: FxHashSet<u64>,
+    /// The elements of each row that its last build found a motion, transition or animation
+    /// running on: `dynamic` holds them, and a row the list stops asking for has to take them out.
+    row_dynamic: FxHashMap<u64, Vec<u64>>,
+    /// Some row built since the last frame ended could be skipped by the next, which the page's
+    /// session cannot see (`finish_frame`).
+    row_candidates: bool,
+    /// What the page's session decided, while a row's replaces it in `summary`.
+    page_summary: Summary,
     selection: u64,
     nodes: Vec<Node>,
     stack: Vec<u32>,
@@ -1194,7 +1219,13 @@ impl Retain {
             reference: false,
             unit: None,
             plan: Plan::default(),
-            rows: 0,
+            row: false,
+            row_parent_shape: 0,
+            row_id: 0,
+            rows_seen: FxHashSet::default(),
+            row_dynamic: FxHashMap::default(),
+            row_candidates: false,
+            page_summary: Summary::default(),
             selection: 0,
             nodes: Vec::new(),
             stack: Vec::new(),
@@ -1273,6 +1304,7 @@ impl Retain {
         self.seen = Seen { scrolls, ..Seen::default() };
         self.records.clear();
         self.dynamic.clear();
+        self.row_dynamic.clear();
         self.release_dormant(false);
         self.plan.recorded = false;
         self.backoff = Backoff::default();
@@ -1361,6 +1393,9 @@ impl Retain {
                     .map_or(0, |root| root.subtree_revision),
                 ..Plan::default()
             };
+        }
+        if sources.pass == 1 && !sources.layout_only && !sources.reference {
+            self.forget_unseen_rows();
         }
         if sources.pass == 1 && !sources.reference {
             self.learn_relocation(sources.tally.lazy_builds, sources.relocations);
@@ -1740,6 +1775,83 @@ impl Retain {
         self.inside_relocatable = false;
     }
 
+    /// Starts the build of a row of a virtual list, which the list asks for while it lays out,
+    /// after the session of the page closed. The row is a root like any other: it is entered with
+    /// the shape of the list for a parent (`parent_shape`, `current_shape` while the list was
+    /// built), skipped when the frame found it unchanged, recorded when it is built. Unlike a
+    /// subtree built late it is a build of the frame, so it takes the next epoch, and it is no
+    /// part of the page's decision: `plan`, `summary` and the dynamic elements of other rows are
+    /// as the page left them.
+    pub(crate) fn begin_row(&mut self, parent_shape: u64, row_id: u64) {
+        debug_assert!(self.stack.is_empty(), "a row is not built inside an element");
+        self.rows_seen.insert(row_id);
+        self.open = self.enabled && !self.backoff.resting;
+        self.row = true;
+        self.row_parent_shape = parent_shape;
+        self.row_id = row_id;
+        self.unit = None;
+        self.inside_relocatable = false;
+        self.nodes.clear();
+        self.below.clear();
+        self.stack.clear();
+        self.page_summary = std::mem::take(&mut self.summary);
+        crate::tape::clear_build_effects();
+    }
+
+    pub(crate) fn finish_row(&mut self) {
+        let built = self.open;
+        self.row_candidates |= self.finish_session();
+        if built {
+            self.note_row_dynamic();
+        }
+        self.row = false;
+        self.row_parent_shape = 0;
+        self.summary = std::mem::take(&mut self.page_summary);
+    }
+
+    /// Notes which elements of the row `finish_row` has just settled have something running, for
+    /// `forget_unseen_rows`. A row that was skipped is as its last build left it.
+    fn note_row_dynamic(&mut self) {
+        let Some(root) = self.nodes.first().filter(|root| root.skipped.is_none()) else { return };
+        let running: Vec<u64> = self
+            .nodes
+            .iter()
+            .filter(|node| node.skipped.is_none() && node.vol.dynamic != 0)
+            .map(|node| node.id)
+            .collect();
+        if running.is_empty() {
+            self.row_dynamic.remove(&root.id);
+        } else {
+            self.row_dynamic.insert(root.id, running);
+        }
+    }
+
+    /// The rows the list stopped asking for since the last frame took their dynamic elements and
+    /// records with them, as `forget_unbuilt_dynamic` does for the ones under an absent box: a row
+    /// that is not built is not visited, and what it had running would keep the list and
+    /// everything above it on the spine for as long as the window lives.
+    fn forget_unseen_rows(&mut self) {
+        let seen = std::mem::take(&mut self.rows_seen);
+        let (dynamic, records) = (&mut self.dynamic, &mut self.records);
+        self.row_dynamic.retain(|row, running| {
+            let kept = seen.contains(row);
+            if !kept {
+                for id in running.iter() {
+                    if dynamic.remove(id).is_some() {
+                        records.remove(id);
+                    }
+                }
+            }
+            kept
+        });
+    }
+
+    /// The shape of the element being built, for a child that is not built inside it to take as its
+    /// parent's (`begin_row`).
+    pub(crate) fn current_shape(&self) -> u64 {
+        self.stack.last().map_or(0, |at| self.nodes[*at as usize].key.shape)
+    }
+
     /// Stops recording, for a build that is not part of a frame (`GpuixView::build_unit`): nothing
     /// is entered, skipped or noted until `resume` gives back what it returns.
     pub(crate) fn suspend(&mut self) -> bool {
@@ -1753,7 +1865,7 @@ impl Retain {
 
     /// Whether the element being built is recorded, so the caller can skip work only the record needs.
     pub(crate) fn recording(&self) -> bool {
-        self.open && self.rows == 0
+        self.open
     }
 
     /// The element being built (not skipped, just entered) is the root of a unit if the last build
@@ -1766,6 +1878,7 @@ impl Retain {
             || !self.planning
             || !self.recording()
             || self.deferred
+            || self.row
             || self.layout_only
             || self.unit.is_some()
         {
@@ -1986,23 +2099,11 @@ impl Retain {
         self.seen.customs.entry(id).or_insert(state);
     }
 
-    pub(crate) fn enter_row(&mut self) {
-        self.rows += 1;
-    }
-
-    pub(crate) fn leave_row(&mut self) {
-        self.rows -= 1;
-    }
-
     /// Enters the element about to be built, or decides to skip it: when the frame found nothing
     /// that its last build read different, and gpui can be handed the subtree to keep. A skipped
     /// element is left entered and exited, and the caller builds a retained element instead.
     pub(crate) fn enter(&mut self, entry: Entry) -> Option<Skip> {
         if !self.enabled {
-            return None;
-        }
-        if self.rows > 0 {
-            crate::perf_counters::retain_slot(EXCLUDED + Exclusion::VirtualRow as usize, 1);
             return None;
         }
         if !self.open {
@@ -2015,7 +2116,7 @@ impl Retain {
                 let mut shape = Fingerprint::new();
                 shape.word(entry.id);
                 shape.word(u64::from(entry.at));
-                shape.word(self.nodes.get(parent as usize).map_or(0, |parent| parent.key.shape));
+                shape.word(self.nodes.get(parent as usize).map_or(self.row_parent_shape, |parent| parent.key.shape));
                 shape.word(entry.container.map_or(0, |size| size | 1));
                 shape.word(entry.contents_overlay.map_or(0, |key| key | 1));
                 shape.bits(&[
@@ -2240,7 +2341,7 @@ impl Retain {
     /// Leaves the element built last, and says whether gpui is to record what was built of it.
     pub(crate) fn exit(&mut self) -> Option<Recording> {
         self.exited_absent = false;
-        if self.rows > 0 || !self.open {
+        if !self.open {
             return None;
         }
         // A skipped element was never pushed.
@@ -2416,9 +2517,6 @@ impl Retain {
     }
 
     fn top(&mut self) -> Option<&mut Node> {
-        if self.rows > 0 {
-            return None;
-        }
         let at = *self.stack.last()?;
         Some(&mut self.nodes[at as usize])
     }
@@ -2643,7 +2741,9 @@ impl Retain {
         let recorded = self.open;
         let candidates = self.finish_session();
         if recorded && self.backs_off() && self.pass == 1 {
-            self.back_off(candidates);
+            // The rows were built after the frame they belong to; a frame that rests records none.
+            let rows = std::mem::take(&mut self.row_candidates);
+            self.back_off(candidates | rows);
             self.gate.note_roots(self.summary.roots.len(), self.summary.elements_in_roots);
         }
     }
@@ -2889,14 +2989,16 @@ impl Retain {
             );
         }
 
-        if !self.reference && !self.layout_only {
+        // A row is built after the frame it belongs to, and says nothing of whether that frame
+        // was steady.
+        if !self.reference && !self.layout_only && !self.row {
             self.plan.recorded = true;
             self.plan.unsteady |= unsteady;
         }
-        if !self.deferred {
+        if !self.deferred && !self.row {
             self.forget_unbuilt_dynamic(&built_dynamic);
         }
-        if keep_slots && !self.deferred {
+        if keep_slots && !self.deferred && !self.row {
             self.debug_capture(&slots);
         }
 
@@ -3533,7 +3635,9 @@ mod tests {
     #[test]
     fn a_changed_row_of_a_virtual_list_is_not_left_unbuilt() {
         // 1 > 2 (virtual-list) > 3 (a row) > 4, the one the pointer is over. The list builds its rows
-        // in its layout and never skips one, so a tick has nothing of them to look for.
+        // in its layout, each in a session of its own (`begin_row`), outside the frame's walk: the
+        // spine has to reach the row, which is built because 4 changed, and the walk leaves nothing
+        // of the rows in `unbuilt`.
         let tree = tree_of(&[
             (1, None, "div", None),
             (2, Some(1), "virtual-list", None),
@@ -5331,6 +5435,156 @@ mod tests {
         }
     }
 
+    impl Units {
+        /// The frame of a page in which 2 is a virtual list (beside 5, or inside it when `nested`), and
+        /// the shape its rows are keyed with.
+        fn list_frame(&mut self, nested: bool) -> u64 {
+            let mut shape = 0;
+            self.frame(&[], false, |page| {
+                page.element(1, None, |page| {
+                    let mut list = |page: &mut Units| {
+                        page.element(2, None, |page| {
+                            page.retain.exclude(Exclusion::VirtualList);
+                            shape = page.retain.current_shape();
+                        });
+                    };
+                    if nested {
+                        page.element(5, None, list);
+                    } else {
+                        list(page);
+                        page.leaf(5);
+                    }
+                });
+            });
+            shape
+        }
+
+        /// Builds the row `id` of the list the way `GpuixView::build_virtual_child` does, after the page's
+        /// session closed: in one of its own. Nothing if the row was skipped, otherwise whether gpui is
+        /// to record what was built.
+        fn row(&mut self, list_shape: u64, id: u64, inside: impl FnOnce(&mut Self)) -> Option<bool> {
+            self.retain.begin_row(list_shape, id);
+            let recorded = if self.enter(id) {
+                None
+            } else {
+                inside(self);
+                Some(self.retain.exit().is_some())
+            };
+            self.retain.finish_row();
+            recorded
+        }
+    }
+
+    #[test]
+    fn a_row_whose_revision_did_not_change_is_skipped_by_its_own_session() {
+        let mut page = Units::new();
+        let shape = page.list_frame(false);
+        assert_eq!(page.row(shape, 3, |_| {}), Some(true), "the first build of a row is recorded");
+        assert_eq!(page.row(shape, 4, |_| {}), Some(true));
+        let shape = page.list_frame(false);
+        assert_eq!(page.row(shape, 3, |_| {}), None);
+        assert_eq!(page.row(shape, 4, |_| {}), None);
+        assert!(page.retain.nodes[0].skipped.is_some());
+    }
+
+    #[test]
+    fn a_changed_row_is_built_and_recorded_while_its_siblings_are_skipped() {
+        let mut page = Units::new();
+        let shape = page.list_frame(false);
+        page.row(shape, 3, |_| {});
+        page.row(shape, 4, |_| {});
+        page.edit(3);
+        let shape = page.list_frame(false);
+        assert_eq!(page.row(shape, 3, |_| {}), Some(true), "built, and recorded for the frame after");
+        assert_eq!(page.row(shape, 4, |_| {}), None);
+        let shape = page.list_frame(false);
+        assert_eq!(page.row(shape, 3, |_| {}), None, "the record the row left is the one the next frame takes");
+        assert_eq!(page.row(shape, 4, |_| {}), None);
+    }
+
+    #[test]
+    fn a_row_key_changes_with_the_shape_of_the_list() {
+        let mut page = Units::new();
+        let beside = page.list_frame(false);
+        page.row(beside, 3, |_| {});
+        let inside = page.list_frame(true);
+        assert_ne!(beside, inside);
+        assert_eq!(page.row(inside, 3, |_| {}), Some(true), "the list moved in the document, and so did its row");
+        let inside = page.list_frame(true);
+        assert_eq!(page.row(inside, 3, |_| {}), None);
+    }
+
+    #[test]
+    fn row_sessions_do_not_touch_summary_plan_or_the_dynamic_entries_of_other_elements() {
+        let mut page = Units::new();
+        let mut shape = 0;
+        page.frame(&[], false, |page| {
+            page.element(1, None, |page| {
+                page.element(2, None, |page| {
+                    page.retain.exclude(Exclusion::VirtualList);
+                    shape = page.retain.current_shape();
+                });
+                page.element(5, Some(true), |_| {});
+            });
+        });
+        let summary = page.retain.summary.clone();
+        assert_eq!(page.retain.dynamic.get(&5), Some(&(Dynamic::Animation as u8)));
+        assert!(!page.retain.plan.unsteady);
+        // Only a page's session says a frame was recorded.
+        page.retain.plan.recorded = false;
+
+        let animating = |page: &mut Units| page.retain.dynamic(Dynamic::Animation);
+        let svg = |page: &mut Units| page.retain.exclude(Exclusion::Svg);
+        assert_eq!(page.row(shape, 3, animating), Some(false), "a row with something running is not recorded");
+        assert_eq!(page.row(shape, 4, svg), Some(false), "an excluded row is not recorded either");
+        assert_eq!(page.retain.summary, summary);
+        assert!(!page.retain.plan.recorded);
+        assert!(!page.retain.plan.unsteady, "a row that varies with time does not make the frame unsteady");
+        assert_eq!(page.retain.dynamic.get(&5), Some(&(Dynamic::Animation as u8)), "the page's entry survives the rows");
+        assert_eq!(page.retain.dynamic.get(&3), Some(&(Dynamic::Animation as u8)), "and the row's is kept for the frames that follow");
+    }
+
+    #[test]
+    fn an_offscreen_rows_dynamic_entries_are_dropped_the_frame_after_the_list_stops_asking_for_it() {
+        let mut page = Units::new();
+        let animating = |page: &mut Units| page.retain.dynamic(Dynamic::Animation);
+        let shape = page.list_frame(false);
+        page.row(shape, 3, animating);
+        page.row(shape, 4, |_| {});
+        assert!(page.retain.dynamic.contains_key(&3));
+
+        // The frames begin without being finished, which would forget what the page did not build (and
+        // the rows with it): this is the sweep of the rows alone.
+        let sources = sources_of(&page.tree, &page.focus, &page.handles, &page.scrolls, &[], false);
+        page.retain.begin_frame(sources);
+        assert!(page.retain.dynamic.contains_key(&3), "the list asked for 3 since the last frame looked");
+        // The list scrolled: it asks for 4 and not for 3.
+        page.row(shape, 4, |_| {});
+        let sources = sources_of(&page.tree, &page.focus, &page.handles, &page.scrolls, &[], false);
+        page.retain.begin_frame(sources);
+        assert!(!page.retain.dynamic.contains_key(&3), "a row nobody builds is not visited, and what it had running would pin the list for good");
+        assert!(!page.retain.records.contains_key(&3));
+        assert!(page.retain.row_dynamic.is_empty());
+        assert!(page.retain.records.contains_key(&4));
+    }
+
+    #[test]
+    fn begin_unit_is_refused_in_a_row() {
+        let mut page = Units::new();
+        page.page(&[], Some(true), None);
+        page.page(&[], Some(true), None);
+        page.frame(&[], false, |page| {
+            page.element(1, None, |page| {
+                assert!(page.element(2, Some(true), |_| {}).is_some(), "an element of the page is begun as a unit");
+            });
+        });
+        page.retain.begin_row(0, 2);
+        assert!(!page.enter(2));
+        assert!(page.retain.begin_unit(true).is_none(), "a tick builds a unit, and no tick builds a row");
+        page.retain.exit();
+        page.retain.finish_row();
+    }
+
     #[test]
     fn a_table_with_collapsed_borders_is_the_unit_of_the_paint_only_animation_of_its_parts() {
         let mut page = Units::new();
@@ -5566,11 +5820,9 @@ mod tests {
         build(&mut page, Exclusion::CustomElement);
         build(&mut page, Exclusion::CustomElement);
         assert_eq!(page.preview(&[], false), Ok(vec![2]), "a code block is rebuilt by its frame, and paints the same in a tick");
-        for steady in [Exclusion::VirtualList, Exclusion::VirtualRow] {
-            build(&mut page, steady);
-            build(&mut page, steady);
-            assert_eq!(page.preview(&[], false), Ok(vec![2]), "{steady:?}: a list is painted as its frame made it, a tick leaves it alone");
-        }
+        build(&mut page, Exclusion::VirtualList);
+        build(&mut page, Exclusion::VirtualList);
+        assert_eq!(page.preview(&[], false), Ok(vec![2]), "a list is painted as its frame made it, a tick leaves it alone");
         for varies in [Exclusion::Highlight, Exclusion::Svg] {
             build(&mut page, varies);
             assert_eq!(page.preview(&[], false), Err(Unpatchable::Unsteady), "{varies:?}");
