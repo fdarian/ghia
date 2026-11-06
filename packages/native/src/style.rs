@@ -1165,6 +1165,11 @@ pub struct StyleDesc {
     /// `position`. Only set when it has a `z-index`.
     #[serde(skip)]
     pub flex_or_grid_item: bool,
+    /// Set by the renderer on the copy of the style it builds the root of a virtual-list row from,
+    /// never by JS: the list prepaints a row inside a lift barrier, so what the row would be lifted
+    /// into is never handed to it and the element does not lift (`stacking::lifted_z`).
+    #[serde(skip)]
+    pub lift_absorbed: bool,
     /// Set by the renderer on the copy of the style it builds an element from, never by JS: the
     /// element is an atomic inline, which the text decoration of the boxes around it does not reach.
     #[serde(skip)]

@@ -138,6 +138,9 @@ pub(crate) fn apply_z_index<E: Styled>(
             el = el.lifted();
         }
     }
+    if style.lift_absorbed {
+        el = el.unlifted();
+    }
     el
 }
 
@@ -151,6 +154,9 @@ pub(crate) fn apply_folded_lift<E: Styled>(
     colors: &ColorContext,
     lengths: &LengthContext,
 ) -> E {
+    if folded.lift_absorbed {
+        return el.unlifted();
+    }
     let resolved = Resolved::of_style(folded, colors, lengths);
     match lift_z(&resolved, folded.flex_or_grid_item) {
         Some(z) => {
@@ -246,7 +252,7 @@ pub(crate) fn is_forced_context(tree: &RetainedTree, element: &RetainedElement) 
         || is_virtual_row(tree, element)
 }
 
-fn is_virtual_row(tree: &RetainedTree, element: &RetainedElement) -> bool {
+pub(crate) fn is_virtual_row(tree: &RetainedTree, element: &RetainedElement) -> bool {
     element
         .parent
         .and_then(|parent| tree.elements.get(&parent))
@@ -581,6 +587,31 @@ mod tests {
         assert_eq!(lifts(&style(Some("relative"), Some(3.0))), (Some(3), None));
         assert_eq!(lifts(&style(None, Some(3.0))), (None, None));
         assert_eq!(lifts(&StyleDesc::default()), (None, None));
+    }
+
+    #[test]
+    fn the_root_of_a_row_is_not_lifted_whatever_lifts_a_style() {
+        let colors = ColorContext::root(Scheme::Light);
+        let lengths = LengthContext::for_tests();
+        let lift = |style: StyleDesc| {
+            let absorbed = StyleDesc { lift_absorbed: true, ..style };
+            let mut el = apply_z_index(gpui::div().relative(), &absorbed, &colors, &lengths);
+            let applied = el.style().lift_z();
+            // A focus variant laid over it is decided from the folded style, which keeps the flag.
+            let over = StyleDesc { z_index: Some(4.0), position: Some("relative".to_string()), ..Default::default() };
+            let folded = crate::events::state_styles::overlay(&absorbed, &over);
+            assert!(folded.lift_absorbed);
+            let mut refolded = apply_folded_lift(apply_z_index(el, &over, &colors, &lengths), &folded, &colors, &lengths);
+            assert_eq!(refolded.style().lift_z(), None);
+            applied
+        };
+        assert_eq!(lift(style(Some("relative"), None)), None);
+        assert_eq!(lift(style(Some("relative"), Some(3.0))), None);
+        assert_eq!(lift(style(Some("sticky"), None)), None);
+        assert_eq!(lift(with(|s| s.opacity = Some(0.5))), None);
+        // The same styles lift an element that is not the root of a row.
+        let mut el = apply_z_index(gpui::div().relative(), &style(Some("relative"), Some(3.0)), &colors, &lengths);
+        assert_eq!(el.style().lift_z(), Some(3));
     }
 
     #[test]

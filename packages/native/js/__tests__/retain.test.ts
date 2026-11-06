@@ -111,8 +111,14 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
     const ROW_HEIGHT = 40
     const rowId = (index: number) => 1000 + index * 10
 
+    // A mailbox row: `position: relative` with two absolutely positioned children, one of which reaches into the
+    // row below. Its own position is the only thing that lifts, and the row is the context its children are
+    // consumed by.
+    type Shape = { rowStyle?: Record<string, unknown> }
+    const MAILBOX_ROW = { height: 40, flexShrink: 0, position: "relative" }
+
     // A virtual list of 40 rows of four elements each (the row and three boxes, one holding a text), 40 px tall.
-    const mountList = (skipping: boolean) => {
+    const mountList = (skipping: boolean, mailbox?: Shape) => {
       const renderer = new TestRenderer({ width: 300, height: 300 })
       renderer.setRetainPlanning(skipping)
       renderer.setRetainEnabled(skipping)
@@ -129,19 +135,33 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
       ]
       for (let index = 0; index < ROWS; index++) {
         const row = rowId(index)
+        const rowStyle = mailbox
+          ? { ...MAILBOX_ROW, backgroundColor: index % 2 ? "#ddccdd" : "#ccddcc", ...mailbox.rowStyle }
+          : { height: 40, flexShrink: 0, display: "flex", flexDirection: "row" }
+        const boxes = mailbox
+          ? [
+              { width: 100, height: 40, backgroundColor: "#335577" },
+              { position: "absolute", left: 120, top: 4, width: 20, height: 20, backgroundColor: "#775533" },
+              { position: "absolute", left: 180, top: 30, width: 40, height: 20, backgroundColor: "#557733" },
+            ]
+          : [
+              { width: 100, height: 40, backgroundColor: "#335577" },
+              { width: 100, height: 40, backgroundColor: "#775533" },
+              { width: 100, height: 40, backgroundColor: "#557733" },
+            ]
         batch.push(
           ["createElement", row, "div"],
           ["appendChild", 2, row],
-          ["setStyle", row, { height: 40, flexShrink: 0, display: "flex", flexDirection: "row" }],
+          ["setStyle", row, rowStyle],
           ["createElement", row + 1, "div"],
           ["appendChild", row, row + 1],
-          ["setStyle", row + 1, { width: 100, height: 40, backgroundColor: "#335577" }],
+          ["setStyle", row + 1, boxes[0]],
           ["createElement", row + 2, "div"],
           ["appendChild", row, row + 2],
-          ["setStyle", row + 2, { width: 100, height: 40, backgroundColor: "#775533" }],
+          ["setStyle", row + 2, boxes[1]],
           ["createElement", row + 4, "div"],
           ["appendChild", row, row + 4],
-          ["setStyle", row + 4, { width: 100, height: 40, backgroundColor: "#557733" }],
+          ["setStyle", row + 4, boxes[2]],
           ["createElement", row + 3, "text"],
           ["setText", row + 3, `row ${index}`],
           ["appendChild", row + 1, row + 3],
@@ -187,8 +207,8 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
 
     // The counters belong to the process and not to a window, so the run that is measured ends before the
     // oracle (the same steps with retention off) is mounted.
-    const play = (skipping: boolean, steps: (renderer: TestRenderer) => void) => {
-      const renderer = mountList(skipping)
+    const play = (skipping: boolean, steps: (renderer: TestRenderer) => void, mailbox?: Shape) => {
+      const renderer = mountList(skipping, mailbox)
       const retained = renderer.getRetainedCounters()
       const layout = renderer.getLayoutCounters()
       renderer.resetBuildCounters()
@@ -287,6 +307,78 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
       expect(kept.bounds).toEqual(built.bounds)
       expect(kept.bounds[4][0]?.y).toBe(ROW_HEIGHT * 4 + 20)
       expect(kept.picture.equals(built.picture)).toBe(true)
+    })
+
+    describe("rows that lift", () => {
+      const scrollRows = (renderer: TestRenderer) => {
+        renderer.scrollTo(2, undefined, ROW_HEIGHT * 2)
+        renderer.flush()
+        renderer.flush()
+        renderer.scrollTo(2, undefined, ROW_HEIGHT * 5)
+        renderer.flush()
+        renderer.flush()
+      }
+
+      it("moves the rows of a mailbox without building them: the row's own position is not a lift out of the list", () => {
+        const scroll = (renderer: TestRenderer) => {
+          renderer.scrollTo(2, undefined, ROW_HEIGHT * 2)
+          renderer.flush()
+          renderer.flush()
+        }
+        const kept = play(true, scroll, {})
+        expect(kept.retained.relocations).toBeGreaterThan(kept.retainedBefore.relocations)
+        expect(kept.retained.lazyBuilds).toBe(kept.retainedBefore.lazyBuilds)
+        expect(kept.retained.layoutFallbacks).toBe(0)
+        expect(kept.built.retainMismatches).toBe(0)
+        const built = play(false, scroll, {})
+        expect(kept.bounds).toEqual(built.bounds)
+        expect(kept.picture.equals(built.picture)).toBe(true)
+      })
+
+      it("scrolls the rows of a mailbox as it scrolls rows that do not lift", () => {
+        const mailbox = play(true, scrollRows, {})
+        const plain = play(true, scrollRows)
+        const delta = (run: typeof mailbox, key: "relocations" | "lazyBuilds") => run.retained[key] - run.retainedBefore[key]
+        expect(delta(mailbox, "relocations")).toBeGreaterThan(0)
+        expect(delta(mailbox, "relocations")).toBe(delta(plain, "relocations"))
+        expect(delta(mailbox, "lazyBuilds")).toBe(delta(plain, "lazyBuilds"))
+        expect(mailbox.retained.nonRelocatable).toEqual(plain.retained.nonRelocatable)
+      })
+
+      it("agrees with a build of the frame under the verifier while the rows of a mailbox are scrolled", () => {
+        const renderer = mountList(true, {})
+        renderer.setRetainVerify(true)
+        for (let frame = 0; frame < 3; frame++) renderer.flush()
+        scrollRows(renderer)
+        renderer.scrollTo(2, undefined, ROW_HEIGHT * 3)
+        renderer.flush()
+        renderer.flush()
+        expect(renderer.getRetainMismatches()).toEqual([])
+        expect(renderer.getRetainedCounters().mismatches).toBe(0)
+      })
+
+      // The list's lift barrier takes the lift of the row root, so a row with an index, a negative one, a
+      // composite or a position other than relative paints where it would if it did not lift.
+      it.each([
+        ["a relative position only", {}],
+        ["a z-index", { zIndex: 5 }],
+        ["a negative z-index", { zIndex: -3 }],
+        ["an opacity below 1", { opacity: 0.9 }],
+        ["a transform", { transform: "translateX(2px)" }],
+        ["position: sticky", { position: "sticky", top: 0 }],
+        ["position: absolute", { position: "absolute", left: 0, top: 0, width: 300 }],
+      ])("paints a row with %s as a build of every row does", (_, rowStyle) => {
+        const steps = (renderer: TestRenderer) => {
+          renderer.scrollTo(2, undefined, ROW_HEIGHT * 2)
+          renderer.flush()
+          renderer.flush()
+        }
+        const kept = play(true, steps, { rowStyle })
+        expect(kept.built.retainMismatches).toBe(0)
+        const built = play(false, steps, { rowStyle })
+        expect(kept.bounds).toEqual(built.bounds)
+        expect(kept.picture.equals(built.picture)).toBe(true)
+      })
     })
 
     it("creates and removes no layout node for the rows it keeps", () => {
