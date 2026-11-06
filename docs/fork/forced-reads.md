@@ -39,6 +39,8 @@ When a pass read the clock, it moved a spring, which fired its `change` event, w
 
 The pass uses the retained subtrees the last presented frame recorded (`RetainedPhase::Layout`, and `LayoutPaint` for a hole). It skips them, publishes their bounds from the tape with `tape::write_in_layout`, builds the spine and what moved, records no frame and takes nothing from the rendered frame, so the draw after it still replays. What it builds it leaves a layout record of (below). A write followed by a read costs the layout and prepaint of the page and the build of the spine, not a build of the page: `write-then-read` is 1.6 ms against 6.7 ms on the 1000-element page of `draws-vs-presents.perf.test.tsx`, one move per frame.
 
+The rows of a virtual list are skipped the same way: the pass lays the list out, each row asks for its own session, a row that did not change publishes its bounds from the tape and a changed one is built, so a read after a write to one row builds that row and the chain of the list ([retention.md](retention.md#rows-of-a-virtual-list)).
+
 The pass counts as a frame for the deltas (`Retain::unbuilt`), or a hover that a read consumed would stay stuck.
 
 A read on a dirty window still builds the spine and lays out and prepaints the page. Only `paint_if_dirty` inside dispatch builds every subtree. After a write that drives only paint-only properties a read does nothing at all (next section).

@@ -7338,6 +7338,8 @@ impl GpuixView {
         list_id: u64,
         index: usize,
         expected_child_id: u64,
+        list_shape: u64,
+        list_viewport: gpui::Size<gpui::Pixels>,
         list_path: Vec<u32>,
         list_hosts: Arc<[crate::text::selection::Host]>,
         inherited: Inherited,
@@ -7424,6 +7426,7 @@ impl GpuixView {
 
         crate::accessibility::links::sync(&tree);
         let activation = self.activation();
+        let scroller = crate::retain::Scroller::of_list(window.window_handle().window_id(), list_viewport, viewport);
         let mut build_ctx = self.build_ctx(
             &tree,
             &callback,
@@ -7440,12 +7443,12 @@ impl GpuixView {
                 text_box_trim: Default::default(),
                 focus_styles,
                 control_styles: Default::default(),
-                scroller: None,
+                scroller: Some(scroller),
             },
         );
-        build_ctx.retain.enter_row();
+        build_ctx.retain.begin_row(list_shape, expected_child_id);
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
-        build_ctx.retain.leave_row();
+        build_ctx.retain.finish_row();
         drop(pointer);
         emit_highlight_events(&callback, &highlight_events);
         emit_motion_settled(&callback, &tree, &motion_settled);
@@ -11538,6 +11541,9 @@ fn build_virtual_list(
     let inherited = ctx.inherited.clone();
     let list_path = ctx.doc_path.clone();
     let list_hosts = ctx.doc_hosts.clone();
+    let list_shape = ctx.retain.current_shape();
+    // Read here: while the list lays out and asks for a row, its state is borrowed.
+    let list_viewport = list_state.viewport_bounds().size;
     let render_item = cx.processor(move |view, index: usize, window, cx| {
         let Some(entry) = view.virtual_lists.get(&list_id) else {
             return unmounted_virtual_row(1.0);
@@ -11546,7 +11552,7 @@ fn build_virtual_list(
             // Empty measures as 0 and poisons ListState. Keep the estimate.
             return unmounted_virtual_row(entry.config.estimated_item_height.unwrap_or(1.0));
         };
-        view.build_virtual_child(list_id, index, child_id, list_path.clone(), list_hosts.clone(), inherited.clone(), window, cx)
+        view.build_virtual_child(list_id, index, child_id, list_shape, list_viewport, list_path.clone(), list_hosts.clone(), inherited.clone(), window, cx)
     });
     let scroll_state = list_state.clone();
     // The list inserts its own hitbox under this id, so a host id makes it a
