@@ -38,6 +38,7 @@ use crate::style::StyleDesc;
 use super::app_region;
 use super::element_drag;
 use super::file_drag;
+use super::hover_paint;
 use super::ids::Hit;
 use super::path::{chain_follows_path, common_ancestor, event_path, path_listens};
 use super::state::{is_connected, DragOver, PointerRequests, PointerState, Press};
@@ -799,6 +800,18 @@ const HOVER_EVENTS: [(&str, &str, &str, &str); 2] = [
     ("mouseout", "mouseleave", "mouseover", "mouseenter"),
 ];
 
+/// What a hover change does to the elements it moves.
+#[derive(Debug, PartialEq)]
+enum Restyle {
+    /// No element that changed state declares a style for it.
+    None,
+    /// Elements do, and every refinement only changes how its element paints
+    /// ([`hover_paint`]): the elements whose build differs.
+    Paint(Vec<u64>),
+    /// Some refinement changes more than that.
+    Whole,
+}
+
 /// What moving the hover chain to a new target changes.
 struct HoverChange {
     new_path: Vec<u64>,
@@ -853,16 +866,50 @@ impl HoverChange {
     /// Whether an element that changed state declares a style for it, or is a follower of a group
     /// that does, or listens for the gesture.
     fn restyles(&self, tree: &RetainedTree, hovered: &[u64]) -> bool {
-        self.leaving
-            .iter()
-            .chain(&self.entering)
-            .any(|id| {
-                // A group's followers restyle with it.
-                has_state_style(tree, *id, |style| {
-                    style.hover.is_some() || style.declared_group().is_some()
-                }) || crate::motion::listens_for_gesture(tree, *id, "whileHover")
-            })
-            || relational_restyle(tree, hovered, &self.new_path, |style| style.has_hover.is_some())
+        self.restyle(tree, hovered) != Restyle::None
+    }
+
+    /// What the change does to the style of the elements it moves, and when it only changes how they
+    /// paint, which elements: the ones whose build differs, not the followers of a group (they are
+    /// below the element that declares it).
+    fn restyle(&self, tree: &RetainedTree, hovered: &[u64]) -> Restyle {
+        let mut restyled = Vec::new();
+        let mut paints_only = true;
+        for id in self.leaving.iter().chain(&self.entering) {
+            if crate::motion::listens_for_gesture(tree, *id, "whileHover") {
+                return Restyle::Whole;
+            }
+            let Some(style) = tree.elements.get(id).and_then(|element| element.style.as_deref()) else {
+                continue;
+            };
+            let mut restyles = false;
+            if style.hover.is_some() {
+                restyles = true;
+                paints_only &= hover_paint::hover_paints_only(tree, *id, style);
+            }
+            // A group's followers restyle with it.
+            if style.declared_group().is_some() {
+                restyles = true;
+                paints_only &= hover_paint::group_paints_only(tree, *id, style);
+            }
+            if restyles {
+                restyled.push(*id);
+            }
+        }
+        for id in relational_changed(hovered, &self.new_path) {
+            let Some(style) = tree.elements.get(&id).and_then(|element| element.style.as_deref()) else {
+                continue;
+            };
+            if style.has_hover.is_some() {
+                paints_only &= hover_paint::has_hover_paints_only(tree, id, style);
+                restyled.push(id);
+            }
+        }
+        match (restyled.is_empty(), paints_only) {
+            (true, _) => Restyle::None,
+            (false, true) => Restyle::Paint(restyled),
+            (false, false) => Restyle::Whole,
+        }
     }
 
     /// Whether any boundary event of the change has a listener: on the path of the element it is
@@ -1109,6 +1156,11 @@ fn relational_restyle(
     new: &[u64],
     declares: impl Fn(&StyleDesc) -> bool,
 ) -> bool {
+    relational_changed(old, new).any(|id| has_state_style(tree, id, &declares))
+}
+
+/// The elements whose `:has(...)` state changed between the chains `old` and `new`.
+fn relational_changed<'a>(old: &'a [u64], new: &'a [u64]) -> impl Iterator<Item = u64> + 'a {
     fn below_target(chain: &[u64]) -> &[u64] {
         chain.split_first().map_or(&[], |(_, rest)| rest)
     }
@@ -1116,7 +1168,7 @@ fn relational_restyle(
     old.iter()
         .filter(|id| !new.contains(id))
         .chain(new.iter().filter(|id| !old.contains(id)))
-        .any(|id| has_state_style(tree, *id, &declares))
+        .copied()
 }
 
 fn has_state_style(tree: &RetainedTree, id: u64, has: impl Fn(&StyleDesc) -> bool) -> bool {
@@ -1983,6 +2035,77 @@ mod tests {
         let mut state = PointerState::default();
         state.requests.set_window_events(vec!["pointerover".to_string()]);
         assert!(matters_as_a_move_does(&mut state, &plain, &[4, 1]));
+    }
+
+    /// What moving the hover to the chain `to` (target first) does to style, from the chain `from`.
+    fn restyle_of(tree: &RetainedTree, from: &[u64], to: &[u64]) -> Restyle {
+        let change = HoverChange::between(tree, from, to.first().copied()).expect("the chains differ");
+        change.restyle(tree, from)
+    }
+
+    fn styled_with(tree: &mut RetainedTree, styles: &[(u64, &str)]) {
+        for (id, json) in styles {
+            let style: StyleDesc = serde_json::from_str(json).unwrap();
+            tree.set_style(*id, Arc::new(style));
+        }
+    }
+
+    #[test]
+    fn a_hover_that_changes_a_colour_restyles_by_paint_and_names_the_element() {
+        let mut tree = tree(&[]);
+        styled_with(&mut tree, &[(3, r##"{"hover":{"backgroundColor":"#eee"}}"##)]);
+        assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Paint(vec![3]));
+        assert_eq!(restyle_of(&tree, &[3, 2, 1], &[4, 1]), Restyle::Paint(vec![3]), "and leaving it");
+        assert_eq!(restyle_of(&tree, &[], &[4, 1]), Restyle::None, "an element with no style");
+    }
+
+    #[test]
+    fn a_hover_that_changes_more_than_paint_is_a_whole_frame() {
+        let mut tree = tree(&[]);
+        styled_with(&mut tree, &[(3, r##"{"hover":{"backgroundColor":"#eee","paddingLeft":4}}"##)]);
+        assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Whole);
+        // One element that is not paint-only makes the change whole, though the other is.
+        styled_with(&mut tree, &[(2, r##"{"hover":{"backgroundColor":"#eee"}}"##)]);
+        assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Whole);
+        assert_eq!(restyle_of(&tree, &[], &[2, 1]), Restyle::Paint(vec![2]));
+    }
+
+    #[test]
+    fn a_hover_that_paints_one_element_and_enters_a_parent_names_both() {
+        let mut tree = tree(&[]);
+        styled_with(
+            &mut tree,
+            &[(3, r##"{"hover":{"color":"red"}}"##), (2, r##"{"hover":{"backgroundColor":"#eee"}}"##)],
+        );
+        assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Paint(vec![2, 3]));
+    }
+
+    #[test]
+    fn a_motion_gesture_is_never_paint_only() {
+        let mut tree = tree(&[]);
+        tree.set_custom_prop(2, "motion".to_string(), serde_json::json!({ "whileHover": { "opacity": 0.5 } }));
+        assert_eq!(restyle_of(&tree, &[], &[2, 1]), Restyle::Whole);
+    }
+
+    #[test]
+    fn a_group_restyles_by_paint_when_its_followers_do() {
+        let mut tree = tree(&[]);
+        styled_with(
+            &mut tree,
+            &[(2, r##"{"group":true}"##), (3, r##"{"groupHover":{"backgroundColor":"red"}}"##)],
+        );
+        assert_eq!(restyle_of(&tree, &[], &[2, 1]), Restyle::Paint(vec![2]), "the group, not the follower");
+        styled_with(&mut tree, &[(3, r##"{"groupHover":{"width":50}}"##)]);
+        assert_eq!(restyle_of(&tree, &[], &[2, 1]), Restyle::Whole);
+    }
+
+    #[test]
+    fn a_has_hover_ancestor_restyles_by_paint_when_its_refinement_does() {
+        let mut tree = tree(&[]);
+        styled_with(&mut tree, &[(2, r##"{"hasHover":{"backgroundColor":"red"}}"##)]);
+        assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Paint(vec![2]));
+        styled_with(&mut tree, &[(2, r##"{"hasHover":{"height":3}}"##)]);
+        assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Whole);
     }
 
     #[test]

@@ -607,6 +607,42 @@ after.
 
 **An `auto` host inside the margin but clipped away** by an `overflow: hidden` scroller is not skipped content: it is built and culled, so its loops are dormant like those of any culled card. This holds where the host began visible and was scrolled or pushed out above or below the clip. Below the clip the content mask is empty, and an empty mask culls every child tested against it (see [culling](retention.md#culling-clipped-content-38)): 0 painted, 0 patched and 0 declines over 60 ticks, the cost of an empty page.
 
+## Hover patches (in progress)
+
+A hover that only changes how elements paint (a row that takes a background colour under the pointer) is drawn like a tick: the
+roots that hold the restyled elements are built again and gpui writes the primitives they paint over the frame shown, where it
+used to be a frame built whole (8.7M instructions a row crossing in the mailbox proxy of ghia-bench, of which a patch repaints
+two rows). Three parts: the classification of a hover (this section, the first), the route from the pointer to a tick, and the
+roots a patch can repaint ([Hover roots](#hover-roots)).
+
+### Which hovers paint only
+
+`events/hover_paint.rs` decides, from the styles alone, and `HoverChange::restyle` in `events/dispatcher.rs` applies it to the
+elements a hover change moves: it says `None` (no element that entered or left declares a style for it), `Paint(ids)` or `Whole`.
+A refinement paints only when the style it resolves to (`resolve_pointer_states`, the same fold a build makes) differs from the one
+without it in nothing but:
+
+- `backgroundColor`, and `background` when it is a colour (a gradient is not looked into);
+- `color`, `outlineColor`, `textDecorationColor`, and every border colour in any spelling: the colour longhands, `borderColor`, and
+  the shorthands (`border`, `borderBottom`, ...) when the width and style of every side stay what they were (the sides are parsed,
+  as a collapsed table reads them); the outline shorthand likewise;
+- `boxShadow` when the layers keep their offsets, blur, spread and `inset`: only the colours differ;
+- `opacity`, while the element stays on the same side of 1 (a value below 1 makes an effect group, so crossing 1 changes the
+  kind of what is painted).
+
+Everything else is compared whole, so a property this module does not list is not paint-only: layout, font, `transform`, `cursor`,
+`zIndex`, a gradient, a custom property. A `transition` declared on the element, in the refinement, or (when `color` changes, which
+descendants inherit and would start a transition from) below it, makes the hover whole, since a transition started by the hover
+is a build that a patch does not make. `whileHover` is never paint-only, and neither is a style with `@container` rules.
+
+- **`group`.** An element that declares a group paints only when its own `hover` does and every element below it that follows the
+  group by name (`groupHover` of that group) does. A group bigger than a unit (256 elements) is not looked through and is whole.
+  The element named is the group, not its followers: the followers are below it, in whatever root holds the group.
+- **`hasHover`.** An ancestor whose `:has(:hover)` state changed is named when its `hasHover` refinement paints only.
+- **Several elements** (a row and the text in it) are named together; one that is not paint-only makes the whole change `Whole`.
+
+`restyles()`, which the scroll-only frames ask (`hover_would_matter`), is now `restyle() != None`: it answers as before.
+
 ## Scroll-only frames (in progress)
 
 Every wheel event over a `<virtual-list>` used to draw a whole frame (`ListState::scroll` sets the offset, runs the scroll handler and notifies
@@ -904,6 +940,11 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
 - gpui `scene::tests`: a scene made again with other colours is the scene painted so (groups, a layer and glyphs included, with no
   order worked out); after something moved it is the scene painted so; a rebuild twice, and an insert after one.
   `cargo test -p gpui --lib --features test-support scene:: patch`: 92 passed.
+- `events/hover_paint.rs` unit tests: a colour, a shadow colour, an opacity that stays a layer, every border colour spelling and
+  a background are paint; a border width or style, a layout property, a font, a transform, a cursor, a gradient, a custom
+  property, a shadow that moves or appears, an opacity that crosses 1 and a transition are not; a colour a transition below
+  inherits; a group by its followers and another group's follower. `events/dispatcher.rs`: what a
+  hover change names (a colour, an entered parent, `whileHover`, a group, `hasHover`) and that `hover_would_matter` is unchanged.
 - `retain.rs` unit tests: the unit choice (outermost, paint-only, size cap, exclusion, scroll, lift, absolute, nothing skipped
   inside), the preview (each decline, dormant, no effect on the next frame), the capturing tape, a patched tick and a tick declined
   after its clocks stepped under the verifier, each refusal and its key, an absolute element and one holding a box against it are
