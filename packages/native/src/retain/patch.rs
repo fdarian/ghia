@@ -177,6 +177,14 @@ impl GpuixView {
                 return None;
             }
         };
+        // A root the frame shown has elsewhere than it was recorded, or did not make patchable, is declined by gpui
+        // after it is built: asking first spares the build.
+        for &id in ids.iter().filter(|id| self.retain.is_hover_root(**id)) {
+            if let Some(blocker) = window.patch_blocker(&crate::renderer::retained_id(id)) {
+                self.patch.decline(format!("Hover:{blocker:?}"));
+                return None;
+            }
+        }
         let stepped = self.step_clocks(window, now);
         let mut units = Vec::with_capacity(ids.len());
         let mut tapes = Vec::with_capacity(ids.len());

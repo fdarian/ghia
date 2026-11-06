@@ -92,6 +92,17 @@ paint repaints those roots in the frame that is shown and leaves the rest as it 
   layout pass; a moved block is caught by the bounds key. `end_unit` judges only what is below the root for an escape, so an absolute
   box inside it against the root is fine and an absolute descendant whose containing block is outside the unit still refuses it as
   `Escapes`.
+- **A relocatable root is patched where it was recorded.** A root recorded to be put elsewhere (`retained(..).relocatable(overscan)`,
+  a row of a virtual list) is `patchable()` like any other, and keeps its `PatchUnit` while its recording is plain but for the scene
+  of its own (`PaintRecord::is_plain_or_relocated`: nothing handed to a stacking context). The unit is registered in the frame that
+  records the root and in a frame that replays it with the key it was recorded with (`delta` zero and the key equal, not merely a
+  place the recording fits); a frame that replays it elsewhere (a list scrolled since) notes it as *relocated* instead
+  (`Frame::relocated`), and a patch of it declines as `PatchDecline::Relocated`, where a root that was never patchable is
+  `UnknownUnit`. `Window::patch_blocker` answers the same question without painting, for an embedder that would build the root for
+  nothing. The scratch frame paints the root under the content mask captured when it was recorded, which is what a recording at its
+  own place was cut by, so what it writes over the frame is what a replay would have put there. A patch of such a root makes the
+  recordings of the rows stale for the scroll translate, which puts rows where their recordings paint them: until a frame is built
+  whole (`PatchWindow::recordings_stale`) the classifier answers `Other`.
 - **`Window::request_tick`** asks for a draw with no view queued and no layout invalidated. A draw for a tick first asks the hook of
   `Window::set_frame_patcher`, which builds the roots the tick changes and calls `Window::repaint_in_place(units, cx, accept)`. That
   restores the surroundings of each unit, lays the new element out onto the nodes the recording has (the counters of a build that
@@ -120,7 +131,7 @@ paint repaints those roots in the frame that is shown and leaves the rest as it 
   `PatchCounters::scene_rebuilds` counts the patches that made the scene again and `in_place_primitives` the primitives written.
 - **Any failure declines.** The element states go back, the layout pass ends, and gpui draws the tick whole in the same draw.
   `PatchDecline` names the reason: pending view, refresh, unknown unit, stale recording, surroundings, layout mismatch, unstable
-  layout, effects, hitboxes, registrations, operations, lifts, scroll extent (the transforms that ticked would clamp a scroller's offset or move a thumb), rejected. A wrong patch is a mismatch under the verifier.
+  layout, effects, relocated, hitboxes, registrations, operations, lifts, scroll extent (the transforms that ticked would clamp a scroller's offset or move a thumb), rejected. A wrong patch is a mismatch under the verifier.
 - **Counters.** `Window::patch_counters` reports patched frames, patched units and the declines by reason; `frame_work_counters` also counts the elements and primitives a patch painted, and `rasterized_glyphs`, the glyphs rasterized because the atlas missed them: a glyph of a patchable root that the content mask clips away is a pending glyph operation (compared like a sprite, never rasterized until it shows), so a patched tick of a long text behind a clip rasterizes only what shows.
 - **A unit that holds the focused element is patched.** The scratch frame sets `Frame::focus`, which used to fail the registration
   check for every such unit; the unit is declined only when it gains or loses the focus.
@@ -705,7 +716,8 @@ keeps what builds it again.
   whether anything needs to be repainted): `compute_deltas(preview)`. Each element is mapped to the innermost unit or hover root
   that holds it in the last frame built whole, walking up the tree; an element no root of the frame holds (the frame skipped the
   root above it, so it never visited it, or the root is not a hover root) is `Unpatchable::Hover(id)` and the frame is built whole:
-  that frame visits the roots, and the hover after it is patched.
+  that frame visits the roots, and the hover after it is patched. A root the frame has elsewhere than it was recorded (a list
+  scrolled since) is asked of gpui before it is built (`Window::patch_blocker`), and counted as `Hover:Relocated`.
 - **After a patch.** The recording gpui holds of a patched root is of the paint before, so the elements the patches repainted are kept
   (`Retain::hover_patched`) and the next frame built whole puts them on its spine, which builds the roots above them and records
   them again. A frame built whole takes `hover_paint` and the patched elements as it takes the difference of the chain.
@@ -713,6 +725,39 @@ keeps what builds it again.
   of its last build, so the first hover of a row that came into view is a patch like any other. (The record was tried: the
   pass that rebuilds a frame to compare it sees the record the first pass made, and has to build the roots in it as the first pass
   did.)
+
+**Measured** (the mailbox proxy of ghia-bench on the test renderer, release addon, `PHASE=hover A11Y=0 bun mailbox-scroll-hover/profile.tsx`,
+instructions per row crossing, 18 crossings of 480 ticks, two runs each back to back; patching off is `GPUIX_PATCH_OFF=1`, which is
+the frame built whole every hover used to be, and the tick it asks for builds nothing):
+
+| | patching off | patching on |
+|---|---|---|
+| the bench app as it is (the row has no background, a hover gives it one) | mean 9.35M and 9.33M, median 8.67M | the same, a frame built whole (`Whole`): mean 9.32M and 9.38M, median 8.66M |
+| a row with a background of its own (`ROW_BG=1`) | mean 9.61M and 9.71M, median 8.90M and 8.94M | mean 4.70M and 4.70M, median 4.07M and 4.09M; 18 of 18 crossings patched, 2 units each, 0.06 scene rebuilds a crossing |
+
+With a background of its own the hover costs 51% less (mean). The bench app as it is gains nothing, because its hover adds a quad. What is
+left of a patched crossing is the rows built (18 elements, 2.9M), the input dispatch and the fixed cost of a patch; a patched row
+still builds its 9 elements, where a row whose children kept their recordings would build one (not done: see the limits). The scroll
+phase (`PHASE=scroll A11Y=0`), where the row under the pointer changes while the rows are translated, is what it was: mean 9.03M and
+9.03M with patching on, 9.02M and 9.01M off.
+
+Two things found by measuring: the patch compared every operation of the two rows by their debug form (formatting two floats-heavy
+structs, a hundred thousand instructions each), 25.7M of a 27.9M tick (`PaintOperation::differs_from` compares the fields of
+glyphs, quads and markers first now); and half of the patches made the scene again, because the recording of a row put elsewhere
+marks `Replaced` with `derived: true`, which a build at the row's own place does not, and a patch tried to write the marker.
+
+**Limits.**
+
+- A hover that adds or takes away a primitive (a background where there was none, a shadow, a border colour from transparent) is a
+  frame built whole; so is a group, a root that might lift, a size by an intrinsic keyword, a root of more than 64 elements, and a
+  row that was scrolled since it was recorded (`Hover:Relocated`: the frame after a scroll builds the rows again where they stand,
+  and the hover after that is patched).
+- A page of at most 64 elements is one root: a patch builds all of it, as a frame built whole does.
+- A hover root that a frame built whole rebuilds builds everything in it.
+- The children of a relocatable row cannot keep their own recordings (`Retained::prepaint_in_scope`), so a rebuilt row builds all its
+  elements. Letting them replay inside the row's recording when the row is rebuilt needs nested relocation semantics (a root nested in
+  a relocatable one recorded in the region of the first, replayed into a scratch frame by a patch, with hitbox ids and registrations
+  that the patch hands out in order): not done, and an open design question.
 
 ## Scroll-only frames (in progress)
 
@@ -1018,11 +1063,15 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   what a hover change names (a colour, an entered parent, `whileHover`, a group, `hasHover`), that `hover_would_matter` is unchanged,
   and what `dispatch` hands out as `paint` and as `restyle` (a listener, a layout hover, a press beside a paint one, an inline span).
 - react `hover-patch.test.tsx`: a paint-only hover, one that changes the padding and one that a `pointerenter` listener hears,
-  over a plain column, cross the rows and back: the picture, the boxes, what is under the pointer and the cursor
+  over a virtual list and a plain column, cross the rows and back: the picture, the boxes, what is under the pointer and the cursor
   are what patching off draws (also under the verifier, with 0 mismatches), a tick is asked for only by the first, and the listener
-  hears the same events; the paint hover is a patched frame for each crossing in a column, none built whole, with
+  hears the same events; the paint hover is a patched frame for each crossing in a column and a list, none built whole, with
   `sceneRebuilds` at most 1 and `inPlacePrimitives` above 0; a `:has(:hover)` ancestor too big to be a root is `Hover` and a frame
   built whole, in a root it is patched; a group is a frame built whole, however small.
+- gpui `window/hover_patch_tests.rs`: a row recorded to be put elsewhere is patched where it was recorded and paints what the frame
+  built whole paints, two rows write in place, a row put elsewhere than it was recorded is declined as `Relocated` (and a row built
+  where it stands after a scroll is patched), a patched row keeps a scroll from putting back the paint before; `scene::tests`:
+  operations are told apart by their fields and a `Replaced` marker is the same whatever its `derived`.
 - `retain.rs` unit tests, hover: a hover is no source of a tick; the outermost root that holds a hover is the hover root and holds
   what is in it; a skipped page hides the roots in it; an element no root holds is `Unpatchable::Hover`; a root found unfit blocks the
   roots in it all the same; a frame after a patch builds the roots it repainted; a frame takes the restyled elements.

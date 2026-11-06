@@ -179,7 +179,7 @@ function patched(kind: Kind, ys: number[], patch = true) {
 }
 
 describeNative("a hover that only paints", { timeout: TIMEOUT }, () => {
-  for (const kind of ["column"] as const) {
+  for (const kind of ["list", "column"] as const) {
     it(`draws what patching off draws, in a ${kind}`, () => {
       const on = crossing(kind, "paint", true)
       const off = crossing(kind, "paint", false)
@@ -218,7 +218,20 @@ describeNative("a hover that only paints", { timeout: TIMEOUT }, () => {
     expect(patched("column", crossings, false).patchedFrames).toBe(0)
   })
 
-  for (const kind of ["column"] as const) {
+  unverified("is a patched frame for each crossing, with nothing else built, in a list", () => {
+    const crossings = [55, 95, 55, 20, 95, 20]
+    const on = patched("list", crossings)
+    expect(on.patchedFrames).toBe(crossings.length)
+    expect(on.declines + on.unpatchable).toBe(0)
+    expect(on.sceneRebuilds).toBeLessThanOrEqual(1)
+    expect(on.inPlacePrimitives).toBeGreaterThan(0)
+    expect(on.painted, "no frame is built whole").toBe(0)
+    const off = patched("list", crossings, false)
+    expect(off.patchedFrames).toBe(0)
+    expect(on.built).toBeLessThan(off.built)
+  })
+
+  for (const kind of ["list", "column"] as const) {
     it(`finds the same pictures under the verifier and with the hover patched, in a ${kind}`, () => {
       // Under GPUIX_RETAIN_VERIFY=1 a patched frame is compared with the frame built whole after it.
       const on = crossing(kind, "paint", true)
