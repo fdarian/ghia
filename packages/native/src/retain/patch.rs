@@ -60,6 +60,7 @@ impl Unpatchable {
             Unpatchable::Ended(_) => "Ended".to_owned(),
             Unpatchable::Dormancy => "Dormancy".to_owned(),
             Unpatchable::Refused(refusal) => refusal.key(),
+            Unpatchable::Hover(_) => "Hover".to_owned(),
         }
     }
 }
@@ -229,6 +230,10 @@ impl GpuixView {
 
     /// Asks for the frames that what still runs after a patch needs, as the end of a frame does.
     fn continue_after_patch(&mut self, window: &mut gpui::Window, stepped: &Stepped, cx: &mut gpui::Context<Self>) {
+        // The elements a hover restyled by paint are drawn: the roots that hold them are older than
+        // what is shown, and the frame built whole after the patches builds them again.
+        let hovered = self.pointer.borrow().take_paint_pending();
+        self.retain.hover_repainted(hovered);
         let running = self.css_transitions.take_active() | self.css_animations.take_active();
         if running || stepped.motion || stepped.motion_values == crate::motion::Demand::Frame {
             self.request_next_frame(window, false);

@@ -145,6 +145,7 @@ The reasons it says no are `Unpatchable`:
 | `Outside` | a time-driven change outside every unit that is not dormant, on an element that has a box and the last build gives no reason for |
 | `Refused` | the element is no unit: `Excluded:<kind>` (`Excluded:fixed` for `position: fixed`; gpui has no root placed by the viewport, `Escape::Viewport` is declined `Surroundings`), `ExcludedBelow:<kind>`, `Escapes`, `Lifts`, `Scrolls`, `LayoutAnimation`, `TooLarge`. What runs on the element is looked at first, so an absolute element whose `top` runs is `LayoutAnimation`, and so is a tick made `Sourced` by the measurement of a layout animation |
 | `Ended` | a unit whose element the last frame no longer found a paint-only animation running on, though a source still lists it, as an SVG shape that holds its end value is: a frame built whole would not make it a unit, so it is not repainted as one |
+| `Hover` | a hover restyled by paint an element that no unit or hover root of the last frame built whole holds ([hover roots](#hover-roots)): the frame is built whole, and visits the roots the next hover is patched in |
 | `Dormancy` | the preview has no unit but elements are about to enter the dormant set or their verdicts moved: the frame settles that ([skipped content](#skipped-content-97)) |
 
 If it says yes, the patcher steps what a frame steps before it builds (`sync_motion_states`, `sync_motion_values`, the clocks of the
@@ -161,8 +162,8 @@ while a scroll animation runs. `patches_ticks` does not need a unit, so a page w
 off with the retention, and with `GPUIX_PATCH_OFF` or `setPatchEnabled(false)`. The counters are listed in
 [testing.md](testing.md#switches-and-counters).
 
-The tick is the only thing a patch can answer. A hover, a React commit, a scroll, a measurement or a click draws a full frame, and
-patching resumes at the next tick.
+The clock and a hover that only paints (see [Hover patches](#hover-patches)) are what a patch can answer. A hover that does
+more than paint, a React commit, a scroll, a measurement or a click draws a full frame, and patching resumes at the next tick.
 
 ## Cases that used to draw whole
 
@@ -607,13 +608,12 @@ after.
 
 **An `auto` host inside the margin but clipped away** by an `overflow: hidden` scroller is not skipped content: it is built and culled, so its loops are dormant like those of any culled card. This holds where the host began visible and was scrolled or pushed out above or below the clip. Below the clip the content mask is empty, and an empty mask culls every child tested against it (see [culling](retention.md#culling-clipped-content-38)): 0 painted, 0 patched and 0 declines over 60 ticks, the cost of an empty page.
 
-## Hover patches (in progress)
+## Hover patches
 
-A hover that only changes how elements paint (a row that takes a background colour under the pointer) is drawn like a tick: the
-roots that hold the restyled elements are built again and gpui writes the primitives they paint over the frame shown, where it
-used to be a frame built whole (8.7M instructions a row crossing in the mailbox proxy of ghia-bench, of which a patch repaints
-two rows). Three parts: the classification of a hover (this section, the first), the route from the pointer to a tick, and the
-roots a patch can repaint ([Hover roots](#hover-roots)).
+A hover that only changes how elements paint (a row that takes another background colour under the pointer) is drawn like a tick:
+the roots that hold the restyled elements are built again and gpui writes the primitives they paint over the frame shown, where it
+used to be a frame built whole. Three parts: the classification of a hover, the route from the pointer to a tick, and the roots a
+patch can repaint ([Hover roots](#hover-roots)).
 
 ### Which hovers paint only
 
@@ -630,33 +630,89 @@ without it in nothing but:
 - `opacity`, while the element stays on the same side of 1 (a value below 1 makes an effect group, so crossing 1 changes the
   kind of what is painted).
 
+**A colour has to keep its visibility.** A patch writes the primitives of an operation over the ones it had, so the operations
+must be the same ones, and gpui paints no quad for a transparent background or border, no glyph for a transparent text and no
+shadow for a transparent one. A hover that gives a background to an element that had none (the mailbox row of ghia-bench:
+`hover: { backgroundColor }` over no background) adds a quad to the operations of the root, and a hover back takes it away, so it
+is `Whole`. The same hover over a row that paints a background of its own is paint-only. (A first version let the patch find
+out: the operations differed in number, gpui declined as `Operations`, and the tick was a patch attempt and then the frame built
+whole, 13.0M instructions a crossing in the mailbox proxy against 8.7M.) A side of a border that draws nothing (no width or no
+line) has no visibility to keep.
+
 Everything else is compared whole, so a property this module does not list is not paint-only: layout, font, `transform`, `cursor`,
 `zIndex`, a gradient, a custom property. A `transition` declared on the element, in the refinement, or (when `color` changes, which
 descendants inherit and would start a transition from) below it, makes the hover whole, since a transition started by the hover
 is a build that a patch does not make. `whileHover` is never paint-only, and neither is a style with `@container` rules.
 
-- **`group`.** An element that declares a group paints only when its own `hover` does and every element below it that follows the
-  group by name (`groupHover` of that group) does. A group bigger than a unit (256 elements) is not looked through and is whole.
-  The element named is the group, not its followers: the followers are below it, in whatever root holds the group.
 - **`hasHover`.** An ancestor whose `:has(:hover)` state changed is named when its `hasHover` refinement paints only.
+- **A group is `Whole`.** An element that declares a group (`group`) restyles its followers, which may be anywhere below it, and
+  a root that holds the group or a follower is not left unrecorded for a patch (see below). `groupHover` followers are
+  therefore a frame built whole.
 - **Several elements** (a row and the text in it) are named together; one that is not paint-only makes the whole change `Whole`.
 
-`restyles()`, which the scroll-only frames ask (`hover_would_matter`), is now `restyle() != None`: it answers as before.
+`restyles()`, which the scroll-only frames ask (`hover_would_matter`), is `restyle() != None`.
 
 ### From the pointer to a tick
 
 `dispatcher::update_hover` leaves the elements of a `Paint` change in `PointerState::paint` and says the view needs no frame
 (`Output::restyle` false); `dispatch` hands them out as `Output::paint`, empty whenever anything else in the same input restyles
-(`restyle` true: a press that changes `:active`, a hover that is not paint-only), since a frame built whole draws them. The
-four places that deliver an input (the deferred move through `submit`, a press, a release and a file drag in
-`events/listeners.rs`) ask the window for a tick, `Window::request_tick`, where they used to notify the view. A hover
-whose boundary events have a listener (on the path of the element, or on `window`) is `Whole`: the script may answer it, and
-the frame it asks for is built whole as before.
+(`restyle` true: a press that changes `:active`, a hover that is not paint-only), since a frame built whole draws them, and keeps
+them in `PointerState::paint_pending` for the tick. The four places that deliver an input (the deferred move through `submit`,
+a press, a release and a file drag in `events/listeners.rs`) ask the window for a tick, `Window::request_tick`, where they used
+to notify the view. A hover whose boundary events have a listener (on the path of the element, or on `window`) is `Whole`: the
+script may answer it, and the frame it asks for is built whole as before.
 
 The tick is drawn by a patch frame if the patcher takes it and by a frame built whole in the same draw if it does not (the
-window is dirty and the view renders, as for any tick), so a decline for any reason still shows the hover: the frame finds it
-in the pointer's chain as it finds any other source. With patching off (`setPatchEnabled(false)`, `GPUIX_PATCH_OFF`) or the
-retention off the tick is always whole.
+window is dirty and the view renders, as for any tick), so a decline for any reason still shows the hover: the frame takes the
+pending elements and the pointer's chain as it takes any other source. With patching off (`setPatchEnabled(false)`,
+`GPUIX_PATCH_OFF`) or the retention off the tick is always whole.
+
+### Hover roots
+
+A patch repaints a retained root, so the frame built whole has to leave the roots that hold a hover ready to be repainted, before
+the pointer arrives: gpui keeps what it needs of a root's surroundings when it records it (`retained(..).patchable()`), and Ghia
+keeps what builds it again.
+
+- **Which roots.** `Retain::paints_hover` says, per subtree revision, whether an element or something below it declares a hover
+  that only paints (`hover_paint::declares_paint_hover`: all it declares of `hover` and `hasHover` paints only, it has no `@container`
+  rule and declares or follows no group) and the subtree holds at most `HOVER_ROOT_MAX_ELEMENTS` (64) elements: a row, a card
+  or a small control, not a page of cards. The outermost recorded or skipped root with the flag is a *hover root*
+  (`Record::hover`) if nothing is lifted out of it and nothing runs on it (`to_record` leaves a root with a running animation
+  unrecorded: it is built every frame). A hover root is wrapped as `gpui::retained(..).patchable()` and its `FrameEnv` is kept in
+  the plan (`Plan::hovers`, `Plan::hover_ids`), next to the units of running animations and apart from them: nothing runs on it, so
+  it is not a source for a time-driven change. A scroller in it is no reason to refuse it: its offset is a source of its own.
+- **What is built inside a hover root is built whole and recorded by no root of its own** (`Retain::hover_unit`, as in a unit:
+  nothing inside is skipped, and no node inside is recorded), so that a patch, which builds the root as one piece, lays out,
+  registers and paints what the recording of the root holds (a nested root is a `retained` element that registers dispatch nodes of
+  its own: 74 against 122 in the first page tried). A frame built whole that rebuilds a hover root therefore builds everything in it,
+  where its nested roots would have been replayed; the cap is what bounds that. This is decided before the root is built, from
+  the tree, so it has to be right for the roots that are recorded:
+  - nothing in the subtree **might lift** (`hover_paint::may_lift`: positioned, a `z-index`, an opacity below 1, a transform,
+    a filter, a mask, a clip path, `content-visibility`), unless the root is a row of a virtual list, which consumes whatever is
+    lifted in it (`lift_absorbed`): a root that lifts is recorded as one that hands elements to the stacking context around, and
+    leaving the roots in it unrecorded changed how it replays (found by the retention fuzz under the verifier);
+  - nothing in it has a **size an intrinsic keyword gives** (`min-content`, `fit-content`, ...): its box is measured under another
+    style and asked for again, and a retained root that holds one is laid out again by every frame unless the box is a root of its own
+    (`retained-intrinsic.test.tsx`);
+  - nothing in it declares or follows a **group**, which the verifier found a patched root of mismatching its frame built whole
+    (`group-state.test.tsx` under `GPUIX_RETAIN_VERIFY=1`); the cause was not found, so a group is a frame built whole.
+  A pass that only lays out builds the root the same way, and registers nothing.
+- **Where the environment comes from.** A root that is built keeps the `BuildStart` taken when it was entered, which is why the flag
+  is asked at `enter` (`Entry::hover`); a root that is skipped (`retained_root`) has it from the skip. Off with patching
+  (`Retain::set_hover_roots`).
+- **The preview.** A tick takes the hover from `Sources::hover_paint`, the elements the dispatcher left in
+  `PointerState::paint_pending`, and does not look at the chain's difference (it is the dispatcher's classification that says
+  whether anything needs to be repainted): `compute_deltas(preview)`. Each element is mapped to the innermost unit or hover root
+  that holds it in the last frame built whole, walking up the tree; an element no root of the frame holds (the frame skipped the
+  root above it, so it never visited it, or the root is not a hover root) is `Unpatchable::Hover(id)` and the frame is built whole:
+  that frame visits the roots, and the hover after it is patched.
+- **After a patch.** The recording gpui holds of a patched root is of the paint before, so the elements the patches repainted are kept
+  (`Retain::hover_patched`) and the next frame built whole puts them on its spine, which builds the roots above them and records
+  them again. A frame built whole takes `hover_paint` and the patched elements as it takes the difference of the chain.
+- **A new row is ready from its first build.** Whether a root blocks the roots in it is decided from the tree and not from the record
+  of its last build, so the first hover of a row that came into view is a patch like any other. (The record was tried: the
+  pass that rebuilds a frame to compare it sees the record the first pass made, and has to build the roots in it as the first pass
+  did.)
 
 ## Scroll-only frames (in progress)
 
@@ -957,13 +1013,19 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   `cargo test -p gpui --lib --features test-support scene:: patch`: 92 passed.
 - `events/hover_paint.rs` unit tests: a colour, a shadow colour, an opacity that stays a layer, every border colour spelling and
   a background are paint; a border width or style, a layout property, a font, a transform, a cursor, a gradient, a custom
-  property, a shadow that moves or appears, an opacity that crosses 1 and a transition are not; a colour a transition below
-  inherits; a group by its followers and another group's follower. `events/dispatcher.rs`: what a
-  hover change names (a colour, an entered parent, `whileHover`, a group, `hasHover`), that `hover_would_matter` is unchanged, and
-  what `dispatch` hands out as `paint` and as `restyle` (a listener, a layout hover, a press beside a paint one, an inline span).
+  property, a shadow that moves or appears, an opacity that crosses 1 and a transition are not; a colour that appears or goes is not
+  (a background, a text, a border, a shadow, an outline); a colour a transition below inherits; what might lift. `events/dispatcher.rs`:
+  what a hover change names (a colour, an entered parent, `whileHover`, a group, `hasHover`), that `hover_would_matter` is unchanged,
+  and what `dispatch` hands out as `paint` and as `restyle` (a listener, a layout hover, a press beside a paint one, an inline span).
 - react `hover-patch.test.tsx`: a paint-only hover, one that changes the padding and one that a `pointerenter` listener hears,
-  over a virtual list and a plain column, cross the rows and back: the picture, the boxes, what is under the pointer and the cursor
-  are what patching off draws, a tick is asked for only by the first, and the listener hears the same events.
+  over a plain column, cross the rows and back: the picture, the boxes, what is under the pointer and the cursor
+  are what patching off draws (also under the verifier, with 0 mismatches), a tick is asked for only by the first, and the listener
+  hears the same events; the paint hover is a patched frame for each crossing in a column, none built whole, with
+  `sceneRebuilds` at most 1 and `inPlacePrimitives` above 0; a `:has(:hover)` ancestor too big to be a root is `Hover` and a frame
+  built whole, in a root it is patched; a group is a frame built whole, however small.
+- `retain.rs` unit tests, hover: a hover is no source of a tick; the outermost root that holds a hover is the hover root and holds
+  what is in it; a skipped page hides the roots in it; an element no root holds is `Unpatchable::Hover`; a root found unfit blocks the
+  roots in it all the same; a frame after a patch builds the roots it repainted; a frame takes the restyled elements.
 - `retain.rs` unit tests: the unit choice (outermost, paint-only, size cap, exclusion, scroll, lift, absolute, nothing skipped
   inside), the preview (each decline, dormant, no effect on the next frame), the capturing tape, a patched tick and a tick declined
   after its clocks stepped under the verifier, each refusal and its key, an absolute element and one holding a box against it are

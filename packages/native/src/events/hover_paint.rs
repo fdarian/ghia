@@ -11,6 +11,12 @@
 //! The comparison is made on the styles the refinement resolves to, not on the refinement: it
 //! copies the paint properties of the style with the state onto the one without, and the two must
 //! be equal after that, so a property this module does not know about is not paint-only.
+//!
+//! A patch writes the primitives of an operation over the ones it had, so the operations must be
+//! the same ones. gpui paints no quad for a transparent background or border and no glyph for
+//! a transparent text, so a colour that is invisible in one style and visible in the other (a
+//! background a hover gives an element that had none) adds or takes away an operation, and is not
+//! paint-only here: it is a frame built whole.
 
 use crate::color::{ColorContext, Scheme};
 use crate::css::length::LengthContext;
@@ -18,10 +24,13 @@ use crate::events::state_styles::{resolve_pointer_states, PointerStates};
 use crate::retained_tree::RetainedTree;
 use crate::style::{BackgroundValue, StyleDesc};
 
-/// The most elements a group's followers are looked for among, and the most that a changed `color`
-/// is checked to reach: a unit holds no more (`retain::UNIT_MAX_ELEMENTS`), so a group bigger than
-/// this one cannot be repainted by a patch anyway.
-const WALK_LIMIT: usize = 256;
+/// The most elements a root that a hover patch repaints holds. A frame built whole that rebuilds the root builds all
+/// of them (what is in it is recorded by no root of its own), so a root is kept to a row, a card or a small
+/// control, and a page of cards is not one: its cards are.
+pub(crate) const HOVER_ROOT_MAX_ELEMENTS: u32 = 64;
+
+/// The most elements that a changed `color` is checked to reach: a root holds no more.
+const WALK_LIMIT: usize = HOVER_ROOT_MAX_ELEMENTS as usize;
 
 /// Whether the `hover` refinement of `style` only changes how the element paints. The element
 /// has to be in `tree` for its `color` to be followed to the elements that inherit it.
@@ -34,36 +43,64 @@ pub(crate) fn has_hover_paints_only(tree: &RetainedTree, id: u64, style: &StyleD
     paints_only(tree, id, style, PointerStates { has_hovered: true, ..Default::default() })
 }
 
-/// Whether the hover of the element `id`, which declares a group, only changes how it and the
-/// elements that follow it paint. The followers are the elements below it with a `groupHover`
-/// style of the group's name, and every one of them has to paint only; a bigger subtree than a
-/// unit holds is not looked through, and is not paint-only.
-pub(crate) fn group_paints_only(tree: &RetainedTree, id: u64, style: &StyleDesc) -> bool {
-    let Some(name) = style.declared_group() else {
-        return true;
-    };
-    let states = PointerStates { group_hovered: true, ..Default::default() };
-    let mut seen = 0;
-    let mut pending: Vec<u64> = tree.elements.get(&id).map(|element| element.children.to_vec()).unwrap_or_default();
-    while let Some(below) = pending.pop() {
-        seen += 1;
-        if seen > WALK_LIMIT {
-            return false;
-        }
-        let Some(element) = tree.elements.get(&below) else {
-            continue;
-        };
-        if let Some(follower) = element.style.as_deref() {
-            if follower.group_hover.is_some()
-                && follower.followed_group() == name
-                && !paints_only(tree, below, follower, states)
-            {
-                return false;
-            }
-        }
-        pending.extend(element.children.iter().copied());
-    }
-    true
+/// Whether an element declares a group or follows one (`groupHover`, `groupActive`, `groupFocusWithin`): the state of a
+/// group reaches its followers through the build that reads it, and a root that holds one end of that and not the other
+/// is not left unrecorded for a hover patch. A group is a frame built whole.
+pub(crate) fn uses_groups(style: &StyleDesc) -> bool {
+    style.declared_group().is_some()
+        || style.group_hover.is_some()
+        || style.group_active.is_some()
+        || style.group_focus_within.is_some()
+}
+
+/// Whether an element might be lifted out of the root it is in, or lift what is in it: it is positioned, has a
+/// `z-index`, an opacity below 1, a transform, a filter, a mask or a clip path, or paints in a layer of its own. A root
+/// that lifts something is recorded as a root that hands it to the stacking context around, which a patch of the root
+/// as one piece does not repeat, so the roots in it are not left unrecorded for one (see `Retain::paints_hover`).
+pub(crate) fn may_lift(style: &StyleDesc) -> bool {
+    let set = |value: &Option<String>| value.as_deref().is_some_and(|value| !value.trim().eq_ignore_ascii_case("none"));
+    style.position.as_deref().is_some_and(|position| !position.eq_ignore_ascii_case("static"))
+        || style.z_index.is_some()
+        || style.opacity.is_some_and(|opacity| opacity < 1.0)
+        || style.animating_opacity
+        || style.animating_transform
+        || style.transform_in_motion
+        || set(&style.transform)
+        || set(&style.translate)
+        || set(&style.rotate)
+        || set(&style.scale)
+        || set(&style.perspective)
+        || set(&style.motion_transform)
+        || style.x.is_some()
+        || style.y.is_some()
+        || set(&style.filter)
+        || set(&style.backdrop_filter)
+        || set(&style.mask)
+        || set(&style.mask_image)
+        || set(&style.clip_path)
+        || style.content_visibility.is_some()
+}
+
+/// Whether an element has a size that an intrinsic keyword gives (`min-content`, `max-content`, `fit-content`, `content`):
+/// its box is measured under another style than its own and asked for again, and a retained root that holds one is laid
+/// out again by every frame unless the box is a root of its own, so it is not left unrecorded for a hover patch.
+pub(crate) fn has_intrinsic_size(style: &StyleDesc) -> bool {
+    use crate::style::DimensionValue;
+    [&style.width, &style.height, &style.min_width, &style.min_height, &style.max_width, &style.max_height, &style.flex_basis]
+        .into_iter()
+        .any(|size| matches!(size, Some(DimensionValue::Intrinsic(_))))
+}
+
+/// Whether a style declares anything a hover of its element could restyle by paint alone, and
+/// nothing a hover would restyle otherwise. The flag a build gives its element for a root that
+/// holds it to be patchable ahead of the hover: it says nothing of which hover happens.
+pub(crate) fn declares_paint_hover(tree: &RetainedTree, id: u64, style: &StyleDesc) -> bool {
+    let declares = style.hover.is_some() || style.has_hover.is_some();
+    declares
+        && style.container_rules.is_none()
+        && !uses_groups(style)
+        && (style.hover.is_none() || hover_paints_only(tree, id, style))
+        && (style.has_hover.is_none() || has_hover_paints_only(tree, id, style))
 }
 
 fn paints_only(tree: &RetainedTree, id: u64, style: &StyleDesc, states: PointerStates) -> bool {
@@ -116,6 +153,7 @@ fn reaches_no_transition(tree: &RetainedTree, id: u64) -> bool {
 /// Whether `on` is `off` with some paint properties set otherwise.
 fn differs_by_paint_only(off: &StyleDesc, on: &StyleDesc) -> bool {
     if !opacity_keeps_layer(off.opacity, on.opacity)
+        || !colours_keep_visibility(off, on)
         || !shadow_keeps_geometry(off, on)
         || !background_is_colour(off)
         || !background_is_colour(on)
@@ -150,6 +188,70 @@ fn differs_by_paint_only(off: &StyleDesc, on: &StyleDesc) -> bool {
 fn opacity_keeps_layer(off: Option<f64>, on: Option<f64>) -> bool {
     let layer = |opacity: Option<f64>| opacity.is_some_and(|opacity| opacity < 1.0);
     layer(off) == layer(on)
+}
+
+/// Whether `value` paints anything: a colour with some alpha. None for one that does not resolve
+/// (a `var()`), which only an equal one is.
+fn paints(value: Option<&str>) -> Option<bool> {
+    match value {
+        None => Some(false),
+        Some(value) => ColorContext::root(Scheme::Light).resolve(value).map(|colour| colour.a > 0.0),
+    }
+}
+
+/// Whether the colour of a property is visible in both styles or in neither, or is written the
+/// same way. A glyph and a shadow of a transparent colour are not painted either.
+fn same_visibility(off: Option<&str>, on: Option<&str>) -> bool {
+    match (paints(off), paints(on)) {
+        (Some(off), Some(on)) => off == on,
+        _ => off == on,
+    }
+}
+
+fn colours_keep_visibility(off: &StyleDesc, on: &StyleDesc) -> bool {
+    let colour = |style: &StyleDesc| match &style.background {
+        Some(BackgroundValue::Color(colour)) => Some(colour.clone()),
+        _ => style.background_color.clone(),
+    };
+    let (off_background, on_background) = (colour(off), colour(on));
+    // A text with no colour of its own inherits one, which paints.
+    let text = |style: &StyleDesc| style.color.clone().unwrap_or_else(|| "black".to_owned());
+    same_visibility(off_background.as_deref(), on_background.as_deref())
+        && same_visibility(Some(&text(off)), Some(&text(on)))
+        && same_visibility(off.outline_color.as_deref(), on.outline_color.as_deref())
+        && same_visibility(
+            off.outline.as_ref().map(|outline| outline.color.as_str()),
+            on.outline.as_ref().map(|outline| outline.color.as_str()),
+        )
+        && same_visibility(off.text_decoration_color.as_deref(), on.text_decoration_color.as_deref())
+        && borders_keep_visibility(off, on)
+        && shadows_keep_visibility(off, on)
+}
+
+fn borders_keep_visibility(off: &StyleDesc, on: &StyleDesc) -> bool {
+    let colors = ColorContext::root(Scheme::Light);
+    let lengths = LengthContext::initial(0.0, 0.0);
+    let (off, on) = (
+        crate::css::border::sides(off, &colors, &lengths),
+        crate::css::border::sides(on, &colors, &lengths),
+    );
+    // A side with no width or no line paints nothing whatever its colour is.
+    let drawn = |side: &crate::css::border::SideBorder| f32::from(side.width) > 0.0 && side.style != crate::css::border::LineStyle::None;
+    off.iter().zip(&on).all(|(off, on)| {
+        let (off_drawn, on_drawn) = (drawn(off), drawn(on));
+        off_drawn == on_drawn && (!off_drawn || off.color.is_transparent() == on.color.is_transparent())
+    })
+}
+
+fn shadows_keep_visibility(off: &StyleDesc, on: &StyleDesc) -> bool {
+    match (&off.box_shadow, &on.box_shadow) {
+        (Some(off), Some(on)) => off
+            .as_slice()
+            .iter()
+            .zip(on.as_slice())
+            .all(|(off, on)| same_visibility(Some(&off.color), Some(&on.color))),
+        _ => true,
+    }
 }
 
 fn background_is_colour(style: &StyleDesc) -> bool {
@@ -220,10 +322,10 @@ mod tests {
     #[test]
     fn a_colour_or_a_shadow_colour_is_paint() {
         assert!(hover_paints(r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##));
-        assert!(hover_paints(r##"{"hover":{"backgroundColor":"#eee"}}"##));
-        assert!(hover_paints(r##"{"hover":{"color":"red","outlineColor":"blue","textDecorationColor":"green"}}"##));
+        assert!(hover_paints(r##"{"background":"#fff","hover":{"background":"#eee"}}"##));
+        assert!(hover_paints(r##"{"hover":{"color":"red"}}"##));
+        assert!(hover_paints(r##"{"outlineColor":"red","textDecorationColor":"red","hover":{"outlineColor":"blue","textDecorationColor":"green"}}"##));
         assert!(hover_paints(r##"{"boxShadow":"0 1px 2px #000","hover":{"boxShadow":"0 1px 2px #f00"}}"##));
-        assert!(hover_paints(r##"{"hover":{"background":"#eee"}}"##));
         assert!(hover_paints(r##"{"opacity":0.5,"hover":{"opacity":0.8}}"##));
     }
 
@@ -257,13 +359,13 @@ mod tests {
             r##""backgroundImage":"linear-gradient(red, blue)""##,
             r##""zIndex":3"##,
         ] {
-            assert!(!hover_paints(&format!(r##"{{"hover":{{"backgroundColor":"#eee",{refinement}}}}}"##)), "{refinement}");
+            assert!(!hover_paints(&format!(r##"{{"backgroundColor":"#fff","hover":{{"backgroundColor":"#eee",{refinement}}}}}"##)), "{refinement}");
         }
     }
 
     #[test]
     fn a_hover_that_sets_a_property_to_the_value_it_has_changes_nothing_else() {
-        assert!(hover_paints(r##"{"padding":4,"hover":{"padding":4,"backgroundColor":"#eee"}}"##));
+        assert!(hover_paints(r##"{"padding":4,"backgroundColor":"#fff","hover":{"padding":4,"backgroundColor":"#eee"}}"##));
     }
 
     #[test]
@@ -282,13 +384,13 @@ mod tests {
 
     #[test]
     fn a_transition_declared_on_the_element_or_in_the_refinement_is_not() {
-        assert!(!hover_paints(r##"{"transition":"background-color 150ms","hover":{"backgroundColor":"#eee"}}"##));
-        assert!(!hover_paints(r##"{"hover":{"backgroundColor":"#eee","transitionDuration":"1s"}}"##));
+        assert!(!hover_paints(r##"{"backgroundColor":"#fff","transition":"background-color 150ms","hover":{"backgroundColor":"#eee"}}"##));
+        assert!(!hover_paints(r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee","transitionDuration":"1s"}}"##));
     }
 
     #[test]
     fn a_custom_property_a_hover_sets_may_feed_anything() {
-        assert!(!hover_paints(r##"{"hover":{"backgroundColor":"#eee","--x":"1px"}}"##));
+        assert!(!hover_paints(r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee","--x":"1px"}}"##));
     }
 
     fn with_child(style: StyleDesc, child: StyleDesc) -> (RetainedTree, u64) {
@@ -304,32 +406,59 @@ mod tests {
 
     #[test]
     fn a_colour_that_a_transition_below_inherits_is_not_paint() {
-        let parent = style(r##"{"hover":{"color":"red"}}"##);
+        let parent = style(r##"{"color":"blue","hover":{"color":"red"}}"##);
         let (tree, id) = with_child(parent.clone(), style(r##"{"transition":"color 1s"}"##));
         assert!(!hover_paints_only(&tree, id, &parent));
         let (tree, id) = with_child(parent.clone(), style(r##"{"color":"blue"}"##));
         assert!(hover_paints_only(&tree, id, &parent));
-        let shadow = style(r##"{"hover":{"backgroundColor":"red"}}"##);
+        let shadow = style(r##"{"backgroundColor":"blue","hover":{"backgroundColor":"red"}}"##);
         let (tree, id) = with_child(shadow.clone(), style(r##"{"transition":"color 1s"}"##));
         assert!(hover_paints_only(&tree, id, &shadow), "a background is not inherited");
     }
 
     #[test]
-    fn a_group_is_paint_when_every_follower_is() {
-        let group = style(r##"{"group":true}"##);
-        let paint = style(r##"{"groupHover":{"backgroundColor":"red"}}"##);
-        let layout = style(r##"{"groupHover":{"width":50}}"##);
-        let (tree, id) = with_child(group.clone(), paint);
-        assert!(group_paints_only(&tree, id, &group));
-        let (tree, id) = with_child(group.clone(), layout);
-        assert!(!group_paints_only(&tree, id, &group));
+    fn a_style_is_flagged_for_a_patchable_root_when_all_it_declares_is_paint() {
+        let paint = style(r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##);
+        let (tree, id) = tree_of(paint.clone());
+        assert!(declares_paint_hover(&tree, id, &paint));
+        let layout = style(r##"{"hover":{"width":4}}"##);
+        let (tree, id) = tree_of(layout.clone());
+        assert!(!declares_paint_hover(&tree, id, &layout));
+        let none = style(r##"{"backgroundColor":"#eee"}"##);
+        let (tree, id) = tree_of(none.clone());
+        assert!(!declares_paint_hover(&tree, id, &none));
     }
 
     #[test]
-    fn a_follower_of_another_group_is_none_of_the_groups_business() {
-        let group = style(r##"{"group":"card"}"##);
-        let other = style(r##"{"groupHover":{"width":50,"group":"toolbar"}}"##);
-        let (tree, id) = with_child(group.clone(), other);
-        assert!(group_paints_only(&tree, id, &group));
+    fn a_colour_that_appears_or_goes_is_an_operation_more_or_less() {
+        // gpui paints no quad, glyph or shadow of a colour with no alpha.
+        assert!(!hover_paints(r##"{"hover":{"backgroundColor":"#eee"}}"##), "a background that appears");
+        assert!(!hover_paints(r##"{"backgroundColor":"#eee","hover":{"backgroundColor":"transparent"}}"##));
+        assert!(!hover_paints(r##"{"backgroundColor":"transparent","hover":{"backgroundColor":"#eee"}}"##));
+        assert!(!hover_paints(r##"{"hover":{"background":"#eee"}}"##));
+        assert!(!hover_paints(r##"{"color":"red","hover":{"color":"transparent"}}"##), "a text that goes");
+        assert!(!hover_paints(r##"{"borderBottom":"1px solid transparent","hover":{"borderBottomColor":"red"}}"##));
+        assert!(!hover_paints(r##"{"boxShadow":"0 1px 2px transparent","hover":{"boxShadow":"0 1px 2px #f00"}}"##));
+        assert!(!hover_paints(r##"{"outlineColor":"transparent","hover":{"outlineColor":"red"}}"##));
+        assert!(hover_paints(r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"rgba(0, 0, 0, 0.1)"}}"##), "alpha is some");
+        assert!(hover_paints(r##"{"backgroundColor":"transparent","hover":{"backgroundColor":"rgba(0, 0, 0, 0)"}}"##));
+    }
+
+    #[test]
+    fn what_lifts_or_forms_a_layer_might_lift() {
+        for lifting in [
+            r##"{"position":"relative"}"##,
+            r##"{"position":"absolute"}"##,
+            r##"{"zIndex":1}"##,
+            r##"{"opacity":0.5}"##,
+            r##"{"transform":"scale(2)"}"##,
+            r##"{"filter":"blur(2px)"}"##,
+            r##"{"clipPath":"circle(50%)"}"##,
+        ] {
+            assert!(may_lift(&style(lifting)), "{lifting}");
+        }
+        for plain in [r##"{"position":"static"}"##, r##"{"opacity":1}"##, r##"{"transform":"none"}"##, r##"{"backgroundColor":"red"}"##] {
+            assert!(!may_lift(&style(plain)), "{plain}");
+        }
     }
 }

@@ -444,6 +444,7 @@ pub fn dispatch(state: &mut PointerState, tree: &RetainedTree, sample: &PointerS
     let mut output = dispatch_input(state, tree, sample);
     let paint = std::mem::take(&mut state.paint);
     if !output.restyle {
+        state.paint_pending.borrow_mut().extend(&paint);
         output.paint = paint;
     }
     output
@@ -902,10 +903,10 @@ impl HoverChange {
                 restyles = true;
                 paints_only &= hover_paint::hover_paints_only(tree, *id, style);
             }
-            // A group's followers restyle with it.
+            // A group's followers restyle with it, and a group is a frame built whole.
             if style.declared_group().is_some() {
                 restyles = true;
-                paints_only &= hover_paint::group_paints_only(tree, *id, style);
+                paints_only = false;
             }
             if restyles {
                 restyled.push(*id);
@@ -2078,7 +2079,7 @@ mod tests {
     #[test]
     fn a_hover_that_changes_a_colour_restyles_by_paint_and_names_the_element() {
         let mut tree = tree(&[]);
-        styled_with(&mut tree, &[(3, r##"{"hover":{"backgroundColor":"#eee"}}"##)]);
+        styled_with(&mut tree, &[(3, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##)]);
         assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Paint(vec![3]));
         assert_eq!(restyle_of(&tree, &[3, 2, 1], &[4, 1]), Restyle::Paint(vec![3]), "and leaving it");
         assert_eq!(restyle_of(&tree, &[], &[4, 1]), Restyle::None, "an element with no style");
@@ -2087,10 +2088,10 @@ mod tests {
     #[test]
     fn a_hover_that_changes_more_than_paint_is_a_whole_frame() {
         let mut tree = tree(&[]);
-        styled_with(&mut tree, &[(3, r##"{"hover":{"backgroundColor":"#eee","paddingLeft":4}}"##)]);
+        styled_with(&mut tree, &[(3, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee","paddingLeft":4}}"##)]);
         assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Whole);
         // One element that is not paint-only makes the change whole, though the other is.
-        styled_with(&mut tree, &[(2, r##"{"hover":{"backgroundColor":"#eee"}}"##)]);
+        styled_with(&mut tree, &[(2, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##)]);
         assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Whole);
         assert_eq!(restyle_of(&tree, &[], &[2, 1]), Restyle::Paint(vec![2]));
     }
@@ -2100,7 +2101,7 @@ mod tests {
         let mut tree = tree(&[]);
         styled_with(
             &mut tree,
-            &[(3, r##"{"hover":{"color":"red"}}"##), (2, r##"{"hover":{"backgroundColor":"#eee"}}"##)],
+            &[(3, r##"{"color":"blue","hover":{"color":"red"}}"##), (2, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##)],
         );
         assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Paint(vec![2, 3]));
     }
@@ -2113,21 +2114,19 @@ mod tests {
     }
 
     #[test]
-    fn a_group_restyles_by_paint_when_its_followers_do() {
+    fn a_group_is_a_frame_built_whole() {
         let mut tree = tree(&[]);
         styled_with(
             &mut tree,
-            &[(2, r##"{"group":true}"##), (3, r##"{"groupHover":{"backgroundColor":"red"}}"##)],
+            &[(2, r##"{"group":true}"##), (3, r##"{"backgroundColor":"blue","groupHover":{"backgroundColor":"red"}}"##)],
         );
-        assert_eq!(restyle_of(&tree, &[], &[2, 1]), Restyle::Paint(vec![2]), "the group, not the follower");
-        styled_with(&mut tree, &[(3, r##"{"groupHover":{"width":50}}"##)]);
         assert_eq!(restyle_of(&tree, &[], &[2, 1]), Restyle::Whole);
     }
 
     #[test]
     fn a_has_hover_ancestor_restyles_by_paint_when_its_refinement_does() {
         let mut tree = tree(&[]);
-        styled_with(&mut tree, &[(2, r##"{"hasHover":{"backgroundColor":"red"}}"##)]);
+        styled_with(&mut tree, &[(2, r##"{"backgroundColor":"blue","hasHover":{"backgroundColor":"red"}}"##)]);
         assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Paint(vec![2]));
         styled_with(&mut tree, &[(2, r##"{"hasHover":{"height":3}}"##)]);
         assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Whole);
@@ -2136,7 +2135,7 @@ mod tests {
     #[test]
     fn a_paint_only_hover_asks_for_a_tick_and_not_for_a_frame() {
         let mut tree = tree(&[]);
-        styled_with(&mut tree, &[(3, r##"{"hover":{"backgroundColor":"#eee"}}"##)]);
+        styled_with(&mut tree, &[(3, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##)]);
         let mut state = PointerState::default();
         let entered = dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1])));
         assert!(!entered.restyle);
@@ -2153,14 +2152,14 @@ mod tests {
     #[test]
     fn a_hover_that_paints_and_sends_an_event_is_a_frame_built_whole() {
         let mut tree = tree(&[(3, "pointerenter")]);
-        styled_with(&mut tree, &[(3, r##"{"hover":{"backgroundColor":"#eee"}}"##)]);
+        styled_with(&mut tree, &[(3, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##)]);
         let mut state = PointerState::default();
         let entered = dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1])));
         assert!(entered.restyle && entered.paint.is_empty());
         assert!(!entered.events.is_empty());
         // A listener that is not for the gesture does not.
         let mut tree = tree_listening_for("pointermove");
-        styled_with(&mut tree, &[(3, r##"{"hover":{"backgroundColor":"#eee"}}"##)]);
+        styled_with(&mut tree, &[(3, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##)]);
         let mut state = PointerState::default();
         let entered = dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1])));
         assert!(!entered.restyle);
@@ -2176,7 +2175,7 @@ mod tests {
         let mut tree = tree(&[]);
         styled_with(
             &mut tree,
-            &[(3, r##"{"hover":{"backgroundColor":"#eee"}}"##), (4, r##"{"hover":{"width":4}}"##)],
+            &[(3, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##), (4, r##"{"hover":{"width":4}}"##)],
         );
         let mut state = PointerState::default();
         let layout = dispatch(&mut state, &tree, &mv(chain_of(&[4, 1])));

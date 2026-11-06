@@ -6942,7 +6942,11 @@ impl GpuixView {
             highlights: HashMap::new(),
             paint_reports: SharedPaintReports::default(),
             containers: Default::default(),
-            retain: crate::retain::Retain::new(),
+            retain: {
+                let mut retain = crate::retain::Retain::new();
+                retain.set_hover_roots(std::env::var_os("GPUIX_PATCH_OFF").is_none());
+                retain
+            },
             tapes: Default::default(),
             pointer: Rc::new(RefCell::new(crate::events::state::PointerState::with_requests(
                 pointer_requests,
@@ -9327,6 +9331,7 @@ impl GpuixView {
         let sources = crate::retain::Sources {
             tree: &tree,
             hovered: pointer.chains().0,
+            hover_paint: pointer.paint_pending(),
             active: pointer.chains().1,
             focus: &focus_styles,
             focusable: &self.focus_handles,
@@ -9908,6 +9913,7 @@ impl gpui::Render for GpuixView {
         self.retain.begin_frame(crate::retain::Sources {
             tree: &tree,
             hovered: pointer.chains().0,
+            hover_paint: pointer.take_paint_pending(),
             active: pointer.chains().1,
             focus: &focus_styles,
             focusable: &self.focus_handles,
@@ -10144,6 +10150,7 @@ fn build_element_in(
     prekeyed: Option<crate::retain::EnterKey>,
 ) -> gpui::AnyElement {
     let mut unit = None;
+    let mut hover_root = None;
     if let Some(known) = ctx.tree.elements.get(&id) {
         let plain = ctx.baseline_probe.is_none()
             && ctx.inline_line.is_none()
@@ -10160,6 +10167,7 @@ fn build_element_in(
                     | crate::layout::table::Part::ColumnGroup
             )
         );
+        let hover = ctx.retain.paints_hover(ctx.tree, id);
         let skip = ctx.retain.enter(crate::retain::Entry {
             id,
             revision: known.subtree_revision,
@@ -10183,6 +10191,7 @@ fn build_element_in(
             costly: known.content.is_some()
                 || !crate::text::inline::is_host_type(&known.element_type)
                 || known.element_type == "text",
+            hover,
         });
         if let Some(skip) = skip {
             ctx.contents_overlay = None;
@@ -10196,6 +10205,14 @@ fn build_element_in(
             relocatable: false,
             forced: false,
         });
+        if unit.is_none() {
+            hover_root = ctx.retain.begin_hover_root().map(|enter| FrameEnv {
+                start: BuildStart::of(ctx),
+                enter,
+                relocatable: false,
+                forced: false,
+            });
+        }
     }
     // After the retained decision: what the `display: contents` ancestors pass down is covered by
     // `contents_key`, and a deferred build of the subtree enters it again.
@@ -10211,7 +10228,7 @@ fn build_element_in(
     let recording = if ctx.tree.elements.contains_key(&id) { ctx.retain.exit() } else { None };
     match (unit, recording) {
         (Some((env, subtree, lift_z)), _) => unit_root(id, env, subtree, lift_z, element, ctx),
-        (None, Some(recording)) => recorded_root(id, recording, element, ctx),
+        (None, Some(recording)) => recorded_root(id, recording, hover_root, element, ctx),
         (None, None) => element,
     }
 }
@@ -10316,6 +10333,7 @@ fn retained_root(
     ctx.stacking_item = false;
     ctx.text_box_trim = Default::default();
     let env = FrameEnv { start, enter: skip.enter, relocatable: skip.overscan.is_some(), forced: ctx.retain.in_forced_content() };
+    let hover_env = env.clone();
     let view = cx.weak_entity();
     let mut retained = gpui::retained(
         retained_id(id),
@@ -10335,6 +10353,10 @@ fn retained_root(
     retained = retained.cull_outset(skip.subtree.outset());
     if let Some(z) = skip.lift_z {
         retained = retained.lift_z(z);
+    }
+    if skip.hover {
+        retained = retained.patchable();
+        ctx.retain.add_hover_unit(crate::retain::Unit { id, env: hover_env });
     }
     retained.into_any_element()
 }
@@ -10424,6 +10446,7 @@ fn unit_root(
 fn recorded_root(
     id: u64,
     recording: crate::retain::Recording,
+    hover: Option<FrameEnv>,
     element: gpui::AnyElement,
     ctx: &mut BuildCtx,
 ) -> gpui::AnyElement {
@@ -10441,6 +10464,10 @@ fn recorded_root(
     }
     if let Some(z) = recording.lift_z {
         retained = retained.lift_z(z);
+    }
+    if let Some(env) = hover.filter(|_| recording.hover) {
+        retained = retained.patchable();
+        ctx.retain.add_hover_unit(crate::retain::Unit { id, env });
     }
     retained.into_any_element()
 }

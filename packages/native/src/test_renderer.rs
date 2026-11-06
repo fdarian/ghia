@@ -1140,7 +1140,10 @@ impl TestGpuixRenderer {
     /// frame before them. On unless `GPUIX_PATCH_OFF`, and never when the retention is off.
     #[napi]
     pub fn set_patch_enabled(&self, enabled: bool) -> Result<()> {
-        update_view(move |view, _window, _cx| view.patch.set_enabled(enabled))
+        update_view(move |view, _window, _cx| {
+            view.patch.set_enabled(enabled);
+            view.retain.set_hover_roots(enabled);
+        })
     }
 
     /// Whether the frames drawn after a list scroll are classified as translates of the frame
