@@ -4783,7 +4783,7 @@ It is current inside a `mousedown` handler, where it is still the element the
 press is about to take focus from. With several windows (one root each), it is
 the focused element of the window that heard a focus event last.
 
-The flip side is that libraries which detect a server with
+Because there is no global `window`, libraries that detect a server with
 `typeof window === "undefined"` treat a Ghia app as server-side rendering.
 TanStack Query (`@tanstack/query-core`, so every adapter) does: queries do not
 retry, `gcTime` defaults to `Infinity` so the cache is never cleared, and no
