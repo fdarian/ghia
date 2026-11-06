@@ -728,7 +728,7 @@ of the 9.2M of an eligible tick): the frames it replaces were already the cheap 
 made again from the log in both (`rebuild_moved` is most of what a patched `Window::draw` does in a profile of the run, `boundsInserts` 255 a tick, the
 same as the replays'); what remains of the tick is the page's present and the JS side. What a translate can save is the scene work, by moving the
 primitives of the rows in the typed vectors and keeping the draw orders where the overlaps of the moved bounds with the rest are the ones the log
-recorded, and the 15M ticks, which are slice 3's (the row that comes in and the hover).
+recorded, and the 15M ticks, which are slice 3's (the row that comes in and the hover). After the scene stopped copying each primitive eight times ([What a replay costs](retention.md#what-a-replay-costs)) the same runs cost 9.77M to 9.80M a tick with the translate, the 328 patched ticks 6.46M and the other ticks 12.5M to 12.6M, 10.00M with the default scrollbar; against 9.75M to 9.77M with `GPUIX_SCROLL_PATCH_OFF=1`, so the translate saves nothing here: both draws make the scene again from the log.
 
 **Not in 2a.** The thumb (a list with a scrollbar is `Thumb`: in the mailbox proxy with its default scrollbar every frame declines), the row
 that comes in at an edge (`Membership`: a layout that builds a row), the hover that changes what is under the pointer (`Hover`), and what the
