@@ -6,7 +6,7 @@
  * and a workspace footer. Markdown turns use the native `<markdown>` element
  * instead of React's safe-mdx tree, because safe-mdx is a React library.
  *
- * Run on desktop: cd examples && bun --hot solid/chat.tsx
+ * `main.tsx` opens it in a window: cd examples && bun run chat-solid
  */
 
 import {
@@ -28,7 +28,6 @@ import {
   DialogTitle,
   isWebBuild,
   motion,
-  render,
   Select,
   SelectContent,
   SelectItem,
@@ -39,34 +38,34 @@ import {
   type HostElement,
   type StyleDesc,
 } from "@ghia/solid"
-import iconCompose from "../assets/icons/compose.svg" with { type: "text" }
-import iconSearch from "../assets/icons/search.svg" with { type: "text" }
-import iconSidebar from "../assets/icons/panel-left.svg" with { type: "text" }
-import iconPanelRight from "../assets/icons/panel-right.svg" with { type: "text" }
-import iconArrowLeft from "../assets/icons/arrow-left.svg" with { type: "text" }
-import iconArrowRight from "../assets/icons/arrow-right.svg" with { type: "text" }
-import iconFolder from "../assets/icons/folder.svg" with { type: "text" }
-import iconSettings from "../assets/icons/settings.svg" with { type: "text" }
-import iconGitBranch from "../assets/icons/git-branch.svg" with { type: "text" }
-import iconLaptop from "../assets/icons/laptop.svg" with { type: "text" }
-import iconLockOpen from "../assets/icons/lock-open.svg" with { type: "text" }
-import iconLock from "../assets/icons/lock.svg" with { type: "text" }
-import iconList from "../assets/icons/list.svg" with { type: "text" }
-import iconZap from "../assets/icons/zap.svg" with { type: "text" }
-import iconPencil from "../assets/icons/pencil.svg" with { type: "text" }
-import iconChevronDown from "../assets/icons/chevron-down.svg" with { type: "text" }
-import iconChevronRight from "../assets/icons/chevron-right.svg" with { type: "text" }
-import iconListFilter from "../assets/icons/list-filter.svg" with { type: "text" }
-import iconSparkle from "../assets/icons/sparkle.svg" with { type: "text" }
-import iconWrench from "../assets/icons/wrench.svg" with { type: "text" }
-import iconSend from "../assets/icons/arrow-up.svg" with { type: "text" }
-import iconCopy from "../assets/icons/copy.svg" with { type: "text" }
-import iconCheck from "../assets/icons/check.svg" with { type: "text" }
-import iconRetry from "../assets/icons/rotate-ccw.svg" with { type: "text" }
-import iconThumbsUp from "../assets/icons/thumbs-up.svg" with { type: "text" }
-import iconThumbsDown from "../assets/icons/thumbs-down.svg" with { type: "text" }
-import iconShare from "../assets/icons/share.svg" with { type: "text" }
-import iconMore from "../assets/icons/ellipsis.svg" with { type: "text" }
+import iconCompose from "../assets/icons/compose.svg?raw"
+import iconSearch from "../assets/icons/search.svg?raw"
+import iconSidebar from "../assets/icons/panel-left.svg?raw"
+import iconPanelRight from "../assets/icons/panel-right.svg?raw"
+import iconArrowLeft from "../assets/icons/arrow-left.svg?raw"
+import iconArrowRight from "../assets/icons/arrow-right.svg?raw"
+import iconFolder from "../assets/icons/folder.svg?raw"
+import iconSettings from "../assets/icons/settings.svg?raw"
+import iconGitBranch from "../assets/icons/git-branch.svg?raw"
+import iconLaptop from "../assets/icons/laptop.svg?raw"
+import iconLockOpen from "../assets/icons/lock-open.svg?raw"
+import iconLock from "../assets/icons/lock.svg?raw"
+import iconList from "../assets/icons/list.svg?raw"
+import iconZap from "../assets/icons/zap.svg?raw"
+import iconPencil from "../assets/icons/pencil.svg?raw"
+import iconChevronDown from "../assets/icons/chevron-down.svg?raw"
+import iconChevronRight from "../assets/icons/chevron-right.svg?raw"
+import iconListFilter from "../assets/icons/list-filter.svg?raw"
+import iconSparkle from "../assets/icons/sparkle.svg?raw"
+import iconWrench from "../assets/icons/wrench.svg?raw"
+import iconSend from "../assets/icons/arrow-up.svg?raw"
+import iconCopy from "../assets/icons/copy.svg?raw"
+import iconCheck from "../assets/icons/check.svg?raw"
+import iconRetry from "../assets/icons/rotate-ccw.svg?raw"
+import iconThumbsUp from "../assets/icons/thumbs-up.svg?raw"
+import iconThumbsDown from "../assets/icons/thumbs-down.svg?raw"
+import iconShare from "../assets/icons/share.svg?raw"
+import iconMore from "../assets/icons/ellipsis.svg?raw"
 
 const C = {
   canvas: "#1A1A1A",
@@ -1892,21 +1891,3 @@ export function ChatApp(propsIn: { turnCount?: number } = {}) {
   )
 }
 
-const isEntryPoint =
-  typeof Bun !== "undefined"
-    ? Bun.isStandaloneExecutable || Bun.main === import.meta.path
-    : typeof process !== "undefined" && process.argv[1]?.endsWith("chat.tsx")
-
-if (isEntryPoint) {
-  render(() => <ChatApp turnCount={1_000} />, {
-    title: "GPUIX Chat · Solid · 1,000 messages",
-    width: 1180,
-    height: 820,
-    titlebarTransparent: true,
-    windowBackground: "blurred",
-    trafficLightX: 16,
-    trafficLightY: 17,
-    debugFrameOverlay: "full",
-    focus: process.env.GPUIX_BACKGROUND !== "1",
-  })
-}

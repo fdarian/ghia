@@ -1,7 +1,7 @@
 /**
  * Drives the Solid chat example through the automation client.
  *
- * Run from this directory so the Solid preload loads:
+ * Runs the app under `ghia dev`, with this directory's Vite config:
  *   cd examples/solid && bun chat.automation.ts
  */
 
@@ -23,8 +23,8 @@ function step(name: string) {
 }
 
 const app = await launch({
-  command: "bun",
-  args: ["chat.tsx"],
+  command: path.resolve(here, "..", "node_modules", ".bin", "ghia"),
+  args: ["dev"],
   cwd: here,
   env: { GPUIX_BACKGROUND: "1" },
 })

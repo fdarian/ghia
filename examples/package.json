@@ -20,9 +20,10 @@
     "test:perf:layout-idle": "NODE_ENV=production vitest run --no-file-parallelism layout-idle.perf.test.tsx",
     "test:perf:draws": "NODE_ENV=production vitest run --no-file-parallelism draws-vs-presents.perf.test.tsx",
     "test:perf:swap": "NODE_ENV=production vitest run --no-file-parallelism page-swap.perf.test.tsx",
-    "native-text":"bun --hot native-text.tsx",
+    "native-text": "bun --hot native-text.tsx",
     "chat": "bun --hot chat.tsx",
-    "chat-solid": "bun --hot solid/chat.tsx",
+    "chat-solid": "cd solid && ghia dev",
+    "chat-solid:build": "cd solid && ghia build",
     "infinite-chat": "bun --hot infinite-chat.tsx",
     "timeline": "bun --hot timeline.tsx",
     "mail": "bun --hot mail.tsx",
@@ -30,22 +31,25 @@
     "bench:serde": "bun bench-serialization.ts"
   },
   "dependencies": {
+    "@ghia/native": "workspace:^",
     "@ghia/react": "workspace:^",
     "@ghia/solid": "workspace:^",
-    "solid-js": "1.9.15",
     "@kmamal/sdl": "^0.11.12",
     "diff": "^7.0.0",
     "react": "^19.2.4",
     "safe-mdx": "1.14.0",
     "shiki": "^3.0.0",
+    "solid-js": "1.9.15",
     "string-dedent": "^3.0.2"
   },
   "devDependencies": {
+    "@ghia/vite": "workspace:^",
     "@types/mdast": "^4.0.4",
     "@types/react": "^19.2.0",
     "cbor-x": "^1.6.6",
     "msgpackr": "^2.0.6",
     "tsx": "^4.19.0",
+    "vite": "^8.3.5",
     "vitest": "^4.0.18"
   }
 }
