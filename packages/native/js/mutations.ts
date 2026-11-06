@@ -71,6 +71,9 @@ export function createMutationQueue(
       enqueue(["destroyElement", id])
       return []
     },
+    detachChild(id) {
+      enqueue(["detachChild", id])
+    },
     appendChild(parentId, childId) {
       enqueue(["appendChild", parentId, childId])
     },

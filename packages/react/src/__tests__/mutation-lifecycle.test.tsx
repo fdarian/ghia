@@ -20,6 +20,7 @@ function recordingRenderer(): MutationRenderer & { styles: object[] } {
     createElement() {},
     destroyElement: () => [],
     appendChild() {},
+    detachChild() {},
     insertBefore() {},
     setStyle(_id, style) {
       styles.push(style)

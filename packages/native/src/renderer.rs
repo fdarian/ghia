@@ -2260,6 +2260,7 @@ impl GpuixRenderer {
     ///
     ///   ["createElement",    id, "type"]
     ///   ["destroyElement",   id]
+    ///   ["detachChild",      id]
     ///   ["appendChild",      parentId, childId]
     ///   ["insertBefore",     parentId, childId, beforeId]
     ///   ["setStyle",         id, { ...style }]
@@ -13400,6 +13401,9 @@ enum BatchOp<'a> {
     DestroyElement {
         id: u64,
     },
+    DetachChild {
+        id: u64,
+    },
     AppendChild {
         parent_id: u64,
         child_id: u64,
@@ -13602,6 +13606,9 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
                     "destroyElement" => BatchOp::DestroyElement {
                         id: next_id(&mut seq, "id")?,
                     },
+                    "detachChild" => BatchOp::DetachChild {
+                        id: next_id(&mut seq, "id")?,
+                    },
                     "appendChild" => BatchOp::AppendChild {
                         parent_id: next_id(&mut seq, "parent id")?,
                         child_id: next_id(&mut seq, "child id")?,
@@ -13744,6 +13751,9 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
             BatchOp::DestroyElement { id } => {
                 let destroyed = tree.destroy_element(id);
                 destroyed_ids.extend(destroyed.iter().map(|&id| id as f64));
+            }
+            BatchOp::DetachChild { id } => {
+                tree.detach_child(id);
             }
             BatchOp::AppendChild {
                 parent_id,
