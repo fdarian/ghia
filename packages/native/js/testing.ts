@@ -260,6 +260,7 @@ interface NativeTestRendererApi
   setScrollbarStyle(style: string): void
   getAppearance(): string
   getWindowTitle(): string
+  setWindowTitle(title: string): void
   setWindowMediaChange(enabled: boolean): void
   getMediaFeatures(): MediaFeatures
   setWindowSize(width: number, height: number): void
@@ -1523,6 +1524,12 @@ export class TestRenderer implements NativeRenderer {
   setScrollbarStyle(style: "overlay" | "classic"): void {
     this.native.flush()
     this.native.setScrollbarStyle(style)
+    this.native.flush()
+  }
+
+  /** Retitles the window, as the live renderer's `setWindowTitle` does. */
+  setWindowTitle(title: string): void {
+    this.native.setWindowTitle(title)
     this.native.flush()
   }
 

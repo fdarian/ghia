@@ -1646,6 +1646,15 @@ impl TestGpuixRenderer {
         window_call(move |_window, cx| cx.set_window_appearance(appearance))
     }
 
+    #[napi]
+    pub fn set_window_title(&self, title: String) -> Result<()> {
+        update_view_or_defer(move |view, window, cx| {
+            view.window_title = title;
+            cx.notify();
+            window.refresh();
+        })
+    }
+
     /// The platform window's title, as the title bar shows it.
     #[napi]
     pub fn get_window_title(&self) -> Result<String> {

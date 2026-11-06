@@ -906,6 +906,7 @@ export declare class TestGpuixRenderer {
    * with another `appearance` or `"system"` is set.
    */
   setAppearance(appearance: string): void
+  setWindowTitle(title: string): void
   /** The platform window's title, as the title bar shows it. */
   getWindowTitle(): string
   getAppearance(): string

@@ -36,6 +36,23 @@ describeNative("test window options", () => {
     titled.unmount()
   })
 
+  it("retitles the platform window, and keeps the title through later frames", () => {
+    const { renderer, render, unmount } = createTestRoot({ title: "Inspector" })
+    try {
+      render(<text>one</text>)
+      renderer.setWindowTitle("Inspector - edited")
+      expect(renderer.getWindowTitle()).toBe("Inspector - edited")
+
+      render(<text>two</text>)
+      expect(renderer.getWindowTitle()).toBe("Inspector - edited")
+
+      renderer.setWindowTitle("")
+      expect(renderer.getWindowTitle()).toBe("")
+    } finally {
+      unmount()
+    }
+  })
+
   it("opens a window with the other options, and ignores fullscreen", () => {
     const { renderer, render, unmount } = createTestRoot({
       width: 320,

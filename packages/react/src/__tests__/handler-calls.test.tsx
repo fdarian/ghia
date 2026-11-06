@@ -213,6 +213,7 @@ function calls(r, ids) {
     setWindowAppearanceChange: () => r.setWindowAppearanceChange(false, 1),
     setWindowEventListeners: () => r.setWindowEventListeners(["keydown"]),
     setWindowKeyEvents: () => r.setWindowKeyEvents(true, true, 1),
+    setWindowTitle: () => r.setWindowTitle("handler-calls"),
     setWindowMediaChange: () => r.setWindowMediaChange(false),
     setWindowSelectionChange: () => r.setWindowSelectionChange(false, 1),
     simulateLostMouseUp: () => r.simulateLostMouseUp(),

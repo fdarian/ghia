@@ -9317,7 +9317,7 @@ const text = renderer.getAllText()
 | Option | In the test window |
 |---|---|
 | `width`, `height` | The window size (`getWindowSize()`). |
-| `title` | The platform window's title, read with `getWindowTitle()`. `"GPUIX"` when unset. |
+| `title` | The platform window's title, read with `getWindowTitle()` and changed with `setWindowTitle()`. `"GPUIX"` when unset. |
 | `appearance` | Applied before the window opens; see [Appearance](#appearance). |
 | `titlebarTransparent` | The window counts as frameless, so [`appRegion`](#window-drag-regions) applies and a press in a drag region is recorded (below). Without it `appRegion` does nothing, as in a window with a titlebar. |
 | `transparent`, `windowBackground` | Set on the native window. |
