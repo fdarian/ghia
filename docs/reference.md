@@ -9604,7 +9604,8 @@ Counters you read off the renderer:
 - `getLayoutPassCount()` and `getPaintedFrameCount()`: layout-only passes (a
   bounds read) and real paints. The test window draws a dirty window whenever
   effects flush, which a display link never does, so `setInlineDraws(false)`
-  stops that and `drawFrame()` ends a frame the way the display does.
+  stops that and `drawFrame()` ends a frame the way the display does: it draws every
+  batch applied before it, whether or not a read came between them.
 
 To measure a tick, pause the clock (`clockPause()`), call `setInlineDraws(false)`, and
 move the clock with `clockAdvance(ms)` before each `drawFrame()`. `clockFastForward(ms)`

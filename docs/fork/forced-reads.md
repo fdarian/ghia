@@ -45,6 +45,8 @@ A read on a dirty window still builds the spine and lays out and prepaints the p
 
 The test renderer draws a dirty window inline whenever effects flush, which hides every pass. `setInlineDraws(false)` stops that and `drawFrame()` ends a frame the way the display link does. `getLayoutPassCount()` counts the passes and `getPaintedFrameCount()` the real paints.
 
+The test renderer keeps the strongest kind of change that no read or flush has notified yet (`UNFLUSHED_MUTATIONS`, set by `applyBatch`). A bounds read, a scroll write and `flushIfDirty` pay it by notifying the view, and so does `drawFrame()`: a frame covers every batch applied before it, so nothing is owed after it. If it did not, a key handler that read layout and then applied one more batch (Solid destroys a remounted subtree after the handler returns) would leave the flag set after the frame, and the `flushIfDirty` at the start of the next key would invalidate the view and make gpui's pre-dispatch draw paint an unchanged page: 17.8M instructions and one painted frame per key in the mailbox bench proxy.
+
 ## Writes that do not make the next read run a pass (#47)
 
 A script that read a rect on every frame after a motion value moved something paid about 6 ms of layout pass at 3000 nodes for a change that cannot move a box. Chrome runs no layout for it.
