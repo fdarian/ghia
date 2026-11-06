@@ -481,7 +481,8 @@ Event handlers are stored in a JS-side registry keyed by `(elementId, eventType)
 ## Packages
 
 - **`@ghia/native`**: Rust bindings plus the framework-neutral TypeScript host runtime. It owns host types, mutation batching, renderer state, event routing, observers, native testing, and automation.
-- **`@ghia/native/host`**: host contracts, mutation helpers, renderer ownership, window observers, selection observation, and text search. Importing it does not load the `.node` addon.
+- **`@ghia/native/host`**: host contracts, mutation helpers, renderer ownership, window observers, selection observation, and text search, and `isWebBuild` (`true` on the browser build). It reads which build it runs on, so importing it loads the `.node` addon.
+- **`@ghia/native/dom-globals`**: a side-effect module that installs the `window`, `document` and no-op scroll globals; `@ghia/native/host` imports it.
 - **`@ghia/native/testing`**: the shared `TestRenderer` over the real `TestGpuixRenderer`.
 - **`@ghia/native/automation`**: the shared automation protocol, client, locators, and process launcher.
 - **`@ghia/react`**: the React reconciler and React components. It preserves its existing exports and re-exports shared testing, automation, search, and observer APIs.
@@ -4743,8 +4744,7 @@ the edit inserted no text. The handler's event is typed `HostInputEvent`.
 ### `window` and `document`
 
 Listen above the element tree with the `window` and `document` objects the
-adapters export. They are `EventTarget`-shaped and are not installed as
-globals, so libraries do not mistake the app for a browser:
+adapters export. They are `EventTarget`-shaped:
 
 ```tsx
 import { document, window } from '@ghia/react' // or '@ghia/solid'
@@ -4761,6 +4761,21 @@ and `focus` and `blur` (which do not bubble, so only capture listeners hear
 them). One event runs window capture, document capture, the element path,
 document bubble, window bubble. The `onKeyDown` and `onKeyUp` options of
 `render()` are window bubble listeners that also receive the renderer.
+
+Importing the adapter (or `@ghia/native/host`) also installs browser globals,
+so code written for the web runs unchanged: `window` is the global object,
+`document` is the same `document`, and `window.addEventListener` is
+`globalThis.addEventListener`. A listener added there is registered with Ghia's
+`window` (so `keydown`, pointer and focus events reach it) and with the runtime's
+own target, so `error`, `unhandledrejection` and `message` listeners keep
+working. `scrollTo`, `scroll` and `scrollBy` exist and do nothing: an app window
+has no document to scroll, as with a page that does not overflow. Libraries that
+check `typeof window` for a browser, such as TanStack Query, see a client.
+Nothing else is installed: `location`, `localStorage`, `innerWidth` and the rest
+are missing, so reading them throws a `ReferenceError` or gives `undefined`. The browser (wasm) build runs in a real page and installs nothing.
+Installing twice is harmless. `isWebBuild`, exported by the adapters and
+`@ghia/native/host`, is `true` on the browser build and `false` on the native
+build; use it to tell them apart, not `typeof window`.
 
 `document.getAnimations()` lists the CSS transitions and animations of every
 window ([Web Animations](#web-animations)).
@@ -4782,18 +4797,6 @@ path, so adding the first listener of a type is what turns it on.
 It is current inside a `mousedown` handler, where it is still the element the
 press is about to take focus from. With several windows (one root each), it is
 the focused element of the window that heard a focus event last.
-
-Because there is no global `window`, libraries that detect a server with
-`typeof window === "undefined"` treat a Ghia app as server-side rendering.
-TanStack Query (`@tanstack/query-core`, so every adapter) does: queries do not
-retry, `gcTime` defaults to `Infinity` so the cache is never cleared, and no
-`staleTime` or `refetchInterval` timers are scheduled. Call this once at startup,
-before creating the `QueryClient`:
-
-```ts
-import { environmentManager } from '@tanstack/query-core'
-environmentManager.setIsServer(() => false)
-```
 
 ### Tab and Escape are defaults
 

@@ -26,6 +26,7 @@ import {
   DialogPopup,
   DialogPortal,
   DialogTitle,
+  isWebBuild,
   motion,
   render,
   Select,
@@ -94,7 +95,7 @@ const TRAFFIC_LIGHT_CLEARANCE =
 const CONTENT_MAX_WIDTH = 720
 const TITLEBAR_HEIGHT = 48
 
-const FONT_SANS = typeof window === "undefined" ? "Helvetica" : "IBM Plex Sans"
+const FONT_SANS = isWebBuild ? "IBM Plex Sans" : "Helvetica"
 
 const ICONS = {
   compose: iconCompose,

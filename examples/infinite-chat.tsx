@@ -13,6 +13,7 @@ import React, { memo, useCallback, useMemo, useRef, useState } from 'react'
 import {
   applyMacCpuThrottleFromEnv,
   flushSync,
+  isWebBuild,
   render,
   useGpuix,
   type DomEvent,
@@ -32,7 +33,7 @@ const C = {
   avatar: '#343434',
 }
 
-const FONT_SANS = typeof window === 'undefined' ? 'Helvetica' : 'IBM Plex Sans'
+const FONT_SANS = isWebBuild ? 'IBM Plex Sans' : 'Helvetica'
 
 /** How many pages stay mounted. The rest are re-fetched from their cursor. */
 const PAGE_CACHE_SIZE = 5

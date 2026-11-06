@@ -1,6 +1,7 @@
 import React, { type ReactNode } from "react"
 import { GpuixRenderer } from "@ghia/native"
 import type { EventPayload, WindowOptions } from "@ghia/native"
+import { isWebBuild } from "@ghia/native/host"
 import {
   createNativeRenderer,
   enableAutomation as enableNativeAutomation,
@@ -411,7 +412,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     })
   }
   if (
-    typeof window !== "undefined" &&
+    isWebBuild &&
     host instanceof GpuixRenderer &&
     !Reflect.has(globalThis, BROWSER_AUTOMATION_KEY)
   ) {

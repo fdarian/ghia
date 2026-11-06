@@ -5,7 +5,7 @@
  */
 
 import { useMemo, useState, type ReactNode } from 'react'
-import { applyMacCpuThrottleFromEnv, render } from '@ghia/react'
+import { applyMacCpuThrottleFromEnv, isWebBuild, render } from '@ghia/react'
 
 import iconSidebar from './assets/icons/panel-left.svg' with { type: 'text' }
 import iconArrowLeft from './assets/icons/arrow-left.svg' with { type: 'text' }
@@ -39,7 +39,7 @@ const C = {
   tree: '#3F3F46',
 }
 
-const FONT = typeof window === 'undefined' ? 'Helvetica' : 'IBM Plex Sans'
+const FONT = isWebBuild ? 'IBM Plex Sans' : 'Helvetica'
 const SIDEBAR_WIDTH = 214
 const LIST_WIDTH = 328
 const TITLEBAR_HEIGHT = 48

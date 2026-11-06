@@ -1,3 +1,4 @@
+import "./dom-globals.js"
 import type { AriaProps } from "./aria.js"
 import type {
   DebugFrameOverlayStats,
@@ -45,6 +46,7 @@ export {
   type AddEventListenerOptions,
   type WindowEventListener,
 } from "./events/window-target.js"
+export { isWebBuild } from "./web-build.js"
 export { preventEventDefault, type DomEvent, type RootEvent } from "./events/dispatch.js"
 export * from "./focus.js"
 export * from "./forms.js"

@@ -1,6 +1,6 @@
 import type { JSX } from "solid-js"
 import { GpuixRenderer, type WindowOptions } from "@ghia/native"
-import type { NativeRenderer, RootEventHandlers } from "@ghia/native/host"
+import { isWebBuild, type NativeRenderer, type RootEventHandlers } from "@ghia/native/host"
 import {
   createNativeRenderer,
   installBrowserAutomation,
@@ -97,7 +97,7 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
     })
   }
   if (
-    typeof window !== "undefined" &&
+    isWebBuild &&
     host.renderer instanceof GpuixRenderer &&
     !Reflect.has(globalThis, "gpuix")
   ) {
