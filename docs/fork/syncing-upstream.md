@@ -95,19 +95,34 @@ each entry or applies it again.
 - **Before.** Every typed vector was sorted in place with `sort_by_key`: by `order`, and the sprite vectors (monochrome,
   subpixel, polychrome) by `(order, tile.tile_id)`. A stable sort of elements of up to 240 bytes moves them about log n times
   each, and the tile id ordered glyphs by where the atlas happened to allocate them.
-- **After.** Each vector is sorted as pairs of `(key, index)`, a few bytes each, with an unstable sort (the index makes the
-  result the stable one), and the permutation is applied to the vector once, so each primitive moves once. The sprite key is
-  `(order, tile.texture_id)`: `AtlasTextureId` and `AtlasTextureKind` derive `Ord` for it. The permutation is also what
-  [a patch](patch-frames.md#how-gpui-patches-windowpatchrs) needs to say where the primitive of each operation went.
+- **After.** Each vector gathers one `u128` per primitive, `key << 32 | index`, and sorts them with the stable `sort`, which
+  finds the dozen sorted runs a frame comes in and merges them. The key is a number that compares as the key does: the draw
+  order for a primitive ordered by it alone, and for a sprite the order, the index of its atlas texture and its kind, packed
+  in that order (`sprite_sort_key`, which gives the order the derived `Ord` of `AtlasTextureId` and `AtlasTextureKind` gives).
+  The index in the low half says which item a number came from, so the permutation is applied to the vector once, and each
+  primitive moves once. The permutation is also what [a patch](patch-frames.md#how-gpui-patches-windowpatchrs) needs to say
+  where the primitive of each operation went.
 - **Why the tie-break does not show.** Primitives of one order never overlap: the bounds tree gives a primitive one more than
   the greatest order of the bounds before it that intersect it. So which of two sprites of an order is drawn first is not
   seen, and the id of the tile was not a meaningful order. (Inside a layer all primitives share the layer's order and do
   overlap; there upstream's tile id reordered them arbitrarily and the new key keeps the paint order within a texture, so it
   reorders less.) The texture is what the renderers batch by (`PrimitiveBatch::MonochromeSprites { texture_id, .. }`), so the
   batches are the same: consecutive sprites of one order and one texture.
-- **Measured** (bench mailbox proxy, test renderer, release addon, instructions per tick, two runs each; scroll, scroll with
-  the default scrollbar, hover): see the commit message of the zed change for the numbers. A frame of about 2000 sprites of
-  240 bytes in a dozen sorted runs spent 161 us (1.27M instructions) in the sprite sort before and 52 us with the texture key.
+- **Measured** (bench mailbox proxy, `examples/solid/mailbox-scroll-hover/profile.tsx`, test renderer, release addon,
+  instructions per tick, two runs each back to back). Each step is against the build before it; the pairs are the two runs,
+  before and after.
+  - `4576d660c1` (the sort by `(order, texture)` with the permutation applied once; ghia `cef50f98`): scroll with the
+    scrollbar hidden 9.41M and 9.40M to 8.96M and 8.95M; scroll with the default scrollbar 10.08M and 10.08M to 9.65M and
+    9.66M; hover 0.51M and 0.50M to 0.48M and 0.47M, with the 18 row crossings under it at 10.06M and 10.00M to 9.43M and
+    9.19M.
+  - `b994fa4773` (one `u128` per primitive in place of the tuple; ghia `b871632e`): mean scroll 8.19M and 8.15M to 7.80M and
+    7.81M; the 328 patched ticks 3.63M and 3.58M to 3.27M and 3.24M; the 392 ticks built whole 12.00M and 11.98M to 11.59M
+    and 11.63M; hover row crossings 9.01M and 9.23M to 8.59M and 8.61M.
+  - `3c3a4187bf` (the stable sort in place of the unstable one; ghia `c6a62710`): mean scroll 7.79M and 7.75M to 7.61M and
+    7.62M; the 328 patched ticks 3.26M and 3.27M to 3.15M and 3.09M; the 392 ticks built whole 11.58M and 11.51M to 11.34M
+    and 11.40M; hover row crossings 8.68M and 8.57M to 8.27M and 8.45M.
+  A frame of about 2000 sprites of 240 bytes in a dozen sorted runs spent 161 us (1.27M instructions) in the sprite sort
+  before and 52 us with the texture key.
 - **Considerations.** A sync that replaces `scene.rs` has to keep the key and the permutation, or the op-to-slot map of
   `Scene::patch_in_place` is lost; the tests `sprites_of_one_order_keep_the_order_they_were_painted_in_within_a_texture_and_group_by_texture`
   and `a_sprite_over_another_is_painted_after_it_whatever_its_texture` fail when the key is lost.
