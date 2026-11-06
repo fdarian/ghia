@@ -201,6 +201,7 @@ function calls(r, ids) {
     setNativeSurfacesAvailable: () => r.setNativeSurfacesAvailable(true),
     setPointerCapture: () => r.setPointerCapture(ids.box, 1),
     setPatchEnabled: () => r.setPatchEnabled(true),
+    setScrollPatchEnabled: () => r.setScrollPatchEnabled(true),
     setRetainLift: () => r.setRetainLift(["svg"]),
     setRetainPlanning: () => r.setRetainPlanning(true),
     setRetainEnabled: () => r.setRetainEnabled(true),
