@@ -14419,7 +14419,7 @@ pub struct ScrollPatchCounters {
     /// The same frames, by every reason that held for them, first or not (`HitboxChain` is only
     /// counted here, it stops no frame), and by what lay behind a reason (`NotRelocatable.noRun`,
     /// `NotRelocatable.noRecording`, `NotRelocatable.unmovable`, `Region.top`, `Region.bottom`,
-    /// `Region.side`).
+    /// `Region.side`, `Thumb.size`, `Thumb.alpha`, `Thumb.appear`, `Thumb.track`).
     pub held: std::collections::HashMap<String, f64>,
 }
 

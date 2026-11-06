@@ -612,12 +612,12 @@ after.
 Every wheel event over a `<virtual-list>` used to draw a whole frame (`ListState::scroll` sets the offset, runs the scroll handler and notifies
 the view), about 12M instructions a tick in the mailbox proxy of ghia-bench, though the only thing that changed is where the rows are.
 A frame like the patch of a tick, that moves the rows of the frame shown by the scroll and builds nothing, has three steps. **Slice 1**
-is the bookkeeping and a classifier that says, before the frame is built, whether it would be a translate of the rows. **Slice 2a
-(this)** draws the frames the classifier calls a translate as one: the operations and hitboxes of the rows are put where their
+is the bookkeeping and a classifier that says, before the frame is built, whether it would be a translate of the rows. **Slice 2a**
+draws the frames the classifier calls a translate as one: the operations and hitboxes of the rows are put where their
 recordings put them at the new position, what the rows wrote into the registries is moved, the scene is made again from its log, and
-nothing is built ([The translate](#the-translate)); it leaves out the scrollbar thumb, which a list with a scrollbar paints (`Thumb`
-declines the frame). **Slice 2b** paints the thumb in the translate and **slice 3** brings in the row at the edge and repaints the hover
-inside the patch: both are not built, and the frames they would draw are drawn whole.
+nothing is built ([The translate](#the-translate)). **Slice 2b (this)** moves the thumb of the list's overlay scrollbar in the same
+frame ([The thumb](#the-thumb)), where 2a declined every frame of a list with a scrollbar as `Thumb`. **Slice 3** brings in the row at the
+edge and repaints the hover inside the patch: both are not built, and the frames they would draw are drawn whole.
 
 **Runs** (zed `window/scroll_patch.rs`). Each frame records, for every relocatable retained root painted inside a list (the rows,
 `retained(..).relocatable(overscan)`, see [retention.md](retention.md#rows-of-a-virtual-list)) and not inside the recording of another
@@ -652,12 +652,13 @@ that holds is counted in `held`, so what else would stop the frame is known too:
 | `Focus` | the frame shown, or a layout there, builds a row outside the viewport for the focus it holds |
 | `A11y` | the accessibility tree is being built |
 | `ScrollAnimation` | a smooth scroll or a scrollbar fade has frames of its own (the owner says it) |
-| `Thumb` | a `<virtual-list>` has a scrollbar (the owner says it, `scrollbar::list_bar_shown`): a scroll moves the thumb or shows it, whether or not it was painted in the frame shown, and the translate does not paint it. A list with `scrollbarWidth: "none"` has none |
+| `Thumb` | the thumb of a bar cannot be put where the scroll puts it ([The thumb](#the-thumb)): the bar of a list would be painted at another alpha, size or track than the frame shown painted it, would appear where the frame shown painted none, or is painted in a way that cannot be moved in place; or a bar of a scroll container is due a frame (`scrollbar::container_bar_stale`, said by the owner's gate). `held` also counts `Thumb.size`, `Thumb.alpha`, `Thumb.appear` and `Thumb.track` |
 | `NotRelocatable` | a row of the frame shown has no run (it is not a relocatable root, or holds several: the runs are not the rows), a run has no recording, or its recording cannot be put elsewhere (built late, a hole, a position kept past the frame). `held` also counts `NotRelocatable.noRun`, `.noRecording` and `.unmovable` |
 
 A frame with none is *eligible*. The owner's part (`Window::set_scroll_patch_gate`, `retain/scroll_gate.rs`) is `Edited` (the root's
 `subtree_revision` against the one `Retain` published when it last recorded a whole frame, or a tree locked by an update),
-`ScrollAnimation` (`scroll::animating()`, `scrollbar::needs_frames()`) and `Other` (nothing to translate from), and, for `Hover`
+`ScrollAnimation` (`scroll::animating()`, `scrollbar::needs_frames()`), `Thumb` (a bar of a scroll container that is not a list's painted at an alpha or thickness
+the clock has since changed, `scrollbar::container_bar_stale`: a translate builds no bar, so it would leave the end of its hold unseen) and `Other` (nothing to translate from), and, for `Hover`
 (`Window::set_scroll_patch_hover`, the same file), whether moving the hover from the chain before to the chain after would restyle or
 emit: `events::dispatcher::hover_would_matter`, which asks the code that `update_hover` runs (`HoverChange`: who enters and leaves, whether
 one of them restyles, whether an event of the change has a listener on the path of the element it is for, or on `window`), of the state
@@ -728,9 +729,36 @@ where it is), and the replays that have not been read. The paragraphs and the te
 a writer has to be shifted here. The alternative (leave the window dirty so that the next read lays out) was not taken: a dirty window is
 drawn again whole by the frame loop.
 
+**The thumb** (`Window::paint_scroll_thumb`, zed `window/scroll_patch.rs`; Ghia `scrollbar.rs`). A list's overlay scrollbar paints its thumb
+over the rows, and a scroll moves it. The bar paints the thumb through `paint_scroll_thumb(list, quad, plan, moved)`, which paints the quad and
+notes, for the frame, the one scene operation it left (a `ScrollThumb`: the operation, the bounds it was painted at, and the owner's two closures),
+or that the bar painted none (not shown, or the content fits). A thumb painted under a general transform, or inside the recording of a row, is not
+tracked and is `Thumb.track`. Before the frame is built the classifier asks `plan` of each bar of the frame shown, with the list already at its new
+position, and `plan` answers with the bounds the thumb goes to, `None` if it does not move, or a `ScrollThumbMiss`, which is a cause of `Thumb`:
+
+- `Thumb.alpha`: the bar would be painted at another alpha than the frame shown painted it (a step of the fade, or a hold that has ended). A scroll
+  that moves the offset starts the second of the hold again, so a bar that was whole stays whole; one that is held by the pointer or dragged is whole;
+  a classic bar is. `plan` runs the prepaint's own arithmetic at the clock's instant (`State::activity`, the same function prepaint uses).
+- `Thumb.appear`: the bar was not painted (alpha 0) and the scroll would show it. The first wheel of a gesture after the fade is a whole frame.
+- `Thumb.size`: the thumb would be longer or thicker (the pointer's thickening has not ended), or the bar would end or begin to have a thumb.
+- `Thumb.track`: the strip, the range or the inset of the bar is not the one painted.
+
+`plan` lays the bar out with `lay_out`, the function prepaint calls, and the rectangle with `bar_rect`, the one paint calls, so a thumb is where the
+frame built whole would put it. What the frame shown painted is captured by the closure at paint time (`ShownBar`), not read from the bar's state,
+which a pass that only lays out may have advanced since. When the rows are moved, each thumb that moves has its quad made again at the new bounds as
+`device_quad` makes it (snapped to the device pixel, placed by the offset the painted one had, so a rect of the same size can be a pixel taller after
+the snap, as it is in the build) and written over its operation; the scene is made again once for the rows and the thumb. An operation that is not the
+quad the bar noted declines the translate before it writes (`applyDeclines.Thumb`). The hitbox of the bar is its **track**, which does not move
+with the thumb, so a scroll moves no hitbox of the bar.
+
+Then `moved` runs for every bar: what the prepaint would have taken from the new position (`move_thumb`): the offset the bar saw, the start of the
+hold (`last_active`, so a bar scrolled by a run of translated frames holds a second after the last of them and does not fade at the end of the
+second after the first), who holds it, the layout the pointer listeners read (`thumb_start` decides whether a press grabs the thumb or pages), and
+the timer for the end of the hold. The timer runs on the clock's instant, since a frame that builds nothing has no `now` of its own.
+
 **The check.** Under the retention verifier (`GPUIX_RETAIN_VERIFY=1`) a translate is followed by the frame built whole at the same instant
 with every subtree built (as a patched tick is), and `verify_scroll_patch` compares what the translate made with it: the primitives of the
-scene with their draw orders, the frame (the scene's operations, every reachable hitbox by value with its parent, tab stops, the dispatch
+scene with their draw orders (the thumb is a primitive of it), the frame (the scene's operations, every reachable hitbox by value with its parent, tab stops, the dispatch
 tree, cursors) and what Ghia keeps outside the frame (`set_scroll_patch_registries`: the painted boxes, the text elements and the start
 regions). A difference is a retention mismatch and fails the tests that run under the verifier. The frame built whole is built from every
 subtree, so the rows it records are `direct` and not movable: the frame after is `NotRelocatable`, and a verified run has about one
@@ -748,8 +776,15 @@ same as the replays'); what remains of the tick is the page's present and the JS
 primitives of the rows in the typed vectors and keeping the draw orders where the overlaps of the moved bounds with the rest are the ones the log
 recorded, and the 15M ticks, which are slice 3's (the row that comes in and the hover). After the scene stopped copying each primitive eight times ([What a replay costs](retention.md#what-a-replay-costs)) the same runs cost 9.77M to 9.80M a tick with the translate, the 328 patched ticks 6.46M and the other ticks 12.5M to 12.6M, 10.00M with the default scrollbar; against 9.75M to 9.77M with `GPUIX_SCROLL_PATCH_OFF=1`, so the translate saves nothing here: both draws make the scene again from the log. The translate had collected the translated operations of every row into a vector and then copied them into the frame (2.2M of a 6.5M patched tick, half of it `memmove`); written straight into their slots they cost 9.30M to 9.33M a tick, the patched ticks 5.37M to 5.42M and the other ticks 12.59M to 12.60M, so the translate now saves about 0.45M a tick against 9.75M to 9.80M with `GPUIX_SCROLL_PATCH_OFF=1`.
 
-**Not in 2a.** The thumb (a list with a scrollbar is `Thumb`: in the mailbox proxy with its default scrollbar every frame declines), the row
-that comes in at an edge (`Membership`: a layout that builds a row), the hover that changes what is under the pointer (`Hover`), and what the
+**Measured, slice 2b** (the same proxy, `PHASE=scroll A11Y=0`, the default scrollbar, release addon, two runs of each before and after):
+before (the build at `cef50f98`): 0 of 720 ticks patched, every frame holds `Thumb` (691 of 720, 328 of them first), mean 9.629M and 9.645M a tick
+(scroll down 10.30M, up 8.96M); after: 328 of 720 patched (the same 328 as with `scrollbarWidth: "none"`), none declined, none mispredicted,
+`Thumb` held once (`Thumb.appear`, the first wheel, which shows the bar), mean 8.981M and 8.993M (down 9.62M, up 8.34M), the patched ticks
+5.01M and 5.06M, the other 392 ticks 12.31M and 12.29M. The mean falls by 0.65M a tick, 6.7%; the patched ticks cost about as much as with the bar
+hidden (5.4M in the previous measurement). The 392 ticks that stay whole are the rows coming in at an edge, a hover and the
+first wheel after a commit, slice 3's.
+
+**Not in 2b.** The row that comes in at an edge (`Membership`: a layout that builds a row), the hover that changes what is under the pointer (`Hover`), and what the
 gate cannot see (a measurement, a link, a command, a running motion: these are the `mispredicted` of an eligible frame that the translate
 would draw wrong; the proxy has none).
 
@@ -802,7 +837,18 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   says it moved without drawing. gpui `window/scroll_patch_tests.rs`: the frames of fractions of a row are the frames built whole (the
   scene with its draw orders, the operations, every hitbox by value, the hit test), also with a root nested in each row, interleaved with
   frames built whole, and with the pointer in a row; a translate that cannot be made declines (`Hitboxes`) and the frame is the one built
-  whole; `Thumb`; the verifier passes a translate and calls a difference in the registries a mismatch.
+  whole; `Thumb` said by the owner; the verifier passes a translate and calls a difference in the registries a mismatch.
+- `scroll-patch-thumb.test.tsx` (react): a virtual list with the scrollbar the system draws, wheeled by pixels and fractions of a row: some frames are
+  translates, none mispredicted, no `Thumb` after the wheel that shows the bar, and the picture after each wheel (the thumb is in it) equals the
+  same wheels with the translate off; 70 ticks of a pixel at a vsync each (1.1 s) then the second of the hold after the last, and the fade, equal
+  the control at every step, which pins that a translated frame starts the hold again (it fails if `move_thumb` leaves `last_active` alone); the
+  first wheel after the fade is `Thumb.appear` and drawn whole, and the wheel after it is a translate again; wheels while the bar fades equal the
+  control. Under the verifier the translates of the first case are compared with the frame built whole and 0 mismatches are asserted.
+  gpui `window/scroll_patch_tests.rs`: a list with a bar whose thumb the test moves (`Bar`): the frames of nine wheels with the thumb are the frames
+  built whole (the scene with the thumb's quad, the operations, the hitboxes), the bar is told once for each frame that moved the rows, each cause
+  (`alpha`, `size`, `track`, and `appear` for a bar not painted) holds only its own and draws whole without telling the bar, a thumb painted under a
+  rotation is `track`, an operation that is not the thumb's quad declines (`applyDeclines.Thumb`) before anything is written, the verifier passes a
+  moved thumb and calls one that was put elsewhere than the bar paints it a mismatch.
 - Transforms in three dimensions patch every tick with no decline of either kind (`getPatchCounters`): `transform-css-patch.test.tsx` for a transition of `rotateY` under a perspective, an animation of 3D lists that do not pair, of the depth of `transform-origin` around a rotation, and of the `perspective` and `perspective-origin` of the parent; `motion-transform.test.tsx` for a Motion tween of `rotateY` whose card hides the face that turns away on the patched ticks (`faces_away` is published with the box, not compared by the tape; [paint-and-transforms.md](paint-and-transforms.md#retention-and-patched-ticks)).
 - `animation-frame-work.test.tsx`: at 500 and 5000 nodes every loop kind (keyframes colour, native `motion` colour, colour
   transition, svg stroke dash, `motion` and keyframes opacity, the colour loop of a relative box with and without a `z-index`, loops

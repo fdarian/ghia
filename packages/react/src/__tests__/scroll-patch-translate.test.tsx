@@ -4,7 +4,7 @@
  * and hitboxes of the rows are made again from their recordings at the new place, what the rows wrote into the registries is
  * moved, and nothing is built (`getPatchCounters().scrollPatch.patched`). The picture, the boxes of the rows, what is under a
  * point, the cursor and the hover are what they are with the translate off (`setScrollPatchEnabled(false)`). Rows of 40 in a view
- * of 100, in a list with no scrollbar (a scrollbar is a `Thumb`, which the translate does not paint yet), and rows narrower than
+ * of 100, in a list with no scrollbar (the thumb of one is in `scroll-patch-thumb.test.tsx`), and rows narrower than
  * the list so that a pointer in the gutter takes no row.
  */
 

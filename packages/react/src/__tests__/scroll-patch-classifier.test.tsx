@@ -5,7 +5,7 @@
  * reason it is not (`getPatchCounters().scrollPatch`). The frames it calls a translate are drawn as one
  * (`scroll-patch-translate.test.tsx`), and the picture, the boxes and what is under a point are what they are with it off. The
  * cases are those the gpui tests of `window/scroll_patch.rs` pin, through the adapter: rows of 40 in a view of 100, in a list
- * with no scrollbar (a scrollbar is a `Thumb`, which the translate does not paint yet).
+ * with no scrollbar unless the case says (the thumb of one is moved by the translate, `scroll-patch-thumb.test.tsx`).
  */
 
 import fs from "fs"
@@ -120,13 +120,13 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
     }
   })
 
-  it("counts the frames of a list with a scrollbar as a thumb", () => {
+  unverified("counts the frames of a list with a scrollbar as translates: the thumb moves with the rows", () => {
     const { renderer, unmount } = open("inert", true)
     try {
       warm(renderer, 100, 50)
       const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 50, by: 5 }))
-      expect(delta).toMatchObject({ frames: 1, eligible: 0, mispredicted: 0, reasons: { Thumb: 1 }, held: { Thumb: 1 } })
-      expect(renderer.getPatchCounters().scrollPatch.patched).toBe(0)
+      expect(delta).toEqual({ frames: 1, eligible: 1, mispredicted: 0, hoverOnly: 0, reasons: {}, held: {} })
+      expect(renderer.getPatchCounters().scrollPatch.patched).toBe(2)
     } finally {
       unmount()
     }

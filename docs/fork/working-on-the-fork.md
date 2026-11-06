@@ -276,8 +276,11 @@ See [patch-frames.md](patch-frames.md).
   `Hitbox::relocated`), not from the frame shown moved by the offset: a change to what a relocated replay does to either belongs in
   those two and the translate follows. It writes nothing before every row is validated. What a root writes outside the frame is moved
   by `RetainedPhase::Scrolled` and `TapeStore::shift`: a registry that gains a writer in a paint listener has to be moved there
-  (`Layered` entries carry the list they were made into). `scroll_patch_tests.rs` and `scroll-patch-translate.test.tsx` under the
-  verifier are the check.
+  (`Layered` entries carry the list they were made into). The thumb of a list's bar is moved by the same translate: what the bar's
+  prepaint and paint compute from the offset goes in `scrollbar.rs`'s `lay_out`, `State::activity` and `bar_rect`, which the bar's
+  plan (`plan_thumb`) and the update after the move (`move_thumb`) call too, so a new input of the thumb's place, size or alpha has to
+  reach them or the translate puts the thumb where the build would not. `scroll_patch_tests.rs`, `scroll-patch-translate.test.tsx` and
+  `scroll-patch-thumb.test.tsx` under the verifier are the check.
 
 ### Forced reads, observers and content visibility
 

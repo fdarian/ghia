@@ -1,6 +1,7 @@
 //! What gpui asks of Ghia before it classifies the frame drawn after a list scroll
 //! (`Window::set_scroll_patch_gate`): whether the tree is the one the frame shown was built from,
-//! and whether an animation of the scroll has frames of its own to run. And what a hit chain that
+//! and whether an animation of the scroll has frames of its own to run, or the bar of a scroll container is due one (the bars of a
+//! list are planned by the bar, `scrollbar::plan_thumb`, through `Window::paint_scroll_thumb`). And what a hit chain that
 //! a scroll changes would do to the pointer (`Window::set_scroll_patch_hover`): restyle an
 //! element or reach a listener, or nothing. The classifier is in zed
 //! (`window/scroll_patch.rs`); see [patch-frames.md](../../../../docs/fork/patch-frames.md).
@@ -85,7 +86,7 @@ impl GpuixView {
             if crate::scroll::animating() || crate::scrollbar::needs_frames() {
                 return Some(ScrollPatchReason::ScrollAnimation);
             }
-            crate::scrollbar::list_bar_shown().then_some(ScrollPatchReason::Thumb)
+            crate::scrollbar::container_bar_stale().then_some(ScrollPatchReason::Thumb)
         })));
     }
 }
