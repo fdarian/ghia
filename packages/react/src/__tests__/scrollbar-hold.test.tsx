@@ -54,14 +54,16 @@ function shot(renderer: Renderer): Buffer {
   return fs.readFileSync(file)
 }
 
+/** The thumb is black or white by the system appearance, and each is invisible on one of them. */
+const GROUND = "#808080"
 const BLANK = { width: 300, height: 900 }
 const scroller = (
-  <div testId="scroller" style={{ width: 300, height: 150, flexShrink: 0, overflow: "auto" }}>
+  <div testId="scroller" style={{ width: 300, height: 150, flexShrink: 0, overflow: "auto", backgroundColor: GROUND }}>
     <div style={BLANK} />
   </div>
 )
 const list = (
-  <virtual-list testId="scroller" itemCount={30} estimatedItemHeight={30} style={{ width: 300, height: 150, flexShrink: 0 }}>
+  <virtual-list testId="scroller" itemCount={30} estimatedItemHeight={30} style={{ width: 300, height: 150, flexShrink: 0, backgroundColor: GROUND }}>
     {Array.from({ length: 30 }, (_, index) => (
       <div key={index} style={{ height: 30 }} />
     ))}
