@@ -5590,6 +5590,80 @@ mod tests {
         assert_eq!(page.row(shape, 3, |_| {}), None);
     }
 
+    /// The row 3 of a list, built in a session of its own inside `scroller` with the `lift_z` the renderer
+    /// decided for its root (a child of the row lifts one more, `child_lifted`), and what the frame after
+    /// skips it with.
+    fn row_skip(page: &mut Units, scroller: Scroller, lift_z: Option<i32>, child_lifted: bool) -> Skip {
+        for _ in 0..2 {
+            let shape = page.list_frame(false);
+            page.retain.begin_row(shape, 3);
+            let skip = page.enter_in(3, Some(scroller));
+            if skip.is_none() {
+                page.retain.stacking(|| (lift_z, true));
+                page.leaf(4);
+                if child_lifted {
+                    assert!(!page.enter(5));
+                    page.retain.stacking(|| (Some(1), false));
+                    page.retain.exit();
+                }
+                page.retain.exit();
+            }
+            page.retain.finish_row();
+            if let Some(skip) = skip {
+                return skip;
+            }
+        }
+        unreachable!("the second frame found the row unchanged")
+    }
+
+    #[test]
+    fn a_row_root_that_does_not_lift_is_relocatable_whatever_is_lifted_inside_its_context() {
+        let window = gpui::WindowId::from(4);
+        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), reach: gpui::px(780.0) };
+        crate::automation::set_bounds(window, 3, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
+        // `None` is what the renderer decides for the root of a row: the list's lift barrier takes its own
+        // position. A row is a stacking context, so the absolute children of a mailbox row stay in it.
+        let skip = row_skip(&mut Units::new(), list, None, true);
+        assert_eq!(skip.lift_z, None);
+        assert_eq!(skip.overscan, Some(gpui::px(390.0)));
+        // A root that lifts is a hole in gpui's recording and cannot be put elsewhere.
+        let skip = row_skip(&mut Units::new(), list, Some(0), true);
+        assert_eq!(skip.lift_z, Some(0));
+        assert_eq!(skip.overscan, None);
+    }
+
+    #[test]
+    fn a_root_that_is_no_row_keeps_its_lift_and_is_not_relocatable() {
+        let window = gpui::WindowId::from(5);
+        let scroller = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), reach: gpui::px(780.0) };
+        crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
+        let root_skip = |lift_z: Option<i32>| {
+            let mut page = Units::new();
+            for _ in 0..2 {
+                let mut skip = None;
+                page.edit(1);
+                page.frame(&[], false, |page| {
+                    page.element(1, None, |page| {
+                        skip = page.enter_in(2, Some(scroller));
+                        if skip.is_none() {
+                            page.retain.stacking(|| (lift_z, false));
+                            page.leaf(3);
+                            page.retain.exit();
+                        }
+                    });
+                });
+                if let Some(skip) = skip {
+                    return skip;
+                }
+            }
+            unreachable!("the second frame found the root unchanged")
+        };
+        let lifting = root_skip(Some(0));
+        assert_eq!(lifting.lift_z, Some(0));
+        assert_eq!(lifting.overscan, None);
+        assert_eq!(root_skip(None).overscan, Some(gpui::px(390.0)));
+    }
+
     #[test]
     fn begin_unit_is_refused_in_a_row() {
         let mut page = Units::new();

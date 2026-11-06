@@ -11030,6 +11030,14 @@ fn build_element_unpumped(
         }
     });
     let style = item_style.as_ref().or(style);
+    // The list prepaints a row inside a lift barrier, which hands nothing to the context around the
+    // list: the root of a row does not lift, whatever its position, `z-index` or composite, as
+    // `stacking::lifted_z` says of the retained tree.
+    let lift_absorbed = stacking_root && crate::layout::stacking::is_virtual_row(tree, element);
+    let absorbed_style = style
+        .filter(|_| lift_absorbed)
+        .map(|style| StyleDesc { lift_absorbed: true, ..style.clone() });
+    let style = absorbed_style.as_ref().or(style);
     // An underline sits where the box that declares it says, and that box inherits
     // its offset.
     let offset_style = style.and_then(|style| {
@@ -11097,7 +11105,7 @@ fn build_element_unpumped(
     );
     ctx.retain.stacking(|| {
         (
-            crate::layout::stacking::lift_z(&resolved, stacking_item),
+            if lift_absorbed { None } else { crate::layout::stacking::lift_z(&resolved, stacking_item) },
             stacking_root
                 || focus_folded
                     .as_deref()
