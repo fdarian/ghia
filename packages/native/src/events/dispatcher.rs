@@ -792,79 +792,152 @@ fn apply_capture(state: &mut PointerState, emitter: &mut Emitter) {
     state.explicit = requested;
 }
 
+/// The boundary event types of a hover change, as Chrome sends them: `out`, `leave`, `over`,
+/// `enter`; the four of the pointer, then the four of the mouse.
+const HOVER_EVENTS: [(&str, &str, &str, &str); 2] = [
+    ("pointerout", "pointerleave", "pointerover", "pointerenter"),
+    ("mouseout", "mouseleave", "mouseover", "mouseenter"),
+];
+
+/// What moving the hover chain to a new target changes.
+struct HoverChange {
+    new_path: Vec<u64>,
+    old_target: Option<u64>,
+    new_target: Option<u64>,
+    leaving: Vec<u64>,
+    entering: Vec<u64>,
+}
+
+impl HoverChange {
+    /// The change from the chain `hovered` to the one of `new_target`, if they differ.
+    fn between(tree: &RetainedTree, hovered: &[u64], new_target: Option<u64>) -> Option<Self> {
+        let new_path = new_target
+            .map(|target| event_path(tree, target))
+            .unwrap_or_default();
+        if hovered == new_path {
+            return None;
+        }
+        let new_target = new_path.first().copied();
+        let old_target = hovered
+            .first()
+            .copied()
+            .filter(|id| tree.elements.contains_key(id));
+        let leaving = hovered
+            .iter()
+            .copied()
+            .filter(|id| tree.elements.contains_key(id) && !new_path.contains(id))
+            .collect();
+        let entering = new_path
+            .iter()
+            .rev()
+            .copied()
+            .filter(|id| !hovered.contains(id))
+            .collect();
+        Some(Self {
+            new_path,
+            old_target,
+            new_target,
+            leaving,
+            entering,
+        })
+    }
+
+    fn left_target(&self) -> Option<u64> {
+        self.old_target.filter(|old| Some(*old) != self.new_target)
+    }
+
+    fn entered_target(&self) -> Option<u64> {
+        self.new_target.filter(|new| Some(*new) != self.old_target)
+    }
+
+    /// Whether an element that changed state declares a style for it, or is a follower of a group
+    /// that does, or listens for the gesture.
+    fn restyles(&self, tree: &RetainedTree, hovered: &[u64]) -> bool {
+        self.leaving
+            .iter()
+            .chain(&self.entering)
+            .any(|id| {
+                // A group's followers restyle with it.
+                has_state_style(tree, *id, |style| {
+                    style.hover.is_some() || style.declared_group().is_some()
+                }) || crate::motion::listens_for_gesture(tree, *id, "whileHover")
+            })
+            || relational_restyle(tree, hovered, &self.new_path, |style| style.has_hover.is_some())
+    }
+
+    /// Whether any boundary event of the change has a listener: on the path of the element it is
+    /// for, or on `window` or `document`.
+    fn emits(&self, tree: &RetainedTree, requests: &PointerRequests) -> bool {
+        let listens = |target: u64, event_type: &str| {
+            path_listens(tree, target, event_type) || requests.window_listens(event_type)
+        };
+        HOVER_EVENTS.iter().any(|(out, leave, over, enter)| {
+            self.left_target().is_some_and(|old| {
+                listens(old, out) || self.leaving.iter().any(|id| listens(*id, leave))
+            }) || self.entered_target().is_some_and(|new| {
+                listens(new, over) || self.entering.iter().any(|id| listens(*id, enter))
+            })
+        })
+    }
+}
+
 /// Moves the hover chain to `new_target` and emits the boundary events. Returns
 /// whether an element that changed state has a `hover` style.
 pub(super) fn update_hover(state: &mut PointerState, emitter: &mut Emitter, new_target: Option<u64>) -> bool {
     let tree = emitter.tree;
-    let new_path = new_target
-        .map(|target| event_path(tree, target))
-        .unwrap_or_default();
-    if state.hovered == new_path {
+    let Some(change) = HoverChange::between(tree, &state.hovered, new_target) else {
         return false;
-    }
-    let new_target = new_path.first().copied();
-    let old_target = state
-        .hovered
-        .first()
-        .copied()
-        .filter(|id| tree.elements.contains_key(id));
-
-    let leaving: Vec<u64> = state
-        .hovered
-        .iter()
-        .copied()
-        .filter(|id| tree.elements.contains_key(id) && !new_path.contains(id))
-        .collect();
-    let entering: Vec<u64> = new_path
-        .iter()
-        .rev()
-        .copied()
-        .filter(|id| !state.hovered.contains(id))
-        .collect();
+    };
 
     let left = Fields {
-        related_target: new_target,
+        related_target: change.new_target,
         hovered: Some(false),
         ..Default::default()
     };
     let entered = Fields {
-        related_target: old_target,
+        related_target: change.old_target,
         hovered: Some(true),
         ..Default::default()
     };
-    let left_target = old_target.filter(|old| Some(*old) != new_target);
-    let entered_target = new_target.filter(|new| Some(*new) != old_target);
-    // Chrome sends the four pointer boundary events, then the four mouse ones.
-    for (out, leave, over, enter) in [
-        ("pointerout", "pointerleave", "pointerover", "pointerenter"),
-        ("mouseout", "mouseleave", "mouseover", "mouseenter"),
-    ] {
+    let (left_target, entered_target) = (change.left_target(), change.entered_target());
+    for (out, leave, over, enter) in HOVER_EVENTS {
         if let Some(old_target) = left_target {
             emitter.emit(out, old_target, left);
-            for id in &leaving {
+            for id in &change.leaving {
                 emitter.emit(leave, *id, left);
             }
         }
         if let Some(new_target) = entered_target {
             emitter.emit(over, new_target, entered);
-            for id in &entering {
+            for id in &change.entering {
                 emitter.emit(enter, *id, entered);
             }
         }
     }
 
-    let restyle = leaving
-        .iter()
-        .chain(&entering)
-        .any(|id| {
-            // A group's followers restyle with it.
-            has_state_style(tree, *id, |style| {
-                style.hover.is_some() || style.declared_group().is_some()
-            }) || crate::motion::listens_for_gesture(tree, *id, "whileHover")
-        })
-        || relational_restyle(tree, &state.hovered, &new_path, |style| style.has_hover.is_some());
-    state.hovered = new_path;
+    let restyle = change.restyles(tree, &state.hovered);
+    state.hovered = change.new_path;
     restyle
+}
+
+/// Whether moving the hover from the chain of `before` to the one of `after`, the topmost elements
+/// under the pointer, would restyle an element or emit a pointer boundary event that someone listens
+/// for, as `update_hover` does. The scroll-only frames ask it of the hit chain a scroll would leave
+/// under a pointer that has not moved: a hit chain that changes without either is no reason to draw
+/// the page again. A target that holds the pointer (capture, lock) is the target before and after.
+pub(crate) fn hover_would_matter(
+    state: &PointerState,
+    tree: &RetainedTree,
+    before: Option<u64>,
+    after: Option<u64>,
+) -> bool {
+    let pinned = pinned_target(state, tree);
+    let hovered = pinned
+        .or(before)
+        .map(|target| event_path(tree, target))
+        .unwrap_or_default();
+    HoverChange::between(tree, &hovered, pinned.or(after))
+        .is_some_and(|change| change.restyles(tree, &hovered) || change.emits(tree, &state.requests))
 }
 
 /// A button changing while another is held is no new pointer contact: DOM
@@ -1842,6 +1915,85 @@ mod tests {
         assert!(!dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1]))).restyle);
         assert!(dispatch(&mut state, &tree, &mv(chain_of(&[4, 1]))).restyle);
         assert!(!dispatch(&mut state, &tree, &mv(chain_of(&[1]))).restyle);
+    }
+
+    /// Asks `hover_would_matter` for a move to `target`, then moves there, and says whether the move did
+    /// restyle or emit. The two have to agree for every move.
+    fn matters_as_a_move_does(state: &mut PointerState, tree: &RetainedTree, chain: &[u64]) -> bool {
+        let asked = hover_would_matter(state, tree, state.hovered.first().copied(), chain.first().copied());
+        let output = dispatch(state, tree, &mv(chain_of(chain)));
+        assert_eq!(asked, output.restyle || !output.events.is_empty(), "moving to {chain:?}: {:?} restyle {}", names(&output), output.restyle);
+        asked
+    }
+
+    #[test]
+    fn a_hover_change_with_no_style_and_no_listener_does_not_matter() {
+        let tree = tree(&[(1, "click")]);
+        let mut state = PointerState::default();
+        for chain in [&[3, 2, 1][..], &[4, 1], &[2, 1], &[1], &[3, 2, 1]] {
+            assert!(!matters_as_a_move_does(&mut state, &tree, chain), "{chain:?}");
+        }
+    }
+
+    #[test]
+    fn a_hover_change_that_restyles_or_reaches_a_listener_matters() {
+        let hover: StyleDesc = serde_json::from_str(r#"{"hover":{"opacity":0.5}}"#).unwrap();
+        let has_hover: StyleDesc = serde_json::from_str(r#"{"hasHover":{"opacity":0.5}}"#).unwrap();
+        let styled = |id: u64, style: &StyleDesc| {
+            let mut styled = tree(&[]);
+            styled.set_style(id, Arc::new(style.clone()));
+            styled
+        };
+
+        // A hover style on the element entered, and none on the one the pointer returns to.
+        let on_child = styled(3, &hover);
+        let mut state = PointerState::default();
+        assert!(matters_as_a_move_does(&mut state, &on_child, &[3, 2, 1]));
+        assert!(!matters_as_a_move_does(&mut state, &on_child, &[3, 2, 1]), "nothing changed");
+        assert!(matters_as_a_move_does(&mut state, &on_child, &[4, 1]), "and left");
+        assert!(!matters_as_a_move_does(&mut state, &on_child, &[2, 1]));
+
+        // :has(:hover) on the ancestor, when a descendant of it gains the pointer.
+        let on_parent = styled(2, &has_hover);
+        let mut state = PointerState::default();
+        assert!(matters_as_a_move_does(&mut state, &on_parent, &[3, 2, 1]));
+        assert!(matters_as_a_move_does(&mut state, &on_parent, &[2, 1]));
+        assert!(!matters_as_a_move_does(&mut state, &on_parent, &[4, 1]));
+
+        // A boundary event type, on the element, on an ancestor that hears it bubble, and on window.
+        for (listening, event_type, matters) in [
+            (3, "pointerenter", true),
+            (3, "mouseleave", true),
+            (1, "pointerover", true),
+            (1, "pointerenter", false),
+            (4, "pointerout", true),
+            (2, "click", false),
+        ] {
+            let listened = tree(&[(listening, event_type)]);
+            let tree = &listened;
+            let mut state = PointerState::default();
+            dispatch(&mut state, tree, &mv(chain_of(&[1])));
+            let mut asked = false;
+            for chain in [&[3, 2, 1][..], &[4, 1], &[3, 2, 1], &[1]] {
+                asked |= matters_as_a_move_does(&mut state, tree, chain);
+            }
+            assert_eq!(asked, matters, "{listening} listens for {event_type}");
+        }
+        let plain = tree(&[]);
+        let mut state = PointerState::default();
+        state.requests.set_window_events(vec!["pointerover".to_string()]);
+        assert!(matters_as_a_move_does(&mut state, &plain, &[4, 1]));
+    }
+
+    #[test]
+    fn a_pinned_target_keeps_the_hover_whatever_is_under_the_pointer() {
+        let hover: StyleDesc = serde_json::from_str(r#"{"hover":{"opacity":0.5}}"#).unwrap();
+        let mut tree = tree(&[]);
+        tree.set_style(3, Arc::new(hover));
+        let mut state = PointerState::default();
+        assert!(hover_would_matter(&state, &tree, Some(4), Some(3)));
+        state.explicit = Some(4);
+        assert!(!hover_would_matter(&state, &tree, Some(4), Some(3)), "what is under a captured pointer is not hovered");
     }
 
     #[test]

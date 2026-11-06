@@ -14391,7 +14391,10 @@ pub struct ScrollPatchCounters {
     pub hover_only: f64,
     /// The others, by the first reason they were not.
     pub reasons: std::collections::HashMap<String, f64>,
-    /// The same frames, by every reason that held for them, first or not.
+    /// The same frames, by every reason that held for them, first or not (`HitboxChain` is only
+    /// counted here, it stops no frame), and by what lay behind a reason (`NotRelocatable.noRun`,
+    /// `NotRelocatable.noRecording`, `NotRelocatable.unmovable`, `Region.top`, `Region.bottom`,
+    /// `Region.side`).
     pub held: std::collections::HashMap<String, f64>,
 }
 
@@ -14426,6 +14429,9 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
                 held: gpui::ScrollPatchReason::ALL
                     .into_iter()
                     .map(|reason| (format!("{reason:?}"), scroll.held(reason) as f64))
+                    .chain(gpui::ScrollPatchCause::ALL.into_iter().map(|cause| {
+                        (format!("{:?}.{}", cause.reason(), cause.name()), scroll.held_cause(cause) as f64)
+                    }))
                     .collect(),
             }
         },

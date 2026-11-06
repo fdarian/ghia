@@ -24,7 +24,9 @@ const VIEWPORT = 100
 const COUNT = 60
 const TIMEOUT = 60_000
 
-type Rows = "inert" | "hit"
+// "inert" rows take no pointer, "hit" rows have a hover style, "plain" rows take the pointer and do nothing with it, "heard"
+// rows listen for the pointer entering them.
+type Rows = "inert" | "hit" | "plain" | "heard"
 
 function Page({ rows }: { rows: Rows }) {
   return (
@@ -43,8 +45,10 @@ function Page({ rows }: { rows: Rows }) {
             height: ROW,
             flexShrink: 0,
             backgroundColor: index % 2 === 0 ? "#223344" : "#334455",
-            ...(rows === "inert" ? { pointerEvents: "none" } : { hover: { backgroundColor: "#664422" } }),
+            ...(rows === "inert" ? { pointerEvents: "none" } : {}),
+            ...(rows === "hit" ? { hover: { backgroundColor: "#664422" } } : {}),
           }}
+          {...(rows === "heard" ? { onPointerEnter: () => {} } : {})}
         >
           <text style={{ color: "#ffffff" }}>{`row-${index}`}</text>
         </div>
@@ -71,9 +75,9 @@ function wheel(renderer, { x, y, by }: Wheel) {
 }
 
 function counts(renderer) {
-  const { frames, eligible, mispredicted, hoverOnly, reasons } = renderer.getPatchCounters().scrollPatch
+  const { frames, eligible, mispredicted, hoverOnly, reasons, held } = renderer.getPatchCounters().scrollPatch
   const named = Object.fromEntries(Object.entries(reasons).filter(([, count]) => count > 0))
-  return { frames, eligible, mispredicted, hoverOnly, reasons: named }
+  return { frames, eligible, mispredicted, hoverOnly, reasons: named, held }
 }
 
 function since(renderer, before, action: () => void) {
@@ -82,12 +86,15 @@ function since(renderer, before, action: () => void) {
   const now = counts(renderer)
   const reasons: Record<string, number> = {}
   for (const [reason, count] of Object.entries(now.reasons)) reasons[reason] = count - (was.reasons[reason] ?? 0)
+  const held: Record<string, number> = {}
+  for (const [reason, count] of Object.entries(now.held)) held[reason] = count - (was.held[reason] ?? 0)
   return {
     frames: now.frames - was.frames,
     eligible: now.eligible - was.eligible,
     mispredicted: now.mispredicted - was.mispredicted,
     hoverOnly: now.hoverOnly - was.hoverOnly,
     reasons: Object.fromEntries(Object.entries(reasons).filter(([, count]) => count !== 0)),
+    held: Object.fromEntries(Object.entries(held).filter(([, count]) => count !== 0)),
   }
 }
 
@@ -106,7 +113,7 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
         wheel(renderer, { x: 100, y: 50, by: 5 })
         wheel(renderer, { x: 100, y: 50, by: 5 })
       })
-      expect(delta).toEqual({ frames: 2, eligible: 2, mispredicted: 0, hoverOnly: 0, reasons: {} })
+      expect(delta).toEqual({ frames: 2, eligible: 2, mispredicted: 0, hoverOnly: 0, reasons: {}, held: {} })
     } finally {
       unmount()
     }
@@ -118,7 +125,14 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
       warm(renderer, 100, 50)
       // The rows 0 to 2 show (40, 80 and 20 of the third); at 25 the row 3 does.
       const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 50, by: 25 }))
-      expect(delta).toEqual({ frames: 1, eligible: 0, mispredicted: 0, hoverOnly: 0, reasons: { Membership: 1 } })
+      expect(delta).toEqual({
+        frames: 1,
+        eligible: 0,
+        mispredicted: 0,
+        hoverOnly: 0,
+        reasons: { Membership: 1 },
+        held: { Membership: 1 },
+      })
     } finally {
       unmount()
     }
@@ -138,12 +152,65 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
     }
   })
 
+  unverified("lets a pointer cross rows that restyle nothing and nobody listens to", () => {
+    const { renderer, unmount } = open("plain")
+    try {
+      warm(renderer, 100, 38)
+      // The pointer at 38 is in the row 0 (0 to 40) and in the row 1 after a scroll by 5: the hitboxes under it change, and
+      // moving the hover from one row to the other restyles nothing and emits nothing.
+      const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 38, by: 5 }))
+      expect(delta).toEqual({ frames: 1, eligible: 1, mispredicted: 0, hoverOnly: 0, reasons: {}, held: { HitboxChain: 1 } })
+    } finally {
+      unmount()
+    }
+  })
+
+  unverified("counts a pointer that crosses to a row that listens for it as a hover change", () => {
+    const { renderer, unmount } = open("heard")
+    try {
+      warm(renderer, 100, 38)
+      const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 38, by: 5 }))
+      expect(delta.reasons).toEqual({ Hover: 1 })
+      expect(delta.held).toEqual({ Hover: 1, HitboxChain: 1 })
+      expect(delta.hoverOnly, "nothing else stops it").toBe(1)
+    } finally {
+      unmount()
+    }
+  })
+
   it("does not count a pointer that stays in its row", () => {
     const { renderer, unmount } = open("hit")
     try {
       warm(renderer, 100, 10)
       const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 10, by: 5 }))
       expect(delta.reasons.Hover ?? 0).toBe(0)
+    } finally {
+      unmount()
+    }
+  })
+
+  unverified("says which edge of the view the recording of a row no longer covers", () => {
+    const { renderer, unmount } = open("inert")
+    try {
+      warm(renderer, 100, 50)
+      // The rows are recorded half a view (50) past the view: moved up by more than that, the bottom of the view shows what was
+      // not recorded.
+      const delta = since(renderer, undefined, () => {
+        for (let step = 0; step < 14; step++) wheel(renderer, { x: 100, y: 50, by: 5 })
+      })
+      expect(delta.held["Region.bottom"]).toBeGreaterThan(0)
+      expect(delta.held["Region.top"]).toBeUndefined()
+      expect(Object.keys(counts(renderer).held)).toEqual(
+        expect.arrayContaining([
+          "HitboxChain",
+          "NotRelocatable.noRun",
+          "NotRelocatable.noRecording",
+          "NotRelocatable.unmovable",
+          "Region.top",
+          "Region.bottom",
+          "Region.side",
+        ]),
+      )
     } finally {
       unmount()
     }
@@ -193,7 +260,7 @@ describeNative("a list scrolled with the classifier on or off", { timeout: TIMEO
     { x: 100, y: 20, by: -200 },
   ]
 
-  for (const rows of ["inert", "hit"] as Rows[]) {
+  for (const rows of ["inert", "hit", "plain", "heard"] as Rows[]) {
     it(`draws the same picture, boxes and hits (${rows} rows)`, () => {
       const run = (classify: boolean) => {
         const { renderer, unmount } = open(rows)

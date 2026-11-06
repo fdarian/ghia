@@ -599,7 +599,9 @@ builds nothing. **Slice 1 (this) is the bookkeeping and a classifier that says, 
 would have been such a translate. Every frame is still drawn whole and nothing is moved.**
 
 **Runs** (zed `window/scroll_patch.rs`). Each frame records, for every relocatable retained root painted inside a list (the rows,
-`retained(..).relocatable(overscan)`, see [retention.md](retention.md#rows-of-a-virtual-list)), a `ScrollRun`: its row, the range of
+`retained(..).relocatable(overscan)`, see [retention.md](retention.md#rows-of-a-virtual-list)) and not inside the recording of another
+(a root nested in a row that was built keeps no recording of its own: the recording around it is what a scroll moves, and a run for it
+would be a root that cannot be moved), a `ScrollRun`: its row, the range of
 hitboxes and of scene operations it left in the frame (a row's operations are recorded even when the clip hides them, so the count does
 not change while it slides under the clip), how far from its recording it was put (`Recorded::delta`), the content mask around it, whether
 an exact clip cut it, and whether it was put from its recording or built. The hooks are in `Retained::prepaint` and `paint` (a root with
@@ -615,24 +617,31 @@ next draw consumes it. A list moved by anything else (`scrollToItem`, a write) i
 **The classifier** (`Window::classify_scroll_patch`, called by `draw` before the new frame is built, and not for a patched tick) works from
 the frame shown: the list whose position is not the one its frame recorded, how far its rows move (the difference of the positions
 rounded half up to a device pixel, which is how `prepaint_items` places a row), and the runs. Every check runs. The first of these that
-holds, in this order, is the frame's reason (`getPatchCounters().scrollPatch.reasons`), and each that holds is counted in `held`, so
-what else would stop the frame is known too:
+holds, in this order, and stops a frame (all but `HitboxChain`) is the frame's reason (`getPatchCounters().scrollPatch.reasons`), and each
+that holds is counted in `held`, so what else would stop the frame is known too:
 
 | Reason | It holds when |
 |---|---|
 | `Other` | the owner has no whole frame shown (no gate, planning off, a layout-only pass since, an element that follows the clock), the frame has no list, more than one list moved, the list is settling its position (a reset, a pending scroll adjustment, following its tail), or the window was resized |
 | `Edited` | the tree's root revision is not the one the frame shown was built from (a commit), a view other than the list's was notified, or the window was refreshed |
 | `Membership` | a layout at the new position would build a row the frame shown did not paint, or measure one (`ListState::rows_needed` replays the walk of `layout_items` over the rows already measured; a row that only leaves is fine, because its operations stay and the clip hides them) |
-| `Hover` | the pointer moved since the frame shown, or a hitbox of a row that takes the pointer (not `PassThrough`) is under it before and not after the rows move, or the other way round. `hoverOnly` counts the `Hover` frames that nothing else stops: eligible with the pointer elsewhere |
-| `Place`, `Region`, `Clip` | `Recorded::place` would not put a row there: what it reads of its surroundings differs in more than the offset (a scale factor that is not a power of two, an exact or rounded clip around, a general transform), the region the row was recorded in no longer covers the clip around it, or a rounded clip in it meets the clip differently (`ReplayKey::relocates_by`, `RelocationInfo::fits`, asked of the recording by `RetainedState::would_place`) |
+| `Hover` | the pointer moved since the frame shown, or the hit chain under it once the rows move would restyle something or emit an event for a listener: the owner is given the chain before (the frame shown) and the one after (the hitboxes of the rows moved, the hit test run on them) and answers with what the dispatcher's `update_hover` would do moving the hover from the one to the other (an element entering or leaving that has a `hover` style, a declared group, `whileHover`, a `:has(:hover)` style on an ancestor; a pointer boundary event with a listener on the path or on `window`). Asked only when `HitboxChain` holds; a window whose owner does not answer takes every `HitboxChain` for a `Hover`. `hoverOnly` counts the `Hover` frames that nothing else stops: eligible with the pointer elsewhere |
+| `HitboxChain` | a hitbox of a row that takes the pointer (not `PassThrough`) is under it before and not after the rows move, or the other way round. **Counted in `held` only**: the hit test is run again after a translate, so this alone stops nothing. It is the old `Hover`, which the children of a row crossing the pointer (an avatar, a text) held for almost every wheel event |
+| `Place`, `Region`, `Clip` | `Recorded::place` would not put a row there: what it reads of its surroundings differs in more than the offset (a scale factor that is not a power of two, an exact or rounded clip around, a general transform), the region the row was recorded in no longer covers the clip around it, or a rounded clip in it meets the clip differently (`ReplayKey::relocates_by`, `RelocationInfo::fits`, asked of the recording by `RetainedState::would_place`). `held` also counts `Region.top`, `Region.bottom` and `Region.side`: the edge of the clip the moved region leaves bare (the rows moved up by more than the overscan leave the bottom bare) |
 | `Focus` | the frame shown, or a layout there, builds a row outside the viewport for the focus it holds |
 | `A11y` | the accessibility tree is being built |
 | `ScrollAnimation` | a smooth scroll or a scrollbar fade has frames of its own (the owner says it) |
-| `NotRelocatable` | a row of the frame shown has no run (it is not a relocatable root) or its recording cannot be put elsewhere (built late, a hole, a position kept past the frame) |
+| `NotRelocatable` | a row of the frame shown has no run (it is not a relocatable root, or holds several: the runs are not the rows), a run has no recording, or its recording cannot be put elsewhere (built late, a hole, a position kept past the frame). `held` also counts `NotRelocatable.noRun`, `.noRecording` and `.unmovable` |
 
 A frame with none is *eligible*. The owner's part (`Window::set_scroll_patch_gate`, `retain/scroll_gate.rs`) is `Edited` (the root's
 `subtree_revision` against the one `Retain` published when it last recorded a whole frame, or a tree locked by an update),
-`ScrollAnimation` (`scroll::animating()`, `scrollbar::needs_frames()`) and `Other` (nothing to translate from). The other sources that
+`ScrollAnimation` (`scroll::animating()`, `scrollbar::needs_frames()`) and `Other` (nothing to translate from), and, for `Hover`
+(`Window::set_scroll_patch_hover`, the same file), whether moving the hover from the chain before to the chain after would restyle or
+emit: `events::dispatcher::hover_would_matter`, which asks the code that `update_hover` runs (`HoverChange`: who enters and leaves, whether
+one of them restyles, whether an event of the change has a listener on the path of the element it is for, or on `window`), of the state
+the pointer is in (a captured or locked target is the target before and after) and of the tree (a tree locked by an update says
+yes). It is a callback and not a state published with each frame (`Retain::publish_shown` is that, for `Edited`) because what it reads
+is the style and listeners of the elements under the pointer, which a frame would have to copy for every element. The other sources that
 `Retain::preview` reads for a tick (a measurement, a link, a command, a running motion) are not asked yet, and the pointer and focus
 styles of the elements outside the rows are not either: a frame that differs in one of those and is called eligible is what
 `mispredicted` is for.
@@ -642,10 +651,19 @@ the rows it painted, a run for each, each put from its recording (not built) and
 is `scrollPatch.mispredicted`. It is the check slice 2 relies on, so it is the number to watch for the classifier having been wrong.
 
 `getPatchCounters().scrollPatch` is `{ frames, eligible, mispredicted, hoverOnly, reasons, held }`, the last two keyed by the names above
-(all of them, zero included). `setScrollPatchEnabled(false)` on the test renderer or `GPUIX_SCROLL_PATCH_OFF=1` turns the bookkeeping and the
+(all of them, zero included; `held` also has `HitboxChain`, counted for eligible frames too, and the causes `NotRelocatable.noRun`,
+`NotRelocatable.noRecording`, `NotRelocatable.unmovable`, `Region.top`, `Region.bottom` and `Region.side`). `setScrollPatchEnabled(false)` on the test renderer or `GPUIX_SCROLL_PATCH_OFF=1` turns the bookkeeping and the
 count off. The pixels, boxes and hits are the same either way (`scroll-patch-classifier.test.tsx`). Under `GPUIX_RETAIN_VERIFY=1` a frame that replays rows is built a second time whole and that build is the frame shown, so its rows are not replayed and the next frame is `NotRelocatable`; the cases that need an eligible frame skip there.
 
-**Measured** (the mailbox proxy of ghia-bench on the test renderer: 360 wheel events of 30 px down and 360 up over rows of 72 px with a hover style, `PHASE=scroll bun mailbox-scroll-hover/profile.tsx`, release addon). None of the 720 frames is eligible. First reasons: `Membership` 356 (a row comes in at the bottom or the top, about 4 frames in 10 each way, and the rows at the edge are not measured), `Hover` 338, `Edited` 26. Counting every reason that holds (`held`): `Hover` 691 (the pointer at a fixed point meets another hitbox after almost every 30 px: the hitboxes of a row's children cross it as well as the rows do), `Membership` 382, `NotRelocatable` 301, `Region` 297, `Edited` 26, and `A11y` 720 with the test window's pretend screen reader (none with `setA11yActive(false)`, which a bench run has). With the screen reader off, 37 frames (5.1%) are stopped by the hover alone. Instructions per tick (mean of two runs, whole `drawFrame` plus input): 11.89M with the earlier addon, 11.86M with the classifier off (`GPUIX_SCROLL_PATCH_OFF=1`), 11.99M on: the recording and the classification cost about 0.13M a tick (1.1%).
+**Measured** (the mailbox proxy of ghia-bench on the test renderer: 360 wheel events of 30 px down and 360 up over rows of 72 px with a hover style, `PHASE=scroll A11Y=0 bun mailbox-scroll-hover/profile.tsx`, release addon, no screen reader as a bench run has). Before the refinements (the commit that introduced the classifier): none of the 720 frames eligible; first reasons `Membership` 356, `Hover` 338, `Edited` 26; `held` `Hover` 691, `Membership` 382, `NotRelocatable` 301, `Region` 297, `Edited` 26. Now **328 of 720 are eligible, none mispredicted**; first reasons `Membership` 356, `Edited` 26, `Region` 6, `Hover` 4; `held` `HitboxChain` 691, `Membership` 382, `Hover` 300, `Region` 297 (`Region.top` 150, `Region.bottom` 147), `Edited` 26, `NotRelocatable` 0. What changed:
+
+- **`Hover` was the hitboxes of the children.** The pointer at a fixed point meets another hitbox after almost every 30 px (the avatar, the texts and the row all take it), and only the row has a `hover` style, so what restyles is the pointer changing rows: every 72 px, 300 of the 720 frames. The 691 are `HitboxChain` now and stop nothing.
+- **`NotRelocatable` was a run for each root nested in a row that was built.** The frame that brings a row in builds it, and the six `retained` roots inside it (four in the row and two in them) were prepainted inside the recording of the row, where a root keeps no recording of its own; each had a run (`replayed` false, no recording), and the frame shown that built a new row was `NotRelocatable` (300 frames: the row that came in, the last after a scroll down and the first after one up). The row roots themselves always had a movable recording. A root prepainted inside the recording of another is no run now.
+- **`Region` is a row that moved more than the overscan since it was recorded.** The overscan is half the viewport (358 of 716 px, `Scroller::overscan`), so a row recorded where it came in has its region used up after 360 px (12 ticks): it is the row at the middle of the viewport (index 5 and 6 of the rows shown when scrolling down, 4 when scrolling up) that the next frame would build late (`retained.relocationMisses.Region`, 0.8 a tick), and once again 360 px later near the edge it leaves by (rows 0 and 1 down, 9 up). 581 row runs in 297 frames, `Region.bottom` for the rows that moved up and `Region.top` for the rows that moved down. Not a row that just came in with too little overscan: a row that traveled farther than the overscan reaches.
+- **The three coincide.** Rows come in every 72 px, the pointer meets a new row every 72 px and a row has traveled 360 px (five rows) every 72 px: in this proxy `Membership`, `Hover` and `Region` hold on the same frames, so `Membership` alone is 382 frames, `Membership` or `Hover` 386 (`Hover` alone adds 4, both 296), and `Membership` or `Hover` or `Region` 392. `Region` is the first reason of 6 frames only. With the old `Hover` (`HitboxChain`) the union with `Membership` is all 720. A row coming in at an edge (`Membership`) is what stops the other 382, and a translate that builds that row is the next step.
+- With the pointer in the scrollbar gutter of the list (`SCROLL_X=637`, outside the hover-styled boxes of the rows) `Hover` holds for 1 frame, and 323 are eligible: the scrollbar fade makes 9 of the frames `ScrollAnimation` first (19 held).
+
+With the test window's pretend screen reader on (`A11Y` unset) `A11y` holds for all 720 and none is eligible; the rest is the same. Instructions per tick (whole `drawFrame` plus input, two runs each back to back): 11.83M and 11.82M on, 11.58M and 11.63M with `GPUIX_SCROLL_PATCH_OFF=1`: the recording and the classification cost about 0.2M a tick (1.9%), the hit tests of the hover included.
 
 **Slice 2 (translate in place), not built.** When the verdict is eligible the draw skips the page: it moves the `ops`, `hitboxes`,
 accessibility bounds and relocation handles of the runs by the delta (`Scene::replay_translated` over the operation range,
@@ -681,13 +699,19 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
 ## Tests
 
 - `scroll-patch-classifier.test.tsx` (react): rows of 40 in a view of 100 that take no pointer: a wheel of 5 twice is two eligible
-  frames and no misprediction; one of 25 that brings the fourth row in is a `Membership`; rows with a hover style and the pointer at
-  38 crossing into the next row is a `Hover` and `hoverOnly`; a pointer that stays in its row is not; nothing is counted with the
-  classifier off; the boxes, what is under a point and the picture after each of seven wheel events are equal with it on and off.
+  frames and no misprediction; one of 25 that brings the fourth row in is a `Membership`; rows with a hover style, or a
+  `pointerenter` listener, and the pointer at 38 crossing into the next row is a `Hover` and `hoverOnly`; rows that take the pointer and
+  restyle nothing and have no listener are an eligible frame with `HitboxChain` held; a pointer that stays in its row is not a hover
+  change; fourteen wheels of 5 say `Region.bottom`; nothing is counted with the classifier off; the boxes, what is under a point and the
+  picture after each of seven wheel events are equal with it on and off, for the four kinds of rows.
   gpui `window/scroll_patch_tests.rs`: each reason on a list of retained rows (a fraction, a row coming in, a row leaving, a pointer
-  that stays and one that crosses, no overscan for the region, rows that are not relocatable, the owner's gate, no owner, a screen
-  reader, another view notified, the focus), `mispredicted` zero, nothing counted when off, and the scene after four wheel events equal
-  with the classifier on and off.
+  that stays and one that crosses, no overscan for the region and its edge, rows that are not relocatable, a root inside a row that was
+  built, the owner's gate, no owner, a screen reader, another view notified, the focus), the owner's answer for the hover (asked with
+  the chain before and the chain after, not asked when the hitboxes under the pointer are the same, `Hover` when it says yes and an
+  eligible frame when it says no, a pointer that moved), `mispredicted` zero, nothing counted when off, and the scene after four wheel
+  events equal with the classifier on and off. Native `events/dispatcher.rs`: `hover_would_matter` agrees with the restyle and the events
+  of the move it asks about, for hover, `:has(:hover)` and boundary-event listeners on the element, an ancestor and `window`, and a
+  captured pointer.
 - Transforms in three dimensions patch every tick with no decline of either kind (`getPatchCounters`): `transform-css-patch.test.tsx` for a transition of `rotateY` under a perspective, an animation of 3D lists that do not pair, of the depth of `transform-origin` around a rotation, and of the `perspective` and `perspective-origin` of the parent; `motion-transform.test.tsx` for a Motion tween of `rotateY` whose card hides the face that turns away on the patched ticks (`faces_away` is published with the box, not compared by the tape; [paint-and-transforms.md](paint-and-transforms.md#retention-and-patched-ticks)).
 - `animation-frame-work.test.tsx`: at 500 and 5000 nodes every loop kind (keyframes colour, native `motion` colour, colour
   transition, svg stroke dash, `motion` and keyframes opacity, the colour loop of a relative box with and without a `z-index`, loops

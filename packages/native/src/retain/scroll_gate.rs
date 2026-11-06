@@ -1,6 +1,8 @@
 //! What gpui asks of Ghia before it classifies the frame drawn after a list scroll
 //! (`Window::set_scroll_patch_gate`): whether the tree is the one the frame shown was built from,
-//! and whether an animation of the scroll has frames of its own to run. The classifier is in zed
+//! and whether an animation of the scroll has frames of its own to run. And what a hit chain that
+//! a scroll changes would do to the pointer (`Window::set_scroll_patch_hover`): restyle an
+//! element or reach a listener, or nothing. The classifier is in zed
 //! (`window/scroll_patch.rs`); see [patch-frames.md](../../../../docs/fork/patch-frames.md).
 
 use std::cell::Cell;
@@ -38,6 +40,24 @@ impl GpuixView {
         window.set_scroll_patch(std::env::var_os("GPUIX_SCROLL_PATCH_OFF").is_none());
         let shown = self.retain.shown.clone();
         let tree = self.tree.clone();
+        let hover_tree = self.tree.clone();
+        let pointer = self.pointer.clone();
+        window.set_scroll_patch_hover(Some(Rc::new(
+            move |_: &gpui::Window, before: &[gpui::GlobalElementId], after: &[gpui::GlobalElementId]| {
+                // What cannot be read is a pointer that may matter.
+                let (Ok(tree), Ok(pointer)) = (hover_tree.try_lock(), pointer.try_borrow()) else {
+                    return true;
+                };
+                // The target of a hit chain, as `dispatch_at` takes it.
+                let target = |chain: &[gpui::GlobalElementId]| {
+                    chain
+                        .iter()
+                        .filter_map(|id| id.last().and_then(crate::events::ids::host_id_of))
+                        .find(|id| tree.elements.contains_key(id))
+                };
+                crate::events::dispatcher::hover_would_matter(&pointer, &tree, target(before), target(after))
+            },
+        )));
         window.set_scroll_patch_gate(Some(Rc::new(move |_: &gpui::Window| {
             let Some(revision) = shown.0.get() else {
                 return Some(ScrollPatchReason::Other);

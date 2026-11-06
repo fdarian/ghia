@@ -2391,7 +2391,12 @@ export interface ScrollPatchCounters {
   hoverOnly: number
   /** The others, by the first reason they were not. */
   reasons: Record<string, number>
-  /** The same frames, by every reason that held for them, first or not. */
+  /**
+   * The same frames, by every reason that held for them, first or not (`HitboxChain` is only
+   * counted here, it stops no frame), and by what lay behind a reason (`NotRelocatable.noRun`,
+   * `NotRelocatable.noRecording`, `NotRelocatable.unmovable`, `Region.top`, `Region.bottom`,
+   * `Region.side`).
+   */
   held: Record<string, number>
 }
 
