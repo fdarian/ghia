@@ -109,12 +109,12 @@ paint repaints those roots in the frame that is shown and leaves the rest as it 
   is the right one: the scene has a map from the index of each operation to its primitive's place in the sorted vectors
   (`op_slots`), and every changed operation has the kind and the clipped bounds of the one it replaces, which is what its draw
   order depends on (an order is one more than the greatest of the earlier bounds that intersect). A sprite also keeps its sort
-  position: a new atlas tile sorts among the sprites of its order, so one whose tile moved it past a neighbour is not in place.
+  position: a new atlas texture sorts among the sprites of its order, so one whose texture moved it past a neighbour is not in place.
   Anything else (a kind that changed, a primitive that is clipped away now or was, bounds that moved, an operation that is not a
   primitive, one inside an effect group or a text clip or faded flat, or a quad drawn as strips around its empty interior, none of
   which is one primitive of the root's vectors) makes the scene again with `Scene::rebuild_from_operations`, the way every patch
   did, reusing the draw orders of the log when the bounds sequence is the same. The map is worked out by that rebuild, as it
-  sorts (a gather permutation of indices, applied to the vectors once), and a frame built whole or one a scroll translate
+  sorts (the gather permutation of `Scene::finish`, see [the sort](syncing-upstream.md#scenefinish-sort-order-and-permutation-zed-sceners-platformrs)), and a frame built whole or one a scroll translate
   rebuilds has none: the first patch after such a frame makes the scene again and the ticks after it write in place. The
   retention verifier makes the map ahead of a patch and compares the scene a patch wrote with the frame built whole after it.
   `PatchCounters::scene_rebuilds` counts the patches that made the scene again and `in_place_primitives` the primitives written.

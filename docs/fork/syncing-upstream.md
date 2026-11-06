@@ -87,6 +87,31 @@ each entry or applies it again.
   ([round 49](frames-and-wakes.md#where-an-apps-memory-goes-round-49)). The cost is a texture per large tile instead of
   sharing, which only matters for many large tiles of different sizes.
 
+### `Scene::finish` sort order and permutation (zed `scene.rs`, `platform.rs`)
+
+- **Decision.** The owner approved this on 2026-11-06 as an exception to the rule above: it changes `Scene::finish`, which is
+  upstream's code. It is a candidate for a PR to `zed-industries/zed` (made in a separate worktree from upstream `main`, per
+  [AGENTS.md](../../AGENTS.md); not from this checkout), and until it lands the fork carries it.
+- **Before.** Every typed vector was sorted in place with `sort_by_key`: by `order`, and the sprite vectors (monochrome,
+  subpixel, polychrome) by `(order, tile.tile_id)`. A stable sort of elements of up to 240 bytes moves them about log n times
+  each, and the tile id ordered glyphs by where the atlas happened to allocate them.
+- **After.** Each vector is sorted as pairs of `(key, index)`, a few bytes each, with an unstable sort (the index makes the
+  result the stable one), and the permutation is applied to the vector once, so each primitive moves once. The sprite key is
+  `(order, tile.texture_id)`: `AtlasTextureId` and `AtlasTextureKind` derive `Ord` for it. The permutation is also what
+  [a patch](patch-frames.md#how-gpui-patches-windowpatchrs) needs to say where the primitive of each operation went.
+- **Why the tie-break does not show.** Primitives of one order never overlap: the bounds tree gives a primitive one more than
+  the greatest order of the bounds before it that intersect it. So which of two sprites of an order is drawn first is not
+  seen, and the id of the tile was not a meaningful order. (Inside a layer all primitives share the layer's order and do
+  overlap; there upstream's tile id reordered them arbitrarily and the new key keeps the paint order within a texture, so it
+  reorders less.) The texture is what the renderers batch by (`PrimitiveBatch::MonochromeSprites { texture_id, .. }`), so the
+  batches are the same: consecutive sprites of one order and one texture.
+- **Measured** (bench mailbox proxy, test renderer, release addon, instructions per tick, two runs each; scroll, scroll with
+  the default scrollbar, hover): see the commit message of the zed change for the numbers. A frame of about 2000 sprites of
+  240 bytes in a dozen sorted runs spent 161 us (1.27M instructions) in the sprite sort before and 52 us with the texture key.
+- **Considerations.** A sync that replaces `scene.rs` has to keep the key and the permutation, or the op-to-slot map of
+  `Scene::patch_in_place` is lost; the tests `sprites_of_one_order_keep_the_order_they_were_painted_in_within_a_texture_and_group_by_texture`
+  and `a_sprite_over_another_is_painted_after_it_whatever_its_texture` fail when the key is lost.
+
 ## Procedure
 
 1. Fetch the upstreams: `git fetch upstream` in the repo root and in `zed/`, and `git fetch zed-industries main` in `zed/`.
