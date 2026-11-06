@@ -1814,16 +1814,17 @@ impl Retain {
     ///
     /// The subtree is walked from the tree, not listed from what the row's last build made: a root
     /// the build skipped, and what gpui built late inside the row (`begin_deferred`), have records
-    /// too, and the build that made them is not the last one.
+    /// too, and the build that made them is not the last one. The walk stops at a nested
+    /// `<virtual-list>`: its rows are rows of their own, swept when they are among `rows_before`,
+    /// and the ones the list never asked for have no record, so descending would visit every row of
+    /// an inner list each time the outer row leaves the viewport.
     fn forget_unseen_rows(&mut self, tree: &crate::retained_tree::RetainedTree) {
         let seen = std::mem::take(&mut self.rows_seen);
-        let mut pending: Vec<u64> = self.rows_before.iter().copied().filter(|row| !seen.contains(row)).collect();
-        while let Some(id) = pending.pop() {
-            self.dynamic.remove(&id);
-            self.records.remove(&id);
-            if let Some(element) = tree.elements.get(&id) {
-                pending.extend(element.children.iter().copied());
-            }
+        if !(self.records.is_empty() && self.dynamic.is_empty()) {
+            for_each_unseen_element(&self.rows_before, &seen, tree, |id| {
+                self.dynamic.remove(&id);
+                self.records.remove(&id);
+            });
         }
         self.rows_before = seen;
     }
@@ -3005,6 +3006,25 @@ impl Retain {
         for id in stale {
             self.dynamic.remove(&id);
             self.records.remove(&id);
+        }
+    }
+}
+
+/// Calls `visit` for each element of the rows `before` asked for and `seen` did not, and of the
+/// subtrees under them, but not the children of a nested `<virtual-list>` (`forget_unseen_rows`).
+fn for_each_unseen_element(
+    before: &FxHashSet<u64>,
+    seen: &FxHashSet<u64>,
+    tree: &crate::retained_tree::RetainedTree,
+    mut visit: impl FnMut(u64),
+) {
+    let mut pending: Vec<u64> = before.iter().copied().filter(|row| !seen.contains(row)).collect();
+    while let Some(id) = pending.pop() {
+        visit(id);
+        if let Some(element) = tree.elements.get(&id) {
+            if element.element_type != "virtual-list" {
+                pending.extend(element.children.iter().copied());
+            }
         }
     }
 }
@@ -5565,16 +5585,52 @@ mod tests {
         assert!(page.retain.records.contains_key(&3) && page.retain.records.contains_key(&6));
         assert!(page.retain.records.contains_key(&7) && page.retain.records.contains_key(&8));
 
-        // The list scrolls: it asks for 4 and not for 3, for two frames running.
-        for _ in 0..2 {
-            let shape = page.list_frame(false);
-            page.row(shape, 4, |_| {});
-        }
+        // The list scrolls: the first frame asks for 4 and not for 3, and the sweep of the frame after
+        // (it compares the rows the frame before last asked for, 3 and 4, with those the last one did, 4) drops 3.
+        let shape = page.list_frame(false);
+        page.row(shape, 4, |_| {});
+        let shape = page.list_frame(false);
+        page.row(shape, 4, |_| {});
         for id in [3, 6, 7, 8] {
             assert!(!page.retain.records.contains_key(&id), "{id} belongs to a row nobody asks for");
-            assert!(!page.retain.dynamic.contains_key(&id));
         }
         assert!(page.retain.records.contains_key(&4));
+
+        // The dynamic entries are the page session's to drop in a frame that records, so the sweep is
+        // called by itself, as a rest frame (no page session) leaves it: 7 has an entry from the row's build.
+        page.retain.dynamic.insert(7, Dynamic::Animation as u8);
+        page.retain.dynamic.insert(4, Dynamic::Animation as u8);
+        page.retain.rows_before = [3, 4].into_iter().collect();
+        page.retain.rows_seen = [4].into_iter().collect();
+        page.retain.forget_unseen_rows(&page.tree);
+        assert!(!page.retain.dynamic.contains_key(&7), "an element of the unseen row's subtree");
+        assert!(page.retain.dynamic.contains_key(&4), "a row the list still asks for");
+    }
+
+    #[test]
+    fn the_sweep_of_unseen_rows_stops_at_a_nested_list_and_still_takes_the_inner_rows_it_asked_for() {
+        // 3 is an outer row holding the list 6; 7 is a row of 6 with 8 in it, 9 a row the list never asked for.
+        let tree = tree_of(&[
+            (1, None, "div", None),
+            (2, Some(1), "virtual-list", None),
+            (3, Some(2), "div", None),
+            (4, Some(2), "div", None),
+            (5, Some(3), "div", None),
+            (6, Some(3), "virtual-list", None),
+            (7, Some(6), "div", None),
+            (8, Some(7), "div", None),
+            (9, Some(6), "div", None),
+        ]);
+        let set = |ids: &[u64]| ids.iter().copied().collect::<FxHashSet<u64>>();
+        let mut visited = Vec::new();
+        for_each_unseen_element(&set(&[3, 4]), &set(&[4]), &tree, |id| visited.push(id));
+        visited.sort_unstable();
+        assert_eq!(visited, [3, 5, 6], "the inner list is visited, its rows are not");
+
+        visited.clear();
+        for_each_unseen_element(&set(&[3, 7]), &set(&[4]), &tree, |id| visited.push(id));
+        visited.sort_unstable();
+        assert_eq!(visited, [3, 5, 6, 7, 8], "an inner row the list asked for is swept as a row, with its subtree");
     }
 
     #[test]
