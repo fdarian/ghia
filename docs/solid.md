@@ -59,6 +59,8 @@ preload = ["@ghia/solid/preload"]
 preload = ["@ghia/solid/preload"]
 ```
 
+The preload sends `solid-js`, `solid-js/store` and `solid-js/web` to Solid's client builds (Bun would otherwise resolve them to the server builds). So `isServer` from `solid-js/web` is `false`, and libraries that branch on it, such as `@tanstack/solid-query`, run their client code.
+
 ## First app
 
 End the file with **`render()`**. That call creates the window, mounts Solid, and starts the frame loop.
