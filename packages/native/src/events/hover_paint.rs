@@ -13,10 +13,12 @@
 //! be equal after that, so a property this module does not know about is not paint-only.
 //!
 //! A patch writes the primitives of an operation over the ones it had, so the operations must be
-//! the same ones. gpui paints no quad for a transparent background or border and no glyph for
-//! a transparent text, so a colour that is invisible in one style and visible in the other (a
-//! background a hover gives an element that had none) adds or takes away an operation, and is not
-//! paint-only here: it is a frame built whole.
+//! the same ones. gpui paints no quad for a transparent border and no glyph for a transparent
+//! text, so a colour that is invisible in one style and visible in the other adds or takes away an
+//! operation, and is not paint-only here: it is a frame built whole. The background is the
+//! exception: an element whose hover gives it a background keeps its quad when the colour is
+//! transparent or there is none (`StyleDesc::keeps_background_quad`), so the quad is there in both
+//! styles and the colour is written over it.
 
 use crate::color::{ColorContext, Scheme};
 use crate::css::length::LengthContext;
@@ -216,7 +218,8 @@ fn colours_keep_visibility(off: &StyleDesc, on: &StyleDesc) -> bool {
     let (off_background, on_background) = (colour(off), colour(on));
     // A text with no colour of its own inherits one, which paints.
     let text = |style: &StyleDesc| style.color.clone().unwrap_or_else(|| "black".to_owned());
-    same_visibility(off_background.as_deref(), on_background.as_deref())
+    (background_quad_kept(off, on, off_background.as_deref(), on_background.as_deref())
+        || same_visibility(off_background.as_deref(), on_background.as_deref()))
         && same_visibility(Some(&text(off)), Some(&text(on)))
         && same_visibility(off.outline_color.as_deref(), on.outline_color.as_deref())
         && same_visibility(
@@ -226,6 +229,19 @@ fn colours_keep_visibility(off: &StyleDesc, on: &StyleDesc) -> bool {
         && same_visibility(off.text_decoration_color.as_deref(), on.text_decoration_color.as_deref())
         && borders_keep_visibility(off, on)
         && shadows_keep_visibility(off, on)
+}
+
+/// Whether the background quad is painted in both styles whatever the colours are: the element keeps it
+/// (`StyleDesc::keeps_background_quad`), so one that has no colour, or a transparent one, still paints a
+/// quad that a colour is written over. Both colours have to be plain ones that resolve, and the colour
+/// confined to no box (`background-clip: text` makes it a layer of its own).
+fn background_quad_kept(off: &StyleDesc, on: &StyleDesc, off_colour: Option<&str>, on_colour: Option<&str>) -> bool {
+    off.keeps_background
+        && on.keeps_background
+        && off.background_clip.is_none()
+        && on.background_clip.is_none()
+        && paints(off_colour).is_some()
+        && paints(on_colour).is_some()
 }
 
 fn borders_keep_visibility(off: &StyleDesc, on: &StyleDesc) -> bool {
@@ -431,17 +447,47 @@ mod tests {
 
     #[test]
     fn a_colour_that_appears_or_goes_is_an_operation_more_or_less() {
-        // gpui paints no quad, glyph or shadow of a colour with no alpha.
-        assert!(!hover_paints(r##"{"hover":{"backgroundColor":"#eee"}}"##), "a background that appears");
-        assert!(!hover_paints(r##"{"backgroundColor":"#eee","hover":{"backgroundColor":"transparent"}}"##));
-        assert!(!hover_paints(r##"{"backgroundColor":"transparent","hover":{"backgroundColor":"#eee"}}"##));
-        assert!(!hover_paints(r##"{"hover":{"background":"#eee"}}"##));
+        // gpui paints no glyph or shadow of a colour with no alpha, nor a quad for a border.
         assert!(!hover_paints(r##"{"color":"red","hover":{"color":"transparent"}}"##), "a text that goes");
         assert!(!hover_paints(r##"{"borderBottom":"1px solid transparent","hover":{"borderBottomColor":"red"}}"##));
         assert!(!hover_paints(r##"{"boxShadow":"0 1px 2px transparent","hover":{"boxShadow":"0 1px 2px #f00"}}"##));
         assert!(!hover_paints(r##"{"outlineColor":"transparent","hover":{"outlineColor":"red"}}"##));
         assert!(hover_paints(r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"rgba(0, 0, 0, 0.1)"}}"##), "alpha is some");
         assert!(hover_paints(r##"{"backgroundColor":"transparent","hover":{"backgroundColor":"rgba(0, 0, 0, 0)"}}"##));
+    }
+
+    #[test]
+    fn a_background_that_appears_or_goes_is_paint_because_the_quad_is_kept() {
+        assert!(hover_paints(r##"{"hover":{"backgroundColor":"#eee"}}"##), "a background that appears");
+        assert!(hover_paints(r##"{"hover":{"background":"#eee"}}"##));
+        assert!(hover_paints(r##"{"backgroundColor":"#eee","hover":{"backgroundColor":"transparent"}}"##));
+        assert!(hover_paints(r##"{"backgroundColor":"transparent","hover":{"backgroundColor":"#eee"}}"##));
+        assert!(hover_paints(r##"{"hasHover":{"backgroundColor":"#eee"}}"##));
+        // The row of the Mailbox bench: a border and no background, which the hover gives.
+        assert!(hover_paints(
+            r##"{"position":"relative","height":72,"borderBottom":"1px solid #F4F4F5","userSelect":"none","hover":{"backgroundColor":"#F4F4F5"}}"##
+        ));
+    }
+
+    #[test]
+    fn a_background_that_is_more_than_a_colour_is_still_an_operation_more_or_less() {
+        // The colour of `background-clip: text` is a layer of its own, and a value that is not a colour a layer.
+        assert!(!hover_paints(r##"{"backgroundClip":"text","hover":{"backgroundColor":"#eee"}}"##));
+        assert!(!hover_paints(r##"{"hover":{"background":"url(a.png) #eee"}}"##));
+        assert!(!hover_paints(r##"{"hover":{"backgroundImage":"linear-gradient(red, blue)"}}"##));
+    }
+
+    #[test]
+    fn only_an_element_whose_hover_sets_a_background_keeps_the_quad() {
+        assert!(style(r##"{"hover":{"backgroundColor":"#eee"}}"##).keeps_background_quad());
+        assert!(style(r##"{"hasHover":{"background":"#eee"}}"##).keeps_background_quad());
+        assert!(!style(r##"{"backgroundColor":"#eee"}"##).keeps_background_quad());
+        assert!(!style(r##"{"hover":{"color":"red"}}"##).keeps_background_quad());
+        assert!(!style(r##"{"active":{"backgroundColor":"#eee"},"groupHover":{"backgroundColor":"#eee"}}"##).keeps_background_quad());
+        // The style folded from it remembers, with the hover folded in or away.
+        let declared = style(r##"{"hover":{"backgroundColor":"#eee"}}"##);
+        assert!(resolve_pointer_states(&declared, PointerStates::default()).keeps_background_quad());
+        assert!(resolve_pointer_states(&declared, PointerStates { hovered: true, ..Default::default() }).keeps_background_quad());
     }
 
     #[test]

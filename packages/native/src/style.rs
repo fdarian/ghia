@@ -1170,6 +1170,10 @@ pub struct StyleDesc {
     /// into is never handed to it and the element does not lift (`stacking::lifted_z`).
     #[serde(skip)]
     pub lift_absorbed: bool,
+    /// Set by `resolve_pointer_states` on the style it folds, never by JS: a `hover` or `hasHover` of the
+    /// style it comes from gives a background colour (`keeps_background_quad`).
+    #[serde(skip)]
+    pub keeps_background: bool,
     /// Set by the renderer on the copy of the style it builds an element from, never by JS: the
     /// element is an atomic inline, which the text decoration of the boxes around it does not reach.
     #[serde(skip)]
@@ -1535,6 +1539,24 @@ impl StyleDesc {
     /// declares it must replace the base layers rather than leave them.
     pub(crate) fn declares_background_layers(&self) -> bool {
         self.background.is_some() || self.background_image.is_some()
+    }
+
+    /// Whether a `hover` or `hasHover` of this style sets a background colour.
+    pub(crate) fn hover_sets_background_color(&self) -> bool {
+        [&self.hover, &self.has_hover].into_iter().any(|state| {
+            state.as_deref().is_some_and(|state| {
+                state.background_color.is_some() || matches!(state.background, Some(BackgroundValue::Color(_)))
+            })
+        })
+    }
+
+    /// Whether the element paints a background quad even where the colour is transparent. gpui paints
+    /// none for a transparent colour, so an element whose hover gives it a background has one quad
+    /// less than the hovered one, and the hover is a frame built whole. Kept, the quad is there in both
+    /// styles and the hover only writes a colour over it (`events/hover_paint.rs`). `keeps_background`
+    /// is what the style folded from this one remembers, once the `hover` is folded in or away.
+    pub(crate) fn keeps_background_quad(&self) -> bool {
+        self.keeps_background || self.hover_sets_background_color()
     }
 
     /// The colour declarations of this style that mention `currentColor` and

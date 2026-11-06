@@ -13098,8 +13098,13 @@ fn apply_styles_taking_borders_from<E: gpui::Styled>(
     if let Some(ratio) = style.aspect_ratio.and_then(|ratio| ratio.ratio()) {
         el = el.aspect_ratio(ratio as f32);
     }
-    if let Some(background) = fill.color {
-        el = el.bg(background);
+    match fill.color {
+        Some(background) => el = el.bg(background),
+        None if style.keeps_background_quad() => el = el.bg(gpui::transparent_black()),
+        None => {}
+    }
+    if style.keeps_background_quad() {
+        el.style().keep_transparent_background = Some(true);
     }
     // An empty list is `background-image: none`, which a state style needs in
     // order to clear the base layers.

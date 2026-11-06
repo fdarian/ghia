@@ -127,6 +127,31 @@ each entry or applies it again.
   `Scene::patch_in_place` is lost; the tests `sprites_of_one_order_keep_the_order_they_were_painted_in_within_a_texture_and_group_by_texture`
   and `a_sprite_over_another_is_painted_after_it_whatever_its_texture` fail when the key is lost.
 
+### A transparent background quad that is kept (zed `style.rs`, `scene.rs`)
+
+- **Decision.** The owner approved this on 2026-11-06 (option "B") as a Ghia-only change to upstream's `Style::paint` and
+  `Scene::border_strips` (zed `88855d100d`), not a candidate for upstream: it exists for the fork's hover patches. It adds `keep_transparent_background`
+  to `Style` (default `false`, a plain field of `StyleRefinement` like `collapsed_border`) and Ghia sets it on an element whose
+  `hover` or `hasHover` gives a background colour.
+- **Before.** `Style::paint_background_color` painted a quad only if the background colour was not transparent
+  (`Hsla::is_transparent`, an alpha of 0). A hover that gave a background to an element with none added a quad to the operations
+  of its root, so the hover was a frame built whole: the mailbox row of ghia-bench took 8.57M instructions a crossing.
+- **After.** With the flag set the quad is painted whatever its alpha is: `paint_background_color` paints when the background is
+  `Some` and it is not transparent or the flag is set. `border_strips` does not cut a transparent quad that has no border into
+  strips (there is nothing to cut around; the strips of such a quad were an invisible ring of four quads and the operation
+  would not have been one primitive a patch can write over). Nothing else drops an alpha-0 quad: `Scene::insert_quad`,
+  the bounds tree, the sort and `Scene::patch_in_place` take it as a quad. An element without the flag paints what it did.
+- **Why.** The hover then writes a colour over a quad that is there in both styles (`hover_paint.rs`), and the mailbox row
+  crossing took 4.48M and 4.51M instructions, all 18 patched ([patch-frames.md](patch-frames.md#which-hovers-paint-only)). A base
+  background of alpha 0.0001 was tried and patched too, but it paints a (nearly invisible) colour; this is a true zero.
+- **Costs.** One quad more in every row that declares such a hover, in every frame: the scroll phase of the mailbox proxy went from
+  7.64M and 7.63M to 7.89M and 7.88M instructions a tick. A flagged transparent quad is shaded by the GPU over the element's area.
+- **Considerations.** A sync that replaces `style.rs` or `scene.rs` has to keep the field in `Style`, its default, the
+  condition in `paint_background_color` and the border test in `border_strips`; the tests
+  `a_transparent_background_paints_no_quad_unless_it_is_kept` and
+  `a_row_with_a_kept_transparent_background_is_patched_to_the_colour_of_the_hover` (`window/hover_patch_tests.rs`) fail when any is
+  lost. If upstream ever paints transparent backgrounds, or gives `Style` a field of its own for it, take theirs and drop the flag.
+
 ## Procedure
 
 1. Fetch the upstreams: `git fetch upstream` in the repo root and in `zed/`, and `git fetch zed-industries main` in `zed/`.

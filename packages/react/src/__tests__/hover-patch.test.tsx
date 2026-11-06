@@ -25,8 +25,8 @@ const TIMEOUT = 60_000
 
 type Kind = "list" | "column"
 
-/** A paint-only hover, one that changes the padding, and one that has a `pointerenter` listener. */
-type Hover = "paint" | "padding" | "listener"
+/** A paint-only hover, one that changes the padding, one that has a `pointerenter` listener, and a paint-only one that gives a row with no background its first. */
+type Hover = "paint" | "padding" | "listener" | "bare"
 
 function Row({ index, hover, onEnter }: { index: number; hover: Hover; onEnter: () => void }) {
   const refinement =
@@ -39,7 +39,7 @@ function Row({ index, hover, onEnter }: { index: number; hover: Hover; onEnter: 
         width: 150,
         height: ROW,
         flexShrink: 0,
-        backgroundColor: index % 2 === 0 ? "#223344" : "#334455",
+        backgroundColor: hover === "bare" ? undefined : index % 2 === 0 ? "#223344" : "#334455",
         borderBottom: "1px solid #112233",
         hover: refinement,
       }}
@@ -152,8 +152,8 @@ function crossing(kind: Kind, hover: Hover, patch: boolean) {
 }
 
 /** What patching did over `ys`, the pointer moving across the rows after the way once. */
-function patched(kind: Kind, ys: number[], patch = true) {
-  const { renderer, unmount } = open(kind, "paint")
+function patched(kind: Kind, ys: number[], patch = true, hover: Hover = "paint") {
+  const { renderer, unmount } = open(kind, hover)
   try {
     renderer.setPatchEnabled(patch)
     for (const y of WAY) move(renderer, 20, y)
@@ -203,6 +203,30 @@ describeNative("a hover that only paints", { timeout: TIMEOUT }, () => {
       expect(on.entered.length).toBeGreaterThan(0)
       expect(on.entered).toEqual(off.entered)
       expect(ticks(on.patches), "a hover that a script hears is a frame").toBe(0)
+    })
+  }
+
+  for (const kind of ["list", "column"] as const) {
+    it(`draws what patching off draws for a row with no background of its own, in a ${kind}`, () => {
+      const on = crossing(kind, "bare", true)
+      const off = crossing(kind, "bare", false)
+      expect(on.frames).toEqual(off.frames)
+      expect(on.mismatches).toBe(0)
+      // The pointer is over a row, which is what is under it, and the hover shows: the quad kept for the background
+      // takes no part in what is hit.
+      expect(on.frames[0].under.length).toBeGreaterThan(0)
+      expect(on.frames[0].picture).not.toEqual(on.frames[1].picture)
+      expect(ticks(on.patches)).toBeGreaterThan(0)
+      expect(ticks(off.patches)).toBe(0)
+    })
+
+    unverified(`is a patched frame for each crossing of a row with no background, in a ${kind}`, () => {
+      const crossings = [55, 95, 55, 20, 95, 20]
+      const on = patched(kind, crossings, true, "bare")
+      expect(on.patchedFrames).toBe(crossings.length)
+      expect(on.declines + on.unpatchable).toBe(0)
+      expect(on.painted, "no frame is built whole").toBe(0)
+      expect(patched(kind, crossings, false, "bare").patchedFrames).toBe(0)
     })
   }
 

@@ -641,14 +641,24 @@ without it in nothing but:
 - `opacity`, while the element stays on the same side of 1 (a value below 1 makes an effect group, so crossing 1 changes the
   kind of what is painted).
 
-**A colour has to keep its visibility.** A patch writes the primitives of an operation over the ones it had, so the operations
-must be the same ones, and gpui paints no quad for a transparent background or border, no glyph for a transparent text and no
-shadow for a transparent one. A hover that gives a background to an element that had none (the mailbox row of ghia-bench:
-`hover: { backgroundColor }` over no background) adds a quad to the operations of the root, and a hover back takes it away, so it
-is `Whole`. The same hover over a row that paints a background of its own is paint-only. (A first version let the patch find
-out: the operations differed in number, gpui declined as `Operations`, and the tick was a patch attempt and then the frame built
-whole, 13.0M instructions a crossing in the mailbox proxy against 8.7M.) A side of a border that draws nothing (no width or no
-line) has no visibility to keep.
+**A colour has to keep its visibility, except a background.** A patch writes the primitives of an operation over the ones it had,
+so the operations must be the same ones, and gpui paints no quad for a transparent border, no glyph for a transparent text and no
+shadow for a transparent one: a hover that takes one of those from invisible to visible adds an operation, and is `Whole`. A
+side of a border that draws nothing (no width or no line) has no visibility to keep.
+
+The background is kept. A hover that gives a background to an element that had none (the mailbox row of ghia-bench:
+`hover: { backgroundColor }` over no background) would add a quad to the operations of the root, and a hover back would take it
+away. So an element whose `hover` or `hasHover` sets a background colour (`StyleDesc::keeps_background_quad`) is built with a fully
+transparent background where it has none, and with gpui's `Style::keep_transparent_background` set, which makes gpui paint the quad
+of a transparent background ([syncing-upstream.md](syncing-upstream.md#a-transparent-background-quad-that-is-kept-zed-stylers-sceners)).
+The quad is in the root both ways and the hover writes a colour over it: `hover_paint::background_quad_kept`. The kept quad takes
+no part in a hit test (a background never does: the hitbox of an element is its own, and `pointer-events` decides it) and paints
+nothing, so the page is the page of a build without it. It does not apply to a background that is more than a colour
+(`background-clip: text`, which makes the colour a layer of its own, an image, a gradient, a colour the root context does not
+resolve): those compare as before. (A first version let the patch find out: the operations differed in number, gpui declined as
+`Operations`, and the tick was a patch attempt and then the frame built whole, 13.0M instructions a crossing in the mailbox proxy
+against 8.7M.) `active`, the group states and the focus states are not kept: they are frames built whole for another reason, and a
+quad per element for them would be paid for nothing.
 
 Everything else is compared whole, so a property this module does not list is not paint-only: layout, font, `transform`, `cursor`,
 `zIndex`, a gradient, a custom property. A `transition` declared on the element, in the refinement, or (when `color` changes, which
@@ -732,14 +742,18 @@ the frame built whole every hover used to be, and the tick it asks for builds no
 
 | | patching off | patching on |
 |---|---|---|
-| the bench app as it is (the row has no background, a hover gives it one) | mean 9.35M and 9.33M, median 8.67M | the same, a frame built whole (`Whole`): mean 9.32M and 9.38M, median 8.66M |
+| the bench app as it is (the row has no background, a hover gives it one) | mean 9.35M and 9.33M, median 8.67M | before the kept background quad: the same, a frame built whole (`Whole`): mean 9.32M and 9.38M, median 8.66M. With it: mean 4.48M and 4.51M, median 4.05M and 4.04M; 18 of 18 crossings patched, 1 scene rebuild |
 | a row with a background of its own (`ROW_BG=1`) | mean 9.61M and 9.71M, median 8.90M and 8.94M | mean 4.70M and 4.70M, median 4.07M and 4.09M; 18 of 18 crossings patched, 2 units each, 0.06 scene rebuilds a crossing |
 
-With a background of its own the hover costs 51% less (mean). The bench app as it is gains nothing, because its hover adds a quad. What is
+With a background of its own the hover costs 51% less (mean), and the bench app as it is costs about the same since the kept quad (a
+build on the same machine, the row crossings before and after: mean 8.57M and 8.61M, median 7.84M, none patched, to mean 4.48M and 4.51M,
+median 4.05M and 4.04M, all 18 patched: 48% less). What is
 left of a patched crossing is the rows built (18 elements, 2.9M), the input dispatch and the fixed cost of a patch; a patched row
 still builds its 9 elements, where a row whose children kept their recordings would build one (not done: see the limits). The scroll
-phase (`PHASE=scroll A11Y=0`), where the row under the pointer changes while the rows are translated, is what it was: mean 9.03M and
-9.03M with patching on, 9.02M and 9.01M off.
+phase (`PHASE=scroll A11Y=0`), where the row under the pointer changes while the rows are translated, was what it was for a row with
+a background of its own: mean 9.03M and 9.03M with patching on, 9.02M and 9.01M off. The kept quad is one primitive more in every
+row that declares such a hover: the scroll phase of the bench app as it is went from mean 7.64M and 7.63M to 7.89M and 7.88M (+3.2%,
+median 6.87M to 7.14M; 14 more replayed primitives and 18 more bounds inserts a tick), the price of the quad.
 
 Two things found by measuring: the patch compared every operation of the two rows by their debug form (formatting two floats-heavy
 structs, a hundred thousand instructions each), 25.7M of a 27.9M tick (`PaintOperation::differs_from` compares the fields of
@@ -748,8 +762,8 @@ marks `Replaced` with `derived: true`, which a build at the row's own place does
 
 **Limits.**
 
-- A hover that adds or takes away a primitive (a background where there was none, a shadow, a border colour from transparent) is a
-  frame built whole; so is a group, a root that might lift, a size by an intrinsic keyword, a root of more than 64 elements, and a
+- A hover that adds or takes away a primitive (a shadow, a border colour from transparent, a text colour from transparent, a
+  background that is more than a colour) is a frame built whole; so is a group, a root that might lift, a size by an intrinsic keyword, a root of more than 64 elements, and a
   row that was scrolled since it was recorded (`Hover:Relocated`: the frame after a scroll builds the rows again where they stand,
   and the hover after that is patched).
 - A page of at most 64 elements is one root: a patch builds all of it, as a frame built whole does.
