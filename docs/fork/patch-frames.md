@@ -680,7 +680,7 @@ what the frame shown cut moved by the offset would be. So for each row it makes 
   far from its recording the frame shown had the row plus the scroll, in device pixels, exactly as the relocation of a replay counts it:
   `ListState::scrolled` rounded half up) and the content mask the row was painted under (the list's clip is in it; `ScrollRun::paint_mask`),
   the same iterator `Scene::replay_translated` puts a relocated replay into the scene with, and overwrite the row's range of
-  `Scene::paint_operations`. The scene is then made again from the log with the draw orders worked out again (`Scene::rebuild_moved`;
+  `Scene::paint_operations` (`TranslatedOperations::overwrite`, one operation at a time into its slot: no vector of the translated operations is made). The scene is then made again from the log with the draw orders worked out again (`Scene::rebuild_moved`;
   `rebuild_from_operations` reuses the orders of the log, which holds for a patch that changes how operations paint and not where).
 - **The hitboxes.** `Hitbox::relocated` of the recorded hitboxes with the total delta and the prepaint mask, keeping the id and the parent
   of the one in the frame. `hitboxes_changed` and the hit test at the pointer are redone (`mouse_hit_test`), as a draw does; the cursor
@@ -695,7 +695,7 @@ what the frame shown cut moved by the offset would be. So for each row it makes 
   view that scrolled stays queued, so a frame built whole after it renders again. Ghia follows the hover with the resync the pointer
   frame schedules after a draw (`Window::set_scroll_patch_settled`, run deferred): the hit test is of the frame that moved.
 
-Everything is worked out before anything is written. A row whose state or recording is gone, that hands elements to a stacking context, or
+Everything that can decline is checked before anything is written (the plan keeps, for each row, the recording it holds by reference, and the writes are made from it). A row whose state or recording is gone, that hands elements to a stacking context, or
 whose operations or hitboxes are not as many as it recorded (a hidden row records none) declines the whole translate
 (`applyDeclines`: `Recording`, `Operations`, `Hitboxes`, `Runs`, `Window`), and the frame is built whole in the same draw, with the
 prediction still checked afterwards. `Window` is a draw that is a layout pass, measures, or runs inside the dispatch of an input.
@@ -728,7 +728,7 @@ of the 9.2M of an eligible tick): the frames it replaces were already the cheap 
 made again from the log in both (`rebuild_moved` is most of what a patched `Window::draw` does in a profile of the run, `boundsInserts` 255 a tick, the
 same as the replays'); what remains of the tick is the page's present and the JS side. What a translate can save is the scene work, by moving the
 primitives of the rows in the typed vectors and keeping the draw orders where the overlaps of the moved bounds with the rest are the ones the log
-recorded, and the 15M ticks, which are slice 3's (the row that comes in and the hover). After the scene stopped copying each primitive eight times ([What a replay costs](retention.md#what-a-replay-costs)) the same runs cost 9.77M to 9.80M a tick with the translate, the 328 patched ticks 6.46M and the other ticks 12.5M to 12.6M, 10.00M with the default scrollbar; against 9.75M to 9.77M with `GPUIX_SCROLL_PATCH_OFF=1`, so the translate saves nothing here: both draws make the scene again from the log.
+recorded, and the 15M ticks, which are slice 3's (the row that comes in and the hover). After the scene stopped copying each primitive eight times ([What a replay costs](retention.md#what-a-replay-costs)) the same runs cost 9.77M to 9.80M a tick with the translate, the 328 patched ticks 6.46M and the other ticks 12.5M to 12.6M, 10.00M with the default scrollbar; against 9.75M to 9.77M with `GPUIX_SCROLL_PATCH_OFF=1`, so the translate saves nothing here: both draws make the scene again from the log. The translate had collected the translated operations of every row into a vector and then copied them into the frame (2.2M of a 6.5M patched tick, half of it `memmove`); written straight into their slots they cost 9.30M to 9.33M a tick, the patched ticks 5.37M to 5.42M and the other ticks 12.59M to 12.60M, so the translate now saves about 0.45M a tick against 9.75M to 9.80M with `GPUIX_SCROLL_PATCH_OFF=1`.
 
 **Not in 2a.** The thumb (a list with a scrollbar is `Thumb`: in the mailbox proxy with its default scrollbar every frame declines), the row
 that comes in at an edge (`Membership`: a layout that builds a row), the hover that changes what is under the pointer (`Hover`), and what the
