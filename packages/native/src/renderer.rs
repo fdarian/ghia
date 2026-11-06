@@ -7510,6 +7510,9 @@ impl GpuixView {
             return false;
         }
         queue_virtual_list_scroll(id, index, offset_in_item);
+        if let Some(entry) = self.virtual_lists.get(&id) {
+            entry.reported_range.set(Some((index, index + 1)));
+        }
         emit_event_full(&self.event_callback, id, "visibleRange", |payload| {
             payload.start_index = Some(index as f64);
             payload.end_index = Some((index + 1) as f64);
@@ -8211,6 +8214,9 @@ struct VirtualListEntry {
     child_revisions: Vec<u64>,
     row_focus_handles: Vec<Option<gpui::FocusHandle>>,
     seen_rows: HashSet<u64>,
+    /// The `visibleRange` this list last reported (start, end). The scroll handler is set again every
+    /// render, so what it compares against lives here and the closure holds a clone.
+    reported_range: Rc<Cell<Option<(usize, usize)>>>,
 }
 
 impl VirtualListEntry {
@@ -8244,6 +8250,7 @@ impl VirtualListEntry {
             child_revisions,
             row_focus_handles,
             seen_rows: HashSet::new(),
+            reported_range: Rc::new(Cell::new(None)),
         }
     }
 
@@ -11495,7 +11502,7 @@ fn build_virtual_list(
     } else {
         0
     };
-    let list_state = match ctx.virtual_lists.entry(element.id) {
+    let (list_state, reported_range) = match ctx.virtual_lists.entry(element.id) {
         std::collections::hash_map::Entry::Occupied(mut entry) => {
             entry.get_mut().sync(
                 config,
@@ -11514,7 +11521,7 @@ fn build_virtual_list(
                     });
                 }
             }
-            entry.state.clone()
+            (entry.state.clone(), entry.reported_range.clone())
         }
         std::collections::hash_map::Entry::Vacant(entry) => {
             let row_focus_handles = child_ids
@@ -11536,7 +11543,7 @@ fn build_virtual_list(
                     });
                 }
             }
-            entry.state.clone()
+            (entry.state.clone(), entry.reported_range.clone())
         }
     };
 
@@ -11553,9 +11560,13 @@ fn build_virtual_list(
         let callback = ctx.event_callback.clone();
         let list_id = element.id;
         list_state.set_scroll_handler(move |event, _window, _cx| {
+            let range = (event.visible_range.start, event.visible_range.end);
+            if reported_range.replace(Some(range)) == Some(range) {
+                return;
+            }
             emit_event_full(&callback, list_id, "visibleRange", |payload| {
-                payload.start_index = Some(event.visible_range.start as f64);
-                payload.end_index = Some(event.visible_range.end as f64);
+                payload.start_index = Some(range.0 as f64);
+                payload.end_index = Some(range.1 as f64);
             });
         });
     }

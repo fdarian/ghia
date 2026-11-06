@@ -3080,6 +3080,7 @@ device pixel as Chrome does. The list records its box like any element, so `getB
 box is its padding box, as a div's is: its rows start inside the `border` and the `padding`, are clipped and hit inside
 the border, and `clientWidth`, `clientHeight`, `scrollHeight` and the largest `scrollTop` are those of the padding box.
 A row that shows only in the top padding of a scrolled list is built and counted by `visibleRange`.
+`onVisibleRange` fires when the visible range (`startIndex` to an exclusive `endIndex`) differs from the one the list last reported, not on every scroll event: a scroll that stays within the same rows reports nothing. The first scroll reports its range, and `scrollToItem` reports its own.
 `fixtures/virtual-list-oracle.*` pins the rest against headless Chrome.
 
 On a virtual list, `scrollToItem` takes an optional **pixel offset** and the
@@ -3146,7 +3147,7 @@ missing, so a jump cannot collapse unmounted rows to height 0.
 There is **no `VirtualList` wrapper component**. The window is app state:
 only the app knows when it must widen, for example when a filter grows
 `itemCount` without any scroll. Keep `start` in `useState`, move it from
-`onVisibleRange`, and slice around it.
+`onVisibleRange` (it fires when the visible range changes), and slice around it.
 
 ```tsx
 const WINDOW = 40
