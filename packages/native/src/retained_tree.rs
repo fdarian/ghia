@@ -668,6 +668,9 @@ pub struct RetainedTree {
     removals: u64,
     /// How many times an element was put under a parent other than the one it had.
     reparents: u64,
+    /// The parent each detached element left, so that putting it under another one counts as a
+    /// reparent as well. Gone once the element is attached again or destroyed.
+    detached_from: HashMap<u64, u64>,
 }
 
 impl RetainedTree {
@@ -700,6 +703,7 @@ impl RetainedTree {
             auto_focus_requested: false,
             removals: 0,
             reparents: 0,
+            detached_from: HashMap::new(),
         }
     }
 
@@ -997,6 +1001,7 @@ impl RetainedTree {
     fn destroy_element_recursive(&mut self, id: u64, destroyed: &mut Vec<u64>) {
         if let Some(element) = self.elements.remove(&id) {
             self.removals += 1;
+            self.detached_from.remove(&id);
             self.motion_ids.remove(&id);
             self.image_ids.remove(&id);
             self.motion_value_ids.remove(&id);
@@ -1017,6 +1022,32 @@ impl RetainedTree {
         }
     }
 
+    /// Takes an element out of its parent and keeps it, with its subtree and all its state, for
+    /// `append_child` or `insert_before` to put back or `destroy_element` to free. It is out of
+    /// the tree, as a node a DOM `removeChild` returned is out of the document, so a layout pass
+    /// no longer builds it.
+    pub fn detach_child(&mut self, id: u64) {
+        let Some(parent_id) = self.elements.get(&id).and_then(|element| element.parent) else {
+            return;
+        };
+        if let Some(parent) = self.elements.get_mut(&parent_id) {
+            parent.children.retain(|child| *child != id);
+        }
+        if let Some(element) = self.elements.get_mut(&id) {
+            element.parent = None;
+        }
+        self.detached_from.insert(id, parent_id);
+        self.mark_changed(parent_id);
+        self.relations.restructured();
+    }
+
+    fn count_reparent(&mut self, child_id: u64, old_parent_id: Option<u64>, parent_id: u64) {
+        let left = old_parent_id.or_else(|| self.detached_from.remove(&child_id));
+        if left.is_some_and(|left| left != parent_id) {
+            self.reparents += 1;
+        }
+    }
+
     pub fn append_child(&mut self, parent_id: u64, child_id: u64) {
         // Remove from old parent if any
         let old_parent_id = self.elements.get(&child_id).and_then(|e| e.parent);
@@ -1029,9 +1060,7 @@ impl RetainedTree {
         if let Some(child) = self.elements.get_mut(&child_id) {
             child.parent = Some(parent_id);
         }
-        if old_parent_id.is_some_and(|old| old != parent_id) {
-            self.reparents += 1;
-        }
+        self.count_reparent(child_id, old_parent_id, parent_id);
         // Add to new parent's children
         if let Some(parent) = self.elements.get_mut(&parent_id) {
             parent.children.push(child_id);
@@ -1058,9 +1087,7 @@ impl RetainedTree {
         if let Some(child) = self.elements.get_mut(&child_id) {
             child.parent = Some(parent_id);
         }
-        if old_parent_id.is_some_and(|old| old != parent_id) {
-            self.reparents += 1;
-        }
+        self.count_reparent(child_id, old_parent_id, parent_id);
         // Insert before the target
         if let Some(parent) = self.elements.get_mut(&parent_id) {
             let pos = parent
@@ -3334,5 +3361,62 @@ mod tests {
             tree.destroy_element(id);
         }
         assert_eq!((tree.elements.capacity(), tree.motion_ids.capacity()), (elements, ids));
+    }
+
+    #[test]
+    fn a_detached_element_is_out_of_the_tree_alive_and_can_be_put_back() {
+        let mut tree = RetainedTree::new();
+        apply(
+            &mut tree,
+            r##"[["createElement",1,"div"],["createElement",2,"div"],["createElement",3,"div"],
+                ["createElement",4,"div"],["appendChild",1,2],["appendChild",2,3],["appendChild",1,4],
+                ["setRoot",1]]"##,
+        );
+        apply(&mut tree, r##"[["detachChild",2]]"##);
+        assert_eq!(tree.elements[&1].children, vec![4]);
+        assert_eq!(tree.elements[&2].parent, None);
+        assert_eq!(tree.elements[&2].children, vec![3], "its subtree goes with it");
+        assert_eq!(tree.elements.len(), 4, "nothing is destroyed");
+
+        apply(&mut tree, r##"[["detachChild",2]]"##);
+        assert_eq!(tree.elements[&1].children, vec![4], "detaching a detached element does nothing");
+
+        apply(&mut tree, r##"[["insertBefore",1,2,4]]"##);
+        assert_eq!(tree.elements[&1].children, vec![2, 4]);
+        assert_eq!(tree.elements[&2].parent, Some(1));
+        assert_eq!(tree.elements[&2].children, vec![3]);
+    }
+
+    #[test]
+    fn a_detached_element_can_be_destroyed_with_its_subtree() {
+        let mut tree = RetainedTree::new();
+        apply(
+            &mut tree,
+            r##"[["createElement",1,"div"],["createElement",2,"div"],["createElement",3,"div"],
+                ["appendChild",1,2],["appendChild",2,3],["setRoot",1],["detachChild",2]]"##,
+        );
+        let removals = tree.removals();
+        let destroyed = crate::renderer::apply_batch_to_tree(&mut tree, br#"[["destroyElement",2]]"#)
+            .expect("valid batch");
+        assert_eq!(destroyed, vec![2.0, 3.0]);
+        assert_eq!(tree.removals(), removals + 2);
+        assert_eq!(tree.elements.len(), 1);
+        assert!(tree.detached_from.is_empty());
+    }
+
+    #[test]
+    fn putting_a_detached_element_under_another_parent_is_a_reparent() {
+        let mut tree = RetainedTree::new();
+        apply(
+            &mut tree,
+            r##"[["createElement",1,"div"],["createElement",2,"div"],["createElement",3,"div"],
+                ["appendChild",1,2],["appendChild",1,3],["setRoot",1]]"##,
+        );
+        let start = tree.reparents();
+        apply(&mut tree, r##"[["detachChild",3],["appendChild",1,3]]"##);
+        assert_eq!(tree.reparents(), start, "back under its own parent is a move");
+        apply(&mut tree, r##"[["detachChild",3],["appendChild",2,3]]"##);
+        assert_eq!(tree.reparents(), start + 1);
+        assert!(tree.detached_from.is_empty());
     }
 }

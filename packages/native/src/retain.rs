@@ -1011,13 +1011,11 @@ pub(crate) struct Retain {
     /// The shape of the list the row is a child of, which the row's key takes where an element
     /// takes the shape of its parent.
     row_parent_shape: u64,
-    /// The row being built.
-    row_id: u64,
     /// The rows built since the last frame that looked, whose records are still wanted.
     rows_seen: FxHashSet<u64>,
-    /// The elements each row's last build made: `records` and `dynamic` hold them, and a row the
-    /// list stops asking for has to take them out.
-    row_nodes: FxHashMap<u64, Vec<u64>>,
+    /// The rows the frame before asked for: the ones of them that this frame does not ask for are
+    /// the rows the list stopped asking for, whose subtrees keep records (`forget_unseen_rows`).
+    rows_before: FxHashSet<u64>,
     /// Some row built since the last frame ended could be skipped by the next, which the page's
     /// session cannot see (`finish_frame`).
     row_candidates: bool,
@@ -1224,9 +1222,8 @@ impl Retain {
             plan: Plan::default(),
             row: false,
             row_parent_shape: 0,
-            row_id: 0,
             rows_seen: FxHashSet::default(),
-            row_nodes: FxHashMap::default(),
+            rows_before: FxHashSet::default(),
             row_candidates: false,
             page_summary: Summary::default(),
             selection: 0,
@@ -1308,7 +1305,7 @@ impl Retain {
         self.seen = Seen { scrolls, ..Seen::default() };
         self.records.clear();
         self.dynamic.clear();
-        self.row_nodes.clear();
+        self.rows_before.clear();
         self.release_dormant(false);
         self.plan.recorded = false;
         self.publish_shown();
@@ -1402,7 +1399,7 @@ impl Retain {
             self.publish_shown();
         }
         if sources.pass == 1 && !sources.layout_only && !sources.reference {
-            self.forget_unseen_rows();
+            self.forget_unseen_rows(sources.tree);
         }
         if sources.pass == 1 && !sources.reference {
             self.learn_relocation(sources.tally.lazy_builds, sources.relocations);
@@ -1795,7 +1792,6 @@ impl Retain {
         self.open = self.enabled && !self.backoff.resting;
         self.row = true;
         self.row_parent_shape = parent_shape;
-        self.row_id = row_id;
         self.unit = None;
         self.inside_relocatable = false;
         self.nodes.clear();
@@ -1806,48 +1802,38 @@ impl Retain {
     }
 
     pub(crate) fn finish_row(&mut self) {
-        let built = self.open;
         self.row_candidates |= self.finish_session();
-        if built {
-            self.note_row_nodes();
-        }
         self.row = false;
         self.row_parent_shape = 0;
         self.summary = std::mem::take(&mut self.page_summary);
     }
 
-    /// Notes the elements `finish_row` has just settled, for `forget_unseen_rows`. A row that was
-    /// skipped is as its last build left it.
-    fn note_row_nodes(&mut self) {
-        let Some(root) = self.nodes.first().filter(|root| root.skipped.is_none()) else { return };
-        let built: Vec<u64> = self.nodes.iter().filter(|node| node.skipped.is_none()).map(|node| node.id).collect();
-        self.row_nodes.insert(root.id, built);
-    }
-
     /// The rows the list stopped asking for since the last frame take their records and dynamic
-    /// elements with them, as `forget_unbuilt_dynamic` does for the ones under an absent box. A row
-    /// that is not built is not visited, and what it had running would keep the list and everything
-    /// above it on the spine for as long as the window lives. Its records go for two reasons: a
-    /// list that scrolls through thousands of rows would keep one per element it ever built, and
-    /// the box of a row the list does not lay out is gone (`Scroller::holds`) while its record
-    /// stays. A frame that asks for it again would skip it as relocatable, handing gpui a root
-    /// that cannot be put elsewhere (no box, so no overscan), which gpui builds late and records
-    /// without the handles that move what it holds outside the frame, to replay it under a root
-    /// that is relocatable once the box is back. A row without a record is built, and recorded as
-    /// a root that has no box yet is.
-    fn forget_unseen_rows(&mut self) {
+    /// elements with them, whole subtree and all, as `forget_unbuilt_dynamic` does for the ones
+    /// under an absent box. A row that is not built is not visited, so nothing of the page's walk
+    /// forgets what is in it. Its records go for two reasons: a list that scrolls through thousands
+    /// of rows would keep one per element it ever built, and the box of a row the list does not lay
+    /// out is gone (`Scroller::holds`) while its record stays. A frame that asks for it again would
+    /// skip it as relocatable, handing gpui a root that cannot be put elsewhere (no box, so no
+    /// overscan), which gpui builds late and records without the handles that move what it holds
+    /// outside the frame, to replay it under a root that is relocatable once the box is back. A row
+    /// without a record is built, and recorded as a root that has no box yet is.
+    ///
+    /// The subtree is walked from the tree, not listed from what the row's last build made: a root
+    /// the build skipped, and what gpui built late inside the row (`begin_deferred`), have records
+    /// too, and the build that made them is not the last one. The walk stops at a nested
+    /// `<virtual-list>`: its rows are rows of their own, swept when they are among `rows_before`,
+    /// and the ones the list never asked for have no record, so descending would visit every row of
+    /// an inner list each time the outer row leaves the viewport.
+    fn forget_unseen_rows(&mut self, tree: &crate::retained_tree::RetainedTree) {
         let seen = std::mem::take(&mut self.rows_seen);
-        let (dynamic, records) = (&mut self.dynamic, &mut self.records);
-        self.row_nodes.retain(|row, nodes| {
-            let kept = seen.contains(row);
-            if !kept {
-                for id in nodes.iter() {
-                    dynamic.remove(id);
-                    records.remove(id);
-                }
-            }
-            kept
-        });
+        if !(self.records.is_empty() && self.dynamic.is_empty()) {
+            for_each_unseen_element(&self.rows_before, &seen, tree, |id| {
+                self.dynamic.remove(&id);
+                self.records.remove(&id);
+            });
+        }
+        self.rows_before = seen;
     }
 
     /// The shape of the element being built, for a child that is not built inside it to take as its
@@ -3028,6 +3014,25 @@ impl Retain {
         for id in stale {
             self.dynamic.remove(&id);
             self.records.remove(&id);
+        }
+    }
+}
+
+/// Calls `visit` for each element of the rows `before` asked for and `seen` did not, and of the
+/// subtrees under them, but not the children of a nested `<virtual-list>` (`forget_unseen_rows`).
+fn for_each_unseen_element(
+    before: &FxHashSet<u64>,
+    seen: &FxHashSet<u64>,
+    tree: &crate::retained_tree::RetainedTree,
+    mut visit: impl FnMut(u64),
+) {
+    let mut pending: Vec<u64> = before.iter().copied().filter(|row| !seen.contains(row)).collect();
+    while let Some(id) = pending.pop() {
+        visit(id);
+        if let Some(element) = tree.elements.get(&id) {
+            if element.element_type != "virtual-list" {
+                pending.extend(element.children.iter().copied());
+            }
         }
     }
 }
@@ -5571,31 +5576,107 @@ mod tests {
     }
 
     #[test]
-    fn an_offscreen_rows_dynamic_entries_are_dropped_the_frame_after_the_list_stops_asking_for_it() {
+    fn a_row_the_list_stopped_asking_for_takes_the_records_of_its_whole_subtree_with_it() {
         let mut page = Units::new();
-        let animating = |page: &mut Units| {
-            page.retain.dynamic(Dynamic::Animation);
-            page.leaf(5);
+        // The rows 3 and 4, and under 3 a root (6, with 7 in it) that a build of the row can skip.
+        page.tree = tree_of(&[
+            (1, None, "div", None),
+            (2, Some(1), "div", None),
+            (3, Some(2), "div", None),
+            (4, Some(2), "div", None),
+            (6, Some(3), "div", None),
+            (7, Some(6), "div", None),
+            (8, Some(7), "div", None),
+        ]);
+        let nested = |page: &mut Units| {
+            page.element(6, None, |page| page.leaf(7));
         };
         let shape = page.list_frame(false);
-        page.row(shape, 3, animating);
+        page.row(shape, 3, nested);
         page.row(shape, 4, |_| {});
-        assert!(page.retain.dynamic.contains_key(&3));
+        // 8 is built late by gpui, after the row's session: no build of the row lists it.
+        page.retain.begin_deferred(false, false);
+        page.leaf(8);
+        page.retain.finish_deferred();
+        for frame in 0..3 {
+            // The row is restyled, so it is built and 6 is skipped: a list of what the build made leaves 6 out.
+            page.edit(3);
+            let shape = page.list_frame(false);
+            page.row(shape, 3, |page| {
+                if frame == 0 {
+                    nested(page);
+                } else {
+                    assert!(page.element(6, None, |_| {}).is_none(), "6 is skipped");
+                }
+            });
+            page.row(shape, 4, |_| {});
+        }
+        assert!(page.retain.records.contains_key(&3) && page.retain.records.contains_key(&6));
+        assert!(page.retain.records.contains_key(&7) && page.retain.records.contains_key(&8));
 
-        // The frames begin without being finished, which would forget what the page did not build (and
-        // the rows with it): this is the sweep of the rows alone.
-        let sources = sources_of(&page.tree, &page.focus, &page.handles, &page.scrolls, &[], false);
-        page.retain.begin_frame(sources);
-        assert!(page.retain.dynamic.contains_key(&3), "the list asked for 3 since the last frame looked");
-        // The list scrolled: it asks for 4 and not for 3.
+        // The list scrolls: the first frame asks for 4 and not for 3, and the sweep of the frame after
+        // (it compares the rows the frame before last asked for, 3 and 4, with those the last one did, 4) drops 3.
+        let shape = page.list_frame(false);
         page.row(shape, 4, |_| {});
-        let sources = sources_of(&page.tree, &page.focus, &page.handles, &page.scrolls, &[], false);
-        page.retain.begin_frame(sources);
-        assert!(!page.retain.dynamic.contains_key(&3), "a row nobody builds is not visited, and what it had running would pin the list for good");
-        assert!(!page.retain.records.contains_key(&3));
-        assert!(!page.retain.records.contains_key(&5), "nor does anything the row built");
+        let shape = page.list_frame(false);
+        page.row(shape, 4, |_| {});
+        for id in [3, 6, 7, 8] {
+            assert!(!page.retain.records.contains_key(&id), "{id} belongs to a row nobody asks for");
+        }
         assert!(page.retain.records.contains_key(&4));
-        assert_eq!(page.retain.row_nodes.keys().copied().collect::<Vec<_>>(), vec![4]);
+
+        // The dynamic entries are the page session's to drop in a frame that records, so the sweep is
+        // called by itself, as a rest frame (no page session) leaves it: 7 has an entry from the row's build.
+        page.retain.dynamic.insert(7, Dynamic::Animation as u8);
+        page.retain.dynamic.insert(4, Dynamic::Animation as u8);
+        page.retain.rows_before = [3, 4].into_iter().collect();
+        page.retain.rows_seen = [4].into_iter().collect();
+        page.retain.forget_unseen_rows(&page.tree);
+        assert!(!page.retain.dynamic.contains_key(&7), "an element of the unseen row's subtree");
+        assert!(page.retain.dynamic.contains_key(&4), "a row the list still asks for");
+    }
+
+    #[test]
+    fn the_sweep_of_unseen_rows_stops_at_a_nested_list_and_still_takes_the_inner_rows_it_asked_for() {
+        // 3 is an outer row holding the list 6; 7 is a row of 6 with 8 in it, 9 a row the list never asked for.
+        let tree = tree_of(&[
+            (1, None, "div", None),
+            (2, Some(1), "virtual-list", None),
+            (3, Some(2), "div", None),
+            (4, Some(2), "div", None),
+            (5, Some(3), "div", None),
+            (6, Some(3), "virtual-list", None),
+            (7, Some(6), "div", None),
+            (8, Some(7), "div", None),
+            (9, Some(6), "div", None),
+        ]);
+        let set = |ids: &[u64]| ids.iter().copied().collect::<FxHashSet<u64>>();
+        let mut visited = Vec::new();
+        for_each_unseen_element(&set(&[3, 4]), &set(&[4]), &tree, |id| visited.push(id));
+        visited.sort_unstable();
+        assert_eq!(visited, [3, 5, 6], "the inner list is visited, its rows are not");
+
+        visited.clear();
+        for_each_unseen_element(&set(&[3, 7]), &set(&[4]), &tree, |id| visited.push(id));
+        visited.sort_unstable();
+        assert_eq!(visited, [3, 5, 6, 7, 8], "an inner row the list asked for is swept as a row, with its subtree");
+    }
+
+    #[test]
+    fn the_page_session_of_the_next_frame_drops_what_a_row_had_running() {
+        let mut page = Units::new();
+        let shape = page.list_frame(false);
+        page.row(shape, 3, |page| {
+            page.retain.dynamic(Dynamic::Animation);
+            page.leaf(5);
+        });
+        assert_eq!(page.retain.dynamic.get(&3), Some(&(Dynamic::Animation as u8)), "there for the deltas of the next frame");
+        // The page's session closes before any row of the frame is built and has not built the row's
+        // elements, so it forgets them (`forget_unbuilt_dynamic`): the row is built again by the frame
+        // that asks for it, whether or not the list does.
+        page.list_frame(false);
+        assert!(!page.retain.dynamic.contains_key(&3));
+        assert!(!page.retain.records.contains_key(&3));
     }
 
     #[test]

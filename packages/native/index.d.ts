@@ -46,6 +46,7 @@ export declare class GpuixRenderer {
    *
    *   ["createElement",    id, "type"]
    *   ["destroyElement",   id]
+   *   ["detachChild",      id]
    *   ["appendChild",      parentId, childId]
    *   ["insertBefore",     parentId, childId, beforeId]
    *   ["setStyle",         id, { ...style }]

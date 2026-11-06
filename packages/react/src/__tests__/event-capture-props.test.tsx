@@ -8,6 +8,7 @@ function setup() {
     createElement() {},
     destroyElement: () => [],
     appendChild() {},
+    detachChild() {},
     insertBefore() {},
     setStyle() {},
     setText() {},
