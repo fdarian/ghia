@@ -9743,6 +9743,10 @@ impl gpui::Render for GpuixView {
             // there is no commit to survey that the update has not just made.
             move |_: &gpui::Window| tree.try_lock().is_ok_and(|tree| flips.wants_survey(tree.revision()))
         })));
+        window.set_scroll_patch_registries(verifies.then(|| {
+            let window_id = window.window_handle().window_id();
+            Rc::new(move |_: &gpui::Window| crate::automation::describe_registries(window_id)) as Rc<dyn Fn(&gpui::Window) -> String>
+        }));
         window.set_retention_verifier(verifies.then(|| {
             let tapes = self.tapes.clone();
             Rc::new(move |window: &gpui::Window| {
@@ -10377,6 +10381,7 @@ fn replay_hook(
             gpui::RetainedPhase::LiftedBegin(rel) => return tapes.begin_lifted(id, rel),
             gpui::RetainedPhase::LiftedEnd => return tapes.end_lifted(id),
             gpui::RetainedPhase::LiftedPaint(rel) => crate::tape::Phase::Lifted(rel),
+            gpui::RetainedPhase::Scrolled(shift) => return tapes.shift(window.window_handle().window_id(), id, shift),
         };
         tapes.replay(window.window_handle().window_id(), id, phase, delta);
     }
@@ -14369,13 +14374,13 @@ pub struct PatchCounters {
     /// JSON object: ticks gpuix did not try to patch, by kind (`Unpatchable`, and the units it
     /// could not build).
     pub unpatchable: String,
-    /// How the frames drawn after a list scroll would have been drawn by translating the rows of the frame before
-    /// them (nothing is translated yet, every frame is drawn whole).
+    /// How the frames drawn after a list scroll were drawn, or would have been, by translating
+    /// the rows of the frame before them.
     pub scroll_patch: ScrollPatchCounters,
 }
 
-/// The frames drawn after a list scroll that could have been a pure translate of the rows, and
-/// the first reason the others could not (`gpui::ScrollPatchReason`).
+/// The frames drawn after a list scroll that could be a pure translate of the rows, those that
+/// were (`patched`), and the first reason the others could not (`gpui::ScrollPatchReason`).
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 #[derive(Debug, Clone)]
 #[napi(object)]
@@ -14389,6 +14394,11 @@ pub struct ScrollPatchCounters {
     /// Of the frames whose first reason is the hover, the ones nothing else stops: eligible with
     /// the pointer elsewhere.
     pub hover_only: f64,
+    /// Of the eligible ones, the ones drawn by moving the rows of the frame shown.
+    pub patched: f64,
+    /// The eligible ones drawn whole, by why the translate declined before it wrote anything
+    /// (`gpui::ScrollApplyDecline`).
+    pub apply_declines: std::collections::HashMap<String, f64>,
     /// The others, by the first reason they were not.
     pub reasons: std::collections::HashMap<String, f64>,
     /// The same frames, by every reason that held for them, first or not (`HitboxChain` is only
@@ -14422,6 +14432,11 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
                 eligible: scroll.eligible as f64,
                 mispredicted: scroll.mispredicted as f64,
                 hover_only: scroll.hover_only as f64,
+                patched: scroll.patched as f64,
+                apply_declines: gpui::ScrollApplyDecline::ALL
+                    .into_iter()
+                    .map(|reason| (format!("{reason:?}"), scroll.apply_declines(reason) as f64))
+                    .collect(),
                 reasons: gpui::ScrollPatchReason::ALL
                     .into_iter()
                     .map(|reason| (format!("{reason:?}"), scroll.reasons(reason) as f64))

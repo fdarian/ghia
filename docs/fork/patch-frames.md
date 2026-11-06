@@ -591,12 +591,15 @@ after.
 
 ## Scroll-only frames (in progress)
 
-Every wheel event over a `<virtual-list>` draws a whole frame (`ListState::scroll` sets the offset, runs the scroll handler and notifies
-the view), about 16M instructions a tick in the mailbox proxy of ghia-bench, though the only thing that changed is where the rows are.
-The aim is a frame, like the patch of a tick, that moves the rows of the frame shown (their scene operations, hitboxes, accessibility
-bounds and the handles of their recordings) by the scroll, paints the scrollbar thumb again, rebuilds the scene from the operation log and
-builds nothing. **Slice 1 (this) is the bookkeeping and a classifier that says, for each frame drawn after a list scroll, whether it
-would have been such a translate. Every frame is still drawn whole and nothing is moved.**
+Every wheel event over a `<virtual-list>` used to draw a whole frame (`ListState::scroll` sets the offset, runs the scroll handler and notifies
+the view), about 12M instructions a tick in the mailbox proxy of ghia-bench, though the only thing that changed is where the rows are.
+A frame like the patch of a tick, that moves the rows of the frame shown by the scroll and builds nothing, has three steps. **Slice 1**
+is the bookkeeping and a classifier that says, before the frame is built, whether it would be a translate of the rows. **Slice 2a
+(this)** draws the frames the classifier calls a translate as one: the operations and hitboxes of the rows are put where their
+recordings put them at the new position, what the rows wrote into the registries is moved, the scene is made again from its log, and
+nothing is built ([The translate](#the-translate)); it leaves out the scrollbar thumb, which a list with a scrollbar paints (`Thumb`
+declines the frame). **Slice 2b** paints the thumb in the translate and **slice 3** brings in the row at the edge and repaints the hover
+inside the patch: both are not built, and the frames they would draw are drawn whole.
 
 **Runs** (zed `window/scroll_patch.rs`). Each frame records, for every relocatable retained root painted inside a list (the rows,
 `retained(..).relocatable(overscan)`, see [retention.md](retention.md#rows-of-a-virtual-list)) and not inside the recording of another
@@ -631,6 +634,7 @@ that holds is counted in `held`, so what else would stop the frame is known too:
 | `Focus` | the frame shown, or a layout there, builds a row outside the viewport for the focus it holds |
 | `A11y` | the accessibility tree is being built |
 | `ScrollAnimation` | a smooth scroll or a scrollbar fade has frames of its own (the owner says it) |
+| `Thumb` | a `<virtual-list>` has a scrollbar (the owner says it, `scrollbar::list_bar_shown`): a scroll moves the thumb or shows it, whether or not it was painted in the frame shown, and the translate does not paint it. A list with `scrollbarWidth: "none"` has none |
 | `NotRelocatable` | a row of the frame shown has no run (it is not a relocatable root, or holds several: the runs are not the rows), a run has no recording, or its recording cannot be put elsewhere (built late, a hole, a position kept past the frame). `held` also counts `NotRelocatable.noRun`, `.noRecording` and `.unmovable` |
 
 A frame with none is *eligible*. The owner's part (`Window::set_scroll_patch_gate`, `retain/scroll_gate.rs`) is `Edited` (the root's
@@ -648,12 +652,12 @@ styles of the elements outside the rows are not either: a frame that differs in 
 
 **The check.** After a frame is drawn whose prediction was eligible, `settle_scroll_patch` compares what it built with the prediction:
 the rows it painted, a run for each, each put from its recording (not built) and moved by the delta the prediction gave. A difference
-is `scrollPatch.mispredicted`. It is the check slice 2 relies on, so it is the number to watch for the classifier having been wrong.
+is `scrollPatch.mispredicted`. It is the check the translate relies on, so it is the number to watch for the classifier having been wrong; a frame that the translate draws is not built, so it has nothing to be compared with (the verifier does, see below).
 
-`getPatchCounters().scrollPatch` is `{ frames, eligible, mispredicted, hoverOnly, reasons, held }`, the last two keyed by the names above
+`getPatchCounters().scrollPatch` is `{ frames, eligible, mispredicted, hoverOnly, patched, applyDeclines, reasons, held }`, `applyDeclines`, `reasons` and `held` keyed by the names above (`applyDeclines` by [why a translate declined](#the-translate))
 (all of them, zero included; `held` also has `HitboxChain`, counted for eligible frames too, and the causes `NotRelocatable.noRun`,
-`NotRelocatable.noRecording`, `NotRelocatable.unmovable`, `Region.top`, `Region.bottom` and `Region.side`). `setScrollPatchEnabled(false)` on the test renderer or `GPUIX_SCROLL_PATCH_OFF=1` turns the bookkeeping and the
-count off. The pixels, boxes and hits are the same either way (`scroll-patch-classifier.test.tsx`). Under `GPUIX_RETAIN_VERIFY=1` a frame that replays rows is built a second time whole and that build is the frame shown, so its rows are not replayed and the next frame is `NotRelocatable`; the cases that need an eligible frame skip there.
+`NotRelocatable.noRecording`, `NotRelocatable.unmovable`, `Region.top`, `Region.bottom` and `Region.side`). `setScrollPatchEnabled(false)` on the test renderer or `GPUIX_SCROLL_PATCH_OFF=1` turns the bookkeeping, the
+count and the translate off. The pixels, boxes and hits are the same either way (`scroll-patch-classifier.test.tsx`, `scroll-patch-translate.test.tsx`). Under `GPUIX_RETAIN_VERIFY=1` a frame that replays rows is built a second time whole and that build is the frame shown, so its rows are not replayed and the next frame is `NotRelocatable`; the cases that need an eligible frame skip there.
 
 **Measured** (the mailbox proxy of ghia-bench on the test renderer: 360 wheel events of 30 px down and 360 up over rows of 72 px with a hover style, `PHASE=scroll A11Y=0 bun mailbox-scroll-hover/profile.tsx`, release addon, no screen reader as a bench run has). Before the refinements (the commit that introduced the classifier): none of the 720 frames eligible; first reasons `Membership` 356, `Hover` 338, `Edited` 26; `held` `Hover` 691, `Membership` 382, `NotRelocatable` 301, `Region` 297, `Edited` 26. Now **328 of 720 are eligible, none mispredicted**; first reasons `Membership` 356, `Edited` 26, `Region` 6, `Hover` 4; `held` `HitboxChain` 691, `Membership` 382, `Hover` 300, `Region` 297 (`Region.top` 150, `Region.bottom` 147), `Edited` 26, `NotRelocatable` 0. What changed:
 
@@ -665,11 +669,71 @@ count off. The pixels, boxes and hits are the same either way (`scroll-patch-cla
 
 With the test window's pretend screen reader on (`A11Y` unset) `A11y` holds for all 720 and none is eligible; the rest is the same. Instructions per tick (whole `drawFrame` plus input, two runs each back to back): 11.83M and 11.82M on, 11.58M and 11.63M with `GPUIX_SCROLL_PATCH_OFF=1`: the recording and the classification cost about 0.2M a tick (1.9%), the hit tests of the hover included.
 
-**Slice 2 (translate in place), not built.** When the verdict is eligible the draw skips the page: it moves the `ops`, `hitboxes`,
-accessibility bounds and relocation handles of the runs by the delta (`Scene::replay_translated` over the operation range,
-`Hitbox::relocated`, `RelocationInfo`'s handles), paints the scrollbar thumb (an overlay closure of the list) again, rebuilds the scene
-from the log (`Scene::rebuild_from_operations`) and runs the hover resync, then verifies against a whole frame under
-`GPUIX_RETAIN_VERIFY`. The rest of the frame (dispatch tree, element states, line layouts, tab stops) is the frame shown's.
+### The translate
+
+`Window::apply_scroll_patch` runs right after the classification, at the top of `Window::draw`, for a frame the classifier called eligible.
+It works from the runs of the frame shown, not from its operations moved by the offset: a row of the list was recorded in a region
+(its overscan past the list's clip) and a replay puts the recording where the key says and cuts it by the clip around, which is not
+what the frame shown cut moved by the offset would be. So for each row it makes again what a replay at the new place makes:
+
+- **The scene.** The operations the recording holds (`PaintRecord::operations`) go through `TranslatedOperations` with the total delta (how
+  far from its recording the frame shown had the row plus the scroll, in device pixels, exactly as the relocation of a replay counts it:
+  `ListState::scrolled` rounded half up) and the content mask the row was painted under (the list's clip is in it; `ScrollRun::paint_mask`),
+  the same iterator `Scene::replay_translated` puts a relocated replay into the scene with, and overwrite the row's range of
+  `Scene::paint_operations`. The scene is then made again from the log with the draw orders worked out again (`Scene::rebuild_moved`;
+  `rebuild_from_operations` reuses the orders of the log, which holds for a patch that changes how operations paint and not where).
+- **The hitboxes.** `Hitbox::relocated` of the recorded hitboxes with the total delta and the prepaint mask, keeping the id and the parent
+  of the one in the frame. `hitboxes_changed` and the hit test at the pointer are redone (`mouse_hit_test`), as a draw does; the cursor
+  is asked again.
+- **The root.** `RetainedState::scrolled_to` sets the delta the root is put at and runs `Relocation::apply` (the handles of text layouts and
+  scroll handles, `note_relocated`), and the root's replay listener is told with `RetainedPhase::Scrolled(shift)`. The listener of Ghia
+  (`replay_hook`) moves what the root wrote into the registries: `TapeStore::shift`.
+- **The list.** The run keeps the new delta and the list's `ListFrame::scrolled` the new position, so the frame after (a translate again, or
+  a classification, or a whole frame) is from this one. `ListState`'s own position was set by `scroll()` and the list's scroll listener
+  measures from the layout of the frame shown, which a translate does not change.
+- **After.** The window is current as after a draw: layout current (`mark_layout_current`), presented, the dirty flag cleared. The
+  view that scrolled stays queued, so a frame built whole after it renders again. Ghia follows the hover with the resync the pointer
+  frame schedules after a draw (`Window::set_scroll_patch_settled`, run deferred): the hit test is of the frame that moved.
+
+Everything is worked out before anything is written. A row whose state or recording is gone, that hands elements to a stacking context, or
+whose operations or hitboxes are not as many as it recorded (a hidden row records none) declines the whole translate
+(`applyDeclines`: `Recording`, `Operations`, `Hitboxes`, `Runs`, `Window`), and the frame is built whole in the same draw, with the
+prediction still checked afterwards. `Window` is a draw that is a layout pass, measures, or runs inside the dispatch of an input.
+
+**Layout and reads (what was chosen).** A bounds read after a translate does not lay out again and sees the moved rows: the registries
+are made complete rather than left to a layout pass, so the window is marked layout-current as after a drawn frame. They are
+`Roots`-aware: each registry write remembers the list of its tape it was made into (`tape::owner`) and a list nested in a root is found
+through the parents the tapes record, so `TapeStore::shift` moves exactly what a root and the roots nested in it wrote, by the shift and
+not to an absolute place: the boxes of `getBoundingClientRect` (the replays that put a root back are further by it; the boxes a frame
+wrote for a root it built are moved where they are kept), the matrices of the text registry and the start regions (a press hits the text
+where it is), and the replays that have not been read. The paragraphs and the text layouts move by their handles. A registry that gains
+a writer has to be shifted here. The alternative (leave the window dirty so that the next read lays out) was not taken: a dirty window is
+drawn again whole by the frame loop.
+
+**The check.** Under the retention verifier (`GPUIX_RETAIN_VERIFY=1`) a translate is followed by the frame built whole at the same instant
+with every subtree built (as a patched tick is), and `verify_scroll_patch` compares what the translate made with it: the primitives of the
+scene with their draw orders, the frame (the scene's operations, every reachable hitbox by value with its parent, tab stops, the dispatch
+tree, cursors) and what Ghia keeps outside the frame (`set_scroll_patch_registries`: the painted boxes, the text elements and the start
+regions). A difference is a retention mismatch and fails the tests that run under the verifier. The frame built whole is built from every
+subtree, so the rows it records are `direct` and not movable: the frame after is `NotRelocatable`, and a verified run has about one
+translate for each wheel after a frame that was not verified.
+
+**Measured** (the mailbox proxy, as above, release addon, three runs of each back to back; instructions per tick are `input + clock + drawFrame` and
+include every thread). With the list's scrollbar hidden (`SCROLLBAR=none`): 328 of 720 frames are translates, all 328 patched, none declined, none
+mispredicted. Per tick, mean 12.35M, 12.32M and 12.32M with the translate against 12.21M, 12.20M and 12.20M with `GPUIX_SCROLL_PATCH_OFF=1`; the patched
+ticks cost 9.10M, 9.04M and 9.03M, the same 328 ticks cost 9.19M drawn whole, and the other 392 ticks (a row comes in, a hover, the first
+frame after a commit) 15.07M to 15.16M against 14.75M whole. With the default scrollbar every frame holds `Thumb` (0.96 of them; 0.46 first), none is patched and the mean is
+12.43M to 12.48M against 12.23M to 12.25M (the classification, 0.2M). **The translate as built saves almost nothing in this proxy** (about 0.1M
+of the 9.2M of an eligible tick): the frames it replaces were already the cheap ones, a replay of the rows with nothing built, and the scene is
+made again from the log in both (`rebuild_moved` is most of what a patched `Window::draw` does in a profile of the run, `boundsInserts` 255 a tick, the
+same as the replays'); what remains of the tick is the page's present and the JS side. What a translate can save is the scene work, by moving the
+primitives of the rows in the typed vectors and keeping the draw orders where the overlaps of the moved bounds with the rest are the ones the log
+recorded, and the 15M ticks, which are slice 3's (the row that comes in and the hover).
+
+**Not in 2a.** The thumb (a list with a scrollbar is `Thumb`: in the mailbox proxy with its default scrollbar every frame declines), the row
+that comes in at an edge (`Membership`: a layout that builds a row), the hover that changes what is under the pointer (`Hover`), and what the
+gate cannot see (a measurement, a link, a command, a running motion: these are the `mispredicted` of an eligible frame that the translate
+would draw wrong; the proxy has none).
 
 ## Limits
 
@@ -712,6 +776,15 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   events equal with the classifier on and off. Native `events/dispatcher.rs`: `hover_would_matter` agrees with the restyle and the events
   of the move it asks about, for hover, `:has(:hover)` and boundary-event listeners on the element, an ancestor and `window`, and a
   captured pointer.
+- `scroll-patch-translate.test.tsx` (react): a virtual list with no scrollbar and rows narrower than it, wheeled by fractions of a row with the
+  pointer in the gutter: some frames are translates (`patched` above 0, none mispredicted, `eligible` is `patched` plus `applyDeclines`) and
+  the picture, the boxes of the rows, what is under four points and the cursor after every wheel equal the same wheels with
+  `setScrollPatchEnabled(false)`; the pointer in a row that has a hover style, kept and then crossed into the next; a commit between the
+  wheels is a whole frame (`Edited`) and a translate again after it, equal to the control; a read of the box of a row after a translate
+  says it moved without drawing. gpui `window/scroll_patch_tests.rs`: the frames of fractions of a row are the frames built whole (the
+  scene with its draw orders, the operations, every hitbox by value, the hit test), also with a root nested in each row, interleaved with
+  frames built whole, and with the pointer in a row; a translate that cannot be made declines (`Hitboxes`) and the frame is the one built
+  whole; `Thumb`; the verifier passes a translate and calls a difference in the registries a mismatch.
 - Transforms in three dimensions patch every tick with no decline of either kind (`getPatchCounters`): `transform-css-patch.test.tsx` for a transition of `rotateY` under a perspective, an animation of 3D lists that do not pair, of the depth of `transform-origin` around a rotation, and of the `perspective` and `perspective-origin` of the parent; `motion-transform.test.tsx` for a Motion tween of `rotateY` whose card hides the face that turns away on the patched ticks (`faces_away` is published with the box, not compared by the tape; [paint-and-transforms.md](paint-and-transforms.md#retention-and-patched-ticks)).
 - `animation-frame-work.test.tsx`: at 500 and 5000 nodes every loop kind (keyframes colour, native `motion` colour, colour
   transition, svg stroke dash, `motion` and keyframes opacity, the colour loop of a relative box with and without a `z-index`, loops

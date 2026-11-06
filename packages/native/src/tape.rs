@@ -320,22 +320,25 @@ fn publish(window: WindowId, live: &Live) {
 }
 
 /// A registry that holds the writes of replays by reference, and the writes made around them, in
-/// the order they came: reading it expands each replay into the writes it stands for.
+/// the order they came: reading it expands each replay into the writes it stands for. Each write
+/// keeps the list it was made into (see [`owner`]), so that a frame that moves the rows of a list in
+/// place can find what the rows wrote and move it ([`Layered::shift`]).
 pub(crate) struct Layered<T> {
-    /// What was read.
+    /// What was read, and the list each write was made into (0 outside any).
     read: Vec<T>,
+    owners: Vec<u64>,
     /// What came since: a write is `Slot::One`, a replay that has not been expanded `Slot::Live`.
     pending: Vec<Slot<T>>,
 }
 
 enum Slot<T> {
-    One(T),
+    One(T, u64),
     Live(Live),
 }
 
 impl<T> Default for Layered<T> {
     fn default() -> Self {
-        Self { read: Vec::new(), pending: Vec::new() }
+        Self { read: Vec::new(), owners: Vec::new(), pending: Vec::new() }
     }
 }
 
@@ -343,8 +346,9 @@ impl<T> Layered<T> {
     pub(crate) fn push(&mut self, value: T) {
         if self.pending.is_empty() {
             self.read.push(value);
+            self.owners.push(owner());
         } else {
-            self.pending.push(Slot::One(value));
+            self.pending.push(Slot::One(value, owner()));
         }
     }
 
@@ -362,11 +366,68 @@ impl<T> Layered<T> {
     pub(crate) fn all_mut(&mut self, kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T) -> &mut [T] {
         for slot in self.pending.drain(..) {
             match slot {
-                Slot::One(value) => self.read.push(value),
-                Slot::Live(live) => live.each(kind, |data, offset| self.read.push(from(data, offset))),
+                Slot::One(value, owner) => {
+                    self.read.push(value);
+                    self.owners.push(owner);
+                }
+                Slot::Live(live) => {
+                    let list = live.entries.serial;
+                    live.each(kind, |data, offset| {
+                        self.read.push(from(data, offset));
+                        self.owners.push(list);
+                    });
+                }
             }
         }
         &mut self.read
+    }
+
+    /// Moves every write that was made into one of the lists `roots` stand for, or into one
+    /// nested in them, `by` further, with `moves`, and every replay that puts one of them back.
+    pub(crate) fn shift(&mut self, roots: &Roots, by: Point<Pixels>, mut moves: impl FnMut(&mut T, Point<Pixels>)) {
+        for slot in &mut self.pending {
+            match slot {
+                Slot::One(value, list) if roots.hold(*list) => moves(value, by),
+                Slot::Live(live) if roots.hold(live.entries.serial) => live.delta = live.delta + by,
+                _ => {}
+            }
+        }
+        let mut last = (u64::MAX, false);
+        for (value, list) in self.read.iter_mut().zip(&self.owners) {
+            if last.0 != *list {
+                last = (*list, roots.hold(*list));
+            }
+            if last.1 {
+                moves(value, by);
+            }
+        }
+    }
+}
+
+/// The lists of the tape of a retained root, and so everything it wrote: a list is in the root if
+/// it is one of them or was nested in one, however deep.
+pub(crate) struct Roots(Vec<u64>);
+
+impl Roots {
+    /// Whether the list `serial` is one of the roots' or is nested in one.
+    pub(crate) fn hold(&self, serial: u64) -> bool {
+        PARENTS.with(|parents| {
+            let parents = parents.borrow();
+            let mut list = serial;
+            loop {
+                if self.0.contains(&list) {
+                    return true;
+                }
+                match parents.get(&list) {
+                    Some((parent, _)) => list = *parent,
+                    None => return false,
+                }
+            }
+        })
+    }
+
+    pub(crate) fn extend(&mut self, other: Roots) {
+        self.0.extend(other.0);
     }
 }
 
@@ -424,6 +485,12 @@ impl Tape {
                 .iter()
                 .zip(&other.lifted)
                 .all(|(left, right)| left.lines_apart_from_transforms() == right.lines_apart_from_transforms())
+    }
+
+    /// The lists the tape writes into, which everything it wrote (and what was replayed into it)
+    /// is in.
+    fn roots(&self) -> Roots {
+        Roots([&self.prepaint, &self.paint].into_iter().chain(&self.lifted).map(|entries| entries.serial).collect())
     }
 
     /// Calls `visit` with the data of every write to the registry of `kind`, and how far from where
@@ -634,6 +701,24 @@ impl TapeStore {
             }
         }
         tape.borrow().replay(window, phase, delta);
+    }
+
+    /// A frame moved the rows of a list in place: the root `root` is `shift` further than the frame
+    /// shown had it, and everything it wrote into the registries that the frame shown made is moved
+    /// the same. Not written again, which would put it into the registries twice.
+    pub(crate) fn shift(&self, window: WindowId, root: u64, shift: Point<Pixels>) {
+        let tape = self
+            .tapes
+            .borrow()
+            .get(&root)
+            .expect("a root that a frame moves has the tape of the build it was recorded from")
+            .clone();
+        let tape = tape.borrow();
+        let roots = tape.roots();
+        let mut boxes = Vec::new();
+        tape.each(Kind::Bounds, &mut |data, _| boxes.push(crate::automation::id_of_bounds_write(data)));
+        crate::automation::shift(window, &boxes, &roots, shift);
+        crate::text::shift(window, &roots, shift);
     }
 
     /// The context starts to paint an element that `root` handed to it: what the element writes
@@ -1345,4 +1430,86 @@ mod tests {
         truncate_build_effects(start);
         assert_eq!(build_effects_len(), 1);
     }
+
+    fn nudge(window: WindowId) -> f64 {
+        crate::automation::get_bounds(window, 1).expect("the box was written").y
+    }
+
+    #[test]
+    fn a_shift_moves_the_box_of_a_root_that_was_built_and_of_one_that_was_replayed() {
+        let window = WindowId::from(921);
+        let tapes = TapeStore::default();
+        let still = gpui::TransformationMatrix::unit();
+        let tape = SharedTape::default();
+        record_box(&tape, window, still, 30.0);
+        tapes.set(1, tape.clone());
+        assert_eq!(nudge(window), 20.0);
+
+        // The frame wrote the box (the root was built): it is moved where the frame keeps it.
+        tapes.shift(window, 1, gpui::point(gpui::px(0.0), gpui::px(-5.0)));
+        assert_eq!(nudge(window), 15.0);
+        tapes.shift(window, 1, gpui::point(gpui::px(0.0), gpui::px(-5.0)));
+        assert_eq!(nudge(window), 10.0);
+
+        // The next frame puts the root back, 3 down, and a shift moves the replay by what it moved.
+        crate::automation::forget_window(window);
+        tape.borrow().replay(window, Phase::Paint, gpui::point(gpui::px(0.0), gpui::px(3.0)));
+        assert_eq!(nudge(window), 23.0);
+        tapes.shift(window, 1, gpui::point(gpui::px(0.0), gpui::px(-5.0)));
+        assert_eq!(nudge(window), 18.0);
+        tapes.shift(window, 1, gpui::point(gpui::px(0.0), gpui::px(-5.0)));
+        assert_eq!(nudge(window), 13.0);
+    }
+
+    #[test]
+    fn a_shift_leaves_the_boxes_of_the_roots_it_is_not_for() {
+        let window = WindowId::from(922);
+        let tapes = TapeStore::default();
+        let other = SharedTape::default();
+        {
+            let _recording = Recorder::begin(&other, Phase::Paint);
+            crate::automation::record_bounds(window, 2, laid_out(gpui::TransformationMatrix::unit()), gpui::point(gpui::px(10.0), gpui::px(20.0)), Default::default());
+        }
+        let tape = SharedTape::default();
+        record_box(&tape, window, gpui::TransformationMatrix::unit(), 30.0);
+        tapes.set(1, tape);
+        tapes.set(2, other);
+        tapes.shift(window, 1, gpui::point(gpui::px(0.0), gpui::px(-5.0)));
+        assert_eq!(nudge(window), 15.0);
+        assert_eq!(crate::automation::get_bounds(window, 2).unwrap().y, 20.0);
+    }
+
+    #[test]
+    fn a_shift_moves_what_a_root_wrote_into_a_layered_registry_and_what_was_nested_in_it() {
+        let window = WindowId::from(923);
+        let roots = |tape: &SharedTape| tape.borrow().roots();
+        let outer = SharedTape::default();
+        let inner = SharedTape::default();
+        let mut registry: Layered<i32> = Layered::default();
+        // A write the outer tape holds, one of a tape nested in it, and one outside both.
+        {
+            let _outer = Recorder::begin(&outer, Phase::Paint);
+            OWNER.set(owner_of(&outer));
+            registry.push(1);
+            {
+                let _inner = Recorder::begin(&inner, Phase::Paint);
+                // A list with no write is not nested in the one around it.
+                add(1);
+                OWNER.set(owner_of(&inner));
+                registry.push(2);
+            }
+            OWNER.set(0);
+        }
+        registry.push(3);
+        log(window, "unrelated");
+        let by = gpui::point(gpui::px(0.0), gpui::px(-5.0));
+        registry.shift(&roots(&outer), by, |value, by| *value += f32::from(by.y) as i32);
+        let read: Vec<i32> = registry.all(Kind::Painted, |_, _| 0).to_vec();
+        assert_eq!(read, [-4, -3, 3]);
+    }
+
+    fn owner_of(tape: &SharedTape) -> u64 {
+        tape.borrow().paint.serial
+    }
+
 }

@@ -452,6 +452,8 @@ pub(crate) struct State {
     frozen: [Option<u64>; 2],
     /// The last prepaint asked for another frame: the bar fades, grows or settles its gutter.
     needs_frames: bool,
+    /// The bar is a virtual list's.
+    list: bool,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -507,6 +509,12 @@ fn now() -> Instant {
 /// Whether a bar of the last frame asked for another frame: it fades, grows or settles its gutter.
 pub(crate) fn needs_frames() -> bool {
     STATES.with(|states| states.borrow().values().any(|state| state.borrow().needs_frames))
+}
+
+/// Whether a virtual list has a bar in the frame shown: a scroll of it moves or shows the thumb,
+/// which a frame that moves the rows in place does not paint.
+pub(crate) fn list_bar_shown() -> bool {
+    STATES.with(|states| states.borrow().values().any(|state| state.borrow().list))
 }
 
 /// Whether a bar of the last frame was painted at an alpha or a thickness that the clock has since
@@ -696,6 +704,7 @@ fn prepaint(
 ) {
     let mut st = state.borrow_mut();
     st.seen = FRAME.get();
+    st.list = matches!(source, Source::List(_));
     let now = now();
     let (max, offset) = source.extent();
 

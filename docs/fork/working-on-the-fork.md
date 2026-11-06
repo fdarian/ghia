@@ -271,6 +271,13 @@ See [patch-frames.md](patch-frames.md).
   its kept `FrameEnv` holds, and a write that bypasses the tape (`report_scroll`) makes an element with a scroller inside no
   unit. A new source of volatile state is a reason in `Unpatchable`, and `Dormancy::holds` must read nothing a build of the
   element does not tell or `Sources::verdicts` does not move.
+- **zed `window/scroll_patch.rs` (`apply_scroll_patch`) and gpuix `tape.rs`:** the translate of a list's rows makes each row's
+  operations and hitboxes again from its recording (`TranslatedOperations`, which `Scene::replay_translated` goes through, and
+  `Hitbox::relocated`), not from the frame shown moved by the offset: a change to what a relocated replay does to either belongs in
+  those two and the translate follows. It writes nothing before every row is validated. What a root writes outside the frame is moved
+  by `RetainedPhase::Scrolled` and `TapeStore::shift`: a registry that gains a writer in a paint listener has to be moved there
+  (`Layered` entries carry the list they were made into). `scroll_patch_tests.rs` and `scroll-patch-translate.test.tsx` under the
+  verifier are the check.
 
 ### Forced reads, observers and content visibility
 

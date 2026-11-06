@@ -549,6 +549,12 @@ pub(crate) fn pointer_frame(
                 }
             });
 
+            // A frame that moves the rows in place builds none of this, and follows the hover with it.
+            let settle = {
+                let (dispatch, view, observed) = (file_drag.clone(), view.clone(), observed.clone());
+                Rc::new(move |window: &mut Window, cx: &mut App| dispatch.resync(&view, &observed, false, window, cx))
+            };
+            file_drag.pointer.borrow_mut().scroll_settle = Some(settle);
             // After the draw: GPUI swaps frames only when it ends, and the control areas of the
             // frame being painted are readable only from then on, so a drag region that appeared
             // under a still pointer is seen by this resync and not a frame late.

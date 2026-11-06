@@ -238,6 +238,9 @@ pub struct PointerState {
     pub(super) element_drag: Option<ElementDrag>,
     /// A resync waits for the next frame (see `PointerDispatch::resync_by_frame`).
     pub(super) resync_queued: bool,
+    /// What follows the hover after a frame that moved the rows of a list in place: the resync
+    /// the pointer frame schedules after a draw that built the content (`Window::set_scroll_patch_settled`).
+    pub(crate) scroll_settle: Option<Rc<dyn Fn(&mut gpui::Window, &mut gpui::App)>>,
     observed: ObservedChain,
 }
 

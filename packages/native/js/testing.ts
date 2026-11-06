@@ -1266,8 +1266,8 @@ export class TestRenderer implements NativeRenderer {
   }
 
   /** Whether the frames drawn after a list scroll are classified as a translate of the frame before
-   *  them, for `getPatchCounters().scrollPatch` (on by default, as `GPUIX_SCROLL_PATCH_OFF` turns
-   *  off for the whole run). Every frame is drawn whole either way. */
+   *  them and drawn as one when they are (`getPatchCounters().scrollPatch`; on by default, as
+   *  `GPUIX_SCROLL_PATCH_OFF` turns off for the whole run). Off, every frame is drawn whole. */
   setScrollPatchEnabled(enabled: boolean): void {
     this.native.setScrollPatchEnabled(enabled)
   }
@@ -1275,8 +1275,8 @@ export class TestRenderer implements NativeRenderer {
   /** How ticks were drawn by patching since the window was made: the frames and roots patched, the
    *  ticks gpui drew whole after the patch was tried (`declines`, by reason, as JSON) and the ones
    *  gpuix did not try to patch (`unpatchable`, by kind, as JSON), and `scrollPatch`: the frames drawn
-   *  after a list scroll, how many would have been a pure translate of the rows, and the first reason
-   *  the others were not. */
+   *  after a list scroll, how many are a pure translate of the rows, how many were drawn as one
+   *  (`patched`), and the first reason the others were not. */
   getPatchCounters(): PatchCounters {
     return this.native.getPatchCounters()
   }

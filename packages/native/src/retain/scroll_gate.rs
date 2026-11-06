@@ -58,6 +58,15 @@ impl GpuixView {
                 crate::events::dispatcher::hover_would_matter(&pointer, &tree, target(before), target(after))
             },
         )));
+        let settled = self.pointer.clone();
+        window.set_scroll_patch_settled(Some(Rc::new(move |window: &mut gpui::Window, cx: &mut gpui::App| {
+            let settle = settled
+                .borrow()
+                .scroll_settle
+                .clone()
+                .expect("a frame that moves the rows has the pointer frame of the frame shown");
+            settle(window, cx);
+        })));
         window.set_scroll_patch_gate(Some(Rc::new(move |_: &gpui::Window| {
             let Some(revision) = shown.0.get() else {
                 return Some(ScrollPatchReason::Other);
@@ -76,7 +85,7 @@ impl GpuixView {
             if crate::scroll::animating() || crate::scrollbar::needs_frames() {
                 return Some(ScrollPatchReason::ScrollAnimation);
             }
-            None
+            crate::scrollbar::list_bar_shown().then_some(ScrollPatchReason::Thumb)
         })));
     }
 }

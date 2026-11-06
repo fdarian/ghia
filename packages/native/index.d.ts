@@ -2284,8 +2284,8 @@ export interface PatchCounters {
    */
   unpatchable: string
   /**
-   * How the frames drawn after a list scroll would have been drawn by translating the rows of the frame before
-   * them (nothing is translated yet, every frame is drawn whole).
+   * How the frames drawn after a list scroll were drawn, or would have been, by translating
+   * the rows of the frame before them.
    */
   scrollPatch: ScrollPatchCounters
 }
@@ -2374,8 +2374,8 @@ export interface RetainedCounters {
 }
 
 /**
- * The frames drawn after a list scroll that could have been a pure translate of the rows, and
- * the first reason the others could not (`gpui::ScrollPatchReason`).
+ * The frames drawn after a list scroll that could be a pure translate of the rows, those that
+ * were (`patched`), and the first reason the others could not (`gpui::ScrollPatchReason`).
  */
 export interface ScrollPatchCounters {
   /** Frames drawn after a list scroll. */
@@ -2389,6 +2389,13 @@ export interface ScrollPatchCounters {
    * the pointer elsewhere.
    */
   hoverOnly: number
+  /** Of the eligible ones, the ones drawn by moving the rows of the frame shown. */
+  patched: number
+  /**
+   * The eligible ones drawn whole, by why the translate declined before it wrote anything
+   * (`gpui::ScrollApplyDecline`).
+   */
+  applyDeclines: Record<string, number>
   /** The others, by the first reason they were not. */
   reasons: Record<string, number>
   /**

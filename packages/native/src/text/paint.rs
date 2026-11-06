@@ -76,6 +76,33 @@ impl RegEntry {
     }
 }
 
+/// The text elements and the start regions painted this frame, with where they are, as text.
+pub(crate) fn describe_registries(window: WindowId) -> String {
+    use std::fmt::Write as _;
+
+    with_frame(window, |frame| {
+        let mut out = String::new();
+        for entry in frame.registry() {
+            writeln!(out, "{}", describe_text(entry, true)).ok();
+        }
+        for region in frame.start_regions() {
+            writeln!(out, "start region {} {:?} {} {:?}", region.id, region.bounds, region.selectable, region.to_window).ok();
+        }
+        out
+    })
+}
+
+/// A frame moved the rows of a list in place: what the roots `roots` wrote here is `by` further.
+pub(crate) fn shift(window: WindowId, roots: &crate::tape::Roots, by: gpui::Point<gpui::Pixels>) {
+    with_frame(window, |frame| {
+        frame.registry.shift(roots, by, |entry, by| entry.to_window = moved_matrix(entry.to_window, by));
+        frame.start_regions.shift(roots, by, |region, by| {
+            region.bounds.origin += by;
+            region.to_window = moved_matrix(region.to_window, by);
+        });
+    });
+}
+
 /// A subtree that was replayed puts back what it wrote here: the registries keep it until they are
 /// read (see [`Layered`]).
 pub(crate) fn publish(window: WindowId, live: &crate::tape::Live) {

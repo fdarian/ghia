@@ -1,10 +1,11 @@
 // @ts-nocheck
 /**
- * The classifier of the frames drawn after a list scroll (slice 1 of the scroll-only patch frame): each wheel event over a
+ * The classifier of the frames drawn after a list scroll (the scroll-only patch frame): each wheel event over a
  * `<virtual-list>` is classified before its frame is drawn, as a pure translate of the rows of the frame shown or by the first
- * reason it is not (`getPatchCounters().scrollPatch`). Nothing is translated yet: the picture, the boxes and what is under a
- * point are what they are with the classifier off. The cases are those the gpui tests of `window/scroll_patch.rs` pin, through
- * the adapter: rows of 40 in a view of 100.
+ * reason it is not (`getPatchCounters().scrollPatch`). The frames it calls a translate are drawn as one
+ * (`scroll-patch-translate.test.tsx`), and the picture, the boxes and what is under a point are what they are with it off. The
+ * cases are those the gpui tests of `window/scroll_patch.rs` pin, through the adapter: rows of 40 in a view of 100, in a list
+ * with no scrollbar (a scrollbar is a `Thumb`, which the translate does not paint yet).
  */
 
 import fs from "fs"
@@ -28,14 +29,14 @@ const TIMEOUT = 60_000
 // rows listen for the pointer entering them.
 type Rows = "inert" | "hit" | "plain" | "heard"
 
-function Page({ rows }: { rows: Rows }) {
+function Page({ rows, scrollbar }: { rows: Rows; scrollbar: boolean }) {
   return (
     <virtual-list
       testId="list"
       itemCount={COUNT}
       estimatedItemHeight={ROW}
       overdraw={0}
-      style={{ width: 200, height: VIEWPORT }}
+      style={{ width: 200, height: VIEWPORT, ...(scrollbar ? {} : { scrollbarWidth: "none" }) }}
     >
       {Array.from({ length: COUNT }, (_, index) => (
         <div
@@ -57,9 +58,9 @@ function Page({ rows }: { rows: Rows }) {
   )
 }
 
-function open(rows: Rows) {
+function open(rows: Rows, scrollbar = false) {
   const root = createTestRoot({ width: 300, height: 200 })
-  root.render(<Page rows={rows} />)
+  root.render(<Page rows={rows} scrollbar={scrollbar} />)
   const renderer = root.renderer
   renderer.setA11yActive(false)
   renderer.dispatchNativeEvents()
@@ -119,7 +120,21 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
     }
   })
 
-  it("counts a scroll that brings a row in as a membership change", () => {
+  it("counts the frames of a list with a scrollbar as a thumb", () => {
+    const { renderer, unmount } = open("inert", true)
+    try {
+      warm(renderer, 100, 50)
+      const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 50, by: 5 }))
+      expect(delta).toMatchObject({ frames: 1, eligible: 0, mispredicted: 0, reasons: { Thumb: 1 }, held: { Thumb: 1 } })
+      expect(renderer.getPatchCounters().scrollPatch.patched).toBe(0)
+    } finally {
+      unmount()
+    }
+  })
+
+  // The reasons that hold are counted exactly, and under the verifier the frame shown is the build every subtree is built in,
+  // whose rows cannot be moved (`NotRelocatable.unmovable` holds as well).
+  unverified("counts a scroll that brings a row in as a membership change", () => {
     const { renderer, unmount } = open("inert")
     try {
       warm(renderer, 100, 50)
