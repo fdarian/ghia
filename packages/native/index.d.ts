@@ -2277,6 +2277,13 @@ export interface PatchCounters {
    * no frame was built or presented.
    */
   emptyTicks: number
+  /**
+   * Patches that made the scene's primitives again from its operations instead of writing the
+   * changed ones in place.
+   */
+  sceneRebuilds: number
+  /** Primitives that patches wrote over their place in the scene. */
+  inPlacePrimitives: number
   /** JSON object: ticks gpui drew whole after the patcher tried, by reason (`PatchDecline`). */
   declines: string
   /**

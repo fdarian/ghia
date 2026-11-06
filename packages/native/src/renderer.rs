@@ -14379,6 +14379,11 @@ pub struct PatchCounters {
     /// Ticks that changed nothing that is drawn (every change was in skipped or sleeping content):
     /// no frame was built or presented.
     pub empty_ticks: f64,
+    /// Patches that made the scene's primitives again from its operations instead of writing the
+    /// changed ones in place.
+    pub scene_rebuilds: f64,
+    /// Primitives that patches wrote over their place in the scene.
+    pub in_place_primitives: f64,
     /// JSON object: ticks gpui drew whole after the patcher tried, by reason (`PatchDecline`).
     pub declines: String,
     /// JSON object: ticks gpuix did not try to patch, by kind (`Unpatchable`, and the units it
@@ -14428,6 +14433,8 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
         patched_frames: counters.patched_frames as f64,
         patched_units: counters.patched_units as f64,
         empty_ticks: counters.empty_ticks as f64,
+        scene_rebuilds: counters.scene_rebuilds as f64,
+        in_place_primitives: counters.in_place_primitives as f64,
         declines: object(
             gpui::PatchDecline::ALL
                 .into_iter()

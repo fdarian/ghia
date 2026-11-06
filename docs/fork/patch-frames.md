@@ -98,8 +98,26 @@ paint repaints those roots in the frame that is shown and leaves the rest as it 
   is skipped must not move), prepaints and paints it into a scratch frame with the recorded hitbox ids handed out in order, and
   compares the result with the recording: the replay key, hitboxes by value, cursors, tab stops, listener, input handler, tooltip and
   dispatch node counts, and the kinds of the operations. Then `accept` runs (the embedder compares its tape). On success the
-  operations of the rendered scene are overwritten in place, `Scene::rebuild_from_operations` makes its primitives again from the
-  log, and the frame is presented only if an operation changed. A tick that changes no operation presents nothing.
+  operations that paint differently are written over the rendered scene's, and the frame is presented only if an operation
+  changed. A tick that changes no operation presents nothing. The scene's primitives are then either written in place or made
+  again, see [the next item](#what-a-patch-does-to-the-scene).
+- **What a patch does to the scene.** A scene holds its operations in a log and its primitives in typed vectors, sorted by draw
+  order. A patch changes how operations paint, seldom where, so most patches have the same draw orders as the frame they patch.
+  `Scene::patch_in_place` writes a changed operation's primitive over its slot in the typed vector, with the order it had (a
+  path keeps its id too), and touches nothing else: no replay of the log and no sort, which cost the page (several million
+  instructions for a 2700 operation frame) whatever the number of operations that changed. It does so when it can prove the slot
+  is the right one: the scene has a map from the index of each operation to its primitive's place in the sorted vectors
+  (`op_slots`), and every changed operation has the kind and the clipped bounds of the one it replaces, which is what its draw
+  order depends on (an order is one more than the greatest of the earlier bounds that intersect). A sprite also keeps its sort
+  position: a new atlas tile sorts among the sprites of its order, so one whose tile moved it past a neighbour is not in place.
+  Anything else (a kind that changed, a primitive that is clipped away now or was, bounds that moved, an operation that is not a
+  primitive, one inside an effect group or a text clip or faded flat, or a quad drawn as strips around its empty interior, none of
+  which is one primitive of the root's vectors) makes the scene again with `Scene::rebuild_from_operations`, the way every patch
+  did, reusing the draw orders of the log when the bounds sequence is the same. The map is worked out by that rebuild, as it
+  sorts (a gather permutation of indices, applied to the vectors once), and a frame built whole or one a scroll translate
+  rebuilds has none: the first patch after such a frame makes the scene again and the ticks after it write in place. The
+  retention verifier makes the map ahead of a patch and compares the scene a patch wrote with the frame built whole after it.
+  `PatchCounters::scene_rebuilds` counts the patches that made the scene again and `in_place_primitives` the primitives written.
 - **Any failure declines.** The element states go back, the layout pass ends, and gpui draws the tick whole in the same draw.
   `PatchDecline` names the reason: pending view, refresh, unknown unit, stale recording, surroundings, layout mismatch, unstable
   layout, effects, hitboxes, registrations, operations, lifts, scroll extent (the transforms that ticked would clamp a scroller's offset or move a thumb), rejected. A wrong patch is a mismatch under the verifier.
