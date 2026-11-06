@@ -6953,11 +6953,13 @@ impl GpuixView {
     /// Hands one pointer input to the dispatcher and delivers the events it
     /// produces. Runs deferred, after GPUI is done with the event. A button
     /// press does not come through here: its listener dispatches it at once.
+    /// Says whether the input only changed how elements paint, for the caller to ask
+    /// the window for a tick (`Output::paint`).
     pub(crate) fn handle_pointer(
         &mut self,
         mut sample: crate::events::dispatcher::PointerSample,
         cx: &mut gpui::Context<Self>,
-    ) {
+    ) -> bool {
         if let (Some(platform), crate::events::dispatcher::PointerAction::Move { .. }) =
             (&self.simulated_platform, &sample.action)
         {
@@ -6967,12 +6969,13 @@ impl GpuixView {
         if output.restyle {
             cx.notify();
         }
-        let Some(callback) = &self.event_callback else {
-            return;
-        };
-        for payload in output.into_payloads() {
-            callback(payload);
+        let repaint = !output.paint.is_empty();
+        if let Some(callback) = &self.event_callback {
+            for payload in output.into_payloads() {
+                callback(payload);
+            }
         }
+        repaint
     }
 
     pub(crate) fn set_live_image(

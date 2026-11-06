@@ -149,6 +149,11 @@ pub struct Output {
     /// An element that entered or left the hover or active chain has a state
     /// style, so the view must rebuild to restyle it.
     pub restyle: bool,
+    /// Elements that entered or left the hover chain and only change how they paint
+    /// ([`hover_paint`]), when nothing in this output asks for the view to rebuild: a frame that
+    /// builds only the roots that hold them draws it. Empty when `restyle` is true, since a
+    /// frame built whole draws them too.
+    pub paint: Vec<u64>,
     /// GPUI's hit chain and the retained path disagree about the target's
     /// ancestry. The retained path is what events use; this reports the drift.
     pub chain_mismatch: bool,
@@ -168,6 +173,7 @@ impl Output {
         Self {
             events,
             restyle,
+            paint: Vec::new(),
             chain_mismatch,
             position: sample.position,
             modifiers: sample.modifiers.clone(),
@@ -435,6 +441,15 @@ fn lowest_held_button(buttons: u32) -> Option<u32> {
 }
 
 pub fn dispatch(state: &mut PointerState, tree: &RetainedTree, sample: &PointerSample) -> Output {
+    let mut output = dispatch_input(state, tree, sample);
+    let paint = std::mem::take(&mut state.paint);
+    if !output.restyle {
+        output.paint = paint;
+    }
+    output
+}
+
+fn dispatch_input(state: &mut PointerState, tree: &RetainedTree, sample: &PointerSample) -> Output {
     // Over a drag region the page sees the pointer outside the window: nothing is under it, so
     // hover leaves and no move is delivered, not even to `window`.
     let hidden;
@@ -929,7 +944,8 @@ impl HoverChange {
 }
 
 /// Moves the hover chain to `new_target` and emits the boundary events. Returns
-/// whether an element that changed state has a `hover` style.
+/// whether an element that changed state has a `hover` style that changes more than how it paints;
+/// the elements whose style only changes that are left in `PointerState::paint`.
 pub(super) fn update_hover(state: &mut PointerState, emitter: &mut Emitter, new_target: Option<u64>) -> bool {
     let tree = emitter.tree;
     let Some(change) = HoverChange::between(tree, &state.hovered, new_target) else {
@@ -962,7 +978,16 @@ pub(super) fn update_hover(state: &mut PointerState, emitter: &mut Emitter, new_
         }
     }
 
-    let restyle = change.restyles(tree, &state.hovered);
+    let restyle = match change.restyle(tree, &state.hovered) {
+        Restyle::None => false,
+        Restyle::Whole => true,
+        // A hover that sends an event to a script is a frame built whole: the script may answer it.
+        Restyle::Paint(_) if change.emits(tree, &state.requests) => true,
+        Restyle::Paint(ids) => {
+            state.paint.extend(ids);
+            false
+        }
+    };
     state.hovered = change.new_path;
     restyle
 }
@@ -2106,6 +2131,63 @@ mod tests {
         assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Paint(vec![2]));
         styled_with(&mut tree, &[(2, r##"{"hasHover":{"height":3}}"##)]);
         assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Whole);
+    }
+
+    #[test]
+    fn a_paint_only_hover_asks_for_a_tick_and_not_for_a_frame() {
+        let mut tree = tree(&[]);
+        styled_with(&mut tree, &[(3, r##"{"hover":{"backgroundColor":"#eee"}}"##)]);
+        let mut state = PointerState::default();
+        let entered = dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1])));
+        assert!(!entered.restyle);
+        assert_eq!(entered.paint, vec![3]);
+        let again = dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1])));
+        assert!(!again.restyle && again.paint.is_empty(), "the pointer stayed");
+        let left = dispatch(&mut state, &tree, &mv(chain_of(&[4, 1])));
+        assert!(!left.restyle);
+        assert_eq!(left.paint, vec![3]);
+        let elsewhere = dispatch(&mut state, &tree, &mv(chain_of(&[1])));
+        assert!(!elsewhere.restyle && elsewhere.paint.is_empty());
+    }
+
+    #[test]
+    fn a_hover_that_paints_and_sends_an_event_is_a_frame_built_whole() {
+        let mut tree = tree(&[(3, "pointerenter")]);
+        styled_with(&mut tree, &[(3, r##"{"hover":{"backgroundColor":"#eee"}}"##)]);
+        let mut state = PointerState::default();
+        let entered = dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1])));
+        assert!(entered.restyle && entered.paint.is_empty());
+        assert!(!entered.events.is_empty());
+        // A listener that is not for the gesture does not.
+        let mut tree = tree_listening_for("pointermove");
+        styled_with(&mut tree, &[(3, r##"{"hover":{"backgroundColor":"#eee"}}"##)]);
+        let mut state = PointerState::default();
+        let entered = dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1])));
+        assert!(!entered.restyle);
+        assert_eq!(entered.paint, vec![3]);
+    }
+
+    fn tree_listening_for(event_type: &str) -> RetainedTree {
+        tree(&[(3, event_type)])
+    }
+
+    #[test]
+    fn a_hover_that_changes_layout_or_a_press_beside_a_paint_one_is_a_frame_built_whole() {
+        let mut tree = tree(&[]);
+        styled_with(
+            &mut tree,
+            &[(3, r##"{"hover":{"backgroundColor":"#eee"}}"##), (4, r##"{"hover":{"width":4}}"##)],
+        );
+        let mut state = PointerState::default();
+        let layout = dispatch(&mut state, &tree, &mv(chain_of(&[4, 1])));
+        assert!(layout.restyle && layout.paint.is_empty());
+        // The pointer leaves a layout hover for a paint one: the change names the elements that
+        // enter and leave, and 4 leaves.
+        let mixed = dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1])));
+        assert!(mixed.restyle && mixed.paint.is_empty());
+        styled_with(&mut tree, &[(2, r##"{"active":{"opacity":0.5}}"##)]);
+        let pressed = dispatch(&mut state, &tree, &down(0, 1, chain_of(&[3, 2, 1])));
+        assert!(pressed.restyle && pressed.paint.is_empty(), "a press restyles by itself");
     }
 
     #[test]

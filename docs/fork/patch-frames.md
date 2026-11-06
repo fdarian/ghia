@@ -643,6 +643,21 @@ is a build that a patch does not make. `whileHover` is never paint-only, and nei
 
 `restyles()`, which the scroll-only frames ask (`hover_would_matter`), is now `restyle() != None`: it answers as before.
 
+### From the pointer to a tick
+
+`dispatcher::update_hover` leaves the elements of a `Paint` change in `PointerState::paint` and says the view needs no frame
+(`Output::restyle` false); `dispatch` hands them out as `Output::paint`, empty whenever anything else in the same input restyles
+(`restyle` true: a press that changes `:active`, a hover that is not paint-only), since a frame built whole draws them. The
+four places that deliver an input (the deferred move through `submit`, a press, a release and a file drag in
+`events/listeners.rs`) ask the window for a tick, `Window::request_tick`, where they used to notify the view. A hover
+whose boundary events have a listener (on the path of the element, or on `window`) is `Whole`: the script may answer it, and
+the frame it asks for is built whole as before.
+
+The tick is drawn by a patch frame if the patcher takes it and by a frame built whole in the same draw if it does not (the
+window is dirty and the view renders, as for any tick), so a decline for any reason still shows the hover: the frame finds it
+in the pointer's chain as it finds any other source. With patching off (`setPatchEnabled(false)`, `GPUIX_PATCH_OFF`) or the
+retention off the tick is always whole.
+
 ## Scroll-only frames (in progress)
 
 Every wheel event over a `<virtual-list>` used to draw a whole frame (`ListState::scroll` sets the offset, runs the scroll handler and notifies
@@ -944,7 +959,11 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   a background are paint; a border width or style, a layout property, a font, a transform, a cursor, a gradient, a custom
   property, a shadow that moves or appears, an opacity that crosses 1 and a transition are not; a colour a transition below
   inherits; a group by its followers and another group's follower. `events/dispatcher.rs`: what a
-  hover change names (a colour, an entered parent, `whileHover`, a group, `hasHover`) and that `hover_would_matter` is unchanged.
+  hover change names (a colour, an entered parent, `whileHover`, a group, `hasHover`), that `hover_would_matter` is unchanged, and
+  what `dispatch` hands out as `paint` and as `restyle` (a listener, a layout hover, a press beside a paint one, an inline span).
+- react `hover-patch.test.tsx`: a paint-only hover, one that changes the padding and one that a `pointerenter` listener hears,
+  over a virtual list and a plain column, cross the rows and back: the picture, the boxes, what is under the pointer and the cursor
+  are what patching off draws, a tick is asked for only by the first, and the listener hears the same events.
 - `retain.rs` unit tests: the unit choice (outermost, paint-only, size cap, exclusion, scroll, lift, absolute, nothing skipped
   inside), the preview (each decline, dormant, no effect on the next frame), the capturing tape, a patched tick and a tick declined
   after its clocks stepped under the verifier, each refusal and its key, an absolute element and one holding a box against it are

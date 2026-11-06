@@ -236,6 +236,9 @@ pub struct PointerState {
     /// A press on a `draggable` element that has not moved far enough to drag it.
     pub(super) pending_drag: Option<PendingDrag>,
     pub(super) element_drag: Option<ElementDrag>,
+    /// The elements the hover changes since the last dispatch were taken only repaint
+    /// (`dispatcher::Restyle::Paint`), for `dispatch` to hand to its caller.
+    pub(super) paint: Vec<u64>,
     /// A resync waits for the next frame (see `PointerDispatch::resync_by_frame`).
     pub(super) resync_queued: bool,
     /// What follows the hover after a frame that moved the rows of a list in place: the resync

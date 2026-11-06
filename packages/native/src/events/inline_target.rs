@@ -216,11 +216,19 @@ mod tests {
             Arc::new(serde_json::from_value(serde_json::json!({"hover": {"color": "red"}})).unwrap()),
         );
         let mut state = PointerState::default();
-        assert!(dispatch(&mut state, &tree, &mv(over(4))).restyle);
+        let entered = dispatch(&mut state, &tree, &mv(over(4)));
+        assert_eq!((entered.restyle, entered.paint), (false, vec![4]), "a colour is a tick");
         assert!(state.is_hovered(4) && state.is_hovered(2));
-        assert!(!dispatch(&mut state, &tree, &mv(over(4))).restyle);
-        assert!(dispatch(&mut state, &tree, &mv(over(7))).restyle);
+        let stayed = dispatch(&mut state, &tree, &mv(over(4)));
+        assert!(!stayed.restyle && stayed.paint.is_empty());
+        let left = dispatch(&mut state, &tree, &mv(over(7)));
+        assert_eq!((left.restyle, left.paint), (false, vec![4]));
         assert!(!state.is_hovered(4));
+        tree.set_style(
+            4,
+            Arc::new(serde_json::from_value(serde_json::json!({"hover": {"fontWeight": 700}})).unwrap()),
+        );
+        assert!(dispatch(&mut state, &tree, &mv(over(4))).restyle, "a weight changes the lines");
     }
 
     #[test]
