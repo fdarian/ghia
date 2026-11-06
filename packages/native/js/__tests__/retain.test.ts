@@ -419,6 +419,107 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
       expect(renderer.getElementBounds(rowId(0))).toBeTruthy()
     })
 
+    // A list of rows that are each a flex row of a box with a text (A) and a box with a hover (B, optionally with a
+    // transition on its background, or holding a box of its own with a text when `deep`), for scenarios that touch an
+    // element under a row and scroll away from it.
+    const mountNestedList = (rows: number, transition: boolean, deep = false) => {
+      const renderer = new TestRenderer({ width: 300, height: 300 })
+      renderer.setRetainPlanning(true)
+      renderer.setRetainEnabled(true)
+      renderer.setRetainVerify(false)
+      renderer.clockPause()
+      const batch: unknown[] = [
+        ["createElement", 1, "div"],
+        ["setRoot", 1],
+        ["setStyle", 1, { width: 300, height: 300 }],
+        ["createElement", 2, "virtual-list"],
+        ["appendChild", 1, 2],
+        ["setStyle", 2, { width: 300, height: 300 }],
+      ]
+      for (let index = 0; index < rows; index++) {
+        const row = rowId(index)
+        const boxB: Record<string, unknown> = deep
+          ? { width: 100, height: ROW_HEIGHT, display: "flex", backgroundColor: "#775533" }
+          : { width: 100, height: 30, backgroundColor: "#775533", hover: { backgroundColor: "#ff00ff" } }
+        if (transition) boxB.transition = "background-color 200ms linear"
+        batch.push(
+          ["createElement", row, "div"],
+          ["appendChild", 2, row],
+          ["setStyle", row, { height: ROW_HEIGHT, flexShrink: 0, display: "flex", flexDirection: "row" }],
+          ["createElement", row + 1, "div"],
+          ["appendChild", row, row + 1],
+          ["setStyle", row + 1, { width: 100, height: ROW_HEIGHT, backgroundColor: "#335577" }],
+          ["createElement", row + 3, "text"],
+          ["setText", row + 3, `row ${index}`],
+          ["appendChild", row + 1, row + 3],
+          ["createElement", row + 2, "div"],
+          ["appendChild", row, row + 2],
+          ["setStyle", row + 2, boxB],
+        )
+        if (deep) {
+          batch.push(
+            ["createElement", row + 5, "div"],
+            ["appendChild", row + 2, row + 5],
+            ["setStyle", row + 5, { width: 50, height: 20, backgroundColor: "#112233" }],
+            ["createElement", row + 6, "text"],
+            ["setText", row + 6, `nested ${index}`],
+            ["appendChild", row + 5, row + 6],
+          )
+        } else {
+          batch.push(["createElement", row + 5, "text"], ["setText", row + 5, `n${index}`], ["appendChild", row + 2, row + 5])
+        }
+      }
+      renderer.applyBatch(JSON.stringify(batch))
+      for (let frame = 0; frame < 4; frame++) renderer.flush()
+      return renderer
+    }
+    const frames = (renderer: TestRenderer, count: number) => {
+      for (let frame = 0; frame < count; frame++) {
+        renderer.clockAdvance(16)
+        renderer.flush()
+      }
+    }
+    const recordCount = (renderer: TestRenderer) =>
+      (renderer as unknown as { native: { getRetainRecordCounts(): number[] } }).native.getRetainRecordCounts()[0]
+
+    it("agrees with a build of the frame when a row with a transition underneath comes back", () => {
+      // A box of row 3 runs a transition under the pointer, so the build of the row skips the box beside it (A, with a
+      // text). The row leaves the viewport and returns: what it held, A and its text included, has to be built again.
+      const renderer = mountNestedList(60, true)
+      renderer.setRetainVerify(true)
+      for (let frame = 0; frame < 3; frame++) renderer.flush()
+      renderer.nativeSimulateMouseMove(150, 135)
+      frames(renderer, 30)
+      renderer.scrollTo(2, undefined, 400)
+      frames(renderer, 2)
+      renderer.scrollTo(2, undefined, 0)
+      frames(renderer, 2)
+      expect(renderer.getRetainMismatches()).toEqual([])
+      expect(renderer.getRetainedCounters().mismatches).toBe(0)
+    })
+
+    it("keeps no more records than the viewport holds when the rows scrolled through are restyled", () => {
+      const rows = 400
+      const renderer = mountNestedList(rows, false, true)
+      const start = recordCount(renderer)
+      let most = start
+      for (let top = 0; top < rows - 8; top += 4) {
+        renderer.scrollTo(2, undefined, top * ROW_HEIGHT)
+        renderer.flush()
+        renderer.flush()
+        const ops = []
+        for (let index = top; index < top + 7; index++) {
+          ops.push(["setStyle", rowId(index) + 1, { width: 100, height: ROW_HEIGHT, backgroundColor: `#33557${top % 10}` }])
+        }
+        renderer.applyBatch(JSON.stringify(ops))
+        renderer.flush()
+        renderer.flush()
+        most = Math.max(most, recordCount(renderer))
+      }
+      // A record for every element ever built was 808 at the end of this walk.
+      expect(most).toBeLessThan(start * 2)
+    })
+
     it("paints what a build of every row paints", () => {
       const dir = mkdtempSync(join(tmpdir(), "retain-rows-"))
       const shot = (skipping: boolean) => {

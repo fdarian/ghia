@@ -152,18 +152,22 @@ describe.skipIf(!hasNativeTestRenderer)("Solid removal takes a node out of the t
     const app = createTestRoot()
     app.render(() => (
       <div style={{ width: 300, height: 300 }}>
-        <div ref={from} style={{ width: 100, height: 100 }}>
+        <div ref={from} style={{ width: 100 }}>
           <div ref={moved} testId="moved" style={{ width: 50, height: 50 }} />
         </div>
-        <div ref={to} style={{ width: 100, height: 100 }} />
+        <div ref={to} style={{ width: 100 }} />
       </div>
     ))
     const id = moved.id
+    expect(from.getBoundingClientRect().height).toBe(50)
     removeHostNode(from, moved)
-    expect(from.getBoundingClientRect().height).toBe(100)
+    // Auto height: the box of `from` is what is left in it.
+    expect(from.getBoundingClientRect().height).toBe(0)
+    expect(app.renderer.getElement(from.id)!.children).not.toContain(id)
     insertHostNode(to, moved, null)
     app.root.flush()
     expect(moved.id).toBe(id)
+    expect(to.getBoundingClientRect().height).toBe(50)
     expect(app.renderer.getElement(to.id)!.children).toContain(id)
     expect(app.renderer.getElement(from.id)!.children).not.toContain(id)
   })
@@ -193,13 +197,15 @@ describe.skipIf(!hasNativeTestRenderer)("Solid removal takes a node out of the t
     let gone!: HostElement
     const app = createTestRoot()
     app.render(() => (
-      <div ref={parent} style={{ width: 100, height: 100 }}>
+      <div ref={parent} style={{ width: 100 }}>
         <div ref={gone} style={{ width: 50, height: 50 }} />
       </div>
     ))
     const before = app.renderer.getRetainedElementCount()
+    expect(parent.getBoundingClientRect().height).toBe(50)
     removeHostNode(parent, gone)
-    expect(parent.getBoundingClientRect().height).toBe(100)
+    // Auto height: the read measures a parent that no longer holds the node.
+    expect(parent.getBoundingClientRect().height).toBe(0)
     // The read applied the detach; the element is alive until the flush destroys it.
     expect(app.renderer.getRetainedElementCount()).toBe(before)
     app.root.flush()
