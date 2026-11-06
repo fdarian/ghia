@@ -1183,8 +1183,10 @@ describeNative("the first read after a change", { timeout: 120_000 }, () => {
           } else {
             const names = expected.names!
             const first = reading(renderer, ids, names.slice(0, 1))
-            expect(first.passes, `${label}: the first read costs one pass`).toBe(1)
-            expect(first.enginePasses, `${label}: and the engine's passes are those of one`).toBeGreaterThan(0)
+            // The mounted page was drawn by the frames above: a read of content that is shown has nothing to lay out.
+            const laysOut = step > 0 || (scene.skipped ? scene.skipped(0) : true)
+            expect(first.passes, `${label}: the first read costs ${laysOut ? "one pass" : "no pass"}`).toBe(laysOut ? 1 : 0)
+            if (laysOut) expect(first.enginePasses, `${label}: and the engine's passes are those of one`).toBeGreaterThan(0)
             const rest = reading(renderer, ids, names.slice(1))
             expect(rest, `${label}: the reads after it cost nothing`).toMatchObject({ passes: 0, enginePasses: 0, nodes: 0, laidOut: 0 })
             const seen = [...first.read, ...rest.read].map((box) => [box!.x, box!.y, box!.width, box!.height])
