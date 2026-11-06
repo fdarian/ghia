@@ -2260,6 +2260,7 @@ impl GpuixRenderer {
     ///
     ///   ["createElement",    id, "type"]
     ///   ["destroyElement",   id]
+    ///   ["detachChild",      id]
     ///   ["appendChild",      parentId, childId]
     ///   ["insertBefore",     parentId, childId, beforeId]
     ///   ["setStyle",         id, { ...style }]
@@ -7338,6 +7339,8 @@ impl GpuixView {
         list_id: u64,
         index: usize,
         expected_child_id: u64,
+        list_shape: u64,
+        list_viewport: gpui::Size<gpui::Pixels>,
         list_path: Vec<u32>,
         list_hosts: Arc<[crate::text::selection::Host]>,
         inherited: Inherited,
@@ -7424,6 +7427,7 @@ impl GpuixView {
 
         crate::accessibility::links::sync(&tree);
         let activation = self.activation();
+        let scroller = crate::retain::Scroller::of_list(window.window_handle().window_id(), list_viewport, viewport);
         let mut build_ctx = self.build_ctx(
             &tree,
             &callback,
@@ -7440,12 +7444,12 @@ impl GpuixView {
                 text_box_trim: Default::default(),
                 focus_styles,
                 control_styles: Default::default(),
-                scroller: None,
+                scroller: Some(scroller),
             },
         );
-        build_ctx.retain.enter_row();
+        build_ctx.retain.begin_row(list_shape, expected_child_id);
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
-        build_ctx.retain.leave_row();
+        build_ctx.retain.finish_row();
         drop(pointer);
         emit_highlight_events(&callback, &highlight_events);
         emit_motion_settled(&callback, &tree, &motion_settled);
@@ -11027,6 +11031,14 @@ fn build_element_unpumped(
         }
     });
     let style = item_style.as_ref().or(style);
+    // The list prepaints a row inside a lift barrier, which hands nothing to the context around the
+    // list: the root of a row does not lift, whatever its position, `z-index` or composite, as
+    // `stacking::lifted_z` says of the retained tree.
+    let lift_absorbed = stacking_root && crate::layout::stacking::is_virtual_row(tree, element);
+    let absorbed_style = style
+        .filter(|_| lift_absorbed)
+        .map(|style| StyleDesc { lift_absorbed: true, ..style.clone() });
+    let style = absorbed_style.as_ref().or(style);
     // An underline sits where the box that declares it says, and that box inherits
     // its offset.
     let offset_style = style.and_then(|style| {
@@ -11094,7 +11106,7 @@ fn build_element_unpumped(
     );
     ctx.retain.stacking(|| {
         (
-            crate::layout::stacking::lift_z(&resolved, stacking_item),
+            if lift_absorbed { None } else { crate::layout::stacking::lift_z(&resolved, stacking_item) },
             stacking_root
                 || focus_folded
                     .as_deref()
@@ -11538,6 +11550,9 @@ fn build_virtual_list(
     let inherited = ctx.inherited.clone();
     let list_path = ctx.doc_path.clone();
     let list_hosts = ctx.doc_hosts.clone();
+    let list_shape = ctx.retain.current_shape();
+    // Read here: while the list lays out and asks for a row, its state is borrowed.
+    let list_viewport = list_state.viewport_bounds().size;
     let render_item = cx.processor(move |view, index: usize, window, cx| {
         let Some(entry) = view.virtual_lists.get(&list_id) else {
             return unmounted_virtual_row(1.0);
@@ -11546,7 +11561,7 @@ fn build_virtual_list(
             // Empty measures as 0 and poisons ListState. Keep the estimate.
             return unmounted_virtual_row(entry.config.estimated_item_height.unwrap_or(1.0));
         };
-        view.build_virtual_child(list_id, index, child_id, list_path.clone(), list_hosts.clone(), inherited.clone(), window, cx)
+        view.build_virtual_child(list_id, index, child_id, list_shape, list_viewport, list_path.clone(), list_hosts.clone(), inherited.clone(), window, cx)
     });
     let scroll_state = list_state.clone();
     // The list inserts its own hitbox under this id, so a host id makes it a
@@ -13386,6 +13401,9 @@ enum BatchOp<'a> {
     DestroyElement {
         id: u64,
     },
+    DetachChild {
+        id: u64,
+    },
     AppendChild {
         parent_id: u64,
         child_id: u64,
@@ -13588,6 +13606,9 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
                     "destroyElement" => BatchOp::DestroyElement {
                         id: next_id(&mut seq, "id")?,
                     },
+                    "detachChild" => BatchOp::DetachChild {
+                        id: next_id(&mut seq, "id")?,
+                    },
                     "appendChild" => BatchOp::AppendChild {
                         parent_id: next_id(&mut seq, "parent id")?,
                         child_id: next_id(&mut seq, "child id")?,
@@ -13730,6 +13751,9 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
             BatchOp::DestroyElement { id } => {
                 let destroyed = tree.destroy_element(id);
                 destroyed_ids.extend(destroyed.iter().map(|&id| id as f64));
+            }
+            BatchOp::DetachChild { id } => {
+                tree.detach_child(id);
             }
             BatchOp::AppendChild {
                 parent_id,

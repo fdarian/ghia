@@ -638,6 +638,10 @@ export function removeHostNode(parent: HostParent, node: HostNode): void {
   const root = parent.kind === "root" ? parent : parent.root
   if (!root || !node.mounted) return
   root.removals.add(node)
+  // Native is told now, not at the flush: a layout read in this turn flushes the queue and
+  // must not lay out a subtree the DOM would already have taken out of the document. A root's
+  // child has no native parent to leave.
+  if (parent.kind === "element") root.mutations.detachChild(node.id)
   root.mutations.requestFlush()
 }
 

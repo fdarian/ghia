@@ -2860,6 +2860,8 @@ export type NativeRenderer = MutationHost &
 export interface MutationRenderer {
   createElement(id: number, elementType: string): void
   destroyElement(id: number): Array<number>
+  /** Takes an element out of its parent and keeps it alive, as `removeChild` does in the DOM. */
+  detachChild(id: number): void
   appendChild(parentId: number, childId: number): void
   insertBefore(parentId: number, childId: number, beforeId: number): void
   setStyle(id: number, style: object): void

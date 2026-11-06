@@ -1252,7 +1252,14 @@ impl TestGpuixRenderer {
     /// pending change, once. For use with `setInlineDraws(false)`.
     #[napi]
     pub fn draw_frame(&self) -> Result<()> {
-        deliver_frame()?;
+        // A frame covers every batch applied before it, so it pays the notify they are owed as a
+        // read does. Left set, the next `flushIfDirty` would invalidate a page this frame drew.
+        let unflushed = take_unflushed();
+        if unflushed != Dirty::Clean {
+            self.flush_for(unflushed)?;
+        } else {
+            deliver_frame()?;
+        }
         window_call(|window, cx| window.paint_if_dirty(cx)).map(|_| ())
     }
 

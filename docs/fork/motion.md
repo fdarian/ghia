@@ -165,7 +165,7 @@ An invalid animation, transition or grid track used to make `applyBatch` fail in
 - An `<svg>` with shape children ignores `source`/`src`, and its `width`/`height` props size the svg box.
 - `strokeDasharray: ["4","2"]` in `motion` is now two keyframes.
 - `layout` is a universal prop on host elements, and `animate` is optional on motion components.
-- Solid's host keeps an element alive when Solid moves its node (a removed node's element is destroyed at flush, and inserting a node before itself is a no-op). This fixed Solid `Reorder` and `AnimatePresence` exits.
+- Solid's host keeps an element alive when Solid moves its node (a removed node's element is detached natively at once and destroyed at flush, and inserting a node before itself is a no-op). This fixed Solid `Reorder` and `AnimatePresence` exits.
 - Solid `AnimatePresence` keeps exiting nodes in place.
 - A motion, transition or keyframes animation of an inherited property on a `display: contents` element reaches its children.
 - The controls of `animate()` follow Motion: `time` counts the delay and is not held at the end, a `speed` of 0 holds until `play()` (a later speed no longer runs it), `isAnimating()` stays true after the controls' `stop()` and `cancel()`, `duration` and `iterationDuration` no longer throw before the value is bound, and `startTime` and `attachTimeline` exist.
