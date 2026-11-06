@@ -9,24 +9,24 @@ function stripQuery(path: string): string {
   return path.split(/[?#]/, 1)[0]!
 }
 
+// Bun resolves each solid-js entry through the `node` export condition to its server build, whose
+// `isServer` is true. Each is loaded from the client build beside it instead.
+const clientBuilds = [
+  { server: /[/\\]node_modules[/\\]solid-js[/\\]dist[/\\]server\.js(?:[?#].*)?$/, client: "solid.js" },
+  { server: /[/\\]node_modules[/\\]solid-js[/\\]store[/\\]dist[/\\]server\.js(?:[?#].*)?$/, client: "store.js" },
+  { server: /[/\\]node_modules[/\\]solid-js[/\\]web[/\\]dist[/\\]server\.js(?:[?#].*)?$/, client: "web.js" },
+]
+
 export function createSolidPlugin(): BunPlugin {
   return {
     name: "gpuix-solid",
     setup(build) {
-      build.onLoad(
-        { filter: /[/\\]node_modules[/\\]solid-js[/\\]dist[/\\]server\.js(?:[?#].*)?$/ },
-        async ({ path }) => ({
-          contents: await readFile(stripQuery(path).replace("server.js", "solid.js"), "utf8"),
+      for (const entry of clientBuilds) {
+        build.onLoad({ filter: entry.server }, async ({ path }) => ({
+          contents: await readFile(stripQuery(path).replace("server.js", entry.client), "utf8"),
           loader: "js",
-        })
-      )
-      build.onLoad(
-        { filter: /[/\\]node_modules[/\\]solid-js[/\\]store[/\\]dist[/\\]server\.js(?:[?#].*)?$/ },
-        async ({ path }) => ({
-          contents: await readFile(stripQuery(path).replace("server.js", "store.js"), "utf8"),
-          loader: "js",
-        })
-      )
+        }))
+      }
       build.onLoad(
         { filter: /^(?!.*[/\\]node_modules[/\\]).*\.[cm]?[jt]sx(?:[?#].*)?$/ },
         async ({ path }) => {
