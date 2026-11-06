@@ -1143,6 +1143,13 @@ impl TestGpuixRenderer {
         update_view(move |view, _window, _cx| view.patch.set_enabled(enabled))
     }
 
+    /// Whether the frames drawn after a list scroll are classified as translates of the frame
+    /// before them (`scrollPatch` of `getPatchCounters`). On unless `GPUIX_SCROLL_PATCH_OFF`.
+    #[napi]
+    pub fn set_scroll_patch_enabled(&self, enabled: bool) -> Result<()> {
+        update_view(move |_view, window, _cx| window.set_scroll_patch(enabled))
+    }
+
     /// How ticks were patched since the window was made: subtract two reads for a span of frames.
     #[napi]
     pub fn get_patch_counters(&self) -> Result<PatchCounters> {

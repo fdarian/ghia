@@ -9616,7 +9616,8 @@ also tells the window, so the frame after it is built whole and never a tick.
 with. Set `GPUIX_RETAIN_OFF=1` (or call `setRetainEnabled(false)` on one window)
 to build every frame in full, for timing, `GPUIX_PATCH_OFF=1` (or
 `setPatchEnabled(false)` on one window) to draw every tick of an animation whole
-instead of patching it, and
+instead of patching it, `getPatchCounters().scrollPatch` for how the frames after a
+list scroll were classified (`GPUIX_SCROLL_PATCH_OFF=1`, or `setScrollPatchEnabled(false)`, turns it off; every frame is drawn whole either way), and
 `GPUIX_RETAIN_VERIFY=1` to build each frame that replayed a second time, whole,
 and compare the two: a difference is printed as `[retained]` and fails
 `unmount()`. Run your suite with it on after a change to a custom element.

@@ -47,6 +47,7 @@ use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 mod debug;
 pub(crate) mod gate;
 mod patch;
+mod scroll_gate;
 
 pub(crate) use patch::Patching;
 
@@ -1065,6 +1066,8 @@ pub(crate) struct Retain {
     mismatches: Vec<String>,
     /// What `getRetainDebug` reports, filled only with `GPUIX_RETAIN_DEBUG`.
     debug: debug::Debug,
+    /// What a list scroll is classified against, see `scroll_gate`.
+    shown: scroll_gate::ShownFrame,
 }
 
 /// What `Retain::enter` is told about the element about to be built.
@@ -1247,6 +1250,7 @@ impl Retain {
             exited_absent: false,
             mismatches: Vec::new(),
             debug: debug::Debug::from_env(),
+            shown: scroll_gate::ShownFrame::default(),
         }
     }
 
@@ -1307,6 +1311,7 @@ impl Retain {
         self.row_nodes.clear();
         self.release_dormant(false);
         self.plan.recorded = false;
+        self.publish_shown();
         self.backoff = Backoff::default();
         self.gate.forget();
     }
@@ -1383,6 +1388,7 @@ impl Retain {
         self.plan.serial += 1;
         if sources.layout_only {
             self.plan.layout_since = true;
+            self.publish_shown();
         } else if !sources.reference {
             self.plan = Plan {
                 serial: self.plan.serial,
@@ -1393,6 +1399,7 @@ impl Retain {
                     .map_or(0, |root| root.subtree_revision),
                 ..Plan::default()
             };
+            self.publish_shown();
         }
         if sources.pass == 1 && !sources.layout_only && !sources.reference {
             self.forget_unseen_rows();
@@ -2991,6 +2998,7 @@ impl Retain {
         if !self.reference && !self.layout_only && !self.row {
             self.plan.recorded = true;
             self.plan.unsteady |= unsteady;
+            self.publish_shown();
         }
         if !self.deferred && !self.row {
             self.forget_unbuilt_dynamic(&built_dynamic);
@@ -5509,6 +5517,27 @@ mod tests {
         assert_eq!(page.row(inside, 3, |_| {}), Some(true), "the list moved in the document, and so did its row");
         let inside = page.list_frame(true);
         assert_eq!(page.row(inside, 3, |_| {}), None);
+    }
+
+    #[test]
+    fn the_frame_shown_is_published_to_the_scroll_gate_while_it_is_a_whole_recorded_one() {
+        let mut page = Units::new();
+        fn page_shown(page: &Units) -> Option<u64> {
+            page.retain.shown.get()
+        }
+        assert_eq!(page_shown(&page), None, "nothing is shown before a frame");
+        page.frame(&[], false, |page| {
+            page.element(1, None, |_| {});
+        });
+        assert_eq!(page_shown(&page), Some(page.retain.plan.revision), "a recorded frame is the one a scroll is classified against");
+        page.frame(&[], true, |_| {});
+        assert_eq!(page_shown(&page), None, "a pass that only lays out takes the changes the frame shown has not seen");
+        page.frame(&[], false, |page| {
+            page.element(1, None, |_| {});
+        });
+        assert!(page_shown(&page).is_some());
+        page.retain.set_planning(false);
+        assert_eq!(page_shown(&page), None, "a retention that does not plan records no frame");
     }
 
     #[test]

@@ -746,6 +746,11 @@ export declare class TestGpuixRenderer {
    * frame before them. On unless `GPUIX_PATCH_OFF`, and never when the retention is off.
    */
   setPatchEnabled(enabled: boolean): void
+  /**
+   * Whether the frames drawn after a list scroll are classified as translates of the frame
+   * before them (`scrollPatch` of `getPatchCounters`). On unless `GPUIX_SCROLL_PATCH_OFF`.
+   */
+  setScrollPatchEnabled(enabled: boolean): void
   /** How ticks were patched since the window was made: subtract two reads for a span of frames. */
   getPatchCounters(): PatchCounters
   resetBuildCounters(): void
@@ -2278,6 +2283,11 @@ export interface PatchCounters {
    * could not build).
    */
   unpatchable: string
+  /**
+   * How the frames drawn after a list scroll would have been drawn by translating the rows of the frame before
+   * them (nothing is translated yet, every frame is drawn whole).
+   */
+  scrollPatch: ScrollPatchCounters
 }
 
 export interface PathPromptOptions {
@@ -2361,6 +2371,28 @@ export interface RetainedCounters {
    * they were the same but for where they are, by the reason.
    */
   relocationMisses: string
+}
+
+/**
+ * The frames drawn after a list scroll that could have been a pure translate of the rows, and
+ * the first reason the others could not (`gpui::ScrollPatchReason`).
+ */
+export interface ScrollPatchCounters {
+  /** Frames drawn after a list scroll. */
+  frames: number
+  /** Of those, the ones that would have been a pure translate. */
+  eligible: number
+  /** Of the eligible ones, the ones whose build was not what the classifier predicted. */
+  mispredicted: number
+  /**
+   * Of the frames whose first reason is the hover, the ones nothing else stops: eligible with
+   * the pointer elsewhere.
+   */
+  hoverOnly: number
+  /** The others, by the first reason they were not. */
+  reasons: Record<string, number>
+  /** The same frames, by every reason that held for them, first or not. */
+  held: Record<string, number>
 }
 
 /** A size in CSS px. */

@@ -14369,6 +14369,30 @@ pub struct PatchCounters {
     /// JSON object: ticks gpuix did not try to patch, by kind (`Unpatchable`, and the units it
     /// could not build).
     pub unpatchable: String,
+    /// How the frames drawn after a list scroll would have been drawn by translating the rows of the frame before
+    /// them (nothing is translated yet, every frame is drawn whole).
+    pub scroll_patch: ScrollPatchCounters,
+}
+
+/// The frames drawn after a list scroll that could have been a pure translate of the rows, and
+/// the first reason the others could not (`gpui::ScrollPatchReason`).
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct ScrollPatchCounters {
+    /// Frames drawn after a list scroll.
+    pub frames: f64,
+    /// Of those, the ones that would have been a pure translate.
+    pub eligible: f64,
+    /// Of the eligible ones, the ones whose build was not what the classifier predicted.
+    pub mispredicted: f64,
+    /// Of the frames whose first reason is the hover, the ones nothing else stops: eligible with
+    /// the pointer elsewhere.
+    pub hover_only: f64,
+    /// The others, by the first reason they were not.
+    pub reasons: std::collections::HashMap<String, f64>,
+    /// The same frames, by every reason that held for them, first or not.
+    pub held: std::collections::HashMap<String, f64>,
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -14388,6 +14412,23 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
                 .collect(),
         ),
         unpatchable: object(view.patch.declines().iter().map(|(kind, count)| (kind.to_string(), *count)).collect()),
+        scroll_patch: {
+            let scroll = window.scroll_patch_counters();
+            ScrollPatchCounters {
+                frames: scroll.frames as f64,
+                eligible: scroll.eligible as f64,
+                mispredicted: scroll.mispredicted as f64,
+                hover_only: scroll.hover_only as f64,
+                reasons: gpui::ScrollPatchReason::ALL
+                    .into_iter()
+                    .map(|reason| (format!("{reason:?}"), scroll.reasons(reason) as f64))
+                    .collect(),
+                held: gpui::ScrollPatchReason::ALL
+                    .into_iter()
+                    .map(|reason| (format!("{reason:?}"), scroll.held(reason) as f64))
+                    .collect(),
+            }
+        },
     }
 }
 
