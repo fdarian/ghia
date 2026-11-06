@@ -7,7 +7,8 @@ import {
   type Plugin,
   type ViteDevServer,
 } from "vite"
-import { ENVIRONMENT_NAME, PLUGIN_NAME, type GhiaPluginApi } from "./plugin.js"
+import { ENVIRONMENT_NAME, PLUGIN_NAME, SERVER_ENVIRONMENT_NAME, type GhiaPluginApi } from "./plugin.js"
+import { SERVER_PORT_SLOT, type WorkerInit } from "./protocol.js"
 
 const USAGE = `Usage: ghia <dev|build> [--config <file>]`
 
@@ -30,21 +31,39 @@ async function dev(configFile: string | undefined): Promise<void> {
     await server.close()
     throw new Error(`The "${ENVIRONMENT_NAME}" environment is not a runnable dev environment`)
   }
-  stopOnSignal(server)
+  const api = findPluginApi(server.config.plugins)
+  const worker = api.server === undefined ? undefined : startServerWorker(api, api.server)
+  stopOnSignal(server, worker)
 
   // A full reload makes the runner clear its module cache and re-import the entry by itself,
   // so `render()` runs again; it is built to be re-run on the same window.
   try {
-    await environment.runner.import(findPluginApi(server.config.plugins).entry)
+    await environment.runner.import(api.entry)
   } catch (error) {
+    await worker?.terminate()
     await server.close()
     throw error
   }
 }
 
-function stopOnSignal(server: ViteDevServer): void {
+/**
+ * Starts the Worker that runs the `server` environment and hands the UI its end of the port
+ * through a global slot, which `virtual:ghia/server` reads when the UI entry loads.
+ */
+function startServerWorker(api: GhiaPluginApi, serverEntry: string): Worker {
+  const worker = new Worker(new URL("./worker.js", import.meta.url))
+  const vite = new MessageChannel()
+  const server = new MessageChannel()
+  api.serverChannel.connect(vite.port1)
+  const init: WorkerInit = { vitePort: vite.port2, serverPort: server.port2, entry: serverEntry }
+  worker.postMessage(init, [vite.port2, server.port2])
+  Object.defineProperty(globalThis, SERVER_PORT_SLOT, { value: server.port1, configurable: true })
+  return worker
+}
+
+function stopOnSignal(server: ViteDevServer, worker: Worker | undefined): void {
   const stop = () => {
-    server.close().finally(() => process.exit(0))
+    Promise.all([worker?.terminate(), server.close()]).finally(() => process.exit(0))
   }
   process.once("SIGINT", stop)
   process.once("SIGTERM", stop)
@@ -57,6 +76,9 @@ async function build(configFile: string | undefined): Promise<void> {
     throw new Error(`The "${ENVIRONMENT_NAME}" environment is not defined; add ghia() to your Vite config`)
   }
   await builder.build(environment)
+  const serverEnvironment = builder.environments[SERVER_ENVIRONMENT_NAME]
+  // After the `ghia` build, which empties the output directory.
+  if (serverEnvironment !== undefined) await builder.build(serverEnvironment)
 }
 
 async function main(): Promise<void> {

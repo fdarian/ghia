@@ -14,9 +14,12 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./client.d.ts"
     }
   },
-  "files": ["dist", "LICENSE"],
+  "files": ["dist", "client.d.ts", "LICENSE"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/fdarian/ghia.git",
