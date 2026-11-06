@@ -309,6 +309,24 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
       expect(renderer.getRetainedCounters().mismatches).toBe(0)
     })
 
+    it("agrees with a build of the frame when a row comes back after a frame the list did not ask for it", () => {
+      const renderer = mountList(true)
+      renderer.setRetainVerify(true)
+      for (let frame = 0; frame < 3; frame++) renderer.flush()
+      // 40 px takes row 0 out of the viewport for a frame, which 20 or 39 px do not: its box is gone while
+      // its record is not, and the row comes back with the scroll.
+      renderer.scrollTo(2, undefined, ROW_HEIGHT)
+      renderer.flush()
+      expect(renderer.getElementBounds(rowId(0))).toBeFalsy()
+      renderer.scrollTo(2, undefined, 0)
+      renderer.flush()
+      renderer.flush()
+      expect(renderer.getRetainMismatches()).toEqual([])
+      expect(renderer.getBuildCounters().retainMismatches).toBe(0)
+      expect(renderer.getRetainedCounters().mismatches).toBe(0)
+      expect(renderer.getElementBounds(rowId(0))).toBeTruthy()
+    })
+
     it("paints what a build of every row paints", () => {
       const dir = mkdtempSync(join(tmpdir(), "retain-rows-"))
       const shot = (skipping: boolean) => {
