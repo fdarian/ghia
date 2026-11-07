@@ -272,6 +272,12 @@ See [patch-frames.md](patch-frames.md).
   recorded (`delta` zero and the key equal); anything that puts the recording elsewhere has to note it as relocated, and a patch of
   such a root makes the recordings stale for the scroll translate. `PaintOperation::differs_from` compares the fields of the kinds it
   lists (`has_equal_fields`) before it formats: a new field of `Quad` or `MonochromeSprite` has to be in it. `hover_patch_tests.rs`.
+- **gpuix anchors (`Retain::begin_anchor`, `end_anchor`, `anchor_repainted`, `RetainedTree::structure_attributed`, `pending_structure`, `TapeStore::replace_recorded`, `Layered::replace`):**
+  a change the tree names no element for (a new mutation that takes a revision without `mark_changed`) moves `patch_barrier`, and one that
+  names the wrong element lets an anchor patch what it does not hold: every mutation that changes what a frame draws goes through
+  `mark_changed_detail` or the barrier. A new registry written through `tape::write` needs a `replace` beside its `publish`, or a patch of
+  an anchor leaves what the anchor wrote before. A new read that lays out has to call `settle_pending_layout` first. `contained-patch.test.tsx`
+  under `GPUIX_RETAIN_VERIFY=1` is the check.
 - **gpuix `patch_roots` (`Retain::can_be_patch_root`, `begin_patch_root`, `patch_root_unit`) and `events/hover_paint.rs`:** a root left
   unrecorded for a patch changes how the roots around it replay, so what makes one unfit (it might lift, an intrinsic size, a group)
   is decided from the tree before it is built; a new style that lifts or is measured under another style belongs in `may_lift` or

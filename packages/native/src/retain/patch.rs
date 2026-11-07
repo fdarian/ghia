@@ -62,6 +62,8 @@ impl Unpatchable {
             Unpatchable::Refused(refusal) => refusal.key(),
             Unpatchable::Hover(_) => "Hover".to_owned(),
             Unpatchable::Commit(_) => "Commit".to_owned(),
+            Unpatchable::Structure(_) => "Structure".to_owned(),
+            Unpatchable::AnchorStale(_) => "Anchor:StaleRecording".to_owned(),
         }
     }
 }
@@ -71,6 +73,9 @@ impl Unpatchable {
 pub(crate) struct Built {
     pub(crate) units: Vec<(gpui::ElementId, gpui::AnyElement)>,
     tapes: Vec<(u64, crate::tape::SharedTape)>,
+    /// The scrollers among the units, which lay out again: what they write into the registries is
+    /// taken as the patch made it, not compared with what the frame wrote.
+    anchors: Vec<u64>,
     stepped: Stepped,
 }
 
@@ -88,6 +93,7 @@ impl GpuixView {
             return;
         }
         let view = cx.weak_entity();
+        window.set_contained_patches(true);
         self.install_scroll_gate(window, view.clone());
         let patcher = move |window: &mut gpui::Window, app: &mut gpui::App| -> bool {
             let Some(view) = view.upgrade() else {
@@ -99,15 +105,24 @@ impl GpuixView {
             let tapes = view.read(app).tapes.clone();
             let scratch = built.tapes;
             let captured = scratch.clone();
-            let accepted = move |_: &mut gpui::Window, _: &mut gpui::App| {
-                scratch.iter().all(|(id, tape)| tapes.same_as_recorded(*id, tape))
+            let anchors = built.anchors.clone();
+            let accepted = {
+                let (tapes, anchors) = (tapes.clone(), anchors.clone());
+                move |_: &mut gpui::Window, _: &mut gpui::App| {
+                    scratch.iter().all(|(id, tape)| anchors.contains(id) || tapes.same_as_recorded(*id, tape))
+                }
             };
             let Ok(outcome) = window.repaint_in_place(built.units, app, accepted) else {
                 return false;
             };
+            // An anchor laid out again wrote other boxes, texts and paragraphs than the frame did: they
+            // take the place of the ones it wrote.
+            let window_id = window.window_handle().window_id();
+            for (id, tape) in captured.iter().filter(|(id, _)| anchors.contains(id)) {
+                tapes.replace_recorded(window_id, *id, tape);
+            }
             // A scroller around the units is not painted again, and its range follows the
             // transforms that moved below it.
-            let window_id = window.window_handle().window_id();
             let scale = window.scale_factor();
             for change in &outcome.scroll_extents {
                 let scrolled = view.read(app).scroll_handles.iter().find(|(_, handle)| **handle == change.handle).map(|(id, _)| *id);
@@ -117,7 +132,7 @@ impl GpuixView {
             }
             // The boxes, and the matrices of the texts and start regions that a press is mapped through,
             // are what a transform that moves changes without a build.
-            for (_, tape) in &captured {
+            for (_, tape) in captured.iter().filter(|(id, _)| !anchors.contains(id)) {
                 let tape = tape.borrow();
                 tape.each(crate::tape::Kind::Bounds, &mut crate::automation::publish_captured_bounds);
                 tape.each(crate::tape::Kind::Text, &mut crate::text::publish_captured_text);
@@ -134,9 +149,19 @@ impl GpuixView {
             if !relevance.is_empty() {
                 let handle = window.window_handle();
                 let viewport = window.viewport_size();
+                let (tree, callback) = (tree.clone(), callback.clone());
                 app.defer(move |cx| crate::observers::sweep_relevance(handle, viewport, &tree, &callback, cx));
             }
-            view.update(app, |view, cx| view.continue_after_patch(window, &built.stepped, cx));
+            if !anchors.is_empty() {
+                // What an anchor laid out again moved is reported as a scroll that moves the rows is.
+                let (reports, callback) = {
+                    let view = view.read(app);
+                    (view.paint_reports.clone(), view.event_callback.clone())
+                };
+                let (handle, viewport, tree) = (window.window_handle(), window.viewport_size(), tree.clone());
+                app.defer(move |cx| crate::observers::sweep_after_translate(handle, viewport, &reports, &tree, &callback, cx));
+            }
+            view.update(app, |view, cx| view.continue_after_patch(window, &built.stepped, &anchors, cx));
             true
         };
         window.set_frame_patcher(Some(Rc::new(patcher)));
@@ -189,11 +214,23 @@ impl GpuixView {
         // A root the frame shown has elsewhere than it was recorded, or did not make patchable, is declined by gpui
         // after it is built: asking first spares the build.
         let by_commit = !self.tree.lock().unwrap().pending_restyles().is_empty();
-        for &id in ids.iter().filter(|id| self.retain.is_patch_root(**id)) {
+        for &id in ids.iter().filter(|id| self.retain.is_patch_root(**id) || self.retain.is_anchor(**id)) {
             if let Some(blocker) = window.patch_blocker(&crate::renderer::retained_id(id)) {
-                self.patch.decline(format!("{}:{blocker:?}", if by_commit { "Commit" } else { "Hover" }));
+                let by = if self.retain.is_anchor(id) {
+                    "Anchor"
+                } else if by_commit {
+                    "Commit"
+                } else {
+                    "Hover"
+                };
+                self.patch.decline(format!("{by}:{blocker:?}"));
                 return None;
             }
+        }
+        let anchors: Vec<u64> = ids.iter().copied().filter(|id| self.retain.is_anchor(*id)).collect();
+        if !anchors.is_empty() && !self.focus_follows_tree() {
+            self.patch.decline("Anchor:Focus".to_owned());
+            return None;
         }
         let stepped = self.step_clocks(window, now);
         let mut units = Vec::with_capacity(ids.len());
@@ -206,7 +243,17 @@ impl GpuixView {
             tapes.push((id, unit.tape));
             units.push((unit.id, unit.element));
         }
-        Some(Built { units, tapes, stepped })
+        Some(Built { units, tapes, anchors, stepped })
+    }
+
+    /// Whether the focus handles are the ones a build of the tree would use: an anchor is built without the
+    /// pass that makes them (`sync_focus_handles`, which also moves the focus), so a focusable element that
+    /// came, went or changed would be built with the handle it had, or none.
+    fn focus_follows_tree(&self) -> bool {
+        let tree = self.tree.lock().unwrap();
+        tree.focusable_ids.len() == self.focus_handles.len()
+            && tree.focusable_ids.iter().all(|id| self.focus_handles.contains_key(id))
+            && !tree.pending_structure().iter().any(|id| tree.focusable_ids.contains(id))
     }
 
     /// What a frame does to the clocks before it builds: motion and motion values are stepped, the
@@ -247,14 +294,22 @@ impl GpuixView {
     }
 
     /// Asks for the frames that what still runs after a patch needs, as the end of a frame does.
-    fn continue_after_patch(&mut self, window: &mut gpui::Window, stepped: &Stepped, cx: &mut gpui::Context<Self>) {
+    fn continue_after_patch(&mut self, window: &mut gpui::Window, stepped: &Stepped, anchors: &[u64], cx: &mut gpui::Context<Self>) {
         // The elements a hover restyled by paint are drawn: the roots that hold them are older than
         // what is shown, and the frame built whole after the patches builds them again.
         let hovered = self.pointer.borrow().take_paint_pending();
         self.retain.hover_repainted(hovered);
         // A commit's restyles need no note: their revision is newer than what the roots recorded, so the
         // frame built whole after the patches builds them again.
-        self.tree.lock().unwrap().take_restyles();
+        {
+            let tree = self.tree.lock().unwrap();
+            tree.take_restyles();
+            tree.take_structure();
+            for &anchor in anchors {
+                self.retain.anchor_repainted(&tree, anchor);
+            }
+        }
+        crate::renderer::layout_is_drawn(cx.entity_id());
         let running = self.css_transitions.take_active() | self.css_animations.take_active();
         let asks_next_frame = running || stepped.motion || stepped.motion_values == crate::motion::Demand::Frame;
         self.retain.note_clock_asked(asks_next_frame);

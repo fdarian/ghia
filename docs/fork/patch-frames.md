@@ -848,6 +848,73 @@ median 40.7M and 38.5M against 38.5M to 39.8M, as before. The hover crossings of
 - A commit patch builds every element of the root it repaints (a row: 9 in the bench) and draws what the roots paint; the frame is not
   cheaper than a hover's.
 
+## Contained-layout patches
+
+A commit whose changes (a text that rewraps, a child added or removed, a style that moves boxes) all lie inside a scroller is drawn
+as a patch of that scroller: it is built again and laid out, gpui accepts the patch when nothing outside it moved, and no frame is
+built whole. Without it every commit that lays out costs the fixed frame (12M instructions in the Navigate proxy) whatever it
+changes. This needs the contained relayout patch of gpui, which is opt-in per window
+([syncing-upstream.md](syncing-upstream.md#contained-relayout-patch-zed-4359857078-afccad7649-third_partytaffy-taffyrs-windowpatchrs-elementsretainedrs)):
+the patcher turns it on with `Window::set_contained_patches`.
+
+- **Anchors.** A scroller (`overflow` `auto` or `scroll` on an axis, with a scroll handle) is wrapped by the frame built whole as
+  `gpui::retained(id, key of this frame, built).patchable_relayout()` and kept in the plan with its `FrameEnv`
+  (`Plan::anchors`, `Retain::begin_anchor`, `end_anchor`, `anchor_root`): recorded by every frame built whole as a source for a
+  patch, and replayed by none (its key is not the one of the frame before, as a unit's is not). The scroller stays an element
+  every frame builds (`Exclusion::Scroller`) and what is in it keeps its roots, so a scroll still moves them. It is an anchor
+  when nothing else is excluded in it (no nested scroller, virtual list, custom element, `layout` animation, highlight, ...),
+  nothing runs in it, nothing in it is lifted out or placed against a block outside it, it is not itself absolute or lifted,
+  and it holds at most `ANCHOR_MAX_ELEMENTS` (1024). An anchor is tried before a patch root for a scroller: a scroller is never
+  recorded as a root.
+- **Which commits.** The tree notes the elements a commit changed (`RetainedTree::pending_structure`: props, style, text and children
+  other than a strict restyle by paint; a created element is covered by the element it is put under, a destroyed one by the
+  parent it left) and moves `patch_barrier` only for a change no element is named for (`setRoot`, the universal style,
+  `autoFocus`, `testId`, `white-space` below an element). While the frame shown has anchors (`RetainedTree::set_anchors`, published
+  by `Retain::publish_anchors` when the frame is over) a batch whose changes are all attributed is `Dirty::LayoutPatchable`:
+  `invalidate_after_mutation` asks for a tick (`Window::request_tick`) and notes the view in `LAYOUT_PENDING`, where a batch with
+  an unattributed change notifies as before.
+- **The preview.** `Retain::preview` maps each pending changed element, still in the tree, to the innermost anchor of the frame shown
+  that holds it (walking up); one that no anchor holds is `Unpatchable::Structure` and the frame is built whole in the same
+  draw, which makes the anchors the next commit is patched in. A restyle by paint, a hover or a running animation that lies in a
+  relaid anchor needs no root of its own: the anchor builds everything in it, so it is dropped from the units. Anchors come
+  after the units in the list handed to the patcher.
+- **The patch.** `GpuixView::build_patch` builds each anchor with `build_unit` (retention suspended: everything in the anchor is
+  built flat, nothing entered, recorded or skipped) and gpui lays it out again from the window's root. The tape captures what its
+  prepaint and paint would write into the registries, and when gpui accepts the patch `TapeStore::replace_recorded` puts
+  those in the place of what the frame wrote for the anchor: the boxes (`getBoundingClientRect`) are published and those of elements
+  the anchor no longer paints forgotten, and the selection text, start regions, painted-text log and inline paragraphs take the
+  place, in the registry's order, of the writes of the tape before (`Layered::replace`). The observers are swept after the patch
+  as after a scroll translate. `Retain::anchor_repainted` drops the records of everything in the anchor, so the next frame built
+  whole builds and records all of it (gpui's recordings of the roots in it are of the layout before), and the anchor is not
+  patched again until then: the recording gpui keeps of it is dropped by an accepted patch, and a second change is
+  `Anchor:StaleRecording`. A tick of a root in a patched anchor is the same.
+- **Declines.** gpui declines `NotContained` when something outside the anchor moved or the anchor's own box changed (a detail
+  that is as wide as its content, with a sibling that shrinks), `Operations`, `Hitboxes` and `Registrations` when the new element has
+  other counts than the recording (a keyed swap of the content with another number of elements, text with other glyphs), and
+  `LayoutMismatch` while an accessibility tree is built. Ghia declines before building: `Structure`, `Anchor:StaleRecording`,
+  `Anchor:Focus` (the focus handles are not the ones the tree needs, or a focusable element changed: the pass that makes them also
+  moves the focus), and `Anchor:<blocker>` for what `Window::patch_blocker` says. A declined patch is drawn whole in the same
+  draw, with the layout work of the patch kept.
+- **Reads.** A batch that moved boxes (`LayoutPatchable`) leaves the layout older than the tree while its tick is waiting, so a read
+  of boxes or scroll metrics before the draw (`settle_pending_layout`, called by every read that lays out) invalidates the view and runs
+  a layout pass as a commit that lays out does; the tick is then drawn whole (`LayoutPass`). The next step is a contained build for the
+  read, kept for the draw.
+- **Counters.** `getPatchCounters().relayoutPatches` (anchors repainted after a layout), the `declines` above of gpui, and in
+  `unpatchable`: `Structure`, `Anchor:StaleRecording`, `Anchor:Focus`, `Anchor:Relocated` and the like.
+
+**Limits (this slice).**
+
+- gpui's patch needs the counts of operations, hitboxes and registrations the recording has, and a root whose recording was made with
+  roots inside it that the flat build of the patch does not have registers differently. Every retained root has a dispatch node of its own, so an anchor that holds roots (a text is one, so is a box with
+  children) is a patch gpui declines as `Registrations` until it splices ranges of other lengths into the frame (zed slice Z2). Until then
+  an anchor is patched when what it holds is no root of its own (boxes with no children). The keyed swap of the bench Detail, which
+  has other counts as well, is `Hitboxes`.
+- The recording of an anchor is dropped by an accepted patch, so the second change in a row is a frame built whole (`Anchor:StaleRecording`).
+- A read of boxes after the commit draws a layout pass and the patch is declined (`LayoutPass`); the Navigate proxy reads after every key.
+- A scroller is wrapped as a retained root that gpui records in every frame built whole: one root more built and painted per anchor
+  (`getRetainedCounters().builds`, `getBuildCounters().painted`).
+- With an accessibility tree built nothing is patched.
+
 ## Scroll-only frames (in progress)
 
 Every wheel event over a `<virtual-list>` used to draw a whole frame (`ListState::scroll` sets the offset, runs the scroll handler and notifies

@@ -122,16 +122,42 @@ pub(crate) fn publish(window: WindowId, live: &crate::tape::Live) {
     });
 }
 
+/// A patch laid out the root whose last build wrote the lists `old` again, and `new` is what it
+/// wrote: the registries give the one for the other, in the place of the first.
+pub(crate) fn replace(window: WindowId, old: &crate::tape::Roots, new: &[crate::tape::Live]) {
+    with_frame(window, |frame| {
+        frame.registry.replace(old, new, Kind::Text, reg_entry);
+        frame.start_regions.replace(old, new, Kind::StartRegion, start_region);
+        frame.painted.replace(old, new, Kind::Painted, painted_text_of);
+    });
+}
+
+fn reg_entry(data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>) -> RegEntry {
+    let entry = &data.downcast_ref::<(WindowId, RegEntry)>().expect("a text write holds its entry").1;
+    RegEntry { to_window: moved_matrix(entry.to_window, offset), ..entry.clone() }
+}
+
+fn start_region(data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>) -> StartRegion {
+    let (_, id, bounds, selectable, to_window) = data.downcast_ref::<StartRegionWrite>().expect("a start region write holds its box");
+    StartRegion {
+        id: *id,
+        bounds: Bounds::new(bounds.origin + offset, bounds.size),
+        selectable: *selectable,
+        to_window: moved_matrix(*to_window, offset),
+    }
+}
+
+fn painted_text_of(data: &dyn std::any::Any, _: gpui::Point<gpui::Pixels>) -> SharedString {
+    data.downcast_ref::<(WindowId, SharedString)>().expect("a painted text write holds its text").1.clone()
+}
+
 impl Frame {
     fn registry(&mut self) -> &[RegEntry] {
         self.registry_mut()
     }
 
     fn registry_mut(&mut self) -> &mut [RegEntry] {
-        self.registry.all_mut(Kind::Text, |data, offset| {
-            let entry = &data.downcast_ref::<(WindowId, RegEntry)>().expect("a text write holds its entry").1;
-            RegEntry { to_window: moved_matrix(entry.to_window, offset), ..entry.clone() }
-        })
+        self.registry.all_mut(Kind::Text, reg_entry)
     }
 
     fn start_regions(&mut self) -> &[StartRegion] {
@@ -139,21 +165,11 @@ impl Frame {
     }
 
     fn start_regions_mut(&mut self) -> &mut [StartRegion] {
-        self.start_regions.all_mut(Kind::StartRegion, |data, offset| {
-            let (_, id, bounds, selectable, to_window) = data.downcast_ref::<StartRegionWrite>().expect("a start region write holds its box");
-            StartRegion {
-                id: *id,
-                bounds: Bounds::new(bounds.origin + offset, bounds.size),
-                selectable: *selectable,
-                to_window: moved_matrix(*to_window, offset),
-            }
-        })
+        self.start_regions.all_mut(Kind::StartRegion, start_region)
     }
 
     fn painted(&mut self) -> &[SharedString] {
-        self.painted.all(Kind::Painted, |data, _| {
-            data.downcast_ref::<(WindowId, SharedString)>().expect("a painted text write holds its text").1.clone()
-        })
+        self.painted.all(Kind::Painted, painted_text_of)
     }
 }
 

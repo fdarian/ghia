@@ -816,6 +816,18 @@ pub(crate) fn republish_scroll_content(window: WindowId, id: u64, content: gpui:
     );
 }
 
+/// Forgets the boxes of the elements `ids` in `window`: a patch laid out the root they were painted in
+/// again and paints them no more.
+pub(crate) fn forget_boxes(window: WindowId, ids: &[u64]) {
+    BOUNDS.with(|cell| {
+        if let Some(bounds) = cell.borrow_mut().get_mut(&window) {
+            for id in ids {
+                bounds.boxes.remove(id);
+            }
+        }
+    });
+}
+
 fn bounds_write(data: &dyn std::any::Any) -> &(WindowId, u64, ElementBounds) {
     data.downcast_ref().expect("a write of the bounds registry holds a window, an element and its box")
 }

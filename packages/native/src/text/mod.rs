@@ -32,6 +32,12 @@ pub(crate) fn publish(window: gpui::WindowId, live: &crate::tape::Live) {
     inline_hit::publish(window, live);
 }
 
+/// A patch laid out a root again: the registries give what its last build wrote for what the patch wrote.
+pub(crate) fn replace(window: gpui::WindowId, old: &crate::tape::Roots, new: &[crate::tape::Live]) {
+    paint::replace(window, old, new);
+    inline_hit::replace(window, old, new);
+}
+
 pub(crate) use paint::{describe_registries, shift};
 pub(crate) use paint::{
     describe_start_region_apart_from_transform, describe_text_apart_from_transform, publish_captured_start_region,

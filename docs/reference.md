@@ -9585,7 +9585,7 @@ Counters you read off the renderer:
 - `getPatchCounters()`, also on the live `GpuixRenderer` so a window with the display
   link can tell a patched tick from one drawn whole: `patchedFrames` and
   `patchedUnits`, `emptyTicks` (ticks whose only changes are in content nobody sees, such as the
-  content of a `content-visibility` host that skips: no frame is built and none is presented), `sceneRebuilds` (patches that had to make the scene's primitives again) and `inPlacePrimitives` (primitives a patch wrote over their place), and two JSON objects keyed by reason, `declines` (ticks GPUI drew
+  content of a `content-visibility` host that skips: no frame is built and none is presented), `relayoutPatches` (scrollers a patch laid out again), `sceneRebuilds` (patches that had to make the scene's primitives again) and `inPlacePrimitives` (primitives a patch wrote over their place), and two JSON objects keyed by reason, `declines` (ticks GPUI drew
   whole after trying to patch them) and `unpatchable` (ticks Ghia did not try to
   patch, such as `Sourced` for a focus or scroll change, `Hover` for a hover that only paints an element that no root of the last frame holds, and `Edited` for a commit). A hover that only changes how elements paint (a colour, a border colour, the colour of a shadow) is a patched tick when the roots that hold them can be repainted; one that lays out, or that a listener hears, is a frame built whole. While
   something runs, every tick drawn whole is counted in one of the two, on a page with

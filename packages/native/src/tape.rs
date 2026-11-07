@@ -382,6 +382,38 @@ impl<T> Layered<T> {
         &mut self.read
     }
 
+    /// Takes out every write that was made into one of the lists `old` stand for (or one nested in
+    /// them), and every replay that puts one back, and puts the writes of `new` in the place of the
+    /// first of them (at the end if there was none), so that what was written around them keeps its
+    /// order. For a registry that a patch laid out again.
+    pub(crate) fn replace(&mut self, old: &Roots, new: &[Live], kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T) {
+        self.all_mut(kind, &from);
+        let (read, owners) = (std::mem::take(&mut self.read), std::mem::take(&mut self.owners));
+        let mut inserted = false;
+        let put = |read: &mut Vec<T>, owners: &mut Vec<u64>| {
+            for live in new {
+                let list = live.entries.serial;
+                live.each(kind, |data, offset| {
+                    read.push(from(data, offset));
+                    owners.push(list);
+                });
+            }
+        };
+        for (value, owner) in read.into_iter().zip(owners) {
+            if old.hold(owner) {
+                if !std::mem::replace(&mut inserted, true) {
+                    put(&mut self.read, &mut self.owners);
+                }
+                continue;
+            }
+            self.read.push(value);
+            self.owners.push(owner);
+        }
+        if !inserted {
+            put(&mut self.read, &mut self.owners);
+        }
+    }
+
     /// Moves every write that was made into one of the lists `roots` stand for, or into one
     /// nested in them, `by` further, with `moves`, and every replay that puts one of them back.
     pub(crate) fn shift(&mut self, roots: &Roots, by: Point<Pixels>, mut moves: impl FnMut(&mut T, Point<Pixels>)) {
@@ -485,6 +517,15 @@ impl Tape {
                 .iter()
                 .zip(&other.lifted)
                 .all(|(left, right)| left.lines_apart_from_transforms() == right.lines_apart_from_transforms())
+    }
+
+    /// What the tape wrote, as the replays that put it back where it was written.
+    pub(crate) fn lives(&self) -> Vec<Live> {
+        [&self.prepaint, &self.paint]
+            .into_iter()
+            .chain(&self.lifted)
+            .map(|entries| Live { entries: entries.clone(), delta: Point::default(), layout_only: false })
+            .collect()
     }
 
     /// The lists the tape writes into, which everything it wrote (and what was replayed into it)
@@ -680,6 +721,33 @@ impl TapeStore {
             .borrow()
             .get(&root)
             .is_some_and(|recorded| captured.borrow().same_writes_apart_from_transforms(&recorded.borrow()))
+    }
+
+    /// `captured`, the tape of an anchor that a patch laid out again, is what the last build of `root`
+    /// wrote now: the registries give what the build before wrote for what `captured` writes (the boxes
+    /// of elements it no longer writes are forgotten, the others published as the patch left them), and
+    /// the frame that replays or compares the root finds `captured`.
+    pub(crate) fn replace_recorded(&self, window: WindowId, root: u64, captured: &SharedTape) {
+        let old = self.tapes.borrow().get(&root).cloned();
+        if let Some(old) = old {
+            let (old, new) = (old.borrow(), captured.borrow());
+            let roots = old.roots();
+            crate::text::replace(window, &roots, &new.lives());
+            let mut written = rustc_hash::FxHashSet::default();
+            new.each(Kind::Bounds, &mut |data, offset| {
+                written.insert(crate::automation::id_of_bounds_write(data));
+                crate::automation::publish_captured_bounds(data, offset);
+            });
+            let mut gone = Vec::new();
+            old.each(Kind::Bounds, &mut |data, _| {
+                let id = crate::automation::id_of_bounds_write(data);
+                if !written.contains(&id) {
+                    gone.push(id);
+                }
+            });
+            crate::automation::forget_boxes(window, &gone);
+        }
+        self.tapes.borrow_mut().insert(root, captured.clone());
     }
 
     /// Replays what the last build of `root` wrote in `phase`, `delta` from where it wrote it.

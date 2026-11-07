@@ -2290,6 +2290,11 @@ export interface PatchCounters {
   sceneRebuilds: number
   /** Primitives that patches wrote over their place in the scene. */
   inPlacePrimitives: number
+  /**
+   * Scrollers that patches laid out again and repainted (contained-layout patches), counted by gpui
+   * when it accepts one.
+   */
+  relayoutPatches: number
   /** JSON object: ticks gpui drew whole after the patcher tried, by reason (`PatchDecline`). */
   declines: string
   /**

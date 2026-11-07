@@ -517,12 +517,30 @@ pub enum Dirty {
     /// the restyled elements are built again and painted over the frame shown, and the elements
     /// are in [`RetainedTree::pending_restyles`] until a frame takes them.
     PaintPatchable,
+    /// [`Dirty::Layout`] whose every change is attributed to an element and the frame shown has anchors,
+    /// the scrollers that a patch lays out again (`RetainedTree::structure_attributed`), with patching on:
+    /// a tick is asked for, which says whether the anchors hold the changes (`Retain::preview`), the changed elements wait in [`RetainedTree::pending_structure`], and a read of
+    /// geometry before the draw notifies the view (`RetainedTree::layout_pending`). Only
+    /// [`RetainedTree::take_dirty`] makes it; [`Dirty::merge`] joins it with the others.
+    LayoutPatchable,
     /// Only style changes whose keys paint and move nothing: the next frame draws, but the boxes
     /// the last layout gave are still the boxes of the tree.
     Paint,
     /// Anything else: a node was added, removed or changed, a prop was set, or a style key that
     /// layout reads.
     Layout,
+}
+
+impl Dirty {
+    /// What two sets of changes ask of the window together: the larger, except that a
+    /// [`Dirty::LayoutPatchable`] beside a paint-only change moves boxes, which `Dirty::Paint` says
+    /// nothing did.
+    pub fn merge(self, other: Dirty) -> Dirty {
+        match (self, other) {
+            (Dirty::LayoutPatchable, Dirty::Paint) | (Dirty::Paint, Dirty::LayoutPatchable) => Dirty::Layout,
+            (left, right) => left.max(right),
+        }
+    }
 }
 
 /// What assigning a style changed, for the caller to mark the tree with.
@@ -670,6 +688,17 @@ pub struct RetainedTree {
     /// The revision of the last mutation that a patch frame cannot follow: any change other than
     /// a restyle that paints strictly. A patch is of the frame built whole, so it is past this.
     patch_barrier: u64,
+    /// The elements whose props, style, text or children changed (other than by a restyle a patch
+    /// follows) since the frame that last took them, while patch frames are made: a patch of an
+    /// anchor follows them, and they are covered by the anchor that holds them. Created elements are
+    /// covered by the element they are put under.
+    structure: std::cell::RefCell<Vec<u64>>,
+    /// The scrollers the frame shown wrapped as patch anchors, and the revision of the root it was
+    /// built at (`GpuixView::publish_anchors`).
+    anchors: std::cell::RefCell<rustc_hash::FxHashSet<u64>>,
+    anchors_revision: std::cell::Cell<u64>,
+    /// A change that no element is named for (`mark_dirty`) was made since `take_dirty`.
+    unattributed_dirty: bool,
     /// The elements restyled by paint since the frame that last took them, which a patch follows
     /// (the commit source: a tick peeks it, a frame built whole or a patch takes it).
     restyled: std::cell::RefCell<Vec<u64>>,
@@ -718,6 +747,10 @@ impl RetainedTree {
             next_revision: 1,
             commit_patching: false,
             patch_barrier: 0,
+            structure: Default::default(),
+            anchors: Default::default(),
+            anchors_revision: Default::default(),
+            unattributed_dirty: false,
             restyled: Default::default(),
             dirty: Dirty::Clean,
             auto_focus_requested: false,
@@ -749,11 +782,68 @@ impl RetainedTree {
     /// by paint alone (every change since the last call was a style change whose keys only paint),
     /// or by anything else. Call once per applied batch.
     pub fn take_dirty(&mut self) -> Dirty {
-        std::mem::take(&mut self.dirty)
+        let dirty = std::mem::take(&mut self.dirty);
+        let unattributed = std::mem::take(&mut self.unattributed_dirty);
+        if dirty == Dirty::Layout && !unattributed && self.structure_attributed() {
+            return Dirty::LayoutPatchable;
+        }
+        dirty
     }
 
+    /// A change that no element is named for: no patch of an anchor follows it.
     fn mark_dirty(&mut self, dirty: Dirty) {
+        self.unattributed_dirty |= dirty == Dirty::Layout;
         self.dirty = self.dirty.max(dirty);
+    }
+
+    /// A change of the element `id`, which the anchor that holds it follows (`pending_structure`).
+    /// False while patch frames are not made, or for a change that is not one a patch lays out again.
+    fn note_structure(&mut self, id: u64, dirty: Dirty) -> bool {
+        if !self.commit_patching || !matches!(dirty, Dirty::Layout | Dirty::Paint) {
+            return false;
+        }
+        self.structure.get_mut().push(id);
+        self.dirty = self.dirty.max(dirty);
+        true
+    }
+
+    /// The scrollers the frame shown wrapped as anchors, built at the root revision `revision`.
+    pub fn set_anchors(&self, anchors: rustc_hash::FxHashSet<u64>, revision: u64) {
+        *self.anchors.borrow_mut() = anchors;
+        self.anchors_revision.set(revision);
+    }
+
+    /// The elements changed since a frame last took them that a patch of anchors follows.
+    pub fn pending_structure(&self) -> Vec<u64> {
+        self.structure.borrow().clone()
+    }
+
+    /// The innermost anchor of the frame shown that holds `id`, walking up the tree as it is now.
+    pub fn anchor_holding(&self, id: u64) -> Option<u64> {
+        let anchors = self.anchors.borrow();
+        let mut at = Some(id);
+        while let Some(up) = at {
+            if anchors.contains(&up) {
+                return Some(up);
+            }
+            at = self.elements.get(&up).and_then(|element| element.parent);
+        }
+        None
+    }
+
+    /// Whether the changes since the frame shown are all attributed to elements and the frame shown made
+    /// anchors, so a tick can say whether the anchors hold them (`Retain::preview`): a change under no anchor is
+    /// counted as `Structure` and drawn whole, as it was, in the same draw.
+    pub fn structure_attributed(&self) -> bool {
+        self.commit_patching
+            && !self.anchors.borrow().is_empty()
+            && self.patch_barrier <= self.anchors_revision.get()
+            && !self.structure.borrow().is_empty()
+    }
+
+    /// Hands the elements of `pending_structure` over: a frame built whole drew them, or a patch did.
+    pub fn take_structure(&self) -> Vec<u64> {
+        std::mem::take(&mut *self.structure.borrow_mut())
     }
 
     /// Classifies paint-only restyles for patch frames from now on, or stops.
@@ -829,7 +919,7 @@ impl RetainedTree {
         if is_control_type(&element_type) {
             self.control_ids.insert(id);
         }
-        let revision = self.take_revision();
+        let revision = self.take_revision_covered();
         self.elements
             .insert(id, RetainedElement::new(id, element_type, revision));
         if self.universal.is_some() {
@@ -941,16 +1031,31 @@ impl RetainedTree {
     }
 
     fn take_revision(&mut self) -> u64 {
-        self.take_revision_for(Dirty::Layout)
+        self.take_revision_for(Dirty::Layout, None)
     }
 
-    fn take_revision_for(&mut self, dirty: Dirty) -> u64 {
-        // Every content change takes a revision to invalidate caches, so this is
-        // the one place that covers style, text, structure and custom props.
-        self.mark_dirty(dirty);
+    /// A revision for a change that a patch of an anchor follows without a barrier: the element is
+    /// covered by the one it is put under.
+    fn take_revision_covered(&mut self) -> u64 {
+        if !self.commit_patching {
+            return self.take_revision();
+        }
+        self.dirty = self.dirty.max(Dirty::Layout);
         let revision = self.next_revision;
         self.next_revision = self.next_revision.wrapping_add(1).max(1);
-        if dirty != Dirty::PaintPatchable {
+        revision
+    }
+
+    fn take_revision_for(&mut self, dirty: Dirty, id: Option<u64>) -> u64 {
+        // Every content change takes a revision to invalidate caches, so this is
+        // the one place that covers style, text, structure and custom props.
+        let followed = id.is_some_and(|id| self.note_structure(id, dirty));
+        if !followed {
+            self.mark_dirty(dirty);
+        }
+        let revision = self.next_revision;
+        self.next_revision = self.next_revision.wrapping_add(1).max(1);
+        if dirty != Dirty::PaintPatchable && !followed {
             self.patch_barrier = revision;
         }
         revision
@@ -997,7 +1102,7 @@ impl RetainedTree {
     }
 
     fn mark_changed_detail(&mut self, id: u64, search: bool, dirty: Dirty) {
-        let revision = self.take_revision_for(dirty);
+        let revision = self.take_revision_for(dirty, Some(id));
         let mut current = Some(id);
         while let Some(current_id) = current {
             let Some(element) = self.elements.get_mut(&current_id) else {
@@ -1018,6 +1123,9 @@ impl RetainedTree {
     /// changed so caches cannot serve text that is no longer in the tree.
     pub fn destroy_element(&mut self, id: u64) -> Vec<u64> {
         let parent_id = self.elements.get(&id).and_then(|element| element.parent);
+        // An element taken out of its parent by `detach_child` was noted then, and one that was never
+        // in the tree is in no frame.
+        let was_placed = parent_id.is_some() || self.detached_from.contains_key(&id);
         if let Some(parent_id) = parent_id {
             if let Some(parent) = self.elements.get_mut(&parent_id) {
                 parent.children.retain(|child| *child != id);
@@ -1027,7 +1135,11 @@ impl RetainedTree {
         self.destroy_element_recursive(id, &mut destroyed);
         self.shrink_tables();
         if !destroyed.is_empty() {
-            self.mark_dirty(Dirty::Layout);
+            if self.commit_patching && (was_placed || self.root_id != Some(id)) {
+                self.dirty = self.dirty.max(Dirty::Layout);
+            } else {
+                self.mark_dirty(Dirty::Layout);
+            }
         }
         if self.root_id == Some(id) {
             self.root_id = None;
@@ -1218,7 +1330,7 @@ impl RetainedTree {
             }
         }
         if total.changed {
-            let revision = self.take_revision_for(if total.layout { Dirty::Layout } else { Dirty::Paint });
+            let revision = self.take_revision_for(if total.layout { Dirty::Layout } else { Dirty::Paint }, None);
             let search = total.regrouped || total.text_reprocessed;
             for element in self.elements.values_mut() {
                 element.subtree_revision = revision;
@@ -1431,8 +1543,10 @@ impl RetainedTree {
             // the custom-prop map that only custom elements read.
             if key == "autoFocus" {
                 let auto_focus = value.as_bool().unwrap_or(false);
+                // Neither this nor `testId` changes what a frame draws: the elements it is put on are covered
+                // by what attaches them.
                 if element.auto_focus != auto_focus {
-                    self.dirty = Dirty::Layout;
+                    self.dirty = self.dirty.max(Dirty::Layout);
                 }
                 self.auto_focus_requested |= auto_focus && !element.auto_focus;
                 element.auto_focus = auto_focus;
@@ -1441,7 +1555,7 @@ impl RetainedTree {
             if key == "testId" {
                 let test_id = value.as_str().map(str::to_string);
                 if element.test_id != test_id {
-                    self.dirty = Dirty::Layout;
+                    self.dirty = self.dirty.max(Dirty::Layout);
                 }
                 element.test_id = test_id;
                 return;
