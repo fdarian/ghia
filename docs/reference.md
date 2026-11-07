@@ -324,7 +324,7 @@ GitHub will 404 the API. Optional: put a Cloudflare cache in front of
 | **diff** | `bun run diff` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
 | **web** | `bun run web` from the repository root | The ChatGPT example rendered in a browser canvas with WebGPU |
 
-They live in [`examples/`](../examples/), which has one `vite.config.mts` for all of them: each script is `ghia dev <entry>`, and `bun run compile` is `ghia build chat.main.tsx`. Where an example's `render()` is not in the file that holds its components, the entry is `<name>.main.tsx` (`chat.main.tsx`), so that a component edit is a Fast Refresh update. The commands need a clone of this repo and a local native build.
+They live in [`examples/`](../examples/), which has one `vite.config.mts` for all of them: each script is `ghia dev <entry>`, and `bun run compile` runs `compile-chat.ts`, which is `ghia build chat.main.tsx` plus the app icons and a macOS `.app`. Where an example's `render()` is not in the file that holds its components, the entry is `<name>.main.tsx` (`chat.main.tsx`), so that a component edit is a Fast Refresh update. The commands need a clone of this repo and a local native build.
 
 The web example bundles the same React app and reconciler as the desktop chat
 example. wasm-bindgen exposes mutations and event callbacks to the existing

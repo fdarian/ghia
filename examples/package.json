@@ -27,7 +27,7 @@
     "infinite-chat": "ghia dev infinite-chat.main.tsx",
     "timeline": "ghia dev timeline.main.tsx",
     "mail": "ghia dev mail.main.tsx",
-    "compile": "ghia build chat.main.tsx",
+    "compile": "bun compile-chat.ts",
     "bench:serde": "bun bench-serialization.ts"
   },
   "dependencies": {
