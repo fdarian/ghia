@@ -246,10 +246,11 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
 
 const shotFile = (name: string) => `${SHOTS_DIR}/scroll-patch-${process.pid}-${name}.png`
 
+/** The frame that was drawn last as it is: `captureScreenshot` refreshes the window and would capture a frame built whole. */
 function picture(renderer, name: string): Buffer {
   const file = shotFile(name)
   fs.rmSync(file, { force: true })
-  renderer.captureScreenshot(file)
+  renderer.captureShownFrame(file)
   const bytes = fs.readFileSync(file)
   fs.rmSync(file, { force: true })
   return bytes
@@ -290,7 +291,7 @@ describeNative("a list scrolled with the classifier on or off", { timeout: TIMEO
               picture: picture(renderer, `${rows}-${classify}-${index}`).toString("base64"),
             })
           }
-          return { seen, frames: counts(renderer).frames }
+          return { seen, frames: counts(renderer).frames, patched: renderer.getPatchCounters().scrollPatch.patched }
         } finally {
           unmount()
         }
@@ -299,6 +300,8 @@ describeNative("a list scrolled with the classifier on or off", { timeout: TIMEO
       const off = run(false)
       expect(on.frames).toBe(steps.length)
       expect(off.frames).toBe(0)
+      expect(off.patched).toBe(0)
+      if (!verifying) expect(on.patched, "some of the frames compared were drawn as translates").toBeGreaterThan(0)
       expect(on.seen).toEqual(off.seen)
     })
   }

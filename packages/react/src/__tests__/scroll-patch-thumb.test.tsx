@@ -72,19 +72,8 @@ function tick(renderer, by: number | undefined, ms = VSYNC) {
 }
 
 let shots = 0
-function picture(renderer): string {
-  const file = `${SHOTS_DIR}/scroll-patch-thumb-${process.pid}-${shots++}.png`
-  fs.rmSync(file, { force: true })
-  renderer.captureScreenshot(file)
-  // The capture notifies the view: the frame it asks for is its own and not the next tick's.
-  renderer.drawFrame()
-  const bytes = fs.readFileSync(file)
-  fs.rmSync(file, { force: true })
-  return bytes.toString("base64")
-}
-
 /** The frame that was drawn last as it is: a frame that moved the rows in place is not built again to be captured. */
-function shownPicture(renderer): string {
+function picture(renderer): string {
   const file = `${SHOTS_DIR}/scroll-patch-thumb-${process.pid}-${shots++}.png`
   fs.rmSync(file, { force: true })
   renderer.captureShownFrame(file)
@@ -98,7 +87,7 @@ function scroll(renderer) {
 }
 
 /** The picture after each tick of `ticks` (a wheel delta, or a wait of that many ticks with none), the translate on or off. */
-function run(translate: boolean, ticks: Array<number | { wait: number }>, count = COUNT, shown = false) {
+function run(translate: boolean, ticks: Array<number | { wait: number }>, count = COUNT) {
   const { renderer, unmount } = open(translate, count)
   try {
     // A wheel and its way back record the rows and show the bar.
@@ -106,15 +95,18 @@ function run(translate: boolean, ticks: Array<number | { wait: number }>, count 
     tick(renderer, -4)
     const warmed = scroll(renderer)
     const pictures: string[] = []
+    const translated: boolean[] = []
     for (const step of ticks) {
+      const before = scroll(renderer).patched
       if (typeof step === "number") tick(renderer, step)
       else for (let index = 0; index < step.wait; index++) tick(renderer, undefined)
-      pictures.push(shown ? shownPicture(renderer) : picture(renderer))
+      translated.push(scroll(renderer).patched > before)
+      pictures.push(picture(renderer))
     }
     if (verifying) {
       expect(renderer.getRetainedCounters().mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
     }
-    return { pictures, counters: scroll(renderer), warmed }
+    return { pictures, translated, counters: scroll(renderer), warmed }
   } finally {
     unmount()
   }
@@ -129,12 +121,15 @@ describeNative("the thumb of a list in the frames a scroll draws by moving the r
     expect(off.counters.frames).toBe(0)
     expect(on.counters.mispredicted).toBe(0)
     expect(on.counters.patched).toBeGreaterThan(0)
+    expect(on.translated, "every frame that is compared was drawn as a translate").toEqual(steps.map(() => true))
     expect(on.counters.held.Thumb).toBe(on.warmed.held.Thumb)
     expect(on.pictures).toEqual(off.pictures)
   })
 
   it("is where the build puts it also under the verifier", () => {
-    expect(run(true, steps).pictures).toEqual(run(false, steps).pictures)
+    const on = run(true, steps)
+    expect(on.pictures).toEqual(run(false, steps).pictures)
+    if (!verifying) expect(on.translated, "every frame that is compared was drawn as a translate").toEqual(steps.map(() => true))
   })
 
   it("is moved back where the whole frame painted it when a scroll brings the rows back there", () => {
@@ -142,12 +137,14 @@ describeNative("the thumb of a list in the frames a scroll draws by moving the r
     // before a fourth is needed, so it is on another pixel at 20 than at 0. The bar fades and the scroll that shows it again is
     // drawn whole, at 20; the next two put the rows at 0 and back at 20, where that frame painted the thumb.
     const back: Array<number | { wait: number }> = [{ wait: 90 }, 20, -20, 20, -20, 15, -15, 20]
-    const on = run(true, back, 6, true)
-    const off = run(false, back, 6, true)
+    const on = run(true, back, 6)
+    const off = run(false, back, 6)
     expect(on.pictures).toEqual(off.pictures)
     expect(new Set(off.pictures).size, "the thumb is on more than one pixel").toBeGreaterThan(2)
     if (!verifying) {
       expect(on.counters.patched - on.warmed.patched).toBeGreaterThanOrEqual(5)
+      // The wait and the scroll that shows the bar again are drawn whole, the six after them are translates.
+      expect(on.translated).toEqual([false, false, true, true, true, true, true, true])
     }
   })
 

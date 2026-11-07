@@ -75,10 +75,11 @@ function wheel(renderer, { x, y, by }: Wheel) {
 
 const shotFile = (name: string) => `${SHOTS_DIR}/scroll-patch-translate-${process.pid}-${name}.png`
 
+/** The frame that was drawn last as it is: `captureScreenshot` refreshes the window and would capture a frame built whole. */
 function picture(renderer, name: string): string {
   const file = shotFile(name)
   fs.rmSync(file, { force: true })
-  renderer.captureScreenshot(file)
+  renderer.captureShownFrame(file)
   const bytes = fs.readFileSync(file)
   fs.rmSync(file, { force: true })
   return bytes.toString("base64")
@@ -116,12 +117,15 @@ function run(translate: boolean, steps: Wheel[], points: Array<[number, number]>
     wheel(renderer, { x: steps[0].x, y: steps[0].y, by: 4 })
     wheel(renderer, { x: steps[0].x, y: steps[0].y, by: -4 })
     const frames: unknown[] = []
+    const translated: boolean[] = []
     for (const [index, step] of steps.entries()) {
       between?.(index)
+      const before = scroll(renderer).patched
       wheel(renderer, step)
+      translated.push(scroll(renderer).patched > before)
       frames.push(seen(renderer, `${translate}-${index}`, points))
     }
-    return { frames, counters: scroll(renderer) }
+    return { frames, translated, counters: scroll(renderer) }
   } finally {
     unmount()
   }
@@ -137,6 +141,8 @@ describeNative("the rows of a list translated by a scroll", { timeout: TIMEOUT }
     expect(off.counters.frames).toBe(0)
     expect(on.counters.mispredicted).toBe(0)
     expect(on.counters.patched).toBeGreaterThan(0)
+    expect(on.translated, "every frame that is compared was drawn as a translate").toEqual(gutter.map(() => true))
+    expect(off.translated.some(Boolean)).toBe(false)
     expect(on.counters.eligible).toBe(on.counters.patched + Object.values(on.counters.applyDeclines).reduce((a, b) => a + b, 0))
     expect(on.frames).toEqual(off.frames)
   })
@@ -144,6 +150,9 @@ describeNative("the rows of a list translated by a scroll", { timeout: TIMEOUT }
   it("draws the same picture, boxes and hits whatever the rows are doing (also under the verifier)", () => {
     const on = run(true, gutter, [[20, 10], [180, 60]])
     const off = run(false, gutter, [[20, 10], [180, 60]])
+    // Under the verifier the frame shown is the build the verifier makes whole: nothing is translated to compare.
+    if (!verifying) expect(on.translated, "every frame that is compared was drawn as a translate").toEqual(gutter.map(() => true))
+    expect(off.translated.some(Boolean)).toBe(false)
     expect(on.frames).toEqual(off.frames)
   })
 
@@ -154,6 +163,8 @@ describeNative("the rows of a list translated by a scroll", { timeout: TIMEOUT }
     const on = run(true, steps, [[20, 38], [20, 10]])
     const off = run(false, steps, [[20, 38], [20, 10]])
     expect(on.counters.patched).toBeGreaterThan(0)
+    // The first wheel brings the pointer into the row 1 (a hover change, drawn whole); the others translate.
+    expect(on.translated).toEqual([false, true, true, true, true, true, true, true])
     expect(on.frames).toEqual(off.frames)
   })
 

@@ -80,10 +80,11 @@ function open(kind: Kind, hover: Hover, entered: string[] = []) {
   return root
 }
 
+/** The frame that was drawn last as it is: `captureScreenshot` refreshes the window and would capture a frame built whole. */
 function picture(renderer, name: string): string {
   const file = `${SHOTS_DIR}/hover-patch-${process.pid}-${name}.png`
   fs.rmSync(file, { force: true })
-  renderer.captureScreenshot(file)
+  renderer.captureShownFrame(file)
   const bytes = fs.readFileSync(file)
   fs.rmSync(file, { force: true })
   return bytes.toString("base64")
@@ -131,6 +132,7 @@ const WAY = [20, 55, 95, 55, 20, 95, 20]
 function crossing(kind: Kind, hover: Hover, patch: boolean) {
   const entered: string[] = []
   const frames = []
+  const patchedLast: boolean[] = []
   let patches
   let mismatches = 0
   for (let steps = 1; steps <= WAY.length; steps++) {
@@ -139,7 +141,11 @@ function crossing(kind: Kind, hover: Hover, patch: boolean) {
       renderer.setPatchEnabled(patch)
       // The first frames record the rows; the way goes over them once to have them recorded with a hover style.
       for (const y of WAY) move(renderer, 20, y)
-      for (const y of WAY.slice(0, steps)) move(renderer, 20, y)
+      const along = WAY.slice(0, steps)
+      for (const y of along.slice(0, -1)) move(renderer, 20, y)
+      const before = renderer.getPatchCounters().patchedFrames
+      move(renderer, 20, along[along.length - 1])
+      patchedLast.push(renderer.getPatchCounters().patchedFrames > before)
       const y = WAY[steps - 1]
       patches = renderer.getPatchCounters()
       frames.push(seen(renderer, `${kind}-${hover}-${patch}-${steps}`, [20, y]))
@@ -148,7 +154,7 @@ function crossing(kind: Kind, hover: Hover, patch: boolean) {
       unmount()
     }
   }
-  return { frames, entered, patches, mismatches }
+  return { frames, entered, patches, mismatches, patchedLast }
 }
 
 /** What patching did over `ys`, the pointer moving across the rows after the way once. */
@@ -188,6 +194,9 @@ describeNative("a hover that only paints", { timeout: TIMEOUT }, () => {
       expect(on.frames[0].picture).not.toEqual(on.frames[1].picture)
       expect(ticks(on.patches)).toBeGreaterThan(0)
       expect(ticks(off.patches)).toBe(0)
+      // The first step does not cross a row; each of the others is a patched frame, and the one that was compared.
+      if (!verifying) expect(on.patchedLast.slice(1).every(Boolean), String(on.patchedLast)).toBe(true)
+      expect(off.patchedLast.some(Boolean)).toBe(false)
     })
 
     it(`draws what patching off draws when the hover changes the padding, in a ${kind}`, () => {
@@ -218,6 +227,8 @@ describeNative("a hover that only paints", { timeout: TIMEOUT }, () => {
       expect(on.frames[0].picture).not.toEqual(on.frames[1].picture)
       expect(ticks(on.patches)).toBeGreaterThan(0)
       expect(ticks(off.patches)).toBe(0)
+      if (!verifying) expect(on.patchedLast.slice(1).every(Boolean), String(on.patchedLast)).toBe(true)
+      expect(off.patchedLast.some(Boolean)).toBe(false)
     })
 
     unverified(`is a patched frame for each crossing of a row with no background, in a ${kind}`, () => {
@@ -260,6 +271,7 @@ describeNative("a hover that only paints", { timeout: TIMEOUT }, () => {
       // Under GPUIX_RETAIN_VERIFY=1 a patched frame is compared with the frame built whole after it.
       const on = crossing(kind, "paint", true)
       expect(on.frames).toEqual(crossing(kind, "paint", false).frames)
+      if (!verifying) expect(on.patchedLast.slice(1).every(Boolean), String(on.patchedLast)).toBe(true)
     })
   }
 })
