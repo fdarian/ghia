@@ -811,6 +811,14 @@ they paint over the frame shown, where it used to be a frame built whole and, fo
 The roots are the units and the hover roots of the last frame built whole. A row with no hover is not one (`Commit` when the element is
 restyled strictly).
 
+**Measured** (the Navigate proxy of ghia-bench, `examples/solid/mailbox-navigate`, release addon, `A11Y=0`, 30 keys, instructions per
+key over keys 2 to 30, two runs each). The selection-only variant (`APP=App-detailstatic VERIFY=0`): median 16.0M and 16.0M against
+18.8M before, and no forced layout pass on any key (it was one a key, 3.6M). A key is a patched frame while the selection stays in the
+view (7 of the 30: 6.7M to 13M); once the key scrolls the list (`reveal`) the scroll queues the view, which is a frame built whole
+(`PendingView`), so the rows still cost their build there. The bench app as it is (`APP=App`, the detail remounts, which lays out):
+median 40.7M and 38.5M against 38.5M to 39.8M, as before. The hover crossings of `mailbox-scroll-hover` are what they were: median
+4.04M and 4.06M, 18 of 18 patched.
+
 **Limits.**
 
 - A commit that adds or takes away an operation (a background where the element keeps no quad, a colour from or to transparent, a

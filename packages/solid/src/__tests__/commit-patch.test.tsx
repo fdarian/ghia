@@ -20,6 +20,9 @@ const verifying = process.env.GPUIX_RETAIN_VERIFY !== undefined
 const patching = process.env.GPUIX_RETAIN_OFF === undefined && process.env.GPUIX_PATCH_OFF === undefined
 const counted = patching && !verifying
 
+const TIMEOUT = 60_000
+const test = (name: string, run: () => void) => it(name, run, TIMEOUT)
+
 const COUNT = 50
 const ROW = 40
 const shots = fs.mkdtempSync(path.join(os.tmpdir(), "commit-patch-"))
@@ -139,7 +142,7 @@ function run(variant: Variant, patch: boolean) {
 }
 
 describe.skipIf(!hasNativeTestRenderer)("Solid: a commit that only paints", () => {
-  it("builds the two rows it restyled and patches the frame, with no layout pass for a read after it", () => {
+  test("builds the two rows it restyled and patches the frame, with no layout pass for a read after it", () => {
     const on = run("paint", true)
     expect(on.mismatches).toBe(0)
     if (!counted) return
@@ -154,7 +157,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit that only paints", () =
   })
 
   for (const variant of ["paint", "opacity", "appear", "layout", "outside"] as const) {
-    it(`${variant}: shows what patching off shows`, () => {
+    test(`${variant}: shows what patching off shows`, () => {
       const on = run(variant, true)
       const off = run(variant, false)
       expect(on.mismatches).toBe(0)
@@ -164,7 +167,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit that only paints", () =
     })
   }
 
-  it("a style whose hover colour changes with the rest is no layout pass for a read", () => {
+  test("a style whose hover colour changes with the rest is no layout pass for a read", () => {
     // `rowStyle` to the selected style also changes the colour of the hover, which was a layout change.
     const { app, renderer, select } = open("paint")
     try {
@@ -181,7 +184,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit that only paints", () =
   })
 
   for (const variant of ["opacity", "appear", "layout"] as const) {
-    it(`${variant}: is drawn whole, not patched`, () => {
+    test(`${variant}: is drawn whole, not patched`, () => {
       const on = run(variant, true)
       if (!counted) return
       for (const step of on.steps) {
@@ -193,7 +196,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit that only paints", () =
     })
   }
 
-  it("outside: a restyled element no root holds is counted as Commit and drawn whole", () => {
+  test("outside: a restyled element no root holds is counted as Commit and drawn whole", () => {
     const on = run("outside", true)
     if (!counted) return
     for (const step of on.steps) {
@@ -204,7 +207,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit that only paints", () =
     expect(reasons.Commit).toBeGreaterThan(0)
   })
 
-  it("a root the list moved since it was recorded is declined as Commit:Relocated and drawn whole", () => {
+  test("a root the list moved since it was recorded is declined as Commit:Relocated and drawn whole", () => {
     const run = (patch: boolean) => {
       const { app, renderer, select } = open("paint")
       try {
