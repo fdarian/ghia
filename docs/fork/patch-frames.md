@@ -921,6 +921,14 @@ its handler reads `scrollTop` after the commit, so every key is `PendingView` (3
 `PHASE=scroll` median 6.889M and 6.893M, mean 7.543M and 7.568M (6.81M and 7.49M before: the retained root the detail's anchor is, in each
 frame built whole).
 
+**Measured, G1.5** (zed `b133d12651`: the splice and the rewrite; same proxies, two runs each). `APP=App`: median 40.5M and 38.7M a key
+(excluding the first; the machine was busier than at G1), every key `PendingView` (30 of 30, from `reveal()`'s read of the scroll metrics), none
+patched. `APP=App-noreveal` (no read): median 28.8M and 28.7M against 28.9M and 28.5M with `GPUIX_ANCHORS_OFF=1`, so the patch alone gains nothing
+yet: 4 keys are relayout patches (keys 2, 4, 6, 8, as many as `Anchor:StaleRecording` keys, 4, the frame built whole that records the anchor
+again, and no patched key costs less than the whole frame next to it but one: 29.3M against 35.4M), 21 are `Commit` (the row the
+selection left or came to is held by no patch root) and one `PendingView`. `PHASE=hover` row crossings: median 4.095M and 4.069M, 18 of 18 patched
+(4.06M at G1), `PHASE=scroll` median 6.893M and 6.896M, mean 7.569M and 7.539M (6.889M and 7.543M at G1).
+
 **Limits.**
 
 - gpui drops the recording of an anchor whose elements published (`rewrittenRecordings` stays 0 in Ghia), so the commit after a patch
