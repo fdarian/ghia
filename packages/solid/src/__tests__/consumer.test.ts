@@ -98,10 +98,25 @@ describe("Solid package consumer", () => {
     }, TIMEOUT_MS)
 
     it("builds with ghia build and runs with plain bun, without a preload", () => {
-      run([ghia, "build"], temp)
+      run([ghia, "build", "--no-compile"], temp)
       const output = run(["bun", join(temp, "dist", "main.js")], temp)
       expect(lines(output, "RENDERED ")).toEqual(["consumer 2"])
       expect(lines(output, "IS_SERVER ")).toEqual(["false"])
     }, TIMEOUT_MS)
+
+    // The addon sits at its pnpm path here, which the compile's loader plugin has to match.
+    it("compiles with ghia build into a binary that runs alone", () => {
+      run([ghia, "build"], temp)
+      const alone = mkdtempSync(join(tmpdir(), "ghia-solid-binary-"))
+      try {
+        cpSync(join(temp, "dist", "app"), join(alone, "app"))
+        const output = run([join(alone, "app")], alone)
+        expect(lines(output, "RENDERED ")).toEqual(["consumer 2"])
+        expect(lines(output, "IS_SERVER ")).toEqual(["false"])
+      } finally {
+        rmSync(alone, { recursive: true, force: true })
+        rmSync(join(temp, "dist", "app"), { force: true })
+      }
+    }, TIMEOUT_MS * 2)
   })
 })
