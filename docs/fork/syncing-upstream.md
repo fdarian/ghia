@@ -258,6 +258,32 @@ each entry or applies it again.
   of the same kind (`window/patch_splice.rs` is new; the rewrite is in `patch_units` and `RetainedState`): apply them in
   order and run `splice_patch_tests.rs` and the retention verifier's tests.
 
+### A list scroll that is a translate, alone or after a patch (zed `window/scroll_patch.rs`, `elements/list/scroll_patch.rs`, `window/patch_splice.rs`, `window/patch.rs`; `a355938ce4`, `3f17e8f0a8`, `53b1476e30`, `92bd787a70`)
+
+- **Decision.** Part of the same approved line of work as the contained relayout patch above (the plan's G3 slices), opt-in per
+  window (`Window::set_scroll_patch`; a window that does not turn it on is drawn as upstream draws it). A scroll of a list that
+  changes which rows show, and a scroll that comes in the same draw as a patch, are a frame that moves the rows of the frame
+  shown instead of a frame built whole.
+- **What it changes.** The rows that stay are moved (`RetainedPhase::Scrolled`), the rows that leave are taken out of every frame
+  vector (`patch_splice.rs`, the insertion and removal forms), and the rows that come in are built through the builder the list
+  was given, each laid out as a root of its own and spliced in at its place; `ScrollPatchCounters` counts them
+  (`membership_frames`, `rows_built`, `rows_removed`, `composed`) and the reasons a frame stays whole (`Membership.*`, `Region`,
+  `Hover`, ...). `Window::note_list_scrolled(view)` lets the owner say a list was scrolled by something other than a wheel (a
+  write of its offset): it asks for the draw itself (`request_tick` on the invalidator, no view queued, no invalidation counted),
+  so the write does not discard a prepared patch. In the draw of a tick, the patch is made first and the translate is classified
+  and applied from the frame the patch left (`composed`), with the tick the patch took no longer held as `Clock`; a translate
+  that declines leaves the patch and builds the frame whole, queueing the noted view for it. A patch of a root recorded to be
+  put elsewhere (a row a translate moved) prepaints and paints it in its region, `delta` from the recording, and rewrites the
+  recording (`RecordingRewrite::relocation`), so rows a translate moved are patchable where they stand and stay a translate source.
+- **Why.** One key of the mailbox of ghia-bench is a restyle of two rows, a swap of the detail and a scroll of the list; each
+  of the three was a patch or a translate alone and the key, drawn whole, cost 40M instructions
+  ([patch-frames.md](patch-frames.md#a-key-in-one-draw-slice-g3c)).
+- **How to carry it on a sync.** The additions are beside upstream's code in `window.rs` (`draw`: the patch before the
+  classification, the decline that queues the view), `window/patch.rs` (the relocated source, the rewrite) and the list element
+  (`elements/list.rs`: the entry points `elements/list/scroll_patch.rs` uses). Run the filters `scroll`, `patch`, `retained`,
+  `membership`, `hover`, `splice_patch` and `contained` of `cargo test -p gpui --lib --features test-support`, which pin each
+  piece, and the retention verifier's steps in `membership_patch_tests.rs`.
+
 ## Procedure
 
 1. Fetch the upstreams: `git fetch upstream` in the repo root and in `zed/`, and `git fetch zed-industries main` in `zed/`.
