@@ -721,12 +721,23 @@ struct Node {
     reads_custom: bool,
 }
 
+/// Whether building the element alone costs more than replaying it: it carries text or is not a plain
+/// host box (an image, an `<svg>`), see [`Entry::costly`].
+pub(crate) fn costly(element: &crate::retained_tree::RetainedElement) -> bool {
+    element.content.is_some() || !crate::text::inline::is_host_type(&element.element_type) || element.element_type == "text"
+}
+
 /// What `Retain::scan_patch_root` finds in a subtree.
 #[derive(Clone, Copy, Default)]
 struct PatchRootScan {
     hovers: bool,
     size: u32,
     lifts: bool,
+    /// Something below the element (not the element) is worth a root of its own (`Retain::worth`): a patch
+    /// root records nothing inside it, so it would take that root from the frames.
+    root_below: bool,
+    /// The element or something below it is worth a root of its own.
+    rooted: bool,
     /// Something in it has a size an intrinsic keyword gives, or declares or follows a group.
     unfit: bool,
 }
@@ -1025,6 +1036,10 @@ pub(crate) struct Retain {
     pass: usize,
     /// How many elements the tree has in the frame being built.
     elements: usize,
+    /// Nothing runs or sleeps in the window, as the frame before left it. Taken when a draw's first pass begins and
+    /// kept for its later passes and the pass that builds the frame again to compare it: what a root is judged by must
+    /// not move between them, and a build that finishes moves it.
+    quiet: bool,
     #[cfg(test)]
     frame_log: Vec<bool>,
     /// Whether a frame skips the building of what the sources say did not change, and hands it
@@ -1271,6 +1286,7 @@ impl Retain {
             inside_relocatable: false,
             pass: 1,
             elements: 0,
+            quiet: true,
             #[cfg(test)]
             frame_log: Vec::new(),
             planning: enabled && !cfg!(test),
@@ -1329,6 +1345,7 @@ impl Retain {
     /// compares the frame with one built whole, see [`Self::verifies_frames`].
     pub(crate) fn set_verify(&mut self, verify: bool) {
         self.verify = verify;
+        self.patch_root_scans.clear();
     }
 
     /// Whether a build is being hashed (`digest`): the one that builds a frame whole to compare it.
@@ -1345,6 +1362,7 @@ impl Retain {
     #[cfg(test)]
     pub(crate) fn set_min_root(&mut self, min_root: u32) {
         self.min_root = min_root;
+        self.patch_root_scans.clear();
     }
 
     /// As if the roots that frames planned to have a scroller move were found built again, for
@@ -1483,6 +1501,9 @@ impl Retain {
             }
         }
         self.elements = sources.tree.elements.len();
+        if sources.pass == 1 && !sources.reference {
+            self.quiet = self.dynamic.is_empty() && self.dormant.is_empty();
+        }
         self.backoff.resting = self.enabled && self.rests(&sources);
         #[cfg(test)]
         if sources.pass == 1 && self.enabled {
@@ -2090,25 +2111,41 @@ impl Retain {
         self.plan.units.iter().chain(&self.plan.patch_roots).find(|unit| unit.id == id)
     }
 
-    /// Whether `id`, or something below it, declares a hover that only changes how it paints and
-    /// nothing a patch cannot repaint, and the subtree is small enough to be a root of one: a
-    /// root built for it is one a patch can repaint. Nothing in it might lift (`may_lift`) unless it is
-    /// a row of a list, which consumes what is lifted in it: a root that lifts is recorded as one that
-    /// hands elements to the stacking context around, and the roots in it are recorded for it as they were.
+    /// Whether the element `id` is made a patch root if the build leaves it recorded: a patch can repaint it
+    /// as one piece. The subtree is small enough (`PATCH_ROOT_MAX_ELEMENTS`), nothing in it has a size an intrinsic
+    /// keyword gives or declares or follows a group, and one of:
+    /// - it declares a hover that only paints, or holds an element that does, and lifts nothing out of it (`may_lift`)
+    ///   unless it is a row of a list, which consumes what is lifted in it: a root that lifts is recorded as one that
+    ///   hands elements to the stacking context around, and the roots in it are recorded for it as they were;
+    /// - it is a row of a virtual list, whatever its style: what a row holds is built whole already, as a patch root's is;
+    /// - it holds no element that is worth a root of its own, lifts nothing, and nothing runs or sleeps in the window:
+    ///   a patch root records nothing inside it, which for such an element changes nothing that was recorded (a unit
+    ///   is one that something runs on).
     /// Worked out once per revision of the subtree. False while nothing is recorded.
     pub(crate) fn can_be_patch_root(&mut self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
         if !self.open || !self.planning || !self.makes_patch_roots {
             return false;
         }
         let scan = self.scan_patch_root(tree, id);
-        // A row of a list is a barrier to a lift: whatever is lifted in it is consumed by the row.
-        scan.hovers && !scan.unfit && (!scan.lifts || tree.elements.get(&id).is_some_and(|element| crate::layout::stacking::is_virtual_row(tree, element)))
+        if scan.unfit || scan.size > PATCH_ROOT_MAX_ELEMENTS {
+            return false;
+        }
+        let Some(element) = tree.elements.get(&id) else {
+            return false;
+        };
+        if crate::layout::stacking::is_virtual_row(tree, element) {
+            return true;
+        }
+        if scan.lifts {
+            return false;
+        }
+        scan.hovers || (self.quiet && !scan.root_below && self.worth(scan.size, costly(element)))
     }
 
     /// What a subtree holds that a patch root is judged by: whether `id` or something below it declares a hover that
-    /// paints only, how many elements it holds, and whether something in it might lift. A subtree bigger than a patch
-    /// root says it holds one more than one may, and nothing of the elements below it: they are asked for when they
-    /// are entered.
+    /// paints only, how many elements it holds, whether something in it might lift, and whether something in it is
+    /// worth a root. A subtree bigger than a patch root says it holds one more than one may, and nothing of the
+    /// elements below it: they are asked for when they are entered.
     fn scan_patch_root(&mut self, tree: &crate::retained_tree::RetainedTree, id: u64) -> PatchRootScan {
         let Some(element) = tree.elements.get(&id) else {
             return PatchRootScan::default();
@@ -2127,27 +2164,30 @@ impl Retain {
             .style
             .as_deref()
             .is_some_and(|style| crate::events::hover_paint::has_intrinsic_size(style) || crate::events::hover_paint::uses_groups(style));
+        let mut root_below = false;
         let mut size = 1;
         for child in &element.children {
             let below = self.scan_patch_root(tree, *child);
             hovers |= below.hovers;
             lifts |= below.lifts;
             unfit |= below.unfit;
+            root_below |= below.rooted;
             size += below.size;
             if size > PATCH_ROOT_MAX_ELEMENTS {
                 break;
             }
         }
         let scanned = if size > PATCH_ROOT_MAX_ELEMENTS {
-            PatchRootScan { hovers: false, size: PATCH_ROOT_MAX_ELEMENTS + 1, lifts, unfit }
+            PatchRootScan { hovers: false, size: PATCH_ROOT_MAX_ELEMENTS + 1, lifts, root_below: true, rooted: true, unfit }
         } else {
-            PatchRootScan { hovers, size, lifts, unfit }
+            let rooted = root_below || self.worth(size, costly(element));
+            PatchRootScan { hovers, size, lifts, root_below, rooted, unfit }
         };
         self.patch_root_scans.insert(id, (element.subtree_revision, scanned));
         scanned
     }
 
-    /// The element just entered is the patch root if the build leaves it recorded
+    /// The element just entered is the root a patch repaints if the build leaves it recorded
     /// (`Recording::patch_root`): the key it was entered with, for the unit to be built again from.
     ///
     /// What is built below it is built whole and recorded by no root of its own, as in a unit,

@@ -156,7 +156,7 @@ The reasons it says no are `Unpatchable`:
 | `Outside` | a time-driven change outside every unit that is not dormant, on an element that has a box and the last build gives no reason for |
 | `Refused` | the element is no unit: `Excluded:<kind>` (`Excluded:fixed` for `position: fixed`; gpui has no root placed by the viewport, `Escape::Viewport` is declined `Surroundings`), `ExcludedBelow:<kind>`, `Escapes`, `Lifts`, `Scrolls`, `LayoutAnimation`, `TooLarge`. What runs on the element is looked at first, so an absolute element whose `top` runs is `LayoutAnimation`, and so is a tick made `Sourced` by the measurement of a layout animation |
 | `Ended` | a unit whose element the last frame no longer found a paint-only animation running on, though a source still lists it, as an SVG shape that holds its end value is: a frame built whole would not make it a unit, so it is not repainted as one |
-| `Hover` | a hover restyled by paint an element that no unit or patch root of the last frame built whole holds ([patch roots](#hover-roots)): the frame is built whole, and visits the roots the next hover is patched in |
+| `Hover` | a hover restyled by paint an element that no unit or patch root of the last frame built whole holds ([patch roots](#patch-roots)): the frame is built whole, and visits the roots the next hover is patched in |
 | `Commit` | a commit restyled by paint an element that no unit or patch root of the last frame built whole holds ([commit patches](#commit-patches)), as `Hover` does for a hover |
 | `Dormancy` | the preview has no unit but elements are about to enter the dormant set or their verdicts moved: the frame settles that ([skipped content](#skipped-content-97)) |
 
@@ -696,14 +696,27 @@ A patch repaints a retained root, so the frame built whole has to leave the root
 repainted, before the pointer arrives or the commit lands. These are the *patch roots*: gpui keeps what it needs of a root's surroundings when it records it (`retained(..).patchable()`), and Ghia
 keeps what builds it again.
 
-- **Which roots.** `Retain::can_be_patch_root` says, per subtree revision, whether an element or something below it declares a hover
-  that only paints (`hover_paint::declares_paint_hover`: all it declares of `hover` and `hasHover` paints only, it has no `@container`
-  rule and declares or follows no group) and the subtree holds at most `PATCH_ROOT_MAX_ELEMENTS` (64) elements: a row, a card
-  or a small control, not a page of cards. The outermost recorded or skipped root with the flag is a *patch root*
-  (`Record::patch_root`) if nothing is lifted out of it and nothing runs on it (`to_record` leaves a root with a running animation
-  unrecorded: it is built every frame). A patch root is wrapped as `gpui::retained(..).patchable()` and its `FrameEnv` is kept in
-  the plan (`Plan::patch_roots`, `Plan::patch_root_ids`), next to the units of running animations and apart from them: nothing runs on it, so
-  it is not a source for a time-driven change. A scroller in it is no reason to refuse it: its offset is a source of its own.
+- **Which roots.** `Retain::can_be_patch_root` says, per subtree revision, whether an element is a candidate, and the subtree holds
+  at most `PATCH_ROOT_MAX_ELEMENTS` (64) elements (a row, a card or a small control, not a page of cards) and has no size an
+  intrinsic keyword gives and declares or follows no group. It is a candidate when one of:
+  1. it, or something below it, declares a hover that only paints (`hover_paint::declares_paint_hover`: all it declares of `hover`
+     and `hasHover` paints only, it has no `@container` rule), and nothing is lifted out of it;
+  2. it is a row of a virtual list, whatever its style (a commit restyles rows that declare no hover: the selection). What a
+     relocatable row holds is built whole already (its children keep no recordings), so the flag asks nothing more of the build, and a
+     row consumes what is lifted in it;
+  3. nothing in it is worth a root of its own (`Retain::worth`: no element below it has a child or is costly to build, so none of
+     them is recorded or skipped by a frame), it lifts nothing, and nothing runs or sleeps in the window (`Retain::quiet`). A patch root
+     records nothing inside it, which for such an element changes nothing that is recorded, where a unit in it (something runs on
+     it) would be taken from the frames. This is decided from the tree and not from the record of the last build of the root (which
+     says the same for a root built before), since the pass that builds a frame again to compare it sees the record the first pass
+     made (see below). `quiet` is the one input that moves with a frame: it is taken when the first pass of a draw begins and kept for
+     the passes after it and the pass that is compared. The element itself has to be worth a root, or there is nothing to patch.
+  The outermost recorded or skipped root with the flag is a *patch root* (`Record::patch_root`) if nothing is lifted out of it
+  and nothing runs on it (`to_record` leaves a root with a running animation unrecorded: it is built every frame). A patch root is
+  wrapped as `gpui::retained(..).patchable()` and its `FrameEnv` is kept in the plan (`Plan::patch_roots`, `Plan::patch_root_ids`),
+  next to the units of running animations and apart from them: nothing runs on it, so it is not a source for a time-driven change. A
+  scroller in it is no reason to refuse it: its offset is a source of its own. A patch root is what gpui keeps a `PatchUnit` and the
+  surroundings of for every frame, so the more roots there are, the more a frame built whole costs (measured below).
 - **What is built inside a patch root is built whole and recorded by no root of its own** (`Retain::patch_root_unit`, as in a unit:
   nothing inside is skipped, and no node inside is recorded), so that a patch, which builds the root as one piece, lays out,
   registers and paints what the recording of the root holds (a nested root is a `retained` element that registers dispatch nodes of
@@ -737,6 +750,14 @@ keeps what builds it again.
   of its last build, so the first hover of a row that came into view is a patch like any other. (The record was tried: the
   pass that rebuilds a frame to compare it sees the record the first pass made, and has to build the roots in it as the first pass
   did.)
+
+**Cost of the wider roots.** Rows of a list and roots with nothing worth a root in them are patch roots (the `PatchUnit` and surroundings
+gpui keeps for each) without a hover. The mailbox rows were hover roots already, so it measures as the same page, two runs each back to
+back, before and after (release addon, `A11Y=0`): `PHASE=scroll` mean 7.510M and 7.495M, median 6.82M and 6.82M before; mean 7.491M and
+7.477M, median 6.81M and 6.81M after; `PHASE=hover` crossing median 4.05M and 4.05M before, 4.04M and 4.03M after (18 of 18 patched);
+the Navigate proxy `APP=App` mean 41.1M and 41.1M before, 41.3M and 41.3M after (median 38.6M and 38.6M, then 40.5M and 40.6M: the
+distribution is bimodal and the median moves by one key, per key the same within noise); `APP=App-detailstatic` median 16.0M and 16.0M,
+then 15.9M and 16.0M. The widening does not help the mailbox: a key that scrolls the list is still a frame built whole.
 
 **Measured** (the mailbox proxy of ghia-bench on the test renderer, release addon, `PHASE=hover A11Y=0 bun mailbox-scroll-hover/profile.tsx`,
 instructions per row crossing, 18 crossings of 480 ticks, two runs each back to back; patching off is `GPUIX_PATCH_OFF=1`, which is
@@ -808,8 +829,9 @@ they paint over the frame shown, where it used to be a frame built whole and, fo
 - **The scroll classifier** still compares the root's revision with the frame shown, so a list scrolled after commit patches is
   built whole once (`Edited`).
 
-The roots are the units and the patch roots of the last frame built whole. A row with no hover is not one (`Commit` when the element is
-restyled strictly).
+The roots are the units and the patch roots of the last frame built whole, which include a row of a virtual list that declares no hover
+and a root with nothing worth a root in it ([patch roots](#patch-roots)). An element that no such root holds (the header outside the list;
+the outer element of a root that has a root of its own in it) is `Commit`.
 
 **Measured** (the Navigate proxy of ghia-bench, `examples/solid/mailbox-navigate`, release addon, `A11Y=0`, 30 keys, instructions per
 key over keys 2 to 30, two runs each). The selection-only variant (`APP=App-detailstatic VERIFY=0`): median 16.0M and 16.0M against

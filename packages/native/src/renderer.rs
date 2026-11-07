@@ -10194,9 +10194,7 @@ fn build_element_in(
                 opacity_runs(known, ctx.css_animations, ctx.css_transitions, ctx.motion_states, ctx.motion_values, ctx.now)
                     || transform_runs(known, ctx.css_animations, ctx.css_transitions, ctx.motion_states, ctx.motion_values, ctx.now)
             },
-            costly: known.content.is_some()
-                || !crate::text::inline::is_host_type(&known.element_type)
-                || known.element_type == "text",
+            costly: crate::retain::costly(known),
             patch_root,
         });
         if let Some(skip) = skip {
