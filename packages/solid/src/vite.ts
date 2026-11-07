@@ -1,17 +1,24 @@
 import { ENVIRONMENT_NAME, findPluginApi, SERVER_ENVIRONMENT_NAME } from "ghia"
 import solidRefresh from "solid-refresh/babel"
-import type { Plugin, ResolvedConfig } from "vite"
-import vitePluginSolid from "vite-plugin-solid"
+import { createFilter, type Plugin, type ResolvedConfig } from "vite"
+import vitePluginSolid, { type Options } from "vite-plugin-solid"
 
 export const RUN_START_MODULE = "virtual:ghia/solid-run-start"
 const RESOLVED_RUN_START_MODULE = `\0${RUN_START_MODULE}`
+
+export type SolidOptions = {
+  /** The files `solid()` compiles; default every `.jsx` and `.tsx` file. An app that also uses `react()` names the Solid files here. */
+  include?: Options["include"]
+  exclude?: Options["exclude"]
+}
 
 /**
  * Compiles JSX and TSX for Solid's universal renderer with `@ghia/solid` as its module, and keeps
  * edited components hot in `ghia dev`. Use it next to `ghia()` from `ghia`. It compiles the
  * UI and vitest's test environment, not Ghia's `server` environment, which has no renderer.
  */
-export function solid(): Plugin[] {
+export function solid(options: SolidOptions = {}): Plugin[] {
+  const filter = createFilter(options.include, options.exclude)
   let hot = false
   let config: ResolvedConfig
 
@@ -41,7 +48,8 @@ export function solid(): Plugin[] {
         order: "pre",
         handler(code, id) {
           if (!hot || this.environment.name !== ENVIRONMENT_NAME) return
-          if (id.split("?")[0] !== findPluginApi(config.plugins).entry) return
+          const file = id.split("?")[0]
+          if (file !== findPluginApi(config.plugins).entry || !filter(file)) return
           // Same line, so the line numbers of the entry's source map stay right.
           return { code: `import "${RUN_START_MODULE}"; ${code}`, map: null }
         },
@@ -49,6 +57,8 @@ export function solid(): Plugin[] {
     },
     {
       ...vitePluginSolid({
+        include: options.include,
+        exclude: options.exclude,
         solid: { generate: "universal", moduleName: "@ghia/solid" },
         // vite-plugin-solid adds solid-refresh only for a `client` consumer: it takes the `server`
         // consumer of Ghia's environment for SSR, and an edit then reloads the whole app.
