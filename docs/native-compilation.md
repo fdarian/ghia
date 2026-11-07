@@ -79,6 +79,6 @@ Run these in order and stop at the first failure. Each needs a new scratch direc
    scriptc coverage entry.ts "--npm-static=react-reconciler...,scheduler"
    ```
 
-4. **Ghia's runtime.** Copy `packages/native/js` and `packages/solid/src` without their tests, `bun-plugin.ts` or `preload.ts`, and stub the addon from `packages/native/index.d.ts`. Getting past the type errors needs DOM type declarations, which this run didn't add.
+4. **Ghia's runtime.** Copy `packages/native/js` and `packages/solid/src` without their tests, and stub the addon from `packages/native/index.d.ts`. Getting past the type errors needs DOM type declarations, which this run didn't add.
 
 If 1 to 3 pass, the addon boundary and the frame loop are the real work, and they are worth a design then.

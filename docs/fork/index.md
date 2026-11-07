@@ -40,6 +40,7 @@ Patches 1 and 2 fix two of the three causes of the slow scrolling. Upstream land
 | `<webview>` | A web page in a native view composed into the window between GPUI layers: a placeholder in the scene cuts the frame into GPUI and native layers at its draw order, so popovers, scroll containers and opacity work around it. Electron's `<webview>` API on a system `WKWebView`, focus and Tab in and out, macOS only (zed `composition`). | [webview.md](webview.md) |
 | `<nativeview>` | A `div` with an AppKit view from another library in it, between GPUI layers: a pointer (`onAttach` / `onDetach`) is the whole boundary, so the library links no GPUI. Clipped by CSS `overflow`, GPUI keeps the pointer unless `nativeEvents`, macOS only (zed `composition`). | [nativeview.md](nativeview.md) |
 | Window features | Following the macOS appearance, a `fonts` window option, `appRegion` drag regions for frameless windows, `x` / `y` window placement with Electron's `screen` displays. | [window.md](window.md) |
+| Web renderer and Vite | The UI process behaves like a browser page (`window === globalThis`, browser export conditions); `@ghia/vite` and `@ghia/solid/vite` run Solid under `ghia dev` and `ghia build`; server code runs in a Worker behind RPC. | [web-renderer.md](web-renderer.md) |
 
 ## Documentation map
 
@@ -65,6 +66,7 @@ This covers the fork. Everything else in `docs/` is listed in [docs/index.md](..
 | [docs/fork/webview.md](webview.md) | `<webview>` and native window composition: the placeholder and layer cut, geometry, input and focus handoff, the wake timer, the zed modules and how they differ from zed PR #62379, tests. |
 | [docs/fork/nativeview.md](nativeview.md) | `<nativeview>` for library authors: `onAttach` / `onDetach` and the lifetime rule, a minimal library, geometry, `overflow` clipping, pointer and focus, nested views, tests. |
 | [docs/fork/testing.md](testing.md) | Test commands, Chrome oracles, the test renderer, the `<webview>` e2e, switches and counters, the test clock, the retention verifier, fuzzers, perf measurement and known failing budgets, driving a live window. |
+| [docs/fork/web-renderer.md](web-renderer.md) | Why the renderer behaves like a page, why Vite and not Bun flags, why only the addon is external, why server code runs in a Worker, and what was measured. |
 | [docs/fork/deviations.md](deviations.md) | Every known deviation from Chrome, the DOM, Electron and Motion, one section per topic, plus the other-platform gaps. |
 
 ## Where notes go

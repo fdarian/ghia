@@ -147,7 +147,7 @@ ghia build
 bun dist/main.js
 ```
 
-`ghia build` writes `dist/main.js`: your code and every dependency except `@ghia/native`. It runs with plain `bun`, with no preload and no `bunfig.toml`. `node_modules/@ghia/native` has to be resolvable from `dist/`, so keep the installed dependencies next to it.
+`ghia build` writes `dist/main.js`: your code and every dependency except `@ghia/native`. It runs with plain `bun` and needs no flags or config. `node_modules/@ghia/native` has to be resolvable from `dist/`, so keep the installed dependencies next to it.
 
 For one file to ship, compile the bundle:
 
