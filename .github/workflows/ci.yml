@@ -61,6 +61,8 @@ jobs:
       - run: bun run build
         working-directory: packages/native
       - run: bun run build
+        working-directory: packages/vite
+      - run: bun run build
         working-directory: packages/solid
       - id: build-react
         run: bun run build
@@ -83,10 +85,13 @@ jobs:
           if-no-files-found: error
 
       # A failing suite must not hide the ones after it, but a failed build stops the job:
-      # a step after a failure is skipped, so react's build succeeding means all three did.
+      # a step after a failure is skipped, so react's build succeeding means all four did.
       - if: ${{ !cancelled() && steps.build-react.outcome == 'success' }}
         run: bun run test
         working-directory: packages/native
+      - if: ${{ !cancelled() && steps.build-react.outcome == 'success' }}
+        run: bun run test
+        working-directory: packages/vite
       - if: ${{ !cancelled() && steps.build-react.outcome == 'success' }}
         run: bun run test
         working-directory: packages/solid

@@ -79,7 +79,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "bun run --cwd ../vite build && tsc",
+    "build": "tsc",
     "test": "bun run build && bun --bun vitest run",
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @ghia/solid locally. CI is the only release path.'); process.exit(1) }\""
   },
