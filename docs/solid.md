@@ -11,7 +11,7 @@
   app.tsx               render(() => <App />)
 ```
 
-> **Note.** Host elements, styles, events, virtual lists, and native text are the same as React. This page covers the **Solid adapter**. See [reference.md](reference.md) for the shared Ghia surface. Solid runs on Vite through the `ghia` command; React still runs on `bun --hot` ([React vs Solid](#react-vs-solid)).
+> **Note.** Host elements, styles, events, virtual lists, and native text are the same as React. This page covers the **Solid adapter**. See [reference.md](reference.md) for the shared Ghia surface. Solid and React both run on Vite through the `ghia` command ([React vs Solid](#react-vs-solid)).
 
 ## Install
 
@@ -138,7 +138,7 @@ Not covered by reload:
 - `vite.config`. Restart `ghia dev`.
 - Anything under `node_modules`: solid-refresh only wraps your own files.
 
-React does not use this path. `bun --hot` re-runs the whole file on a save and remounts the tree, which drops `useState` ([reference.md](reference.md#hot-reload)).
+React runs under the same command, with React Fast Refresh in place of solid-refresh ([reference.md](reference.md#hot-reload)).
 
 ### Production build
 
@@ -805,15 +805,15 @@ import { jsx, jsxs, Fragment } from '@ghia/solid/jsx-runtime'
 
 |             | React                                        | Solid                                             |
 | ----------- | -------------------------------------------- | ------------------------------------------------- |
-| JSX         | `"react-jsx"`                                | `"preserve"`                                      |
+| JSX         | `"react-jsx"`, `react()` plugin              | `"preserve"`, `solid()` plugin                    |
 | Mount       | `render(<App />)`                            | `render(() => <App />)`                           |
 | State       | `useState`                                   | `createSignal`                                    |
 | Window size | `useWindowSize()`                            | `createWindowSize()`                              |
 | Find bar    | `useTextSearch(options)`                     | `createTextSearch(() => options)`                 |
 | Select root | `Select.Root`                                | `Select`                                          |
 | Tests       | `createTestRoot()` then `root.render(<X />)` | `createTestRoot()` then `app.render(() => <X />)` |
-| Run         | `bun --hot app.tsx`                          | `ghia dev`                                        |
-| Hot reload  | Remount, `useState` dropped                  | HMR per component, local signals reset            |
-| Bundle      | `bun build --compile app.tsx`                | `ghia build`, then `./dist/app`                   |
+| Run         | `ghia dev`                                   | `ghia dev`                                        |
+| Hot reload  | Fast Refresh, `useState` kept                | HMR per component, local signals reset            |
+| Bundle      | `ghia build`, then `./dist/app`              | `ghia build`, then `./dist/app`                   |
 
 The native addon, mutation queue, and automation client are shared. A Solid app and a React app can drive the same window types and the same `testId` locators.

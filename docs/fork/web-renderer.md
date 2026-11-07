@@ -1,6 +1,6 @@
 # The web renderer and the Vite toolchain
 
-The UI process of a Ghia app is a web renderer, like an Electron renderer or a React Native app: it has the globals a web page has, it resolves packages to their browser builds, and server code runs behind an RPC boundary. `ghia` (the `ghia()` plugin, `dev()` and `build()`, and the `ghia dev` / `ghia build` commands, a thin Effect CLI over them) and `@ghia/solid/vite` carry that into the toolchain. This file records why it is built this way; what an app author does is in [docs/solid.md](../solid.md) and [docs/reference.md](../reference.md#window-and-document).
+The UI process of a Ghia app is a web renderer, like an Electron renderer or a React Native app: it has the globals a web page has, it resolves packages to their browser builds, and server code runs behind an RPC boundary. `ghia` (the `ghia()` plugin, `dev()` and `build()`, and the `ghia dev` / `ghia build` commands, a thin Effect CLI over them) `@ghia/solid/vite` and `@ghia/react/vite` carry that into the toolchain. This file records why it is built this way; what an app author does is in [docs/solid.md](../solid.md) and [docs/reference.md](../reference.md#window-and-document).
 
 The reason is the principle in [index.md](index.md#the-principle-dom-and-css-semantics): code written for the web works unchanged. The libraries a web developer reaches for (TanStack Query and Router, `nanoid`, `solid-js/web`) pick their build from `window` and from package export conditions, and a UI process that looks like a Node server gets their server builds.
 
@@ -46,9 +46,20 @@ The UI thread draws frames, so server work that blocks it stalls the window. The
 - **`ghia build` compiles by default**, through `Bun.build` (`compile: { outfile }`, `format: "esm"`, `bytecode`, `minify`) with `dist/main.js` and, when there is one, `dist/server.js` as entrypoints. The Worker has to be an entrypoint, or the binary fails with `ModuleNotFound /$bunfs/root/server.js`. A plugin deletes `const require = createRequire(import.meta.url)` from `@ghia/native/index.js` (matched by the pnpm path and by `packages/native/index.js`), because Bun's bundler embeds an addon only for a free `require("./x.node")`; it throws when the line is gone, since that means the napi-rs loader changed shape. `ghia build --no-compile` and `build({ compile: false })` skip the compile. `Bun.build` is used because the CLI's `bun build --compile` takes no plugins. The binary is about 128 MB, 38 MB of it the addon.
 - **The built `virtual:ghia/server` listens for the Worker's `error` event** and reports it, so a server that fails to start ends the app instead of leaving the UI waiting on a port nobody answers.
 
+## React Fast Refresh
+
+`react()` (`@ghia/react/vite`) is `@vitejs/plugin-react` for the JSX transform, plus the pieces that plugin only wires for a `client` consumer, which the `ghia` environment is not:
+
+- **Vite's own transform leaves the refresh registrations out for a `server` consumer,** and plugin-react's wrapper (`vite/internal`'s `reactRefreshWrapperPlugin`, the native module that adds the `$RefreshReg$` prologue and the `import.meta.hot` boundary check) applies to `client` only. `react()` runs `transformWithOxc` with `jsx.refresh` on every `.tsx` and `.jsx` file of the `ghia` environment, and applies the same wrapper plugin to that environment, in dev only.
+- **The refresh runtime reaches `globalThis` through a first import of the entry,** a virtual module that does what plugin-react's `index.html` preamble does: `injectIntoGlobalHook(globalThis)` and the default `$RefreshReg$` and `$RefreshSig$`. Everything depends on it running before `@ghia/react` evaluates, because the reconciler registers with the hook while it loads (`injectIntoDevTools` in `reconciler.ts`). It imports `@ghia/native/dom-globals` first, since the wrapper's code reads `window`. Without it the first component module throws `can't detect preamble`; `packages/react/src/__tests__/vite.test.ts` asserts that.
+- **A full reload evaluates a fresh runtime,** because the runner's cache is cleared and the runtime is an ordinary module of the graph. The new run's reconciler registers with the hook through the new runtime's patched `inject`, so refresh works after any number of reloads (tested for one and two).
+- **`react` and `react-reconciler` are external in dev.** They are CommonJS, and Vite's module runner cannot evaluate CommonJS (`module is not defined`), which `noExternal: true` would hit. Bun loads them natively, one copy for the app and `@ghia/react`. `ghia build` bundles them.
+- **`react({ include, exclude })`** scopes the plugin to some files, because React and Solid both compile `.tsx` and one Vite config for both has to say which is which; `solid({ include, exclude })` is the same. `examples/vite.config.mts` gives Solid `examples/solid/**` and React the rest. The setup import goes only into an entry the plugin owns.
+- **The server environment gets neither plugin's transforms.**
+
 ## Not decided
 
-- `@ghia/react` stays on `bun --hot`. A `@ghia/react/vite` with Fast Refresh is the follow-up; the globals already apply to React through `host.ts`.
+
 - Editing `vite.config` in `ghia dev`, and a UI full reload that re-runs the entry on the same `serverPort`, leaving the old run's listeners on it.
 
 ## Measured, and where

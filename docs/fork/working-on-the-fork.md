@@ -370,7 +370,7 @@ append when each frame reaches the screen to that file. There is no separate tes
 [frames-and-wakes.md](frames-and-wakes.md#no-inline-draws-in-real-windows-patch-1)), so `TestGpuixRenderer` is in the same
 file.
 
-After a reconciler change in `packages/react`, run `bun run build` there. The `examples/` apps and `bun --hot chat.tsx` load
+After a reconciler change in `packages/react`, run `bun run build` there. The `examples/` apps and `ghia dev chat.main.tsx` load
 `packages/react/dist`, while its vitest suite loads `src`, so a fix can pass one and fail the other. Never run `bun run clean`
 there while the web dev server (`bun scripts/web.ts`) is up: the folder is in the server's module graph, and removing it
 corrupts the registry until the server restarts (every page load fails with `Failed to load bundled module
