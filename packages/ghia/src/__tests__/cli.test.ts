@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const PACKAGE_ROOT = join(import.meta.dirname, "..", "..")
 const CLI = join(PACKAGE_ROOT, "dist", "cli.js")
 const SCRATCH_ROOT = join(PACKAGE_ROOT, "fixtures", "tmp")
 const TIMEOUT_MS = 30_000
+// Compiling embeds Bun and the addon into a binary of about 128 MB.
+const COMPILE_TIMEOUT_MS = 120_000
 
 interface Run {
   readonly process: Bun.Subprocess<"ignore", "pipe", "pipe">
@@ -16,6 +19,7 @@ interface Run {
 const running: Bun.Subprocess[] = []
 let appDir: string
 let serverDir: string
+let emptyDir: string
 
 function spawn(command: string[], cwd: string, env: Record<string, string | undefined> = process.env): Run {
   const child = Bun.spawn(command, { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
@@ -91,6 +95,7 @@ function copyFixture(name: string): string {
 beforeEach(() => {
   appDir = copyFixture("app")
   serverDir = copyFixture("server")
+  emptyDir = mkdtempSync(join(tmpdir(), "ghia-empty-"))
 })
 
 afterEach(async () => {
@@ -100,6 +105,7 @@ afterEach(async () => {
   }
   rmSync(appDir, { recursive: true, force: true })
   rmSync(serverDir, { recursive: true, force: true })
+  rmSync(emptyDir, { recursive: true, force: true })
 })
 
 describe("ghia dev", () => {
@@ -219,7 +225,7 @@ describe("ghia build", () => {
   test(
     "builds a bundle that runs with plain bun",
     async () => {
-      await runToExit(["bun", CLI, "build"], appDir)
+      await runToExit(["bun", CLI, "build", "--no-compile"], appDir)
       const output = await runToExit(["bun", join(appDir, "dist", "main.js")], appDir)
       expect(lines(output, "WINDOW_AT_LOAD ")).toEqual(["object"])
       expect(lines(output, "IS_SERVER ")).toEqual(["false"])
@@ -234,7 +240,7 @@ describe("ghia build", () => {
   ])(
     "for an entry that imports nothing from ghia, the entry transform decides window (inject: $inject)",
     async (variant) => {
-      await runToExit(["bun", CLI, "build", "--config", writeBareConfig(variant)], appDir)
+      await runToExit(["bun", CLI, "build", "--no-compile", "--config", writeBareConfig(variant)], appDir)
       const output = await runToExit(["bun", join(appDir, "dist", "main.js")], appDir)
       expect(lines(output, "WINDOW_AT_LOAD ")).toEqual([variant.windowAtLoad])
     },
@@ -291,7 +297,7 @@ describe("ghia build with a server", () => {
   test(
     "emits a UI bundle and a server bundle that run with plain bun",
     async () => {
-      await runToExit(["bun", CLI, "build"], serverDir)
+      await runToExit(["bun", CLI, "build", "--no-compile"], serverDir)
       expect(existsSync(join(serverDir, "dist", "main.js"))).toBe(true)
       expect(existsSync(join(serverDir, "dist", "server.js"))).toBe(true)
 
@@ -307,7 +313,7 @@ describe("ghia build with a server", () => {
   test(
     "keeps node_modules dependencies external in the server bundle and the server out of the UI bundle",
     async () => {
-      await runToExit(["bun", CLI, "build"], serverDir)
+      await runToExit(["bun", CLI, "build", "--no-compile"], serverDir)
       const server = readFileSync(join(serverDir, "dist", "server.js"), "utf8")
       const main = readFileSync(join(serverDir, "dist", "main.js"), "utf8")
 
@@ -316,6 +322,98 @@ describe("ghia build with a server", () => {
       expect(server).toContain("SERVER_START")
       expect(main).not.toContain("SERVER_START")
       expect(main).not.toContain("solid-js")
+    },
+    TIMEOUT_MS * 2
+  )
+})
+
+describe("ghia build compiles", () => {
+  /** Only the binary moves: the directory it runs in has no node_modules, no dist and no addon beside it. */
+  function copyBinaryToEmptyDir(binary: string): string {
+    const copy = join(emptyDir, "app")
+    cpSync(binary, copy)
+    return copy
+  }
+
+  test(
+    "a binary that runs alone, with the UI rendering and the server Worker answering",
+    async () => {
+      await runToExit(["bun", CLI, "build"], serverDir)
+      const binary = join(serverDir, "dist", "app")
+      expect(statSync(binary).size).toBeGreaterThan(50_000_000)
+
+      const run = spawn([copyBinaryToEmptyDir(binary)], emptyDir)
+      await run.waitFor("VERSION 1")
+      expect(lines(run.output(), "ECHO ")).toEqual(["echo"])
+      expect(lines(run.output(), "UI_START ")).toEqual(["window=object"])
+      expect(lines(run.output(), "SERVER_START ")).toEqual(["window=undefined dep=function"])
+    },
+    COMPILE_TIMEOUT_MS
+  )
+
+  test(
+    "an app without a server, to the file the compile.outfile option names",
+    async () => {
+      writeFileSync(
+        join(appDir, "vite.config.outfile.ts"),
+        `import { defineConfig } from "vite"
+import { ghia } from "ghia"
+
+export default defineConfig({ plugins: [ghia({ entry: "main.ts", compile: { outfile: "out/tool" } })] })
+`
+      )
+      await runToExit(["bun", CLI, "build", "--config", "vite.config.outfile.ts"], appDir)
+      expect(existsSync(join(appDir, "dist", "app"))).toBe(false)
+
+      const output = await runToExit([copyBinaryToEmptyDir(join(appDir, "out", "tool"))], emptyDir)
+      expect(lines(output, "RENDERED ")).toEqual(["marker v1"])
+    },
+    COMPILE_TIMEOUT_MS
+  )
+
+  test(
+    "without the loader plugin the binary cannot find the addon",
+    async () => {
+      await runToExit(["bun", CLI, "build", "--no-compile"], serverDir)
+      const outfile = join(serverDir, "dist", "unpatched")
+      const result = await Bun.build({
+        entrypoints: [join(serverDir, "dist", "main.js"), join(serverDir, "dist", "server.js")],
+        compile: { outfile },
+        format: "esm",
+        bytecode: true,
+        minify: true,
+      })
+      expect(result.success).toBe(true)
+
+      const output = await runToFailure([copyBinaryToEmptyDir(outfile)], emptyDir)
+      expect(output).toContain("Cannot find native binding")
+      expect(output).not.toContain("VERSION")
+    },
+    COMPILE_TIMEOUT_MS
+  )
+
+  test(
+    "--no-compile writes no binary",
+    async () => {
+      await runToExit(["bun", CLI, "build", "--no-compile"], serverDir)
+      expect(existsSync(join(serverDir, "dist", "main.js"))).toBe(true)
+      expect(existsSync(join(serverDir, "dist", "app"))).toBe(false)
+    },
+    TIMEOUT_MS * 2
+  )
+})
+
+describe("a server Worker that fails to start", () => {
+  test(
+    "fails the built app loudly instead of leaving the UI waiting",
+    async () => {
+      const server = join(serverDir, "server.ts")
+      writeFileSync(server, readFileSync(server, "utf8").replace("{\n  console.log(`SERVER_START", '{\n  throw new Error("SERVER_BOOM")\n  console.log(`SERVER_START'))
+      await runToExit(["bun", CLI, "build", "--no-compile"], serverDir)
+
+      const output = await runToFailure(["bun", join(serverDir, "dist", "main.js")], serverDir)
+      expect(output).toContain("The server Worker failed")
+      expect(output).toContain("SERVER_BOOM")
     },
     TIMEOUT_MS * 2
   )
@@ -364,7 +462,7 @@ export default defineConfig({ plugins: [ghia({ entry: "wants-server.ts" })] })
   test(
     "builds no server bundle",
     async () => {
-      await runToExit(["bun", CLI, "build"], appDir)
+      await runToExit(["bun", CLI, "build", "--no-compile"], appDir)
       expect(existsSync(join(appDir, "dist", "main.js"))).toBe(true)
       expect(existsSync(join(appDir, "dist", "server.js"))).toBe(false)
     },
@@ -383,7 +481,7 @@ export default defineConfig({ plugins: [ghia({ entry: "wants-server.ts" })] })
   test(
     "fails the build with a clear error when the UI imports virtual:ghia/server",
     async () => {
-      const output = await runToFailure(["bun", CLI, "build", "--config", writeServerImportingApp()], appDir)
+      const output = await runToFailure(["bun", CLI, "build", "--no-compile", "--config", writeServerImportingApp()], appDir)
       expect(output).toContain('has no "server" option')
     },
     TIMEOUT_MS * 2

@@ -35,7 +35,7 @@ describe("build()", () => {
   test(
     "emits dist/main.js under the root it is given",
     async () => {
-      await build({ root: appDir })
+      await build({ root: appDir, compile: false })
       expect(existsSync(join(appDir, "dist", "main.js"))).toBe(true)
       expect(existsSync(join(appDir, "dist", "server.js"))).toBe(false)
     },
@@ -45,7 +45,7 @@ describe("build()", () => {
   test(
     "rejects when the plugin has no entry",
     async () => {
-      await expect(build({ root: appDir, configFile: writeEntrylessConfig() })).rejects.toThrow("ghia build needs an entry")
+      await expect(build({ root: appDir, configFile: writeEntrylessConfig(), compile: false })).rejects.toThrow("ghia build needs an entry")
     },
     TIMEOUT_MS
   )

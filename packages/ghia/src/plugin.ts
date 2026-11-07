@@ -27,6 +27,11 @@ export interface GhiaOptions {
    * end of the port through `serverPort` from `virtual:ghia/server`.
    */
   server?: string
+  /**
+   * Where `ghia build` writes the compiled executable, relative to the Vite root; the default is
+   * `app` inside the build's output directory.
+   */
+  compile?: { outfile?: string }
 }
 
 export interface GhiaPluginApi {
@@ -36,9 +41,11 @@ export interface GhiaPluginApi {
   readonly server: string | undefined
   /** The transport of the `server` environment's module runner. Needs the `server` option. */
   readonly serverChannel: WorkerHotChannel
+  /** Absolute path of the `compile.outfile` option; undefined when it is not set. Set once the config is resolved. */
+  readonly compileOutfile: string | undefined
 }
 
-const ENTRY_FILE_NAMES: Record<string, string> = {
+export const ENTRY_FILE_NAMES: Record<string, string> = {
   [ENVIRONMENT_NAME]: "main.js",
   [SERVER_ENVIRONMENT_NAME]: "server.js",
 }
@@ -61,6 +68,7 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
   const underVitest = process.env.VITEST !== undefined
   let entry: string | undefined
   let serverEntry: string | undefined
+  let compileOutfile: string | undefined
   const serverChannel = options.server === undefined ? undefined : new WorkerHotChannel()
 
   return {
@@ -154,6 +162,7 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
       if (options.server !== undefined) {
         serverEntry = realpathSync(resolve(config.root, options.server))
       }
+      if (options.compile?.outfile !== undefined) compileOutfile = resolve(config.root, options.compile.outfile)
     },
 
     applyToEnvironment(environment) {
@@ -211,6 +220,9 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
       get server() {
         return serverEntry
       },
+      get compileOutfile() {
+        return compileOutfile
+      },
       get serverChannel() {
         if (serverChannel === undefined) throw new Error("The ghia() plugin has no \"server\" option")
         return serverChannel
@@ -230,6 +242,8 @@ export const serverPort = port
 function builtServerPortModule(): string {
   return `const channel = new MessageChannel()
 const worker = new Worker(new URL("./server.js", import.meta.url))
+// Without this a Worker that fails to start leaves the UI waiting on a port nobody answers.
+worker.addEventListener("error", (event) => reportError(new Error("The server Worker failed: " + event.message)))
 worker.postMessage({ serverPort: channel.port2 }, [channel.port2])
 export const serverPort = channel.port1
 `

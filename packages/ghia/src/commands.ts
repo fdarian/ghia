@@ -8,6 +8,11 @@ const configFile = Flag.String("config").pipe(
   Flag.optional
 )
 
+const compile = Flag.Boolean("compile").pipe(
+  Flag.withDescription("Compile the bundle into one executable with Bun and the native addon embedded; --no-compile skips it"),
+  Flag.withDefault(true)
+)
+
 const requireBun = Effect.suspend(() =>
   process.versions.bun
     ? Effect.void
@@ -37,15 +42,15 @@ const devCommand = Command.make("dev", { config: configFile }, (input) =>
   )
 ).pipe(Command.withDescription("Run the app with hot reload"))
 
-const buildCommand = Command.make("build", { config: configFile }, (input) =>
+const buildCommand = Command.make("build", { config: configFile, compile }, (input) =>
   Effect.gen(function* () {
     yield* requireBun
     yield* Effect.tryPromise({
-      try: () => build({ configFile: Option.getOrUndefined(input.config) }),
+      try: () => build({ configFile: Option.getOrUndefined(input.config), compile: input.compile }),
       catch: failAsUserError,
     })
   })
-).pipe(Command.withDescription("Bundle the app into dist/, ready to run with plain bun"))
+).pipe(Command.withDescription("Bundle the app into dist/ and compile it into one executable"))
 
 export const ghia = Command.make("ghia").pipe(
   Command.withDescription("Develop and build Ghia apps"),

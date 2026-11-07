@@ -4,3 +4,8 @@ export interface RunOptions {
   /** The project root, an absolute path or relative to the working directory; defaults to the working directory. */
   root?: string
 }
+
+export interface BuildOptions extends RunOptions {
+  /** Compile `dist/main.js` (and `dist/server.js`) into one executable that embeds Bun and the native addon, about 128 MB. Defaults to true. */
+  compile?: boolean
+}
