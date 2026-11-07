@@ -47,7 +47,7 @@ use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 mod debug;
 pub(crate) mod gate;
 mod patch;
-mod scroll_gate;
+pub(crate) mod scroll_gate;
 
 pub(crate) use patch::Patching;
 
@@ -1508,11 +1508,7 @@ impl Retain {
         } else if !sources.reference {
             self.plan = Plan {
                 serial: self.plan.serial,
-                revision: sources
-                    .tree
-                    .root_id
-                    .and_then(|id| sources.tree.elements.get(&id))
-                    .map_or(0, |root| root.subtree_revision),
+                revision: sources.tree.root_revision(),
                 ..Plan::default()
             };
             self.publish_shown();
@@ -2512,8 +2508,15 @@ impl Retain {
             }
         }
         for id in sources.tree.pending_restyles() {
-            if !covered(id) {
-                touched.insert(self.root_holding(sources.tree, id).ok_or(Unpatchable::Commit(id))?);
+            if covered(id) {
+                continue;
+            }
+            match self.root_holding(sources.tree, id) {
+                Some(root) => {
+                    touched.insert(root);
+                }
+                None if self.in_row_out_of_frame(sources.tree, id) => {}
+                None => return Err(Unpatchable::Commit(id)),
             }
         }
         let units: Vec<u64> = self
@@ -2543,6 +2546,20 @@ impl Retain {
             return Err(Unpatchable::Ended(ended));
         }
         Ok(units.into_iter().chain(anchors).collect())
+    }
+
+    /// Whether `id` is in a row of a virtual list that the frame shown does not hold: a row that is not built has nothing to
+    /// repaint, and when a scroll brings it in the list builds it from the tree as it is, restyle included. Not a row that the
+    /// frame holds with no root a patch can repaint (one the list measured and did not paint).
+    fn in_row_out_of_frame(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
+        let mut at = id;
+        while let Some(parent) = tree.elements.get(&at).and_then(|element| element.parent) {
+            if tree.elements.get(&parent).is_some_and(|parent| parent.element_type == "virtual-list") {
+                return !self.rows_seen.contains(&at);
+            }
+            at = parent;
+        }
+        false
     }
 
     /// The innermost unit or patch root of the last frame built whole that holds `id`, walking up.
@@ -6470,6 +6487,42 @@ mod tests {
         assert_eq!(page.preview(&[], false), Err(Unpatchable::Edited));
     }
 
+    #[test]
+    fn a_restyle_in_a_row_the_frame_does_not_hold_needs_no_unit_and_one_in_a_row_it_holds_with_no_root_is_a_commit() {
+        let mut page = Units::new();
+        page.tree = tree_of(&[
+            (1, None, "div", None),
+            (2, Some(1), "virtual-list", None),
+            (3, Some(2), "div", None),
+            (4, Some(2), "div", None),
+            (6, Some(3), "div", None),
+            (7, Some(4), "div", None),
+        ]);
+        page.tree.set_commit_patching(true);
+        for id in [6, 7] {
+            page.tree.set_style(id, restyled(r##"{"backgroundColor":"#111111"}"##));
+        }
+        let shape = page.list_frame(false);
+        // The list builds the row 3 and not the row 4.
+        page.row(shape, 3, |page| page.leaf(6));
+        page.tree.take_dirty();
+        page.tree.take_restyles();
+
+        page.tree.set_style(7, restyled(r##"{"backgroundColor":"#222222"}"##));
+        assert_eq!(page.tree.pending_restyles(), [7]);
+        assert_eq!(page.preview(&[], false), Ok(vec![]), "a row that is not built has nothing to repaint, and is built with the new style when it comes in");
+
+        page.tree.set_style(6, restyled(r##"{"backgroundColor":"#222222"}"##));
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Commit(6)), "a row that is built and no root holds is a frame built whole");
+
+        let env = crate::renderer::FrameEnv::for_test(page.inherited.clone(), EnterKey(Key::default()), web_time::Instant::now());
+        page.retain.add_patch_root(Unit { id: 3, env });
+        assert_eq!(page.preview(&[], false), Ok(vec![3]), "the root of the row that is built is repainted, the one that is not needs no unit");
+
+        page.retain.forget_left_rows(&[3], &page.tree);
+        assert_eq!(page.preview(&[], false), Ok(vec![]), "a row that left the frame is not one that is built");
+    }
+
     fn restyled(json: &str) -> Arc<crate::style::StyleDesc> {
         Arc::new(serde_json::from_str(json).unwrap())
     }
@@ -7098,7 +7151,7 @@ mod tests {
         let built = built.expect("20 is a unit");
         assert_eq!(built.id, crate::renderer::retained_id(20));
         // It was not painted: it wrote nothing, while the frame wrote the boxes of the card.
-        assert!(!tapes.same_as_recorded(20, &built.tape));
+        assert!(!tapes.same_as_recorded(20, &built.tape, gpui::Point::default()));
         // And the tick is still the same tick: nothing was taken by the preview or the build.
         assert_eq!(
             scene.window.update(cx, |view, window, _| view.preview_tick(window, view.clock.now())).unwrap(),

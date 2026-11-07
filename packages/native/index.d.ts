@@ -2421,6 +2421,8 @@ export interface ScrollPatchCounters {
   rowsBuilt: number
   /** The rows those frames took out of the frame. */
   rowsRemoved: number
+  /** Of the translates, the ones that a patch drawn in the same draw came first of: the rows were moved from the frame the patch left. */
+  composed: number
   /**
    * The eligible ones drawn whole, by why the translate declined before it wrote anything
    * (`gpui::ScrollApplyDecline`).

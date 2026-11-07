@@ -7,13 +7,38 @@
 //! element or reach a listener, or nothing. The classifier is in zed
 //! (`window/scroll_patch.rs`); see [patch-frames.md](../../../../docs/fork/patch-frames.md).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+
+use rustc_hash::FxHashSet;
 
 use gpui::ScrollPatchReason;
 
 use super::Retain;
 use crate::renderer::GpuixView;
+
+thread_local! {
+    /// The views whose window classifies the frames after a list scroll.
+    static CLASSIFYING: RefCell<FxHashSet<gpui::EntityId>> = Default::default();
+}
+
+/// Turns the classification of the frames after a list scroll on or off for the window of `view`.
+pub(crate) fn set_scroll_patch(window: &mut gpui::Window, view: gpui::EntityId, enabled: bool) {
+    window.set_scroll_patch(enabled);
+    CLASSIFYING.with(|views| {
+        if enabled {
+            views.borrow_mut().insert(view);
+        } else {
+            views.borrow_mut().remove(&view);
+        }
+    });
+}
+
+/// Whether the draw that follows a write to a list's offset is asked for by `Window::note_list_scrolled` alone, which
+/// does not notify the view: only a window that classifies the frame draws the list again when it declines.
+pub(crate) fn list_write_is_quiet(view: gpui::EntityId) -> bool {
+    CLASSIFYING.with(|views| views.borrow().contains(&view))
+}
 
 /// The revision of the tree that the frame shown was built whole from. Nothing while there is no
 /// such frame: planning is off, no frame was recorded, a pass that only lays out ran since (it takes
@@ -39,6 +64,14 @@ impl Retain {
         self.clock_asked.0.set(asked);
     }
 
+    /// A patch drew the tree as it is at `revision`: the frame shown is the frame of that revision, so a list scroll noted in
+    /// the draw of the patch is classified against it. Only a frame that was shown whole has anything to say it of.
+    pub(crate) fn note_patched(&self, revision: u64) {
+        if self.shown.0.get().is_some() {
+            self.shown.0.set(Some(revision));
+        }
+    }
+
     /// Says what the frame shown is, after anything that changes it.
     pub(super) fn publish_shown(&self) {
         let whole = self.planning && self.plan.recorded && !self.plan.layout_since && !self.plan.unsteady;
@@ -58,7 +91,7 @@ impl GpuixView {
 
     /// Turns the classification on unless `GPUIX_SCROLL_PATCH_OFF`, and gives gpui the gate. Once.
     pub(super) fn install_scroll_gate(&mut self, window: &mut gpui::Window, view: gpui::WeakEntity<GpuixView>) {
-        window.set_scroll_patch(std::env::var_os("GPUIX_SCROLL_PATCH_OFF").is_none());
+        set_scroll_patch(window, view.entity_id(), std::env::var_os("GPUIX_SCROLL_PATCH_OFF").is_none());
         let shown = self.retain.shown.clone();
         let clock_asked = self.retain.clock_asked.clone();
         let tree = self.tree.clone();
@@ -112,9 +145,7 @@ impl GpuixView {
                 let Ok(tree) = tree.try_lock() else {
                     return Some(ScrollPatchReason::Edited);
                 };
-                tree.root_id
-                    .and_then(|id| tree.elements.get(&id))
-                    .map_or(0, |root| root.subtree_revision)
+                tree.root_revision()
             };
             if current != revision {
                 return Some(ScrollPatchReason::Edited);

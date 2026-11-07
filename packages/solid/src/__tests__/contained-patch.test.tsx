@@ -547,15 +547,33 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a read while a commit inside a s
     if (!counted) return
     for (const [index, step] of on.steps.entries()) {
       expect(step.readPasses, `step ${index}`).toBe(0)
-      // A discarded patch leaves the layout it computed in the engine and the recording of the anchor behind it: the frame is built whole
-      // (gpui declines StaleRecording) and records the anchor again.
-      expect(step.relaid, `step ${index}`).toBe(0)
-      expect(step.whole, `step ${index}`).toBe(1)
+      // A discarded patch leaves the recording of the anchor on screen behind it, so the patch the draw makes lays the anchor out from it:
+      // the second swap is a relayout patch of both.
+      expect(step.relaid, `step ${index}`).toBe(1)
+      expect(step.whole, `step ${index}`).toBe(0)
     }
-    expect(reason(on.counters.declines, "StaleRecording")).toBe(SWAPS.length)
+    expect(reason(on.counters.declines, "StaleRecording")).toBe(0)
   })
 
-  for (const between of ["outside change", "detail scroll", "list scroll"] as const) {
+  test("a list scroll after the read keeps the prepared patch: the draw finishes it, and when the rows cannot be moved (they are not measured) the frame built after it is the one patching off draws", () => {
+    const on = runReading(true, SWAPS, "list scroll")
+    const off = runReading(false, SWAPS, "list scroll")
+    expect(on.mismatches).toBe(0)
+    expect(on.steps.map((step) => step.reads)).toEqual(off.steps.map((step) => step.reads))
+    expect(on.steps.map((step) => step.after)).toEqual(off.steps.map((step) => step.after))
+    expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+    if (!counted) return
+    for (const [index, step] of on.steps.entries()) {
+      expect(step.readPasses, `step ${index}`).toBe(0)
+      expect(step.relaid, `step ${index}`).toBe(1)
+      // The write notified no view: it did not discard the patch. The rows of this list have no measured size, so the translate declines
+      // and the frame is built whole at the new offset (navigate-patch.test.tsx has them measured).
+      expect(step.patched, `step ${index}`).toBe(1)
+      expect(step.whole, `step ${index}`).toBe(1)
+    }
+  })
+
+  for (const between of ["outside change", "detail scroll"] as const) {
     test(`${between} after the read throws the prepared patch away: the frame is drawn whole and is the one patching off draws`, () => {
       const on = runReading(true, SWAPS, between)
       const off = runReading(false, SWAPS, between)

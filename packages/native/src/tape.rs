@@ -248,11 +248,11 @@ impl Entries {
     }
 
     /// [`Self::lines`] with the boxes, texts and start regions described apart from the transforms
-    /// around them.
-    fn lines_apart_from_transforms(&self) -> Vec<(bool, String)> {
+    /// around them, and the text layouts `moved` further.
+    fn lines_apart_from_transforms(&self, moved: Point<Pixels>) -> Vec<(bool, String)> {
         self.lines_by(|effect, offset| match effect.kind() {
             Kind::Bounds => crate::automation::describe_apart_from_transform(effect.data(), offset),
-            Kind::Text => crate::text::describe_text_apart_from_transform(effect.data()),
+            Kind::Text => crate::text::describe_text_apart_from_transform(effect.data(), moved),
             Kind::StartRegion => crate::text::describe_start_region_apart_from_transform(effect.data(), offset),
             _ => effect.describe(offset),
         })
@@ -543,23 +543,23 @@ impl Tape {
     /// [`Self::same_writes`] where the boxes of the elements, and the matrices of their texts and
     /// start regions, may differ in the transforms around them. A patch of a transform that moves
     /// paints the same, and what it publishes of them is what [`Self::each`] reads.
-    pub(crate) fn same_writes_apart_from_transforms(&self, other: &Tape) -> bool {
-        self.prepaint.lines_apart_from_transforms() == other.prepaint.lines_apart_from_transforms()
-            && self.paint.lines_apart_from_transforms() == other.paint.lines_apart_from_transforms()
+    pub(crate) fn same_writes_apart_from_transforms(&self, other: &Tape, moved: Point<Pixels>) -> bool {
+        self.prepaint.lines_apart_from_transforms(moved) == other.prepaint.lines_apart_from_transforms(Point::default())
+            && self.paint.lines_apart_from_transforms(moved) == other.paint.lines_apart_from_transforms(Point::default())
             && self.lifted.len() == other.lifted.len()
             && self
                 .lifted
                 .iter()
                 .zip(&other.lifted)
-                .all(|(left, right)| left.lines_apart_from_transforms() == right.lines_apart_from_transforms())
+                .all(|(left, right)| left.lines_apart_from_transforms(moved) == right.lines_apart_from_transforms(Point::default()))
     }
 
     /// What the tape wrote, as the replays that put it back where it was written.
-    pub(crate) fn lives(&self) -> Vec<Live> {
+    pub(crate) fn lives(&self, delta: Point<Pixels>) -> Vec<Live> {
         [&self.prepaint, &self.paint]
             .into_iter()
             .chain(&self.lifted)
-            .map(|entries| Live { entries: entries.clone(), delta: Point::default(), layout_only: false })
+            .map(|entries| Live { entries: entries.clone(), delta, layout_only: false })
             .collect()
     }
 
@@ -718,6 +718,9 @@ pub(crate) struct TapeStore {
     /// While gpui compares frames that replayed with frames built whole: what the tape of each
     /// root that replayed was, when it was replayed.
     verifying: std::cell::Cell<bool>,
+    /// How far from where the last build of a root wrote it the frame shown has it, for the roots a frame moved or replayed
+    /// elsewhere. A root built again is where it was built and has none.
+    moved: RefCell<rustc_hash::FxHashMap<u64, Point<Pixels>>>,
     replayed: RefCell<Vec<(u64, String)>>,
     /// The writes of elements handed to the stacking context that a replay put back, by root and
     /// ordinal: a root that replayed has to have put back every one it wrote when it was built.
@@ -747,7 +750,14 @@ pub(crate) type Tapes = Rc<TapeStore>;
 
 impl TapeStore {
     pub(crate) fn set(&self, root: u64, tape: SharedTape) {
+        self.moved.borrow_mut().remove(&root);
         self.tapes.borrow_mut().insert(root, tape);
+    }
+
+    /// How far from where the last build of `root` wrote it the frame shown has it: what a patch that builds the root again, where
+    /// layout puts it, has to add to what it publishes for the registries to say where the frame shows it.
+    pub(crate) fn moved(&self, root: u64) -> Point<Pixels> {
+        self.moved.borrow().get(&root).copied().unwrap_or_default()
     }
 
     /// `tape` is what a pass that only lays out wrote when it built `root`.
@@ -770,27 +780,27 @@ impl TapeStore {
     /// Whether `captured`, the tape of a subtree prepainted and painted again, holds the writes
     /// that the tape of the build of `root` the frame was recorded from holds, the transforms around
     /// its elements aside.
-    pub(crate) fn same_as_recorded(&self, root: u64, captured: &SharedTape) -> bool {
+    pub(crate) fn same_as_recorded(&self, root: u64, captured: &SharedTape, moved: Point<Pixels>) -> bool {
         self.tapes
             .borrow()
             .get(&root)
-            .is_some_and(|recorded| captured.borrow().same_writes_apart_from_transforms(&recorded.borrow()))
+            .is_some_and(|recorded| captured.borrow().same_writes_apart_from_transforms(&recorded.borrow(), moved))
     }
 
-    /// `captured`, the tape of an anchor that a patch laid out again, is what the last build of `root`
-    /// wrote now: the registries give what the build before wrote for what `captured` writes (the boxes
-    /// of elements it no longer writes are forgotten, the others published as the patch left them), and
-    /// the frame that replays or compares the root finds `captured`.
-    pub(crate) fn replace_recorded(&self, window: WindowId, root: u64, captured: &SharedTape) {
+    /// `captured`, the tape of an anchor that a patch laid out again, is what the last build of `root` wrote now,
+    /// `moved` from where the patch built it: the registries give what the build before wrote for what `captured`
+    /// writes (the boxes of elements it no longer writes are forgotten, the others published as the patch left them),
+    /// and the frame that replays or compares the root finds `captured`.
+    pub(crate) fn replace_recorded(&self, window: WindowId, root: u64, captured: &SharedTape, moved: Point<Pixels>) {
         let old = self.tapes.borrow().get(&root).cloned();
         if let Some(old) = old {
             let (old, new) = (old.borrow(), captured.borrow());
             let roots = old.roots();
-            crate::text::replace(window, &roots, &new.lives());
+            crate::text::replace(window, &roots, &new.lives(moved));
             let mut written = rustc_hash::FxHashSet::default();
             new.each(Kind::Bounds, &mut |data, offset| {
                 written.insert(crate::automation::id_of_bounds_write(data));
-                crate::automation::publish_captured_bounds(data, offset);
+                crate::automation::publish_captured_bounds(data, offset + moved);
             });
             let mut gone = Vec::new();
             old.each(Kind::Bounds, &mut |data, _| {
@@ -801,6 +811,22 @@ impl TapeStore {
             });
             crate::automation::forget_boxes(window, &gone);
         }
+        self.tapes.borrow_mut().insert(root, captured.clone());
+    }
+
+    /// `captured`, the tape of a row of a list that a patch built again where it stands, has the writes the tape of the last build of
+    /// `root` has (the patch only repainted it, which `same_as_recorded` says) and is what that build wrote now: the text registries
+    /// take its text layouts, the ones gpui moves with the recording it rewrote, and the frames that replay or compare the root find
+    /// it. The boxes are published again where the frame shows them (`moved` from where the patch built them), as the writes of
+    /// `captured`, so that a frame that moves the row moves them with the tape it finds for it.
+    pub(crate) fn replace_recorded_paint(&self, window: WindowId, root: u64, captured: &SharedTape, moved: Point<Pixels>) {
+        let old = self.tapes.borrow().get(&root).cloned().expect("a row that a patch repainted has the tape of the build it was recorded from");
+        let new = captured.borrow();
+        crate::text::replace(window, &old.borrow().roots(), &new.lives(moved));
+        let before = OWNER.replace(new.prepaint.serial);
+        new.each(Kind::Bounds, &mut |data, offset| crate::automation::publish_captured_bounds(data, offset + moved));
+        OWNER.set(before);
+        drop(new);
         self.tapes.borrow_mut().insert(root, captured.clone());
     }
 
@@ -822,6 +848,9 @@ impl TapeStore {
                 _ => {}
             }
         }
+        if matches!(phase, Phase::Prepaint | Phase::Paint | Phase::Lifted(_)) {
+            self.moved.borrow_mut().insert(root, delta);
+        }
         tape.borrow().replay(window, phase, delta);
     }
 
@@ -830,6 +859,11 @@ impl TapeStore {
     /// the same. Not written again, which would put it into the registries twice.
     pub(crate) fn shift(&self, window: WindowId, root: u64, shift: Point<Pixels>) {
         self.rows.borrow_mut().kept.insert(root);
+        {
+            let mut moved = self.moved.borrow_mut();
+            let at = moved.entry(root).or_default();
+            *at = *at + shift;
+        }
         let tape = self
             .tapes
             .borrow()
@@ -1325,11 +1359,11 @@ mod tests {
         tapes.set(1, recorded);
         let same = Tape::capturing();
         record(&same, &[7]);
-        assert!(tapes.same_as_recorded(1, &same));
+        assert!(tapes.same_as_recorded(1, &same, Point::default()));
         let different = Tape::capturing();
         record(&different, &[8]);
-        assert!(!tapes.same_as_recorded(1, &different));
-        assert!(!tapes.same_as_recorded(2, &same), "a root with no recording has nothing to be the same as");
+        assert!(!tapes.same_as_recorded(1, &different, Point::default()));
+        assert!(!tapes.same_as_recorded(2, &same, Point::default()), "a root with no recording has nothing to be the same as");
     }
 
     fn laid_out(to_window: gpui::TransformationMatrix) -> crate::automation::LaidOut {
@@ -1349,6 +1383,25 @@ mod tests {
     }
 
     #[test]
+    fn how_far_a_root_is_from_its_build_is_what_frames_moved_it_by_until_it_is_built_again() {
+        let window = WindowId::from(912);
+        let down = |dy: f32| gpui::point(gpui::px(0.0), gpui::px(dy));
+        let tapes = TapeStore::default();
+        let recorded = SharedTape::default();
+        record_box(&recorded, window, gpui::TransformationMatrix::unit(), 30.0);
+        tapes.set(1, recorded);
+        assert_eq!(tapes.moved(1), Point::default());
+
+        tapes.shift(window, 1, down(-20.0));
+        tapes.shift(window, 1, down(-40.0));
+        assert_eq!(tapes.moved(1), down(-60.0), "scrolls add up");
+        tapes.replay(window, 1, Phase::Paint, down(-100.0));
+        assert_eq!(tapes.moved(1), down(-100.0), "a replay says where the root is");
+        tapes.set(1, SharedTape::default());
+        assert_eq!(tapes.moved(1), Point::default(), "a root built again is where it was built");
+    }
+
+    #[test]
     fn a_capture_may_differ_from_the_recording_in_the_transforms_and_nothing_else() {
         let window = WindowId::from(911);
         let moved = |dx: f32| gpui::TransformationMatrix::affine([[1.0, 0.0], [0.0, 1.0]], [dx, 0.0]);
@@ -1360,10 +1413,10 @@ mod tests {
         let later = Tape::capturing();
         record_box(&later, window, moved(9.0), 30.0);
         assert!(!later.borrow().same_writes(&recorded.borrow()), "the placement is a write like the others");
-        assert!(tapes.same_as_recorded(1, &later), "but a patch of a transform that moves paints the same");
+        assert!(tapes.same_as_recorded(1, &later, Point::default()), "but a patch of a transform that moves paints the same");
         let wider = Tape::capturing();
         record_box(&wider, window, moved(5.0), 31.0);
-        assert!(!tapes.same_as_recorded(1, &wider), "a box that is another size is not the same");
+        assert!(!tapes.same_as_recorded(1, &wider, Point::default()), "a box that is another size is not the same");
 
         let mut published = 0;
         later.borrow().each(Kind::Bounds, &mut |data, offset| {

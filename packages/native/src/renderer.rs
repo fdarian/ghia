@@ -823,18 +823,21 @@ pub(crate) fn is_virtual_list(id: u64) -> bool {
 
 /// [`invalidate_after_commit`] for a scroll write of a `div` scroller or a virtual list, clamped
 /// to its range. It moves the boxes of what the scroller holds and nothing a scroll query reads, as
-/// in a browser, where a scroll offset is a paint property. The next frame builds the rows of a
-/// list at the new offset, or moves the ones it has and builds the ones that come in, as one after
-/// a wheel does (`Window::note_list_scrolled`).
+/// in a browser, where a scroll offset is a paint property.
+///
+/// The next frame builds the rows of a list at the new offset, or moves the ones it has and builds the
+/// ones that come in, as one after a wheel does (`Window::note_list_scrolled`). That write is quiet: it
+/// asks for the draw and notifies nothing, so a patch a read prepared is still there for the draw to
+/// finish before it moves the rows, and the frame whose translate declines is built whole by the view
+/// gpui queues for it. A window that does not classify the frame is notified, as a `div` scroller is.
 pub(crate) fn invalidate_after_scroll(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, list: bool) {
-    // The view is notified, so the patch of anchors a read prepared is gone and the tick is drawn whole;
-    // a list that scrolls is the one write the draw cannot follow yet.
+    if list && crate::retain::scroll_gate::list_write_is_quiet(view) {
+        window.note_list_scrolled(view);
+        return;
+    }
+    // The view is notified, so the patch of anchors a read prepared is gone and the tick is drawn whole.
     discard_prepared_patch(window, cx, view, PendingLayout::Notified);
     note_pending(view, PendingLayout::Notified);
-    if list {
-        // Not a tick: the draw of one is a frame the classifier holds for the clock.
-        window.note_list_scrolled(view);
-    }
     cx.notify_scroll_only(view);
 }
 
@@ -14636,6 +14639,8 @@ pub struct ScrollPatchCounters {
     pub rows_built: f64,
     /// The rows those frames took out of the frame.
     pub rows_removed: f64,
+    /// Of the translates, the ones that a patch drawn in the same draw came first of: the rows were moved from the frame the patch left.
+    pub composed: f64,
     /// The eligible ones drawn whole, by why the translate declined before it wrote anything
     /// (`gpui::ScrollApplyDecline`).
     pub apply_declines: std::collections::HashMap<String, f64>,
@@ -14681,6 +14686,7 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
                 membership_frames: scroll.membership_frames as f64,
                 rows_built: scroll.rows_built as f64,
                 rows_removed: scroll.rows_removed as f64,
+                composed: scroll.composed as f64,
                 apply_declines: gpui::ScrollApplyDecline::ALL
                     .into_iter()
                     .map(|reason| (format!("{reason:?}"), scroll.apply_declines(reason) as f64))

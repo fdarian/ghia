@@ -128,10 +128,12 @@ impl GpuixView {
             let scratch = built.tapes.clone();
             let captured = scratch.clone();
             let anchors = built.anchors.clone();
+            // The text layouts of a row are moved by the frames that scroll it, where a patch builds the row at its layout.
+            let moved: Vec<gpui::Point<gpui::Pixels>> = scratch.iter().map(|(id, _)| view.read(app).moved_row(*id)).collect();
             let accepted = {
                 let (tapes, anchors) = (tapes.clone(), anchors.clone());
                 move |_: &mut gpui::Window, _: &mut gpui::App| {
-                    scratch.iter().all(|(id, tape)| anchors.contains(id) || tapes.same_as_recorded(*id, tape))
+                    scratch.iter().zip(&moved).all(|((id, tape), moved)| anchors.contains(id) || tapes.same_as_recorded(*id, tape, *moved))
                 }
             };
             let rewritten_before = window.patch_counters().rewritten_recordings;
@@ -141,10 +143,17 @@ impl GpuixView {
             };
             let rewritten = window.patch_counters().rewritten_recordings - rewritten_before >= anchors.len() as u64;
             // An anchor laid out again wrote other boxes, texts and paragraphs than the frame did: they
-            // take the place of the ones it wrote.
+            // take the place of the ones it wrote. A row repainted wrote the same, but its text layouts are the
+            // new ones, which gpui moves with the recording it rewrote and the frames that move the row move.
             let window_id = window.window_handle().window_id();
-            for (id, tape) in captured.iter().filter(|(id, _)| anchors.contains(id)) {
-                tapes.replace_recorded(window_id, *id, tape);
+            let rows: Vec<u64> = captured.iter().map(|(id, _)| *id).filter(|id| view.read(app).is_virtual_row(*id)).collect();
+            for (id, tape) in &captured {
+                let moved = view.read(app).moved_since_built(*id);
+                if anchors.contains(id) {
+                    tapes.replace_recorded(window_id, *id, tape, moved);
+                } else if rows.contains(id) {
+                    tapes.replace_recorded_paint(window_id, *id, tape, moved);
+                }
             }
             // A scroller around the units is not painted again, and its range follows the
             // transforms that moved below it.
@@ -156,12 +165,14 @@ impl GpuixView {
                 }
             }
             // The boxes, and the matrices of the texts and start regions that a press is mapped through,
-            // are what a transform that moves changes without a build.
-            for (_, tape) in captured.iter().filter(|(id, _)| !anchors.contains(id)) {
+            // are what a transform that moves changes without a build. A unit is built where layout puts it,
+            // which is not where the frame shows a row that a scroll moved.
+            for (id, tape) in captured.iter().filter(|(id, _)| !anchors.contains(id) && !rows.contains(id)) {
+                let moved = view.read(app).moved_since_built(*id);
                 let tape = tape.borrow();
-                tape.each(crate::tape::Kind::Bounds, &mut crate::automation::publish_captured_bounds);
-                tape.each(crate::tape::Kind::Text, &mut crate::text::publish_captured_text);
-                tape.each(crate::tape::Kind::StartRegion, &mut crate::text::publish_captured_start_region);
+                tape.each(crate::tape::Kind::Bounds, &mut |data, offset| crate::automation::publish_captured_bounds(data, offset + moved));
+                tape.each(crate::tape::Kind::Text, &mut |data, offset| crate::text::publish_captured_text(data, offset + moved));
+                tape.each(crate::tape::Kind::StartRegion, &mut |data, offset| crate::text::publish_captured_start_region(data, offset + moved));
             }
             let (tree, callback) = {
                 let view = view.read(app);
@@ -333,6 +344,31 @@ impl GpuixView {
         (ids == prepared.ids).then_some(prepared.built)
     }
 
+    /// How far a scroll moved the row `id` from where it was built, nothing for what is no row.
+    fn moved_row(&self, id: u64) -> gpui::Point<gpui::Pixels> {
+        if self.is_virtual_row(id) { self.tapes.moved(id) } else { gpui::Point::default() }
+    }
+
+    fn is_virtual_row(&self, id: u64) -> bool {
+        let tree = self.tree.lock().unwrap();
+        tree.elements.get(&id).is_some_and(|element| crate::layout::stacking::is_virtual_row(&tree, element))
+    }
+
+    /// How far from where the root `id` was last built the frame shown has it: the distance of the row that holds it, if a scroll
+    /// moved the row and not the root's own recording.
+    fn moved_since_built(&self, id: u64) -> gpui::Point<gpui::Pixels> {
+        let tree = self.tree.lock().unwrap();
+        let mut at = Some(id);
+        while let Some(up) = at {
+            let moved = self.tapes.moved(up);
+            if moved != gpui::Point::default() {
+                return moved;
+            }
+            at = tree.elements.get(&up).and_then(|element| element.parent);
+        }
+        gpui::Point::default()
+    }
+
     /// Whether the focus handles are the ones a build of the tree would use. An anchor is built without the
     /// pass that makes them (`sync_focus_handles`), so when a focusable element came, went or changed it is run first.
     fn focus_follows_tree(&self) -> bool {
@@ -391,6 +427,7 @@ impl GpuixView {
             let tree = self.tree.lock().unwrap();
             tree.take_restyles();
             tree.take_structure();
+            self.retain.note_patched(tree.root_revision());
             for &anchor in anchors {
                 self.retain.anchor_repainted(&tree, anchor, rewritten);
             }

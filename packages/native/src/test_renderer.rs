@@ -1157,7 +1157,7 @@ impl TestGpuixRenderer {
     /// before them (`scrollPatch` of `getPatchCounters`). On unless `GPUIX_SCROLL_PATCH_OFF`.
     #[napi]
     pub fn set_scroll_patch_enabled(&self, enabled: bool) -> Result<()> {
-        update_view(move |_view, window, _cx| window.set_scroll_patch(enabled))
+        update_view(move |_view, window, cx| crate::retain::scroll_gate::set_scroll_patch(window, cx.entity_id(), enabled))
     }
 
     /// How ticks were patched since the window was made: subtract two reads for a span of frames.

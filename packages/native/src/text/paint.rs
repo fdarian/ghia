@@ -83,7 +83,7 @@ pub(crate) fn describe_registries(window: WindowId) -> String {
     with_frame(window, |frame| {
         let mut out = String::new();
         for entry in frame.registry() {
-            writeln!(out, "{}", describe_text(entry, true)).ok();
+            writeln!(out, "{}", describe_text(entry, true, gpui::Point::default())).ok();
         }
         for region in frame.start_regions() {
             writeln!(out, "start region {} {:?} {} {:?}", region.id, region.bounds, region.selectable, region.to_window).ok();
@@ -319,8 +319,8 @@ pub(crate) fn publish_captured_start_region(data: &dyn std::any::Any, offset: gp
 }
 
 /// What a text write says, apart from the transforms around the element.
-pub(crate) fn describe_text_apart_from_transform(data: &dyn std::any::Any) -> String {
-    describe_text(&text_write(data).1, false)
+pub(crate) fn describe_text_apart_from_transform(data: &dyn std::any::Any, moved: gpui::Point<gpui::Pixels>) -> String {
+    describe_text(&text_write(data).1, false, moved)
 }
 
 /// Gives the text that a patch painted again the matrix it was painted through, as for
@@ -339,14 +339,16 @@ fn text_write(data: &dyn std::any::Any) -> &(WindowId, RegEntry) {
     data.downcast_ref().expect("a text write holds its entry")
 }
 
-fn describe_text(entry: &RegEntry, with_matrix: bool) -> String {
+fn describe_text(entry: &RegEntry, with_matrix: bool, moved: gpui::Point<gpui::Pixels>) -> String {
+    let bounds = entry.layout.bounds();
+    let bounds = Bounds::new(bounds.origin + moved, bounds.size);
     let matrix = if with_matrix { format!(" {:?}", entry.to_window) } else { String::new() };
     format!(
         "text {} {:?} {:?} {:?} {:?} {:?} {:?}{matrix}",
         entry.key,
         entry.doc,
         entry.text,
-        entry.layout.bounds(),
+        bounds,
         entry.group,
         entry.line,
         entry.cell,
@@ -737,7 +739,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                     (window_id, entry),
                     // Its layout is moved by the frame, with the subtree.
                     |(window, entry)| with_frame(*window, |frame| frame.registry.push(entry.clone())),
-                    |(_, entry), _| describe_text(entry, true),
+                    |(_, entry), _| describe_text(entry, true, gpui::Point::default()),
                 );
             }
             log_painted_text(window_id, text.clone());

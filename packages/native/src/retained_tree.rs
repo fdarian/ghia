@@ -857,6 +857,13 @@ impl RetainedTree {
         self.patch_barrier
     }
 
+    /// The revision of the root's subtree: what a frame, or a patch that drew the tree, was drawn from.
+    pub fn root_revision(&self) -> u64 {
+        self.root_id
+            .and_then(|id| self.elements.get(&id))
+            .map_or(0, |root| root.subtree_revision)
+    }
+
     /// The elements restyled by paint, strictly, since a frame last took them (see [`Dirty::PaintPatchable`]).
     pub fn pending_restyles(&self) -> Vec<u64> {
         self.restyled.borrow().clone()
