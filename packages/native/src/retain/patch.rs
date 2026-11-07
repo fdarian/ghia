@@ -20,6 +20,21 @@ pub(crate) struct Patching {
     enabled: bool,
     installed: bool,
     declines: BTreeMap<String, u64>,
+    /// What a read built ahead of the draw, which gpui holds the elements of (`Window::prepare_patch`).
+    prepared: Option<Prepared>,
+}
+
+/// A patch a read prepared: what the draw needs of it to finish it, as it would of the units it built.
+struct Prepared {
+    ids: Vec<u64>,
+    built: Built,
+}
+
+/// Where a decline is counted: a tick that was not patched, or a read that could not be answered by a patch of its own.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Declining {
+    Tick,
+    Read,
 }
 
 impl Patching {
@@ -28,6 +43,7 @@ impl Patching {
             enabled: std::env::var_os("GPUIX_PATCH_OFF").is_none(),
             installed: false,
             declines: BTreeMap::new(),
+            prepared: None,
         }
     }
 
@@ -99,11 +115,17 @@ impl GpuixView {
             let Some(view) = view.upgrade() else {
                 return false;
             };
-            let Some(built) = view.update(app, |view, cx| view.build_patch(window, cx)) else {
+            let prepared = view.update(app, |view, _| view.take_prepared_patch(window));
+            let finishing = prepared.is_some();
+            let Some(mut built) = (match prepared {
+                Some(built) => Some(built),
+                None => view.update(app, |view, cx| view.build_patch(window, cx)),
+            }) else {
                 return false;
             };
+            let units = std::mem::take(&mut built.units);
             let tapes = view.read(app).tapes.clone();
-            let scratch = built.tapes;
+            let scratch = built.tapes.clone();
             let captured = scratch.clone();
             let anchors = built.anchors.clone();
             let accepted = {
@@ -113,7 +135,8 @@ impl GpuixView {
                 }
             };
             let rewritten_before = window.patch_counters().rewritten_recordings;
-            let Ok(outcome) = window.repaint_in_place(built.units, app, accepted) else {
+            let done = if finishing { window.finish_prepared_patch(app, accepted) } else { window.repaint_in_place(units, app, accepted) };
+            let Ok(outcome) = done else {
                 return false;
             };
             let rewritten = window.patch_counters().rewritten_recordings - rewritten_before >= anchors.len() as u64;
@@ -199,22 +222,28 @@ impl GpuixView {
     /// its place to find at its own instant. A tick that changes nothing that is drawn (every change
     /// is in content that is skipped, or asleep) has no unit, and gpui counts it as an empty tick.
     pub(crate) fn build_patch(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Option<Built> {
+        let now = self.clock.now();
+        let ids = self.plan_patch(window, now, Declining::Tick)?;
+        self.build_units(ids, now, window, cx)
+    }
+
+    /// The units a patch at `now` builds, or none and why (counted as `declining` says). A unit gpui
+    /// would decline after it is built is declined here, which spares the build.
+    fn plan_patch(&mut self, window: &gpui::Window, now: web_time::Instant, declining: Declining) -> Option<Vec<u64>> {
         if !self.patch.enabled {
             return None;
         }
-        let now = self.clock.now();
+        let key = |kind: String| if declining == Declining::Read { format!("Read:{kind}") } else { kind };
         let ids = match self.preview_tick(window, now) {
             Ok(ids) => ids,
             Err(reason) => {
                 if let Unpatchable::Outside(id) = reason {
                     self.retain.debug_outside(id);
                 }
-                self.patch.decline(reason.kind());
+                self.patch.decline(key(reason.kind()));
                 return None;
             }
         };
-        // A root the frame shown has elsewhere than it was recorded, or did not make patchable, is declined by gpui
-        // after it is built: asking first spares the build.
         let by_commit = !self.tree.lock().unwrap().pending_restyles().is_empty();
         for &id in ids.iter().filter(|id| self.retain.is_patch_root(**id) || self.retain.is_anchor(**id)) {
             if let Some(blocker) = window.patch_blocker(&crate::renderer::retained_id(id)) {
@@ -225,10 +254,15 @@ impl GpuixView {
                 } else {
                     "Hover"
                 };
-                self.patch.decline(format!("{by}:{blocker:?}"));
+                self.patch.decline(key(format!("{by}:{blocker:?}")));
                 return None;
             }
         }
+        Some(ids)
+    }
+
+    /// Builds `ids`, which [`Self::plan_patch`] chose, at `now`.
+    fn build_units(&mut self, ids: Vec<u64>, now: web_time::Instant, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Option<Built> {
         let anchors: Vec<u64> = ids.iter().copied().filter(|id| self.retain.is_anchor(*id)).collect();
         if !anchors.is_empty() && !self.focus_follows_tree() {
             // What a frame built whole does before it builds: an anchor is built without the pass that gives
@@ -249,6 +283,54 @@ impl GpuixView {
             units.push((unit.id, unit.element));
         }
         Some(Built { units, tapes, anchors, stepped })
+    }
+
+    /// Lays out and prepaints the patch the tree is waiting for, ahead of the draw, so that a read of
+    /// boxes or scroll metrics is answered by it and not by a pass from the root of the window
+    /// (`Window::prepare_patch`). The draw finishes it without building or laying out again
+    /// ([`Self::take_prepared_patch`]). False, with the window as a pass would find it, when the
+    /// patch cannot be made: the caller lays out as it did before.
+    pub(crate) fn prepare_for_read(view: &gpui::Entity<Self>, window: &mut gpui::Window, app: &mut gpui::App) -> bool {
+        let planned = view.update(app, |view, _| {
+            let now = view.clock.now();
+            view.plan_patch(window, now, Declining::Read).map(|ids| (ids, now))
+        });
+        let Some((ids, now)) = planned else {
+            return false;
+        };
+        let built: Rc<std::cell::RefCell<Option<Built>>> = Rc::default();
+        let prepared = window.prepare_patch(app, {
+            let (view, built, ids) = (view.clone(), built.clone(), ids.clone());
+            move |window, app| {
+                let Some(mut made) = view.update(app, |view, cx| view.build_units(ids, now, window, cx)) else {
+                    return Vec::new();
+                };
+                let units = std::mem::take(&mut made.units);
+                *built.borrow_mut() = Some(made);
+                units
+            }
+        });
+        if prepared.is_err() {
+            return false;
+        }
+        let built = built.borrow_mut().take().expect("a patch that was prepared was built");
+        view.update(app, |view, _| view.patch.prepared = Some(Prepared { ids, built }));
+        true
+    }
+
+    /// What a read prepared, if the patch the draw would build is that one: the same units, and gpui still
+    /// holds it (nothing invalidated the window since). Any other patch prepared is left to gpui, which
+    /// drops it when it paints other roots.
+    fn take_prepared_patch(&mut self, window: &gpui::Window) -> Option<Built> {
+        let prepared = self.patch.prepared.take()?;
+        let held = window.prepared_patch_units()?;
+        let named: Vec<gpui::ElementId> = prepared.ids.iter().map(|id| crate::renderer::retained_id(*id)).collect();
+        if held != named {
+            return None;
+        }
+        let now = self.clock.now();
+        let ids = self.preview_tick(window, now).ok()?;
+        (ids == prepared.ids).then_some(prepared.built)
     }
 
     /// Whether the focus handles are the ones a build of the tree would use. An anchor is built without the

@@ -42,13 +42,29 @@ type Page = {
 
 type Open = { app: ReturnType<typeof createTestRoot>; renderer: TestRenderer; set: (change: Partial<Page>) => void }
 
-function open(initial: Page): Open {
+function open(initial: Page, withList = false, onKey?: () => void): Open {
   const [page, setPage] = createSignal(initial)
   const app = createTestRoot({ width: 600, height: 400 })
   app.render(() => (
-    <div style={{ display: "flex", flexDirection: "row", width: 600, height: 400, backgroundColor: "#ffffff" }}>
+    <div
+      testId="page"
+      tabIndex={onKey ? 0 : undefined}
+      onKeyDown={onKey}
+      style={{ display: "flex", flexDirection: "row", width: 600, height: 400, backgroundColor: "#ffffff" }}
+    >
       <div testId="sidebar" style={{ width: 120, flexShrink: 0, height: "100%", backgroundColor: "#f4f4f5" }}>
         <text style={{ color: "#18181b" }}>{page().side}</text>
+        {withList && (
+          <virtual-list testId="list" itemCount={40} estimatedItemHeight={30} overdraw={0} style={{ width: 120, height: 300, scrollbarWidth: "none" }}>
+            <For each={Array.from({ length: 12 }, (_, index) => index)}>
+              {(index) => (
+                <div testId={`row-${index}`} style={{ width: 100, height: 30, flexShrink: 0, backgroundColor: index % 2 ? "#e4e4e7" : "#d4d4d8" }}>
+                  <text style={{ fontSize: 12 }}>{`row ${index}`}</text>
+                </div>
+              )}
+            </For>
+          </virtual-list>
+        )}
       </div>
       <div
         testId="detail"
@@ -155,7 +171,7 @@ function run(name: string, patch: boolean, changes: Partial<Page>[], options: Op
 const REWRAP: Partial<Page>[] = [{ box: 200 }, { box: 90 }, { box: 270 }, { box: 120 }]
 
 describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a scroller", () => {
-  test("boxes that rewrap are a relayout patch of the detail with no whole frame, and show what patching off shows", () => {
+  test("boxes that rewrap are each a relayout patch of the detail with no whole frame, and show what patching off shows", () => {
     const on = run("rewrap", true, REWRAP)
     const off = run("rewrap", false, REWRAP)
     expect(on.mismatches).toBe(0)
@@ -163,19 +179,17 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a scroller", () 
     expect(on.steps.map((step) => step.bounds)).toEqual(off.steps.map((step) => step.bounds))
     expect(off.counters.patchedFrames).toBe(0)
     if (!counted) return
-    // gpui drops the recording of an anchor whose elements publish their boxes (every one of Ghia's does) instead of rewriting it
-    // (`rewrittenRecordings`, zed b133d12651): the first change is a patch and the one after it is the frame that records the anchor
-    // again (`Anchor:StaleRecording`, decided before anything is built), then the next is a patch again.
-    expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 0, 1, 0])
-    expect(on.steps.map((step) => step.whole)).toEqual([0, 1, 0, 1])
-    expect(reason(on.counters.unpatchable, "Anchor:StaleRecording")).toBe(2)
-    expect(on.counters.rewrittenRecordings).toBe(0)
+    // gpui keeps the recording of an anchor whose elements publish their boxes, as Ghia's all do (zed c4590da472): every change is a patch.
+    expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 1, 1, 1])
+    expect(on.steps.map((step) => step.whole)).toEqual([0, 0, 0, 0])
+    expect(reason(on.counters.unpatchable, "Anchor:StaleRecording")).toBe(0)
+    expect(on.counters.rewrittenRecordings).toBe(4)
     // The first patch builds the detail and its six boxes, and the filler: no other element of the page.
     expect(on.steps[0].built).toBeLessThanOrEqual(10)
     expect(on.steps[0].built).toBeGreaterThan(0)
   })
 
-  test("roots inside the anchor (a paragraph and a box with a text) are spliced: a commit is a relayout patch, and shows what patching off shows", () => {
+  test("roots inside the anchor (a paragraph and a box with a text) are spliced: each commit is a relayout patch, and shows what patching off shows", () => {
     const rooted: Page = { ...BASE, rooted: true }
     const changes: Partial<Page>[] = [{ box: 200 }, { box: 90 }, { box: 270 }]
     const on = run("rooted", true, changes, {}, rooted)
@@ -184,9 +198,9 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a scroller", () 
     expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
     expect(on.steps.map((step) => step.bounds)).toEqual(off.steps.map((step) => step.bounds))
     if (!counted) return
-    // Roots nested in the anchor (they have dispatch nodes) are spliced out and in; the recording gpui keeps of the anchor is dropped as above.
-    expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 0, 1])
-    expect(on.steps.map((step) => step.whole)).toEqual([0, 1, 0])
+    // Roots nested in the anchor (they have dispatch nodes) are spliced out and in.
+    expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 1, 1])
+    expect(on.steps.map((step) => step.whole)).toEqual([0, 0, 0])
     expect(sum(on.counters.declines)).toBe(0)
   })
 
@@ -220,15 +234,15 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a scroller", () 
     expect(reason(on.counters.unpatchable, "Structure")).toBe(changes.length)
   })
 
-  test("a keyed swap of the detail's content with another number of elements is a relayout patch, and shows what patching off shows", () => {
+  test("keyed swaps of the detail's content with another number of elements are relayout patches, and show what patching off shows", () => {
     const changes: Partial<Page>[] = [{ count: 9 }, { count: 4 }, { count: 7 }]
     const on = run("swap", true, changes)
     const off = run("swap", false, changes)
     expect(on.mismatches).toBe(0)
     expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
     if (!counted) return
-    expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 0, 1])
-    expect(on.steps.map((step) => step.whole)).toEqual([0, 1, 0])
+    expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 1, 1])
+    expect(on.steps.map((step) => step.whole)).toEqual([0, 0, 0])
     expect(sum(on.counters.declines)).toBe(0)
   })
 
@@ -377,7 +391,7 @@ function runMailbox(patch: boolean, interact: boolean) {
 }
 
 describe.skipIf(!hasNativeTestRenderer)("Solid: the detail of a mailbox swapped between messages", () => {
-  test("swaps between messages of other paragraph counts are patch frames and show what patching off shows, a whole frame between them", () => {
+  test("swaps between messages of other paragraph counts are all patch frames and show what patching off shows", () => {
     const on = runMailbox(true, false)
     const off = runMailbox(false, false)
     expect(on.mismatches).toBe(0)
@@ -386,11 +400,10 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: the detail of a mailbox swapped 
     expect(on.steps.map((step) => step.tail)).toEqual(off.steps.map((step) => step.tail))
     expect(on.steps.map((step) => step.detail)).toEqual(off.steps.map((step) => step.detail))
     if (!counted) return
-    // The recording of the anchor is dropped by the first patch (see the rewrap test), so the second swap is the frame that records it again.
-    expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 0, 1])
-    expect(on.steps.map((step) => step.whole)).toEqual([0, 1, 0])
+    expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 1, 1])
+    expect(on.steps.map((step) => step.whole)).toEqual([0, 0, 0])
     expect(sum(on.counters.declines)).toBe(0)
-    expect(reason(on.counters.unpatchable, "Anchor:StaleRecording")).toBe(1)
+    expect(reason(on.counters.unpatchable, "Anchor:StaleRecording")).toBe(0)
   })
 
   test("a click and a hover on the new content reach its listeners, and Tab moves focus into it, after each patch", () => {
@@ -406,5 +419,209 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: the detail of a mailbox swapped 
     if (!counted) return
     // Each swap is the frame the interaction before left: the first is a patch, whatever the clicks and the focus before it made.
     expect(on.steps[0].relaid, JSON.stringify(on.counters)).toBe(1)
+  })
+})
+
+type Between = "nothing" | "second swap" | "outside change" | "detail scroll" | "list scroll"
+
+/**
+ * The detail is swapped, and what a handler reads right after is read: the scroll metrics of the detail, the box of an element in the new
+ * content, the scroll offset and height of a list outside it. `between` is what the handler does after the reads and before the frame.
+ */
+function runReading(patch: boolean, changes: Partial<Page>[], between: Between, initial: Page = BASE) {
+  const { app, renderer, set } = open(initial, true)
+  try {
+    renderer.setPatchEnabled(patch)
+    renderer.drawFrame()
+    renderer.drawFrame()
+    const detail = renderer.findByTestId("detail")!.id
+    const list = renderer.findByTestId("list")!.id
+    const steps = []
+    for (const [step, change] of changes.entries()) {
+      const before = renderer.getPatchCounters()
+      const frames = renderer.getPaintedFrameCount()
+      renderer.resetBuildCounters()
+      const passes = renderer.getLayoutPassCount()
+      set(change)
+      const inside = renderer.findByTestId("box-5")?.id
+      const reads = {
+        detail: renderer.getScrollMetrics(detail),
+        inside: inside === undefined ? null : renderer.getElementBounds(inside),
+        list: renderer.getScrollMetrics(list),
+      }
+      const readPasses = renderer.getLayoutPassCount() - passes
+      switch (between) {
+        case "nothing":
+          break
+        case "second swap":
+          set({ count: (change.count ?? 6) + 2 })
+          break
+        case "outside change":
+          set({ side: `Folder ${step}` })
+          break
+        case "detail scroll":
+          renderer.scrollTo(detail, 0, 20 + step * 10)
+          break
+        case "list scroll":
+          renderer.scrollTo(list, 0, 60 + step * 30)
+          break
+      }
+      renderer.drawFrame()
+      const after = renderer.getPatchCounters()
+      const last = renderer.findByTestId("box-5")?.id
+      steps.push({
+        reads,
+        readPasses,
+        patched: after.patchedFrames - before.patchedFrames,
+        relaid: after.relayoutPatches - before.relayoutPatches,
+        whole: renderer.getPaintedFrameCount() - frames,
+        built: renderer.getBuildCounters().elementsBuilt,
+        declines: sum(after.declines) - sum(before.declines),
+        picture: picture(renderer, `reading-${between}-${patch}-${step}`),
+        after: {
+          detail: renderer.getScrollMetrics(detail),
+          inside: last === undefined ? null : renderer.getElementBounds(last),
+          list: renderer.getScrollMetrics(list),
+        },
+      })
+    }
+    return { steps, mismatches: renderer.getRetainedCounters().mismatches, counters: renderer.getPatchCounters() }
+  } finally {
+    app.unmount()
+  }
+}
+
+const SWAPS: Partial<Page>[] = [{ count: 9 }, { count: 4 }, { count: 11 }]
+
+describe.skipIf(!hasNativeTestRenderer)("Solid: a read while a commit inside a scroller is pending", () => {
+  test("is answered by the patch of the detail, with no layout pass, and the draw finishes it without building the detail again", () => {
+    const on = runReading(true, SWAPS, "nothing")
+    const off = runReading(false, SWAPS, "nothing")
+    expect(on.mismatches).toBe(0)
+    expect(on.steps.map((step) => step.reads)).toEqual(off.steps.map((step) => step.reads))
+    expect(on.steps.map((step) => step.after)).toEqual(off.steps.map((step) => step.after))
+    expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+    expect(off.counters.patchedFrames).toBe(0)
+    // The read saw the new content: the box that was read is in a row further down than the first swap puts it.
+    expect(on.steps[0].reads.inside).not.toBeNull()
+    if (!counted) return
+    for (const [index, step] of on.steps.entries()) {
+      expect(step.readPasses, `step ${index}`).toBe(0)
+      expect(step.relaid, `step ${index}: ${JSON.stringify(on.counters)}`).toBe(1)
+      expect(step.whole, `step ${index}`).toBe(0)
+      // The detail, its boxes and the filler, once: the read builds them and the draw does not.
+      expect(step.built, `step ${index}`).toBe((SWAPS[index].count as number) + 2)
+    }
+    expect(sum(on.counters.declines)).toBe(0)
+    expect(sum(on.counters.unpatchable)).toBe(0)
+  })
+
+  test("a second swap after the read throws the prepared patch away, and the frame is the one patching off draws", () => {
+    const on = runReading(true, SWAPS, "second swap")
+    const off = runReading(false, SWAPS, "second swap")
+    expect(on.mismatches).toBe(0)
+    expect(on.steps.map((step) => step.reads)).toEqual(off.steps.map((step) => step.reads))
+    expect(on.steps.map((step) => step.after)).toEqual(off.steps.map((step) => step.after))
+    expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+    if (!counted) return
+    for (const [index, step] of on.steps.entries()) {
+      expect(step.readPasses, `step ${index}`).toBe(0)
+      // A discarded patch leaves the layout it computed in the engine and the recording of the anchor behind it: the frame is built whole
+      // (gpui declines StaleRecording) and records the anchor again.
+      expect(step.relaid, `step ${index}`).toBe(0)
+      expect(step.whole, `step ${index}`).toBe(1)
+    }
+    expect(reason(on.counters.declines, "StaleRecording")).toBe(SWAPS.length)
+  })
+
+  for (const between of ["outside change", "detail scroll", "list scroll"] as const) {
+    test(`${between} after the read throws the prepared patch away: the frame is drawn whole and is the one patching off draws`, () => {
+      const on = runReading(true, SWAPS, between)
+      const off = runReading(false, SWAPS, between)
+      expect(on.mismatches).toBe(0)
+      expect(on.steps.map((step) => step.reads)).toEqual(off.steps.map((step) => step.reads))
+      expect(on.steps.map((step) => step.after)).toEqual(off.steps.map((step) => step.after))
+      expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+      if (!counted) return
+      for (const [index, step] of on.steps.entries()) {
+        expect(step.readPasses, `step ${index}`).toBe(0)
+        expect(step.patched, `step ${index}`).toBe(0)
+        expect(step.whole, `step ${index}`).toBeGreaterThan(0)
+      }
+    })
+  }
+
+  test("a commit that is not contained (a detail as wide as its widest box) falls back to a layout pass for the read, and the values are right", () => {
+    const leaks: Page = { ...BASE, leaks: true, box: 200 }
+    const changes: Partial<Page>[] = [{ box: 260 }, { box: 150 }, { box: 220 }]
+    const on = runReading(true, changes, "nothing", leaks)
+    const off = runReading(false, changes, "nothing", leaks)
+    expect(on.mismatches).toBe(0)
+    expect(on.steps.map((step) => step.reads)).toEqual(off.steps.map((step) => step.reads))
+    expect(on.steps.map((step) => step.after)).toEqual(off.steps.map((step) => step.after))
+    expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+    if (!counted) return
+    for (const [index, step] of on.steps.entries()) {
+      expect(step.readPasses, `step ${index}`).toBeGreaterThan(0)
+      expect(step.patched, `step ${index}`).toBe(0)
+      expect(step.whole, `step ${index}`).toBeGreaterThan(0)
+    }
+    expect(reason(on.counters.declines, "NotContained")).toBe(changes.length)
+  })
+
+  test("a key handler that swaps the detail and reads right after, inside the dispatch of the key, gets the new values with no layout pass", () => {
+    const run = (patch: boolean) => {
+      let renderer: TestRenderer | undefined
+      let reads: unknown[] = []
+      let swap: ((change: Partial<Page>) => void) | undefined
+      let armed = false
+      const handler = () => {
+        if (!armed) return
+        const current = renderer!
+        swap!({ count: 9 })
+        const inside = current.findByTestId("box-5")?.id
+        reads = [
+          current.getScrollMetrics(current.findByTestId("detail")!.id),
+          inside === undefined ? null : current.getElementBounds(inside),
+          current.getScrollMetrics(current.findByTestId("list")!.id),
+        ]
+      }
+      const opened = open(BASE, true, handler)
+      renderer = opened.renderer
+      swap = opened.set
+      try {
+        renderer.setPatchEnabled(patch)
+        renderer.drawFrame()
+        renderer.drawFrame()
+        renderer.focusElement(renderer.findByTestId("page")!.id)
+        // The first key after a focus that was not made by a key turns the focus ring on, which redraws the page: it is not the key under test.
+        renderer.simulateKeystrokes("F2")
+        renderer.drawFrame()
+        renderer.drawFrame()
+        armed = true
+        const passes = renderer.getLayoutPassCount()
+        // The test window draws at the end of the key's dispatch, where a patch is not made (gpui draws a tick whole inside a dispatch): the
+        // frame is one built whole, which shows what the prepared patch laid out, and the live window draws the tick after the dispatch.
+        renderer.simulateKeystrokes("F2")
+        const readPasses = renderer.getLayoutPassCount() - passes
+        renderer.drawFrame()
+        return {
+          reads,
+          readPasses,
+          picture: picture(renderer, `key-${patch}`),
+          mismatches: renderer.getRetainedCounters().mismatches,
+        }
+      } finally {
+        opened.app.unmount()
+      }
+    }
+    const on = run(true)
+    const off = run(false)
+    expect(on.mismatches).toBe(0)
+    expect(on.reads).toEqual(off.reads)
+    expect(on.picture).toEqual(off.picture)
+    expect(on.reads[1]).not.toBeNull()
+    if (!counted) return
+    expect(on.readPasses).toBe(0)
   })
 })

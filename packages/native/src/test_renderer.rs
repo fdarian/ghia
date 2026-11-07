@@ -1966,7 +1966,7 @@ impl TestGpuixRenderer {
             crate::scroll_write::lays_out_first(crate::scroll_write::metrics_current(window), id, state, top, behavior)
         })?;
         if lays_out_first {
-            window_call(|window, cx| { crate::renderer::settle_pending_layout(cx); window.draw_if_scroll_metrics_dirty(cx) })?;
+            window_call(|window, cx| { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) })?;
         }
         update_view_or_defer(move |view, window, cx| {
             let was_current = crate::scroll_write::metrics_current(window);
@@ -2537,7 +2537,7 @@ impl TestGpuixRenderer {
     pub fn get_scroll_offset(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
         let id = to_element_id(element_id)?;
         if crate::scroll_write::has_pending_container(id) {
-            window_call(|window, cx| { crate::renderer::settle_pending_layout(cx); window.draw_if_scroll_metrics_dirty(cx) })?;
+            window_call(|window, cx| { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) })?;
         }
         update_view(|view, _window, _cx| {
             view.virtual_list_position(id)
@@ -2738,7 +2738,7 @@ impl TestGpuixRenderer {
             self.flush_for(unflushed)?;
         }
         window_call(|window, cx| {
-            { crate::renderer::settle_pending_layout(cx); window.draw_if_dirty(cx) };
+            { crate::renderer::settle_pending_layout(window, cx); window.draw_if_dirty(cx) };
             crate::automation::get_bounds(window.window_handle().window_id(), id)
                 .map(crate::renderer::ElementBounds::from_painted)
         })

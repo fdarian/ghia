@@ -537,33 +537,102 @@ pub(crate) fn invalidate_after_commit(cx: &mut gpui::App, view: gpui::EntityId) 
 /// The layout stays current as it does for `notify_paint_only`, so a read before the frame lays
 /// nothing out. A batch whose changes all lie in anchors (`Dirty::LayoutPatchable`) asks for a tick too,
 /// but moves boxes: the tree says its layout is pending, and a read of geometry before the draw
-/// notifies the view (`settle_pending_layout`).
+/// answers from a patch it prepares for the anchors (`settle_pending_layout`).
+///
+/// A change made after a read prepared that patch is not in it: the patch is thrown away, and the
+/// next read prepares another (or notifies the view, as before) for all the changes.
 pub(crate) fn invalidate_after_mutation(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, dirty: Dirty) {
+    if dirty == Dirty::Clean {
+        return;
+    }
+    discard_prepared_patch(window, cx, view, PendingLayout::Waiting);
     match dirty {
         Dirty::Clean => {}
         Dirty::PaintPatchable => window.request_tick(),
         Dirty::LayoutPatchable => {
-            LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view));
+            LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Waiting));
             window.request_tick();
         }
-        Dirty::Paint => cx.notify_paint_only(view),
-        Dirty::Layout => invalidate_after_commit(cx, view),
+        Dirty::Paint => {
+            note_pending(view, PendingLayout::Notified);
+            cx.notify_paint_only(view)
+        }
+        Dirty::Layout => {
+            note_pending(view, PendingLayout::Notified);
+            invalidate_after_commit(cx, view)
+        }
     }
+}
+
+/// Throws away the patch a read prepared, because the tree or a scroller changed after it, and says what
+/// the view's pending layout is now: `then` if a patch was waiting for it (`Waiting`, a patch for the
+/// changes made so far is prepared by the next read; `Notified`, the view is invalidated and the next read
+/// lays out).
+pub(crate) fn discard_prepared_patch(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, then: PendingLayout) {
+    if window.prepared_patch_units().is_none() {
+        return;
+    }
+    window.discard_prepared_patch(cx);
+    note_pending(view, then);
+}
+
+/// Says what the pending layout of `view` is now, if it has one.
+fn note_pending(view: gpui::EntityId, state: PendingLayout) {
+    LAYOUT_PENDING.with(|pending| {
+        if let Some(held) = pending.borrow_mut().get_mut(&view) {
+            *held = state;
+        }
+    });
+}
+
+/// What a view that has a patch of anchors to draw has done about the layout a read needs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PendingLayout {
+    /// Nothing yet: the next read prepares the patch.
+    Waiting,
+    /// A patch is prepared, and answers reads until something changes.
+    Prepared,
+    /// The view is invalidated: the next read lays out from the root of the window, and the tick that was asked for is drawn whole.
+    Notified,
 }
 
 thread_local! {
     /// The views that have a patch of anchors to draw, which moved boxes: the layout is older than the tree.
-    static LAYOUT_PENDING: std::cell::RefCell<rustc_hash::FxHashSet<gpui::EntityId>> = Default::default();
+    static LAYOUT_PENDING: std::cell::RefCell<rustc_hash::FxHashMap<gpui::EntityId, PendingLayout>> = Default::default();
 }
 
-/// What a read of geometry does before it lays out: a view with a patch of anchors waiting is
-/// invalidated, as a commit that lays out invalidates it, so the read sees the tree's boxes. The tick
-/// that is asked for is then drawn whole (a pending view); a contained build for the read is the next
-/// step (patch-frames.md, "Contained-layout patches").
-pub(crate) fn settle_pending_layout(cx: &mut gpui::App) {
-    let views: Vec<gpui::EntityId> = LAYOUT_PENDING.with(|pending| pending.borrow().iter().copied().collect());
+/// What a read of geometry does before it lays out. A view with a patch of anchors waiting has its
+/// patch prepared: gpui lays out and prepaints the anchors, and the read is answered by the boxes they
+/// publish, with no pass from the root of the window and with no second build of the anchors in the
+/// draw (patch-frames.md, "Contained-layout patches"). When the patch cannot be prepared (gpui
+/// declines it, or the tree is not a patch any more) the view is invalidated, as a commit that lays
+/// out invalidates it, so the read sees the tree's boxes, and the tick that was asked for is drawn whole.
+pub(crate) fn settle_pending_layout(window: &mut gpui::Window, cx: &mut gpui::App) {
+    let views: Vec<(gpui::EntityId, PendingLayout)> =
+        LAYOUT_PENDING.with(|pending| pending.borrow().iter().map(|(view, state)| (*view, *state)).collect());
+    let root = window.root::<GpuixView>().flatten();
+    for (view, state) in views {
+        let ours = root.as_ref().filter(|root| root.entity_id() == view);
+        match (state, ours) {
+            (PendingLayout::Prepared, Some(_)) if window.prepared_patch_units().is_some() => continue,
+            (PendingLayout::Waiting, Some(root)) if GpuixView::prepare_for_read(root, window, cx) => {
+                LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Prepared));
+                continue;
+            }
+            _ => {}
+        }
+        invalidate_after_commit(cx, view);
+        LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Notified));
+    }
+}
+
+/// [`settle_pending_layout`] for a read that has no window to prepare in: the view is invalidated.
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+pub(crate) fn notify_pending_layout(cx: &mut gpui::App) {
+    let views: Vec<gpui::EntityId> = LAYOUT_PENDING.with(|pending| pending.borrow().keys().copied().collect());
     for view in views {
         invalidate_after_commit(cx, view);
+        LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Notified));
     }
 }
 
@@ -630,7 +699,7 @@ pub(crate) fn read_after_layout<R>(
     read: impl FnOnce(gpui::WindowId) -> R,
 ) -> Result<R> {
     use crate::layout::content_visibility::{ancestors_of, skipped_ancestors};
-    settle_pending_layout(cx);
+    settle_pending_layout(window, cx);
     let window_id = window.window_handle().window_id();
     if skipped == SkippedContent::Leave {
         lay_out(window, cx);
@@ -752,7 +821,11 @@ impl Repaint {
 /// to its range. It moves the boxes of what the scroller holds and nothing a scroll query reads, as
 /// in a browser, where a scroll offset is a paint property. The next frame builds the rows of a
 /// list at the new offset.
-pub(crate) fn invalidate_after_scroll(cx: &mut gpui::App, view: gpui::EntityId) {
+pub(crate) fn invalidate_after_scroll(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId) {
+    // The view is notified, so the patch of anchors a read prepared is gone and the tick is drawn whole;
+    // a list that scrolls is the one write the draw cannot follow yet.
+    discard_prepared_patch(window, cx, view, PendingLayout::Notified);
+    note_pending(view, PendingLayout::Notified);
     cx.notify_scroll_only(view);
 }
 
@@ -1080,7 +1153,7 @@ async fn run_ui_commands(
                 behavior,
             } => window.update(cx, move |_view, window, cx| {
                 if scroll_write_lays_out_first(crate::scroll_write::metrics_current(window), id, top, behavior) {
-                    { crate::renderer::settle_pending_layout(cx); window.draw_if_scroll_metrics_dirty(cx) };
+                    { crate::renderer::notify_pending_layout(cx); window.draw_if_scroll_metrics_dirty(cx) };
                 }
                 let was_current = crate::scroll_write::metrics_current(window);
                 if scroll_element_to(was_current, id, left, top, behavior) {
@@ -1107,7 +1180,7 @@ async fn run_ui_commands(
             UiCommand::ScrollIntoView { id, options } => {
                 // Align by the tree as it is, not the last frame; see `GetElementBounds`.
                 gpui::AnyWindowHandle::from(window)
-                    .update(cx, |_view, window, cx| { crate::renderer::settle_pending_layout(cx); window.draw_if_dirty(cx) })?;
+                    .update(cx, |_view, window, cx| { crate::renderer::settle_pending_layout(window, cx); window.draw_if_dirty(cx) })?;
                 window.update(cx, move |view, window, cx| {
                     if view.scroll_element_into_view(window, id, options) {
                         cx.notify();
@@ -1117,7 +1190,7 @@ async fn run_ui_commands(
             }
             UiCommand::GetScrollMetrics { id, response } => {
                 gpui::AnyWindowHandle::from(window).update(cx, move |_view, window, cx| {
-                    { crate::renderer::settle_pending_layout(cx); window.draw_if_scroll_metrics_dirty(cx) };
+                    { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) };
                     response.send(scroll_metrics(window.window_handle().window_id(), id)).ok();
                 })
             }
@@ -1210,13 +1283,13 @@ async fn run_ui_commands(
             // builds it.
             UiCommand::GetAutomationBounds { response } => {
                 gpui::AnyWindowHandle::from(window).update(cx, move |_view, window, cx| {
-                    { crate::renderer::settle_pending_layout(cx); window.draw_if_dirty(cx) };
+                    { crate::renderer::settle_pending_layout(window, cx); window.draw_if_dirty(cx) };
                     response.send(crate::automation::all_bounds(window.window_handle().window_id())).ok();
                 })
             }
             UiCommand::GetElementBounds { id, response } => {
                 gpui::AnyWindowHandle::from(window).update(cx, move |_view, window, cx| {
-                    { crate::renderer::settle_pending_layout(cx); window.draw_if_dirty(cx) };
+                    { crate::renderer::settle_pending_layout(window, cx); window.draw_if_dirty(cx) };
                     response.send(crate::automation::get_bounds(window.window_handle().window_id(), id)).ok();
                 })
             }
@@ -1730,7 +1803,7 @@ impl GpuixRenderer {
     /// `init`: nothing was laid out.
     #[cfg(target_os = "macos")]
     fn draw_pending_changes(&self) -> Result<Option<gpui::WindowId>> {
-        self.with_initialized_window(|window, cx| { crate::renderer::settle_pending_layout(cx); window.draw_if_dirty(cx) })
+        self.with_initialized_window(|window, cx| { crate::renderer::settle_pending_layout(window, cx); window.draw_if_dirty(cx) })
     }
 
     /// Like `draw_pending_changes`, for a read of what a frame painted (the painted text), which
@@ -3696,7 +3769,7 @@ impl GpuixRenderer {
             // Nothing is laid out for most writes (see `scroll_write`): a write the layout is behind
             // is clamped by the layout that comes next, and a read after it lays out first.
             if scroll_write_lays_out_first(crate::scroll_write::metrics_current(window), id, top, behavior) {
-                { crate::renderer::settle_pending_layout(cx); window.draw_if_scroll_metrics_dirty(cx) };
+                { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) };
             }
             let was_current = crate::scroll_write::metrics_current(window);
             if scroll_element_to(was_current, id, left, top, behavior) {
@@ -3821,7 +3894,7 @@ impl GpuixRenderer {
         {
             if crate::scroll_write::has_pending_container(id) {
                 update_window_without_view(|window, cx| {
-                    { crate::renderer::settle_pending_layout(cx); window.draw_if_scroll_metrics_dirty(cx) };
+                    { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) };
                 })?;
             }
             return Ok(scroll_element_position(id).map(|position| position.to_vec()));

@@ -204,7 +204,7 @@ each entry or applies it again.
   touch edges, a layer a line, empty and overflowing boxes, steps of 0.1 and 1/3 up to 10 000) and two mailbox frames
   recorded from the proxy (`bounds_tree/mailbox_frames.txt`).
 
-### Contained relayout patch (zed `4359857078`, `afccad7649`, `f9a51894e7`, `06fc9e85e3`, `b133d12651`; `third_party/taffy`, `taffy.rs`, `window/patch.rs`, `window/patch_splice.rs`, `elements/retained.rs`)
+### Contained relayout patch (zed `4359857078`, `afccad7649`, `f9a51894e7`, `06fc9e85e3`, `b133d12651`, `52f5a22f76`, `c4590da472`; `third_party/taffy`, `taffy.rs`, `window/patch.rs`, `window/patch_splice.rs`, `elements/retained.rs`)
 
 - **Decision.** The owner approved this on 2026-11-07 (the full option 2 of the contained-layout design) as an engine change
   that lets a commit patch the frame instead of drawing it whole. It is opt-in per window (`Window::set_contained_patches`, off
@@ -231,10 +231,21 @@ each entry or applies it again.
 - **The recording rewrite (`b133d12651`).** After a relayout patch the recording of the root is made again from the patch
   (`RecordingRewrite`, `PatchCounters::rewritten_recordings`), so the next tick patches the root again and a frame built whole
   replays it. What cannot be made what a frame built whole records is dropped as before: a root recorded to be put elsewhere,
-  one that handed elements to a stacking context outside it, one that published (`note_publication`: any element with an
-  `on_painted`, `on_painted_layout` or prepaint listener, which every host element of Ghia has, whether or not the root has an
-  `on_replay` hook), one with an accessibility recording, and the roots recorded inside it. The patch cannot update the key
-  the root was recorded with.
+  one that handed elements to a stacking context outside it, one whose listeners report to their owner without an `on_replay`
+  hook, one with an accessibility recording, and the roots recorded inside it. A root that published (`note_publication`: any
+  element with an `on_painted`, `on_painted_layout` or prepaint listener, which every host element of Ghia has) keeps the rewritten
+  recording when it has an `on_replay` hook, as a frame built whole accepts for the recording (`c4590da472`), so consecutive
+  commits in a root are all patches. The patch cannot update the key the root was recorded with.
+- **Prepared patches (`52f5a22f76`).** The relayout path of a patch is split into `prepare_unit` (surroundings, request_layout, the
+  contained compute and the `NotContained` check, the `ReplayKey` check, prepaint into the scratch frame) and `finish_unit` (paint,
+  the comparisons, the splice and the rewrite); `repaint_in_place` is the two in a row. `Window::prepare_patch(cx, build)` runs the
+  first for a forced layout read, so that the read answers from the post-commit boxes and scroll metrics without a pass from the
+  window's root (the publications of prepaint run at once, with `is_layout_pass()` true), and `finish_prepared_patch` or
+  `repaint_in_place` for the same roots does the second without building or laying out again. While a patch is prepared
+  `draw_if_dirty` and its variants run no pass; any invalidation that moves `update_count`, a draw that does not patch the roots,
+  a patch for other roots and `discard_prepared_patch` discard it, leaving the layout the engine computed. A `prepare_patch` that
+  declines leaves nothing prepared. `PreparedPatch` holds the scratch frame, the layout engine's pass and the element arena
+  (taken from clearing until the patch is finished or dropped, hence the `build` closure). `contained_patch_tests.rs`.
 - **Why.** Navigating the mailbox of ghia-bench (the Navigate proxy, `examples/solid/mailbox-navigate`) cost 39M instructions
   a key, 12M of it the fixed full frame that every commit that lays out draws. A patch that lays out only the scroller the commit
   changed does not copy what it does not change ([patch-frames.md](patch-frames.md#contained-layout-patches)).
