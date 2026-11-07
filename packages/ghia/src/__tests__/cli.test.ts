@@ -82,6 +82,18 @@ export default defineConfig({ plugins: [plugin] })
   return file
 }
 
+function writeHotDataConfig(): string {
+  writeFileSync(
+    join(appDir, "vite.config.hot-data.ts"),
+    `import { defineConfig } from "vite"
+import { ghia } from "ghia"
+
+export default defineConfig({ plugins: [ghia({ entry: "hot-data.ts" })] })
+`
+  )
+  return "vite.config.hot-data.ts"
+}
+
 function copyFixture(name: string): string {
   mkdirSync(SCRATCH_ROOT, { recursive: true })
   const directory = mkdtempSync(join(SCRATCH_ROOT, `${name}-`))
@@ -162,6 +174,24 @@ describe("ghia dev", () => {
 
       expect(run.process.exitCode).toBeNull()
       expect(lines(run.output(), "RENDERED ")).toEqual(["marker v1", "marker v2"])
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "clears the runner's caches on a full reload, so the old run's hot data is gone",
+    async () => {
+      const run = spawn(["bun", CLI, "dev", "--config", writeHotDataConfig()], appDir)
+      await run.waitFor("HOT_RUN 1 version one")
+
+      const entry = join(appDir, "hot-data.ts")
+      writeFileSync(entry, readFileSync(entry, "utf8").replace("version one", "version two"))
+      await run.waitFor("HOT_RUN 1 version two")
+      writeFileSync(entry, readFileSync(entry, "utf8").replace("version two", "version three"))
+      await run.waitFor("HOT_RUN 1 version three")
+
+      expect(run.process.exitCode).toBeNull()
+      expect(lines(run.output(), "HOT_RUN ")).toEqual(["1 version one", "1 version two", "1 version three"])
     },
     TIMEOUT_MS * 2
   )

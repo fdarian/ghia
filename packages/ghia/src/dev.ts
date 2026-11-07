@@ -2,6 +2,7 @@ import { createServer, isRunnableDevEnvironment } from "vite"
 import { ENVIRONMENT_NAME, type GhiaPluginApi } from "./plugin.js"
 import { clearVitestMarker, findPluginApi, requireEntry } from "./plugin-api.js"
 import type { RunOptions } from "./options.js"
+import { createFullReload, createSerialQueue } from "./reload.js"
 import { SERVER_PORT_SLOT, type WorkerInit } from "./protocol.js"
 
 export interface DevHandle {
@@ -39,6 +40,11 @@ export async function dev(options: RunOptions = {}): Promise<DevHandle> {
     const api = findPluginApi(server.config.plugins)
     const entry = requireEntry(api, "dev")
     if (api.server !== undefined) worker = startServerWorker(api, api.server)
+    api.uiChannel.onFullReload = createFullReload({
+      enqueue: createSerialQueue(),
+      runner: () => environment.runner,
+      start: () => environment.runner.import(entry).then(() => undefined),
+    })
     await environment.runner.import(entry)
   } catch (error) {
     await close()

@@ -4,6 +4,7 @@ import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createRunnableDevEnvironment, DevEnvironment, type Plugin, type ResolvedConfig } from "vite"
 import { SERVER_PORT_SLOT_KEY } from "./protocol.js"
+import { createUiHotChannel, type UiHotChannel } from "./ui-channel.js"
 import { WorkerHotChannel } from "./worker-channel.js"
 
 export const ENVIRONMENT_NAME = "ghia"
@@ -39,6 +40,8 @@ export interface GhiaPluginApi {
   readonly entry: string | undefined
   /** Absolute, symlink-resolved path of the server entry; undefined without the `server` option. */
   readonly server: string | undefined
+  /** The channel of the `ghia` environment's module runner; `ghia dev` takes over its full reloads. */
+  readonly uiChannel: UiHotChannel
   /** The transport of the `server` environment's module runner. Needs the `server` option. */
   readonly serverChannel: WorkerHotChannel
   /** Absolute path of the `compile.outfile` option; undefined when it is not set. Set once the config is resolved. */
@@ -69,6 +72,7 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
   let entry: string | undefined
   let serverEntry: string | undefined
   let compileOutfile: string | undefined
+  const uiChannel = createUiHotChannel()
   const serverChannel = options.server === undefined ? undefined : new WorkerHotChannel()
 
   return {
@@ -98,7 +102,7 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
               dev: {
                 moduleRunnerTransform: true,
                 createEnvironment: (name, config) =>
-                  createRunnableDevEnvironment(name, config, { hot: true }),
+                  createRunnableDevEnvironment(name, config, { hot: true, transport: uiChannel }),
               },
               resolve: {
                 conditions: UI_CONDITIONS,
@@ -222,6 +226,9 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
       },
       get compileOutfile() {
         return compileOutfile
+      },
+      get uiChannel() {
+        return uiChannel
       },
       get serverChannel() {
         if (serverChannel === undefined) throw new Error("The ghia() plugin has no \"server\" option")
