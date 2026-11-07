@@ -20,6 +20,13 @@ function findPluginApi(plugins: readonly Plugin[]): GhiaPluginApi {
   return plugin.api as GhiaPluginApi
 }
 
+function requireEntry(api: GhiaPluginApi, command: string): string {
+  if (api.entry === undefined) {
+    throw new Error(`ghia ${command} needs an entry: set ghia({ entry: "<entry file>" }) in your Vite config`)
+  }
+  return api.entry
+}
+
 async function dev(configFile: string | undefined): Promise<void> {
   const server = await createServer({
     configFile,
@@ -32,13 +39,20 @@ async function dev(configFile: string | undefined): Promise<void> {
     throw new Error(`The "${ENVIRONMENT_NAME}" environment is not a runnable dev environment`)
   }
   const api = findPluginApi(server.config.plugins)
+  let entry: string
+  try {
+    entry = requireEntry(api, "dev")
+  } catch (error) {
+    await server.close()
+    throw error
+  }
   const worker = api.server === undefined ? undefined : startServerWorker(api, api.server)
   stopOnSignal(server, worker)
 
   // A full reload makes the runner clear its module cache and re-import the entry by itself,
   // so `render()` runs again; it is built to be re-run on the same window.
   try {
-    await environment.runner.import(api.entry)
+    await environment.runner.import(entry)
   } catch (error) {
     await worker?.terminate()
     await server.close()
@@ -71,6 +85,7 @@ function stopOnSignal(server: ViteDevServer, worker: Worker | undefined): void {
 
 async function build(configFile: string | undefined): Promise<void> {
   const builder = await createBuilder({ configFile })
+  requireEntry(findPluginApi(builder.config.plugins), "build")
   const environment = builder.environments[ENVIRONMENT_NAME]
   if (environment === undefined) {
     throw new Error(`The "${ENVIRONMENT_NAME}" environment is not defined; add ghia() to your Vite config`)
@@ -82,6 +97,8 @@ async function build(configFile: string | undefined): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // A test that spawns `ghia` hands down vitest's marker, and ghia() would then configure for tests.
+  delete process.env.VITEST
   if (!process.versions.bun) {
     throw new Error("ghia runs the app inside its own process with the native addon, so it needs Bun")
   }

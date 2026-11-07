@@ -357,9 +357,6 @@ importers:
       '@ghia/native':
         specifier: workspace:^
         version: link:../native
-      '@ghia/solid':
-        specifier: workspace:^
-        version: link:../solid
       '@types/bun':
         specifier: ^1.4.0
         version: 1.4.4

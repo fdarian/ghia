@@ -1,10 +1,12 @@
+import { SERVER_ENVIRONMENT_NAME } from "@ghia/vite"
 import solidRefresh from "solid-refresh/babel"
 import type { Plugin } from "vite"
 import vitePluginSolid from "vite-plugin-solid"
 
 /**
  * Compiles JSX and TSX for Solid's universal renderer with `@ghia/solid` as its module, and keeps
- * edited components hot in `ghia dev`. Use it next to `ghia()` from `@ghia/vite`.
+ * edited components hot in `ghia dev`. Use it next to `ghia()` from `@ghia/vite`. It compiles the
+ * UI and vitest's test environment, not Ghia's `server` environment, which has no renderer.
  */
 export function solid(): Plugin[] {
   let hot = false
@@ -16,12 +18,16 @@ export function solid(): Plugin[] {
         hot = config.command === "serve" && config.mode !== "production" && config.mode !== "test"
       },
     },
-    vitePluginSolid({
-      solid: { generate: "universal", moduleName: "@ghia/solid" },
-      // vite-plugin-solid adds solid-refresh only for a `client` consumer: it takes the `server`
-      // consumer of Ghia's environment for SSR, and an edit then reloads the whole app.
-      babel: (_source, id) =>
-        hot && !id.includes("/node_modules/") ? { plugins: [[solidRefresh, { bundler: "vite" }]] } : {},
-    }),
+    {
+      ...vitePluginSolid({
+        solid: { generate: "universal", moduleName: "@ghia/solid" },
+        // vite-plugin-solid adds solid-refresh only for a `client` consumer: it takes the `server`
+        // consumer of Ghia's environment for SSR, and an edit then reloads the whole app.
+        babel: (_source, id) =>
+          hot && !id.includes("/node_modules/") ? { plugins: [[solidRefresh, { bundler: "vite" }]] } : {},
+      }),
+      // vite-plugin-solid otherwise applies to every environment.
+      applyToEnvironment: (environment) => environment.name !== SERVER_ENVIRONMENT_NAME,
+    },
   ]
 }

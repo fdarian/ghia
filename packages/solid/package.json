@@ -102,10 +102,14 @@
     "vite-plugin-solid": "^2.11.15"
   },
   "peerDependencies": {
+    "@ghia/vite": "workspace:^",
     "solid-js": ">=1.9 <2",
     "vite": "^8.0.0"
   },
   "peerDependenciesMeta": {
+    "@ghia/vite": {
+      "optional": true
+    },
     "vite": {
       "optional": true
     }

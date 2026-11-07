@@ -17,8 +17,8 @@ const running: Bun.Subprocess[] = []
 let appDir: string
 let serverDir: string
 
-function spawn(command: string[], cwd: string): Run {
-  const child = Bun.spawn(command, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
+function spawn(command: string[], cwd: string, env: Record<string, string | undefined> = process.env): Run {
+  const child = Bun.spawn(command, { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
   running.push(child)
   let output = ""
   const collect = async (stream: ReadableStream<Uint8Array>) => {
@@ -110,6 +110,16 @@ describe("ghia dev", () => {
       await run.waitFor("RENDERED marker v1")
       expect(lines(run.output(), "WINDOW_AT_LOAD ")).toEqual(["object"])
       expect(lines(run.output(), "IS_SERVER ")).toEqual(["false"])
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "ignores the VITEST variable a test runner hands down",
+    async () => {
+      const run = spawn(["bun", CLI, "dev"], appDir, { ...process.env, VITEST: "true" })
+      await run.waitFor("RENDERED marker v1")
+      expect(lines(run.output(), "WINDOW_AT_LOAD ")).toEqual(["object"])
     },
     TIMEOUT_MS * 2
   )
@@ -263,6 +273,29 @@ describe("ghia build with a server", () => {
       expect(server).toContain("SERVER_START")
       expect(main).not.toContain("SERVER_START")
       expect(main).not.toContain("solid-js")
+    },
+    TIMEOUT_MS * 2
+  )
+})
+
+describe("without an entry", () => {
+  function writeEntrylessConfig(): string {
+    writeFileSync(
+      join(appDir, "vite.config.entryless.ts"),
+      `import { defineConfig } from "vite"
+import { ghia } from "@ghia/vite"
+
+export default defineConfig({ plugins: [ghia()] })
+`
+    )
+    return "vite.config.entryless.ts"
+  }
+
+  test.each(["dev", "build"])(
+    "ghia %s fails with a clear error",
+    async (command) => {
+      const output = await runToFailure(["bun", CLI, command, "--config", writeEntrylessConfig()], appDir)
+      expect(output).toContain(`ghia ${command} needs an entry`)
     },
     TIMEOUT_MS * 2
   )

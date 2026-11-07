@@ -1,16 +1,10 @@
 import "./record-window.ts"
 import { isServer } from "solid-js/web"
-import { createComponent, createElement, insert } from "@ghia/solid"
-import { createTestRoot } from "@ghia/solid/testing"
+import { TestRenderer } from "@ghia/native/testing"
 
-function Marker() {
-  const text = createElement("text")
-  insert(text, "marker v1")
-  return text
-}
-
-const app = createTestRoot()
-app.render(() => createComponent(Marker, {}))
+const renderer = new TestRenderer()
+renderer.applyBatch(JSON.stringify([["createElement", 1, "text"], ["setText", 1, "marker v1"], ["setRoot", 1]]))
+renderer.flush()
 console.log(`IS_SERVER ${isServer}`)
-console.log(`RENDERED ${app.renderer.getAllText().join("")}`)
-app.unmount()
+console.log(`RENDERED ${renderer.getAllText().join("")}`)
+renderer.dispose()

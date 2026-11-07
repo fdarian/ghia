@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs"
 import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { createRunnableDevEnvironment, DevEnvironment, type Plugin, type ResolvedConfig } from "vite"
 import { SERVER_PORT_SLOT_KEY } from "./protocol.js"
 import { WorkerHotChannel } from "./worker-channel.js"
@@ -13,8 +14,11 @@ const SERVER_MAIN_MODULE = "virtual:ghia/server-main"
 const RESOLVED_PREFIX = "\0"
 
 export interface GhiaOptions {
-  /** The app entry, relative to the Vite root. It is the single input of the `ghia` build. */
-  entry: string
+  /**
+   * The app entry, relative to the Vite root. It is the single input of the `ghia` build.
+   * `ghia dev` and `ghia build` need it; vitest does not.
+   */
+  entry?: string
   /**
    * The server entry, relative to the Vite root. It runs in a Worker, in its own `server`
    * environment, and exports `default function serve(port: MessagePort): () => void`: it wires
@@ -25,8 +29,8 @@ export interface GhiaOptions {
 }
 
 export interface GhiaPluginApi {
-  /** Absolute, symlink-resolved path of the entry. Set once the config is resolved. */
-  readonly entry: string
+  /** Absolute, symlink-resolved path of the entry; undefined without the `entry` option. Set once the config is resolved. */
+  readonly entry: string | undefined
   /** Absolute, symlink-resolved path of the server entry; undefined without the `server` option. */
   readonly server: string | undefined
   /** The transport of the `server` environment's module runner. Needs the `server` option. */
@@ -40,11 +44,20 @@ const ENTRY_FILE_NAMES: Record<string, string> = {
 
 const DOM_GLOBALS_IMPORT = 'import "@ghia/native/dom-globals";'
 
+const UI_CONDITIONS = ["browser", "import", "module", "default"]
+const NATIVE_PACKAGE = "@ghia/native"
+
+const TEST_SETUP_FILE = fileURLToPath(new URL("./test-setup.js", import.meta.url))
+
 /**
  * Defines the `ghia` environment: the UI process of a Ghia app, which behaves like a browser
  * page (browser export conditions, `window`) but runs inside Bun next to the native addon.
+ *
+ * Under vitest there is no `ghia` environment: the test environment gets the same resolve
+ * settings, and `@ghia/native/dom-globals` loads before every test file.
  */
-export function ghia(options: GhiaOptions): Plugin<GhiaPluginApi> {
+export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
+  const underVitest = process.env.VITEST !== undefined
   let entry: string | undefined
   let serverEntry: string | undefined
   const serverChannel = options.server === undefined ? undefined : new WorkerHotChannel()
@@ -53,6 +66,7 @@ export function ghia(options: GhiaOptions): Plugin<GhiaPluginApi> {
     name: PLUGIN_NAME,
 
     config() {
+      if (underVitest) return { test: { setupFiles: [TEST_SETUP_FILE] } }
       return {
         environments: {
           [ENVIRONMENT_NAME]: {
@@ -64,11 +78,11 @@ export function ghia(options: GhiaOptions): Plugin<GhiaPluginApi> {
                 createRunnableDevEnvironment(name, config, { hot: true }),
             },
             resolve: {
-              conditions: ["browser", "import", "module", "default"],
+              conditions: UI_CONDITIONS,
               noExternal: true,
               // The addon has to load natively. External is a prefix match, so the subpaths
               // follow, and the `browser` export (a wasm build) is never picked.
-              external: ["@ghia/native"],
+              external: [NATIVE_PACKAGE],
             },
             build: {
               rolldownOptions: { input: options.entry },
@@ -99,6 +113,7 @@ export function ghia(options: GhiaOptions): Plugin<GhiaPluginApi> {
 
     // A default the user can override: `config` would win over the user's own values.
     configEnvironment(name, environment) {
+      if (underVitest) return { resolve: { conditions: UI_CONDITIONS } }
       const entryFileName = ENTRY_FILE_NAMES[name]
       if (entryFileName === undefined) return
       const output = environment.build?.rolldownOptions?.output
@@ -114,23 +129,33 @@ export function ghia(options: GhiaOptions): Plugin<GhiaPluginApi> {
     },
 
     configResolved(config) {
-      entry = realpathSync(resolve(config.root, options.entry))
+      if (options.entry !== undefined) entry = realpathSync(resolve(config.root, options.entry))
       if (options.server !== undefined) {
         serverEntry = realpathSync(resolve(config.root, options.server))
       }
     },
 
     applyToEnvironment(environment) {
+      if (underVitest) return true
       return environment.name === ENVIRONMENT_NAME || environment.name === SERVER_ENVIRONMENT_NAME
     },
 
-    resolveId(id) {
-      if (id === SERVER_PORT_MODULE && this.environment.name === ENVIRONMENT_NAME) {
-        return RESOLVED_PREFIX + id
-      }
-      if (id === SERVER_MAIN_MODULE && this.environment.name === SERVER_ENVIRONMENT_NAME) {
-        return RESOLVED_PREFIX + id
-      }
+    resolveId: {
+      // Vite's own resolver runs before ordinary plugins, and it must not see the addon's ids.
+      order: "pre",
+      handler(id) {
+        if (underVitest && (id === NATIVE_PACKAGE || id.startsWith(`${NATIVE_PACKAGE}/`))) {
+          // Vitest decides what is external from the resolved path, and with the `browser`
+          // condition that path is the wasm build. Node's own resolution finds the addon's loader.
+          return { id: fileURLToPath(import.meta.resolve(id)), external: true }
+        }
+        if (id === SERVER_PORT_MODULE && this.environment.name === ENVIRONMENT_NAME) {
+          return RESOLVED_PREFIX + id
+        }
+        if (id === SERVER_MAIN_MODULE && this.environment.name === SERVER_ENVIRONMENT_NAME) {
+          return RESOLVED_PREFIX + id
+        }
+      },
     },
 
     load(id) {
@@ -160,7 +185,6 @@ export function ghia(options: GhiaOptions): Plugin<GhiaPluginApi> {
 
     api: {
       get entry() {
-        if (entry === undefined) throw new Error("The ghia() plugin has not resolved its config yet")
         return entry
       },
       get server() {
