@@ -1148,7 +1148,7 @@ impl TestGpuixRenderer {
     pub fn set_patch_enabled(&self, enabled: bool) -> Result<()> {
         update_view(move |view, _window, _cx| {
             view.patch.set_enabled(enabled);
-            view.retain.set_hover_roots(enabled);
+            view.retain.set_patch_roots(enabled);
             view.sync_commit_patching();
         })
     }

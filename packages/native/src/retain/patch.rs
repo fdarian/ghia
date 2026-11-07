@@ -189,7 +189,7 @@ impl GpuixView {
         // A root the frame shown has elsewhere than it was recorded, or did not make patchable, is declined by gpui
         // after it is built: asking first spares the build.
         let by_commit = !self.tree.lock().unwrap().pending_restyles().is_empty();
-        for &id in ids.iter().filter(|id| self.retain.is_hover_root(**id)) {
+        for &id in ids.iter().filter(|id| self.retain.is_patch_root(**id)) {
             if let Some(blocker) = window.patch_blocker(&crate::renderer::retained_id(id)) {
                 self.patch.decline(format!("{}:{blocker:?}", if by_commit { "Commit" } else { "Hover" }));
                 return None;

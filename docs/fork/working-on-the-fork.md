@@ -272,7 +272,7 @@ See [patch-frames.md](patch-frames.md).
   recorded (`delta` zero and the key equal); anything that puts the recording elsewhere has to note it as relocated, and a patch of
   such a root makes the recordings stale for the scroll translate. `PaintOperation::differs_from` compares the fields of the kinds it
   lists (`has_equal_fields`) before it formats: a new field of `Quad` or `MonochromeSprite` has to be in it. `hover_patch_tests.rs`.
-- **gpuix `hover_roots` (`Retain::paints_hover`, `begin_hover_root`, `hover_unit`) and `events/hover_paint.rs`:** a root left
+- **gpuix `patch_roots` (`Retain::can_be_patch_root`, `begin_patch_root`, `patch_root_unit`) and `events/hover_paint.rs`:** a root left
   unrecorded for a patch changes how the roots around it replay, so what makes one unfit (it might lift, an intrinsic size, a group)
   is decided from the tree before it is built; a new style that lifts or is measured under another style belongs in `may_lift` or
   `has_intrinsic_size`, and a new paint property in `differs_by_paint_only`, with its visibility. The retention fuzz and

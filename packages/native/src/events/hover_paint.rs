@@ -26,13 +26,13 @@ use crate::events::state_styles::{resolve_pointer_states, PointerStates};
 use crate::retained_tree::RetainedTree;
 use crate::style::{BackgroundValue, StyleDesc};
 
-/// The most elements a root that a hover patch repaints holds. A frame built whole that rebuilds the root builds all
+/// The most elements a root that a patch repaints holds. A frame built whole that rebuilds the root builds all
 /// of them (what is in it is recorded by no root of its own), so a root is kept to a row, a card or a small
 /// control, and a page of cards is not one: its cards are.
-pub(crate) const HOVER_ROOT_MAX_ELEMENTS: u32 = 64;
+pub(crate) const PATCH_ROOT_MAX_ELEMENTS: u32 = 64;
 
 /// The most elements that a changed `color` is checked to reach: a root holds no more.
-const WALK_LIMIT: usize = HOVER_ROOT_MAX_ELEMENTS as usize;
+const WALK_LIMIT: usize = PATCH_ROOT_MAX_ELEMENTS as usize;
 
 /// Whether the `hover` refinement of `style` only changes how the element paints. The element
 /// has to be in `tree` for its `color` to be followed to the elements that inherit it.
@@ -47,7 +47,7 @@ pub(crate) fn has_hover_paints_only(tree: &RetainedTree, id: u64, style: &StyleD
 
 /// Whether an element declares a group or follows one (`groupHover`, `groupActive`, `groupFocusWithin`): the state of a
 /// group reaches its followers through the build that reads it, and a root that holds one end of that and not the other
-/// is not left unrecorded for a hover patch. A group is a frame built whole.
+/// is not left unrecorded for a patch. A group is a frame built whole.
 pub(crate) fn uses_groups(style: &StyleDesc) -> bool {
     style.declared_group().is_some()
         || style.group_hover.is_some()
@@ -58,7 +58,7 @@ pub(crate) fn uses_groups(style: &StyleDesc) -> bool {
 /// Whether an element might be lifted out of the root it is in, or lift what is in it: it is positioned, has a
 /// `z-index`, an opacity below 1, a transform, a filter, a mask or a clip path, or paints in a layer of its own. A root
 /// that lifts something is recorded as a root that hands it to the stacking context around, which a patch of the root
-/// as one piece does not repeat, so the roots in it are not left unrecorded for one (see `Retain::paints_hover`).
+/// as one piece does not repeat, so the roots in it are not left unrecorded for one (see `Retain::can_be_patch_root`).
 pub(crate) fn may_lift(style: &StyleDesc) -> bool {
     let set = |value: &Option<String>| value.as_deref().is_some_and(|value| !value.trim().eq_ignore_ascii_case("none"));
     style.position.as_deref().is_some_and(|position| !position.eq_ignore_ascii_case("static"))
@@ -85,7 +85,7 @@ pub(crate) fn may_lift(style: &StyleDesc) -> bool {
 
 /// Whether an element has a size that an intrinsic keyword gives (`min-content`, `max-content`, `fit-content`, `content`):
 /// its box is measured under another style than its own and asked for again, and a retained root that holds one is laid
-/// out again by every frame unless the box is a root of its own, so it is not left unrecorded for a hover patch.
+/// out again by every frame unless the box is a root of its own, so it is not left unrecorded for a patch.
 pub(crate) fn has_intrinsic_size(style: &StyleDesc) -> bool {
     use crate::style::DimensionValue;
     [&style.width, &style.height, &style.min_width, &style.min_height, &style.max_width, &style.max_height, &style.flex_basis]

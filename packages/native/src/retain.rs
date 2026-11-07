@@ -51,7 +51,7 @@ mod scroll_gate;
 
 pub(crate) use patch::Patching;
 
-use crate::events::hover_paint::HOVER_ROOT_MAX_ELEMENTS;
+use crate::events::hover_paint::PATCH_ROOT_MAX_ELEMENTS;
 use crate::renderer::{GroupScope, Inherited};
 use crate::tape::BuildEffect;
 
@@ -443,11 +443,11 @@ struct Record {
     holes: u64,
     /// Elements in the subtree.
     size: u32,
-    /// The element is a root a hover patch can repaint: something in it declares a hover that only
-    /// paints (`Node::hover`), it is small enough to be a unit, lifts nothing out of it, and nothing
+    /// The element is a patch root: something in it declares a hover that only
+    /// paints (`Node::patch_root`), it is small enough to be a unit, lifts nothing out of it, and nothing
     /// runs on it. A scroller in it is no reason: its offset is a source, and a tick that finds it
     /// moved is built whole.
-    hover: bool,
+    patch_root: bool,
     /// The build read the colour the element inherits (`color::reads`): a text that sets no colour of
     /// its own, a `currentColor`, an element that paints as it likes. A colour is part of the key of
     /// the record only then.
@@ -683,8 +683,8 @@ struct Node {
     /// The scroller around it, if it is one gpui can move recordings for.
     scroller: Option<Scroller>,
     costly: bool,
-    /// See [`Entry::hover`].
-    hover: bool,
+    /// See [`Entry::patch_root`].
+    patch_root: bool,
     /// Only with `verify`: a hash of what the build made of the element itself.
     digest: u64,
     /// The element was built as a `display: none` host, which paints and lays out nothing.
@@ -721,9 +721,9 @@ struct Node {
     reads_custom: bool,
 }
 
-/// What `Retain::scan_hover` finds in a subtree.
+/// What `Retain::scan_patch_root` finds in a subtree.
 #[derive(Clone, Copy, Default)]
-struct HoverScan {
+struct PatchRootScan {
     hovers: bool,
     size: u32,
     lifts: bool,
@@ -917,11 +917,11 @@ struct Plan {
     revision: u64,
     units: Vec<Unit>,
     ids: FxHashSet<u64>,
-    /// The roots of the frame that a hover patch can repaint (`Record::hover`), recorded or skipped:
+    /// The roots of the frame that a hover or a commit patch repaints (`Record::patch_root`), recorded or skipped:
     /// built or replayed by the frame as roots of the recording gpui keeps, and not units in the
     /// sense of `units`, since nothing runs on them.
-    hovers: Vec<Unit>,
-    hover_ids: FxHashSet<u64>,
+    patch_roots: Vec<Unit>,
+    patch_root_ids: FxHashSet<u64>,
 }
 
 /// Why a tick cannot be patched, see `Retain::preview`.
@@ -1048,21 +1048,21 @@ pub(crate) struct Retain {
     reference: bool,
     /// The node a unit began at, while it is being built: nothing inside it is skipped.
     unit: Option<u32>,
-    /// The node a root that a hover patch repaints began at, while it is being built: nothing
+    /// The node a root that a patch repaints began at, while it is being built: nothing
     /// inside it is skipped or recorded either, since a patch builds the root as one piece and what
     /// it lays out, registers and paints has to be what the recording of the root holds.
-    hover_unit: Option<u32>,
+    patch_root_unit: Option<u32>,
     plan: Plan,
     /// The elements that patches repainted for a hover since the last frame built whole, whose
     /// roots hold the paint of before in their recordings: that frame builds them again.
     hover_patched: Vec<u64>,
-    /// Whether roots are made ready for a hover patch: off with patching, which would only cost the
+    /// Whether roots are made ready for a patch: off with patching, which would only cost the
     /// roots in them their records.
-    hover_roots: bool,
+    makes_patch_roots: bool,
     /// Whether an element or something below it declares a hover that only paints, and how many
-    /// elements the subtree holds (up to one more than a hover root may), by the revision of the subtree
-    /// (`paints_hover`).
-    hover_subtrees: FxHashMap<u64, (u64, HoverScan)>,
+    /// elements the subtree holds (up to one more than a patch root may), by the revision of the subtree
+    /// (`can_be_patch_root`).
+    patch_root_scans: FxHashMap<u64, (u64, PatchRootScan)>,
     /// A virtual list's row is being built, in a session of its own (`begin_row`): the list builds
     /// its rows in layout, after the render that entered the list closed the page's session.
     row: bool,
@@ -1165,8 +1165,8 @@ pub(crate) struct Entry<'a> {
     /// not a plain host box (an image, an `<svg>`). Only a root of one element needs this.
     pub costly: bool,
     /// Whether the element, or something in its subtree, declares a hover that only changes how it
-    /// paints (`Retain::paints_hover`): a root built for it is one a hover patch can repaint.
-    pub hover: bool,
+    /// paints (`Retain::can_be_patch_root`): a root built for it is a patch root.
+    pub patch_root: bool,
 }
 
 /// An element built whole that gpui records in the frame, under the key the frame after enters it
@@ -1178,9 +1178,9 @@ pub(crate) struct Recording {
     pub ignores_text_color: bool,
     pub subtree: crate::layout::cull::Subtree,
     pub overscan: Option<gpui::Pixels>,
-    /// A hover patch can repaint the root, see [`Record::hover`]: gpui keeps what a patch needs of
+    /// A patch can repaint the root, see [`Record::patch_root`]: gpui keeps what a patch needs of
     /// its surroundings, and the frame keeps what builds it again.
-    pub hover: bool,
+    pub patch_root: bool,
 }
 
 /// An element that was skipped, and what its parent and the frame need of it.
@@ -1197,8 +1197,8 @@ pub(crate) struct Skip {
     /// How far past the clip of its scroller the subtree is recorded, if it is to be put
     /// elsewhere when the scroller moves it.
     pub overscan: Option<gpui::Pixels>,
-    /// See [`Recording::hover`].
-    pub hover: bool,
+    /// See [`Recording::patch_root`].
+    pub patch_root: bool,
 }
 
 /// Why an element that is entered is built and not skipped; `getRetainDebug` reports the ones
@@ -1286,11 +1286,11 @@ impl Retain {
             layout_only: false,
             reference: false,
             unit: None,
-            hover_unit: None,
+            patch_root_unit: None,
             plan: Plan::default(),
             hover_patched: Vec::new(),
-            hover_roots: true,
-            hover_subtrees: FxHashMap::default(),
+            makes_patch_roots: true,
+            patch_root_scans: FxHashMap::default(),
             row: false,
             row_parent_shape: 0,
             rows_seen: FxHashSet::default(),
@@ -1456,7 +1456,7 @@ impl Retain {
         self.layout_only = sources.layout_only;
         self.reference = sources.reference;
         self.unit = None;
-        self.hover_unit = None;
+        self.patch_root_unit = None;
         self.plan.serial += 1;
         if sources.layout_only {
             self.plan.layout_since = true;
@@ -1551,7 +1551,7 @@ impl Retain {
         });
         self.woken.retain(|id| tree.elements.contains_key(id));
         self.skipping.retain(|id| tree.elements.contains_key(id));
-        self.hover_subtrees.retain(|id, _| tree.elements.contains_key(id));
+        self.patch_root_scans.retain(|id, _| tree.elements.contains_key(id));
     }
 
     /// Whether the frame about to be built is one that is not recorded, see [`Backoff`].
@@ -1884,7 +1884,7 @@ impl Retain {
         self.deferred = true;
         self.deferred_forced = forced;
         self.unit = None;
-        self.hover_unit = None;
+        self.patch_root_unit = None;
         self.inside_relocatable = inside_relocatable;
         self.nodes.clear();
         self.below.clear();
@@ -1913,7 +1913,7 @@ impl Retain {
         self.row = true;
         self.row_parent_shape = parent_shape;
         self.unit = None;
-        self.hover_unit = None;
+        self.patch_root_unit = None;
         self.inside_relocatable = false;
         self.nodes.clear();
         self.below.clear();
@@ -1992,7 +1992,7 @@ impl Retain {
             || self.row
             || self.layout_only
             || self.unit.is_some()
-            || self.hover_unit.is_some()
+            || self.patch_root_unit.is_some()
         {
             return None;
         }
@@ -2085,35 +2085,35 @@ impl Retain {
     }
 
     /// The unit of the last frame built whole that is the element `id`: one that a running paint-only
-    /// animation changes, or a root that a hover patch repaints.
+    /// animation changes, or a root that a patch repaints.
     pub(crate) fn unit(&self, id: u64) -> Option<&Unit> {
-        self.plan.units.iter().chain(&self.plan.hovers).find(|unit| unit.id == id)
+        self.plan.units.iter().chain(&self.plan.patch_roots).find(|unit| unit.id == id)
     }
 
     /// Whether `id`, or something below it, declares a hover that only changes how it paints and
-    /// nothing a hover patch cannot repaint, and the subtree is small enough to be a root of one: a
+    /// nothing a patch cannot repaint, and the subtree is small enough to be a root of one: a
     /// root built for it is one a patch can repaint. Nothing in it might lift (`may_lift`) unless it is
     /// a row of a list, which consumes what is lifted in it: a root that lifts is recorded as one that
     /// hands elements to the stacking context around, and the roots in it are recorded for it as they were.
     /// Worked out once per revision of the subtree. False while nothing is recorded.
-    pub(crate) fn paints_hover(&mut self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
-        if !self.open || !self.planning || !self.hover_roots {
+    pub(crate) fn can_be_patch_root(&mut self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
+        if !self.open || !self.planning || !self.makes_patch_roots {
             return false;
         }
-        let scan = self.scan_hover(tree, id);
+        let scan = self.scan_patch_root(tree, id);
         // A row of a list is a barrier to a lift: whatever is lifted in it is consumed by the row.
         scan.hovers && !scan.unfit && (!scan.lifts || tree.elements.get(&id).is_some_and(|element| crate::layout::stacking::is_virtual_row(tree, element)))
     }
 
-    /// What a subtree holds that a hover root is judged by: whether `id` or something below it declares a hover that
-    /// paints only, how many elements it holds, and whether something in it might lift. A subtree bigger than a hover
+    /// What a subtree holds that a patch root is judged by: whether `id` or something below it declares a hover that
+    /// paints only, how many elements it holds, and whether something in it might lift. A subtree bigger than a patch
     /// root says it holds one more than one may, and nothing of the elements below it: they are asked for when they
     /// are entered.
-    fn scan_hover(&mut self, tree: &crate::retained_tree::RetainedTree, id: u64) -> HoverScan {
+    fn scan_patch_root(&mut self, tree: &crate::retained_tree::RetainedTree, id: u64) -> PatchRootScan {
         let Some(element) = tree.elements.get(&id) else {
-            return HoverScan::default();
+            return PatchRootScan::default();
         };
-        if let Some((revision, scan)) = self.hover_subtrees.get(&id) {
+        if let Some((revision, scan)) = self.patch_root_scans.get(&id) {
             if *revision == element.subtree_revision {
                 return *scan;
             }
@@ -2129,45 +2129,45 @@ impl Retain {
             .is_some_and(|style| crate::events::hover_paint::has_intrinsic_size(style) || crate::events::hover_paint::uses_groups(style));
         let mut size = 1;
         for child in &element.children {
-            let below = self.scan_hover(tree, *child);
+            let below = self.scan_patch_root(tree, *child);
             hovers |= below.hovers;
             lifts |= below.lifts;
             unfit |= below.unfit;
             size += below.size;
-            if size > HOVER_ROOT_MAX_ELEMENTS {
+            if size > PATCH_ROOT_MAX_ELEMENTS {
                 break;
             }
         }
-        let scanned = if size > HOVER_ROOT_MAX_ELEMENTS {
-            HoverScan { hovers: false, size: HOVER_ROOT_MAX_ELEMENTS + 1, lifts, unfit }
+        let scanned = if size > PATCH_ROOT_MAX_ELEMENTS {
+            PatchRootScan { hovers: false, size: PATCH_ROOT_MAX_ELEMENTS + 1, lifts, unfit }
         } else {
-            HoverScan { hovers, size, lifts, unfit }
+            PatchRootScan { hovers, size, lifts, unfit }
         };
-        self.hover_subtrees.insert(id, (element.subtree_revision, scanned));
+        self.patch_root_scans.insert(id, (element.subtree_revision, scanned));
         scanned
     }
 
-    /// The element just entered is the root a hover patch repaints if the build leaves it recorded
-    /// (`Recording::hover`): the key it was entered with, for the unit to be built again from.
+    /// The element just entered is the patch root if the build leaves it recorded
+    /// (`Recording::patch_root`): the key it was entered with, for the unit to be built again from.
     ///
     /// What is built below it is built whole and recorded by no root of its own, as in a unit,
     /// until the element is left; a pass that only lays out does the same, but returns none: its
     /// roots are no frame to patch.
-    pub(crate) fn begin_hover_root(&mut self) -> Option<EnterKey> {
+    pub(crate) fn begin_patch_root(&mut self) -> Option<EnterKey> {
         // The pass that rebuilds a frame to compare it makes the roots the frame it stands for made: after
         // a patch it is the frame shown.
-        if !self.open || !self.planning || self.deferred || self.hover_unit.is_some() {
+        if !self.open || !self.planning || self.deferred || self.patch_root_unit.is_some() {
             return None;
         }
         let at = *self.stack.last()?;
         let node = &self.nodes[at as usize];
         // Not asked of the record of the last build: the pass that rebuilds a frame to compare it has
         // the record the first pass made, and has to build the roots in it as that pass did.
-        if !(node.hover && node.records) {
+        if !(node.patch_root && node.records) {
             return None;
         }
         let enter = EnterKey(node.enter);
-        self.hover_unit = Some(at);
+        self.patch_root_unit = Some(at);
         // A pass that only lays out builds the root as the frames do, but is no frame to patch.
         (!self.layout_only).then_some(enter)
     }
@@ -2177,23 +2177,23 @@ impl Retain {
         self.planning
     }
 
-    /// Makes the roots that hold a hover ready for a patch to repaint, or not (patching is off).
-    pub(crate) fn set_hover_roots(&mut self, on: bool) {
-        self.hover_roots = on;
+    /// Makes the patch roots ready for a patch to repaint, or not (patching is off).
+    pub(crate) fn set_patch_roots(&mut self, on: bool) {
+        self.makes_patch_roots = on;
     }
 
-    /// Whether the last frame built whole has the element `id` as a root that a hover patch repaints.
-    pub(crate) fn is_hover_root(&self, id: u64) -> bool {
-        self.plan.hover_ids.contains(&id)
+    /// Whether the last frame built whole has the element `id` as a root that a patch repaints.
+    pub(crate) fn is_patch_root(&self, id: u64) -> bool {
+        self.plan.patch_root_ids.contains(&id)
     }
 
-    /// Keeps the root that a hover patch repaints, for the ticks that follow the frame.
-    pub(crate) fn add_hover_unit(&mut self, unit: Unit) {
+    /// Keeps the root that a patch repaints, for the ticks that follow the frame.
+    pub(crate) fn add_patch_root(&mut self, unit: Unit) {
         if self.reference {
             return;
         }
-        self.plan.hover_ids.insert(unit.id);
-        self.plan.hovers.push(unit);
+        self.plan.patch_root_ids.insert(unit.id);
+        self.plan.patch_roots.push(unit);
     }
 
     /// The patches that were drawn for the elements `ids` restyled by paint: the roots that hold
@@ -2306,7 +2306,7 @@ impl Retain {
             .plan
             .units
             .iter()
-            .chain(&self.plan.hovers)
+            .chain(&self.plan.patch_roots)
             .map(|unit| unit.id)
             .filter(|id| touched.contains(id))
             .collect();
@@ -2322,11 +2322,11 @@ impl Retain {
         Ok(units)
     }
 
-    /// The innermost unit or hover root of the last frame built whole that holds `id`, walking up.
+    /// The innermost unit or patch root of the last frame built whole that holds `id`, walking up.
     fn root_holding(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> Option<u64> {
         let mut at = Some(id);
         while let Some(up) = at {
-            if self.plan.hover_ids.contains(&up) || self.plan.ids.contains(&up) {
+            if self.plan.patch_root_ids.contains(&up) || self.plan.ids.contains(&up) {
                 return Some(up);
             }
             at = tree.elements.get(&up).and_then(|element| element.parent);
@@ -2408,7 +2408,7 @@ impl Retain {
             moved,
             scroller: entry.scroller,
             costly: entry.costly,
-            hover: entry.hover,
+            patch_root: entry.patch_root,
             digest: 0,
             absent: false,
             absent_children: Vec::new(),
@@ -2430,7 +2430,7 @@ impl Retain {
                 && self.gate.samples(entry.id)
                 && self.lifted == 0
                 && self.unit.is_none()
-                && self.hover_unit.is_none()
+                && self.patch_root_unit.is_none()
                 && !self.deferred
                 && !self.inside_relocatable
                 && entry.plain
@@ -2476,7 +2476,7 @@ impl Retain {
                     subtree: record.subtree,
                     effects: record.effects.clone(),
                     overscan,
-                    hover: record.hover,
+                    patch_root: record.patch_root,
                 };
                 self.nodes.push(node);
                 self.below.push(Below::default());
@@ -2513,7 +2513,7 @@ impl Retain {
         }
         // A unit is built whole, so that a tick can build it again to what it is, not to what is
         // left of it.
-        if self.unit.is_some() || self.hover_unit.is_some() {
+        if self.unit.is_some() || self.patch_root_unit.is_some() {
             return Err(Kept::InUnit);
         }
         if self.deltas.all {
@@ -2591,8 +2591,8 @@ impl Retain {
         }
         // A skipped element was never pushed.
         let at = self.stack.pop().expect("exit without enter") as usize;
-        if self.hover_unit == Some(at as u32) {
-            self.hover_unit = None;
+        if self.patch_root_unit == Some(at as u32) {
+            self.patch_root_unit = None;
         }
         let end = self.nodes.len() as u32;
         let node = &mut self.nodes[at];
@@ -2643,7 +2643,7 @@ impl Retain {
             ignores_text_color: !node.reads_colors && !lifts,
             subtree: node.subtree,
             overscan,
-            hover: node.hover && !lifts && own.size <= HOVER_ROOT_MAX_ELEMENTS,
+            patch_root: node.patch_root && !lifts && own.size <= PATCH_ROOT_MAX_ELEMENTS,
         })
     }
 
@@ -3222,7 +3222,7 @@ impl Retain {
                     lifts,
                     holes,
                     size: own.size,
-                    hover: node.hover && eligible && !lifts && own.size <= HOVER_ROOT_MAX_ELEMENTS && node.vol.dynamic == 0 && !own.dynamic,
+                    patch_root: node.patch_root && eligible && !lifts && own.size <= PATCH_ROOT_MAX_ELEMENTS && node.vol.dynamic == 0 && !own.dynamic,
                     reads_colors: node.reads_colors,
                     reads_custom: node.reads_custom,
                     costly: node.costly,
@@ -3499,7 +3499,7 @@ mod tests {
             scroller: None,
             lift_run: &|| false,
             costly: true,
-                hover: false,
+                patch_root: false,
         });
         retain.stacking(|| (None, true));
         retain.digest(|| built.to_owned());
@@ -3579,7 +3579,7 @@ mod tests {
             scroller: None,
             lift_run: &|| false,
             costly: true,
-                hover: false,
+                patch_root: false,
         };
         let mut recordings = Vec::new();
         let skipped = retain.enter(entry(1, 0)).is_some();
@@ -3654,7 +3654,7 @@ mod tests {
                 scroller: None,
                 lift_run: &|| false,
                 costly: true,
-                hover: false,
+                patch_root: false,
             })
             .expect("the root is skipped by the frame after the one that built it");
         assert_eq!(skip.token, parent);
@@ -3741,7 +3741,7 @@ mod tests {
                     scroller: None,
                     lift_run: &|| lift_run,
                     costly: true,
-                hover: false,
+                patch_root: false,
                 })
                 .is_some();
             if !skipped {
@@ -3876,7 +3876,7 @@ mod tests {
                 scroller: None,
                 lift_run: &|| false,
                 costly: true,
-                hover: false,
+                patch_root: false,
             });
             retain.stacking(|| (None, true));
         }
@@ -4014,7 +4014,7 @@ mod tests {
                 scroller: None,
                 lift_run: &|| false,
                 costly: true,
-                hover: false,
+                patch_root: false,
             })
         };
         enter(retain, 1, revision);
@@ -5188,7 +5188,7 @@ mod tests {
         /// The custom elements the registry holds when a frame begins, with their `retain_state`.
         customs: Vec<(u64, Option<u64>)>,
         /// The elements that declare a hover that only paints, or hold one.
-        hovers: FxHashSet<u64>,
+        patch_roots: FxHashSet<u64>,
         /// The elements a hover restyled by paint, which the next preview and frame find.
         hover_paint: Vec<u64>,
     }
@@ -5213,7 +5213,7 @@ mod tests {
                 scrolls: HashMap::new(),
                 revisions: HashMap::new(),
                 customs: Vec::new(),
-                hovers: FxHashSet::default(),
+                patch_roots: FxHashSet::default(),
                 hover_paint: Vec::new(),
             }
         }
@@ -5261,29 +5261,29 @@ mod tests {
                     scroller,
                     lift_run: &|| false,
                     costly: true,
-                    hover: self.hovers.contains(&id),
+                    patch_root: self.patch_roots.contains(&id),
                 })
         }
 
-        /// Builds the element `id` the way `build_element_in` does for a root a hover patch can
-        /// repaint, with `inside` building what is in it. Says whether it is one. Nothing if the frame
+        /// Builds the element `id` the way `build_element_in` does for a patch root, with `inside` building what is in it.
+        /// Says whether it is one. Nothing if the frame
         /// skipped it, in which case the skip says whether it is and it is kept as one.
-        fn hover_root(&mut self, id: u64, inside: impl FnOnce(&mut Self)) -> Option<bool> {
+        fn patch_root(&mut self, id: u64, inside: impl FnOnce(&mut Self)) -> Option<bool> {
             if let Some(skip) = self.enter_in(id, None) {
-                if skip.hover {
+                if skip.patch_root {
                     let env = crate::renderer::FrameEnv::for_test(self.inherited.clone(), skip.enter, web_time::Instant::now());
-                    self.retain.add_hover_unit(Unit { id, env });
+                    self.retain.add_patch_root(Unit { id, env });
                 }
                 return None;
             }
             self.retain.stacking(|| (None, true));
-            let enter = self.retain.begin_hover_root();
+            let enter = self.retain.begin_patch_root();
             inside(self);
             let recording = self.retain.exit();
-            let hover = enter.zip(recording).filter(|(_, recording)| recording.hover);
+            let hover = enter.zip(recording).filter(|(_, recording)| recording.patch_root);
             if let Some((enter, _)) = hover {
                 let env = crate::renderer::FrameEnv::for_test(self.inherited.clone(), enter, web_time::Instant::now());
-                self.retain.add_hover_unit(Unit { id, env });
+                self.retain.add_patch_root(Unit { id, env });
             }
             Some(hover.is_some())
         }
@@ -6221,7 +6221,7 @@ mod tests {
     #[test]
     fn a_restyle_by_paint_is_no_edit_but_any_other_change_is_one_a_frame_built_whole_ends() {
         let mut page = Units::new();
-        page.hovers = [2, 3].into_iter().collect();
+        page.patch_roots = [2, 3].into_iter().collect();
         page.tree.set_commit_patching(true);
         page.tree.set_style(3, restyled(r##"{"backgroundColor":"#111111"}"##));
         page.tree.set_style(5, restyled(r##"{"backgroundColor":"#111111"}"##));
@@ -6322,9 +6322,9 @@ mod tests {
     fn hover_page(page: &mut Units, hovered: &[u64]) -> [Option<bool>; 3] {
         let mut roots = [None; 3];
         page.frame(hovered, false, |page| {
-            roots[0] = page.hover_root(1, |page| {
-                roots[1] = page.hover_root(2, |page| {
-                    roots[2] = page.hover_root(3, |_| {});
+            roots[0] = page.patch_root(1, |page| {
+                roots[1] = page.patch_root(2, |page| {
+                    roots[2] = page.patch_root(3, |_| {});
                     page.leaf(4);
                 });
                 page.leaf(5);
@@ -6336,7 +6336,7 @@ mod tests {
     #[test]
     fn a_hover_that_only_paints_is_not_a_source_of_a_tick() {
         let mut page = Units::new();
-        page.hovers = [1, 2, 3].into_iter().collect();
+        page.patch_roots = [1, 2, 3].into_iter().collect();
         hover_page(&mut page, &[]);
         hover_page(&mut page, &[]);
         assert_eq!(page.preview(&[3, 2, 1], false), Ok(vec![]), "the chain moved and nothing was restyled");
@@ -6348,10 +6348,10 @@ mod tests {
     #[test]
     fn the_outermost_root_that_holds_a_hover_is_the_hover_root_and_holds_what_is_in_it() {
         let mut page = Units::new();
-        page.hovers = [1, 2, 3].into_iter().collect();
+        page.patch_roots = [1, 2, 3].into_iter().collect();
         let first = hover_page(&mut page, &[]);
         assert_eq!(first, [Some(true), Some(false), Some(false)], "what is below the root is built in it, recorded by nothing");
-        assert_eq!(page.retain.plan.hover_ids, [1].into_iter().collect());
+        assert_eq!(page.retain.plan.patch_root_ids, [1].into_iter().collect());
         for restyled in [vec![3], vec![3, 4], vec![5], vec![1]] {
             page.hover_paint = restyled;
             assert_eq!(page.preview(&[], false), Ok(vec![1]));
@@ -6362,7 +6362,7 @@ mod tests {
     fn a_tick_repaints_the_roots_that_hold_what_a_hover_restyled() {
         let mut page = Units::new();
         // 1 is too big to be a root (it is not asked for a hover), 2 and 5 hold a hover.
-        page.hovers = [2, 3, 5].into_iter().collect();
+        page.patch_roots = [2, 3, 5].into_iter().collect();
         let first = hover_page(&mut page, &[]);
         assert_eq!(first, [Some(false), Some(true), Some(false)]);
         page.hover_paint = vec![3];
@@ -6374,7 +6374,7 @@ mod tests {
         page.hover_paint.clear();
         let again = hover_page(&mut page, &[]);
         assert_eq!(again, [None, None, None], "the page is skipped");
-        assert!(page.retain.plan.hover_ids.is_empty());
+        assert!(page.retain.plan.patch_root_ids.is_empty());
         page.hover_paint = vec![3];
         assert_eq!(page.preview(&[3, 2, 1], false), Err(Unpatchable::Hover(3)));
     }
@@ -6382,12 +6382,12 @@ mod tests {
     #[test]
     fn a_skipped_root_that_holds_a_hover_is_kept_as_one() {
         let mut page = Units::new();
-        page.hovers = [1, 2, 3].into_iter().collect();
+        page.patch_roots = [1, 2, 3].into_iter().collect();
         hover_page(&mut page, &[]);
         page.hover_paint.clear();
         let again = hover_page(&mut page, &[]);
         assert_eq!(again, [None, None, None], "the page is skipped");
-        assert_eq!(page.retain.plan.hover_ids, [1].into_iter().collect());
+        assert_eq!(page.retain.plan.patch_root_ids, [1].into_iter().collect());
         page.hover_paint = vec![3];
         assert_eq!(page.preview(&[3, 2, 1], false), Ok(vec![1]));
     }
@@ -6395,7 +6395,7 @@ mod tests {
     #[test]
     fn an_element_no_root_holds_is_a_frame_built_whole() {
         let mut page = Units::new();
-        page.hovers = [2, 3].into_iter().collect();
+        page.patch_roots = [2, 3].into_iter().collect();
         hover_page(&mut page, &[]);
         page.hover_paint = vec![5];
         assert_eq!(page.preview(&[], false), Err(Unpatchable::Hover(5)));
@@ -6408,25 +6408,25 @@ mod tests {
     #[test]
     fn a_root_found_unfit_is_no_hover_root_and_blocks_the_roots_in_it_all_the_same() {
         let mut page = Units::new();
-        page.hovers = [1, 2, 3].into_iter().collect();
-        // Something runs in 3, so the root above it is built every frame and is no hover root.
+        page.patch_roots = [1, 2, 3].into_iter().collect();
+        // Something runs in 3, so the root above it is built every frame and is no patch root.
         let mut inner = None;
         page.frame(&[], false, |page| {
-            let outer = page.hover_root(1, |page| {
+            let outer = page.patch_root(1, |page| {
                 inner = page.element(3, Some(true), |_| {});
                 page.leaf(4);
             });
             assert_eq!(outer, Some(false));
         });
         assert_eq!(inner, None, "the element with the animation is no unit inside the root");
-        assert!(page.retain.plan.hover_ids.is_empty());
-        assert!(page.retain.records.get(&1).is_some_and(|record| !record.hover), "recorded as no hover root");
+        assert!(page.retain.plan.patch_root_ids.is_empty());
+        assert!(page.retain.records.get(&1).is_some_and(|record| !record.patch_root), "recorded as no patch root");
     }
 
     #[test]
     fn a_frame_built_whole_after_a_patch_builds_the_roots_the_patch_repainted() {
         let mut page = Units::new();
-        page.hovers = [1, 2, 3].into_iter().collect();
+        page.patch_roots = [1, 2, 3].into_iter().collect();
         hover_page(&mut page, &[]);
         hover_page(&mut page, &[]);
         // A frame that finds nothing changed skips the roots: here 1.
@@ -6449,7 +6449,7 @@ mod tests {
     #[test]
     fn a_frame_takes_what_the_hover_restyled_by_paint_before_it() {
         let mut page = Units::new();
-        page.hovers = [1, 2, 3].into_iter().collect();
+        page.patch_roots = [1, 2, 3].into_iter().collect();
         hover_page(&mut page, &[]);
         hover_page(&mut page, &[]);
         page.hover_paint = vec![3];
