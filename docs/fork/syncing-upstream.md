@@ -152,6 +152,49 @@ each entry or applies it again.
   `a_row_with_a_kept_transparent_background_is_patched_to_the_colour_of_the_hover` (`window/hover_patch_tests.rs`) fail when any is
   lost. If upstream ever paints transparent backgrounds, or gives `Style` a field of its own for it, take theirs and drop the flag.
 
+### Recent leaves in the bounds tree (zed `bounds_tree.rs`)
+
+- **Decision.** The owner approved this on 2026-11-07 as an exception to the rule above: it changes
+  `BoundsTree::find_max_ordering`, upstream's code, and any GPUI app would gain from it. It is a candidate for a PR to
+  `zed-industries/zed` (made in a separate worktree from upstream `main`, per [AGENTS.md](../../AGENTS.md)); until it lands
+  the fork carries it.
+- **Before.** The order of a primitive is one more than the greatest order of the bounds inserted before it that intersect it.
+  `find_max_ordering` answered from the leaf of the greatest order when that intersects, and otherwise searched the R-tree
+  from the root: 44 nodes popped an insert over the 211 476 inserts of the mailbox scroll proxy.
+- **After.** The tree keeps the last 16 inserts and their orders in a ring (`RecentLeaves`, emptied by `clear`), and a query that
+  the leaf of the greatest order does not answer checks them newest first. One that intersects the query raises the answer to its
+  order; one that intersects it and encloses it (edges included, `encloses`) ends the query. Otherwise the tree is searched as
+  before, with the answer the ring found as the floor its pruning starts from. GPUI paints a parent before its children and a text
+  layout one layer a line, so the bounds just before a child's are mostly its parent's background: in the proxy the ring ends
+  85% of the queries the leaf of the greatest order does not (89% in the hover phase), and the nodes popped fall to 3.5 an
+  insert. The size is the const parameter `RECENT` of `BoundsTree` (default `RECENT_LEAVES`, 16; 32 ended 87%), and
+  `RECENT = 0` is the search as upstream wrote it.
+- **Why it is exact.** Let the leaf L that ends the query intersect it and enclose it. A leaf older than L that intersects the
+  query intersects L (its edges are past the query's, and the query's are inside L's, with the corners worked out as
+  `Bounds::intersects` works them out), so its order is below L's; every leaf newer than L is in the ring and was checked. The
+  floor the search starts from is the order of a leaf that intersects, which the search would have found.
+- **Where it differs.** The tree's own node boxes are an origin and a size, and a box's far edge, the origin plus the size, can
+  come out an ulp short of the far edge of the leaf it was made from, so upstream's search misses an overlap of an ulp (rows
+  stepped by a third of a pixel near 1000 get the order of the row before, which they overlap by an ulp). A recent leaf is
+  compared as it was inserted and finds such an overlap, so there the orders are the definition's and not upstream's. Bounds on
+  a grid of a power of two, which a layout in 1/64 px scaled by 1 or 2 is, are added and subtracted exactly: every one of the
+  853 212 numbers the proxy inserted is a multiple of 1/64, and its orders are upstream's in all 749 frames.
+- **Measured** (bench mailbox proxy, `examples/solid/mailbox-scroll-hover/profile.tsx`, `A11Y=0`, test renderer, release addon,
+  instructions per tick, two runs each back to back; zed `88855d100d` before, ghia `6deba69a`):
+  - scroll: mean 7.87M and 7.88M to 7.50M and 7.49M; the 328 patched ticks 3.38M and 3.36M to 2.91M and 2.95M; the 392 ticks
+    built whole 11.62M and 11.65M to 11.34M and 11.30M. About 1.3K instructions a bounds insert (292 a tick).
+  - scroll with `NO_ROW_HOVER=1 NO_FOLDER_HOVER=1` (rows without the kept transparent background of
+    [the entry above](#a-transparent-background-quad-that-is-kept-zed-stylers-scenrs)): 7.58M and 7.67M to 7.54M and 7.56M.
+    The kept background cost 0.25M a tick before (7.87M against 7.62M) and nothing after (7.50M against 7.55M): it is the
+    enclosing leaf that ends the queries of the row's text.
+  - hover row crossings (18, all patched, 0 to 33 inserts each): median 4.07M and 4.07M to 4.05M and 4.10M, unchanged.
+- **Considerations.** A sync that replaces `bounds_tree.rs` has to keep the ring (`recent`, cleared in `clear`, pushed in
+  `insert`) and the scan before the search, or drop this entry if upstream takes the PR. The tests in
+  `bounds_tree/differential_tests.rs` keep upstream's implementation as `ReferenceTree` and compare the orders of the tree with
+  0, 1 and 16 recent leaves with it and with the definition, on random bounds, bounds painted the way a UI paints them (rows that
+  touch edges, a layer a line, empty and overflowing boxes, steps of 0.1 and 1/3 up to 10 000) and two mailbox frames
+  recorded from the proxy (`bounds_tree/mailbox_frames.txt`).
+
 ## Procedure
 
 1. Fetch the upstreams: `git fetch upstream` in the repo root and in `zed/`, and `git fetch zed-industries main` in `zed/`.
