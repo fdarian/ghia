@@ -123,6 +123,7 @@ impl GpuixView {
             // The rows that left are out of the registries before the sweeps read the boxes, and out of
             // the page's records before a frame builds a row that comes in again.
             settled_tapes.settle_rows(window.window_handle().window_id());
+            crate::renderer::list_writes_drawn(settled_view.entity_id());
             if let Some(view) = settled_view.upgrade().filter(|view| !view.is_updating(cx)) {
                 view.update(cx, |view, _| view.forget_left_rows());
             }

@@ -599,6 +599,9 @@ pub(crate) enum PendingLayout {
 thread_local! {
     /// The views that have a patch of anchors to draw, which moved boxes: the layout is older than the tree.
     static LAYOUT_PENDING: std::cell::RefCell<rustc_hash::FxHashMap<gpui::EntityId, PendingLayout>> = Default::default();
+    /// The views whose list was written to quietly (`invalidate_after_scroll`) and not drawn since: the boxes of the rows are
+    /// where the write put the offset only in a layout, which a read of boxes runs.
+    static LIST_WRITTEN: std::cell::RefCell<rustc_hash::FxHashSet<gpui::EntityId>> = Default::default();
 }
 
 /// What a read of geometry does before it lays out. A view with a patch of anchors waiting has its
@@ -608,6 +611,14 @@ thread_local! {
 /// declines it, or the tree is not a patch any more) the view is invalidated, as a commit that lays
 /// out invalidates it, so the read sees the tree's boxes, and the tick that was asked for is drawn whole.
 pub(crate) fn settle_pending_layout(window: &mut gpui::Window, cx: &mut gpui::App) {
+    // A read of boxes after a write to a list's offset sees the rows where the write put them, as a browser's does: the view is
+    // notified as a `div` scroller's write notifies it, which a patch that was prepared does not survive.
+    let written: Vec<gpui::EntityId> = LIST_WRITTEN.with(|written| written.borrow_mut().drain().collect());
+    for view in written {
+        discard_prepared_patch(window, cx, view, PendingLayout::Notified);
+        note_pending(view, PendingLayout::Notified);
+        cx.notify_scroll_only(view);
+    }
     let views: Vec<(gpui::EntityId, PendingLayout)> =
         LAYOUT_PENDING.with(|pending| pending.borrow().iter().map(|(view, state)| (*view, *state)).collect());
     let root = window.root::<GpuixView>().flatten();
@@ -639,6 +650,12 @@ pub(crate) fn notify_pending_layout(cx: &mut gpui::App) {
 /// A frame is being built: the view's layout is no older than the tree.
 pub(crate) fn layout_is_drawn(view: gpui::EntityId) {
     LAYOUT_PENDING.with(|pending| pending.borrow_mut().remove(&view));
+    list_writes_drawn(view);
+}
+
+/// The draw that follows a quiet write to a list's offset is done.
+pub(crate) fn list_writes_drawn(view: gpui::EntityId) {
+    LIST_WRITTEN.with(|written| written.borrow_mut().remove(&view));
 }
 
 /// What a read of geometry does about the content of the skipped ancestors of its element.
@@ -833,6 +850,7 @@ pub(crate) fn is_virtual_list(id: u64) -> bool {
 pub(crate) fn invalidate_after_scroll(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, list: bool) {
     if list && crate::retain::scroll_gate::list_write_is_quiet(view) {
         window.note_list_scrolled(view);
+        LIST_WRITTEN.with(|written| written.borrow_mut().insert(view));
         return;
     }
     // The view is notified, so the patch of anchors a read prepared is gone and the tick is drawn whole.
