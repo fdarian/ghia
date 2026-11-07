@@ -943,6 +943,20 @@ again, and no patched key costs less than the whole frame next to it but one: 29
 selection left or came to is held by no patch root) and one `PendingView`. `PHASE=hover` row crossings: median 4.095M and 4.069M, 18 of 18 patched
 (4.06M at G1), `PHASE=scroll` median 6.893M and 6.896M, mean 7.569M and 7.539M (6.889M and 7.543M at G1).
 
+**Measured, G2** (zed `c4590da472`: a read prepares the patch; same proxies, `A11Y=0`, two runs each, instructions per key). Keys 1 to 8 of the
+Navigate proxy do not scroll the list (the selection stays in view), keys 9 to 30 do (`reveal` calls `list.scrollTo`). `APP=App`: median 38.5M and 39.2M
+over keys 2 to 30 (38.6M to 40.5M at G1.5; 39.0M with `GPUIX_ANCHORS_OFF=1`), in two kinds of key. Keys 2 to 8: all seven are a relayout patch,
+prepared at the read and finished by the draw, no layout pass, no whole frame: median 34.3M and 33.1M (40.1M with anchors off), and keys 4 to 8, which
+are warm, 31.5M and 30.9M against 38.0M. The phases of those keys, medians: the read that prepares (`getScrollMetrics`) 17.3M against the pass of 19.3M, the
+draw 9.4M against 14.2M, 32.1M in all against 39.6M. Keys 9 to 30: none is patched (22 of 22 `PendingView`; 21 of them are declined `Commit` at the read, a restyle of
+a row that no patch root holds (the row the selection comes to is not in the frame shown), so the read lays out as before; the one that gets as far as a prepare, key 9,
+is discarded by the scroll and costs 40.5M to 47.6M against 31.5M with anchors off, the price of a prepare that nothing finishes): median 41.1M and 40.6M
+(38.3M with anchors off, keys 10 to 30 within 1M of each other key by key). `APP=App-noreveal`: median 28.7M and 28.6M (28.6M with anchors off); keys 2 to 8 are the seven
+patches (30.7M and 33.7M, 32.4M with anchors off), the rest `Commit`. `PHASE=hover` row crossings: median 4.118M and 4.113M, 18 of 18 patched (4.07M at G1.5);
+`PHASE=scroll` median 6.882M and 6.874M, mean 7.541M and 7.544M (6.89M and 7.54M). What is left of the patched key is what the estimate of the design
+kept (the detail built, laid out and painted once, the rows) and it costs more than estimated: the prepare is 17.3M, of which the detail's text shaping and
+layout is the most.
+
 **Limits.**
 
 - A scroll write after a read that prepared the patch (the bench's `reveal()` scrolls the list on the keys that move the selection out of
