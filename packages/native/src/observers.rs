@@ -601,6 +601,30 @@ pub(crate) fn frame_sweep(
     .h(px(0.0))
 }
 
+/// What [`frame_sweep`] does after a draw, for a frame that moved the rows of a list in place
+/// (`Window::set_scroll_patch_settled`): nothing paints in such a frame, so the canvas the sweep
+/// is made of does not run, and the boxes the translate moved are read here, after it, as they
+/// are after a frame that painted them.
+pub(crate) fn sweep_after_translate(
+    window: gpui::AnyWindowHandle,
+    viewport: gpui::Size<Pixels>,
+    reports: &SharedPaintReports,
+    tree: &Mutex<RetainedTree>,
+    callback: &Option<EventCallback>,
+    cx: &mut App,
+) {
+    let (relevant, active) = {
+        let tree = tree.lock().unwrap();
+        (!tree.relevance.is_empty(), !tree.geometry_ids.is_empty() || reports.borrow().observers.is_observing())
+    };
+    if relevant {
+        sweep_relevance(window, viewport, tree, callback, cx);
+    }
+    if active {
+        sweep(window.window_id(), viewport, reports, tree, callback);
+    }
+}
+
 /// Reads the boxes of the elements with `content-visibility: auto` to see which are near the
 /// viewport, asks for a frame when one is to show or skip its content, and tells the elements
 /// whose state a frame has applied (`contentvisibilityautostatechange`).

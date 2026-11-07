@@ -72,6 +72,9 @@ impl GpuixView {
             },
         )));
         let settled = self.pointer.clone();
+        let reports = self.paint_reports.clone();
+        let sweep_tree = self.tree.clone();
+        let callback = self.event_callback.clone();
         window.set_scroll_patch_settled(Some(Rc::new(move |window: &mut gpui::Window, cx: &mut gpui::App| {
             let settle = settled
                 .borrow()
@@ -79,6 +82,7 @@ impl GpuixView {
                 .clone()
                 .expect("a frame that moves the rows has the pointer frame of the frame shown");
             settle(window, cx);
+            crate::observers::sweep_after_translate(window.window_handle(), window.viewport_size(), &reports, &sweep_tree, &callback, cx);
         })));
         window.set_scroll_patch_gate(Some(Rc::new(move |_: &gpui::Window| {
             let Some(revision) = shown.0.get() else {

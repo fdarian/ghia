@@ -5940,7 +5940,7 @@ pub(crate) struct GpuixView {
     highlights: HashMap<u64, HighlightCacheEntry>,
     /// What `onLayout` and `onScroll` last reported, for the elements that
     /// have the listener. Shared with the paint closures that compare against it.
-    paint_reports: SharedPaintReports,
+    pub(crate) paint_reports: SharedPaintReports,
     /// The content box layout last produced for each query container, which the next build
     /// reads: see `layout::container`.
     containers: crate::layout::container::ContainerStore,

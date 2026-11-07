@@ -879,7 +879,10 @@ what the frame shown cut moved by the offset would be. So for each row it makes 
   measures from the layout of the frame shown, which a translate does not change.
 - **After.** The window is current as after a draw: layout current (`mark_layout_current`), presented, the dirty flag cleared. The
   view that scrolled stays queued, so a frame built whole after it renders again. Ghia follows the hover with the resync the pointer
-  frame schedules after a draw (`Window::set_scroll_patch_settled`, run deferred): the hit test is of the frame that moved.
+  frame schedules after a draw (`Window::set_scroll_patch_settled`, run deferred): the hit test is of the frame that moved. The same callback runs the
+  sweeps that a painted frame runs from the canvas `observers::frame_sweep` (`onLayout`, `ResizeObserver`, `IntersectionObserver` and the `content-visibility: auto`
+  elements, `observers::sweep_after_translate`): a translate paints nothing, so nothing else would read the boxes it moved, and an `IntersectionObserver` on a row
+  would be told of a row that came into view with the next frame built whole.
 
 Everything that can decline is checked before anything is written (the plan keeps, for each row, the recording it holds by reference, and the writes are made from it). A row whose state or recording is gone, that hands elements to a stacking context, or
 whose operations or hitboxes are not as many as it recorded (a hidden row records none) declines the whole translate
@@ -1019,6 +1022,10 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   A scroll that brings the thumb back to where the frame shown painted it moves it back (`brings_the_thumb_back_to_where_the_frame_shown_painted_it`: it
   fails when `plan` compares against the whole frame's thumb), and `scroll-patch-thumb.test.tsx` has the same after a fade: the wheel that shows the bar is
   drawn whole, then 0 and back, with the picture of the control at each step.
+- `scroll-patch-observers.test.tsx` (react): an `IntersectionObserver` with thresholds on the third row of a short list, wheeled by 5 px in steps and back, is told the
+  entries of the control with the translate off, in frames that are translates (`patched` at least 6; it fails without the sweep after a translate). `onLayout` and
+  `ResizeObserver` have nothing to read in a translate (no size changes) and an `auto` element cannot change its answer by a scroll that a recording of a row allows, so
+  they have no case.
 - `scroll-patch-clock.test.tsx` (react): a wheel in the draw of a tick (a transition of a box beside the list, the blink of the caret of an input beside it) is
   a whole frame, `reasons.Clock` counts them, the picture after each step and the `transitionend` are those of the control with the translate off, and the
   translates resume once the transition has ended. gpui `window/scroll_patch_tests.rs`: a `request_tick` in the draw of a wheel is `Clock` and the next wheel
