@@ -1817,6 +1817,7 @@ export interface HostProps
   onShowMore?: (event: DomEvent) => void
   onLineClick?: (event: DomEvent) => void
   onLinkClick?: (event: DomEvent) => void
+  /** Fires when the rows in view change (`startIndex` to `endIndex`, exclusive), not on every scroll event. */
   onVisibleRange?: (event: DomEvent) => void
   /** Match count changed for this element's `highlight`. See `matchCount`. */
   onHighlight?: (event: DomEvent) => void
@@ -2011,6 +2012,7 @@ export type VirtualListShared = AriaProps & {
   alignment?: "top" | "bottom"
   followTail?: boolean
   overdraw?: number
+  /** Fires when the rows in view change (`startIndex` to `endIndex`, exclusive), not on every scroll event. */
   onVisibleRange?: (event: DomEvent) => void
   role?: string
   id?: string

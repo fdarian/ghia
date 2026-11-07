@@ -39,6 +39,7 @@ macro_rules! overlay_fields {
             // What the element is, not a property: the style on top of it is the same element's.
             flex_or_grid_item: $base.flex_or_grid_item,
             lift_absorbed: $base.lift_absorbed,
+            keeps_background: $base.keeps_background,
             atomic_inline: false,
             animating_opacity: $base.animating_opacity,
             animating_transform: $base.animating_transform,
@@ -165,6 +166,7 @@ pub(crate) fn is_overlay_fixed_point(style: &StyleDesc) -> bool {
 /// handle applies them after it, so they beat every layer here either way.
 pub fn resolve_pointer_states(style: &StyleDesc, states: PointerStates) -> StyleDesc {
     let mut resolved = overlay(style, &StyleDesc::default());
+    resolved.keeps_background = style.keeps_background_quad();
     let layers = [
         (states.group_hovered, style.group_hover.as_deref(), true),
         (states.has_hovered, style.has_hover.as_deref(), false),

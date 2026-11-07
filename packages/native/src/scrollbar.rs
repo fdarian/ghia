@@ -16,6 +16,10 @@
 //! In both styles the thumb drags, and pressing the track pages toward the pointer. The bar is
 //! an overlay (`paint_overlay`), so it never takes part in what the container can scroll. Its
 //! hitbox exists only where the bar is visible, so it blocks nothing otherwise.
+//!
+//! A virtual list's bar also tells gpui how a scroll moves its thumb (`paint_scroll_thumb`), so a
+//! frame that moves the rows of the frame shown moves the thumb too and builds nothing: see
+//! [`plan_thumb`] and [`move_thumb`].
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -452,6 +456,8 @@ pub(crate) struct State {
     frozen: [Option<u64>; 2],
     /// The last prepaint asked for another frame: the bar fades, grows or settles its gutter.
     needs_frames: bool,
+    /// The bar is a virtual list's.
+    list: bool,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -504,9 +510,33 @@ fn now() -> Instant {
     NOW.get().unwrap_or_else(Instant::now)
 }
 
+/// The clock's instant, which a frame that builds nothing has no `now` of its own to sample at.
+fn clock_now() -> Instant {
+    CLOCK.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .expect("a frame began before a bar is planned")
+            .now()
+    })
+}
+
 /// Whether a bar of the last frame asked for another frame: it fades, grows or settles its gutter.
 pub(crate) fn needs_frames() -> bool {
     STATES.with(|states| states.borrow().values().any(|state| state.borrow().needs_frames))
+}
+
+/// Whether a bar of a scroll container (a list's are planned, see [`plan_thumb`]) was painted at
+/// an alpha or a thickness that the clock has since changed. A frame that moves the rows builds no
+/// bar, so it would leave the end of its hold, or the thickening, unseen.
+pub(crate) fn container_bar_stale() -> bool {
+    let now = clock_now();
+    let frame = FRAME.get();
+    STATES.with(|states| {
+        states.borrow().values().any(|state| {
+            let st = state.borrow();
+            st.seen == frame && !st.list && st.stale_at(now)
+        })
+    })
 }
 
 /// Whether a bar of the last frame was painted at an alpha or a thickness that the clock has since
@@ -548,7 +578,7 @@ impl State {
     /// Has one timer wait for `ends`, the end of the hold, and none when there is no hold. A timer
     /// already waiting for it is left alone: prepaint runs again in the culled, the multi-pass and
     /// the reference passes of a draw.
-    fn wake_at(&mut self, ends: Option<Instant>, window: &gpui::Window, cx: &gpui::App) {
+    fn wake_at(&mut self, ends: Option<Instant>, view: gpui::EntityId, window: &gpui::Window, cx: &gpui::App) {
         let Some(at) = ends else {
             self.hold_timer = None;
             return;
@@ -556,7 +586,6 @@ impl State {
         if self.hold_timer.as_ref().is_some_and(|timer| timer.at == at) {
             return;
         }
-        let view = window.current_view();
         let clock = CLOCK
             .with(|cell| cell.borrow().clone())
             .expect("a frame began before its bars are prepainted");
@@ -684,37 +713,24 @@ fn axis_of(bounds: gpui::Bounds<gpui::Pixels>, vertical: bool) -> (f32, f32) {
     }
 }
 
-/// Works out whether and where the bars show, and inserts their hitboxes. Prepaint, because a
-/// hitbox can only be inserted there.
-fn prepaint(
-    state: &Rc<RefCell<State>>,
-    source: &Source,
-    look: Look,
-    bounds: gpui::Bounds<gpui::Pixels>,
-    window: &mut gpui::Window,
-    cx: &gpui::App,
-) {
-    let mut st = state.borrow_mut();
-    st.seen = FRAME.get();
-    let now = now();
+/// Where the bars of a source lie for its extent now.
+struct Bars {
+    layout: [Option<AxisLayout>; 2],
+    /// Tracks with no thumb: a classic bar with nothing to scroll, and the corner where two meet.
+    empty_tracks: Vec<gpui::Bounds<gpui::Pixels>>,
+    /// Per axis, whether the content scrolls.
+    needed: [bool; 2],
+}
+
+/// Works out where the bars of `source` lie in the box `bounds`, which prepaint and the plan of a
+/// frame that moves the rows both ask, so a thumb is where the frame built whole would put it.
+fn lay_out(source: &Source, look: Look, bounds: gpui::Bounds<gpui::Pixels>) -> Bars {
     let (max, offset) = source.extent();
-
-    if let Some(last) = st.last_offset {
-        let moved = (f32::from(last.x - offset.x)).abs() > 0.01
-            || (f32::from(last.y - offset.y)).abs() > 0.01;
-        if moved {
-            st.last_active = Some(now);
-        }
-    }
-    st.last_offset = Some(offset);
-
     let port = source.port(bounds);
     let gutter = source.gutter();
-    let classic = look.classic();
     let bar = look.bar();
     let [user_x, user_y] = source.axes();
     let scrolls = [user_x && f32::from(max.x) > 0.5, user_y && f32::from(max.y) > 0.5];
-    st.needed = scrolls;
     // The bar of the x axis lies along the bottom, so it takes the gutter's height.
     let room = [f32::from(gutter.height), f32::from(gutter.width)];
     let shown = [scrolls[0] || room[0] > 0.0, scrolls[1] || room[1] > 0.0];
@@ -775,26 +791,85 @@ fn prepaint(
             gpui::size(gutter.width, gutter.height),
         ));
     }
+    Bars { layout, empty_tracks, needed: scrolls }
+}
 
-    let held = st.hover.iter().any(|hovered| *hovered) || st.drag.is_some();
-    // The hold starts when the pointer lets go, not when a frame last saw it there: no frame is
-    // asked for while it stays.
-    if held || st.was_held {
-        st.last_active = Some(now);
+/// Whether the offset moved from `last`, as the bar counts a move.
+fn moved(last: gpui::Point<gpui::Pixels>, offset: gpui::Point<gpui::Pixels>) -> bool {
+    (f32::from(last.x - offset.x)).abs() > 0.01 || (f32::from(last.y - offset.y)).abs() > 0.01
+}
+
+/// What a bar's activity comes to at an instant, from where its offset is and who holds it.
+struct Activity {
+    last_active: Option<Instant>,
+    held: bool,
+    pinned: bool,
+    alpha: f32,
+}
+
+impl Activity {
+    fn holding(&self, now: Instant) -> bool {
+        !self.pinned && self.last_active.is_some_and(|active| now < active + IDLE)
     }
-    st.was_held = held;
-    st.pinned = classic || held;
-    let alpha = if classic { 1.0 } else { alpha_at(st.last_active, now) };
-    let holding = !st.pinned && st.last_active.is_some_and(|active| now < active + IDLE);
-    let fading = !st.pinned && alpha > 0.0 && !holding;
-    let hold_ends = st
-        .last_active
-        .filter(|_| holding)
-        .map(|active| active + IDLE);
-    st.wake_at(hold_ends, window, cx);
+
+    fn fading(&self, now: Instant) -> bool {
+        !self.pinned && self.alpha > 0.0 && !self.holding(now)
+    }
+
+    /// The end of the hold, while there is one.
+    fn hold_ends(&self, now: Instant) -> Option<Instant> {
+        self.last_active.filter(|_| self.holding(now)).map(|active| active + IDLE)
+    }
+}
+
+impl State {
+    /// What prepaint makes of the bar at `now` for an offset: a move, or a hold, starts the
+    /// bar's second again. The hold starts when the pointer lets go, not when a frame last saw
+    /// it there: no frame is asked for while it stays.
+    fn activity(&self, offset: gpui::Point<gpui::Pixels>, now: Instant, classic: bool) -> Activity {
+        let mut last_active = self.last_active;
+        if self.last_offset.is_some_and(|last| moved(last, offset)) {
+            last_active = Some(now);
+        }
+        let held = self.hover.iter().any(|hovered| *hovered) || self.drag.is_some();
+        if held || self.was_held {
+            last_active = Some(now);
+        }
+        let alpha = if classic { 1.0 } else { alpha_at(last_active, now) };
+        Activity { last_active, held, pinned: classic || held, alpha }
+    }
+}
+
+/// Works out whether and where the bars show, and inserts their hitboxes. Prepaint, because a
+/// hitbox can only be inserted there.
+fn prepaint(
+    state: &Rc<RefCell<State>>,
+    source: &Source,
+    look: Look,
+    bounds: gpui::Bounds<gpui::Pixels>,
+    window: &mut gpui::Window,
+    cx: &gpui::App,
+) {
+    let mut st = state.borrow_mut();
+    st.seen = FRAME.get();
+    st.list = matches!(source, Source::List(_));
+    let now = now();
+    let (_, offset) = source.extent();
+    let classic = look.classic();
+
+    let activity = st.activity(offset, now, classic);
+    st.last_offset = Some(offset);
+    let bars = lay_out(source, look, bounds);
+    st.needed = bars.needed;
+    let layout = bars.layout;
+    st.last_active = activity.last_active;
+    st.was_held = activity.held;
+    st.pinned = activity.pinned;
+    let alpha = activity.alpha;
+    st.wake_at(activity.hold_ends(now), window.current_view(), window, cx);
 
     st.layout = layout;
-    st.empty_tracks = empty_tracks;
+    st.empty_tracks = bars.empty_tracks;
     st.alpha = alpha;
     for index in 0..2 {
         st.hitboxes[index] = match layout[index] {
@@ -827,7 +902,7 @@ fn prepaint(
     // The draw ran out of passes: what it presents has the old gutter, and the next frame builds
     // with the new one.
     let unsettled = settling && crate::layout::container::last_pass(window);
-    st.needs_frames = fading || growing || unsettled;
+    st.needs_frames = activity.fading(now) || growing || unsettled;
     if st.needs_frames {
         window.request_animation_frame();
     }
@@ -853,16 +928,121 @@ fn scroll_axis_to(source: &Source, axis: usize, position: f32, max: f32) {
     source.set_offset(offset);
 }
 
+impl AxisLayout {
+    /// Whether the track is the same one, whatever the thumb on it.
+    fn same_track(&self, other: &AxisLayout) -> bool {
+        self.strip == other.strip
+            && self.track_start == other.track_start
+            && self.track_len == other.track_len
+            && self.port_len == other.port_len
+            && self.max == other.max
+            && self.inset == other.inset
+    }
+}
+
+/// The box of a thumb or a track along an axis, `start` and `len` from the start of the track.
+fn bar_rect(axis: &AxisLayout, vertical: bool, start: f32, len: f32, thickness: f32) -> gpui::Bounds<gpui::Pixels> {
+    let strip = axis.strip;
+    if vertical {
+        gpui::Bounds::new(
+            gpui::point(strip.right() - gpui::px(axis.inset + thickness), gpui::px(axis.track_start + start)),
+            gpui::size(gpui::px(thickness), gpui::px(len)),
+        )
+    } else {
+        gpui::Bounds::new(
+            gpui::point(gpui::px(axis.track_start + start), strip.bottom() - gpui::px(axis.inset + thickness)),
+            gpui::size(gpui::px(len), gpui::px(thickness)),
+        )
+    }
+}
+
+/// What a list's bar painted, which a scroll that moves the rows is planned against.
+#[derive(Clone, Copy)]
+struct ShownBar {
+    /// The bar of the vertical axis, the only one a list has.
+    layout: Option<AxisLayout>,
+    alpha: f32,
+    grow: f32,
+}
+
+/// Where a scroll that moved a list puts the thumb of its bar, against what the frame shown
+/// painted, as the frame built whole would: the bounds of the thumb if it moves, or why the frame
+/// cannot be one that builds nothing. The clock is the one a frame samples at, so a bar whose
+/// hold has since ended, or that has begun to fade, is not one that stays as painted.
+fn plan_thumb(
+    state: &Rc<RefCell<State>>,
+    source: &Source,
+    look: Look,
+    bounds: gpui::Bounds<gpui::Pixels>,
+    shown: &ShownBar,
+    drawn: Option<gpui::Bounds<gpui::Pixels>>,
+) -> Result<Option<gpui::Bounds<gpui::Pixels>>, gpui::ScrollThumbMiss> {
+    use gpui::ScrollThumbMiss as Miss;
+
+    let now = clock_now();
+    let st = state.borrow();
+    let (_, offset) = source.extent();
+    let activity = st.activity(offset, now, look.classic());
+    if shown.alpha <= 0.0 {
+        return if activity.alpha > 0.0 { Err(Miss::Appear) } else { Ok(None) };
+    }
+    if activity.alpha != shown.alpha {
+        return Err(Miss::Alpha);
+    }
+    let (Some(painted), Some(placed)) = (shown.layout, lay_out(source, look, bounds).layout[1]) else {
+        return Err(Miss::Size);
+    };
+    if !placed.same_track(&painted) {
+        return Err(Miss::Track);
+    }
+    if placed.thumb_len != painted.thumb_len || st.grow[1].value(now) != shown.grow {
+        return Err(Miss::Size);
+    }
+    let (rest, hover) = look.thickness();
+    let thickness = rest + (hover - rest) * shown.grow;
+    // Against where the thumb is drawn now, which is not where the frame shown painted it once a
+    // translate moved it: a scroll that brings it back there moves it back.
+    let thumb = bar_rect(&placed, true, placed.thumb_start, placed.thumb_len, thickness);
+    Ok((drawn != Some(thumb)).then_some(thumb))
+}
+
+/// What prepaint takes from a list's new position, for a frame that moved the rows and built
+/// nothing: where the bar is, what it is doing, and the end of its hold. The listeners of the
+/// bar read this, and the hold of the bar is a second after the scroll and not after the frame
+/// that painted the thumb.
+fn move_thumb(
+    state: &Rc<RefCell<State>>,
+    source: &Source,
+    look: Look,
+    bounds: gpui::Bounds<gpui::Pixels>,
+    view: gpui::EntityId,
+    window: &gpui::Window,
+    cx: &gpui::App,
+) {
+    let now = clock_now();
+    let mut st = state.borrow_mut();
+    let (_, offset) = source.extent();
+    let activity = st.activity(offset, now, look.classic());
+    st.last_offset = Some(offset);
+    st.last_active = activity.last_active;
+    st.was_held = activity.held;
+    st.pinned = activity.pinned;
+    let bars = lay_out(source, look, bounds);
+    st.needed = bars.needed;
+    st.layout = bars.layout;
+    st.wake_at(activity.hold_ends(now), view, window, cx);
+}
+
 /// Draws the bars and listens for the pointer.
 fn paint(
     state: &Rc<RefCell<State>>,
     source: &Source,
     look: Look,
-    _bounds: gpui::Bounds<gpui::Pixels>,
+    bounds: gpui::Bounds<gpui::Pixels>,
     window: &mut gpui::Window,
     _cx: &mut gpui::App,
 ) {
-    let (layout, empty_tracks, hitboxes, alpha) = {
+    let (layout, empty_tracks, hitboxes, alpha, painted) = {
         let mut st = state.borrow_mut();
         for index in 0..2 {
             if let Some(hitbox) = &st.hitboxes[index] {
@@ -871,9 +1051,27 @@ fn paint(
         }
         let now = now();
         st.painted = Painted { alpha: st.alpha, grow: [st.grow[0].value(now), st.grow[1].value(now)] };
-        (st.layout, st.empty_tracks.clone(), st.hitboxes.clone(), st.alpha)
+        (st.layout, st.empty_tracks.clone(), st.hitboxes.clone(), st.alpha, st.painted)
+    };
+    let view = window.current_view();
+    // A list tells gpui how a scroll moves its thumb, whether or not it paints one.
+    let note_thumb = |window: &mut gpui::Window, thumb: Option<gpui::PaintQuad>| {
+        let Source::List(list) = source else { return };
+        let shown = ShownBar { layout: layout[1], alpha, grow: painted.grow[1] };
+        let plan = {
+            let (state, source) = (state.clone(), source.clone());
+            Rc::new(move |_: &gpui::Window, drawn| plan_thumb(&state, &source, look, bounds, &shown, drawn))
+        };
+        let moved = {
+            let (state, source) = (state.clone(), source.clone());
+            Rc::new(move |window: &mut gpui::Window, cx: &mut gpui::App| {
+                move_thumb(&state, &source, look, bounds, view, window, cx)
+            })
+        };
+        window.paint_scroll_thumb(list, thumb, plan, moved);
     };
     if alpha <= 0.0 {
+        note_thumb(window, None);
         return;
     }
 
@@ -885,19 +1083,23 @@ fn paint(
     let scaled = |color: gpui::Rgba, share: f32| -> gpui::Hsla {
         gpui::Rgba { a: color.a * alpha * share, ..color }.into()
     };
-    let paint_rect = |window: &mut gpui::Window, bounds, radius: f32, color| {
-        window.paint_quad(gpui::quad(
+    let rounded = |bounds, radius: f32, color| {
+        gpui::quad(
             bounds,
             gpui::px(radius),
             color,
             gpui::px(0.0),
             gpui::transparent_black(),
             gpui::BorderStyle::default(),
-        ));
+        )
+    };
+    let paint_rect = |window: &mut gpui::Window, bounds, radius: f32, color| {
+        window.paint_quad(rounded(bounds, radius, color));
     };
     for track in &empty_tracks {
         paint_rect(window, *track, 0.0, scaled(track_color, 1.0));
     }
+    let mut thumb_noted = false;
     {
         let st = state.borrow();
         let now = now();
@@ -905,28 +1107,9 @@ fn paint(
             let Some(axis) = layout[index] else { continue };
             let grown = st.grow[index].value(now);
             let thickness = rest + (hover - rest) * grown;
-            let strip = axis.strip;
-            let rect = |start: f32, len: f32, thickness: f32| {
-                if vertical {
-                    gpui::Bounds::new(
-                        gpui::point(
-                            strip.right() - gpui::px(axis.inset + thickness),
-                            gpui::px(axis.track_start + start),
-                        ),
-                        gpui::size(gpui::px(thickness), gpui::px(len)),
-                    )
-                } else {
-                    gpui::Bounds::new(
-                        gpui::point(
-                            gpui::px(axis.track_start + start),
-                            strip.bottom() - gpui::px(axis.inset + thickness),
-                        ),
-                        gpui::size(gpui::px(len), gpui::px(thickness)),
-                    )
-                }
-            };
+            let rect = |start: f32, len: f32, thickness: f32| bar_rect(&axis, vertical, start, len, thickness);
             if classic {
-                paint_rect(window, strip, 0.0, scaled(track_color, 1.0));
+                paint_rect(window, axis.strip, 0.0, scaled(track_color, 1.0));
             } else if grown > 0.0 {
                 paint_rect(
                     window,
@@ -935,16 +1118,24 @@ fn paint(
                     scaled(track_color, grown),
                 );
             }
-            paint_rect(
-                window,
+            let thumb = rounded(
                 rect(axis.thumb_start, axis.thumb_len, thickness),
                 thickness / 2.0,
                 scaled(thumb_color, 1.0),
             );
+            // A list's one bar is along the vertical axis.
+            if vertical && matches!(source, Source::List(_)) {
+                note_thumb(window, Some(thumb));
+                thumb_noted = true;
+            } else {
+                window.paint_quad(thumb);
+            }
         }
     }
+    if !thumb_noted {
+        note_thumb(window, None);
+    }
 
-    let view = window.current_view();
     window.on_mouse_event({
         let (state, source, hitboxes) = (state.clone(), source.clone(), hitboxes.clone());
         move |event: &gpui::MouseMoveEvent, phase, window, cx| {

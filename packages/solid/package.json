@@ -68,7 +68,7 @@
       "default": "./dist/components/floating.js"
     }
   },
-  "files": ["dist", "LICENSE"],
+  "files": ["dist", "LICENSE", "NOTICE"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/fdarian/ghia.git",

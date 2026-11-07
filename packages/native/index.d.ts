@@ -747,6 +747,11 @@ export declare class TestGpuixRenderer {
    * frame before them. On unless `GPUIX_PATCH_OFF`, and never when the retention is off.
    */
   setPatchEnabled(enabled: boolean): void
+  /**
+   * Whether the frames drawn after a list scroll are classified as translates of the frame
+   * before them (`scrollPatch` of `getPatchCounters`). On unless `GPUIX_SCROLL_PATCH_OFF`.
+   */
+  setScrollPatchEnabled(enabled: boolean): void
   /** How ticks were patched since the window was made: subtract two reads for a span of frames. */
   getPatchCounters(): PatchCounters
   resetBuildCounters(): void
@@ -907,6 +912,7 @@ export declare class TestGpuixRenderer {
    * with another `appearance` or `"system"` is set.
    */
   setAppearance(appearance: string): void
+  setWindowTitle(title: string): void
   /** The platform window's title, as the title bar shows it. */
   getWindowTitle(): string
   getAppearance(): string
@@ -1179,6 +1185,12 @@ export declare class TestGpuixRenderer {
    * Supported on macOS through Metal and Windows through DirectX.
    */
   captureScreenshot(path: string): void
+  /**
+   * Capture the frame that was drawn last as it is, and save it as a PNG: `captureScreenshot` notifies
+   * the view and refreshes the window first, so what it captures is a frame built whole, whatever drew the one
+   * before it. This captures what a frame that patched or moved the rows in place left.
+   */
+  captureShownFrame(path: string): void
   /**
    * Return and clear all collected events since the last drain.
    * Events are collected synchronously — no event loop queuing.
@@ -2271,6 +2283,13 @@ export interface PatchCounters {
    * no frame was built or presented.
    */
   emptyTicks: number
+  /**
+   * Patches that made the scene's primitives again from its operations instead of writing the
+   * changed ones in place.
+   */
+  sceneRebuilds: number
+  /** Primitives that patches wrote over their place in the scene. */
+  inPlacePrimitives: number
   /** JSON object: ticks gpui drew whole after the patcher tried, by reason (`PatchDecline`). */
   declines: string
   /**
@@ -2278,6 +2297,11 @@ export interface PatchCounters {
    * could not build).
    */
   unpatchable: string
+  /**
+   * How the frames drawn after a list scroll were drawn, or would have been, by translating
+   * the rows of the frame before them.
+   */
+  scrollPatch: ScrollPatchCounters
 }
 
 export interface PathPromptOptions {
@@ -2361,6 +2385,40 @@ export interface RetainedCounters {
    * they were the same but for where they are, by the reason.
    */
   relocationMisses: string
+}
+
+/**
+ * The frames drawn after a list scroll that could be a pure translate of the rows, those that
+ * were (`patched`), and the first reason the others could not (`gpui::ScrollPatchReason`).
+ */
+export interface ScrollPatchCounters {
+  /** Frames drawn after a list scroll. */
+  frames: number
+  /** Of those, the ones that would have been a pure translate. */
+  eligible: number
+  /** Of the eligible ones, the ones whose build was not what the classifier predicted. */
+  mispredicted: number
+  /**
+   * Of the frames whose first reason is the hover, the ones nothing else stops: eligible with
+   * the pointer elsewhere.
+   */
+  hoverOnly: number
+  /** Of the eligible ones, the ones drawn by moving the rows of the frame shown. */
+  patched: number
+  /**
+   * The eligible ones drawn whole, by why the translate declined before it wrote anything
+   * (`gpui::ScrollApplyDecline`).
+   */
+  applyDeclines: Record<string, number>
+  /** The others, by the first reason they were not. */
+  reasons: Record<string, number>
+  /**
+   * The same frames, by every reason that held for them, first or not (`HitboxChain` is only
+   * counted here, it stops no frame), and by what lay behind a reason (`NotRelocatable.noRun`,
+   * `NotRelocatable.noRecording`, `NotRelocatable.unmovable`, `Region.top`, `Region.bottom`,
+   * `Region.side`, `Thumb.size`, `Thumb.alpha`, `Thumb.appear`, `Thumb.track`).
+   */
+  held: Record<string, number>
 }
 
 /** A size in CSS px. */

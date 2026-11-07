@@ -87,6 +87,123 @@ each entry or applies it again.
   ([round 49](frames-and-wakes.md#where-an-apps-memory-goes-round-49)). The cost is a texture per large tile instead of
   sharing, which only matters for many large tiles of different sizes.
 
+### `Scene::finish` sort order and permutation (zed `scene.rs`, `platform.rs`)
+
+- **Decision.** The owner approved this on 2026-11-06 as an exception to the rule above: it changes `Scene::finish`, which is
+  upstream's code. It is a candidate for a PR to `zed-industries/zed` (made in a separate worktree from upstream `main`, per
+  [AGENTS.md](../../AGENTS.md); not from this checkout), and until it lands the fork carries it.
+- **Before.** Every typed vector was sorted in place with `sort_by_key`: by `order`, and the sprite vectors (monochrome,
+  subpixel, polychrome) by `(order, tile.tile_id)`. A stable sort of elements of up to 240 bytes moves them about log n times
+  each, and the tile id ordered glyphs by where the atlas happened to allocate them.
+- **After.** Each vector gathers one `u128` per primitive, `key << 32 | index`, and sorts them with the stable `sort`, which
+  finds the dozen sorted runs a frame comes in and merges them. The key is a number that compares as the key does: the draw
+  order for a primitive ordered by it alone, and for a sprite the order, the index of its atlas texture and its kind, packed
+  in that order (`sprite_sort_key`, which gives the order the derived `Ord` of `AtlasTextureId` and `AtlasTextureKind` gives).
+  The index in the low half says which item a number came from, so the permutation is applied to the vector once, and each
+  primitive moves once. The permutation is also what [a patch](patch-frames.md#how-gpui-patches-windowpatchrs) needs to say
+  where the primitive of each operation went.
+- **Why the tie-break does not show.** Primitives of one order never overlap: the bounds tree gives a primitive one more than
+  the greatest order of the bounds before it that intersect it. So which of two sprites of an order is drawn first is not
+  seen, and the id of the tile was not a meaningful order. (Inside a layer all primitives share the layer's order and do
+  overlap; there upstream's tile id reordered them arbitrarily and the new key keeps the paint order within a texture, so it
+  reorders less.) The texture is what the renderers batch by (`PrimitiveBatch::MonochromeSprites { texture_id, .. }`), so the
+  batches are the same: consecutive sprites of one order and one texture.
+- **Measured** (bench mailbox proxy, `examples/solid/mailbox-scroll-hover/profile.tsx`, test renderer, release addon,
+  instructions per tick, two runs each back to back). Each step is against the build before it; the pairs are the two runs,
+  before and after.
+  - `4576d660c1` (the sort by `(order, texture)` with the permutation applied once; ghia `cef50f98`): scroll with the
+    scrollbar hidden 9.41M and 9.40M to 8.96M and 8.95M; scroll with the default scrollbar 10.08M and 10.08M to 9.65M and
+    9.66M; hover 0.51M and 0.50M to 0.48M and 0.47M, with the 18 row crossings under it at 10.06M and 10.00M to 9.43M and
+    9.19M.
+  - `b994fa4773` (one `u128` per primitive in place of the tuple; ghia `b871632e`): mean scroll 8.19M and 8.15M to 7.80M and
+    7.81M; the 328 patched ticks 3.63M and 3.58M to 3.27M and 3.24M; the 392 ticks built whole 12.00M and 11.98M to 11.59M
+    and 11.63M; hover row crossings 9.01M and 9.23M to 8.59M and 8.61M.
+  - `3c3a4187bf` (the stable sort in place of the unstable one; ghia `c6a62710`): mean scroll 7.79M and 7.75M to 7.61M and
+    7.62M; the 328 patched ticks 3.26M and 3.27M to 3.15M and 3.09M; the 392 ticks built whole 11.58M and 11.51M to 11.34M
+    and 11.40M; hover row crossings 8.68M and 8.57M to 8.27M and 8.45M.
+  A frame of about 2000 sprites of 240 bytes in a dozen sorted runs spent 161 us (1.27M instructions) in the sprite sort
+  before and 52 us with the texture key.
+- **Considerations.** A sync that replaces `scene.rs` has to keep the key and the permutation, or the op-to-slot map of
+  `Scene::patch_in_place` is lost; the tests `sprites_of_one_order_keep_the_order_they_were_painted_in_within_a_texture_and_group_by_texture`
+  and `a_sprite_over_another_is_painted_after_it_whatever_its_texture` fail when the key is lost.
+
+### A transparent background quad that is kept (zed `style.rs`, `scene.rs`)
+
+- **Decision.** The owner approved this on 2026-11-06 (option "B") as a Ghia-only change to upstream's `Style::paint` and
+  `Scene::border_strips` (zed `88855d100d`), not a candidate for upstream: it exists for the fork's hover patches. It adds `keep_transparent_background`
+  to `Style` (default `false`, a plain field of `StyleRefinement` like `collapsed_border`) and Ghia sets it on an element whose
+  `hover` or `hasHover` gives a background colour.
+- **Before.** `Style::paint_background_color` painted a quad only if the background colour was not transparent
+  (`Hsla::is_transparent`, an alpha of 0). A hover that gave a background to an element with none added a quad to the operations
+  of its root, so the hover was a frame built whole: the mailbox row of ghia-bench took 8.57M instructions a crossing.
+- **After.** With the flag set the quad is painted whatever its alpha is: `paint_background_color` paints when the background is
+  `Some` and it is not transparent or the flag is set. `border_strips` does not cut a transparent quad that has no border into
+  strips (there is nothing to cut around; the strips of such a quad were an invisible ring of four quads and the operation
+  would not have been one primitive a patch can write over). Nothing else drops an alpha-0 quad: `Scene::insert_quad`,
+  the bounds tree, the sort and `Scene::patch_in_place` take it as a quad. **The change is not for the flagged quad alone:**
+  `border_strips` sees a `Quad`, which does not say whether a style asked to keep it, so every fully transparent quad with no
+  border that reaches the scene is one primitive now, whoever painted it (the caret of an input that is not lit,
+  `input.rs`; the background of a run of text; any `fill` of a transparent colour). Before, one of those was recorded as an
+  operation and left no primitive (its four strips had no area), except under a transform or a rounded clip, where it was one
+  invisible primitive. An element without the flag paints the same pixels it did: the quad is alpha 0, but it takes an order,
+  a slot in the quads of the scene and an insertion in the bounds tree like any quad, so the orders and the batches of a
+  frame that paints such a quad can differ from before. Carrying the flag with the quad was considered and not
+  done: `Quad` is the struct the shaders read, and the operation the frame records (`PaintOperation::Quad`, 18 match sites
+  and the replay) would need a variant of its own so that a recording put elsewhere decides as the paint did.
+- **Why.** The hover then writes a colour over a quad that is there in both styles (`hover_paint.rs`), and the mailbox row
+  crossing took 4.48M and 4.51M instructions, all 18 patched ([patch-frames.md](patch-frames.md#which-hovers-paint-only)). A base
+  background of alpha 0.0001 was tried and patched too, but it paints a (nearly invisible) colour; this is a true zero.
+- **Costs.** One quad more in every row that declares such a hover, in every frame: the scroll phase of the mailbox proxy went from
+  7.64M and 7.63M to 7.89M and 7.88M instructions a tick. A flagged transparent quad is shaded by the GPU over the element's area. Every other transparent quad with no border costs the same, in the frames that paint one (an input's caret off its phase).
+- **Considerations.** A sync that replaces `style.rs` or `scene.rs` has to keep the field in `Style`, its default, the
+  condition in `paint_background_color` and the border test in `border_strips`; the tests
+  `a_transparent_background_paints_no_quad_unless_it_is_kept` and
+  `a_row_with_a_kept_transparent_background_is_patched_to_the_colour_of_the_hover` (`window/hover_patch_tests.rs`) fail when any is
+  lost. If upstream ever paints transparent backgrounds, or gives `Style` a field of its own for it, take theirs and drop the flag.
+
+### Recent leaves in the bounds tree (zed `bounds_tree.rs`)
+
+- **Decision.** The owner approved this on 2026-11-07 as an exception to the rule above: it changes
+  `BoundsTree::find_max_ordering`, upstream's code, and any GPUI app would gain from it. It is a candidate for a PR to
+  `zed-industries/zed` (made in a separate worktree from upstream `main`, per [AGENTS.md](../../AGENTS.md)); until it lands
+  the fork carries it.
+- **Before.** The order of a primitive is one more than the greatest order of the bounds inserted before it that intersect it.
+  `find_max_ordering` answered from the leaf of the greatest order when that intersects, and otherwise searched the R-tree
+  from the root: 44 nodes popped an insert over the 211 476 inserts of the mailbox scroll proxy.
+- **After.** The tree keeps the last 16 inserts and their orders in a ring (`RecentLeaves`, emptied by `clear`), and a query that
+  the leaf of the greatest order does not answer checks them newest first. One that intersects the query raises the answer to its
+  order; one that intersects it and encloses it (edges included, `encloses`) ends the query. Otherwise the tree is searched as
+  before, with the answer the ring found as the floor its pruning starts from. GPUI paints a parent before its children and a text
+  layout one layer a line, so the bounds just before a child's are mostly its parent's background: in the proxy the ring ends
+  85% of the queries the leaf of the greatest order does not (89% in the hover phase), and the nodes popped fall to 3.5 an
+  insert. The size is the const parameter `RECENT` of `BoundsTree` (default `RECENT_LEAVES`, 16; 32 ended 87%), and
+  `RECENT = 0` is the search as upstream wrote it.
+- **Why it is exact.** Let the leaf L that ends the query intersect it and enclose it. A leaf older than L that intersects the
+  query intersects L (its edges are past the query's, and the query's are inside L's, with the corners worked out as
+  `Bounds::intersects` works them out), so its order is below L's; every leaf newer than L is in the ring and was checked. The
+  floor the search starts from is the order of a leaf that intersects, which the search would have found.
+- **Where it differs.** The tree's own node boxes are an origin and a size, and a box's far edge, the origin plus the size, can
+  come out an ulp short of the far edge of the leaf it was made from, so upstream's search misses an overlap of an ulp (rows
+  stepped by a third of a pixel near 1000 get the order of the row before, which they overlap by an ulp). A recent leaf is
+  compared as it was inserted and finds such an overlap, so there the orders are the definition's and not upstream's. Bounds on
+  a grid of a power of two, which a layout in 1/64 px scaled by 1 or 2 is, are added and subtracted exactly: every one of the
+  853 212 numbers the proxy inserted is a multiple of 1/64, and its orders are upstream's in all 749 frames.
+- **Measured** (bench mailbox proxy, `examples/solid/mailbox-scroll-hover/profile.tsx`, `A11Y=0`, test renderer, release addon,
+  instructions per tick, two runs each back to back; zed `88855d100d` before, ghia `6deba69a`):
+  - scroll: mean 7.87M and 7.88M to 7.50M and 7.49M; the 328 patched ticks 3.38M and 3.36M to 2.91M and 2.95M; the 392 ticks
+    built whole 11.62M and 11.65M to 11.34M and 11.30M. About 1.3K instructions a bounds insert (292 a tick).
+  - scroll with `NO_ROW_HOVER=1 NO_FOLDER_HOVER=1` (rows without the kept transparent background of
+    [the entry above](#a-transparent-background-quad-that-is-kept-zed-stylers-scenrs)): 7.58M and 7.67M to 7.54M and 7.56M.
+    The kept background cost 0.25M a tick before (7.87M against 7.62M) and nothing after (7.50M against 7.55M): it is the
+    enclosing leaf that ends the queries of the row's text.
+  - hover row crossings (18, all patched, 0 to 33 inserts each): median 4.07M and 4.07M to 4.05M and 4.10M, unchanged.
+- **Considerations.** A sync that replaces `bounds_tree.rs` has to keep the ring (`recent`, cleared in `clear`, pushed in
+  `insert`) and the scan before the search, or drop this entry if upstream takes the PR. The tests in
+  `bounds_tree/differential_tests.rs` keep upstream's implementation as `ReferenceTree` and compare the orders of the tree with
+  0, 1 and 16 recent leaves with it and with the definition, on random bounds, bounds painted the way a UI paints them (rows that
+  touch edges, a layer a line, empty and overflowing boxes, steps of 0.1 and 1/3 up to 10 000) and two mailbox frames
+  recorded from the proxy (`bounds_tree/mailbox_frames.txt`).
+
 ## Procedure
 
 1. Fetch the upstreams: `git fetch upstream` in the repo root and in `zed/`, and `git fetch zed-industries main` in `zed/`.

@@ -267,10 +267,30 @@ See [patch-frames.md](patch-frames.md).
   paint reads belongs in the `PatchUnit` surroundings as well as in the `ReplayKey`. `Window::element_states` (`StateOwner`,
   the pass stamps) and `Origin` (`range_now`) are what makes a replay a step per root: a path that copies states or visits
   nested roots per element undoes it. `patch_tests.rs` and the retained fuzz under the verifier are the check.
+- **zed `elements/retained.rs` (`record_prepaint`, `paint_subtree`, `prepaint_skipped`) and `window/patch.rs` (`patch_blocker`, `Frame::relocated`):**
+  a relocatable root keeps its `PatchUnit` while its recording is plain but for its own scene, and registers it only at the place it was
+  recorded (`delta` zero and the key equal); anything that puts the recording elsewhere has to note it as relocated, and a patch of
+  such a root makes the recordings stale for the scroll translate. `PaintOperation::differs_from` compares the fields of the kinds it
+  lists (`has_equal_fields`) before it formats: a new field of `Quad` or `MonochromeSprite` has to be in it. `hover_patch_tests.rs`.
+- **gpuix `hover_roots` (`Retain::paints_hover`, `begin_hover_root`, `hover_unit`) and `events/hover_paint.rs`:** a root left
+  unrecorded for a patch changes how the roots around it replay, so what makes one unfit (it might lift, an intrinsic size, a group)
+  is decided from the tree before it is built; a new style that lifts or is measured under another style belongs in `may_lift` or
+  `has_intrinsic_size`, and a new paint property in `differs_by_paint_only`, with its visibility. The retention fuzz and
+  `retained-intrinsic`, `group-state` under `GPUIX_RETAIN_VERIFY=1` are the check.
 - **gpuix `retain/patch.rs`, and `begin_unit`, `end_unit` and `preview` in `retain.rs`:** a unit builds alone only from what
   its kept `FrameEnv` holds, and a write that bypasses the tape (`report_scroll`) makes an element with a scroller inside no
   unit. A new source of volatile state is a reason in `Unpatchable`, and `Dormancy::holds` must read nothing a build of the
   element does not tell or `Sources::verdicts` does not move.
+- **zed `window/scroll_patch.rs` (`apply_scroll_patch`) and gpuix `tape.rs`:** the translate of a list's rows makes each row's
+  operations and hitboxes again from its recording (`TranslatedOperations`, which `Scene::replay_translated` goes through, and
+  `Hitbox::relocated`), not from the frame shown moved by the offset: a change to what a relocated replay does to either belongs in
+  those two and the translate follows. It writes nothing before every row is validated. What a root writes outside the frame is moved
+  by `RetainedPhase::Scrolled` and `TapeStore::shift`: a registry that gains a writer in a paint listener has to be moved there
+  (`Layered` entries carry the list they were made into). The thumb of a list's bar is moved by the same translate: what the bar's
+  prepaint and paint compute from the offset goes in `scrollbar.rs`'s `lay_out`, `State::activity` and `bar_rect`, which the bar's
+  plan (`plan_thumb`) and the update after the move (`move_thumb`) call too, so a new input of the thumb's place, size or alpha has to
+  reach them or the translate puts the thumb where the build would not. `scroll_patch_tests.rs`, `scroll-patch-translate.test.tsx` and
+  `scroll-patch-thumb.test.tsx` under the verifier are the check.
 
 ### Forced reads, observers and content visibility
 

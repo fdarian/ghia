@@ -27,6 +27,7 @@
     "infinite-chat": "ghia dev infinite-chat.main.tsx",
     "timeline": "ghia dev timeline.main.tsx",
     "mail": "ghia dev mail.main.tsx",
+    "profile-mailbox": "ghia dev solid/mailbox-scroll-hover/profile.tsx",
     "compile": "bun compile-chat.ts",
     "bench:serde": "bun bench-serialization.ts"
   },

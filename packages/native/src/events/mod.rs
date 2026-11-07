@@ -6,6 +6,7 @@ pub mod app_region;
 pub mod dispatcher;
 pub mod element_drag;
 pub mod file_drag;
+pub(crate) mod hover_paint;
 pub mod ids;
 pub mod inline_target;
 pub(crate) mod key_codes;

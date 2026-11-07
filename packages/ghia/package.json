@@ -20,7 +20,7 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "client.d.ts", "LICENSE"],
+  "files": ["dist", "client.d.ts", "LICENSE", "NOTICE"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/fdarian/ghia.git",

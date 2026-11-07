@@ -32,6 +32,7 @@ pub(crate) fn publish(window: gpui::WindowId, live: &crate::tape::Live) {
     inline_hit::publish(window, live);
 }
 
+pub(crate) use paint::{describe_registries, shift};
 pub(crate) use paint::{
     describe_start_region_apart_from_transform, describe_text_apart_from_transform, publish_captured_start_region,
     publish_captured_text,

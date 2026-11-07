@@ -709,6 +709,30 @@ describeNative("a tick of a paint-only animation", { timeout: TIMEOUT }, () => {
   })
 })
 
+// A patch that changes only how operations paint writes their primitives over their slots in the scene; the first patch after a
+// frame built whole makes the scene (and its map of operations to slots) again, and the ticks after it do not.
+describeNative("the scene of a patched tick", { timeout: TIMEOUT }, () => {
+  it.skipIf(!patching)("is written in place by a colour loop, and made again only by the first patch", async () => {
+    const page = await mount(colourHead(), 500)
+    try {
+      const renderer = page.renderer
+      for (let warm = 0; warm < WARM; warm++) tick(renderer)
+      const before = renderer.getPatchCounters()
+      for (let index = 0; index < 20; index++) tick(renderer)
+      const after = renderer.getPatchCounters()
+      expect(after.patchedFrames - before.patchedFrames).toBe(20)
+      expect(after.sceneRebuilds - before.sceneRebuilds, "no tick makes the scene again").toBe(0)
+      expect(after.inPlacePrimitives - before.inPlacePrimitives, "the glyphs of the text are written over their slots").toBeGreaterThanOrEqual(20)
+      wholeFrame(renderer)
+      tick(renderer)
+      expect(renderer.getPatchCounters().sceneRebuilds - after.sceneRebuilds, "a frame built whole has no map").toBe(verifying ? 0 : 1)
+      if (verifying) expect(renderer.getRetainedCounters().mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
+    } finally {
+      page.root.unmount()
+    }
+  })
+})
+
 describeNative("a tick that cannot be patched", { timeout: TIMEOUT }, () => {
   it.skipIf(!patching || verifying)("is a frame built whole, and patching resumes after a hover", async () => {
     const page = await mount(colourHead(), 500)

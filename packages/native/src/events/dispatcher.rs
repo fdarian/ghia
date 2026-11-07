@@ -38,6 +38,7 @@ use crate::style::StyleDesc;
 use super::app_region;
 use super::element_drag;
 use super::file_drag;
+use super::hover_paint;
 use super::ids::Hit;
 use super::path::{chain_follows_path, common_ancestor, event_path, path_listens};
 use super::state::{is_connected, DragOver, PointerRequests, PointerState, Press};
@@ -148,6 +149,11 @@ pub struct Output {
     /// An element that entered or left the hover or active chain has a state
     /// style, so the view must rebuild to restyle it.
     pub restyle: bool,
+    /// Elements that entered or left the hover chain and only change how they paint
+    /// ([`hover_paint`]), when nothing in this output asks for the view to rebuild: a frame that
+    /// builds only the roots that hold them draws it. Empty when `restyle` is true, since a
+    /// frame built whole draws them too.
+    pub paint: Vec<u64>,
     /// GPUI's hit chain and the retained path disagree about the target's
     /// ancestry. The retained path is what events use; this reports the drift.
     pub chain_mismatch: bool,
@@ -167,6 +173,7 @@ impl Output {
         Self {
             events,
             restyle,
+            paint: Vec::new(),
             chain_mismatch,
             position: sample.position,
             modifiers: sample.modifiers.clone(),
@@ -434,6 +441,16 @@ fn lowest_held_button(buttons: u32) -> Option<u32> {
 }
 
 pub fn dispatch(state: &mut PointerState, tree: &RetainedTree, sample: &PointerSample) -> Output {
+    let mut output = dispatch_input(state, tree, sample);
+    let paint = std::mem::take(&mut state.paint);
+    if !output.restyle {
+        state.paint_pending.borrow_mut().extend(&paint);
+        output.paint = paint;
+    }
+    output
+}
+
+fn dispatch_input(state: &mut PointerState, tree: &RetainedTree, sample: &PointerSample) -> Output {
     // Over a drag region the page sees the pointer outside the window: nothing is under it, so
     // hover leaves and no move is delivered, not even to `window`.
     let hidden;
@@ -792,79 +809,208 @@ fn apply_capture(state: &mut PointerState, emitter: &mut Emitter) {
     state.explicit = requested;
 }
 
+/// The boundary event types of a hover change, as Chrome sends them: `out`, `leave`, `over`,
+/// `enter`; the four of the pointer, then the four of the mouse.
+const HOVER_EVENTS: [(&str, &str, &str, &str); 2] = [
+    ("pointerout", "pointerleave", "pointerover", "pointerenter"),
+    ("mouseout", "mouseleave", "mouseover", "mouseenter"),
+];
+
+/// What a hover change does to the elements it moves.
+#[derive(Debug, PartialEq)]
+enum Restyle {
+    /// No element that changed state declares a style for it.
+    None,
+    /// Elements do, and every refinement only changes how its element paints
+    /// ([`hover_paint`]): the elements whose build differs.
+    Paint(Vec<u64>),
+    /// Some refinement changes more than that.
+    Whole,
+}
+
+/// What moving the hover chain to a new target changes.
+struct HoverChange {
+    new_path: Vec<u64>,
+    old_target: Option<u64>,
+    new_target: Option<u64>,
+    leaving: Vec<u64>,
+    entering: Vec<u64>,
+}
+
+impl HoverChange {
+    /// The change from the chain `hovered` to the one of `new_target`, if they differ.
+    fn between(tree: &RetainedTree, hovered: &[u64], new_target: Option<u64>) -> Option<Self> {
+        let new_path = new_target
+            .map(|target| event_path(tree, target))
+            .unwrap_or_default();
+        if hovered == new_path {
+            return None;
+        }
+        let new_target = new_path.first().copied();
+        let old_target = hovered
+            .first()
+            .copied()
+            .filter(|id| tree.elements.contains_key(id));
+        let leaving = hovered
+            .iter()
+            .copied()
+            .filter(|id| tree.elements.contains_key(id) && !new_path.contains(id))
+            .collect();
+        let entering = new_path
+            .iter()
+            .rev()
+            .copied()
+            .filter(|id| !hovered.contains(id))
+            .collect();
+        Some(Self {
+            new_path,
+            old_target,
+            new_target,
+            leaving,
+            entering,
+        })
+    }
+
+    fn left_target(&self) -> Option<u64> {
+        self.old_target.filter(|old| Some(*old) != self.new_target)
+    }
+
+    fn entered_target(&self) -> Option<u64> {
+        self.new_target.filter(|new| Some(*new) != self.old_target)
+    }
+
+    /// Whether an element that changed state declares a style for it, or is a follower of a group
+    /// that does, or listens for the gesture.
+    fn restyles(&self, tree: &RetainedTree, hovered: &[u64]) -> bool {
+        self.restyle(tree, hovered) != Restyle::None
+    }
+
+    /// What the change does to the style of the elements it moves, and when it only changes how they
+    /// paint, which elements: the ones whose build differs, not the followers of a group (they are
+    /// below the element that declares it).
+    fn restyle(&self, tree: &RetainedTree, hovered: &[u64]) -> Restyle {
+        let mut restyled = Vec::new();
+        let mut paints_only = true;
+        for id in self.leaving.iter().chain(&self.entering) {
+            if crate::motion::listens_for_gesture(tree, *id, "whileHover") {
+                return Restyle::Whole;
+            }
+            let Some(style) = tree.elements.get(id).and_then(|element| element.style.as_deref()) else {
+                continue;
+            };
+            let mut restyles = false;
+            if style.hover.is_some() {
+                restyles = true;
+                paints_only &= hover_paint::hover_paints_only(tree, *id, style);
+            }
+            // A group's followers restyle with it, and a group is a frame built whole.
+            if style.declared_group().is_some() {
+                restyles = true;
+                paints_only = false;
+            }
+            if restyles {
+                restyled.push(*id);
+            }
+        }
+        for id in relational_changed(hovered, &self.new_path) {
+            let Some(style) = tree.elements.get(&id).and_then(|element| element.style.as_deref()) else {
+                continue;
+            };
+            if style.has_hover.is_some() {
+                paints_only &= hover_paint::has_hover_paints_only(tree, id, style);
+                restyled.push(id);
+            }
+        }
+        match (restyled.is_empty(), paints_only) {
+            (true, _) => Restyle::None,
+            (false, true) => Restyle::Paint(restyled),
+            (false, false) => Restyle::Whole,
+        }
+    }
+
+    /// Whether any boundary event of the change has a listener: on the path of the element it is
+    /// for, or on `window` or `document`.
+    fn emits(&self, tree: &RetainedTree, requests: &PointerRequests) -> bool {
+        let listens = |target: u64, event_type: &str| {
+            path_listens(tree, target, event_type) || requests.window_listens(event_type)
+        };
+        HOVER_EVENTS.iter().any(|(out, leave, over, enter)| {
+            self.left_target().is_some_and(|old| {
+                listens(old, out) || self.leaving.iter().any(|id| listens(*id, leave))
+            }) || self.entered_target().is_some_and(|new| {
+                listens(new, over) || self.entering.iter().any(|id| listens(*id, enter))
+            })
+        })
+    }
+}
+
 /// Moves the hover chain to `new_target` and emits the boundary events. Returns
-/// whether an element that changed state has a `hover` style.
+/// whether an element that changed state has a `hover` style that changes more than how it paints;
+/// the elements whose style only changes that are left in `PointerState::paint`.
 pub(super) fn update_hover(state: &mut PointerState, emitter: &mut Emitter, new_target: Option<u64>) -> bool {
     let tree = emitter.tree;
-    let new_path = new_target
-        .map(|target| event_path(tree, target))
-        .unwrap_or_default();
-    if state.hovered == new_path {
+    let Some(change) = HoverChange::between(tree, &state.hovered, new_target) else {
         return false;
-    }
-    let new_target = new_path.first().copied();
-    let old_target = state
-        .hovered
-        .first()
-        .copied()
-        .filter(|id| tree.elements.contains_key(id));
-
-    let leaving: Vec<u64> = state
-        .hovered
-        .iter()
-        .copied()
-        .filter(|id| tree.elements.contains_key(id) && !new_path.contains(id))
-        .collect();
-    let entering: Vec<u64> = new_path
-        .iter()
-        .rev()
-        .copied()
-        .filter(|id| !state.hovered.contains(id))
-        .collect();
+    };
 
     let left = Fields {
-        related_target: new_target,
+        related_target: change.new_target,
         hovered: Some(false),
         ..Default::default()
     };
     let entered = Fields {
-        related_target: old_target,
+        related_target: change.old_target,
         hovered: Some(true),
         ..Default::default()
     };
-    let left_target = old_target.filter(|old| Some(*old) != new_target);
-    let entered_target = new_target.filter(|new| Some(*new) != old_target);
-    // Chrome sends the four pointer boundary events, then the four mouse ones.
-    for (out, leave, over, enter) in [
-        ("pointerout", "pointerleave", "pointerover", "pointerenter"),
-        ("mouseout", "mouseleave", "mouseover", "mouseenter"),
-    ] {
+    let (left_target, entered_target) = (change.left_target(), change.entered_target());
+    for (out, leave, over, enter) in HOVER_EVENTS {
         if let Some(old_target) = left_target {
             emitter.emit(out, old_target, left);
-            for id in &leaving {
+            for id in &change.leaving {
                 emitter.emit(leave, *id, left);
             }
         }
         if let Some(new_target) = entered_target {
             emitter.emit(over, new_target, entered);
-            for id in &entering {
+            for id in &change.entering {
                 emitter.emit(enter, *id, entered);
             }
         }
     }
 
-    let restyle = leaving
-        .iter()
-        .chain(&entering)
-        .any(|id| {
-            // A group's followers restyle with it.
-            has_state_style(tree, *id, |style| {
-                style.hover.is_some() || style.declared_group().is_some()
-            }) || crate::motion::listens_for_gesture(tree, *id, "whileHover")
-        })
-        || relational_restyle(tree, &state.hovered, &new_path, |style| style.has_hover.is_some());
-    state.hovered = new_path;
+    let restyle = match change.restyle(tree, &state.hovered) {
+        Restyle::None => false,
+        Restyle::Whole => true,
+        // A hover that sends an event to a script is a frame built whole: the script may answer it.
+        Restyle::Paint(_) if change.emits(tree, &state.requests) => true,
+        Restyle::Paint(ids) => {
+            state.paint.extend(ids);
+            false
+        }
+    };
+    state.hovered = change.new_path;
     restyle
+}
+
+/// Whether moving the hover from the chain of `before` to the one of `after`, the topmost elements
+/// under the pointer, would restyle an element or emit a pointer boundary event that someone listens
+/// for, as `update_hover` does. The scroll-only frames ask it of the hit chain a scroll would leave
+/// under a pointer that has not moved: a hit chain that changes without either is no reason to draw
+/// the page again. A target that holds the pointer (capture, lock) is the target before and after.
+pub(crate) fn hover_would_matter(
+    state: &PointerState,
+    tree: &RetainedTree,
+    before: Option<u64>,
+    after: Option<u64>,
+) -> bool {
+    let pinned = pinned_target(state, tree);
+    let hovered = pinned
+        .or(before)
+        .map(|target| event_path(tree, target))
+        .unwrap_or_default();
+    HoverChange::between(tree, &hovered, pinned.or(after))
+        .is_some_and(|change| change.restyles(tree, &hovered) || change.emits(tree, &state.requests))
 }
 
 /// A button changing while another is held is no new pointer contact: DOM
@@ -1036,6 +1182,11 @@ fn relational_restyle(
     new: &[u64],
     declares: impl Fn(&StyleDesc) -> bool,
 ) -> bool {
+    relational_changed(old, new).any(|id| has_state_style(tree, id, &declares))
+}
+
+/// The elements whose `:has(...)` state changed between the chains `old` and `new`.
+fn relational_changed<'a>(old: &'a [u64], new: &'a [u64]) -> impl Iterator<Item = u64> + 'a {
     fn below_target(chain: &[u64]) -> &[u64] {
         chain.split_first().map_or(&[], |(_, rest)| rest)
     }
@@ -1043,7 +1194,7 @@ fn relational_restyle(
     old.iter()
         .filter(|id| !new.contains(id))
         .chain(new.iter().filter(|id| !old.contains(id)))
-        .any(|id| has_state_style(tree, *id, &declares))
+        .copied()
 }
 
 fn has_state_style(tree: &RetainedTree, id: u64, has: impl Fn(&StyleDesc) -> bool) -> bool {
@@ -1842,6 +1993,211 @@ mod tests {
         assert!(!dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1]))).restyle);
         assert!(dispatch(&mut state, &tree, &mv(chain_of(&[4, 1]))).restyle);
         assert!(!dispatch(&mut state, &tree, &mv(chain_of(&[1]))).restyle);
+    }
+
+    /// Asks `hover_would_matter` for a move to `target`, then moves there, and says whether the move did
+    /// restyle or emit. The two have to agree for every move.
+    fn matters_as_a_move_does(state: &mut PointerState, tree: &RetainedTree, chain: &[u64]) -> bool {
+        let asked = hover_would_matter(state, tree, state.hovered.first().copied(), chain.first().copied());
+        let output = dispatch(state, tree, &mv(chain_of(chain)));
+        assert_eq!(asked, output.restyle || !output.events.is_empty(), "moving to {chain:?}: {:?} restyle {}", names(&output), output.restyle);
+        asked
+    }
+
+    #[test]
+    fn a_hover_change_with_no_style_and_no_listener_does_not_matter() {
+        let tree = tree(&[(1, "click")]);
+        let mut state = PointerState::default();
+        for chain in [&[3, 2, 1][..], &[4, 1], &[2, 1], &[1], &[3, 2, 1]] {
+            assert!(!matters_as_a_move_does(&mut state, &tree, chain), "{chain:?}");
+        }
+    }
+
+    #[test]
+    fn a_hover_change_that_restyles_or_reaches_a_listener_matters() {
+        let hover: StyleDesc = serde_json::from_str(r#"{"hover":{"opacity":0.5}}"#).unwrap();
+        let has_hover: StyleDesc = serde_json::from_str(r#"{"hasHover":{"opacity":0.5}}"#).unwrap();
+        let styled = |id: u64, style: &StyleDesc| {
+            let mut styled = tree(&[]);
+            styled.set_style(id, Arc::new(style.clone()));
+            styled
+        };
+
+        // A hover style on the element entered, and none on the one the pointer returns to.
+        let on_child = styled(3, &hover);
+        let mut state = PointerState::default();
+        assert!(matters_as_a_move_does(&mut state, &on_child, &[3, 2, 1]));
+        assert!(!matters_as_a_move_does(&mut state, &on_child, &[3, 2, 1]), "nothing changed");
+        assert!(matters_as_a_move_does(&mut state, &on_child, &[4, 1]), "and left");
+        assert!(!matters_as_a_move_does(&mut state, &on_child, &[2, 1]));
+
+        // :has(:hover) on the ancestor, when a descendant of it gains the pointer.
+        let on_parent = styled(2, &has_hover);
+        let mut state = PointerState::default();
+        assert!(matters_as_a_move_does(&mut state, &on_parent, &[3, 2, 1]));
+        assert!(matters_as_a_move_does(&mut state, &on_parent, &[2, 1]));
+        assert!(!matters_as_a_move_does(&mut state, &on_parent, &[4, 1]));
+
+        // A boundary event type, on the element, on an ancestor that hears it bubble, and on window.
+        for (listening, event_type, matters) in [
+            (3, "pointerenter", true),
+            (3, "mouseleave", true),
+            (1, "pointerover", true),
+            (1, "pointerenter", false),
+            (4, "pointerout", true),
+            (2, "click", false),
+        ] {
+            let listened = tree(&[(listening, event_type)]);
+            let tree = &listened;
+            let mut state = PointerState::default();
+            dispatch(&mut state, tree, &mv(chain_of(&[1])));
+            let mut asked = false;
+            for chain in [&[3, 2, 1][..], &[4, 1], &[3, 2, 1], &[1]] {
+                asked |= matters_as_a_move_does(&mut state, tree, chain);
+            }
+            assert_eq!(asked, matters, "{listening} listens for {event_type}");
+        }
+        let plain = tree(&[]);
+        let mut state = PointerState::default();
+        state.requests.set_window_events(vec!["pointerover".to_string()]);
+        assert!(matters_as_a_move_does(&mut state, &plain, &[4, 1]));
+    }
+
+    /// What moving the hover to the chain `to` (target first) does to style, from the chain `from`.
+    fn restyle_of(tree: &RetainedTree, from: &[u64], to: &[u64]) -> Restyle {
+        let change = HoverChange::between(tree, from, to.first().copied()).expect("the chains differ");
+        change.restyle(tree, from)
+    }
+
+    fn styled_with(tree: &mut RetainedTree, styles: &[(u64, &str)]) {
+        for (id, json) in styles {
+            let style: StyleDesc = serde_json::from_str(json).unwrap();
+            tree.set_style(*id, Arc::new(style));
+        }
+    }
+
+    #[test]
+    fn a_hover_that_changes_a_colour_restyles_by_paint_and_names_the_element() {
+        let mut tree = tree(&[]);
+        styled_with(&mut tree, &[(3, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##)]);
+        assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Paint(vec![3]));
+        assert_eq!(restyle_of(&tree, &[3, 2, 1], &[4, 1]), Restyle::Paint(vec![3]), "and leaving it");
+        assert_eq!(restyle_of(&tree, &[], &[4, 1]), Restyle::None, "an element with no style");
+    }
+
+    #[test]
+    fn a_hover_that_changes_more_than_paint_is_a_whole_frame() {
+        let mut tree = tree(&[]);
+        styled_with(&mut tree, &[(3, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee","paddingLeft":4}}"##)]);
+        assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Whole);
+        // One element that is not paint-only makes the change whole, though the other is.
+        styled_with(&mut tree, &[(2, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##)]);
+        assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Whole);
+        assert_eq!(restyle_of(&tree, &[], &[2, 1]), Restyle::Paint(vec![2]));
+    }
+
+    #[test]
+    fn a_hover_that_paints_one_element_and_enters_a_parent_names_both() {
+        let mut tree = tree(&[]);
+        styled_with(
+            &mut tree,
+            &[(3, r##"{"color":"blue","hover":{"color":"red"}}"##), (2, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##)],
+        );
+        assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Paint(vec![2, 3]));
+    }
+
+    #[test]
+    fn a_motion_gesture_is_never_paint_only() {
+        let mut tree = tree(&[]);
+        tree.set_custom_prop(2, "motion".to_string(), serde_json::json!({ "whileHover": { "opacity": 0.5 } }));
+        assert_eq!(restyle_of(&tree, &[], &[2, 1]), Restyle::Whole);
+    }
+
+    #[test]
+    fn a_group_is_a_frame_built_whole() {
+        let mut tree = tree(&[]);
+        styled_with(
+            &mut tree,
+            &[(2, r##"{"group":true}"##), (3, r##"{"backgroundColor":"blue","groupHover":{"backgroundColor":"red"}}"##)],
+        );
+        assert_eq!(restyle_of(&tree, &[], &[2, 1]), Restyle::Whole);
+    }
+
+    #[test]
+    fn a_has_hover_ancestor_restyles_by_paint_when_its_refinement_does() {
+        let mut tree = tree(&[]);
+        styled_with(&mut tree, &[(2, r##"{"backgroundColor":"blue","hasHover":{"backgroundColor":"red"}}"##)]);
+        assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Paint(vec![2]));
+        styled_with(&mut tree, &[(2, r##"{"hasHover":{"height":3}}"##)]);
+        assert_eq!(restyle_of(&tree, &[], &[3, 2, 1]), Restyle::Whole);
+    }
+
+    #[test]
+    fn a_paint_only_hover_asks_for_a_tick_and_not_for_a_frame() {
+        let mut tree = tree(&[]);
+        styled_with(&mut tree, &[(3, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##)]);
+        let mut state = PointerState::default();
+        let entered = dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1])));
+        assert!(!entered.restyle);
+        assert_eq!(entered.paint, vec![3]);
+        let again = dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1])));
+        assert!(!again.restyle && again.paint.is_empty(), "the pointer stayed");
+        let left = dispatch(&mut state, &tree, &mv(chain_of(&[4, 1])));
+        assert!(!left.restyle);
+        assert_eq!(left.paint, vec![3]);
+        let elsewhere = dispatch(&mut state, &tree, &mv(chain_of(&[1])));
+        assert!(!elsewhere.restyle && elsewhere.paint.is_empty());
+    }
+
+    #[test]
+    fn a_hover_that_paints_and_sends_an_event_is_a_frame_built_whole() {
+        let mut tree = tree(&[(3, "pointerenter")]);
+        styled_with(&mut tree, &[(3, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##)]);
+        let mut state = PointerState::default();
+        let entered = dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1])));
+        assert!(entered.restyle && entered.paint.is_empty());
+        assert!(!entered.events.is_empty());
+        // A listener that is not for the gesture does not.
+        let mut tree = tree_listening_for("pointermove");
+        styled_with(&mut tree, &[(3, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##)]);
+        let mut state = PointerState::default();
+        let entered = dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1])));
+        assert!(!entered.restyle);
+        assert_eq!(entered.paint, vec![3]);
+    }
+
+    fn tree_listening_for(event_type: &str) -> RetainedTree {
+        tree(&[(3, event_type)])
+    }
+
+    #[test]
+    fn a_hover_that_changes_layout_or_a_press_beside_a_paint_one_is_a_frame_built_whole() {
+        let mut tree = tree(&[]);
+        styled_with(
+            &mut tree,
+            &[(3, r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##), (4, r##"{"hover":{"width":4}}"##)],
+        );
+        let mut state = PointerState::default();
+        let layout = dispatch(&mut state, &tree, &mv(chain_of(&[4, 1])));
+        assert!(layout.restyle && layout.paint.is_empty());
+        // The pointer leaves a layout hover for a paint one: the change names the elements that
+        // enter and leave, and 4 leaves.
+        let mixed = dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1])));
+        assert!(mixed.restyle && mixed.paint.is_empty());
+        styled_with(&mut tree, &[(2, r##"{"active":{"opacity":0.5}}"##)]);
+        let pressed = dispatch(&mut state, &tree, &down(0, 1, chain_of(&[3, 2, 1])));
+        assert!(pressed.restyle && pressed.paint.is_empty(), "a press restyles by itself");
+    }
+
+    #[test]
+    fn a_pinned_target_keeps_the_hover_whatever_is_under_the_pointer() {
+        let hover: StyleDesc = serde_json::from_str(r#"{"hover":{"opacity":0.5}}"#).unwrap();
+        let mut tree = tree(&[]);
+        tree.set_style(3, Arc::new(hover));
+        let mut state = PointerState::default();
+        assert!(hover_would_matter(&state, &tree, Some(4), Some(3)));
+        state.explicit = Some(4);
+        assert!(!hover_would_matter(&state, &tree, Some(4), Some(3)), "what is under a captured pointer is not hovered");
     }
 
     #[test]

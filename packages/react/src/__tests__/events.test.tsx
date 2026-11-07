@@ -162,6 +162,68 @@ describe("frame loop", () => {
     40_000,
   )
 
+  // AppKit begins a Core Animation transaction for every event it sends, and from macOS 26 its
+  // update cycle commits one that begins before the next frame boundary from a timer at that
+  // boundary: a second wake of JS for the event, unless the tick commits it. The moves come at
+  // random points of 120 Hz periods, so some land before the boundary and some after it.
+  it.skipIf(process.platform !== "darwin")(
+    "wakes JS once per mouse move, not again when the frame boundary comes",
+    () => {
+      const rendererPath = fileURLToPath(
+        new URL("../reconciler/renderer.ts", import.meta.url),
+      )
+      const script = [
+        'import React from "react"',
+        `import { createRenderer, render } from ${JSON.stringify(rendererPath)}`,
+        'import { startFrameLoop } from "@ghia/native/runtime"',
+        "const renderer = createRenderer()",
+        "renderer.init({ focus: false })",
+        "const wakes = []",
+        'render(React.createElement("div", { style: { width: "100%", height: "100%" } }), { renderer })',
+        "startFrameLoop({",
+        "  requiresTick: () => renderer.requiresTick(),",
+        "  tick: () => renderer.tick(),",
+        "  setFrameWakeCallback: (callback) => renderer.setFrameWakeCallback(callback && (() => {",
+        "    wakes.push(performance.now())",
+        "    callback()",
+        "  })),",
+        "})",
+        "const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))",
+        "const launchedAt = performance.now()",
+        "for (;;) {",
+        "  const now = performance.now()",
+        "  const quiet = now - (wakes.length === 0 ? launchedAt : wakes[wakes.length - 1])",
+        "  if (quiet >= 800 && now - launchedAt >= 7000) break",
+        '  if (now - launchedAt > 20000) throw new Error("the wake loop did not settle in 20 s")',
+        "  await sleep(20)",
+        "}",
+        "const size = renderer.getWindowSize()",
+        "const period = 1000 / 120",
+        "const posts = 240",
+        "const wakesBefore = wakes.length",
+        "const start = performance.now()",
+        "for (let i = 0; i < posts; i++) {",
+        "  const wait = start + (i + Math.random()) * period - performance.now()",
+        "  if (wait > 0.5) await sleep(wait)",
+        '  renderer.postNativeEvent("mouseMove", size.width * (0.25 + 0.5 * ((i % 60) / 60)), size.height / 2)',
+        "}",
+        "await sleep(300)",
+        "console.log(JSON.stringify({ posts, wakes: wakes.length - wakesBefore }))",
+        "process.exit(0)",
+      ].join("\n")
+      const result = spawnSync("bun", ["-e", script], {
+        encoding: "utf8",
+        timeout: 40_000,
+      })
+      expect(result.status, result.stderr || result.error?.message).toBe(0)
+      const report = JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "")
+      console.log(`mouse moves and wakes: ${JSON.stringify(report)}`)
+      // About 1.03 with the commit in the tick; 1.3 to 1.8 without it.
+      expect(report.wakes / report.posts).toBeLessThanOrEqual(1.15)
+    },
+    40_000,
+  )
+
   // The same wake path as the live test above, on the test renderer: its window is not key and
   // not on screen, and `tick()` hands AppKit's queue for it to the window.
   it.skipIf(process.platform !== "darwin" || !hasNativeTestRenderer)(

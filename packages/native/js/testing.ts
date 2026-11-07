@@ -260,6 +260,7 @@ interface NativeTestRendererApi
   setScrollbarStyle(style: string): void
   getAppearance(): string
   getWindowTitle(): string
+  setWindowTitle(title: string): void
   setWindowMediaChange(enabled: boolean): void
   getMediaFeatures(): MediaFeatures
   setWindowSize(width: number, height: number): void
@@ -325,6 +326,7 @@ interface NativeTestRendererApi
   setRetainPlanning(planning: boolean): void
   setRetainEnabled(enabled: boolean): void
   setPatchEnabled(enabled: boolean): void
+  setScrollPatchEnabled(enabled: boolean): void
   getPatchCounters(): PatchCounters
   setRetainLift(names: string[]): void
   getRetainMismatches(): string[]
@@ -450,6 +452,7 @@ interface NativeTestRendererApi
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
+  captureShownFrame(path: string): void
 }
 
 interface NativeTestRendererConstructor {
@@ -1263,9 +1266,18 @@ export class TestRenderer implements NativeRenderer {
     this.native.setPatchEnabled(enabled)
   }
 
+  /** Whether the frames drawn after a list scroll are classified as a translate of the frame before
+   *  them and drawn as one when they are (`getPatchCounters().scrollPatch`; on by default, as
+   *  `GPUIX_SCROLL_PATCH_OFF` turns off for the whole run). Off, every frame is drawn whole. */
+  setScrollPatchEnabled(enabled: boolean): void {
+    this.native.setScrollPatchEnabled(enabled)
+  }
+
   /** How ticks were drawn by patching since the window was made: the frames and roots patched, the
    *  ticks gpui drew whole after the patch was tried (`declines`, by reason, as JSON) and the ones
-   *  gpuix did not try to patch (`unpatchable`, by kind, as JSON). */
+   *  gpuix did not try to patch (`unpatchable`, by kind, as JSON), and `scrollPatch`: the frames drawn
+   *  after a list scroll, how many are a pure translate of the rows, how many were drawn as one
+   *  (`patched`), and the first reason the others were not. */
   getPatchCounters(): PatchCounters {
     return this.native.getPatchCounters()
   }
@@ -1523,6 +1535,12 @@ export class TestRenderer implements NativeRenderer {
   setScrollbarStyle(style: "overlay" | "classic"): void {
     this.native.flush()
     this.native.setScrollbarStyle(style)
+    this.native.flush()
+  }
+
+  /** Retitles the window, as the live renderer's `setWindowTitle` does. */
+  setWindowTitle(title: string): void {
+    this.native.setWindowTitle(title)
     this.native.flush()
   }
 
@@ -2078,6 +2096,12 @@ export class TestRenderer implements NativeRenderer {
   captureScreenshot(path: string): void {
     this.native.flush()
     this.native.captureScreenshot(path)
+  }
+
+  /** Capture the frame that was drawn last as it is. `captureScreenshot` notifies the view and refreshes the window, so it
+   *  captures a frame built whole; this captures what a patched tick or a frame that moved the rows in place left. */
+  captureShownFrame(path: string): void {
+    this.native.captureShownFrame(path)
   }
 
   /** Whether the native GPUI test renderer is available. Always true. */

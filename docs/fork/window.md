@@ -15,6 +15,14 @@ a zed commit makes `VisualTestPlatform` forward `set_window_appearance` to the r
 no-op), so a headless window follows the override and delivers the change. Conflicts live in
 `packages/native/js/host.ts`, `src/renderer.rs` and `src/test_renderer.rs`.
 
+## The window title
+
+`setWindowTitle()` and the `title` option write the view's `window_title`, and `GpuixView::render` gives it to the platform
+window. It does so only when it differs from the title the view last gave the window (`applied_window_title`, empty until
+the first render): `Window::set_window_title` is an AppKit `setTitle` (with the window-list update behind it) and an a11y
+update, and it used to run on every frame of a scroll. A window has one view and a reopened window gets a new one, so the
+record cannot outlive the window it describes.
+
 ## The `fonts` option
 
 The `fonts` window option takes a list of font files, reads them and passes them to upstream's `registerFont` right after
@@ -279,5 +287,9 @@ second display, a rotated one and a mirrored one were not checked live.
   the scale factor is at least 1, the rotation is a quarter turn, the label is not empty. zed has `gpui_macos` `display`
   (2): `screen().frame` equals `CGDisplayBounds`.
 - Drag regions: see Platform status above; the window tests are listed in [testing.md](testing.md).
+- The title: `window_title_tests` in `renderer.rs` (3) cover the decision to set it (the first title, a changed one, an
+  unchanged one, an empty one), and `window-options.test.tsx` retitles a test window with `setWindowTitle()` and reads
+  `getWindowTitle()` back after a later frame. gpui's test window does not report its title, so a skipped set is only
+  observable in the decision.
 
 Deviations: [deviations.md#window](deviations.md#window).
