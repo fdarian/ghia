@@ -3,7 +3,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { join } from "node:path"
 
 const PACKAGE_ROOT = join(import.meta.dirname, "..", "..")
-const GHIA_CLI = join(PACKAGE_ROOT, "node_modules", "@ghia", "vite", "dist", "cli.js")
+const GHIA_CLI = join(PACKAGE_ROOT, "node_modules", "ghia", "dist", "cli.js")
 const SCRATCH_ROOT = join(PACKAGE_ROOT, "fixtures", "tmp")
 const TIMEOUT_MS = 30_000
 
@@ -69,7 +69,7 @@ function writeConfigWithoutRefresh(): string {
   writeFileSync(
     join(appDir, file),
     `import { defineConfig } from "vite"
-import { ghia } from "@ghia/vite"
+import { ghia } from "ghia"
 import vitePluginSolid from "vite-plugin-solid"
 
 export default defineConfig({

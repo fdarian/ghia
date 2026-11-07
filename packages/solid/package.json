@@ -89,12 +89,12 @@
     "vite-plugin-solid": "^2.11.15"
   },
   "peerDependencies": {
-    "@ghia/vite": "workspace:^",
+    "ghia": "workspace:^",
     "solid-js": ">=1.9 <2",
     "vite": "^8.0.0"
   },
   "peerDependenciesMeta": {
-    "@ghia/vite": {
+    "ghia": {
       "optional": true
     },
     "vite": {
@@ -102,7 +102,7 @@
     }
   },
   "devDependencies": {
-    "@ghia/vite": "workspace:^",
+    "ghia": "workspace:^",
     "@types/bun": "^1.4.0",
     "@types/node": "^25.3.3",
     "solid-js": "1.9.15",

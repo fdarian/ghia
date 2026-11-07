@@ -1,5 +1,5 @@
 import { defineConfig } from "vite"
-import { ghia } from "@ghia/vite"
+import { ghia } from "ghia"
 import { solid } from "@ghia/solid/vite"
 
 export default defineConfig({

@@ -1,7 +1,7 @@
 {
-  "name": "@ghia/vite",
+  "name": "ghia",
   "version": "0.11.1",
-  "description": "Vite toolchain for Ghia apps",
+  "description": "The ghia command and Vite plugin: dev and build for Ghia apps",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -17,13 +17,14 @@
     },
     "./client": {
       "types": "./client.d.ts"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": ["dist", "client.d.ts", "LICENSE"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/fdarian/ghia.git",
-    "directory": "packages/vite"
+    "directory": "packages/ghia"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
@@ -32,7 +33,11 @@
   "scripts": {
     "build": "tsc",
     "test": "bun run build && bun test",
-    "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @ghia/vite locally. CI is the only release path.'); process.exit(1) }\""
+    "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish ghia locally. CI is the only release path.'); process.exit(1) }\""
+  },
+  "dependencies": {
+    "@effect/platform-bun": "4.1.2",
+    "effect": "4.1.2"
   },
   "peerDependencies": {
     "@ghia/native": "workspace:^",

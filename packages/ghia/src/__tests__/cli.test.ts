@@ -67,7 +67,7 @@ function writeBareConfig(options: { inject: boolean }): string {
   writeFileSync(
     join(appDir, file),
     `import { defineConfig } from "vite"
-import { ghia } from "@ghia/vite"
+import { ghia } from "ghia"
 
 const plugin = ghia({ entry: "bare.ts" })
 ${options.inject ? "" : "delete plugin.transform"}
@@ -170,6 +170,49 @@ describe("ghia dev", () => {
     },
     TIMEOUT_MS * 2
   )
+
+  test(
+    "stops on SIGINT",
+    async () => {
+      const run = spawn(["bun", CLI, "dev"], appDir)
+      await run.waitFor("RENDERED marker v1")
+      run.process.kill("SIGINT")
+      expect(await run.process.exited).toBe(0)
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "accepts the config file as -c",
+    async () => {
+      const run = spawn(["bun", CLI, "dev", "-c", writeBareConfig({ inject: true })], appDir)
+      await run.waitFor("WINDOW_AT_LOAD")
+      expect(lines(run.output(), "WINDOW_AT_LOAD ")).toEqual(["object"])
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "fails with a non-zero exit when the config file does not exist",
+    async () => {
+      const output = await runToFailure(["bun", CLI, "dev", "--config", "missing.config.ts"], appDir)
+      expect(output).toContain("missing.config.ts")
+    },
+    TIMEOUT_MS * 2
+  )
+})
+
+describe("ghia", () => {
+  test("lists dev and build in its help", async () => {
+    const output = await runToExit(["bun", CLI, "--help"], appDir)
+    expect(output).toContain("dev")
+    expect(output).toContain("build")
+  })
+
+  test("fails on an unknown command", async () => {
+    const output = await runToFailure(["bun", CLI, "serve"], appDir)
+    expect(output).toContain("serve")
+  })
 })
 
 describe("ghia build", () => {
@@ -283,7 +326,7 @@ describe("without an entry", () => {
     writeFileSync(
       join(appDir, "vite.config.entryless.ts"),
       `import { defineConfig } from "vite"
-import { ghia } from "@ghia/vite"
+import { ghia } from "ghia"
 
 export default defineConfig({ plugins: [ghia()] })
 `
@@ -310,7 +353,7 @@ describe("without the server option", () => {
     writeFileSync(
       join(appDir, "vite.config.wants-server.ts"),
       `import { defineConfig } from "vite"
-import { ghia } from "@ghia/vite"
+import { ghia } from "ghia"
 
 export default defineConfig({ plugins: [ghia({ entry: "wants-server.ts" })] })
 `

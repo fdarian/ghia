@@ -1,4 +1,4 @@
-import { ghia } from "@ghia/vite"
+import { ghia } from "ghia"
 import { defineConfig } from "vitest/config"
 import { solid } from "./src/vite.ts"
 

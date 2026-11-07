@@ -1,5 +1,0 @@
----
-'@ghia/vite': minor
----
-
-New package: the Vite toolchain for Ghia apps. `ghia({ entry, server })` is a Vite plugin that defines a `ghia` environment whose modules resolve like a browser page's (browser export conditions, every dependency bundled except `@ghia/native` and its subpaths, which load natively) and injects `@ghia/native/dom-globals` ahead of the entry. `ghia dev` runs the app in Bun with HMR, and `ghia build` emits `dist/main.js`, which runs with plain `bun`. With `server`, a second `server` environment runs your server code in a Bun Worker, and the UI reaches it through the `serverPort` `MessagePort` from `virtual:ghia/server` (types in `@ghia/vite/client`); the server entry is `export default function serve(port)` and returns a function that detaches its handler, and `ghia build` also emits `dist/server.js`. An edit to a server module reloads the server in dev, on the same port; a call in flight at that moment may go unanswered. Under vitest, `ghia()` applies the same resolve conditions, inlines every dependency, loads the addon natively and installs the globals before each test file.

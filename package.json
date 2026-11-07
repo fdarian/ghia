@@ -1,11 +1,11 @@
 {
-  "name": "ghia",
+  "name": "ghia-monorepo",
   "private": true,
   "license": "Apache-2.0",
   "packageManager": "pnpm@12.16.1",
   "scripts": {
-    "build": "bun run build:native && bun run build:vite && bun run build:react && bun run build:solid",
-    "build:vite": "cd packages/vite && bun run build",
+    "build": "bun run build:native && bun run build:ghia && bun run build:react && bun run build:solid",
+    "build:ghia": "cd packages/ghia && bun run build",
     "build:native": "cd packages/native && bun run build",
     "build:react": "cd packages/react && bun run build",
     "build:solid": "cd packages/solid && bun run build",
@@ -15,7 +15,7 @@
     "web:wasm": "bun scripts/web.ts --build-only",
     "changeset": "changeset",
     "ci:version": "changeset version",
-    "ci:release": "bun run build:native && bun run build:vite && bun run build:solid && bun run build:react && changeset publish"
+    "ci:release": "bun run build:native && bun run build:ghia && bun run build:solid && bun run build:react && changeset publish"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.3",

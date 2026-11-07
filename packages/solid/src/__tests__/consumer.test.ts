@@ -11,7 +11,7 @@ const TIMEOUT_MS = 60_000
 const tarballs = {
   "@ghia/native": { directory: "packages/native", filename: "ghia-native.tgz" },
   "@ghia/solid": { directory: "packages/solid", filename: "ghia-solid.tgz" },
-  "@ghia/vite": { directory: "packages/vite", filename: "ghia-vite.tgz" },
+  ghia: { directory: "packages/ghia", filename: "ghia.tgz" },
 }
 
 const running: Bun.Subprocess[] = []

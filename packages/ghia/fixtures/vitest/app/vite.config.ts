@@ -1,5 +1,5 @@
 import { defineConfig } from "vitest/config"
-import { ghia } from "@ghia/vite"
+import { ghia } from "ghia"
 
 export default defineConfig({
   plugins: [ghia()],

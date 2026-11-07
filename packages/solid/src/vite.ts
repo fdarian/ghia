@@ -1,11 +1,11 @@
-import { SERVER_ENVIRONMENT_NAME } from "@ghia/vite"
+import { SERVER_ENVIRONMENT_NAME } from "ghia"
 import solidRefresh from "solid-refresh/babel"
 import type { Plugin } from "vite"
 import vitePluginSolid from "vite-plugin-solid"
 
 /**
  * Compiles JSX and TSX for Solid's universal renderer with `@ghia/solid` as its module, and keeps
- * edited components hot in `ghia dev`. Use it next to `ghia()` from `@ghia/vite`. It compiles the
+ * edited components hot in `ghia dev`. Use it next to `ghia()` from `ghia`. It compiles the
  * UI and vitest's test environment, not Ghia's `server` environment, which has no renderer.
  */
 export function solid(): Plugin[] {
