@@ -818,12 +818,13 @@ that holds is counted in `held`, so what else would stop the frame is known too:
 | `Focus` | the frame shown, or a layout there, builds a row outside the viewport for the focus it holds |
 | `A11y` | the accessibility tree is being built |
 | `ScrollAnimation` | a smooth scroll or a scrollbar fade has frames of its own (the owner says it) |
+| `Clock` | something that follows the clock has a frame to draw: a tick was requested for this draw (`Window::request_tick`: a transition, a keyframe animation, a motion value, the blink of a caret, a hover paint), or the owner says its last frame asked for another (`ClockAsked`, published by the frame that ran: a transition, animation or motion running, a motion value that wants frames). A translate builds nothing, and `draw` takes the tick (`patch.tick`) before it classifies, so a translate that took it would leave nothing to ask for the next frame and what runs would stand still until a frame built whole. The tick is kept as a flag of the draw (`ScrollPatchWindow::ticked`) and refused, not left set, so the tick is drawn by the frame that is built whole |
 | `Thumb` | the thumb of a bar cannot be put where the scroll puts it ([The thumb](#the-thumb)): the bar of a list would be painted at another alpha, size or track than the frame shown painted it, would appear where the frame shown painted none, or is painted in a way that cannot be moved in place; or a bar of a scroll container is due a frame (`scrollbar::container_bar_stale`, said by the owner's gate). `held` also counts `Thumb.size`, `Thumb.alpha`, `Thumb.appear` and `Thumb.track` |
 | `NotRelocatable` | a row of the frame shown has no run (it is not a relocatable root, or holds several: the runs are not the rows), a run has no recording, or its recording cannot be put elsewhere (built late, a hole, a position kept past the frame). `held` also counts `NotRelocatable.noRun`, `.noRecording` and `.unmovable` |
 
 A frame with none is *eligible*. The owner's part (`Window::set_scroll_patch_gate`, `retain/scroll_gate.rs`) is `Edited` (the root's
 `subtree_revision` against the one `Retain` published when it last recorded a whole frame, or a tree locked by an update),
-`ScrollAnimation` (`scroll::animating()`, `scrollbar::needs_frames()`), `Thumb` (a bar of a scroll container that is not a list's painted at an alpha or thickness
+`ScrollAnimation` (`scroll::animating()`, `scrollbar::needs_frames()`), `Clock` (`ClockAsked`, set by `GpuixView::render` and `continue_after_patch` from what they ask `request_next_frame` for), `Thumb` (a bar of a scroll container that is not a list's painted at an alpha or thickness
 the clock has since changed, `scrollbar::container_bar_stale`: a translate builds no bar, so it would leave the end of its hold unseen) and `Other` (nothing to translate from), and, for `Hover`
 (`Window::set_scroll_patch_hover`, the same file), whether moving the hover from the chain before to the chain after would restyle or
 emit: `events::dispatcher::hover_would_matter`, which asks the code that `update_hover` runs (`HoverChange`: who enters and leaves, whether
@@ -831,7 +832,7 @@ one of them restyles, whether an event of the change has a listener on the path 
 the pointer is in (a captured or locked target is the target before and after) and of the tree (a tree locked by an update says
 yes). It is a callback and not a state published with each frame (`Retain::publish_shown` is that, for `Edited`) because what it reads
 is the style and listeners of the elements under the pointer, which a frame would have to copy for every element. The other sources that
-`Retain::preview` reads for a tick (a measurement, a link, a command, a running motion) are not asked yet, and the pointer and focus
+`Retain::preview` reads for a tick (a measurement, a link, a command) are not asked yet, and the pointer and focus
 styles of the elements outside the rows are not either: a frame that differs in one of those and is called eligible is what
 `mispredicted` is for.
 
@@ -951,7 +952,7 @@ hidden (5.4M in the previous measurement). The 392 ticks that stay whole are the
 first wheel after a commit, slice 3's.
 
 **Not in 2b.** The row that comes in at an edge (`Membership`: a layout that builds a row), the hover that changes what is under the pointer (`Hover`), and what the
-gate cannot see (a measurement, a link, a command, a running motion: these are the `mispredicted` of an eligible frame that the translate
+gate cannot see (a measurement, a link, a command: these are the `mispredicted` of an eligible frame that the translate
 would draw wrong; the proxy has none).
 
 ## Limits
@@ -1015,6 +1016,10 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   (`alpha`, `size`, `track`, and `appear` for a bar not painted) holds only its own and draws whole without telling the bar, a thumb painted under a
   rotation is `track`, an operation that is not the thumb's quad declines (`applyDeclines.Thumb`) before anything is written, the verifier passes a
   moved thumb and calls one that was put elsewhere than the bar paints it a mismatch.
+- `scroll-patch-clock.test.tsx` (react): a wheel in the draw of a tick (a transition of a box beside the list, the blink of the caret of an input beside it) is
+  a whole frame, `reasons.Clock` counts them, the picture after each step and the `transitionend` are those of the control with the translate off, and the
+  translates resume once the transition has ended. gpui `window/scroll_patch_tests.rs`: a `request_tick` in the draw of a wheel is `Clock` and the next wheel
+  without one is a translate; the owner's `Clock` is the only reason.
 - Transforms in three dimensions patch every tick with no decline of either kind (`getPatchCounters`): `transform-css-patch.test.tsx` for a transition of `rotateY` under a perspective, an animation of 3D lists that do not pair, of the depth of `transform-origin` around a rotation, and of the `perspective` and `perspective-origin` of the parent; `motion-transform.test.tsx` for a Motion tween of `rotateY` whose card hides the face that turns away on the patched ticks (`faces_away` is published with the box, not compared by the tape; [paint-and-transforms.md](paint-and-transforms.md#retention-and-patched-ticks)).
 - `animation-frame-work.test.tsx`: at 500 and 5000 nodes every loop kind (keyframes colour, native `motion` colour, colour
   transition, svg stroke dash, `motion` and keyframes opacity, the colour loop of a relative box with and without a `z-index`, loops

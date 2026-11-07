@@ -1,6 +1,7 @@
 //! What gpui asks of Ghia before it classifies the frame drawn after a list scroll
 //! (`Window::set_scroll_patch_gate`): whether the tree is the one the frame shown was built from,
-//! and whether an animation of the scroll has frames of its own to run, or the bar of a scroll container is due one (the bars of a
+//! whether something that follows the clock asked the last frame for another (`ClockAsked`), and
+//! whether an animation of the scroll has frames of its own to run, or the bar of a scroll container is due one (the bars of a
 //! list are planned by the bar, `scrollbar::plan_thumb`, through `Window::paint_scroll_thumb`). And what a hit chain that
 //! a scroll changes would do to the pointer (`Window::set_scroll_patch_hover`): restyle an
 //! element or reach a listener, or nothing. The classifier is in zed
@@ -27,7 +28,17 @@ impl ShownFrame {
     }
 }
 
+/// Whether the last frame that ran (a build or a patched tick) asked for another because something
+/// follows the clock: a transition, an animation, motion, a motion value that wants frames.
+#[derive(Clone, Default)]
+pub(crate) struct ClockAsked(Rc<Cell<bool>>);
+
 impl Retain {
+    /// Says whether the frame that ran asked for the next one.
+    pub(crate) fn note_clock_asked(&self, asked: bool) {
+        self.clock_asked.0.set(asked);
+    }
+
     /// Says what the frame shown is, after anything that changes it.
     pub(super) fn publish_shown(&self) {
         let whole = self.planning && self.plan.recorded && !self.plan.layout_since && !self.plan.unsteady;
@@ -40,6 +51,7 @@ impl GpuixView {
     pub(super) fn install_scroll_gate(&mut self, window: &mut gpui::Window) {
         window.set_scroll_patch(std::env::var_os("GPUIX_SCROLL_PATCH_OFF").is_none());
         let shown = self.retain.shown.clone();
+        let clock_asked = self.retain.clock_asked.clone();
         let tree = self.tree.clone();
         let hover_tree = self.tree.clone();
         let pointer = self.pointer.clone();
@@ -85,6 +97,10 @@ impl GpuixView {
             }
             if crate::scroll::animating() || crate::scrollbar::needs_frames() {
                 return Some(ScrollPatchReason::ScrollAnimation);
+            }
+            // A translate builds nothing, so it would leave what runs where the last frame left it.
+            if clock_asked.0.get() {
+                return Some(ScrollPatchReason::Clock);
             }
             crate::scrollbar::container_bar_stale().then_some(ScrollPatchReason::Thumb)
         })));

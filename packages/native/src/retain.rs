@@ -1111,6 +1111,7 @@ pub(crate) struct Retain {
     debug: debug::Debug,
     /// What a list scroll is classified against, see `scroll_gate`.
     shown: scroll_gate::ShownFrame,
+    clock_asked: scroll_gate::ClockAsked,
 }
 
 /// What `Retain::enter` is told about the element about to be built.
@@ -1305,6 +1306,7 @@ impl Retain {
             mismatches: Vec::new(),
             debug: debug::Debug::from_env(),
             shown: scroll_gate::ShownFrame::default(),
+            clock_asked: scroll_gate::ClockAsked::default(),
         }
     }
 

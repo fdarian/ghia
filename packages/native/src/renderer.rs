@@ -10102,11 +10102,12 @@ impl gpui::Render for GpuixView {
         crate::scroll_write::note_metrics_current(window);
 
         let motion_value_demand = motion_value_demand(&tree, &self.motion_values, &self.retain);
-        if motion_active
+        let asks_next_frame = motion_active
             || transitions_active
             || motion_value_demand == crate::motion::Demand::Frame
-            || scroll_animating
-        {
+            || scroll_animating;
+        self.retain.note_clock_asked(asks_next_frame);
+        if asks_next_frame {
             self.request_next_frame(window, scroll_animating);
         } else {
             let wake = self.dormant_clock_wake(&tree).merge(dormant_motion);

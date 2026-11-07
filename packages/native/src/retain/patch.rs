@@ -243,7 +243,9 @@ impl GpuixView {
         let hovered = self.pointer.borrow().take_paint_pending();
         self.retain.hover_repainted(hovered);
         let running = self.css_transitions.take_active() | self.css_animations.take_active();
-        if running || stepped.motion || stepped.motion_values == crate::motion::Demand::Frame {
+        let asks_next_frame = running || stepped.motion || stepped.motion_values == crate::motion::Demand::Frame;
+        self.retain.note_clock_asked(asks_next_frame);
+        if asks_next_frame {
             self.request_next_frame(window, false);
         } else {
             let tree_arc = self.tree.clone();
