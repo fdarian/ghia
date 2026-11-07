@@ -902,6 +902,13 @@ the patcher turns it on with `Window::set_contained_patches`.
 - **Counters.** `getPatchCounters().relayoutPatches` (anchors repainted after a layout), the `declines` above of gpui, and in
   `unpatchable`: `Structure`, `Anchor:StaleRecording`, `Anchor:Focus`, `Anchor:Relocated` and the like.
 
+**Measured** (the mailbox proxies of ghia-bench, release addon, `A11Y=0`, two runs each back to back). The Navigate proxy `APP=App`: median
+38.8M and 38.6M a key (excluding the first), as before; no key is patched: the bench Detail holds roots (texts, a box with children) and
+its handler reads `scrollTop` after the commit, so every key is `PendingView` (30 of 30) and drawn whole as it was. `APP=App-detailstatic`:
+16.1M and 16.1M (as before, 7 keys patched as commit patches). `PHASE=hover` row crossings: median 4.060M and 4.054M (4.04M before), and
+`PHASE=scroll` median 6.889M and 6.893M, mean 7.543M and 7.568M (6.81M and 7.49M before: the retained root the detail's anchor is, in each
+frame built whole).
+
 **Limits (this slice).**
 
 - gpui's patch needs the counts of operations, hitboxes and registrations the recording has, and a root whose recording was made with
