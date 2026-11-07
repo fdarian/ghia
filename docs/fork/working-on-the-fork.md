@@ -385,7 +385,7 @@ keeps its own build script for them.
 
 `ci.yml` runs on pushes to `main` and on pull requests (not for changes that only touch Markdown, `docs/`, `LICENSE`, `NOTICE` or
 `.changeset/`, and not for the `Version Packages` PR, which only changes versions and changelogs) as one `check` job on
-`macos-latest`: the native build, the Vite, Solid and React builds, then `bun run test` in `packages/native`, `packages/vite`,
+`macos-latest`: the native build, the `ghia`, Solid and React builds, then `bun run test` in `packages/native`, `packages/ghia`,
 `packages/solid` and `examples`. A failing suite does not skip the ones after it. The React suite is not part of that run. Start it on a branch with
 `gh workflow run ci.yml -R fdarian/ghia --ref <branch>`: `check` runs as above and uploads the build output, and the
 `react-tests` job then runs the suite on three runners, a third of the files each, even if a `check` suite failed. Running the
@@ -393,8 +393,8 @@ React suite locally is still the bar before landing ([testing.md](testing.md#tes
 There is no format job and no Turbo: a format commit over upstream-derived code would conflict with every pick.
 
 A user-visible change adds a changeset with `pnpm changeset`. Pushing it to `main` runs `release.yml`, where the changesets
-action opens or updates the `Version Packages` PR. `@ghia/native`, `@ghia/vite`, `@ghia/solid` and `@ghia/react` are `fixed`: they share a
-version. Merging that PR runs the action again: `bun run ci:release` builds the addon, `@ghia/vite` and both adapters on the runner and
+action opens or updates the `Version Packages` PR. `@ghia/native`, `ghia`, `@ghia/solid` and `@ghia/react` are `fixed`: they share a
+version. Merging that PR runs the action again: `bun run ci:release` builds the addon, `ghia` and both adapters on the runner and
 `changeset publish` publishes the four packages with provenance, through npm trusted publishing (OIDC, no token). Each
 package's `prepublishOnly` refuses to run without `CI`, so nothing is published from a laptop by accident.
 
@@ -406,7 +406,7 @@ Publish each package once by hand from a checkout of the version commit, after b
 `workspace:^` into the version, `npm publish` does not):
 
 ```bash
-CI=true pnpm --filter @ghia/native --filter @ghia/vite --filter @ghia/solid --filter @ghia/react publish --access public --no-git-checks
+CI=true pnpm --filter @ghia/native --filter ghia --filter @ghia/solid --filter @ghia/react publish --access public --no-git-checks
 ```
 
 Then on npmjs.com add a trusted publisher to each package (Settings, Publishing): repository `fdarian/ghia`, workflow

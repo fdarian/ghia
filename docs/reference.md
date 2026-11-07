@@ -487,7 +487,7 @@ Event handlers are stored in a JS-side registry keyed by `(elementId, eventType)
 - **`@ghia/native/automation`**: the shared automation protocol, client, locators, and process launcher.
 - **`@ghia/react`**: the React reconciler and React components. It preserves its existing exports and re-exports shared testing, automation, search, and observer APIs.
 - **`@ghia/solid`**: the Solid 1 universal renderer, Solid primitives, motion, Select, Combobox, Tooltip, and `solid()` (`@ghia/solid/vite`), the Vite plugin that compiles Solid JSX.
-- **`@ghia/vite`**: the `ghia()` Vite plugin and the `ghia dev` / `ghia build` commands. Solid apps run and build with them; React apps still run on `bun --hot`. `@ghia/vite/client` types `virtual:ghia/server`.
+- **`ghia`**: the `ghia()` Vite plugin, the programmatic `dev()` and `build()`, and the `ghia dev` / `ghia build` commands (built with Effect's CLI). Solid apps run and build with them; React apps still run on `bun --hot`. `ghia/client` types `virtual:ghia/server`.
 
 Pin the selected adapter and `@ghia/native` to the **same exact version**.
 Ghia is still pre-1.0. Breaking changes can land before v1. Upgrade them
@@ -498,7 +498,7 @@ together.
 Install Solid, the Solid adapter and the Vite toolchain:
 
 ```bash
-pnpm add --save-exact @ghia/solid @ghia/native @ghia/vite solid-js
+pnpm add --save-exact @ghia/solid @ghia/native ghia solid-js
 pnpm add --save-dev vite
 ```
 
@@ -524,7 +524,7 @@ files for Solid's universal renderer and selects the reactive client runtime.
 ```ts
 // vite.config.mts
 import { defineConfig } from 'vite'
-import { ghia } from '@ghia/vite'
+import { ghia } from 'ghia'
 import { solid } from '@ghia/solid/vite'
 
 export default defineConfig({

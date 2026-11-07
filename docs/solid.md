@@ -15,10 +15,10 @@
 
 ## Install
 
-Pin **`@ghia/solid`**, **`@ghia/native`** and **`@ghia/vite`** to the same exact version. Ghia is still pre-1.0. Upgrade them together.
+Pin **`@ghia/solid`**, **`@ghia/native`** and **`ghia`** to the same exact version. Ghia is still pre-1.0. Upgrade them together.
 
 ```bash
-pnpm add --save-exact @ghia/solid @ghia/native @ghia/vite solid-js
+pnpm add --save-exact @ghia/solid @ghia/native ghia solid-js
 pnpm add --save-dev vite
 ```
 
@@ -53,7 +53,7 @@ Install **`@ghia/native`** yourself, although `@ghia/solid` depends on it. The `
 ```ts
 // vite.config.mts
 import { defineConfig } from 'vite'
-import { ghia } from '@ghia/vite'
+import { ghia } from 'ghia'
 import { solid } from '@ghia/solid/vite'
 
 export default defineConfig({
@@ -190,13 +190,13 @@ src/
   main.tsx      UI entry
   server.ts     server entry
   router.ts     oRPC router, shared by both sides
-  env.d.ts      /// <reference types="@ghia/vite/client" />
+  env.d.ts      /// <reference types="ghia/client" />
 ```
 
 ```ts
 // vite.config.mts
 import { defineConfig } from 'vite'
-import { ghia } from '@ghia/vite'
+import { ghia } from 'ghia'
 import { solid } from '@ghia/solid/vite'
 
 export default defineConfig({
@@ -243,7 +243,7 @@ export default function serve(port: MessagePort): () => void {
 }
 ```
 
-**The UI** imports `serverPort` from `virtual:ghia/server`: its end of the channel to `serve`. `@ghia/vite/client` declares the module, so reference it once in a `.d.ts` (`env.d.ts` above).
+**The UI** imports `serverPort` from `virtual:ghia/server`: its end of the channel to `serve`. `ghia/client` declares the module, so reference it once in a `.d.ts` (`env.d.ts` above).
 
 ```tsx
 // src/main.tsx
@@ -308,7 +308,7 @@ Import the router into the UI as a type only. A value import would pull the serv
 
 There is no **`./cpu-throttle`**. Testing and automation are subpaths only.
 
-`@ghia/vite` exports **`ghia()`** and ships the `ghia` command. `@ghia/vite/client` declares `virtual:ghia/server`.
+`ghia` exports **`ghia()`**, the programmatic **`dev(options)`** and **`build(options)`** (options `configFile` and `root`; `dev()` resolves to a handle with `close()`), and ships the `ghia` command, a thin shell over those two. `ghia/client` declares `virtual:ghia/server`.
 
 ## `render()`
 
@@ -679,7 +679,7 @@ Tests run on vitest, under Bun, with the plugins the app uses:
 ```ts
 // vitest.config.ts
 import { defineConfig } from 'vitest/config'
-import { ghia } from '@ghia/vite'
+import { ghia } from 'ghia'
 import { solid } from '@ghia/solid/vite'
 
 export default defineConfig({

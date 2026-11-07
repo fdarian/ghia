@@ -40,7 +40,7 @@ Patches 1 and 2 fix two of the three causes of the slow scrolling. Upstream land
 | `<webview>` | A web page in a native view composed into the window between GPUI layers: a placeholder in the scene cuts the frame into GPUI and native layers at its draw order, so popovers, scroll containers and opacity work around it. Electron's `<webview>` API on a system `WKWebView`, focus and Tab in and out, macOS only (zed `composition`). | [webview.md](webview.md) |
 | `<nativeview>` | A `div` with an AppKit view from another library in it, between GPUI layers: a pointer (`onAttach` / `onDetach`) is the whole boundary, so the library links no GPUI. Clipped by CSS `overflow`, GPUI keeps the pointer unless `nativeEvents`, macOS only (zed `composition`). | [nativeview.md](nativeview.md) |
 | Window features | Following the macOS appearance, a `fonts` window option, `appRegion` drag regions for frameless windows, `x` / `y` window placement with Electron's `screen` displays. | [window.md](window.md) |
-| Web renderer and Vite | The UI process behaves like a browser page (`window === globalThis`, browser export conditions); `@ghia/vite` and `@ghia/solid/vite` run Solid under `ghia dev` and `ghia build`; server code runs in a Worker behind RPC. | [web-renderer.md](web-renderer.md) |
+| Web renderer and Vite | The UI process behaves like a browser page (`window === globalThis`, browser export conditions); `ghia` and `@ghia/solid/vite` run Solid under `ghia dev` and `ghia build`; server code runs in a Worker behind RPC. | [web-renderer.md](web-renderer.md) |
 
 ## Documentation map
 

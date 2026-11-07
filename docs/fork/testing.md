@@ -9,7 +9,7 @@ cd packages/native && cargo test --lib          # Rust unit tests
 cd packages/native && bun run test              # vitest; one test skips without the wasm build
 cd packages/react && bun run test               # vitest, needs the addon built
 cd packages/solid && bun run test               # builds, then vitest under Bun (bun --bun vitest run)
-cd packages/vite && bun run test                # builds, then bun test: the CLI tests spawn ghia dev and ghia build
+cd packages/ghia && bun run test               # builds, then bun test: the CLI tests spawn ghia dev and ghia build; the API tests call dev() and build()
 cd examples && bun run test                     # the examples suite; *.perf.test.tsx is excluded
 cd zed && cargo test -p gpui --lib --features test-support   # GPUI's own tests, where the zed commits are tested
 cd zed && cargo test -p gpui_macos --test native_surface       # window composition in a real window (needs an unoccluded display)
@@ -17,7 +17,7 @@ cd zed && cargo test -p gpui_macos --test native_surface_present # a surface's s
 cd packages/native/examples/webview-e2e && bun run e2e         # <webview> on real WKWebViews in a real window
 ```
 
-- Run a package's suite with `bun run test`, not a bare `bun test`: `packages/react`, `packages/native` and `examples` are vitest, so Bun's own runner fails on their `vitest` imports. `packages/solid` is vitest too, run under Bun (`bun --bun vitest run`) with the same `ghia()` and `solid()` plugins an app uses (`packages/solid/vitest.config.ts`). `packages/vite` is `bun:test`. Both build first, because the tests run the built `ghia` command from `dist/`.
+- Run a package's suite with `bun run test`, not a bare `bun test`: `packages/react`, `packages/native` and `examples` are vitest, so Bun's own runner fails on their `vitest` imports. `packages/solid` is vitest too, run under Bun (`bun --bun vitest run`) with the same `ghia()` and `solid()` plugins an app uses (`packages/solid/vitest.config.ts`). `packages/ghia` is `bun:test`. Both build first, because the tests run the built `ghia` command from `dist/`.
 - `packages/native` has one test that bundles both adapters for the browser. It needs `packages/react` built and `bun run build:web` (nightly Rust and `wasm-bindgen`), so it is skipped while `packages/native/wasm/gpuix-web.js` is absent, which is every checkout and CI run that does not build the wasm.
 - The `*.perf.test.tsx` files in `examples/` run with `bun run test:perf` (chat, timeline and rerender) or one at a time, through the scripts that set `NODE_ENV=production`. Use a release addon: a leftover debug build times like a regression. To time another build of the addon, copy it over `packages/native/gpuix-native.darwin-arm64.node`: `NAPI_RS_NATIVE_LIBRARY_PATH` replaces every napi-rs binding the process loads, rolldown's too, so vitest fails at startup (`Class extends value undefined`) and so does `ghia dev` or `ghia build`, which run Vite on rolldown.
 - Tests that need the native addon are `describe.skip` when it is missing (`hasNativeTestRenderer`), so a green run without the addon proves little.

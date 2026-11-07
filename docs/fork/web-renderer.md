@@ -1,6 +1,6 @@
 # The web renderer and the Vite toolchain
 
-The UI process of a Ghia app is a web renderer, like an Electron renderer or a React Native app: it has the globals a web page has, it resolves packages to their browser builds, and server code runs behind an RPC boundary. `@ghia/vite` (the `ghia()` plugin and the `ghia dev` / `ghia build` commands) and `@ghia/solid/vite` carry that into the toolchain. This file records why it is built this way; what an app author does is in [docs/solid.md](../solid.md) and [docs/reference.md](../reference.md#window-and-document).
+The UI process of a Ghia app is a web renderer, like an Electron renderer or a React Native app: it has the globals a web page has, it resolves packages to their browser builds, and server code runs behind an RPC boundary. `ghia` (the `ghia()` plugin, `dev()` and `build()`, and the `ghia dev` / `ghia build` commands, a thin Effect CLI over them) and `@ghia/solid/vite` carry that into the toolchain. This file records why it is built this way; what an app author does is in [docs/solid.md](../solid.md) and [docs/reference.md](../reference.md#window-and-document).
 
 The reason is the principle in [index.md](index.md#the-principle-dom-and-css-semantics): code written for the web works unchanged. The libraries a web developer reaches for (TanStack Query and Router, `nanoid`, `solid-js/web`) pick their build from `window` and from package export conditions, and a UI process that looks like a Node server gets their server builds.
 
@@ -57,4 +57,4 @@ Both spikes ran on 2026-11-06 on one Mac, headless (the test renderer or plain B
 - Renderer spike, `~/spaces/scratchs/ghia-renderer-spike/FINDINGS.md` (Bun 1.4.4, oRPC 1.16.2, TanStack Router 1.170 and Query 5.106): export conditions under Bun, the global `window`, and the transport comparison (median of five runs; a plain Bun process stood in for the UI, sequential calls only).
 - Vite spike, `~/spaces/scratchs/ghia-vite-spike/FINDINGS.md` (Vite 8.3.6, vite-plugin-solid 2.11.15): the `ghia` environment, solid-refresh, the build, and the start and HMR timings above.
 
-The behaviour is pinned by `packages/vite/src/__tests__` (the CLI, spawning `ghia dev` and `ghia build`, with and without a server), `packages/solid/src/__tests__/vite.test.ts` and `consumer.test.ts` (an app installed from tarballs with pnpm).
+The behaviour is pinned by `packages/ghia/src/__tests__` (the CLI, spawning `ghia dev` and `ghia build`, with and without a server, and `dev()` and `build()` called in process), `packages/solid/src/__tests__/vite.test.ts` and `consumer.test.ts` (an app installed from tarballs with pnpm).
