@@ -15343,6 +15343,24 @@ mod batch_tests {
     }
 
     #[test]
+    fn destroying_an_element_a_batch_detached_leaves_the_frame_as_it_was() {
+        let mut tree = RetainedTree::new();
+        apply(&mut tree, MOUNT).expect("valid batch");
+        tree.set_commit_patching(true);
+        tree.take_dirty();
+        tree.set_anchors([3].into_iter().collect(), tree.revision());
+        let created = r#"[["createElement",4,"div"],["setStyle",4,{"height":3}],["appendChild",3,4]]"#;
+        assert_eq!(dirty_after(&mut tree, created), Dirty::LayoutPatchable);
+        assert_eq!(dirty_after(&mut tree, r#"[["detachChild",4]]"#), Dirty::LayoutPatchable);
+        // The cleanup of a framework destroys what the handler's batch detached, in a batch of its own.
+        assert_eq!(dirty_after(&mut tree, r#"[["destroyElement",4]]"#), Dirty::Clean);
+        // One that was in the tree when it was destroyed changed the frame.
+        let placed = r#"[["createElement",5,"div"],["appendChild",3,5]]"#;
+        assert_eq!(dirty_after(&mut tree, placed), Dirty::LayoutPatchable);
+        assert_eq!(dirty_after(&mut tree, r#"[["destroyElement",5]]"#), Dirty::LayoutPatchable);
+    }
+
+    #[test]
     fn a_style_change_that_is_not_only_paint_is_dirty_for_layout() {
         let changes = [
             r#"{"height":11}"#,

@@ -917,7 +917,9 @@ the patcher turns it on with `Window::set_contained_patches`.
   the prepared patch (`Window::finish_prepared_patch`, with the tape acceptance of any patch) when `prepared_patch_units` is what the
   preview names then; otherwise it builds as for any tick, and gpui drops the prepared patch. The view's pending layout is `Waiting`
   (nothing prepared), `Prepared` or `Notified` (the view was invalidated, so the next read lays out from the root and the tick is
-  drawn whole). Anything that changes the tree or a scroller after the prepare (`invalidate_after_mutation`, a scroll write) discards the
+  drawn whole). A framework that destroys what a handler's batch detached in a batch of its own after the handler returns (Solid's
+  `finishRemovals`) discards nothing: destroying an element that `detach_child` took out of the tree is `Dirty::Clean` when patch frames are
+  made (`RetainedTree::destroy_element`), since the batch that detached it already said the frame changed. Anything else that changes the tree or a scroller after the prepare (`invalidate_after_mutation`, a scroll write) discards the
   patch with `Window::discard_prepared_patch`, which leaves the layout it computed in the engine and loses the recording of the anchor,
   so the frame after a discard is built whole (`StaleRecording`) and records it again. A decline of the prepare (gpui's, `NotContained`
   for one) falls back to what a read did before: the view is notified, a pass runs, and the tick is drawn whole (`PendingView`); a

@@ -422,7 +422,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: the detail of a mailbox swapped 
   })
 })
 
-type Between = "nothing" | "second swap" | "outside change" | "detail scroll" | "list scroll"
+type Between = "nothing" | "cleanup" | "second swap" | "outside change" | "detail scroll" | "list scroll"
 
 /**
  * The detail is swapped, and what a handler reads right after is read: the scroll metrics of the detail, the box of an element in the new
@@ -452,6 +452,10 @@ function runReading(patch: boolean, changes: Partial<Page>[], between: Between, 
       const readPasses = renderer.getLayoutPassCount() - passes
       switch (between) {
         case "nothing":
+          break
+        case "cleanup":
+          // What the framework does when the handler has returned: it destroys the nodes the commit detached, in a batch of its own.
+          app.root.flush()
           break
         case "second swap":
           set({ count: (change.count ?? 6) + 2 })
@@ -514,6 +518,23 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a read while a commit inside a s
     }
     expect(sum(on.counters.declines)).toBe(0)
     expect(sum(on.counters.unpatchable)).toBe(0)
+  })
+
+  test("the framework's cleanup after the handler (it destroys the nodes the commit detached) does not discard the prepared patch", () => {
+    const on = runReading(true, SWAPS, "cleanup")
+    const off = runReading(false, SWAPS, "cleanup")
+    expect(on.mismatches).toBe(0)
+    expect(on.steps.map((step) => step.reads)).toEqual(off.steps.map((step) => step.reads))
+    expect(on.steps.map((step) => step.after)).toEqual(off.steps.map((step) => step.after))
+    expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+    if (!counted) return
+    for (const [index, step] of on.steps.entries()) {
+      expect(step.readPasses, `step ${index}`).toBe(0)
+      expect(step.relaid, `step ${index}: ${JSON.stringify(on.counters)}`).toBe(1)
+      expect(step.whole, `step ${index}`).toBe(0)
+      expect(step.built, `step ${index}`).toBe((SWAPS[index].count as number) + 2)
+    }
+    expect(sum(on.counters.declines)).toBe(0)
   })
 
   test("a second swap after the read throws the prepared patch away, and the frame is the one patching off draws", () => {

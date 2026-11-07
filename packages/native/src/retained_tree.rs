@@ -1125,7 +1125,8 @@ impl RetainedTree {
         let parent_id = self.elements.get(&id).and_then(|element| element.parent);
         // An element taken out of its parent by `detach_child` was noted then, and one that was never
         // in the tree is in no frame.
-        let was_placed = parent_id.is_some() || self.detached_from.contains_key(&id);
+        let detached = parent_id.is_none() && self.detached_from.contains_key(&id);
+        let was_placed = parent_id.is_some() || detached;
         if let Some(parent_id) = parent_id {
             if let Some(parent) = self.elements.get_mut(&parent_id) {
                 parent.children.retain(|child| *child != id);
@@ -1134,7 +1135,10 @@ impl RetainedTree {
         let mut destroyed = Vec::new();
         self.destroy_element_recursive(id, &mut destroyed);
         self.shrink_tables();
-        if !destroyed.is_empty() {
+        // The batch that detached it said that the frame changed, and the frame it asks for is drawn without the element: a
+        // destroy that comes after, as a framework's cleanup does when the handler has returned, changes nothing drawn, so it
+        // leaves a patch a read prepared for that batch alone (`prepare_for_read`).
+        if !destroyed.is_empty() && !(self.commit_patching && detached) {
             if self.commit_patching && (was_placed || self.root_id != Some(id)) {
                 self.dirty = self.dirty.max(Dirty::Layout);
             } else {
