@@ -5,8 +5,11 @@ import { createUiHotChannel } from "../ui-channel.ts"
 
 const payload: FullReloadPayload = { type: "full-reload", triggeredBy: "/app/main.ts" }
 
-function fakeRunner(steps: string[]): ModuleRunner {
+function fakeRunner(steps: string[], loadedFiles: string[] = [payload.triggeredBy as string]): ModuleRunner {
   return {
+    evaluatedModules: {
+      getModulesByFile: (file: string) => (loadedFiles.includes(file) ? new Set([{}]) : undefined),
+    },
     hmrClient: {
       notifyListeners: async (event: string) => {
         steps.push(`notify ${event}`)
@@ -32,6 +35,55 @@ describe("createFullReload", () => {
     await new Promise<void>((resolve) => enqueue(async () => resolve()))
 
     expect(steps).toEqual(["notify vite:beforeFullReload", "stop", "clearCache", "start"])
+  })
+
+  test("skips a payload whose triggeredBy file is not in the runner's module graph", async () => {
+    const steps: string[] = []
+    const enqueue = createSerialQueue()
+    const reload = createFullReload({
+      enqueue,
+      runner: () => fakeRunner(steps, ["/app/other.ts"]),
+      stop: () => steps.push("stop"),
+      start: async () => {
+        steps.push("start")
+      },
+    })
+    reload(payload)
+    await new Promise<void>((resolve) => enqueue(async () => resolve()))
+
+    expect(steps).toEqual([])
+  })
+
+  test("reloads a payload whose triggeredBy file is in the runner's module graph", async () => {
+    const steps: string[] = []
+    const enqueue = createSerialQueue()
+    const reload = createFullReload({
+      enqueue,
+      runner: () => fakeRunner(steps, ["/app/main.ts"]),
+      start: async () => {
+        steps.push("start")
+      },
+    })
+    reload(payload)
+    await new Promise<void>((resolve) => enqueue(async () => resolve()))
+
+    expect(steps).toEqual(["notify vite:beforeFullReload", "clearCache", "start"])
+  })
+
+  test("reloads a payload without triggeredBy whatever the module graph holds", async () => {
+    const steps: string[] = []
+    const enqueue = createSerialQueue()
+    const reload = createFullReload({
+      enqueue,
+      runner: () => fakeRunner(steps, []),
+      start: async () => {
+        steps.push("start")
+      },
+    })
+    reload({ type: "full-reload" })
+    await new Promise<void>((resolve) => enqueue(async () => resolve()))
+
+    expect(steps).toEqual(["notify vite:beforeFullReload", "clearCache", "start"])
   })
 
   test("runs reloads one at a time, and a failing start does not block the next one", async () => {

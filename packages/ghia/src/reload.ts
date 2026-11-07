@@ -25,12 +25,14 @@ export interface FullReloadOptions {
  * runner's default re-imports the entry after `evaluatedModules.clear()` only, so the HMR client
  * keeps the hot data of the old run: a library that keeps its first registry there (solid-refresh)
  * then patches a dead tree after the reload, and the old run's modules stay reachable.
- * `clearCache()` drops both.
+ * `clearCache()` drops both. Like the runner's default, it skips a payload whose `triggeredBy` file
+ * is not in the runner's module graph.
  */
 export function createFullReload(options: FullReloadOptions): (payload: FullReloadPayload) => void {
   return (payload) => {
     options.enqueue(async () => {
       const runner = options.runner()
+      if (payload.triggeredBy && !runner.evaluatedModules.getModulesByFile(payload.triggeredBy.replaceAll("\\", "/"))?.size) return
       await runner.hmrClient?.notifyListeners("vite:beforeFullReload", payload)
       options.stop?.()
       runner.clearCache()
