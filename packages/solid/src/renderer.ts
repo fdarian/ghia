@@ -17,6 +17,8 @@ interface RenderSlot {
   renderer?: NativeRenderer
   root?: Root
   loop?: FrameLoop
+  /** The latest render's handler: the renderer outlives the render that created it. */
+  onUncaughtError?: RenderOptions["onUncaughtError"]
 }
 
 export interface RenderOptions
@@ -63,10 +65,11 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
     ...windowOptions
   } = options
   const host = slot()
+  host.onUncaughtError = onUncaughtError
   if (!host.renderer) {
     host.renderer = injected ?? createNativeRenderer({
       onError(error) {
-        onUncaughtError?.(
+        host.onUncaughtError?.(
           error instanceof Error ? error : new Error(String(error)),
           {}
         )
