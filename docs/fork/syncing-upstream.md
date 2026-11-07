@@ -204,7 +204,7 @@ each entry or applies it again.
   touch edges, a layer a line, empty and overflowing boxes, steps of 0.1 and 1/3 up to 10 000) and two mailbox frames
   recorded from the proxy (`bounds_tree/mailbox_frames.txt`).
 
-### Contained relayout patch (zed `4359857078`, `afccad7649`; `third_party/taffy`, `taffy.rs`, `window/patch.rs`, `elements/retained.rs`)
+### Contained relayout patch (zed `4359857078`, `afccad7649`, `f9a51894e7`, `06fc9e85e3`, `b133d12651`; `third_party/taffy`, `taffy.rs`, `window/patch.rs`, `window/patch_splice.rs`, `elements/retained.rs`)
 
 - **Decision.** The owner approved this on 2026-11-07 (the full option 2 of the contained-layout design) as an engine change
   that lets a commit patch the frame instead of drawing it whole. It is opt-in per window (`Window::set_contained_patches`, off
@@ -219,9 +219,22 @@ each entry or applies it again.
   `PatchDecline::NotContained` and the frame is built whole in the same draw. What it repaints is compared with the recording
   as before, except that hitboxes may have other bounds, corner radii and clip paths, and the listeners, input handlers and
   tooltips the scratch frame registered replace the rendered frame's (their closures know the layout they were built from). The
-  scrollers around the root are measured again, the recording of the root is dropped (no frame replays or patches from it until
-  a frame built whole records it), and an accessibility tree that is built declines it as `LayoutMismatch`.
-  `PatchCounters::relayout_patches` counts them. The slices that follow (Z2) splice ranges of other lengths into the frame.
+  scrollers around the root are measured again, and an accessibility tree that is built declines it as `LayoutMismatch`.
+  `PatchCounters::relayout_patches` counts them.
+- **The splice (`f9a51894e7`, `06fc9e85e3`).** A root that lays out again may register, hit and paint other things than its
+  recording did: the part of every frame vector it held (operations, hitboxes, listeners, input handlers, tooltips, cursors,
+  dispatch nodes with their parents and focus and view maps, tab stops, scrollers, accessed element states, debug bounds) is
+  replaced with what the scratch frame got, and everything recorded after it moves by how much each vector grew or shrank
+  (`window/patch_splice.rs`, `PatchDecline::Splice`). The roots nested in the spliced one and the ones around it are
+  forgotten: they are neither replayed nor patched until a frame built whole records them, and a frame that replays the outer
+  root does not register the ones inside it. `splice_patch_tests.rs`.
+- **The recording rewrite (`b133d12651`).** After a relayout patch the recording of the root is made again from the patch
+  (`RecordingRewrite`, `PatchCounters::rewritten_recordings`), so the next tick patches the root again and a frame built whole
+  replays it. What cannot be made what a frame built whole records is dropped as before: a root recorded to be put elsewhere,
+  one that handed elements to a stacking context outside it, one that published (`note_publication`: any element with an
+  `on_painted`, `on_painted_layout` or prepaint listener, which every host element of Ghia has, whether or not the root has an
+  `on_replay` hook), one with an accessibility recording, and the roots recorded inside it. The patch cannot update the key
+  the root was recorded with.
 - **Why.** Navigating the mailbox of ghia-bench (the Navigate proxy, `examples/solid/mailbox-navigate`) cost 39M instructions
   a key, 12M of it the fixed full frame that every commit that lays out draws. A patch that lays out only the scroller the commit
   changed does not copy what it does not change ([patch-frames.md](patch-frames.md#contained-layout-patches)).
@@ -230,7 +243,9 @@ each entry or applies it again.
   flag on `PatchWindow`, `lay_out_again`, `hitboxes_are`'s `relaid` and `Registrations`, `Frame::root_layout`, the taffy
   change set). Check that the patch still lays out from the window's root with the layout engine that drew the frame
   (`layout_engine_id`), and that `contained_patch_tests.rs` passes: a text that rewraps is patched, a leak is `NotContained`,
-  an accessibility tree declines, a scroller's extent is measured again.
+  an accessibility tree declines, a scroller's extent is measured again. The splice and the rewrite are three more commits
+  of the same kind (`window/patch_splice.rs` is new; the rewrite is in `patch_units` and `RetainedState`): apply them in
+  order and run `splice_patch_tests.rs` and the retention verifier's tests.
 
 ## Procedure
 

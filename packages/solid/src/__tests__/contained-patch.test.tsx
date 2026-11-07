@@ -151,8 +151,7 @@ function run(name: string, patch: boolean, changes: Partial<Page>[], options: Op
   }
 }
 
-/** The boxes wrap in rows of two, three, one, three. A second change in a row is drawn whole (the recording gpui keeps of the anchor is dropped), so each
- *  run of the patching tests starts from a frame built whole: the changes alternate with one that is not in an anchor. */
+/** The boxes wrap in rows of two, three, one, three. */
 const REWRAP: Partial<Page>[] = [{ box: 200 }, { box: 90 }, { box: 270 }, { box: 120 }]
 
 describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a scroller", () => {
@@ -164,26 +163,31 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a scroller", () 
     expect(on.steps.map((step) => step.bounds)).toEqual(off.steps.map((step) => step.bounds))
     expect(off.counters.patchedFrames).toBe(0)
     if (!counted) return
-    // gpui keeps no recording of an anchor a patch laid out until a frame is built whole: the first change is a patch and the one after it
-    // is the frame that records the anchor again (`Anchor:StaleRecording`), then the next is a patch again.
+    // gpui drops the recording of an anchor whose elements publish their boxes (every one of Ghia's does) instead of rewriting it
+    // (`rewrittenRecordings`, zed b133d12651): the first change is a patch and the one after it is the frame that records the anchor
+    // again (`Anchor:StaleRecording`, decided before anything is built), then the next is a patch again.
     expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 0, 1, 0])
     expect(on.steps.map((step) => step.whole)).toEqual([0, 1, 0, 1])
     expect(reason(on.counters.unpatchable, "Anchor:StaleRecording")).toBe(2)
+    expect(on.counters.rewrittenRecordings).toBe(0)
     // The first patch builds the detail and its six boxes, and the filler: no other element of the page.
     expect(on.steps[0].built).toBeLessThanOrEqual(10)
     expect(on.steps[0].built).toBeGreaterThan(0)
   })
 
-  test("roots inside the anchor (a paragraph and a box with a text) make gpui decline Registrations until it splices them", () => {
+  test("roots inside the anchor (a paragraph and a box with a text) are spliced: a commit is a relayout patch, and shows what patching off shows", () => {
     const rooted: Page = { ...BASE, rooted: true }
-    const changes: Partial<Page>[] = [{ box: 200 }, { box: 90 }]
+    const changes: Partial<Page>[] = [{ box: 200 }, { box: 90 }, { box: 270 }]
     const on = run("rooted", true, changes, {}, rooted)
     const off = run("rooted", false, changes, {}, rooted)
     expect(on.mismatches).toBe(0)
     expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+    expect(on.steps.map((step) => step.bounds)).toEqual(off.steps.map((step) => step.bounds))
     if (!counted) return
-    expect(on.steps.map((step) => step.patched)).toEqual([0, 0])
-    expect(reason(on.counters.declines, "Registrations")).toBe(2)
+    // Roots nested in the anchor (they have dispatch nodes) are spliced out and in; the recording gpui keeps of the anchor is dropped as above.
+    expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 0, 1])
+    expect(on.steps.map((step) => step.whole)).toEqual([0, 1, 0])
+    expect(sum(on.counters.declines)).toBe(0)
   })
 
   test("a leak: a detail as wide as its widest box moves what is beside it, so the patch declines NotContained and the frame is built whole", () => {
@@ -216,22 +220,16 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a scroller", () 
     expect(reason(on.counters.unpatchable, "Structure")).toBe(changes.length)
   })
 
-  test("a keyed swap of the detail's content with another number of elements declines safely and is drawn whole", () => {
+  test("a keyed swap of the detail's content with another number of elements is a relayout patch, and shows what patching off shows", () => {
     const changes: Partial<Page>[] = [{ count: 9 }, { count: 4 }, { count: 7 }]
     const on = run("swap", true, changes)
     const off = run("swap", false, changes)
     expect(on.mismatches).toBe(0)
     expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
     if (!counted) return
-    // Another number of operations, hitboxes and registrations is what gpui's patch cannot yet splice (zed slice Z2): the key moves
-    // to a patch when it can.
-    for (const step of on.steps) {
-      expect(step.patched).toBe(0)
-      expect(step.whole).toBeGreaterThan(0)
-    }
-    // The hitboxes are counted first: a box more or less is a hitbox more or less.
-    expect(reason(on.counters.declines, "Hitboxes"), JSON.stringify(on.counters)).toBe(changes.length)
-    expect(sum(on.counters.declines)).toBe(changes.length)
+    expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 0, 1])
+    expect(on.steps.map((step) => step.whole)).toEqual([0, 1, 0])
+    expect(sum(on.counters.declines)).toBe(0)
   })
 
   test("with an accessibility tree built, a patch that lays out declines and the frame is built whole", () => {
@@ -256,5 +254,157 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a scroller", () 
     // Boxes of 200 wide go one to a row in a detail of 456, so the fourth is further down than at 120, where three fit in a row: the read saw the new layout.
     const tops = on.steps.map((step) => step.read?.box?.y ?? 0)
     expect(tops[0]).not.toBe(tops[3])
+  })
+})
+
+/** The paragraphs each message of the mailbox page has: the detail is swapped between messages of other counts, as ghia-bench's mailbox is. */
+const PARAGRAPHS: Record<number, number> = { 1: 3, 2: 6, 3: 2, 4: 5 }
+const MESSAGES = [2, 3, 4]
+
+type Mailbox = {
+  app: ReturnType<typeof createTestRoot>
+  renderer: TestRenderer
+  select: (message: number) => void
+  log: string[]
+  host: (testId: string) => { getBoundingClientRect: () => unknown }
+}
+
+function openMailbox(): Mailbox {
+  const [message, setMessage] = createSignal(1)
+  const log: string[] = []
+  const hosts = new Map<string, { getBoundingClientRect: () => unknown }>()
+  const app = createTestRoot({ width: 600, height: 400 })
+  app.render(() => (
+    <div style={{ display: "flex", flexDirection: "row", width: 600, height: 400, backgroundColor: "#ffffff" }}>
+      <div testId="sidebar" style={{ width: 120, flexShrink: 0, height: "100%", backgroundColor: "#f4f4f5" }}>
+        <div testId="inbox" tabIndex={0} style={{ width: 100, height: 28 }}>
+          <text style={{ color: "#18181b" }}>Inbox</text>
+        </div>
+      </div>
+      <div
+        testId="detail"
+        style={{ flexGrow: 1, minWidth: 0, height: "100%", padding: 16, overflowY: "auto", backgroundColor: "#ffffff" }}
+      >
+        <Show when={message()} keyed>
+          {(current) => (
+            <div testId={`message-${current}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <text style={{ fontSize: 16, color: "#18181b" }}>{`Message ${current}`}</text>
+              <div
+                testId={`reply-${current}`}
+                tabIndex={0}
+                ref={(element) => hosts.set(`reply-${current}`, element)}
+                onClick={() => log.push(`click reply-${current}`)}
+                onMouseEnter={() => log.push(`enter reply-${current}`)}
+                style={{ width: 80, height: 28, backgroundColor: "#dbeafe" }}
+              >
+                <text style={{ fontSize: 12 }}>Reply</text>
+              </div>
+              <div
+                testId={`tail-${current}`}
+                ref={(element) => hosts.set(`tail-${current}`, element)}
+                onClick={() => log.push(`click tail-${current}`)}
+                style={{ width: 120, height: 32, backgroundColor: "#fee2e2" }}
+              />
+              <For each={Array.from({ length: PARAGRAPHS[current] }, (_, index) => index)}>
+                {(index) => (
+                  <text style={{ fontSize: 14, color: "#27272a" }}>{`${PARAGRAPH} `.repeat(1 + ((index + current) % 3))}</text>
+                )}
+              </For>
+            </div>
+          )}
+        </Show>
+      </div>
+    </div>
+  ))
+  app.renderer.setA11yActive(false)
+  app.renderer.setInlineDraws(false)
+  const host = (testId: string) => {
+    const element = hosts.get(testId)
+    if (!element) throw new Error(`no host element ${testId}`)
+    return element
+  }
+  return { app, renderer: app.renderer, select: (next) => app.root.flushSync(() => setMessage(next)), log, host }
+}
+
+/** The detail goes through `MESSAGES`, a frame each; with `interact` the page is used after each frame, which is when a patch that left a
+ *  stale hitbox, listener or tab stop shows. */
+function runMailbox(patch: boolean, interact: boolean) {
+  const { app, renderer, select, log, host } = openMailbox()
+  try {
+    renderer.setPatchEnabled(patch)
+    renderer.drawFrame()
+    renderer.drawFrame()
+    const steps = []
+    for (const message of MESSAGES) {
+      const before = renderer.getPatchCounters()
+      const frames = renderer.getPaintedFrameCount()
+      select(message)
+      renderer.drawFrame()
+      const after = renderer.getPatchCounters()
+      const step = {
+        patched: after.patchedFrames - before.patchedFrames,
+        relaid: after.relayoutPatches - before.relayoutPatches,
+        whole: renderer.getPaintedFrameCount() - frames,
+        picture: picture(renderer, `mailbox-${patch}-${interact}-${message}`),
+        reply: host(`reply-${message}`).getBoundingClientRect(),
+        tail: host(`tail-${message}`).getBoundingClientRect(),
+        detail: renderer.getScrollMetrics(renderer.findByTestId("detail")!.id),
+        used: [] as string[],
+        focused: "" as string | null,
+      }
+      if (interact) {
+        const center = (testId: string): [number, number] => {
+          const bounds = renderer.getElementBounds(renderer.findByTestId(testId)!.id)!
+          return [bounds.x + bounds.width / 2, bounds.y + bounds.height / 2]
+        }
+        log.length = 0
+        renderer.nativeSimulateMouseMove(300, 5)
+        renderer.nativeSimulateMouseMove(...center(`reply-${message}`))
+        renderer.nativeSimulateClick(...center(`reply-${message}`))
+        renderer.nativeSimulateClick(...center(`tail-${message}`))
+        renderer.focusElement(renderer.findByTestId("inbox")!.id)
+        renderer.simulateKeystrokes("Tab")
+        const focused = renderer.getFocusedElementId()
+        step.focused = focused === null ? null : (renderer.getElement(focused)?.testId ?? null)
+        step.used = [...log]
+      }
+      steps.push(step)
+    }
+    return { steps, mismatches: renderer.getRetainedCounters().mismatches, counters: renderer.getPatchCounters() }
+  } finally {
+    app.unmount()
+  }
+}
+
+describe.skipIf(!hasNativeTestRenderer)("Solid: the detail of a mailbox swapped between messages", () => {
+  test("swaps between messages of other paragraph counts are patch frames and show what patching off shows, a whole frame between them", () => {
+    const on = runMailbox(true, false)
+    const off = runMailbox(false, false)
+    expect(on.mismatches).toBe(0)
+    expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+    expect(on.steps.map((step) => step.reply)).toEqual(off.steps.map((step) => step.reply))
+    expect(on.steps.map((step) => step.tail)).toEqual(off.steps.map((step) => step.tail))
+    expect(on.steps.map((step) => step.detail)).toEqual(off.steps.map((step) => step.detail))
+    if (!counted) return
+    // The recording of the anchor is dropped by the first patch (see the rewrap test), so the second swap is the frame that records it again.
+    expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 0, 1])
+    expect(on.steps.map((step) => step.whole)).toEqual([0, 1, 0])
+    expect(sum(on.counters.declines)).toBe(0)
+    expect(reason(on.counters.unpatchable, "Anchor:StaleRecording")).toBe(1)
+  })
+
+  test("a click and a hover on the new content reach its listeners, and Tab moves focus into it, after each patch", () => {
+    const on = runMailbox(true, true)
+    const off = runMailbox(false, true)
+    expect(on.mismatches).toBe(0)
+    for (const [index, message] of MESSAGES.entries()) {
+      expect(on.steps[index].used).toEqual([`enter reply-${message}`, `click reply-${message}`, `click tail-${message}`])
+      expect(on.steps[index].focused).toBe(`reply-${message}`)
+    }
+    expect(on.steps.map((step) => step.used)).toEqual(off.steps.map((step) => step.used))
+    expect(on.steps.map((step) => step.reply)).toEqual(off.steps.map((step) => step.reply))
+    if (!counted) return
+    // Each swap is the frame the interaction before left: the first is a patch, whatever the clicks and the focus before it made.
+    expect(on.steps[0].relaid, JSON.stringify(on.counters)).toBe(1)
   })
 })

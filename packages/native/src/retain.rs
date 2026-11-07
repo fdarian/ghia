@@ -943,9 +943,12 @@ struct Plan {
     /// as a retained root that gpui records as a source for a patch and never replays.
     anchors: Vec<Unit>,
     anchor_ids: FxHashSet<u64>,
-    /// The anchors patches laid out again since the frame: what gpui recorded of them and of the roots
-    /// in them is of the layout before, so none is patched again until a frame is built whole.
+    /// The anchors patches laid out again since the frame: what gpui recorded of the roots in them is
+    /// of the layout before, so none of those is patched until a frame is built whole.
     repainted: FxHashSet<u64>,
+    /// Of those, the anchors whose own recording gpui dropped (it rewrites one only when it can, see
+    /// `RecordingRewrite`): none is patched again until a frame is built whole.
+    unrecorded: FxHashSet<u64>,
 }
 
 /// Why a tick cannot be patched, see `Retain::preview`.
@@ -984,8 +987,8 @@ pub(crate) enum Unpatchable {
     /// A commit changed an element that no anchor of the last frame built whole holds
     /// ([contained-layout patches](docs/fork/patch-frames.md)): the frame is built whole, and wraps the anchors again.
     Structure(u64),
-    /// A patch laid out the anchor `.0` since the frame built whole, which holds the root a tick
-    /// changed or is the anchor a commit changed again: gpui keeps no recording of it until a frame is built whole.
+    /// A patch laid out the anchor `.0`, or the one that holds the unit `.0`, since the frame built whole: gpui
+    /// forgot the recordings of what is nested in it, and of the anchor itself when it could not rewrite it.
     AnchorStale(u64),
     /// A unit that the last frame found nothing left running on (the animation ended in it, while
     /// a source goes on listing it): the frame built whole in the tick's place does not make it a
@@ -2315,8 +2318,12 @@ impl Retain {
 
     /// An anchor was patched: what the recordings of its content hold is of the layout before, so
     /// no element of it is skipped by the next frame built whole, which builds and records it all.
-    pub(crate) fn anchor_repainted(&mut self, tree: &crate::retained_tree::RetainedTree, id: u64) {
+    /// `rewritten` says gpui rewrote the recording of the anchor itself, which is then patched again.
+    pub(crate) fn anchor_repainted(&mut self, tree: &crate::retained_tree::RetainedTree, id: u64, rewritten: bool) {
         self.plan.repainted.insert(id);
+        if !rewritten {
+            self.plan.unrecorded.insert(id);
+        }
         let mut pending = vec![id];
         while let Some(next) = pending.pop() {
             self.records.remove(&next);
@@ -2493,8 +2500,10 @@ impl Retain {
             .collect();
         let anchors: Vec<u64> = self.plan.anchors.iter().map(|unit| unit.id).filter(|id| relaid.contains(id)).collect();
         if !self.plan.repainted.is_empty() {
+            // What is nested in an anchor that a patch spliced was forgotten by gpui, and is neither replayed nor
+            // patched until a frame built whole records it.
             let stale = |id: u64| self.anchor_holding(sources.tree, id).is_some_and(|anchor| self.plan.repainted.contains(&anchor));
-            if let Some(&id) = units.iter().chain(&anchors).find(|id| stale(**id)) {
+            if let Some(&id) = units.iter().find(|id| stale(**id)).or_else(|| anchors.iter().find(|id| self.plan.unrecorded.contains(id))) {
                 return Err(Unpatchable::AnchorStale(id));
             }
         }

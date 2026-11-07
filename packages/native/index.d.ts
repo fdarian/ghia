@@ -2295,6 +2295,11 @@ export interface PatchCounters {
    * when it accepts one.
    */
   relayoutPatches: number
+  /**
+   * Of the patches that laid out again, the ones after which gpui rewrote the recording of the root, so
+   * the next patch or replay finds one.
+   */
+  rewrittenRecordings: number
   /** JSON object: ticks gpui drew whole after the patcher tried, by reason (`PatchDecline`). */
   declines: string
   /**

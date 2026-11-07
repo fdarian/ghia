@@ -112,9 +112,11 @@ impl GpuixView {
                     scratch.iter().all(|(id, tape)| anchors.contains(id) || tapes.same_as_recorded(*id, tape))
                 }
             };
+            let rewritten_before = window.patch_counters().rewritten_recordings;
             let Ok(outcome) = window.repaint_in_place(built.units, app, accepted) else {
                 return false;
             };
+            let rewritten = window.patch_counters().rewritten_recordings - rewritten_before >= anchors.len() as u64;
             // An anchor laid out again wrote other boxes, texts and paragraphs than the frame did: they
             // take the place of the ones it wrote.
             let window_id = window.window_handle().window_id();
@@ -161,7 +163,7 @@ impl GpuixView {
                 let (handle, viewport, tree) = (window.window_handle(), window.viewport_size(), tree.clone());
                 app.defer(move |cx| crate::observers::sweep_after_translate(handle, viewport, &reports, &tree, &callback, cx));
             }
-            view.update(app, |view, cx| view.continue_after_patch(window, &built.stepped, &anchors, cx));
+            view.update(app, |view, cx| view.continue_after_patch(window, &built.stepped, &anchors, rewritten, cx));
             true
         };
         window.set_frame_patcher(Some(Rc::new(patcher)));
@@ -229,8 +231,11 @@ impl GpuixView {
         }
         let anchors: Vec<u64> = ids.iter().copied().filter(|id| self.retain.is_anchor(*id)).collect();
         if !anchors.is_empty() && !self.focus_follows_tree() {
-            self.patch.decline("Anchor:Focus".to_owned());
-            return None;
+            // What a frame built whole does before it builds: an anchor is built without the pass that gives
+            // the elements that came their focus handles, and takes the ones that went.
+            let tree_arc = self.tree.clone();
+            let tree = tree_arc.lock().unwrap();
+            self.sync_focus_handles(&tree, window, cx);
         }
         let stepped = self.step_clocks(window, now);
         let mut units = Vec::with_capacity(ids.len());
@@ -246,9 +251,8 @@ impl GpuixView {
         Some(Built { units, tapes, anchors, stepped })
     }
 
-    /// Whether the focus handles are the ones a build of the tree would use: an anchor is built without the
-    /// pass that makes them (`sync_focus_handles`, which also moves the focus), so a focusable element that
-    /// came, went or changed would be built with the handle it had, or none.
+    /// Whether the focus handles are the ones a build of the tree would use. An anchor is built without the
+    /// pass that makes them (`sync_focus_handles`), so when a focusable element came, went or changed it is run first.
     fn focus_follows_tree(&self) -> bool {
         let tree = self.tree.lock().unwrap();
         tree.focusable_ids.len() == self.focus_handles.len()
@@ -294,7 +298,7 @@ impl GpuixView {
     }
 
     /// Asks for the frames that what still runs after a patch needs, as the end of a frame does.
-    fn continue_after_patch(&mut self, window: &mut gpui::Window, stepped: &Stepped, anchors: &[u64], cx: &mut gpui::Context<Self>) {
+    fn continue_after_patch(&mut self, window: &mut gpui::Window, stepped: &Stepped, anchors: &[u64], rewritten: bool, cx: &mut gpui::Context<Self>) {
         // The elements a hover restyled by paint are drawn: the roots that hold them are older than
         // what is shown, and the frame built whole after the patches builds them again.
         let hovered = self.pointer.borrow().take_paint_pending();
@@ -306,7 +310,7 @@ impl GpuixView {
             tree.take_restyles();
             tree.take_structure();
             for &anchor in anchors {
-                self.retain.anchor_repainted(&tree, anchor);
+                self.retain.anchor_repainted(&tree, anchor, rewritten);
             }
         }
         crate::renderer::layout_is_drawn(cx.entity_id());

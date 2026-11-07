@@ -8750,7 +8750,7 @@ impl GpuixView {
     /// Give every DOM-focusable element a gpui focus handle in tab order, report
     /// focus changes, and drop the handles of elements that are no longer
     /// focusable.
-    fn sync_focus_handles(
+    pub(crate) fn sync_focus_handles(
         &mut self,
         tree: &RetainedTree,
         window: &mut gpui::Window,
@@ -14500,6 +14500,9 @@ pub struct PatchCounters {
     /// Scrollers that patches laid out again and repainted (contained-layout patches), counted by gpui
     /// when it accepts one.
     pub relayout_patches: f64,
+    /// Of the patches that laid out again, the ones after which gpui rewrote the recording of the root, so
+    /// the next patch or replay finds one.
+    pub rewritten_recordings: f64,
     /// JSON object: ticks gpui drew whole after the patcher tried, by reason (`PatchDecline`).
     pub declines: String,
     /// JSON object: ticks gpuix did not try to patch, by kind (`Unpatchable`, and the units it
@@ -14552,6 +14555,7 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
         scene_rebuilds: counters.scene_rebuilds as f64,
         in_place_primitives: counters.in_place_primitives as f64,
         relayout_patches: counters.relayout_patches as f64,
+        rewritten_recordings: counters.rewritten_recordings as f64,
         declines: object(
             gpui::PatchDecline::ALL
                 .into_iter()
