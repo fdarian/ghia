@@ -1,11 +1,11 @@
 /**
  * Discord-style mail client. Channel tree, timeline, and reading pane.
  *
- * Run: cd examples && bun --hot mail.tsx
+ * Run: cd examples && bun run mail
  */
 
 import { useMemo, useState, type ReactNode } from 'react'
-import { applyMacCpuThrottleFromEnv, isWebBuild, render } from '@ghia/react'
+import { isWebBuild } from '@ghia/react'
 
 import iconSidebar from './assets/icons/panel-left.svg' with { type: 'text' }
 import iconArrowLeft from './assets/icons/arrow-left.svg' with { type: 'text' }
@@ -1230,24 +1230,4 @@ export function MailApp() {
       </div>
     </div>
   )
-}
-
-const isEntryPoint =
-  typeof Bun !== 'undefined'
-    ? Bun.isStandaloneExecutable || Bun.main === import.meta.path
-    : typeof process !== 'undefined' && process.argv[1]?.endsWith('mail.tsx')
-
-if (isEntryPoint) {
-  applyMacCpuThrottleFromEnv()
-  render(<MailApp />, {
-    title: 'Mail',
-    appName: 'Mail',
-    width: 1280,
-    height: 860,
-    titlebarTransparent: true,
-    windowBackground: C.sidebar,
-    trafficLightX: 16,
-    trafficLightY: 17,
-    focus: process.env.GPUIX_BACKGROUND !== '1',
-  })
 }

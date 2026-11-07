@@ -11,10 +11,8 @@
 
 import React, { memo, useCallback, useMemo, useRef, useState } from 'react'
 import {
-  applyMacCpuThrottleFromEnv,
   flushSync,
   isWebBuild,
-  render,
   useGpuix,
   type DomEvent,
   type PublicInstance,
@@ -644,23 +642,4 @@ export function InfiniteChatApp({
       </div>
     </div>
   )
-}
-
-const isEntryPoint =
-  typeof Bun !== 'undefined'
-    ? Bun.isStandaloneExecutable || Bun.main === import.meta.path
-    : typeof process !== 'undefined' && process.argv[1]?.endsWith('infinite-chat.tsx')
-
-if (isEntryPoint) {
-  applyMacCpuThrottleFromEnv()
-  render(<InfiniteChatApp />, {
-    title: 'GPUIX Infinite History',
-    width: 920,
-    height: 760,
-    titlebarTransparent: true,
-    windowBackground: C.canvas,
-    debugFrameOverlay: 'full',
-    // Agent checks need real GPU paint, not control of the user's keyboard.
-    focus: process.env.GPUIX_BACKGROUND !== '1',
-  })
 }
