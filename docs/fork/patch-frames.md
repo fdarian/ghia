@@ -901,7 +901,7 @@ over the rows, and a scroll moves it. The bar paints the thumb through `paint_sc
 notes, for the frame, the one scene operation it left (a `ScrollThumb`: the operation, the bounds it was painted at, and the owner's two closures),
 or that the bar painted none (not shown, or the content fits). A thumb painted under a general transform, or inside the recording of a row, is not
 tracked and is `Thumb.track`. Before the frame is built the classifier asks `plan` of each bar of the frame shown, with the list already at its new
-position, and `plan` answers with the bounds the thumb goes to, `None` if it does not move, or a `ScrollThumbMiss`, which is a cause of `Thumb`:
+position, and `plan` answers with the bounds the thumb goes to, `None` if it does not move, or a `ScrollThumbMiss`, which is a cause of `Thumb`. "Does not move" is against where the thumb is drawn now, which `plan` is given (`ThumbPaint::Quad::bounds`: where the frame shown painted it, or where the last translate put it), and not against where the whole frame painted it: a scroll that brings the thumb back to the whole frame's place after a translate moved it away moves it back.
 
 - `Thumb.alpha`: the bar would be painted at another alpha than the frame shown painted it (a step of the fade, or a hold that has ended). A scroll
   that moves the offset starts the second of the hold again, so a bar that was whole stays whole; one that is held by the pointer or dragged is whole;
@@ -1016,6 +1016,9 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   (`alpha`, `size`, `track`, and `appear` for a bar not painted) holds only its own and draws whole without telling the bar, a thumb painted under a
   rotation is `track`, an operation that is not the thumb's quad declines (`applyDeclines.Thumb`) before anything is written, the verifier passes a
   moved thumb and calls one that was put elsewhere than the bar paints it a mismatch.
+  A scroll that brings the thumb back to where the frame shown painted it moves it back (`brings_the_thumb_back_to_where_the_frame_shown_painted_it`: it
+  fails when `plan` compares against the whole frame's thumb), and `scroll-patch-thumb.test.tsx` has the same after a fade: the wheel that shows the bar is
+  drawn whole, then 0 and back, with the picture of the control at each step.
 - `scroll-patch-clock.test.tsx` (react): a wheel in the draw of a tick (a transition of a box beside the list, the blink of the caret of an input beside it) is
   a whole frame, `reasons.Clock` counts them, the picture after each step and the `transitionend` are those of the control with the translate off, and the
   translates resume once the transition has ended. gpui `window/scroll_patch_tests.rs`: a `request_tick` in the draw of a wheel is `Clock` and the next wheel

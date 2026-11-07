@@ -975,6 +975,7 @@ fn plan_thumb(
     look: Look,
     bounds: gpui::Bounds<gpui::Pixels>,
     shown: &ShownBar,
+    drawn: Option<gpui::Bounds<gpui::Pixels>>,
 ) -> Result<Option<gpui::Bounds<gpui::Pixels>>, gpui::ScrollThumbMiss> {
     use gpui::ScrollThumbMiss as Miss;
 
@@ -999,8 +1000,10 @@ fn plan_thumb(
     }
     let (rest, hover) = look.thickness();
     let thickness = rest + (hover - rest) * shown.grow;
-    Ok((placed.thumb_start != painted.thumb_start)
-        .then(|| bar_rect(&placed, true, placed.thumb_start, placed.thumb_len, thickness)))
+    // Against where the thumb is drawn now, which is not where the frame shown painted it once a
+    // translate moved it: a scroll that brings it back there moves it back.
+    let thumb = bar_rect(&placed, true, placed.thumb_start, placed.thumb_len, thickness);
+    Ok((drawn != Some(thumb)).then_some(thumb))
 }
 
 /// What prepaint takes from a list's new position, for a frame that moved the rows and built
@@ -1057,7 +1060,7 @@ fn paint(
         let shown = ShownBar { layout: layout[1], alpha, grow: painted.grow[1] };
         let plan = {
             let (state, source) = (state.clone(), source.clone());
-            Rc::new(move |_: &gpui::Window| plan_thumb(&state, &source, look, bounds, &shown))
+            Rc::new(move |_: &gpui::Window, drawn| plan_thumb(&state, &source, look, bounds, &shown, drawn))
         };
         let moved = {
             let (state, source) = (state.clone(), source.clone());

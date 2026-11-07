@@ -27,16 +27,16 @@ const COUNT = 60
 const VSYNC = 16
 const TIMEOUT = 120_000
 
-function Page() {
+function Page({ count = COUNT }: { count?: number }) {
   return (
     <virtual-list
       testId="list"
-      itemCount={COUNT}
+      itemCount={count}
       estimatedItemHeight={ROW}
       overdraw={0}
       style={{ width: 200, height: VIEWPORT, backgroundColor: "#808080" }}
     >
-      {Array.from({ length: COUNT }, (_, index) => (
+      {Array.from({ length: count }, (_, index) => (
         <div key={index} testId={`row-${index}`} style={{ width: 150, height: ROW, flexShrink: 0, backgroundColor: index % 2 === 0 ? "#223344" : "#334455" }}>
           <text style={{ color: "#ffffff" }}>{`row-${index}`}</text>
         </div>
@@ -45,11 +45,11 @@ function Page() {
   )
 }
 
-function open(translate: boolean) {
+function open(translate: boolean, count = COUNT) {
   const root = createTestRoot({ width: 300, height: 200 })
   const renderer = root.renderer
   renderer.clockPause()
-  root.render(<Page />)
+  root.render(<Page count={count} />)
   for (let frame = 0; frame < 3; frame++) {
     renderer.flush()
     renderer.dispatchNativeEvents()
@@ -88,8 +88,8 @@ function scroll(renderer) {
 }
 
 /** The picture after each tick of `ticks` (a wheel delta, or a wait of that many ticks with none), the translate on or off. */
-function run(translate: boolean, ticks: Array<number | { wait: number }>) {
-  const { renderer, unmount } = open(translate)
+function run(translate: boolean, ticks: Array<number | { wait: number }>, count = COUNT) {
+  const { renderer, unmount } = open(translate, count)
   try {
     // A wheel and its way back record the rows and show the bar.
     tick(renderer, 4)
@@ -125,6 +125,20 @@ describeNative("the thumb of a list in the frames a scroll draws by moving the r
 
   it("is where the build puts it also under the verifier", () => {
     expect(run(true, steps).pictures).toEqual(run(false, steps).pictures)
+  })
+
+  it("is moved back where the whole frame painted it when a scroll brings the rows back there", () => {
+    // Six rows of 40 in a view of 100: the thumb is long and travels 0.4 px for each of the 20 px that the first three rows allow
+    // before a fourth is needed, so it is on another pixel at 20 than at 0. The bar fades and the scroll that shows it again is
+    // drawn whole, at 20; the next two put the rows at 0 and back at 20, where that frame painted the thumb.
+    const back: Array<number | { wait: number }> = [{ wait: 90 }, 20, -20, 20, -20, 15, -15, 20]
+    const on = run(true, back, 6)
+    const off = run(false, back, 6)
+    expect(on.pictures).toEqual(off.pictures)
+    expect(new Set(off.pictures).size, "the thumb is on more than one pixel").toBeGreaterThan(2)
+    if (!verifying) {
+      expect(on.counters.patched - on.warmed.patched).toBeGreaterThanOrEqual(5)
+    }
   })
 
   unverified("holds for a second after the last of the translated frames, and fades after it", () => {
