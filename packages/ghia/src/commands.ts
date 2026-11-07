@@ -1,11 +1,16 @@
 import { build, dev } from "./index.js"
 import { Effect, Option } from "effect"
-import { CliError, Command, Flag } from "effect/cli"
+import { Argument, CliError, Command, Flag } from "effect/cli"
 
 const configFile = Flag.String("config").pipe(
   Flag.withAlias("c"),
   Flag.withDescription("Vite config file, relative to the working directory (default: vite.config.*)"),
   Flag.optional
+)
+
+const entry = Argument.String("entry").pipe(
+  Argument.withDescription("The app entry, relative to the Vite root; replaces the entry option of ghia()"),
+  Argument.optional
 )
 
 const compile = Flag.Boolean("compile").pipe(
@@ -25,13 +30,13 @@ const requireBun = Effect.suspend(() =>
 
 const failAsUserError = (cause: unknown) => new CliError.UserError({ cause })
 
-const devCommand = Command.make("dev", { config: configFile }, (input) =>
+const devCommand = Command.make("dev", { entry, config: configFile }, (input) =>
   Effect.scoped(
     Effect.gen(function* () {
       yield* requireBun
       yield* Effect.acquireRelease(
         Effect.tryPromise({
-          try: () => dev({ configFile: Option.getOrUndefined(input.config) }),
+          try: () => dev({ configFile: Option.getOrUndefined(input.config), entry: Option.getOrUndefined(input.entry) }),
           catch: failAsUserError,
         }),
         (handle) => Effect.promise(() => handle.close())
@@ -42,11 +47,16 @@ const devCommand = Command.make("dev", { config: configFile }, (input) =>
   )
 ).pipe(Command.withDescription("Run the app with hot reload"))
 
-const buildCommand = Command.make("build", { config: configFile, compile }, (input) =>
+const buildCommand = Command.make("build", { entry, config: configFile, compile }, (input) =>
   Effect.gen(function* () {
     yield* requireBun
     yield* Effect.tryPromise({
-      try: () => build({ configFile: Option.getOrUndefined(input.config), compile: input.compile }),
+      try: () =>
+        build({
+          configFile: Option.getOrUndefined(input.config),
+          entry: Option.getOrUndefined(input.entry),
+          compile: input.compile,
+        }),
       catch: failAsUserError,
     })
   })

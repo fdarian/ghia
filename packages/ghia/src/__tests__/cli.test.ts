@@ -197,6 +197,18 @@ describe("ghia dev", () => {
   )
 
   test(
+    "runs the entry named on the command line instead of the plugin's",
+    async () => {
+      const run = spawn(["bun", CLI, "dev", "bare.ts"], appDir)
+      await run.waitFor("WINDOW_AT_LOAD")
+      await Bun.sleep(500)
+      expect(lines(run.output(), "WINDOW_AT_LOAD ")).toEqual(["object"])
+      expect(run.output()).not.toContain("RENDERED")
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
     "stops on SIGTERM",
     async () => {
       const run = spawn(["bun", CLI, "dev"], appDir)
@@ -260,6 +272,17 @@ describe("ghia build", () => {
       expect(lines(output, "WINDOW_AT_LOAD ")).toEqual(["object"])
       expect(lines(output, "IS_SERVER ")).toEqual(["false"])
       expect(lines(output, "RENDERED ")).toEqual(["marker v1"])
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "bundles the entry named on the command line instead of the plugin's",
+    async () => {
+      await runToExit(["bun", CLI, "build", "bare.ts", "--no-compile"], appDir)
+      const output = await runToExit(["bun", join(appDir, "dist", "main.js")], appDir)
+      expect(lines(output, "WINDOW_AT_LOAD ")).toEqual(["object"])
+      expect(output).not.toContain("RENDERED")
     },
     TIMEOUT_MS * 2
   )

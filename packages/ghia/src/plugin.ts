@@ -18,7 +18,7 @@ const RESOLVED_PREFIX = "\0"
 export interface GhiaOptions {
   /**
    * The app entry, relative to the Vite root. It is the single input of the `ghia` build.
-   * `ghia dev` and `ghia build` need it; vitest does not.
+   * `ghia dev` and `ghia build` need it, unless the command line names one; vitest does not.
    */
   entry?: string
   /**
@@ -94,6 +94,8 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
           }
           return
         }
+        // `dev()` and `build()` pass an entry from the command line as this very input, in the inline config.
+        const input = userConfig.environments?.[ENVIRONMENT_NAME]?.build?.rolldownOptions?.input ?? options.entry
         return {
           environments: {
             [ENVIRONMENT_NAME]: {
@@ -112,7 +114,7 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
                 external: [NATIVE_PACKAGE],
               },
               build: {
-                rolldownOptions: { input: options.entry },
+                rolldownOptions: { input },
               },
             },
             ...(serverChannel === undefined
@@ -162,7 +164,11 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
     },
 
     configResolved(config) {
-      if (options.entry !== undefined) entry = realpathSync(resolve(config.root, options.entry))
+      const input = config.environments[ENVIRONMENT_NAME]?.build.rolldownOptions?.input ?? options.entry
+      if (input !== undefined) {
+        if (typeof input !== "string") throw new Error(`The "${ENVIRONMENT_NAME}" build takes a single entry file, not ${JSON.stringify(input)}`)
+        entry = realpathSync(resolve(config.root, input))
+      }
       if (options.server !== undefined) {
         serverEntry = realpathSync(resolve(config.root, options.server))
       }

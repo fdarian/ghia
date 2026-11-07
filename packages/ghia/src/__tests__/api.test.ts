@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { build, dev } from "../../dist/index.js"
 
@@ -51,6 +51,26 @@ describe("build()", () => {
   )
 
   test(
+    "builds the entry it is given, over the plugin's",
+    async () => {
+      await build({ root: appDir, entry: "bare.ts", compile: false })
+      const bundle = readFileSync(join(appDir, "dist", "main.js"), "utf8")
+      expect(bundle).toContain("WINDOW_AT_LOAD")
+      expect(bundle).not.toContain("marker v1")
+    },
+    TIMEOUT_MS
+  )
+
+  test(
+    "builds the entry it is given for a config without one",
+    async () => {
+      await build({ root: appDir, configFile: writeEntrylessConfig(), entry: "bare.ts", compile: false })
+      expect(readFileSync(join(appDir, "dist", "main.js"), "utf8")).toContain("WINDOW_AT_LOAD")
+    },
+    TIMEOUT_MS
+  )
+
+  test(
     "rejects when the config has no ghia() plugin",
     async () => {
       writeFileSync(
@@ -77,6 +97,37 @@ describe("dev()", () => {
       }
       // A second close is the same close.
       await handle.close()
+    },
+    TIMEOUT_MS
+  )
+
+  test(
+    "runs the entry it is given, resolved against the root, over the plugin's",
+    async () => {
+      const log = spyOn(console, "log")
+      const handle = await dev({ root: appDir, entry: "bare.ts" })
+      try {
+        expect(log).toHaveBeenCalledWith("WINDOW_AT_LOAD object")
+        expect(log).not.toHaveBeenCalledWith("RENDERED marker v1")
+      } finally {
+        log.mockRestore()
+        await handle.close()
+      }
+    },
+    TIMEOUT_MS
+  )
+
+  test(
+    "runs the entry it is given for a config without one",
+    async () => {
+      const log = spyOn(console, "log")
+      const handle = await dev({ root: appDir, configFile: writeEntrylessConfig(), entry: "bare.ts" })
+      try {
+        expect(log).toHaveBeenCalledWith("WINDOW_AT_LOAD object")
+      } finally {
+        log.mockRestore()
+        await handle.close()
+      }
     },
     TIMEOUT_MS
   )

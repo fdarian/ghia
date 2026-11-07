@@ -1,6 +1,6 @@
 import { createServer, isRunnableDevEnvironment } from "vite"
 import { ENVIRONMENT_NAME, type GhiaPluginApi } from "./plugin.js"
-import { clearVitestMarker, findPluginApi, requireEntry } from "./plugin-api.js"
+import { clearVitestMarker, entryEnvironments, findPluginApi, requireEntry } from "./plugin-api.js"
 import type { RunOptions } from "./options.js"
 import { createFullReload, createSerialQueue } from "./reload.js"
 import { SERVER_PORT_SLOT, type WorkerInit } from "./protocol.js"
@@ -21,6 +21,7 @@ export async function dev(options: RunOptions = {}): Promise<DevHandle> {
     configFile: options.configFile,
     root: options.root,
     appType: "custom",
+    environments: entryEnvironments(options.entry),
     server: { middlewareMode: true, ws: false },
   })
   const environment = server.environments[ENVIRONMENT_NAME]

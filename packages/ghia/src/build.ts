@@ -2,7 +2,7 @@ import { join, resolve } from "node:path"
 import { createBuilder } from "vite"
 import { compile } from "./compile.js"
 import { ENTRY_FILE_NAMES, ENVIRONMENT_NAME, SERVER_ENVIRONMENT_NAME } from "./plugin.js"
-import { clearVitestMarker, findPluginApi, requireEntry } from "./plugin-api.js"
+import { clearVitestMarker, entryEnvironments, findPluginApi, requireEntry } from "./plugin-api.js"
 import type { BuildOptions } from "./options.js"
 
 /**
@@ -11,7 +11,7 @@ import type { BuildOptions } from "./options.js"
  */
 export async function build(options: BuildOptions = {}): Promise<void> {
   clearVitestMarker()
-  const builder = await createBuilder({ configFile: options.configFile, root: options.root })
+  const builder = await createBuilder({ configFile: options.configFile, root: options.root, environments: entryEnvironments(options.entry) })
   const api = findPluginApi(builder.config.plugins)
   requireEntry(api, "build")
   const environment = builder.environments[ENVIRONMENT_NAME]
