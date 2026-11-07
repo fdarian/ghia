@@ -84,7 +84,15 @@ impl GpuixView {
         let reports = self.paint_reports.clone();
         let sweep_tree = self.tree.clone();
         let callback = self.event_callback.clone();
+        let settled_tapes = self.tapes.clone();
+        let settled_view = view.clone();
         window.set_scroll_patch_settled(Some(Rc::new(move |window: &mut gpui::Window, cx: &mut gpui::App| {
+            // The rows that left are out of the registries before the sweeps read the boxes, and out of
+            // the page's records before a frame builds a row that comes in again.
+            settled_tapes.settle_rows(window.window_handle().window_id());
+            if let Some(view) = settled_view.upgrade().filter(|view| !view.is_updating(cx)) {
+                view.update(cx, |view, _| view.forget_left_rows());
+            }
             let settle = settled
                 .borrow()
                 .scroll_settle
@@ -93,7 +101,9 @@ impl GpuixView {
             settle(window, cx);
             crate::observers::sweep_after_translate(window.window_handle(), window.viewport_size(), &reports, &sweep_tree, &callback, cx);
         })));
+        let gate_tapes = self.tapes.clone();
         window.set_scroll_patch_gate(Some(Rc::new(move |window: &gpui::Window, cx: &gpui::App| {
+            gate_tapes.fold_rows(window.window_handle().window_id());
             let Some(revision) = shown.0.get() else {
                 return Some(ScrollPatchReason::Other);
             };

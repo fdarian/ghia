@@ -38,6 +38,12 @@ pub(crate) fn replace(window: gpui::WindowId, old: &crate::tape::Roots, new: &[c
     inline_hit::replace(window, old, new);
 }
 
+/// A frame brought rows in: what they wrote goes where the rows of each of `rows`, in the order of their list, have theirs.
+pub(crate) fn order_by_rows(window: gpui::WindowId, rows: &[crate::tape::Roots]) {
+    paint::order_by_rows(window, rows);
+    inline_hit::order_by_rows(window, rows);
+}
+
 pub(crate) use paint::{describe_registries, shift};
 pub(crate) use paint::{
     describe_start_region_apart_from_transform, describe_text_apart_from_transform, publish_captured_start_region,

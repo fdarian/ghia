@@ -182,6 +182,12 @@ pub(crate) fn replace(window: WindowId, old: &crate::tape::Roots, new: &[crate::
     PARAGRAPHS.with(|paragraphs| paragraphs.borrow_mut().entry(window).or_default().replace(old, new, Kind::Paragraph, entry_of));
 }
 
+/// A frame brought rows in: the paragraphs they painted go where the rows of each of `rows` (in the order of
+/// the list) have theirs.
+pub(crate) fn order_by_rows(window: WindowId, rows: &[crate::tape::Roots]) {
+    PARAGRAPHS.with(|paragraphs| paragraphs.borrow_mut().entry(window).or_default().order_by_rows(rows, Kind::Paragraph, entry_of));
+}
+
 fn entry_of(data: &dyn std::any::Any, _: Point<Pixels>) -> Entry {
     let (_, container, layout, targets) = data.downcast_ref::<Written>().expect("a paragraph write holds its paragraph");
     Entry { container: *container, layout: layout.clone(), targets: targets.clone() }

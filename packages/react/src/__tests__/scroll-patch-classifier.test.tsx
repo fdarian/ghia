@@ -134,7 +134,7 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
 
   // The reasons that hold are counted exactly, and under the verifier the frame shown is the build every subtree is built in,
   // whose rows cannot be moved (`NotRelocatable.unmovable` holds as well).
-  unverified("counts a scroll that brings a row in as a membership change", () => {
+  unverified("counts a scroll that brings in a row that was never measured as a membership change", () => {
     const { renderer, unmount } = open("inert")
     try {
       warm(renderer, 100, 50)
@@ -146,7 +146,9 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
         mispredicted: 0,
         hoverOnly: 0,
         reasons: { Membership: 1 },
-        held: { Membership: 1 },
+        // The row has no measured size (and the list settles what it measures): a row that has one is a translate, see
+        // `scroll-patch-membership.test.tsx`.
+        held: { Membership: 1, "Membership.settles": 1, "Membership.unmeasured": 1 },
       })
     } finally {
       unmount()

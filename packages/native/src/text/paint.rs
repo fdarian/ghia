@@ -132,6 +132,16 @@ pub(crate) fn replace(window: WindowId, old: &crate::tape::Roots, new: &[crate::
     });
 }
 
+/// A frame brought rows in, and what they wrote is at the end of the registries: it goes where the rows of
+/// each of `rows` (in the order of the list) are.
+pub(crate) fn order_by_rows(window: WindowId, rows: &[crate::tape::Roots]) {
+    with_frame(window, |frame| {
+        frame.registry.order_by_rows(rows, Kind::Text, reg_entry);
+        frame.start_regions.order_by_rows(rows, Kind::StartRegion, start_region);
+        frame.painted.order_by_rows(rows, Kind::Painted, painted_text_of);
+    });
+}
+
 fn reg_entry(data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>) -> RegEntry {
     let entry = &data.downcast_ref::<(WindowId, RegEntry)>().expect("a text write holds its entry").1;
     RegEntry { to_window: moved_matrix(entry.to_window, offset), ..entry.clone() }

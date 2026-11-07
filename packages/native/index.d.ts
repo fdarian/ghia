@@ -2415,6 +2415,12 @@ export interface ScrollPatchCounters {
   hoverOnly: number
   /** Of the eligible ones, the ones drawn by moving the rows of the frame shown. */
   patched: number
+  /** Of those, the ones that built rows that came in or took out rows that left. */
+  membershipFrames: number
+  /** The rows those frames built. */
+  rowsBuilt: number
+  /** The rows those frames took out of the frame. */
+  rowsRemoved: number
   /**
    * The eligible ones drawn whole, by why the translate declined before it wrote anything
    * (`gpui::ScrollApplyDecline`).
@@ -2426,7 +2432,8 @@ export interface ScrollPatchCounters {
    * The same frames, by every reason that held for them, first or not (`HitboxChain` is only
    * counted here, it stops no frame), and by what lay behind a reason (`NotRelocatable.noRun`,
    * `NotRelocatable.noRecording`, `NotRelocatable.unmovable`, `Region.top`, `Region.bottom`,
-   * `Region.side`, `Thumb.size`, `Thumb.alpha`, `Thumb.appear`, `Thumb.track`).
+   * `Region.side`, `Thumb.size`, `Thumb.alpha`, `Thumb.appear`, `Thumb.track`, `Membership.settles`,
+   * `Membership.unmeasured`, `Membership.unmeasuredOverdraw`, `Membership.disjoint`, `Membership.noBuilder`).
    */
   held: Record<string, number>
 }

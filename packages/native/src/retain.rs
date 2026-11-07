@@ -2004,6 +2004,32 @@ impl Retain {
         self.rows_before = seen;
     }
 
+    /// The rows that a frame that moved the rows of a list in place took out of the frame take their
+    /// records, dynamic elements and patch roots with them, as the rows a list stops asking for do in
+    /// `forget_unseen_rows`: the frame that moved them is no frame that visits the rest, and a row
+    /// that came in again would be skipped with a record of a build whose recording gpui dropped with
+    /// the row.
+    pub(crate) fn forget_left_rows(&mut self, left: &[u64], tree: &crate::retained_tree::RetainedTree) {
+        if left.is_empty() {
+            return;
+        }
+        let left: FxHashSet<u64> = left.iter().copied().collect();
+        let mut gone = FxHashSet::default();
+        for_each_unseen_element(&left, &FxHashSet::default(), tree, |id| {
+            self.dynamic.remove(&id);
+            self.records.remove(&id);
+            gone.insert(id);
+        });
+        self.rows_seen.retain(|row| !left.contains(row));
+        self.rows_before.retain(|row| !left.contains(row));
+        self.plan.patch_roots.retain(|unit| !gone.contains(&unit.id));
+        self.plan.patch_root_ids.retain(|id| !gone.contains(id));
+        self.plan.anchors.retain(|unit| !gone.contains(&unit.id));
+        self.plan.anchor_ids.retain(|id| !gone.contains(id));
+        self.plan.repainted.retain(|id| !gone.contains(id));
+        self.plan.unrecorded.retain(|id| !gone.contains(id));
+    }
+
     /// The shape of the element being built, for a child that is not built inside it to take as its
     /// parent's (`begin_row`).
     pub(crate) fn current_shape(&self) -> u64 {
@@ -6142,6 +6168,38 @@ mod tests {
         page.retain.forget_unseen_rows(&page.tree);
         assert!(!page.retain.dynamic.contains_key(&7), "an element of the unseen row's subtree");
         assert!(page.retain.dynamic.contains_key(&4), "a row the list still asks for");
+    }
+
+    #[test]
+    fn a_row_a_frame_that_moved_the_rows_took_out_leaves_no_record_and_no_patch_root_and_the_others_keep_theirs() {
+        let mut page = Units::new();
+        page.tree = tree_of(&[
+            (1, None, "div", None),
+            (2, Some(1), "div", None),
+            (3, Some(2), "div", None),
+            (4, Some(2), "div", None),
+            (6, Some(3), "div", None),
+            (7, Some(4), "div", None),
+        ]);
+        let shape = page.list_frame(false);
+        page.row(shape, 3, |page| page.leaf(6));
+        page.row(shape, 4, |page| page.leaf(7));
+        for id in [3, 4] {
+            let env = crate::renderer::FrameEnv::for_test(page.inherited.clone(), EnterKey(Key::default()), web_time::Instant::now());
+            page.retain.add_patch_root(Unit { id, env });
+        }
+        page.retain.dynamic.insert(6, Dynamic::Animation as u8);
+        assert!(page.retain.rows_seen.contains(&3));
+
+        page.retain.forget_left_rows(&[3], &page.tree);
+        for id in [3, 6] {
+            assert!(!page.retain.records.contains_key(&id), "{id} is of the row that left");
+        }
+        assert!(!page.retain.dynamic.contains_key(&6));
+        assert!(!page.retain.rows_seen.contains(&3));
+        assert!(!page.retain.is_patch_root(3) && page.retain.unit(3).is_none());
+        assert!(page.retain.records.contains_key(&4) && page.retain.records.contains_key(&7));
+        assert!(page.retain.is_patch_root(4) && page.retain.unit(4).is_some());
     }
 
     #[test]

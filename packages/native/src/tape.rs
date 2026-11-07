@@ -414,6 +414,41 @@ impl<T> Layered<T> {
         }
     }
 
+    /// Puts the writes that were made into the lists of each of `rows` (or into one nested in them)
+    /// together, in the order of `rows`, where the first of them was; what was written around them keeps
+    /// its order. For a registry that a frame which brought rows in put the writes of at its end.
+    pub(crate) fn order_by_rows(&mut self, rows: &[Roots], kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T) {
+        self.all_mut(kind, &from);
+        let (read, owners) = (std::mem::take(&mut self.read), std::mem::take(&mut self.owners));
+        let mut row_of: rustc_hash::FxHashMap<u64, Option<usize>> = Default::default();
+        let (mut block, mut rest) = (Vec::new(), Vec::new());
+        let mut at = None;
+        for (value, owner) in read.into_iter().zip(owners) {
+            match *row_of.entry(owner).or_insert_with(|| rows.iter().position(|roots| roots.hold(owner))) {
+                Some(row) => {
+                    at.get_or_insert(rest.len());
+                    block.push((row, value, owner));
+                }
+                None => rest.push((value, owner)),
+            }
+        }
+        block.sort_by_key(|(row, ..)| *row);
+        let at = at.unwrap_or(rest.len());
+        let mut rest = rest.into_iter();
+        for (value, owner) in rest.by_ref().take(at) {
+            self.read.push(value);
+            self.owners.push(owner);
+        }
+        for (_, value, owner) in block {
+            self.read.push(value);
+            self.owners.push(owner);
+        }
+        for (value, owner) in rest {
+            self.read.push(value);
+            self.owners.push(owner);
+        }
+    }
+
     /// Moves every write that was made into one of the lists `roots` stand for, or into one
     /// nested in them, `by` further, with `moves`, and every replay that puts one of them back.
     pub(crate) fn shift(&mut self, roots: &Roots, by: Point<Pixels>, mut moves: impl FnMut(&mut T, Point<Pixels>)) {
@@ -687,6 +722,25 @@ pub(crate) struct TapeStore {
     /// The writes of elements handed to the stacking context that a replay put back, by root and
     /// ordinal: a root that replayed has to have put back every one it wrote when it was built.
     replayed_lifted: RefCell<Vec<(u64, u32, String)>>,
+    rows: RefCell<Rows>,
+}
+
+/// Which rows of virtual lists the frame shown has, and what a frame that moved them in place did to
+/// that: gpui puts the rows that stay where the scroll takes them (`RetainedPhase::Scrolled`), builds
+/// the ones that come in through the builder of the list, and takes out the ones that leave without
+/// saying which. A row that is in the frame shown, in a list that moved, and neither stayed nor came
+/// in, left ([`TapeStore::settle_rows`]).
+#[derive(Default)]
+struct Rows {
+    /// The rows of the frame shown, with the list each is a row of and its index in it.
+    shown: rustc_hash::FxHashMap<u64, (u64, usize)>,
+    /// The rows built since the frame shown was last settled: the rows of a frame built whole, or the
+    /// ones that came in by a frame that moved the rows.
+    built: rustc_hash::FxHashMap<u64, (u64, usize)>,
+    /// The rows that a frame that moved the rows in place left where the scroll took them.
+    kept: rustc_hash::FxHashSet<u64>,
+    /// The rows that left and the page's records have not forgotten yet ([`TapeStore::take_left`]).
+    left: Vec<u64>,
 }
 
 pub(crate) type Tapes = Rc<TapeStore>;
@@ -775,6 +829,7 @@ impl TapeStore {
     /// shown had it, and everything it wrote into the registries that the frame shown made is moved
     /// the same. Not written again, which would put it into the registries twice.
     pub(crate) fn shift(&self, window: WindowId, root: u64, shift: Point<Pixels>) {
+        self.rows.borrow_mut().kept.insert(root);
         let tape = self
             .tapes
             .borrow()
@@ -787,6 +842,95 @@ impl TapeStore {
         tape.each(Kind::Bounds, &mut |data, _| boxes.push(crate::automation::id_of_bounds_write(data)));
         crate::automation::shift(window, &boxes, &roots, shift);
         crate::text::shift(window, &roots, shift);
+    }
+
+    /// A frame is built whole: the rows it builds are the rows of the frame shown.
+    pub(crate) fn begin_rows(&self) {
+        let mut rows = self.rows.borrow_mut();
+        rows.shown.clear();
+        rows.built.clear();
+        rows.kept.clear();
+    }
+
+    /// The list `list` builds its row `row`, the one at `index`.
+    pub(crate) fn row_built(&self, list: u64, index: usize, row: u64) {
+        self.rows.borrow_mut().built.insert(row, (list, index));
+    }
+
+    /// A list scrolled and the frame about to be drawn may move its rows: what was built since the
+    /// frame shown was settled is part of it.
+    pub(crate) fn fold_rows(&self, window: WindowId) {
+        self.settle_rows(window);
+        let mut rows = self.rows.borrow_mut();
+        let built = std::mem::take(&mut rows.built);
+        rows.shown.extend(built);
+    }
+
+    /// Takes out of the registries what the rows that a frame that moved the rows in place took out of
+    /// the frame wrote, and forgets their tapes: the frame built whole has none of it, and a row that
+    /// comes in again is built, so its tape is its own. Does nothing until such a frame has moved
+    /// rows, and once for each.
+    pub(crate) fn settle_rows(&self, window: WindowId) {
+        let mut rows = self.rows.borrow_mut();
+        if rows.kept.is_empty() {
+            return;
+        }
+        let kept = std::mem::take(&mut rows.kept);
+        let entered = std::mem::take(&mut rows.built);
+        let lists: rustc_hash::FxHashSet<u64> = kept
+            .iter()
+            .filter_map(|row| rows.shown.get(row))
+            .chain(entered.values())
+            .map(|(list, _)| *list)
+            .collect();
+        let left: Vec<u64> = rows
+            .shown
+            .iter()
+            .filter(|(row, (list, _))| lists.contains(list) && !kept.contains(*row) && !entered.contains_key(*row))
+            .map(|(row, _)| *row)
+            .collect();
+        for row in &left {
+            rows.shown.remove(row);
+        }
+        let came: rustc_hash::FxHashSet<u64> = entered.values().map(|(list, _)| *list).collect();
+        rows.shown.extend(entered);
+        rows.left.extend(&left);
+        let mut order: Vec<(u64, usize, u64)> = rows
+            .shown
+            .iter()
+            .filter(|(_, (list, _))| came.contains(list))
+            .map(|(row, (list, index))| (*list, *index, *row))
+            .collect();
+        drop(rows);
+        let mut roots = Roots(Vec::new());
+        let mut boxes = Vec::new();
+        for row in left {
+            self.laid_out.borrow_mut().remove(&row);
+            let Some(tape) = self.tapes.borrow_mut().remove(&row) else {
+                continue;
+            };
+            let tape = tape.borrow();
+            roots.extend(tape.roots());
+            tape.each(Kind::Bounds, &mut |data, _| boxes.push(crate::automation::id_of_bounds_write(data)));
+        }
+        crate::text::replace(window, &roots, &[]);
+        crate::automation::forget_boxes(window, &boxes);
+        // The rows that came in were written after everything else, wherever they belong in the list.
+        order.sort_unstable();
+        let tapes = self.tapes.borrow();
+        for list in came {
+            let rows: Vec<Roots> = order
+                .iter()
+                .filter(|(owner, ..)| *owner == list)
+                .filter_map(|(.., row)| tapes.get(row).map(|tape| tape.borrow().roots()))
+                .collect();
+            crate::text::order_by_rows(window, &rows);
+        }
+    }
+
+    /// The rows that left since this was last asked, for the records the page keeps of them to go.
+    pub(crate) fn take_left(&self) -> Vec<u64> {
+        std::mem::take(&mut self.rows.borrow_mut().left)
     }
 
     /// The context starts to paint an element that `root` handed to it: what the element writes
@@ -1580,4 +1724,94 @@ mod tests {
         tape.borrow().paint.serial
     }
 
+    /// A row of a list: the tape of its build, with the box it painted and the text it logged.
+    fn built_row(tapes: &TapeStore, window: WindowId, list: u64, row: u64) {
+        let tape = SharedTape::default();
+        {
+            let _recording = Recorder::begin(&tape, Phase::Paint);
+            box_at(window, row, row as f32);
+            log(window, Box::leak(format!("row{row}").into_boxed_str()));
+        }
+        tapes.set(row, tape);
+        tapes.row_built(list, row as usize, row);
+    }
+
+    #[test]
+    fn the_rows_that_a_frame_which_moved_the_rows_neither_kept_nor_built_left_and_their_writes_go() {
+        let window = WindowId::from(924);
+        crate::automation::forget_window(window);
+        let tapes = TapeStore::default();
+        tapes.begin_rows();
+        for row in 1..=4 {
+            built_row(&tapes, window, 100, row);
+        }
+        // A row of another list, which the frame does not move.
+        built_row(&tapes, window, 200, 50);
+        tapes.fold_rows(window);
+        assert_eq!(crate::text::painted_text(window).len(), 5);
+
+        // The frame keeps 3 and 4, and builds 5.
+        built_row(&tapes, window, 100, 5);
+        tapes.shift(window, 3, Point::default());
+        tapes.shift(window, 4, Point::default());
+        tapes.settle_rows(window);
+        let mut left = tapes.take_left();
+        left.sort();
+        assert_eq!(left, [1, 2]);
+        assert_eq!([1, 2, 3, 4, 5, 50].map(|row| x_of(window, row)), [None, None, Some(3.0), Some(4.0), Some(5.0), Some(50.0)]);
+        assert!(tapes.take_left().is_empty(), "each row leaves once");
+        tapes.settle_rows(window);
+        assert!(tapes.take_left().is_empty());
+
+        // The frame after keeps 4 and 5 and builds nothing: 3 left.
+        tapes.fold_rows(window);
+        tapes.shift(window, 4, Point::default());
+        tapes.shift(window, 5, Point::default());
+        tapes.settle_rows(window);
+        assert_eq!(tapes.take_left(), [3]);
+        assert_eq!([3, 4, 5, 50].map(|row| x_of(window, row)), [None, Some(4.0), Some(5.0), Some(50.0)]);
+    }
+
+    #[test]
+    fn what_the_rows_that_came_in_wrote_is_read_where_their_rows_are_and_not_at_the_end() {
+        let window = WindowId::from(926);
+        crate::automation::forget_window(window);
+        let tapes = TapeStore::default();
+        tapes.begin_rows();
+        for row in [3, 4, 5] {
+            built_row(&tapes, window, 100, row);
+        }
+        log(window, "after the list");
+        tapes.fold_rows(window);
+
+        // 6 comes in at the tail and 2 at the head, 5 leaves.
+        built_row(&tapes, window, 100, 6);
+        built_row(&tapes, window, 100, 2);
+        tapes.shift(window, 3, Point::default());
+        tapes.shift(window, 4, Point::default());
+        tapes.settle_rows(window);
+        assert_eq!(tapes.take_left(), [5]);
+        assert_eq!(crate::text::painted_text(window), ["row2", "row3", "row4", "row6", "after the list"]);
+    }
+
+    #[test]
+    fn a_frame_that_moved_no_row_leaves_none_and_a_frame_built_whole_starts_the_rows_over() {
+        let window = WindowId::from(925);
+        crate::automation::forget_window(window);
+        let tapes = TapeStore::default();
+        tapes.begin_rows();
+        for row in 1..=2 {
+            built_row(&tapes, window, 100, row);
+        }
+        tapes.fold_rows(window);
+        tapes.settle_rows(window);
+        assert!(tapes.take_left().is_empty(), "nothing was kept, so nothing is known to have left");
+
+        tapes.begin_rows();
+        built_row(&tapes, window, 100, 2);
+        tapes.fold_rows(window);
+        tapes.shift(window, 2, Point::default());
+        tapes.settle_rows(window);
+        assert!(tapes.take_left().is_empty(), "the rows of the frame before the whole one are not the frame shown's");
+    }
 }

@@ -95,15 +95,17 @@ pub(crate) fn lays_out_first(
     target != 0.0 && target != held
 }
 
-/// Invalidates the window for a write that moved a scroller. `was_current` is [`metrics_current`]
-/// from before the write: the invalidation moves no extent, so the metrics stay current.
+/// Invalidates the window for a write that moved the scroller `id`. `was_current` is
+/// [`metrics_current`] from before the write: the invalidation moves no extent, so the metrics stay
+/// current.
 pub(crate) fn finish_write(
     window: &mut gpui::Window,
     cx: &mut gpui::App,
     view: gpui::EntityId,
+    id: u64,
     was_current: bool,
 ) {
-    crate::renderer::invalidate_after_scroll(window, cx, view);
+    crate::renderer::invalidate_after_scroll(window, cx, view, crate::renderer::is_virtual_list(id));
     if was_current {
         note_metrics_current(window);
     }

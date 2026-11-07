@@ -817,15 +817,24 @@ impl Repaint {
     }
 }
 
+pub(crate) fn is_virtual_list(id: u64) -> bool {
+    VIRTUAL_LIST_STATES.with(|cell| cell.borrow().contains_key(&id))
+}
+
 /// [`invalidate_after_commit`] for a scroll write of a `div` scroller or a virtual list, clamped
 /// to its range. It moves the boxes of what the scroller holds and nothing a scroll query reads, as
 /// in a browser, where a scroll offset is a paint property. The next frame builds the rows of a
-/// list at the new offset.
-pub(crate) fn invalidate_after_scroll(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId) {
+/// list at the new offset, or moves the ones it has and builds the ones that come in, as one after
+/// a wheel does (`Window::note_list_scrolled`).
+pub(crate) fn invalidate_after_scroll(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, list: bool) {
     // The view is notified, so the patch of anchors a read prepared is gone and the tick is drawn whole;
     // a list that scrolls is the one write the draw cannot follow yet.
     discard_prepared_patch(window, cx, view, PendingLayout::Notified);
     note_pending(view, PendingLayout::Notified);
+    if list {
+        // Not a tick: the draw of one is a frame the classifier holds for the clock.
+        window.note_list_scrolled(view);
+    }
     cx.notify_scroll_only(view);
 }
 
@@ -1158,7 +1167,7 @@ async fn run_ui_commands(
                 let was_current = crate::scroll_write::metrics_current(window);
                 if scroll_element_to(was_current, id, left, top, behavior) {
                     let view = cx.entity_id();
-                    crate::scroll_write::finish_write(window, cx, view, was_current);
+                    crate::scroll_write::finish_write(window, cx, view, id, was_current);
                 }
             }),
             UiCommand::ScrollToItem { id, index, offset } => {
@@ -3774,7 +3783,7 @@ impl GpuixRenderer {
             let was_current = crate::scroll_write::metrics_current(window);
             if scroll_element_to(was_current, id, left, top, behavior) {
                 let view = crate::events::sync_dispatch::root_view(window).map_err(Error::from_reason)?;
-                crate::scroll_write::finish_write(window, cx, view.entity_id(), was_current);
+                crate::scroll_write::finish_write(window, cx, view.entity_id(), id, was_current);
             }
             Ok(())
         })?;
@@ -7509,6 +7518,7 @@ impl GpuixView {
             return unmounted_virtual_row(height);
         }
 
+        self.tapes.row_built(list_id, index, expected_child_id);
         let callback = self.event_callback.clone();
         let now = self.pass_instant(window);
         let focus_styles = self.focus.styles(&tree, tree.keyboard_focus_dim());
@@ -7599,6 +7609,13 @@ impl GpuixView {
             .track_focus(&focus_handle)
             .child(child)
             .into_any_element()
+    }
+
+    /// The page's records of the rows a frame that moved the rows of a list in place took out of the frame.
+    pub(crate) fn forget_left_rows(&mut self) {
+        let left = self.tapes.take_left();
+        let tree = self.tree.clone();
+        self.retain.forget_left_rows(&left, &tree.lock().unwrap());
     }
 
     pub(crate) fn scroll_virtual_list_to_item(
@@ -9861,7 +9878,12 @@ impl gpui::Render for GpuixView {
         })));
         window.set_scroll_patch_registries(verifies.then(|| {
             let window_id = window.window_handle().window_id();
-            Rc::new(move |_: &gpui::Window| crate::automation::describe_registries(window_id)) as Rc<dyn Fn(&gpui::Window) -> String>
+            let tapes = self.tapes.clone();
+            Rc::new(move |_: &gpui::Window| {
+                // The frame built whole after the translate is about to forget which rows the translate moved.
+                tapes.settle_rows(window_id);
+                crate::automation::describe_registries(window_id)
+            }) as Rc<dyn Fn(&gpui::Window) -> String>
         }));
         window.set_retention_verifier(verifies.then(|| {
             let tapes = self.tapes.clone();
@@ -10017,6 +10039,11 @@ impl gpui::Render for GpuixView {
         let value_key = self.motion_value_key(&tree, window);
         let value_index = self.motion_value_index.as_ref().filter(|(known, _)| *known == value_key).map(|(_, index)| index.clone());
         let value_bindings = value_index.as_deref();
+        self.tapes.settle_rows(window.window_handle().window_id());
+        self.retain.forget_left_rows(&self.tapes.take_left(), &tree);
+        if !window.is_layout_pass() {
+            self.tapes.begin_rows();
+        }
         self.retain.begin_frame(crate::retain::Sources {
             tree: &tree,
             hovered: pointer.chains().0,
@@ -14603,6 +14630,12 @@ pub struct ScrollPatchCounters {
     pub hover_only: f64,
     /// Of the eligible ones, the ones drawn by moving the rows of the frame shown.
     pub patched: f64,
+    /// Of those, the ones that built rows that came in or took out rows that left.
+    pub membership_frames: f64,
+    /// The rows those frames built.
+    pub rows_built: f64,
+    /// The rows those frames took out of the frame.
+    pub rows_removed: f64,
     /// The eligible ones drawn whole, by why the translate declined before it wrote anything
     /// (`gpui::ScrollApplyDecline`).
     pub apply_declines: std::collections::HashMap<String, f64>,
@@ -14611,7 +14644,8 @@ pub struct ScrollPatchCounters {
     /// The same frames, by every reason that held for them, first or not (`HitboxChain` is only
     /// counted here, it stops no frame), and by what lay behind a reason (`NotRelocatable.noRun`,
     /// `NotRelocatable.noRecording`, `NotRelocatable.unmovable`, `Region.top`, `Region.bottom`,
-    /// `Region.side`, `Thumb.size`, `Thumb.alpha`, `Thumb.appear`, `Thumb.track`).
+    /// `Region.side`, `Thumb.size`, `Thumb.alpha`, `Thumb.appear`, `Thumb.track`, `Membership.settles`,
+    /// `Membership.unmeasured`, `Membership.unmeasuredOverdraw`, `Membership.disjoint`, `Membership.noBuilder`).
     pub held: std::collections::HashMap<String, f64>,
 }
 
@@ -14644,6 +14678,9 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
                 mispredicted: scroll.mispredicted as f64,
                 hover_only: scroll.hover_only as f64,
                 patched: scroll.patched as f64,
+                membership_frames: scroll.membership_frames as f64,
+                rows_built: scroll.rows_built as f64,
+                rows_removed: scroll.rows_removed as f64,
                 apply_declines: gpui::ScrollApplyDecline::ALL
                     .into_iter()
                     .map(|reason| (format!("{reason:?}"), scroll.apply_declines(reason) as f64))
