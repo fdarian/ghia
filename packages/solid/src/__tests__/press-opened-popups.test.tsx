@@ -4,7 +4,7 @@
  * there, as it is not in a window. A lease made the read throw VIEW_BUSY, which onError reports.
  */
 import { createSignal } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import {
   Combobox,
   ComboboxContent,

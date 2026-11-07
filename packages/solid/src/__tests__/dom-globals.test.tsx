@@ -3,7 +3,7 @@
  * web (`window.addEventListener("keydown", ...)`, a router calling `scrollTo`) runs
  * unchanged, while Bun's own events still reach the same global listeners.
  */
-import { afterEach, describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "vitest"
 import { document, isWebBuild } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 

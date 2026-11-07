@@ -4,7 +4,7 @@
  * as the target's own, because the offset is the target's, not `currentTarget`'s.
  */
 
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 type Offset = { type: string; offsetX: number | undefined; offsetY: number | undefined }

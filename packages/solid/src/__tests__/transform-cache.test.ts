@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it, spyOn } from "bun:test"
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -80,7 +80,7 @@ describe("transform cache", () => {
   it("a cache directory that cannot be written still returns the transformed code", async () => {
     const blocked = join(root, "blocked")
     writeFileSync(blocked, "a file where the directory should be")
-    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const run = () =>
       cachedTransform({
         dir: join(blocked, "nested"),

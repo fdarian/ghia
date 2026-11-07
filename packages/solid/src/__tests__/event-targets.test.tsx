@@ -2,7 +2,7 @@
  * `target`, `currentTarget` and `relatedTarget` are element objects, the same
  * ones a `ref` gives, for every event. `elementId` stays the numeric id.
  */
-import { afterEach, describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "vitest"
 import { document, window, type DomEvent } from "@ghia/native/host"
 import type { HostElement } from "../host.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"

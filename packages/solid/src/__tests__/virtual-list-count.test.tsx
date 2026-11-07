@@ -1,7 +1,7 @@
 /// A shrinking `itemCount` on a windowed `<virtual-list>` keeps the list state: nothing measured is
 /// measured again and the scroll anchor stays (packages/react has the other cases).
 import { createSignal, For } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 const ROW = 36

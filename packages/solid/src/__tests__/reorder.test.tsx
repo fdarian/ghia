@@ -1,5 +1,5 @@
 import { For, createSignal } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { Reorder } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import type { TestRenderer } from "../testing.js"

@@ -16,7 +16,7 @@ import {
   Show,
   useContext,
 } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { IntersectionObserver, ResizeObserver, createMotionValue, motion } from "../index.js"
 import type { HostElement } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { clipboard } from "@ghia/native/host"
 import { window } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
@@ -43,9 +43,9 @@ describe.skipIf(!hasNativeTestRenderer)("renderer calls from a keydown handler",
   })
 
   describe("an error a handler throws", () => {
-    let reported: ReturnType<typeof spyOn>
+    let reported: ReturnType<typeof vi.spyOn>
     beforeEach(() => {
-      reported = spyOn(globalThis, "reportError").mockImplementation(() => {})
+      reported = vi.spyOn(globalThis, "reportError").mockImplementation(() => {})
     })
     afterEach(() => {
       reported.mockRestore()

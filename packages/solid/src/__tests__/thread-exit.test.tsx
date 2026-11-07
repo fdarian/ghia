@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { hasNativeTestRenderer } from "../testing.js"
 
 // The test window lives in a thread-local. Tearing it down from the thread's
@@ -8,7 +8,7 @@ describe.skipIf(!hasNativeTestRenderer)("test renderer at thread exit", () => {
   for (const scenario of ["tooltip", "dialog"]) {
     it(`a failed ${scenario} test ends the process with the test failure`, async () => {
       const child = Bun.spawn(
-        ["bun", "test", new URL("./thread-exit.fixture.test.tsx", import.meta.url).pathname],
+        ["bun", "--bun", "vitest", "run", new URL("./thread-exit.fixture.test.tsx", import.meta.url).pathname],
         {
           cwd: new URL("../..", import.meta.url).pathname,
           env: { ...process.env, GPUIX_THREAD_EXIT_FIXTURE: scenario },

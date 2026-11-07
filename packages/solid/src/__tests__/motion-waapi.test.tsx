@@ -3,7 +3,7 @@
 /// nothing lists. The expected shape is Chrome's (`packages/react/src/__tests__/fixtures/motion-waapi-oracle.json`), and so
 /// is what the commands on the listed `Animation` do to the motion that made it.
 
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { motion } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import type { HostElement } from "../host.js"

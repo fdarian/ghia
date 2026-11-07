@@ -1,5 +1,5 @@
 import { For, Show, createSignal } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 const box = { width: 100, height: 40, backgroundColor: "#333333" } as const

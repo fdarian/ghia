@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { isServer } from "solid-js/web"
 
 describe("solid-js/web under the preload", () => {

@@ -1,11 +1,11 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import solidPlugin from "../bun-plugin.js"
 
-const fixture = join(import.meta.dir, "../../fixtures/consumer")
-const workspace = resolve(import.meta.dir, "../../../..")
+const fixture = join(import.meta.dirname, "../../fixtures/consumer")
+const workspace = resolve(import.meta.dirname, "../../../..")
 const temp = mkdtempSync(join(tmpdir(), "ghia-solid-consumer-"))
 const TIMEOUT_MS = 60_000
 
