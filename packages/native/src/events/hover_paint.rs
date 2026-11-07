@@ -105,6 +105,68 @@ pub(crate) fn declares_paint_hover(tree: &RetainedTree, id: u64, style: &StyleDe
         && (style.has_hover.is_none() || has_hover_paints_only(tree, id, style))
 }
 
+/// Whether a commit that restyles an element from `old` to `new`, a change that only paints
+/// (`StyleDesc::differs_only_in_paint`), is one a patch frame can follow: the roots that hold the
+/// element are built again and their primitives are written over the frame shown
+/// (`docs/fork/patch-frames.md`, "Commit patches").
+///
+/// The comparison is a hover's (`differs_by_paint_only`) made on the style the element resolves to
+/// without a state and with each state that either declares: whichever state the element is in when
+/// the patch is built, what it paints differs in values and not in operations. The background quad
+/// is kept in both or in neither (`StyleDesc::keeps_background_quad`), so a background that appears
+/// is a quad that was already there. A transition declared on the element, one below it that
+/// inherits a colour that changed, a group and a `@container` rule are a frame built whole, as for
+/// a hover.
+pub(crate) fn restyle_paints_strictly(tree: &RetainedTree, id: u64, old: &StyleDesc, new: &StyleDesc) -> bool {
+    if old.container_rules.is_some()
+        || new.container_rules.is_some()
+        || uses_groups(old)
+        || uses_groups(new)
+        || old.keeps_background_quad() != new.keeps_background_quad()
+    {
+        return false;
+    }
+    let mut colour_changed = false;
+    for states in declared_states(old, new) {
+        let (off, on) = (resolve_pointer_states(old, states), resolve_pointer_states(new, states));
+        if declares_transition(&off) || declares_transition(&on) || !differs_by_paint_only(&off, &on) {
+            return false;
+        }
+        colour_changed |= off.color != on.color;
+    }
+    !colour_changed || reaches_no_transition(tree, id)
+}
+
+/// No state, and each state that `old` or `new` has a refinement of, as the element can be in it.
+/// The group states are not here: a style that follows or declares one is not strict.
+fn declared_states(old: &StyleDesc, new: &StyleDesc) -> Vec<PointerStates> {
+    let mut states = vec![PointerStates::default()];
+    macro_rules! declared {
+        ($($field:ident => $state:ident),+ $(,)?) => {
+            $(
+                if old.$field.is_some() || new.$field.is_some() {
+                    states.push(PointerStates { $state: true, ..Default::default() });
+                }
+            )+
+        };
+    }
+    declared!(
+        hover => hovered,
+        active => active,
+        has_hover => has_hovered,
+        has_active => has_active,
+        has_focus => has_focused,
+        disabled => disabled,
+        enabled => enabled,
+        has_disabled => has_disabled,
+        has_enabled => has_enabled,
+        focus_within => focus_within,
+        has_focus_visible => has_focus_visible,
+        focus_visible => focus_visible,
+    );
+    states
+}
+
 fn paints_only(tree: &RetainedTree, id: u64, style: &StyleDesc, states: PointerStates) -> bool {
     let off = resolve_pointer_states(style, PointerStates::default());
     let on = resolve_pointer_states(style, states);

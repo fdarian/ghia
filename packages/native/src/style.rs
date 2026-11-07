@@ -1330,10 +1330,32 @@ impl StyleDesc {
     /// Motion's, `perspective` and `transformStyle` too) are paint while the element keeps or lacks a
     /// transform context, because having one makes it a containing block.
     ///
-    /// Every other field, a state style (`hover`, ...) and a custom property included, is compared
-    /// whole: a key that is added to the struct is a layout key until it is listed here.
+    /// A state style (`hover`, `hasHover`, `focusVisible`, ...) the two both declare is compared by the
+    /// same rule, as a style of its own: a refinement that only changes colours changes what the
+    /// element paints in that state and moves no box. One that is declared by only one of them is
+    /// layout, as it can change what the element is.
+    ///
+    /// Every other field, a custom property included, is compared whole: a key that is added to the
+    /// struct is a layout key until it is listed here.
     pub(crate) fn differs_only_in_paint(&self, other: &Self) -> bool {
         let mut painted = self.clone();
+        macro_rules! paint_states {
+            ($($field:ident),+ $(,)?) => {
+                $(
+                    let paints = match (&painted.$field, &other.$field) {
+                        (Some(before), Some(after)) => before.differs_only_in_paint(after),
+                        _ => false,
+                    };
+                    if paints {
+                        painted.$field = other.$field.clone();
+                    }
+                )+
+            };
+        }
+        paint_states!(
+            hover, active, focus_visible, focus_within, group_hover, group_active, group_focus_within,
+            has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
+        );
         painted.opacity = other.opacity;
         painted.box_shadow = other.box_shadow.clone();
         painted.color = other.color.clone();
@@ -1407,6 +1429,21 @@ impl StyleDesc {
             // The transform properties read `var()`, and a custom property is inherited: the style of a
             // descendant that reads it is the same.
             || self.custom_properties != other.custom_properties
+            || self.state_styles_touch_transform(other)
+    }
+
+    /// Whether a refinement both styles declare has another transform: the element that is in that state
+    /// is seen through it.
+    fn state_styles_touch_transform(&self, other: &Self) -> bool {
+        macro_rules! touches {
+            ($($field:ident),+ $(,)?) => {
+                false $(|| matches!((&self.$field, &other.$field), (Some(before), Some(after)) if before.touches_transform(after)))+
+            };
+        }
+        touches!(
+            hover, active, focus_visible, focus_within, group_hover, group_active, group_focus_within,
+            has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
+        )
     }
 
     /// [`Self::differs_only_in_paint`] that also lets the custom properties differ. They are read
@@ -1840,6 +1877,31 @@ mod tests {
 
     fn style(json: &str) -> StyleDesc {
         serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn a_state_style_that_differs_in_paint_alone_is_paint() {
+        let paint_only = |from: &str, to: &str| style(from).differs_only_in_paint(&style(to));
+        // The mailbox row: the selected one has a background and a hover background of its own.
+        assert!(paint_only(
+            r##"{"height":40,"hover":{"backgroundColor":"#eee"}}"##,
+            r##"{"height":40,"backgroundColor":"#abc","hover":{"backgroundColor":"#abc"}}"##
+        ));
+        assert!(paint_only(r##"{"hasHover":{"color":"red"}}"##, r##"{"hasHover":{"color":"blue","opacity":0.5}}"##));
+        assert!(paint_only(r##"{"focusVisible":{"outlineColor":"red"}}"##, r##"{"focusVisible":{"outlineColor":"blue"}}"##));
+        // A refinement that changes anything else, declared by one only, or in a state that is not paint, is layout.
+        assert!(!paint_only(r##"{"hover":{"width":1}}"##, r##"{"hover":{"width":2}}"##));
+        assert!(!paint_only(r##"{"hover":{"backgroundColor":"#eee"}}"##, "{}"));
+        assert!(!paint_only("{}", r##"{"active":{"backgroundColor":"#eee"}}"##));
+        assert!(!paint_only(r##"{"hover":{"backgroundColor":"#eee"}}"##, r##"{"hover":{"backgroundColor":"#eee","height":3}}"##));
+        assert!(!paint_only(
+            r##"{"hover":{"backgroundColor":"#eee"},"width":1}"##,
+            r##"{"hover":{"backgroundColor":"#abc"},"width":2}"##
+        ));
+        // The transform a state gives is seen through, like the element's own.
+        let touches = |from: &str, to: &str| style(from).touches_transform(&style(to));
+        assert!(touches(r##"{"hover":{"transform":"scale(2)"}}"##, r##"{"hover":{"transform":"scale(3)"}}"##));
+        assert!(!touches(r##"{"hover":{"color":"red"}}"##, r##"{"hover":{"color":"blue"}}"##));
     }
 
     #[test]

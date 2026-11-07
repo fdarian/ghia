@@ -954,6 +954,9 @@ pub(crate) enum Unpatchable {
     /// built whole: it is not in a recorded or skipped root of a size a unit may be, or the frame
     /// built the root every time.
     Hover(u64),
+    /// A commit restyled by paint an element that no root a patch can repaint holds in the frame that
+    /// was built whole, as for [`Self::Hover`]: the frame is built whole, and visits the roots.
+    Commit(u64),
     /// A unit that the last frame found nothing left running on (the animation ended in it, while
     /// a source goes on listing it): the frame built whole in the tick's place does not make it a
     /// unit, so a patch would repaint a root that frame does not have.
@@ -1446,6 +1449,8 @@ impl Retain {
     /// Starts the build of a frame. `selection` in `sources` is the identity of the selected
     /// text, 0 for none: text that is in a selection that moved paints differently.
     pub(crate) fn begin_frame(&mut self, sources: Sources) {
+        // A frame draws what the tree has, and what was restyled by paint is in it.
+        sources.tree.take_restyles();
         self.prune(sources.tree);
         self.pass = sources.pass;
         self.layout_only = sources.layout_only;
@@ -2167,6 +2172,11 @@ impl Retain {
         (!self.layout_only).then_some(enter)
     }
 
+    /// Whether frames are recorded to be patched: the retention is planning.
+    pub(crate) fn plans(&self) -> bool {
+        self.planning
+    }
+
     /// Makes the roots that hold a hover ready for a patch to repaint, or not (patching is off).
     pub(crate) fn set_hover_roots(&mut self, on: bool) {
         self.hover_roots = on;
@@ -2235,12 +2245,9 @@ impl Retain {
         if gliding {
             return Err(Unpatchable::Gliding);
         }
-        let revision = sources
-            .tree
-            .root_id
-            .and_then(|id| sources.tree.elements.get(&id))
-            .map_or(0, |root| root.subtree_revision);
-        if revision != self.plan.revision {
+        // What was restyled by paint since the frame built whole is not an edit: the roots that hold it
+        // are built again. Anything else the tree changed since is.
+        if sources.tree.patch_barrier() > self.plan.revision {
             return Err(Unpatchable::Edited);
         }
         let found = self.compute_deltas(sources, true);
@@ -2288,22 +2295,12 @@ impl Retain {
                 }
             }
         }
-        // The root that holds an element a hover restyled by paint, or the unit it is in.
+        // The root that holds an element a hover or a commit restyled by paint, or the unit it is in.
         for &id in &sources.hover_paint {
-            let mut at = Some(id);
-            let root = loop {
-                match at {
-                    Some(up) if self.plan.hover_ids.contains(&up) || self.plan.ids.contains(&up) => break Some(up),
-                    Some(up) => at = sources.tree.elements.get(&up).and_then(|element| element.parent),
-                    None => break None,
-                }
-            };
-            match root {
-                Some(root) => {
-                    touched.insert(root);
-                }
-                None => return Err(Unpatchable::Hover(id)),
-            }
+            touched.insert(self.root_holding(sources.tree, id).ok_or(Unpatchable::Hover(id))?);
+        }
+        for id in sources.tree.pending_restyles() {
+            touched.insert(self.root_holding(sources.tree, id).ok_or(Unpatchable::Commit(id))?);
         }
         let units: Vec<u64> = self
             .plan
@@ -2323,6 +2320,18 @@ impl Retain {
             return Err(Unpatchable::Ended(ended));
         }
         Ok(units)
+    }
+
+    /// The innermost unit or hover root of the last frame built whole that holds `id`, walking up.
+    fn root_holding(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> Option<u64> {
+        let mut at = Some(id);
+        while let Some(up) = at {
+            if self.plan.hover_ids.contains(&up) || self.plan.ids.contains(&up) {
+                return Some(up);
+            }
+            at = tree.elements.get(&up).and_then(|element| element.parent);
+        }
+        None
     }
 
     /// Records the state the build of the custom element `id` saw, for an element the registry did
@@ -3395,7 +3404,7 @@ mod tests {
 
     use super::*;
     use crate::renderer::GpuixView;
-    use crate::retained_tree::RetainedTree;
+    use crate::retained_tree::{Dirty, RetainedTree};
 
     #[test]
     fn the_fingerprint_names_every_field_of_inherited() {
@@ -6203,6 +6212,62 @@ mod tests {
         assert_eq!(page.preview(&[], true), Err(Unpatchable::ScrollAnimation));
         page.tree.set_text(3, "words".to_owned());
         assert_eq!(page.preview(&[], false), Err(Unpatchable::Edited));
+    }
+
+    fn restyled(json: &str) -> Arc<crate::style::StyleDesc> {
+        Arc::new(serde_json::from_str(json).unwrap())
+    }
+
+    #[test]
+    fn a_restyle_by_paint_is_no_edit_but_any_other_change_is_one_a_frame_built_whole_ends() {
+        let mut page = Units::new();
+        page.hovers = [2, 3].into_iter().collect();
+        page.tree.set_commit_patching(true);
+        page.tree.set_style(3, restyled(r##"{"backgroundColor":"#111111"}"##));
+        page.tree.set_style(5, restyled(r##"{"backgroundColor":"#111111"}"##));
+        assert_eq!(hover_page(&mut page, &[]), [Some(false), Some(true), Some(false)]);
+        page.tree.take_dirty();
+        assert_eq!(page.preview(&[], false), Ok(vec![]), "nothing changed");
+
+        // A colour that stays visible: the revision moved, the barrier did not.
+        let frame_revision = page.retain.plan.revision;
+        page.tree.set_style(3, restyled(r##"{"backgroundColor":"#222222"}"##));
+        assert_eq!(page.tree.take_dirty(), Dirty::PaintPatchable);
+        assert!(page.tree.revision() > frame_revision);
+        assert!(page.tree.patch_barrier() <= frame_revision);
+        assert_eq!(page.preview(&[], false), Ok(vec![2]), "the root that holds 3 is repainted");
+
+        // An element no root holds is a frame built whole, which visits the roots.
+        page.tree.set_style(5, restyled(r##"{"backgroundColor":"#333333"}"##));
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Commit(5)));
+        page.tree.take_restyles();
+        assert_eq!(page.preview(&[], false), Ok(vec![]), "once a frame took what was restyled");
+
+        // An opacity that crosses 1 changes what is painted in kind: a barrier, though it only paints.
+        page.tree.set_style(3, restyled(r##"{"backgroundColor":"#222222","opacity":0.5}"##));
+        assert_eq!(page.tree.take_dirty(), Dirty::Paint);
+        assert!(page.tree.patch_barrier() > frame_revision);
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Edited));
+        // And it stays one for the restyles after it, until a frame is built whole.
+        page.tree.set_style(3, restyled(r##"{"backgroundColor":"#444444","opacity":0.5}"##));
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Edited));
+        hover_page(&mut page, &[]);
+        assert_eq!(page.preview(&[], false), Ok(vec![]), "the frame built whole is past the barrier");
+
+        // A text, a node or a prop is one too.
+        page.tree.set_text(3, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Edited));
+    }
+
+    #[test]
+    fn a_restyle_is_not_classified_while_patching_is_off() {
+        let mut page = Units::new();
+        page.tree.set_style(3, restyled(r##"{"backgroundColor":"#111111"}"##));
+        page.tree.take_dirty();
+        page.tree.set_style(3, restyled(r##"{"backgroundColor":"#222222"}"##));
+        assert_eq!(page.tree.take_dirty(), Dirty::Paint);
+        assert!(page.tree.pending_restyles().is_empty());
+        assert_eq!(page.tree.patch_barrier(), page.tree.revision() - 1);
     }
 
     #[test]

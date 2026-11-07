@@ -530,9 +530,16 @@ pub(crate) fn invalidate_after_commit(cx: &mut gpui::App, view: gpui::EntityId) 
 /// [`invalidate_after_commit`] for the changes `RetainedTree::take_dirty` reported. A paint-only
 /// batch still draws the next frame, which rebuilds the elements it changed, but a read of bounds
 /// or a scroll write before it needs no layout pass: no box moved.
-pub(crate) fn invalidate_after_mutation(cx: &mut gpui::App, view: gpui::EntityId, dirty: Dirty) {
+///
+/// A batch whose restyles a patch frame can follow (`Dirty::PaintPatchable`) asks for a tick, as a
+/// hover that only paints does: the roots that hold the restyled elements are built again and
+/// painted over the frame shown, and a tick that cannot be patched is drawn whole in the same draw.
+/// The layout stays current as it does for `notify_paint_only`, so a read before the frame lays
+/// nothing out.
+pub(crate) fn invalidate_after_mutation(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, dirty: Dirty) {
     match dirty {
         Dirty::Clean => {}
+        Dirty::PaintPatchable => window.request_tick(),
         Dirty::Paint => cx.notify_paint_only(view),
         Dirty::Layout => invalidate_after_commit(cx, view),
     }
@@ -726,9 +733,9 @@ fn invalidate_window(dirty: Dirty) -> Result<()> {
     if crate::events::sync_dispatch::in_sync_call() {
         return crate::events::sync_dispatch::invalidate_root_view(dirty).map_err(Error::from_reason);
     }
-    update_window(move |_view, _window, cx| {
+    update_window(move |_view, window, cx| {
         let view = cx.entity_id();
-        invalidate_after_mutation(cx, view, dirty);
+        invalidate_after_mutation(window, cx, view, dirty);
     })
 }
 
@@ -9736,6 +9743,7 @@ impl gpui::Render for GpuixView {
         self.note_pass(window);
         self.apply_pointer_lock(window, cx);
         self.install_patcher(window, cx);
+        self.sync_commit_patching();
         let verifies = self.retain.verifies_frames();
         self.tapes.verify(verifies);
         // A build is not the same twice in a frame here (anchor-size() reads the size the trigger
@@ -15101,6 +15109,50 @@ mod batch_tests {
                 "{key} added"
             );
         }
+    }
+
+    #[test]
+    fn a_restyle_that_a_patch_follows_is_patchable_and_the_others_are_dirty_for_paint() {
+        let mut tree = RetainedTree::new();
+        apply(&mut tree, MOUNT).expect("valid batch");
+        tree.set_commit_patching(true);
+        let row = |style: &str| format!(r##"[["setStyle",3,{style}]]"##);
+        // The mailbox row: the selected one has a background and a hover background of its own.
+        let unselected = r##"{"height":10,"hover":{"backgroundColor":"#F4F4F5"}}"##;
+        let selected = r##"{"height":10,"backgroundColor":"#DBEAFE","hover":{"backgroundColor":"#DBEAFE"}}"##;
+        dirty_after(&mut tree, &row(unselected));
+        tree.take_restyles();
+        assert_eq!(dirty_after(&mut tree, &row(selected)), Dirty::PaintPatchable, "a state style that paints is a paint change");
+        assert_eq!(tree.pending_restyles(), [3]);
+        assert_eq!(dirty_after(&mut tree, &row(unselected)), Dirty::PaintPatchable);
+        let barrier = tree.patch_barrier();
+        // A refinement taken away is a layout change, which is a barrier.
+        dirty_after(&mut tree, &row(r##"{"height":10}"##));
+        assert!(tree.patch_barrier() > barrier);
+        // A background that appears where the element keeps no quad adds an operation: paint, not patchable.
+        assert_eq!(dirty_after(&mut tree, &row(r##"{"height":10,"backgroundColor":"#112233"}"##)), Dirty::Paint);
+        // So does an opacity that crosses 1, a transition, and a group.
+        for (before, after) in [
+            (r##"{"height":10,"backgroundColor":"#112233"}"##, r##"{"height":10,"backgroundColor":"#112233","opacity":0.5}"##),
+            (
+                r##"{"height":10,"backgroundColor":"#112233","transition":"background-color 1s"}"##,
+                r##"{"height":10,"backgroundColor":"#223344","transition":"background-color 1s"}"##,
+            ),
+            (
+                r##"{"height":10,"backgroundColor":"#112233","group":true}"##,
+                r##"{"height":10,"backgroundColor":"#223344","group":true}"##,
+            ),
+        ] {
+            dirty_after(&mut tree, &row(before));
+            assert_eq!(dirty_after(&mut tree, &row(after)), Dirty::Paint, "{after}");
+        }
+        // Anything that moves a box is layout whatever else changed with it, and a batch takes the greatest.
+        let both = r##"[["setStyle",3,{"height":10,"backgroundColor":"#111111"}],["setStyle",1,{"width":101,"backgroundColor":"#112233"}]]"##;
+        dirty_after(&mut tree, &row(unselected));
+        assert_eq!(dirty_after(&mut tree, both), Dirty::Layout);
+        dirty_after(&mut tree, &row(unselected));
+        let mixed = r##"[["setStyle",3,{"height":10,"backgroundColor":"#111111","hover":{"backgroundColor":"#111111"}}],["setStyle",1,{"width":101,"backgroundColor":"#112233","opacity":0.4}]]"##;
+        assert_eq!(dirty_after(&mut tree, mixed), Dirty::Paint, "one that is not patchable makes the batch not");
     }
 
     #[test]

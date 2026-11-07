@@ -1048,7 +1048,10 @@ impl TestGpuixRenderer {
     /// was off starts from a frame that builds everything.
     #[napi]
     pub fn set_retain_planning(&self, planning: bool) -> Result<()> {
-        update_view(move |view, _window, _cx| view.retain.set_planning(planning))
+        update_view(move |view, _window, _cx| {
+            view.retain.set_planning(planning);
+            view.sync_commit_patching();
+        })
     }
 
     /// Whether a frame records what it builds at all, which `GPUIX_RETAIN_OFF` turns off for a whole
@@ -1056,7 +1059,10 @@ impl TestGpuixRenderer {
     /// that builds everything.
     #[napi]
     pub fn set_retain_enabled(&self, enabled: bool) -> Result<()> {
-        update_view(move |view, _window, _cx| view.retain.set_enabled(enabled))
+        update_view(move |view, _window, _cx| {
+            view.retain.set_enabled(enabled);
+            view.sync_commit_patching();
+        })
     }
 
     /// Builds each frame that replayed a retained subtree once more, whole, and compares the two:
@@ -1143,6 +1149,7 @@ impl TestGpuixRenderer {
         update_view(move |view, _window, _cx| {
             view.patch.set_enabled(enabled);
             view.retain.set_hover_roots(enabled);
+            view.sync_commit_patching();
         })
     }
 
@@ -1231,9 +1238,9 @@ impl TestGpuixRenderer {
         // From a sync event handler this only marks the view dirty: the frame
         // is drawn once the input that is being dispatched has returned.
         deliver_frame()?;
-        update_view_or_defer(move |_view, _window, cx| {
+        update_view_or_defer(move |_view, window, cx| {
             let view = cx.entity_id();
-            crate::renderer::invalidate_after_mutation(cx, view, dirty);
+            crate::renderer::invalidate_after_mutation(window, cx, view, dirty);
         })
     }
 

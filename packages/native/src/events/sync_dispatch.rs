@@ -281,7 +281,7 @@ pub(crate) fn report_deferred_error(message: String) {
 pub(crate) fn invalidate_root_view(dirty: crate::retained_tree::Dirty) -> Result<(), String> {
     with_active_window(|window, cx| {
         let view = root_view(window)?;
-        crate::renderer::invalidate_after_mutation(cx, view.entity_id(), dirty);
+        crate::renderer::invalidate_after_mutation(window, cx, view.entity_id(), dirty);
         Ok(())
     })
     .unwrap_or_else(|| Err(NESTED.to_string()))

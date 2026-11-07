@@ -512,6 +512,11 @@ pub enum Dirty {
     /// Nothing a frame would draw changed.
     #[default]
     Clean,
+    /// [`Dirty::Paint`] whose every restyle is also one a patch frame can follow
+    /// (`events/hover_paint.rs`, `restyle_paints_strictly`), with patching on: the roots that hold
+    /// the restyled elements are built again and painted over the frame shown, and the elements
+    /// are in [`RetainedTree::pending_restyles`] until a frame takes them.
+    PaintPatchable,
     /// Only style changes whose keys paint and move nothing: the next frame draws, but the boxes
     /// the last layout gave are still the boxes of the tree.
     Paint,
@@ -526,6 +531,9 @@ struct StyleChange {
     changed: bool,
     /// The style differs in a key that is not only painted (see `StyleDesc::differs_only_in_paint`).
     layout: bool,
+    /// It paints only, and a patch frame can follow it (`hover_paint::restyle_paints_strictly`).
+    /// Never set for a change that is not classified: the universal layer, or patching off.
+    strict: bool,
     regrouped: bool,
     text_reprocessed: bool,
     focusability_changed: bool,
@@ -656,6 +664,15 @@ pub struct RetainedTree {
     /// Dim other focusables while a control has keyboard focus. Set per root.
     keyboard_focus_dim: bool,
     next_revision: u64,
+    /// Whether a paint-only restyle is classified for a patch frame (`StyleChange::strict`). The
+    /// view says so (`GpuixView::sync_commit_patching`): patching on and the retention planning.
+    commit_patching: bool,
+    /// The revision of the last mutation that a patch frame cannot follow: any change other than
+    /// a restyle that paints strictly. A patch is of the frame built whole, so it is past this.
+    patch_barrier: u64,
+    /// The elements restyled by paint since the frame that last took them, which a patch follows
+    /// (the commit source: a tick peeks it, a frame built whole or a patch takes it).
+    restyled: std::cell::RefCell<Vec<u64>>,
     /// What a frame would draw differently since the last `take_dirty`. A batch
     /// of resends, which is what a re-render with unchanged props produces,
     /// leaves it clean, so the window is not asked to rebuild its element tree
@@ -699,6 +716,9 @@ impl RetainedTree {
             root_id: None,
             keyboard_focus_dim: true,
             next_revision: 1,
+            commit_patching: false,
+            patch_barrier: 0,
+            restyled: Default::default(),
             dirty: Dirty::Clean,
             auto_focus_requested: false,
             removals: 0,
@@ -734,6 +754,27 @@ impl RetainedTree {
 
     fn mark_dirty(&mut self, dirty: Dirty) {
         self.dirty = self.dirty.max(dirty);
+    }
+
+    /// Classifies paint-only restyles for patch frames from now on, or stops.
+    pub fn set_commit_patching(&mut self, on: bool) {
+        self.commit_patching = on;
+    }
+
+    /// The revision of the last mutation that a patch frame cannot follow. A tick can patch the frame
+    /// built whole at a revision at or past it, whatever restyles by paint came after.
+    pub fn patch_barrier(&self) -> u64 {
+        self.patch_barrier
+    }
+
+    /// The elements restyled by paint, strictly, since a frame last took them (see [`Dirty::PaintPatchable`]).
+    pub fn pending_restyles(&self) -> Vec<u64> {
+        self.restyled.borrow().clone()
+    }
+
+    /// Hands the elements of `pending_restyles` over: a frame built whole drew them, or a patch did.
+    pub fn take_restyles(&self) -> Vec<u64> {
+        std::mem::take(&mut *self.restyled.borrow_mut())
     }
 
     /// Whether an element was given `autoFocus` since the last call. Call once
@@ -792,7 +833,7 @@ impl RetainedTree {
         self.elements
             .insert(id, RetainedElement::new(id, element_type, revision));
         if self.universal.is_some() {
-            self.refresh_effective_style(id);
+            self.refresh_effective_style(id, false);
         }
         self.track_focusable(id);
     }
@@ -909,6 +950,9 @@ impl RetainedTree {
         self.mark_dirty(dirty);
         let revision = self.next_revision;
         self.next_revision = self.next_revision.wrapping_add(1).max(1);
+        if dirty != Dirty::PaintPatchable {
+            self.patch_barrier = revision;
+        }
         revision
     }
 
@@ -925,9 +969,15 @@ impl RetainedTree {
     }
 
     /// [`Self::mark_render_changed`] for a style change that only paints: the window is not asked to
-    /// lay out again.
-    fn mark_paint_changed(&mut self, id: u64) {
-        self.mark_changed_detail(id, false, Dirty::Paint);
+    /// lay out again. A `strict` one is also what a patch frame follows: the element is noted for it,
+    /// and the revision is no barrier.
+    fn mark_paint_changed(&mut self, id: u64, strict: bool) {
+        if strict {
+            self.mark_changed_detail(id, false, Dirty::PaintPatchable);
+            self.restyled.get_mut().push(id);
+        } else {
+            self.mark_changed_detail(id, false, Dirty::Paint);
+        }
     }
 
     /// Invalidate `id`, its ancestors and everything below it, including their
@@ -1136,7 +1186,8 @@ impl RetainedTree {
             return;
         }
         element.own_style = Some(style);
-        let change = self.refresh_effective_style(id);
+        let classify = self.commit_patching;
+        let change = self.refresh_effective_style(id, classify);
         self.settle_style_change(id, change);
     }
 
@@ -1152,7 +1203,7 @@ impl RetainedTree {
         let ids: Vec<u64> = self.elements.keys().copied().collect();
         let mut total = StyleChange::default();
         for id in ids {
-            total.absorb(self.refresh_effective_style(id));
+            total.absorb(self.refresh_effective_style(id, false));
         }
         if total.focusability_changed {
             // One pass from the tops of the trees instead of a walk below every element.
@@ -1180,7 +1231,7 @@ impl RetainedTree {
 
     /// Recompute the effective style of `id` from the style it declared and the
     /// universal layer, and assign it.
-    fn refresh_effective_style(&mut self, id: u64) -> StyleChange {
+    fn refresh_effective_style(&mut self, id: u64, classify: bool) -> StyleChange {
         let Some(element) = self.elements.get(&id) else {
             return StyleChange::default();
         };
@@ -1191,7 +1242,7 @@ impl RetainedTree {
             }),
             (_, own) => own.clone(),
         };
-        self.assign_style(id, effective)
+        self.assign_style(id, effective, classify)
     }
 
     /// The one place `RetainedElement::style` is written, and the bookkeeping
@@ -1199,7 +1250,7 @@ impl RetainedTree {
     /// from, containing-block escapes and `visibility`. Marking the tree
     /// changed is the caller's, because the universal layer does it once for
     /// all elements.
-    fn assign_style(&mut self, id: u64, style: Option<Arc<StyleDesc>>) -> StyleChange {
+    fn assign_style(&mut self, id: u64, style: Option<Arc<StyleDesc>>, classify: bool) -> StyleChange {
         let Some(element) = self.elements.get_mut(&id) else {
             return StyleChange::default();
         };
@@ -1215,6 +1266,7 @@ impl RetainedTree {
             (Some(old), Some(new)) => old.differs_only_in_paint(new),
             _ => false,
         };
+        let old_for_patch = if paints_only && classify { element.style.clone() } else { None };
         // A write that moves no box still moves the transform that readers see the boxes of the
         // element, and of what is inside it, through.
         if paints_only && element.style.as_deref().zip(style.as_deref()).is_some_and(|(old, new)| old.touches_transform(new)) {
@@ -1254,13 +1306,21 @@ impl RetainedTree {
             self.visibility_count = self.visibility_count + usize::from(now_declared.is_some())
                 - usize::from(was_declared.is_some());
         }
+        let focusability_changed =
+            visibility_changed || was_contents != crate::layout::contents::is_display_contents(element);
+        let strict = old_for_patch.is_some_and(|old| {
+            self.elements
+                .get(&id)
+                .and_then(|element| element.style.as_deref())
+                .is_some_and(|new| crate::events::hover_paint::restyle_paints_strictly(self, id, &old, new))
+        });
         StyleChange {
             changed: true,
             layout: !paints_only,
+            strict,
             regrouped,
             text_reprocessed,
-            focusability_changed: visibility_changed
-                || was_contents != crate::layout::contents::is_display_contents(element),
+            focusability_changed,
         }
     }
 
@@ -1279,7 +1339,7 @@ impl RetainedTree {
         } else if change.layout {
             self.mark_render_changed(id);
         } else if change.changed {
-            self.mark_paint_changed(id);
+            self.mark_paint_changed(id, change.strict);
         }
     }
 
@@ -1294,7 +1354,7 @@ impl RetainedTree {
         if changed {
             if self.universal.is_some() {
                 // The string makes this a text node, which no style layer reaches.
-                let change = self.refresh_effective_style(id);
+                let change = self.refresh_effective_style(id, false);
                 self.settle_style_change(id, change);
             }
             self.mark_changed(id);

@@ -151,12 +151,13 @@ The reasons it says no are `Unpatchable`:
 
 | Key | Meaning |
 |---|---|
-| `NoFrame`, `LayoutPass`, `Unsteady`, `Gliding`, `ScrollAnimation`, `Edited`, `Everything` | no frame to patch, a layout-only pass ran, the last frame held an element that follows the clock, a `layout` glide is in flight or its events are to be sent, a scroll animation runs, a scrollbar fades or thickens or its hold has ended since it was painted, the tree was edited, everything changed |
+| `NoFrame`, `LayoutPass`, `Unsteady`, `Gliding`, `ScrollAnimation`, `Edited`, `Everything` | no frame to patch, a layout-only pass ran, the last frame held an element that follows the clock, a `layout` glide is in flight or its events are to be sent, a scroll animation runs, a scrollbar fades or thickens or its hold has ended since it was painted, the tree was edited by something other than a restyle a patch follows (`RetainedTree::patch_barrier` is newer than the frame), everything changed |
 | `Sourced` | the pointer, focus, a scroll, a custom element, a measurement, a link or a command changed |
 | `Outside` | a time-driven change outside every unit that is not dormant, on an element that has a box and the last build gives no reason for |
 | `Refused` | the element is no unit: `Excluded:<kind>` (`Excluded:fixed` for `position: fixed`; gpui has no root placed by the viewport, `Escape::Viewport` is declined `Surroundings`), `ExcludedBelow:<kind>`, `Escapes`, `Lifts`, `Scrolls`, `LayoutAnimation`, `TooLarge`. What runs on the element is looked at first, so an absolute element whose `top` runs is `LayoutAnimation`, and so is a tick made `Sourced` by the measurement of a layout animation |
 | `Ended` | a unit whose element the last frame no longer found a paint-only animation running on, though a source still lists it, as an SVG shape that holds its end value is: a frame built whole would not make it a unit, so it is not repainted as one |
 | `Hover` | a hover restyled by paint an element that no unit or hover root of the last frame built whole holds ([hover roots](#hover-roots)): the frame is built whole, and visits the roots the next hover is patched in |
+| `Commit` | a commit restyled by paint an element that no unit or hover root of the last frame built whole holds ([commit patches](#commit-patches)), as `Hover` does for a hover |
 | `Dormancy` | the preview has no unit but elements are about to enter the dormant set or their verdicts moved: the frame settles that ([skipped content](#skipped-content-97)) |
 
 If it says yes, the patcher steps what a frame steps before it builds (`sync_motion_states`, `sync_motion_values`, the clocks of the
@@ -173,8 +174,9 @@ while a scroll animation runs. `patches_ticks` does not need a unit, so a page w
 off with the retention, and with `GPUIX_PATCH_OFF` or `setPatchEnabled(false)`. The counters are listed in
 [testing.md](testing.md#switches-and-counters).
 
-The clock and a hover that only paints (see [Hover patches](#hover-patches)) are what a patch can answer. A hover that does
-more than paint, a React commit, a scroll, a measurement or a click draws a full frame, and patching resumes at the next tick.
+The clock, a hover that only paints (see [Hover patches](#hover-patches)) and a commit that only paints (see [Commit
+patches](#commit-patches)) are what a patch can answer. A hover that does more than paint, a commit that does more, a scroll, a
+measurement or a click draws a full frame, and patching resumes at the next tick.
 
 ## Cases that used to draw whole
 
@@ -773,6 +775,49 @@ marks `Replaced` with `derived: true`, which a build at the row's own place does
   a relocatable one recorded in the region of the first, replayed into a scratch frame by a patch, with hitbox ids and registrations
   that the patch hands out in order): not done, and an open design question.
 
+## Commit patches
+
+A commit from JS that only changes how elements paint (the mailbox row of ghia-bench: `rowStyle` to `selectedRowStyle` when the
+selection moves) is drawn like a hover: the roots that hold the restyled elements are built again and gpui writes the primitives
+they paint over the frame shown, where it used to be a frame built whole and, for a read of the scroll metrics after it, a layout pass.
+
+- **Classification, in the tree** (`RetainedTree::settle_style_change`). A style change that only paints
+  (`StyleDesc::differs_only_in_paint`) is also *strict* when a hover of the same change would be a patch:
+  `hover_paint::restyle_paints_strictly` compares the style the element resolves to before and after with `differs_by_paint_only`, with no
+  state and with each state either style declares, and wants `keeps_background_quad` the same before and after, no transition on
+  either (nor below the element when its `color` changed), no group and no `@container` rule. A state style (`hover`, `hasHover`,
+  `focusVisible`, ...) that both styles declare and that differs in paint alone is a paint change for `differs_only_in_paint` too (it
+  compared the state styles whole, so `rowStyle` to `selectedRowStyle`, which changes `backgroundColor` and `hover.backgroundColor`, was
+  `Dirty::Layout`); one that only one style declares is still layout. A strict restyle takes the revision as any, and is noted in
+  `RetainedTree::pending_restyles`; any other mutation (any mark that is not paint, the universal style, a paint restyle that is not strict)
+  moves `RetainedTree::patch_barrier` to its revision. The classification is on while the view patches ticks and the retention plans
+  (`GpuixView::sync_commit_patching`; the tree is what `applyBatch` has, and the view may be leased by the input that made the batch).
+- **Routing.** A batch whose restyles are all strict is `Dirty::PaintPatchable` (`Clean < PaintPatchable < Paint < Layout`, so one
+  batch or several flushes in between that are not all strict are `Paint` or `Layout` as before). `invalidate_after_mutation`, which
+  `applyBatch` (live and test renderer) and the sync-dispatch route (`events/sync_dispatch.rs`) go through, asks the window for a tick
+  (`Window::request_tick`) for it, where it called `notify_paint_only` for `Paint`. A request for a tick leaves the layout current as
+  `notify_paint_only` does, so a read of `scrollTop` or `clientHeight` after the commit runs no pass; a tick that cannot be patched is
+  drawn whole in the same draw. The elements wait in the tree (a tick peeks them) and a frame built whole takes them
+  (`Retain::begin_frame`), as a patch does after it (`continue_after_patch`), as the pointer keeps `paint_pending` for hover.
+- **The preview.** `Retain::preview` no longer says `Edited` because the root's revision moved: it says it when the patch barrier is
+  newer than the revision the frame shown was built at. Each pending element is mapped as a hover's is (the innermost unit or hover root
+  of that frame, walking up); an element no root holds is `Unpatchable::Commit(id)` and the frame is built whole, which visits the
+  roots; a hover root that gpui has since put elsewhere (a list scrolled) declines through `Window::patch_blocker` as `Commit:<blocker>`.
+  The patcher builds the roots with `build_unit` from the live tree, as for a hover. What an earlier patch repainted needs no note: its
+  revision is newer than what the root recorded, so the next frame built whole builds it again (the verifier agrees).
+- **The scroll classifier** still compares the root's revision with the frame shown, so a list scrolled after commit patches is
+  built whole once (`Edited`).
+
+The roots are the units and the hover roots of the last frame built whole. A row with no hover is not one (`Commit` when the element is
+restyled strictly).
+
+**Limits.**
+
+- A commit that adds or takes away an operation (a background where the element keeps no quad, a colour from or to transparent, a
+  shadow, an opacity across 1), changes a box, or restyles an element that is in no root is a frame built whole.
+- A commit patch builds every element of the root it repaints (a row: 9 in the bench) and draws what the roots paint; the frame is not
+  cheaper than a hover's.
+
 ## Scroll-only frames (in progress)
 
 Every wheel event over a `<virtual-list>` used to draw a whole frame (`ListState::scroll` sets the offset, runs the scroll handler and notifies
@@ -966,7 +1011,8 @@ first wheel after a commit, slice 3's.
 - **A tick that gpui or gpuix cannot patch is a full frame, and says why.** A subtree of more than 256 elements is built whole
   (`unitsOversized`, `TooLarge`). A `position: fixed` element is no unit (`Excluded:fixed`), where an absolute one is. A loop on an
   element that holds an absolute box against a block outside it is `Escapes`. A scroll animation, a scrollbar fade (not its hold), a layout-only
-  pass since the last full frame, the pointer, focus, a scroll, a measurement or any change that is not the clock make the tick a
+  pass since the last full frame, the pointer, focus, a scroll, a measurement or any change that is not the clock (a hover or a
+  commit that only paints is answered by a patch, see [Commit patches](#commit-patches)) make the tick a
   full frame (`getPatchCounters().unpatchable`). A scroll animation is always asked for as `request_animation_frame` and drawn
   whole. The run of an `opacity` or transform animation starts and ends with a whole frame.
 - **A hover frame still scales with the roots it replays**, so culled cards are not free there (see above and

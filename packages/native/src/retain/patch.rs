@@ -61,6 +61,7 @@ impl Unpatchable {
             Unpatchable::Dormancy => "Dormancy".to_owned(),
             Unpatchable::Refused(refusal) => refusal.key(),
             Unpatchable::Hover(_) => "Hover".to_owned(),
+            Unpatchable::Commit(_) => "Commit".to_owned(),
         }
     }
 }
@@ -148,6 +149,14 @@ impl GpuixView {
         self.patch.enabled
     }
 
+    /// Tells the tree whether a commit that only paints is drawn as a patch frame, which it classifies
+    /// the restyles for (`Dirty::PaintPatchable`). The tree is what `applyBatch` has, and the view may
+    /// be leased by the input that made the batch. Called when a frame is built and when patching or
+    /// the retention is switched.
+    pub(crate) fn sync_commit_patching(&self) {
+        self.tree.lock().unwrap().set_commit_patching(self.patches_ticks() && self.retain.plans());
+    }
+
     /// Asks for the next frame of an animation that runs. A tick is drawn by patching the frame
     /// before when it can be, and whole when it cannot (a scroll animation never is patched).
     pub(crate) fn request_next_frame(&self, window: &mut gpui::Window, scroll_animating: bool) {
@@ -179,9 +188,10 @@ impl GpuixView {
         };
         // A root the frame shown has elsewhere than it was recorded, or did not make patchable, is declined by gpui
         // after it is built: asking first spares the build.
+        let by_commit = !self.tree.lock().unwrap().pending_restyles().is_empty();
         for &id in ids.iter().filter(|id| self.retain.is_hover_root(**id)) {
             if let Some(blocker) = window.patch_blocker(&crate::renderer::retained_id(id)) {
-                self.patch.decline(format!("Hover:{blocker:?}"));
+                self.patch.decline(format!("{}:{blocker:?}", if by_commit { "Commit" } else { "Hover" }));
                 return None;
             }
         }
@@ -242,6 +252,9 @@ impl GpuixView {
         // what is shown, and the frame built whole after the patches builds them again.
         let hovered = self.pointer.borrow().take_paint_pending();
         self.retain.hover_repainted(hovered);
+        // A commit's restyles need no note: their revision is newer than what the roots recorded, so the
+        // frame built whole after the patches builds them again.
+        self.tree.lock().unwrap().take_restyles();
         let running = self.css_transitions.take_active() | self.css_animations.take_active();
         let asks_next_frame = running || stepped.motion || stepped.motion_values == crate::motion::Demand::Frame;
         self.retain.note_clock_asked(asks_next_frame);
