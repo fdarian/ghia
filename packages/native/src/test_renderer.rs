@@ -2588,6 +2588,22 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Capture the frame that was drawn last as it is, and save it as a PNG: `captureScreenshot` notifies
+    /// the view and refreshes the window first, so what it captures is a frame built whole, whatever drew the one
+    /// before it. This captures what a frame that patched or moved the rows in place left.
+    #[napi]
+    pub fn capture_shown_frame(&self, path: String) -> Result<()> {
+        with_test_state(|cx, window, _view| {
+            let image = cx
+                .capture_screenshot(window)
+                .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {}", e)))?;
+            image
+                .save(&path)
+                .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {}", e)))?;
+            Ok(())
+        })
+    }
+
     /// Return and clear all collected events since the last drain.
     /// Events are collected synchronously — no event loop queuing.
     #[napi]

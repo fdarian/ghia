@@ -452,6 +452,7 @@ interface NativeTestRendererApi
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
+  captureShownFrame(path: string): void
 }
 
 interface NativeTestRendererConstructor {
@@ -2095,6 +2096,12 @@ export class TestRenderer implements NativeRenderer {
   captureScreenshot(path: string): void {
     this.native.flush()
     this.native.captureScreenshot(path)
+  }
+
+  /** Capture the frame that was drawn last as it is. `captureScreenshot` notifies the view and refreshes the window, so it
+   *  captures a frame built whole; this captures what a patched tick or a frame that moved the rows in place left. */
+  captureShownFrame(path: string): void {
+    this.native.captureShownFrame(path)
   }
 
   /** Whether the native GPUI test renderer is available. Always true. */

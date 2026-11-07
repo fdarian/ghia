@@ -29,13 +29,13 @@ const TIMEOUT = 120_000
 
 function Page({ hot, onEnd, field }: { hot: boolean; onEnd: () => void; field: boolean }) {
   return (
-    <div style={{ width: 400, height: 200 }}>
+    <div style={{ display: "flex", flexDirection: "column", width: 400, height: 200 }}>
       <div
         testId="beside"
         onTransitionEnd={onEnd}
         style={{ position: "absolute", left: 220, top: 40, width: 100, height: 40, backgroundColor: hot ? "#ff0000" : "#223344", transition: "background-color 150ms linear" }}
       />
-      {field ? <input testId="field" defaultValue="caret" style={{ position: "absolute", left: 220, top: 0, width: 100, height: 24 }} /> : null}
+      {field ? <input testId="field" defaultValue="caret" style={{ width: 100, height: 24, flexShrink: 0 }} /> : null}
       <virtual-list testId="list" itemCount={COUNT} estimatedItemHeight={ROW} overdraw={0} style={{ width: 200, height: VIEWPORT, scrollbarWidth: "none" }}>
         {Array.from({ length: COUNT }, (_, index) => (
           <div
@@ -60,18 +60,17 @@ function Page({ hot, onEnd, field }: { hot: boolean; onEnd: () => void; field: b
 function tick(renderer, by: number | undefined, ms = VSYNC) {
   renderer.clockAdvance(ms)
   renderer.advanceTime(ms)
-  if (by !== undefined) renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+  if (by !== undefined) renderer.nativeSimulateScrollWheel(180, 80, 0, by)
   renderer.dispatchNativeEvents()
   renderer.drawFrame()
 }
 
 let shots = 0
+/** The frame that was drawn last as it is: a frame that moved the rows in place is not built again to be captured. */
 function picture(renderer): string {
   const file = `${SHOTS_DIR}/scroll-patch-clock-${process.pid}-${shots++}.png`
   fs.rmSync(file, { force: true })
-  renderer.captureScreenshot(file)
-  // The capture notifies the view: the frame it asks for is its own and not the next tick's.
-  renderer.drawFrame()
+  renderer.captureShownFrame(file)
   const bytes = fs.readFileSync(file)
   fs.rmSync(file, { force: true })
   return bytes.toString("base64")

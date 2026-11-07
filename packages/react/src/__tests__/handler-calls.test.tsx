@@ -24,6 +24,7 @@ const PNG_1X1 = Buffer.from(
 const NOT_CALLABLE_FROM_A_HANDLER = new Set([
   "advanceTime",
   "captureScreenshot",
+  "captureShownFrame",
   "dispose",
   "dispatchEvent",
   "dispatchMouseMove",

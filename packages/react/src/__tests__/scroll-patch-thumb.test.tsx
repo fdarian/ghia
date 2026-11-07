@@ -83,12 +83,22 @@ function picture(renderer): string {
   return bytes.toString("base64")
 }
 
+/** The frame that was drawn last as it is: a frame that moved the rows in place is not built again to be captured. */
+function shownPicture(renderer): string {
+  const file = `${SHOTS_DIR}/scroll-patch-thumb-${process.pid}-${shots++}.png`
+  fs.rmSync(file, { force: true })
+  renderer.captureShownFrame(file)
+  const bytes = fs.readFileSync(file)
+  fs.rmSync(file, { force: true })
+  return bytes.toString("base64")
+}
+
 function scroll(renderer) {
   return renderer.getPatchCounters().scrollPatch
 }
 
 /** The picture after each tick of `ticks` (a wheel delta, or a wait of that many ticks with none), the translate on or off. */
-function run(translate: boolean, ticks: Array<number | { wait: number }>, count = COUNT) {
+function run(translate: boolean, ticks: Array<number | { wait: number }>, count = COUNT, shown = false) {
   const { renderer, unmount } = open(translate, count)
   try {
     // A wheel and its way back record the rows and show the bar.
@@ -99,7 +109,7 @@ function run(translate: boolean, ticks: Array<number | { wait: number }>, count 
     for (const step of ticks) {
       if (typeof step === "number") tick(renderer, step)
       else for (let index = 0; index < step.wait; index++) tick(renderer, undefined)
-      pictures.push(picture(renderer))
+      pictures.push(shown ? shownPicture(renderer) : picture(renderer))
     }
     if (verifying) {
       expect(renderer.getRetainedCounters().mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
@@ -132,8 +142,8 @@ describeNative("the thumb of a list in the frames a scroll draws by moving the r
     // before a fourth is needed, so it is on another pixel at 20 than at 0. The bar fades and the scroll that shows it again is
     // drawn whole, at 20; the next two put the rows at 0 and back at 20, where that frame painted the thumb.
     const back: Array<number | { wait: number }> = [{ wait: 90 }, 20, -20, 20, -20, 15, -15, 20]
-    const on = run(true, back, 6)
-    const off = run(false, back, 6)
+    const on = run(true, back, 6, true)
+    const off = run(false, back, 6, true)
     expect(on.pictures).toEqual(off.pictures)
     expect(new Set(off.pictures).size, "the thumb is on more than one pixel").toBeGreaterThan(2)
     if (!verifying) {

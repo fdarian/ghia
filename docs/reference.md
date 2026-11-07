@@ -9313,6 +9313,8 @@ renderer.captureScreenshot('/tmp/test.png')
 const text = renderer.getAllText()
 ```
 
+`captureScreenshot` draws the page whole first (it notifies the view and refreshes the window), so it cannot show what a patched tick or a frame that moved the rows of a `<virtual-list>` in place drew; `captureShownFrame(path)` saves the frame that was drawn last as it is, for a test that compares such a frame with the one built whole.
+
 `createTestRoot(options)` takes the same window options as a live window (`WindowOptions`), plus `fonts` to register font files and `scaleFactor`, which only the test window has, and opens the offscreen window with them through the same translation. The size defaults to 1280x800, not the live 800x600, and `focus` to `false`. What the window does with each option:
 
 | Option | In the test window |

@@ -1186,6 +1186,12 @@ export declare class TestGpuixRenderer {
    */
   captureScreenshot(path: string): void
   /**
+   * Capture the frame that was drawn last as it is, and save it as a PNG: `captureScreenshot` notifies
+   * the view and refreshes the window first, so what it captures is a frame built whole, whatever drew the one
+   * before it. This captures what a frame that patched or moved the rows in place left.
+   */
+  captureShownFrame(path: string): void
+  /**
    * Return and clear all collected events since the last drain.
    * Events are collected synchronously — no event loop queuing.
    */
