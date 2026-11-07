@@ -140,12 +140,21 @@ each entry or applies it again.
   `Some` and it is not transparent or the flag is set. `border_strips` does not cut a transparent quad that has no border into
   strips (there is nothing to cut around; the strips of such a quad were an invisible ring of four quads and the operation
   would not have been one primitive a patch can write over). Nothing else drops an alpha-0 quad: `Scene::insert_quad`,
-  the bounds tree, the sort and `Scene::patch_in_place` take it as a quad. An element without the flag paints what it did.
+  the bounds tree, the sort and `Scene::patch_in_place` take it as a quad. **The change is not for the flagged quad alone:**
+  `border_strips` sees a `Quad`, which does not say whether a style asked to keep it, so every fully transparent quad with no
+  border that reaches the scene is one primitive now, whoever painted it (the caret of an input that is not lit,
+  `input.rs`; the background of a run of text; any `fill` of a transparent colour). Before, one of those was recorded as an
+  operation and left no primitive (its four strips had no area), except under a transform or a rounded clip, where it was one
+  invisible primitive. An element without the flag paints the same pixels it did: the quad is alpha 0, but it takes an order,
+  a slot in the quads of the scene and an insertion in the bounds tree like any quad, so the orders and the batches of a
+  frame that paints such a quad can differ from before. Carrying the flag with the quad was considered and not
+  done: `Quad` is the struct the shaders read, and the operation the frame records (`PaintOperation::Quad`, 18 match sites
+  and the replay) would need a variant of its own so that a recording put elsewhere decides as the paint did.
 - **Why.** The hover then writes a colour over a quad that is there in both styles (`hover_paint.rs`), and the mailbox row
   crossing took 4.48M and 4.51M instructions, all 18 patched ([patch-frames.md](patch-frames.md#which-hovers-paint-only)). A base
   background of alpha 0.0001 was tried and patched too, but it paints a (nearly invisible) colour; this is a true zero.
 - **Costs.** One quad more in every row that declares such a hover, in every frame: the scroll phase of the mailbox proxy went from
-  7.64M and 7.63M to 7.89M and 7.88M instructions a tick. A flagged transparent quad is shaded by the GPU over the element's area.
+  7.64M and 7.63M to 7.89M and 7.88M instructions a tick. A flagged transparent quad is shaded by the GPU over the element's area. Every other transparent quad with no border costs the same, in the frames that paint one (an input's caret off its phase).
 - **Considerations.** A sync that replaces `style.rs` or `scene.rs` has to keep the field in `Style`, its default, the
   condition in `paint_background_color` and the border test in `border_strips`; the tests
   `a_transparent_background_paints_no_quad_unless_it_is_kept` and
