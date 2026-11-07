@@ -883,7 +883,7 @@ what the frame shown cut moved by the offset would be. So for each row it makes 
   a classification, or a whole frame) is from this one. `ListState`'s own position was set by `scroll()` and the list's scroll listener
   measures from the layout of the frame shown, which a translate does not change.
 - **After.** The window is current as after a draw: layout current (`mark_layout_current`), presented, the dirty flag cleared. The
-  view that scrolled stays queued, so a frame built whole after it renders again. Ghia follows the hover with the resync the pointer
+  view that scrolled is taken off the invalidator's queue (`Invalidator::take_views`): left there, the next tick would decline for a pending view (`PatchDecline::PendingView`) and be drawn whole, as the caret's after a scroll was. Under the verifier it stays, for the frame built whole after the translate to take. Ghia follows the hover with the resync the pointer
   frame schedules after a draw (`Window::set_scroll_patch_settled`, run deferred): the hit test is of the frame that moved. The same callback runs the
   sweeps that a painted frame runs from the canvas `observers::frame_sweep` (`onLayout`, `ResizeObserver`, `IntersectionObserver` and the `content-visibility: auto`
   elements, `observers::sweep_after_translate`): a translate paints nothing, so nothing else would read the boxes it moved, and an `IntersectionObserver` on a row
@@ -1029,6 +1029,8 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   entries of the control with the translate off, in frames that are translates (`patched` at least 6; it fails without the sweep after a translate). `onLayout` and
   `ResizeObserver` have nothing to read in a translate (no size changes) and an `auto` element cannot change its answer by a scroll that a recording of a row allows, so
   they have no case.
+- `scroll-patch-clock.test.tsx` also has the tick of a caret after a translate: with no wheel event in its draw it is a patch (`patchedFrames` goes up), where it declined `PendingView`
+  with the list's view left queued. gpui `window/scroll_patch_tests.rs`: `a_translate_takes_the_view_the_scroll_notified_off_the_queue` (fails without the take).
 - Native `retain.rs`: `sources_changed` (what the scroll gate asks of the sources) is false for a frame that only time and a hover chain moved, and true for a press (the
   active chain), the focus, a selection, a measurement, a link, a command, a relevance, a hover restyled by paint, a custom element, a scroller that is no list and a
   frame never built. There is no react test of the gate itself: a press and a double click are declined by the other checks too (the notify of another view, the

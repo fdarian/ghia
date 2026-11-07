@@ -157,6 +157,27 @@ describeNative("a tick due in the draw of a scroll", { timeout: TIMEOUT }, () =>
     }
   }
 
+  unverified("patches the tick of a caret that comes after a translate", () => {
+    const { renderer, unmount } = open(true, true)
+    try {
+      renderer.focusElement(renderer.findByTestId("field").id)
+      renderer.dispatchNativeEvents()
+      renderer.drawFrame()
+      tick(renderer, 4)
+      tick(renderer, -4)
+      const before = scroll(renderer).patched
+      tick(renderer, 1)
+      expect(scroll(renderer).patched, "the scroll is a translate").toBe(before + 1)
+      // The blink is due with no wheel event in its draw: the list's view was left queued by the translate, which made the
+      // tick decline (`PendingView`) and be drawn whole.
+      const patchedFrames = renderer.getPatchCounters().patchedFrames
+      tick(renderer, undefined, 500)
+      expect(renderer.getPatchCounters().patchedFrames).toBe(patchedFrames + 1)
+    } finally {
+      unmount()
+    }
+  })
+
   it("blinks a caret beside the list as the build does", () => {
     const on = blink(true)
     const off = blink(false)
