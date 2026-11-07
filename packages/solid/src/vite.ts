@@ -1,7 +1,10 @@
-import { SERVER_ENVIRONMENT_NAME } from "ghia"
+import { ENVIRONMENT_NAME, findPluginApi, SERVER_ENVIRONMENT_NAME } from "ghia"
 import solidRefresh from "solid-refresh/babel"
-import type { Plugin } from "vite"
+import type { Plugin, ResolvedConfig } from "vite"
 import vitePluginSolid from "vite-plugin-solid"
+
+export const RUN_START_MODULE = "virtual:ghia/solid-run-start"
+const RESOLVED_RUN_START_MODULE = `\0${RUN_START_MODULE}`
 
 /**
  * Compiles JSX and TSX for Solid's universal renderer with `@ghia/solid` as its module, and keeps
@@ -10,12 +13,38 @@ import vitePluginSolid from "vite-plugin-solid"
  */
 export function solid(): Plugin[] {
   let hot = false
+  let config: ResolvedConfig
 
   return [
     {
       name: "ghia:solid-refresh",
-      configResolved(config) {
-        hot = config.command === "serve" && config.mode !== "production" && config.mode !== "test"
+      configResolved(resolved) {
+        config = resolved
+        hot = resolved.command === "serve" && resolved.mode !== "production" && resolved.mode !== "test"
+      },
+    },
+    {
+      // A reload evaluates solid-js again, and it warns about a second copy when the flag of the
+      // first run is still set. The flag goes at the start of each run, so a real duplicate
+      // inside one run still warns.
+      name: "ghia:solid-run-start",
+      resolveId: {
+        order: "pre",
+        handler(id) {
+          if (hot && id === RUN_START_MODULE) return RESOLVED_RUN_START_MODULE
+        },
+      },
+      load(id) {
+        if (id === RESOLVED_RUN_START_MODULE) return "delete globalThis.Solid$$\n"
+      },
+      transform: {
+        order: "pre",
+        handler(code, id) {
+          if (!hot || this.environment.name !== ENVIRONMENT_NAME) return
+          if (id.split("?")[0] !== findPluginApi(config.plugins).entry) return
+          // Same line, so the line numbers of the entry's source map stay right.
+          return { code: `import "${RUN_START_MODULE}"; ${code}`, map: null }
+        },
       },
     },
     {

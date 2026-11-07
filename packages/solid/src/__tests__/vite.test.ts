@@ -10,14 +10,15 @@ const TIMEOUT_MS = 30_000
 interface Run {
   readonly process: Bun.Subprocess<"ignore", "pipe", "pipe">
   readonly output: () => string
-  waitFor(text: string): Promise<void>
+  waitFor(text: string, occurrences?: number): Promise<void>
 }
 
 const running: Bun.Subprocess[] = []
 let appDir: string
+let reloadDir: string
 
-function spawn(command: string[]): Run {
-  const child = Bun.spawn(command, { cwd: appDir, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
+function spawn(command: string[], cwd = appDir): Run {
+  const child = Bun.spawn(command, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
   running.push(child)
   let output = ""
   const collect = async (stream: ReadableStream<Uint8Array>) => {
@@ -29,9 +30,9 @@ function spawn(command: string[]): Run {
   return {
     process: child,
     output: () => output,
-    async waitFor(text) {
+    async waitFor(text, occurrences = 1) {
       const deadline = Date.now() + TIMEOUT_MS
-      while (!output.includes(text)) {
+      while (output.split(text).length - 1 < occurrences) {
         if (child.exitCode !== null) throw new Error(`exited before "${text}":\n${output}`)
         if (Date.now() > deadline) throw new Error(`timed out waiting for "${text}":\n${output}`)
         await Bun.sleep(50)
@@ -83,13 +84,24 @@ export default defineConfig({
   return file
 }
 
-beforeEach(() => {
+function copyFixture(name: string): string {
   mkdirSync(SCRATCH_ROOT, { recursive: true })
-  appDir = mkdtempSync(join(SCRATCH_ROOT, "vite-app-"))
-  cpSync(join(PACKAGE_ROOT, "fixtures", "vite-app"), appDir, {
+  const directory = mkdtempSync(join(SCRATCH_ROOT, `${name}-`))
+  cpSync(join(PACKAGE_ROOT, "fixtures", name), directory, {
     recursive: true,
     filter: (source) => !source.endsWith("/dist"),
   })
+  return directory
+}
+
+function editFile(directory: string, file: string, from: string, to: string): void {
+  const path = join(directory, file)
+  writeFileSync(path, readFileSync(path, "utf8").replace(from, to))
+}
+
+beforeEach(() => {
+  appDir = copyFixture("vite-app")
+  reloadDir = copyFixture("reload-app")
 })
 
 afterEach(async () => {
@@ -98,6 +110,7 @@ afterEach(async () => {
     await child.exited
   }
   rmSync(appDir, { recursive: true, force: true })
+  rmSync(reloadDir, { recursive: true, force: true })
 })
 
 describe("solid() under ghia dev", () => {
@@ -139,6 +152,44 @@ describe("solid() under ghia dev", () => {
       await run.waitFor("RENDERED label v2 2")
 
       expect(count(run.output(), "ENTRY_RUN")).toBe(2)
+    },
+    TIMEOUT_MS * 2
+  )
+})
+
+describe("solid() under ghia dev, across full reloads", () => {
+  test.each([1, 2])(
+    "applies a component edit to the tree after %i full reload(s) of the entry",
+    async (reloads) => {
+      const run = spawn(["bun", GHIA_CLI, "dev"], reloadDir)
+      await run.waitFor("RENDERED label v1 2")
+      for (let reload = 1; reload <= reloads; reload++) {
+        editFile(reloadDir, "main.tsx", `entry v${reload}`, `entry v${reload + 1}`)
+        await run.waitFor(`ENTRY_RUN entry v${reload + 1}`)
+      }
+      await run.waitFor("RENDERED label v1 2", reloads + 1)
+
+      editFile(reloadDir, "label.tsx", "label v1", "label v2")
+      await run.waitFor("UPDATED label v2 2")
+
+      expect(run.output()).not.toContain("multiple instances of Solid")
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test.each([1, 2])(
+    "collects the solid-js and @ghia/solid of the older runs after %i full reload(s)",
+    async (reloads) => {
+      const run = spawn(["bun", GHIA_CLI, "dev"], reloadDir)
+      await run.waitFor("MODULES_ALIVE [true,true]")
+      for (let reload = 1; reload <= reloads; reload++) {
+        editFile(reloadDir, "main.tsx", `entry v${reload}`, `entry v${reload + 1}`)
+        await run.waitFor(`ENTRY_RUN entry v${reload + 1}`)
+      }
+      const alive = [...Array(reloads * 2).fill(false), true, true]
+      await run.waitFor(`MODULES_ALIVE ${JSON.stringify(alive)}`)
+
+      expect(run.output()).not.toContain("multiple instances of Solid")
     },
     TIMEOUT_MS * 2
   )

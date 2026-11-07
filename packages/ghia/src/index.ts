@@ -1,4 +1,5 @@
-export { ghia, SERVER_ENVIRONMENT_NAME } from "./plugin.js"
+export { ghia, ENVIRONMENT_NAME, SERVER_ENVIRONMENT_NAME } from "./plugin.js"
+export { findPluginApi } from "./plugin-api.js"
 export type { GhiaOptions, GhiaPluginApi } from "./plugin.js"
 export { dev } from "./dev.js"
 export type { DevHandle } from "./dev.js"

@@ -130,7 +130,7 @@ An edit to a component module is an HMR update (solid-refresh): the edited compo
 
 > **Warning.** Local signal state in the components that update is reset. It is not React Fast Refresh with preserved state: `createSignal` inside an edited component starts again at its initial value.
 
-An edit that no component accepts is a full reload: the module cache is cleared and the entry runs again, so `render()` remounts the tree on the same window and all state is lost. That is the entry itself and any module reached only from the entry. Solid then logs `You appear to have multiple instances of Solid`, because `solid-js` was evaluated again.
+An edit that no component accepts is a full reload: the runner's module cache and its HMR data are cleared and the entry runs again, so `render()` remounts the tree on the same window and all state is lost. That is the entry itself and any module reached only from the entry. Component edits after a reload are HMR updates again, and `render()` uses the options of its latest call, such as `onUncaughtError`.
 
 Not covered by reload:
 
