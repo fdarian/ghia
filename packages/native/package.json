@@ -93,6 +93,7 @@
     "browser.mjs",
     "dist",
     "wasm",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ]
 }
