@@ -1,3 +1,4 @@
+import type {} from "vitest/config"
 import { realpathSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -54,7 +55,7 @@ const TEST_SETUP_FILE = fileURLToPath(new URL("./test-setup.js", import.meta.url
  * page (browser export conditions, `window`) but runs inside Bun next to the native addon.
  *
  * Under vitest there is no `ghia` environment: the test environment gets the same resolve
- * settings, and `@ghia/native/dom-globals` loads before every test file.
+ * settings and inlines every dependency, and `@ghia/native/dom-globals` loads before every test file.
  */
 export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
   const underVitest = process.env.VITEST !== undefined
@@ -65,55 +66,75 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
   return {
     name: PLUGIN_NAME,
 
-    config() {
-      if (underVitest) return { test: { setupFiles: [TEST_SETUP_FILE] } }
-      return {
-        environments: {
-          [ENVIRONMENT_NAME]: {
-            // `client` would get Vite's browser HMR client and no dependency externalization.
-            consumer: "server",
-            dev: {
-              moduleRunnerTransform: true,
-              createEnvironment: (name, config) =>
-                createRunnableDevEnvironment(name, config, { hot: true }),
+    config: {
+      // After the other plugins: vite-plugin-solid adds patterns to `test.server.deps.inline`,
+      // and merging those into `true` afterwards would leave an array that holds a boolean.
+      order: "post",
+      handler(userConfig) {
+        if (underVitest) {
+          // Vitest loads node_modules dependencies with Node's own resolution, so a package with
+          // `browser` and `node` builds would run its `node` build. The `ghia` environment inlines
+          // every dependency, and the tests must resolve the same way.
+          userConfig.test = {
+            ...userConfig.test,
+            setupFiles: [...(userConfig.test?.setupFiles ?? []), TEST_SETUP_FILE],
+            server: { ...userConfig.test?.server, deps: { ...userConfig.test?.server?.deps, inline: true } },
+          }
+          return
+        }
+        return {
+          environments: {
+            [ENVIRONMENT_NAME]: {
+              // `client` would get Vite's browser HMR client and no dependency externalization.
+              consumer: "server",
+              dev: {
+                moduleRunnerTransform: true,
+                createEnvironment: (name, config) =>
+                  createRunnableDevEnvironment(name, config, { hot: true }),
+              },
+              resolve: {
+                conditions: UI_CONDITIONS,
+                noExternal: true,
+                // The addon has to load natively. External is a prefix match, so the subpaths
+                // follow, and the `browser` export (a wasm build) is never picked.
+                external: [NATIVE_PACKAGE],
+              },
+              build: {
+                rolldownOptions: { input: options.entry },
+              },
             },
-            resolve: {
-              conditions: UI_CONDITIONS,
-              noExternal: true,
-              // The addon has to load natively. External is a prefix match, so the subpaths
-              // follow, and the `browser` export (a wasm build) is never picked.
-              external: [NATIVE_PACKAGE],
-            },
-            build: {
-              rolldownOptions: { input: options.entry },
-            },
+            ...(serverChannel === undefined
+              ? {}
+              : {
+                  [SERVER_ENVIRONMENT_NAME]: {
+                    // Vite's server defaults apply: Node/Bun resolution, and dependencies in
+                    // node_modules stay external so that Bun loads them natively.
+                    consumer: "server" as const,
+                    dev: {
+                      moduleRunnerTransform: true,
+                      createEnvironment: (name: string, config: ResolvedConfig) =>
+                        new DevEnvironment(name, config, { hot: true, transport: serverChannel }),
+                    },
+                    build: {
+                      // The `ghia` build runs first and empties the output directory.
+                      emptyOutDir: false,
+                      rolldownOptions: { input: SERVER_MAIN_MODULE },
+                    },
+                  },
+                }),
           },
-          ...(serverChannel === undefined
-            ? {}
-            : {
-                [SERVER_ENVIRONMENT_NAME]: {
-                  // Vite's server defaults apply: Node/Bun resolution, and dependencies in
-                  // node_modules stay external so that Bun loads them natively.
-                  consumer: "server" as const,
-                  dev: {
-                    moduleRunnerTransform: true,
-                    createEnvironment: (name: string, config: ResolvedConfig) =>
-                      new DevEnvironment(name, config, { hot: true, transport: serverChannel }),
-                  },
-                  build: {
-                    // The `ghia` build runs first and empties the output directory.
-                    emptyOutDir: false,
-                    rolldownOptions: { input: SERVER_MAIN_MODULE },
-                  },
-                },
-              }),
-        },
-      }
+        }
+      },
     },
 
     // A default the user can override: `config` would win over the user's own values.
     configEnvironment(name, environment) {
-      if (underVitest) return { resolve: { conditions: UI_CONDITIONS } }
+      if (underVitest) {
+        // Replaces the defaults instead of merging into them: the `node` condition vitest adds
+        // would come before `browser` in a package whose exports list the node build first.
+        environment.resolve = { ...environment.resolve, conditions: UI_CONDITIONS }
+        return
+      }
       const entryFileName = ENTRY_FILE_NAMES[name]
       if (entryFileName === undefined) return
       const output = environment.build?.rolldownOptions?.output
