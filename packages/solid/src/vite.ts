@@ -1,6 +1,6 @@
 import { ENVIRONMENT_NAME, findPluginApi, SERVER_ENVIRONMENT_NAME } from "ghia"
 import solidRefresh from "solid-refresh/babel"
-import { createFilter, type Plugin, type ResolvedConfig } from "vite"
+import type { Plugin, ResolvedConfig } from "vite"
 import vitePluginSolid, { type Options } from "vite-plugin-solid"
 
 export const RUN_START_MODULE = "virtual:ghia/solid-run-start"
@@ -18,7 +18,6 @@ export type SolidOptions = {
  * UI and vitest's test environment, not Ghia's `server` environment, which has no renderer.
  */
 export function solid(options: SolidOptions = {}): Plugin[] {
-  const filter = createFilter(options.include, options.exclude)
   let hot = false
   let config: ResolvedConfig
 
@@ -48,8 +47,7 @@ export function solid(options: SolidOptions = {}): Plugin[] {
         order: "pre",
         handler(code, id) {
           if (!hot || this.environment.name !== ENVIRONMENT_NAME) return
-          const file = id.split("?")[0]
-          if (file !== findPluginApi(config.plugins).entry || !filter(file)) return
+          if (id.split("?")[0] !== findPluginApi(config.plugins).entry) return
           // Same line, so the line numbers of the entry's source map stay right.
           return { code: `import "${RUN_START_MODULE}"; ${code}`, map: null }
         },
