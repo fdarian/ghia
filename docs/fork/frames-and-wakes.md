@@ -187,6 +187,67 @@ Post to the wake of JS, and post to its handler:
   real input takes that path; FF's `poster.ts` Worker trials do.
 - The observer uses the private `_CFRunLoopGet0` and the thread name `com.apple.NSEventThread`.
 
+### One wake per event: the commit of `sendEvent:`
+
+**Problem.** A stream of input woke JS about twice per event: once for the event, and once 1 to 8 ms later for a tick
+that dequeued nothing and handled no source. Scrolling ghia-bench's Mailbox, Ghia had about 215 wakeups a second against
+about 120 for raw GPUI.
+
+**Cause.** `-[NSApplication sendEvent:]` begins an implicit Core Animation transaction for every event
+(`+[CATransaction activateBackground:]`, `CA::Transaction::ensure_implicit`). From macOS 26, AppKit's update cycle
+(the private `UpdateCycle` framework) commits it: its next pass of the run loop reads the time against the next frame
+boundary of the display, commits at once if the boundary has passed, and otherwise arms a timer for the boundary
+(`UC::LoopTapCFRunLoop::onTimer`, a `CFMachPort` source in the default mode). The timer's message is on a port of the
+default-mode set, so the run-loop watch wakes JS for it, and that tick only commits. A blocking AppKit app wakes for the
+same timer, but its wake is a return from `mach_msg`; here it is a hop to JS and a tick. Whether an event lands before
+or after the boundary is its phase to the display, so with moves posted at a steady 120 Hz the share of events with a
+second wake went from 5% to nearly all between runs of the same build. `-NSUpdateCycleDebugLoggingEnabled YES` on the command line logs every step of the cycle
+(`log stream --level debug --predicate 'processID == <pid>'`, category `UpdateCycle`).
+
+**Design.** `pump_app_nonblocking` calls `[CATransaction flush]` after each `sendEvent:`. The update cycle's next pass
+then finds no transaction to commit and arms nothing. Nothing else in the pump changed: the run-until-unhandled loop
+stays as it is and nothing blocks (#39).
+
+**Alternatives rejected.**
+
+- **One flush at the end of the pump.** It halves the extra wakes (jittered moves, 1.22 to 1.31 wakes per move against
+  1.42 to 1.75) but does not end them: the pass after `sendEvent:` has already armed the timer by then.
+- **A pass through `kCFRunLoopBeforeWaiting`** (a 0-byte message to a private `CFMachPort` in the default mode, then
+  `CFRunLoopRunInMode(default, 1e10, true)`, which is past `TIMER_INTERVAL_LIMIT` and arms no timeout timer, so the pass
+  waits, receives the message and returns). The pass reached `BeforeWaiting` every time and changed nothing: the update
+  cycle observes only `kCFRunLoopEntry` in the main run loop, and Core Animation's own `BeforeWaiting | Exit` observer
+  leaves the commit to it.
+- **Turning the update cycle off.** `-NSUpdateCycleEnabled NO` does not; there is no other switch, and it would change how
+  AppKit paces its own views.
+
+**Measured** (the Mailbox app of ghia-bench in a real window that is not key, 1280 x 800, release addon, mouse moves or
+wheel events posted from NSEventThread at 120 Hz for 4 s, each at a random point of its 8.3 ms period; three runs each,
+back to back, before and after; wakeups are `ri_interrupt_wkups` + `ri_pkg_idle_wkups` of `proc_pid_rusage`):
+
+| | before | after |
+|---|---|---|
+| Moves inside one row: wakes per move | 1.46 to 1.64 | 1.03 to 1.04 |
+| wakeups/s | 190 to 208 | 139 to 141 |
+| instructions per move | 911K to 946K | 831K to 840K |
+| CPU ms | 251 to 261 | 216 to 219 |
+| context switches/s | 1143 to 1285 | 904 to 954 |
+| Moves across rows (hover changes): wakes per move | 1.47 to 1.88 | 1.07 to 1.09 |
+| wakeups/s | 185 to 231 | 143 to 145 |
+| instructions per move | 899K to 962K | 850K to 889K |
+| Wheel events: wakes per event | 1.73 to 1.98 | 1.69 to 1.74 |
+| wakeups/s | 225 to 256 | 192 to 200 |
+| instructions per event | 14.2M to 14.6M | 14.0M to 14.2M |
+| Ticks woken by the update cycle's timer, per 480 events (moves in a row / across / wheel) | 136-173 / 154-184 / 31-104 | 0-2 / 0 / 0 |
+| Post to the end of the tick that handled it, p50 | 0.3 to 0.9 ms | 0.3 to 0.4 ms |
+| 100 file reads awaited one at a time during the moves | 4.2, 4.4, 4.4, 50.2 ms | 3.4, 4.2, 4.8, 8.0 ms |
+| Idle 2 s: wakes | 0 | 0 |
+
+The ticks that are still empty (about 20 per 480 moves in a row, 50 across rows) are woken by the main queue's port, not
+by the update cycle. A wheel event still wakes JS a second time for the display link's frame, which is the frame of the
+scroll. The cost of the flush is not seen in the pump: the median time of a pump that dequeued events is 205 to 230 µs
+before and after. A `<webview>` app at rest (`examples/webview-wake/measure.tsx`, two runs each) woke 2 and 2 times in
+15 s after, 642 (a burst, see [Bursts](#waking-js-for-a-webview)) and 10 before, and its events arrived as fast.
+
 ### One frame per JS task
 
 A frame is one task of the JS event loop, as a rendering update is in the HTML event loop: every task that was queued
@@ -493,6 +554,9 @@ drew.
   never, and ticks once per wake and not in between. `frame-loop-yields.test.ts` (2) runs the real loop against a hidden
   window with synthetic wakes from a Rust thread (`simulateFrameWakes`, `setTickDelay`, test-support builds only) and
   checks that timers and file reads keep running when every frame outlasts a vsync.
+- react `events.test.tsx` "wakes JS once per mouse move, not again when the frame boundary comes" opens a visible window
+  with `focus: false`, posts 240 mouse moves from NSEventThread at random points of 120 Hz periods and allows 1.15 wakes
+  per move. Without the flush after `sendEvent:` it saw 352 and 339 wakes for 240 moves (1.47 and 1.41).
 - zed `gpui_macos` `run_loop_wake` lib (1: the set is found twice alike, is not the main queue's port and has members)
   and `tests/run_loop_wake.rs` (`harness = false`, it pumps the main run loop on the main thread): a `dispatch_async` from
   another thread and a `CFRunLoopTimer` each wake the hook while nothing runs the loop, neither runs before the pump, the
