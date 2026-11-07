@@ -43,11 +43,12 @@ The UI thread draws frames, so server work that blocks it stalls the window. The
 - **The server is a second Vite environment,** `server`, with Vite's server defaults: Bun/Node resolution, `node_modules` external, no browser conditions and no `dom-globals`. The Worker runs its own ModuleRunner, whose transport is the Worker's message channel (as Cloudflare's workerd runner does), so the server graph resolves with its own conditions.
 - **A server edit reloads the server on the same port.** The Worker calls the previous cleanup, clears the runner's cache, imports the entry again and calls `serve(port)` with the same port. Restarting the Worker would have needed a new port and a new client in the UI. A call in flight at that moment can go unanswered, which is acceptable in dev.
 - **The UI's end of the port reaches the UI through a slot on `globalThis`** that `virtual:ghia/server` reads before the UI entry loads (dev), or through a `MessageChannel` and `new Worker(new URL("./server.js", import.meta.url))` in the virtual module (build).
+- **`ghia build` compiles by default**, through `Bun.build` (`compile: { outfile }`, `format: "esm"`, `bytecode`, `minify`) with `dist/main.js` and, when there is one, `dist/server.js` as entrypoints. The Worker has to be an entrypoint, or the binary fails with `ModuleNotFound /$bunfs/root/server.js`. A plugin deletes `const require = createRequire(import.meta.url)` from `@ghia/native/index.js` (matched by the pnpm path and by `packages/native/index.js`), because Bun's bundler embeds an addon only for a free `require("./x.node")`; it throws when the line is gone, since that means the napi-rs loader changed shape. `ghia build --no-compile` and `build({ compile: false })` skip the compile. `Bun.build` is used because the CLI's `bun build --compile` takes no plugins. The binary is about 128 MB, 38 MB of it the addon.
+- **The built `virtual:ghia/server` listens for the Worker's `error` event** and reports it, so a server that fails to start ends the app instead of leaving the UI waiting on a port nobody answers.
 
 ## Not decided
 
 - `@ghia/react` stays on `bun --hot`. A `@ghia/react/vite` with Fast Refresh is the follow-up; the globals already apply to React through `host.ts`.
-- `bun build --compile` of an app with a server Worker.
 - Editing `vite.config` in `ghia dev`, and a UI full reload that re-runs the entry on the same `serverPort`, leaving the old run's listeners on it.
 
 ## Measured, and where

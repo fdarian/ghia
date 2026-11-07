@@ -9,7 +9,7 @@ cd packages/native && cargo test --lib          # Rust unit tests
 cd packages/native && bun run test              # vitest; one test skips without the wasm build
 cd packages/react && bun run test               # vitest, needs the addon built
 cd packages/solid && bun run test               # builds, then vitest under Bun (bun --bun vitest run)
-cd packages/ghia && bun run test               # builds, then bun test: the CLI tests spawn ghia dev and ghia build; the API tests call dev() and build()
+cd packages/ghia && bun run test               # builds, then bun test: the CLI tests spawn ghia dev and ghia build, and the compile tests run the 128 MB binaries from an empty directory; the API tests call dev() and build()
 cd examples && bun run test                     # the examples suite; *.perf.test.tsx is excluded
 cd zed && cargo test -p gpui --lib --features test-support   # GPUI's own tests, where the zed commits are tested
 cd zed && cargo test -p gpui_macos --test native_surface       # window composition in a real window (needs an unoccluded display)

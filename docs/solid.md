@@ -140,22 +140,22 @@ Not covered by reload:
 
 React does not use this path. `bun --hot` re-runs the whole file on a save and remounts the tree, which drops `useState` ([reference.md](reference.md#hot-reload)).
 
-### Production bundle
+### Production build
 
 ```bash
 ghia build
-bun dist/main.js
+./dist/app
 ```
 
-`ghia build` writes `dist/main.js`: your code and every dependency except `@ghia/native`. It runs with plain `bun` and needs no flags or config. `node_modules/@ghia/native` has to be resolvable from `dist/`, so keep the installed dependencies next to it.
+`ghia build` bundles the app and then compiles the bundle into `dist/app`, one executable. It embeds Bun and the native addon, so it runs on a machine with no Bun, no `node_modules` and no `@ghia/native` installed. It is about 128 MB, and the addon is 38 MB of that. With a [server Worker](#server-code) the compile carries the Worker too.
 
-For one file to ship, compile the bundle:
+`dist/main.js` (and `dist/server.js`) are written before the compile. They run with plain `bun` when `node_modules/@ghia/native` is resolvable from `dist/`.
 
-```bash
-bun build --compile dist/main.js --outfile dist/app
-```
+- `ghia build --no-compile` stops after the bundle and writes no binary.
+- `ghia({ entry, compile: { outfile: 'out/tool' } })` moves the binary. The path is relative to the project root, and the default is `app` inside the build's output directory.
+- `build({ compile: false })` is the programmatic form of `--no-compile`.
 
-An app with a [server Worker](#server-code) is not covered by `bun build --compile` yet. The built UI starts the Worker from `dist/server.js` by URL, and that bundle leaves its npm dependencies outside, so a single binary would have to carry both.
+The compile rewrites `@ghia/native`'s loader on the fly, because Bun's bundler embeds an addon only for a plain `require('./x.node')` and the generated loader gets its `require` from `createRequire`. It fails the build with a clear error if that loader changes shape.
 
 ### Gotchas
 
@@ -282,14 +282,13 @@ Import the router into the UI as a type only. A value import would pull the serv
 
 `ghia dev` runs the server entry in the Worker through Vite's module runner. When you edit a module the server imports, the Worker calls the function `serve` returned, imports the entry again and calls `serve(port)` on the **same port**. The UI keeps `serverPort` and its client. Module state on the server starts over: `count` above returns to 0.
 
-`ghia build` writes `dist/main.js` and `dist/server.js`. The built UI creates its Worker with `new Worker(new URL('./server.js', import.meta.url))`, so the two files stay together. `bun dist/main.js` starts both.
+`ghia build` writes `dist/main.js` and `dist/server.js`. The built UI creates its Worker with `new Worker(new URL('./server.js', import.meta.url))`, so the two files stay together. `bun dist/main.js` starts both. The compiled `dist/app` carries both, and a Worker that fails to start ends the app with the Worker's error instead of leaving the UI waiting.
 
 ### What dev does not cover
 
 - **A call in flight during a server reload may never be answered.** The old handler is detached before the new one attaches. Ask again from the UI.
 - **A full reload of the UI runs the entry again on the same `serverPort`.** Listeners the old run added to the port stay, so an `RPCLink` created at the top level of the entry exists once per reload.
 - **Editing `vite.config` needs a restart** of `ghia dev`, with or without a server.
-- **`bun build --compile`** with a Worker is not covered ([Production bundle](#production-bundle)).
 
 ## Package exports
 
@@ -815,6 +814,6 @@ import { jsx, jsxs, Fragment } from '@ghia/solid/jsx-runtime'
 | Tests       | `createTestRoot()` then `root.render(<X />)` | `createTestRoot()` then `app.render(() => <X />)` |
 | Run         | `bun --hot app.tsx`                          | `ghia dev`                                        |
 | Hot reload  | Remount, `useState` dropped                  | HMR per component, local signals reset            |
-| Bundle      | `bun build --compile app.tsx`                | `ghia build`, then `bun dist/main.js`             |
+| Bundle      | `bun build --compile app.tsx`                | `ghia build`, then `./dist/app`                   |
 
 The native addon, mutation queue, and automation client are shared. A Solid app and a React app can drive the same window types and the same `testId` locators.

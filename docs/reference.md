@@ -553,11 +553,14 @@ render(() => <App />, { title: 'Solid Ghia', width: 800, height: 600 })
 
 Run it with `ghia dev`. A save applies a component edit as a hot update
 (local signal state resets) and re-runs the entry when no component accepts
-the edit. `ghia build` writes `dist/main.js`, which runs with plain `bun`.
+the edit. `ghia build` writes `dist/main.js` and compiles it into `dist/app`,
+one executable that embeds Bun and the native addon (about 128 MB). `ghia build
+--no-compile` writes only `dist/main.js`, which runs with plain `bun`, and
+`ghia({ entry, compile: { outfile } })` moves the binary.
 
 ```bash
 ghia dev
-ghia build && bun dist/main.js
+ghia build && ./dist/app
 ```
 
 Why `@ghia/native` is a direct dependency, the hot-reload rules, the vitest
