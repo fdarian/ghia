@@ -2,7 +2,7 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { createEffect, createSignal } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import {
   animate,
   createMotionValue,

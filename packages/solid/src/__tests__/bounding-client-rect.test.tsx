@@ -1,5 +1,5 @@
 import { createSignal, Show } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import type { HostElement } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 

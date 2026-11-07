@@ -9,8 +9,8 @@
     "noImplicitAny": false,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "types": ["bun", "node"],
+    "types": ["bun", "node", "vite/client"],
     "noEmit": true
   },
-  "include": ["./*.tsx", "./*.ts"]
+  "include": ["./*.tsx", "./*.ts", "./*.mts"]
 }

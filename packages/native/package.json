@@ -19,6 +19,11 @@
       "import": "./dist/host.js",
       "default": "./dist/host.js"
     },
+    "./dom-globals": {
+      "types": "./dist/dom-globals.d.ts",
+      "import": "./dist/dom-globals.js",
+      "default": "./dist/dom-globals.js"
+    },
     "./screen": {
       "types": "./dist/screen.d.ts",
       "import": "./dist/screen.js",

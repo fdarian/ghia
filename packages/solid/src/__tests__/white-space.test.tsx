@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 const LINE = 20

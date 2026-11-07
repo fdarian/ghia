@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { defineKeyframes } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 

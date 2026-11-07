@@ -3,25 +3,28 @@
 **`@ghia/solid`** paints a Solid 1 tree with GPUI. Same host elements, styles, events, and native addon as React. The adapter is Solid. The window is not a web view.
 
 ```text
-  bunfig.toml          babel-preset-solid         @ghia/native
-  preload ──────────►  universal compiler ──────► host mutations ──► GPUI ──► GPU
-       │                      │
-       ▼                      ▼
-  app.tsx              @ghia/solid renderer
-  createSignal()       render(() => <App />)
+  vite.config.mts        vite-plugin-solid          @ghia/native
+  ghia() + solid() ────► universal compiler ───────► host mutations ──► GPUI ──► GPU
+       │                        │
+       ▼                        ▼
+  ghia dev / build      @ghia/solid renderer
+  app.tsx               render(() => <App />)
 ```
 
-> **Note.** Host elements, styles, events, virtual lists, and native text are the same as React. This page covers the **Solid adapter**. See [reference.md](reference.md) for the shared Ghia surface.
+> **Note.** Host elements, styles, events, virtual lists, and native text are the same as React. This page covers the **Solid adapter**. See [reference.md](reference.md) for the shared Ghia surface. Solid and React both run on Vite through the `ghia` command ([React vs Solid](#react-vs-solid)).
 
 ## Install
 
-Pin **`@ghia/solid`** and **`@ghia/native`** to the same exact version. Ghia is still pre-1.0. Upgrade them together.
+Pin **`@ghia/solid`**, **`@ghia/native`** and **`ghia`** to the same exact version. Ghia is still pre-1.0. Upgrade them together.
 
 ```bash
-pnpm add --save-exact @ghia/solid @ghia/native solid-js
+pnpm add --save-exact @ghia/solid @ghia/native ghia solid-js
+pnpm add --save-dev vite
 ```
 
-The peer range is **`solid-js` `>=1.9 <2`**.
+The peer ranges are **`solid-js` `>=1.9 <2`** and **`vite` `^8`**.
+
+Install **`@ghia/native`** yourself, although `@ghia/solid` depends on it. The `ghia()` plugin makes `import "@ghia/native/dom-globals"` the first line of your entry, and that import stays outside the bundle (the native addon has to load as a real module). It is resolved from your app, so a package that is not one of your own dependencies is not found under pnpm.
 
 ### TypeScript
 
@@ -35,6 +38,7 @@ The peer range is **`solid-js` `>=1.9 <2`**.
     "moduleResolution": "bundler",
     "jsx": "preserve",
     "jsxImportSource": "@ghia/solid",
+    "types": ["vite/client"],
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true
@@ -42,28 +46,35 @@ The peer range is **`solid-js` `>=1.9 <2`**.
 }
 ```
 
-### Bun preload
+`vite/client` types `?raw` imports and `import.meta.hot`.
 
-The preload compiles application `.tsx` and `.jsx` for Solid's **universal renderer** and selects the reactive client runtime. Do not add Vite.
+### Vite config
 
-```toml
-preload = ["@ghia/solid/preload"]
+```ts
+// vite.config.mts
+import { defineConfig } from 'vite'
+import { ghia } from 'ghia'
+import { solid } from '@ghia/solid/vite'
+
+export default defineConfig({
+  plugins: [ghia({ entry: 'main.tsx' }), solid()],
+})
 ```
 
-That is the whole Bun setup. `examples/solid/bunfig.toml` also preloads tests:
+Name the file `vite.config.mts` unless your `package.json` has `"type": "module"`.
 
-```toml
-preload = ["@ghia/solid/preload"]
+**`ghia({ entry })`** sets up the environment the app runs in. The UI process behaves like a browser page: it resolves packages with their `browser` export conditions and has `window` and `document`, but it runs inside Bun next to the native addon. The plugin bundles every dependency into the app except `@ghia/native`. `entry` is the file that calls `render()`, relative to the project root. It is the single input of `ghia build`.
 
-[test]
-preload = ["@ghia/solid/preload"]
-```
+**`solid()`** compiles JSX for Solid's universal renderer with `@ghia/solid` as its module, resolves one `solid-js` for the app and the adapter, and adds solid-refresh in `ghia dev`. The app resolves Solid's client builds, so `isServer` from `solid-js/web` is `false` and libraries that branch on it, such as `@tanstack/solid-query`, run their client code.
+
+The design behind these choices is in [web-renderer.md](fork/web-renderer.md).
 
 ## First app
 
-End the file with **`render()`**. That call creates the window, mounts Solid, and starts the frame loop.
+End the entry with **`render()`**. That call creates the window, mounts Solid, and starts the frame loop.
 
 ```tsx
+// main.tsx
 import { createSignal } from 'solid-js'
 import { render } from '@ghia/solid'
 
@@ -97,37 +108,187 @@ Read signals with **`count()`**. `render` takes a function, not a pre-built elem
 ## Run
 
 ```bash
-bun app.tsx
-bun --hot app.tsx
+ghia dev
 ```
 
-Use **`bun --hot`** so a save remounts Solid on the same window. `render()` is idempotent. The first call owns the window. Later calls only remount.
+`ghia dev` starts a Vite dev server and imports the entry in the same process, so the window opens from the CLI's own process. Pass `--config <file>` for a config with another name. The `ghia` command runs under Bun and refuses to start under Node. Put it in your scripts:
 
-Do **not** call `createRenderer()` or `init()` in the app entry. `bun --hot` re-runs the file. A second `init()` would open a second window.
-
-> **Warning.** Desktop `bun --hot` remounts the tree. It does not keep `createSignal` state. That is the same remount path as React, not Fast Refresh.
-
-### Production bundle
-
-For **`Bun.build`**, pass the exported plugin. The preload is for `bun app.tsx`. The plugin is for a production build.
-
-```ts
-import solidPlugin from '@ghia/solid/bun-plugin'
-
-await Bun.build({
-  entrypoints: ['./app.tsx'],
-  target: 'bun',
-  outdir: './dist',
-  plugins: [solidPlugin],
-})
+```json
+{
+  "scripts": {
+    "dev": "ghia dev",
+    "build": "ghia build"
+  }
+}
 ```
+
+Do **not** call `createRenderer()` or `init()` in the entry. A full reload imports the entry again, and a second `init()` would open a second window. `render()` is idempotent: the first call owns the window, later calls only remount.
+
+### Hot reload
+
+An edit to a component module is an HMR update (solid-refresh): the edited component runs again and the window, the rest of the tree and the module state of the other files stay. An edit to a module a component imports updates the components that import it.
+
+> **Warning.** Local signal state in the components that update is reset. It is not React Fast Refresh with preserved state: `createSignal` inside an edited component starts again at its initial value.
+
+An edit that no component accepts is a full reload: the runner's module cache and its HMR data are cleared and the entry runs again, so `render()` remounts the tree on the same window and all state is lost. That is the entry itself and any module reached only from the entry. Component edits after a reload are HMR updates again, and `render()` uses the options of its latest call, such as `onUncaughtError`.
+
+Not covered by reload:
+
+- The native addon. Rebuild it and restart `ghia dev`.
+- `vite.config`. Restart `ghia dev`.
+- Anything under `node_modules`: solid-refresh only wraps your own files.
+
+React runs under the same command, with React Fast Refresh in place of solid-refresh ([reference.md](reference.md#hot-reload)).
+
+### Production build
 
 ```bash
-bun build --compile dist/app.js --outfile dist/app
+ghia build
 ./dist/app
 ```
 
-A worked chat lives in `examples/solid/chat.tsx`. Run it with `cd examples && bun --hot solid/chat.tsx`.
+`ghia build` bundles the app and then compiles the bundle into `dist/app`, one executable. It embeds Bun and the native addon, so it runs on a machine with no Bun, no `node_modules` and no `@ghia/native` installed. It is about 128 MB, and the addon is 38 MB of that. With a [server Worker](#server-code) the compile carries the Worker too.
+
+`dist/main.js` (and `dist/server.js`) are written before the compile. They run with plain `bun` when `node_modules/@ghia/native` is resolvable from `dist/`.
+
+- `ghia build --no-compile` stops after the bundle and writes no binary.
+- `ghia({ entry, compile: { outfile: 'out/tool' } })` moves the binary. The path is relative to the project root, and the default is `app` inside the build's output directory.
+- `build({ compile: false })` is the programmatic form of `--no-compile`.
+
+The compile rewrites `@ghia/native`'s loader on the fly, because Bun's bundler embeds an addon only for a plain `require('./x.node')` and the generated loader gets its `require` from `createRequire`. It fails the build with a clear error if that loader changes shape.
+
+### Gotchas
+
+- **Import text with `?raw`.** Vite ignores `with { type: 'text' }`. Write `import icon from './icon.svg?raw'` to get the file as a string.
+- **`Bun.main` is the `ghia` CLI under `ghia dev`.** A guard such as `if (Bun.main === import.meta.path) render(...)` never passes. Call `render()` at the top level of the entry.
+- **`NAPI_RS_NATIVE_LIBRARY_PATH` breaks `ghia`.** It replaces every napi-rs binding in the process, and Vite's rolldown is one of them ([testing.md](fork/testing.md#test-commands)).
+
+A worked chat lives in `examples/solid/chat.tsx`. Run it with `cd examples && bun run chat-solid`.
+
+## Server code
+
+The UI process draws frames and handles input. Code that blocks it, such as a database call, a file scan or a long computation, stalls the window. Put that code in a Bun Worker and call it over RPC, the way a page calls its backend. `ghia({ entry, server })` starts the Worker, connects it to the UI with a `MessagePort`, and reloads it when you edit server code. The RPC library is yours; the example uses [oRPC](https://orpc.dev) and its MessagePort adapter.
+
+### Why a Worker
+
+A spike on 2026-11-06 called an oRPC router from a plain Bun process in three ways (Bun 1.4.4, oRPC 1.16.2, median of five runs, no live window):
+
+| | called in the UI process | Worker | separate process |
+| --- | --- | --- | --- |
+| Startup to the first reply | 2.4 ms | 7.4 ms | 23.7 ms |
+| Memory added | 0.3 MB | 8.0 MB, inside the UI process | 22.2 MB idle, in its own process |
+| 1 MB round trip, p50 | no RPC | 0.62 ms | 3.06 ms |
+| UI timer lag during a 500 ms server task | 499 ms | 0.3 ms | 1.0 ms |
+
+A Worker keeps the UI responsive during long server work for 7 ms of startup. It shares the UI's process, so a native crash or an out-of-memory in server code takes the window down with it. A separate process isolates crashes, at about 24 ms of startup and 22 MB idle; Ghia does not start or reload one for you.
+
+### Set it up
+
+```text
+vite.config.mts
+src/
+  main.tsx      UI entry
+  server.ts     server entry
+  router.ts     oRPC router, shared by both sides
+  env.d.ts      /// <reference types="ghia/client" />
+```
+
+```ts
+// vite.config.mts
+import { defineConfig } from 'vite'
+import { ghia } from 'ghia'
+import { solid } from '@ghia/solid/vite'
+
+export default defineConfig({
+  plugins: [ghia({ entry: 'src/main.tsx', server: 'src/server.ts' }), solid()],
+})
+```
+
+`server` is the server entry, relative to the project root. It defines a second Vite environment, `server`, which resolves as Bun does: packages load natively from `node_modules`, with no browser conditions and no `window`.
+
+**The server entry** default-exports `serve(port: MessagePort): () => void`. It wires an RPC handler to the port and returns a function that detaches it. `ghia dev` calls that function before it runs `serve` again.
+
+```ts
+// src/router.ts
+import { os, type } from '@orpc/server'
+
+let count = 0
+
+export const router = {
+  count: os.handler(() => count),
+  increment: os.input(type<{ by: number }>()).handler(({ input }) => {
+    count += input.by
+    return count
+  }),
+}
+
+export type Router = typeof router
+```
+
+```ts
+// src/server.ts
+import { RPCHandler } from '@orpc/server/message-port'
+import { router } from './router.ts'
+
+export default function serve(port: MessagePort): () => void {
+  // upgrade() returns nothing and never removes its listeners. ghia dev calls serve() again on the
+  // same port after an edit, so without the signal the old handler would answer next to the new one.
+  const listeners = new AbortController()
+  new RPCHandler(router).upgrade({
+    addEventListener: (type: string, listener: EventListenerOrEventListenerObject) =>
+      port.addEventListener(type, listener, { signal: listeners.signal }),
+    postMessage: (message: unknown) => port.postMessage(message),
+  })
+  return () => listeners.abort()
+}
+```
+
+**The UI** imports `serverPort` from `virtual:ghia/server`: its end of the channel to `serve`. `ghia/client` declares the module, so reference it once in a `.d.ts` (`env.d.ts` above).
+
+```tsx
+// src/main.tsx
+import { createORPCClient } from '@orpc/client'
+import { RPCLink } from '@orpc/client/message-port'
+import type { RouterClient } from '@orpc/server'
+import { render } from '@ghia/solid'
+import { createResource } from 'solid-js'
+import { serverPort } from 'virtual:ghia/server'
+import type { Router } from './router.ts'
+
+const client: RouterClient<Router> = createORPCClient(new RPCLink({ port: serverPort }))
+
+function App() {
+  const [count, { mutate }] = createResource(() => client.count())
+  return (
+    <div style={{ padding: 24, height: '100%', backgroundColor: '#1a1a1a' }}>
+      <div
+        onClick={async () => mutate(await client.increment({ by: 1 }))}
+        style={{ padding: 12, borderRadius: 8, cursor: 'pointer', backgroundColor: '#232323' }}
+      >
+        <text style={{ color: '#e2e2e2' }}>Server count: {count()}</text>
+      </div>
+    </div>
+  )
+}
+
+render(() => <App />, { title: 'Notes', width: 480, height: 240 })
+```
+
+Import the router into the UI as a type only. A value import would pull the server code and its dependencies into the UI bundle. Importing `virtual:ghia/server` without the `server` option fails with an error that names the option.
+
+`@orpc/client` and `@orpc/server` go in `dependencies`. The server bundle leaves them outside, so they have to be installed where `dist/server.js` runs.
+
+### Dev and build
+
+`ghia dev` runs the server entry in the Worker through Vite's module runner. When you edit a module the server imports, the Worker calls the function `serve` returned, imports the entry again and calls `serve(port)` on the **same port**. The UI keeps `serverPort` and its client. Module state on the server starts over: `count` above returns to 0.
+
+`ghia build` writes `dist/main.js` and `dist/server.js`. The built UI creates its Worker with `new Worker(new URL('./server.js', import.meta.url))`, so the two files stay together. `bun dist/main.js` starts both. The compiled `dist/app` carries both, and a Worker that fails to start ends the app with the Worker's error instead of leaving the UI waiting.
+
+### What dev does not cover
+
+- **A call in flight during a server reload may never be answered.** The old handler is detached before the new one attaches. Ask again from the UI.
+- **A full reload of the UI runs the entry again on the same `serverPort`.** Listeners the old run added to the port stay, so an `RPCLink` created at the top level of the entry exists once per reload.
+- **Editing `vite.config` needs a restart** of `ghia dev`, with or without a server.
 
 ## Package exports
 
@@ -136,8 +297,7 @@ A worked chat lives in `examples/solid/chat.tsx`. Run it with `cd examples && bu
 | `@ghia/solid`                 | Renderer, primitives, motion, controls, host types   |
 | `@ghia/solid/jsx-runtime`     | `jsx`, `jsxs`, `Fragment`. Used by `jsxImportSource` |
 | `@ghia/solid/jsx-dev-runtime` | `jsxDEV`, `Fragment`                                 |
-| `@ghia/solid/preload`         | Bun preload. Put it in `bunfig.toml`                 |
-| `@ghia/solid/bun-plugin`      | `Bun.build` plugin                                   |
+| `@ghia/solid/vite`            | `solid()`, the Vite plugin for JSX and solid-refresh |
 | `@ghia/solid/testing`         | `createTestRoot`, `TestRenderer`                     |
 | `@ghia/solid/automation`      | `launch`, `connectTest`                              |
 | `@ghia/solid/select`          | Select primitives                                    |
@@ -146,6 +306,8 @@ A worked chat lives in `examples/solid/chat.tsx`. Run it with `cd examples && bu
 | `@ghia/solid/floating`        | `FloatingLayer`, `renderSlot`                        |
 
 There is no **`./cpu-throttle`**. Testing and automation are subpaths only.
+
+`ghia` exports **`ghia()`**, the programmatic **`dev(options)`** and **`build(options)`** (options `configFile` and `root`; `dev()` resolves to a handle with `close()`), and ships the `ghia` command, a thin shell over those two. `ghia/client` declares `virtual:ghia/server`.
 
 ## `render()`
 
@@ -511,6 +673,26 @@ Menus go through **`SelectContent` / `ComboboxContent` / `<anchored deferred>`**
 
 ## Testing
 
+Tests run on vitest, under Bun, with the plugins the app uses:
+
+```ts
+// vitest.config.ts
+import { defineConfig } from 'vitest/config'
+import { ghia } from 'ghia'
+import { solid } from '@ghia/solid/vite'
+
+export default defineConfig({
+  plugins: [ghia(), solid()],
+  test: { environment: 'node' },
+})
+```
+
+```bash
+bun --bun vitest run
+```
+
+`--bun` runs vitest itself under Bun; without it vitest's `node` shebang wins. Under vitest `ghia()` needs no `entry`. It gives the tests the app's resolution (browser export conditions, one `solid-js`), inlines every dependency, loads `@ghia/native` natively, and runs `@ghia/native/dom-globals` before each test file.
+
 ```ts
 import { createTestRoot, hasNativeTestRenderer } from '@ghia/solid/testing'
 
@@ -553,8 +735,8 @@ The subpath re-exports **`@ghia/native/testing`**, including `TestRenderer` and 
 import { launch } from '@ghia/solid/automation'
 
 const app = await launch({
-  command: 'bun',
-  args: ['app.tsx'],
+  command: './node_modules/.bin/ghia',
+  args: ['dev'],
   env: { GPUIX_BACKGROUND: '1' },
 })
 await app.getByTestId('bump').waitFor()
@@ -623,12 +805,15 @@ import { jsx, jsxs, Fragment } from '@ghia/solid/jsx-runtime'
 
 |             | React                                        | Solid                                             |
 | ----------- | -------------------------------------------- | ------------------------------------------------- |
-| JSX         | `"react-jsx"`                                | `"preserve"`                                      |
+| JSX         | `"react-jsx"`, `react()` plugin              | `"preserve"`, `solid()` plugin                    |
 | Mount       | `render(<App />)`                            | `render(() => <App />)`                           |
 | State       | `useState`                                   | `createSignal`                                    |
 | Window size | `useWindowSize()`                            | `createWindowSize()`                              |
 | Find bar    | `useTextSearch(options)`                     | `createTextSearch(() => options)`                 |
 | Select root | `Select.Root`                                | `Select`                                          |
 | Tests       | `createTestRoot()` then `root.render(<X />)` | `createTestRoot()` then `app.render(() => <X />)` |
+| Run         | `ghia dev`                                   | `ghia dev`                                        |
+| Hot reload  | Fast Refresh, `useState` kept                | HMR per component, local signals reset            |
+| Bundle      | `ghia build`, then `./dist/app`              | `ghia build`, then `./dist/app`                   |
 
 The native addon, mutation queue, and automation client are shared. A Solid app and a React app can drive the same window types and the same `testId` locators.

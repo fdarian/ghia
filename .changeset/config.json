@@ -9,6 +9,7 @@
   "fixed": [
     [
       "@ghia/native",
+      "ghia",
       "@ghia/solid",
       "@ghia/react"
     ]

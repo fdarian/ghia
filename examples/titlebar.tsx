@@ -1,7 +1,6 @@
 /** A custom titlebar: a drag region that moves the window, with interactive controls cut out of it. */
 
 import { useState } from 'react'
-import { render } from '@ghia/react'
 
 const muted = '#FFFFFF99'
 
@@ -94,17 +93,4 @@ export function TitlebarApp() {
       </div>
     </div>
   )
-}
-
-if (import.meta.main) {
-  render(<TitlebarApp />, {
-    title: 'GPUIX Titlebar',
-    appName: 'GPUIX Titlebar',
-    width: 640,
-    height: 360,
-    titlebarTransparent: true,
-    trafficLightX: 18,
-    trafficLightY: 13,
-    focus: process.env.GPUIX_BACKGROUND !== '1',
-  })
 }

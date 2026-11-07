@@ -2,7 +2,7 @@
 // element asks of its page is recorded, and a test makes the page report. The geometry is what
 // the window recorded of the native surface it composed.
 import { createSignal } from "solid-js"
-import { afterEach, describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
 import type { HostElement } from "../host.js"
 

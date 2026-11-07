@@ -8,7 +8,7 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    // Bun runs these files straight from source and `compile-chat.ts` bundles
+    // `ghia dev` runs these files straight from source and `ghia build` bundles
     // them. Nothing here is ever compiled by tsc, so an accidental `tsc -p .`
     // must not litter the folder with .js next to every .tsx.
     "noEmit": true

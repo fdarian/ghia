@@ -1,6 +1,6 @@
 import type { JSX } from "solid-js"
 import { GpuixRenderer, type WindowOptions } from "@ghia/native"
-import type { NativeRenderer, RootEventHandlers } from "@ghia/native/host"
+import { isWebBuild, type NativeRenderer, type RootEventHandlers } from "@ghia/native/host"
 import {
   createNativeRenderer,
   installBrowserAutomation,
@@ -17,6 +17,8 @@ interface RenderSlot {
   renderer?: NativeRenderer
   root?: Root
   loop?: FrameLoop
+  /** The latest render's handler: the renderer outlives the render that created it. */
+  onUncaughtError?: RenderOptions["onUncaughtError"]
 }
 
 export interface RenderOptions
@@ -63,10 +65,11 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
     ...windowOptions
   } = options
   const host = slot()
+  host.onUncaughtError = onUncaughtError
   if (!host.renderer) {
     host.renderer = injected ?? createNativeRenderer({
       onError(error) {
-        onUncaughtError?.(
+        host.onUncaughtError?.(
           error instanceof Error ? error : new Error(String(error)),
           {}
         )
@@ -97,7 +100,7 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
     })
   }
   if (
-    typeof window !== "undefined" &&
+    isWebBuild &&
     host.renderer instanceof GpuixRenderer &&
     !Reflect.has(globalThis, "gpuix")
   ) {

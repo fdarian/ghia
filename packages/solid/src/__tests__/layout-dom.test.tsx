@@ -1,5 +1,5 @@
 import { createSignal, For, Show } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
 
 function boundsOf(app: TestRoot, testId: string) {

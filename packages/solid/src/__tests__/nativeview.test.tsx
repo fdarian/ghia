@@ -2,7 +2,7 @@
 // being a real AppKit view: what the element tells the library through `onAttach` and
 // `onDetach`, and in which order. The geometry of the surface is covered with the native side.
 import { For, Show, createSignal } from "solid-js"
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { EventPayload } from "@ghia/native"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
 

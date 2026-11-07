@@ -8,7 +8,7 @@ import os from "os"
 import path from "path"
 import { fileURLToPath } from "url"
 import type { JSX } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import { readLogicalPixels } from "./pixels.js"
 
