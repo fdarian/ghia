@@ -1140,7 +1140,17 @@ impl TestGpuixRenderer {
     /// frame before them. On unless `GPUIX_PATCH_OFF`, and never when the retention is off.
     #[napi]
     pub fn set_patch_enabled(&self, enabled: bool) -> Result<()> {
-        update_view(move |view, _window, _cx| view.patch.set_enabled(enabled))
+        update_view(move |view, _window, _cx| {
+            view.patch.set_enabled(enabled);
+            view.retain.set_hover_roots(enabled);
+        })
+    }
+
+    /// Whether the frames drawn after a list scroll are classified as translates of the frame
+    /// before them (`scrollPatch` of `getPatchCounters`). On unless `GPUIX_SCROLL_PATCH_OFF`.
+    #[napi]
+    pub fn set_scroll_patch_enabled(&self, enabled: bool) -> Result<()> {
+        update_view(move |_view, window, _cx| window.set_scroll_patch(enabled))
     }
 
     /// How ticks were patched since the window was made: subtract two reads for a span of frames.
@@ -1644,6 +1654,15 @@ impl TestGpuixRenderer {
         let appearance =
             crate::renderer::parse_window_appearance(&appearance).map_err(Error::from_reason)?;
         window_call(move |_window, cx| cx.set_window_appearance(appearance))
+    }
+
+    #[napi]
+    pub fn set_window_title(&self, title: String) -> Result<()> {
+        update_view_or_defer(move |view, window, cx| {
+            view.window_title = title;
+            cx.notify();
+            window.refresh();
+        })
     }
 
     /// The platform window's title, as the title bar shows it.
@@ -2565,6 +2584,22 @@ impl TestGpuixRenderer {
                 .save(&path)
                 .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {}", e)))?;
 
+            Ok(())
+        })
+    }
+
+    /// Capture the frame that was drawn last as it is, and save it as a PNG: `captureScreenshot` notifies
+    /// the view and refreshes the window first, so what it captures is a frame built whole, whatever drew the one
+    /// before it. This captures what a frame that patched or moved the rows in place left.
+    #[napi]
+    pub fn capture_shown_frame(&self, path: String) -> Result<()> {
+        with_test_state(|cx, window, _view| {
+            let image = cx
+                .capture_screenshot(window)
+                .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {}", e)))?;
+            image
+                .save(&path)
+                .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {}", e)))?;
             Ok(())
         })
     }

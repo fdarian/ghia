@@ -414,6 +414,30 @@ impl WindowBounds {
         self.live.clear();
     }
 
+    /// Moves the boxes of the roots `roots` by `shift`: the replays that put them back are further
+    /// by it, and the boxes that the frame wrote (a root that was built) are moved where they are
+    /// kept. `ids` are the elements the roots wrote.
+    fn shift(&mut self, ids: &[u64], roots: &crate::tape::Roots, shift: Point<Pixels>) {
+        let frame = self.frame;
+        let moved = |live: &mut FxHashMap<u64, Point<Pixels>>| {
+            for (list, delta) in live.iter_mut() {
+                if roots.hold(*list) {
+                    *delta = *delta + shift;
+                }
+            }
+        };
+        moved(&mut self.live);
+        if let Some(kept) = self.kept.as_mut() {
+            moved(&mut kept.live);
+        }
+        for id in ids {
+            let Some(stored) = self.boxes.get_mut(id) else { continue };
+            if stored.frame == frame && stored.recorded.as_ref().is_some_and(|(_, list)| roots.hold(*list)) {
+                stored.bounds = stored.bounds.translated(shift);
+            }
+        }
+    }
+
     /// Forgets the boxes of the elements `keep` says are gone.
     fn retain(&mut self, mut keep: impl FnMut(u64) -> bool) {
         self.boxes.retain(|id, _| keep(*id));
@@ -516,6 +540,21 @@ fn note_host_node(window: &gpui::Window, id: u64, node: gpui::LayoutId) {
             nodes.insert(id, (node, window.layout_engine_id()));
         } else {
             nodes.remove(&id);
+        }
+    });
+}
+
+/// The element a write of the bounds registry is for.
+pub(crate) fn id_of_bounds_write(data: &dyn std::any::Any) -> u64 {
+    bounds_write(data).1
+}
+
+/// A frame moved the rows of a list in place: the boxes the roots `roots` hold (the elements
+/// `ids` wrote) are `shift` further, whether the frame shown made them or put them back.
+pub(crate) fn shift(window: WindowId, ids: &[u64], roots: &crate::tape::Roots, shift: Point<Pixels>) {
+    BOUNDS.with(|cell| {
+        if let Some(bounds) = cell.borrow_mut().get_mut(&window) {
+            bounds.shift(ids, roots, shift);
         }
     });
 }
@@ -836,6 +875,13 @@ pub(crate) fn describe_bounds(window: WindowId) -> String {
     let mut all: Vec<_> = all_bounds(window).into_iter().collect();
     all.sort_by_key(|(id, _)| *id);
     all.iter().map(|(id, bounds)| format!("bounds {id} {}\n", bounds.described())).collect()
+}
+
+/// Everything the registries of `window` hold of the places of elements, as text: the painted
+/// boxes and the regions text is selected from. For comparing a frame that moved the rows in place
+/// with the frame built whole.
+pub(crate) fn describe_registries(window: WindowId) -> String {
+    describe_bounds(window) + &crate::text::describe_registries(window)
 }
 
 pub fn all_bounds(window: WindowId) -> HashMap<u64, ElementBounds> {

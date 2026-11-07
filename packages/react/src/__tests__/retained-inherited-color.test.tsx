@@ -340,6 +340,10 @@ const READERS: Record<string, (index: number) => React.ReactNode> = {
     />
   ),
   background: (index) => <div style={{ height: 20, backgroundColor: "currentColor" }} />,
+  // A hover that only paints is patched, in a root that is built with the colour the page hands down.
+  "a hover that paints": (index) => (
+    <div style={{ height: 20, hover: { backgroundColor: "currentColor" } }} />
+  ),
   gradient: (index) => (
     <div style={{ height: 20, backgroundImage: "linear-gradient(90deg, currentColor, transparent)" }} />
   ),
@@ -362,9 +366,10 @@ const READERS: Record<string, (index: number) => React.ReactNode> = {
 const NOT_READERS: Record<string, (index: number) => React.ReactNode> = {
   // A border with no colour is transparent here.
   "a border with no colour": (index) => <div style={{ height: 20, borderWidth: 3, borderStyle: "solid" }} />,
-  // A state resolves its colours when it is the state, which is a build.
+  // A state resolves its colours when it is the state, which is a build. (One that only paints is patched in a root
+  // that reads the colour: "a hover that paints" above.)
   "a state": (index) => (
-    <div testId={`state-${index}`} style={{ height: 20, hover: { backgroundColor: "currentColor" } }} />
+    <div testId={`state-${index}`} style={{ height: 20, hover: { backgroundColor: "currentColor", paddingLeft: 2 } }} />
   ),
 }
 

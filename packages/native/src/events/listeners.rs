@@ -177,12 +177,7 @@ impl PointerDispatch {
         cx: &mut App,
     ) {
         let output = dispatch_sample(&self.pointer, &self.activation.tree, &sample);
-        if output.restyle {
-            // The view may be leased by the input being dispatched.
-            if let Some(view) = view.upgrade() {
-                cx.notify(view.entity_id());
-            }
-        }
+        restyled(view, &output, window, cx);
         // A press that hit nothing has no path, and the default blurs.
         let target_path = self
             .pointer
@@ -292,7 +287,7 @@ impl PointerDispatch {
         if self.pointer.borrow().file_drag.is_some() {
             self.file_drag(view, resync, window, cx);
         } else {
-            submit(view, resync, cx);
+            submit(view, resync, window, cx);
         }
     }
 
@@ -329,11 +324,7 @@ impl PointerDispatch {
     ) {
         let is_move = matches!(sample.action, PointerAction::FileDragMove { .. });
         let output = dispatch_sample(&self.pointer, &self.activation.tree, &sample);
-        if output.restyle {
-            if let Some(view) = view.upgrade() {
-                cx.notify(view.entity_id());
-            }
-        }
+        restyled(view, &output, window, cx);
         let mut operation = is_move.then_some(Some(DragOperation::None));
         for payload in output.into_payloads() {
             let is_dragover = payload.event_type == "dragover";
@@ -359,11 +350,7 @@ impl PointerDispatch {
         cx: &mut App,
     ) {
         let output = dispatch_sample(&self.pointer, &self.activation.tree, &sample);
-        if output.restyle {
-            if let Some(view) = view.upgrade() {
-                cx.notify(view.entity_id());
-            }
-        }
+        restyled(view, &output, window, cx);
         for payload in output.into_payloads() {
             let click = (payload.event_type == "click").then(|| payload.clone());
             let outcome = sync_dispatch::emit(window, cx, &self.activation.callback, payload);
@@ -374,12 +361,31 @@ impl PointerDispatch {
     }
 }
 
-fn submit(view: &WeakEntity<GpuixView>, sample: PointerSample, cx: &mut App) {
+fn submit(view: &WeakEntity<GpuixView>, sample: PointerSample, window: &Window, cx: &mut App) {
     let view = view.clone();
+    let window = window.window_handle();
     cx.defer(move |cx| {
-        view.update(cx, |view, cx| view.handle_pointer(sample, cx))
-            .ok();
+        let repaint = view
+            .update(cx, |view, cx| view.handle_pointer(sample, cx))
+            .unwrap_or(false);
+        if repaint {
+            window.update(cx, |_, window, _| window.request_tick()).ok();
+        }
     });
+}
+
+/// Draws what a dispatch restyled: a frame built whole when it asks for one, and when all it did
+/// was change how elements paint, a tick, which a patch frame takes when it can and a frame built
+/// whole otherwise (`Output::paint`).
+fn restyled(view: &WeakEntity<GpuixView>, output: &Output, window: &mut Window, cx: &mut App) {
+    if output.restyle {
+        // The view may be leased by the input being dispatched.
+        if let Some(view) = view.upgrade() {
+            cx.notify(view.entity_id());
+        }
+    } else if !output.paint.is_empty() {
+        window.request_tick();
+    }
 }
 
 /// Registers the frame's pointer listeners and notices a layout that moved under
@@ -497,6 +503,7 @@ pub(crate) fn pointer_frame(
                         submit(
                             &move_view,
                             sample(window, action, event.position, event.modifiers),
+                            window,
                             cx,
                         );
                     }
@@ -532,6 +539,7 @@ pub(crate) fn pointer_frame(
                         window.mouse_position(),
                         window.modifiers(),
                     ),
+                    window,
                     cx,
                 );
             });
@@ -545,10 +553,16 @@ pub(crate) fn pointer_frame(
                 if exit_dispatch.pointer.borrow().file_drag.is_some() {
                     exit_dispatch.file_drag(&exit_view, exit, window, cx);
                 } else {
-                    submit(&exit_view, exit, cx);
+                    submit(&exit_view, exit, window, cx);
                 }
             });
 
+            // A frame that moves the rows in place builds none of this, and follows the hover with it.
+            let settle = {
+                let (dispatch, view, observed) = (file_drag.clone(), view.clone(), observed.clone());
+                Rc::new(move |window: &mut Window, cx: &mut App| dispatch.resync(&view, &observed, false, window, cx))
+            };
+            file_drag.pointer.borrow_mut().scroll_settle = Some(settle);
             // After the draw: GPUI swaps frames only when it ends, and the control areas of the
             // frame being painted are readable only from then on, so a drag region that appeared
             // under a still pointer is seen by this resync and not a frame late.

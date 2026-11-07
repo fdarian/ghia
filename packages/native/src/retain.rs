@@ -47,9 +47,11 @@ use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 mod debug;
 pub(crate) mod gate;
 mod patch;
+mod scroll_gate;
 
 pub(crate) use patch::Patching;
 
+use crate::events::hover_paint::HOVER_ROOT_MAX_ELEMENTS;
 use crate::renderer::{GroupScope, Inherited};
 use crate::tape::BuildEffect;
 
@@ -441,6 +443,11 @@ struct Record {
     holes: u64,
     /// Elements in the subtree.
     size: u32,
+    /// The element is a root a hover patch can repaint: something in it declares a hover that only
+    /// paints (`Node::hover`), it is small enough to be a unit, lifts nothing out of it, and nothing
+    /// runs on it. A scroller in it is no reason: its offset is a source, and a tick that finds it
+    /// moved is built whole.
+    hover: bool,
     /// The build read the colour the element inherits (`color::reads`): a text that sets no colour of
     /// its own, a `currentColor`, an element that paints as it likes. A colour is part of the key of
     /// the record only then.
@@ -676,6 +683,8 @@ struct Node {
     /// The scroller around it, if it is one gpui can move recordings for.
     scroller: Option<Scroller>,
     costly: bool,
+    /// See [`Entry::hover`].
+    hover: bool,
     /// Only with `verify`: a hash of what the build made of the element itself.
     digest: u64,
     /// The element was built as a `display: none` host, which paints and lays out nothing.
@@ -710,6 +719,16 @@ struct Node {
     /// `custom_properties::reads::count` when the element was entered, while it is built.
     custom_reads_at: u64,
     reads_custom: bool,
+}
+
+/// What `Retain::scan_hover` finds in a subtree.
+#[derive(Clone, Copy, Default)]
+struct HoverScan {
+    hovers: bool,
+    size: u32,
+    lifts: bool,
+    /// Something in it has a size an intrinsic keyword gives, or declares or follows a group.
+    unfit: bool,
 }
 
 /// What a node adds up to with what is below it, filled in bottom-up when the build is done.
@@ -751,6 +770,10 @@ pub(crate) struct Summary {
 pub(crate) struct Sources<'a> {
     pub tree: &'a crate::retained_tree::RetainedTree,
     pub hovered: &'a [u64],
+    /// The elements a hover restyled by paint only since the last frame that took them
+    /// (`PointerState::paint_pending`): the tick that patches them takes them from the hover chain's
+    /// difference, which it does not look at.
+    pub hover_paint: Vec<u64>,
     pub active: &'a [u64],
     pub focus: &'a crate::focus::FocusStyles,
     pub focusable: &'a HashMap<u64, gpui::FocusHandle>,
@@ -834,6 +857,16 @@ struct Deltas {
     scrolling: bool,
 }
 
+/// What the pointer, focus, scrolls and custom elements differ in from the frame before, see `Retain::compare_sources`.
+struct Compared {
+    all: bool,
+    changed: Vec<u64>,
+    scrolled: FxHashSet<u64>,
+    scrolling: bool,
+    scrolls: FxHashMap<u64, (u32, u32)>,
+    customs: FxHashMap<u64, Option<u64>>,
+}
+
 /// What the sources differ in from the frame before, see `Retain::compute_deltas`.
 struct Found {
     all: bool,
@@ -884,6 +917,11 @@ struct Plan {
     revision: u64,
     units: Vec<Unit>,
     ids: FxHashSet<u64>,
+    /// The roots of the frame that a hover patch can repaint (`Record::hover`), recorded or skipped:
+    /// built or replayed by the frame as roots of the recording gpui keeps, and not units in the
+    /// sense of `units`, since nothing runs on them.
+    hovers: Vec<Unit>,
+    hover_ids: FxHashSet<u64>,
 }
 
 /// Why a tick cannot be patched, see `Retain::preview`.
@@ -912,6 +950,10 @@ pub(crate) enum Unpatchable {
     /// A time-driven change outside every unit that is not dormant, on an element that is no unit
     /// for this reason.
     Refused(Refusal),
+    /// A hover restyled an element that no root a patch can repaint holds in the frame that was
+    /// built whole: it is not in a recorded or skipped root of a size a unit may be, or the frame
+    /// built the root every time.
+    Hover(u64),
     /// A unit that the last frame found nothing left running on (the animation ended in it, while
     /// a source goes on listing it): the frame built whole in the tick's place does not make it a
     /// unit, so a patch would repaint a root that frame does not have.
@@ -1003,7 +1045,21 @@ pub(crate) struct Retain {
     reference: bool,
     /// The node a unit began at, while it is being built: nothing inside it is skipped.
     unit: Option<u32>,
+    /// The node a root that a hover patch repaints began at, while it is being built: nothing
+    /// inside it is skipped or recorded either, since a patch builds the root as one piece and what
+    /// it lays out, registers and paints has to be what the recording of the root holds.
+    hover_unit: Option<u32>,
     plan: Plan,
+    /// The elements that patches repainted for a hover since the last frame built whole, whose
+    /// roots hold the paint of before in their recordings: that frame builds them again.
+    hover_patched: Vec<u64>,
+    /// Whether roots are made ready for a hover patch: off with patching, which would only cost the
+    /// roots in them their records.
+    hover_roots: bool,
+    /// Whether an element or something below it declares a hover that only paints, and how many
+    /// elements the subtree holds (up to one more than a hover root may), by the revision of the subtree
+    /// (`paints_hover`).
+    hover_subtrees: FxHashMap<u64, (u64, HoverScan)>,
     /// A virtual list's row is being built, in a session of its own (`begin_row`): the list builds
     /// its rows in layout, after the render that entered the list closed the page's session.
     row: bool,
@@ -1063,6 +1119,9 @@ pub(crate) struct Retain {
     mismatches: Vec<String>,
     /// What `getRetainDebug` reports, filled only with `GPUIX_RETAIN_DEBUG`.
     debug: debug::Debug,
+    /// What a list scroll is classified against, see `scroll_gate`.
+    shown: scroll_gate::ShownFrame,
+    clock_asked: scroll_gate::ClockAsked,
 }
 
 /// What `Retain::enter` is told about the element about to be built.
@@ -1102,6 +1161,9 @@ pub(crate) struct Entry<'a> {
     /// Whether building the element alone costs more than replaying it: it carries text or is
     /// not a plain host box (an image, an `<svg>`). Only a root of one element needs this.
     pub costly: bool,
+    /// Whether the element, or something in its subtree, declares a hover that only changes how it
+    /// paints (`Retain::paints_hover`): a root built for it is one a hover patch can repaint.
+    pub hover: bool,
 }
 
 /// An element built whole that gpui records in the frame, under the key the frame after enters it
@@ -1113,6 +1175,9 @@ pub(crate) struct Recording {
     pub ignores_text_color: bool,
     pub subtree: crate::layout::cull::Subtree,
     pub overscan: Option<gpui::Pixels>,
+    /// A hover patch can repaint the root, see [`Record::hover`]: gpui keeps what a patch needs of
+    /// its surroundings, and the frame keeps what builds it again.
+    pub hover: bool,
 }
 
 /// An element that was skipped, and what its parent and the frame need of it.
@@ -1129,6 +1194,8 @@ pub(crate) struct Skip {
     /// How far past the clip of its scroller the subtree is recorded, if it is to be put
     /// elsewhere when the scroller moves it.
     pub overscan: Option<gpui::Pixels>,
+    /// See [`Recording::hover`].
+    pub hover: bool,
 }
 
 /// Why an element that is entered is built and not skipped; `getRetainDebug` reports the ones
@@ -1216,7 +1283,11 @@ impl Retain {
             layout_only: false,
             reference: false,
             unit: None,
+            hover_unit: None,
             plan: Plan::default(),
+            hover_patched: Vec::new(),
+            hover_roots: true,
+            hover_subtrees: FxHashMap::default(),
             row: false,
             row_parent_shape: 0,
             rows_seen: FxHashSet::default(),
@@ -1244,6 +1315,8 @@ impl Retain {
             exited_absent: false,
             mismatches: Vec::new(),
             debug: debug::Debug::from_env(),
+            shown: scroll_gate::ShownFrame::default(),
+            clock_asked: scroll_gate::ClockAsked::default(),
         }
     }
 
@@ -1304,6 +1377,7 @@ impl Retain {
         self.rows_before.clear();
         self.release_dormant(false);
         self.plan.recorded = false;
+        self.publish_shown();
         self.backoff = Backoff::default();
         self.gate.forget();
     }
@@ -1377,9 +1451,11 @@ impl Retain {
         self.layout_only = sources.layout_only;
         self.reference = sources.reference;
         self.unit = None;
+        self.hover_unit = None;
         self.plan.serial += 1;
         if sources.layout_only {
             self.plan.layout_since = true;
+            self.publish_shown();
         } else if !sources.reference {
             self.plan = Plan {
                 serial: self.plan.serial,
@@ -1390,6 +1466,7 @@ impl Retain {
                     .map_or(0, |root| root.subtree_revision),
                 ..Plan::default()
             };
+            self.publish_shown();
         }
         if sources.pass == 1 && !sources.layout_only && !sources.reference {
             self.forget_unseen_rows(sources.tree);
@@ -1469,6 +1546,7 @@ impl Retain {
         });
         self.woken.retain(|id| tree.elements.contains_key(id));
         self.skipping.retain(|id| tree.elements.contains_key(id));
+        self.hover_subtrees.retain(|id, _| tree.elements.contains_key(id));
     }
 
     /// Whether the frame about to be built is one that is not recorded, see [`Backoff`].
@@ -1517,23 +1595,27 @@ impl Retain {
     /// What changed in `sources` since the frame before, as the elements that differ and their
     /// ancestors.
     fn find_deltas(&mut self, sources: &Sources) {
-        let found = self.compute_deltas(sources);
+        let found = self.compute_deltas(sources, false);
         self.commit_deltas(sources, found);
     }
 
-    /// What `sources` differ in from what the frame before saw. Changes nothing, so that a tick can
-    /// ask whether a frame would find something without being that frame.
-    fn compute_deltas(&self, sources: &Sources) -> Found {
+    /// What the pointer, the focus, the scrolls and the custom elements say differs from the frame before,
+    /// the part of [`Self::compute_deltas`] that no clock moves (`preview` is as it is there).
+    fn compare_sources(&self, sources: &Sources, preview: bool) -> Compared {
         let mut changed: Vec<u64> = Vec::new();
         let seen = &self.seen;
         let all = !seen.known || seen.selection != sources.selection;
 
-        differ(&seen.hovered, sources.hovered, &mut changed);
+        if !preview {
+            differ(&seen.hovered, sources.hovered, &mut changed);
+            changed.extend(&sources.hover_paint);
+            changed.extend(&self.hover_patched);
+        }
         differ(&seen.active, sources.active, &mut changed);
         differ(&seen.within, &sources.focus.within, &mut changed);
         // The target's ancestors stay in the chain, and `:has(:hover)` changes for the one the
         // target moves to or from.
-        if seen.hovered.first() != sources.hovered.first() {
+        if !preview && seen.hovered.first() != sources.hovered.first() {
             changed.extend(seen.hovered.first().into_iter().chain(sources.hovered.first()));
         }
         if seen.active.first() != sources.active.first() {
@@ -1589,6 +1671,44 @@ impl Retain {
         }
         changed.extend(seen.customs.keys().filter(|id| !customs.contains_key(id)));
 
+        Compared { all, changed, scrolled, scrolling, scrolls, customs }
+    }
+
+    /// Whether something differs from the frame shown that a frame that only moves the rows of a list would
+    /// leave as it was: a source `compute_deltas` finds for a tick (a press, the focus, a selection, a custom
+    /// element, the scroll of a scroller that is no list: the list is not among `Sources::scrolls`), a
+    /// measurement, a link, a command or a hover restyled by paint that no frame has drawn. A peek, as `preview` is.
+    pub(crate) fn sources_changed(&self, sources: &Sources) -> bool {
+        if !self.seen.known {
+            return true;
+        }
+        let compared = self.compare_sources(sources, true);
+        compared.all
+            || !compared.changed.is_empty()
+            || !sources.measured.is_empty()
+            || !sources.links.is_empty()
+            || !sources.commanded.is_empty()
+            || !sources.relevance.is_empty()
+            || !sources.hover_paint.is_empty()
+    }
+
+    /// What `sources` differ in from what the frame before saw. Changes nothing, so that a tick can
+    /// ask whether a frame would find something without being that frame.
+    ///
+    /// A `preview` is for a tick that a patch can draw, which takes the hover from
+    /// `Sources::hover_paint` and does not look at the chain: a hover that restyles by paint is
+    /// there, and one that restyles otherwise is a frame built whole before any tick is asked about.
+    /// A frame built whole takes the chain's difference, the elements restyled since it by paint,
+    /// and those that patches repainted.
+    fn compute_deltas(&self, sources: &Sources, preview: bool) -> Found {
+        let compared = self.compare_sources(sources, preview);
+        let all = compared.all;
+        let scrolled = compared.scrolled;
+        let scrolling = compared.scrolling;
+        let scrolls = compared.scrolls;
+        let customs = compared.customs;
+        let mut changed = compared.changed;
+
         let motion: FxHashSet<u64> = sources.motion.iter().copied().collect();
         // A dormant element is not a change: the roots above it keep their recording, and a frame
         // that shows it builds the root late, with the clock of that frame. One that was found
@@ -1607,7 +1727,7 @@ impl Retain {
                 running.push(id);
             }
         }
-        running.extend(seen.motion.iter().filter(|id| !motion.contains(id)));
+        running.extend(self.seen.motion.iter().filter(|id| !motion.contains(id)));
         let mut dynamic = Vec::new();
         // Everything that is asleep is asked again when the answers may have moved.
         let sleepers = self.dormant.iter().filter(|(id, bits)| stale && **bits != 0 && !self.dynamic.contains_key(id));
@@ -1640,6 +1760,7 @@ impl Retain {
     fn commit_deltas(&mut self, sources: &Sources, found: Found) {
         let Found { all, sourced, scrolled, scrolling, scrolls, customs, motion, running, dynamic, entered, stale } = found;
         let mut changed = sourced;
+        self.hover_patched.clear();
         let seen = &mut self.seen;
         self.debug.sources("pointer-focus-scroll-custom", changed.iter().copied());
         self.debug.sources("motion-just-ended", seen.motion.iter().copied().filter(|id| !sources.motion.contains(id)));
@@ -1758,6 +1879,7 @@ impl Retain {
         self.deferred = true;
         self.deferred_forced = forced;
         self.unit = None;
+        self.hover_unit = None;
         self.inside_relocatable = inside_relocatable;
         self.nodes.clear();
         self.below.clear();
@@ -1786,6 +1908,7 @@ impl Retain {
         self.row = true;
         self.row_parent_shape = parent_shape;
         self.unit = None;
+        self.hover_unit = None;
         self.inside_relocatable = false;
         self.nodes.clear();
         self.below.clear();
@@ -1864,6 +1987,7 @@ impl Retain {
             || self.row
             || self.layout_only
             || self.unit.is_some()
+            || self.hover_unit.is_some()
         {
             return None;
         }
@@ -1955,9 +2079,117 @@ impl Retain {
         self.plan.serial
     }
 
-    /// The unit of the last frame built whole that is the element `id`.
+    /// The unit of the last frame built whole that is the element `id`: one that a running paint-only
+    /// animation changes, or a root that a hover patch repaints.
     pub(crate) fn unit(&self, id: u64) -> Option<&Unit> {
-        self.plan.units.iter().find(|unit| unit.id == id)
+        self.plan.units.iter().chain(&self.plan.hovers).find(|unit| unit.id == id)
+    }
+
+    /// Whether `id`, or something below it, declares a hover that only changes how it paints and
+    /// nothing a hover patch cannot repaint, and the subtree is small enough to be a root of one: a
+    /// root built for it is one a patch can repaint. Nothing in it might lift (`may_lift`) unless it is
+    /// a row of a list, which consumes what is lifted in it: a root that lifts is recorded as one that
+    /// hands elements to the stacking context around, and the roots in it are recorded for it as they were.
+    /// Worked out once per revision of the subtree. False while nothing is recorded.
+    pub(crate) fn paints_hover(&mut self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
+        if !self.open || !self.planning || !self.hover_roots {
+            return false;
+        }
+        let scan = self.scan_hover(tree, id);
+        // A row of a list is a barrier to a lift: whatever is lifted in it is consumed by the row.
+        scan.hovers && !scan.unfit && (!scan.lifts || tree.elements.get(&id).is_some_and(|element| crate::layout::stacking::is_virtual_row(tree, element)))
+    }
+
+    /// What a subtree holds that a hover root is judged by: whether `id` or something below it declares a hover that
+    /// paints only, how many elements it holds, and whether something in it might lift. A subtree bigger than a hover
+    /// root says it holds one more than one may, and nothing of the elements below it: they are asked for when they
+    /// are entered.
+    fn scan_hover(&mut self, tree: &crate::retained_tree::RetainedTree, id: u64) -> HoverScan {
+        let Some(element) = tree.elements.get(&id) else {
+            return HoverScan::default();
+        };
+        if let Some((revision, scan)) = self.hover_subtrees.get(&id) {
+            if *revision == element.subtree_revision {
+                return *scan;
+            }
+        }
+        let mut hovers = element
+            .style
+            .as_deref()
+            .is_some_and(|style| crate::events::hover_paint::declares_paint_hover(tree, id, style));
+        let mut lifts = element.style.as_deref().is_some_and(crate::events::hover_paint::may_lift);
+        let mut unfit = element
+            .style
+            .as_deref()
+            .is_some_and(|style| crate::events::hover_paint::has_intrinsic_size(style) || crate::events::hover_paint::uses_groups(style));
+        let mut size = 1;
+        for child in &element.children {
+            let below = self.scan_hover(tree, *child);
+            hovers |= below.hovers;
+            lifts |= below.lifts;
+            unfit |= below.unfit;
+            size += below.size;
+            if size > HOVER_ROOT_MAX_ELEMENTS {
+                break;
+            }
+        }
+        let scanned = if size > HOVER_ROOT_MAX_ELEMENTS {
+            HoverScan { hovers: false, size: HOVER_ROOT_MAX_ELEMENTS + 1, lifts, unfit }
+        } else {
+            HoverScan { hovers, size, lifts, unfit }
+        };
+        self.hover_subtrees.insert(id, (element.subtree_revision, scanned));
+        scanned
+    }
+
+    /// The element just entered is the root a hover patch repaints if the build leaves it recorded
+    /// (`Recording::hover`): the key it was entered with, for the unit to be built again from.
+    ///
+    /// What is built below it is built whole and recorded by no root of its own, as in a unit,
+    /// until the element is left; a pass that only lays out does the same, but returns none: its
+    /// roots are no frame to patch.
+    pub(crate) fn begin_hover_root(&mut self) -> Option<EnterKey> {
+        // The pass that rebuilds a frame to compare it makes the roots the frame it stands for made: after
+        // a patch it is the frame shown.
+        if !self.open || !self.planning || self.deferred || self.hover_unit.is_some() {
+            return None;
+        }
+        let at = *self.stack.last()?;
+        let node = &self.nodes[at as usize];
+        // Not asked of the record of the last build: the pass that rebuilds a frame to compare it has
+        // the record the first pass made, and has to build the roots in it as that pass did.
+        if !(node.hover && node.records) {
+            return None;
+        }
+        let enter = EnterKey(node.enter);
+        self.hover_unit = Some(at);
+        // A pass that only lays out builds the root as the frames do, but is no frame to patch.
+        (!self.layout_only).then_some(enter)
+    }
+
+    /// Makes the roots that hold a hover ready for a patch to repaint, or not (patching is off).
+    pub(crate) fn set_hover_roots(&mut self, on: bool) {
+        self.hover_roots = on;
+    }
+
+    /// Whether the last frame built whole has the element `id` as a root that a hover patch repaints.
+    pub(crate) fn is_hover_root(&self, id: u64) -> bool {
+        self.plan.hover_ids.contains(&id)
+    }
+
+    /// Keeps the root that a hover patch repaints, for the ticks that follow the frame.
+    pub(crate) fn add_hover_unit(&mut self, unit: Unit) {
+        if self.reference {
+            return;
+        }
+        self.plan.hover_ids.insert(unit.id);
+        self.plan.hovers.push(unit);
+    }
+
+    /// The patches that were drawn for the elements `ids` restyled by paint: the roots that hold
+    /// them are built again by the next frame built whole.
+    pub(crate) fn hover_repainted(&mut self, ids: Vec<u64>) {
+        self.hover_patched.extend(ids);
     }
 
     /// The units of the last frame built whole, in the order it built them.
@@ -2011,7 +2243,7 @@ impl Retain {
         if revision != self.plan.revision {
             return Err(Unpatchable::Edited);
         }
-        let found = self.compute_deltas(sources);
+        let found = self.compute_deltas(sources, true);
         if found.all {
             return Err(Unpatchable::Everything);
         }
@@ -2056,10 +2288,28 @@ impl Retain {
                 }
             }
         }
+        // The root that holds an element a hover restyled by paint, or the unit it is in.
+        for &id in &sources.hover_paint {
+            let mut at = Some(id);
+            let root = loop {
+                match at {
+                    Some(up) if self.plan.hover_ids.contains(&up) || self.plan.ids.contains(&up) => break Some(up),
+                    Some(up) => at = sources.tree.elements.get(&up).and_then(|element| element.parent),
+                    None => break None,
+                }
+            };
+            match root {
+                Some(root) => {
+                    touched.insert(root);
+                }
+                None => return Err(Unpatchable::Hover(id)),
+            }
+        }
         let units: Vec<u64> = self
             .plan
             .units
             .iter()
+            .chain(&self.plan.hovers)
             .map(|unit| unit.id)
             .filter(|id| touched.contains(id))
             .collect();
@@ -2068,7 +2318,7 @@ impl Retain {
         }
         if let Some(&ended) = units
             .iter()
-            .find(|id| !self.records.get(id).is_some_and(Record::is_unit_candidate))
+            .find(|id| self.plan.ids.contains(id) && !self.records.get(id).is_some_and(Record::is_unit_candidate))
         {
             return Err(Unpatchable::Ended(ended));
         }
@@ -2149,6 +2399,7 @@ impl Retain {
             moved,
             scroller: entry.scroller,
             costly: entry.costly,
+            hover: entry.hover,
             digest: 0,
             absent: false,
             absent_children: Vec::new(),
@@ -2170,6 +2421,7 @@ impl Retain {
                 && self.gate.samples(entry.id)
                 && self.lifted == 0
                 && self.unit.is_none()
+                && self.hover_unit.is_none()
                 && !self.deferred
                 && !self.inside_relocatable
                 && entry.plain
@@ -2215,6 +2467,7 @@ impl Retain {
                     subtree: record.subtree,
                     effects: record.effects.clone(),
                     overscan,
+                    hover: record.hover,
                 };
                 self.nodes.push(node);
                 self.below.push(Below::default());
@@ -2251,7 +2504,7 @@ impl Retain {
         }
         // A unit is built whole, so that a tick can build it again to what it is, not to what is
         // left of it.
-        if self.unit.is_some() {
+        if self.unit.is_some() || self.hover_unit.is_some() {
             return Err(Kept::InUnit);
         }
         if self.deltas.all {
@@ -2329,6 +2582,9 @@ impl Retain {
         }
         // A skipped element was never pushed.
         let at = self.stack.pop().expect("exit without enter") as usize;
+        if self.hover_unit == Some(at as u32) {
+            self.hover_unit = None;
+        }
         let end = self.nodes.len() as u32;
         let node = &mut self.nodes[at];
         node.end = end;
@@ -2378,6 +2634,7 @@ impl Retain {
             ignores_text_color: !node.reads_colors && !lifts,
             subtree: node.subtree,
             overscan,
+            hover: node.hover && !lifts && own.size <= HOVER_ROOT_MAX_ELEMENTS,
         })
     }
 
@@ -2956,6 +3213,7 @@ impl Retain {
                     lifts,
                     holes,
                     size: own.size,
+                    hover: node.hover && eligible && !lifts && own.size <= HOVER_ROOT_MAX_ELEMENTS && node.vol.dynamic == 0 && !own.dynamic,
                     reads_colors: node.reads_colors,
                     reads_custom: node.reads_custom,
                     costly: node.costly,
@@ -2977,6 +3235,7 @@ impl Retain {
         if !self.reference && !self.layout_only && !self.row {
             self.plan.recorded = true;
             self.plan.unsteady |= unsteady;
+            self.publish_shown();
         }
         if !self.deferred && !self.row {
             self.forget_unbuilt_dynamic(&built_dynamic);
@@ -3192,6 +3451,7 @@ mod tests {
         retain.begin_frame(Sources {
             tree: &tree,
             hovered: &[],
+            hover_paint: Vec::new(),
             active: &[],
             focus: &focus,
             focusable: &handles,
@@ -3230,6 +3490,7 @@ mod tests {
             scroller: None,
             lift_run: &|| false,
             costly: true,
+                hover: false,
         });
         retain.stacking(|| (None, true));
         retain.digest(|| built.to_owned());
@@ -3269,6 +3530,7 @@ mod tests {
         retain.begin_frame(Sources {
             tree: &tree,
             hovered: &[],
+            hover_paint: Vec::new(),
             active: &[],
             focus: &focus,
             focusable: &handles,
@@ -3308,6 +3570,7 @@ mod tests {
             scroller: None,
             lift_run: &|| false,
             costly: true,
+                hover: false,
         };
         let mut recordings = Vec::new();
         let skipped = retain.enter(entry(1, 0)).is_some();
@@ -3341,6 +3604,7 @@ mod tests {
         retain.begin_frame(Sources {
             tree: &tree,
             hovered: &[],
+            hover_paint: Vec::new(),
             active: &[],
             focus: &focus,
             focusable: &handles,
@@ -3381,6 +3645,7 @@ mod tests {
                 scroller: None,
                 lift_run: &|| false,
                 costly: true,
+                hover: false,
             })
             .expect("the root is skipped by the frame after the one that built it");
         assert_eq!(skip.token, parent);
@@ -3424,6 +3689,7 @@ mod tests {
         retain.begin_frame(Sources {
             tree: &tree,
             hovered: &changes.hovered,
+            hover_paint: Vec::new(),
             active: &changes.active,
             focus: &focus,
             focusable: &handles,
@@ -3466,6 +3732,7 @@ mod tests {
                     scroller: None,
                     lift_run: &|| lift_run,
                     costly: true,
+                hover: false,
                 })
                 .is_some();
             if !skipped {
@@ -3559,6 +3826,7 @@ mod tests {
         retain.begin_frame(Sources {
             tree,
             hovered: &[],
+            hover_paint: Vec::new(),
             active: &[],
             focus: &focus,
             focusable: &handles,
@@ -3599,6 +3867,7 @@ mod tests {
                 scroller: None,
                 lift_run: &|| false,
                 costly: true,
+                hover: false,
             });
             retain.stacking(|| (None, true));
         }
@@ -3695,6 +3964,7 @@ mod tests {
         retain.begin_frame(Sources {
             tree: &tree,
             hovered: &[],
+            hover_paint: Vec::new(),
             active: &[],
             focus: &focus,
             focusable: &handles,
@@ -3735,6 +4005,7 @@ mod tests {
                 scroller: None,
                 lift_run: &|| false,
                 costly: true,
+                hover: false,
             })
         };
         enter(retain, 1, revision);
@@ -4872,6 +5143,7 @@ mod tests {
         Sources {
             tree,
             hovered,
+            hover_paint: Vec::new(),
             active: &[],
             focus,
             focusable: handles,
@@ -4906,6 +5178,10 @@ mod tests {
         revisions: HashMap<u64, u64>,
         /// The custom elements the registry holds when a frame begins, with their `retain_state`.
         customs: Vec<(u64, Option<u64>)>,
+        /// The elements that declare a hover that only paints, or hold one.
+        hovers: FxHashSet<u64>,
+        /// The elements a hover restyled by paint, which the next preview and frame find.
+        hover_paint: Vec<u64>,
     }
 
     impl Units {
@@ -4928,6 +5204,8 @@ mod tests {
                 scrolls: HashMap::new(),
                 revisions: HashMap::new(),
                 customs: Vec::new(),
+                hovers: FxHashSet::default(),
+                hover_paint: Vec::new(),
             }
         }
 
@@ -4940,6 +5218,7 @@ mod tests {
         fn frame(&mut self, hovered: &[u64], layout_only: bool, build: impl FnOnce(&mut Self)) {
             let mut sources = sources_of(&self.tree, &self.focus, &self.handles, &self.scrolls, hovered, layout_only);
             sources.customs = self.customs.clone();
+            sources.hover_paint = std::mem::take(&mut self.hover_paint);
             self.retain.begin_frame(sources);
             build(self);
             self.retain.finish_frame();
@@ -4973,7 +5252,31 @@ mod tests {
                     scroller,
                     lift_run: &|| false,
                     costly: true,
+                    hover: self.hovers.contains(&id),
                 })
+        }
+
+        /// Builds the element `id` the way `build_element_in` does for a root a hover patch can
+        /// repaint, with `inside` building what is in it. Says whether it is one. Nothing if the frame
+        /// skipped it, in which case the skip says whether it is and it is kept as one.
+        fn hover_root(&mut self, id: u64, inside: impl FnOnce(&mut Self)) -> Option<bool> {
+            if let Some(skip) = self.enter_in(id, None) {
+                if skip.hover {
+                    let env = crate::renderer::FrameEnv::for_test(self.inherited.clone(), skip.enter, web_time::Instant::now());
+                    self.retain.add_hover_unit(Unit { id, env });
+                }
+                return None;
+            }
+            self.retain.stacking(|| (None, true));
+            let enter = self.retain.begin_hover_root();
+            inside(self);
+            let recording = self.retain.exit();
+            let hover = enter.zip(recording).filter(|(_, recording)| recording.hover);
+            if let Some((enter, _)) = hover {
+                let env = crate::renderer::FrameEnv::for_test(self.inherited.clone(), enter, web_time::Instant::now());
+                self.retain.add_hover_unit(Unit { id, env });
+            }
+            Some(hover.is_some())
         }
 
         /// Builds the element `id` the way `build_element_in` does, with `inside` building what is
@@ -5006,8 +5309,14 @@ mod tests {
             self.retain.units().iter().map(|unit| unit.id).collect()
         }
 
+        /// The sources of a frame that nothing but time moved.
+        fn sources(&self) -> Sources<'_> {
+            sources_of(&self.tree, &self.focus, &self.handles, &self.scrolls, &[], false)
+        }
+
         fn preview(&self, hovered: &[u64], scroll_animating: bool) -> Result<Vec<u64>, Unpatchable> {
-            let sources = sources_of(&self.tree, &self.focus, &self.handles, &self.scrolls, hovered, false);
+            let mut sources = sources_of(&self.tree, &self.focus, &self.handles, &self.scrolls, hovered, false);
+            sources.hover_paint = self.hover_paint.clone();
             self.retain.preview(&sources, scroll_animating, false)
         }
 
@@ -5517,6 +5826,27 @@ mod tests {
     }
 
     #[test]
+    fn the_frame_shown_is_published_to_the_scroll_gate_while_it_is_a_whole_recorded_one() {
+        let mut page = Units::new();
+        fn page_shown(page: &Units) -> Option<u64> {
+            page.retain.shown.get()
+        }
+        assert_eq!(page_shown(&page), None, "nothing is shown before a frame");
+        page.frame(&[], false, |page| {
+            page.element(1, None, |_| {});
+        });
+        assert_eq!(page_shown(&page), Some(page.retain.plan.revision), "a recorded frame is the one a scroll is classified against");
+        page.frame(&[], true, |_| {});
+        assert_eq!(page_shown(&page), None, "a pass that only lays out takes the changes the frame shown has not seen");
+        page.frame(&[], false, |page| {
+            page.element(1, None, |_| {});
+        });
+        assert!(page_shown(&page).is_some());
+        page.retain.set_planning(false);
+        assert_eq!(page_shown(&page), None, "a retention that does not plan records no frame");
+    }
+
+    #[test]
     fn row_sessions_do_not_touch_summary_plan_or_the_dynamic_entries_of_other_elements() {
         let mut page = Units::new();
         let mut shape = 0;
@@ -5870,10 +6200,202 @@ mod tests {
         let mut page = Units::new();
         page.page(&[], Some(true), None);
         page.page(&[], Some(true), None);
-        assert_eq!(page.preview(&[3], false), Err(Unpatchable::Sourced), "the pointer moved");
         assert_eq!(page.preview(&[], true), Err(Unpatchable::ScrollAnimation));
         page.tree.set_text(3, "words".to_owned());
         assert_eq!(page.preview(&[], false), Err(Unpatchable::Edited));
+    }
+
+    #[test]
+    fn a_frame_that_only_moves_the_rows_of_a_list_asks_for_the_sources_a_tick_asks_for() {
+        let mut page = Units::new();
+        page.page(&[], None, None);
+        page.page(&[], None, None);
+        assert!(!page.retain.sources_changed(&page.sources()), "nothing but time and the scroll of a list differs");
+
+        // The pointer is the classifier's: a hover chain that moved is no source here.
+        let moved = [3, 2, 1];
+        let mut sources = sources_of(&page.tree, &page.focus, &page.handles, &page.scrolls, &moved, false);
+        assert!(!page.retain.sources_changed(&sources));
+        // What a tick treats as a source is one: a press, the focus, a selection, a measurement, a link, a command, a
+        // relevance, a hover restyled by paint that no frame drew, a custom element, the scroll of a scroller.
+        let pressed = [3];
+        sources = page.sources();
+        sources.active = &pressed;
+        assert!(page.retain.sources_changed(&sources), "the active chain");
+        sources = page.sources();
+        sources.selection = 7;
+        assert!(page.retain.sources_changed(&sources), "the selection");
+        for (what, edit) in [
+            ("a measurement", (|sources: &mut Sources| sources.measured = vec![3]) as fn(&mut Sources)),
+            ("a link", |sources| sources.links = vec![3]),
+            ("a command", |sources| sources.commanded = vec![3]),
+            ("a relevance", |sources| sources.relevance = vec![3]),
+            ("a hover restyled by paint", |sources| sources.hover_paint = vec![3]),
+            ("a custom element", |sources| sources.customs = vec![(5, Some(1))]),
+        ] {
+            sources = page.sources();
+            edit(&mut sources);
+            assert!(page.retain.sources_changed(&sources), "{what}");
+        }
+        page.focus.within = Arc::from([5]);
+        assert!(page.retain.sources_changed(&page.sources()), "the focus");
+        page.focus.within = Arc::from([]);
+        assert!(!page.retain.sources_changed(&page.sources()));
+        page.scrolls.insert(2, gpui::ScrollHandle::new());
+        page.scrolls[&2].set_offset(gpui::point(gpui::px(0.0), gpui::px(-40.0)));
+        assert!(page.retain.sources_changed(&page.sources()), "a scroller that is no list scrolled");
+    }
+
+    #[test]
+    fn the_sources_of_a_frame_that_was_never_built_are_a_change() {
+        let page = Units::new();
+        let sources = sources_of(&page.tree, &page.focus, &page.handles, &page.scrolls, &[], false);
+        assert!(page.retain.sources_changed(&sources));
+    }
+
+    /// The page with 1, 2 and 3 holding a hover that paints (3 declares it), whose roots a frame records.
+    fn hover_page(page: &mut Units, hovered: &[u64]) -> [Option<bool>; 3] {
+        let mut roots = [None; 3];
+        page.frame(hovered, false, |page| {
+            roots[0] = page.hover_root(1, |page| {
+                roots[1] = page.hover_root(2, |page| {
+                    roots[2] = page.hover_root(3, |_| {});
+                    page.leaf(4);
+                });
+                page.leaf(5);
+            });
+        });
+        roots
+    }
+
+    #[test]
+    fn a_hover_that_only_paints_is_not_a_source_of_a_tick() {
+        let mut page = Units::new();
+        page.hovers = [1, 2, 3].into_iter().collect();
+        hover_page(&mut page, &[]);
+        hover_page(&mut page, &[]);
+        assert_eq!(page.preview(&[3, 2, 1], false), Ok(vec![]), "the chain moved and nothing was restyled");
+        assert_eq!(page.preview(&[], false), Ok(vec![]));
+        page.focus.within = Arc::from([5]);
+        assert_eq!(page.preview(&[3, 2, 1], false), Err(Unpatchable::Sourced), "the focus is a source");
+    }
+
+    #[test]
+    fn the_outermost_root_that_holds_a_hover_is_the_hover_root_and_holds_what_is_in_it() {
+        let mut page = Units::new();
+        page.hovers = [1, 2, 3].into_iter().collect();
+        let first = hover_page(&mut page, &[]);
+        assert_eq!(first, [Some(true), Some(false), Some(false)], "what is below the root is built in it, recorded by nothing");
+        assert_eq!(page.retain.plan.hover_ids, [1].into_iter().collect());
+        for restyled in [vec![3], vec![3, 4], vec![5], vec![1]] {
+            page.hover_paint = restyled;
+            assert_eq!(page.preview(&[], false), Ok(vec![1]));
+        }
+    }
+
+    #[test]
+    fn a_tick_repaints_the_roots_that_hold_what_a_hover_restyled() {
+        let mut page = Units::new();
+        // 1 is too big to be a root (it is not asked for a hover), 2 and 5 hold a hover.
+        page.hovers = [2, 3, 5].into_iter().collect();
+        let first = hover_page(&mut page, &[]);
+        assert_eq!(first, [Some(false), Some(true), Some(false)]);
+        page.hover_paint = vec![3];
+        assert_eq!(page.preview(&[3, 2, 1], false), Ok(vec![2]));
+        page.hover_paint = vec![3, 4];
+        assert_eq!(page.preview(&[], false), Ok(vec![2]));
+        // A frame that skips a root registers it if it holds a hover, and the roots in it are not visited:
+        // here the page above 2 is skipped, and a hover in it is a frame built whole, which visits them.
+        page.hover_paint.clear();
+        let again = hover_page(&mut page, &[]);
+        assert_eq!(again, [None, None, None], "the page is skipped");
+        assert!(page.retain.plan.hover_ids.is_empty());
+        page.hover_paint = vec![3];
+        assert_eq!(page.preview(&[3, 2, 1], false), Err(Unpatchable::Hover(3)));
+    }
+
+    #[test]
+    fn a_skipped_root_that_holds_a_hover_is_kept_as_one() {
+        let mut page = Units::new();
+        page.hovers = [1, 2, 3].into_iter().collect();
+        hover_page(&mut page, &[]);
+        page.hover_paint.clear();
+        let again = hover_page(&mut page, &[]);
+        assert_eq!(again, [None, None, None], "the page is skipped");
+        assert_eq!(page.retain.plan.hover_ids, [1].into_iter().collect());
+        page.hover_paint = vec![3];
+        assert_eq!(page.preview(&[3, 2, 1], false), Ok(vec![1]));
+    }
+
+    #[test]
+    fn an_element_no_root_holds_is_a_frame_built_whole() {
+        let mut page = Units::new();
+        page.hovers = [2, 3].into_iter().collect();
+        hover_page(&mut page, &[]);
+        page.hover_paint = vec![5];
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Hover(5)));
+        page.hover_paint = vec![1];
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Hover(1)), "nor is the page");
+        page.hover_paint = vec![3];
+        assert_eq!(page.preview(&[], false), Ok(vec![2]));
+    }
+
+    #[test]
+    fn a_root_found_unfit_is_no_hover_root_and_blocks_the_roots_in_it_all_the_same() {
+        let mut page = Units::new();
+        page.hovers = [1, 2, 3].into_iter().collect();
+        // Something runs in 3, so the root above it is built every frame and is no hover root.
+        let mut inner = None;
+        page.frame(&[], false, |page| {
+            let outer = page.hover_root(1, |page| {
+                inner = page.element(3, Some(true), |_| {});
+                page.leaf(4);
+            });
+            assert_eq!(outer, Some(false));
+        });
+        assert_eq!(inner, None, "the element with the animation is no unit inside the root");
+        assert!(page.retain.plan.hover_ids.is_empty());
+        assert!(page.retain.records.get(&1).is_some_and(|record| !record.hover), "recorded as no hover root");
+    }
+
+    #[test]
+    fn a_frame_built_whole_after_a_patch_builds_the_roots_the_patch_repainted() {
+        let mut page = Units::new();
+        page.hovers = [1, 2, 3].into_iter().collect();
+        hover_page(&mut page, &[]);
+        hover_page(&mut page, &[]);
+        // A frame that finds nothing changed skips the roots: here 1.
+        page.frame(&[], false, |page| assert!(page.enter(1), "the page is skipped"));
+        // The pointer entered 3, and a patch drew it.
+        page.hover_paint = vec![3];
+        page.retain.hover_repainted(std::mem::take(&mut page.hover_paint));
+        page.frame(&[3, 2, 1], false, |page| {
+            assert!(!page.enter(1), "the root above an element a patch repainted is built");
+            assert!(!page.enter(2));
+            assert!(!page.enter(3));
+            for id in [3, 2, 1] {
+                page.retain.exit();
+                let _ = id;
+            }
+        });
+        page.frame(&[3, 2, 1], false, |page| assert!(page.enter(1), "and skipped again once built"));
+    }
+
+    #[test]
+    fn a_frame_takes_what_the_hover_restyled_by_paint_before_it() {
+        let mut page = Units::new();
+        page.hovers = [1, 2, 3].into_iter().collect();
+        hover_page(&mut page, &[]);
+        hover_page(&mut page, &[]);
+        page.hover_paint = vec![3];
+        page.frame(&[3, 2, 1], false, |page| {
+            assert!(!page.enter(1), "a hover that the frame has to draw is on its spine");
+            assert!(!page.enter(2));
+            assert!(!page.enter(3));
+            for _ in 0..3 {
+                page.retain.exit();
+            }
+        });
     }
 
     #[test]

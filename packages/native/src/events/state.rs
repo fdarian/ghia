@@ -236,8 +236,19 @@ pub struct PointerState {
     /// A press on a `draggable` element that has not moved far enough to drag it.
     pub(super) pending_drag: Option<PendingDrag>,
     pub(super) element_drag: Option<ElementDrag>,
+    /// The elements the hover changes of the input being dispatched only repaint
+    /// (`dispatcher::Restyle::Paint`), for `dispatch` to hand to its caller.
+    pub(super) paint: Vec<u64>,
+    /// The elements a hover restyled by paint only since a frame took them: what the view reads
+    /// from here when it decides whether a patch can draw the tick the input asked for. Kept in the
+    /// state, which the listeners reach without the view, and behind a cell, since the view reads
+    /// it while the state is borrowed for the build.
+    pub(super) paint_pending: std::cell::RefCell<Vec<u64>>,
     /// A resync waits for the next frame (see `PointerDispatch::resync_by_frame`).
     pub(super) resync_queued: bool,
+    /// What follows the hover after a frame that moved the rows of a list in place: the resync
+    /// the pointer frame schedules after a draw that built the content (`Window::set_scroll_patch_settled`).
+    pub(crate) scroll_settle: Option<Rc<dyn Fn(&mut gpui::Window, &mut gpui::App)>>,
     observed: ObservedChain,
 }
 
@@ -245,6 +256,16 @@ impl PointerState {
     /// Whether an element is being dragged: `dragstart` has fired and `dragend` has not.
     pub fn element_drag_active(&self) -> bool {
         self.element_drag.is_some()
+    }
+
+    /// The elements a hover restyled by paint only that no frame has taken yet.
+    pub fn paint_pending(&self) -> Vec<u64> {
+        self.paint_pending.borrow().clone()
+    }
+
+    /// Hands the elements of `paint_pending` over: a frame built whole drew them, or a patch did.
+    pub fn take_paint_pending(&self) -> Vec<u64> {
+        std::mem::take(&mut *self.paint_pending.borrow_mut())
     }
 
     /// The hover chain and the press chain, target first.

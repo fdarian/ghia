@@ -56,6 +56,7 @@ mod text;
 mod theme;
 mod universal_style;
 mod window_kind;
+mod window_title;
 #[cfg(target_os = "macos")]
 mod window_key;
 // Desktop only. HTTP goes through reqwest_client, not crates.io reqwest.

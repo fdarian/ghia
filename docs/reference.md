@@ -3080,6 +3080,7 @@ device pixel as Chrome does. The list records its box like any element, so `getB
 box is its padding box, as a div's is: its rows start inside the `border` and the `padding`, are clipped and hit inside
 the border, and `clientWidth`, `clientHeight`, `scrollHeight` and the largest `scrollTop` are those of the padding box.
 A row that shows only in the top padding of a scrolled list is built and counted by `visibleRange`.
+`onVisibleRange` fires when the visible range (`startIndex` to an exclusive `endIndex`) differs from the one the list last reported, not on every scroll event: a scroll that stays within the same rows reports nothing. The first scroll reports its range, and `scrollToItem` reports its own.
 `fixtures/virtual-list-oracle.*` pins the rest against headless Chrome.
 
 On a virtual list, `scrollToItem` takes an optional **pixel offset** and the
@@ -3146,7 +3147,7 @@ missing, so a jump cannot collapse unmounted rows to height 0.
 There is **no `VirtualList` wrapper component**. The window is app state:
 only the app knows when it must widen, for example when a filter grows
 `itemCount` without any scroll. Keep `start` in `useState`, move it from
-`onVisibleRange`, and slice around it.
+`onVisibleRange` (it fires when the visible range changes), and slice around it.
 
 ```tsx
 const WINDOW = 40
@@ -9312,12 +9313,14 @@ renderer.captureScreenshot('/tmp/test.png')
 const text = renderer.getAllText()
 ```
 
+`captureScreenshot` draws the page whole first (it notifies the view and refreshes the window), so it cannot show what a patched tick or a frame that moved the rows of a `<virtual-list>` in place drew; `captureShownFrame(path)` saves the frame that was drawn last as it is, for a test that compares such a frame with the one built whole.
+
 `createTestRoot(options)` takes the same window options as a live window (`WindowOptions`), plus `fonts` to register font files and `scaleFactor`, which only the test window has, and opens the offscreen window with them through the same translation. The size defaults to 1280x800, not the live 800x600, and `focus` to `false`. What the window does with each option:
 
 | Option | In the test window |
 |---|---|
 | `width`, `height` | The window size (`getWindowSize()`). |
-| `title` | The platform window's title, read with `getWindowTitle()`. `"GPUIX"` when unset. |
+| `title` | The platform window's title, read with `getWindowTitle()` and changed with `setWindowTitle()`. `"GPUIX"` when unset. |
 | `appearance` | Applied before the window opens; see [Appearance](#appearance). |
 | `titlebarTransparent` | The window counts as frameless, so [`appRegion`](#window-drag-regions) applies and a press in a drag region is recorded (below). Without it `appRegion` does nothing, as in a window with a titlebar. |
 | `transparent`, `windowBackground` | Set on the native window. |
@@ -9582,9 +9585,9 @@ Counters you read off the renderer:
 - `getPatchCounters()`, also on the live `GpuixRenderer` so a window with the display
   link can tell a patched tick from one drawn whole: `patchedFrames` and
   `patchedUnits`, `emptyTicks` (ticks whose only changes are in content nobody sees, such as the
-  content of a `content-visibility` host that skips: no frame is built and none is presented), and two JSON objects keyed by reason, `declines` (ticks GPUI drew
+  content of a `content-visibility` host that skips: no frame is built and none is presented), `sceneRebuilds` (patches that had to make the scene's primitives again) and `inPlacePrimitives` (primitives a patch wrote over their place), and two JSON objects keyed by reason, `declines` (ticks GPUI drew
   whole after trying to patch them) and `unpatchable` (ticks Ghia did not try to
-  patch, such as `Sourced` for a pointer move and `Edited` for a commit). While
+  patch, such as `Sourced` for a focus or scroll change, `Hover` for a hover that only paints an element that no root of the last frame holds, and `Edited` for a commit). A hover that only changes how elements paint (a colour, a border colour, the colour of a shadow) is a patched tick when the roots that hold them can be repainted; one that lays out, or that a listener hears, is a frame built whole. While
   something runs, every tick drawn whole is counted in one of the two, on a page with
   no patched unit too. A running element that is no unit is counted under the reason
   it is none: `LayoutAnimation` (what runs moves a box), `Escapes` (it holds a
@@ -9615,7 +9618,10 @@ also tells the window, so the frame after it is built whole and never a tick.
 with. Set `GPUIX_RETAIN_OFF=1` (or call `setRetainEnabled(false)` on one window)
 to build every frame in full, for timing, `GPUIX_PATCH_OFF=1` (or
 `setPatchEnabled(false)` on one window) to draw every tick of an animation whole
-instead of patching it, and
+instead of patching it, `getPatchCounters().scrollPatch` for how the frames after a
+list scroll were classified and how many were drawn by moving the rows of the frame before (`patched`; `applyDeclines`
+says why the others that could be were not; a `<virtual-list>` with a scrollbar is not yet, give it `scrollbarWidth: "none"`
+to measure one; `GPUIX_SCROLL_PATCH_OFF=1`, or `setScrollPatchEnabled(false)`, turns it off and draws every frame whole), and
 `GPUIX_RETAIN_VERIFY=1` to build each frame that replayed a second time, whole,
 and compare the two: a difference is printed as `[retained]` and fails
 `unmount()`. Run your suite with it on after a change to a custom element.

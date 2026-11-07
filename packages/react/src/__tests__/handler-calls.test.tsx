@@ -24,6 +24,7 @@ const PNG_1X1 = Buffer.from(
 const NOT_CALLABLE_FROM_A_HANDLER = new Set([
   "advanceTime",
   "captureScreenshot",
+  "captureShownFrame",
   "dispose",
   "dispatchEvent",
   "dispatchMouseMove",
@@ -201,6 +202,7 @@ function calls(r, ids) {
     setNativeSurfacesAvailable: () => r.setNativeSurfacesAvailable(true),
     setPointerCapture: () => r.setPointerCapture(ids.box, 1),
     setPatchEnabled: () => r.setPatchEnabled(true),
+    setScrollPatchEnabled: () => r.setScrollPatchEnabled(true),
     setRetainLift: () => r.setRetainLift(["svg"]),
     setRetainPlanning: () => r.setRetainPlanning(true),
     setRetainEnabled: () => r.setRetainEnabled(true),
@@ -213,6 +215,7 @@ function calls(r, ids) {
     setWindowAppearanceChange: () => r.setWindowAppearanceChange(false, 1),
     setWindowEventListeners: () => r.setWindowEventListeners(["keydown"]),
     setWindowKeyEvents: () => r.setWindowKeyEvents(true, true, 1),
+    setWindowTitle: () => r.setWindowTitle("handler-calls"),
     setWindowMediaChange: () => r.setWindowMediaChange(false),
     setWindowSelectionChange: () => r.setWindowSelectionChange(false, 1),
     simulateLostMouseUp: () => r.simulateLostMouseUp(),
