@@ -86,8 +86,8 @@ impl GpuixView {
         if std::mem::replace(&mut self.patch.installed, true) {
             return;
         }
-        self.install_scroll_gate(window);
         let view = cx.weak_entity();
+        self.install_scroll_gate(window, view.clone());
         let patcher = move |window: &mut gpui::Window, app: &mut gpui::App| -> bool {
             let Some(view) = view.upgrade() else {
                 return false;

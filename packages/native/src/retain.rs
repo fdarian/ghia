@@ -857,6 +857,16 @@ struct Deltas {
     scrolling: bool,
 }
 
+/// What the pointer, focus, scrolls and custom elements differ in from the frame before, see `Retain::compare_sources`.
+struct Compared {
+    all: bool,
+    changed: Vec<u64>,
+    scrolled: FxHashSet<u64>,
+    scrolling: bool,
+    scrolls: FxHashMap<u64, (u32, u32)>,
+    customs: FxHashMap<u64, Option<u64>>,
+}
+
 /// What the sources differ in from the frame before, see `Retain::compute_deltas`.
 struct Found {
     all: bool,
@@ -1589,15 +1599,9 @@ impl Retain {
         self.commit_deltas(sources, found);
     }
 
-    /// What `sources` differ in from what the frame before saw. Changes nothing, so that a tick can
-    /// ask whether a frame would find something without being that frame.
-    ///
-    /// A `preview` is for a tick that a patch can draw, which takes the hover from
-    /// `Sources::hover_paint` and does not look at the chain: a hover that restyles by paint is
-    /// there, and one that restyles otherwise is a frame built whole before any tick is asked about.
-    /// A frame built whole takes the chain's difference, the elements restyled since it by paint,
-    /// and those that patches repainted.
-    fn compute_deltas(&self, sources: &Sources, preview: bool) -> Found {
+    /// What the pointer, the focus, the scrolls and the custom elements say differs from the frame before,
+    /// the part of [`Self::compute_deltas`] that no clock moves (`preview` is as it is there).
+    fn compare_sources(&self, sources: &Sources, preview: bool) -> Compared {
         let mut changed: Vec<u64> = Vec::new();
         let seen = &self.seen;
         let all = !seen.known || seen.selection != sources.selection;
@@ -1667,6 +1671,44 @@ impl Retain {
         }
         changed.extend(seen.customs.keys().filter(|id| !customs.contains_key(id)));
 
+        Compared { all, changed, scrolled, scrolling, scrolls, customs }
+    }
+
+    /// Whether something differs from the frame shown that a frame that only moves the rows of a list would
+    /// leave as it was: a source `compute_deltas` finds for a tick (a press, the focus, a selection, a custom
+    /// element, the scroll of a scroller that is no list: the list is not among `Sources::scrolls`), a
+    /// measurement, a link, a command or a hover restyled by paint that no frame has drawn. A peek, as `preview` is.
+    pub(crate) fn sources_changed(&self, sources: &Sources) -> bool {
+        if !self.seen.known {
+            return true;
+        }
+        let compared = self.compare_sources(sources, true);
+        compared.all
+            || !compared.changed.is_empty()
+            || !sources.measured.is_empty()
+            || !sources.links.is_empty()
+            || !sources.commanded.is_empty()
+            || !sources.relevance.is_empty()
+            || !sources.hover_paint.is_empty()
+    }
+
+    /// What `sources` differ in from what the frame before saw. Changes nothing, so that a tick can
+    /// ask whether a frame would find something without being that frame.
+    ///
+    /// A `preview` is for a tick that a patch can draw, which takes the hover from
+    /// `Sources::hover_paint` and does not look at the chain: a hover that restyles by paint is
+    /// there, and one that restyles otherwise is a frame built whole before any tick is asked about.
+    /// A frame built whole takes the chain's difference, the elements restyled since it by paint,
+    /// and those that patches repainted.
+    fn compute_deltas(&self, sources: &Sources, preview: bool) -> Found {
+        let compared = self.compare_sources(sources, preview);
+        let all = compared.all;
+        let scrolled = compared.scrolled;
+        let scrolling = compared.scrolling;
+        let scrolls = compared.scrolls;
+        let customs = compared.customs;
+        let mut changed = compared.changed;
+
         let motion: FxHashSet<u64> = sources.motion.iter().copied().collect();
         // A dormant element is not a change: the roots above it keep their recording, and a frame
         // that shows it builds the root late, with the clock of that frame. One that was found
@@ -1685,7 +1727,7 @@ impl Retain {
                 running.push(id);
             }
         }
-        running.extend(seen.motion.iter().filter(|id| !motion.contains(id)));
+        running.extend(self.seen.motion.iter().filter(|id| !motion.contains(id)));
         let mut dynamic = Vec::new();
         // Everything that is asleep is asked again when the answers may have moved.
         let sleepers = self.dormant.iter().filter(|(id, bits)| stale && **bits != 0 && !self.dynamic.contains_key(id));
@@ -5267,6 +5309,11 @@ mod tests {
             self.retain.units().iter().map(|unit| unit.id).collect()
         }
 
+        /// The sources of a frame that nothing but time moved.
+        fn sources(&self) -> Sources<'_> {
+            sources_of(&self.tree, &self.focus, &self.handles, &self.scrolls, &[], false)
+        }
+
         fn preview(&self, hovered: &[u64], scroll_animating: bool) -> Result<Vec<u64>, Unpatchable> {
             let mut sources = sources_of(&self.tree, &self.focus, &self.handles, &self.scrolls, hovered, false);
             sources.hover_paint = self.hover_paint.clone();
@@ -6156,6 +6203,54 @@ mod tests {
         assert_eq!(page.preview(&[], true), Err(Unpatchable::ScrollAnimation));
         page.tree.set_text(3, "words".to_owned());
         assert_eq!(page.preview(&[], false), Err(Unpatchable::Edited));
+    }
+
+    #[test]
+    fn a_frame_that_only_moves_the_rows_of_a_list_asks_for_the_sources_a_tick_asks_for() {
+        let mut page = Units::new();
+        page.page(&[], None, None);
+        page.page(&[], None, None);
+        assert!(!page.retain.sources_changed(&page.sources()), "nothing but time and the scroll of a list differs");
+
+        // The pointer is the classifier's: a hover chain that moved is no source here.
+        let moved = [3, 2, 1];
+        let mut sources = sources_of(&page.tree, &page.focus, &page.handles, &page.scrolls, &moved, false);
+        assert!(!page.retain.sources_changed(&sources));
+        // What a tick treats as a source is one: a press, the focus, a selection, a measurement, a link, a command, a
+        // relevance, a hover restyled by paint that no frame drew, a custom element, the scroll of a scroller.
+        let pressed = [3];
+        sources = page.sources();
+        sources.active = &pressed;
+        assert!(page.retain.sources_changed(&sources), "the active chain");
+        sources = page.sources();
+        sources.selection = 7;
+        assert!(page.retain.sources_changed(&sources), "the selection");
+        for (what, edit) in [
+            ("a measurement", (|sources: &mut Sources| sources.measured = vec![3]) as fn(&mut Sources)),
+            ("a link", |sources| sources.links = vec![3]),
+            ("a command", |sources| sources.commanded = vec![3]),
+            ("a relevance", |sources| sources.relevance = vec![3]),
+            ("a hover restyled by paint", |sources| sources.hover_paint = vec![3]),
+            ("a custom element", |sources| sources.customs = vec![(5, Some(1))]),
+        ] {
+            sources = page.sources();
+            edit(&mut sources);
+            assert!(page.retain.sources_changed(&sources), "{what}");
+        }
+        page.focus.within = Arc::from([5]);
+        assert!(page.retain.sources_changed(&page.sources()), "the focus");
+        page.focus.within = Arc::from([]);
+        assert!(!page.retain.sources_changed(&page.sources()));
+        page.scrolls.insert(2, gpui::ScrollHandle::new());
+        page.scrolls[&2].set_offset(gpui::point(gpui::px(0.0), gpui::px(-40.0)));
+        assert!(page.retain.sources_changed(&page.sources()), "a scroller that is no list scrolled");
+    }
+
+    #[test]
+    fn the_sources_of_a_frame_that_was_never_built_are_a_change() {
+        let page = Units::new();
+        let sources = sources_of(&page.tree, &page.focus, &page.handles, &page.scrolls, &[], false);
+        assert!(page.retain.sources_changed(&sources));
     }
 
     /// The page with 1, 2 and 3 holding a hover that paints (3 declares it), whose roots a frame records.

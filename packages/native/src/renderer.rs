@@ -9300,6 +9300,23 @@ impl GpuixView {
         window: &gpui::Window,
         now: web_time::Instant,
     ) -> std::result::Result<Vec<u64>, crate::retain::Unpatchable> {
+        self.with_sources(window, now, |sources, gliding| {
+            self.retain.preview(
+                sources,
+                crate::scroll::animating() || crate::scrollbar::needs_frames() || crate::scrollbar::stale_at(now),
+                gliding,
+            )
+        })
+    }
+
+    /// Reads everything the build takes besides the tree, as the frame at `now` would find it (changing
+    /// nothing, see [`Self::preview_tick`]) and gives it to `read`, with whether a `layout` glide is in flight.
+    pub(crate) fn with_sources<R>(
+        &self,
+        window: &gpui::Window,
+        now: web_time::Instant,
+        read: impl FnOnce(&crate::retain::Sources, bool) -> R,
+    ) -> R {
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();
         let focus_styles = self.focus.styles(&tree, tree.keyboard_focus_dim());
@@ -9361,12 +9378,7 @@ impl GpuixView {
         let gliding = self.layout_flips.needs_frames(&self.motion_values, |id| {
             tree.elements.get(&id).is_some_and(|element| !crate::layout::box_generation::is_hidden(&tree, element))
         });
-        self.retain
-            .preview(
-                &sources,
-                crate::scroll::animating() || crate::scrollbar::needs_frames() || crate::scrollbar::stale_at(now),
-                gliding,
-            )
+        read(&sources, gliding)
     }
 
     /// Everything `Dormancy::holds` reads that a build of the element is not the only way to move,

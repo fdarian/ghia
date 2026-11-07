@@ -810,7 +810,7 @@ that holds is counted in `held`, so what else would stop the frame is known too:
 | Reason | It holds when |
 |---|---|
 | `Other` | the owner has no whole frame shown (no gate, planning off, a layout-only pass since, an element that follows the clock), the frame has no list, more than one list moved, the list is settling its position (a reset, a pending scroll adjustment, following its tail), or the window was resized |
-| `Edited` | the tree's root revision is not the one the frame shown was built from (a commit), a view other than the list's was notified, or the window was refreshed |
+| `Edited` | the tree's root revision is not the one the frame shown was built from (a commit), a view other than the list's was notified, the window was refreshed, or a source other than the scroll differs from the frame shown (a press that restyles with `:active`, the focus, a selection, a measurement, a link, a command, a custom element, the scroll of a scroller that is no list: the owner says it, below) |
 | `Membership` | a layout at the new position would build a row the frame shown did not paint, or measure one (`ListState::rows_needed` replays the walk of `layout_items` over the rows already measured; a row that only leaves is fine, because its operations stay and the clip hides them) |
 | `Hover` | the pointer moved since the frame shown, or the hit chain under it once the rows move would restyle something or emit an event for a listener: the owner is given the chain before (the frame shown) and the one after (the hitboxes of the rows moved, the hit test run on them) and answers with what the dispatcher's `update_hover` would do moving the hover from the one to the other (an element entering or leaving that has a `hover` style, a declared group, `whileHover`, a `:has(:hover)` style on an ancestor; a pointer boundary event with a listener on the path or on `window`). Asked only when `HitboxChain` holds; a window whose owner does not answer takes every `HitboxChain` for a `Hover`. `hoverOnly` counts the `Hover` frames that nothing else stops: eligible with the pointer elsewhere |
 | `HitboxChain` | a hitbox of a row that takes the pointer (not `PassThrough`) is under it before and not after the rows move, or the other way round. **Counted in `held` only**: the hit test is run again after a translate, so this alone stops nothing. It is the old `Hover`, which the children of a row crossing the pointer (an avatar, a text) held for almost every wheel event |
@@ -831,10 +831,15 @@ emit: `events::dispatcher::hover_would_matter`, which asks the code that `update
 one of them restyles, whether an event of the change has a listener on the path of the element it is for, or on `window`), of the state
 the pointer is in (a captured or locked target is the target before and after) and of the tree (a tree locked by an update says
 yes). It is a callback and not a state published with each frame (`Retain::publish_shown` is that, for `Edited`) because what it reads
-is the style and listeners of the elements under the pointer, which a frame would have to copy for every element. The other sources that
-`Retain::preview` reads for a tick (a measurement, a link, a command) are not asked yet, and the pointer and focus
-styles of the elements outside the rows are not either: a frame that differs in one of those and is called eligible is what
-`mispredicted` is for.
+is the style and listeners of the elements under the pointer, which a frame would have to copy for every element. The view notifies for sources other than the tree (a press that restyles by `:active`,
+a selection, a measurement, a link, a command, relevance: `events/listeners.rs`) with the same entity as the list's notify, which the tree's
+revision and the queue of views cannot tell apart, so the gate also asks what a tick asks: `GpuixView::with_sources` reads the sources as
+`preview_tick` does (the code is the same: `preview_tick` is `with_sources` and `Retain::preview`), and `Retain::sources_changed` is a peek of
+`compare_sources`, the part of `compute_deltas` that no clock moves, with the hover chain left out as a tick leaves it (the classifier asks
+about the pointer): anything it finds, or a measurement, a link, a command, a relevance or a hover restyled by paint that no frame has drawn,
+is `Edited`. The gate is given the `App` for it (`Window::set_scroll_patch_gate`) and reads the view only when it is not being updated.
+What it cannot read (the view or the pointer state in use) is a change. A running motion, a transition or an animation is not a source
+but a clock, which is `Clock`.
 
 **The check.** After a frame is drawn whose prediction was eligible, `settle_scroll_patch` compares what it built with the prediction:
 the rows it painted, a run for each, each put from its recording (not built) and moved by the delta the prediction gave. A difference
@@ -954,9 +959,7 @@ before (the build at `cef50f98`): 0 of 720 ticks patched, every frame holds `Thu
 hidden (5.4M in the previous measurement). The 392 ticks that stay whole are the rows coming in at an edge, a hover and the
 first wheel after a commit, slice 3's.
 
-**Not in 2b.** The row that comes in at an edge (`Membership`: a layout that builds a row), the hover that changes what is under the pointer (`Hover`), and what the
-gate cannot see (a measurement, a link, a command: these are the `mispredicted` of an eligible frame that the translate
-would draw wrong; the proxy has none).
+**Not in 2b.** The row that comes in at an edge (`Membership`: a layout that builds a row), and the hover that changes what is under the pointer (`Hover`).
 
 ## Limits
 
@@ -1026,6 +1029,11 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   entries of the control with the translate off, in frames that are translates (`patched` at least 6; it fails without the sweep after a translate). `onLayout` and
   `ResizeObserver` have nothing to read in a translate (no size changes) and an `auto` element cannot change its answer by a scroll that a recording of a row allows, so
   they have no case.
+- Native `retain.rs`: `sources_changed` (what the scroll gate asks of the sources) is false for a frame that only time and a hover chain moved, and true for a press (the
+  active chain), the focus, a selection, a measurement, a link, a command, a relevance, a hover restyled by paint, a custom element, a scroller that is no list and a
+  frame never built. There is no react test of the gate itself: a press and a double click are declined by the other checks too (the notify of another view, the
+  tree), and the keyboard does not select the text of the page, so no input of the test renderer changes only these sources; the translate tests passing (`patched` above 0) show
+  the gate does not decline what it should not.
 - `scroll-patch-clock.test.tsx` (react): a wheel in the draw of a tick (a transition of a box beside the list, the blink of the caret of an input beside it) is
   a whole frame, `reasons.Clock` counts them, the picture after each step and the `transitionend` are those of the control with the translate off, and the
   translates resume once the transition has ended. gpui `window/scroll_patch_tests.rs`: a `request_tick` in the draw of a wheel is `Clock` and the next wheel

@@ -47,8 +47,17 @@ impl Retain {
 }
 
 impl GpuixView {
+    /// Whether a source other than the scroll of a list differs from the frame shown, see
+    /// `Retain::sources_changed`. What cannot be read is a change.
+    fn sources_besides_scroll_changed(&self, window: &gpui::Window) -> bool {
+        if self.pointer.try_borrow().is_err() {
+            return true;
+        }
+        self.with_sources(window, self.clock.now(), |sources, _| self.retain.sources_changed(sources))
+    }
+
     /// Turns the classification on unless `GPUIX_SCROLL_PATCH_OFF`, and gives gpui the gate. Once.
-    pub(super) fn install_scroll_gate(&mut self, window: &mut gpui::Window) {
+    pub(super) fn install_scroll_gate(&mut self, window: &mut gpui::Window, view: gpui::WeakEntity<GpuixView>) {
         window.set_scroll_patch(std::env::var_os("GPUIX_SCROLL_PATCH_OFF").is_none());
         let shown = self.retain.shown.clone();
         let clock_asked = self.retain.clock_asked.clone();
@@ -84,18 +93,19 @@ impl GpuixView {
             settle(window, cx);
             crate::observers::sweep_after_translate(window.window_handle(), window.viewport_size(), &reports, &sweep_tree, &callback, cx);
         })));
-        window.set_scroll_patch_gate(Some(Rc::new(move |_: &gpui::Window| {
+        window.set_scroll_patch_gate(Some(Rc::new(move |window: &gpui::Window, cx: &gpui::App| {
             let Some(revision) = shown.0.get() else {
                 return Some(ScrollPatchReason::Other);
             };
             // A tree locked by an update is being edited.
-            let Ok(tree) = tree.try_lock() else {
-                return Some(ScrollPatchReason::Edited);
+            let current = {
+                let Ok(tree) = tree.try_lock() else {
+                    return Some(ScrollPatchReason::Edited);
+                };
+                tree.root_id
+                    .and_then(|id| tree.elements.get(&id))
+                    .map_or(0, |root| root.subtree_revision)
             };
-            let current = tree
-                .root_id
-                .and_then(|id| tree.elements.get(&id))
-                .map_or(0, |root| root.subtree_revision);
             if current != revision {
                 return Some(ScrollPatchReason::Edited);
             }
@@ -105,6 +115,15 @@ impl GpuixView {
             // A translate builds nothing, so it would leave what runs where the last frame left it.
             if clock_asked.0.get() {
                 return Some(ScrollPatchReason::Clock);
+            }
+            // The view notifies for other sources than the tree too (a press that restyles, a selection, a
+            // measurement, a link, a command), and the list's notify is the same entity's: the sources are
+            // compared as a tick's are, and what differs besides the scroll is a frame built whole.
+            let Some(view) = view.upgrade().filter(|view| !view.is_updating(cx)) else {
+                return Some(ScrollPatchReason::Edited);
+            };
+            if view.read(cx).sources_besides_scroll_changed(window) {
+                return Some(ScrollPatchReason::Edited);
             }
             crate::scrollbar::container_bar_stale().then_some(ScrollPatchReason::Thumb)
         })));
