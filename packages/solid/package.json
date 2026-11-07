@@ -22,16 +22,6 @@
       "import": "./dist/jsx-dev-runtime.js",
       "default": "./dist/jsx-dev-runtime.js"
     },
-    "./preload": {
-      "types": "./dist/preload.d.ts",
-      "import": "./dist/preload.js",
-      "default": "./dist/preload.js"
-    },
-    "./bun-plugin": {
-      "types": "./dist/bun-plugin.d.ts",
-      "import": "./dist/bun-plugin.js",
-      "default": "./dist/bun-plugin.js"
-    },
     "./vite": {
       "types": "./dist/vite.d.ts",
       "import": "./dist/vite.js",
@@ -89,15 +79,12 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc",
-    "test": "bun run build && bun --cwd ../vite run build && bun --bun vitest run",
+    "build": "bun run --cwd ../vite build && tsc",
+    "test": "bun run build && bun --bun vitest run",
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @ghia/solid locally. CI is the only release path.'); process.exit(1) }\""
   },
   "dependencies": {
-    "@babel/core": "^7.28.0",
-    "@babel/preset-typescript": "^7.27.1",
     "@ghia/native": "workspace:^",
-    "babel-preset-solid": "1.9.15",
     "solid-refresh": "^0.6.3",
     "vite-plugin-solid": "^2.11.15"
   },
@@ -116,7 +103,6 @@
   },
   "devDependencies": {
     "@ghia/vite": "workspace:^",
-    "@types/babel__core": "^7.20.5",
     "@types/bun": "^1.4.0",
     "@types/node": "^25.3.3",
     "solid-js": "1.9.15",

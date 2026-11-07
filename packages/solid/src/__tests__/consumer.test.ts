@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import solidPlugin from "../bun-plugin.js"
 
 const fixture = join(import.meta.dirname, "../../fixtures/consumer")
 const workspace = resolve(import.meta.dirname, "../../../..")
@@ -63,19 +62,6 @@ async function waitForLine(command: string[], cwd: string, prefix: string): Prom
 }
 
 describe("Solid package consumer", () => {
-  it("builds TSX with the exported Bun plugin", async () => {
-    const result = await Bun.build({
-      entrypoints: [join(fixture, "build-entry.tsx")],
-      target: "bun",
-      plugins: [solidPlugin],
-      write: false,
-    })
-    expect(result.success, result.logs.join("\n")).toBe(true)
-    const output = result.outputs[0]
-    if (output === undefined) throw new Error("Bun.build produced no output")
-    expect(await output.text()).toContain("built with plugin")
-  })
-
   describe("installed from tarballs with pnpm, on Vite", () => {
     const ghia = join(temp, "node_modules", ".bin", "ghia")
 

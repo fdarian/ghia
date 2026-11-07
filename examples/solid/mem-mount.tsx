@@ -1,3 +1,4 @@
+// Mounts the chat page once and prints the memory it cost: ghia dev --config vite.mem-mount.config.mts
 import { createTestRoot } from "@ghia/solid/testing"
 import { ChatApp } from "./chat"
 
