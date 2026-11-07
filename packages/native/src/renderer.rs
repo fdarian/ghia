@@ -5813,28 +5813,13 @@ impl Drop for GpuixRenderer {
 
 // ── GPUI View ────────────────────────────────────────────────────────
 
-/// The title a view last gave its platform window.
-#[derive(Default)]
-struct AppliedWindowTitle(Option<String>);
-
-impl AppliedWindowTitle {
-    /// `wanted` when the window does not have it yet, recording it as applied.
-    fn to_apply<'a>(&mut self, wanted: &'a str) -> Option<&'a str> {
-        if self.0.as_deref() == Some(wanted) {
-            return None;
-        }
-        self.0 = Some(wanted.to_owned());
-        Some(wanted)
-    }
-}
-
 pub(crate) struct GpuixView {
     pub(crate) tree: Arc<Mutex<RetainedTree>>,
     pub(crate) event_callback: Option<EventCallback>,
     pub(crate) window_title: String,
     /// The title this view last gave its platform window. `render` sets the window's title only when
     /// `window_title` differs from it: the platform call is an AppKit `setTitle` and an a11y update.
-    applied_window_title: AppliedWindowTitle,
+    applied_window_title: crate::window_title::AppliedWindowTitle,
     /// What the key and mouse listeners read about this view. See `InputRouting`.
     pub(crate) routing: crate::events::keyboard::InputRouting,
     key_down_interception: Option<gpui::Subscription>,
@@ -6887,7 +6872,7 @@ impl GpuixView {
             tree,
             event_callback,
             window_title,
-            applied_window_title: AppliedWindowTitle::default(),
+            applied_window_title: crate::window_title::AppliedWindowTitle::default(),
             routing: routing.clone(),
             key_down_interception: None,
             window_selection_change: false,
@@ -19106,33 +19091,5 @@ mod running_motion_tests {
         assert!(states[&3].is_animating(now) && states[&4].is_animating(now), "both run");
         let running = running_motion(&tree, &states, None, (&Default::default(), &Default::default()), &Default::default(), now);
         assert_eq!(running, vec![4], "3 is under the host that skips its content, 4 is drawn");
-    }
-}
-
-#[cfg(test)]
-mod window_title_tests {
-    use super::*;
-
-    #[test]
-    fn the_first_title_and_a_changed_one_are_applied() {
-        let mut applied = AppliedWindowTitle::default();
-        assert_eq!(applied.to_apply("first"), Some("first"));
-        assert_eq!(applied.to_apply("second"), Some("second"));
-        assert_eq!(applied.to_apply("first"), Some("first"));
-    }
-
-    #[test]
-    fn the_title_the_window_already_has_is_not_applied_again() {
-        let mut applied = AppliedWindowTitle::default();
-        applied.to_apply("title");
-        assert_eq!(applied.to_apply("title"), None);
-        assert_eq!(applied.to_apply("title"), None);
-    }
-
-    #[test]
-    fn an_empty_title_is_applied_once() {
-        let mut applied = AppliedWindowTitle::default();
-        assert_eq!(applied.to_apply(""), Some(""));
-        assert_eq!(applied.to_apply(""), None);
     }
 }
