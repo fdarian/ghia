@@ -1345,6 +1345,45 @@ those of `restyle_paints_strictly` and `declares_paint_hover`), `style_memo.rs` 
 memo that is full lets go of the styles nothing holds) and `tape.rs` (nine variants of a root compared by what they hold and by their words, at
 two moves of the text layout, give the same answer for every pair).
 
+### A row the list does not have to build to measure (slice G4e)
+
+A list scroll that brings a row into the overdraw measured it first: the list built the row and laid it out in a scratch frame, threw the
+frame away, and built the row again when it showed (a profile of the allstatic key put 37% of it, 3.3M instructions, in `measure_overdraw`).
+A row whose root style fixes its border box needs no measuring, so the owner tells the list
+(`ListState::set_exact_item_size`, [scroll.md](scroll.md#virtual-lists), `list_sizes.rs`): the overdraw of a scroll is measured from the
+declarations with no scratch frame, and a row that shows is checked against what it was told (`scrollPatch.declarationMismatches`, 0 in every
+test and measurement). `scrollPatch.rowsMeasuredByLayout` and `rowsMeasuredByDeclaration` count the rows measured each way. The proxies'
+rows (`position: relative`, `height: 72`, a bottom border, a paint-only hover) are declared, and none of their rows is measured by layout.
+
+The declarations are read from the tree when a list's rows change, and only for the rows whose revision changed: a first version read all 60
+rows at every restyle of two, which cost App-noreveal 1M a key, and costs nothing now (22.3M and 22.2M against 22.5M and 22.6M with the
+switch off).
+
+**Measured** (release addon, `A11Y=0`, ghia-bench's data, two runs each, back to back with `GPUIX_LIST_SIZES_OFF=1`, which is the build
+before the slice with the zed bump). The navigate proxy (`mailbox-navigate/profile.tsx`, 51 keys), median of keys 2 to 30 (10 to 50): App
+**28.1M and 28.8M** (26.8M and 26.8M) against 28.8M and 30.1M (27.6M and 27.6M) off, and 32.0M (30.8M) at G4c, the rest of that being the zed
+bump (the sort that moves each item once, the scene made once for a patch and a translate, `deferredSceneRebuilds` 1 a key that scrolls);
+App-allstatic **8.6M and 8.6M** (8.7M) against 9.4M and 9.4M; App-noreveal 22.3M and 22.2M (19.2M and 19.3M), unchanged by the slice (22.5M and
+22.6M off). Per key `rowsMeasuredByDeclaration` is 1 (0 to 9, 53 over the 51 keys, the nine of the first draw), `rowsMeasuredByLayout`
+is 0 on every key where it was 1 (0 to 9, 53) with the switch off. The scroll proxy (`PHASE=scroll`) median **3.185M and 3.182M** against
+4.270M and 4.213M off and 4.33M at G4c, mean 5.008M and 5.017M against 5.406M and 5.398M (5.47M); the membership translates (333 of 720
+ticks, 286 rows built) cost a median of 5.58M against 6.56M. `PHASE=hover` row crossings 3.654M and 3.653M against 3.663M and 3.660M
+(3.66M): they build no row that is not shown.
+
+The saving is the scratch layout and not the shaping: a text laid out in the scratch frame is a hit in the line layout cache when the row
+is built where it shows, so the shaping the declaration avoids in the scratch frame is paid by the row that shows, and a key that brings one
+row in saves about 0.8M, not the 3.3M the scratch frame took.
+
+**Pinned** by `list-exact-sizes.test.tsx` (react): 34 row styles (a height in px, with a position, a width, padding, borders of 1, 3, 0.4, 1.5
+and 2.5 px, a height below its padding or border, margins, a flex and a grid container with and without a width, a fractional height, a hover
+and a transition that paint) are laid out at the size they declare (`declarationMismatches` 0, no row measured by layout) and are the
+same list as one that is not told (boxes, scroll extent, picture with the thumb, after wheels and `scrollTo`s down and back); styles that
+leave the box to layout (no height, `%`, `em`, `calc()`, min and max sizes, an aspect ratio, an absolute position, a hover that pads, a
+transition of the height) declare nothing; a list of both measures by layout only the rows that are not told; 120 rows of which most are
+never shown are not built to be measured (`elementsBuilt` below that of the list not told); a windowed list; a row whose height changes.
+`scroll-patch-classifier.test.tsx`: a row never measured is a translate when its style declares its size and `Membership.unmeasured` when
+it does not. The unit tests of `list_sizes.rs` pin each condition of the declaration, and the zed tests (`exact_sizes`) the list.
+
 ## Limits
 
 - **A tick that gpui or gpuix cannot patch is a full frame, and says why.** A subtree of more than 256 elements is built whole

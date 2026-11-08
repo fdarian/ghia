@@ -9623,7 +9623,7 @@ to build every frame in full, for timing, `GPUIX_PATCH_OFF=1` (or
 instead of patching it, `getPatchCounters().scrollPatch` for how the frames after a
 list scroll were classified and how many were drawn by moving the rows of the frame before (`patched`; `applyDeclines`
 says why the others that could be were not; a `<virtual-list>` with a scrollbar is not yet, give it `scrollbarWidth: "none"`
-to measure one; `GPUIX_SCROLL_PATCH_OFF=1`, or `setScrollPatchEnabled(false)`, turns it off and draws every frame whole), and
+to measure one; `GPUIX_SCROLL_PATCH_OFF=1`, or `setScrollPatchEnabled(false)`, turns it off and draws every frame whole; `rowsMeasuredByLayout`, `rowsMeasuredByDeclaration` and `declarationMismatches` count how the lists measured their rows, and `GPUIX_LIST_SIZES_OFF=1`, or `setListSizesEnabled(false)`, makes them all by layout), and
 `GPUIX_RETAIN_VERIFY=1` to build each frame that replayed a second time, whole,
 and compare the two: a difference is printed as `[retained]` and fails
 `unmount()`. Run your suite with it on after a change to a custom element.
