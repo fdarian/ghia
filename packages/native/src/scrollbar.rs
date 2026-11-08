@@ -378,9 +378,7 @@ impl Source {
     }
 
     /// A user's drag or click on a list's bar is a scroll the page hears of as it hears of a wheel.
-    /// It is reported here, not by gpui's `set_offset_from_scrollbar_by_user`: that reads the range
-    /// at `logical_scroll_top`, which for a bottom-aligned list at its end is the item count, and
-    /// reports no rows then.
+    /// gpui calls a list's scroll handler for the wheel only, so the range is reported here.
     fn set_offset(&self, offset: gpui::Point<gpui::Pixels>) {
         match self {
             Source::Container { id, handle } => {
