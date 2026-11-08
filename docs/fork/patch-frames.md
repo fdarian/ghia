@@ -1011,7 +1011,7 @@ that holds is counted in `held`, so what else would stop the frame is known too:
 | `Membership` | a layout at the new position would build a row the frame shown did not paint, or measure one (`ListState::rows_needed` replays the walk of `layout_items` over the rows already measured; a row that only leaves is fine, because its operations stay and the clip hides them). The rows of the overdraw that are not measured are measured first, inside the draw, so only a row that shows with no size holds it ([slice G3d](#overdraw-measured-and-rows-built-again-slice-g3d)) |
 | `Hover` | the pointer moved since the frame shown, or the hit chain under it once the rows move would restyle something or emit an event for a listener: the owner is given the chain before (the frame shown) and the one after (the hitboxes of the rows moved, the hit test run on them) and answers with what the dispatcher's `update_hover` would do moving the hover from the one to the other (an element entering or leaving that has a `hover` style, a declared group, `whileHover`, a `:has(:hover)` style on an ancestor; a pointer boundary event with a listener on the path or on `window`). The owner says yes for a hover that is a frame built whole (a restyle by more than paint, `whileHover`, a group) or that a listener hears, and no for one that only paints: that one is painted by the tick after the translate ([Under a wheel](#under-a-wheel-slice-g3e)). Asked only when `HitboxChain` holds and the pointer is where the frame shown had it; a pointer that moved since holds `Hover` without being asked (`hoverAsked` and `hoverMatters` below tell the two apart); a window whose owner does not answer takes every `HitboxChain` for a `Hover`. `hoverOnly` counts the `Hover` frames that nothing else stops: eligible with the pointer elsewhere |
 | `HitboxChain` | a hitbox of a row that takes the pointer (not `PassThrough`) is under it before and not after the rows move, or the other way round. **Counted in `held` only**: the hit test is run again after a translate, so this alone stops nothing. It is the old `Hover`, which the children of a row crossing the pointer (an avatar, a text) held for almost every wheel event |
-| `Place`, `Region`, `Clip` | `Recorded::place` would not put a row there (a `Region` or `Clip` miss of a row that stays is built again in the translate when the list has a builder, which Ghia's lists have, so for them only `Place` holds the frame, [slice G3d](#overdraw-measured-and-rows-built-again-slice-g3d)): what it reads of its surroundings differs in more than the offset (a scale factor that is not a power of two, an exact or rounded clip around, a general transform), the region the row was recorded in no longer covers the clip around it, or a rounded clip in it meets the clip differently (`ReplayKey::relocates_by`, `RelocationInfo::fits`, asked of the recording by `RetainedState::would_place`). `held` also counts `Region.top`, `Region.bottom` and `Region.side`: the edge of the clip the moved region leaves bare (the rows moved up by more than the overscan leave the bottom bare) |
+| `Place`, `Region`, `Clip` | `Recorded::place` would not put a row there (a `Region` or `Clip` miss of a row that stays is built again in the translate when the list has a builder, which Ghia's lists have, though since [slice G4a](#a-row-of-a-list-is-recorded-for-its-travel-slice-g4a) a row of a list does not miss `Region` while it shows, so for them only `Place` holds the frame, [slice G3d](#overdraw-measured-and-rows-built-again-slice-g3d)): what it reads of its surroundings differs in more than the offset (a scale factor that is not a power of two, an exact or rounded clip around, a general transform), the region the row was recorded in no longer covers the clip around it, or a rounded clip in it meets the clip differently (`ReplayKey::relocates_by`, `RelocationInfo::fits`, asked of the recording by `RetainedState::would_place`). `held` also counts `Region.top`, `Region.bottom` and `Region.side`: the edge of the clip the moved region leaves bare (the rows moved up by more than the overscan leave the bottom bare) |
 | `Focus` | the frame shown, or a layout there, builds a row outside the viewport for the focus it holds |
 | `A11y` | the accessibility tree is being built |
 | `ScrollAnimation` | a smooth scroll or a scrollbar fade has frames of its own (the owner says it) |
@@ -1269,6 +1269,39 @@ the boxes after each step are equal with the translate off; the row under the po
 frame built whole, so a run of its own); rows with a `pointerenter` listener are a frame built whole for the crossing; and under the retention
 verifier the steps are translates compared with a build.
 
+### A row of a list is recorded for its travel (slice G4a)
+
+A row was recorded with the overscan of any scroller, half the height of the list, so a row that travelled further than that since the
+frame that recorded it did not fit (`Region`: the region it was recorded in, moved by the scroll, no longer covers the clip) and was built
+again where it is, in the translate (`rowsRebuilt`, [slice G3d](#overdraw-measured-and-rows-built-again-slice-g3d)): one row for each row that
+came in, 3.6M instructions or so a row and a layout pass of the row. `Scroller::of_list` now records a row for the travel of a row that shows.
+A row is recorded when the list builds it, up to the list's overdraw outside the clip, and is replayed until it leaves across the
+viewport, so it travels the overdraw, the viewport and its own height; the box of a row that has never painted is not known, and a root is
+at most `ROOT_VIEWPORTS` (2) viewports tall, so the overscan of a row is three heights of the list plus the overdraw (`Scroller::of_list`,
+`overdraw` read from the list's config where the row is built). A scroller that is no list keeps half a viewport (`OVERSCAN_VIEWPORTS`).
+
+The region is bigger, not the row: what a recording holds is the box of the row cut by the region, and a row the list builds is within
+the overdraw of the clip, so every row is recorded whole as it was when the overscan was bigger than the distance of the row from the
+clip. The overdraw is 512 by default, which is more than the 358 of the old overscan of the proxy, so a row 358 to 512 px outside the clip
+was culled by its parents (`cull_outset` plus the overscan, `Retained::cull_outset`) and is now prepainted and painted in its region
+when the list builds it: once, where it was built again when it came in. What a frame built whole emits does not change, since placing
+the recording drops what the clip around cuts away entirely (`Scene::place`).
+
+**Measured** (release addon, `A11Y=0`, ghia-bench's data, two runs). The navigate proxy (`mailbox-navigate/profile.tsx`): App median of keys 2 to 30
+**36.9M and 36.1M** (G3e: 38.5M and 38.6M), keys 2 to 8 33.9M and 31.6M, keys 9 to 30 38.9M and 37.3M; a key that scrolls builds 1 row
+(`rowsBuilt` 1, 21 of 22 composed) and builds none again (`rowsRebuilt` 0, it was 1), and no key counts a `Region` miss. App-allstatic (only
+the list scrolls) 9.6M and 9.6M (about 12.5M), App-noreveal 26.3M and 26.4M. The scroll proxy (`PHASE=scroll`): median 4.358M and 4.223M
+(4.369M and 4.365M), mean **5.511M and 5.520M** (7.148M and 7.134M): the translates are the same 693 of 720 ticks, and what they cost less is the rows
+that came in at a tick; no row is built again. `PHASE=hover` row crossings 4.598M and 4.604M (4.595M and 4.597M).
+
+**Pinned** by `scroll-patch-membership.test.tsx` (steps of two thirds of the list's height through four heights and back, by `scrollTo` and by
+wheel): rows come in (`rowsBuilt` above 0), `rowsRebuilt` is 0 and `relocationMisses.Region` is 0, and the picture, the boxes and the clicks are
+what the translate off gives, with the retention verifier too; `scroll-patch-classifier.test.tsx`: a hundred wheels of 5 (five heights of the
+list) build no row again and hold the frame for no `Region`; `navigate-patch.test.tsx`: the fifth key, which moved the rows by more than half
+the list, builds a row that comes in and none again. `retain.rs`: `Scroller::of_list` records for the overdraw and three heights of the list
+(the window's before the first layout). A row built again for `Clip` or `Place` is still built where it is, and `rowsRebuilt` counts it: gpui's
+tests pin that.
+
 ## Limits
 
 - **A tick that gpui or gpuix cannot patch is a full frame, and says why.** A subtree of more than 256 elements is built whole
@@ -1301,7 +1334,7 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   frames and no misprediction; one of 25 that brings the fourth row in is a `Membership`; rows with a hover style, or a
   `pointerenter` listener, and the pointer at 38 crossing into the next row is a `Hover` and `hoverOnly` for the listener and an eligible frame (`HitboxChain` held) for the hover style; rows that take the pointer and
   restyle nothing and have no listener are an eligible frame with `HitboxChain` held; a pointer that stays in its row is not a hover
-  change; fourteen wheels of 5 build a row again where it is (`rowsRebuilt`) and hold the frame for no `Region`; nothing is counted with the classifier off; the boxes, what is under a point and the
+  change; a hundred wheels of 5 build no row again (`rowsRebuilt` 0) and hold the frame for no `Region`; nothing is counted with the classifier off; the boxes, what is under a point and the
   picture after each of seven wheel events are equal with it on and off, for the four kinds of rows.
   gpui `window/scroll_patch_tests.rs`: each reason on a list of retained rows (a fraction, a row coming in, a row leaving, a pointer
   that stays and one that crosses, no overscan for the region and its edge, rows that are not relocatable, a root inside a row that was
