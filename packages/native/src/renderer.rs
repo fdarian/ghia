@@ -165,6 +165,8 @@ thread_local! {
     /// TODO: Scope by renderer/window ID when multi-window support is added.
     static SCROLL_HANDLES: RefCell<HashMap<u64, gpui::ScrollHandle>> = RefCell::new(HashMap::new());
     static VIRTUAL_LIST_STATES: RefCell<HashMap<u64, gpui::ListState>> = RefCell::new(HashMap::new());
+    /// The `visibleRange` reporters of the lists in `VIRTUAL_LIST_STATES`, for a write that moves one.
+    static VIRTUAL_LIST_REPORTERS: RefCell<HashMap<u64, Rc<crate::visible_range::RangeReporter>>> = RefCell::new(HashMap::new());
     /// `SCROLL_HANDLES` and `VIRTUAL_LIST_STATES` as the last forced pass of a read left them: a frame that
     /// skips the content it forced drops the scrollers in it from both, see [`keep_scroll_state`].
     static KEPT_SCROLL_HANDLES: RefCell<HashMap<u64, gpui::ScrollHandle>> = RefCell::new(HashMap::new());
@@ -265,9 +267,13 @@ fn scroll_element_to(
     behavior: crate::scroll::Behavior,
 ) -> bool {
     let list = VIRTUAL_LIST_STATES.with(|cell| {
-        cell.borrow()
-            .get(&id)
-            .map(|state| crate::scroll_write::write_list(metrics_current, id, state, top))
+        cell.borrow().get(&id).map(|state| {
+            VIRTUAL_LIST_REPORTERS.with(|reporters| {
+                let reporters = reporters.borrow();
+                let reporter = reporters.get(&id).map(|reporter| reporter.as_ref());
+                crate::scroll_write::write_list(metrics_current, id, state, reporter, top)
+            })
+        })
     });
     if let Some(moved) = list {
         return moved;
@@ -7664,12 +7670,14 @@ impl GpuixView {
         }
         queue_virtual_list_scroll(id, index, offset_in_item);
         if let Some(entry) = self.virtual_lists.get(&id) {
-            entry.reported_range.set(Some((index, index + 1)));
+            entry.reporter.report_at(
+                &entry.state,
+                gpui::ListOffset {
+                    item_ix: index,
+                    offset_in_item: gpui::px(offset_in_item),
+                },
+            );
         }
-        emit_event_full(&self.event_callback, id, "visibleRange", |payload| {
-            payload.start_index = Some(index as f64);
-            payload.end_index = Some((index + 1) as f64);
-        });
         true
     }
 
@@ -7704,7 +7712,7 @@ impl GpuixView {
         top: Option<f64>,
     ) -> Option<bool> {
         let entry = self.virtual_lists.get(&id)?;
-        Some(crate::scroll_write::write_list(metrics_current, id, &entry.state, top))
+        Some(crate::scroll_write::write_list(metrics_current, id, &entry.state, Some(&entry.reporter), top))
     }
 
     pub(crate) fn virtual_list_position(&self, id: u64) -> Option<[f64; 2]> {
@@ -8367,9 +8375,8 @@ struct VirtualListEntry {
     child_revisions: Vec<u64>,
     row_focus_handles: Vec<Option<gpui::FocusHandle>>,
     seen_rows: HashSet<u64>,
-    /// The `visibleRange` this list last reported (start, end). The scroll handler is set again every
-    /// render, so what it compares against lives here and the closure holds a clone.
-    reported_range: Rc<Cell<Option<(usize, usize)>>>,
+    /// Reports the list's `visibleRange` for the wheel handler and for a write that moves the list.
+    reporter: Rc<crate::visible_range::RangeReporter>,
     /// What the list asks for the size of a row it has not measured, see `list_sizes`.
     sizes: Rc<crate::list_sizes::DeclaredSizes>,
     /// What each row declared at its revision and focusability, so a change of two rows reads two styles.
@@ -8378,6 +8385,7 @@ struct VirtualListEntry {
 
 impl VirtualListEntry {
     fn new(
+        list_id: u64,
         config: VirtualListConfig,
         window_start: usize,
         child_ids: Vec<u64>,
@@ -8409,7 +8417,7 @@ impl VirtualListEntry {
             child_revisions,
             row_focus_handles,
             seen_rows: HashSet::new(),
-            reported_range: Rc::new(Cell::new(None)),
+            reporter: Rc::new(crate::visible_range::RangeReporter::new(list_id)),
             sizes,
             declared: HashMap::new(),
         }
@@ -8517,6 +8525,7 @@ impl VirtualListEntry {
             let should_follow =
                 config.follow_tail && (!self.config.follow_tail || self.state.is_following_tail());
             let mut replacement = Self::new(
+                self.reporter.list_id(),
                 config,
                 window_start,
                 child_ids,
@@ -10304,7 +10313,18 @@ impl gpui::Render for GpuixView {
         // would otherwise fire on some later frame, against child indices that
         // no longer match what JS meant.
         PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().clear());
-        VIRTUAL_LIST_STATES.with(|cell| crate::scroll_write::settle_lists(&cell.borrow()));
+        VIRTUAL_LIST_REPORTERS.with(|cell| {
+            let mut reporters = cell.borrow_mut();
+            reporters.clear();
+            for (&id, entry) in &self.virtual_lists {
+                reporters.insert(id, entry.reporter.clone());
+            }
+        });
+        VIRTUAL_LIST_STATES.with(|states| {
+            VIRTUAL_LIST_REPORTERS.with(|reporters| {
+                crate::scroll_write::settle_lists(&states.borrow(), &reporters.borrow())
+            })
+        });
         crate::scroll_write::note_metrics_current(window);
 
         let motion_value_demand = motion_value_demand(&tree, &self.motion_values, &self.retain);
@@ -11795,7 +11815,7 @@ fn build_virtual_list(
     } else {
         0
     };
-    let (list_state, reported_range) = match ctx.virtual_lists.entry(element.id) {
+    let (list_state, reporter) = match ctx.virtual_lists.entry(element.id) {
         std::collections::hash_map::Entry::Occupied(mut entry) => {
             let changed = entry.get_mut().sync(
                 config,
@@ -11818,7 +11838,7 @@ fn build_virtual_list(
                     });
                 }
             }
-            (entry.state.clone(), entry.reported_range.clone())
+            (entry.state.clone(), entry.reporter.clone())
         }
         std::collections::hash_map::Entry::Vacant(entry) => {
             let row_focus_handles = child_ids
@@ -11826,6 +11846,7 @@ fn build_virtual_list(
                 .map(|id| focusable_rows.contains(id).then(|| cx.focus_handle()))
                 .collect();
             let entry = entry.insert(VirtualListEntry::new(
+                element.id,
                 config,
                 window_start,
                 child_ids.clone(),
@@ -11842,7 +11863,7 @@ fn build_virtual_list(
                     });
                 }
             }
-            (entry.state.clone(), entry.reported_range.clone())
+            (entry.state.clone(), entry.reporter.clone())
         }
     };
 
@@ -11855,19 +11876,10 @@ fn build_virtual_list(
         list_state.scroll_to(offset);
     }
 
-    if element.events().contains("visibleRange") {
-        let callback = ctx.event_callback.clone();
-        let list_id = element.id;
-        list_state.set_scroll_handler(move |event, _window, _cx| {
-            let range = (event.visible_range.start, event.visible_range.end);
-            if reported_range.replace(Some(range)) == Some(range) {
-                return;
-            }
-            emit_event_full(&callback, list_id, "visibleRange", |payload| {
-                payload.start_index = Some(range.0 as f64);
-                payload.end_index = Some(range.1 as f64);
-            });
-        });
+    let listens = element.events().contains("visibleRange");
+    reporter.listen(&ctx.event_callback, listens);
+    if listens {
+        list_state.set_scroll_handler(move |event, _window, _cx| reporter.report(event.visible_range.clone()));
     }
 
     let list_id = element.id;

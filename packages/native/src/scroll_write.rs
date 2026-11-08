@@ -157,11 +157,13 @@ pub(crate) fn settle_containers(handles: &HashMap<u64, gpui::ScrollHandle>) {
 
 /// Writes a virtual list, which has no horizontal offset. It is written to the list as it stands,
 /// so the paths that read the state see the write, and again by [`settle_lists`] when the layout
-/// was behind the tree, since a pixel position is converted against the rows the list has.
+/// was behind the tree, since a pixel position is converted against the rows the list has. A write
+/// that moved the list reports its `visibleRange` as a wheel does.
 pub(crate) fn write_list(
     metrics_current: bool,
     id: u64,
     state: &gpui::ListState,
+    reporter: Option<&crate::visible_range::RangeReporter>,
     top: Option<f64>,
 ) -> bool {
     let Some(top) = top else {
@@ -171,6 +173,9 @@ pub(crate) fn write_list(
     let target = scroll::gpui_offset(0.0, top);
     let before = state.scroll_px_offset_for_scrollbar();
     let moved = scroll::scroll_list_to(state, target);
+    if let Some(reporter) = reporter.filter(|_| moved) {
+        reporter.report_at(state, state.logical_scroll_top());
+    }
     let snapped = scroll::snapped_offset(target, state.scale_factor());
     PENDING_LIST_WRITES.with(|pending| {
         let mut pending = pending.borrow_mut();
@@ -185,12 +190,19 @@ pub(crate) fn write_list(
 }
 
 /// Called when the rows of a frame are spliced, before its layout: the writes recorded since the
-/// last one are made again against the rows the layout will measure.
-pub(crate) fn settle_lists(states: &HashMap<u64, gpui::ListState>) {
+/// last one are made again against the rows the layout will measure, and the range they show is
+/// reported if the rows changed it.
+pub(crate) fn settle_lists(
+    states: &HashMap<u64, gpui::ListState>,
+    reporters: &HashMap<u64, std::rc::Rc<crate::visible_range::RangeReporter>>,
+) {
     let pending = PENDING_LIST_WRITES.with(|pending| std::mem::take(&mut *pending.borrow_mut()));
     for (id, offset) in pending {
         if let Some(state) = states.get(&id) {
             scroll::scroll_list_to(state, offset);
+            if let Some(reporter) = reporters.get(&id) {
+                reporter.report_at(state, state.logical_scroll_top());
+            }
         }
     }
 }
