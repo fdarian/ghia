@@ -606,6 +606,50 @@ export declare class GpuixRenderer {
   setTickDelay(ms: number): void
 }
 
+export declare class RowOracle {
+  constructor(options: RowOracleOptions)
+  /** Tears the window down. Every other call throws afterwards. */
+  dispose(): void
+  /**
+   * The rows to draw: JSON `[{fromName, subject, snippet, time, unread}]`, with the row at
+   * `selected` (-1 for none) drawn selected. Marks the view dirty.
+   */
+  setRows(json: string, selected: number): void
+  /**
+   * Whether the test window is drawn whenever an input flushes. Off, a frame is drawn by
+   * `drawFrame` and `drawWholeFrame` only, as a display link ends one.
+   */
+  setInlineDraws(enabled: boolean): void
+  setDomHitTesting(enabled: boolean): void
+  setMaxDrawPasses(passes: number): void
+  setA11yActive(active: boolean): void
+  setWindowActive(active: boolean): void
+  /**
+   * A display-link frame: delivers the frame callbacks, then draws a pending change, once.
+   * Draws nothing on a clean window.
+   */
+  drawFrame(): void
+  /**
+   * Rebuilds, lays out, prepaints and paints every row: the view is notified, then one frame
+   * is drawn.
+   */
+  drawWholeFrame(): void
+  /** A pointer move to (x, y), dispatched like the test renderer's `simulateMouseMove`. */
+  simulateMouseMove(x: number, y: number): void
+  /**
+   * Saves the window as a PNG, as `TestGpuixRenderer.captureScreenshot` does, to compare what
+   * the oracle draws with what the same rows draw as Ghia elements.
+   */
+  captureScreenshot(path: string): void
+  /**
+   * `[renders, divs, texts]`: how many times the view was rendered, and how many divs and
+   * text leaves those renders made.
+   */
+  getCounters(): Array<number>
+  /** How many layout-only passes the window has run. */
+  getLayoutPassCount(): number
+}
+
 /**
  * GPU-backed GPUI test renderer. Uses VisualTestAppContext with the native
  * Metal or DirectX renderer and TestDispatcher for deterministic scheduling.
@@ -2423,6 +2467,20 @@ export interface RetainedCounters {
    * they were the same but for where they are, by the reason.
    */
   relocationMisses: string
+}
+
+export interface RowOracleOptions {
+  width: number
+  height: number
+  scaleFactor?: number
+  /** `Window::set_dom_hit_testing`, which Ghia turns on for every window. Off here unless asked. */
+  domHitTesting?: boolean
+  /** `Window::set_max_draw_passes`; Ghia allows 4 (container queries). 1 is GPUI's. */
+  maxDrawPasses?: number
+  /** `Window::set_a11y_active_for_tests`: the test window starts with a pretend screen reader. */
+  a11yActive?: boolean
+  /** `Window::set_active_for_tests`: the test window is made key. */
+  windowActive?: boolean
 }
 
 /**

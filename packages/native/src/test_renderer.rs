@@ -427,7 +427,7 @@ fn update_view_or_defer(
 
 /// Every window option unset, so the test window's own defaults apply. `WindowOptions::default`
 /// is the live renderer's (800x600, focused), not this window's.
-fn unset_window_options() -> WindowOptions {
+pub(crate) fn unset_window_options() -> WindowOptions {
     WindowOptions {
         title: None,
         app_name: None,
@@ -456,7 +456,7 @@ fn unset_window_options() -> WindowOptions {
 /// What a headless Chrome window is, whatever display the machine has.
 const DEFAULT_SCALE_FACTOR: f64 = 1.;
 
-fn window_scale_factor(scale_factor: f64) -> Result<f32> {
+pub(crate) fn window_scale_factor(scale_factor: f64) -> Result<f32> {
     if !(scale_factor.is_finite() && scale_factor > 0.) {
         return Err(Error::from_reason(format!("scale factor must be positive, got {scale_factor}")));
     }
