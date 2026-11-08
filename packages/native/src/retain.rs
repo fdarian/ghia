@@ -1865,7 +1865,7 @@ impl Retain {
         self.unbuilt = spine
             .iter()
             .copied()
-            .filter(|id| sources.tree.elements.get(id).is_none_or(|element| !element.is_built_by_ancestor(sources.tree)))
+            .filter(|id| sources.tree.elements.get(id).is_some_and(|element| !element.is_built_by_ancestor(sources.tree)))
             .collect();
         self.forget_changed_under_skipped(&spine, sources.tree);
         self.deltas = Deltas { all, spine, scrolled, scrolling };
@@ -3938,7 +3938,8 @@ mod tests {
     /// `display: none` above it). Returns whether the frame skipped it.
     fn frame(retain: &mut Retain, changes: Changes, visit: bool) -> bool {
         let lift_run = changes.lift_run;
-        let (tree, focus) = (RetainedTree::new(), crate::focus::FocusStyles {
+        // Element 1 is in the tree: a change to one the tree destroyed is nobody's to find (`unbuilt` drops it).
+        let (tree, focus) = (tree_of(&[(1, None, "div", None)]), crate::focus::FocusStyles {
             within: changes.within.into(),
             ..Default::default()
         });
@@ -4158,6 +4159,18 @@ mod tests {
         // The walk from 4 used to stop at 3, which the frame before had left in `unbuilt`.
         frame_of(&mut retain, &tree, &[4], &[1, 2]);
         assert_eq!(sorted(&retain.deltas.spine), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn a_changed_element_the_tree_destroyed_is_not_left_unbuilt() {
+        // 1 > 2, and 9, which a list recycled while the pointer was over it: the pointer's chain still
+        // named it in the frame before, so it is a change. Nothing builds it and nothing can, so it
+        // stays in `unbuilt` for good and every tick that follows is declined `Outside`.
+        let tree = tree_of(&[(1, None, "div", None), (2, Some(1), "div", None)]);
+        let mut retain = Retain::new();
+        retain.set_planning(true);
+        frame_of(&mut retain, &tree, &[9], &[1, 2]);
+        assert!(retain.unbuilt.is_empty(), "{:?}", sorted(&retain.unbuilt));
     }
 
     #[test]

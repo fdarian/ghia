@@ -753,6 +753,20 @@ keeps what builds it again.
   of its last build, so the first hover of a row that came into view is a patch like any other. (The record was tried: the
   pass that rebuilds a frame to compare it sees the record the first pass made, and has to build the roots in it as the first pass
   did.)
+- **An element the tree destroyed is not left unbuilt (hover after a wheel).** A frame built whole puts the elements that changed
+  since the frame before, and their ancestors, on the spine, and what the frame did not enter stays in `Retain::unbuilt`, so that a
+  tick finds a change nobody built. The rows a hover patched during a wheel (`hover_patched`, one pair for each crossing, 24 or more
+  by the time the window of a list moves) are in the next frame built whole, which is the frame that moves the window and destroys
+  most of them. An id the tree no longer holds has no ancestor to walk and no build to enter it, yet it was kept (`is_none_or`) and
+  seeded every spine after it: each tick with a hover to paint was `Outside` (`preview`, `retain.rs`) and built whole, for good,
+  after the first wheel that moved the window (a list with a scrollbar: the fade makes the frame built whole that sees them). `unbuilt` keeps
+  the elements the tree holds. Pinned in `retain.rs` (`a_changed_element_the_tree_destroyed_is_not_left_unbuilt`) and in
+  `hover-after-wheel.test.tsx` (solid): a windowed list of the mailbox's shape, wheeled 360 down and 360 up under a still pointer,
+  and two sweeps of the pointer down it; no tick is `Outside`, the second sweep is patched at each crossing, the pictures equal
+  those of patching off. Measured (`AFTER_SCROLL=1 PHASE=hover A11Y=0`, two runs each): 0 of 480 ticks patched, row crossing median
+  7.8M (24 elements built, 140 replayed), phase 243.7M before; 11 of 480, crossing median 4.2M and 4.8M, phase 220.8M and 199.9M after
+  (a fresh window: 18 of 480, 3.45M, 125M). What is left is `Hover:Relocated` (below) and the scrollbar's fade, which is a whole
+  frame of its own for nine ticks after the wheel.
 
 **Cost of the wider roots.** Rows of a list and roots with nothing worth a root in them are patch roots (the `PatchUnit` and surroundings
 gpui keeps for each) without a hover. The mailbox rows were hover roots already, so it measures as the same page, two runs each back to
@@ -791,7 +805,7 @@ marks `Replaced` with `derived: true`, which a build at the row's own place does
 - A hover that adds or takes away a primitive (a shadow, a border colour from transparent, a text colour from transparent, a
   background that is more than a colour) is a frame built whole; so is a group, a root that might lift, a size by an intrinsic keyword, a root of more than 64 elements, and a
   row that a frame built whole replayed from a recording made elsewhere (`Hover:Relocated`: a whole frame after a scroll replays the rows with
-  a delta, and builds one again only when something changes it, so the hover of that row is a frame built whole, which records it where it stands; a row a translate moved is patched).
+  a delta, and builds one again only when something changes it, so the hover of that row is a frame built whole, which records it where it stands; a row a translate moved is patched). After a wheel phase and back (`AFTER_SCROLL=1`) six of the ten rows that show are such rows, one is rebuilt by each crossing that meets one (`retained.relocations` 6, 5, 4 ...), and those crossings cost 7.4M, not 3.4M.
 - A page of at most 64 elements is one root: a patch builds all of it, as a frame built whole does.
 - A patch root that a frame built whole rebuilds builds everything in it.
 - The children of a relocatable row cannot keep their own recordings (`Retained::prepaint_in_scope`), so a rebuilt row builds all its
