@@ -242,6 +242,128 @@ describeNative("scrollToItem reports the rows the list shows after the layout ho
   })
 })
 
+/** The thumb of a list this wide is in the column 6 px from its right edge. */
+const BAR_X = 194
+
+type Pointer = { move: number } | { page: number }
+
+/**
+ * A wheel shows the bar, then the thumb is held at `grab` and the pointer goes to each `y`, and a press on the track pages. After
+ * every step the range reported is the rows painted and the one a wheel to the offset reports, and none comes when the rows stay
+ * the same. The rows are exact: the thumb of estimated rows moves over the extent the list guesses.
+ */
+function dragged(alignment: "bottom" | undefined, wheel: number, grab: number, steps: Pointer[]) {
+  const app = createTestRoot()
+  try {
+    const renderer = app.renderer
+    const ranges: Range[] = []
+    app.render(sizedList(true, (event) => ranges.push([event.startIndex, event.endIndex]), alignment))
+    renderer.dispatchNativeEvents()
+    renderer.drawFrame()
+    const list = renderer.findByTestId("list")!.id
+    renderer.nativeSimulateScrollWheel(100, 50, 0, wheel)
+    renderer.drawFrame()
+    renderer.dispatchNativeEvents()
+    expect(ranges, "the wheel that shows the bar").toHaveLength(1)
+
+    const rowsAt = (offset: number): Range => [Math.floor(offset / ROW), Math.min(ROWS, Math.ceil((offset + VIEWPORT) / ROW))]
+    let last = ranges[0]
+    let reported = 0
+    const check = (step: string) => {
+      renderer.drawFrame()
+      renderer.dispatchNativeEvents()
+      const offset = renderer.getScrollOffset(list)![1]
+      const expected = paintedRange(renderer)
+      expect(expected, `${step}: at ${offset}, the rows the offset shows`).toEqual(rowsAt(offset))
+      const events = ranges.splice(1).map((range): Range => [range[0], Math.min(range[1]!, ROWS)])
+      if (JSON.stringify(expected) === JSON.stringify(last)) {
+        expect(events, `${step}: at ${offset}, the same rows`).toEqual([])
+      } else {
+        expect(events, `${step}: at ${offset}`).toEqual([expected])
+        reported++
+      }
+      last = expected
+    }
+    renderer.nativeSimulateMouseMove(BAR_X, grab)
+    renderer.nativeSimulateMouseDown(BAR_X, grab)
+    for (const step of steps) {
+      if ("move" in step) {
+        renderer.nativeSimulateMouseMove(BAR_X, step.move)
+        check(`drag to ${step.move}`)
+      } else {
+        renderer.nativeSimulateMouseUp(BAR_X, step.page)
+        renderer.nativeSimulateMouseMove(BAR_X, step.page)
+        renderer.nativeSimulateMouseDown(BAR_X, step.page)
+        renderer.nativeSimulateMouseUp(BAR_X, step.page)
+        check(`page at ${step.page}`)
+      }
+    }
+    renderer.nativeSimulateMouseUp(BAR_X, 0)
+    return reported
+  } finally {
+    app.unmount()
+  }
+}
+
+describeNative("onVisibleRange of a scrollbar drag", () => {
+  it("reports the rows at each position of the thumb, to the end and back, and nothing for a drag that moves nothing", () => {
+    const reported = dragged(undefined, 5, 10, [
+      { move: 30 },
+      { move: 30 },
+      { move: 60 },
+      { move: 200 },
+      { move: 400 },
+      { move: 40 },
+      { move: -80 },
+      { move: -90 },
+      { page: 95 },
+      { page: 95 },
+    ])
+    expect(reported).toBeGreaterThanOrEqual(6)
+  })
+
+  it("reports the rows of a bottom-aligned list dragged to its end, where its anchor is no row, and back", () => {
+    const reported = dragged("bottom", -5, 88, [
+      { move: 60 },
+      { move: 30 },
+      { move: 400 },
+      { move: 400 },
+      { move: 60 },
+      { move: 400 },
+      { move: -80 },
+      { move: 400 },
+      { page: 5 },
+    ])
+    expect(reported).toBeGreaterThanOrEqual(6)
+  })
+})
+
+describeNative("onVisibleRange of a write to the end of a bottom-aligned list", () => {
+  it("reports the rows that show at the end, not the item count and the one after", () => {
+    const app = createTestRoot()
+    try {
+      const renderer = app.renderer
+      const ranges: Range[] = []
+      app.render(sizedList(true, (event) => ranges.push([event.startIndex, event.endIndex]), "bottom"))
+      renderer.dispatchNativeEvents()
+      renderer.drawFrame()
+      const list = renderer.findByTestId("list")!.id
+      let last: Range = [undefined, undefined]
+      for (const [offset, rows] of [[100, [2, 5]], [LAST_OFFSET, [ROWS - 3, ROWS]], [LAST_OFFSET - 1, [ROWS - 3, ROWS]], [0, [0, 3]], [LAST_OFFSET + 50, [ROWS - 3, ROWS]]] as const) {
+        ranges.length = 0
+        renderer.scrollTo(list, 0, offset)
+        renderer.drawFrame()
+        renderer.dispatchNativeEvents()
+        expect(paintedRange(renderer), `at ${offset}, the rows painted`).toEqual(rows)
+        expect(ranges, `at ${offset}`).toEqual(JSON.stringify(last) === JSON.stringify(rows) ? [] : [rows])
+        last = [...rows]
+      }
+    } finally {
+      app.unmount()
+    }
+  })
+})
+
 const COUNT = 200
 const VIEW = 300
 const WINDOW = 60

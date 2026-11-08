@@ -11955,7 +11955,7 @@ fn build_virtual_list(
     crate::scrollbar::attach_to_list(
         list,
         element.id,
-        crate::scrollbar::Source::List(scroll_state),
+        crate::scrollbar::Source::List(scroll_state, reporter.clone()),
         element.style.as_deref().unwrap_or(&default_style),
         &ctx.inherited.colors,
     )

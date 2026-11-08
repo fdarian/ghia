@@ -64,12 +64,15 @@ impl RangeReporter {
     }
 
     /// Reports the rows a scroll of `state` to `offset` shows. A list that has not been laid out
-    /// has no range to report: its first layout is not a scroll.
+    /// has no range to report: its first layout is not a scroll. A bottom-aligned list resting at
+    /// its end has the item count for its anchor, which is no row to read the range from.
     pub(crate) fn report_at(&self, state: &gpui::ListState, offset: gpui::ListOffset) {
         if !self.listens() {
             return;
         }
-        if let Some(range) = state.visible_range_at(offset) {
+        if offset.item_ix >= state.item_count() {
+            self.report(rows_shown_at_end(state));
+        } else if let Some(range) = state.visible_range_at(offset) {
             self.report(range);
         }
     }
@@ -88,12 +91,7 @@ impl RangeReporter {
         if !self.awaiting_layout.replace(false) {
             return;
         }
-        let top = state.logical_scroll_top();
-        if top.item_ix < state.item_count() {
-            self.report_at(state, top);
-        } else {
-            self.report(rows_shown_at_end(state));
-        }
+        self.report_at(state, state.logical_scroll_top());
     }
 }
 
