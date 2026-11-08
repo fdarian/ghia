@@ -6,7 +6,7 @@ import fs from "fs"
 import path from "path"
 import { fileURLToPath } from "url"
 import { createSignal, type JSX } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { animate, motion, motionValue } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 

@@ -11,9 +11,8 @@
 
 import React, { memo, useCallback, useMemo, useRef, useState } from 'react'
 import {
-  applyMacCpuThrottleFromEnv,
   flushSync,
-  render,
+  isWebBuild,
   useGpuix,
   type DomEvent,
   type PublicInstance,
@@ -32,7 +31,7 @@ const C = {
   avatar: '#343434',
 }
 
-const FONT_SANS = typeof window === 'undefined' ? 'Helvetica' : 'IBM Plex Sans'
+const FONT_SANS = isWebBuild ? 'IBM Plex Sans' : 'Helvetica'
 
 /** How many pages stay mounted. The rest are re-fetched from their cursor. */
 const PAGE_CACHE_SIZE = 5
@@ -643,23 +642,4 @@ export function InfiniteChatApp({
       </div>
     </div>
   )
-}
-
-const isEntryPoint =
-  typeof Bun !== 'undefined'
-    ? Bun.isStandaloneExecutable || Bun.main === import.meta.path
-    : typeof process !== 'undefined' && process.argv[1]?.endsWith('infinite-chat.tsx')
-
-if (isEntryPoint) {
-  applyMacCpuThrottleFromEnv()
-  render(<InfiniteChatApp />, {
-    title: 'GPUIX Infinite History',
-    width: 920,
-    height: 760,
-    titlebarTransparent: true,
-    windowBackground: C.canvas,
-    debugFrameOverlay: 'full',
-    // Agent checks need real GPU paint, not control of the user's keyboard.
-    focus: process.env.GPUIX_BACKGROUND !== '1',
-  })
 }

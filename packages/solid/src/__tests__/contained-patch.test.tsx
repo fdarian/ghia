@@ -10,7 +10,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { For, Show, createSignal } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import type { TestRenderer } from "../testing.js"
 

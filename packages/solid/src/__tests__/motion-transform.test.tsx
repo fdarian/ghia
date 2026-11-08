@@ -2,7 +2,7 @@
 /// `motion.div` give the box of the CSS transform they stand for, and animate.
 
 import { createSignal } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { animate, createMotionValue, motion } from "../index.js"
 import type { MotionValue } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"

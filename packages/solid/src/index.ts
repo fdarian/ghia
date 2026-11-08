@@ -11,6 +11,7 @@ export {
   spread,
   use,
 } from "./universal.js"
+export { isWebBuild } from "@ghia/native/host"
 export { createRoot, GpuixContext, useGpuix, useGpuixRequired } from "./root.js"
 export type { HostElement } from "./host.js"
 import { document as sharedDocument, window } from "@ghia/native/host"

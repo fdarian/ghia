@@ -1,6 +1,6 @@
 {
   "name": "@ghia/solid",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "description": "Solid renderer for GPUIX",
   "license": "Apache-2.0",
   "type": "module",
@@ -22,15 +22,10 @@
       "import": "./dist/jsx-dev-runtime.js",
       "default": "./dist/jsx-dev-runtime.js"
     },
-    "./preload": {
-      "types": "./dist/preload.d.ts",
-      "import": "./dist/preload.js",
-      "default": "./dist/preload.js"
-    },
-    "./bun-plugin": {
-      "types": "./dist/bun-plugin.d.ts",
-      "import": "./dist/bun-plugin.js",
-      "default": "./dist/bun-plugin.js"
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "import": "./dist/vite.js",
+      "default": "./dist/vite.js"
     },
     "./testing": {
       "types": "./dist/testing.d.ts",
@@ -85,24 +80,34 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "bun run build && bun test",
+    "test": "bun run build && bun --bun vitest run",
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @ghia/solid locally. CI is the only release path.'); process.exit(1) }\""
   },
   "dependencies": {
-    "@babel/core": "^7.28.0",
-    "@babel/preset-typescript": "^7.27.1",
     "@ghia/native": "workspace:^",
-    "babel-preset-solid": "1.9.15"
+    "solid-refresh": "^0.6.3",
+    "vite-plugin-solid": "^2.11.15"
   },
   "peerDependencies": {
-    "solid-js": ">=1.9 <2"
+    "ghia": "workspace:^",
+    "solid-js": ">=1.9 <2",
+    "vite": "^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ghia": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    }
   },
   "devDependencies": {
-    "@types/babel__core": "^7.20.5",
+    "ghia": "workspace:^",
     "@types/bun": "^1.4.0",
     "@types/node": "^25.3.3",
     "solid-js": "1.9.15",
     "typescript": "^5.3.0",
+    "vite": "^8.0.0",
     "vitest": "^4.0.18"
   }
 }

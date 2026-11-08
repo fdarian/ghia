@@ -3,8 +3,8 @@
 // copies `render_row` of ghia-bench's apps/gpui, and Rows.tsx copies the Row of apps/ghia. Both are a plain column of `count`
 // rows in a window WIDTH x (count * 72), so every row is on screen and nothing is culled or virtualised.
 //
-// Run, from examples/solid (like the other profile.tsx there), with a release addon:
-//   cd examples/solid && GHIA_BENCH_MESSAGES=/path/to/ghia-bench/data/messages.json bun row-cost/profile.tsx
+// Run, from examples/ (its Vite config compiles the Solid files), with a release addon:
+//   cd examples && GHIA_BENCH_MESSAGES=/path/to/ghia-bench/data/messages.json bun run profile-row-cost
 // Instructions are the process's ri_instructions (native threads included), one read around each stage; medians over REPS.
 //
 // Env:

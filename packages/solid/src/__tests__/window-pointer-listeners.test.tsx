@@ -5,7 +5,7 @@
  * the window but outside the root's box has no target at all: it is aimed at
  * the window, as a key with nothing focused is.
  */
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { document, window } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 

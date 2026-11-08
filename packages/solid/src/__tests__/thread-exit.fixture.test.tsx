@@ -1,5 +1,5 @@
 // Run by thread-exit.test.tsx in a child process; skipped in a normal run.
-import { describe, it } from "bun:test"
+import { describe, it } from "vitest"
 import {
   Dialog,
   DialogBackdrop,

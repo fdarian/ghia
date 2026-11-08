@@ -1,6 +1,6 @@
 // The bench's Mailbox in a real window that does not take focus, for measuring a live phase from outside (see "Driving a
 // live window" and "Measuring performance" in docs/fork/testing.md). App.tsx and types.ts are the bench app's, verbatim as in profile.tsx.
-//   cd examples/solid && NODE_ENV=production GHIA_BENCH_MESSAGES=/path/to/ghia-bench/data/messages.json bun mailbox-scroll-hover/live.tsx
+//   cd examples && NODE_ENV=production GHIA_BENCH_MESSAGES=/path/to/ghia-bench/data/messages.json bun run mailbox-live
 // GPUIX_BACKGROUND=1 emulates focus, so the search input's caret blinks as it does in the bench's key window.
 import { readFileSync } from "node:fs"
 import { render } from "@ghia/solid"

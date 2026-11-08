@@ -3,7 +3,7 @@
  * dispatches input, so a handler reads current values, as in the DOM.
  */
 import { createSignal } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { Dialog, DialogPopup, DialogPortal, document } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import type { HostElement } from "../host.js"

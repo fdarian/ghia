@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import type { MutationRenderer, NativeRenderer } from "@ghia/native/host"
 import { createHostElement, HostRoot, insertHostNode, setHostProperty } from "../host.js"
 

@@ -1,0 +1,12 @@
+{
+  "name": "dual-build",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "node": "./node.js",
+      "browser": "./browser.js",
+      "default": "./node.js"
+    }
+  }
+}

@@ -1,8 +1,8 @@
 // Profiling proxy for ghia-bench's Scroll and Hover phases on the test renderer, in the way of the profile-*.tsx files of
 // examples/. App.tsx and types.ts are the bench app's mailbox, verbatim, and the messages are the bench's data.
 //
-// Run, from this folder's parent (bun run from here misses ../bunfig.toml's preload and Solid resolves to its server build):
-//   cd examples/solid && GHIA_BENCH_MESSAGES=/path/to/ghia-bench/data/messages.json PHASE=scroll|hover|idle bun mailbox-scroll-hover/profile.tsx
+// Run, from examples/ (Solid's JSX is compiled by the Vite config there, so `bun` on this file alone does not run it):
+//   cd examples && GHIA_BENCH_MESSAGES=/path/to/ghia-bench/data/messages.json PHASE=scroll|hover|idle bun run profile-mailbox
 // Use a release addon (`bun run build` in packages/native). A tick is 1000/120 ms: one input (none in idle), then clockAdvance +
 // dispatchNativeEvents + drawFrame, the way a display link ends a frame (inline draws are off; drawFrame paints only a dirty
 // window). Instructions are the process's ri_instructions, which include native threads.

@@ -1,7 +1,7 @@
 /// The Solid half of "what moves on it reaches its children" in `display-contents.test.tsx` of the React package: a
 /// `display: contents` element has no box, so what it runs is shown by the text it hands its font to.
 import { createSignal } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { motion } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 

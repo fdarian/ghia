@@ -18,8 +18,8 @@ and native text.
 Install the packages:
 
 ```bash
-pnpm add --save-exact @ghia/react @ghia/native react
-pnpm add -D @types/react typescript
+pnpm add --save-exact @ghia/react @ghia/native ghia react
+pnpm add -D @types/react typescript vite
 ```
 
 **Pin your adapter and `@ghia/native` to the same exact version.** Ghia is
@@ -52,12 +52,32 @@ typecheck.
 }
 ```
 
-### 2. Write the entry file
+### 2. Add a Vite config
 
-End the file with `render()`. That call creates the window, mounts React, and
+`ghia` is the `ghia dev` and `ghia build` command and the `ghia()` Vite plugin;
+`react()` compiles JSX through `@ghia/react` and gives `ghia dev` React Fast
+Refresh.
+
+```ts
+// vite.config.mts
+import { defineConfig } from 'vite'
+import { ghia } from 'ghia'
+import { react } from '@ghia/react/vite'
+
+export default defineConfig({
+  plugins: [ghia({ entry: 'main.tsx' }), react()],
+})
+```
+
+Use `vite.config.mts` when your `package.json` has no `"type": "module"`.
+
+### 3. Write the entry file
+
+End the entry file with `render()`. That call creates the window, mounts React, and
 starts the frame loop.
 
 ```tsx
+// main.tsx
 import { useState } from 'react'
 import { render } from '@ghia/react'
 
@@ -89,35 +109,38 @@ render(<App />, { title: 'My App', width: 800, height: 600 })
 > parent, so text with no color paints **black** and disappears on a dark
 > surface.
 
-### 3. Run it
+### 4. Run it
 
 ```bash
-bun --hot app.tsx
+ghia dev
 ```
 
-For hot reload during development, use `bun --hot` rather than plain `bun`.
-A save then remounts React on the same window instead of opening a second one.
+`ghia dev` runs the app inside its own Bun process with hot reload: a save to a
+component is a React Fast Refresh update and keeps the state of the components
+around it ([Hot reload](#hot-reload)). `ghia dev app.tsx` runs another entry
+file and replaces the `entry` option; `ghia` needs Bun.
 
-Bun is not required to run the renderer. Ghia uses Node-API native bindings,
-and React apps also run on Node.js. For
-Node.js, compile TSX to JavaScript first or use a Node-compatible TSX loader.
-The `--hot` option and same-window hot-remount workflow described below are
-Bun-specific; running an app on Node.js does not provide Bun's hot reload.
+The renderer itself does not need Bun. Ghia uses Node-API native bindings, and
+a React app built without `ghia` also runs on Node.js, after you compile TSX to
+JavaScript or use a Node-compatible TSX loader; that run has no hot reload.
 
-### 4. Ship a binary
+### 5. Ship a binary
 
 ```bash
-bun build --compile app.tsx --outfile dist/app
+ghia build
 ./dist/app
 ```
 
-The binary carries the renderer, so it runs with no Bun and no Node install.
+`ghia build` writes `dist/main.js` and compiles it into `dist/app`, one
+executable that carries Bun and the renderer (about 128 MB), so it runs with no
+Bun and no Node install. `ghia build --no-compile` writes only `dist/main.js`,
+which runs with plain `bun`.
 
 For a smaller ship set, run the same React app on
 [hermes-node](../hermes/README.md) instead of Bun. That path is
 **12 MB** plus a **22 MB** native sidecar. The steps are in that guide.
 
-### 5. Wrap it in an app with an icon
+### 6. Wrap it in an app with an icon
 
 A raw Mach-O has no Dock icon. Use
 [cargo-packager](https://github.com/crabnebula-dev/cargo-packager) to wrap the
@@ -293,15 +316,15 @@ GitHub will 404 the API. Optional: put a Cloudflare cache in front of
 | Example | Run | What it shows |
 |---|---|---|
 | **blurred window** | `bun run blurred-window` | A macOS frosted-glass surface using GPUI's native vibrancy backdrop and transparent titlebar |
-| **chat** | `bun --hot chat.tsx` | An Ghia app: transparent titlebar, animated sidebar, per-thread transcripts, demo replies, composer, `<markdown>` |
-| **timeline** | `bun --hot timeline.tsx` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
-| **mail** | `bun --hot mail.tsx` | A Superhuman-style mail client: three panes, thread list, and a Framer newsletter |
-| **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
-| **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
-| **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
+| **chat** | `bun run chat` | An Ghia app: transparent titlebar, animated sidebar, per-thread transcripts, demo replies, composer, `<markdown>` |
+| **timeline** | `bun run timeline` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
+| **mail** | `bun run mail` | A Superhuman-style mail client: three panes, thread list, and a Framer newsletter |
+| **native-text** | `bun run native-text` | The three native text components with a tab switcher |
+| **counter** | `bun run counter` | The smallest possible app: state, events, hover |
+| **diff** | `bun run diff` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
 | **web** | `bun run web` from the repository root | The ChatGPT example rendered in a browser canvas with WebGPU |
 
-They live in [`examples/`](../examples/). The `bun --hot` commands need a clone of this repo and a local native build.
+They live in [`examples/`](../examples/), which has one `vite.config.mts` for all of them: each script is `ghia dev <entry>`, and `bun run compile` runs `compile-chat.ts`, which is `ghia build chat.main.tsx` plus the app icons and a macOS `.app`. Where an example's `render()` is not in the file that holds its components, the entry is `<name>.main.tsx` (`chat.main.tsx`), so that a component edit is a Fast Refresh update. The commands need a clone of this repo and a local native build.
 
 The web example bundles the same React app and reconciler as the desktop chat
 example. wasm-bindgen exposes mutations and event callbacks to the existing
@@ -481,11 +504,13 @@ Event handlers are stored in a JS-side registry keyed by `(elementId, eventType)
 ## Packages
 
 - **`@ghia/native`**: Rust bindings plus the framework-neutral TypeScript host runtime. It owns host types, mutation batching, renderer state, event routing, observers, native testing, and automation.
-- **`@ghia/native/host`**: host contracts, mutation helpers, renderer ownership, window observers, selection observation, and text search. Importing it does not load the `.node` addon.
+- **`@ghia/native/host`**: host contracts, mutation helpers, renderer ownership, window observers, selection observation, and text search, and `isWebBuild` (`true` on the browser build). It reads which build it runs on, so importing it loads the `.node` addon.
+- **`@ghia/native/dom-globals`**: a side-effect module that installs the `window`, `document` and no-op scroll globals; `@ghia/native/host` imports it, and the `ghia()` Vite plugin makes it the first import of the app entry, so libraries that read `typeof window` while they load see it.
 - **`@ghia/native/testing`**: the shared `TestRenderer` over the real `TestGpuixRenderer`.
 - **`@ghia/native/automation`**: the shared automation protocol, client, locators, and process launcher.
-- **`@ghia/react`**: the React reconciler and React components. It preserves its existing exports and re-exports shared testing, automation, search, and observer APIs.
-- **`@ghia/solid`**: the Solid 1 universal renderer, Solid primitives, motion, Select, Combobox, Tooltip, Bun preload, and build plugin.
+- **`@ghia/react`**: the React reconciler and React components, and `react()` (`@ghia/react/vite`), the Vite plugin that compiles React JSX and gives `ghia dev` Fast Refresh. It preserves its existing exports and re-exports shared testing, automation, search, and observer APIs.
+- **`@ghia/solid`**: the Solid 1 universal renderer, Solid primitives, motion, Select, Combobox, Tooltip, and `solid()` (`@ghia/solid/vite`), the Vite plugin that compiles Solid JSX.
+- **`ghia`**: the `ghia()` Vite plugin, the programmatic `dev()` and `build()`, and the `ghia dev` / `ghia build` commands (built with Effect's CLI). React and Solid apps run and build with them, and take the entry as an argument (`ghia dev [entry]`). `ghia/client` types `virtual:ghia/server`.
 
 Pin the selected adapter and `@ghia/native` to the **same exact version**.
 Ghia is still pre-1.0. Breaking changes can land before v1. Upgrade them
@@ -493,13 +518,14 @@ together.
 
 ### Solid quick start
 
-Install Solid and the official Solid adapter:
+Install Solid, the Solid adapter and the Vite toolchain:
 
 ```bash
-pnpm add --save-exact @ghia/solid @ghia/native solid-js
+pnpm add --save-exact @ghia/solid @ghia/native ghia solid-js
+pnpm add --save-dev vite
 ```
 
-Use Solid's preserved JSX. The preload compiles application `.tsx` and `.jsx`
+Use Solid's preserved JSX. `solid()` compiles application `.tsx` and `.jsx`
 files for Solid's universal renderer and selects the reactive client runtime.
 
 ```json
@@ -510,6 +536,7 @@ files for Solid's universal renderer and selects the reactive client runtime.
     "moduleResolution": "bundler",
     "jsx": "preserve",
     "jsxImportSource": "@ghia/solid",
+    "types": ["vite/client"],
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true
@@ -517,11 +544,19 @@ files for Solid's universal renderer and selects the reactive client runtime.
 }
 ```
 
-```toml
-preload = ["@ghia/solid/preload"]
+```ts
+// vite.config.mts
+import { defineConfig } from 'vite'
+import { ghia } from 'ghia'
+import { solid } from '@ghia/solid/vite'
+
+export default defineConfig({
+  plugins: [ghia({ entry: 'main.tsx' }), solid()],
+})
 ```
 
 ```tsx
+// main.tsx
 import { createSignal } from 'solid-js'
 import { render } from '@ghia/solid'
 
@@ -539,32 +574,22 @@ function App() {
 render(() => <App />, { title: 'Solid Ghia', width: 800, height: 600 })
 ```
 
-Run it directly. No wrapper command or Vite configuration is required.
+Run it with `ghia dev`. A save applies a component edit as a hot update
+(local signal state resets) and re-runs the entry when no component accepts
+the edit. `ghia build` writes `dist/main.js` and compiles it into `dist/app`,
+one executable that embeds Bun and the native addon (about 128 MB). `ghia build
+--no-compile` writes only `dist/main.js`, which runs with plain `bun`, and
+`ghia({ entry, compile: { outfile } })` moves the binary.
 
 ```bash
-bun app.tsx
-bun --hot app.tsx
+ghia dev
+ghia build && ./dist/app
 ```
 
-The compiled output of each source file is cached in
-`~/Library/Caches/ghia/solid-transform/`, one entry per source path, and is
-reused while the file, `@ghia/solid`, Babel and the Solid preset are unchanged.
-A run with a warm cache never loads Babel, which saves 55-73 MB of memory per
-app. The cache needs no setup, and deleting the directory only costs one slow
-launch. `Bun.build` with the plugin below shares it.
-
-For production `Bun.build`, pass the exported plugin:
-
-```ts
-import solidPlugin from '@ghia/solid/bun-plugin'
-
-await Bun.build({
-  entrypoints: ['./app.tsx'],
-  target: 'bun',
-  outdir: './dist',
-  plugins: [solidPlugin],
-})
-```
+Why `@ghia/native` is a direct dependency, the hot-reload rules, the vitest
+setup and the gotchas are in the [Solid guide](./solid.md#install). A UI that
+needs a database, the filesystem or long computations runs that code in a
+Worker behind RPC: [Server code](./solid.md#server-code).
 
 `@ghia/solid` targets stable Solid 1.9. Its peer range is `>=1.9 <2`.
 
@@ -596,6 +621,10 @@ git submodule update --init --recursive
 cd packages/native
 bun run build
 
+# Build the Vite package (the ghia command and plugin)
+cd ../vite
+bun run build
+
 # Build React package
 cd ../react
 bun run build
@@ -606,7 +635,10 @@ bun run build
 
 # Run example (use tmux for long-running sessions)
 cd ../../examples
-bun --hot counter.tsx
+bun run counter
+
+# Run the Solid chat (ghia dev)
+bun run chat-solid
 ```
 
 ## Usage
@@ -708,8 +740,8 @@ There is **no Edit menu**, on purpose. A menu key equivalent is consumed by
 AppKit before the window sees the key event, so an Edit menu carrying `⌘C`
 would take the keystroke away from text selection and from `<input>`.
 
-Use **`render()`**, not `createRenderer()`, in the app entry. `bun --hot`
-re-runs the whole file on save. `createRenderer()` plus `init()` would then
+Use **`render()`**, not `createRenderer()`, in the app entry. A full reload
+under `ghia dev` re-runs the whole entry on save. `createRenderer()` plus `init()` would then
 build a second host. `render()` is idempotent: the first call owns the window,
 later calls only remount React.
 
@@ -1315,56 +1347,72 @@ On macOS, `THROTTLE=utility` restarts the process under `taskpolicy -c utility`.
 ```bash
 cd examples
 THROTTLE=utility bun run test:perf
-THROTTLE=utility bun --hot chat.tsx
+THROTTLE=utility bun run chat
 ```
 
 ## Hot reload
 
-### 1. End the file with `render()`
+### 1. End the entry with `render()`
 
 ```tsx
+// main.tsx
 import { render } from '@ghia/react'
-
-function App() {
-  return <div style={{ padding: 16 }}>hello</div>
-}
+import { App } from './app'
 
 render(<App />, { title: 'My App', width: 800, height: 600 })
 ```
 
-Do **not** call `createRenderer()` or `init()` in this file. `bun --hot` re-runs
-the whole entry on save. A second `init()` would open a second window.
+```tsx
+// app.tsx
+export function App() {
+  return <div style={{ padding: 16 }}>hello</div>
+}
+```
 
-### 2. Start the app with `bun --hot`
+Keep `render()` out of the module that holds your components. Do **not** call
+`createRenderer()` or `init()` here: a full reload re-runs the entry, and a
+second `init()` would open a second window.
 
-Prefer **`bun --hot`** over a plain `bun` or `tsx` run. Without `--hot`, a
-save starts a second process. With it, `render()` remounts React on the same
-window.
+### 2. Start the app with `ghia dev`
 
 ```bash
-bun --hot app.tsx
+ghia dev
 ```
+
+This is the same command for Solid: [Solid hot reload](./solid.md#hot-reload).
+`ghia dev` is a Vite dev server whose `ghia` environment runs inside the `ghia`
+process, next to the native addon; `react()` in the Vite config (step 2 of the
+[quick start](#quickstart)) adds React Fast Refresh to it.
 
 ### 3. Save the file
 
 ```
-save .tsx  ►  bun re-evaluates the entry  ►  render() remounts React
+save a component module  ►  Fast Refresh swaps the components  ►  tree updates in place
+save anything else       ►  the entry runs again                ►  render() remounts React
                      │
                      ▼
               GpuixRenderer, window, GPU stay
 ```
 
-The first `render()` creates the native host and stores it on `globalThis`.
-Each save unmounts the React tree and mounts a new one on that same host.
+A module is a Fast Refresh boundary when every export is a component. An edit
+to one re-renders its components with the new code and **keeps their `useState`,
+and the state of every component around them**; the entry does not run again.
+An edit to a module that is not a boundary (the entry, a file that also exports
+a constant or a function) goes up to the modules that import it, and an edit
+nothing accepts is a full reload: the entry runs again, `render()` remounts
+React on the same window, and `useState` resets. Hot updates keep working after
+a full reload.
 
-**Stays:** window, GPU device, native `.node` addon, GPUI scroll physics.
+**Stays:** window, GPU device, native `.node` addon, GPUI scroll physics, and on
+a Fast Refresh update also `useState`.
 
-**Resets:** `useState`, focus, React event handlers.
+**Resets on a full reload:** `useState`, focus, React event handlers.
 
-This is a remount, not React Refresh. Keeping hook state needs Bun to inject
-`$RefreshReg$` during `--hot`. That transform exists on
-`bun build --react-fast-refresh` only. Tracked in
-[oven-sh/bun#40179](https://github.com/oven-sh/bun/issues/40179).
+`react()` installs the refresh runtime as the first import of the entry, before
+any component module loads. Without `react()` in the Vite config, JSX does not
+compile; with the plugin but without that import, the first component module
+throws `@vitejs/plugin-react can't detect preamble`. `vite.config`, the native
+addon and `node_modules` are not hot; restart `ghia dev`.
 
 Native `.node` edits still need a rebuild. See [Developing the Rust side](#developing-the-rust-side).
 
@@ -1396,8 +1444,7 @@ A **runtime throw does not freeze the window.** The frame loop catches errors fr
 `tick()`, native event callbacks catch throws from React handlers, and `render()`
 installs `uncaughtException` / `unhandledRejection` listeners so bun stays alive.
 The window shows the stack and a **Reload** button that remounts the last
-`render()` tree. Save under `bun --hot` also remounts. The process does not
-exit.
+`render()` tree. A full reload under `ghia dev` also remounts. The process does not exit.
 
 An error thrown by an **event handler** (an element's, or a `window` or `document`
 listener's) does not stop the dispatch: the remaining handlers still run. The error
@@ -4744,8 +4791,7 @@ the edit inserted no text. The handler's event is typed `HostInputEvent`.
 ### `window` and `document`
 
 Listen above the element tree with the `window` and `document` objects the
-adapters export. They are `EventTarget`-shaped and are not installed as
-globals, so libraries do not mistake the app for a browser:
+adapters export. They are `EventTarget`-shaped:
 
 ```tsx
 import { document, window } from '@ghia/react' // or '@ghia/solid'
@@ -4762,6 +4808,21 @@ and `focus` and `blur` (which do not bubble, so only capture listeners hear
 them). One event runs window capture, document capture, the element path,
 document bubble, window bubble. The `onKeyDown` and `onKeyUp` options of
 `render()` are window bubble listeners that also receive the renderer.
+
+Importing the adapter (or `@ghia/native/host`) also installs browser globals,
+so code written for the web runs unchanged: `window` is the global object,
+`document` is the same `document`, and `window.addEventListener` is
+`globalThis.addEventListener`. A listener added there is registered with Ghia's
+`window` (so `keydown`, pointer and focus events reach it) and with the runtime's
+own target, so `error`, `unhandledrejection` and `message` listeners keep
+working. `scrollTo`, `scroll` and `scrollBy` exist and do nothing: an app window
+has no document to scroll, as with a page that does not overflow. Libraries that
+check `typeof window` for a browser, such as TanStack Query, see a client.
+Nothing else is installed: `location`, `localStorage`, `innerWidth` and the rest
+are missing, so reading them throws a `ReferenceError` or gives `undefined`. The browser (wasm) build runs in a real page and installs nothing.
+Installing twice is harmless. `isWebBuild`, exported by the adapters and
+`@ghia/native/host`, is `true` on the browser build and `false` on the native
+build; use it to tell them apart, not `typeof window`.
 
 `document.getAnimations()` lists the CSS transitions and animations of every
 window ([Web Animations](#web-animations)).
@@ -9733,8 +9794,9 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [ ] Canvas element
 - [ ] Multiple windows
-- [x] JS remount under `bun --hot` (`render()` keeps the native window)
-- [ ] React Refresh during `bun --hot` (needs a Bun runtime transform)
+- [x] JS remount on a full reload under `ghia dev` (`render()` keeps the native window)
+- [x] Solid component hot updates under `ghia dev` (solid-refresh; local signal state resets)
+- [x] React Fast Refresh under `ghia dev` (`@ghia/react/vite`)
 - [ ] Hot reload of the native `.node` addon. `bun run dev` rebuilds and restarts. Native modules cannot unload.
 - [x] Native `motion.div` transitions with deterministic frame capture
 - [x] `AnimatePresence` exit transitions for `motion.div`

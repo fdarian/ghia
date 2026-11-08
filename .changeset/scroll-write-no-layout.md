@@ -1,5 +1,0 @@
----
-'@ghia/native': patch
----
-
-A scroll write (`scrollTo`, `scrollTop = n`, `scrollLeft = n`) no longer lays the page out. It used to read the scroll metrics first and then draw a pending change, so a write after a mutation was a whole layout pass and the frame after it drew the page again (4 passes an ArrowDown and 2 a typed key in a mail client with a search box, 12 to 17 million instructions each). A write made while the layout is older than the tree is recorded and made by the layout that comes next, which clamps it, as a browser does; one with nothing pending clamps at once, as before. A `div` scroller written to another vertical position than the start while the layout is behind still lays out first, as scroll anchoring needs the DOM's order. `scrollTo({ top })` names one axis to native, which keeps the other. A read (`scrollTop`, `scrollHeight`, `clientHeight`) lays out only when a layout-class change is pending, so a write followed by a read still returns the clamped value. A smooth scroll and a write to a scroller mounted since the last render lay out first too.

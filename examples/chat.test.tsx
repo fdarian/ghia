@@ -28,7 +28,7 @@ describeNative('chat example', () => {
     async () => {
       const app = await launch({
         command: 'bun',
-        args: ['chat.tsx'],
+        args: ['chat.main.tsx'],
         cwd: path.dirname(fileURLToPath(import.meta.url)),
         env: { GPUIX_BACKGROUND: '1' },
       })

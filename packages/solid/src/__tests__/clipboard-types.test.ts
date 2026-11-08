@@ -1,10 +1,10 @@
-import { afterAll, describe, expect, it } from "bun:test"
+import { afterAll, describe, expect, it } from "vitest"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 // Inside the package so `@ghia/solid` self-resolves to the built dist and
 // `@ghia/native` and `solid-js` resolve through its node_modules.
-const root = resolve(import.meta.dir, "../..")
+const root = resolve(import.meta.dirname, "../..")
 mkdirSync(join(root, "tmp"), { recursive: true })
 const temp = mkdtempSync(join(root, "tmp/clipboard-types-"))
 afterAll(() => rmSync(temp, { recursive: true, force: true }))

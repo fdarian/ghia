@@ -449,9 +449,10 @@ animating).
 
 What each item is, largest first:
 
-- **Babel** (55 to 73 MB per app, all in Tag 1). `@ghia/solid`'s preload imports Babel only for a file that misses
-  the transform cache in `~/Library/Caches/ghia/solid-transform/`, so a warm launch never loads it. A compiled app
-  (`bun build --compile`) carries no Babel either.
+- **Babel** (55 to 73 MB per app, all in Tag 1). The rows above were measured with the Bun preload, which loaded Babel
+  into the app's process for every file that missed its transform cache. Under `ghia dev` the compiler is
+  vite-plugin-solid's Babel, in the same process, so a dev run carries it; a `ghia build` bundle carries none. Not
+  measured under Vite.
 - **Album covers in the atlas** (music: IOAccelerator 73.7 to 30.9 MB, -42.8, nearly all of the music clone's
   -50 MB). A tile wider or taller than 512 px gets a texture of exactly its size (zed `metal_atlas.rs`), so the 15
   covers take the 21.6 MB their pixels need; a padded 1024 x 1024 texture each is 60.5 MB. This one stays, as an
