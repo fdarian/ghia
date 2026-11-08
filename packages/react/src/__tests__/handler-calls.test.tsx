@@ -204,6 +204,8 @@ function calls(r, ids) {
     setPatchEnabled: () => r.setPatchEnabled(true),
     setScrollPatchEnabled: () => r.setScrollPatchEnabled(true),
     setListSizesEnabled: () => r.setListSizesEnabled(true),
+    setTextLeafEnabled: () => r.setTextLeafEnabled(true),
+    getRegistrySlots: () => r.getRegistrySlots(),
     setRetainLift: () => r.setRetainLift(["svg"]),
     setRetainPlanning: () => r.setRetainPlanning(true),
     setRetainEnabled: () => r.setRetainEnabled(true),

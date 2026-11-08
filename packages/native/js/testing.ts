@@ -331,6 +331,7 @@ interface NativeTestRendererApi
   setPatchEnabled(enabled: boolean): void
   setScrollPatchEnabled(enabled: boolean): void
   setListSizesEnabled(enabled: boolean): void
+  setTextLeafEnabled(enabled: boolean): void
   getPatchCounters(): PatchCounters
   setRetainLift(names: string[]): void
   getRetainMismatches(): string[]
@@ -1283,6 +1284,13 @@ export class TestRenderer implements NativeRenderer {
    *  on by default, as `GPUIX_LIST_SIZES_OFF` turns off for the whole run). Process wide. */
   setListSizesEnabled(enabled: boolean): void {
     this.native.setListSizesEnabled(enabled)
+  }
+
+  /** Whether a text with nothing else to place is built as one element and not as a wrapper holding a
+   *  canvas and the glyphs (on by default, as `GPUIX_TEXT_LEAF_OFF` turns off for the whole run).
+   *  Process wide and read at every build: set it before content is mounted. */
+  setTextLeafEnabled(enabled: boolean): void {
+    this.native.setTextLeafEnabled(enabled)
   }
 
   /** How ticks were drawn by patching since the window was made: the frames and roots patched, the

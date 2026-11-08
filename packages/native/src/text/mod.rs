@@ -19,6 +19,7 @@ pub mod inline_focus;
 pub mod inline_hit;
 pub mod inline_insets;
 pub mod inline_region;
+mod leaf;
 pub mod paint;
 pub mod paragraph;
 pub mod runs;
@@ -44,6 +45,8 @@ pub(crate) fn order_by_rows(window: gpui::WindowId, rows: &[crate::tape::Roots])
     inline_hit::order_by_rows(window, rows);
 }
 
+#[cfg(feature = "test-support")]
+pub(crate) use leaf::set_enabled as set_leaf_enabled;
 pub(crate) use paint::{describe_registries, shift};
 #[cfg(feature = "test-support")]
 pub(crate) use paint::registry_slots;

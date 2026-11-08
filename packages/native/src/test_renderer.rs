@@ -1180,6 +1180,15 @@ impl TestGpuixRenderer {
         Ok(())
     }
 
+    /// Whether a text with nothing else to place is built as one element (`text/leaf.rs`) and not as
+    /// a wrapper that holds a canvas and the glyphs. On unless `GPUIX_TEXT_LEAF_OFF`; process wide, and
+    /// read at every build, so set it before content is mounted.
+    #[napi]
+    pub fn set_text_leaf_enabled(&self, enabled: bool) -> Result<()> {
+        crate::text::set_leaf_enabled(enabled);
+        Ok(())
+    }
+
     /// How ticks were patched since the window was made: subtract two reads for a span of frames.
     #[napi]
     pub fn get_patch_counters(&self) -> Result<PatchCounters> {

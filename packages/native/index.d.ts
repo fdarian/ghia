@@ -802,6 +802,12 @@ export declare class TestGpuixRenderer {
    * read at every ask, so a list that is already mounted stops too.
    */
   setListSizesEnabled(enabled: boolean): void
+  /**
+   * Whether a text with nothing else to place is built as one element (`text/leaf.rs`) and not as
+   * a wrapper that holds a canvas and the glyphs. On unless `GPUIX_TEXT_LEAF_OFF`; process wide, and
+   * read at every build, so set it before content is mounted.
+   */
+  setTextLeafEnabled(enabled: boolean): void
   /** How ticks were patched since the window was made: subtract two reads for a span of frames. */
   getPatchCounters(): PatchCounters
   resetBuildCounters(): void
