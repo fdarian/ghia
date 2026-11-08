@@ -66,6 +66,8 @@ export interface BuildCounters {
   elementsBuilt: number
   elementsSkipped: number
   styleDescClones: number
+  styleAppliesComputed: number
+  styleAppliesReplayed: number
   inheritedClones: number
   retainableRoots: number
   retainableElements: number
@@ -332,6 +334,7 @@ interface NativeTestRendererApi
   setScrollPatchEnabled(enabled: boolean): void
   setListSizesEnabled(enabled: boolean): void
   setTextLeafEnabled(enabled: boolean): void
+  setStyleCache(mode: "on" | "off" | "verify"): void
   getPatchCounters(): PatchCounters
   setRetainLift(names: string[]): void
   getRetainMismatches(): string[]
@@ -1291,6 +1294,14 @@ export class TestRenderer implements NativeRenderer {
    *  Process wide and read at every build: set it before content is mounted. */
   setTextLeafEnabled(enabled: boolean): void {
     this.native.setTextLeafEnabled(enabled)
+  }
+
+  /** Whether the step that applies a declared style to a host element is kept for the next element of
+   *  the style (`on`, the default; `GPUIX_STYLE_CACHE_OFF` turns it off for the whole run), run again
+   *  and asserted equal (`verify`, which `GPUIX_RETAIN_VERIFY` selects) or not kept (`off`). Process
+   *  wide and read at every build. */
+  setStyleCache(mode: "on" | "off" | "verify"): void {
+    this.native.setStyleCache(mode)
   }
 
   /** How ticks were drawn by patching since the window was made: the frames and roots patched, the

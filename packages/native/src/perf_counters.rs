@@ -11,6 +11,8 @@ thread_local! {
     static ELEMENTS_BUILT: Cell<u64> = const { Cell::new(0) };
     static ELEMENTS_SKIPPED: Cell<u64> = const { Cell::new(0) };
     static STYLE_DESC_CLONES: Cell<u64> = const { Cell::new(0) };
+    static STYLE_APPLIES_COMPUTED: Cell<u64> = const { Cell::new(0) };
+    static STYLE_APPLIES_REPLAYED: Cell<u64> = const { Cell::new(0) };
     static INHERITED_CLONES: Cell<u64> = const { Cell::new(0) };
     static RETAINABLE_ROOTS: Cell<u64> = const { Cell::new(0) };
     static RETAINABLE_ELEMENTS_LARGE: Cell<u64> = const { Cell::new(0) };
@@ -33,6 +35,10 @@ pub(crate) struct Counts {
     pub elements_built: u64,
     pub elements_skipped: u64,
     pub style_desc_clones: u64,
+    /// Declared styles applied to a host `div` by running `apply_styles`, see `css::style_cache`.
+    pub style_applies_computed: u64,
+    /// The same, replayed from what an earlier element of the style had made.
+    pub style_applies_replayed: u64,
     pub inherited_clones: u64,
     /// The maximal unchanged, retainable subtrees of the builds, see `retain`.
     pub retainable_roots: u64,
@@ -63,6 +69,11 @@ pub(crate) fn elements_skipped(elements: u64) {
 
 pub(crate) fn element_built() {
     ELEMENTS_BUILT.with(|count| count.set(count.get() + 1));
+}
+
+pub(crate) fn style_applied(replayed: bool) {
+    let counter = if replayed { &STYLE_APPLIES_REPLAYED } else { &STYLE_APPLIES_COMPUTED };
+    counter.with(|count| count.set(count.get() + 1));
 }
 
 pub(crate) fn retained(roots: u64, large_elements: u64) {
@@ -139,6 +150,8 @@ pub(crate) fn snapshot() -> Counts {
         elements_built: ELEMENTS_BUILT.with(Cell::get),
         elements_skipped: ELEMENTS_SKIPPED.with(Cell::get),
         style_desc_clones: STYLE_DESC_CLONES.with(Cell::get),
+        style_applies_computed: STYLE_APPLIES_COMPUTED.with(Cell::get),
+        style_applies_replayed: STYLE_APPLIES_REPLAYED.with(Cell::get),
         inherited_clones: INHERITED_CLONES.with(Cell::get),
         retainable_roots: RETAINABLE_ROOTS.with(Cell::get),
         retainable_elements: RETAIN_SLOTS.with(|slots| slots.borrow()[crate::retain::RETAINED]),
@@ -157,6 +170,8 @@ pub(crate) fn reset() {
     ELEMENTS_BUILT.with(|count| count.set(0));
     ELEMENTS_SKIPPED.with(|count| count.set(0));
     STYLE_DESC_CLONES.with(|count| count.set(0));
+    STYLE_APPLIES_COMPUTED.with(|count| count.set(0));
+    STYLE_APPLIES_REPLAYED.with(|count| count.set(0));
     INHERITED_CLONES.with(|count| count.set(0));
     RETAINABLE_ROOTS.with(|count| count.set(0));
     RETAINABLE_ELEMENTS_LARGE.with(|count| count.set(0));

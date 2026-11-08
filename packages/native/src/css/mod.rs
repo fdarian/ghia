@@ -35,6 +35,7 @@ pub(crate) mod overflow_anchor;
 pub(crate) mod place;
 pub(crate) mod position;
 pub(crate) mod shorthand;
+pub(crate) mod style_cache;
 pub(crate) mod syntax;
 pub(crate) mod tab_size;
 pub(crate) mod table;

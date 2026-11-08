@@ -12060,7 +12060,7 @@ pub(crate) fn build_host_container(
     };
 
     if let Some(style) = style {
-        el = apply_interactive_styles(el, style, &ctx.inherited.colors, &ctx.inherited.lengths);
+        el = crate::css::style_cache::apply(el, element.style.as_ref(), style, &ctx.inherited.colors, &ctx.inherited.lengths);
 
         if let Some(features) = ctx.inherited.font_features.clone() {
             el = el.font_features(features);

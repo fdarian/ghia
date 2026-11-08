@@ -825,6 +825,13 @@ export declare class TestGpuixRenderer {
    */
   setListSizesEnabled(enabled: boolean): void
   /**
+   * Whether the step that applies a declared style to a host `div` is kept for the next element
+   * of the style (`css/style_cache.rs`): `"on"`, `"off"`, or `"verify"`, which runs it as well and
+   * panics when the two differ. Process wide; the first is the default, `GPUIX_STYLE_CACHE_OFF`
+   * and `GPUIX_RETAIN_VERIFY` say otherwise, and the next build takes the change.
+   */
+  setStyleCache(mode: string): void
+  /**
    * Whether a text with nothing else to place is built as one element (`text/leaf.rs`) and not as
    * a wrapper that holds a canvas and the glyphs. On unless `GPUIX_TEXT_LEAF_OFF`; process wide, and
    * read at every build, so set it before content is mounted.
@@ -1512,6 +1519,12 @@ export interface BuildCounters {
   elementsSkipped: number
   /** `StyleDesc` values cloned, a state style inside a style counted as its own. */
   styleDescClones: number
+  /**
+   * Declared styles applied to a host `div` by running the step, and replayed from the step's
+   * result for an earlier element of the same style (`css/style_cache.rs`).
+   */
+  styleAppliesComputed: number
+  styleAppliesReplayed: number
   inheritedClones: number
   /** The maximal unchanged subtrees a retained replay could have reused, see `retain`. */
   retainableRoots: number

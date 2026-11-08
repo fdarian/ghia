@@ -39,6 +39,10 @@ pub struct BuildCounters {
     pub elements_skipped: f64,
     /// `StyleDesc` values cloned, a state style inside a style counted as its own.
     pub style_desc_clones: f64,
+    /// Declared styles applied to a host `div` by running the step, and replayed from the step's
+    /// result for an earlier element of the same style (`css/style_cache.rs`).
+    pub style_applies_computed: f64,
+    pub style_applies_replayed: f64,
     pub inherited_clones: f64,
     /// The maximal unchanged subtrees a retained replay could have reused, see `retain`.
     pub retainable_roots: f64,
@@ -957,6 +961,8 @@ impl TestGpuixRenderer {
             elements_built: counts.elements_built as f64,
             elements_skipped: counts.elements_skipped as f64,
             style_desc_clones: counts.style_desc_clones as f64,
+            style_applies_computed: counts.style_applies_computed as f64,
+            style_applies_replayed: counts.style_applies_replayed as f64,
             inherited_clones: counts.inherited_clones as f64,
             retainable_roots: counts.retainable_roots as f64,
             retainable_elements: counts.retainable_elements as f64,
@@ -1177,6 +1183,22 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn set_list_sizes_enabled(&self, enabled: bool) -> Result<()> {
         crate::list_sizes::set_enabled(enabled);
+        Ok(())
+    }
+
+    /// Whether the step that applies a declared style to a host `div` is kept for the next element
+    /// of the style (`css/style_cache.rs`): `"on"`, `"off"`, or `"verify"`, which runs it as well and
+    /// panics when the two differ. Process wide; the first is the default, `GPUIX_STYLE_CACHE_OFF`
+    /// and `GPUIX_RETAIN_VERIFY` say otherwise, and the next build takes the change.
+    #[napi]
+    pub fn set_style_cache(&self, mode: String) -> Result<()> {
+        use crate::css::style_cache::Mode;
+        crate::css::style_cache::set_mode(match mode.as_str() {
+            "on" => Mode::On,
+            "off" => Mode::Off,
+            "verify" => Mode::Verify,
+            other => return Err(napi::Error::from_reason(format!("style cache mode {other:?} is not on, off or verify"))),
+        });
         Ok(())
     }
 
