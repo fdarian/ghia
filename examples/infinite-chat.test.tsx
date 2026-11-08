@@ -25,6 +25,14 @@ function listOf(renderer: TestRenderer) {
   return renderer.findByType('virtual-list')[0]
 }
 
+/** `scrollToItem` reports the rows the list shows from the paint of the frame that applies it, so the edge row's range event comes with the draw. */
+function scrollToEdge(renderer: TestRenderer, list: number) {
+  renderer.scrollToItem(list, 0)
+  renderer.drawFrame()
+  renderer.dispatchNativeEvents()
+  renderer.flush()
+}
+
 /** Scroll to the edge row, which is the only thing that starts a fetch. */
 async function pageTo(renderer: TestRenderer, side: 'previous' | 'next') {
   const list = listOf(renderer)
@@ -100,7 +108,7 @@ describeNative('infinite chat example', () => {
     expect(api.requests).toHaveLength(0)
     expect(isLoading(renderer)).toBe(false)
 
-    renderer.scrollToItem(listOf(renderer).id, 0)
+    scrollToEdge(renderer, listOf(renderer).id)
     expect(api.requests).toHaveLength(1)
     expect(isLoading(renderer)).toBe(true)
     await waitForIdle(renderer)
@@ -117,7 +125,7 @@ describeNative('infinite chat example', () => {
     const list = listOf(renderer)
     const rows = list.children.slice()
 
-    renderer.scrollToItem(list.id, 0)
+    scrollToEdge(renderer, list.id)
     expect(isLoading(renderer)).toBe(true)
     expect(listOf(renderer).id).toBe(list.id)
     expect(listOf(renderer).children).toEqual(rows)
