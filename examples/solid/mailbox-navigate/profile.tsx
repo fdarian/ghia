@@ -11,6 +11,7 @@
 //   VERIFY=0  does not check that the detail follows the selection (for the App variants whose detail is static)
 //   TRACE_KEY=n  prints the ordered phase events (with painted frames / layout passes) of key n
 //   APP=App|App-noreveal|App-revealfirst|App-rowsstatic|App-detailhidden|App-detailstatic|App-allstatic  picks the app variant
+//   SHOT_DIR=dir SHOT_KEYS=52,70  writes the frame shown after those keys to dir/key-N.png
 //   PHASES_OUT=path  writes the raw per-key phase data as JSON
 import { dlopen, ptr } from "bun:ffi"
 import { existsSync, readFileSync } from "node:fs"
@@ -28,6 +29,9 @@ const CONSUME_UNFLUSHED = process.env.CONSUME_UNFLUSHED === "1"
 const DRAW_AT_END = process.env.DRAW_AT_END === "1"
 const RETAIN_DEBUG_KEY = Number(process.env.RETAIN_DEBUG_KEY ?? "0") // needs GPUIX_RETAIN_DEBUG=1
 const VERIFY = process.env.VERIFY !== "0"
+// SHOT_DIR=dir SHOT_KEYS=52,70,120 writes the frame shown after each of those keys to dir/key-N.png, outside the timed key.
+const SHOT_DIR = process.env.SHOT_DIR
+const SHOT_KEYS = (process.env.SHOT_KEYS ?? "").split(",").filter(Boolean).map(Number)
 const TRACE_KEY = Number(process.env.TRACE_KEY ?? "0")
 
 const MESSAGES_PATH = process.env.GHIA_BENCH_MESSAGES
@@ -395,6 +399,7 @@ for (let index = 0; index < KEYS; index++) {
     paintedAt,
     counters: KEYS_ONLY ? {} : diffCounters(countersBefore, snapshotCounters()),
   })
+  if (SHOT_DIR && SHOT_KEYS.includes(index + 1)) renderer.captureShownFrame(`${SHOT_DIR}/key-${index + 1}.png`)
 }
 
 const median = (values: number[]) => {

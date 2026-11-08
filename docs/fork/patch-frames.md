@@ -1385,6 +1385,19 @@ never shown are not built to be measured (`elementsBuilt` below that of the list
 `scroll-patch-classifier.test.tsx`: a row never measured is a translate when its style declares its size and `Membership.unmeasured` when
 it does not. The unit tests of `list_sizes.rs` pin each condition of the declaration, and the zed tests (`exact_sizes`) the list.
 
+### The window of a list moves under keys (slice G4d)
+
+The navigate proxy windows its rows from `onVisibleRange` (`WINDOW` 60, `windowStart` from the start index), and `scrollTo` reported no range
+(see [scroll.md](scroll.md)), so its window stayed at the first 60 rows and the list was blank from key 52. A write now reports the range, the
+window moves every ten rows, and the rows past it are mounted and painted (`SHOT_DIR=dir SHOT_KEYS=52,70,120` of the proxy writes the frame shown
+after those keys; the list shows the selected row at keys 52, 70 and 120).
+
+**Measured** (release addon, `A11Y=0`, ghia-bench's data, two runs, `KEYS=120`). Median of keys 2 to 30 (10 to 50): App **29.5M and 28.2M**
+(28.7M and 28.0M) against 28.1M and 28.8M (26.8M and 26.8M) at G4e, the window moving at key 44 now and at 54, 64, 74, 84 and 94 after it
+(a move is a key of 44M to 66M against 20M to 30M: the rows of the new window are mounted and the old ones unmounted). The 69 keys 52 to 120,
+which were blank before: median **25.6M and 25.2M**, mean 28.6M and 28.6M. The scroll proxy (`PHASE=scroll`), which wheels, reports the same events as before and is
+median 3.171M and 3.192M, mean 5.004M and 5.018M (3.185M and 3.182M, 5.008M and 5.017M).
+
 ## Limits
 
 - **A tick that gpui or gpuix cannot patch is a full frame, and says why.** A subtree of more than 256 elements is built whole

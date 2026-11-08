@@ -3080,7 +3080,7 @@ device pixel as Chrome does. The list records its box like any element, so `getB
 box is its padding box, as a div's is: its rows start inside the `border` and the `padding`, are clipped and hit inside
 the border, and `clientWidth`, `clientHeight`, `scrollHeight` and the largest `scrollTop` are those of the padding box.
 A row that shows only in the top padding of a scrolled list is built and counted by `visibleRange`.
-`onVisibleRange` fires when the visible range (`startIndex` to an exclusive `endIndex`) differs from the one the list last reported, not on every scroll event: a scroll that stays within the same rows reports nothing. The first scroll reports its range, and `scrollToItem` reports its own.
+`onVisibleRange` fires when the visible range (`startIndex` to an exclusive `endIndex`) differs from the one the list last reported, not on every scroll event: a scroll that stays within the same rows reports nothing. The first scroll reports its range. It fires for a write to the scroll position as it does for a wheel, with the range a wheel to the same position reports: `scrollTo`, `scrollTop = n` and `scrollBy`, so a window of rows moved from it follows an app's key handler that writes the position. A write that leaves the list where it is reports nothing. `scrollToItem` reports the rows that show at the row it asks for, from the rows measured so far and before a layout clamps the position at the end. As every event does, it reaches the handler after the call that scrolled.
 `fixtures/virtual-list-oracle.*` pins the rest against headless Chrome.
 
 On a virtual list, `scrollToItem` takes an optional **pixel offset** and the
