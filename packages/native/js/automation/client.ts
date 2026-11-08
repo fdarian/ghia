@@ -3,6 +3,7 @@
 /// In-process tests talk to TestRenderer through the same typed method catalog
 /// as a live app on SSE stdin/stdout. Locators query the retained tree.
 
+import { isWebBuild } from "../web-build.js"
 import {
   AutomationError,
   createSseDecoder,
@@ -144,13 +145,13 @@ export class InProcessBackend extends ValidatedAutomationBackend {
     initialize: () => ({
       protocolVersion: PROTOCOL_VERSION,
       pid: typeof process === "undefined" ? 0 : process.pid,
-      capabilities: typeof window !== "undefined"
+      capabilities: isWebBuild
         ? ["input", "clock", "tree"]
         : ["input", "screenshot", "clock", "tree"],
       window: (() => {
         return {
-          width: typeof window === "undefined" ? 800 : window.innerWidth,
-          height: typeof window === "undefined" ? 600 : window.innerHeight,
+          width: isWebBuild ? window.innerWidth : 800,
+          height: isWebBuild ? window.innerHeight : 600,
         }
       })(),
     }),

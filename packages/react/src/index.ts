@@ -57,6 +57,7 @@ export {
   pushDismissLayer,
   readWindowInsets,
   readWindowSize,
+  isWebBuild,
   window,
   ResizeObserver,
 } from "@ghia/native/host"

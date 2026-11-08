@@ -19,7 +19,6 @@
  */
 
 import React, { useState } from "react"
-import { render } from "@ghia/react"
 import { diffWords } from "diff"
 import {
   createHighlighter,
@@ -842,7 +841,7 @@ const exampleHunks: Hunk[] = [
   },
 ]
 
-function App() {
+export function App() {
   return (
     <div
       style={{
@@ -884,22 +883,4 @@ function App() {
       </div>
     </div>
   )
-}
-
-// ── Main ─────────────────────────────────────────────────────────────
-// Only runs when executed directly (not when imported by tests).
-
-const isEntryPoint =
-  typeof Bun !== "undefined"
-    ? Bun.main === import.meta.path
-    : process.argv[1]?.endsWith("diff.tsx") || process.argv[1]?.endsWith("diff.js")
-
-if (isEntryPoint) {
-  render(<App />, {
-    title: "GPUIX Diff Viewer",
-    width: 900,
-    height: 600,
-    // Agent checks need real GPU paint, not control of the user's keyboard.
-    focus: process.env.GPUIX_BACKGROUND !== "1",
-  })
 }

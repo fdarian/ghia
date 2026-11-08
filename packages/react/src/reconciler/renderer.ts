@@ -1,6 +1,7 @@
 import React, { type ReactNode } from "react"
 import { GpuixRenderer } from "@ghia/native"
 import type { EventPayload, WindowOptions } from "@ghia/native"
+import { isWebBuild } from "@ghia/native/host"
 import {
   createNativeRenderer,
   enableAutomation as enableNativeAutomation,
@@ -117,6 +118,11 @@ type RenderSlot = {
   lastNode?: ReactNode
   lastOptions?: RenderOptions
   overlayShown?: boolean
+  /**
+   * The latest render's scheduler. The native renderer, the frame loop and the process handlers
+   * outlive the render that created them, and must report to the module that mounted the tree.
+   */
+  scheduleError?: (error: Error | string, componentStack?: string) => void
 }
 
 function formatRuntimeError(
@@ -332,6 +338,11 @@ function showRuntimeError(error: Error | string, componentStack?: string): void 
 
 function scheduleRuntimeError(error: Error | string, componentStack?: string): void {
   const slot = Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
+  slot?.scheduleError?.(error, componentStack)
+}
+
+function scheduleOwnRuntimeError(error: Error | string, componentStack?: string): void {
+  const slot = Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
   if (!slot?.root) return
   const failedRoot = slot.root
   queueMicrotask(() => {
@@ -387,6 +398,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     ...windowOptions
   } = options
   const slot = renderSlot()
+  slot.scheduleError = scheduleOwnRuntimeError
   const remount = slot.root != null
   if (!slot.renderer) {
     if (injected) {
@@ -411,7 +423,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     })
   }
   if (
-    typeof window !== "undefined" &&
+    isWebBuild &&
     host instanceof GpuixRenderer &&
     !Reflect.has(globalThis, BROWSER_AUTOMATION_KEY)
   ) {

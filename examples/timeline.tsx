@@ -6,8 +6,8 @@
  * playhead, marquee-selects, zooms under the pointer, and pans on both axes,
  * with a frozen ruler and a frozen track column.
  *
- * Run on desktop: cd examples && bun --hot timeline.tsx
- * Slow CPU:       THROTTLE=utility bun --hot timeline.tsx
+ * Run on desktop: cd examples && bun run timeline
+ * Slow CPU:       THROTTLE=utility bun run timeline
  *
  * ── Why React owns the scroll offset ────────────────────────────────────────
  *
@@ -47,8 +47,6 @@
 
 import React, { memo, useCallback, useMemo, useRef, useState } from 'react'
 import {
-  applyMacCpuThrottleFromEnv,
-  render,
   useWindowSize,
   type DomEvent,
   type HostMouseEvent,
@@ -1494,21 +1492,4 @@ export function TimelineApp(props: TimelineAppProps = {}) {
       </div>
     </div>
   )
-}
-
-const isEntryPoint =
-  typeof Bun !== 'undefined'
-    ? Bun.isStandaloneExecutable || Bun.main === import.meta.path
-    : typeof process !== 'undefined' && process.argv[1]?.endsWith('timeline.tsx')
-
-if (isEntryPoint) {
-  applyMacCpuThrottleFromEnv()
-  render(<TimelineApp />, {
-    title: 'GPUIX · Timeline',
-    width: 1280,
-    height: 800,
-    debugFrameOverlay: 'full',
-    // Agent checks need real GPU paint, not control of the user's keyboard.
-    focus: process.env.GPUIX_BACKGROUND !== '1',
-  })
 }

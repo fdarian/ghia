@@ -1,5 +1,66 @@
 # @ghia/react
 
+## 0.12.0
+
+### Minor Changes
+
+- 4c7d9c6: A React app has the `window`, `document` and no-op `scrollTo` globals in the native build, because the renderer imports `@ghia/native/host`, and `@ghia/react` re-exports `isWebBuild` from it. The renderer tells the wasm build from the native one with `isWebBuild` instead of `typeof window`.
+- 9d68f3b: `@ghia/react/vite` exports `react()`: @vitejs/plugin-react's JSX transform with the automatic runtime and `jsxImportSource: "@ghia/react"`, and React Fast Refresh in `ghia dev`. An edit to a component module updates the tree in place and keeps the `useState` of the components around it, and the entry does not run again; any other edit re-runs the entry, and refresh still works after it. Use it next to `ghia()` in the Vite config, and run React apps with `ghia dev` and `ghia build` instead of `bun --hot`. `react({ include, exclude })` scopes it to some files, for an app that also uses `solid()`. `ghia` and `vite` are optional peer dependencies, as for `@ghia/solid`.
+
+### Patch Changes
+
+- 751f7e2: After the entry is evaluated again, runtime errors from the native renderer, the frame loop and the process handlers are reported by the latest `render()` call's module, so the error overlay no longer mounts through the first run's copy of the reconciler.
+- Updated dependencies [8fcd806]
+- Updated dependencies [7528529]
+- Updated dependencies [8fe6300]
+- Updated dependencies [9be6797]
+- Updated dependencies [c936c56]
+- Updated dependencies [d711914]
+- Updated dependencies [521b773]
+- Updated dependencies [9d68f3b]
+- Updated dependencies [3a1421b]
+- Updated dependencies [c4b1800]
+- Updated dependencies [0a746f2]
+- Updated dependencies [4ee7fa6]
+- Updated dependencies [57e782f]
+- Updated dependencies [c4e29c2]
+- Updated dependencies [4c7d9c6]
+- Updated dependencies [d246bac]
+- Updated dependencies [7419c3b]
+- Updated dependencies [134e72b]
+- Updated dependencies [5a6ecc0]
+- Updated dependencies [fe4feb4]
+- Updated dependencies [05929b1]
+- Updated dependencies [4944439]
+- Updated dependencies [c0e1eb7]
+- Updated dependencies [1ed2c72]
+- Updated dependencies [fcc0d2e]
+- Updated dependencies [cef50f9]
+- Updated dependencies [b871632]
+- Updated dependencies [c6a6271]
+- Updated dependencies [4e79714]
+- Updated dependencies [69e9c2b]
+- Updated dependencies [671330d]
+- Updated dependencies [3ed3d47]
+- Updated dependencies [c642e6a]
+- Updated dependencies [523e8dd]
+- Updated dependencies [bd73d27]
+- Updated dependencies [a0b62db]
+- Updated dependencies [a198da5]
+- Updated dependencies [863db25]
+- Updated dependencies [ec13354]
+- Updated dependencies [439271f]
+- Updated dependencies [9bce77d]
+- Updated dependencies [f6b9458]
+- Updated dependencies [77be0bf]
+- Updated dependencies [4b90976]
+- Updated dependencies [c668d7f]
+- Updated dependencies [8d9a70f]
+- Updated dependencies [dec3bf7]
+- Updated dependencies [a0d537f]
+  - @ghia/native@0.12.0
+  - ghia@0.12.0
+
 ## 0.11.1
 
 ### Patch Changes

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { createSignal } from "solid-js"
 import { document } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"

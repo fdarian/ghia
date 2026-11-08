@@ -7,7 +7,7 @@ import { createRequire } from "node:module"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import React, { useState } from "react"
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { hasNativeTestRenderer, readMacCpuThrottle, TestRenderer } from "../testing.js"
 import {
   installBrowserAutomation,
@@ -349,6 +349,40 @@ describeNative("render()", () => {
       expect(result.stdout).toMatch(/promise boom/)
       expect(result.stdout).toMatch(/Reload/)
     })
+
+  it("reports an error that reaches the first run's handlers to the module that rendered last", async () => {
+    render(<text>one</text>, { renderer })
+    const firstRunHandlers = Reflect.get(globalThis, "__gpuixRuntimeErrorHandlers")
+
+    const rootsCreatedByLastRun: unknown[] = []
+    vi.resetModules()
+    vi.doMock("../reconciler/reconciler.js", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("../reconciler/reconciler.js")>()
+      return {
+        ...actual,
+        createRoot: (...args: Parameters<typeof actual.createRoot>) => {
+          const root = actual.createRoot(...args)
+          rootsCreatedByLastRun.push(root)
+          return root
+        },
+      }
+    })
+    try {
+      const lastRun = await import("../reconciler/renderer.js")
+      lastRun.render(<text>two</text>, { renderer })
+      expect(rootsCreatedByLastRun).toHaveLength(1)
+
+      firstRunHandlers.uncaughtException(new Error("late failure"))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      renderer.flush()
+
+      expect(rootsCreatedByLastRun).toHaveLength(2)
+      expect(renderer.getAllText().join("\n")).toContain("late failure")
+    } finally {
+      vi.doUnmock("../reconciler/reconciler.js")
+      vi.resetModules()
+    }
+  })
 
   it("does not deliver a queued window event to a remounted root", () => {
     const received: string[] = []

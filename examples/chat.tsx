@@ -5,14 +5,13 @@
  * graphite surfaces, composer chips, and a workspace footer. Threads, sends,
  * and chrome controls are interactive. Replies stay in this demo.
  *
- * Run on desktop: cd examples && bun --hot chat.tsx
+ * Run on desktop: cd examples && bun run chat
  * Run in a browser: bun run web
- * Slow CPU: THROTTLE=utility bun --hot chat.tsx
+ * Slow CPU: THROTTLE=utility bun run chat
  */
 
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  applyMacCpuThrottleFromEnv,
   Button,
   Dialog,
   DialogBackdrop,
@@ -20,8 +19,8 @@ import {
   DialogPopup,
   DialogPortal,
   DialogTitle,
+  isWebBuild,
   motion,
-  render,
   Select,
   SelectContent,
   SelectItem,
@@ -92,8 +91,8 @@ const TRAFFIC_LIGHT_CLEARANCE =
 const CONTENT_MAX_WIDTH = 720
 const TITLEBAR_HEIGHT = 48
 
-const FONT_SANS = typeof window === 'undefined' ? 'Helvetica' : 'IBM Plex Sans'
-const FONT_MONO = typeof window === 'undefined' ? 'Menlo' : 'Lilex'
+const FONT_SANS = isWebBuild ? 'IBM Plex Sans' : 'Helvetica'
+const FONT_MONO = isWebBuild ? 'Lilex' : 'Menlo'
 
 const ICONS = {
   compose: iconCompose,
@@ -2482,26 +2481,4 @@ export function ChatApp({
       </OverlayCard>
     </div>
   )
-}
-
-const isEntryPoint =
-  typeof Bun !== 'undefined'
-    ? Bun.isStandaloneExecutable || Bun.main === import.meta.path
-    : typeof process !== 'undefined' && process.argv[1]?.endsWith('chat.tsx')
-
-if (isEntryPoint) {
-  applyMacCpuThrottleFromEnv()
-  render(<ChatApp turnCount={1_000} includeSafeMdx />, {
-    title: 'GPUIX Chat · 1,000 messages',
-    width: 1180,
-    height: 820,
-    titlebarTransparent: process.platform !== 'win32',
-    windowBackground: 'blurred',
-    trafficLightX: 16,
-    trafficLightY: 17,
-    debugFrameOverlay: 'full',
-    // An agent launching this to check its own work must not take the keyboard
-    // away from whoever is typing. Automation needs no focus.
-    focus: process.env.GPUIX_BACKGROUND !== '1',
-  })
 }

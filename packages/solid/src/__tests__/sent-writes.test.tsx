@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 type Op = [string, ...unknown[]]

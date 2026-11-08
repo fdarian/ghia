@@ -4,7 +4,7 @@
 /// component's, never `animate`'s), and `initial`'s is ignored.
 
 import { createSignal, Show, type JSX } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { AnimatePresence, motion } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 

@@ -1,11 +1,12 @@
 /**
- * Compile the GPUIX chat example into a standalone Bun binary.
+ * Compile the GPUIX chat example into a standalone Bun binary with `ghia build`.
  * On macOS also wraps it in a .app so Finder and Dock can show a custom icon.
  *
- * CI sets COMPILE_OUT, COMPILE_TARGET, COMPILE_SKIP_ICONS, COMPILE_SKIP_APP.
+ * CI sets COMPILE_OUT, COMPILE_SKIP_ICONS, COMPILE_SKIP_APP. COMPILE_TARGET throws: ghia build
+ * has no cross-compile option.
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -116,50 +117,24 @@ async function buildIcons(): Promise<void> {
   log(`wrote ${path.relative(ROOT, ICNS)}`)
 }
 
-async function compileBinary(): Promise<void> {
-  log('bundling chat.tsx into a standalone binary')
-  const compile: {
-    outfile: string
-    target?: string
-    windows?: {
-      icon?: string
-      hideConsole: boolean
-      title: string
-      publisher: string
-      version: string
-      description: string
-    }
-  } = {
-    outfile: BINARY,
-  }
+function compileBinary(): void {
   if (COMPILE_TARGET) {
-    compile.target = COMPILE_TARGET
-    log(`target ${COMPILE_TARGET}`)
+    throw new Error(
+      `COMPILE_TARGET=${COMPILE_TARGET} is not supported: ghia build compiles for the host only`,
+    )
   }
-  if (WINDOWS) {
-    compile.windows = {
-      hideConsole: true,
-      title: APP_NAME,
-      publisher: 'GPUIX',
-      version: '0.1.0',
-      description: 'Native GPUIX chat example',
-    }
-    if (process.platform === 'win32' && existsSync(ICO)) {
-      compile.windows.icon = ICO
-    }
+  log('running ghia build chat.main.tsx')
+  const result = spawnSync(
+    path.join(ROOT, 'node_modules', '.bin', 'ghia'),
+    ['build', 'chat.main.tsx'],
+    { cwd: ROOT, stdio: 'inherit' },
+  )
+  if (result.status !== 0) {
+    throw new Error(`ghia build failed with exit ${result.status}`)
   }
-
-  const result = await Bun.build({
-    entrypoints: [path.join(ROOT, 'chat.tsx')],
-    compile,
-    minify: true,
-  })
-  if (!result.success) {
-    for (const message of result.logs) console.error(message)
-    throw new Error('bun build --compile failed')
-  }
-  const output = result.outputs[0]?.path ?? BINARY
-  log(`wrote ${path.relative(ROOT, output)}`)
+  const built = path.join(DIST, WINDOWS ? 'app.exe' : 'app')
+  if (built !== BINARY) renameSync(built, BINARY)
+  log(`wrote ${path.relative(ROOT, BINARY)}`)
 }
 
 function wrapMacApp(): void {
@@ -224,9 +199,9 @@ function wrapMacApp(): void {
 async function main(): Promise<void> {
   log(`output dir ${path.relative(ROOT, DIST) || '.'}`)
   rmSync(DIST, { recursive: true, force: true })
-  mkdirSync(DIST, { recursive: true })
+  // ghia build empties dist/, so the icons are written after it.
+  compileBinary()
   await buildIcons()
-  await compileBinary()
   wrapMacApp()
   log('done')
   if (process.platform === 'darwin' && existsSync(APP_BUNDLE)) {

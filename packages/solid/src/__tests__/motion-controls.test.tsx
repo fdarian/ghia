@@ -1,5 +1,5 @@
 import { createEffect, createSignal, onCleanup } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { animate, createMotionValue, motionValue } from "../index.js"
 import type { AnimationPlaybackControlsWithThen, MotionValue } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"

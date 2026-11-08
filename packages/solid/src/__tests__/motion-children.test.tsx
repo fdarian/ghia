@@ -1,7 +1,7 @@
 /// A `motion.*` builds its children once, whatever its props do: the consumer needs no `children()` around them to keep
 /// an input (and its focus) through a change of `animate`.
 import { createSignal } from "solid-js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { motion } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 

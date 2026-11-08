@@ -1,3 +1,4 @@
+// Mounts the chat page once and prints the memory it cost: cd examples && ghia dev solid/mem-mount.tsx
 import { createTestRoot } from "@ghia/solid/testing"
 import { ChatApp } from "./chat"
 
