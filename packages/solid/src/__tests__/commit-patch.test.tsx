@@ -280,10 +280,11 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit that only paints", () =
   })
 
   test("a root the list moved since it was recorded is declined as Commit:Relocated and drawn whole", () => {
-    const run = (patch: boolean) => {
+    const run = (patch: boolean, declared: boolean) => {
       const { app, renderer, select } = open("paint")
       try {
         renderer.setPatchEnabled(patch)
+        renderer.setListSizesEnabled(declared)
         const list = renderer.findByTestId("list")!.id
         renderer.drawFrame()
         for (const index of WAY) {
@@ -305,11 +306,17 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit that only paints", () =
           picture: picture(renderer, `relocated-${patch}`),
         }
       } finally {
+        renderer.setListSizesEnabled(true)
         app.unmount()
       }
     }
-    const on = run(true)
-    expect(on.picture).toEqual(run(false).picture)
+    // The rows of the list are measured by layout, so the scrolls before it are built again where the rows stand.
+    const on = run(true, false)
+    expect(on.picture).toEqual(run(false, false).picture)
     if (counted) expect(on).toMatchObject({ relocated: 1, patched: 0 })
+    // Told the sizes, the list translates those scrolls and the root is patched where it stands.
+    const told = run(true, true)
+    expect(told.picture).toEqual(run(false, true).picture)
+    if (counted) expect(told).toMatchObject({ relocated: 0, patched: 1 })
   })
 })

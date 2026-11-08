@@ -330,6 +330,7 @@ interface NativeTestRendererApi
   setRetainEnabled(enabled: boolean): void
   setPatchEnabled(enabled: boolean): void
   setScrollPatchEnabled(enabled: boolean): void
+  setListSizesEnabled(enabled: boolean): void
   getPatchCounters(): PatchCounters
   setRetainLift(names: string[]): void
   getRetainMismatches(): string[]
@@ -1274,6 +1275,13 @@ export class TestRenderer implements NativeRenderer {
    *  `GPUIX_SCROLL_PATCH_OFF` turns off for the whole run). Off, every frame is drawn whole. */
   setScrollPatchEnabled(enabled: boolean): void {
     this.native.setScrollPatchEnabled(enabled)
+  }
+
+  /** Whether a virtual list tells the list the size of a row whose style fixes it, so the rows it does
+   *  not show are not built to be measured (`getPatchCounters().scrollPatch.rowsMeasuredByDeclaration`;
+   *  on by default, as `GPUIX_LIST_SIZES_OFF` turns off for the whole run). Process wide. */
+  setListSizesEnabled(enabled: boolean): void {
+    this.native.setListSizesEnabled(enabled)
   }
 
   /** How ticks were drawn by patching since the window was made: the frames and roots patched, the

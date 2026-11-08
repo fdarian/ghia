@@ -137,6 +137,8 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
   unverified("counts a scroll that brings in a row that was never measured as a membership change", () => {
     const { renderer, unmount } = open("inert")
     try {
+      // The size of the rows is not told to the list, so the row that comes in has none.
+      renderer.setListSizesEnabled(false)
       warm(renderer, 100, 50)
       // The rows 0 to 2 show (40, 80 and 20 of the third); at 25 the row 3 does.
       const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 50, by: 25 }))
@@ -150,6 +152,19 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
         // `scroll-patch-membership.test.tsx`.
         held: { Membership: 1, "Membership.settles": 1, "Membership.unmeasured": 1 },
       })
+    } finally {
+      renderer.setListSizesEnabled(true)
+      unmount()
+    }
+  })
+
+  unverified("counts a scroll that brings in a row whose style declares its size as a translate", () => {
+    const { renderer, unmount } = open("inert")
+    try {
+      warm(renderer, 100, 50)
+      // The row 3 was never measured, nor laid out: the list is told it is 40 high (`list_sizes.rs`).
+      const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 50, by: 25 }))
+      expect(delta).toEqual({ frames: 1, eligible: 1, mispredicted: 0, hoverOnly: 0, reasons: {}, held: {} })
     } finally {
       unmount()
     }

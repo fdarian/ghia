@@ -8370,6 +8370,10 @@ struct VirtualListEntry {
     /// The `visibleRange` this list last reported (start, end). The scroll handler is set again every
     /// render, so what it compares against lives here and the closure holds a clone.
     reported_range: Rc<Cell<Option<(usize, usize)>>>,
+    /// What the list asks for the size of a row it has not measured, see `list_sizes`.
+    sizes: Rc<crate::list_sizes::DeclaredSizes>,
+    /// What each row declared at its revision and focusability, so a change of two rows reads two styles.
+    declared: HashMap<u64, ((u64, bool), Option<crate::list_sizes::RowBox>)>,
 }
 
 impl VirtualListEntry {
@@ -8382,6 +8386,8 @@ impl VirtualListEntry {
     ) -> Self {
         let item_count = config.logical_count(child_ids.len());
         let state = config.make_state(item_count, &row_focus_handles);
+        let sizes = Rc::new(crate::list_sizes::DeclaredSizes::default());
+        sizes.install(&state);
         if row_focus_handles.len() != item_count {
             for (offset, handle) in row_focus_handles.iter().enumerate() {
                 if handle.is_some() {
@@ -8404,7 +8410,35 @@ impl VirtualListEntry {
             row_focus_handles,
             seen_rows: HashSet::new(),
             reported_range: Rc::new(Cell::new(None)),
+            sizes,
+            declared: HashMap::new(),
         }
+    }
+
+    /// Declares the rows of the window to the list again: call it when `sync` changed something,
+    /// since a row's size is read from the tree at that point only.
+    fn declare_sizes(&mut self, tree: &RetainedTree) {
+        let mut declared = HashMap::with_capacity(self.child_ids.len());
+        let rows = self
+            .child_ids
+            .iter()
+            .zip(&self.child_revisions)
+            .zip(&self.row_focus_handles)
+            .map(|((id, revision), focus_handle)| {
+                let key = (*revision, focus_handle.is_some());
+                let row = match self.declared.get(id) {
+                    Some((known, row)) if *known == key => *row,
+                    _ => tree
+                        .elements
+                        .get(id)
+                        .and_then(|element| crate::list_sizes::RowBox::of(element, key.1)),
+                };
+                declared.insert(*id, (key, row));
+                row
+            })
+            .collect();
+        self.declared = declared;
+        self.sizes.declare(self.window_start, rows);
     }
 
     fn child_at(&self, logical_index: usize) -> Option<u64> {
@@ -8420,6 +8454,7 @@ impl VirtualListEntry {
             .map(|offset| self.window_start + offset)
     }
 
+    /// Whether the rows or their revisions changed, so the declared sizes are to be made again.
     fn sync(
         &mut self,
         config: VirtualListConfig,
@@ -8428,7 +8463,7 @@ impl VirtualListEntry {
         child_revisions: Vec<u64>,
         focusable_rows: &HashSet<u64>,
         cx: &mut gpui::Context<GpuixView>,
-    ) {
+    ) -> bool {
         let focus_unchanged = self.child_ids == child_ids
             && self.row_focus_handles.len() == child_ids.len()
             && self
@@ -8441,7 +8476,7 @@ impl VirtualListEntry {
             && focus_unchanged
             && self.child_revisions == child_revisions
         {
-            return;
+            return false;
         }
 
         let old_rows: HashMap<u64, (u64, Option<gpui::FocusHandle>)> = self
@@ -8496,7 +8531,7 @@ impl VirtualListEntry {
                 replacement.state.scroll_to(scroll_top);
             }
             *self = replacement;
-            return;
+            return true;
         }
 
         // gpui anchors a list on a logical item, so splicing rows in at the
@@ -8587,6 +8622,7 @@ impl VirtualListEntry {
         self.child_ids = child_ids;
         self.child_revisions = child_revisions;
         self.row_focus_handles = row_focus_handles;
+        true
     }
 
     /// A window that is still showing rows past a shrunk count has none of them in the state.
@@ -11761,7 +11797,7 @@ fn build_virtual_list(
     };
     let (list_state, reported_range) = match ctx.virtual_lists.entry(element.id) {
         std::collections::hash_map::Entry::Occupied(mut entry) => {
-            entry.get_mut().sync(
+            let changed = entry.get_mut().sync(
                 config,
                 window_start,
                 child_ids.clone(),
@@ -11770,6 +11806,10 @@ fn build_virtual_list(
                 cx,
             );
             let entry = entry.into_mut();
+            if changed {
+                entry.declare_sizes(ctx.tree);
+            }
+            entry.sizes.set_scale(window.scale_factor());
             if let Some(row_id) = focused_row.filter(|row_id| !entry.seen_rows.contains(row_id)) {
                 if let Some(index) = entry.logical_index_of(row_id) {
                     entry.state.scroll_to(gpui::ListOffset {
@@ -11792,6 +11832,8 @@ fn build_virtual_list(
                 child_revisions,
                 row_focus_handles,
             ));
+            entry.declare_sizes(ctx.tree);
+            entry.sizes.set_scale(window.scale_factor());
             if let Some(row_id) = focused_row {
                 if let Some(index) = entry.logical_index_of(row_id) {
                     entry.state.scroll_to(gpui::ListOffset {
@@ -14630,6 +14672,9 @@ pub struct PatchCounters {
     /// Patches that made the scene's primitives again from its operations instead of writing the
     /// changed ones in place.
     pub scene_rebuilds: f64,
+    /// Of the patches, the ones that left the scene to the list translate that follows in the same
+    /// draw, which makes it again once from the operations both wrote.
+    pub deferred_scene_rebuilds: f64,
     /// Primitives that patches wrote over their place in the scene.
     pub in_place_primitives: f64,
     /// Scrollers that patches laid out again and repainted (contained-layout patches), counted by gpui
@@ -14679,6 +14724,13 @@ pub struct ScrollPatchCounters {
     pub rows_rebuilt: f64,
     /// The rows those frames took out of the frame.
     pub rows_removed: f64,
+    /// How the virtual lists of the window found the size of the rows they measured, summed over the
+    /// lists that are mounted: by building and laying the row out, or from the size its style declares
+    /// (`list_sizes`). A list that is made again counts from zero.
+    pub rows_measured_by_layout: f64,
+    pub rows_measured_by_declaration: f64,
+    /// Rows that showed at another size than their style declared: a declaration that is wrong.
+    pub declaration_mismatches: f64,
     /// Of the translates, the ones that a patch drawn in the same draw came first of: the rows were moved from the frame the patch left.
     pub composed: f64,
     /// The eligible ones drawn whole, by why the translate declined before it wrote anything
@@ -14705,6 +14757,7 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
         patched_units: counters.patched_units as f64,
         empty_ticks: counters.empty_ticks as f64,
         scene_rebuilds: counters.scene_rebuilds as f64,
+        deferred_scene_rebuilds: counters.deferred_scene_rebuilds as f64,
         in_place_primitives: counters.in_place_primitives as f64,
         relayout_patches: counters.relayout_patches as f64,
         rewritten_recordings: counters.rewritten_recordings as f64,
@@ -14717,6 +14770,8 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
         unpatchable: object(view.patch.declines().iter().map(|(kind, count)| (kind.to_string(), *count)).collect()),
         scroll_patch: {
             let scroll = window.scroll_patch_counters();
+            let measures: Vec<gpui::ListMeasureCounters> =
+                view.virtual_lists.values().map(|entry| entry.state.measure_counters()).collect();
             ScrollPatchCounters {
                 frames: scroll.frames as f64,
                 eligible: scroll.eligible as f64,
@@ -14729,6 +14784,9 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
                 rows_built: scroll.rows_built as f64,
                 rows_rebuilt: scroll.rows_rebuilt as f64,
                 rows_removed: scroll.rows_removed as f64,
+                rows_measured_by_layout: measures.iter().map(|measure| measure.by_layout).sum::<u64>() as f64,
+                rows_measured_by_declaration: measures.iter().map(|measure| measure.by_exact_size).sum::<u64>() as f64,
+                declaration_mismatches: measures.iter().map(|measure| measure.exact_size_mismatches).sum::<u64>() as f64,
                 composed: scroll.composed as f64,
                 apply_declines: gpui::ScrollApplyDecline::ALL
                     .into_iter()

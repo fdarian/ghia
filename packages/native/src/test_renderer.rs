@@ -1171,6 +1171,15 @@ impl TestGpuixRenderer {
         update_view(move |_view, window, cx| crate::retain::scroll_gate::set_scroll_patch(window, cx.entity_id(), enabled))
     }
 
+    /// Whether virtual lists tell their rows' sizes to the list when the row's style fixes them
+    /// (`rowsMeasuredByDeclaration` of `scrollPatch`). On unless `GPUIX_LIST_SIZES_OFF`; process wide, and
+    /// read at every ask, so a list that is already mounted stops too.
+    #[napi]
+    pub fn set_list_sizes_enabled(&self, enabled: bool) -> Result<()> {
+        crate::list_sizes::set_enabled(enabled);
+        Ok(())
+    }
+
     /// How ticks were patched since the window was made: subtract two reads for a span of frames.
     #[napi]
     pub fn get_patch_counters(&self) -> Result<PatchCounters> {

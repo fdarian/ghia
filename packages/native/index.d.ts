@@ -752,6 +752,12 @@ export declare class TestGpuixRenderer {
    * before them (`scrollPatch` of `getPatchCounters`). On unless `GPUIX_SCROLL_PATCH_OFF`.
    */
   setScrollPatchEnabled(enabled: boolean): void
+  /**
+   * Whether virtual lists tell their rows' sizes to the list when the row's style fixes them
+   * (`rowsMeasuredByDeclaration` of `scrollPatch`). On unless `GPUIX_LIST_SIZES_OFF`; process wide, and
+   * read at every ask, so a list that is already mounted stops too.
+   */
+  setListSizesEnabled(enabled: boolean): void
   /** How ticks were patched since the window was made: subtract two reads for a span of frames. */
   getPatchCounters(): PatchCounters
   resetBuildCounters(): void
@@ -2300,6 +2306,11 @@ export interface PatchCounters {
    * changed ones in place.
    */
   sceneRebuilds: number
+  /**
+   * Of the patches, the ones that left the scene to the list translate that follows in the same
+   * draw, which makes it again once from the operations both wrote.
+   */
+  deferredSceneRebuilds: number
   /** Primitives that patches wrote over their place in the scene. */
   inPlacePrimitives: number
   /**
@@ -2445,6 +2456,15 @@ export interface ScrollPatchCounters {
   rowsRebuilt: number
   /** The rows those frames took out of the frame. */
   rowsRemoved: number
+  /**
+   * How the virtual lists of the window found the size of the rows they measured, summed over the
+   * lists that are mounted: by building and laying the row out, or from the size its style declares
+   * (`list_sizes`). A list that is made again counts from zero.
+   */
+  rowsMeasuredByLayout: number
+  rowsMeasuredByDeclaration: number
+  /** Rows that showed at another size than their style declared: a declaration that is wrong. */
+  declarationMismatches: number
   /** Of the translates, the ones that a patch drawn in the same draw came first of: the rows were moved from the frame the patch left. */
   composed: number
   /**

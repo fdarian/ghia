@@ -428,10 +428,11 @@ type Between = "nothing" | "cleanup" | "second swap" | "outside change" | "detai
  * The detail is swapped, and what a handler reads right after is read: the scroll metrics of the detail, the box of an element in the new
  * content, the scroll offset and height of a list outside it. `between` is what the handler does after the reads and before the frame.
  */
-function runReading(patch: boolean, changes: Partial<Page>[], between: Between, initial: Page = BASE) {
+function runReading(patch: boolean, changes: Partial<Page>[], between: Between, initial: Page = BASE, declared = true) {
   const { app, renderer, set } = open(initial, true)
   try {
     renderer.setPatchEnabled(patch)
+    renderer.setListSizesEnabled(declared)
     renderer.drawFrame()
     renderer.drawFrame()
     const detail = renderer.findByTestId("detail")!.id
@@ -491,6 +492,7 @@ function runReading(patch: boolean, changes: Partial<Page>[], between: Between, 
     }
     return { steps, mismatches: renderer.getRetainedCounters().mismatches, counters: renderer.getPatchCounters() }
   } finally {
+    renderer.setListSizesEnabled(true)
     app.unmount()
   }
 }
@@ -556,6 +558,24 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a read while a commit inside a s
   })
 
   test("a list scroll after the read keeps the prepared patch: the draw finishes it, and when the rows cannot be moved (they are not measured) the frame built after it is the one patching off draws", () => {
+    const on = runReading(true, SWAPS, "list scroll", BASE, false)
+    const off = runReading(false, SWAPS, "list scroll", BASE, false)
+    expect(on.mismatches).toBe(0)
+    expect(on.steps.map((step) => step.reads)).toEqual(off.steps.map((step) => step.reads))
+    expect(on.steps.map((step) => step.after)).toEqual(off.steps.map((step) => step.after))
+    expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+    if (!counted) return
+    for (const [index, step] of on.steps.entries()) {
+      expect(step.readPasses, `step ${index}`).toBe(0)
+      expect(step.relaid, `step ${index}`).toBe(1)
+      // The write notified no view: it did not discard the patch. The rows of this list have no measured size (the list is not told
+      // them), so the translate declines and the frame is built whole at the new offset (navigate-patch.test.tsx has them measured).
+      expect(step.patched, `step ${index}`).toBe(1)
+      expect(step.whole, `step ${index}`).toBe(1)
+    }
+  })
+
+  test("a list scroll after the read is a translate after the patch when the list is told the sizes of its rows", () => {
     const on = runReading(true, SWAPS, "list scroll")
     const off = runReading(false, SWAPS, "list scroll")
     expect(on.mismatches).toBe(0)
@@ -566,10 +586,10 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a read while a commit inside a s
     for (const [index, step] of on.steps.entries()) {
       expect(step.readPasses, `step ${index}`).toBe(0)
       expect(step.relaid, `step ${index}`).toBe(1)
-      // The write notified no view: it did not discard the patch. The rows of this list have no measured size, so the translate declines
-      // and the frame is built whole at the new offset (navigate-patch.test.tsx has them measured).
       expect(step.patched, `step ${index}`).toBe(1)
-      expect(step.whole, `step ${index}`).toBe(1)
+      // The list mounts 12 of its 40 rows: the first scroll brings in rows that are mounted and declare their size, the next ones rows
+      // that are not, which only a layout can measure.
+      expect(step.whole, `step ${index}`).toBe(index === 0 ? 0 : 1)
     }
   })
 
