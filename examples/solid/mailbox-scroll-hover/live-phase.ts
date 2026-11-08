@@ -5,7 +5,7 @@
 // <pid> is a process you started (`live.tsx` here, with `focus: false`); the harness posts its events with CGEventPostToPid to that
 // pid and nothing else, takes no screenshot (no --capture) and does not move the real cursor.
 //   GHIA_BENCH_HELPER  path of ghia-bench's harness/bin/benchhelper (default: ~/code/fdarian/ghia-bench/harness/bin/benchhelper)
-//   SECONDS=10         length of an idle phase
+//   IDLE_SECONDS=10        length of an idle phase
 //   POLL_MS=10         how often the threads' CPU times and the instructions are read
 //   BUCKET_MS=250      width of the buckets of the instructions timeline (0 turns it off)
 // Output: the phase's ri_instructions (from the harness's own before/after samples, as the bench reports them), then each thread's
@@ -98,7 +98,7 @@ async function runPhase(name: string) {
   const own = name.startsWith("own:")
   const command = own
     ? [process.execPath, `${import.meta.dir}/live-poster.ts`, String(pid), name.slice(4), process.env.EVENTS ?? "480", process.env.RATE ?? "120"]
-    : [helper, "phase", "--pid", String(pid), "--name", name, ...(name === "idle" ? ["--seconds", process.env.SECONDS ?? "10"] : [])]
+    : [helper, "phase", "--pid", String(pid), "--name", name, ...(name === "idle" ? ["--seconds", process.env.IDLE_SECONDS ?? "10"] : [])]
   const child = Bun.spawn(command, { stdout: "pipe", stderr: "pipe" })
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
   clearInterval(timer)
