@@ -574,17 +574,18 @@ pub(crate) struct Scroller {
     pub window: gpui::WindowId,
     /// The size of its box, which bounds what a root is worth recording.
     pub viewport: gpui::Size<gpui::Pixels>,
-    /// How far it scrolls with one step of the viewport: its height, its width, or the larger.
-    pub reach: gpui::Pixels,
+    /// How far past its clip a root is recorded, see [`gpui::Retained::relocatable`].
+    pub overscan: gpui::Pixels,
 }
 
 /// Roots of at most this many viewports (per axis) are recorded to be moved by their scroller. A
 /// bigger one is not a root: it is built, and what is below it is judged by itself.
 const ROOT_VIEWPORTS: f32 = 2.0;
 
-/// How far past the clip of its scroller a root is recorded, in viewports of the scroller. The
-/// recording of a root is put elsewhere while the scroll since it was made is within it, so a
-/// bigger one is built fewer times and replays more roots that are not shown.
+/// How far past the clip of a scroller that is no list a root is recorded, in viewports of the
+/// scroller (its height, its width, or the larger, as it scrolls). The recording of a root is put
+/// elsewhere while the scroll since it was made is within it, so a bigger one is built fewer
+/// times and replays more roots that are not shown.
 const OVERSCAN_VIEWPORTS: f32 = 0.5;
 
 impl Scroller {
@@ -617,18 +618,25 @@ impl Scroller {
             (false, true) => viewport.height,
             (true, true) => viewport.width.max(viewport.height),
         };
-        Some(Self { window, viewport, reach })
+        Some(Self { window, viewport, overscan: reach * OVERSCAN_VIEWPORTS })
     }
 
     /// The scroller a virtual list is for its rows: it always scrolls, by its height. Before its
     /// first layout it has the window for a viewport, as `of` does.
+    ///
+    /// A row is recorded when the list builds it, up to `overdraw` outside the clip, and replayed
+    /// while it is shown, at most a viewport and its own height further (a root is at most
+    /// `ROOT_VIEWPORTS` viewports tall, and the box of a row that has never painted is not known).
+    /// The region that covers the clip after that travel is the overscan, so a row is not built
+    /// again for `RelocationMiss::Region` while it is shown.
     pub(crate) fn of_list(
         window: gpui::WindowId,
         viewport: gpui::Size<gpui::Pixels>,
+        overdraw: gpui::Pixels,
         window_size: gpui::Size<gpui::Pixels>,
     ) -> Self {
         let viewport = if viewport.width <= gpui::px(0.0) || viewport.height <= gpui::px(0.0) { window_size } else { viewport };
-        Self { window, viewport, reach: viewport.height }
+        Self { window, viewport, overscan: viewport.height * (1.0 + ROOT_VIEWPORTS) + overdraw }
     }
 
     /// Whether the element's last box is small enough to be recorded to move: one that has no box
@@ -647,10 +655,6 @@ impl Scroller {
             bounds.width <= f64::from(f32::from(self.viewport.width) * ROOT_VIEWPORTS)
                 && bounds.height <= f64::from(f32::from(self.viewport.height) * ROOT_VIEWPORTS)
         })
-    }
-
-    fn overscan(&self) -> gpui::Pixels {
-        self.reach * OVERSCAN_VIEWPORTS
     }
 }
 
@@ -2706,7 +2710,7 @@ impl Retain {
                     _ => node
                         .scroller
                         .filter(|scroller| scroller.holds(node.id) && !record.lifts)
-                        .map(|scroller| scroller.overscan()),
+                        .map(|scroller| scroller.overscan),
                 };
                 let planned = overscan.is_some() && moved && record.seasoned;
                 let skip = Skip {
@@ -2877,7 +2881,7 @@ impl Retain {
         let overscan = node
             .scroller
             .filter(|scroller| !lifts && scroller.fits(node.id) != Some(false))
-            .map(|scroller| scroller.overscan());
+            .map(|scroller| scroller.overscan);
         Some(Recording {
             token: own.token,
             lift_z: node.lift_z,
@@ -5606,9 +5610,20 @@ mod tests {
     }
 
     #[test]
+    fn a_list_records_its_rows_to_cover_the_travel_of_a_row_that_is_shown() {
+        let window = gpui::WindowId::from(4);
+        let list = Scroller::of_list(window, gpui::size(gpui::px(900.0), gpui::px(780.0)), gpui::px(512.0), gpui::size(gpui::px(1000.0), gpui::px(600.0)));
+        // Built at the far side of the overdraw, a row of at most `ROOT_VIEWPORTS` viewports is shown until it
+        // leaves across the viewport.
+        assert_eq!(list.overscan, gpui::px(780.0 * 3.0 + 512.0));
+        let unlaid = Scroller::of_list(window, gpui::size(gpui::px(0.0), gpui::px(0.0)), gpui::px(512.0), gpui::size(gpui::px(1000.0), gpui::px(600.0)));
+        assert_eq!(unlaid.overscan, gpui::px(600.0 * 3.0 + 512.0));
+    }
+
+    #[test]
     fn a_pass_that_only_lays_out_skips_a_root_with_the_overscan_it_was_wrapped_with() {
         let window = gpui::WindowId::from(1);
-        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), reach: gpui::px(780.0) };
+        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
         crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
         let mut page = Units::new();
         // A list laid out empty is no scroller, and the entry is wrapped to stay where it is.
@@ -5626,7 +5641,7 @@ mod tests {
     #[test]
     fn the_content_under_a_scroller_first_found_in_a_painted_frame_is_still_recorded_to_be_moved() {
         let window = gpui::WindowId::from(2);
-        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), reach: gpui::px(780.0) };
+        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
         crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
         let mut page = Units::new();
         assert!(page_in(&mut page, false, Some(list)).is_none());
@@ -5650,7 +5665,7 @@ mod tests {
     #[test]
     fn a_record_made_to_be_moved_is_built_again_where_its_scroller_moves_nothing_now() {
         let window = gpui::WindowId::from(3);
-        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), reach: gpui::px(780.0) };
+        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
         crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
         let mut page = Units::new();
         assert!(page_in(&mut page, false, Some(list)).is_none());
@@ -6312,7 +6327,7 @@ mod tests {
     #[test]
     fn a_row_root_that_does_not_lift_is_relocatable_whatever_is_lifted_inside_its_context() {
         let window = gpui::WindowId::from(4);
-        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), reach: gpui::px(780.0) };
+        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
         crate::automation::set_bounds(window, 3, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
         // `None` is what the renderer decides for the root of a row: the list's lift barrier takes its own
         // position. A row is a stacking context, so the absolute children of a mailbox row stay in it.
@@ -6328,7 +6343,7 @@ mod tests {
     #[test]
     fn a_root_that_is_no_row_keeps_its_lift_and_is_not_relocatable() {
         let window = gpui::WindowId::from(5);
-        let scroller = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), reach: gpui::px(780.0) };
+        let scroller = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
         crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
         let root_skip = |lift_z: Option<i32>| {
             let mut page = Units::new();

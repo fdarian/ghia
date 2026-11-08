@@ -7586,7 +7586,18 @@ impl GpuixView {
 
         crate::accessibility::links::sync(&tree);
         let activation = self.activation();
-        let scroller = crate::retain::Scroller::of_list(window.window_handle().window_id(), list_viewport, viewport);
+        let overdraw = self
+            .virtual_lists
+            .get(&list_id)
+            .expect("a row is built for a list that is mounted")
+            .config
+            .overdraw;
+        let scroller = crate::retain::Scroller::of_list(
+            window.window_handle().window_id(),
+            list_viewport,
+            gpui::px(overdraw),
+            viewport,
+        );
         let mut build_ctx = self.build_ctx(
             &tree,
             &callback,

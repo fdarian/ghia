@@ -205,19 +205,19 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
     }
   })
 
-  unverified("builds again a row whose recording no longer covers the view and holds the frame for no edge of it", () => {
+  unverified("moves a row that stays however far the list scrolls, and holds the frame for no edge of its recording", () => {
     const { renderer, unmount } = open("inert")
     try {
       warm(renderer, 100, 50)
-      // The rows are recorded half a view (50) past the view: moved up by more than that, the bottom of the view shows what was
-      // not recorded. The list says how to build a row, so a row that stays is built where it is, as one that comes in is.
+      // A row is recorded to cover the travel of a row that shows (three views and the overdraw past the view), so no row is built
+      // again for the view it no longer covers, in steps that add up to several views.
       const before = renderer.getPatchCounters().scrollPatch.rowsRebuilt
       const delta = since(renderer, undefined, () => {
-        for (let step = 0; step < 14; step++) wheel(renderer, { x: 100, y: 50, by: 5 })
+        for (let step = 0; step < 100; step++) wheel(renderer, { x: 100, y: 50, by: 5 })
       })
       expect(delta.held["Region.bottom"]).toBeUndefined()
       expect(delta.held["Region.top"]).toBeUndefined()
-      expect(renderer.getPatchCounters().scrollPatch.rowsRebuilt - before).toBeGreaterThan(0)
+      expect(renderer.getPatchCounters().scrollPatch.rowsRebuilt - before).toBe(0)
       expect(delta.reasons.Region).toBeUndefined()
       expect(Object.keys(counts(renderer).held)).toEqual(
         expect.arrayContaining([

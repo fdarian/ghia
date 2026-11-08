@@ -335,15 +335,15 @@ function showing(renderer, list: number): number[] {
   })
 }
 
-/** Two thirds of the list's height: more than a row recorded where it showed can be moved by (half of it), and less than the rows measured past the ones that show. */
+/** Two thirds of the list's height: less than the rows measured past the ones that show, and a few steps move a row by more than half of it. */
 const DRIFT = 400
 const FAR = Array.from({ length: 7 }, (_, step) => step * DRIFT)
 const THERE_AND_BACK = [...FAR.slice(1), ...FAR.slice(0, -1).reverse()]
 
 /**
  * A list whose rows are not measured (the list estimates each at 40), scrolled by steps of two thirds of its height through four of its
- * heights and back with no frame between built whole: the rows that stay move further than they were recorded for and are built where
- * they are, and the rows past the ones that show are measured by the scroll before the translate is classified.
+ * heights and back with no frame between built whole: the rows that stay are moved, whatever the distance (their recordings cover the
+ * travel of a row that shows), and the rows past the ones that show are measured by the scroll before the translate is classified.
  */
 function drift(translate: boolean, how: How, overdraw: number) {
   const { renderer, unmount, list, log } = open(overdraw, false)
@@ -364,7 +364,8 @@ function drift(translate: boolean, how: How, overdraw: number) {
       renderer.flush()
       frames.push({ ...seen(renderer, `drift-${translate}-${how}-${index}`), clicks: click(renderer, list, log, showing(renderer, list)) })
     }
-    return { frames, whole, counters: scroll(renderer), mismatches: renderer.getRetentionMismatches() }
+    const misses = JSON.parse(renderer.getRetainedCounters().relocationMisses) as Record<string, number>
+    return { frames, whole, counters: scroll(renderer), misses, mismatches: renderer.getRetentionMismatches() }
   } finally {
     unmount()
   }
@@ -375,13 +376,14 @@ describeNative("a list of rows with estimated heights scrolled through several o
     ["scrollTo", 450],
     ["wheel", 450],
   ] as Array<[How, number]>)("by %s, overdraw %i", (how, overdraw) => {
-    unverified("builds the rows that come in and the rows that stay but moved too far, and is shown as the build shows it", () => {
+    unverified("builds the rows that come in, moves the rows that stay however far, and is shown as the build shows it", () => {
       const on = drift(true, how, overdraw)
       const off = drift(false, how, overdraw)
       expect(on.mismatches).toEqual([])
       expect(on.counters.mispredicted).toBe(0)
-      expect(on.counters.rowsRebuilt, JSON.stringify(on.counters)).toBeGreaterThan(0)
-      expect(on.counters.rowsBuilt).toBeGreaterThanOrEqual(on.counters.rowsRebuilt)
+      expect(on.counters.rowsBuilt, JSON.stringify(on.counters)).toBeGreaterThan(0)
+      expect(on.counters.rowsRebuilt, JSON.stringify(on.counters)).toBe(0)
+      expect(on.misses.Region ?? 0, JSON.stringify(on.misses)).toBe(0)
       expect(on.counters.patched, JSON.stringify(on.counters)).toBe(THERE_AND_BACK.length)
       expect(on.counters.frames).toBe(THERE_AND_BACK.length)
       expect(on.whole, "no frame was built whole").toBe(0)
@@ -407,7 +409,8 @@ describeNative("a list of rows with estimated heights scrolled through several o
       const after = scroll(renderer)
       // The frame after a translate that was compared is a frame built whole (see the top of the verified case above): every second one.
       expect(after.patched - before.patched, JSON.stringify(after)).toBe(THERE_AND_BACK.length / 2)
-      expect(after.rowsRebuilt - before.rowsRebuilt, "rows that stayed were built again, and compared").toBeGreaterThan(0)
+      expect(after.rowsBuilt - before.rowsBuilt, "rows came in, and were compared").toBeGreaterThan(0)
+      expect(after.rowsRebuilt - before.rowsRebuilt, "no row that stayed was built again").toBe(0)
       expect(after.mispredicted).toBe(0)
       expect(renderer.getRetainedCounters().mismatches).toBe(0)
       expect(renderer.getRetainedCounters().verified).toBeGreaterThan(compared)

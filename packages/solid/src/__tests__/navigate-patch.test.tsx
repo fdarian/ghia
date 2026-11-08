@@ -199,7 +199,7 @@ function run(mode: Mode, overdraw: number, keys: Key[]) {
 
 /** Seven and a half rows show; the first key brings row 7 fully in, and each after it a row in at the bottom and one out at the top. */
 const NAVIGATE: Key[] = [7, 8, 9, 10].map((to) => ({ to, read: true, scroll: revealing(to) }))
-/** The rows were recorded at the top: by the fifth key they have moved by more than the overscan their recording was made with (half the list). */
+/** The rows were recorded at the top: by the fifth key they have moved by more than half the list, which the overscan of a recording was before a list's rows were recorded for the travel of a row that shows. */
 const DRIFTED: Key[] = [...NAVIGATE, { to: 11, read: true, scroll: revealing(11) }]
 const THEN_WHOLE: Key[] = [...DRIFTED, { to: 11, read: false, paint: "#fafafa" }, { to: 12, read: true, scroll: revealing(12) }]
 
@@ -233,20 +233,19 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a key of the mailbox is one draw
     expect(on.steps.map((step) => step.rowsBuilt)).toEqual([0, 1, 1, 1])
   })
 
-  test("rows that moved by more than the overscan of their recording are built again where they are in the same translate, showing what patching off shows", () => {
+  test("rows that moved by more than half the list are moved, not built again, in the same translate, showing what patching off shows", () => {
     const on = run("on", 0, DRIFTED)
     same(on, run("whole", 0, DRIFTED))
     if (!counted) return
-    expect(on.steps.slice(0, 4).map((step) => step.rowsRebuilt)).toEqual([0, 0, 0, 0])
     for (const [index, step] of on.steps.entries()) {
       const where = `step ${index}: ${nonzero(on.counters)}`
       expect(step.whole, where).toBe(0)
       expect(step.composed, where).toBe(1)
       expect(step.declines + step.unpatchable, where).toBe(0)
     }
-    // The rows were recorded at the top, and the fifth key has moved them by 200: past the 150 their recordings cover.
-    expect(on.steps[4].rowsRebuilt, nonzero(on.counters)).toBeGreaterThan(0)
-    expect(on.steps[4].rowsBuilt).toBeGreaterThan(on.steps[4].rowsRebuilt)
+    // The rows were recorded at the top, and the fifth key has moved them by 200: past the 150 that half the list is, which their recordings cover.
+    expect(on.steps[4].rowsBuilt, nonzero(on.counters)).toBeGreaterThan(0)
+    expect(on.steps.map((step) => step.rowsRebuilt)).toEqual([0, 0, 0, 0, 0])
     expect(on.counters.scrollPatch.held["Region"]).toBe(0)
   })
 
