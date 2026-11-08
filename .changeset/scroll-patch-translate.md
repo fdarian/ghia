@@ -1,5 +1,0 @@
----
-'@ghia/native': patch
----
-
-The frame drawn after a wheel event over a `<virtual-list>` is not built when the rows only moved: the classifier's translates are drawn by putting the rows of the frame shown where a replay of their recordings puts them at the new position (the scene, the hitboxes, the boxes `getBoundingClientRect` reads, the regions text is selected from), the scene is made again from its log, the hover is followed as after a drawn frame, and nothing else is walked. `getPatchCounters().scrollPatch` gains `patched` and `applyDeclines` (why a translate that could be made was drawn whole; nothing is written before it declines), and a list with a scrollbar is a `Thumb` reason (the translate does not paint the thumb yet; `scrollbarWidth: "none"` has none). `GPUIX_SCROLL_PATCH_OFF=1` or `setScrollPatchEnabled(false)` draws every frame whole as before; under `GPUIX_RETAIN_VERIFY=1` each translate is compared with the frame built whole after it (scene with draw orders, hitboxes, registries).
