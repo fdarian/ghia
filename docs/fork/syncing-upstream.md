@@ -204,7 +204,7 @@ each entry or applies it again.
   touch edges, a layer a line, empty and overflowing boxes, steps of 0.1 and 1/3 up to 10 000) and two mailbox frames
   recorded from the proxy (`bounds_tree/mailbox_frames.txt`).
 
-### Contained relayout patch (zed `4359857078`, `afccad7649`, `f9a51894e7`, `06fc9e85e3`, `b133d12651`, `52f5a22f76`, `c4590da472`; `third_party/taffy`, `taffy.rs`, `window/patch.rs`, `window/patch_splice.rs`, `elements/retained.rs`)
+### Contained relayout patch (zed `4359857078`, `afccad7649`, `f9a51894e7`, `06fc9e85e3`, `b133d12651`, `52f5a22f76`, `c4590da472`, `31494a952c`; `third_party/taffy`, `taffy.rs`, `window/patch.rs`, `window/patch_splice.rs`, `elements/retained.rs`)
 
 - **Decision.** The owner approved this on 2026-11-07 (the full option 2 of the contained-layout design) as an engine change
   that lets a commit patch the frame instead of drawing it whole. It is opt-in per window (`Window::set_contained_patches`, off
@@ -246,6 +246,9 @@ each entry or applies it again.
   a patch for other roots and `discard_prepared_patch` discard it, leaving the layout the engine computed. A `prepare_patch` that
   declines leaves nothing prepared. `PreparedPatch` holds the scratch frame, the layout engine's pass and the element arena
   (taken from clearing until the patch is finished or dropped, hence the `build` closure). `contained_patch_tests.rs`.
+  The scratch frame holds one focus for every root of a patch, so each `PreparedStep` records whether its own prepaint set it
+  (`holds_focus`, `31494a952c`) and the focus check of `finish_unit` reads that: read from the frame, a root without the focus
+  declined `Registrations` after a focused root had prepared in the same patch. `patch_tests.rs`.
 - **Why.** Navigating the mailbox of ghia-bench (the Navigate proxy, `examples/solid/mailbox-navigate`) cost 39M instructions
   a key, 12M of it the fixed full frame that every commit that lays out draws. A patch that lays out only the scroller the commit
   changed does not copy what it does not change ([patch-frames.md](patch-frames.md#contained-layout-patches)).
