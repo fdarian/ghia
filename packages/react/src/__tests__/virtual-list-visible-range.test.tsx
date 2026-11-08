@@ -189,7 +189,138 @@ describeNative("onVisibleRange of a programmatic scroll", () => {
       renderer.dispatchNativeEvents()
       renderer.drawFrame()
       renderer.scrollToItem(renderer.findByTestId("list")!.id, 5)
+      renderer.drawFrame()
+      renderer.dispatchNativeEvents()
       expect(ranges).toEqual([[5, 8]])
+    } finally {
+      unmount()
+    }
+  })
+})
+
+const ROWS = 20
+const LAST_OFFSET = ROWS * ROW - VIEWPORT
+
+/** `exact` rows fix their border box, so the list is told their size; the others are measured and the list guesses their height first. */
+function sizedList(exact: boolean, onVisibleRange: (event: DomEvent) => void, alignment?: "bottom") {
+  return (
+    <virtual-list
+      testId="list"
+      itemCount={ROWS}
+      estimatedItemHeight={exact ? ROW : 25}
+      overdraw={0}
+      alignment={alignment}
+      style={{ width: 200, height: VIEWPORT }}
+      onVisibleRange={onVisibleRange}
+    >
+      {Array.from({ length: ROWS }, (_, index) => (
+        <div key={index} testId={`row-${index}`} style={exact ? { height: ROW, flexShrink: 0 } : undefined}>
+          {exact ? <text>{`row-${index}`}</text> : <div style={{ height: ROW, flexShrink: 0 }} />}
+        </div>
+      ))}
+    </virtual-list>
+  )
+}
+
+/** The rows a frame paints in the list, from their boxes. */
+function paintedRange(renderer: TestRenderer): Range {
+  const box = renderer.getElementBounds(renderer.findByTestId("list")!.id)!
+  const shown: number[] = []
+  for (let index = 0; index < ROWS; index++) {
+    const row = renderer.getElementBounds(renderer.findByTestId(`row-${index}`)!.id)
+    if (row && row.y < box.y + box.height && row.y + row.height > box.y) shown.push(index)
+  }
+  return [shown[0], shown[shown.length - 1] + 1]
+}
+
+describeNative("scrollToItem reports the rows the list shows after the layout holds its offset", () => {
+  const TARGETS = [ROWS - 1, ROWS - 2, ROWS - 3, ROWS - 4, 10, 1, 0, ROWS, ROWS + 7]
+
+  for (const exact of [true, false]) {
+    for (const target of TARGETS) {
+      it(`${exact ? "exact" : "estimated"} rows, row ${target}: the range is the rows painted (and, for exact rows, the one a wheel to the offset reports), once`, () => {
+        const scrolled = createTestRoot()
+        let painted: Range
+        let offset: number
+        const ranges: Range[] = []
+        try {
+          scrolled.render(sizedList(exact, (event) => ranges.push([event.startIndex, event.endIndex])))
+          scrolled.renderer.dispatchNativeEvents()
+          scrolled.renderer.drawFrame()
+          scrolled.renderer.scrollToItem(scrolled.renderer.findByTestId("list")!.id, target)
+          scrolled.renderer.drawFrame()
+          scrolled.renderer.dispatchNativeEvents()
+          scrolled.renderer.drawFrame()
+          scrolled.renderer.dispatchNativeEvents()
+          painted = paintedRange(scrolled.renderer)
+          offset = scrolled.renderer.getScrollOffset(scrolled.renderer.findByTestId("list")!.id)![1]
+        } finally {
+          scrolled.unmount()
+        }
+        if (exact) {
+          const expectedOffset = Math.min(LAST_OFFSET, target * ROW)
+          expect(offset).toBe(expectedOffset)
+          const wheeled: Range[] = []
+          const reference = createTestRoot()
+          try {
+            reference.render(sizedList(exact, (event) => wheeled.push([event.startIndex, event.endIndex])))
+            reference.renderer.dispatchNativeEvents()
+            reference.renderer.drawFrame()
+            reference.renderer.nativeSimulateScrollWheel(100, 50, 0, offset)
+            reference.renderer.dispatchNativeEvents()
+          } finally {
+            reference.unmount()
+          }
+          if (expectedOffset > 0) expect(ranges, "the range a wheel to the same offset reports").toEqual(wheeled)
+        }
+        expect(ranges, "one event").toHaveLength(1)
+        expect(ranges[0][0], "the first row painted").toBe(painted[0])
+        expect(Math.min(ranges[0][1]!, ROWS), "the last row painted").toBe(painted[1])
+      })
+    }
+  }
+
+  for (const alignment of [undefined, "bottom"] as const) {
+    it(`${alignment ?? "top"}-aligned list, scrollIntoView of the last row at the end and the start: the range is the rows painted`, () => {
+      for (const block of ["end", "start"] as const) {
+        const { render, renderer, unmount } = createTestRoot()
+        try {
+          const ranges: Range[] = []
+          render(sizedList(true, (event) => ranges.push([event.startIndex, event.endIndex]), alignment))
+          renderer.dispatchNativeEvents()
+          renderer.drawFrame()
+          renderer.scrollTo(renderer.findByTestId("list")!.id, 0, 100)
+          renderer.drawFrame()
+          renderer.dispatchNativeEvents()
+          ranges.length = 0
+          renderer.scrollIntoView(renderer.findByTestId(`row-${ROWS - 1}`)!.id, block)
+          renderer.drawFrame()
+          renderer.drawFrame()
+          renderer.dispatchNativeEvents()
+          const painted = paintedRange(renderer)
+          expect(ranges, `block ${block}: one event`).toHaveLength(1)
+          expect([ranges[0][0], Math.min(ranges[0][1]!, ROWS)], `block ${block}: the rows painted`).toEqual(painted)
+        } finally {
+          unmount()
+        }
+      }
+    })
+  }
+
+  it("scrollToItem to the last rows, which all rest at the same offset, reports once", () => {
+    const { render, renderer, unmount } = createTestRoot()
+    try {
+      const ranges: Range[] = []
+      render(sizedList(true, (event) => ranges.push([event.startIndex, event.endIndex])))
+      renderer.dispatchNativeEvents()
+      renderer.drawFrame()
+      const list = renderer.findByTestId("list")!.id
+      for (const target of [ROWS - 1, ROWS - 1, ROWS - 2, ROWS - 1]) {
+        renderer.scrollToItem(list, target)
+        renderer.drawFrame()
+        renderer.dispatchNativeEvents()
+      }
+      expect(ranges).toHaveLength(1)
     } finally {
       unmount()
     }

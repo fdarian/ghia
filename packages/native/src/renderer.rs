@@ -7675,15 +7675,6 @@ impl GpuixView {
             return false;
         }
         queue_virtual_list_scroll(id, index, offset_in_item);
-        if let Some(entry) = self.virtual_lists.get(&id) {
-            entry.reporter.report_at(
-                &entry.state,
-                gpui::ListOffset {
-                    item_ix: index,
-                    offset_in_item: gpui::px(offset_in_item),
-                },
-            );
-        }
         true
     }
 
@@ -11876,15 +11867,26 @@ fn build_virtual_list(
     // Queued scrolls apply here, after `sync` spliced this frame's child
     // changes, so the indices JS computed against its committed child list are
     // the indices the splice-adjusted ListState sees.
-    if let Some(offset) =
-        PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().remove(&element.id))
-    {
-        list_state.scroll_to(offset);
-    }
-
+    let queued_scroll =
+        PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().remove(&element.id));
     let listens = element.events().contains("visibleRange");
     reporter.listen(&ctx.event_callback, listens);
+    let range_report = queued_scroll.filter(|_| listens).map(|_| {
+        let reporter = reporter.clone();
+        let state = list_state.clone();
+        let report: crate::automation::PaintReporter = Rc::new(move |_, _, window, _| {
+            if !window.is_layout_pass() {
+                reporter.report_laid_out(&state);
+            }
+        });
+        report
+    });
+    if let Some(offset) = queued_scroll {
+        list_state.scroll_to(offset);
+        reporter.await_layout();
+    }
     if listens {
+        let reporter = reporter.clone();
         list_state.set_scroll_handler(move |event, _window, _cx| reporter.report(event.visible_range.clone()));
     }
 
@@ -11944,7 +11946,11 @@ fn build_virtual_list(
         .borrow_mut()
         .observers
         .note_clip_origin(element.id, element.events(), None);
-    let list = crate::automation::track_host_bounds(list, element.id, None, false, false, None);
+    // Only the frame that applies the scroll has the reporter, and it paints without a patch.
+    if range_report.is_some() {
+        ctx.retain.exclude(crate::retain::Exclusion::PaintReporter);
+    }
+    let list = crate::automation::track_host_bounds(list, element.id, None, false, false, range_report);
     let default_style = StyleDesc::default();
     crate::scrollbar::attach_to_list(
         list,
