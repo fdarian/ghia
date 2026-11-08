@@ -446,14 +446,30 @@ impl WindowBounds {
     }
 
     fn insert(&mut self, id: u64, bounds: ElementBounds, owner: u64) {
-        let previous = self.boxes.get_mut(&id);
-        let (mut recorded, mut laid_out) = previous.map_or((None, None), |stored| (stored.recorded.take(), stored.laid_out.take()));
-        match owner {
-            0 => {}
-            owner if crate::tape::is_laid_out(owner) => laid_out = Some((bounds, owner)),
-            owner => recorded = Some((bounds, owner)),
+        use std::collections::hash_map::Entry;
+        let frame = self.frame;
+        // Updated where it is stored: a `Stored` is a few hundred bytes, which a lookup and an insert would move twice.
+        match self.boxes.entry(id) {
+            Entry::Occupied(mut occupied) => {
+                let stored = occupied.get_mut();
+                stored.bounds = bounds;
+                stored.frame = frame;
+                match owner {
+                    0 => {}
+                    owner if crate::tape::is_laid_out(owner) => stored.laid_out = Some((bounds, owner)),
+                    owner => stored.recorded = Some((bounds, owner)),
+                }
+            }
+            Entry::Vacant(vacant) => {
+                let (mut recorded, mut laid_out) = (None, None);
+                match owner {
+                    0 => {}
+                    owner if crate::tape::is_laid_out(owner) => laid_out = Some((bounds, owner)),
+                    owner => recorded = Some((bounds, owner)),
+                }
+                vacant.insert(Stored { bounds, frame, recorded, laid_out });
+            }
         }
-        self.boxes.insert(id, Stored { bounds, frame: self.frame, recorded, laid_out });
     }
 }
 
@@ -684,36 +700,53 @@ impl LaidOutBox {
     }
 }
 
-/// `scrolls`: the element is a scroller, whose overflow is measured; it walks the subtree, so it is
-/// not asked of the others.
+/// Reads the box layout gave the element, in prepaint. `scrolls`: the element is a scroller, whose
+/// overflow is measured; it walks the subtree, so it is not asked of the others.
+fn read_layout(window: &mut Window, layout_id: gpui::LayoutId, scrolls: bool) -> gpui::LayoutSample {
+    let border_box = window.layout_unsnapped_bounds(layout_id);
+    let content = match scrolls.then(|| window.layout_unsnapped_scrollable_overflow(layout_id)).flatten() {
+        Some(reach) => {
+            let insets = window.layout_insets(layout_id);
+            gpui::size(
+                reach.width - insets.border.left + insets.padding.right,
+                reach.height - insets.border.top + insets.padding.bottom,
+            )
+        }
+        None => border_box.size,
+    };
+    // Prepaint runs outside the element's own transform, which layout holds: the listener
+    // sees the ambient one of its parent.
+    let to_window = window.layout_to_window(layout_id, border_box);
+    gpui::LayoutSample {
+        border_box,
+        content,
+        scale: window.scale_factor(),
+        culled: window.is_culling(),
+        to_window,
+        faces_away: window.layout_faces_away(layout_id, border_box),
+    }
+}
+
+impl From<gpui::LayoutSample> for LaidOut {
+    fn from(sample: gpui::LayoutSample) -> Self {
+        Self {
+            border_box: sample.border_box,
+            content: sample.content,
+            scale: sample.scale,
+            collapsed_table: false,
+            culled: sample.culled,
+            to_window: sample.to_window,
+            faces_away: sample.faces_away,
+        }
+    }
+}
+
+/// `scrolls`: see [`read_layout`].
 pub fn capture_layout_box<E: gpui::InteractiveElement>(el: E, scrolls: bool) -> (E, LaidOutBox) {
     let captured = LaidOutBox::default();
     let slot = captured.0.clone();
     let el = el.on_prepainted_layout(move |_, layout_id, window, _| {
-        let border_box = window.layout_unsnapped_bounds(layout_id);
-        let content = match scrolls.then(|| window.layout_unsnapped_scrollable_overflow(layout_id)).flatten() {
-            Some(reach) => {
-                let insets = window.layout_insets(layout_id);
-                gpui::size(
-                    reach.width - insets.border.left + insets.padding.right,
-                    reach.height - insets.border.top + insets.padding.bottom,
-                )
-            }
-            None => border_box.size,
-        };
-        // Prepaint runs outside the element's own transform, which layout holds: the listener
-        // sees the ambient one of its parent.
-        let to_window = window.layout_to_window(layout_id, border_box);
-        let laid_out = LaidOut {
-            border_box,
-            content,
-            scale: window.scale_factor(),
-            collapsed_table: false,
-            culled: window.is_culling(),
-            to_window,
-            faces_away: window.layout_faces_away(layout_id, border_box),
-        };
-        slot.set(Some(laid_out));
+        slot.set(Some(read_layout(window, layout_id, scrolls).into()));
     });
     (el, captured)
 }
@@ -721,9 +754,10 @@ pub fn capture_layout_box<E: gpui::InteractiveElement>(el: E, scrolls: bool) -> 
 /// Record a host element's painted box, and its selection-start region, for
 /// automation and text selection.
 ///
-/// The element reports its own box through `on_painted_layout`, so tracking it adds
-/// nothing to the tree. A canvas child per element would double the number of
-/// nodes gpui lays out, prepaints and paints.
+/// The element reports its own box to one probe that every host element shares
+/// (`InteractiveElement::layout_probe`), so tracking it adds nothing to the tree and allocates
+/// nothing: two boxed listeners per element cost more than the write they make. A canvas child
+/// per element would double the number of nodes gpui lays out, prepaints and paints.
 ///
 /// A `visibility: hidden` element paints nothing but keeps its box, so it is
 /// recorded and reports like any other. What is not recorded for it is what a
@@ -733,8 +767,8 @@ pub fn capture_layout_box<E: gpui::InteractiveElement>(el: E, scrolls: bool) -> 
 /// reports. `scrolls` says it is a scroller, whose scrollable overflow is measured too.
 /// `collapsed_table` says it is a table with collapsed borders.
 ///
-/// `report` sees the painted box right after it is recorded. `on_painted_layout`
-/// takes one listener, so it shares this one. It is for what cannot be read from the recorded
+/// `report` sees the painted box right after it is recorded, as the `on_painted_layout` listener that runs
+/// after the probe. It is for what cannot be read from the recorded
 /// boxes afterwards (`onScroll`); `onLayout` and the observers are read from them by
 /// [`crate::observers::frame_sweep`], which is what lets a replayed subtree report.
 pub fn track_host_bounds<E>(
@@ -748,25 +782,82 @@ pub fn track_host_bounds<E>(
 where
     E: gpui::InteractiveElement + gpui::Styled,
 {
-    let (el, laid_out) = capture_layout_box(el, scrolls);
-    el.on_painted_layout(move |bounds, layout_id, window, cx| {
+    let mut flags = 0;
+    if scrolls {
+        flags |= HostFlags::SCROLLS;
+    }
+    if collapsed_table {
+        flags |= HostFlags::COLLAPSED_TABLE;
+    }
+    match selection_start {
+        Some(false) => flags |= HostFlags::START_REGION,
+        Some(true) => flags |= HostFlags::START_REGION | HostFlags::SELECTABLE,
+        None => {}
+    }
+    let el = el.layout_probe(HOST_BOUNDS_PROBE.with(Rc::clone), id, flags);
+    match report {
+        Some(report) => el.on_painted_layout(move |bounds, layout_id, window, cx| {
+            report(bounds, window.layout_insets(layout_id), window, cx);
+        }),
+        None => el,
+    }
+}
+
+/// What [`track_host_bounds`] tells the probe of an element, which it keeps in a byte.
+struct HostFlags;
+
+impl HostFlags {
+    const SCROLLS: u8 = 1;
+    const COLLAPSED_TABLE: u8 = 2;
+    /// The element claims a selection-start region, which is selectable when `SELECTABLE` is set.
+    const START_REGION: u8 = 4;
+    const SELECTABLE: u8 = 8;
+}
+
+thread_local! {
+    /// The probe every host element shares, so that tracking one allocates nothing.
+    static HOST_BOUNDS_PROBE: Rc<dyn gpui::LayoutProbe> = Rc::new(HostBoundsProbe);
+}
+
+struct HostBoundsProbe;
+
+impl gpui::LayoutProbe for HostBoundsProbe {
+    fn prepainted(
+        &self,
+        _id: u64,
+        flags: u8,
+        _bounds: Bounds<Pixels>,
+        layout_id: gpui::LayoutId,
+        window: &mut Window,
+        _cx: &mut App,
+    ) -> gpui::LayoutSample {
+        read_layout(window, layout_id, flags & HostFlags::SCROLLS != 0)
+    }
+
+    fn painted(
+        &self,
+        id: u64,
+        flags: u8,
+        sample: gpui::LayoutSample,
+        bounds: Bounds<Pixels>,
+        layout_id: gpui::LayoutId,
+        window: &mut Window,
+        _cx: &mut App,
+    ) {
         let insets = window.layout_insets(layout_id);
         let window_id = window.window_handle().window_id();
         note_host_node(window, id, layout_id);
-        let laid_out = LaidOut { collapsed_table, ..laid_out.get() };
+        let laid_out = LaidOut { collapsed_table: flags & HostFlags::COLLAPSED_TABLE != 0, ..sample.into() };
         let to_window = laid_out.to_window;
         record_bounds(window_id, id, laid_out, bounds.origin, insets);
         let visible = window.visibility() == gpui::Visibility::Visible;
         // A pass that only lays out (a read, or a patch prepared ahead of its draw) runs this from the publications that prepaint
         // queued, outside the tape of any subtree, and only writes what it can write again: the boxes are replaced by id, but a start
         // region is added to the registry, once more at every pass, and nothing takes the copy out. Paint writes it, on the tape.
-        if let Some(selectable) = selection_start.filter(|_| visible && !window.is_layout_pass()) {
-            crate::text::record_start_region(window_id, id, bounds, selectable, to_window);
+        if flags & HostFlags::START_REGION != 0 && visible && !window.is_layout_pass() {
+            crate::text::record_start_region(window_id, id, bounds, flags & HostFlags::SELECTABLE != 0, to_window);
         }
-        if let Some(report) = &report {
-            report(bounds, insets, window, cx);
-        }
-    })
+    }
 }
 
 /// Called with an element's painted box and the padding and border it was laid

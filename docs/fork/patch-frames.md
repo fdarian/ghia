@@ -487,7 +487,7 @@ states, `reuse_subtree`, and gpuix's tape writing each replayed root into the re
 Nothing is built or drawn for an animation nobody sees.
 
 - **An element is dormant** when everything that runs on it only changes what it paints and the last frame that reached it walked it
-  culled (`ElementBounds::culled`, taken from `Window::is_culling` in the prepaint listener of `capture_layout_box` and written
+  culled (`ElementBounds::culled`, taken from `Window::is_culling` in the prepaint of the layout probe (`automation::read_layout`) and written
   through the tape like the rest of the box, so a replayed root republishes it; a verified frame leaves it out of what it compares,
   since a root kept near a scroller's clip is walked culled when it replays an old recording and unculled when it is built whole).
   `Dormancy::holds` decides it from live state: culled, no span, no `layout`, and the animations, transitions, `motion` and
@@ -912,7 +912,7 @@ the patcher turns it on with `Window::set_contained_patches`.
   `Hitboxes` and `Registrations`. An anchor that holds roots (text, boxes with children) and a keyed swap of the content with
   another number of elements are patched. gpui then rewrites the recording of the anchor from the patch
   (`rewrittenRecordings`), which is what lets the next commit patch it again. A root that published (every host element of Ghia
-  reports its box through an `on_painted_layout` listener) keeps its rewritten recording when it has an `on_replay` hook, as a frame built
+  reports its box through a layout probe) keeps its rewritten recording when it has an `on_replay` hook, as a frame built
   whole accepts for the recording (zed `c4590da472`), so consecutive commits in an anchor are all patches. Ghia reads the outcome after
   each patch (the counter moved by the number of anchors patched) and keeps an anchor whose recording was dropped as `Plan::unrecorded`:
   the next commit that changes it is `Anchor:StaleRecording`, decided before anything is built, and the frame built whole after it

@@ -326,7 +326,7 @@ A browser keeps style and layout for content a clip hides and skips its paint. T
 
 **What a culled subtree still does** (`prepaint_culled`, `paint_culled`, under an empty content mask):
 
-- `on_painted`, `on_painted_layout`, `on_prepainted_layout` and `on_children_prepainted` listeners run, so bounds, observers and `onLayout` are as for a painted box.
+- `on_painted`, `on_painted_layout`, `on_prepainted_layout`, `on_children_prepainted` listeners and the layout probe run, so bounds, observers and `onLayout` are as for a painted box.
 - The scroll metrics of the scrollers in it and the prepaint overlay of a classic scrollbar (so a scroller outside the clip takes its gutter), tab stops and the focus path, the layout-pass publication, and the positioned frame an escaping descendant is placed by.
 - The accessibility nodes, with bounds and relations. The accessibility tree is not a reason to stop culling: macOS turns it on for the first query from any assistive client and never turns it off.
 - `StyledText` only sets its bounds; the canvas under a text runs in full, which is where the selection registry, the find ranges, the inline-box bounds and the painted-text log are written, so selecting, searching and `getPaintedText()` see clipped text.

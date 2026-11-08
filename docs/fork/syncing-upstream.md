@@ -233,7 +233,7 @@ each entry or applies it again.
   replays it. What cannot be made what a frame built whole records is dropped as before: a root recorded to be put elsewhere,
   one that handed elements to a stacking context outside it, one whose listeners report to their owner without an `on_replay`
   hook, one with an accessibility recording, and the roots recorded inside it. A root that published (`note_publication`: any
-  element with an `on_painted`, `on_painted_layout` or prepaint listener, which every host element of Ghia has) keeps the rewritten
+  element with an `on_painted`, `on_painted_layout`, prepaint listener or layout probe, which every host element of Ghia has) keeps the rewritten
   recording when it has an `on_replay` hook, as a frame built whole accepts for the recording (`c4590da472`), so consecutive
   commits in a root are all patches. The patch cannot update the key the root was recorded with.
 - **Prepared patches (`52f5a22f76`).** The relayout path of a patch is split into `prepare_unit` (surroundings, request_layout, the
