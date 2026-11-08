@@ -115,6 +115,9 @@ function run(row: Row, declared: boolean, options: { count?: number; estimated?:
   const renderer = root.renderer
   renderer.setListSizesEnabled(declared)
   renderer.setA11yActive(false)
+  // A hover that starts a transition is painted at the time it has run since, and the two lists are not drawn in the same
+  // milliseconds: a clock that runs makes the pictures differ with the load of the machine.
+  renderer.clockPause()
   try {
     root.render(<Rows row={row} count={options.count} estimated={options.estimated} extra={options.extra} />)
     renderer.dispatchNativeEvents()
