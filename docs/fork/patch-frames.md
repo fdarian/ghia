@@ -448,7 +448,9 @@ over the page, each in something that did not move.
   a tree. The comparison of what an operation paints with its recording (`PaintOperation::differs_from`) used to format both through
   `Debug` to two strings for every operation of every unit, 8% of a tick of the tile; it formats the recorded one once and writes the
   other through a comparison that stops at the first character that differs, which is early for what changes (a colour, an opacity).
-  The answer is the one of comparing the two strings.
+  The answer is the one of comparing the two strings. A kind whose fields are all compared (`fields_equal`: `Quad`, `MonochromeSprite`,
+  `StartLayer`, `WidenGroups`) answers "differs" from its fields too and does not format: the hover crossing of the mailbox, whose
+  every changed quad took the debug form, went from 3.65M to 3.46M (median of the crossing, two runs each).
 - **A tick samples the values that move and parses no binding.** `MotionValueStore::step` samples again what moved by itself when it
   was last sampled (the values elements bind and the ones read for a drag) and the values a write since can have changed, and leaves
   the rest as the frame left them, since only time and a write move a value. A tick does that while the bindings, appearance and

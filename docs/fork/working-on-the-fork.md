@@ -271,7 +271,7 @@ See [patch-frames.md](patch-frames.md).
   a relocatable root keeps its `PatchUnit` while its recording is plain but for its own scene, and registers it only at the place it was
   recorded (`delta` zero and the key equal); anything that puts the recording elsewhere has to note it as relocated, and a patch of
   such a root makes the recordings stale for the scroll translate. `PaintOperation::differs_from` compares the fields of the kinds it
-  lists (`has_equal_fields`) before it formats: a new field of `Quad` or `MonochromeSprite` has to be in it. `hover_patch_tests.rs`.
+  lists (`fields_equal`) before it formats, and says "differs" with no formatting when one of them does (a quad that a hover gave another background: 34 fallbacks in 18 crossings, all of them quads): a new field of `Quad` or `MonochromeSprite` has to be in it, or an operation that differs only there reads as the same. `hover_patch_tests.rs`, and the scene test that changes each field alone.
 - **gpuix anchors (`Retain::begin_anchor`, `end_anchor`, `anchor_repainted`, `RetainedTree::structure_attributed`, `pending_structure`, `TapeStore::replace_recorded`, `Layered::replace`):**
   a change the tree names no element for (a new mutation that takes a revision without `mark_changed`) moves `patch_barrier`, and one that
   names the wrong element lets an anchor patch what it does not hold: every mutation that changes what a frame draws goes through
