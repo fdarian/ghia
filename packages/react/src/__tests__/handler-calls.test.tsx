@@ -203,6 +203,7 @@ function calls(r, ids) {
     setPointerCapture: () => r.setPointerCapture(ids.box, 1),
     setPatchEnabled: () => r.setPatchEnabled(true),
     setScrollPatchEnabled: () => r.setScrollPatchEnabled(true),
+    setListSizesEnabled: () => r.setListSizesEnabled(true),
     setRetainLift: () => r.setRetainLift(["svg"]),
     setRetainPlanning: () => r.setRetainPlanning(true),
     setRetainEnabled: () => r.setRetainEnabled(true),

@@ -1372,7 +1372,8 @@ ticks, 286 rows built) cost a median of 5.58M against 6.56M. `PHASE=hover` row c
 
 The saving is the scratch layout and not the shaping: a text laid out in the scratch frame is a hit in the line layout cache when the row
 is built where it shows, so the shaping the declaration avoids in the scratch frame is paid by the row that shows, and a key that brings one
-row in saves about 0.8M, not the 3.3M the scratch frame took.
+row in saves about 0.8M, not the 3.3M the scratch frame took (App-allstatic per key: `elementsBuilt` 9 against 18 and `layout.nodesCreated` 24
+against 24 to 50 on the keys that bring a row in, `layout.shapes` 5 against 5, 210 over the keys against 205).
 
 **Pinned** by `list-exact-sizes.test.tsx` (react): 34 row styles (a height in px, with a position, a width, padding, borders of 1, 3, 0.4, 1.5
 and 2.5 px, a height below its padding or border, margins, a flex and a grid container with and without a width, a fractional height, a hover
