@@ -249,6 +249,11 @@ pub struct PointerState {
     /// What follows the hover after a frame that moved the rows of a list in place: the resync
     /// the pointer frame schedules after a draw that built the content (`Window::set_scroll_patch_settled`).
     pub(crate) scroll_settle: Option<Rc<dyn Fn(&mut gpui::Window, &mut gpui::App)>>,
+    /// How many hit chains that a scroll changed `hover_would_matter` was asked about, and for how many it
+    /// said a frame built whole (`ScrollPatchCounters::hover_asked`, `hover_matters`): gpui holds `Hover` for
+    /// those and for a pointer that is not where the frame shown had it, and only these two are the hover.
+    pub(crate) scroll_hover_asked: std::cell::Cell<u64>,
+    pub(crate) scroll_hover_matters: std::cell::Cell<u64>,
     observed: ObservedChain,
 }
 

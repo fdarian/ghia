@@ -14652,6 +14652,12 @@ pub struct ScrollPatchCounters {
     /// Of the frames whose first reason is the hover, the ones nothing else stops: eligible with
     /// the pointer elsewhere.
     pub hover_only: f64,
+    /// The frames whose rows move under a pointer where the frame shown had it and change the hitboxes under it, for which
+    /// the owner was asked whether the hover would matter (`hover_would_matter`).
+    pub hover_asked: f64,
+    /// Of those, the ones that would be a frame built whole (a hover that is more than paint, or that a listener hears).
+    /// `Hover` held for a frame that is not one of these is a pointer that is not where the frame shown had it.
+    pub hover_matters: f64,
     /// Of the eligible ones, the ones drawn by moving the rows of the frame shown.
     pub patched: f64,
     /// Of those, the ones that built rows that came in or took out rows that left.
@@ -14705,6 +14711,8 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
                 eligible: scroll.eligible as f64,
                 mispredicted: scroll.mispredicted as f64,
                 hover_only: scroll.hover_only as f64,
+                hover_asked: view.pointer.borrow().scroll_hover_asked.get() as f64,
+                hover_matters: view.pointer.borrow().scroll_hover_matters.get() as f64,
                 patched: scroll.patched as f64,
                 membership_frames: scroll.membership_frames as f64,
                 rows_built: scroll.rows_built as f64,

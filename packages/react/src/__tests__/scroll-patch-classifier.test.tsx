@@ -155,15 +155,14 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
     }
   })
 
-  unverified("counts a pointer that crosses from a row to the next as a hover change", () => {
+  unverified("counts a pointer that crosses from a row to the next whose hover only paints as a translate", () => {
     const { renderer, unmount } = open("hit")
     try {
       warm(renderer, 100, 38)
-      // The pointer at 38 is in the row 0 (0 to 40) and in the row 1 after a scroll by 5.
+      // The pointer at 38 is in the row 0 (0 to 40) and in the row 1 after a scroll by 5. The hover only paints, so the tick
+      // after the translate repaints the two rows (`scroll-patch-hover.test.tsx`).
       const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 38, by: 5 }))
-      expect(delta.frames).toBe(1)
-      expect(delta.reasons).toEqual({ Hover: 1 })
-      expect(delta.hoverOnly, "nothing else stops it").toBe(1)
+      expect(delta).toEqual({ frames: 1, eligible: 1, mispredicted: 0, hoverOnly: 0, reasons: {}, held: { HitboxChain: 1 } })
     } finally {
       unmount()
     }

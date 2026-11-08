@@ -158,13 +158,13 @@ describeNative("the rows of a list translated by a scroll", { timeout: TIMEOUT }
 
   unverified("restyles the row that comes under the pointer in the frame after a translate, as the build does", () => {
     // The pointer at (20, 38) is in the row 0 and then, 5 up, still in it: a translate with the hover style on the row that
-    // moves. 5 more crosses into the row 1: a hover change, drawn whole.
+    // moves. 5 more crosses into the row 1: a hover change that only paints, so a translate as well, and the tick after it
+    // repaints the rows (`scroll-patch-hover.test.tsx`).
     const steps: Wheel[] = [3, 2, 1, 5, 2, 2, -4, -4].map((by) => ({ x: 20, y: 38, by }))
     const on = run(true, steps, [[20, 38], [20, 10]])
     const off = run(false, steps, [[20, 38], [20, 10]])
     expect(on.counters.patched).toBeGreaterThan(0)
-    // The first wheel brings the pointer into the row 1 (a hover change, drawn whole); the others translate.
-    expect(on.translated).toEqual([false, true, true, true, true, true, true, true])
+    expect(on.translated).toEqual([true, true, true, true, true, true, true, true])
     expect(on.frames).toEqual(off.frames)
   })
 

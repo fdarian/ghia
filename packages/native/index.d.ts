@@ -2413,6 +2413,16 @@ export interface ScrollPatchCounters {
    * the pointer elsewhere.
    */
   hoverOnly: number
+  /**
+   * The frames whose rows move under a pointer where the frame shown had it and change the hitboxes under it, for which
+   * the owner was asked whether the hover would matter (`hover_would_matter`).
+   */
+  hoverAsked: number
+  /**
+   * Of those, the ones that would be a frame built whole (a hover that is more than paint, or that a listener hears).
+   * `Hover` held for a frame that is not one of these is a pointer that is not where the frame shown had it.
+   */
+  hoverMatters: number
   /** Of the eligible ones, the ones drawn by moving the rows of the frame shown. */
   patched: number
   /** Of those, the ones that built rows that came in or took out rows that left. */

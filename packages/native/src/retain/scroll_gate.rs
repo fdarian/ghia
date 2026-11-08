@@ -110,7 +110,10 @@ impl GpuixView {
                         .filter_map(|id| id.last().and_then(crate::events::ids::host_id_of))
                         .find(|id| tree.elements.contains_key(id))
                 };
-                crate::events::dispatcher::hover_would_matter(&pointer, &tree, target(before), target(after))
+                let matters = crate::events::dispatcher::hover_would_matter(&pointer, &tree, target(before), target(after));
+                pointer.scroll_hover_asked.set(pointer.scroll_hover_asked.get() + 1);
+                pointer.scroll_hover_matters.set(pointer.scroll_hover_matters.get() + u64::from(matters));
+                matters
             },
         )));
         let settled = self.pointer.clone();
