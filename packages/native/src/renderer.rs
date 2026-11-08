@@ -14701,6 +14701,9 @@ pub struct PatchCounters {
     pub deferred_scene_rebuilds: f64,
     /// Primitives that patches wrote over their place in the scene.
     pub in_place_primitives: f64,
+    /// Thumbs of a list's scrollbar that a tick painted another alpha in the frame shown, with the rows
+    /// as they were and no frame built (a step of the bar's fade).
+    pub thumb_repaints: f64,
     /// Scrollers that patches laid out again and repainted (contained-layout patches), counted by gpui
     /// when it accepts one.
     pub relayout_patches: f64,
@@ -14783,6 +14786,7 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
         scene_rebuilds: counters.scene_rebuilds as f64,
         deferred_scene_rebuilds: counters.deferred_scene_rebuilds as f64,
         in_place_primitives: counters.in_place_primitives as f64,
+        thumb_repaints: counters.thumb_repaints as f64,
         relayout_patches: counters.relayout_patches as f64,
         rewritten_recordings: counters.rewritten_recordings as f64,
         declines: object(

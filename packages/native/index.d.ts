@@ -2363,6 +2363,11 @@ export interface PatchCounters {
   /** Primitives that patches wrote over their place in the scene. */
   inPlacePrimitives: number
   /**
+   * Thumbs of a list's scrollbar that a tick painted another alpha in the frame shown, with the rows
+   * as they were and no frame built (a step of the bar's fade).
+   */
+  thumbRepaints: number
+  /**
    * Scrollers that patches laid out again and repainted (contained-layout patches), counted by gpui
    * when it accepts one.
    */

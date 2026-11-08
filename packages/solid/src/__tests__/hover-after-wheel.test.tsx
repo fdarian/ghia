@@ -25,6 +25,7 @@ const COUNT = 600
 const ROW = 72
 const VIEW = 716
 const WINDOW = 60
+const FADE_TICKS = 170
 const WINDOW_STEP = 10
 const WINDOW_LEAD = 15
 const TICK_MS = 1000 / 120
@@ -72,11 +73,7 @@ function picture(renderer: TestRenderer, name: string): string {
   return bytes.toString("base64")
 }
 
-/** The ticks declined for any reason but the fade of the scrollbar, which is a frame of its own in the sweeps whatever the hover does. */
-const unpatchable = (reasons: string) =>
-  Object.entries(JSON.parse(reasons) as Record<string, number>)
-    .filter(([reason]) => reason !== "ScrollAnimation")
-    .reduce((total, [, count]) => total + count, 0)
+const unpatchable = (reasons: string) => Object.values(JSON.parse(reasons) as Record<string, number>).reduce((total, count) => total + count, 0)
 
 function run(patchEnabled: boolean) {
   const app = open()
@@ -95,8 +92,24 @@ function run(patchEnabled: boolean) {
         tick(renderer)
       }
     }
-    // The list is at the top again, with its scrollbar showing, as in the bench: what a wheel shows of it is frames built whole.
-    for (let i = 0; i < 60; i++) tick(renderer)
+    // The list is at the top again, with its scrollbar showing, as in the bench, and the bar holds for a second and fades for 200 ms:
+    // a step of the fade is the thumb written over the frame shown and not a frame, so the rows keep what the wheel left them.
+    const fadeBefore = renderer.getPatchCounters()
+    const paintedBefore = renderer.getPaintedFrameCount()
+    const fade: string[] = []
+    for (let i = 0; i < FADE_TICKS; i++) {
+      // The end of the hold is a timer of the executor, which the window's clock does not move.
+      renderer.advanceTime(TICK_MS)
+      tick(renderer)
+      if (i % 6 === 0) fade.push(picture(renderer, `${patchEnabled}-fade-${i}`))
+    }
+    const fadeAfter = renderer.getPatchCounters()
+    const faded = {
+      pictures: fade,
+      whole: renderer.getPaintedFrameCount() - paintedBefore,
+      thumbRepaints: fadeAfter.thumbRepaints - fadeBefore.thumbRepaints,
+      unpatchable: unpatchable(fadeAfter.unpatchable) - unpatchable(fadeBefore.unpatchable),
+    }
     const list = renderer.findByTestId("list")!.id
     expect(renderer.getScrollMetrics(list)![1]).toBe(0)
 
@@ -127,7 +140,7 @@ function run(patchEnabled: boolean) {
     tick(renderer)
     tick(renderer)
     const second = sweep("second")
-    return { first, second, mismatches: renderer.getRetainedCounters().mismatches }
+    return { faded, first, second, mismatches: renderer.getRetainedCounters().mismatches }
   } finally {
     app.unmount()
   }
@@ -140,9 +153,14 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: hover crossings of a windowed li
       const on = run(true)
       const off = run(false)
       expect(on.mismatches).toBe(0)
+      expect(on.faded.pictures).toEqual(off.faded.pictures)
       expect(on.first.picture).toEqual(off.first.picture)
       expect(on.second.picture).toEqual(off.second.picture)
       if (!counted) return
+      expect(on.faded.thumbRepaints, "the fade is steps of the thumb").toBeGreaterThan(0)
+      expect(on.faded.whole, "the hold and the fade of the bar after the wheel build no frame").toBe(0)
+      expect(on.faded.unpatchable, "a step of the fade is not a decline").toBe(0)
+      expect(on.first.unpatchable, "no row was replayed from a recording made elsewhere, so no crossing is a frame built whole").toBe(0)
       expect(on.first.outside + on.second.outside, "no tick is declined for an element outside every unit").toBe(0)
       expect(on.second.crossings).toBeGreaterThanOrEqual(4)
       expect(on.second.unpatchable, "every row was built where it stands by the first sweep").toBe(0)
