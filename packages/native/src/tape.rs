@@ -185,6 +185,20 @@ impl Drop for Entries {
 }
 
 impl Entries {
+    /// Empties a list that nothing else holds, to be recorded into again, under a serial of its own
+    /// when it was written into: the registries tag a write with the serial of the list it was
+    /// recorded into, and a write of an earlier recording must not be taken for one of this.
+    fn restart(&mut self, laid_out: bool) {
+        if self.list.is_empty() && is_laid_out(self.serial) == laid_out {
+            return;
+        }
+        PARENTS.try_with(|parents| parents.borrow_mut().remove(&self.serial)).ok();
+        self.serial = next_serial() | if laid_out { LAID_OUT } else { 0 };
+        self.list.clear();
+        self.kinds = Kinds::default();
+        self.layout_kinds = Kinds::default();
+    }
+
     fn new(laid_out: bool) -> Rc<Self> {
         Rc::new(Self {
             serial: next_serial() | if laid_out { LAID_OUT } else { 0 },
@@ -707,12 +721,32 @@ impl Tape {
         Rc::make_mut(list)
     }
 
+    /// Makes `list` one that holds no write, as a list of its own for what is recorded next: the one
+    /// that was there is left as it was when a replay or a subtree around holds it, and is emptied
+    /// in place, keeping its storage, when nothing does.
+    fn restart(list: &mut Rc<Entries>, laid_out: bool) {
+        match Rc::get_mut(list) {
+            Some(entries) => entries.restart(laid_out),
+            None => *list = Entries::new(laid_out),
+        }
+    }
+
+    /// This tape as [`Tape::default`] makes one, for the build of a root whose last tape nothing
+    /// holds any more to record into.
+    fn renew(&mut self) {
+        self.capture_only = false;
+        self.laid_out = false;
+        self.lifted.clear();
+        Self::restart(&mut self.prepaint, false);
+        Self::restart(&mut self.paint, false);
+    }
+
     /// Starts a list of its own for `phase`, so that what a replay of the one before holds is left
     /// as it was.
     fn start(&mut self, phase: Phase) {
         match phase {
-            Phase::Prepaint => self.prepaint = Entries::new(self.laid_out),
-            Phase::Paint => self.paint = Entries::new(self.laid_out),
+            Phase::Prepaint => Self::restart(&mut self.prepaint, self.laid_out),
+            Phase::Paint => Self::restart(&mut self.paint, self.laid_out),
             Phase::Lifted(rel) => {
                 let rel = rel as usize;
                 let laid_out = self.laid_out;
@@ -854,6 +888,20 @@ struct Rows {
 pub(crate) type Tapes = Rc<TapeStore>;
 
 impl TapeStore {
+    /// The tape the build of `root` records into: the last build's, emptied, when nothing but the
+    /// store holds it (the lists it has are reused when nothing holds them either), else a new one.
+    pub(crate) fn renew(&self, root: u64) -> SharedTape {
+        self.moved.borrow_mut().remove(&root);
+        let mut tapes = self.tapes.borrow_mut();
+        if let Some(tape) = tapes.get(&root).filter(|tape| Rc::strong_count(tape) == 1) {
+            tape.borrow_mut().renew();
+            return tape.clone();
+        }
+        let tape = SharedTape::default();
+        tapes.insert(root, tape.clone());
+        tape
+    }
+
     pub(crate) fn set(&self, root: u64, tape: SharedTape) {
         self.moved.borrow_mut().remove(&root);
         self.tapes.borrow_mut().insert(root, tape);
@@ -1659,6 +1707,35 @@ mod tests {
         assert_eq!(crate::text::painted_text(window), ["old"]);
         replay(&tape, window);
         assert_eq!(crate::text::painted_text(window), ["old", "new"]);
+    }
+
+    #[test]
+    fn a_tape_that_the_store_renews_is_emptied_in_place_and_leaves_what_a_replay_holds() {
+        let (recorded_in, window) = (WindowId::from(931), WindowId::from(932));
+        let tapes = TapeStore::default();
+        let first = tapes.renew(1);
+        record_logs(&first, recorded_in, &["old"]);
+        replay(&first, window);
+        let first_serial = first.borrow().roots().0;
+        drop(first);
+
+        let second = tapes.renew(1);
+        assert_ne!(second.borrow().roots().0[1], first_serial[1], "the list a replay holds is left as it was, and the tape has one of its own");
+        record_logs(&second, recorded_in, &["new"]);
+        assert_eq!(crate::text::painted_text(window), ["old"]);
+        replay(&second, window);
+        assert_eq!(crate::text::painted_text(window), ["old", "new"]);
+        let second_serial = second.borrow().roots().0;
+        let second_address = Rc::as_ptr(&second);
+        drop(second);
+
+        // Nothing holds this one any more but the registry of another window, which has not read it.
+        let third = tapes.renew(1);
+        assert_eq!(Rc::as_ptr(&third), second_address, "the tape of the store is reused");
+        assert_ne!(third.borrow().roots().0[1], second_serial[1], "what was written under a serial is not taken for what is written now");
+        for kind in [Kind::Bounds, Kind::StartRegion, Kind::Painted, Kind::Text, Kind::Paragraph, Kind::Measured] {
+            third.borrow().each(kind, &mut |_, _| panic!("a renewed tape holds no write"));
+        }
     }
 
     #[test]

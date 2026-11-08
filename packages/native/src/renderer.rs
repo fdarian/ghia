@@ -10627,8 +10627,7 @@ fn taped(tapes: &crate::tape::Tapes, id: u64, element: gpui::AnyElement, window:
     use gpui::IntoElement;
 
     if window.retention_records() {
-        let tape = crate::tape::SharedTape::default();
-        tapes.set(id, tape.clone());
+        let tape = tapes.renew(id);
         crate::tape::Taped::new(element, tape).into_any_element()
     } else if window.is_layout_pass() && window.retention_allowed() {
         let tape = crate::tape::Tape::laid_out();
