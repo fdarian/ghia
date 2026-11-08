@@ -1106,6 +1106,9 @@ pub(crate) struct Retain {
     /// elements the subtree holds (up to one more than a patch root may), by the revision of the subtree
     /// (`can_be_patch_root`).
     patch_root_scans: FxHashMap<u64, (u64, PatchRootScan)>,
+    /// What the style of an element says of whether its hover only paints, which every scan of a subtree asks again
+    /// of every element in it.
+    hover_scans: crate::style_memo::StyleMemo<crate::events::hover_paint::Paints>,
     /// A virtual list's row is being built, in a session of its own (`begin_row`): the list builds
     /// its rows in layout, after the render that entered the list closed the page's session.
     row: bool,
@@ -1336,6 +1339,7 @@ impl Retain {
             makes_patch_roots: true,
             makes_anchors: true,
             patch_root_scans: FxHashMap::default(),
+            hover_scans: Default::default(),
             row: false,
             row_parent_shape: 0,
             rows_seen: FxHashSet::default(),
@@ -2207,10 +2211,9 @@ impl Retain {
                 return *scan;
             }
         }
-        let mut hovers = element
-            .style
-            .as_deref()
-            .is_some_and(|style| crate::events::hover_paint::declares_paint_hover(tree, id, style));
+        let mut hovers = element.style.as_ref().is_some_and(|style| {
+            self.hover_scans.of_one(style, crate::events::hover_paint::paint_hover_of).settled(tree, id)
+        });
         let mut lifts = element.style.as_deref().is_some_and(crate::events::hover_paint::may_lift);
         let mut unfit = element
             .style
