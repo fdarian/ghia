@@ -258,7 +258,7 @@ each entry or applies it again.
   of the same kind (`window/patch_splice.rs` is new; the rewrite is in `patch_units` and `RetainedState`): apply them in
   order and run `splice_patch_tests.rs` and the retention verifier's tests.
 
-### A list scroll that is a translate, alone or after a patch (zed `window/scroll_patch.rs`, `elements/list/scroll_patch.rs`, `window/patch_splice.rs`, `window/patch.rs`; `a355938ce4`, `3f17e8f0a8`, `53b1476e30`, `92bd787a70`)
+### A list scroll that is a translate, alone or after a patch (zed `window/scroll_patch.rs`, `elements/list/scroll_patch.rs`, `window/patch_splice.rs`, `window/patch.rs`; `a355938ce4`, `3f17e8f0a8`, `53b1476e30`, `92bd787a70`, `32ab4df63c`)
 
 - **Decision.** Part of the same approved line of work as the contained relayout patch above (the plan's G3 slices), opt-in per
   window (`Window::set_scroll_patch`; a window that does not turn it on is drawn as upstream draws it). A scroll of a list that
@@ -267,7 +267,7 @@ each entry or applies it again.
 - **What it changes.** The rows that stay are moved (`RetainedPhase::Scrolled`), the rows that leave are taken out of every frame
   vector (`patch_splice.rs`, the insertion and removal forms), and the rows that come in are built through the builder the list
   was given, each laid out as a root of its own and spliced in at its place; `ScrollPatchCounters` counts them
-  (`membership_frames`, `rows_built`, `rows_removed`, `composed`) and the reasons a frame stays whole (`Membership.*`, `Region`,
+  (`membership_frames`, `rows_built`, `rows_rebuilt`, `rows_removed`, `composed`) and the reasons a frame stays whole (`Membership.*`, `Region`,
   `Hover`, ...). `Window::note_list_scrolled(view)` lets the owner say a list was scrolled by something other than a wheel (a
   write of its offset): it asks for the draw itself (`request_tick` on the invalidator, no view queued, no invalidation counted),
   so the write does not discard a prepared patch. In the draw of a tick, the patch is made first and the translate is classified
@@ -275,6 +275,12 @@ each entry or applies it again.
   that declines leaves the patch and builds the frame whole, queueing the noted view for it. A patch of a root recorded to be
   put elsewhere (a row a translate moved) prepaints and paints it in its region, `delta` from the recording, and rewrites the
   recording (`RecordingRewrite::relocation`), so rows a translate moved are patchable where they stand and stay a translate source.
+  When a scroll is noted, before the classifier reads the list, the rows of its overdraw that have no size are measured as
+  `layout_items` does (`ListState::measure_overdraw`, `Window::measure_scrolled_overdraw`), so `UnmeasuredOverdraw` is held only
+  for a row that shows; a kept row whose recording misses its region or a clip is taken out and built where it is as a row that
+  comes in is (`Prediction::rebuilds`, counted by `rows_rebuilt`). Ghia depends on this: `build_virtual_child` runs for the rows
+  measured and for the rows built again, and `TapeStore::row_built` and `Retain::forget_left_rows` answer for the second
+  ([patch-frames.md](patch-frames.md#overdraw-measured-and-rows-built-again-slice-g3d)).
 - **Why.** One key of the mailbox of ghia-bench is a restyle of two rows, a swap of the detail and a scroll of the list; each
   of the three was a patch or a translate alone and the key, drawn whole, cost 40M instructions
   ([patch-frames.md](patch-frames.md#a-key-in-one-draw-slice-g3c)).
