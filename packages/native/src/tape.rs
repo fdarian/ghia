@@ -386,31 +386,54 @@ impl<T> Layered<T> {
     /// them), and every replay that puts one back, and puts the writes of `new` in the place of the
     /// first of them (at the end if there was none), so that what was written around them keeps its
     /// order. For a registry that a patch laid out again.
+    ///
+    /// The replays that were not read are not expanded: they are kept or taken out whole, and `new` takes
+    /// the place of the first among them as replays too, so a patch costs what the registry has read and
+    /// the replays it holds, not what they stand for.
     pub(crate) fn replace(&mut self, old: &Roots, new: &[Live], kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T) {
-        self.all_mut(kind, &from);
+        let mut last = (u64::MAX, false);
+        let mut holds = |owner: u64| {
+            if last.0 != owner {
+                last = (owner, old.hold(owner));
+            }
+            last.1
+        };
         let (read, owners) = (std::mem::take(&mut self.read), std::mem::take(&mut self.owners));
         let mut inserted = false;
-        let put = |read: &mut Vec<T>, owners: &mut Vec<u64>| {
-            for live in new {
-                let list = live.entries.serial;
-                live.each(kind, |data, offset| {
-                    read.push(from(data, offset));
-                    owners.push(list);
-                });
-            }
-        };
         for (value, owner) in read.into_iter().zip(owners) {
-            if old.hold(owner) {
+            if holds(owner) {
                 if !std::mem::replace(&mut inserted, true) {
-                    put(&mut self.read, &mut self.owners);
+                    for live in new {
+                        let list = live.entries.serial;
+                        live.each(kind, |data, offset| {
+                            self.read.push(from(data, offset));
+                            self.owners.push(list);
+                        });
+                    }
                 }
                 continue;
             }
             self.read.push(value);
             self.owners.push(owner);
         }
+        let put = |pending: &mut Vec<Slot<T>>| {
+            pending.extend(new.iter().filter(|live| live.has(kind)).cloned().map(Slot::Live));
+        };
+        for slot in std::mem::take(&mut self.pending) {
+            let owner = match &slot {
+                Slot::One(_, owner) => *owner,
+                Slot::Live(live) => live.entries.serial,
+            };
+            if holds(owner) {
+                if !std::mem::replace(&mut inserted, true) {
+                    put(&mut self.pending);
+                }
+                continue;
+            }
+            self.pending.push(slot);
+        }
         if !inserted {
-            put(&mut self.read, &mut self.owners);
+            put(&mut self.pending);
         }
     }
 
