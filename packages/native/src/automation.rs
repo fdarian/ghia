@@ -757,7 +757,10 @@ where
         let to_window = laid_out.to_window;
         record_bounds(window_id, id, laid_out, bounds.origin, insets);
         let visible = window.visibility() == gpui::Visibility::Visible;
-        if let Some(selectable) = selection_start.filter(|_| visible) {
+        // A pass that only lays out (a read, or a patch prepared ahead of its draw) runs this from the publications that prepaint
+        // queued, outside the tape of any subtree, and only writes what it can write again: the boxes are replaced by id, but a start
+        // region is added to the registry, once more at every pass, and nothing takes the copy out. Paint writes it, on the tape.
+        if let Some(selectable) = selection_start.filter(|_| visible && !window.is_layout_pass()) {
             crate::text::record_start_region(window_id, id, bounds, selectable, to_window);
         }
         if let Some(report) = &report {

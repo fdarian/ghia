@@ -336,6 +336,7 @@ interface NativeTestRendererApi
   getRetainMismatches(): string[]
   getPaintedFrameCount(): number
   getLayoutPassCount(): number
+  getRegistrySlots(): number[]
   getCulledSubtreeCount(): number
   setA11yActive(active: boolean): void
   setInlineDraws(enabled: boolean): void
@@ -1328,6 +1329,13 @@ export class TestRenderer implements NativeRenderer {
    *  once regardless. */
   getLayoutPassCount(): number {
     return this.native.getLayoutPassCount()
+  }
+
+  /** How many writes and replays each registry that a frame resets holds, without reading it: the text, the start regions, the painted
+   *  text and the paragraphs. Patches repeated with no frame built whole between them must not grow them. */
+  getRegistrySlots(): { text: number; startRegions: number; painted: number; paragraphs: number } {
+    const [text, startRegions, painted, paragraphs] = this.native.getRegistrySlots() as [number, number, number, number]
+    return { text, startRegions, painted, paragraphs }
   }
 
   /** Pretends a screen reader is connected, as the test window starts out,

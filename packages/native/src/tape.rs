@@ -399,6 +399,12 @@ impl<T> Layered<T> {
         self.pending.push(Slot::Live(live));
     }
 
+    /// How many writes and replays the registry holds, without reading it.
+    #[cfg(feature = "test-support")]
+    pub(crate) fn slots(&self) -> usize {
+        self.read.len() + self.pending.len()
+    }
+
     /// Every write, in order. `from` makes one from the data of a write of `kind` and how far from
     /// where it was made it is made.
     pub(crate) fn all(&mut self, kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T) -> &[T] {

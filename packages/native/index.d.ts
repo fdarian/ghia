@@ -768,6 +768,11 @@ export declare class TestGpuixRenderer {
    */
   getPaintedFrameCount(): number
   /**
+   * How many writes and replays each of the registries that the frame resets holds: the text, the start regions, the painted text and the
+   * paragraphs. A patch repeated many times with no frame built whole must leave these as they were.
+   */
+  getRegistrySlots(): Array<number>
+  /**
    * How many layout-only passes the window has run: what a bounds or scroll read makes of a
    * dirty window, in place of a draw. The next frame draws once more regardless.
    */

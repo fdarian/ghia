@@ -20,6 +20,7 @@
 //   WHEEL_PHASE=moved  gesture phase of each wheel; AppKit reports a phaseless wheel to GPUI as "moved", a bare simulate call is "started"
 //   RAW=1         only the loops: no counters, no event wrappers, no per-stage reads (for `sample` and `bun --cpu-prof`)
 //   SPLIT=1       times the native simulate call and the JS dispatch of its events apart (the input stage otherwise is one call)
+//   LOOP_LOG=1    RAW only: reads the counter around each tick and prints, per loop, its instructions and the median of its row crossings (a flat series is a regime that does not drift)
 //   HOLD_MS=0     waits before the loop (time to attach `sample`)
 //   JSON=1        also prints the aggregates as JSON
 //   DUMP_TICKS=file   the scrollPatch counters of each tick, as JSON lines (DUMP_ALL=1: every counter, and the instructions of each stage)
@@ -380,20 +381,36 @@ if (HOLD_MS > 0) await new Promise((resolve) => setTimeout(resolve, HOLD_MS))
 const countedPainted = () => renderer.getPaintedFrameCount()
 
 if (RAW) {
+  const perTick = process.env.LOOP_LOG === "1"
+  // LOOP_LOG=1 reads the counter around each tick (a read is ~10k instructions, a crossing ~3.6M) and keeps those of the ticks
+  // that cross a row, so a loop reports what the normal run reports: the median instructions of a crossing.
+  let crossings: number[] = []
   const run = (list: Step[]) => {
     const paintedBefore = countedPainted()
     const before = readInstructions()
     for (const step of list) {
+      const tickStart = perTick ? readInstructions() : 0
       if (step.input) step.input()
       renderer.clockAdvance(TICK_MS)
       renderer.dispatchNativeEvents()
       renderer.drawFrame()
+      if (perTick && step.category({ label: step.label } as Tick) === "row crossing") crossings.push(readInstructions() - tickStart - readOverhead)
     }
     const after = readInstructions()
     return { instructions: after - before, painted: countedPainted() - paintedBefore }
   }
+  const loopLog = (loop: number, result: { instructions: number; painted: number }) => {
+    if (!perTick) return
+    console.error(`loop ${loop}: ${(result.instructions / 1e6).toFixed(1)}M instr, ${crossings.length} crossings, median crossing ${(median(crossings) / 1e6).toFixed(3)}M`)
+    crossings = []
+  }
   let input = run(steps)
-  for (let loop = 1; loop < Number(process.env.LOOPS ?? '1'); loop++) { const more = run(steps); input = { instructions: input.instructions + more.instructions, painted: input.painted + more.painted } }
+  loopLog(0, input)
+  for (let loop = 1; loop < Number(process.env.LOOPS ?? '1'); loop++) {
+    const more = run(steps)
+    loopLog(loop, more)
+    input = { instructions: input.instructions + more.instructions, painted: input.painted + more.painted }
+  }
   const tail = run(tailSteps)
   console.log(
     `${PHASE} raw: ${steps.length} ticks, ${(input.instructions / 1e6).toFixed(1)}M instr (${(input.instructions / steps.length / 1e6).toFixed(3)}M per tick), ${input.painted} frames painted; tail ${tailSteps.length} ticks ${(tail.instructions / 1e6).toFixed(1)}M, ${tail.painted} painted`,

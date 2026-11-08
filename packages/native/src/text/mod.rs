@@ -45,6 +45,8 @@ pub(crate) fn order_by_rows(window: gpui::WindowId, rows: &[crate::tape::Roots])
 }
 
 pub(crate) use paint::{describe_registries, shift};
+#[cfg(feature = "test-support")]
+pub(crate) use paint::registry_slots;
 pub(crate) use paint::{
     publish_captured_start_region, publish_captured_text, same_painted_text, same_start_region_apart_from_transform,
     same_text_apart_from_transform,

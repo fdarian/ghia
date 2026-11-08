@@ -1199,6 +1199,13 @@ impl TestGpuixRenderer {
         update_view(|view, _window, _cx| view.painted_frame_count() as f64)
     }
 
+    /// How many writes and replays each of the registries that the frame resets holds: the text, the start regions, the painted text and the
+    /// paragraphs. A patch repeated many times with no frame built whole must leave these as they were.
+    #[napi]
+    pub fn get_registry_slots(&self) -> Result<Vec<f64>> {
+        Ok(crate::text::registry_slots(test_window_id()?).into_iter().map(|slots| slots as f64).collect())
+    }
+
     /// How many layout-only passes the window has run: what a bounds or scroll read makes of a
     /// dirty window, in place of a draw. The next frame draws once more regardless.
     #[napi]

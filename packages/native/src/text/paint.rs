@@ -132,6 +132,13 @@ pub(crate) fn replace(window: WindowId, old: &crate::tape::Roots, new: &[crate::
     });
 }
 
+/// How many writes and replays each registry of `window` holds, in the order text, start regions, painted text, paragraphs.
+#[cfg(feature = "test-support")]
+pub(crate) fn registry_slots(window: WindowId) -> [usize; 4] {
+    let (text, start_regions, painted) = with_frame(window, |frame| (frame.registry.slots(), frame.start_regions.slots(), frame.painted.slots()));
+    [text, start_regions, painted, super::inline_hit::paragraph_slots(window)]
+}
+
 /// A frame brought rows in, and what they wrote is at the end of the registries: it goes where the rows of
 /// each of `rows` (in the order of the list) are.
 pub(crate) fn order_by_rows(window: WindowId, rows: &[crate::tape::Roots]) {
