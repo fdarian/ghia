@@ -1,7 +1,7 @@
 // Profiling proxy for ghia-bench's Navigate phase (30 x ArrowDown, 120 ms apart) on the test renderer.
 // App.tsx and types.ts are the bench app's mailbox plus phase-timer hooks (`phaseRun`); the App-*.tsx files are one-line experiments on it.
-// Run, from examples/solid (bun run from this folder misses ../bunfig.toml's preload):
-//   cd examples/solid && GHIA_BENCH_MESSAGES=/path/to/ghia-bench/data/messages.json A11Y=0 bun mailbox-navigate/profile.tsx
+// Run, from examples/ (Solid's JSX is compiled by the Vite config there, so `bun` on this file alone does not run it):
+//   cd examples && GHIA_BENCH_MESSAGES=/path/to/ghia-bench/data/messages.json A11Y=0 bun run profile-navigate
 // Env: GHIA_BENCH_MESSAGES  path of ghia-bench's data/messages.json (required; the run stops without it)
 //   A11Y=0  takes the pretend screen reader the test window starts with away (as a bench run has none)
 //   KEYS=30, KEYS_ONLY=1 (no per-key counters/verification, for --cpu-prof / sample), HOLD_MS=0, JSON=1
