@@ -104,8 +104,8 @@ interface OracleConfig {
   maxDrawPasses: number
   a11yActive: boolean
   windowActive: boolean
-  /** [hitbox, bounds, ids] put on each div of the raw row */
-  decorations?: [boolean, boolean, boolean]
+  /** [hitbox, bounds, ids, stackingRoot] put on each div of the raw row (and its root column) */
+  decorations?: [boolean, boolean, boolean, boolean]
   /** the row is one element: [hitbox per node, bounds write per node, style resolved every frame] */
   direct?: [boolean, boolean, boolean]
 }
@@ -123,11 +123,13 @@ const GHIA_SET: OracleConfig = { name: "gpui+ghiaSet", domHitTesting: true, maxD
 /** What Ghia puts on each host div, one part at a time, on the raw divs (the DOM hit testing Ghia runs under is on in all of them). */
 const DECOR_CONFIGS: OracleConfig[] = [
   GHIA_SET,
-  { ...GHIA_SET, name: "div+hitbox", decorations: [true, false, false] },
-  { ...GHIA_SET, name: "div+ids", decorations: [false, false, true] },
-  { ...GHIA_SET, name: "div+bounds", decorations: [false, true, false] },
-  { ...GHIA_SET, name: "div+ids+bounds", decorations: [false, true, true] },
-  { ...GHIA_SET, name: "div+hitbox+ids+bounds", decorations: [true, true, true] },
+  { ...GHIA_SET, name: "div+hitbox", decorations: [true, false, false, false] },
+  { ...GHIA_SET, name: "div+ids", decorations: [false, false, true, false] },
+  { ...GHIA_SET, name: "div+bounds", decorations: [false, true, false, false] },
+  { ...GHIA_SET, name: "div+ids+bounds", decorations: [false, true, true, false] },
+  { ...GHIA_SET, name: "div+hitbox+ids+bounds", decorations: [true, true, true, false] },
+  { ...GHIA_SET, name: "div+stackingRoot", decorations: [false, false, false, true] },
+  { ...GHIA_SET, name: "div+all+stackingRoot", decorations: [true, true, true, true] },
 ]
 /** The same row as one element: layout, hitboxes and paint of every node done by it. */
 const DIRECT_CONFIGS: OracleConfig[] = [

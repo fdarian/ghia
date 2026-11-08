@@ -216,13 +216,14 @@ impl RowOracle {
     }
 
     /// What Ghia puts on each of its host divs, put on the oracle's divs (`"div"` rows): a hitbox
-    /// (`always_hitbox`, needs DOM hit testing), the `track_host_bounds` closures, an element id.
+    /// (`always_hitbox`, needs DOM hit testing), the `track_host_bounds` closures, an element id, and the
+    /// root column as a stacking context.
     #[napi]
-    pub fn set_decorations(&self, hitbox: bool, bounds: bool, ids: bool) -> Result<()> {
+    pub fn set_decorations(&self, hitbox: bool, bounds: bool, ids: bool, stacking_root: bool) -> Result<()> {
         with_oracle(|cx, _window, view| {
             cx.update(|app| {
                 view.update(app, |view, cx| {
-                    view.decorations = Decorations { hitbox, bounds, ids };
+                    view.decorations = Decorations { hitbox, bounds, ids, stacking_root };
                     cx.notify();
                 })
             });

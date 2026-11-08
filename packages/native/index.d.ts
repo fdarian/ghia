@@ -631,9 +631,10 @@ export declare class RowOracle {
   setRowKind(kind: string): void
   /**
    * What Ghia puts on each of its host divs, put on the oracle's divs (`"div"` rows): a hitbox
-   * (`always_hitbox`, needs DOM hit testing), the `track_host_bounds` closures, an element id.
+   * (`always_hitbox`, needs DOM hit testing), the `track_host_bounds` closures, an element id, and the
+   * root column as a stacking context.
    */
-  setDecorations(hitbox: boolean, bounds: boolean, ids: boolean): void
+  setDecorations(hitbox: boolean, bounds: boolean, ids: boolean, stackingRoot: boolean): void
   /**
    * The parts of a direct row: a hitbox per node (off: the row's own, for its hover), a bounds
    * write per node as `record_bounds` makes it, and the style of every node resolved from its

@@ -73,6 +73,9 @@ pub struct Decorations {
     pub bounds: bool,
     /// An element id on each div (a `Stateful<Div>`), as every host div has.
     pub ids: bool,
+    /// The root column is a stacking context, as the window root of a Ghia page is: the absolute
+    /// children of every row are lifted into it and sorted (`Window::end_stacking_context`).
+    pub stacking_root: bool,
 }
 
 pub struct RawRows {
@@ -152,7 +155,13 @@ impl Render for RawRows {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.renders += 1;
         let rows: Vec<_> = (0..self.rows.len()).map(|position| self.render_row(position, cx)).collect();
-        div().flex().flex_col().size_full().bg(rgb(0xFFFFFF)).children(rows)
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .bg(rgb(0xFFFFFF))
+            .when(self.decorations.stacking_root, |root| root.stacking_context())
+            .children(rows)
     }
 }
 
