@@ -37,14 +37,15 @@ pub(crate) fn note_metrics_current(window: &gpui::Window) {
     CURRENT_AT.with(|current| current.set(Some(window.layout_stamp())));
 }
 
-/// Whether no layout invalidation came since [`note_metrics_current`]. A scroll write counts as
-/// one; [`finish_write`] takes its own back.
+/// Whether no layout invalidation came since [`note_metrics_current`], and no commit is waiting for
+/// its patch to be prepared: a commit inside an anchor counts as no invalidation, but moves the
+/// extents. A scroll write counts as one; [`finish_write`] takes its own back.
 pub(crate) fn metrics_current(window: &gpui::Window) -> bool {
     CURRENT_AT.with(|current| {
         current
             .get()
             .is_some_and(|stamp| stamp.same_invalidations(&window.layout_stamp()))
-    })
+    }) && !crate::renderer::layout_awaits_a_read()
 }
 
 /// What the renderer holds for the element a write is aimed at.

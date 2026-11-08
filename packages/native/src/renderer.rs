@@ -653,6 +653,12 @@ pub(crate) fn notify_pending_layout(cx: &mut gpui::App) {
     }
 }
 
+/// Whether a commit that moved boxes in anchors waits for a read to prepare its patch: no layout
+/// invalidation was counted for it, yet the scroll metrics are older than the tree.
+pub(crate) fn layout_awaits_a_read() -> bool {
+    LAYOUT_PENDING.with(|pending| pending.borrow().values().any(|state| *state == PendingLayout::Waiting))
+}
+
 /// A frame is being built: the view's layout is no older than the tree.
 pub(crate) fn layout_is_drawn(view: gpui::EntityId) {
     LAYOUT_PENDING.with(|pending| pending.borrow_mut().remove(&view));
