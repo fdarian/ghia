@@ -17,6 +17,7 @@
 //   HITS=1             prints the hit chain over the avatar of row 2 for the Ghia-like div row and for the direct row (with `decor`, `direct`)
 //   A11Y=0             takes the pretend screen reader away from the Ghia window (default 0 here: a bench run has none)
 //   JSON=1             prints the results as JSON on the last line
+//   COUNTERS=1         LOOP only: prints the build, retained, frame-work and layout counters per loop after it
 //   HOLD_MS=0          LOOP only: waits after the setup, before the loop (time to attach `sample`)
 //   LOOP=name LOOPS=n  runs one loop of `oracle-whole`, `oracle-cross` (CONFIG=name picks the oracle config of a `decor` or `direct` mode), or `ghia-{column|list}-{on|off}-{whole|cross}` (on: retention
 //                      on, "whole" then rebuilds everything and records it) LOOPS times in a row, without reading the counter (RAW, for `sample`)
@@ -434,6 +435,8 @@ if (LOOP) {
     renderer.dispatchMouseMove(HOVER_X, rowCenter(row))
     frameStep()
     await hold()
+    const countersBefore = process.env.COUNTERS === "1" ? { retained: renderer.getRetainedCounters(), frame: renderer.getFrameWorkCounters(), layout: renderer.getLayoutCounters(), slots: renderer.getRegistrySlots() } : null
+    renderer.resetBuildCounters()
     const start = readInstructions()
     for (let i = 0; i < LOOPS; i++) {
       if (LOOP.endsWith("-whole")) {
@@ -450,6 +453,18 @@ if (LOOP) {
       }
     }
     console.log(`${LOOP}: ${((readInstructions() - start) / LOOPS / 1e6).toFixed(3)}M instr per loop`)
+    if (countersBefore) {
+      const perLoop = (after: object, before: object) =>
+        Object.fromEntries(
+          Object.entries(after)
+            .filter(([, value]) => typeof value === "number")
+            .map(([key, value]) => [key, ((value as number) - ((before as Record<string, number>)[key] ?? 0)) / LOOPS])
+        )
+      console.log("COUNTERS build", JSON.stringify({ ...renderer.getBuildCounters(), retainReasons: undefined }))
+      console.log("COUNTERS retained per loop", JSON.stringify(perLoop(renderer.getRetainedCounters(), countersBefore.retained)))
+      console.log("COUNTERS frame per loop", JSON.stringify(perLoop(renderer.getFrameWorkCounters(), countersBefore.frame)))
+      console.log("COUNTERS layout per loop", JSON.stringify(perLoop(renderer.getLayoutCounters(), countersBefore.layout)))
+    }
     root.unmount()
   }
   process.exit(0)
