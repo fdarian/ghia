@@ -165,6 +165,8 @@ thread_local! {
     /// TODO: Scope by renderer/window ID when multi-window support is added.
     static SCROLL_HANDLES: RefCell<HashMap<u64, gpui::ScrollHandle>> = RefCell::new(HashMap::new());
     static VIRTUAL_LIST_STATES: RefCell<HashMap<u64, gpui::ListState>> = RefCell::new(HashMap::new());
+    /// The `visibleRange` reporters of the lists in `VIRTUAL_LIST_STATES`, for a write that moves one.
+    static VIRTUAL_LIST_REPORTERS: RefCell<HashMap<u64, Rc<crate::visible_range::RangeReporter>>> = RefCell::new(HashMap::new());
     /// `SCROLL_HANDLES` and `VIRTUAL_LIST_STATES` as the last forced pass of a read left them: a frame that
     /// skips the content it forced drops the scrollers in it from both, see [`keep_scroll_state`].
     static KEPT_SCROLL_HANDLES: RefCell<HashMap<u64, gpui::ScrollHandle>> = RefCell::new(HashMap::new());
@@ -265,9 +267,13 @@ fn scroll_element_to(
     behavior: crate::scroll::Behavior,
 ) -> bool {
     let list = VIRTUAL_LIST_STATES.with(|cell| {
-        cell.borrow()
-            .get(&id)
-            .map(|state| crate::scroll_write::write_list(metrics_current, id, state, top))
+        cell.borrow().get(&id).map(|state| {
+            VIRTUAL_LIST_REPORTERS.with(|reporters| {
+                let reporters = reporters.borrow();
+                let reporter = reporters.get(&id).map(|reporter| reporter.as_ref());
+                crate::scroll_write::write_list(metrics_current, id, state, reporter, top)
+            })
+        })
     });
     if let Some(moved) = list {
         return moved;
@@ -530,12 +536,153 @@ pub(crate) fn invalidate_after_commit(cx: &mut gpui::App, view: gpui::EntityId) 
 /// [`invalidate_after_commit`] for the changes `RetainedTree::take_dirty` reported. A paint-only
 /// batch still draws the next frame, which rebuilds the elements it changed, but a read of bounds
 /// or a scroll write before it needs no layout pass: no box moved.
-pub(crate) fn invalidate_after_mutation(cx: &mut gpui::App, view: gpui::EntityId, dirty: Dirty) {
+///
+/// A batch whose restyles a patch frame can follow (`Dirty::PaintPatchable`) asks for a tick, as a
+/// hover that only paints does: the roots that hold the restyled elements are built again and
+/// painted over the frame shown, and a tick that cannot be patched is drawn whole in the same draw.
+/// The layout stays current as it does for `notify_paint_only`, so a read before the frame lays
+/// nothing out. A batch whose changes all lie in anchors (`Dirty::LayoutPatchable`) asks for a tick too,
+/// but moves boxes: the tree says its layout is pending, and a read of geometry before the draw
+/// answers from a patch it prepares for the anchors (`settle_pending_layout`).
+///
+/// A batch is joined with the layout the view is still owed from the ones before it ([`layout_owed`], by [`Dirty::merge`]): a
+/// paint-only batch after a `Dirty::LayoutPatchable` one is a `Dirty::Layout`, since boxes moved that no layout invalidation was counted for.
+///
+/// A change made after a read prepared that patch is not in it: the patch is thrown away, and the
+/// next read prepares another (or notifies the view, as before) for all the changes.
+pub(crate) fn invalidate_after_mutation(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, dirty: Dirty) {
+    if dirty == Dirty::Clean {
+        return;
+    }
+    discard_prepared_patch(window, cx, view, PendingLayout::Waiting);
+    // The batches before this one that moved boxes are still owed their layout, and this one does not take that away.
+    let dirty = dirty.merge(layout_owed(view));
     match dirty {
         Dirty::Clean => {}
-        Dirty::Paint => cx.notify_paint_only(view),
-        Dirty::Layout => invalidate_after_commit(cx, view),
+        Dirty::PaintPatchable => window.request_tick(),
+        Dirty::LayoutPatchable => {
+            LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Waiting));
+            window.request_tick();
+        }
+        Dirty::Paint => {
+            note_pending(view, PendingLayout::Notified);
+            cx.notify_paint_only(view)
+        }
+        Dirty::Layout => {
+            note_pending(view, PendingLayout::Notified);
+            invalidate_after_commit(cx, view)
+        }
     }
+}
+
+/// What the layout the view is owed asks of the window, as the batches that owe it did: [`Dirty::LayoutPatchable`] while a read has
+/// not prepared the patch for them, [`Dirty::Layout`] once the view is invalidated.
+fn layout_owed(view: gpui::EntityId) -> Dirty {
+    LAYOUT_PENDING.with(|pending| match pending.borrow().get(&view) {
+        None => Dirty::Clean,
+        Some(PendingLayout::Waiting | PendingLayout::Prepared) => Dirty::LayoutPatchable,
+        Some(PendingLayout::Notified) => Dirty::Layout,
+    })
+}
+
+/// Throws away the patch a read prepared, because the tree or a scroller changed after it, and says what
+/// the view's pending layout is now: `then` if a patch was waiting for it (`Waiting`, a patch for the
+/// changes made so far is prepared by the next read; `Notified`, the view is invalidated and the next read
+/// lays out).
+pub(crate) fn discard_prepared_patch(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, then: PendingLayout) {
+    if window.prepared_patch_units().is_none() {
+        return;
+    }
+    window.discard_prepared_patch(cx);
+    note_pending(view, then);
+}
+
+/// Says what the pending layout of `view` is now, if it has one.
+fn note_pending(view: gpui::EntityId, state: PendingLayout) {
+    LAYOUT_PENDING.with(|pending| {
+        if let Some(held) = pending.borrow_mut().get_mut(&view) {
+            *held = state;
+        }
+    });
+}
+
+/// What a view that has a patch of anchors to draw has done about the layout a read needs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PendingLayout {
+    /// Nothing yet: the next read prepares the patch.
+    Waiting,
+    /// A patch is prepared, and answers reads until something changes.
+    Prepared,
+    /// The view is invalidated: the next read lays out from the root of the window, and the tick that was asked for is drawn whole.
+    Notified,
+}
+
+thread_local! {
+    /// The views that have a patch of anchors to draw, which moved boxes: the layout is older than the tree.
+    static LAYOUT_PENDING: std::cell::RefCell<rustc_hash::FxHashMap<gpui::EntityId, PendingLayout>> = Default::default();
+    /// The views whose list was written to quietly (`invalidate_after_scroll`) and not drawn since: the boxes of the rows are
+    /// where the write put the offset only in a layout, which a read of boxes runs.
+    static LIST_WRITTEN: std::cell::RefCell<rustc_hash::FxHashSet<gpui::EntityId>> = Default::default();
+}
+
+/// What a read of geometry does before it lays out. A view with a patch of anchors waiting has its
+/// patch prepared: gpui lays out and prepaints the anchors, and the read is answered by the boxes they
+/// publish, with no pass from the root of the window and with no second build of the anchors in the
+/// draw (patch-frames.md, "Contained-layout patches"). When the patch cannot be prepared (gpui
+/// declines it, or the tree is not a patch any more) the view is invalidated, as a commit that lays
+/// out invalidates it, so the read sees the tree's boxes, and the tick that was asked for is drawn whole.
+pub(crate) fn settle_pending_layout(window: &mut gpui::Window, cx: &mut gpui::App) {
+    // A read of boxes after a write to a list's offset sees the rows where the write put them, as a browser's does: the view is
+    // notified as a `div` scroller's write notifies it, which a patch that was prepared does not survive.
+    let written: Vec<gpui::EntityId> = LIST_WRITTEN.with(|written| written.borrow_mut().drain().collect());
+    for view in written {
+        discard_prepared_patch(window, cx, view, PendingLayout::Notified);
+        note_pending(view, PendingLayout::Notified);
+        cx.notify_scroll_only(view);
+    }
+    let views: Vec<(gpui::EntityId, PendingLayout)> =
+        LAYOUT_PENDING.with(|pending| pending.borrow().iter().map(|(view, state)| (*view, *state)).collect());
+    let root = window.root::<GpuixView>().flatten();
+    for (view, state) in views {
+        let ours = root.as_ref().filter(|root| root.entity_id() == view);
+        match (state, ours) {
+            (PendingLayout::Prepared, Some(_)) if window.prepared_patch_units().is_some() => continue,
+            (PendingLayout::Waiting, Some(root)) if GpuixView::prepare_for_read(root, window, cx) => {
+                LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Prepared));
+                continue;
+            }
+            _ => {}
+        }
+        invalidate_after_commit(cx, view);
+        LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Notified));
+    }
+}
+
+/// [`settle_pending_layout`] for a read that has no window to prepare in: the view is invalidated.
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+pub(crate) fn notify_pending_layout(cx: &mut gpui::App) {
+    let views: Vec<gpui::EntityId> = LAYOUT_PENDING.with(|pending| pending.borrow().keys().copied().collect());
+    for view in views {
+        invalidate_after_commit(cx, view);
+        LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Notified));
+    }
+}
+
+/// Whether a commit that moved boxes in anchors waits for a read to prepare its patch: no layout
+/// invalidation was counted for it, yet the scroll metrics are older than the tree.
+pub(crate) fn layout_awaits_a_read() -> bool {
+    LAYOUT_PENDING.with(|pending| pending.borrow().values().any(|state| *state == PendingLayout::Waiting))
+}
+
+/// A frame is being built: the view's layout is no older than the tree.
+pub(crate) fn layout_is_drawn(view: gpui::EntityId) {
+    LAYOUT_PENDING.with(|pending| pending.borrow_mut().remove(&view));
+    list_writes_drawn(view);
+}
+
+/// The draw that follows a quiet write to a list's offset is done.
+pub(crate) fn list_writes_drawn(view: gpui::EntityId) {
+    LIST_WRITTEN.with(|written| written.borrow_mut().remove(&view));
 }
 
 /// What a read of geometry does about the content of the skipped ancestors of its element.
@@ -596,6 +743,7 @@ pub(crate) fn read_after_layout<R>(
     read: impl FnOnce(gpui::WindowId) -> R,
 ) -> Result<R> {
     use crate::layout::content_visibility::{ancestors_of, skipped_ancestors};
+    settle_pending_layout(window, cx);
     let window_id = window.window_handle().window_id();
     if skipped == SkippedContent::Leave {
         lay_out(window, cx);
@@ -713,11 +861,28 @@ impl Repaint {
     }
 }
 
+pub(crate) fn is_virtual_list(id: u64) -> bool {
+    VIRTUAL_LIST_STATES.with(|cell| cell.borrow().contains_key(&id))
+}
+
 /// [`invalidate_after_commit`] for a scroll write of a `div` scroller or a virtual list, clamped
 /// to its range. It moves the boxes of what the scroller holds and nothing a scroll query reads, as
-/// in a browser, where a scroll offset is a paint property. The next frame builds the rows of a
-/// list at the new offset.
-pub(crate) fn invalidate_after_scroll(cx: &mut gpui::App, view: gpui::EntityId) {
+/// in a browser, where a scroll offset is a paint property.
+///
+/// The next frame builds the rows of a list at the new offset, or moves the ones it has and builds the
+/// ones that come in, as one after a wheel does (`Window::note_list_scrolled`). That write is quiet: it
+/// asks for the draw and notifies nothing, so a patch a read prepared is still there for the draw to
+/// finish before it moves the rows, and the frame whose translate declines is built whole by the view
+/// gpui queues for it. A window that does not classify the frame is notified, as a `div` scroller is.
+pub(crate) fn invalidate_after_scroll(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, list: bool) {
+    if list && crate::retain::scroll_gate::list_write_is_quiet(view) {
+        window.note_list_scrolled(view);
+        LIST_WRITTEN.with(|written| written.borrow_mut().insert(view));
+        return;
+    }
+    // The view is notified, so the patch of anchors a read prepared is gone and the tick is drawn whole.
+    discard_prepared_patch(window, cx, view, PendingLayout::Notified);
+    note_pending(view, PendingLayout::Notified);
     cx.notify_scroll_only(view);
 }
 
@@ -726,9 +891,9 @@ fn invalidate_window(dirty: Dirty) -> Result<()> {
     if crate::events::sync_dispatch::in_sync_call() {
         return crate::events::sync_dispatch::invalidate_root_view(dirty).map_err(Error::from_reason);
     }
-    update_window(move |_view, _window, cx| {
+    update_window(move |_view, window, cx| {
         let view = cx.entity_id();
-        invalidate_after_mutation(cx, view, dirty);
+        invalidate_after_mutation(window, cx, view, dirty);
     })
 }
 
@@ -1045,12 +1210,12 @@ async fn run_ui_commands(
                 behavior,
             } => window.update(cx, move |_view, window, cx| {
                 if scroll_write_lays_out_first(crate::scroll_write::metrics_current(window), id, top, behavior) {
-                    window.draw_if_scroll_metrics_dirty(cx);
+                    { crate::renderer::notify_pending_layout(cx); window.draw_if_scroll_metrics_dirty(cx) };
                 }
                 let was_current = crate::scroll_write::metrics_current(window);
                 if scroll_element_to(was_current, id, left, top, behavior) {
                     let view = cx.entity_id();
-                    crate::scroll_write::finish_write(window, cx, view, was_current);
+                    crate::scroll_write::finish_write(window, cx, view, id, was_current);
                 }
             }),
             UiCommand::ScrollToItem { id, index, offset } => {
@@ -1072,7 +1237,7 @@ async fn run_ui_commands(
             UiCommand::ScrollIntoView { id, options } => {
                 // Align by the tree as it is, not the last frame; see `GetElementBounds`.
                 gpui::AnyWindowHandle::from(window)
-                    .update(cx, |_view, window, cx| window.draw_if_dirty(cx))?;
+                    .update(cx, |_view, window, cx| { crate::renderer::settle_pending_layout(window, cx); window.draw_if_dirty(cx) })?;
                 window.update(cx, move |view, window, cx| {
                     if view.scroll_element_into_view(window, id, options) {
                         cx.notify();
@@ -1082,7 +1247,7 @@ async fn run_ui_commands(
             }
             UiCommand::GetScrollMetrics { id, response } => {
                 gpui::AnyWindowHandle::from(window).update(cx, move |_view, window, cx| {
-                    window.draw_if_scroll_metrics_dirty(cx);
+                    { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) };
                     response.send(scroll_metrics(window.window_handle().window_id(), id)).ok();
                 })
             }
@@ -1175,13 +1340,13 @@ async fn run_ui_commands(
             // builds it.
             UiCommand::GetAutomationBounds { response } => {
                 gpui::AnyWindowHandle::from(window).update(cx, move |_view, window, cx| {
-                    window.draw_if_dirty(cx);
+                    { crate::renderer::settle_pending_layout(window, cx); window.draw_if_dirty(cx) };
                     response.send(crate::automation::all_bounds(window.window_handle().window_id())).ok();
                 })
             }
             UiCommand::GetElementBounds { id, response } => {
                 gpui::AnyWindowHandle::from(window).update(cx, move |_view, window, cx| {
-                    window.draw_if_dirty(cx);
+                    { crate::renderer::settle_pending_layout(window, cx); window.draw_if_dirty(cx) };
                     response.send(crate::automation::get_bounds(window.window_handle().window_id(), id)).ok();
                 })
             }
@@ -1695,7 +1860,7 @@ impl GpuixRenderer {
     /// `init`: nothing was laid out.
     #[cfg(target_os = "macos")]
     fn draw_pending_changes(&self) -> Result<Option<gpui::WindowId>> {
-        self.with_initialized_window(|window, cx| window.draw_if_dirty(cx))
+        self.with_initialized_window(|window, cx| { crate::renderer::settle_pending_layout(window, cx); window.draw_if_dirty(cx) })
     }
 
     /// Like `draw_pending_changes`, for a read of what a frame painted (the painted text), which
@@ -3661,12 +3826,12 @@ impl GpuixRenderer {
             // Nothing is laid out for most writes (see `scroll_write`): a write the layout is behind
             // is clamped by the layout that comes next, and a read after it lays out first.
             if scroll_write_lays_out_first(crate::scroll_write::metrics_current(window), id, top, behavior) {
-                window.draw_if_scroll_metrics_dirty(cx);
+                { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) };
             }
             let was_current = crate::scroll_write::metrics_current(window);
             if scroll_element_to(was_current, id, left, top, behavior) {
                 let view = crate::events::sync_dispatch::root_view(window).map_err(Error::from_reason)?;
-                crate::scroll_write::finish_write(window, cx, view.entity_id(), was_current);
+                crate::scroll_write::finish_write(window, cx, view.entity_id(), id, was_current);
             }
             Ok(())
         })?;
@@ -3786,7 +3951,7 @@ impl GpuixRenderer {
         {
             if crate::scroll_write::has_pending_container(id) {
                 update_window_without_view(|window, cx| {
-                    window.draw_if_scroll_metrics_dirty(cx);
+                    { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) };
                 })?;
             }
             return Ok(scroll_element_position(id).map(|position| position.to_vec()));
@@ -6929,7 +7094,7 @@ impl GpuixView {
             containers: Default::default(),
             retain: {
                 let mut retain = crate::retain::Retain::new();
-                retain.set_hover_roots(std::env::var_os("GPUIX_PATCH_OFF").is_none());
+                retain.set_patch_roots(std::env::var_os("GPUIX_PATCH_OFF").is_none());
                 retain
             },
             tapes: Default::default(),
@@ -7401,6 +7566,10 @@ impl GpuixView {
             return unmounted_virtual_row(height);
         }
 
+        let window_id = window.window_handle().window_id();
+        if self.tapes.row_built(window_id, window.retention_records(), list_id, index, expected_child_id) {
+            self.retain.forget_left_rows(&[expected_child_id], &tree);
+        }
         let callback = self.event_callback.clone();
         let now = self.pass_instant(window);
         let focus_styles = self.focus.styles(&tree, tree.keyboard_focus_dim());
@@ -7444,7 +7613,18 @@ impl GpuixView {
 
         crate::accessibility::links::sync(&tree);
         let activation = self.activation();
-        let scroller = crate::retain::Scroller::of_list(window.window_handle().window_id(), list_viewport, viewport);
+        let overdraw = self
+            .virtual_lists
+            .get(&list_id)
+            .expect("a row is built for a list that is mounted")
+            .config
+            .overdraw;
+        let scroller = crate::retain::Scroller::of_list(
+            window.window_handle().window_id(),
+            list_viewport,
+            gpui::px(overdraw),
+            viewport,
+        );
         let mut build_ctx = self.build_ctx(
             &tree,
             &callback,
@@ -7493,6 +7673,13 @@ impl GpuixView {
             .into_any_element()
     }
 
+    /// The page's records of the rows a frame that moved the rows of a list in place took out of the frame.
+    pub(crate) fn forget_left_rows(&mut self) {
+        let left = self.tapes.take_left();
+        let tree = self.tree.clone();
+        self.retain.forget_left_rows(&left, &tree.lock().unwrap());
+    }
+
     pub(crate) fn scroll_virtual_list_to_item(
         &self,
         id: u64,
@@ -7503,13 +7690,6 @@ impl GpuixView {
             return false;
         }
         queue_virtual_list_scroll(id, index, offset_in_item);
-        if let Some(entry) = self.virtual_lists.get(&id) {
-            entry.reported_range.set(Some((index, index + 1)));
-        }
-        emit_event_full(&self.event_callback, id, "visibleRange", |payload| {
-            payload.start_index = Some(index as f64);
-            payload.end_index = Some((index + 1) as f64);
-        });
         true
     }
 
@@ -7544,7 +7724,7 @@ impl GpuixView {
         top: Option<f64>,
     ) -> Option<bool> {
         let entry = self.virtual_lists.get(&id)?;
-        Some(crate::scroll_write::write_list(metrics_current, id, &entry.state, top))
+        Some(crate::scroll_write::write_list(metrics_current, id, &entry.state, Some(&entry.reporter), top))
     }
 
     pub(crate) fn virtual_list_position(&self, id: u64) -> Option<[f64; 2]> {
@@ -8207,13 +8387,17 @@ struct VirtualListEntry {
     child_revisions: Vec<u64>,
     row_focus_handles: Vec<Option<gpui::FocusHandle>>,
     seen_rows: HashSet<u64>,
-    /// The `visibleRange` this list last reported (start, end). The scroll handler is set again every
-    /// render, so what it compares against lives here and the closure holds a clone.
-    reported_range: Rc<Cell<Option<(usize, usize)>>>,
+    /// Reports the list's `visibleRange` for the wheel handler and for a write that moves the list.
+    reporter: Rc<crate::visible_range::RangeReporter>,
+    /// What the list asks for the size of a row it has not measured, see `list_sizes`.
+    sizes: Rc<crate::list_sizes::DeclaredSizes>,
+    /// What each row declared at its revision and focusability, so a change of two rows reads two styles.
+    declared: HashMap<u64, ((u64, bool), Option<crate::list_sizes::RowBox>)>,
 }
 
 impl VirtualListEntry {
     fn new(
+        list_id: u64,
         config: VirtualListConfig,
         window_start: usize,
         child_ids: Vec<u64>,
@@ -8222,6 +8406,8 @@ impl VirtualListEntry {
     ) -> Self {
         let item_count = config.logical_count(child_ids.len());
         let state = config.make_state(item_count, &row_focus_handles);
+        let sizes = Rc::new(crate::list_sizes::DeclaredSizes::default());
+        sizes.install(&state);
         if row_focus_handles.len() != item_count {
             for (offset, handle) in row_focus_handles.iter().enumerate() {
                 if handle.is_some() {
@@ -8243,8 +8429,36 @@ impl VirtualListEntry {
             child_revisions,
             row_focus_handles,
             seen_rows: HashSet::new(),
-            reported_range: Rc::new(Cell::new(None)),
+            reporter: Rc::new(crate::visible_range::RangeReporter::new(list_id)),
+            sizes,
+            declared: HashMap::new(),
         }
+    }
+
+    /// Declares the rows of the window to the list again: call it when `sync` changed something,
+    /// since a row's size is read from the tree at that point only.
+    fn declare_sizes(&mut self, tree: &RetainedTree) {
+        let mut declared = HashMap::with_capacity(self.child_ids.len());
+        let rows = self
+            .child_ids
+            .iter()
+            .zip(&self.child_revisions)
+            .zip(&self.row_focus_handles)
+            .map(|((id, revision), focus_handle)| {
+                let key = (*revision, focus_handle.is_some());
+                let row = match self.declared.get(id) {
+                    Some((known, row)) if *known == key => *row,
+                    _ => tree
+                        .elements
+                        .get(id)
+                        .and_then(|element| crate::list_sizes::RowBox::of(element, key.1)),
+                };
+                declared.insert(*id, (key, row));
+                row
+            })
+            .collect();
+        self.declared = declared;
+        self.sizes.declare(self.window_start, rows);
     }
 
     fn child_at(&self, logical_index: usize) -> Option<u64> {
@@ -8260,6 +8474,7 @@ impl VirtualListEntry {
             .map(|offset| self.window_start + offset)
     }
 
+    /// Whether the rows or their revisions changed, so the declared sizes are to be made again.
     fn sync(
         &mut self,
         config: VirtualListConfig,
@@ -8268,7 +8483,7 @@ impl VirtualListEntry {
         child_revisions: Vec<u64>,
         focusable_rows: &HashSet<u64>,
         cx: &mut gpui::Context<GpuixView>,
-    ) {
+    ) -> bool {
         let focus_unchanged = self.child_ids == child_ids
             && self.row_focus_handles.len() == child_ids.len()
             && self
@@ -8281,7 +8496,7 @@ impl VirtualListEntry {
             && focus_unchanged
             && self.child_revisions == child_revisions
         {
-            return;
+            return false;
         }
 
         let old_rows: HashMap<u64, (u64, Option<gpui::FocusHandle>)> = self
@@ -8322,6 +8537,7 @@ impl VirtualListEntry {
             let should_follow =
                 config.follow_tail && (!self.config.follow_tail || self.state.is_following_tail());
             let mut replacement = Self::new(
+                self.reporter.list_id(),
                 config,
                 window_start,
                 child_ids,
@@ -8336,7 +8552,7 @@ impl VirtualListEntry {
                 replacement.state.scroll_to(scroll_top);
             }
             *self = replacement;
-            return;
+            return true;
         }
 
         // gpui anchors a list on a logical item, so splicing rows in at the
@@ -8427,6 +8643,7 @@ impl VirtualListEntry {
         self.child_ids = child_ids;
         self.child_revisions = child_revisions;
         self.row_focus_handles = row_focus_handles;
+        true
     }
 
     /// A window that is still showing rows past a shrunk count has none of them in the state.
@@ -8715,7 +8932,7 @@ impl GpuixView {
     /// Give every DOM-focusable element a gpui focus handle in tab order, report
     /// focus changes, and drop the handles of elements that are no longer
     /// focusable.
-    fn sync_focus_handles(
+    pub(crate) fn sync_focus_handles(
         &mut self,
         tree: &RetainedTree,
         window: &mut gpui::Window,
@@ -9735,7 +9952,9 @@ impl gpui::Render for GpuixView {
         settle_scroll_writes();
         self.note_pass(window);
         self.apply_pointer_lock(window, cx);
+        layout_is_drawn(cx.entity_id());
         self.install_patcher(window, cx);
+        self.sync_commit_patching();
         let verifies = self.retain.verifies_frames();
         self.tapes.verify(verifies);
         // A build is not the same twice in a frame here (anchor-size() reads the size the trigger
@@ -9751,7 +9970,12 @@ impl gpui::Render for GpuixView {
         })));
         window.set_scroll_patch_registries(verifies.then(|| {
             let window_id = window.window_handle().window_id();
-            Rc::new(move |_: &gpui::Window| crate::automation::describe_registries(window_id)) as Rc<dyn Fn(&gpui::Window) -> String>
+            let tapes = self.tapes.clone();
+            Rc::new(move |_: &gpui::Window| {
+                // The frame built whole after the translate is about to forget which rows the translate moved.
+                tapes.settle_rows(window_id);
+                crate::automation::describe_registries(window_id)
+            }) as Rc<dyn Fn(&gpui::Window) -> String>
         }));
         window.set_retention_verifier(verifies.then(|| {
             let tapes = self.tapes.clone();
@@ -9907,6 +10131,11 @@ impl gpui::Render for GpuixView {
         let value_key = self.motion_value_key(&tree, window);
         let value_index = self.motion_value_index.as_ref().filter(|(known, _)| *known == value_key).map(|(_, index)| index.clone());
         let value_bindings = value_index.as_deref();
+        self.tapes.settle_rows(window.window_handle().window_id());
+        self.retain.forget_left_rows(&self.tapes.take_left(), &tree);
+        if !window.is_layout_pass() {
+            self.tapes.begin_rows();
+        }
         self.retain.begin_frame(crate::retain::Sources {
             tree: &tree,
             hovered: pointer.chains().0,
@@ -9987,6 +10216,7 @@ impl gpui::Render for GpuixView {
             None => gpui::Empty.into_any_element(),
         };
         self.retain.finish_frame();
+        self.retain.publish_anchors(&tree);
         drop(pointer);
         self.custom_registry
             .load_hidden_images(&tree, &callback, window, cx);
@@ -10095,7 +10325,18 @@ impl gpui::Render for GpuixView {
         // would otherwise fire on some later frame, against child indices that
         // no longer match what JS meant.
         PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().clear());
-        VIRTUAL_LIST_STATES.with(|cell| crate::scroll_write::settle_lists(&cell.borrow()));
+        VIRTUAL_LIST_REPORTERS.with(|cell| {
+            let mut reporters = cell.borrow_mut();
+            reporters.clear();
+            for (&id, entry) in &self.virtual_lists {
+                reporters.insert(id, entry.reporter.clone());
+            }
+        });
+        VIRTUAL_LIST_STATES.with(|states| {
+            VIRTUAL_LIST_REPORTERS.with(|reporters| {
+                crate::scroll_write::settle_lists(&states.borrow(), &reporters.borrow())
+            })
+        });
         crate::scroll_write::note_metrics_current(window);
 
         let motion_value_demand = motion_value_demand(&tree, &self.motion_values, &self.retain);
@@ -10148,7 +10389,8 @@ fn build_element_in(
     prekeyed: Option<crate::retain::EnterKey>,
 ) -> gpui::AnyElement {
     let mut unit = None;
-    let mut hover_root = None;
+    let mut patch_root_env = None;
+    let mut anchor_env = None;
     if let Some(known) = ctx.tree.elements.get(&id) {
         let plain = ctx.baseline_probe.is_none()
             && ctx.inline_line.is_none()
@@ -10165,7 +10407,7 @@ fn build_element_in(
                     | crate::layout::table::Part::ColumnGroup
             )
         );
-        let hover = ctx.retain.paints_hover(ctx.tree, id);
+        let patch_root = ctx.retain.can_be_patch_root(ctx.tree, id);
         let skip = ctx.retain.enter(crate::retain::Entry {
             id,
             revision: known.subtree_revision,
@@ -10186,10 +10428,8 @@ fn build_element_in(
                 opacity_runs(known, ctx.css_animations, ctx.css_transitions, ctx.motion_states, ctx.motion_values, ctx.now)
                     || transform_runs(known, ctx.css_animations, ctx.css_transitions, ctx.motion_states, ctx.motion_values, ctx.now)
             },
-            costly: known.content.is_some()
-                || !crate::text::inline::is_host_type(&known.element_type)
-                || known.element_type == "text",
-            hover,
+            costly: crate::retain::costly(known),
+            patch_root,
         });
         if let Some(skip) = skip {
             ctx.contents_overlay = None;
@@ -10204,12 +10444,28 @@ fn build_element_in(
             forced: false,
         });
         if unit.is_none() {
-            hover_root = ctx.retain.begin_hover_root().map(|enter| FrameEnv {
-                start: BuildStart::of(ctx),
-                enter,
-                relocatable: false,
-                forced: false,
+            let scrolls = known.style.as_deref().is_some_and(|style| {
+                let axes = crate::scroll::Axes::of(style);
+                axes.x.scrolls_for_user() || axes.y.scrolls_for_user()
             });
+            // A scroller is never recorded as a root (it is excluded), so what a patch root would make of it is
+            // only that nothing in it is recorded: an anchor is tried first, and keeps what is in it.
+            if scrolls {
+                anchor_env = ctx.retain.begin_anchor(plain && boxed && prekeyed.is_none()).map(|enter| FrameEnv {
+                    start: BuildStart::of(ctx),
+                    enter,
+                    relocatable: false,
+                    forced: false,
+                });
+            }
+            if anchor_env.is_none() {
+                patch_root_env = ctx.retain.begin_patch_root().map(|enter| FrameEnv {
+                    start: BuildStart::of(ctx),
+                    enter,
+                    relocatable: false,
+                    forced: false,
+                });
+            }
         }
     }
     // After the retained decision: what the `display: contents` ancestors pass down is covered by
@@ -10223,10 +10479,15 @@ fn build_element_in(
     // Every style resolves while its element is built, and a virtual-list row is
     // built in list layout, so this is the one place that sees both.
     crate::background_images::pump(window, cx);
+    let anchor = anchor_env.and_then(|env| ctx.retain.end_anchor().map(|subtree| (env, subtree)));
     let recording = if ctx.tree.elements.contains_key(&id) { ctx.retain.exit() } else { None };
     match (unit, recording) {
         (Some((env, subtree, lift_z)), _) => unit_root(id, env, subtree, lift_z, element, ctx),
-        (None, Some(recording)) => recorded_root(id, recording, hover_root, element, ctx),
+        (None, _) if anchor.is_some() => {
+            let (env, subtree) = anchor.expect("checked");
+            anchor_root(id, env, subtree, element, ctx)
+        }
+        (None, Some(recording)) => recorded_root(id, recording, patch_root_env, element, ctx),
         (None, None) => element,
     }
 }
@@ -10331,7 +10592,7 @@ fn retained_root(
     ctx.stacking_item = false;
     ctx.text_box_trim = Default::default();
     let env = FrameEnv { start, enter: skip.enter, relocatable: skip.overscan.is_some(), forced: ctx.retain.in_forced_content() };
-    let hover_env = env.clone();
+    let patch_root_env = env.clone();
     let view = cx.weak_entity();
     let mut retained = gpui::retained(
         retained_id(id),
@@ -10352,9 +10613,9 @@ fn retained_root(
     if let Some(z) = skip.lift_z {
         retained = retained.lift_z(z);
     }
-    if skip.hover {
+    if skip.patch_root {
         retained = retained.patchable();
-        ctx.retain.add_hover_unit(crate::retain::Unit { id, env: hover_env });
+        ctx.retain.add_patch_root(crate::retain::Unit { id, env: patch_root_env });
     }
     retained.into_any_element()
 }
@@ -10437,6 +10698,28 @@ fn unit_root(
     retained.into_any_element()
 }
 
+/// `element`, the scroller `id` built whole, as a retained root that gpui records in every frame as a
+/// source for a patch that lays it out again (`Retained::patchable_relayout`) and never replays: its key
+/// is not the one of the frame before, as a unit's is not, and the scroller stays an element every frame
+/// builds. What is in it keeps the roots it has. The root keeps `env` for building the scroller again.
+fn anchor_root(
+    id: u64,
+    env: FrameEnv,
+    subtree: crate::layout::cull::Subtree,
+    element: gpui::AnyElement,
+    ctx: &mut BuildCtx,
+) -> gpui::AnyElement {
+    use gpui::IntoElement;
+
+    let hook = replay_hook(id, ctx.tapes.clone(), ctx.measurements.clone());
+    let retained = gpui::retained(retained_id(id), ctx.retain.unit_key(), taped_build(id, element, ctx.tapes.clone()))
+        .on_replay_translated(hook)
+        .cull_outset(subtree.outset())
+        .patchable_relayout();
+    ctx.retain.add_anchor(crate::retain::Unit { id, env });
+    retained.into_any_element()
+}
+
 /// `element`, just built whole, as the root gpui records in this frame for the next to replay
 /// (`Retain::exit`): the key is the one the record this build leaves has, so the frame after enters
 /// the element with a key that gpui has a recording of, and builds nothing, where a root that is
@@ -10444,7 +10727,7 @@ fn unit_root(
 fn recorded_root(
     id: u64,
     recording: crate::retain::Recording,
-    hover: Option<FrameEnv>,
+    patch_root_env: Option<FrameEnv>,
     element: gpui::AnyElement,
     ctx: &mut BuildCtx,
 ) -> gpui::AnyElement {
@@ -10463,9 +10746,9 @@ fn recorded_root(
     if let Some(z) = recording.lift_z {
         retained = retained.lift_z(z);
     }
-    if let Some(env) = hover.filter(|_| recording.hover) {
+    if let Some(env) = patch_root_env.filter(|_| recording.patch_root) {
         retained = retained.patchable();
-        ctx.retain.add_hover_unit(crate::retain::Unit { id, env });
+        ctx.retain.add_patch_root(crate::retain::Unit { id, env });
     }
     retained.into_any_element()
 }
@@ -11544,9 +11827,9 @@ fn build_virtual_list(
     } else {
         0
     };
-    let (list_state, reported_range) = match ctx.virtual_lists.entry(element.id) {
+    let (list_state, reporter) = match ctx.virtual_lists.entry(element.id) {
         std::collections::hash_map::Entry::Occupied(mut entry) => {
-            entry.get_mut().sync(
+            let changed = entry.get_mut().sync(
                 config,
                 window_start,
                 child_ids.clone(),
@@ -11555,6 +11838,10 @@ fn build_virtual_list(
                 cx,
             );
             let entry = entry.into_mut();
+            if changed {
+                entry.declare_sizes(ctx.tree);
+            }
+            entry.sizes.set_scale(window.scale_factor());
             if let Some(row_id) = focused_row.filter(|row_id| !entry.seen_rows.contains(row_id)) {
                 if let Some(index) = entry.logical_index_of(row_id) {
                     entry.state.scroll_to(gpui::ListOffset {
@@ -11563,7 +11850,7 @@ fn build_virtual_list(
                     });
                 }
             }
-            (entry.state.clone(), entry.reported_range.clone())
+            (entry.state.clone(), entry.reporter.clone())
         }
         std::collections::hash_map::Entry::Vacant(entry) => {
             let row_focus_handles = child_ids
@@ -11571,12 +11858,15 @@ fn build_virtual_list(
                 .map(|id| focusable_rows.contains(id).then(|| cx.focus_handle()))
                 .collect();
             let entry = entry.insert(VirtualListEntry::new(
+                element.id,
                 config,
                 window_start,
                 child_ids.clone(),
                 child_revisions,
                 row_focus_handles,
             ));
+            entry.declare_sizes(ctx.tree);
+            entry.sizes.set_scale(window.scale_factor());
             if let Some(row_id) = focused_row {
                 if let Some(index) = entry.logical_index_of(row_id) {
                     entry.state.scroll_to(gpui::ListOffset {
@@ -11585,32 +11875,34 @@ fn build_virtual_list(
                     });
                 }
             }
-            (entry.state.clone(), entry.reported_range.clone())
+            (entry.state.clone(), entry.reporter.clone())
         }
     };
 
     // Queued scrolls apply here, after `sync` spliced this frame's child
     // changes, so the indices JS computed against its committed child list are
     // the indices the splice-adjusted ListState sees.
-    if let Some(offset) =
-        PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().remove(&element.id))
-    {
-        list_state.scroll_to(offset);
-    }
-
-    if element.events().contains("visibleRange") {
-        let callback = ctx.event_callback.clone();
-        let list_id = element.id;
-        list_state.set_scroll_handler(move |event, _window, _cx| {
-            let range = (event.visible_range.start, event.visible_range.end);
-            if reported_range.replace(Some(range)) == Some(range) {
-                return;
+    let queued_scroll =
+        PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().remove(&element.id));
+    let listens = element.events().contains("visibleRange");
+    reporter.listen(&ctx.event_callback, listens);
+    let range_report = queued_scroll.filter(|_| listens).map(|_| {
+        let reporter = reporter.clone();
+        let state = list_state.clone();
+        let report: crate::automation::PaintReporter = Rc::new(move |_, _, window, _| {
+            if !window.is_layout_pass() {
+                reporter.report_laid_out(&state);
             }
-            emit_event_full(&callback, list_id, "visibleRange", |payload| {
-                payload.start_index = Some(range.0 as f64);
-                payload.end_index = Some(range.1 as f64);
-            });
         });
+        report
+    });
+    if let Some(offset) = queued_scroll {
+        list_state.scroll_to(offset);
+        reporter.await_layout();
+    }
+    if listens {
+        let reporter = reporter.clone();
+        list_state.set_scroll_handler(move |event, _window, _cx| reporter.report(event.visible_range.clone()));
     }
 
     let list_id = element.id;
@@ -11669,12 +11961,16 @@ fn build_virtual_list(
         .borrow_mut()
         .observers
         .note_clip_origin(element.id, element.events(), None);
-    let list = crate::automation::track_host_bounds(list, element.id, None, false, false, None);
+    // Only the frame that applies the scroll has the reporter, and it paints without a patch.
+    if range_report.is_some() {
+        ctx.retain.exclude(crate::retain::Exclusion::PaintReporter);
+    }
+    let list = crate::automation::track_host_bounds(list, element.id, None, false, false, range_report);
     let default_style = StyleDesc::default();
     crate::scrollbar::attach_to_list(
         list,
         element.id,
-        crate::scrollbar::Source::List(scroll_state),
+        crate::scrollbar::Source::List(scroll_state, reporter.clone()),
         element.style.as_deref().unwrap_or(&default_style),
         &ctx.inherited.colors,
     )
@@ -14415,8 +14711,17 @@ pub struct PatchCounters {
     /// Patches that made the scene's primitives again from its operations instead of writing the
     /// changed ones in place.
     pub scene_rebuilds: f64,
+    /// Of the patches, the ones that left the scene to the list translate that follows in the same
+    /// draw, which makes it again once from the operations both wrote.
+    pub deferred_scene_rebuilds: f64,
     /// Primitives that patches wrote over their place in the scene.
     pub in_place_primitives: f64,
+    /// Scrollers that patches laid out again and repainted (contained-layout patches), counted by gpui
+    /// when it accepts one.
+    pub relayout_patches: f64,
+    /// Of the patches that laid out again, the ones after which gpui rewrote the recording of the root, so
+    /// the next patch or replay finds one.
+    pub rewritten_recordings: f64,
     /// JSON object: ticks gpui drew whole after the patcher tried, by reason (`PatchDecline`).
     pub declines: String,
     /// JSON object: ticks gpuix did not try to patch, by kind (`Unpatchable`, and the units it
@@ -14442,8 +14747,31 @@ pub struct ScrollPatchCounters {
     /// Of the frames whose first reason is the hover, the ones nothing else stops: eligible with
     /// the pointer elsewhere.
     pub hover_only: f64,
+    /// The frames whose rows move under a pointer where the frame shown had it and change the hitboxes under it, for which
+    /// the owner was asked whether the hover would matter (`hover_would_matter`).
+    pub hover_asked: f64,
+    /// Of those, the ones that would be a frame built whole (a hover that is more than paint, or that a listener hears).
+    /// `Hover` held for a frame that is not one of these is a pointer that is not where the frame shown had it.
+    pub hover_matters: f64,
     /// Of the eligible ones, the ones drawn by moving the rows of the frame shown.
     pub patched: f64,
+    /// Of those, the ones that built rows that came in or took out rows that left.
+    pub membership_frames: f64,
+    /// The rows those frames built: the ones that came in, and the ones that stayed and were built again because their recording no longer fits the list's clip.
+    pub rows_built: f64,
+    /// Of those, the rows that stayed.
+    pub rows_rebuilt: f64,
+    /// The rows those frames took out of the frame.
+    pub rows_removed: f64,
+    /// How the virtual lists of the window found the size of the rows they measured, summed over the
+    /// lists that are mounted: by building and laying the row out, or from the size its style declares
+    /// (`list_sizes`). A list that is made again counts from zero.
+    pub rows_measured_by_layout: f64,
+    pub rows_measured_by_declaration: f64,
+    /// Rows that showed at another size than their style declared: a declaration that is wrong.
+    pub declaration_mismatches: f64,
+    /// Of the translates, the ones that a patch drawn in the same draw came first of: the rows were moved from the frame the patch left.
+    pub composed: f64,
     /// The eligible ones drawn whole, by why the translate declined before it wrote anything
     /// (`gpui::ScrollApplyDecline`).
     pub apply_declines: std::collections::HashMap<String, f64>,
@@ -14452,7 +14780,8 @@ pub struct ScrollPatchCounters {
     /// The same frames, by every reason that held for them, first or not (`HitboxChain` is only
     /// counted here, it stops no frame), and by what lay behind a reason (`NotRelocatable.noRun`,
     /// `NotRelocatable.noRecording`, `NotRelocatable.unmovable`, `Region.top`, `Region.bottom`,
-    /// `Region.side`, `Thumb.size`, `Thumb.alpha`, `Thumb.appear`, `Thumb.track`).
+    /// `Region.side`, `Thumb.size`, `Thumb.alpha`, `Thumb.appear`, `Thumb.track`, `Membership.settles`,
+    /// `Membership.unmeasured`, `Membership.unmeasuredOverdraw`, `Membership.disjoint`, `Membership.noBuilder`).
     pub held: std::collections::HashMap<String, f64>,
 }
 
@@ -14467,7 +14796,10 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
         patched_units: counters.patched_units as f64,
         empty_ticks: counters.empty_ticks as f64,
         scene_rebuilds: counters.scene_rebuilds as f64,
+        deferred_scene_rebuilds: counters.deferred_scene_rebuilds as f64,
         in_place_primitives: counters.in_place_primitives as f64,
+        relayout_patches: counters.relayout_patches as f64,
+        rewritten_recordings: counters.rewritten_recordings as f64,
         declines: object(
             gpui::PatchDecline::ALL
                 .into_iter()
@@ -14477,12 +14809,24 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
         unpatchable: object(view.patch.declines().iter().map(|(kind, count)| (kind.to_string(), *count)).collect()),
         scroll_patch: {
             let scroll = window.scroll_patch_counters();
+            let measures: Vec<gpui::ListMeasureCounters> =
+                view.virtual_lists.values().map(|entry| entry.state.measure_counters()).collect();
             ScrollPatchCounters {
                 frames: scroll.frames as f64,
                 eligible: scroll.eligible as f64,
                 mispredicted: scroll.mispredicted as f64,
                 hover_only: scroll.hover_only as f64,
+                hover_asked: view.pointer.borrow().scroll_hover_asked.get() as f64,
+                hover_matters: view.pointer.borrow().scroll_hover_matters.get() as f64,
                 patched: scroll.patched as f64,
+                membership_frames: scroll.membership_frames as f64,
+                rows_built: scroll.rows_built as f64,
+                rows_rebuilt: scroll.rows_rebuilt as f64,
+                rows_removed: scroll.rows_removed as f64,
+                rows_measured_by_layout: measures.iter().map(|measure| measure.by_layout).sum::<u64>() as f64,
+                rows_measured_by_declaration: measures.iter().map(|measure| measure.by_exact_size).sum::<u64>() as f64,
+                declaration_mismatches: measures.iter().map(|measure| measure.exact_size_mismatches).sum::<u64>() as f64,
+                composed: scroll.composed as f64,
                 apply_declines: gpui::ScrollApplyDecline::ALL
                     .into_iter()
                     .map(|reason| (format!("{reason:?}"), scroll.apply_declines(reason) as f64))
@@ -15101,6 +15445,102 @@ mod batch_tests {
                 "{key} added"
             );
         }
+    }
+
+    #[test]
+    fn a_restyle_that_a_patch_follows_is_patchable_and_the_others_are_dirty_for_paint() {
+        let mut tree = RetainedTree::new();
+        apply(&mut tree, MOUNT).expect("valid batch");
+        tree.set_commit_patching(true);
+        let row = |style: &str| format!(r##"[["setStyle",3,{style}]]"##);
+        // The mailbox row: the selected one has a background and a hover background of its own.
+        let unselected = r##"{"height":10,"hover":{"backgroundColor":"#F4F4F5"}}"##;
+        let selected = r##"{"height":10,"backgroundColor":"#DBEAFE","hover":{"backgroundColor":"#DBEAFE"}}"##;
+        dirty_after(&mut tree, &row(unselected));
+        tree.take_restyles();
+        assert_eq!(dirty_after(&mut tree, &row(selected)), Dirty::PaintPatchable, "a state style that paints is a paint change");
+        assert_eq!(tree.pending_restyles(), [3]);
+        assert_eq!(dirty_after(&mut tree, &row(unselected)), Dirty::PaintPatchable);
+        let barrier = tree.patch_barrier();
+        // A refinement taken away is a layout change: no restyle a root repaints, and the element is noted for the anchor
+        // that may hold it (`pending_structure`), where the barrier is for a change no element is named for.
+        tree.take_structure();
+        dirty_after(&mut tree, &row(r##"{"height":10}"##));
+        assert_eq!(tree.patch_barrier(), barrier);
+        assert_eq!(tree.pending_structure(), [3]);
+        // A background that appears where the element keeps no quad adds an operation: paint, not patchable.
+        assert_eq!(dirty_after(&mut tree, &row(r##"{"height":10,"backgroundColor":"#112233"}"##)), Dirty::Paint);
+        // So does an opacity that crosses 1, a transition, and a group.
+        for (before, after) in [
+            (r##"{"height":10,"backgroundColor":"#112233"}"##, r##"{"height":10,"backgroundColor":"#112233","opacity":0.5}"##),
+            (
+                r##"{"height":10,"backgroundColor":"#112233","transition":"background-color 1s"}"##,
+                r##"{"height":10,"backgroundColor":"#223344","transition":"background-color 1s"}"##,
+            ),
+            (
+                r##"{"height":10,"backgroundColor":"#112233","group":true}"##,
+                r##"{"height":10,"backgroundColor":"#223344","group":true}"##,
+            ),
+        ] {
+            dirty_after(&mut tree, &row(before));
+            assert_eq!(dirty_after(&mut tree, &row(after)), Dirty::Paint, "{after}");
+        }
+        // Anything that moves a box is layout whatever else changed with it, and a batch takes the greatest.
+        let both = r##"[["setStyle",3,{"height":10,"backgroundColor":"#111111"}],["setStyle",1,{"width":101,"backgroundColor":"#112233"}]]"##;
+        dirty_after(&mut tree, &row(unselected));
+        assert_eq!(dirty_after(&mut tree, both), Dirty::Layout);
+        dirty_after(&mut tree, &row(unselected));
+        let mixed = r##"[["setStyle",3,{"height":10,"backgroundColor":"#111111","hover":{"backgroundColor":"#111111"}}],["setStyle",1,{"width":101,"backgroundColor":"#112233","opacity":0.4}]]"##;
+        assert_eq!(dirty_after(&mut tree, mixed), Dirty::Paint, "one that is not patchable makes the batch not");
+    }
+
+    #[test]
+    fn a_change_the_anchors_of_the_frame_can_hold_is_layout_patchable_and_a_change_no_element_is_named_for_is_not() {
+        let mut tree = RetainedTree::new();
+        apply(&mut tree, MOUNT).expect("valid batch");
+        tree.set_commit_patching(true);
+        tree.take_dirty();
+        // No frame has made an anchor: a tick has nothing to say whether anchors hold the change.
+        assert_eq!(dirty_after(&mut tree, r#"[["setText",2,"words"]]"#), Dirty::Layout);
+        tree.take_structure();
+        tree.set_anchors([3].into_iter().collect(), tree.revision());
+        // A text, a created and attached element and a removed one are attributed to the element they change.
+        assert_eq!(dirty_after(&mut tree, r#"[["setText",2,"more"]]"#), Dirty::LayoutPatchable);
+        assert_eq!(tree.pending_structure(), [2]);
+        assert_eq!(tree.anchor_holding(2), None, "the text is beside the anchor 3, not in it");
+        tree.take_structure();
+        let created = r#"[["createElement",4,"div"],["setStyle",4,{"height":3}],["appendChild",3,4]]"#;
+        assert_eq!(dirty_after(&mut tree, created), Dirty::LayoutPatchable);
+        assert_eq!(tree.anchor_holding(4), Some(3));
+        let removed = r#"[["detachChild",4],["destroyElement",4]]"#;
+        assert_eq!(dirty_after(&mut tree, removed), Dirty::LayoutPatchable);
+        // `testId` and `autoFocus` change nothing a frame draws.
+        tree.take_structure();
+        assert_eq!(dirty_after(&mut tree, r#"[["setCustomProp",3,"testId","other"]]"#), Dirty::Layout);
+        // What no element is named for moves the barrier, and the batch is not patchable.
+        assert_eq!(dirty_after(&mut tree, r#"[["setRoot",3]]"#), Dirty::Layout);
+        assert!(tree.patch_barrier() > 0);
+        // A batch that mixes a paint-only change with one that moves boxes moves boxes.
+        assert_eq!(Dirty::LayoutPatchable.merge(Dirty::Paint), Dirty::Layout);
+        assert_eq!(Dirty::LayoutPatchable.merge(Dirty::PaintPatchable), Dirty::LayoutPatchable);
+    }
+
+    #[test]
+    fn destroying_an_element_a_batch_detached_leaves_the_frame_as_it_was() {
+        let mut tree = RetainedTree::new();
+        apply(&mut tree, MOUNT).expect("valid batch");
+        tree.set_commit_patching(true);
+        tree.take_dirty();
+        tree.set_anchors([3].into_iter().collect(), tree.revision());
+        let created = r#"[["createElement",4,"div"],["setStyle",4,{"height":3}],["appendChild",3,4]]"#;
+        assert_eq!(dirty_after(&mut tree, created), Dirty::LayoutPatchable);
+        assert_eq!(dirty_after(&mut tree, r#"[["detachChild",4]]"#), Dirty::LayoutPatchable);
+        // The cleanup of a framework destroys what the handler's batch detached, in a batch of its own.
+        assert_eq!(dirty_after(&mut tree, r#"[["destroyElement",4]]"#), Dirty::Clean);
+        // One that was in the tree when it was destroyed changed the frame.
+        let placed = r#"[["createElement",5,"div"],["appendChild",3,5]]"#;
+        assert_eq!(dirty_after(&mut tree, placed), Dirty::LayoutPatchable);
+        assert_eq!(dirty_after(&mut tree, r#"[["destroyElement",5]]"#), Dirty::LayoutPatchable);
     }
 
     #[test]

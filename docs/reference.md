@@ -3127,7 +3127,7 @@ device pixel as Chrome does. The list records its box like any element, so `getB
 box is its padding box, as a div's is: its rows start inside the `border` and the `padding`, are clipped and hit inside
 the border, and `clientWidth`, `clientHeight`, `scrollHeight` and the largest `scrollTop` are those of the padding box.
 A row that shows only in the top padding of a scrolled list is built and counted by `visibleRange`.
-`onVisibleRange` fires when the visible range (`startIndex` to an exclusive `endIndex`) differs from the one the list last reported, not on every scroll event: a scroll that stays within the same rows reports nothing. The first scroll reports its range, and `scrollToItem` reports its own.
+`onVisibleRange` fires when the visible range (`startIndex` to an exclusive `endIndex`) differs from the one the list last reported, not on every scroll event: a scroll that stays within the same rows reports nothing. The first scroll reports its range. It fires for a write to the scroll position as it does for a wheel, with the range a wheel to the same position reports: `scrollTo`, `scrollTop = n` and `scrollBy`, so a window of rows moved from it follows an app's key handler that writes the position. A user dragging the list's scrollbar thumb or clicking its track reports the same way, as the DOM fires `scroll` for it. A write or a drag that leaves the list where it is reports nothing. A bottom-aligned list resting at its end reports the last rows. `scrollToItem` reports the rows the list shows after it: it is applied on the next render and reported by the paint of that frame, when the layout has held the position to what the list can scroll to, so `scrollToItem(last)` (or any row in the last viewport, or a row past the end) reports the last viewport's worth of rows and a row that shows at the top reports the rows below it. That is the range a wheel to the position it ended at reports, and the rows painted, for estimated rows too. As every event does, it reaches the handler after the call that scrolled.
 `fixtures/virtual-list-oracle.*` pins the rest against headless Chrome.
 
 On a virtual list, `scrollToItem` takes an optional **pixel offset** and the
@@ -9625,7 +9625,9 @@ Counters you read off the renderer:
   window was made, the
   text system's lines shaped, wrapped layouts built, line layout hits and
   `shapeCacheHits` (lines the window's shape store gave back: text shaped more than
-  two frames ago and mounted again is not shaped again), and the
+  two frames ago and mounted again is not shaped again), `snapComputations`,
+  `snapCacheHits` and `endReshapeComputations` (the width-independent marks of a text,
+  which each width of it would otherwise compute again), and the
   subtrees whose extent for culling and whose scrollable overflow were worked out
   again (`extentWalks`, `overflowWalks`, `unsnappedOverflowWalks`).
 - `getFrameWorkCounters()`: elements prepainted and painted by themselves (those in
@@ -9646,7 +9648,7 @@ Counters you read off the renderer:
 - `getPatchCounters()`, also on the live `GpuixRenderer` so a window with the display
   link can tell a patched tick from one drawn whole: `patchedFrames` and
   `patchedUnits`, `emptyTicks` (ticks whose only changes are in content nobody sees, such as the
-  content of a `content-visibility` host that skips: no frame is built and none is presented), `sceneRebuilds` (patches that had to make the scene's primitives again) and `inPlacePrimitives` (primitives a patch wrote over their place), and two JSON objects keyed by reason, `declines` (ticks GPUI drew
+  content of a `content-visibility` host that skips: no frame is built and none is presented), `relayoutPatches` (scrollers a patch laid out again), `sceneRebuilds` (patches that had to make the scene's primitives again) and `inPlacePrimitives` (primitives a patch wrote over their place), and two JSON objects keyed by reason, `declines` (ticks GPUI drew
   whole after trying to patch them) and `unpatchable` (ticks Ghia did not try to
   patch, such as `Sourced` for a focus or scroll change, `Hover` for a hover that only paints an element that no root of the last frame holds, and `Edited` for a commit). A hover that only changes how elements paint (a colour, a border colour, the colour of a shadow) is a patched tick when the roots that hold them can be repainted; one that lays out, or that a listener hears, is a frame built whole. While
   something runs, every tick drawn whole is counted in one of the two, on a page with
@@ -9682,7 +9684,7 @@ to build every frame in full, for timing, `GPUIX_PATCH_OFF=1` (or
 instead of patching it, `getPatchCounters().scrollPatch` for how the frames after a
 list scroll were classified and how many were drawn by moving the rows of the frame before (`patched`; `applyDeclines`
 says why the others that could be were not; a `<virtual-list>` with a scrollbar is not yet, give it `scrollbarWidth: "none"`
-to measure one; `GPUIX_SCROLL_PATCH_OFF=1`, or `setScrollPatchEnabled(false)`, turns it off and draws every frame whole), and
+to measure one; `GPUIX_SCROLL_PATCH_OFF=1`, or `setScrollPatchEnabled(false)`, turns it off and draws every frame whole; `rowsMeasuredByLayout`, `rowsMeasuredByDeclaration` and `declarationMismatches` count how the lists measured their rows, and `GPUIX_LIST_SIZES_OFF=1`, or `setListSizesEnabled(false)`, makes them all by layout), and
 `GPUIX_RETAIN_VERIFY=1` to build each frame that replayed a second time, whole,
 and compare the two: a difference is printed as `[retained]` and fails
 `unmount()`. Run your suite with it on after a change to a custom element.

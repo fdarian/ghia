@@ -34,7 +34,7 @@ use crate::shrink::shrink_if_sparse;
 /// `x`, `y`, `width` and `height` are the box before any `transform`, in the space of its
 /// ancestors' transforms, which is what `offset*`, `client*`, `scroll*` and the layout reads
 /// measure. What `getBoundingClientRect` reports is [`Self::window_box`].
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ElementBounds {
     pub x: f64,
     pub y: f64,
@@ -245,15 +245,16 @@ impl ElementBounds {
             format!(" perspective({g:.6}, {h:.6}, {i:.3})")
         };
         format!(
-            "{} matrix({a:.3}, {b:.3}, {c:.3}, {d:.3}, {e:.3}, {f:.3}){perspective} faces_away={}",
-            self.described_apart_from_transform(),
+            "{:?} matrix({a:.3}, {b:.3}, {c:.3}, {d:.3}, {e:.3}, {f:.3}){perspective} faces_away={}",
+            self.apart_from_transform(),
             self.faces_away
         )
     }
 
-    fn described_apart_from_transform(self) -> String {
-        // Which way a box faces moves with its matrix, and a patch publishes it with the matrix.
-        format!("{:?}", Self { culled: false, to_window: TransformationMatrix::unit(), faces_away: false, ..self })
+    /// The box without what moves with its matrix, which a patch publishes with the matrix: which way it faces, whether
+    /// prepaint culled it.
+    fn apart_from_transform(self) -> Self {
+        Self { culled: false, to_window: TransformationMatrix::unit(), faces_away: false, ..self }
     }
 
     /// The box `offset` away, in the single precision it is measured in, which is what painting
@@ -786,11 +787,24 @@ pub fn record_bounds(
     );
 }
 
-/// What a [`record_bounds`] write says, apart from the transforms around the element, which an
+/// Whether two [`record_bounds`] writes say the same, apart from the transforms around the element, which an
 /// animation of a transform changes at every tick of a patch.
+pub(crate) fn same_bounds_apart_from_transform(
+    left: &dyn std::any::Any,
+    left_offset: Point<Pixels>,
+    right: &dyn std::any::Any,
+    right_offset: Point<Pixels>,
+) -> bool {
+    let ((_, left_id, left), (_, right_id, right)) = (bounds_write(left), bounds_write(right));
+    left_id == right_id
+        && left.translated(left_offset).apart_from_transform() == right.translated(right_offset).apart_from_transform()
+}
+
+/// What a [`record_bounds`] write says, apart from the transforms around the element.
+#[cfg(test)]
 pub(crate) fn describe_apart_from_transform(data: &dyn std::any::Any, offset: Point<Pixels>) -> String {
     let (_, id, bounds) = bounds_write(data);
-    format!("bounds {id} {}", bounds.translated(offset).described_apart_from_transform())
+    format!("bounds {id} {:?}", bounds.translated(offset).apart_from_transform())
 }
 
 /// Makes a [`record_bounds`] write that a patch captured, which painted again without writing it.
@@ -814,6 +828,18 @@ pub(crate) fn republish_scroll_content(window: WindowId, id: u64, content: gpui:
             ..bounds
         },
     );
+}
+
+/// Forgets the boxes of the elements `ids` in `window`: a patch laid out the root they were painted in
+/// again and paints them no more.
+pub(crate) fn forget_boxes(window: WindowId, ids: &[u64]) {
+    BOUNDS.with(|cell| {
+        if let Some(bounds) = cell.borrow_mut().get_mut(&window) {
+            for id in ids {
+                bounds.boxes.remove(id);
+            }
+        }
+    });
 }
 
 fn bounds_write(data: &dyn std::any::Any) -> &(WindowId, u64, ElementBounds) {

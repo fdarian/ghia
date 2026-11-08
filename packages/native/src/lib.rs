@@ -28,6 +28,7 @@ mod focus_emulation;
 mod forms;
 mod layout;
 mod list_resize;
+mod list_sizes;
 mod markdown;
 mod media;
 mod motion;
@@ -54,7 +55,9 @@ pub mod style;
 mod syntax;
 mod text;
 mod theme;
+mod style_memo;
 mod universal_style;
+mod visible_range;
 mod window_kind;
 mod window_title;
 #[cfg(target_os = "macos")]

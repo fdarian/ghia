@@ -182,7 +182,14 @@ describeNative("a hover frame on a page with unchanged content that is not shown
       const full = await hoverFrames({ cards: 200, place, ghost }, a11y)
       // A verified frame builds the page a second time, whole: only its mismatches are looked at there.
       if (verifying) return
-      for (let move = 0; move < MOVES; move++) expect(pick(full[move]), `move ${move}`).toEqual(pick(empty[move]))
+      // A scroller that is an anchor (patch-frames.md, "Contained-layout patches") is one retained root more that the frame
+      // paints: the empty main area is one, and the 200 cards are more elements than an anchor may hold.
+      const anchored = (work: Work) => ({ ...pick(work), painted: 0, prepainted: 0 })
+      for (let move = 0; move < MOVES; move++) {
+        expect(anchored(full[move]), `move ${move}`).toEqual(anchored(empty[move]))
+        expect(Math.abs(full[move].painted - empty[move].painted), `move ${move}: painted`).toBeLessThanOrEqual(1)
+        expect(Math.abs(full[move].prepainted - empty[move].prepainted), `move ${move}: prepainted`).toBeLessThanOrEqual(1)
+      }
       // The recordings are put into the frame again: what the cards cost, and not asserted.
       console.info(
         `[hover-frame-work] ${name}: replays ${mean(empty, "replays")} -> ${mean(full, "replays")}, ` +

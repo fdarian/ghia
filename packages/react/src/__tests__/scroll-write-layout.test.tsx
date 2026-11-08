@@ -644,3 +644,67 @@ describeNative("a scroll write to a list while the layout is behind the tree", (
     }
   })
 })
+
+describeNative("a scrollTop write after a commit inside the scroller and a restyle that only paints", () => {
+  it("lays out first for the commit, as a write after the commit alone does", () => {
+    let scroller: PublicInstance | null = null
+    let setGrown!: (grown: boolean) => void
+    let setTinted!: (tinted: boolean) => void
+    function Page() {
+      const [grown, grow] = useState(false)
+      const [tinted, tint] = useState(false)
+      setGrown = grow
+      setTinted = tint
+      return (
+        <div style={{ width: WIDTH, height: HEIGHT, display: "flex", flexDirection: "column" }}>
+          <div
+            style={{
+              width: 40,
+              height: 20,
+              flexShrink: 0,
+              backgroundColor: tinted ? "#ff0000" : "#0000ff",
+              transition: "background-color 1s linear",
+            }}
+          />
+          <div
+            ref={(instance) => {
+              scroller = instance
+            }}
+            style={{ height: 200, overflowY: "scroll", display: "flex", flexDirection: "column" }}
+          >
+            <div style={{ height: grown ? 800 : ROW, flexShrink: 0 }} />
+            <Rows count={24} />
+          </div>
+        </div>
+      )
+    }
+    const root = createTestRoot({ width: WIDTH, height: HEIGHT })
+    const renderer = root.renderer
+    const unmount = () => root.unmount()
+    renderer.clockPause()
+    renderer.setInlineDraws(false)
+    // The scroller is an anchor of the patch frames only where the retention records its frame: planning on, and the gate open,
+    // which the verifier forces whatever the run's environment says.
+    renderer.setRetainPlanning(true)
+    renderer.setRetainVerify(true)
+    renderer.setPatchEnabled(true)
+    try {
+      root.render(<Page />)
+      renderer.drawFrame()
+      expect(scroller!.scrollTop).toBe(0)
+
+      // The commit lies inside an anchor, so it counts no layout invalidation and waits for a read to prepare its patch; the
+      // restyle after it paints only, and must not take that wait away.
+      flushSync(() => setGrown(true))
+      // A live window invalidates for every batch; the test window does it when something reads, and merges the batches before.
+      renderer["native"].flushIfDirty()
+      flushSync(() => setTinted(true))
+      scroller!.scrollTop = 1000
+      // Past the old extent and inside the new one; scroll anchoring would carry it to the end if the write came before the layout.
+      expect(scroller!.scrollTop).toBe(1000)
+    } finally {
+      renderer.setInlineDraws(true)
+      unmount()
+    }
+  })
+})

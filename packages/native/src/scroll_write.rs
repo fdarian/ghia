@@ -37,14 +37,15 @@ pub(crate) fn note_metrics_current(window: &gpui::Window) {
     CURRENT_AT.with(|current| current.set(Some(window.layout_stamp())));
 }
 
-/// Whether no layout invalidation came since [`note_metrics_current`]. A scroll write counts as
-/// one; [`finish_write`] takes its own back.
+/// Whether no layout invalidation came since [`note_metrics_current`], and no commit is waiting for
+/// its patch to be prepared: a commit inside an anchor counts as no invalidation, but moves the
+/// extents. A scroll write counts as one; [`finish_write`] takes its own back.
 pub(crate) fn metrics_current(window: &gpui::Window) -> bool {
     CURRENT_AT.with(|current| {
         current
             .get()
             .is_some_and(|stamp| stamp.same_invalidations(&window.layout_stamp()))
-    })
+    }) && !crate::renderer::layout_awaits_a_read()
 }
 
 /// What the renderer holds for the element a write is aimed at.
@@ -95,15 +96,17 @@ pub(crate) fn lays_out_first(
     target != 0.0 && target != held
 }
 
-/// Invalidates the window for a write that moved a scroller. `was_current` is [`metrics_current`]
-/// from before the write: the invalidation moves no extent, so the metrics stay current.
+/// Invalidates the window for a write that moved the scroller `id`. `was_current` is
+/// [`metrics_current`] from before the write: the invalidation moves no extent, so the metrics stay
+/// current.
 pub(crate) fn finish_write(
-    window: &gpui::Window,
+    window: &mut gpui::Window,
     cx: &mut gpui::App,
     view: gpui::EntityId,
+    id: u64,
     was_current: bool,
 ) {
-    crate::renderer::invalidate_after_scroll(cx, view);
+    crate::renderer::invalidate_after_scroll(window, cx, view, crate::renderer::is_virtual_list(id));
     if was_current {
         note_metrics_current(window);
     }
@@ -155,11 +158,13 @@ pub(crate) fn settle_containers(handles: &HashMap<u64, gpui::ScrollHandle>) {
 
 /// Writes a virtual list, which has no horizontal offset. It is written to the list as it stands,
 /// so the paths that read the state see the write, and again by [`settle_lists`] when the layout
-/// was behind the tree, since a pixel position is converted against the rows the list has.
+/// was behind the tree, since a pixel position is converted against the rows the list has. A write
+/// that moved the list reports its `visibleRange` as a wheel does.
 pub(crate) fn write_list(
     metrics_current: bool,
     id: u64,
     state: &gpui::ListState,
+    reporter: Option<&crate::visible_range::RangeReporter>,
     top: Option<f64>,
 ) -> bool {
     let Some(top) = top else {
@@ -169,6 +174,9 @@ pub(crate) fn write_list(
     let target = scroll::gpui_offset(0.0, top);
     let before = state.scroll_px_offset_for_scrollbar();
     let moved = scroll::scroll_list_to(state, target);
+    if let Some(reporter) = reporter.filter(|_| moved) {
+        reporter.report_at(state, state.logical_scroll_top());
+    }
     let snapped = scroll::snapped_offset(target, state.scale_factor());
     PENDING_LIST_WRITES.with(|pending| {
         let mut pending = pending.borrow_mut();
@@ -183,12 +191,19 @@ pub(crate) fn write_list(
 }
 
 /// Called when the rows of a frame are spliced, before its layout: the writes recorded since the
-/// last one are made again against the rows the layout will measure.
-pub(crate) fn settle_lists(states: &HashMap<u64, gpui::ListState>) {
+/// last one are made again against the rows the layout will measure, and the range they show is
+/// reported if the rows changed it.
+pub(crate) fn settle_lists(
+    states: &HashMap<u64, gpui::ListState>,
+    reporters: &HashMap<u64, std::rc::Rc<crate::visible_range::RangeReporter>>,
+) {
     let pending = PENDING_LIST_WRITES.with(|pending| std::mem::take(&mut *pending.borrow_mut()));
     for (id, offset) in pending {
         if let Some(state) = states.get(&id) {
             scroll::scroll_list_to(state, offset);
+            if let Some(reporter) = reporters.get(&id) {
+                reporter.report_at(state, state.logical_scroll_top());
+            }
         }
     }
 }

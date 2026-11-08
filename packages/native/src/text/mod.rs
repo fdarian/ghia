@@ -32,11 +32,25 @@ pub(crate) fn publish(window: gpui::WindowId, live: &crate::tape::Live) {
     inline_hit::publish(window, live);
 }
 
+/// A patch laid out a root again: the registries give what its last build wrote for what the patch wrote.
+pub(crate) fn replace(window: gpui::WindowId, old: &crate::tape::Roots, new: &[crate::tape::Live]) {
+    paint::replace(window, old, new);
+    inline_hit::replace(window, old, new);
+}
+
+/// A frame brought rows in: what they wrote goes where the rows of each of `rows`, in the order of their list, have theirs.
+pub(crate) fn order_by_rows(window: gpui::WindowId, rows: &[crate::tape::Roots]) {
+    paint::order_by_rows(window, rows);
+    inline_hit::order_by_rows(window, rows);
+}
+
 pub(crate) use paint::{describe_registries, shift};
 pub(crate) use paint::{
-    describe_start_region_apart_from_transform, describe_text_apart_from_transform, publish_captured_start_region,
-    publish_captured_text,
+    publish_captured_start_region, publish_captured_text, same_painted_text, same_start_region_apart_from_transform,
+    same_text_apart_from_transform,
 };
+#[cfg(test)]
+pub(crate) use paint::{describe_start_region_apart_from_transform, describe_text_apart_from_transform};
 pub use paint::{
     chrome_text, log_painted_text, painted_highlights, painted_text, range_rects,
     record_start_region, selectable_text, selection_frame_reset, selection_key, HighlightSource,

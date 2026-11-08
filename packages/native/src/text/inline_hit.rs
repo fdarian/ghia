@@ -176,11 +176,25 @@ pub(crate) fn publish(window: WindowId, live: &crate::tape::Live) {
     }
 }
 
+/// A patch laid out the root whose last build wrote the lists `old` again: the paragraphs of `new` take
+/// the place of the ones they wrote.
+pub(crate) fn replace(window: WindowId, old: &crate::tape::Roots, new: &[crate::tape::Live]) {
+    PARAGRAPHS.with(|paragraphs| paragraphs.borrow_mut().entry(window).or_default().replace(old, new, Kind::Paragraph, entry_of));
+}
+
+/// A frame brought rows in: the paragraphs they painted go where the rows of each of `rows` (in the order of
+/// the list) have theirs.
+pub(crate) fn order_by_rows(window: WindowId, rows: &[crate::tape::Roots]) {
+    PARAGRAPHS.with(|paragraphs| paragraphs.borrow_mut().entry(window).or_default().order_by_rows(rows, Kind::Paragraph, entry_of));
+}
+
+fn entry_of(data: &dyn std::any::Any, _: Point<Pixels>) -> Entry {
+    let (_, container, layout, targets) = data.downcast_ref::<Written>().expect("a paragraph write holds its paragraph");
+    Entry { container: *container, layout: layout.clone(), targets: targets.clone() }
+}
+
 fn read(paragraphs: &mut Layered<Entry>) -> &[Entry] {
-    paragraphs.all(Kind::Paragraph, |data, _| {
-        let (_, container, layout, targets) = data.downcast_ref::<Written>().expect("a paragraph write holds its paragraph");
-        Entry { container: *container, layout: layout.clone(), targets: targets.clone() }
-    })
+    paragraphs.all(Kind::Paragraph, entry_of)
 }
 
 pub fn register(window: WindowId, container: u64, layout: TextLayout, targets: Arc<Targets>) {

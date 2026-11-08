@@ -134,9 +134,11 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
 
   // The reasons that hold are counted exactly, and under the verifier the frame shown is the build every subtree is built in,
   // whose rows cannot be moved (`NotRelocatable.unmovable` holds as well).
-  unverified("counts a scroll that brings a row in as a membership change", () => {
+  unverified("counts a scroll that brings in a row that was never measured as a membership change", () => {
     const { renderer, unmount } = open("inert")
     try {
+      // The size of the rows is not told to the list, so the row that comes in has none.
+      renderer.setListSizesEnabled(false)
       warm(renderer, 100, 50)
       // The rows 0 to 2 show (40, 80 and 20 of the third); at 25 the row 3 does.
       const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 50, by: 25 }))
@@ -146,22 +148,36 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
         mispredicted: 0,
         hoverOnly: 0,
         reasons: { Membership: 1 },
-        held: { Membership: 1 },
+        // The row has no measured size (and the list settles what it measures): a row that has one is a translate, see
+        // `scroll-patch-membership.test.tsx`.
+        held: { Membership: 1, "Membership.settles": 1, "Membership.unmeasured": 1 },
       })
+    } finally {
+      renderer.setListSizesEnabled(true)
+      unmount()
+    }
+  })
+
+  unverified("counts a scroll that brings in a row whose style declares its size as a translate", () => {
+    const { renderer, unmount } = open("inert")
+    try {
+      warm(renderer, 100, 50)
+      // The row 3 was never measured, nor laid out: the list is told it is 40 high (`list_sizes.rs`).
+      const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 50, by: 25 }))
+      expect(delta).toEqual({ frames: 1, eligible: 1, mispredicted: 0, hoverOnly: 0, reasons: {}, held: {} })
     } finally {
       unmount()
     }
   })
 
-  unverified("counts a pointer that crosses from a row to the next as a hover change", () => {
+  unverified("counts a pointer that crosses from a row to the next whose hover only paints as a translate", () => {
     const { renderer, unmount } = open("hit")
     try {
       warm(renderer, 100, 38)
-      // The pointer at 38 is in the row 0 (0 to 40) and in the row 1 after a scroll by 5.
+      // The pointer at 38 is in the row 0 (0 to 40) and in the row 1 after a scroll by 5. The hover only paints, so the tick
+      // after the translate repaints the two rows (`scroll-patch-hover.test.tsx`).
       const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 38, by: 5 }))
-      expect(delta.frames).toBe(1)
-      expect(delta.reasons).toEqual({ Hover: 1 })
-      expect(delta.hoverOnly, "nothing else stops it").toBe(1)
+      expect(delta).toEqual({ frames: 1, eligible: 1, mispredicted: 0, hoverOnly: 0, reasons: {}, held: { HitboxChain: 1 } })
     } finally {
       unmount()
     }
@@ -204,17 +220,20 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
     }
   })
 
-  unverified("says which edge of the view the recording of a row no longer covers", () => {
+  unverified("moves a row that stays however far the list scrolls, and holds the frame for no edge of its recording", () => {
     const { renderer, unmount } = open("inert")
     try {
       warm(renderer, 100, 50)
-      // The rows are recorded half a view (50) past the view: moved up by more than that, the bottom of the view shows what was
-      // not recorded.
+      // A row is recorded to cover the travel of a row that shows (three views and the overdraw past the view), so no row is built
+      // again for the view it no longer covers, in steps that add up to several views.
+      const before = renderer.getPatchCounters().scrollPatch.rowsRebuilt
       const delta = since(renderer, undefined, () => {
-        for (let step = 0; step < 14; step++) wheel(renderer, { x: 100, y: 50, by: 5 })
+        for (let step = 0; step < 100; step++) wheel(renderer, { x: 100, y: 50, by: 5 })
       })
-      expect(delta.held["Region.bottom"]).toBeGreaterThan(0)
+      expect(delta.held["Region.bottom"]).toBeUndefined()
       expect(delta.held["Region.top"]).toBeUndefined()
+      expect(renderer.getPatchCounters().scrollPatch.rowsRebuilt - before).toBe(0)
+      expect(delta.reasons.Region).toBeUndefined()
       expect(Object.keys(counts(renderer).held)).toEqual(
         expect.arrayContaining([
           "HitboxChain",

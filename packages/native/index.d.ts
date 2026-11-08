@@ -752,6 +752,12 @@ export declare class TestGpuixRenderer {
    * before them (`scrollPatch` of `getPatchCounters`). On unless `GPUIX_SCROLL_PATCH_OFF`.
    */
   setScrollPatchEnabled(enabled: boolean): void
+  /**
+   * Whether virtual lists tell their rows' sizes to the list when the row's style fixes them
+   * (`rowsMeasuredByDeclaration` of `scrollPatch`). On unless `GPUIX_LIST_SIZES_OFF`; process wide, and
+   * read at every ask, so a list that is already mounted stops too.
+   */
+  setListSizesEnabled(enabled: boolean): void
   /** How ticks were patched since the window was made: subtract two reads for a span of frames. */
   getPatchCounters(): PatchCounters
   resetBuildCounters(): void
@@ -2109,6 +2115,18 @@ export interface LayoutCounters {
    */
   shapeCacheHits: number
   /**
+   * Wrapped layouts that computed the width-independent marks of their text (advances, kerns,
+   * soft hyphens), which take a platform call for each distinct glyph.
+   */
+  snapComputations: number
+  /** Wrapped layouts that took those marks from the ones another width of the text computed. */
+  snapCacheHits: number
+  /**
+   * Lists of line ends that Blink reshapes that were computed, one for a text that some width
+   * of it breaks lines at.
+   */
+  endReshapeComputations: number
+  /**
    * Subtrees whose painted extent (what culling reads) was worked out from their children,
    * not found as an earlier pass or frame left it.
    */
@@ -2288,8 +2306,23 @@ export interface PatchCounters {
    * changed ones in place.
    */
   sceneRebuilds: number
+  /**
+   * Of the patches, the ones that left the scene to the list translate that follows in the same
+   * draw, which makes it again once from the operations both wrote.
+   */
+  deferredSceneRebuilds: number
   /** Primitives that patches wrote over their place in the scene. */
   inPlacePrimitives: number
+  /**
+   * Scrollers that patches laid out again and repainted (contained-layout patches), counted by gpui
+   * when it accepts one.
+   */
+  relayoutPatches: number
+  /**
+   * Of the patches that laid out again, the ones after which gpui rewrote the recording of the root, so
+   * the next patch or replay finds one.
+   */
+  rewrittenRecordings: number
   /** JSON object: ticks gpui drew whole after the patcher tried, by reason (`PatchDecline`). */
   declines: string
   /**
@@ -2403,8 +2436,37 @@ export interface ScrollPatchCounters {
    * the pointer elsewhere.
    */
   hoverOnly: number
+  /**
+   * The frames whose rows move under a pointer where the frame shown had it and change the hitboxes under it, for which
+   * the owner was asked whether the hover would matter (`hover_would_matter`).
+   */
+  hoverAsked: number
+  /**
+   * Of those, the ones that would be a frame built whole (a hover that is more than paint, or that a listener hears).
+   * `Hover` held for a frame that is not one of these is a pointer that is not where the frame shown had it.
+   */
+  hoverMatters: number
   /** Of the eligible ones, the ones drawn by moving the rows of the frame shown. */
   patched: number
+  /** Of those, the ones that built rows that came in or took out rows that left. */
+  membershipFrames: number
+  /** The rows those frames built: the ones that came in, and the ones that stayed and were built again because their recording no longer fits the list's clip. */
+  rowsBuilt: number
+  /** Of those, the rows that stayed. */
+  rowsRebuilt: number
+  /** The rows those frames took out of the frame. */
+  rowsRemoved: number
+  /**
+   * How the virtual lists of the window found the size of the rows they measured, summed over the
+   * lists that are mounted: by building and laying the row out, or from the size its style declares
+   * (`list_sizes`). A list that is made again counts from zero.
+   */
+  rowsMeasuredByLayout: number
+  rowsMeasuredByDeclaration: number
+  /** Rows that showed at another size than their style declared: a declaration that is wrong. */
+  declarationMismatches: number
+  /** Of the translates, the ones that a patch drawn in the same draw came first of: the rows were moved from the frame the patch left. */
+  composed: number
   /**
    * The eligible ones drawn whole, by why the translate declined before it wrote anything
    * (`gpui::ScrollApplyDecline`).
@@ -2416,7 +2478,8 @@ export interface ScrollPatchCounters {
    * The same frames, by every reason that held for them, first or not (`HitboxChain` is only
    * counted here, it stops no frame), and by what lay behind a reason (`NotRelocatable.noRun`,
    * `NotRelocatable.noRecording`, `NotRelocatable.unmovable`, `Region.top`, `Region.bottom`,
-   * `Region.side`, `Thumb.size`, `Thumb.alpha`, `Thumb.appear`, `Thumb.track`).
+   * `Region.side`, `Thumb.size`, `Thumb.alpha`, `Thumb.appear`, `Thumb.track`, `Membership.settles`,
+   * `Membership.unmeasured`, `Membership.unmeasuredOverdraw`, `Membership.disjoint`, `Membership.noBuilder`).
    */
   held: Record<string, number>
 }

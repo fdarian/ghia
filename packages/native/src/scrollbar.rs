@@ -327,7 +327,7 @@ pub(crate) fn scrollbar_thumb(track: f32, max_scroll: f32, offset: f32) -> Optio
 #[derive(Clone)]
 pub(crate) enum Source {
     Container { id: u64, handle: gpui::ScrollHandle },
-    List(gpui::ListState),
+    List(gpui::ListState, Rc<crate::visible_range::RangeReporter>),
 }
 
 impl Source {
@@ -338,7 +338,7 @@ impl Source {
                 let user = handle.user_scrollable();
                 [user.x, user.y]
             }
-            Source::List(_) => [false, true],
+            Source::List(..) => [false, true],
         }
     }
 
@@ -346,7 +346,7 @@ impl Source {
     fn extent(&self) -> (gpui::Point<gpui::Pixels>, gpui::Point<gpui::Pixels>) {
         match self {
             Source::Container { handle, .. } => (handle.max_offset(), handle.offset()),
-            Source::List(state) => match state.averaged_scroll_extent() {
+            Source::List(state, _) => match state.averaged_scroll_extent() {
                 // Rows not yet measured count as the average measured row, so the thumb does
                 // not jump as rows come into view.
                 Some((max, offset)) => (
@@ -365,7 +365,7 @@ impl Source {
     fn port(&self, bounds: gpui::Bounds<gpui::Pixels>) -> gpui::Bounds<gpui::Pixels> {
         match self {
             Source::Container { handle, .. } => handle.padding_box(),
-            Source::List(_) => bounds,
+            Source::List(..) => bounds,
         }
     }
 
@@ -373,22 +373,30 @@ impl Source {
     fn gutter(&self) -> gpui::Size<gpui::Pixels> {
         match self {
             Source::Container { handle, .. } => handle.scrollbar_size(),
-            Source::List(_) => gpui::size(gpui::px(0.0), gpui::px(0.0)),
+            Source::List(..) => gpui::size(gpui::px(0.0), gpui::px(0.0)),
         }
     }
 
+    /// A user's drag or click on a list's bar is a scroll the page hears of as it hears of a wheel.
+    /// gpui calls a list's scroll handler for the wheel only, so the range is reported here.
     fn set_offset(&self, offset: gpui::Point<gpui::Pixels>) {
         match self {
             Source::Container { id, handle } => {
                 crate::scroll::scroll_to(*id, handle, offset, crate::scroll::Behavior::Instant);
             }
-            Source::List(state) => state.set_offset_from_scrollbar(offset),
+            Source::List(state, reporter) => {
+                let before = state.scroll_px_offset_for_scrollbar();
+                state.set_offset_from_scrollbar(offset);
+                if state.scroll_px_offset_for_scrollbar() != before {
+                    reporter.report_at(state, state.logical_scroll_top());
+                }
+            }
         }
     }
 
     /// A list keeps its totals steady while a thumb is held, so the thumb does not run away.
     fn drag(&self, started: bool) {
-        if let Source::List(state) = self {
+        if let Source::List(state, _) = self {
             if started {
                 state.scrollbar_drag_started();
             } else {
@@ -852,7 +860,7 @@ fn prepaint(
 ) {
     let mut st = state.borrow_mut();
     st.seen = FRAME.get();
-    st.list = matches!(source, Source::List(_));
+    st.list = matches!(source, Source::List(..));
     let now = now();
     let (_, offset) = source.extent();
     let classic = look.classic();
@@ -1056,7 +1064,7 @@ fn paint(
     let view = window.current_view();
     // A list tells gpui how a scroll moves its thumb, whether or not it paints one.
     let note_thumb = |window: &mut gpui::Window, thumb: Option<gpui::PaintQuad>| {
-        let Source::List(list) = source else { return };
+        let Source::List(list, _) = source else { return };
         let shown = ShownBar { layout: layout[1], alpha, grow: painted.grow[1] };
         let plan = {
             let (state, source) = (state.clone(), source.clone());
@@ -1124,7 +1132,7 @@ fn paint(
                 scaled(thumb_color, 1.0),
             );
             // A list's one bar is along the vertical axis.
-            if vertical && matches!(source, Source::List(_)) {
+            if vertical && matches!(source, Source::List(..)) {
                 note_thumb(window, Some(thumb));
                 thumb_noted = true;
             } else {

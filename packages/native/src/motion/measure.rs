@@ -117,6 +117,16 @@ impl Measurement {
     }
 }
 
+/// Whether two `measured` writes of a tape say the same: the element, and the measurement with the parent content each reads now.
+pub(crate) fn same_measured_write(left: &dyn std::any::Any, right: &dyn std::any::Any) -> bool {
+    type Write = (Rc<RefCell<HashMap<u64, Measurement>>>, u64, Measurement, ParentContent);
+    let read = |data: &dyn std::any::Any| {
+        let write = data.downcast_ref::<Write>().expect("a measured write holds the element and its measurement");
+        (write.1, Measurement { parent_content: write.3.get(), ..write.2 })
+    };
+    read(left) == read(right)
+}
+
 /// Shared with the paint closures, like the paint reports, so a handle is
 /// cheap to clone and every clone sees the same map.
 #[derive(Clone, Default)]

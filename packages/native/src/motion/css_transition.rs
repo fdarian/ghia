@@ -540,6 +540,24 @@ pub(crate) fn declares_transitions(style: &StyleDesc) -> bool {
             .any(|(_, state)| state.is_some_and(declares_transition))
 }
 
+/// Whether nothing in `style` or its state styles can run a transition or an animation that changes
+/// the size of the box: no animation at all (its keyframes are not read), and no transition that
+/// names a property other than the ones that only paint (`all` names them all).
+pub(crate) fn leaves_box_size(style: &StyleDesc) -> bool {
+    let leaves = |style: &StyleDesc| {
+        !super::css_animation::declares_animation(style)
+            && TransitionList::parse(style).is_ok_and(|list| {
+                AnimProp::ALL
+                    .iter()
+                    .filter(|prop| !prop.paints_only())
+                    .all(|prop| list.matching(PropKey::Style(*prop)).is_none())
+            })
+    };
+    leaves(style)
+        && style.focus_within.as_deref().is_none_or(leaves)
+        && super::state_styles(style).into_iter().all(|(_, state)| state.is_none_or(leaves))
+}
+
 /// Whether `style` sets a `transition*` field that is more than `none`.
 fn declares_transition(style: &StyleDesc) -> bool {
     let only_none = |text: &Option<String>| {

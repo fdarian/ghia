@@ -58,7 +58,8 @@ describeNative("a root recorded by the frame that builds it", () => {
       const second = frame(view, <List tint="#eeeeee" />)
       if (retained && !verifying) {
         expect(mount.builds, "the cards are built by the frame that mounts them").toBeGreaterThanOrEqual(ENTRIES)
-        expect(second.builds, "no card is built to be recorded").toBe(0)
+        // The scroller is an anchor: gpui records it in every frame built whole, as a source for a patch, and replays it in none.
+        expect(second.builds, "no card is built to be recorded, and the scroller's anchor is").toBe(1)
         expect(second.hits, "every card has its recording").toBe(ENTRIES)
         // The card at the edge of what the scroller records beyond its clip is recorded where it stands by the
         // frame that mounts it, before the scroller has a box, and is built where it is put by the next.
@@ -85,11 +86,11 @@ describeNative("a root recorded by the frame that builds it", () => {
         expect(changing.built, "the card that changed is built, and nothing else of the page").toBeGreaterThan(0)
         expect(changing.built).toBeLessThan(20)
         expect(changing.hits, "the others are replayed").toBe(ENTRIES - 1)
-        expect(after.builds, "the frame after replays the card that changed").toBe(0)
+        expect(after.builds, "the frame after replays the card that changed, and records the anchor").toBe(1)
         expect(after.hits).toBe(ENTRIES)
         expect(after.lazy).toBe(0)
         expect(after.built).toBeLessThan(5)
-        expect(again.builds).toBe(0)
+        expect(again.builds).toBe(1)
         expect(again.built).toBeLessThan(5)
       }
       expect(view.renderer.getAllText()).toContain("changed")

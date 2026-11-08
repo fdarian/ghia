@@ -879,12 +879,6 @@ impl HoverChange {
         self.new_target.filter(|new| Some(*new) != self.old_target)
     }
 
-    /// Whether an element that changed state declares a style for it, or is a follower of a group
-    /// that does, or listens for the gesture.
-    fn restyles(&self, tree: &RetainedTree, hovered: &[u64]) -> bool {
-        self.restyle(tree, hovered) != Restyle::None
-    }
-
     /// What the change does to the style of the elements it moves, and when it only changes how they
     /// paint, which elements: the ones whose build differs, not the followers of a group (they are
     /// below the element that declares it).
@@ -994,10 +988,12 @@ pub(super) fn update_hover(state: &mut PointerState, emitter: &mut Emitter, new_
 }
 
 /// Whether moving the hover from the chain of `before` to the one of `after`, the topmost elements
-/// under the pointer, would restyle an element or emit a pointer boundary event that someone listens
-/// for, as `update_hover` does. The scroll-only frames ask it of the hit chain a scroll would leave
-/// under a pointer that has not moved: a hit chain that changes without either is no reason to draw
-/// the page again. A target that holds the pointer (capture, lock) is the target before and after.
+/// under the pointer, would need a frame built whole, as `update_hover` says: an element restyled by
+/// more than paint, or a pointer boundary event that someone listens for. The scroll-only frames ask
+/// it of the hit chain a scroll would leave under a pointer that has not moved. A hover that only
+/// paints is not a reason to draw the page again: the tick after the translate patches the rows it
+/// touches where the translate left them. A target that holds the pointer (capture, lock) is the
+/// target before and after.
 pub(crate) fn hover_would_matter(
     state: &PointerState,
     tree: &RetainedTree,
@@ -1010,7 +1006,7 @@ pub(crate) fn hover_would_matter(
         .map(|target| event_path(tree, target))
         .unwrap_or_default();
     HoverChange::between(tree, &hovered, pinned.or(after))
-        .is_some_and(|change| change.restyles(tree, &hovered) || change.emits(tree, &state.requests))
+        .is_some_and(|change| change.restyle(tree, &hovered) == Restyle::Whole || change.emits(tree, &state.requests))
 }
 
 /// A button changing while another is held is no new pointer contact: DOM
@@ -2187,6 +2183,26 @@ mod tests {
         styled_with(&mut tree, &[(2, r##"{"active":{"opacity":0.5}}"##)]);
         let pressed = dispatch(&mut state, &tree, &down(0, 1, chain_of(&[3, 2, 1])));
         assert!(pressed.restyle && pressed.paint.is_empty(), "a press restyles by itself");
+    }
+
+    #[test]
+    fn a_hover_that_only_paints_does_not_matter_to_a_scroll_unless_a_listener_hears_it() {
+        let paints = r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##;
+        let mut painted = tree(&[]);
+        styled_with(&mut painted, &[(3, paints)]);
+        let mut state = PointerState::default();
+        assert!(!matters_as_a_move_does(&mut state, &painted, &[3, 2, 1]), "the row is repainted by the tick after the translate");
+        assert!(!matters_as_a_move_does(&mut state, &painted, &[4, 1]), "and again when it is left");
+
+        let mut heard = tree(&[(3, "pointerenter")]);
+        styled_with(&mut heard, &[(3, paints)]);
+        let mut state = PointerState::default();
+        assert!(matters_as_a_move_does(&mut state, &heard, &[3, 2, 1]), "a script may answer the event");
+
+        let mut whole = tree(&[]);
+        styled_with(&mut whole, &[(3, r##"{"hover":{"width":4}}"##)]);
+        let mut state = PointerState::default();
+        assert!(matters_as_a_move_does(&mut state, &whole, &[3, 2, 1]), "a hover that is more than paint is a frame built whole");
     }
 
     #[test]

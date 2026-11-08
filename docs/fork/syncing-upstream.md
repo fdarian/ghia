@@ -204,6 +204,121 @@ each entry or applies it again.
   touch edges, a layer a line, empty and overflowing boxes, steps of 0.1 and 1/3 up to 10 000) and two mailbox frames
   recorded from the proxy (`bounds_tree/mailbox_frames.txt`).
 
+### Contained relayout patch (zed `4359857078`, `afccad7649`, `f9a51894e7`, `06fc9e85e3`, `b133d12651`, `52f5a22f76`, `c4590da472`, `31494a952c`, `01bf68b572`, `32f49a4a45`; `third_party/taffy`, `taffy.rs`, `window/patch.rs`, `window/patch_splice.rs`, `elements/retained.rs`)
+
+- **Decision.** The owner approved this on 2026-11-07 (the full option 2 of the contained-layout design) as an engine change
+  that lets a commit patch the frame instead of drawing it whole. It is opt-in per window (`Window::set_contained_patches`, off
+  by default; Ghia turns it on where it patches ticks) and per root (`Retained::patchable_relayout`), so a window that does
+  not ask for it behaves as upstream's.
+- **What it changes.** taffy can note the nodes whose layout a computation changed (`track_layout_changes`,
+  `take_layout_changes`: location, size, border, padding, scrollbars or content size other than before, and whether the
+  location or size moved), at the cost of one check per stored layout while off. gpui's patch of a `patchable_relayout` root
+  no longer declines `LayoutMismatch` for a new element with other nodes, styles or children than the recording: it computes
+  the layout from the window's root (`Frame::root_layout`, with the space the frame was laid out in; whatever has an answer
+  keeps it), and accepts the patch when nothing outside the root changed and the root has the box it had, otherwise it declines
+  `PatchDecline::NotContained` and the frame is built whole in the same draw. What it repaints is compared with the recording
+  as before, except that hitboxes may have other bounds, corner radii and clip paths, and the listeners, input handlers and
+  tooltips the scratch frame registered replace the rendered frame's (their closures know the layout they were built from). The
+  scrollers around the root are measured again, and an accessibility tree that is built declines it as `LayoutMismatch`.
+  `PatchCounters::relayout_patches` counts them.
+- **The splice (`f9a51894e7`, `06fc9e85e3`).** A root that lays out again may register, hit and paint other things than its
+  recording did: the part of every frame vector it held (operations, hitboxes, listeners, input handlers, tooltips, cursors,
+  dispatch nodes with their parents and focus and view maps, tab stops, scrollers, accessed element states, debug bounds) is
+  replaced with what the scratch frame got, and everything recorded after it moves by how much each vector grew or shrank
+  (`window/patch_splice.rs`, `PatchDecline::Splice`). The roots nested in the spliced one and the ones around it are
+  forgotten: they are neither replayed nor patched until a frame built whole records them, and a frame that replays the outer
+  root does not register the ones inside it. `splice_patch_tests.rs`.
+- **The recording rewrite (`b133d12651`).** After a relayout patch the recording of the root is made again from the patch
+  (`RecordingRewrite`, `PatchCounters::rewritten_recordings`), so the next tick patches the root again and a frame built whole
+  replays it. What cannot be made what a frame built whole records is dropped as before: a root recorded to be put elsewhere,
+  one that handed elements to a stacking context outside it, one whose listeners report to their owner without an `on_replay`
+  hook, one with an accessibility recording, and the roots recorded inside it. A root that published (`note_publication`: any
+  element with an `on_painted`, `on_painted_layout` or prepaint listener, which every host element of Ghia has) keeps the rewritten
+  recording when it has an `on_replay` hook, as a frame built whole accepts for the recording (`c4590da472`), so consecutive
+  commits in a root are all patches. The patch cannot update the key the root was recorded with.
+- **Prepared patches (`52f5a22f76`).** The relayout path of a patch is split into `prepare_unit` (surroundings, request_layout, the
+  contained compute and the `NotContained` check, the `ReplayKey` check, prepaint into the scratch frame) and `finish_unit` (paint,
+  the comparisons, the splice and the rewrite); `repaint_in_place` is the two in a row. `Window::prepare_patch(cx, build)` runs the
+  first for a forced layout read, so that the read answers from the post-commit boxes and scroll metrics without a pass from the
+  window's root (the publications of prepaint run at once, with `is_layout_pass()` true), and `finish_prepared_patch` or
+  `repaint_in_place` for the same roots does the second without building or laying out again. While a patch is prepared
+  `draw_if_dirty` and its variants run no pass; any invalidation that moves `update_count`, a draw that does not patch the roots,
+  a patch for other roots and `discard_prepared_patch` discard it, leaving the layout the engine computed. A `prepare_patch` that
+  declines leaves nothing prepared. `PreparedPatch` holds the scratch frame, the layout engine's pass and the element arena
+  (taken from clearing until the patch is finished or dropped, hence the `build` closure). `contained_patch_tests.rs`.
+  The scratch frame holds one focus for every root of a patch, so each `PreparedStep` records whether its own prepaint set it
+  (`holds_focus`, `31494a952c`) and the focus check of `finish_unit` reads that: read from the frame, a root without the focus
+  declined `Registrations` after a focused root had prepared in the same patch. `patch_tests.rs`.
+- **The hit test of a patch with several roots (`01bf68b572`).** Each root of a patch that lays out again replaced only its own hitboxes in the rendered frame, so a root painted while the roots beside it still had their old hitboxes, and the replacement of the last root won over the others where they overlapped. `Window::refresh_hit_test_for_roots` replaces the hitboxes of every root before any paints, and `Frame::hit_test_replacing` takes the replacements as `HitboxReplacement` slices, in the order of the patch. `splice_patch_tests.rs`: two roots that overlap at the pointer, one gaining an occluding box and one keeping its box, in both orders, hit, paint and click as a frame built whole.
+- **A splice with an empty old part (`32f49a4a45`).** A root that registered nothing and painted nothing and gains boxes has an empty part in the hitboxes and the operations; the splice took that for a root with no scroll runs and removed the runs of every list around it, so the next scroll declined `NoRun`. The runs now stay, placed before or after the root by the vector the run has something in. `splice_patch_tests.rs`: a list before and after such a root.
+- **Why.** Navigating the mailbox of ghia-bench (the Navigate proxy, `examples/solid/mailbox-navigate`) cost 39M instructions
+  a key, 12M of it the fixed full frame that every commit that lays out draws. A patch that lays out only the scroller the commit
+  changed does not copy what it does not change ([patch-frames.md](patch-frames.md#contained-layout-patches)).
+- **How to carry it on a sync.** Take upstream's side of `window/patch.rs`, `elements/retained.rs` and `taffy.rs`, then apply
+  the two commits again: they are additions beside upstream's code (`relayout` on `Retained` and `PatchUnit`, the `contained`
+  flag on `PatchWindow`, `lay_out_again`, `hitboxes_are`'s `relaid` and `Registrations`, `Frame::root_layout`, the taffy
+  change set). Check that the patch still lays out from the window's root with the layout engine that drew the frame
+  (`layout_engine_id`), and that `contained_patch_tests.rs` passes: a text that rewraps is patched, a leak is `NotContained`,
+  an accessibility tree declines, a scroller's extent is measured again. The splice and the rewrite are three more commits
+  of the same kind (`window/patch_splice.rs` is new; the rewrite is in `patch_units` and `RetainedState`): apply them in
+  order and run `splice_patch_tests.rs` and the retention verifier's tests.
+
+### A list scroll that is a translate, alone or after a patch (zed `window/scroll_patch.rs`, `elements/list/scroll_patch.rs`, `window/patch_splice.rs`, `window/patch.rs`; `a355938ce4`, `3f17e8f0a8`, `53b1476e30`, `92bd787a70`, `32ab4df63c`, `01980dc564`, `e665e8a5d2`, `dd52c2c4ab`)
+
+- **Decision.** Part of the same approved line of work as the contained relayout patch above (the plan's G3 slices), opt-in per
+  window (`Window::set_scroll_patch`; a window that does not turn it on is drawn as upstream draws it). A scroll of a list that
+  changes which rows show, and a scroll that comes in the same draw as a patch, are a frame that moves the rows of the frame
+  shown instead of a frame built whole.
+- **What it changes.** The rows that stay are moved (`RetainedPhase::Scrolled`), the rows that leave are taken out of every frame
+  vector (`patch_splice.rs`, the insertion and removal forms), and the rows that come in are built through the builder the list
+  was given, each laid out as a root of its own and spliced in at its place; `ScrollPatchCounters` counts them
+  (`membership_frames`, `rows_built`, `rows_rebuilt`, `rows_removed`, `composed`) and the reasons a frame stays whole (`Membership.*`, `Region`,
+  `Hover`, ...). `Window::note_list_scrolled(view)` lets the owner say a list was scrolled by something other than a wheel (a
+  write of its offset): it asks for the draw itself (`request_tick` on the invalidator, no view queued, no invalidation counted),
+  so the write does not discard a prepared patch. In the draw of a tick, the patch is made first and the translate is classified
+  and applied from the frame the patch left (`composed`), with the tick the patch took no longer held as `Clock`; a translate
+  that declines leaves the patch and builds the frame whole, queueing the noted view for it. A patch of a root recorded to be
+  put elsewhere (a row a translate moved) prepaints and paints it in its region, `delta` from the recording, and rewrites the
+  recording (`RecordingRewrite::relocation`), so rows a translate moved are patchable where they stand and stay a translate source.
+  When a scroll is noted, before the classifier reads the list, the rows of its overdraw that have no size are measured as
+  `layout_items` does (`ListState::measure_overdraw`, `Window::measure_scrolled_overdraw`), so `UnmeasuredOverdraw` is held only
+  for a row that shows; a kept row whose recording misses its region or a clip is taken out and built where it is as a row that
+  comes in is (`Prediction::rebuilds`, counted by `rows_rebuilt`). Ghia depends on this: `build_virtual_child` runs for the rows
+  measured and for the rows built again, and `TapeStore::row_built` and `Retain::forget_left_rows` answer for the second
+  ([patch-frames.md](patch-frames.md#overdraw-measured-and-rows-built-again-slice-g3d)).
+  A wheel on a list goes on from the live `ListState` (the listener reads the offset and the extent when the event arrives, so a write
+  to the offset that was drawn as a translate is not lost to the wheel after it); the scene a patch wrote in place is described for the
+  retention verifier after the splice of the same patch; and a patch of a root painted in its region does less work at delta zero (the
+  hitboxes the prepaint relocated in place are not relocated again, and the recording rewrite is not given the hitboxes it then replaces).
+  A hover that only paints is the owner's to say it does not hold a translate (`Window::set_scroll_patch_hover`), and the rows a translate moved are
+  patchable where they stand ([patch-frames.md](patch-frames.md#under-a-wheel-slice-g3e)).
+- **Why.** One key of the mailbox of ghia-bench is a restyle of two rows, a swap of the detail and a scroll of the list; each
+  of the three was a patch or a translate alone and the key, drawn whole, cost 40M instructions
+  ([patch-frames.md](patch-frames.md#a-key-in-one-draw-slice-g3c)).
+- **How to carry it on a sync.** The additions are beside upstream's code in `window.rs` (`draw`: the patch before the
+  classification, the decline that queues the view), `window/patch.rs` (the relocated source, the rewrite) and the list element
+  (`elements/list.rs`: the entry points `elements/list/scroll_patch.rs` uses). Run the filters `scroll`, `patch`, `retained`,
+  `membership`, `hover`, `splice_patch` and `contained` of `cargo test -p gpui --lib --features test-support`, which pin each
+  piece, and the retention verifier's steps in `membership_patch_tests.rs`.
+
+### The marks of a text kept across widths (zed `2b2da134c4`, `gpui/src/text_system/line_layout.rs`, `line_layout/snap.rs`, `shape_store.rs`)
+
+- **Decision.** Taken with the slice Z4a of the contained-layout line of work (2026-11-08), after a profile of a key of the Navigate proxy put 19% of the read in `snap_marks` and the end reshapes: `SnapMarks`, which is Ghia's own code (`snap.rs` is not upstream's), and the list of line ends that Blink reshapes were computed again for every wrapped layout of a text. They are kept in the window's `ShapeStore`.
+- **Before.** A text laid out at the min-content, the max-content, the place and the definite widths took its kerns, soft hyphens, advances and end reshapes four to five times a read, though only the fit test reads the width.
+- **After.** The marks and the end reshapes of the first width that breaks a line are an entry of the store under the key of the text with no wrap width, no insets and no tab size (the strut font and `nowrap` stay, which shape the line); the other widths take them. They age and go with the fonts as the layouts do. `TextCounters` counts `snap_computations`, `snap_cache_hits` and `end_reshape_computations`, which Ghia reads as `getLayoutCounters().snapComputations`, `snapCacheHits` and `endReshapeComputations`.
+- **Why it is exact.** The marks read the shaped line, the text and the item starts, none of them the width, which only gates the fit test; `text_system/snap_cache_tests.rs` compares whole layouts of 11 texts at 8 widths with the store warm and cold.
+- **Measured** (release, 11 paragraphs at 5 widths, back to back): 0.50 ms a round without the cache, 0.42 ms with it. A per-glyph advance cache in `gpui_macos` (`e1a4e822e3`) gained nothing and was dropped.
+- **How to carry it on a sync.** Keep the entry type in `shape_store.rs` and the two lookups in `layout_wrapped_line`; run the `snap_cache` filter of `cargo test -p gpui --lib --features test-support`.
+
+### Row sizes declared by the owner of a list (zed `4815eaca3f`, `elements/list.rs`, `elements/list/scroll_patch.rs`, `window/scroll_patch.rs`)
+
+- **Decision.** Taken with the slice Z4d of the contained-layout line of work (2026-11-08), after a per-row profile of a list scroll put 37% of a key that does nothing else (~3.3M instructions) in `measure_overdraw`: the row that enters the overdraw was built and laid out in a scratch frame that is thrown away, and built again when it showed. Ghia knows what a row is when its root style fixes its box, so the list is told.
+- **Before.** gpui measured every row it did not show by rendering it and laying it out (`layout_as_root_unsnapped`), in the overdraw, in the walk to a scroll position and in `measure_all`.
+- **After.** `ListState::set_exact_item_size(Fn(index, Option<Pixels>) -> Option<Size<Pixels>>)` (and `clear_exact_item_size`): a row with no measured size that the callback answers for counts as measured at that size, without being rendered, wherever the list measures a row it does not show. The overdraw of a scroll is measured from the declarations alone, with no scratch frame, when they cover it (`measure_declared_overdraw`); `Window::measure_scrolled_overdraw` tries that first. A row that shows is built and laid out to be painted as before; if its size is not the declared one it is counted (`ListState::measure_counters().exact_size_mismatches`) and debug-asserted, and the laid out size is used. A size already measured is kept: the owner calls `remeasure_items` for the rows whose declaration changes. With nothing set, the list is upstream's.
+- **Why it is exact.** The owner answers only when its style leaves no doubt (`list_sizes.rs`), and every shown row is checked, in release too (the counter); `window/membership_patch_tests.rs` (`exact_sizes`) compares wheels, writes, the extent and `measure_all` of a list with declared sizes with the same list measured by layout, and `react/src/__tests__/list-exact-sizes.test.tsx` does it for 30 row styles.
+- **Also taken, same bump** (zed `0f2308a120`, `a8f385f381`, slice Z4c): `Scene::finish` moves each item of a sorted vector once, and a patch that a list scroll follows in the same draw leaves the scene to the translate (`PatchCounters::deferred_scene_rebuilds`, `getPatchCounters().deferredSceneRebuilds`), which made the frame again twice.
+- **How to carry it on a sync.** The additions are beside upstream's code: the field `exact_size` and the counters in `StateInner`, `measure_unshown` and `note_laid_out` where `layout_all_items`, `layout_items` and the overdraw measured a row, and the two functions of `scroll_patch.rs`. Run the `exact_sizes` filter of `cargo test -p gpui --lib --features test-support` and `list-exact-sizes.test.tsx`.
+
 ## Procedure
 
 1. Fetch the upstreams: `git fetch upstream` in the repo root and in `zed/`, and `git fetch zed-industries main` in `zed/`.

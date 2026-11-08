@@ -46,9 +46,10 @@ pub(crate) use css_animation::{
 pub(crate) use keyframes::{validate_keyframes, KeyframesRegistry};
 pub(crate) use layout_flip::{drag_value_ids, LayoutEvent, LayoutFlips};
 pub(crate) use css_transition::{
-    declares_transitions, validate_transitions, CssTransitions, InterpolateSize, Svg, TransitionEvent,
+    declares_transitions, leaves_box_size, validate_transitions, CssTransitions, InterpolateSize, Svg, TransitionEvent,
     TransitionStyle,
 };
+pub(crate) use measure::same_measured_write;
 pub(crate) use style_ref::StyleRef;
 pub(crate) use bindings::{BindingIndex, Demand, MotionValueEvent, MotionValueFrame, MotionValueStore};
 pub(crate) use values::{PlaybackInfo, StartTime};

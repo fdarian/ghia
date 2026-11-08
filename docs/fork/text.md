@@ -249,6 +249,8 @@ Two causes of needless measuring were fixed in the key and the cache around it (
 
 The line layout cache counts what it did (`getLayoutCounters().shapes`, `wrappedLayouts`, `lineLayoutHits`, `shapeCacheHits`). Behind its two frame generations the window keeps a store of what it shaped (`shape_store.rs`, 8 MiB estimated, least recently used out, emptied when fonts are added), so a page mounted again after other frames finds its lines (`shapeCacheHits`) and shapes nothing.
 
+The marks of a text that do not depend on its width (the kerns, soft hyphens and advances of `SnapMarks`, and the list of line ends that Blink reshapes) are an entry of the same store, under the key of the text with no wrap width, so the min-content, max-content, place and definite widths that a layout pass asks of one text compute them once (`snapComputations`, `endReshapeComputations`; the other widths are `snapCacheHits`). They age with the layouts and go with the fonts.
+
 ## Breaking changes
 
 - `display: "inline-block"`, `"inline-flex"` and `"inline-grid"` are atomic inlines that sit on a line of text, where they were ignored and left the box a block. `display: "table"` and the `table-*` values, ignored before, lay out as tables.

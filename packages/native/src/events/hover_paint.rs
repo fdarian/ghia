@@ -26,28 +26,59 @@ use crate::events::state_styles::{resolve_pointer_states, PointerStates};
 use crate::retained_tree::RetainedTree;
 use crate::style::{BackgroundValue, StyleDesc};
 
-/// The most elements a root that a hover patch repaints holds. A frame built whole that rebuilds the root builds all
+/// The most elements a root that a patch repaints holds. A frame built whole that rebuilds the root builds all
 /// of them (what is in it is recorded by no root of its own), so a root is kept to a row, a card or a small
 /// control, and a page of cards is not one: its cards are.
-pub(crate) const HOVER_ROOT_MAX_ELEMENTS: u32 = 64;
+pub(crate) const PATCH_ROOT_MAX_ELEMENTS: u32 = 64;
 
 /// The most elements that a changed `color` is checked to reach: a root holds no more.
-const WALK_LIMIT: usize = HOVER_ROOT_MAX_ELEMENTS as usize;
+const WALK_LIMIT: usize = PATCH_ROOT_MAX_ELEMENTS as usize;
+
+/// What the styles alone say of whether a change only paints. A colour is inherited, and a transition below the
+/// element would start from the old one, so what the styles do not settle is left to the tree below the element:
+/// that is the one part of the answer that is not a function of the styles, and so not kept with them
+/// (`StyleMemo`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Paints {
+    No,
+    Yes,
+    /// Paints if no element below declares a transition.
+    UnlessTransitionBelow,
+}
+
+impl Paints {
+    /// The answer for the element `id` of `tree`.
+    pub(crate) fn settled(self, tree: &RetainedTree, id: u64) -> bool {
+        match self {
+            Paints::No => false,
+            Paints::Yes => true,
+            Paints::UnlessTransitionBelow => reaches_no_transition(tree, id),
+        }
+    }
+
+    fn and(self, other: Paints) -> Paints {
+        match (self, other) {
+            (Paints::No, _) | (_, Paints::No) => Paints::No,
+            (Paints::UnlessTransitionBelow, _) | (_, Paints::UnlessTransitionBelow) => Paints::UnlessTransitionBelow,
+            (Paints::Yes, Paints::Yes) => Paints::Yes,
+        }
+    }
+}
 
 /// Whether the `hover` refinement of `style` only changes how the element paints. The element
 /// has to be in `tree` for its `color` to be followed to the elements that inherit it.
 pub(crate) fn hover_paints_only(tree: &RetainedTree, id: u64, style: &StyleDesc) -> bool {
-    paints_only(tree, id, style, PointerStates { hovered: true, ..Default::default() })
+    paints_only(style, PointerStates { hovered: true, ..Default::default() }).settled(tree, id)
 }
 
 /// Whether the `hasHover` refinement of `style` (`:has(:hover)`) only changes how the element paints.
 pub(crate) fn has_hover_paints_only(tree: &RetainedTree, id: u64, style: &StyleDesc) -> bool {
-    paints_only(tree, id, style, PointerStates { has_hovered: true, ..Default::default() })
+    paints_only(style, PointerStates { has_hovered: true, ..Default::default() }).settled(tree, id)
 }
 
 /// Whether an element declares a group or follows one (`groupHover`, `groupActive`, `groupFocusWithin`): the state of a
 /// group reaches its followers through the build that reads it, and a root that holds one end of that and not the other
-/// is not left unrecorded for a hover patch. A group is a frame built whole.
+/// is not left unrecorded for a patch. A group is a frame built whole.
 pub(crate) fn uses_groups(style: &StyleDesc) -> bool {
     style.declared_group().is_some()
         || style.group_hover.is_some()
@@ -58,7 +89,7 @@ pub(crate) fn uses_groups(style: &StyleDesc) -> bool {
 /// Whether an element might be lifted out of the root it is in, or lift what is in it: it is positioned, has a
 /// `z-index`, an opacity below 1, a transform, a filter, a mask or a clip path, or paints in a layer of its own. A root
 /// that lifts something is recorded as a root that hands it to the stacking context around, which a patch of the root
-/// as one piece does not repeat, so the roots in it are not left unrecorded for one (see `Retain::paints_hover`).
+/// as one piece does not repeat, so the roots in it are not left unrecorded for one (see `Retain::can_be_patch_root`).
 pub(crate) fn may_lift(style: &StyleDesc) -> bool {
     let set = |value: &Option<String>| value.as_deref().is_some_and(|value| !value.trim().eq_ignore_ascii_case("none"));
     style.position.as_deref().is_some_and(|position| !position.eq_ignore_ascii_case("static"))
@@ -85,7 +116,7 @@ pub(crate) fn may_lift(style: &StyleDesc) -> bool {
 
 /// Whether an element has a size that an intrinsic keyword gives (`min-content`, `max-content`, `fit-content`, `content`):
 /// its box is measured under another style than its own and asked for again, and a retained root that holds one is laid
-/// out again by every frame unless the box is a root of its own, so it is not left unrecorded for a hover patch.
+/// out again by every frame unless the box is a root of its own, so it is not left unrecorded for a patch.
 pub(crate) fn has_intrinsic_size(style: &StyleDesc) -> bool {
     use crate::style::DimensionValue;
     [&style.width, &style.height, &style.min_width, &style.min_height, &style.max_width, &style.max_height, &style.flex_basis]
@@ -97,25 +128,94 @@ pub(crate) fn has_intrinsic_size(style: &StyleDesc) -> bool {
 /// nothing a hover would restyle otherwise. The flag a build gives its element for a root that
 /// holds it to be patchable ahead of the hover: it says nothing of which hover happens.
 pub(crate) fn declares_paint_hover(tree: &RetainedTree, id: u64, style: &StyleDesc) -> bool {
-    let declares = style.hover.is_some() || style.has_hover.is_some();
-    declares
-        && style.container_rules.is_none()
-        && !uses_groups(style)
-        && (style.hover.is_none() || hover_paints_only(tree, id, style))
-        && (style.has_hover.is_none() || has_hover_paints_only(tree, id, style))
+    paint_hover_of(style).settled(tree, id)
 }
 
-fn paints_only(tree: &RetainedTree, id: u64, style: &StyleDesc, states: PointerStates) -> bool {
+/// [`declares_paint_hover`] as far as the style says.
+pub(crate) fn paint_hover_of(style: &StyleDesc) -> Paints {
+    let declares = style.hover.is_some() || style.has_hover.is_some();
+    if !declares || style.container_rules.is_some() || uses_groups(style) {
+        return Paints::No;
+    }
+    let refinement = |declared: bool, states: PointerStates| if declared { paints_only(style, states) } else { Paints::Yes };
+    refinement(style.hover.is_some(), PointerStates { hovered: true, ..Default::default() })
+        .and(refinement(style.has_hover.is_some(), PointerStates { has_hovered: true, ..Default::default() }))
+}
+
+/// Whether a commit that restyles an element from `old` to `new`, a change that only paints
+/// (`StyleDesc::differs_only_in_paint`), is one a patch frame can follow: the roots that hold the
+/// element are built again and their primitives are written over the frame shown
+/// (`docs/fork/patch-frames.md`, "Commit patches").
+///
+/// The comparison is a hover's (`differs_by_paint_only`) made on the style the element resolves to
+/// without a state and with each state that either declares: whichever state the element is in when
+/// the patch is built, what it paints differs in values and not in operations. The background quad
+/// is kept in both or in neither (`StyleDesc::keeps_background_quad`), so a background that appears
+/// is a quad that was already there. A transition declared on the element, one below it that
+/// inherits a colour that changed, a group and a `@container` rule are a frame built whole, as for
+/// a hover.
+pub(crate) fn restyle_paints_strictly(tree: &RetainedTree, id: u64, old: &StyleDesc, new: &StyleDesc) -> bool {
+    restyle_paints_of(old, new).settled(tree, id)
+}
+
+/// [`restyle_paints_strictly`] as far as the two styles say.
+pub(crate) fn restyle_paints_of(old: &StyleDesc, new: &StyleDesc) -> Paints {
+    if old.container_rules.is_some()
+        || new.container_rules.is_some()
+        || uses_groups(old)
+        || uses_groups(new)
+        || old.keeps_background_quad() != new.keeps_background_quad()
+    {
+        return Paints::No;
+    }
+    let mut colour_changed = false;
+    for states in declared_states(old, new) {
+        let (off, on) = (resolve_pointer_states(old, states), resolve_pointer_states(new, states));
+        if declares_transition(&off) || declares_transition(&on) || !differs_by_paint_only(&off, &on) {
+            return Paints::No;
+        }
+        colour_changed |= off.color != on.color;
+    }
+    if colour_changed { Paints::UnlessTransitionBelow } else { Paints::Yes }
+}
+
+/// No state, and each state that `old` or `new` has a refinement of, as the element can be in it.
+/// The group states are not here: a style that follows or declares one is not strict.
+fn declared_states(old: &StyleDesc, new: &StyleDesc) -> Vec<PointerStates> {
+    let mut states = vec![PointerStates::default()];
+    macro_rules! declared {
+        ($($field:ident => $state:ident),+ $(,)?) => {
+            $(
+                if old.$field.is_some() || new.$field.is_some() {
+                    states.push(PointerStates { $state: true, ..Default::default() });
+                }
+            )+
+        };
+    }
+    declared!(
+        hover => hovered,
+        active => active,
+        has_hover => has_hovered,
+        has_active => has_active,
+        has_focus => has_focused,
+        disabled => disabled,
+        enabled => enabled,
+        has_disabled => has_disabled,
+        has_enabled => has_enabled,
+        focus_within => focus_within,
+        has_focus_visible => has_focus_visible,
+        focus_visible => focus_visible,
+    );
+    states
+}
+
+fn paints_only(style: &StyleDesc, states: PointerStates) -> Paints {
     let off = resolve_pointer_states(style, PointerStates::default());
     let on = resolve_pointer_states(style, states);
-    if declares_transition(&off) || declares_transition(&on) {
-        return false;
+    if declares_transition(&off) || declares_transition(&on) || !differs_by_paint_only(&off, &on) {
+        return Paints::No;
     }
-    if !differs_by_paint_only(&off, &on) {
-        return false;
-    }
-    // A colour is inherited, and a transition below the element would start from the old one.
-    off.color == on.color || reaches_no_transition(tree, id)
+    if off.color == on.color { Paints::Yes } else { Paints::UnlessTransitionBelow }
 }
 
 fn declares_transition(style: &StyleDesc) -> bool {
@@ -430,6 +530,54 @@ mod tests {
         let shadow = style(r##"{"backgroundColor":"blue","hover":{"backgroundColor":"red"}}"##);
         let (tree, id) = with_child(shadow.clone(), style(r##"{"transition":"color 1s"}"##));
         assert!(hover_paints_only(&tree, id, &shadow), "a background is not inherited");
+    }
+
+    #[test]
+    fn what_the_memo_keeps_of_styles_is_what_they_say_without_it() {
+        use crate::style_memo::StyleMemo;
+        use std::sync::Arc;
+        let styles: Vec<Arc<StyleDesc>> = [
+            r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##,
+            r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#ddd"}}"##,
+            r##"{"color":"blue","hover":{"color":"red"}}"##,
+            r##"{"color":"blue","hasHover":{"color":"red"},"hover":{"opacity":0.5}}"##,
+            r##"{"borderBottom":"1px solid #f4f4f5","hover":{"borderBottomColor":"red"}}"##,
+            r##"{"borderBottom":"1px solid #f4f4f5","hover":{"borderBottom":"2px solid red"}}"##,
+            r##"{"backgroundColor":"#fff","transition":"background-color 150ms","hover":{"backgroundColor":"#eee"}}"##,
+            r##"{"hover":{"width":4}}"##,
+            r##"{"backgroundColor":"#eee"}"##,
+            r##"{"groupHover":{"color":"red"},"hover":{"color":"red"}}"##,
+            r##"{"color":"blue","active":{"color":"red"},"disabled":{"opacity":0.5}}"##,
+            r##"{"color":"blue","active":{"color":"green"},"disabled":{"opacity":0.4}}"##,
+        ]
+        .iter()
+        .map(|json| Arc::new(style(json)))
+        .collect();
+        let (mut one, mut two) = (StyleMemo::default(), StyleMemo::default());
+        let (mut said, mut said_no) = (0, 0);
+        for below in [r##"{"color":"blue"}"##, r##"{"transition":"color 1s"}"##] {
+            for left in &styles {
+                let (tree, id) = with_child((**left).clone(), style(below));
+                // Twice: the second answer is the one kept.
+                for _ in 0..2 {
+                    let kept = one.of_one(left, paint_hover_of).settled(&tree, id);
+                    assert_eq!(kept, declares_paint_hover(&tree, id, left));
+                    said += usize::from(kept);
+                    said_no += usize::from(!kept);
+                }
+                for right in &styles {
+                    for _ in 0..2 {
+                        let kept = two.of_two(left, right, restyle_paints_of).settled(&tree, id);
+                        assert_eq!(kept, restyle_paints_strictly(&tree, id, left, right));
+                        said += usize::from(kept);
+                        said_no += usize::from(!kept);
+                    }
+                }
+            }
+        }
+        assert!(said > 20 && said_no > 20, "the styles are told apart: {said} yes, {said_no} no");
+        assert_eq!(one.counts().1, styles.len() as u64, "a style is judged once, whatever is below it");
+        assert_eq!(two.counts().1, (styles.len() * styles.len()) as u64);
     }
 
     #[test]

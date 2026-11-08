@@ -121,7 +121,7 @@ const SNAP_SLACK: f32 = 1.0 / 1024.0;
 
 /// `width` as Chrome snaps a border width: whole device pixels, floored, except that a width of less than one device
 /// pixel is one and none stays none. It is the width the layout and the paint of a border of its own would use.
-fn snap(width: f32, scale: f32) -> f32 {
+pub(crate) fn snap(width: f32, scale: f32) -> f32 {
     let device = width.max(0.0) * scale;
     if device == 0.0 {
         return 0.0;

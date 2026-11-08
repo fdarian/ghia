@@ -83,7 +83,7 @@ pub(crate) fn describe_registries(window: WindowId) -> String {
     with_frame(window, |frame| {
         let mut out = String::new();
         for entry in frame.registry() {
-            writeln!(out, "{}", describe_text(entry, true)).ok();
+            writeln!(out, "{}", describe_text(entry, true, gpui::Point::default())).ok();
         }
         for region in frame.start_regions() {
             writeln!(out, "start region {} {:?} {} {:?}", region.id, region.bounds, region.selectable, region.to_window).ok();
@@ -122,16 +122,52 @@ pub(crate) fn publish(window: WindowId, live: &crate::tape::Live) {
     });
 }
 
+/// A patch laid out the root whose last build wrote the lists `old` again, and `new` is what it
+/// wrote: the registries give the one for the other, in the place of the first.
+pub(crate) fn replace(window: WindowId, old: &crate::tape::Roots, new: &[crate::tape::Live]) {
+    with_frame(window, |frame| {
+        frame.registry.replace(old, new, Kind::Text, reg_entry);
+        frame.start_regions.replace(old, new, Kind::StartRegion, start_region);
+        frame.painted.replace(old, new, Kind::Painted, painted_text_of);
+    });
+}
+
+/// A frame brought rows in, and what they wrote is at the end of the registries: it goes where the rows of
+/// each of `rows` (in the order of the list) are.
+pub(crate) fn order_by_rows(window: WindowId, rows: &[crate::tape::Roots]) {
+    with_frame(window, |frame| {
+        frame.registry.order_by_rows(rows, Kind::Text, reg_entry);
+        frame.start_regions.order_by_rows(rows, Kind::StartRegion, start_region);
+        frame.painted.order_by_rows(rows, Kind::Painted, painted_text_of);
+    });
+}
+
+fn reg_entry(data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>) -> RegEntry {
+    let entry = &data.downcast_ref::<(WindowId, RegEntry)>().expect("a text write holds its entry").1;
+    RegEntry { to_window: moved_matrix(entry.to_window, offset), ..entry.clone() }
+}
+
+fn start_region(data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>) -> StartRegion {
+    let (_, id, bounds, selectable, to_window) = data.downcast_ref::<StartRegionWrite>().expect("a start region write holds its box");
+    StartRegion {
+        id: *id,
+        bounds: Bounds::new(bounds.origin + offset, bounds.size),
+        selectable: *selectable,
+        to_window: moved_matrix(*to_window, offset),
+    }
+}
+
+fn painted_text_of(data: &dyn std::any::Any, _: gpui::Point<gpui::Pixels>) -> SharedString {
+    data.downcast_ref::<(WindowId, SharedString)>().expect("a painted text write holds its text").1.clone()
+}
+
 impl Frame {
     fn registry(&mut self) -> &[RegEntry] {
         self.registry_mut()
     }
 
     fn registry_mut(&mut self) -> &mut [RegEntry] {
-        self.registry.all_mut(Kind::Text, |data, offset| {
-            let entry = &data.downcast_ref::<(WindowId, RegEntry)>().expect("a text write holds its entry").1;
-            RegEntry { to_window: moved_matrix(entry.to_window, offset), ..entry.clone() }
-        })
+        self.registry.all_mut(Kind::Text, reg_entry)
     }
 
     fn start_regions(&mut self) -> &[StartRegion] {
@@ -139,21 +175,11 @@ impl Frame {
     }
 
     fn start_regions_mut(&mut self) -> &mut [StartRegion] {
-        self.start_regions.all_mut(Kind::StartRegion, |data, offset| {
-            let (_, id, bounds, selectable, to_window) = data.downcast_ref::<StartRegionWrite>().expect("a start region write holds its box");
-            StartRegion {
-                id: *id,
-                bounds: Bounds::new(bounds.origin + offset, bounds.size),
-                selectable: *selectable,
-                to_window: moved_matrix(*to_window, offset),
-            }
-        })
+        self.start_regions.all_mut(Kind::StartRegion, start_region)
     }
 
     fn painted(&mut self) -> &[SharedString] {
-        self.painted.all(Kind::Painted, |data, _| {
-            data.downcast_ref::<(WindowId, SharedString)>().expect("a painted text write holds its text").1.clone()
-        })
+        self.painted.all(Kind::Painted, painted_text_of)
     }
 }
 
@@ -274,7 +300,22 @@ fn push_start_region(window: WindowId, id: u64, bounds: Bounds<gpui::Pixels>, se
     });
 }
 
+/// Whether two [`record_start_region`] writes say the same, apart from the transforms around the element.
+pub(crate) fn same_start_region_apart_from_transform(
+    left: &dyn std::any::Any,
+    left_offset: gpui::Point<gpui::Pixels>,
+    right: &dyn std::any::Any,
+    right_offset: gpui::Point<gpui::Pixels>,
+) -> bool {
+    let (_, left_id, left_bounds, left_selectable, _) = left.downcast_ref::<StartRegionWrite>().expect("a start region write holds its box");
+    let (_, right_id, right_bounds, right_selectable, _) = right.downcast_ref::<StartRegionWrite>().expect("a start region write holds its box");
+    left_id == right_id
+        && left_selectable == right_selectable
+        && Bounds::new(left_bounds.origin + left_offset, left_bounds.size) == Bounds::new(right_bounds.origin + right_offset, right_bounds.size)
+}
+
 /// What a [`record_start_region`] write says, apart from the transforms around the element.
+#[cfg(test)]
 pub(crate) fn describe_start_region_apart_from_transform(data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>) -> String {
     let (_, id, bounds, selectable, _) = data.downcast_ref::<StartRegionWrite>().expect("a start region write holds its box");
     format!("start region {id} {:?} {selectable}", Bounds::new(bounds.origin + offset, bounds.size))
@@ -292,9 +333,41 @@ pub(crate) fn publish_captured_start_region(data: &dyn std::any::Any, offset: gp
     });
 }
 
+/// Whether two text writes say the same, apart from the transforms around the element, the layout of each `moved` as given.
+pub(crate) fn same_text_apart_from_transform(
+    left: &dyn std::any::Any,
+    left_moved: gpui::Point<gpui::Pixels>,
+    right: &dyn std::any::Any,
+    right_moved: gpui::Point<gpui::Pixels>,
+) -> bool {
+    let (left, right) = (&text_write(left).1, &text_write(right).1);
+    let moved_bounds = |entry: &RegEntry, moved: gpui::Point<gpui::Pixels>| {
+        let bounds = entry.layout.bounds();
+        Bounds::new(bounds.origin + moved, bounds.size)
+    };
+    left.key == right.key
+        && left.doc == right.doc
+        && left.text == right.text
+        && moved_bounds(left, left_moved) == moved_bounds(right, right_moved)
+        && left.group == right.group
+        && left.line == right.line
+        && left.cell == right.cell
+}
+
+/// Whether two [`log_painted_text`] writes log the same text.
+pub(crate) fn same_painted_text(left: &dyn std::any::Any, right: &dyn std::any::Any) -> bool {
+    let (left, right) = (painted_write(left), painted_write(right));
+    left.1 == right.1
+}
+
+fn painted_write(data: &dyn std::any::Any) -> &(WindowId, SharedString) {
+    data.downcast_ref().expect("a painted text write holds its window and its text")
+}
+
 /// What a text write says, apart from the transforms around the element.
-pub(crate) fn describe_text_apart_from_transform(data: &dyn std::any::Any) -> String {
-    describe_text(&text_write(data).1, false)
+#[cfg(test)]
+pub(crate) fn describe_text_apart_from_transform(data: &dyn std::any::Any, moved: gpui::Point<gpui::Pixels>) -> String {
+    describe_text(&text_write(data).1, false, moved)
 }
 
 /// Gives the text that a patch painted again the matrix it was painted through, as for
@@ -313,14 +386,16 @@ fn text_write(data: &dyn std::any::Any) -> &(WindowId, RegEntry) {
     data.downcast_ref().expect("a text write holds its entry")
 }
 
-fn describe_text(entry: &RegEntry, with_matrix: bool) -> String {
+fn describe_text(entry: &RegEntry, with_matrix: bool, moved: gpui::Point<gpui::Pixels>) -> String {
+    let bounds = entry.layout.bounds();
+    let bounds = Bounds::new(bounds.origin + moved, bounds.size);
     let matrix = if with_matrix { format!(" {:?}", entry.to_window) } else { String::new() };
     format!(
         "text {} {:?} {:?} {:?} {:?} {:?} {:?}{matrix}",
         entry.key,
         entry.doc,
         entry.text,
-        entry.layout.bounds(),
+        bounds,
         entry.group,
         entry.line,
         entry.cell,
@@ -711,7 +786,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                     (window_id, entry),
                     // Its layout is moved by the frame, with the subtree.
                     |(window, entry)| with_frame(*window, |frame| frame.registry.push(entry.clone())),
-                    |(_, entry), _| describe_text(entry, true),
+                    |(_, entry), _| describe_text(entry, true, gpui::Point::default()),
                 );
             }
             log_painted_text(window_id, text.clone());

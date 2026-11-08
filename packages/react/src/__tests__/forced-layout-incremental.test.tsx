@@ -716,6 +716,10 @@ function mountWithoutAFrame(entries: number, retention: boolean, icons = false) 
     renderer.clockPause()
     renderer.setInlineDraws(false)
     renderer.setA11yActive(false)
+    // The reads are meant to be passes that skip with layout records. Under the retention verifier every root is recorded, the
+    // scroller is an anchor, and a read of it is answered by the patch of the anchor prepared ahead of the draw (no pass, no
+    // record), which a discarded one no longer stops the next from being (zed `PatchWindow::discarded`).
+    renderer.setPatchEnabled(false)
     if (!retention) renderer.setRetainEnabled(false)
     settle(renderer)
     const painted = renderer.getPaintedFrameCount()

@@ -521,6 +521,11 @@ if (PHASE === "scroll") {
       .filter((key) => key.startsWith("patch.scrollPatch.applyDeclines."))
       .map((key) => [key.slice("patch.scrollPatch.applyDeclines.".length), sum(ticks.map((t) => t.counters[key] ?? 0))]),
   )
+  const total = (key: string) => sum(ticks.map((t) => t.counters[key] ?? 0))
+  const membershipTicks = ticks.filter((t) => (t.counters["patch.scrollPatch.membershipFrames"] ?? 0) > 0)
+  console.log(
+    `scrollPatch membership translates ${membershipTicks.length} of ${ticks.length} ticks (rows built ${total("patch.scrollPatch.rowsBuilt")}, rows removed ${total("patch.scrollPatch.rowsRemoved")}), median ${(median(membershipTicks.map(instr)) / 1e6).toFixed(3)}M, the other patched ticks ${(mean(patchedTicks.filter((t) => !membershipTicks.includes(t)).map(instr)) / 1e6).toFixed(3)}M`,
+  )
   console.log(
     `scrollPatch patched ${patchedTicks.length} of ${ticks.length} ticks, applyDeclines ${JSON.stringify(declines)}; instructions per tick: mean ${(mean(ticks.map(instr)) / 1e6).toFixed(3)}M, patched ticks ${(mean(patchedTicks.map(instr)) / 1e6).toFixed(3)}M, other ticks ${(mean(wholeTicks.map(instr)) / 1e6).toFixed(3)}M`,
   )

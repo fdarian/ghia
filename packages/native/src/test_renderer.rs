@@ -99,6 +99,14 @@ pub struct LayoutCounters {
     /// Line layout lookups that neither frame had but the window's shape store did: a layout shaped
     /// some frames ago, found again without shaping. Not counted in `shapes`.
     pub shape_cache_hits: f64,
+    /// Wrapped layouts that computed the width-independent marks of their text (advances, kerns,
+    /// soft hyphens), which take a platform call for each distinct glyph.
+    pub snap_computations: f64,
+    /// Wrapped layouts that took those marks from the ones another width of the text computed.
+    pub snap_cache_hits: f64,
+    /// Lists of line ends that Blink reshapes that were computed, one for a text that some width
+    /// of it breaks lines at.
+    pub end_reshape_computations: f64,
     /// Subtrees whose painted extent (what culling reads) was worked out from their children,
     /// not found as an earlier pass or frame left it.
     pub extent_walks: f64,
@@ -1048,7 +1056,10 @@ impl TestGpuixRenderer {
     /// was off starts from a frame that builds everything.
     #[napi]
     pub fn set_retain_planning(&self, planning: bool) -> Result<()> {
-        update_view(move |view, _window, _cx| view.retain.set_planning(planning))
+        update_view(move |view, _window, _cx| {
+            view.retain.set_planning(planning);
+            view.sync_commit_patching();
+        })
     }
 
     /// Whether a frame records what it builds at all, which `GPUIX_RETAIN_OFF` turns off for a whole
@@ -1056,7 +1067,10 @@ impl TestGpuixRenderer {
     /// that builds everything.
     #[napi]
     pub fn set_retain_enabled(&self, enabled: bool) -> Result<()> {
-        update_view(move |view, _window, _cx| view.retain.set_enabled(enabled))
+        update_view(move |view, _window, _cx| {
+            view.retain.set_enabled(enabled);
+            view.sync_commit_patching();
+        })
     }
 
     /// Builds each frame that replayed a retained subtree once more, whole, and compares the two:
@@ -1107,6 +1121,9 @@ impl TestGpuixRenderer {
                 wrapped_layouts: text.wrapped_layouts as f64,
                 line_layout_hits: text.hits as f64,
                 shape_cache_hits: text.shape_cache_hits as f64,
+                snap_computations: text.snap_computations as f64,
+                snap_cache_hits: text.snap_cache_hits as f64,
+                end_reshape_computations: text.end_reshape_computations as f64,
                 extent_walks: counters.extent_walks as f64,
                 overflow_walks: counters.overflow_walks as f64,
                 unsnapped_overflow_walks: counters.unsnapped_overflow_walks as f64,
@@ -1142,7 +1159,8 @@ impl TestGpuixRenderer {
     pub fn set_patch_enabled(&self, enabled: bool) -> Result<()> {
         update_view(move |view, _window, _cx| {
             view.patch.set_enabled(enabled);
-            view.retain.set_hover_roots(enabled);
+            view.retain.set_patch_roots(enabled);
+            view.sync_commit_patching();
         })
     }
 
@@ -1150,7 +1168,16 @@ impl TestGpuixRenderer {
     /// before them (`scrollPatch` of `getPatchCounters`). On unless `GPUIX_SCROLL_PATCH_OFF`.
     #[napi]
     pub fn set_scroll_patch_enabled(&self, enabled: bool) -> Result<()> {
-        update_view(move |_view, window, _cx| window.set_scroll_patch(enabled))
+        update_view(move |_view, window, cx| crate::retain::scroll_gate::set_scroll_patch(window, cx.entity_id(), enabled))
+    }
+
+    /// Whether virtual lists tell their rows' sizes to the list when the row's style fixes them
+    /// (`rowsMeasuredByDeclaration` of `scrollPatch`). On unless `GPUIX_LIST_SIZES_OFF`; process wide, and
+    /// read at every ask, so a list that is already mounted stops too.
+    #[napi]
+    pub fn set_list_sizes_enabled(&self, enabled: bool) -> Result<()> {
+        crate::list_sizes::set_enabled(enabled);
+        Ok(())
     }
 
     /// How ticks were patched since the window was made: subtract two reads for a span of frames.
@@ -1209,7 +1236,7 @@ impl TestGpuixRenderer {
         crate::custom_elements::nativeview::teardown::tell_destroyed(tree_id, &destroyed)?;
         // Like the live renderer, a change made from a handler marks the window dirty at once, so
         // that a read in the same handler draws it. Outside a handler `flush()` does.
-        UNFLUSHED_MUTATIONS.with(|unflushed| unflushed.set(unflushed.get().max(dirty)));
+        UNFLUSHED_MUTATIONS.with(|unflushed| unflushed.set(unflushed.get().merge(dirty)));
         if dirty != Dirty::Clean && crate::events::sync_dispatch::in_sync_call() {
             crate::events::sync_dispatch::invalidate_root_view(dirty).map_err(Error::from_reason)?;
         }
@@ -1231,9 +1258,9 @@ impl TestGpuixRenderer {
         // From a sync event handler this only marks the view dirty: the frame
         // is drawn once the input that is being dispatched has returned.
         deliver_frame()?;
-        update_view_or_defer(move |_view, _window, cx| {
+        update_view_or_defer(move |_view, window, cx| {
             let view = cx.entity_id();
-            crate::renderer::invalidate_after_mutation(cx, view, dirty);
+            crate::renderer::invalidate_after_mutation(window, cx, view, dirty);
         })
     }
 
@@ -1959,7 +1986,7 @@ impl TestGpuixRenderer {
             crate::scroll_write::lays_out_first(crate::scroll_write::metrics_current(window), id, state, top, behavior)
         })?;
         if lays_out_first {
-            window_call(|window, cx| window.draw_if_scroll_metrics_dirty(cx))?;
+            window_call(|window, cx| { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) })?;
         }
         update_view_or_defer(move |view, window, cx| {
             let was_current = crate::scroll_write::metrics_current(window);
@@ -1970,7 +1997,7 @@ impl TestGpuixRenderer {
             });
             if moved {
                 let entity = cx.entity_id();
-                crate::scroll_write::finish_write(window, cx, entity, was_current);
+                crate::scroll_write::finish_write(window, cx, entity, id, was_current);
             }
         })
     }
@@ -2530,7 +2557,7 @@ impl TestGpuixRenderer {
     pub fn get_scroll_offset(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
         let id = to_element_id(element_id)?;
         if crate::scroll_write::has_pending_container(id) {
-            window_call(|window, cx| window.draw_if_scroll_metrics_dirty(cx))?;
+            window_call(|window, cx| { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) })?;
         }
         update_view(|view, _window, _cx| {
             view.virtual_list_position(id)
@@ -2731,7 +2758,7 @@ impl TestGpuixRenderer {
             self.flush_for(unflushed)?;
         }
         window_call(|window, cx| {
-            window.draw_if_dirty(cx);
+            { crate::renderer::settle_pending_layout(window, cx); window.draw_if_dirty(cx) };
             crate::automation::get_bounds(window.window_handle().window_id(), id)
                 .map(crate::renderer::ElementBounds::from_painted)
         })

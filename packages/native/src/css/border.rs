@@ -412,6 +412,21 @@ pub(crate) fn used_widths(style: &StyleDesc, colors: &ColorContext, lengths: &Le
     SIDES.map(|side| declared.used_width(side, lengths))
 }
 
+/// [`used_widths`] as `[top, right, bottom, left]` in px, for a style whose visible sides are all
+/// declared in px alone: no `em` or viewport unit, so the element's own context does not matter.
+pub(crate) fn used_px_widths(style: &StyleDesc, colors: &ColorContext) -> Option<[f32; 4]> {
+    let declared = declare(style, colors);
+    let mut widths = [0.0; 4];
+    for side in SIDES {
+        let visible = declared.styles[side as usize].is_some_and(LineStyle::is_visible);
+        if visible {
+            let width = declared.widths[side as usize].clone().unwrap_or(MEDIUM);
+            widths[side as usize] = width.as_px()?.max(0.0) as f32;
+        }
+    }
+    Some(widths)
+}
+
 /// Whether `style` declares a border width, style or shorthand on any side.
 pub(crate) fn declares_widths(style: &StyleDesc, colors: &ColorContext) -> bool {
     let declared = declare(style, colors);
