@@ -204,7 +204,7 @@ each entry or applies it again.
   touch edges, a layer a line, empty and overflowing boxes, steps of 0.1 and 1/3 up to 10 000) and two mailbox frames
   recorded from the proxy (`bounds_tree/mailbox_frames.txt`).
 
-### Contained relayout patch (zed `4359857078`, `afccad7649`, `f9a51894e7`, `06fc9e85e3`, `b133d12651`, `52f5a22f76`, `c4590da472`, `31494a952c`; `third_party/taffy`, `taffy.rs`, `window/patch.rs`, `window/patch_splice.rs`, `elements/retained.rs`)
+### Contained relayout patch (zed `4359857078`, `afccad7649`, `f9a51894e7`, `06fc9e85e3`, `b133d12651`, `52f5a22f76`, `c4590da472`, `31494a952c`, `01bf68b572`; `third_party/taffy`, `taffy.rs`, `window/patch.rs`, `window/patch_splice.rs`, `elements/retained.rs`)
 
 - **Decision.** The owner approved this on 2026-11-07 (the full option 2 of the contained-layout design) as an engine change
   that lets a commit patch the frame instead of drawing it whole. It is opt-in per window (`Window::set_contained_patches`, off
@@ -249,6 +249,7 @@ each entry or applies it again.
   The scratch frame holds one focus for every root of a patch, so each `PreparedStep` records whether its own prepaint set it
   (`holds_focus`, `31494a952c`) and the focus check of `finish_unit` reads that: read from the frame, a root without the focus
   declined `Registrations` after a focused root had prepared in the same patch. `patch_tests.rs`.
+- **The hit test of a patch with several roots (`01bf68b572`).** Each root of a patch that lays out again replaced only its own hitboxes in the rendered frame, so a root painted while the roots beside it still had their old hitboxes, and the replacement of the last root won over the others where they overlapped. `Window::refresh_hit_test_for_roots` replaces the hitboxes of every root before any paints, and `Frame::hit_test_replacing` takes the replacements as `HitboxReplacement` slices, in the order of the patch. `splice_patch_tests.rs`: two roots that overlap at the pointer, one gaining an occluding box and one keeping its box, in both orders, hit, paint and click as a frame built whole.
 - **Why.** Navigating the mailbox of ghia-bench (the Navigate proxy, `examples/solid/mailbox-navigate`) cost 39M instructions
   a key, 12M of it the fixed full frame that every commit that lays out draws. A patch that lays out only the scroller the commit
   changed does not copy what it does not change ([patch-frames.md](patch-frames.md#contained-layout-patches)).
@@ -316,6 +317,13 @@ each entry or applies it again.
 - **Why it is exact.** The owner answers only when its style leaves no doubt (`list_sizes.rs`), and every shown row is checked, in release too (the counter); `window/membership_patch_tests.rs` (`exact_sizes`) compares wheels, writes, the extent and `measure_all` of a list with declared sizes with the same list measured by layout, and `react/src/__tests__/list-exact-sizes.test.tsx` does it for 30 row styles.
 - **Also taken, same bump** (zed `0f2308a120`, `a8f385f381`, slice Z4c): `Scene::finish` moves each item of a sorted vector once, and a patch that a list scroll follows in the same draw leaves the scene to the translate (`PatchCounters::deferred_scene_rebuilds`, `getPatchCounters().deferredSceneRebuilds`), which made the frame again twice.
 - **How to carry it on a sync.** The additions are beside upstream's code: the field `exact_size` and the counters in `StateInner`, `measure_unshown` and `note_laid_out` where `layout_all_items`, `layout_items` and the overdraw measured a row, and the two functions of `scroll_patch.rs`. Run the `exact_sizes` filter of `cargo test -p gpui --lib --features test-support` and `list-exact-sizes.test.tsx`.
+
+### A scrollbar drag reports to a list's scroll handler (zed `a4dd9c9a96`, `elements/list.rs`, `crates/ui` scrollbar)
+
+- **Decision.** Taken 2026-11-08 with the report of `onVisibleRange` for every way a list scrolls ([scroll.md](scroll.md)): gpui called a list's scroll handler for the wheel only, so the user dragging a scrollbar or clicking its track changed the rows and told the page nothing, where the DOM fires `scroll`.
+- **What it changes.** `ListState::set_offset_from_scrollbar_by_user(point, window, cx)` is `set_offset_from_scrollbar` followed by a call to the scroll handler with a `ListScrollEvent` (`visible_range_at` of the new position), unless the position and the follow of the tail stayed what they were or the list has not been laid out. `set_offset_from_scrollbar` reports nothing, as before, for a write an embedder reports itself. The `ui` crate's scrollbar calls the new one through `ScrollableHandle::set_offset_by_user`. Test: `elements/list.rs` (`test_a_scrollbar_drag_reports_the_visible_range_a_wheel_reports`).
+- **What Ghia uses of it.** Ghia draws its own bar (`scrollbar.rs`) and does not call it: the event reads the range at `logical_scroll_top`, which for a bottom-aligned list resting at its end is the item count and shows no rows (`[count, count]`), so `Source::set_offset` writes with `set_offset_from_scrollbar` and reports through `RangeReporter::report_at`, which reads the last rows there ([scroll.md](scroll.md)). A wheel of such a list reports the same way, since `ListState::scroll` goes through the scroll handler with gpui's range.
+- **How to carry it on a sync.** The addition is beside upstream's code (`set_offset_from_scrollbar_by_user` next to `set_offset_from_scrollbar`, `StateInner::set_offset_from_scrollbar_by_user`, one line in `ui`'s `ScrollableHandle`). Run the `list` filter of `cargo test -p gpui --lib --features test-support`.
 
 ## Procedure
 
