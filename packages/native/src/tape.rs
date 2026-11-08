@@ -247,8 +247,42 @@ impl Entries {
         self.lines_by(|effect, offset| effect.describe(offset))
     }
 
-    /// [`Self::lines`] with the boxes, texts and start regions described apart from the transforms
-    /// around them, and the text layouts `moved` further.
+    /// Whether the writes of the two lists are the same, the boxes, texts and start regions compared apart from the
+    /// transforms around them, and the text layouts of this one `moved` further. A write is compared by what it holds:
+    /// the words that [`Replay::describe`] says are for a write with no comparison of its own.
+    fn same_apart_from_transforms(&self, other: &Entries, moved: Point<Pixels>) -> bool {
+        let (mut mine, mut theirs) = (Vec::new(), Vec::new());
+        self.collect(Point::default(), &mut mine);
+        other.collect(Point::default(), &mut theirs);
+        mine.len() == theirs.len()
+            && mine.iter().zip(&theirs).all(|((left, left_offset), (right, right_offset))| {
+                left.kind() == right.kind()
+                    && left.in_layout() == right.in_layout()
+                    && match left.kind() {
+                        Kind::Bounds => crate::automation::same_bounds_apart_from_transform(left.data(), *left_offset, right.data(), *right_offset),
+                        Kind::Text => crate::text::same_text_apart_from_transform(left.data(), moved, right.data(), Point::default()),
+                        Kind::StartRegion => {
+                            crate::text::same_start_region_apart_from_transform(left.data(), *left_offset, right.data(), *right_offset)
+                        }
+                        Kind::Painted => crate::text::same_painted_text(left.data(), right.data()),
+                        Kind::Measured => crate::motion::same_measured_write(left.data(), right.data()),
+                        Kind::Paragraph => left.describe(*left_offset) == right.describe(*right_offset),
+                    }
+            })
+    }
+
+    /// Every write in the order it was made, with how far from where it was made it is.
+    fn collect<'a>(&'a self, offset: Point<Pixels>, writes: &mut Vec<(&'a dyn Replay, Point<Pixels>)>) {
+        for entry in &self.list {
+            match entry {
+                Entry::Write(effect) => writes.push((effect.as_ref(), offset)),
+                Entry::Nested(child, by) => child.collect(offset + *by, writes),
+            }
+        }
+    }
+
+    /// [`Self::lines`] said by words: what [`Self::same_apart_from_transforms`] compares, which a test holds it to.
+    #[cfg(test)]
     fn lines_apart_from_transforms(&self, moved: Point<Pixels>) -> Vec<(bool, String)> {
         self.lines_by(|effect, offset| match effect.kind() {
             Kind::Bounds => crate::automation::describe_apart_from_transform(effect.data(), offset),
@@ -567,6 +601,15 @@ impl Tape {
     /// start regions, may differ in the transforms around them. A patch of a transform that moves
     /// paints the same, and what it publishes of them is what [`Self::each`] reads.
     pub(crate) fn same_writes_apart_from_transforms(&self, other: &Tape, moved: Point<Pixels>) -> bool {
+        self.prepaint.same_apart_from_transforms(&other.prepaint, moved)
+            && self.paint.same_apart_from_transforms(&other.paint, moved)
+            && self.lifted.len() == other.lifted.len()
+            && self.lifted.iter().zip(&other.lifted).all(|(left, right)| left.same_apart_from_transforms(right, moved))
+    }
+
+    /// [`Self::same_writes_apart_from_transforms`] said by words, which it is held to.
+    #[cfg(test)]
+    fn same_writes_by_words_apart_from_transforms(&self, other: &Tape, moved: Point<Pixels>) -> bool {
         self.prepaint.lines_apart_from_transforms(moved) == other.prepaint.lines_apart_from_transforms(Point::default())
             && self.paint.lines_apart_from_transforms(moved) == other.paint.lines_apart_from_transforms(Point::default())
             && self.lifted.len() == other.lifted.len()
@@ -1367,8 +1410,9 @@ mod tests {
         static REGISTRY: Cell<i32> = const { Cell::new(0) };
     }
 
+    /// A write of the kind that is compared by its words, which holds anything.
     fn add(amount: i32) {
-        write(Kind::Painted, amount, |amount| REGISTRY.set(REGISTRY.get() + amount), |amount, _| format!("add {amount}"));
+        write(Kind::Paragraph, amount, |amount| REGISTRY.set(REGISTRY.get() + amount), |amount, _| format!("add {amount}"));
     }
 
     fn record(tape: &SharedTape, writes: &[i32]) {
@@ -1449,6 +1493,69 @@ mod tests {
         assert_eq!(tapes.moved(1), down(-100.0), "a replay says where the root is");
         tapes.set(1, SharedTape::default());
         assert_eq!(tapes.moved(1), Point::default(), "a root built again is where it was built");
+    }
+
+    #[test]
+    fn writes_compared_by_what_they_hold_are_the_same_as_when_compared_by_the_words_that_say_them() {
+        let window = WindowId::from(913);
+        let slid = |dx: f32| gpui::TransformationMatrix::affine([[1.0, 0.0], [0.0, 1.0]], [dx, 0.0]);
+        let region = |x: f32, selectable: bool| {
+            crate::text::record_start_region(
+                window,
+                7,
+                gpui::Bounds::new(gpui::point(gpui::px(x), gpui::px(2.0)), gpui::size(gpui::px(8.0), gpui::px(9.0))),
+                selectable,
+                gpui::TransformationMatrix::unit(),
+            )
+        };
+        let child = SharedTape::default();
+        record_box(&child, window, slid(1.0), 12.0);
+        // (matrix, width, text logged, region at x, region selectable, replayed child at dx)
+        let variants: [(gpui::TransformationMatrix, f32, &str, f32, bool, Option<f32>); 9] = [
+            (slid(5.0), 30.0, "a", 1.0, true, None),
+            (slid(9.0), 30.0, "a", 1.0, true, None),
+            (slid(5.0), 31.0, "a", 1.0, true, None),
+            (slid(5.0), 30.0, "b", 1.0, true, None),
+            (slid(5.0), 30.0, "a", 2.0, true, None),
+            (slid(5.0), 30.0, "a", 1.0, false, None),
+            (slid(5.0), 30.0, "a", 1.0, true, Some(0.0)),
+            (slid(5.0), 30.0, "a", 1.0, true, Some(4.0)),
+            (gpui::TransformationMatrix::unit(), 30.0, "a", 1.0, true, Some(4.0)),
+        ];
+        let tapes: Vec<SharedTape> = variants
+            .iter()
+            .map(|(matrix, width, text, x, selectable, replayed)| {
+                let tape = SharedTape::default();
+                {
+                    let _recording = Recorder::begin(&tape, Phase::Paint);
+                    let mut laid_out = laid_out(*matrix);
+                    laid_out.border_box.size.width = gpui::px(*width);
+                    crate::automation::record_bounds(window, 1, laid_out, gpui::point(gpui::px(10.0), gpui::px(20.0)), Default::default());
+                    crate::text::log_painted_text(window, (*text).into());
+                    region(*x, *selectable);
+                    if let Some(dx) = replayed {
+                        child.borrow().replay(window, Phase::Paint, gpui::point(gpui::px(*dx), gpui::px(0.0)));
+                    }
+                }
+                tape
+            })
+            .collect();
+        let (mut same, mut different) = (0, 0);
+        for moved in [Point::default(), gpui::point(gpui::px(3.0), gpui::px(-2.0))] {
+            for left in &tapes {
+                for right in &tapes {
+                    let (left, right) = (left.borrow(), right.borrow());
+                    let by_what_they_hold = left.same_writes_apart_from_transforms(&right, moved);
+                    assert_eq!(by_what_they_hold, left.same_writes_by_words_apart_from_transforms(&right, moved));
+                    if by_what_they_hold {
+                        same += 1;
+                    } else {
+                        different += 1;
+                    }
+                }
+            }
+        }
+        assert!(same > 18 && different > 18, "the variants are told apart and found equal: {same} same, {different} different");
     }
 
     #[test]
@@ -1819,7 +1926,7 @@ mod tests {
         log(window, "unrelated");
         let by = gpui::point(gpui::px(0.0), gpui::px(-5.0));
         registry.shift(&roots(&outer), by, |value, by| *value += f32::from(by.y) as i32);
-        let read: Vec<i32> = registry.all(Kind::Painted, |_, _| 0).to_vec();
+        let read: Vec<i32> = registry.all(Kind::Paragraph, |_, _| 0).to_vec();
         assert_eq!(read, [-4, -3, 3]);
     }
 

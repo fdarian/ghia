@@ -300,7 +300,22 @@ fn push_start_region(window: WindowId, id: u64, bounds: Bounds<gpui::Pixels>, se
     });
 }
 
+/// Whether two [`record_start_region`] writes say the same, apart from the transforms around the element.
+pub(crate) fn same_start_region_apart_from_transform(
+    left: &dyn std::any::Any,
+    left_offset: gpui::Point<gpui::Pixels>,
+    right: &dyn std::any::Any,
+    right_offset: gpui::Point<gpui::Pixels>,
+) -> bool {
+    let (_, left_id, left_bounds, left_selectable, _) = left.downcast_ref::<StartRegionWrite>().expect("a start region write holds its box");
+    let (_, right_id, right_bounds, right_selectable, _) = right.downcast_ref::<StartRegionWrite>().expect("a start region write holds its box");
+    left_id == right_id
+        && left_selectable == right_selectable
+        && Bounds::new(left_bounds.origin + left_offset, left_bounds.size) == Bounds::new(right_bounds.origin + right_offset, right_bounds.size)
+}
+
 /// What a [`record_start_region`] write says, apart from the transforms around the element.
+#[cfg(test)]
 pub(crate) fn describe_start_region_apart_from_transform(data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>) -> String {
     let (_, id, bounds, selectable, _) = data.downcast_ref::<StartRegionWrite>().expect("a start region write holds its box");
     format!("start region {id} {:?} {selectable}", Bounds::new(bounds.origin + offset, bounds.size))
@@ -318,7 +333,39 @@ pub(crate) fn publish_captured_start_region(data: &dyn std::any::Any, offset: gp
     });
 }
 
+/// Whether two text writes say the same, apart from the transforms around the element, the layout of each `moved` as given.
+pub(crate) fn same_text_apart_from_transform(
+    left: &dyn std::any::Any,
+    left_moved: gpui::Point<gpui::Pixels>,
+    right: &dyn std::any::Any,
+    right_moved: gpui::Point<gpui::Pixels>,
+) -> bool {
+    let (left, right) = (&text_write(left).1, &text_write(right).1);
+    let moved_bounds = |entry: &RegEntry, moved: gpui::Point<gpui::Pixels>| {
+        let bounds = entry.layout.bounds();
+        Bounds::new(bounds.origin + moved, bounds.size)
+    };
+    left.key == right.key
+        && left.doc == right.doc
+        && left.text == right.text
+        && moved_bounds(left, left_moved) == moved_bounds(right, right_moved)
+        && left.group == right.group
+        && left.line == right.line
+        && left.cell == right.cell
+}
+
+/// Whether two [`log_painted_text`] writes log the same text.
+pub(crate) fn same_painted_text(left: &dyn std::any::Any, right: &dyn std::any::Any) -> bool {
+    let (left, right) = (painted_write(left), painted_write(right));
+    left.1 == right.1
+}
+
+fn painted_write(data: &dyn std::any::Any) -> &(WindowId, SharedString) {
+    data.downcast_ref().expect("a painted text write holds its window and its text")
+}
+
 /// What a text write says, apart from the transforms around the element.
+#[cfg(test)]
 pub(crate) fn describe_text_apart_from_transform(data: &dyn std::any::Any, moved: gpui::Point<gpui::Pixels>) -> String {
     describe_text(&text_write(data).1, false, moved)
 }

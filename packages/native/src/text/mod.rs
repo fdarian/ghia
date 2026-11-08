@@ -46,9 +46,11 @@ pub(crate) fn order_by_rows(window: gpui::WindowId, rows: &[crate::tape::Roots])
 
 pub(crate) use paint::{describe_registries, shift};
 pub(crate) use paint::{
-    describe_start_region_apart_from_transform, describe_text_apart_from_transform, publish_captured_start_region,
-    publish_captured_text,
+    publish_captured_start_region, publish_captured_text, same_painted_text, same_start_region_apart_from_transform,
+    same_text_apart_from_transform,
 };
+#[cfg(test)]
+pub(crate) use paint::{describe_start_region_apart_from_transform, describe_text_apart_from_transform};
 pub use paint::{
     chrome_text, log_painted_text, painted_highlights, painted_text, range_rects,
     record_start_region, selectable_text, selection_frame_reset, selection_key, HighlightSource,
