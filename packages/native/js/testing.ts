@@ -331,6 +331,9 @@ interface NativeTestRendererApi
   setRetainPlanning(planning: boolean): void
   setRetainEnabled(enabled: boolean): void
   setPatchEnabled(enabled: boolean): void
+  setPartialRedraw(enabled: boolean): void
+  presentFrame(): void
+  capturePartialPicture(path: string): boolean
   setScrollPatchEnabled(enabled: boolean): void
   setListSizesEnabled(enabled: boolean): void
   setTextLeafEnabled(enabled: boolean): void
@@ -2140,6 +2143,23 @@ export class TestRenderer implements NativeRenderer {
    *  captures a frame built whole; this captures what a patched tick or a frame that moved the rows in place left. */
   captureShownFrame(path: string): void {
     this.native.captureShownFrame(path)
+  }
+
+  /** Whether the window draws only the part of the picture that a frame changed, where the platform can (docs/fork/paint-and-transforms.md,
+   *  "Partial redraw"). Off unless `GPUIX_PARTIAL_REDRAW=1` was set when the window opened. */
+  setPartialRedraw(enabled: boolean): void {
+    this.native.setPartialRedraw(enabled)
+  }
+
+  /** Presents the frame that was drawn and not shown, as the display link of a live window does after a tick (an offscreen window has none). */
+  presentFrame(): void {
+    this.native.presentFrame()
+  }
+
+  /** Save the picture that the frames drawn in part add up to, and say whether the window has one: it is what `captureShownFrame` draws of the
+   *  scene when the damage of each frame covered what changed. */
+  capturePartialPicture(path: string): boolean {
+    return this.native.capturePartialPicture(path)
   }
 
   /** Whether the native GPUI test renderer is available. Always true. */

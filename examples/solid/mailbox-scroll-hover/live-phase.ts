@@ -12,6 +12,7 @@
 // user+system CPU time between the same two instants. A thread's share of the instructions is its share of the CPU time; that is an
 // estimate (IPC differs between threads), proc_pid_rusage has no per-thread instructions.
 import { dlopen, ptr } from "bun:ffi"
+import { appendFileSync } from "node:fs"
 import { homedir } from "node:os"
 
 const pid = Number(process.argv[2])
@@ -131,6 +132,14 @@ async function runPhase(name: string) {
   }
   const total = rows.reduce((sum, row) => sum + row.ms, 0)
   rows.sort((a, b) => b.ms - a.ms)
+  const phaseLog = process.env.PHASE_LOG
+  if (phaseLog) {
+    // Seconds on the mach_absolute_time clock, the one a GPUI_GPU_TIMES line starts with.
+    const mainThread = [...last.threads.keys()].reduce((lowest, id) => (BigInt(id) < BigInt(lowest) ? id : lowest))
+    const mainMs = rows.find((row) => row.id === mainThread)!.ms
+    const line = `${name} ${(result.rusageBefore.tNs / 1e9).toFixed(6)} ${(result.rusageAfter.tNs / 1e9).toFixed(6)} cpu_ms=${total.toFixed(1)} main_ms=${mainMs.toFixed(1)} instr_m=${(instructions / 1e6).toFixed(1)}\n`
+    appendFileSync(phaseLog, line)
+  }
   console.log(`  threads (cpu ms between the same instants; sum ${total.toFixed(0)} ms; estimated M instr = share x ${(instructions / 1e6).toFixed(1)}M):`)
   for (const row of rows.filter((candidate) => candidate.ms >= 0.5)) {
     console.log(`    ${row.id.padStart(10)}  ${(row.name || "(unnamed)").padEnd(36)} ${row.ms.toFixed(1).padStart(8)} ms  ${((row.ms / total) * instructions / 1e6).toFixed(1).padStart(7)}M`)
