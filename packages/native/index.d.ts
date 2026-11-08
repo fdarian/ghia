@@ -625,6 +625,27 @@ export declare class RowOracle {
   setA11yActive(active: boolean): void
   setWindowActive(active: boolean): void
   /**
+   * How a row is built: `"div"` (the bench's divs) or `"direct"` (one element per row, no `Div`
+   * per node, see `direct.rs`). Marks the view dirty.
+   */
+  setRowKind(kind: string): void
+  /**
+   * What Ghia puts on each of its host divs, put on the oracle's divs (`"div"` rows): a hitbox
+   * (`always_hitbox`, needs DOM hit testing), the `track_host_bounds` closures, an element id.
+   */
+  setDecorations(hitbox: boolean, bounds: boolean, ids: boolean): void
+  /**
+   * The parts of a direct row: a hitbox per node (off: the row's own, for its hover), a bounds
+   * write per node as `record_bounds` makes it, and the style of every node resolved from its
+   * refinement in every frame (off: cloned from the template).
+   */
+  setDirectKnobs(hitboxes: boolean, bounds: boolean, styleEachFrame: boolean): void
+  /**
+   * The hit chain under the pointer, target first, as `Debug` prints the element ids of its
+   * hitboxes (needs DOM hit testing and a pointer move first).
+   */
+  getHitChain(): Array<string>
+  /**
    * A display-link frame: delivers the frame callbacks, then draws a pending change, once.
    * Draws nothing on a clean window.
    */

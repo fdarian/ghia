@@ -8,9 +8,14 @@
 //! bench's single `Mailbox` view does to its visible rows. The fork's per-window options that
 //! Ghia turns on are switches here, so their cost on raw GPUI elements can be priced.
 //!
+//! `setRowKind("direct")` swaps the divs for one custom element per row (`direct.rs`), which lays
+//! out and paints the same nodes without a `Div` each; `setDecorations` puts what Ghia puts on its
+//! host divs on the raw ones, one at a time.
+//!
 //! Use it from a script that reads the process's instruction counter around `drawWholeFrame()`
 //! and `simulateMouseMove()` + `drawFrame()`, see `examples/solid/row-cost/profile.tsx`.
 
+mod direct;
 mod rows;
 
 use std::cell::RefCell;
@@ -20,7 +25,8 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use crate::renderer::WindowOptions;
-use rows::RawRows;
+use direct::DirectKnobs;
+use rows::{Decorations, RawRows, RowKind};
 
 #[napi(object)]
 pub struct RowOracleOptions {
@@ -186,6 +192,67 @@ impl RowOracle {
     #[napi]
     pub fn set_window_active(&self, active: bool) -> Result<()> {
         in_window(|window, app| window.set_active_for_tests(active, app))
+    }
+
+    /// How a row is built: `"div"` (the bench's divs) or `"direct"` (one element per row, no `Div`
+    /// per node, see `direct.rs`). Marks the view dirty.
+    #[napi]
+    pub fn set_row_kind(&self, kind: String) -> Result<()> {
+        let kind = match kind.as_str() {
+            "div" => RowKind::Div,
+            "direct" => RowKind::Direct,
+            other => return Err(Error::from_reason(format!("unknown row kind {other:?}"))),
+        };
+        with_oracle(|cx, _window, view| {
+            cx.update(|app| {
+                view.update(app, |view, cx| {
+                    view.kind = kind;
+                    cx.notify();
+                })
+            });
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    /// What Ghia puts on each of its host divs, put on the oracle's divs (`"div"` rows): a hitbox
+    /// (`always_hitbox`, needs DOM hit testing), the `track_host_bounds` closures, an element id.
+    #[napi]
+    pub fn set_decorations(&self, hitbox: bool, bounds: bool, ids: bool) -> Result<()> {
+        with_oracle(|cx, _window, view| {
+            cx.update(|app| {
+                view.update(app, |view, cx| {
+                    view.decorations = Decorations { hitbox, bounds, ids };
+                    cx.notify();
+                })
+            });
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    /// The parts of a direct row: a hitbox per node (off: the row's own, for its hover), a bounds
+    /// write per node as `record_bounds` makes it, and the style of every node resolved from its
+    /// refinement in every frame (off: cloned from the template).
+    #[napi]
+    pub fn set_direct_knobs(&self, hitboxes: bool, bounds: bool, style_each_frame: bool) -> Result<()> {
+        with_oracle(|cx, _window, view| {
+            cx.update(|app| {
+                view.update(app, |view, cx| {
+                    view.direct = DirectKnobs { hitboxes, bounds, style_each_frame };
+                    cx.notify();
+                })
+            });
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    /// The hit chain under the pointer, target first, as `Debug` prints the element ids of its
+    /// hitboxes (needs DOM hit testing and a pointer move first).
+    #[napi]
+    pub fn get_hit_chain(&self) -> Result<Vec<String>> {
+        in_window(|window, _app| window.hit_chain().map(|(id, _)| format!("{id:?}")).collect())
     }
 
     /// A display-link frame: delivers the frame callbacks, then draws a pending change, once.

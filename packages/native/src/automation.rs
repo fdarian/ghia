@@ -532,7 +532,7 @@ impl HostPlace {
 }
 
 /// Notes the layout node a host was painted (or published) with, if it is the window's own.
-fn note_host_node(window: &gpui::Window, id: u64, node: gpui::LayoutId) {
+pub(crate) fn note_host_node(window: &gpui::Window, id: u64, node: gpui::LayoutId) {
     let window_id = window.window_handle().window_id();
     HOST_NODES.with(|nodes| {
         let mut nodes = nodes.borrow_mut();

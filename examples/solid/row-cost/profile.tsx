@@ -12,11 +12,13 @@
 //   WIDTH=420          window and row width (the bench's list column is 420 wide, so snippets truncate as they do there)
 //   SHOT=dir           saves a PNG of the oracle's and of the Ghia column's window of each count, to compare the pictures
 //   REPS=15            measured frames or crossings of each number (after SETTLE=8 unmeasured ones)
-//   MODES=oracle,options,ghia   which parts run
+//   MODES=oracle,options,ghia   which parts run; `decor` adds the raw rows with what Ghia puts on its divs (hitbox, ids, bounds closures)
+//                      one at a time, `direct` the rows as one element each with no Div per node (packages/native/src/oracle/direct.rs)
+//   HITS=1             prints the hit chain over the avatar of row 2 for the Ghia-like div row and for the direct row (with `decor`, `direct`)
 //   A11Y=0             takes the pretend screen reader away from the Ghia window (default 0 here: a bench run has none)
 //   JSON=1             prints the results as JSON on the last line
 //   HOLD_MS=0          LOOP only: waits after the setup, before the loop (time to attach `sample`)
-//   LOOP=name LOOPS=n  runs one loop of `oracle-whole`, `oracle-cross`, or `ghia-{column|list}-{on|off}-{whole|cross}` (on: retention
+//   LOOP=name LOOPS=n  runs one loop of `oracle-whole`, `oracle-cross` (CONFIG=name picks the oracle config of a `decor` or `direct` mode), or `ghia-{column|list}-{on|off}-{whole|cross}` (on: retention
 //                      on, "whole" then rebuilds everything and records it) LOOPS times in a row, without reading the counter (RAW, for `sample`)
 import { dlopen, ptr } from "bun:ffi"
 import { existsSync, readFileSync } from "node:fs"
@@ -34,6 +36,8 @@ const SETTLE = Number(process.env.SETTLE ?? "8")
 const MODES = (process.env.MODES ?? "oracle,options,ghia").split(",")
 const A11Y = process.env.A11Y === "1"
 const SHOT = process.env.SHOT
+const HITS = process.env.HITS === "1"
+const CONFIG = process.env.CONFIG
 const LOOP = process.env.LOOP
 const LOOPS = Number(process.env.LOOPS ?? "1")
 const HOLD_MS = Number(process.env.HOLD_MS ?? "0")
@@ -100,6 +104,10 @@ interface OracleConfig {
   maxDrawPasses: number
   a11yActive: boolean
   windowActive: boolean
+  /** [hitbox, bounds, ids] put on each div of the raw row */
+  decorations?: [boolean, boolean, boolean]
+  /** the row is one element: [hitbox per node, bounds write per node, style resolved every frame] */
+  direct?: [boolean, boolean, boolean]
 }
 const GPUI_DEFAULTS: OracleConfig = { name: "gpui", domHitTesting: false, maxDrawPasses: 1, a11yActive: false, windowActive: false }
 const OPTION_CONFIGS: OracleConfig[] = [
@@ -110,6 +118,26 @@ const OPTION_CONFIGS: OracleConfig[] = [
   { ...GPUI_DEFAULTS, name: "gpui+a11y", a11yActive: true },
   { name: "gpui+ghiaSet", domHitTesting: true, maxDrawPasses: 4, a11yActive: false, windowActive: true },
 ]
+
+const GHIA_SET: OracleConfig = { name: "gpui+ghiaSet", domHitTesting: true, maxDrawPasses: 4, a11yActive: false, windowActive: true }
+/** What Ghia puts on each host div, one part at a time, on the raw divs (the DOM hit testing Ghia runs under is on in all of them). */
+const DECOR_CONFIGS: OracleConfig[] = [
+  GHIA_SET,
+  { ...GHIA_SET, name: "div+hitbox", decorations: [true, false, false] },
+  { ...GHIA_SET, name: "div+ids", decorations: [false, false, true] },
+  { ...GHIA_SET, name: "div+bounds", decorations: [false, true, false] },
+  { ...GHIA_SET, name: "div+ids+bounds", decorations: [false, true, true] },
+  { ...GHIA_SET, name: "div+hitbox+ids+bounds", decorations: [true, true, true] },
+]
+/** The same row as one element: layout, hitboxes and paint of every node done by it. */
+const DIRECT_CONFIGS: OracleConfig[] = [
+  { ...GHIA_SET, name: "direct", direct: [true, false, false] },
+  { ...GHIA_SET, name: "direct-noHitbox", direct: [false, false, false] },
+  { ...GHIA_SET, name: "direct+bounds", direct: [true, true, false] },
+  { ...GHIA_SET, name: "direct+styleEachFrame", direct: [true, false, true] },
+  { ...GHIA_SET, name: "direct+bounds+style", direct: [true, true, true] },
+]
+const ALL_CONFIGS = [...OPTION_CONFIGS, ...DECOR_CONFIGS, ...DIRECT_CONFIGS]
 
 function openOracle(count: number, config: OracleConfig) {
   const oracle = new RowOracle({
@@ -122,6 +150,11 @@ function openOracle(count: number, config: OracleConfig) {
   })
   oracle.setInlineDraws(false)
   oracle.setRows(JSON.stringify(rowsOf(count)), 0)
+  if (config.decorations) oracle.setDecorations(...config.decorations)
+  if (config.direct) {
+    oracle.setRowKind("direct")
+    oracle.setDirectKnobs(...config.direct)
+  }
   for (let i = 0; i < SETTLE; i++) oracle.drawWholeFrame()
   return oracle
 }
@@ -168,6 +201,12 @@ function runOracle(count: number, config: OracleConfig, rowsAlso: boolean) {
     return readInstructions() - a - readOverhead
   })
   if (SHOT && config === GPUI_DEFAULTS) oracle.captureScreenshot(`${SHOT}/oracle-${count}.png`)
+  if (SHOT && (config.decorations || config.direct)) oracle.captureScreenshot(`${SHOT}/${config.name}-${count}.png`)
+  if (HITS && (config.direct || config.name === "div+hitbox+ids+bounds")) {
+    oracle.simulateMouseMove(34, rowCenter(2) - 36 + 12 + 18)
+    oracle.drawFrame()
+    console.log(`hit chain over the avatar of row 2, ${config.name}: ${JSON.stringify(oracle.getHitChain())}`)
+  }
   oracle.dispose()
   record(config.name, count, {
     whole,
@@ -189,6 +228,8 @@ if (MODES.includes("oracle") && !LOOP) {
   for (const count of COUNTS) runOracle(count, GPUI_DEFAULTS, true)
   for (const count of COUNTS) runOracle(count, OPTION_CONFIGS.at(-1)!, false)
 }
+if (MODES.includes("decor") && !LOOP) for (const config of DECOR_CONFIGS) for (const count of COUNTS) runOracle(count, config, false)
+if (MODES.includes("direct") && !LOOP) for (const config of DIRECT_CONFIGS) for (const count of COUNTS) runOracle(count, config, false)
 if (MODES.includes("options") && !LOOP) {
   for (const config of OPTION_CONFIGS) for (const count of COUNTS) if (!(config === GPUI_DEFAULTS && MODES.includes("oracle"))) runOracle(count, config, false)
 }
@@ -338,7 +379,9 @@ if (LOOP) {
     if (HOLD_MS) await new Promise((resolve) => setTimeout(resolve, HOLD_MS))
   }
   if (LOOP.startsWith("oracle")) {
-    const oracle = openOracle(count, GPUI_DEFAULTS)
+    const config = CONFIG ? ALL_CONFIGS.find((candidate) => candidate.name === CONFIG) : GPUI_DEFAULTS
+    if (!config) throw new Error(`CONFIG ${CONFIG} is none of ${ALL_CONFIGS.map((candidate) => candidate.name).join(", ")}`)
+    const oracle = openOracle(count, config)
     const cross = crossingSteps((x, y) => oracle.simulateMouseMove(x, y), () => oracle.drawFrame())
     await hold()
     const start = readInstructions()
