@@ -258,7 +258,7 @@ each entry or applies it again.
   of the same kind (`window/patch_splice.rs` is new; the rewrite is in `patch_units` and `RetainedState`): apply them in
   order and run `splice_patch_tests.rs` and the retention verifier's tests.
 
-### A list scroll that is a translate, alone or after a patch (zed `window/scroll_patch.rs`, `elements/list/scroll_patch.rs`, `window/patch_splice.rs`, `window/patch.rs`; `a355938ce4`, `3f17e8f0a8`, `53b1476e30`, `92bd787a70`, `32ab4df63c`)
+### A list scroll that is a translate, alone or after a patch (zed `window/scroll_patch.rs`, `elements/list/scroll_patch.rs`, `window/patch_splice.rs`, `window/patch.rs`; `a355938ce4`, `3f17e8f0a8`, `53b1476e30`, `92bd787a70`, `32ab4df63c`, `01980dc564`, `e665e8a5d2`, `dd52c2c4ab`)
 
 - **Decision.** Part of the same approved line of work as the contained relayout patch above (the plan's G3 slices), opt-in per
   window (`Window::set_scroll_patch`; a window that does not turn it on is drawn as upstream draws it). A scroll of a list that
@@ -281,6 +281,12 @@ each entry or applies it again.
   comes in is (`Prediction::rebuilds`, counted by `rows_rebuilt`). Ghia depends on this: `build_virtual_child` runs for the rows
   measured and for the rows built again, and `TapeStore::row_built` and `Retain::forget_left_rows` answer for the second
   ([patch-frames.md](patch-frames.md#overdraw-measured-and-rows-built-again-slice-g3d)).
+  A wheel on a list goes on from the live `ListState` (the listener reads the offset and the extent when the event arrives, so a write
+  to the offset that was drawn as a translate is not lost to the wheel after it); the scene a patch wrote in place is described for the
+  retention verifier after the splice of the same patch; and a patch of a root painted in its region does less work at delta zero (the
+  hitboxes the prepaint relocated in place are not relocated again, and the recording rewrite is not given the hitboxes it then replaces).
+  A hover that only paints is the owner's to say it does not hold a translate (`Window::set_scroll_patch_hover`), and the rows a translate moved are
+  patchable where they stand ([patch-frames.md](patch-frames.md#under-a-wheel-slice-g3e)).
 - **Why.** One key of the mailbox of ghia-bench is a restyle of two rows, a swap of the detail and a scroll of the list; each
   of the three was a patch or a translate alone and the key, drawn whole, cost 40M instructions
   ([patch-frames.md](patch-frames.md#a-key-in-one-draw-slice-g3c)).
