@@ -545,6 +545,9 @@ pub(crate) fn invalidate_after_commit(cx: &mut gpui::App, view: gpui::EntityId) 
 /// but moves boxes: the tree says its layout is pending, and a read of geometry before the draw
 /// answers from a patch it prepares for the anchors (`settle_pending_layout`).
 ///
+/// A batch is joined with the layout the view is still owed from the ones before it ([`layout_owed`], by [`Dirty::merge`]): a
+/// paint-only batch after a `Dirty::LayoutPatchable` one is a `Dirty::Layout`, since boxes moved that no layout invalidation was counted for.
+///
 /// A change made after a read prepared that patch is not in it: the patch is thrown away, and the
 /// next read prepares another (or notifies the view, as before) for all the changes.
 pub(crate) fn invalidate_after_mutation(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, dirty: Dirty) {
@@ -552,6 +555,8 @@ pub(crate) fn invalidate_after_mutation(window: &mut gpui::Window, cx: &mut gpui
         return;
     }
     discard_prepared_patch(window, cx, view, PendingLayout::Waiting);
+    // The batches before this one that moved boxes are still owed their layout, and this one does not take that away.
+    let dirty = dirty.merge(layout_owed(view));
     match dirty {
         Dirty::Clean => {}
         Dirty::PaintPatchable => window.request_tick(),
@@ -568,6 +573,16 @@ pub(crate) fn invalidate_after_mutation(window: &mut gpui::Window, cx: &mut gpui
             invalidate_after_commit(cx, view)
         }
     }
+}
+
+/// What the layout the view is owed asks of the window, as the batches that owe it did: [`Dirty::LayoutPatchable`] while a read has
+/// not prepared the patch for them, [`Dirty::Layout`] once the view is invalidated.
+fn layout_owed(view: gpui::EntityId) -> Dirty {
+    LAYOUT_PENDING.with(|pending| match pending.borrow().get(&view) {
+        None => Dirty::Clean,
+        Some(PendingLayout::Waiting | PendingLayout::Prepared) => Dirty::LayoutPatchable,
+        Some(PendingLayout::Notified) => Dirty::Layout,
+    })
 }
 
 /// Throws away the patch a read prepared, because the tree or a scroller changed after it, and says what
