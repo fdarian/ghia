@@ -600,6 +600,7 @@ unsafe extern "C" {
     fn CFRunLoopRunInMode(mode: *const c_void, seconds: f64, return_after_source_handled: u8) -> i32;
 }
 
+#[cfg(feature = "test-support")]
 /// Runs the main run loop, where WebKit reports, until `done` or a timeout.
 fn pump(done: impl Fn() -> bool) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
@@ -609,6 +610,7 @@ fn pump(done: impl Fn() -> bool) {
     }
 }
 
+#[cfg(feature = "test-support")]
 fn run(backend: &mut WkBackend, code: &str) -> ScriptOutcome {
     let outcome = Rc::new(RefCell::new(None));
     let slot = outcome.clone();
@@ -618,6 +620,7 @@ fn run(backend: &mut WkBackend, code: &str) -> ScriptOutcome {
     result
 }
 
+#[cfg(feature = "test-support")]
 /// A real `WKWebView` in a real view, run by `cargo run --example webview_smoke`: WebKit wants the
 /// main thread, which a test of the test harness is not on. Panics when the page does not behave.
 pub(crate) fn smoke() {
