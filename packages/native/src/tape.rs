@@ -370,6 +370,15 @@ enum Slot<T> {
     Live(Live),
 }
 
+impl<T> Slot<T> {
+    fn owner(&self) -> u64 {
+        match self {
+            Slot::One(_, owner) => *owner,
+            Slot::Live(live) => live.entries.serial,
+        }
+    }
+}
+
 impl<T> Default for Layered<T> {
     fn default() -> Self {
         Self { read: Vec::new(), owners: Vec::new(), pending: Vec::new() }
@@ -424,51 +433,54 @@ impl<T> Layered<T> {
     /// The replays that were not read are not expanded: they are kept or taken out whole, and `new` takes
     /// the place of the first among them as replays too, so a patch costs what the registry has read and
     /// the replays it holds, not what they stand for.
+    ///
+    /// A registry holds the writes of the whole window and a patch replaces a few rows of them, so this
+    /// only looks at who owns each write and moves the writes it takes out of the way in place: the runs
+    /// of writes that `old` holds are drained, and what is left is not copied.
     pub(crate) fn replace(&mut self, old: &Roots, new: &[Live], kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T) {
+        let brings = new.iter().any(|live| live.has(kind));
+        if !brings && self.read.is_empty() && self.pending.is_empty() {
+            return;
+        }
+        let mut owned: rustc_hash::FxHashMap<u64, bool> = Default::default();
         let mut last = (u64::MAX, false);
         let mut holds = |owner: u64| {
             if last.0 != owner {
-                last = (owner, old.hold(owner));
+                last = (owner, *owned.entry(owner).or_insert_with(|| old.hold(owner)));
             }
             last.1
         };
-        let (read, owners) = (std::mem::take(&mut self.read), std::mem::take(&mut self.owners));
-        let mut inserted = false;
-        for (value, owner) in read.into_iter().zip(owners) {
-            if holds(owner) {
-                if !std::mem::replace(&mut inserted, true) {
-                    for live in new {
-                        let list = live.entries.serial;
-                        live.each(kind, |data, offset| {
-                            self.read.push(from(data, offset));
-                            self.owners.push(list);
-                        });
-                    }
-                }
-                continue;
-            }
-            self.read.push(value);
-            self.owners.push(owner);
+
+        let taken = held_runs(self.owners.len(), |at| self.owners[at], &mut holds);
+        for run in taken.iter().rev() {
+            self.read.drain(run.clone());
+            self.owners.drain(run.clone());
         }
-        let put = |pending: &mut Vec<Slot<T>>| {
-            pending.extend(new.iter().filter(|live| live.has(kind)).cloned().map(Slot::Live));
+        let mut taken_pending = held_runs(self.pending.len(), |at| self.pending[at].owner(), &mut holds);
+        let Some(first) = taken.first() else {
+            // The replays of `new` take the place of the first run, where a patch that puts back as many as it took
+            // out moves nothing after it.
+            let first = if taken_pending.is_empty() { self.pending.len()..self.pending.len() } else { taken_pending.remove(0) };
+            for run in taken_pending.iter().rev() {
+                self.pending.drain(run.clone());
+            }
+            self.pending.splice(first, new.iter().filter(|live| live.has(kind)).cloned().map(Slot::Live));
+            return;
         };
-        for slot in std::mem::take(&mut self.pending) {
-            let owner = match &slot {
-                Slot::One(_, owner) => *owner,
-                Slot::Live(live) => live.entries.serial,
-            };
-            if holds(owner) {
-                if !std::mem::replace(&mut inserted, true) {
-                    put(&mut self.pending);
-                }
-                continue;
-            }
-            self.pending.push(slot);
+        for run in taken_pending.iter().rev() {
+            self.pending.drain(run.clone());
         }
-        if !inserted {
-            put(&mut self.pending);
+        let (at, before) = (first.start, self.read.len());
+        for live in new.iter().filter(|live| live.has(kind)) {
+            let list = live.entries.serial;
+            live.each(kind, |data, offset| {
+                self.read.push(from(data, offset));
+                self.owners.push(list);
+            });
         }
+        let added = self.read.len() - before;
+        self.read[at..].rotate_right(added);
+        self.owners[at..].rotate_right(added);
     }
 
     /// Puts the writes that were made into the lists of each of `rows` (or into one nested in them)
@@ -526,6 +538,24 @@ impl<T> Layered<T> {
             }
         }
     }
+}
+
+/// The runs of a sequence of `len` items, by index, whose owner (`owner_at`) `holds`.
+fn held_runs(len: usize, owner_at: impl Fn(usize) -> u64, holds: &mut impl FnMut(u64) -> bool) -> Vec<std::ops::Range<usize>> {
+    let mut runs = Vec::new();
+    let mut at = 0;
+    while at < len {
+        if !holds(owner_at(at)) {
+            at += 1;
+            continue;
+        }
+        let start = at;
+        while at < len && holds(owner_at(at)) {
+            at += 1;
+        }
+        runs.push(start..at);
+    }
+    runs
 }
 
 /// The lists of the tape of a retained root, and so everything it wrote: a list is in the root if
@@ -1928,6 +1958,132 @@ mod tests {
         registry.shift(&roots(&outer), by, |value, by| *value += f32::from(by.y) as i32);
         let read: Vec<i32> = registry.all(Kind::Paragraph, |_, _| 0).to_vec();
         assert_eq!(read, [-4, -3, 3]);
+    }
+
+    /// Writes `values` into `registry` as the recording of the list `owner` (0: outside any) does.
+    fn push_owned(registry: &mut Layered<i32>, owner: u64, values: &[i32]) {
+        for value in values {
+            OWNER.set(owner);
+            registry.push(*value);
+        }
+        OWNER.set(0);
+    }
+
+    fn numbers(registry: &mut Layered<i32>) -> Vec<i32> {
+        registry.all(Kind::Paragraph, |data, _| *data.downcast_ref::<i32>().expect("the test writes numbers")).to_vec()
+    }
+
+    fn lives_of(tape: &SharedTape) -> Vec<Live> {
+        tape.borrow().lives(Point::default()).into_iter().filter(|live| live.has(Kind::Paragraph)).collect()
+    }
+
+    fn read_number(data: &dyn Any, _: Point<Pixels>) -> i32 {
+        *data.downcast_ref::<i32>().expect("the test writes numbers")
+    }
+
+    fn row_with_nested_list(outer: &SharedTape, inner: &SharedTape) {
+        let _outer = Recorder::begin(outer, Phase::Paint);
+        add(1);
+        let _inner = Recorder::begin(inner, Phase::Paint);
+        add(2);
+    }
+
+    #[test]
+    fn a_replace_puts_the_new_writes_where_the_first_removed_one_was_and_keeps_the_order_of_the_rest() {
+        let (old, inner, new, other) = (SharedTape::default(), SharedTape::default(), SharedTape::default(), SharedTape::default());
+        row_with_nested_list(&old, &inner);
+        record(&new, &[7, 8]);
+        record(&other, &[40, 41]);
+        let (old_list, inner_list, other_list) = (owner_of(&old), owner_of(&inner), owner_of(&other));
+        let roots = old.borrow().roots();
+        assert!(roots.hold(inner_list), "a list nested in a root is held by it");
+        assert!(!roots.hold(other_list));
+
+        let registry = || {
+            let mut registry: Layered<i32> = Layered::default();
+            push_owned(&mut registry, 0, &[10]);
+            // The outer list, the one nested in it, the outer again, and a list that is not held.
+            push_owned(&mut registry, old_list, &[20]);
+            push_owned(&mut registry, inner_list, &[21]);
+            push_owned(&mut registry, old_list, &[22]);
+            push_owned(&mut registry, other_list, &[30]);
+            registry
+        };
+
+        // Removed from what was read: the new writes take the place of the first, the rest stays in its order.
+        let mut read = registry();
+        read.replace(&roots, &lives_of(&new), Kind::Paragraph, read_number);
+        assert_eq!(numbers(&mut read), [10, 7, 8, 30]);
+
+        // A run of the owner apart from another is taken out as well, and the new writes go where the first run was.
+        let mut apart = Layered::default();
+        push_owned(&mut apart, old_list, &[20]);
+        push_owned(&mut apart, other_list, &[30]);
+        push_owned(&mut apart, inner_list, &[21]);
+        push_owned(&mut apart, 0, &[10]);
+        apart.replace(&roots, &lives_of(&new), Kind::Paragraph, read_number);
+        assert_eq!(numbers(&mut apart), [7, 8, 30, 10]);
+
+        // Nothing it holds: the new writes come last, as replays that are not expanded.
+        let mut none: Layered<i32> = Layered::default();
+        push_owned(&mut none, other_list, &[30]);
+        none.replace(&roots, &lives_of(&new), Kind::Paragraph, read_number);
+        assert!(matches!(none.pending.as_slice(), [Slot::Live(_)]));
+        assert_eq!(numbers(&mut none), [30, 7, 8]);
+
+        // No new writes: only the removal.
+        let mut gone = registry();
+        gone.replace(&roots, &[], Kind::Paragraph, read_number);
+        assert_eq!(numbers(&mut gone), [10, 30]);
+        let mut empty: Layered<i32> = Layered::default();
+        empty.replace(&roots, &[], Kind::Paragraph, read_number);
+        assert!(numbers(&mut empty).is_empty());
+    }
+
+    #[test]
+    fn a_replace_keeps_a_replay_that_was_not_read_whole_and_puts_the_new_writes_in_the_place_of_the_first_it_takes_out() {
+        let (old, inner, new, other, kept) =
+            (SharedTape::default(), SharedTape::default(), SharedTape::default(), SharedTape::default(), SharedTape::default());
+        row_with_nested_list(&old, &inner);
+        record(&new, &[7, 8]);
+        record(&other, &[40]);
+        record(&kept, &[50, 51]);
+        let roots = old.borrow().roots();
+        let (old_list, inner_list) = (owner_of(&old), owner_of(&inner));
+
+        let registry = || {
+            let mut registry: Layered<i32> = Layered::default();
+            push_owned(&mut registry, 0, &[10]);
+            // Not read yet: a replay that is kept, a write of the old root, a replay of the old root (taken out whole), a
+            // write of the list nested in it, and a write outside.
+            registry.push_live(lives_of(&kept).remove(0));
+            push_owned(&mut registry, old_list, &[20]);
+            registry.push_live(lives_of(&old).remove(0));
+            push_owned(&mut registry, inner_list, &[21]);
+            push_owned(&mut registry, 0, &[60]);
+            registry
+        };
+
+        // Nothing it holds was read: the new writes are a replay in the place of the first thing taken out of the replays.
+        let mut registry_a = registry();
+        registry_a.replace(&roots, &lives_of(&new), Kind::Paragraph, read_number);
+        assert_eq!(registry_a.read.len(), 1);
+        assert!(matches!(registry_a.pending.as_slice(), [Slot::Live(_), Slot::Live(_), Slot::One(60, 0)]));
+        assert_eq!(numbers(&mut registry_a), [10, 50, 51, 7, 8, 60]);
+
+        // What it held was read: the new writes go where that was, the replay of the old root is taken out and the new ones are
+        // not put there as well, and the replays that are not its own are kept whole.
+        let mut read_part: Layered<i32> = Layered::default();
+        push_owned(&mut read_part, 0, &[10]);
+        push_owned(&mut read_part, old_list, &[20]);
+        push_owned(&mut read_part, 0, &[30]);
+        read_part.push_live(lives_of(&kept).remove(0));
+        read_part.push_live(lives_of(&old).remove(0));
+        read_part.push_live(lives_of(&other).remove(0));
+        read_part.replace(&roots, &lives_of(&new), Kind::Paragraph, read_number);
+        assert_eq!(read_part.read.len(), 4);
+        assert!(matches!(read_part.pending.as_slice(), [Slot::Live(_), Slot::Live(_)]), "the replays that stay are not expanded");
+        assert_eq!(numbers(&mut read_part), [10, 7, 8, 30, 50, 51, 40]);
     }
 
     fn owner_of(tape: &SharedTape) -> u64 {
