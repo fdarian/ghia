@@ -14,6 +14,8 @@
 //   PHASE=idle    TICKS (default 720) ticks with no input
 //   EVENTS=n      events per direction (scroll 360, hover 240)
 //   LOOPS=n       runs the steps n times in one measurement (1)
+//   AFTER_SCROLL=1  PHASE=hover only: first the bench's scroll phase (360 wheel events down, 360 up, one tick each) in the same window, as a bench
+//                 session runs hover after scroll; the list is back at scrollTop 0 when the hover starts
 //   SCROLL_DELTA  pixels of a wheel event (30)
 //   SCROLL_X / SCROLL_Y   where the wheel and the pointer are (430, 442)
 //   TAIL_MS=500   ticks without input after the last event, reported separately (0 turns it off)
@@ -363,6 +365,15 @@ for (let i = 0; i < Math.round(TAIL_MS / TICK_MS); i++) tailSteps.push({ label: 
 
 // ── Pointer and starting state ──────────────────────────────────
 
+if (PHASE === "hover" && process.env.AFTER_SCROLL === "1") {
+  renderer.dispatchMouseMove(SCROLL_AT.x, SCROLL_AT.y)
+  for (const dy of [SCROLL_DELTA, -SCROLL_DELTA]) {
+    for (let i = 0; i < 360; i++) {
+      renderer.dispatchScrollWheel(SCROLL_AT.x, SCROLL_AT.y, 0, dy, undefined, WHEEL_PHASE)
+      frameStep(TICK_MS)
+    }
+  }
+}
 if (PHASE === "scroll") {
   renderer.dispatchMouseMove(SCROLL_AT.x, SCROLL_AT.y)
   for (let i = 0; i < 3; i++) frameStep(TICK_MS)
