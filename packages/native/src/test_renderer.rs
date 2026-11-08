@@ -99,6 +99,14 @@ pub struct LayoutCounters {
     /// Line layout lookups that neither frame had but the window's shape store did: a layout shaped
     /// some frames ago, found again without shaping. Not counted in `shapes`.
     pub shape_cache_hits: f64,
+    /// Wrapped layouts that computed the width-independent marks of their text (advances, kerns,
+    /// soft hyphens), which take a platform call for each distinct glyph.
+    pub snap_computations: f64,
+    /// Wrapped layouts that took those marks from the ones another width of the text computed.
+    pub snap_cache_hits: f64,
+    /// Lists of line ends that Blink reshapes that were computed, one for a text that some width
+    /// of it breaks lines at.
+    pub end_reshape_computations: f64,
     /// Subtrees whose painted extent (what culling reads) was worked out from their children,
     /// not found as an earlier pass or frame left it.
     pub extent_walks: f64,
@@ -1113,6 +1121,9 @@ impl TestGpuixRenderer {
                 wrapped_layouts: text.wrapped_layouts as f64,
                 line_layout_hits: text.hits as f64,
                 shape_cache_hits: text.shape_cache_hits as f64,
+                snap_computations: text.snap_computations as f64,
+                snap_cache_hits: text.snap_cache_hits as f64,
+                end_reshape_computations: text.end_reshape_computations as f64,
                 extent_walks: counters.extent_walks as f64,
                 overflow_walks: counters.overflow_walks as f64,
                 unsnapped_overflow_walks: counters.unsnapped_overflow_walks as f64,

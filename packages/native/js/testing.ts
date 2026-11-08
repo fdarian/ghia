@@ -107,6 +107,9 @@ export interface LayoutCounters {
   wrappedLayouts: number
   lineLayoutHits: number
   shapeCacheHits: number
+  snapComputations: number
+  snapCacheHits: number
+  endReshapeComputations: number
   extentWalks: number
   overflowWalks: number
   unsnappedOverflowWalks: number

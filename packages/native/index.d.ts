@@ -2109,6 +2109,18 @@ export interface LayoutCounters {
    */
   shapeCacheHits: number
   /**
+   * Wrapped layouts that computed the width-independent marks of their text (advances, kerns,
+   * soft hyphens), which take a platform call for each distinct glyph.
+   */
+  snapComputations: number
+  /** Wrapped layouts that took those marks from the ones another width of the text computed. */
+  snapCacheHits: number
+  /**
+   * Lists of line ends that Blink reshapes that were computed, one for a text that some width
+   * of it breaks lines at.
+   */
+  endReshapeComputations: number
+  /**
    * Subtrees whose painted extent (what culling reads) was worked out from their children,
    * not found as an earlier pass or frame left it.
    */

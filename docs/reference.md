@@ -9564,7 +9564,9 @@ Counters you read off the renderer:
   window was made, the
   text system's lines shaped, wrapped layouts built, line layout hits and
   `shapeCacheHits` (lines the window's shape store gave back: text shaped more than
-  two frames ago and mounted again is not shaped again), and the
+  two frames ago and mounted again is not shaped again), `snapComputations`,
+  `snapCacheHits` and `endReshapeComputations` (the width-independent marks of a text,
+  which each width of it would otherwise compute again), and the
   subtrees whose extent for culling and whose scrollable overflow were worked out
   again (`extentWalks`, `overflowWalks`, `unsnappedOverflowWalks`).
 - `getFrameWorkCounters()`: elements prepainted and painted by themselves (those in

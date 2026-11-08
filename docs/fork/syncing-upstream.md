@@ -296,6 +296,15 @@ each entry or applies it again.
   `membership`, `hover`, `splice_patch` and `contained` of `cargo test -p gpui --lib --features test-support`, which pin each
   piece, and the retention verifier's steps in `membership_patch_tests.rs`.
 
+### The marks of a text kept across widths (zed `2b2da134c4`, `gpui/src/text_system/line_layout.rs`, `line_layout/snap.rs`, `shape_store.rs`)
+
+- **Decision.** Taken with the slice Z4a of the contained-layout line of work (2026-11-08), after a profile of a key of the Navigate proxy put 19% of the read in `snap_marks` and the end reshapes: `SnapMarks`, which is Ghia's own code (`snap.rs` is not upstream's), and the list of line ends that Blink reshapes were computed again for every wrapped layout of a text. They are kept in the window's `ShapeStore`.
+- **Before.** A text laid out at the min-content, the max-content, the place and the definite widths took its kerns, soft hyphens, advances and end reshapes four to five times a read, though only the fit test reads the width.
+- **After.** The marks and the end reshapes of the first width that breaks a line are an entry of the store under the key of the text with no wrap width, no insets and no tab size (the strut font and `nowrap` stay, which shape the line); the other widths take them. They age and go with the fonts as the layouts do. `TextCounters` counts `snap_computations`, `snap_cache_hits` and `end_reshape_computations`, which Ghia reads as `getLayoutCounters().snapComputations`, `snapCacheHits` and `endReshapeComputations`.
+- **Why it is exact.** The marks read the shaped line, the text and the item starts, none of them the width, which only gates the fit test; `text_system/snap_cache_tests.rs` compares whole layouts of 11 texts at 8 widths with the store warm and cold.
+- **Measured** (release, 11 paragraphs at 5 widths, back to back): 0.50 ms a round without the cache, 0.42 ms with it. A per-glyph advance cache in `gpui_macos` (`e1a4e822e3`) gained nothing and was dropped.
+- **How to carry it on a sync.** Keep the entry type in `shape_store.rs` and the two lookups in `layout_wrapped_line`; run the `snap_cache` filter of `cargo test -p gpui --lib --features test-support`.
+
 ## Procedure
 
 1. Fetch the upstreams: `git fetch upstream` in the repo root and in `zed/`, and `git fetch zed-industries main` in `zed/`.

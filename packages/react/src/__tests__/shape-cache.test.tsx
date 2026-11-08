@@ -100,3 +100,28 @@ describeNative("a page mounted again with the text it had", () => {
     }
   }
 })
+
+describeNative("the marks of a text", () => {
+  it("are computed once for the widths a layout pass asks one text at", () => {
+    const test = createTestRoot(SIZE)
+    const renderer = test.renderer
+    renderer.registerFont(SQUARE_FONT)
+    try {
+      renderer.setInlineDraws(false)
+      const before = renderer.getLayoutCounters()
+      test.render(<Page />)
+      renderer.flush()
+      renderer.drawFrame()
+      const after = renderer.getLayoutCounters()
+      const computed = after.snapComputations - before.snapComputations
+      const found = after.snapCacheHits - before.snapCacheHits
+      const wrapped = after.wrappedLayouts - before.wrappedLayouts
+      expect(computed, "every text computed its marks").toBeGreaterThanOrEqual(ENTRIES)
+      expect(found, "the widths after the first of a text took them").toBeGreaterThan(0)
+      expect(computed + found, "every wrapped layout either computed or took them").toBeLessThanOrEqual(wrapped)
+      expect(after.endReshapeComputations - before.endReshapeComputations).toBeLessThanOrEqual(computed)
+    } finally {
+      test.unmount()
+    }
+  })
+})
