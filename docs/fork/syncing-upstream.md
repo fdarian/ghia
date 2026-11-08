@@ -204,7 +204,7 @@ each entry or applies it again.
   touch edges, a layer a line, empty and overflowing boxes, steps of 0.1 and 1/3 up to 10 000) and two mailbox frames
   recorded from the proxy (`bounds_tree/mailbox_frames.txt`).
 
-### Contained relayout patch (zed `4359857078`, `afccad7649`, `f9a51894e7`, `06fc9e85e3`, `b133d12651`, `52f5a22f76`, `c4590da472`, `31494a952c`, `01bf68b572`; `third_party/taffy`, `taffy.rs`, `window/patch.rs`, `window/patch_splice.rs`, `elements/retained.rs`)
+### Contained relayout patch (zed `4359857078`, `afccad7649`, `f9a51894e7`, `06fc9e85e3`, `b133d12651`, `52f5a22f76`, `c4590da472`, `31494a952c`, `01bf68b572`, `32f49a4a45`; `third_party/taffy`, `taffy.rs`, `window/patch.rs`, `window/patch_splice.rs`, `elements/retained.rs`)
 
 - **Decision.** The owner approved this on 2026-11-07 (the full option 2 of the contained-layout design) as an engine change
   that lets a commit patch the frame instead of drawing it whole. It is opt-in per window (`Window::set_contained_patches`, off
@@ -250,6 +250,7 @@ each entry or applies it again.
   (`holds_focus`, `31494a952c`) and the focus check of `finish_unit` reads that: read from the frame, a root without the focus
   declined `Registrations` after a focused root had prepared in the same patch. `patch_tests.rs`.
 - **The hit test of a patch with several roots (`01bf68b572`).** Each root of a patch that lays out again replaced only its own hitboxes in the rendered frame, so a root painted while the roots beside it still had their old hitboxes, and the replacement of the last root won over the others where they overlapped. `Window::refresh_hit_test_for_roots` replaces the hitboxes of every root before any paints, and `Frame::hit_test_replacing` takes the replacements as `HitboxReplacement` slices, in the order of the patch. `splice_patch_tests.rs`: two roots that overlap at the pointer, one gaining an occluding box and one keeping its box, in both orders, hit, paint and click as a frame built whole.
+- **A splice with an empty old part (`32f49a4a45`).** A root that registered nothing and painted nothing and gains boxes has an empty part in the hitboxes and the operations; the splice took that for a root with no scroll runs and removed the runs of every list around it, so the next scroll declined `NoRun`. The runs now stay, placed before or after the root by the vector the run has something in. `splice_patch_tests.rs`: a list before and after such a root.
 - **Why.** Navigating the mailbox of ghia-bench (the Navigate proxy, `examples/solid/mailbox-navigate`) cost 39M instructions
   a key, 12M of it the fixed full frame that every commit that lays out draws. A patch that lays out only the scroller the commit
   changed does not copy what it does not change ([patch-frames.md](patch-frames.md#contained-layout-patches)).
