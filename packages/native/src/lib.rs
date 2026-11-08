@@ -54,6 +54,7 @@ pub mod style;
 mod syntax;
 mod text;
 mod theme;
+mod style_memo;
 mod universal_style;
 mod window_kind;
 mod window_title;

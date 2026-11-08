@@ -414,6 +414,9 @@ pub struct StyleTable {
     /// The universal layer's result per own style. It lives here because it holds
     /// styles of the table, which `sweep` could not reclaim while it did.
     layered: crate::universal_style::LayerCache,
+    /// What the styles of a restyle say of whether it only paints: the same few styles take turns on
+    /// the rows of a page.
+    restyles: crate::style_memo::StyleMemo<crate::events::hover_paint::Paints>,
 }
 
 fn has_container_rules(element: &RetainedElement) -> bool {
@@ -1432,10 +1435,11 @@ impl RetainedTree {
         let focusability_changed =
             visibility_changed || was_contents != crate::layout::contents::is_display_contents(element);
         let strict = old_for_patch.is_some_and(|old| {
-            self.elements
-                .get(&id)
-                .and_then(|element| element.style.as_deref())
-                .is_some_and(|new| crate::events::hover_paint::restyle_paints_strictly(self, id, &old, new))
+            let new = self.elements.get(&id).and_then(|element| element.style.clone());
+            new.is_some_and(|new| {
+                let paints = self.styles.restyles.of_two(&old, &new, crate::events::hover_paint::restyle_paints_of);
+                paints.settled(self, id)
+            })
         });
         StyleChange {
             changed: true,
