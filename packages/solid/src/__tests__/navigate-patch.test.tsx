@@ -180,6 +180,7 @@ function run(mode: Mode, overdraw: number, keys: Key[]) {
         membership: after.scrollPatch.membershipFrames - before.scrollPatch.membershipFrames,
         composed: after.scrollPatch.composed - before.scrollPatch.composed,
         rowsBuilt: after.scrollPatch.rowsBuilt - before.scrollPatch.rowsBuilt,
+        rowsRebuilt: after.scrollPatch.rowsRebuilt - before.scrollPatch.rowsRebuilt,
         declines: sum(after.declines) - sum(before.declines),
         unpatchable: sum(after.unpatchable) - sum(before.unpatchable),
         readPasses,
@@ -232,14 +233,21 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a key of the mailbox is one draw
     expect(on.steps.map((step) => step.rowsBuilt)).toEqual([0, 1, 1, 1])
   })
 
-  test("rows that moved by more than the overscan of their recording are a frame built whole (the patch is made, then the frame), showing what patching off shows", () => {
+  test("rows that moved by more than the overscan of their recording are built again where they are in the same translate, showing what patching off shows", () => {
     const on = run("on", 0, DRIFTED)
     same(on, run("whole", 0, DRIFTED))
     if (!counted) return
-    expect(on.steps.slice(0, 4).map((step) => step.composed)).toEqual([1, 1, 1, 1])
-    expect(on.steps[4].whole, nonzero(on.counters)).toBe(1)
-    expect(on.steps[4].translated).toBe(0)
-    expect(on.counters.scrollPatch.held["Region"]).toBeGreaterThan(0)
+    expect(on.steps.slice(0, 4).map((step) => step.rowsRebuilt)).toEqual([0, 0, 0, 0])
+    for (const [index, step] of on.steps.entries()) {
+      const where = `step ${index}: ${nonzero(on.counters)}`
+      expect(step.whole, where).toBe(0)
+      expect(step.composed, where).toBe(1)
+      expect(step.declines + step.unpatchable, where).toBe(0)
+    }
+    // The rows were recorded at the top, and the fifth key has moved them by 200: past the 150 their recordings cover.
+    expect(on.steps[4].rowsRebuilt, nonzero(on.counters)).toBeGreaterThan(0)
+    expect(on.steps[4].rowsBuilt).toBeGreaterThan(on.steps[4].rowsRebuilt)
+    expect(on.counters.scrollPatch.held["Region"]).toBe(0)
   })
 
   test("a frame built whole after keys replays the rows where the patches and the scrolls left them, and the keys after it are the same", () => {

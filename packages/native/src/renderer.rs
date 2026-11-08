@@ -7539,7 +7539,10 @@ impl GpuixView {
             return unmounted_virtual_row(height);
         }
 
-        self.tapes.row_built(list_id, index, expected_child_id);
+        let window_id = window.window_handle().window_id();
+        if self.tapes.row_built(window_id, window.retention_records(), list_id, index, expected_child_id) {
+            self.retain.forget_left_rows(&[expected_child_id], &tree);
+        }
         let callback = self.event_callback.clone();
         let now = self.pass_instant(window);
         let focus_styles = self.focus.styles(&tree, tree.keyboard_focus_dim());
@@ -14653,8 +14656,10 @@ pub struct ScrollPatchCounters {
     pub patched: f64,
     /// Of those, the ones that built rows that came in or took out rows that left.
     pub membership_frames: f64,
-    /// The rows those frames built.
+    /// The rows those frames built: the ones that came in, and the ones that stayed and were built again because their recording no longer fits the list's clip.
     pub rows_built: f64,
+    /// Of those, the rows that stayed.
+    pub rows_rebuilt: f64,
     /// The rows those frames took out of the frame.
     pub rows_removed: f64,
     /// Of the translates, the ones that a patch drawn in the same draw came first of: the rows were moved from the frame the patch left.
@@ -14703,6 +14708,7 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
                 patched: scroll.patched as f64,
                 membership_frames: scroll.membership_frames as f64,
                 rows_built: scroll.rows_built as f64,
+                rows_rebuilt: scroll.rows_rebuilt as f64,
                 rows_removed: scroll.rows_removed as f64,
                 composed: scroll.composed as f64,
                 apply_declines: gpui::ScrollApplyDecline::ALL

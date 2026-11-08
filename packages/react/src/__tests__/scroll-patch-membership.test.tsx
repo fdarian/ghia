@@ -79,7 +79,7 @@ function Rows({ overdraw, log }: Page) {
   )
 }
 
-function open(overdraw: number) {
+function open(overdraw: number, measured = true) {
   const log: number[] = []
   const root = createTestRoot({ width: 300, height: 700 })
   root.render(<Rows overdraw={overdraw} log={log} />)
@@ -88,11 +88,13 @@ function open(overdraw: number) {
   renderer.flush()
   renderer.setA11yActive(false)
   const list = renderer.findByTestId("list")!.id
-  // Every row measured, by showing every row once with the translate off.
-  renderer.setScrollPatchEnabled(false)
-  for (let scrolled = 0; scrolled <= LAST_TOP; scrolled += 20) renderer.scrollTo(list, 0, scrolled)
-  renderer.scrollTo(list, 0, 0)
-  renderer.setScrollPatchEnabled(true)
+  if (measured) {
+    // Every row measured, by showing every row once with the translate off.
+    renderer.setScrollPatchEnabled(false)
+    for (let scrolled = 0; scrolled <= LAST_TOP; scrolled += 20) renderer.scrollTo(list, 0, scrolled)
+    renderer.scrollTo(list, 0, 0)
+    renderer.setScrollPatchEnabled(true)
+  }
   return { ...root, renderer, list, log }
 }
 
@@ -129,7 +131,7 @@ function picture(renderer, name: string): string {
 
 function boxes(renderer) {
   const out: Record<string, unknown> = {}
-  for (const element of renderer.findByType("div")) {
+  for (const element of [...renderer.findByType("div"), ...renderer.findByType("text")]) {
     const box = renderer.getElementBounds(element.id)
     if (box) out[String(element.testId ?? element.id)] = box
   }
@@ -268,7 +270,7 @@ describeNative("a list scroll that changes which rows show", { timeout: TIMEOUT 
         const next = step.by === "down" ? downBy(scrolled, step.rows) : upBy(scrolled, step.rows)
         move(renderer, list, how, scrolled, next)
         scrolled = next
-        expect(renderer.getRetentionMismatches(), `step ${index}`).toEqual([])
+        expect(renderer.getRetentionMismatches().join("\n"), `step ${index}`).toBe("")
       }
       const after = scroll(renderer)
       expect(after.membershipFrames - before.membershipFrames, "the scrolls are translates that were compared with a build").toBe(steps.length)
@@ -318,6 +320,97 @@ describeNative("a list scroll that changes which rows show", { timeout: TIMEOUT 
       expect(scroll(renderer).membershipFrames).toBe(before + 1)
       expect(rowsAt(downBy(300, 5))).not.toContain(first)
       expect(renderer.getElementBounds(id)).toBeFalsy()
+    } finally {
+      unmount()
+    }
+  })
+})
+
+/** The rows with a box that shows in the list. */
+function showing(renderer, list: number): number[] {
+  const view = renderer.getElementBounds(list)
+  return Array.from({ length: COUNT }, (_, row) => row).filter((row) => {
+    const box = renderer.getElementBounds(renderer.findByTestId(`row-${row}`)!.id)
+    return box && box.y < view.y + view.height && box.y + box.height > view.y
+  })
+}
+
+/** Two thirds of the list's height: more than a row recorded where it showed can be moved by (half of it), and less than the rows measured past the ones that show. */
+const DRIFT = 400
+const FAR = Array.from({ length: 7 }, (_, step) => step * DRIFT)
+const THERE_AND_BACK = [...FAR.slice(1), ...FAR.slice(0, -1).reverse()]
+
+/**
+ * A list whose rows are not measured (the list estimates each at 40), scrolled by steps of two thirds of its height through four of its
+ * heights and back with no frame between built whole: the rows that stay move further than they were recorded for and are built where
+ * they are, and the rows past the ones that show are measured by the scroll before the translate is classified.
+ */
+function drift(translate: boolean, how: How, overdraw: number) {
+  const { renderer, unmount, list, log } = open(overdraw, false)
+  try {
+    renderer.setScrollPatchEnabled(translate)
+    // The pointer is where it stays, so that no step is a hover change.
+    renderer.nativeSimulateMouseMove(GUTTER, 300)
+    renderer.dispatchNativeEvents()
+    renderer.flush()
+    let whole = 0
+    const frames: unknown[] = []
+    let scrolled = 0
+    for (const [index, to] of THERE_AND_BACK.entries()) {
+      const painted = renderer.getPaintedFrameCount()
+      move(renderer, list, how, scrolled, to)
+      whole += renderer.getPaintedFrameCount() - painted
+      scrolled = to
+      renderer.flush()
+      frames.push({ ...seen(renderer, `drift-${translate}-${how}-${index}`), clicks: click(renderer, list, log, showing(renderer, list)) })
+    }
+    return { frames, whole, counters: scroll(renderer), mismatches: renderer.getRetentionMismatches() }
+  } finally {
+    unmount()
+  }
+}
+
+describeNative("a list of rows with estimated heights scrolled through several of its heights", { timeout: TIMEOUT }, () => {
+  describe.each([
+    ["scrollTo", 450],
+    ["wheel", 450],
+  ] as Array<[How, number]>)("by %s, overdraw %i", (how, overdraw) => {
+    unverified("builds the rows that come in and the rows that stay but moved too far, and is shown as the build shows it", () => {
+      const on = drift(true, how, overdraw)
+      const off = drift(false, how, overdraw)
+      expect(on.mismatches).toEqual([])
+      expect(on.counters.mispredicted).toBe(0)
+      expect(on.counters.rowsRebuilt, JSON.stringify(on.counters)).toBeGreaterThan(0)
+      expect(on.counters.rowsBuilt).toBeGreaterThanOrEqual(on.counters.rowsRebuilt)
+      expect(on.counters.patched, JSON.stringify(on.counters)).toBe(THERE_AND_BACK.length)
+      expect(on.counters.frames).toBe(THERE_AND_BACK.length)
+      expect(on.whole, "no frame was built whole").toBe(0)
+      expect(on.frames).toEqual(off.frames)
+    })
+  })
+
+  it.each(["scrollTo", "wheel"] as How[])("is the frame built whole under the retention verifier, registries included, by %s", (how) => {
+    const { renderer, unmount, list } = open(450, false)
+    try {
+      renderer.setRetainVerify(true)
+      renderer.nativeSimulateMouseMove(GUTTER, 300)
+      renderer.dispatchNativeEvents()
+      renderer.flush()
+      const before = scroll(renderer)
+      const compared = renderer.getRetainedCounters().verified
+      let scrolled = 0
+      for (const [index, to] of THERE_AND_BACK.entries()) {
+        move(renderer, list, how, scrolled, to)
+        scrolled = to
+        expect(renderer.getRetentionMismatches().join("\n"), `step ${index}`).toBe("")
+      }
+      const after = scroll(renderer)
+      // The frame after a translate that was compared is a frame built whole (see the top of the verified case above): every second one.
+      expect(after.patched - before.patched, JSON.stringify(after)).toBe(THERE_AND_BACK.length / 2)
+      expect(after.rowsRebuilt - before.rowsRebuilt, "rows that stayed were built again, and compared").toBeGreaterThan(0)
+      expect(after.mispredicted).toBe(0)
+      expect(renderer.getRetainedCounters().mismatches).toBe(0)
+      expect(renderer.getRetainedCounters().verified).toBeGreaterThan(compared)
     } finally {
       unmount()
     }

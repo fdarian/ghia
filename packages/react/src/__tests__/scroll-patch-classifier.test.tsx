@@ -206,17 +206,20 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
     }
   })
 
-  unverified("says which edge of the view the recording of a row no longer covers", () => {
+  unverified("builds again a row whose recording no longer covers the view and holds the frame for no edge of it", () => {
     const { renderer, unmount } = open("inert")
     try {
       warm(renderer, 100, 50)
       // The rows are recorded half a view (50) past the view: moved up by more than that, the bottom of the view shows what was
-      // not recorded.
+      // not recorded. The list says how to build a row, so a row that stays is built where it is, as one that comes in is.
+      const before = renderer.getPatchCounters().scrollPatch.rowsRebuilt
       const delta = since(renderer, undefined, () => {
         for (let step = 0; step < 14; step++) wheel(renderer, { x: 100, y: 50, by: 5 })
       })
-      expect(delta.held["Region.bottom"]).toBeGreaterThan(0)
+      expect(delta.held["Region.bottom"]).toBeUndefined()
       expect(delta.held["Region.top"]).toBeUndefined()
+      expect(renderer.getPatchCounters().scrollPatch.rowsRebuilt - before).toBeGreaterThan(0)
+      expect(delta.reasons.Region).toBeUndefined()
       expect(Object.keys(counts(renderer).held)).toEqual(
         expect.arrayContaining([
           "HitboxChain",

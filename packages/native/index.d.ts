@@ -2417,8 +2417,10 @@ export interface ScrollPatchCounters {
   patched: number
   /** Of those, the ones that built rows that came in or took out rows that left. */
   membershipFrames: number
-  /** The rows those frames built. */
+  /** The rows those frames built: the ones that came in, and the ones that stayed and were built again because their recording no longer fits the list's clip. */
   rowsBuilt: number
+  /** Of those, the rows that stayed. */
+  rowsRebuilt: number
   /** The rows those frames took out of the frame. */
   rowsRemoved: number
   /** Of the translates, the ones that a patch drawn in the same draw came first of: the rows were moved from the frame the patch left. */

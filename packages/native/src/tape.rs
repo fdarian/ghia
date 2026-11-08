@@ -730,9 +730,9 @@ pub(crate) struct TapeStore {
 
 /// Which rows of virtual lists the frame shown has, and what a frame that moved them in place did to
 /// that: gpui puts the rows that stay where the scroll takes them (`RetainedPhase::Scrolled`), builds
-/// the ones that come in through the builder of the list, and takes out the ones that leave without
-/// saying which. A row that is in the frame shown, in a list that moved, and neither stayed nor came
-/// in, left ([`TapeStore::settle_rows`]).
+/// the ones that come in, and the ones that stay but cannot be put where the scroll takes them, through
+/// the builder of the list, and takes out the ones that leave without saying which. A row that is in the
+/// frame shown, in a list that moved, and neither stayed nor was built, left ([`TapeStore::settle_rows`]).
 #[derive(Default)]
 struct Rows {
     /// The rows of the frame shown, with the list each is a row of and its index in it.
@@ -742,6 +742,9 @@ struct Rows {
     built: rustc_hash::FxHashMap<u64, (u64, usize)>,
     /// The rows that a frame that moved the rows in place left where the scroll took them.
     kept: rustc_hash::FxHashSet<u64>,
+    /// The rows of the frame shown that the frame built again where they are, because the recording of each no longer fits
+    /// where the scroll put it. They are in `built`; a frame that kept none of its rows has moved the rows all the same.
+    rebuilt: rustc_hash::FxHashSet<u64>,
     /// The rows that left and the page's records have not forgotten yet ([`TapeStore::take_left`]).
     left: Vec<u64>,
 }
@@ -884,11 +887,34 @@ impl TapeStore {
         rows.shown.clear();
         rows.built.clear();
         rows.kept.clear();
+        rows.rebuilt.clear();
     }
 
-    /// The list `list` builds its row `row`, the one at `index`.
-    pub(crate) fn row_built(&self, list: u64, index: usize, row: u64) {
-        self.rows.borrow_mut().built.insert(row, (list, index));
+    /// The list `list` builds its row `row`, the one at `index`, in a build that `records` (a presented frame, not a pass that only
+    /// lays out). Whether the frame shown holds the row: then the build is of a frame that moves the rows, which builds the row again
+    /// where it is, and what the row wrote before is taken out of the registries now, before the build writes what it writes
+    /// (the boxes it writes again are put back as it writes them). The caller drops the page's records of the row, which a frame that
+    /// builds the row as one that came in has none of.
+    pub(crate) fn row_built(&self, window: WindowId, records: bool, list: u64, index: usize, row: u64) -> bool {
+        let rebuilt = {
+            let mut rows = self.rows.borrow_mut();
+            rows.built.insert(row, (list, index));
+            let rebuilt = records && rows.shown.contains_key(&row);
+            if rebuilt {
+                rows.rebuilt.insert(row);
+            }
+            rebuilt
+        };
+        if rebuilt {
+            if let Some(old) = self.tapes.borrow().get(&row) {
+                let old = old.borrow();
+                let mut boxes = Vec::new();
+                old.each(Kind::Bounds, &mut |data, _| boxes.push(crate::automation::id_of_bounds_write(data)));
+                crate::text::replace(window, &old.roots(), &[]);
+                crate::automation::forget_boxes(window, &boxes);
+            }
+        }
+        rebuilt
     }
 
     /// A list scrolled and the frame about to be drawn may move its rows: what was built since the
@@ -903,13 +929,14 @@ impl TapeStore {
     /// Takes out of the registries what the rows that a frame that moved the rows in place took out of
     /// the frame wrote, and forgets their tapes: the frame built whole has none of it, and a row that
     /// comes in again is built, so its tape is its own. Does nothing until such a frame has moved
-    /// rows, and once for each.
+    /// rows (kept one in place, or built one again where it is), and once for each.
     pub(crate) fn settle_rows(&self, window: WindowId) {
         let mut rows = self.rows.borrow_mut();
-        if rows.kept.is_empty() {
+        if rows.kept.is_empty() && rows.rebuilt.is_empty() {
             return;
         }
         let kept = std::mem::take(&mut rows.kept);
+        rows.rebuilt.clear();
         let entered = std::mem::take(&mut rows.built);
         let lists: rustc_hash::FxHashSet<u64> = kept
             .iter()
@@ -1777,16 +1804,23 @@ mod tests {
         tape.borrow().paint.serial
     }
 
-    /// A row of a list: the tape of its build, with the box it painted and the text it logged.
-    fn built_row(tapes: &TapeStore, window: WindowId, list: u64, row: u64) {
+    /// A row of a list: the tape of its build, with the box it painted (`x` from the row, which is what says it was built again
+    /// elsewhere) and the text it logged. The list is told first, as `build_virtual_child` does, and what the build wrote goes
+    /// into the registries as the frame paints it. Whether the frame shown held the row (it was built again).
+    fn built_row_at(tapes: &TapeStore, window: WindowId, list: u64, row: u64, x: f32) -> bool {
+        let rebuilt = tapes.row_built(window, true, list, row as usize, row);
         let tape = SharedTape::default();
         {
             let _recording = Recorder::begin(&tape, Phase::Paint);
-            box_at(window, row, row as f32);
+            box_at(window, row, x);
             log(window, Box::leak(format!("row{row}").into_boxed_str()));
         }
         tapes.set(row, tape);
-        tapes.row_built(list, row as usize, row);
+        rebuilt
+    }
+
+    fn built_row(tapes: &TapeStore, window: WindowId, list: u64, row: u64) {
+        built_row_at(tapes, window, list, row, row as f32);
     }
 
     #[test]
@@ -1866,5 +1900,77 @@ mod tests {
         tapes.shift(window, 2, Point::default());
         tapes.settle_rows(window);
         assert!(tapes.take_left().is_empty(), "the rows of the frame before the whole one are not the frame shown's");
+    }
+    #[test]
+    fn a_frame_that_kept_no_row_and_built_every_row_it_shows_takes_out_the_rows_that_left() {
+        let window = WindowId::from(927);
+        crate::automation::forget_window(window);
+        let tapes = TapeStore::default();
+        tapes.begin_rows();
+        for row in 1..=4 {
+            built_row(&tapes, window, 100, row);
+        }
+        built_row(&tapes, window, 200, 50);
+        tapes.fold_rows(window);
+
+        // The rows 3 and 4 stay but are built again where they are, 5 comes in, 1 and 2 leave: nothing is moved in place.
+        assert!(built_row_at(&tapes, window, 100, 3, 30.0));
+        assert!(built_row_at(&tapes, window, 100, 4, 40.0));
+        assert!(!built_row_at(&tapes, window, 100, 5, 5.0));
+        tapes.settle_rows(window);
+        let mut left = tapes.take_left();
+        left.sort();
+        assert_eq!(left, [1, 2]);
+        assert_eq!([1, 2, 3, 4, 5, 50].map(|row| x_of(window, row)), [None, None, Some(30.0), Some(40.0), Some(5.0), Some(50.0)]);
+        assert_eq!(crate::text::painted_text(window), ["row50", "row3", "row4", "row5"].map(String::from));
+        assert!(tapes.take_left().is_empty(), "each row leaves once");
+    }
+
+    #[test]
+    fn a_row_built_again_where_it_is_is_in_the_registries_once_and_where_the_build_put_it() {
+        let window = WindowId::from(928);
+        crate::automation::forget_window(window);
+        let tapes = TapeStore::default();
+        tapes.begin_rows();
+        for row in 1..=3 {
+            built_row(&tapes, window, 100, row);
+        }
+        log(window, "after the list");
+        tapes.fold_rows(window);
+
+        // 2 is built again, 1 and 3 stay.
+        tapes.shift(window, 1, Point::default());
+        tapes.shift(window, 3, Point::default());
+        assert!(built_row_at(&tapes, window, 100, 2, 20.0));
+        tapes.settle_rows(window);
+        assert!(tapes.take_left().is_empty());
+        assert_eq!(crate::text::painted_text(window), ["row1", "row2", "row3", "after the list"].map(String::from));
+        assert_eq!([1, 2, 3].map(|row| x_of(window, row)), [Some(1.0), Some(20.0), Some(3.0)]);
+
+        // The frame after builds it again: the tape that stands is the one of the second build.
+        tapes.fold_rows(window);
+        tapes.shift(window, 1, Point::default());
+        tapes.shift(window, 3, Point::default());
+        assert!(built_row_at(&tapes, window, 100, 2, 25.0));
+        tapes.settle_rows(window);
+        assert_eq!(crate::text::painted_text(window).len(), 4);
+        assert_eq!(x_of(window, 2), Some(25.0));
+    }
+
+    #[test]
+    fn a_row_built_in_a_pass_that_only_lays_out_is_not_built_again_and_a_whole_frame_starts_over() {
+        let window = WindowId::from(929);
+        crate::automation::forget_window(window);
+        let tapes = TapeStore::default();
+        tapes.begin_rows();
+        built_row(&tapes, window, 100, 1);
+        tapes.fold_rows(window);
+        assert!(!tapes.row_built(window, false, 100, 1, 1), "a pass that lays out replaces nothing");
+        tapes.settle_rows(window);
+        assert_eq!(x_of(window, 1), Some(1.0));
+        assert!(tapes.take_left().is_empty());
+
+        tapes.begin_rows();
+        assert!(!built_row_at(&tapes, window, 100, 1, 1.0), "a frame built whole holds no row of the frame shown");
     }
 }
