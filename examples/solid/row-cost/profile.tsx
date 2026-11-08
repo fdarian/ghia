@@ -241,6 +241,9 @@ if (MODES.includes("options") && !LOOP) {
 interface BuildNumbers {
   elementsBuilt: number
   elementsSkipped: number
+  styleDescClones: number
+  styleAppliesComputed: number
+  styleAppliesReplayed: number
   painted: number
 }
 
@@ -268,11 +271,21 @@ function runGhia(count: number, container: "column" | "list") {
   }
   const counters = (): BuildNumbers => {
     const build = renderer.getBuildCounters()
-    return { elementsBuilt: build.elementsBuilt, elementsSkipped: build.elementsSkipped, painted: renderer.getPaintedFrameCount() }
+    return {
+      elementsBuilt: build.elementsBuilt,
+      elementsSkipped: build.elementsSkipped,
+      styleDescClones: build.styleDescClones,
+      styleAppliesComputed: build.styleAppliesComputed,
+      styleAppliesReplayed: build.styleAppliesReplayed,
+      painted: renderer.getPaintedFrameCount(),
+    }
   }
   const perUnit = (before: BuildNumbers, after: BuildNumbers, units: number, prefix: string) => ({
     [`${prefix}ElementsBuilt`]: (after.elementsBuilt - before.elementsBuilt) / units,
     [`${prefix}ElementsSkipped`]: (after.elementsSkipped - before.elementsSkipped) / units,
+    [`${prefix}StyleDescClones`]: (after.styleDescClones - before.styleDescClones) / units,
+    [`${prefix}StyleApplies`]: (after.styleAppliesComputed - before.styleAppliesComputed) / units,
+    [`${prefix}StyleReplays`]: (after.styleAppliesReplayed - before.styleAppliesReplayed) / units,
     [`${prefix}FramesPainted`]: (after.painted - before.painted) / units,
   })
   const units = SETTLE + REPS
