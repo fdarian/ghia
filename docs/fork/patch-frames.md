@@ -1302,6 +1302,49 @@ the list, builds a row that comes in and none again. `retain.rs`: `Scroller::of_
 (the window's before the first layout). A row built again for `Clip` or `Place` is still built where it is, and `rowsRebuilt` counts it: gpui's
 tests pin that.
 
+### The work of a restyle and of a build, per element (slice G4c)
+
+A profile of a navigate key (a restyle of two rows, a swap of the detail and a scroll of the list) found cost in the per-element code that no
+patch changes, and three pieces of it were the same question asked again of the same answer:
+
+- **A restyle that only paints is judged once for its styles.** `RetainedTree::set_style` asks whether a restyle is one a patch can follow
+  (`hover_paint::restyle_paints_strictly`): it resolves each style under every state either declares and compares the two, and the compare
+  parses the border shorthands of every side again. The answer is a function of the two styles and of one thing below the element (a colour
+  that changes is inherited, and a transition below would start from the old one), so `restyle_paints_of` says what the styles say (`Paints`:
+  no, yes, or yes if no element below declares a transition) and `StyleMemo` (`style_memo.rs`) keeps that by the addresses of the two interned
+  styles. The address names the content because a shared style is not changed; the memo holds `Weak` references so the address is not given to
+  another style while the entry lives and `StyleTable::sweep` still frees the styles, and it has 512 entries. The tree part is asked each time.
+- **The scan of a subtree for a patch root** (`Retain::scan_patch_root`, once per revision of a subtree) asked `declares_paint_hover` of every
+  element in it, which is the same two resolutions and border parses: `paint_hover_of` is the style part, kept the same way
+  (`Retain::hover_scans`).
+- **`TapeStore::same_as_recorded`** (every patch of a row asks it, to know the patch only repainted) rendered every write of both tapes through
+  `format!` and `Debug` and compared the strings. It compares the writes by what they hold: the box without its matrix, culled and facing
+  flags, a text by key, position, text, group, line and cell, a start region by its box, a logged text, a measurement with the parent content each
+  reads now. A paragraph write has no comparison of its own and is still compared by its words. Floats are compared by `==`, so a box at -0.0
+  against one at 0.0 is the same where the words differed; they paint the same. The words stay under `cfg(test)` as the oracle.
+
+The profile's other costs of `build_element` (a `StyleDesc` clone and drop about 7%, allocation 11%) were looked at and not changed: the
+style derivations it reads (a container fold, `var()` resolution, content visibility, the underline offset, a row's `lift_absorbed`) clone
+only for a style that they change, and no clone of a style that stays the same was found. `getBuildCounters().styleDescClones` counts them.
+
+**Measured** (release addon, `A11Y=0`, ghia-bench's data, two runs, alternating with the build before the slice, which is the zed bump alone: the
+snap cache of zed `2b2da134c4` is in both). The navigate proxy (`mailbox-navigate/profile.tsx`, 51 keys), median of keys 2 to 30 and of keys 10 to
+50 (the proxy app's own windowing runs out of mounted rows after key 52, so the warm window ends before it): App **32.0M and 32.1M** (30.8M and
+30.8M) against 33.6M and 33.2M (32.0M and 31.5M) before; App-detailstatic 14.0M and 14.2M (13.7M) against 15.4M and 15.3M (15.0M and 14.9M);
+App-noreveal 22.4M and 22.4M (19.3M) against 23.7M and 22.8M (19.7M); App-allstatic 9.4M and 9.5M against 9.6M and 9.6M (nothing restyles).
+Against G4a the zed bump alone took App from 36.5M to 33.4M and App-noreveal from 26.4M to 23.2M: the snap cache computes the marks of a text
+once for its widths, 15 times a key (`snapComputations`, 9 to 19) where a layout takes them 39 times (`snapCacheHits`, 21 to 52; 72% of the
+wrapped layouts that need marks), and the lists of line ends 9 times (`endReshapeComputations`, 5 to 12). By piece, two runs each of builds with the commits
+up to it, App and App-detailstatic: the tape comparison took 0.35M and 0.65M, the restyle memo 0.75M and 0.25M, the scan memo 0.25M and
+0.35M. The hover row crossings (`PHASE=hover`) are **3.655M and 3.664M** against 4.586M and 4.601M, all of it the tape comparison (3.670M with
+that commit alone): a patch of a row asks `same_as_recorded` for each row it repaints. The scroll proxy (`PHASE=scroll`) median 4.325M and
+4.343M against 4.345M and 4.336M, mean 5.479M and 5.465M against 5.515M and 5.516M: nothing in the slice is on the path of a translate.
+
+**Pinned** by `hover_paint.rs` (the memo's answers for twelve styles against each other, above a child with and without a transition, twice, equal
+those of `restyle_paints_strictly` and `declares_paint_hover`), `style_memo.rs` (an answer is computed once for a style and for an ordered pair, a
+memo that is full lets go of the styles nothing holds) and `tape.rs` (nine variants of a root compared by what they hold and by their words, at
+two moves of the text layout, give the same answer for every pair).
+
 ## Limits
 
 - **A tick that gpui or gpuix cannot patch is a full frame, and says why.** A subtree of more than 256 elements is built whole
