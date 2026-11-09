@@ -3157,6 +3157,8 @@ impl Retain {
     pub(crate) fn scroll(&mut self, offset: gpui::Point<gpui::Pixels>) {
         if let Some(node) = self.top() {
             let mut fp = Fingerprint::new();
+            // A direct root (`crate::render`) holds the scrollers below it, which have no node of their own.
+            fp.word(node.vol.scroll);
             fp.f32(f32::from(offset.x));
             fp.f32(f32::from(offset.y));
             node.vol.scroll = fp.finish() | 1;

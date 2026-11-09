@@ -12142,21 +12142,8 @@ pub(crate) fn build_host_container(
     el = crate::layout::table::apply(el, ctx.tree, element, style, &ctx.inherited.table, &ctx.collapsed);
     el = crate::scroll::apply_container(el, element.id, style, &ctx.inherited.colors, ctx.scroll_handles);
     let outer_scroller = ctx.scroller;
-    if let Some(handle) = ctx.scroll_handles.get(&element.id) {
-        // Its offset is part of what the build read (the key sees it move), and so is where its
-        // children are. A hidden one is only moved by script, and that is a change like any other.
-        let offset = handle.offset();
-        ctx.retain.scroll(offset);
-        let declared = style.map(crate::scroll::Axes::of).map_or(
-            gpui::point(false, false),
-            |axes| gpui::point(axes.x.scrolls_for_user(), axes.y.scrolls_for_user()),
-        );
-        if declared.x || declared.y {
-            ctx.retain.exclude(crate::retain::Exclusion::Scroller);
-        }
-        ctx.scroller =
-            crate::retain::Scroller::of(handle, window.window_handle().window_id(), window.viewport_size(), declared)
-                .or(ctx.scroller);
+    if let Some(handle) = ctx.scroll_handles.get(&element.id).cloned() {
+        crate::scroll::note_scroll_container(&handle, style, ctx, window);
     }
 
     // If a FocusHandle was pre-created for this element (by sync_focus_handles),

@@ -6,7 +6,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use gpui::{AnyElement, Bounds, Escape, Hitbox, LayoutId, LayoutSample, Pixels, Style};
+use gpui::{AnyElement, Bounds, Escape, Hitbox, LayoutId, LayoutSample, Pixels, Point, ScrollHandle, ScrollerFrame, Style};
 
 #[derive(Clone, Copy)]
 pub(super) enum Child {
@@ -34,6 +34,16 @@ impl Placement {
     }
 }
 
+/// A scroll container (`overflow: hidden`, which only code scrolls): the handle the host has in
+/// `scroll_handles`, which gpui keeps the offset and the range in.
+pub(super) struct Scroller {
+    pub handle: ScrollHandle,
+    /// The axes the user does not scroll.
+    pub programmatic: Point<bool>,
+    /// What prepaint measured of the layout, for the clamp of the offset.
+    pub frame: RefCell<Option<ScrollerFrame>>,
+}
+
 pub(super) struct Node {
     /// The host id of the element, which names its hitbox.
     pub id: u64,
@@ -46,8 +56,9 @@ pub(super) struct Node {
     pub holds_positioned: bool,
     /// The hitbox is only a link in the chain of a descendant that is hit (`pointer-events: none`).
     pub passes_pointer: bool,
-    /// What `crate::automation::host_bounds_flags` says of the node's `user-select`.
+    /// What `crate::automation::host_bounds_flags` says of the node's `user-select` and of whether it scrolls.
     pub bounds_flags: u8,
+    pub scroller: Option<Scroller>,
     pub layout_id: Cell<Option<LayoutId>>,
     pub bounds: Cell<Bounds<Pixels>>,
     /// Set in prepaint: a box below escaped the clip of the node, which paint then does not make exact.
@@ -76,6 +87,7 @@ pub(super) struct NodeSpec {
     pub placement: Placement,
     pub passes_pointer: bool,
     pub bounds_flags: u8,
+    pub scroller: Option<(ScrollHandle, Point<bool>)>,
 }
 
 impl Arena {
@@ -93,6 +105,7 @@ impl Arena {
             holds_positioned,
             passes_pointer: spec.passes_pointer,
             bounds_flags: spec.bounds_flags,
+            scroller: spec.scroller.map(|(handle, programmatic)| Scroller { handle, programmatic, frame: RefCell::new(None) }),
             layout_id: Cell::new(None),
             bounds: Cell::new(Bounds::default()),
             escape_inside: Cell::new(false),

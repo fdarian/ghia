@@ -4,7 +4,7 @@
 //! that the arena does not give. It has a hitbox, a cursor, a bounds record and a positioned frame per
 //! node, and an element of its own where it is handed to a stacking context, so a node is plain only
 //! when none of the rest could show: no listener (but the root's, which the dispatcher runs), prop,
-//! focus, scroll, sticky or fixed box, stacking context, pointer state, transition or animation, and
+//! focus, scroller the user scrolls, sticky or fixed box, stacking context, pointer state, transition or animation, and
 //! nothing the build of a `Div` registers for an accessibility node (the window's a11y being off is
 //! checked at the root).
 //!
@@ -135,6 +135,8 @@ fn own_is_plain(element: &RetainedElement, style: Option<&StyleDesc>, kind: Kind
     typed
         && element.custom_props().is_empty()
         && (kind == Kind::Root || element.events().is_empty())
+        // The reporter of `onScroll` is made by the build of a `Div`.
+        && !(element.events().contains("scroll") && style.is_some_and(|style| crate::scroll::Axes::of(style).scrolls()))
         && !element.auto_focus
         && style.is_none_or(|style| style_is_plain(style, kind))
 }
@@ -285,7 +287,14 @@ fn style_is_plain(style: &StyleDesc, kind: Kind) -> bool {
         && style.contents_levels.is_none()
         && style.direction.is_none_or(|direction| !direction.is_rtl())
         && style.border_collapse.is_none()
-        && !crate::scroll::Axes::of(style).scrolls()
+        && match kind {
+            Kind::Inline => !crate::scroll::Axes::of(style).scrolls(),
+            // `hidden` only: a scroller the user scrolls has the wheel, scroll chaining and a scrollbar.
+            Kind::Root | Kind::Descendant => {
+                let axes = crate::scroll::Axes::of(style);
+                !axes.x.scrolls_for_user() && !axes.y.scrolls_for_user()
+            }
+        }
         && !style.lays_out_unstably()
         && !style.atomic_inline
         && !style.animating_opacity

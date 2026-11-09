@@ -31,8 +31,10 @@ pub(crate) fn build_direct(
     ctx.retain.shape(SHAPE);
     note_plain(element.id, ctx);
     note_listeners(element, ctx);
+    let scroller = enter_scroller(element.id, style, ctx, window);
     let (root_style, placement) = resolve_style(element, style, ctx);
     let children = build_children(element, ctx, window, cx, &mut arena);
+    let scroller = leave_scroller(scroller, ctx);
     ctx.subtree = Subtree::of_element(ctx.subtree, style, &ctx.inherited.colors, &ctx.inherited.lengths);
     let cull_outset = ctx.subtree.outset();
     let root = arena.push_node(NodeSpec {
@@ -41,7 +43,8 @@ pub(crate) fn build_direct(
         children,
         placement,
         passes_pointer: ctx.inherited.pointer_events_none,
-        bounds_flags: crate::automation::host_bounds_flags(crate::renderer::selection_start_flag(style)),
+        bounds_flags: bounds_flags(style, &scroller),
+        scroller,
     });
     crate::perf_counters::direct_built(arena.nodes.len() as u64);
     DirectRoot::new(crate::events::ids::host_element_id(element.id), arena, root, cull_outset).into_any_element()
@@ -68,8 +71,10 @@ fn build_node(
     let resolved = Resolved::of(element, style, &ctx.inherited.colors, &ctx.inherited.lengths);
     tree.resolved.borrow_mut().record(id, resolved);
     note_plain(id, ctx);
+    let scroller = enter_scroller(id, style, ctx, window);
     let (node_style, placement) = resolve_style(element, style, ctx);
     let children = build_children(element, ctx, window, cx, arena);
+    let scroller = leave_scroller(scroller, ctx);
     ctx.subtree = Subtree::of_element(ctx.subtree, style, &ctx.inherited.colors, &ctx.inherited.lengths);
     ctx.retain.direct_descendant(id, placement.lift_z.is_some());
     let pointer_events_none = ctx.inherited.pointer_events_none;
@@ -82,7 +87,8 @@ fn build_node(
         children,
         placement,
         passes_pointer: pointer_events_none,
-        bounds_flags: crate::automation::host_bounds_flags(crate::renderer::selection_start_flag(style)),
+        bounds_flags: bounds_flags(style, &scroller),
+        scroller,
     })
 }
 
@@ -94,12 +100,52 @@ fn note_listeners(element: &RetainedElement, ctx: &mut BuildCtx) {
     ctx.retain.shape(crate::renderer::click_path(ctx.tree, element).len() as u64);
 }
 
-/// What `build_host_container` tells the registries about a host that has no scroller, no
+/// What `build_host_container` tells the registries about a host that has no scroller the user scrolls, no
 /// `content-visibility` and no focus handle, which is every host a direct root holds.
 fn note_plain(id: u64, ctx: &mut BuildCtx) {
     ctx.tree.relevance.built(id, false, false, false);
     ctx.retain.show_content(id);
-    crate::scroll::not_a_scroller(id, ctx.scroll_handles);
+}
+
+/// A scroll container that is being built: its handle, which axes only code scrolls, and the container
+/// its parent is in, which `leave_scroller` puts back.
+struct EnteredScroller {
+    handle: gpui::ScrollHandle,
+    programmatic: gpui::Point<bool>,
+    outer: Option<crate::retain::Scroller>,
+}
+
+/// What `build_host_container` does for a host's scroll handle, which for a direct node is `overflow: hidden`
+/// (a scroll container that only code scrolls: [`super::eligible`] has no other): `scroll::apply_container` keeps the
+/// handle (the host that is none drops it) and `scroll::note_scroll_container` tells `Retain`. The children are built
+/// in the container, and the offset is read by the record of the root, which holds the nodes below it.
+fn enter_scroller(
+    id: u64,
+    style: Option<&StyleDesc>,
+    ctx: &mut BuildCtx,
+    window: &gpui::Window,
+) -> Option<EnteredScroller> {
+    let Some(axes) = style.map(crate::scroll::Axes::of).filter(|axes| axes.scrolls()) else {
+        crate::scroll::not_a_scroller(id, ctx.scroll_handles);
+        return None;
+    };
+    let style = style.expect("a style that scrolls is declared");
+    let handle = crate::scroll::scroller_handle(id, style, ctx.scroll_handles);
+    let outer = ctx.scroller;
+    crate::scroll::note_scroll_container(&handle, Some(style), ctx, window);
+    let hidden = |overflow| overflow == crate::scroll::Overflow::Hidden;
+    Some(EnteredScroller { handle, programmatic: gpui::point(hidden(axes.x), hidden(axes.y)), outer })
+}
+
+fn leave_scroller(scroller: Option<EnteredScroller>, ctx: &mut BuildCtx) -> Option<(gpui::ScrollHandle, gpui::Point<bool>)> {
+    scroller.map(|scroller| {
+        ctx.scroller = scroller.outer;
+        (scroller.handle, scroller.programmatic)
+    })
+}
+
+fn bounds_flags(style: Option<&StyleDesc>, scroller: &Option<(gpui::ScrollHandle, gpui::Point<bool>)>) -> u8 {
+    crate::automation::host_bounds_flags(crate::renderer::selection_start_flag(style), scroller.is_some())
 }
 
 /// The style of a host as `compute_style_internal` makes it from the `Div` that `build_host_container`
@@ -115,6 +161,10 @@ fn resolve_style(element: &RetainedElement, style: Option<&StyleDesc>, ctx: &Bui
             &ctx.inherited.colors,
             &ctx.inherited.lengths,
         );
+        let axes = crate::scroll::Axes::of(style);
+        if axes.scrolls() {
+            crate::scroll::scroll_container_style(&mut refinement, axes);
+        }
         if let Some(features) = ctx.inherited.font_features.clone() {
             refinement = refinement.font_features(features);
         }

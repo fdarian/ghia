@@ -18,7 +18,7 @@ The root keeps its entry in `Retain` and its `Retained`/`Taped` wrappers. A node
 
 - Types `div` and `text`, no custom prop, no focus, no `testId` beyond the locator. No listener below the root; the root may have them (`onClick`, `onPointerMove`): the pointer, wheel and click events are the dispatcher's, which runs them along the retained tree, and a host builds nothing per listener when the window has no screen reader (`build.rs` `note_listeners` does what the build of a `Div` does for it: the click path in the key of the root, the clip origin of an intersection listener).
 - `position` is `static`, `relative` or `absolute` with `z-index: auto` (see [lifting](#lifting-and-positioned-nodes)). An absolute box needs a positioned ancestor at or below the root (`eligible.rs` `Verdict`), since a retained root can only be kept if the box that places it is in it.
-- No `sticky` or `fixed` box, stacking context (`opacity`, `filter`, `mask`, `clip-path`, transforms, `z-index`), `visibility`, `app-region`, scroller (`overflow` other than `visible` or `clip`; `hidden` has a scroll offset), container query or unit, `content-visibility`, custom property, transition, animation, text decoration or `text-box`; `display` is block, flex or grid.
+- No `sticky` or `fixed` box, stacking context (`opacity`, `filter`, `mask`, `clip-path`, transforms, `z-index`), `visibility`, `app-region`, scroller the user scrolls (`overflow: scroll` or `auto`, or `hidden` on one axis, which computes the other to `auto`; `hidden` on both axes is admitted, see [scroll containers](#scroll-containers-overflow-hidden)), container query or unit, `content-visibility`, custom property, transition, animation, text decoration or `text-box`; `display` is block, flex or grid.
 - Below the root, no pointer state or group either. The root may have them: the build folds them in and the root has the hitbox that tells them.
 - Children that are blocks, paragraphs of text and plain spans, and empty lines; no atomic inline, table box or `display: contents`.
 - The context is plain: not a stacking root, an atomic inline, inside an `inert` or `visibility: hidden` subtree, a right-to-left one, a collapsed table, a highlight or a query container.
@@ -37,6 +37,17 @@ Each node does what a `Div` host does for the pointer and for the bounds registr
 
 `Window::note_publication` is called before the layout sample and before the paint of the box, as a `Div` calls it before it hands the probe a sample, so a recording that holds the boxes of direct nodes is counted as one that publishes.
 
+## Scroll containers (`overflow: hidden`)
+
+`overflow: hidden` on both axes is a scroll container that only code scrolls (`scrollTop` works, the wheel does not), and a node that has it is direct. The handle is the one the host has in `scroll_handles` (`scroll::scroller_handle`, which `apply_container` uses too), the style is `scroll::scroll_container_style` over the refinement (the axes that have an offset are `scroll`), and the nodes below the root run the same scroller code as a `Div` through helpers in gpui that `Div` calls itself (`ScrollHandle::note_scroller_layout`, `ScrollHandle::begin_scroller_prepaint`, `ScrollerFrame::clamp_scroll_position`, `Style::lay_out_without_scrollbars`; zed `a141c8ba4d`, no behaviour change for a `Div`):
+
+- **Layout.** The node is requested with the axes that only code scrolls laid out as `hidden`, and tells layout that it may anchor its scroll position.
+- **Prepaint.** Before the node is read, the handle gets the boxes of its children and measures the range of its content and its scrollport from layout; after its hitbox (a scroller always has one) the offset is clamped to the range, anchoring steps it, and the box and range are recorded for the handle and for the patches of the frame. The children are prepainted under the clamped offset (`Window::with_element_offset`), a culled node does the same, so `scrollTop`, `scrollHeight` and `clientHeight` read back as for a `Div` and a frame that replays or is patched moves the content with the handle.
+- **Build.** `scroll::note_scroll_container` tells `Retain` what `build_host_container` does (the offset is part of the key; the container the children are built in), and `Retain::scroll` folds the offsets of the scrollers below a root into the root's record, since they have no entry of their own: a scroll from script makes the root a change, and a root that holds a scroller is no patch unit, as an entry with one is not.
+- **Bounds.** `host_bounds_flags` carries `scrolls`, so the layout sample of the node has the size of its content (`scrollWidth`, `scrollHeight`) as for a host with a handle.
+
+A node that has an `onScroll` listener is not direct (the reporter is made by the build of a `Div`), and neither is one the user scrolls: `overflow: scroll` and `auto` need the wheel, scroll chaining and a scrollbar.
+
 ## Lifting and positioned nodes
 
 A positioned box (`relative` or `absolute`, `z-index: auto`) is not drawn in its place in the tree: the stacking context around it takes it (`Element::lift_z`) and paints it above the in-flow content, and an absolute one is placed by the clip and offset of its containing block, not its parent's (`Element::escapes_to`). A `Div` child does this through gpui's elements, so a positioned node of a direct root is an element of its own: `DirectRoot::positioned`, the same type as the root, over the same arena (`Rc`), walking the nodes below its node. The node is a `Child::Positioned` of its parent, whose walk makes the element in layout and handles it as `prepaint_child` of `Div` does:
@@ -51,4 +62,4 @@ gpui's `Window::lifting`, `begin_lift`, `finish_lift`, `mark_lifted`, `LiftTicke
 
 ## What a direct node does not have yet
 
-No accessibility node, no element state, and no listener, focus or scroller of its own below the root, no stacking context, and no sticky or fixed box. A subtree that needs one of those is not direct. See [deviations.md](deviations.md#direct-paint).
+No accessibility node, no element state, and no listener, focus or scroller the user scrolls of its own below the root, no stacking context, and no sticky or fixed box. A subtree that needs one of those is not direct. See [deviations.md](deviations.md#direct-paint).

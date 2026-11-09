@@ -10,6 +10,8 @@
  * test has the pointer cross the nodes of a root that hold a cursor and `pointer-events`, and compares the target, the path
  * of the event and the cursor. The `user-select` scene drags a selection from each card (none, text, and a descendant that
  * reopens or closes it) and copies it, so the start regions and the selectable text must come out as the `Div` build's.
+ * The `overflow-hidden` scene scrolls boxes that clip (one inside another, and a text that clips with an ellipsis) from script
+ * and reads what they report back, with steps that leave the offset alone and replay the boxes.
  */
 
 import fs from "node:fs"
@@ -58,8 +60,16 @@ const box = (target: unknown) => {
 const hear = (label: string) => (event: { target: unknown; composedPath: () => unknown[] }) =>
   void heard.push(`${label} ${box(event.target)} < ${event.composedPath().map(box).join(" < ")}`)
 
+/** The hosts of a scene that the pointer does not reach but a script does (`scrollTop`). */
+const hosts: Record<string, HostElement> = {}
+const named = (name: string) => (host: HostElement) => void (hosts[name] = host)
+const scrollState = (name: string) => {
+  const host = hosts[name]
+  return `${name} ${host.scrollLeft},${host.scrollTop} of ${host.scrollWidth}x${host.scrollHeight} in ${host.clientWidth}x${host.clientHeight}`
+}
+
 const ROW_HEIGHT = 72
-const ONE_LINE = { whiteSpace: "nowrap", textOverflow: "ellipsis" } as const
+const ONE_LINE = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const
 const AVATAR_COLORS = ["#F87171", "#FB923C", "#FBBF24", "#34D399", "#22D3EE", "#60A5FA", "#A78BFA", "#F472B6"]
 const MESSAGES = [
   { from: "Ada Lovelace", time: "9:41", subject: "Notes on the Analytical Engine, translated and extended", snippet: "The Engine might act upon other things besides number, were objects found whose mutual fundamental relations could be expressed", unread: true },
@@ -68,7 +78,7 @@ const MESSAGES = [
   { from: "Edsger Dijkstra", time: "Fri", subject: "Go To Statement Considered Harmful", snippet: "For a number of years I have been familiar with the observation", unread: false },
 ]
 
-/** A row of the bench's mailbox: a positioned root with `user-select: none`, a click listener and a hover style, whose children are absolute. */
+/** A row of the bench's mailbox: a positioned root with `user-select: none`, a click listener and a hover style, whose children are absolute, and one-line texts that clip (`overflow: hidden`). */
 function MailRow(props: { index: number; step: Accessor<number>; selected: Accessor<number> }) {
   const message = () => MESSAGES[(props.index + props.step()) % MESSAGES.length]
   const unread = () => message().unread
@@ -261,7 +271,7 @@ const scenes: Scene[] = [
     directRoots: 0,
     view: (step) => (
       <div style={{ width: 300, backgroundColor: "#ffffff" }}>
-        <div style={{ ...CARD, overflow: "hidden", height: 20 }} />
+        <div style={{ ...CARD, overflow: "scroll", height: 20 }} />
         <div style={{ ...CARD, position: "sticky", top: 0, height: 20 }} />
         <div style={{ ...CARD, position: "relative", zIndex: 2, height: 20 }} />
         <div style={{ ...CARD, opacity: [1, 0.5, 1][step()], height: 20 }} />
@@ -391,6 +401,47 @@ const scenes: Scene[] = [
     },
   },
   {
+    name: "overflow-hidden",
+    steps: 5,
+    width: 320,
+    height: 320,
+    directRoots: 4,
+    hears: true,
+    view: (step) => (
+      <div style={{ width: 300, display: "flex", flexDirection: "column", backgroundColor: "#ffffff" }}>
+        <div ref={named("box")} style={{ ...CARD, width: [160, 160, 200, 160, 160][step()], height: 48, overflow: "hidden" }}>
+          <text style={{ ...ONE_LINE, fontSize: 13 }}>{() => ["a long line that does not fit in its box", "short", "another long line that does not fit in its box either", "a long line that does not fit in its box", "short"][step()]}</text>
+          <div style={{ height: 40, backgroundColor: "#99bbdd" }} />
+          <div style={{ height: 60, backgroundColor: "#ddbb99", borderTop: "3px solid #884400" }}>
+            <text style={{ fontSize: 12 }}>below the fold</text>
+          </div>
+        </div>
+        <div ref={named("outer")} style={{ ...CARD, height: 70, overflow: "hidden" }}>
+          <div style={{ height: 20, backgroundColor: "#ccddee" }} />
+          <div ref={named("inner")} style={{ height: 36, overflow: "hidden", backgroundColor: "#eef3f8" }}>
+            <text style={{ fontSize: 12 }}>inner line one</text>
+            <text style={{ fontSize: 12 }}>inner line two</text>
+            <text style={{ fontSize: 12 }}>inner line three</text>
+          </div>
+          <div style={{ height: 40, backgroundColor: "#bbddaa" }} />
+        </div>
+        <text ref={named("line")} style={{ ...ONE_LINE, width: 100, margin: 6, fontSize: 14 }}>{() => `a ${["long", "much longer", "long", "short", "long"][step()]} line that the box clips`}</text>
+        <div style={{ ...CARD, height: 30 }}>
+          <text>{() => `beside the scrollers ${step()}`}</text>
+        </div>
+      </div>
+    ),
+    act: (_renderer, step) => {
+      // Scripts scroll them (the user cannot), and read the range back; a step that sets what was set before leaves
+      // the boxes to be replayed with the offset they have.
+      hosts.box.scrollTop = [30, 30, 80, 80, 0][step]
+      hosts.outer.scrollTop = [10, 10, 25, 25, 0][step]
+      hosts.inner.scrollTop = [0, 14, 14, 14, 3][step]
+      hosts.line.scrollLeft = [0, 0, 12, 12, 0][step]
+      heard.push(...["box", "outer", "inner", "line"].map(scrollState))
+    },
+  },
+  {
     name: "z-order",
     steps: 4,
     width: 320,
@@ -504,6 +555,39 @@ describeNative("direct paint", { timeout: 120_000 }, () => {
       if (scene.hears) expect(off.frames.flatMap((frame) => frame.heard).length, "the pointer reached the page").toBeGreaterThan(0)
     })
   }
+
+  it("draws each row of the mailbox as one direct root", () => {
+    const app = createTestRoot({ width: 320, height: 4 * ROW_HEIGHT })
+    const renderer = app.renderer
+    renderer.setDirectPaint(true)
+    renderer.clockPause()
+    try {
+      const [step] = createSignal(0)
+      const [selected] = createSignal(1)
+      renderer.setA11yActive(false)
+      renderer.resetBuildCounters()
+      app.render(() => (
+        <div style={{ width: 300, display: "flex", flexDirection: "column", backgroundColor: "#ffffff" }}>
+          {[0, 1, 2, 3].map((index) => (
+            <MailRow index={index} step={step} selected={selected} />
+          ))}
+        </div>
+      ))
+      renderer.drawFrame()
+      const counters = renderer.getBuildCounters()
+      // The page is built more than once before it settles (and again by a draw), each build making the same roots, so the
+      // count is of rows by builds. The row holds everything: no avatar, text or dot is a root of its own.
+      const rows = 4
+      const unread = MESSAGES.slice(0, rows).filter((message) => message.unread).length
+      // A row is the root, the avatar and its text, the column, its two rows and texts, the subject and the snippet, and the dot of an unread one.
+      const nodesPerBuild = rows * 9 + unread
+      expect(counters.directRoots, "one root per row").toBeGreaterThanOrEqual(rows)
+      expect(counters.directRoots % rows, "whole builds of the page").toBe(0)
+      expect(counters.directNodes * rows, "every node is in the root of its row").toBe(counters.directRoots * nodesPerBuild)
+    } finally {
+      app.unmount()
+    }
+  })
 
   it("has the pointer cross the nodes of a root as it crosses Divs", () => {
     const run = (direct: boolean) => {

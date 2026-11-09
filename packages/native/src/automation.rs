@@ -782,10 +782,7 @@ pub fn track_host_bounds<E>(
 where
     E: gpui::InteractiveElement + gpui::Styled,
 {
-    let mut flags = host_bounds_flags(selection_start);
-    if scrolls {
-        flags |= HostFlags::SCROLLS;
-    }
+    let mut flags = host_bounds_flags(selection_start, scrolls);
     if collapsed_table {
         flags |= HostFlags::COLLAPSED_TABLE;
     }
@@ -798,15 +795,21 @@ where
     }
 }
 
-/// What [`track_host_bounds`] tells the probe of an element that is neither a scroller nor a collapsed table, which
+/// What [`track_host_bounds`] tells the probe of an element that is not a collapsed table, which
 /// is all a direct node (`crate::render`) can be: it makes the probe's calls itself ([`paint_host_bounds`],
-/// [`publish_host_bounds`]) with these flags.
-pub(crate) fn host_bounds_flags(selection_start: Option<bool>) -> u8 {
-    match selection_start {
+/// [`publish_host_bounds`], [`read_host_layout`]) with these flags. `scrolls`: it is a scroll container.
+pub(crate) fn host_bounds_flags(selection_start: Option<bool>, scrolls: bool) -> u8 {
+    let selection = match selection_start {
         Some(false) => HostFlags::START_REGION,
         Some(true) => HostFlags::START_REGION | HostFlags::SELECTABLE,
         None => 0,
-    }
+    };
+    selection | if scrolls { HostFlags::SCROLLS } else { 0 }
+}
+
+/// What the probe reads in prepaint of an element with these `flags`.
+pub(crate) fn read_host_layout(window: &mut Window, layout_id: gpui::LayoutId, flags: u8) -> gpui::LayoutSample {
+    read_layout(window, layout_id, flags & HostFlags::SCROLLS != 0)
 }
 
 /// What [`track_host_bounds`] tells the probe of an element, which it keeps in a byte.
@@ -837,7 +840,7 @@ impl gpui::LayoutProbe for HostBoundsProbe {
         window: &mut Window,
         _cx: &mut App,
     ) -> gpui::LayoutSample {
-        read_layout(window, layout_id, flags & HostFlags::SCROLLS != 0)
+        read_host_layout(window, layout_id, flags)
     }
 
     fn painted(

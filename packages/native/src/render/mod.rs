@@ -5,8 +5,8 @@
 //! order and with the same inherited state, but the result goes into an arena ([`node`]) instead of
 //! a `Div` per node, and [`element::DirectRoot`] lays out, prepaints and paints it with the calls a
 //! `Div` makes. Which subtrees are drawn this way is [`eligible`]'s decision: a subtree whose nodes
-//! need nothing from a `Div` that the arena does not give (no listener, focus, scroll, positioned
-//! box, stacking context or accessibility node). Behind `GPUIX_DIRECT_PAINT=1`; see
+//! need nothing from a `Div` that the arena does not give (no listener, focus, scroller the user scrolls,
+//! sticky or fixed box, stacking context or accessibility node). Behind `GPUIX_DIRECT_PAINT=1`; see
 //! `docs/fork/direct-paint.md`.
 
 mod build;

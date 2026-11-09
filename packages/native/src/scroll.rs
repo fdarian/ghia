@@ -117,6 +117,49 @@ pub(crate) fn not_a_scroller(id: u64, handles: &mut HashMap<u64, gpui::ScrollHan
     set_smooth_by_default(id, false);
 }
 
+/// The part of a scroll container's style that `overflow` sets: the axes that have a scroll offset are
+/// `scroll` (the container's `programmatic_scroll_only` says which of them the user does not scroll),
+/// and a diagonal wheel moves both axes.
+pub(crate) fn scroll_container_style(style: &mut gpui::StyleRefinement, axes: Axes) {
+    let scroll = Some(gpui::Overflow::Scroll);
+    match (axes.x.has_offset(), axes.y.has_offset()) {
+        (true, true) => (style.overflow.x, style.overflow.y) = (scroll, scroll),
+        (true, false) => style.overflow.x = scroll,
+        _ => style.overflow.y = scroll,
+    }
+    // A browser moves both axes of a diagonal wheel, and gives each axis only its own delta.
+    // This is also what makes GPUI hand the unused delta to an ancestor.
+    style.allow_concurrent_scroll = Some(true);
+}
+
+/// The handle of the scroll container `id`, which outlives the frame in `handles`, and its `scroll-behavior`.
+pub(crate) fn scroller_handle(id: u64, style: &StyleDesc, handles: &mut HashMap<u64, gpui::ScrollHandle>) -> gpui::ScrollHandle {
+    set_smooth_by_default(id, style.scroll_behavior.as_deref() == Some("smooth"));
+    handles.entry(id).or_insert_with(gpui::ScrollHandle::new).clone()
+}
+
+/// What the build tells `Retain` of a scroll container whose handle is `handle` (`ctx.scroller` is
+/// the container the children are built in, which the caller puts back when it is done with them).
+pub(crate) fn note_scroll_container(
+    handle: &gpui::ScrollHandle,
+    style: Option<&StyleDesc>,
+    ctx: &mut crate::renderer::BuildCtx,
+    window: &gpui::Window,
+) {
+    // Its offset is part of what the build read (the key sees it move), and so is where its
+    // children are. A hidden one is only moved by script, and that is a change like any other.
+    ctx.retain.scroll(handle.offset());
+    let declared = style.map(Axes::of).map_or(gpui::point(false, false), |axes| {
+        gpui::point(axes.x.scrolls_for_user(), axes.y.scrolls_for_user())
+    });
+    if declared.x || declared.y {
+        ctx.retain.exclude(crate::retain::Exclusion::Scroller);
+    }
+    ctx.scroller =
+        crate::retain::Scroller::of(handle, window.window_handle().window_id(), window.viewport_size(), declared)
+            .or(ctx.scroller);
+}
+
 /// Makes `el` a scroll container if its style asks for one, and drops the handle of an
 /// element that no longer is.
 ///
@@ -139,31 +182,20 @@ pub(crate) fn apply_container<E: gpui::Styled + gpui::StatefulInteractiveElement
         not_a_scroller(id, handles);
         return el;
     }
-    el = match (axes.x.has_offset(), axes.y.has_offset()) {
-        (true, true) => el.overflow_scroll(),
-        (true, false) => el.overflow_x_scroll(),
-        _ => el.overflow_y_scroll(),
-    };
+    scroll_container_style(el.style(), axes);
     el = el.programmatic_scroll_only(axes.x == Overflow::Hidden, axes.y == Overflow::Hidden);
-    // A browser moves both axes of a diagonal wheel, and gives each axis only its own delta.
-    // This is also what makes GPUI hand the unused delta to an ancestor.
-    el.style().allow_concurrent_scroll = Some(true);
     let both = style.overscroll_behavior.as_deref();
     el = el.overscroll_behavior(
         overscroll(style.overscroll_behavior_x.as_deref().or(both)),
         overscroll(style.overscroll_behavior_y.as_deref().or(both)),
     );
-    set_smooth_by_default(id, style.scroll_behavior.as_deref() == Some("smooth"));
-    let handle = handles.entry(id).or_insert_with(gpui::ScrollHandle::new);
-    el = el.track_scroll(handle);
+    let handle = scroller_handle(id, style, handles);
+    el = el.track_scroll(&handle);
     if axes.x.scrolls_for_user() || axes.y.scrolls_for_user() {
         el = crate::scrollbar::attach(
             el,
             id,
-            crate::scrollbar::Source::Container {
-                id,
-                handle: handle.clone(),
-            },
+            crate::scrollbar::Source::Container { id, handle },
             style,
             colors,
             [axes.x, axes.y],

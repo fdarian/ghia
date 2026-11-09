@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, Bounds, CornerRadii, CornerRadius, Corners, Edges, Element, ElementId, Escape, GlobalElementId,
-    HitboxBehavior, InspectorElementId, IntoElement, LayoutId, Pixels, Style, Window,
+    HitboxBehavior, InspectorElementId, IntoElement, LayoutId, OverflowAnchor, Pixels, Point, Style, Window,
 };
 
 use super::node::{Arena, Child, Content, Node};
@@ -98,7 +98,15 @@ impl Walk<'_> {
                         }
                     });
                 }
-                window.request_layout(Style::clone(&style), ids, cx)
+                let mut laid_out = Style::clone(&style);
+                if let Some(scroller) = &target.scroller {
+                    laid_out.lay_out_without_scrollbars(scroller.programmatic);
+                }
+                let layout_id = window.request_layout(laid_out, ids, cx);
+                if let Some(scroller) = &target.scroller {
+                    scroller.handle.note_scroller_layout(layout_id, style.overflow_anchor != OverflowAnchor::None, window);
+                }
+                layout_id
             })
         });
         target.layout_id.set(Some(layout_id));
@@ -122,6 +130,7 @@ impl Walk<'_> {
         let layout_id = target.layout_id.get().expect("a node is requested before it is prepainted");
         let bounds = window.layout_bounds(layout_id);
         target.bounds.set(bounds);
+        self.begin_scroller_prepaint(node, layout_id, bounds, window);
         sample_layout(target, layout_id, bounds, window);
         let style = target.style.clone();
         let rem_size = window.rem_size();
@@ -130,17 +139,40 @@ impl Walk<'_> {
             window.with_exact_hit_mask(style.overflow_mask(bounds, rem_size), |window| {
                 let escapes_before = window.escapes_prepainted();
                 // `Interactivity::should_insert_hitbox` for a host that is not a text node, which `always_hitbox` makes of
-                // every one, and has nothing of the rest that asks for one (listener, focus, scroll, group, clip path).
-                let hitbox = (behavior != HitboxBehavior::Normal || window.dom_hit_testing() || style.mouse_cursor.is_some())
-                    .then(|| window.insert_hitbox_shaped(bounds, behavior, border_box_radii(&style, bounds, rem_size), None));
+                // every one, and has nothing of the rest that asks for one (listener, focus, group, clip path), but a scroller.
+                let hitbox = (behavior != HitboxBehavior::Normal
+                    || window.dom_hit_testing()
+                    || style.mouse_cursor.is_some()
+                    || target.scroller.is_some())
+                .then(|| window.insert_hitbox_shaped(bounds, behavior, border_box_radii(&style, bounds, rem_size), None));
+                let scroll_offset = clamp_scroll_position(target, &style, window);
                 match hitbox.as_ref() {
-                    Some(parent) => window.with_hitbox_parent(parent, |window| self.prepaint_in_frame(node, window, cx)),
-                    None => self.prepaint_in_frame(node, window, cx),
+                    Some(parent) => window.with_hitbox_parent(parent, |window| {
+                        window.with_element_offset(scroll_offset, |window| self.prepaint_in_frame(node, window, cx))
+                    }),
+                    None => window.with_element_offset(scroll_offset, |window| self.prepaint_in_frame(node, window, cx)),
                 }
                 target.escape_inside.set(window.escapes_prepainted() != escapes_before);
                 *target.hitbox.borrow_mut() = hitbox;
             })
         });
+    }
+
+    /// What `Div::prepaint_with` does before its children are prepainted when it tracks a scroll handle: the handle gets
+    /// the boxes of the children, and the range of the content is read from layout.
+    fn begin_scroller_prepaint(&self, node: usize, layout_id: LayoutId, bounds: Bounds<Pixels>, window: &mut Window) {
+        let arena = self.arena;
+        let target = &arena.nodes[node];
+        let Some(scroller) = &target.scroller else { return };
+        let child_layout_ids: Vec<LayoutId> = target
+            .children
+            .iter()
+            .map(|child| match *child {
+                Child::Node(child) | Child::Positioned(child) => arena.nodes[child].layout_id.get(),
+                Child::Content(content) => arena.contents[content].layout_id.get(),
+            }.expect("a child is requested before its parent is prepainted"))
+            .collect();
+        *scroller.frame.borrow_mut() = Some(scroller.handle.begin_scroller_prepaint(layout_id, bounds, &child_layout_ids, window));
     }
 
     /// The children of a positioned box (or of one that contains fixed boxes) are prepainted in a frame
@@ -190,7 +222,9 @@ impl Walk<'_> {
         let layout_id = target.layout_id.get().expect("a node is requested before it is prepainted");
         let bounds = window.layout_bounds(layout_id);
         target.bounds.set(bounds);
+        self.begin_scroller_prepaint(node, layout_id, bounds, window);
         sample_layout(target, layout_id, bounds, window);
+        let scroll_offset = clamp_scroll_position(target, &target.style, window);
         let mut prepaint_children = |walk: &mut Self, window: &mut Window| {
             for child in &target.children {
                 match *child {
@@ -204,10 +238,10 @@ impl Walk<'_> {
                 }
             }
         };
-        match target.placement.frame {
+        window.with_element_offset(scroll_offset, |window| match target.placement.frame {
             Some(contains_fixed) => window.with_frame(contains_fixed, |window| prepaint_children(self, window)),
             None => prepaint_children(self, window),
-        }
+        })
     }
 
     fn paint_node_culled(&mut self, node: usize, window: &mut Window, cx: &mut App) {
@@ -263,9 +297,20 @@ impl Walk<'_> {
 /// `HostBoundsProbe`: the box is read where layout left it, and a pass that does not paint reports it from here.
 fn sample_layout(node: &Node, layout_id: LayoutId, bounds: Bounds<Pixels>, window: &mut Window) {
     window.note_publication();
-    let sample = crate::automation::read_layout(window, layout_id, false);
+    let sample = crate::automation::read_host_layout(window, layout_id, node.bounds_flags);
     node.sample.set(Some(sample));
     crate::automation::publish_host_bounds(node.id, node.bounds_flags, sample, bounds, layout_id, window);
+}
+
+/// Where the children of a scroll container sit: its offset, clamped to the range its content has now (zero for a
+/// node that does not scroll). `Interactivity::clamp_scroll_position` for a `Div`, which gpui does for the handle.
+fn clamp_scroll_position(node: &Node, style: &Style, window: &mut Window) -> Point<Pixels> {
+    let Some(scroller) = &node.scroller else { return Point::default() };
+    let frame = scroller.frame.borrow();
+    frame
+        .as_ref()
+        .expect("a scroller measures its layout before its offset is clamped")
+        .clamp_scroll_position(&scroller.handle, style, scroller.programmatic, window)
 }
 
 fn paint_bounds(node: &Node, window: &mut Window) {
