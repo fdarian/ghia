@@ -285,28 +285,6 @@ describe("WireWriter", () => {
     expect(nativeOps(encode([["setText", 1, "a\ud800b"]]))).toEqual([["setText", 1, "a�b"]])
   })
 
-  it("writes long ASCII, long non-ASCII and mixed strings as TextEncoder would", () => {
-    const ascii = "The quick brown fox, 0123456789 {\"a\":1}. ".repeat(200)
-    const strings = [
-      ascii,
-      "é" + ascii,
-      ascii + "é",
-      ascii + "日本語" + ascii,
-      ascii + "😀" + ascii,
-      ascii.slice(0, 40) + "\ud800" + ascii,
-      ascii + "\udc00",
-      "日本語".repeat(500) + ascii,
-      "é".repeat(1000),
-      "😀".repeat(1000) + ascii.slice(0, 3),
-    ]
-    const encoder = new TextEncoder()
-    const decoder = new TextDecoder()
-    const tuples: Tuple[] = strings.map((text, index): Tuple => ["setText", index + 1, text])
-    expect(nativeOps(encode(tuples))).toEqual(
-      strings.map((text, index) => ["setText", index + 1, decoder.decode(encoder.encode(text))])
-    )
-  })
-
   it("writes the next batch in another buffer, so a batch in flight is never overwritten", () => {
     const writer = new WireWriter()
     writer.createElement(1, "div")

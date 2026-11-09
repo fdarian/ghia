@@ -54,6 +54,13 @@ const COUNT_WIDTH = 5
 /** One id is a varint of at most eight bytes, since it is at most 2^53 - 1. */
 const MAX_ID_BYTES = 8
 /**
+ * Strings up to this many UTF-16 units are copied by a loop that stops at the
+ * first non-ASCII unit. `encodeInto` needs a `subarray` of the buffer for each
+ * string, which costs more than copying a type name or an event name.
+ */
+const SHORT_STRING = 32
+
+/**
  * A finished batch, until it is released. It remembers where each op starts, so a
  * rejected op can be cut out of it by byte range and the rest sent again.
  */
@@ -361,17 +368,12 @@ export class WireWriter {
     // the worst case needs and padded to it, which saves moving the bytes back.
     const width = varintWidth(length * 3)
     const start = this.position + width
-    const end = this.copyAscii(value, start)
+    const end = length <= SHORT_STRING ? this.copyShort(value, start) : this.encodeFrom(value, start)
     writePadded(this.bytes, this.position, end - start, width)
     this.position = end
   }
 
-  /**
-   * A loop that stops at the first non-ASCII unit and leaves the string to `encodeFrom`.
-   * `encodeInto` needs a `subarray` of the buffer for each string, and nearly every
-   * string a batch holds (type and event names, style JSON, most text) is ASCII.
-   */
-  private copyAscii(value: string, start: number): number {
+  private copyShort(value: string, start: number): number {
     const bytes = this.bytes
     for (let index = 0; index < value.length; index++) {
       const unit = value.charCodeAt(index)
