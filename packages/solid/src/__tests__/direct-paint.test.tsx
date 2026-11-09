@@ -211,11 +211,12 @@ const scenes: Scene[] = [
           color: ["#aa2200", "#0044aa", "#aa2200", "#008844", "#008844", "#aa2200"][step()],
           fontSize: [16, 20, 16, 12, 12, 16][step()],
           colorScheme: (["light", "light", "dark", "dark", "light", "light"] as const)[step()],
+          whiteSpace: (["normal", "pre", "normal", "pre-wrap", "nowrap", "pre"] as const)[step()],
         }}
         onPointerMove={hear("page")}
       >
         <div style={{ padding: "0.5em", border: "2px solid currentColor", borderRadius: "0.4em", backgroundColor: "light-dark(#eef3f8, #223344)", hover: { backgroundColor: "light-dark(#ffeedd, #553311)", borderColor: "#cc3300" } }}>
-          <text>inherits the colour and the size</text>
+          <text>{"inherits   the colour,\n  and the   size"}</text>
           <div style={{ marginTop: "0.25em", padding: "0.2em", borderLeft: "3px solid currentColor", width: "12em", boxShadow: "0 1px 2px currentColor" }}>
             <text style={{ fontSize: "0.8em" }}>{() => `em text ${step()}`}</text>
             <div style={{ height: "1.5em", marginTop: "0.2em", backgroundColor: "currentColor" }} />

@@ -98,7 +98,7 @@ pub(crate) fn is_direct_root(
         && plain_inheritance
         && !ctx.focus_handles.contains_key(&element.id)
         && own_is_plain(element, style, Kind::Root)
-        && children_are_plain(ctx.tree, element, is_positioned(style))
+        && root_children_are_plain(ctx.tree, element, is_positioned(style))
 }
 
 /// Whether the box is a containing block for an absolute descendant (`position: static` is not).
@@ -151,9 +151,22 @@ fn children_are_plain(tree: &RetainedTree, element: &RetainedElement, positioned
     if element.children.is_empty() {
         return true;
     }
-    crate::text::inline::plan_children_at(tree, element).into_iter().all(|(child, _)| match child {
-        Child::Block(id) => tree.elements.get(&id).is_some_and(|child| node_is_plain(tree, child, positioned)),
-        Child::Paragraph(paragraph) => paragraph_is_plain(tree, &paragraph),
+    plan_is_plain(tree, &crate::text::inline::plan_children_at(tree, element), positioned)
+}
+
+/// [`children_are_plain`] of a root, whose plan is the one its build takes, kept by the node ([`super::store::plan_children`]).
+fn root_children_are_plain(tree: &RetainedTree, element: &RetainedElement, positioned: bool) -> bool {
+    if element.children.is_empty() {
+        return true;
+    }
+    let white_space = crate::text::white_space::computed(tree, element);
+    plan_is_plain(tree, &super::store::plan_children(tree, element, white_space), positioned)
+}
+
+fn plan_is_plain(tree: &RetainedTree, plan: &[(Child, u32)], positioned: bool) -> bool {
+    plan.iter().all(|(child, _)| match child {
+        Child::Block(id) => tree.elements.get(id).is_some_and(|child| node_is_plain(tree, child, positioned)),
+        Child::Paragraph(paragraph) => paragraph_is_plain(tree, paragraph),
         Child::EmptyLine => true,
         Child::AnonymousCell(_) | Child::AnonymousTable(_) => false,
     })

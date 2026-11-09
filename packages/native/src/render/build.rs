@@ -21,6 +21,7 @@ use crate::resolved_style::Resolved;
 use crate::retained_tree::RetainedElement;
 use crate::style::StyleDesc;
 use crate::text::inline::Child as Planned;
+use crate::text::white_space::WhiteSpace;
 
 /// Marks the key of a root built this way, so that a record of one built as `Div`s is not taken for it.
 const SHAPE: u64 = 0xD1EC_7000;
@@ -42,7 +43,8 @@ pub(crate) fn build_direct(
     let (root_style, mut placement) = resolve_style(element, style, lift_absorbed, ctx);
     // As `build_host_container` flags the host: the style says so, or it is the root of a list row.
     placement.context = crate::layout::stacking::forms_context(style, stacking_root, &ctx.inherited.colors, &ctx.inherited.lengths);
-    let children = build_children(element, ctx, window, cx, &mut arena);
+    let white_space = crate::text::white_space::computed(ctx.tree, element);
+    let children = build_children(element, white_space, ctx, window, cx, &mut arena);
     let scroller = leave_scroller(scroller, ctx);
     ctx.subtree = Subtree::of_element(ctx.subtree, style, &ctx.inherited.colors, &ctx.inherited.lengths);
     let cull_outset = ctx.subtree.outset();
@@ -63,6 +65,7 @@ pub(crate) fn build_direct(
 /// style is its declared one and which nothing runs on.
 fn build_node(
     id: u64,
+    parent_white_space: WhiteSpace,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -82,7 +85,8 @@ fn build_node(
     note_plain(id, ctx);
     let scroller = enter_scroller(id, style, ctx, window);
     let (node_style, placement) = resolve_style(element, style, false, ctx);
-    let children = build_children(element, ctx, window, cx, arena);
+    let white_space = crate::text::white_space::of_box(element, parent_white_space);
+    let children = build_children(element, white_space, ctx, window, cx, arena);
     let scroller = leave_scroller(scroller, ctx);
     ctx.subtree = Subtree::of_element(ctx.subtree, style, &ctx.inherited.colors, &ctx.inherited.lengths);
     ctx.retain.direct_descendant(id, placement.lift_z.is_some());
@@ -243,6 +247,7 @@ fn resolve_fresh(element: &RetainedElement, style: Option<&StyleDesc>, lift_abso
 /// What `build_content` builds for the children of `element`, with `ctx.inherited` the element's own.
 fn build_children(
     element: &RetainedElement,
+    white_space: WhiteSpace,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -260,15 +265,16 @@ fn build_children(
         }
         return children;
     }
-    for (child, at) in crate::text::inline::plan_children_at(ctx.tree, element) {
-        ctx.doc_path.push(at);
+    let plan = super::store::plan_children(ctx.tree, element, white_space);
+    for (child, at) in plan.iter() {
+        ctx.doc_path.push(*at);
         match child {
             Planned::Block(id) => {
-                let node = build_node(id, ctx, window, cx, arena);
+                let node = build_node(*id, white_space, ctx, window, cx, arena);
                 children.push(if arena.nodes[node].placement.is_positioned() { Child::Positioned(node) } else { Child::Node(node) });
             }
             Planned::Paragraph(paragraph) => {
-                let (content, subtree) = crate::renderer::paragraph_content(&paragraph, Default::default(), ctx, window, cx);
+                let (content, subtree) = crate::renderer::paragraph_content(paragraph, Default::default(), ctx, window, cx);
                 children.push(arena.push_content(content));
                 ctx.subtree.merge(subtree);
             }

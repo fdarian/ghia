@@ -24,7 +24,10 @@ use super::node::Placement;
 use crate::color::{ColorContext, ColorReads};
 use crate::css::length::LengthContext;
 use crate::renderer::BuildCtx;
+use crate::retained_tree::{RetainedElement, RetainedTree};
 use crate::style::StyleDesc;
+use crate::text::inline::Child;
+use crate::text::white_space::WhiteSpace;
 
 /// Whether nodes keep their styles: with the style cache, whose switch it follows.
 pub(super) fn enabled() -> bool {
@@ -65,9 +68,19 @@ pub(super) struct Kept {
     pub(super) placement: Placement,
 }
 
+/// How a node's children are laid into paragraphs and blocks ([`plan_children_at`]), which reads the subtree of the node and
+/// the `white-space` it inherits, and nothing else: the plan of a node whose subtree has the revision it had, under the same
+/// `white-space`, is the plan it had.
+struct KeptPlan {
+    revision: u64,
+    white_space: WhiteSpace,
+    plan: Rc<Vec<(Child, u32)>>,
+}
+
 #[derive(Default)]
 pub(crate) struct Store {
     kept: FxHashMap<u64, Kept>,
+    plans: FxHashMap<u64, KeptPlan>,
 }
 
 impl Store {
@@ -89,10 +102,43 @@ impl Store {
 
     pub(crate) fn forget(&mut self, id: u64) {
         self.kept.remove(&id);
+        self.plans.remove(&id);
     }
 
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.kept.len()
     }
+}
+
+/// `plan_children_at(tree, element)`, kept while the subtree of `element` and the `white-space` it inherits (`white_space`: the
+/// element's own computed one) are what they were.
+pub(super) fn plan_children(tree: &RetainedTree, element: &RetainedElement, white_space: WhiteSpace) -> Rc<Vec<(Child, u32)>> {
+    if !enabled() {
+        return Rc::new(crate::text::inline::plan_children_at(tree, element));
+    }
+    let kept = tree
+        .direct
+        .borrow()
+        .plans
+        .get(&element.id)
+        .filter(|kept| kept.revision == element.subtree_revision && kept.white_space == white_space)
+        .map(|kept| Rc::clone(&kept.plan));
+    if let Some(plan) = kept {
+        if crate::css::style_cache::mode() == crate::css::style_cache::Mode::Verify {
+            let fresh = crate::text::inline::plan_children_at(tree, element);
+            assert!(
+                *plan == fresh,
+                "the node {} kept a plan that is made differently now\n kept {plan:?}\n now  {fresh:?}",
+                element.id,
+            );
+        }
+        return plan;
+    }
+    let plan = Rc::new(crate::text::inline::plan_children_at(tree, element));
+    tree.direct.borrow_mut().plans.insert(
+        element.id,
+        KeptPlan { revision: element.subtree_revision, white_space, plan: Rc::clone(&plan) },
+    );
+    plan
 }
