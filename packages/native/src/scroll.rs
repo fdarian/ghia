@@ -110,6 +110,13 @@ pub(crate) fn overscroll_y(style: &StyleDesc) -> gpui::OverscrollBehavior {
     )
 }
 
+/// What `apply_container` does for an element that does not scroll: it has no handle, and
+/// `scroll-behavior` is not smooth.
+pub(crate) fn not_a_scroller(id: u64, handles: &mut HashMap<u64, gpui::ScrollHandle>) {
+    handles.remove(&id);
+    set_smooth_by_default(id, false);
+}
+
 /// Makes `el` a scroll container if its style asks for one, and drops the handle of an
 /// element that no longer is.
 ///
@@ -124,14 +131,12 @@ pub(crate) fn apply_container<E: gpui::Styled + gpui::StatefulInteractiveElement
     handles: &mut HashMap<u64, gpui::ScrollHandle>,
 ) -> E {
     let Some(style) = style else {
-        handles.remove(&id);
-        set_smooth_by_default(id, false);
+        not_a_scroller(id, handles);
         return el;
     };
     let axes = Axes::of(style);
     if !axes.scrolls() {
-        handles.remove(&id);
-        set_smooth_by_default(id, false);
+        not_a_scroller(id, handles);
         return el;
     }
     el = match (axes.x.has_offset(), axes.y.has_offset()) {

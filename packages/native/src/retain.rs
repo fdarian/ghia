@@ -2996,6 +2996,18 @@ impl Retain {
         }
     }
 
+    /// `id`, a descendant of the element being built, was drawn by it without being entered (a direct root,
+    /// `render`), where an entry would have been. It is built, so it leaves `unbuilt`, which would keep
+    /// the elements above it on the spine for good (the frame that built it has no node to remove it
+    /// at the end of), and it counts in the size of the element, which decides whether a root is
+    /// worth skipping.
+    pub(crate) fn direct_descendant(&mut self, id: u64) {
+        self.unbuilt.remove(&id);
+        if let Some(&at) = self.stack.last() {
+            self.below[at as usize].size += 1;
+        }
+    }
+
     /// Whether the element left last came back absent, once: the parent says where it put it.
     pub(crate) fn take_exited_absent(&mut self) -> bool {
         std::mem::take(&mut self.exited_absent)

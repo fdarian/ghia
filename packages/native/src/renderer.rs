@@ -8204,7 +8204,7 @@ impl Inherited {
     }
 
     /// Apply the inheritable parts of `style` for the subtree below it.
-    fn descend(mut self, style: Option<&StyleDesc>, inert: bool) -> Self {
+    pub(crate) fn descend(mut self, style: Option<&StyleDesc>, inert: bool) -> Self {
         self = self.enter_children();
         self.lengths = self
             .lengths
@@ -11548,7 +11548,11 @@ fn build_element_unpumped(
                     &ctx.inherited.colors,
                     &ctx.inherited.lengths,
                 );
-                build_host_container(element, style, stacking_root, ctx, window, cx)
+                if crate::render::is_direct_root(element, style, stacking_root || atomic_root, ctx, window) {
+                    crate::render::build_direct(element, style, ctx, window, cx)
+                } else {
+                    build_host_container(element, style, stacking_root, ctx, window, cx)
+                }
             }
         }
         "virtual-list" => {
@@ -11993,7 +11997,7 @@ fn virtual_row_ancestor(tree: &RetainedTree, list_id: u64, element_id: u64) -> O
 }
 
 /// A text instance: a bare string with no style, children or listeners.
-fn is_text_node(element: &crate::retained_tree::RetainedElement) -> bool {
+pub(crate) fn is_text_node(element: &crate::retained_tree::RetainedElement) -> bool {
     element.element_type == "text"
         && element.content.is_some()
         && element.style.is_none()
@@ -12805,7 +12809,7 @@ fn build_contents_container(
 /// A `userSelect: "none"` run still paints highlight washes, because a browser
 /// still finds that text with Ctrl+F. Element chrome that must never be found,
 /// such as a code gutter, uses `chrome_text` instead.
-fn text_content(
+pub(crate) fn text_content(
     element: &crate::retained_tree::RetainedElement,
     content: &str,
     text_box_trim: gpui::TextBoxTrim,
@@ -12842,7 +12846,7 @@ fn text_content(
 /// One paragraph of inline content: a single string with a run per text node,
 /// selected, searched and copied as one line of text. It has no group, so two
 /// paragraphs never join into one copied line.
-fn paragraph_content(
+pub(crate) fn paragraph_content(
     paragraph: &crate::text::inline::Paragraph,
     text_box_trim: gpui::TextBoxTrim,
     ctx: &mut BuildCtx,

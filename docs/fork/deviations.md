@@ -266,6 +266,12 @@ A native view from another library between the GPUI layers ([nativeview.md](nati
 
 - **`initialFocus` defaults to the popup, not the first tabbable element.** Base UI picks the first tabbable element. GPUI's tab order exists only after the popup has painted, so the popup is focused and the first Tab walks that order.
 
+## Direct paint
+
+Only with `GPUIX_DIRECT_PAINT=1` (an experiment, [direct-paint.md](direct-paint.md)); nothing here applies by default.
+
+- **A node below a direct root has no hitbox, no box record and no accessibility node.** The pointer is over the root (the `target` of an event is the root, and a descendant is never hovered), `getElementBounds` and the observers that read it find nothing for a descendant, and direct paint is off while a screen reader is connected. A subtree whose nodes need any of that (a listener, a cursor, a pointer state, focus, a scroller, a positioned box) is not direct.
+
 ## Other platforms
 
 The fork is macOS-only, so these are recorded, not open. Each entry says what the other platforms do or lack and, where it is known, what closing the gap would take.

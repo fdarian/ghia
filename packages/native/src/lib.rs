@@ -38,6 +38,7 @@ mod native_event;
 mod platform;
 mod observers;
 pub mod perf_counters;
+mod render;
 mod renderer;
 mod retain;
 mod resolved_style;

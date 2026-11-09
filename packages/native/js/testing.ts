@@ -79,6 +79,8 @@ export interface BuildCounters {
   motionValuesSampled: number
   listStatesCreated: number
   listItemsSpliced: number
+  directRoots: number
+  directNodes: number
   retainReasons: string
 }
 
@@ -335,6 +337,7 @@ interface NativeTestRendererApi
   setListSizesEnabled(enabled: boolean): void
   setTextLeafEnabled(enabled: boolean): void
   setStyleCache(mode: "on" | "off" | "verify"): void
+  setDirectPaint(enabled: boolean): void
   getPatchCounters(): PatchCounters
   setRetainLift(names: string[]): void
   getRetainMismatches(): string[]
@@ -1302,6 +1305,13 @@ export class TestRenderer implements NativeRenderer {
    *  wide and read at every build. */
   setStyleCache(mode: "on" | "off" | "verify"): void {
     this.native.setStyleCache(mode)
+  }
+
+  /** Whether plain subtrees are drawn by one element that owns their nodes, where each host would be a
+   *  `Div` (`GPUIX_DIRECT_PAINT=1` turns it on for the whole run). Process wide and read at every build,
+   *  so set it before content is mounted: a subtree recorded before is replayed as it was. */
+  setDirectPaint(enabled: boolean): void {
+    this.native.setDirectPaint(enabled)
   }
 
   /** How ticks were drawn by patching since the window was made: the frames and roots patched, the

@@ -60,6 +60,7 @@ This covers the fork. Everything else in `docs/` is listed in [docs/index.md](..
 | [docs/fork/scroll.md](scroll.md) | The scrolling engine, wheel routing, scrollbars, `onScroll`, scroll writes, virtual lists, scroll anchoring. |
 | [docs/fork/motion.md](motion.md) | Springs, transitions, keyframes, CSS animations, motion values, layout animations, Web Animations objects, `matchMedia`, reduced motion. |
 | [docs/fork/retention.md](retention.md) | The three layers that skip what did not change, replay, holes and fragments, relocation under scroll, keys and eligibility, tapes, invalidation rules, culling, where a frame differs from a full build. |
+| [docs/fork/direct-paint.md](direct-paint.md) | An experiment behind `GPUIX_DIRECT_PAINT`: a plain subtree drawn by one element that owns its nodes, what is direct, what a node below the root does not have. |
 | [docs/fork/patch-frames.md](patch-frames.md) | Animation ticks: patch frames and units, what a tick may change, dormant animations and their wake times, the cases that draw whole. |
 | [docs/fork/forced-reads.md](forced-reads.md) | Layout-only passes for bounds and scroll reads, reads inside dispatch, what a forced read costs, reads inside skipped content. |
 | [docs/fork/observers-and-content-visibility.md](observers-and-content-visibility.md) | `onLayout`, `ResizeObserver`, `IntersectionObserver`, report order; `content-visibility` and what it does to events, accessibility, Tab and find. |

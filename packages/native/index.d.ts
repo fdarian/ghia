@@ -832,6 +832,12 @@ export declare class TestGpuixRenderer {
    */
   setStyleCache(mode: string): void
   /**
+   * Whether plain subtrees are drawn by one element that owns their nodes (`render/`), where each
+   * host would be a `Div`. Off unless `GPUIX_DIRECT_PAINT=1`; process wide, and read at every build,
+   * so set it before content is mounted.
+   */
+  setDirectPaint(enabled: boolean): void
+  /**
    * Whether a text with nothing else to place is built as one element (`text/leaf.rs`) and not as
    * a wrapper that holds a canvas and the glyphs. On unless `GPUIX_TEXT_LEAF_OFF`; process wide, and
    * read at every build, so set it before content is mounted.
@@ -1552,6 +1558,9 @@ export interface BuildCounters {
   listStatesCreated: number
   /** Items a change of a list's item count spliced out of or into its state. */
   listItemsSpliced: number
+  /** Roots drawn direct (`GPUIX_DIRECT_PAINT`, `render/`), and the nodes they hold. */
+  directRoots: number
+  directNodes: number
   /**
    * A JSON object: elements by the reason they are, or are not, in a retainable subtree, for
    * the builds since the reset. `retained` is the share that is; every built element is counted

@@ -66,6 +66,9 @@ pub struct BuildCounters {
     pub list_states_created: f64,
     /// Items a change of a list's item count spliced out of or into its state.
     pub list_items_spliced: f64,
+    /// Roots drawn direct (`GPUIX_DIRECT_PAINT`, `render/`), and the nodes they hold.
+    pub direct_roots: f64,
+    pub direct_nodes: f64,
     /// A JSON object: elements by the reason they are, or are not, in a retainable subtree, for
     /// the builds since the reset. `retained` is the share that is; every built element is counted
     /// once.
@@ -803,13 +806,14 @@ impl TestGpuixRenderer {
 
         // Visual tests have no VoiceOver / UIA client, so AccessKit never
         // activates. Pretend one is connected so every flush builds a tree
-        // that get_a11y_tree can dump.
+        // that get_a11y_tree can dump. Not under `GPUIX_DIRECT_PAINT`, which is off while one is
+        // connected (`render::is_direct_root`): a run with the switch on would draw nothing direct.
         //
         // The offscreen window is also never key. GPUI reports focus paths
         // only for an active window, so without this onFocus / onBlur never
         // fire in tests. Real activation would take the user's keyboard.
         cx.update_window(window, |_, window, cx| {
-            window.set_a11y_active_for_tests(true);
+            window.set_a11y_active_for_tests(!crate::render::enabled());
             window.set_active_for_tests(true, cx);
         })
         .map_err(|e| Error::from_reason(e.to_string()))?;
@@ -974,6 +978,8 @@ impl TestGpuixRenderer {
             motion_values_sampled: counts.motion_values_sampled as f64,
             list_states_created: counts.list_states_created as f64,
             list_items_spliced: counts.list_items_spliced as f64,
+            direct_roots: counts.direct_roots as f64,
+            direct_nodes: counts.direct_nodes as f64,
             retain_reasons: serde_json::Value::Object(
                 crate::perf_counters::retain_reasons()
                     .into_iter()
@@ -1199,6 +1205,15 @@ impl TestGpuixRenderer {
             "verify" => Mode::Verify,
             other => return Err(napi::Error::from_reason(format!("style cache mode {other:?} is not on, off or verify"))),
         });
+        Ok(())
+    }
+
+    /// Whether plain subtrees are drawn by one element that owns their nodes (`render/`), where each
+    /// host would be a `Div`. Off unless `GPUIX_DIRECT_PAINT=1`; process wide, and read at every build,
+    /// so set it before content is mounted.
+    #[napi]
+    pub fn set_direct_paint(&self, enabled: bool) -> Result<()> {
+        crate::render::set_enabled(enabled);
         Ok(())
     }
 
