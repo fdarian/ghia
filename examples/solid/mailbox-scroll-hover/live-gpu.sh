@@ -3,7 +3,7 @@
 # phase's CPU time: GPUI_GPU_TIMES logs every presented frame's kind and GPU busy time, live-phase.ts's PHASE_LOG the phases on the same
 # clock, gpu-times-report.py joins them. Needs ghia-bench's data/messages.json (GHIA_BENCH_MESSAGES) and harness/bin/benchhelper.
 #   examples/solid/mailbox-scroll-hover/live-gpu.sh <label> <out dir> [KEY=VALUE ...]
-# `GPUIX_PARTIAL_REDRAW=1` as an extra argument measures a window that draws only what a frame changed. The window is not made key
+# The window draws only what a frame changed (always on), so `damage=` in the .gpu lines says which frames were part. It is not made key
 # and the events go to its pid only; it takes the screen lock like any live run. Quits the app by pid.
 set -uo pipefail
 label="$1"

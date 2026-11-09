@@ -785,7 +785,6 @@ impl TestGpuixRenderer {
                         view.set_frameless(frameless);
                         crate::events::enable_dom_hit_testing(window);
                         crate::focus_emulation::apply(window, cx);
-                        crate::partial_redraw::apply(window);
                         crate::layout::container::allow_redraw_passes(window);
                         view.install_key_interception(window, cx);
                         view
@@ -2670,15 +2669,8 @@ impl TestGpuixRenderer {
         })
     }
 
-    /// Whether the window draws only the part of the picture that a frame changed (`Window::set_partial_redraw`).
-    /// Off unless `GPUIX_PARTIAL_REDRAW=1` at window creation.
-    #[napi]
-    pub fn set_partial_redraw(&self, enabled: bool) -> Result<()> {
-        update_view(move |_view, window, _cx| window.set_partial_redraw(enabled))
-    }
-
     /// Presents the frame that was drawn and not shown, as the display link of a live window does after a tick
-    /// (an offscreen window has none): with `setPartialRedraw`, this draws what the frame changed into the
+    /// (an offscreen window has none): this draws what the frame changed into the
     /// picture the window keeps.
     #[napi]
     pub fn present_frame(&self) -> Result<()> {

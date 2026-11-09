@@ -25,7 +25,6 @@ mod element_tree;
 pub mod events;
 mod focus;
 mod focus_emulation;
-mod partial_redraw;
 mod forms;
 mod layout;
 mod list_resize;

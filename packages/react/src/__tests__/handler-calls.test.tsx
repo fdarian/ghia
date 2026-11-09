@@ -25,6 +25,9 @@ const NOT_CALLABLE_FROM_A_HANDLER = new Set([
   "advanceTime",
   "captureScreenshot",
   "captureShownFrame",
+  // Like captureShownFrame: native refuses them inside a handler it called synchronously, as they reach for the window's frame.
+  "capturePartialPicture",
+  "presentFrame",
   "dispose",
   "dispatchEvent",
   "dispatchMouseMove",
@@ -205,6 +208,7 @@ function calls(r, ids) {
     setScrollPatchEnabled: () => r.setScrollPatchEnabled(true),
     setListSizesEnabled: () => r.setListSizesEnabled(true),
     setTextLeafEnabled: () => r.setTextLeafEnabled(true),
+    setStyleCache: () => r.setStyleCache("on"),
     getRegistrySlots: () => r.getRegistrySlots(),
     setRetainLift: () => r.setRetainLift(["svg"]),
     setRetainPlanning: () => r.setRetainPlanning(true),

@@ -1282,13 +1282,8 @@ export declare class TestGpuixRenderer {
    */
   captureShownFrame(path: string): void
   /**
-   * Whether the window draws only the part of the picture that a frame changed (`Window::set_partial_redraw`).
-   * Off unless `GPUIX_PARTIAL_REDRAW=1` at window creation.
-   */
-  setPartialRedraw(enabled: boolean): void
-  /**
    * Presents the frame that was drawn and not shown, as the display link of a live window does after a tick
-   * (an offscreen window has none): with `setPartialRedraw`, this draws what the frame changed into the
+   * (an offscreen window has none): this draws what the frame changed into the
    * picture the window keeps.
    */
   presentFrame(): void
