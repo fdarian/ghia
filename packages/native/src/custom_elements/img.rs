@@ -569,6 +569,7 @@ impl CustomElement for ImgElement {
             }
         }
         el = crate::layout::container::contain_declared(el, ctx.style);
+        el = crate::layout::stacking::absorb_lift(el, ctx.lift_absorbed);
 
         let mut el = crate::accessibility::apply_accessibility(
             el,

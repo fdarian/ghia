@@ -113,6 +113,9 @@ pub struct CustomRenderContext<'a> {
     /// The first element of a build, the window root or a virtual-list row: no stacking context
     /// is around it, so `custom_surface` makes it one.
     pub stacking_root: bool,
+    /// The element is the root of a virtual-list row, which does not lift: the builder says `unlifted()` of
+    /// what it builds last (`stacking::absorb_lift`), after the style and the focus variants.
+    pub lift_absorbed: bool,
     /// What the walks over the retained tree read of this element's final style.
     pub resolved: crate::resolved_style::Resolved,
 }
@@ -233,6 +236,7 @@ pub(crate) fn custom_surface(
             &ctx.focus_styles,
         ),
     };
+    el = crate::layout::stacking::absorb_lift(el, ctx.lift_absorbed);
     el = crate::accessibility::apply_accessibility(el, ctx.id, ctx.props, None);
     wire_host_events(el, ctx)
 }
@@ -691,6 +695,9 @@ impl CustomElementRegistry {
         }
     }
 }
+
+#[cfg(test)]
+mod lift_tests;
 
 #[cfg(test)]
 mod tests {

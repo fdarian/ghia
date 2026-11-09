@@ -138,9 +138,6 @@ pub(crate) fn apply_z_index<E: Styled>(
             el = el.lifted();
         }
     }
-    if style.lift_absorbed {
-        el = el.unlifted();
-    }
     el
 }
 
@@ -154,9 +151,6 @@ pub(crate) fn apply_folded_lift<E: Styled>(
     colors: &ColorContext,
     lengths: &LengthContext,
 ) -> E {
-    if folded.lift_absorbed {
-        return el.unlifted();
-    }
     let resolved = Resolved::of_style(folded, colors, lengths);
     match lift_z(&resolved, folded.flex_or_grid_item) {
         Some(z) => {
@@ -250,6 +244,20 @@ pub(crate) fn is_forced_context(tree: &RetainedTree, element: &RetainedElement) 
     tree.root_id == Some(element.id)
         || element.element_type == "anchored"
         || is_virtual_row(tree, element)
+}
+
+/// Whether the root of what is built, `element`, is the row of a virtual list. The list prepaints a row inside a
+/// lift barrier, which hands nothing to the context around the list: the root of a row does not lift, whatever its
+/// position, `z-index` or composite, as [`lifted_z`] says of the retained tree.
+pub(crate) fn absorbs_lift(tree: &RetainedTree, element: &RetainedElement, stacking_root: bool) -> bool {
+    stacking_root && is_virtual_row(tree, element)
+}
+
+/// Says `unlifted()` of a row root, last: after the style, and after the focus variants, which decide the lift
+/// again from the style they fold. It is not part of the style, so the cached application of a row's style is the
+/// same as another host's, and nothing clones a `StyleDesc` to carry it.
+pub(crate) fn absorb_lift<E: Styled>(el: E, absorbed: bool) -> E {
+    if absorbed { el.unlifted() } else { el }
 }
 
 pub(crate) fn is_virtual_row(tree: &RetainedTree, element: &RetainedElement) -> bool {
@@ -593,24 +601,46 @@ mod tests {
     fn the_root_of_a_row_is_not_lifted_whatever_lifts_a_style() {
         let colors = ColorContext::root(Scheme::Light);
         let lengths = LengthContext::for_tests();
-        let lift = |style: StyleDesc| {
-            let absorbed = StyleDesc { lift_absorbed: true, ..style };
-            let mut el = apply_z_index(gpui::div().relative(), &absorbed, &colors, &lengths);
-            let applied = el.style().lift_z();
-            // A focus variant laid over it is decided from the folded style, which keeps the flag.
-            let over = StyleDesc { z_index: Some(4.0), position: Some("relative".to_string()), ..Default::default() };
-            let folded = crate::events::state_styles::overlay(&absorbed, &over);
-            assert!(folded.lift_absorbed);
-            let mut refolded = apply_folded_lift(apply_z_index(el, &over, &colors, &lengths), &folded, &colors, &lengths);
-            assert_eq!(refolded.style().lift_z(), None);
-            applied
-        };
-        assert_eq!(lift(style(Some("relative"), None)), None);
-        assert_eq!(lift(style(Some("relative"), Some(3.0))), None);
-        assert_eq!(lift(style(Some("sticky"), None)), None);
-        assert_eq!(lift(with(|s| s.opacity = Some(0.5))), None);
-        // The same styles lift an element that is not the root of a row.
-        let mut el = apply_z_index(gpui::div().relative(), &style(Some("relative"), Some(3.0)), &colors, &lengths);
+        // A focus variant laid over the element decides the lift again from the style it folds.
+        let over = StyleDesc { z_index: Some(4.0), position: Some("relative".to_string()), ..Default::default() };
+        for base in [
+            style(Some("relative"), None),
+            style(Some("relative"), Some(3.0)),
+            style(Some("sticky"), None),
+            with(|s| s.opacity = Some(0.5)),
+        ] {
+            let built = |absorbed: bool| {
+                let mut el = apply_z_index(gpui::div().relative(), &base, &colors, &lengths);
+                let applied = el.style().lift_z();
+                let folded = crate::events::state_styles::overlay(&base, &over);
+                let el = apply_folded_lift(apply_z_index(el, &over, &colors, &lengths), &folded, &colors, &lengths);
+                (applied, absorb_lift(el, absorbed).style().lift_z())
+            };
+            // Without the row, the style and the variant do lift the element, so the check below has something to undo.
+            let (applied, folded) = built(false);
+            assert!(applied.is_some(), "{base:?}");
+            assert_eq!(folded, Some(4), "{base:?}");
+            assert_eq!(built(true).1, None, "{base:?}");
+        }
+    }
+
+    #[test]
+    fn a_row_root_says_unlifted_after_the_lift_not_before_it() {
+        let colors = ColorContext::root(Scheme::Light);
+        let lengths = LengthContext::for_tests();
+        let folded = style(Some("relative"), Some(4.0));
+        // What the order protects: the fold of a focus variant lifts again whatever was said before it.
+        let mut early = apply_folded_lift(absorb_lift(gpui::div(), true), &folded, &colors, &lengths);
+        assert_eq!(early.style().lift_z(), Some(4));
+        let mut late = absorb_lift(apply_folded_lift(gpui::div(), &folded, &colors, &lengths), true);
+        assert_eq!(late.style().lift_z(), None);
+    }
+
+    #[test]
+    fn an_element_that_is_no_row_root_keeps_its_lift() {
+        let colors = ColorContext::root(Scheme::Light);
+        let lengths = LengthContext::for_tests();
+        let mut el = absorb_lift(apply_z_index(gpui::div().relative(), &style(Some("relative"), Some(3.0)), &colors, &lengths), false);
         assert_eq!(el.style().lift_z(), Some(3));
     }
 

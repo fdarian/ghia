@@ -1165,11 +1165,6 @@ pub struct StyleDesc {
     /// `position`. Only set when it has a `z-index`.
     #[serde(skip)]
     pub flex_or_grid_item: bool,
-    /// Set by the renderer on the copy of the style it builds the root of a virtual-list row from,
-    /// never by JS: the list prepaints a row inside a lift barrier, so what the row would be lifted
-    /// into is never handed to it and the element does not lift (`stacking::lifted_z`).
-    #[serde(skip)]
-    pub lift_absorbed: bool,
     /// Set by `resolve_pointer_states` on the style it folds, never by JS: a `hover` or `hasHover` of the
     /// style it comes from gives a background colour (`keeps_background_quad`).
     #[serde(skip)]

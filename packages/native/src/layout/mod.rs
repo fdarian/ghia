@@ -14,6 +14,8 @@ pub(crate) mod display;
 pub mod grid;
 pub mod grid_values;
 pub(crate) mod order;
+#[cfg(test)]
+mod row_root_tests;
 pub(crate) mod stacking;
 pub(crate) mod style;
 pub(crate) mod table;
