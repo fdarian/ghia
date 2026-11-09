@@ -81,6 +81,7 @@ export interface BuildCounters {
   listItemsSpliced: number
   directRoots: number
   directNodes: number
+  directStylesKept: number
   retainReasons: string
 }
 

@@ -20,7 +20,7 @@ pub(super) enum Child {
 
 /// How a node is placed: what `Element::lift_z` and `Element::escapes_to` say of a `Div`, and whether
 /// its children are drawn in a positioned frame (`Window::with_frame`).
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Placement {
     pub lift_z: Option<i32>,
     pub escape: Option<Escape>,
@@ -82,7 +82,7 @@ pub(super) struct Arena {
 
 pub(super) struct NodeSpec {
     pub id: u64,
-    pub style: Style,
+    pub style: Rc<Style>,
     pub children: Vec<Child>,
     pub placement: Placement,
     pub passes_pointer: bool,
@@ -94,7 +94,7 @@ impl Arena {
     pub fn push_node(&mut self, spec: NodeSpec) -> usize {
         self.nodes.push(Node {
             id: spec.id,
-            style: Rc::new(spec.style),
+            style: spec.style,
             children: spec.children,
             placement: spec.placement,
             passes_pointer: spec.passes_pointer,

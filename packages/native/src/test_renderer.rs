@@ -69,6 +69,8 @@ pub struct BuildCounters {
     /// Roots drawn direct (`GPUIX_DIRECT_PAINT`, `render/`), and the nodes they hold.
     pub direct_roots: f64,
     pub direct_nodes: f64,
+    /// Nodes of direct roots whose style came from what the node kept, not from a resolve.
+    pub direct_styles_kept: f64,
     /// A JSON object: elements by the reason they are, or are not, in a retainable subtree, for
     /// the builds since the reset. `retained` is the share that is; every built element is counted
     /// once.
@@ -980,6 +982,7 @@ impl TestGpuixRenderer {
             list_items_spliced: counts.list_items_spliced as f64,
             direct_roots: counts.direct_roots as f64,
             direct_nodes: counts.direct_nodes as f64,
+            direct_styles_kept: counts.direct_styles_kept as f64,
             retain_reasons: serde_json::Value::Object(
                 crate::perf_counters::retain_reasons()
                     .into_iter()

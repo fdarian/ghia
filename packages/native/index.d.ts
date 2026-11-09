@@ -1561,6 +1561,8 @@ export interface BuildCounters {
   /** Roots drawn direct (`GPUIX_DIRECT_PAINT`, `render/`), and the nodes they hold. */
   directRoots: number
   directNodes: number
+  /** Nodes of direct roots whose style came from what the node kept, not from a resolve. */
+  directStylesKept: number
   /**
    * A JSON object: elements by the reason they are, or are not, in a retainable subtree, for
    * the builds since the reset. `retained` is the share that is; every built element is counted

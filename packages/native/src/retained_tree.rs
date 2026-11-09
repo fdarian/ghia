@@ -675,6 +675,8 @@ pub struct RetainedTree {
     pub styles: StyleTable,
     /// What each built element was painted with, for the walks that read the tree.
     pub(crate) resolved: std::cell::RefCell<crate::resolved_style::ResolvedStyles>,
+    /// What the nodes of direct roots keep from frame to frame (`render::store`).
+    pub(crate) direct: std::cell::RefCell<crate::render::Store>,
     /// Whether the elements with `content-visibility: auto` skip their content, and the sizes
     /// elements remember.
     pub(crate) relevance: crate::layout::content_visibility::Relevance,
@@ -743,6 +745,7 @@ impl RetainedTree {
             relations: RelationRegistry::default(),
             styles: StyleTable::default(),
             resolved: Default::default(),
+            direct: Default::default(),
             relevance: Default::default(),
             universal: None,
             root_id: None,
@@ -1191,6 +1194,7 @@ impl RetainedTree {
             self.container_rule_count -= usize::from(has_container_rules(&element));
             self.relations.destroyed(&element);
             self.resolved.get_mut().forget(id);
+            self.direct.get_mut().forget(id);
             destroyed.push(id);
             for child_id in element.children {
                 self.destroy_element_recursive(child_id, destroyed);

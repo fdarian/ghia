@@ -25,6 +25,7 @@ thread_local! {
     static LIST_ITEMS_SPLICED: Cell<u64> = const { Cell::new(0) };
     static DIRECT_ROOTS: Cell<u64> = const { Cell::new(0) };
     static DIRECT_NODES: Cell<u64> = const { Cell::new(0) };
+    static DIRECT_STYLES_KEPT: Cell<u64> = const { Cell::new(0) };
     /// Not cleared by `reset`: it is read with the window's frame work counters, which run from
     /// the window's creation and are subtracted by the reader.
     static DORMANT_TICKS: Cell<u64> = const { Cell::new(0) };
@@ -65,6 +66,8 @@ pub(crate) struct Counts {
     /// Roots drawn direct (`render`), and the nodes they hold.
     pub direct_roots: u64,
     pub direct_nodes: u64,
+    /// Nodes whose resolved style a direct root took from what the node kept (`render::store`).
+    pub direct_styles_kept: u64,
 }
 
 /// A frame left `elements` unbuilt because it found them unchanged.
@@ -118,6 +121,10 @@ pub(crate) fn list_items_spliced(items: u64) {
 pub(crate) fn direct_built(nodes: u64) {
     DIRECT_ROOTS.with(|count| count.set(count.get() + 1));
     DIRECT_NODES.with(|count| count.set(count.get() + nodes));
+}
+
+pub(crate) fn direct_style_kept() {
+    DIRECT_STYLES_KEPT.with(|count| count.set(count.get() + 1));
 }
 
 pub(crate) fn dormant_tick() {
@@ -176,6 +183,7 @@ pub(crate) fn snapshot() -> Counts {
         list_items_spliced: LIST_ITEMS_SPLICED.with(Cell::get),
         direct_roots: DIRECT_ROOTS.with(Cell::get),
         direct_nodes: DIRECT_NODES.with(Cell::get),
+        direct_styles_kept: DIRECT_STYLES_KEPT.with(Cell::get),
     }
 }
 
@@ -197,6 +205,7 @@ pub(crate) fn reset() {
     LIST_ITEMS_SPLICED.with(|count| count.set(0));
     DIRECT_ROOTS.with(|count| count.set(0));
     DIRECT_NODES.with(|count| count.set(0));
+    DIRECT_STYLES_KEPT.with(|count| count.set(0));
     RETAIN_SLOTS.with(|slots| *slots.borrow_mut() = [0; crate::retain::SLOTS]);
 }
 

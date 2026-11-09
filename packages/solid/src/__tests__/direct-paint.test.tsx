@@ -39,6 +39,8 @@ type Scene = {
   directRoots: number
   /** The nodes they hold, at least. */
   directNodes?: number
+  /** Some node took its resolved style from what it kept in an earlier frame (`directStylesKept`). */
+  directStylesKept?: boolean
   /** The pointer is on the page: what it heard in each frame is compared, and some frame heard it. */
   hears?: boolean
   /** What the pointer does after the step is drawn. */
@@ -189,6 +191,50 @@ const scenes: Scene[] = [
         </div>
       </div>
     ),
+  },
+  {
+    name: "inherited-only",
+    steps: 6,
+    width: 360,
+    height: 300,
+    directRoots: 2,
+    directStylesKept: true,
+    hears: true,
+    // The styles of the roots and of the nodes below are the same objects in every step: a commit moves only what they inherit (the colour and
+    // size of the page around them, its colour scheme) and whether the pointer is on the first root, which has a hover style. A node that kept its
+    // resolved style from an earlier step must not show it.
+    view: (step) => (
+      <div
+        style={{
+          width: 340,
+          backgroundColor: "#ffffff",
+          color: ["#aa2200", "#0044aa", "#aa2200", "#008844", "#008844", "#aa2200"][step()],
+          fontSize: [16, 20, 16, 12, 12, 16][step()],
+          colorScheme: (["light", "light", "dark", "dark", "light", "light"] as const)[step()],
+        }}
+        onPointerMove={hear("page")}
+      >
+        <div style={{ padding: "0.5em", border: "2px solid currentColor", borderRadius: "0.4em", backgroundColor: "light-dark(#eef3f8, #223344)", hover: { backgroundColor: "light-dark(#ffeedd, #553311)", borderColor: "#cc3300" } }}>
+          <text>inherits the colour and the size</text>
+          <div style={{ marginTop: "0.25em", padding: "0.2em", borderLeft: "3px solid currentColor", width: "12em", boxShadow: "0 1px 2px currentColor" }}>
+            <text style={{ fontSize: "0.8em" }}>{() => `em text ${step()}`}</text>
+            <div style={{ height: "1.5em", marginTop: "0.2em", backgroundColor: "currentColor" }} />
+          </div>
+        </div>
+        <div style={{ margin: "0.5em 0", padding: "0.3em 0.6em", backgroundColor: "light-dark(#f3f8ee, #334422)", border: "1px solid light-dark(#335577, #99bbdd)" }}>
+          <text>a second root</text>
+        </div>
+      </div>
+    ),
+    act: (renderer, step) => {
+      // The pointer crosses the page from the top, and rests on the first root in the odd steps and off the page in the even ones.
+      for (const y of [6, 20, 40, 60, 80, 100, 130, 170]) {
+        renderer.nativeSimulateMouseMove(40, y)
+        renderer.dispatchNativeEvents()
+      }
+      renderer.nativeSimulateMouseMove(step % 2 ? 40 : 400, step % 2 ? 20 : 400)
+      renderer.dispatchNativeEvents()
+    },
   },
   {
     name: "em-units",
@@ -699,6 +745,7 @@ function run(scene: Scene, direct: boolean) {
       frames,
       roots: counters.directRoots,
       nodes: counters.directNodes,
+      kept: counters.directStylesKept,
       hits: retained.hits,
       mismatches: renderer.getRetainMismatches(),
     }
@@ -716,6 +763,8 @@ describeNative("direct paint", { timeout: 120_000 }, () => {
       if (scene.directRoots === 0) expect(on.roots, "nothing here is plain").toBe(0)
       else expect(on.roots, "the plain roots are drawn direct").toBeGreaterThanOrEqual(scene.directRoots)
       expect(on.nodes, "a direct root holds its nodes").toBeGreaterThanOrEqual(scene.directNodes ?? on.roots)
+      expect(off.kept, "nothing is kept with the switch off").toBe(0)
+      if (scene.directStylesKept) expect(on.kept, "a node whose inheritance did not change keeps its style").toBeGreaterThan(0)
       expect(on.mismatches, "what a retained root replays is what is built").toEqual([])
       for (let index = 0; index < off.frames.length; index++) {
         const frame = off.frames[index].label

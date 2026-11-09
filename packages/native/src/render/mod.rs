@@ -13,6 +13,7 @@ mod build;
 mod eligible;
 mod element;
 mod node;
+mod store;
 
 use std::sync::{
     LazyLock,
@@ -21,6 +22,7 @@ use std::sync::{
 
 pub(crate) use build::build_direct;
 pub(crate) use eligible::is_direct_root;
+pub(crate) use store::Store;
 
 static ENABLED: LazyLock<AtomicBool> =
     LazyLock::new(|| AtomicBool::new(std::env::var("GPUIX_DIRECT_PAINT").is_ok_and(|value| value == "1")));

@@ -6,10 +6,15 @@
 //! of theirs would have recorded is recorded here ([`build_node`]), or is nothing for a node that
 //! [`super::eligible`] let through.
 
+use std::rc::Rc;
+use std::sync::Arc;
+
 use gpui::{AnyElement, IntoElement, Refineable, Style, StyleRefinement, Styled};
 
 use super::element::DirectRoot;
 use super::node::{Arena, Child, NodeSpec, Placement};
+use super::store::Inputs;
+use crate::color::ColorReads;
 use crate::layout::cull::Subtree;
 use crate::renderer::{BuildCtx, GpuixView};
 use crate::resolved_style::Resolved;
@@ -155,7 +160,48 @@ fn bounds_flags(style: Option<&StyleDesc>, scroller: &Option<(gpui::ScrollHandle
 /// The style of a host as `compute_style_internal` makes it from the `Div` that `build_host_container`
 /// makes, which has only its base style set: `Style::default()` refined by what the build applied. With how
 /// that `Div` is placed: `Element::lift_z` and `Element::escapes_to` read its base style, the refinement.
-fn resolve_style(element: &RetainedElement, style: Option<&StyleDesc>, lift_absorbed: bool, ctx: &BuildCtx) -> (Style, Placement) {
+///
+/// A node whose style is its element's own takes what it kept ([`super::store`]) while nothing the resolve reads
+/// has changed.
+fn resolve_style(element: &RetainedElement, style: Option<&StyleDesc>, lift_absorbed: bool, ctx: &BuildCtx) -> (Rc<Style>, Placement) {
+    let own = element
+        .style
+        .as_ref()
+        .filter(|own| super::store::enabled() && style.is_some_and(|style| std::ptr::eq(Arc::as_ptr(own), style)));
+    let Some(own) = own else {
+        let (resolved, placement) = resolve_fresh(element, style, lift_absorbed, ctx);
+        return (Rc::new(resolved), placement);
+    };
+    let inputs = Inputs::of(ctx, lift_absorbed);
+    let verify = crate::css::style_cache::mode() == crate::css::style_cache::Mode::Verify;
+    if let Some(kept) = ctx.tree.direct.borrow().find(element.id, own, &inputs) {
+        if verify {
+            let ((fresh, placement), reads) = ctx.inherited.colors.watch_reads(|| resolve_fresh(element, style, lift_absorbed, ctx));
+            assert!(
+                format!("{fresh:?}") == format!("{:?}", kept.resolved) && placement == kept.placement && reads == kept.reads,
+                "the node {} kept a style that resolves differently now\n kept {:?} {:?} ({:?})\n now  {fresh:?} {placement:?} ({reads:?})",
+                element.id,
+                kept.resolved,
+                kept.placement,
+                kept.reads,
+            );
+        }
+        if kept.reads == ColorReads::Own {
+            ctx.inherited.colors.note_read();
+        }
+        crate::perf_counters::direct_style_kept();
+        return (Rc::clone(&kept.resolved), kept.placement);
+    }
+    let ((resolved, placement), reads) = ctx.inherited.colors.watch_reads(|| resolve_fresh(element, style, lift_absorbed, ctx));
+    let resolved = Rc::new(resolved);
+    // What another context's colour was read cannot be said again by a node of this one.
+    if reads != ColorReads::Other {
+        ctx.tree.direct.borrow_mut().keep(element.id, own, inputs, reads, Rc::clone(&resolved), placement);
+    }
+    (resolved, placement)
+}
+
+fn resolve_fresh(element: &RetainedElement, style: Option<&StyleDesc>, lift_absorbed: bool, ctx: &BuildCtx) -> (Style, Placement) {
     let mut refinement = StyleRefinement::default();
     if let Some(style) = style {
         refinement = crate::css::style_cache::apply(
