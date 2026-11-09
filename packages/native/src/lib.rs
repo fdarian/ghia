@@ -16,6 +16,7 @@ mod accessibility;
 mod app_menu;
 mod automation;
 mod background_images;
+pub mod batch;
 mod color;
 mod css;
 mod custom_elements;

@@ -35,6 +35,7 @@ use std::time::Duration;
 use wasm_bindgen::JsCast as _;
 
 use crate::accessibility::{apply_a11y_click, apply_accessibility};
+use crate::batch::BatchOp;
 use crate::css::length::LengthContext;
 use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::events::app_region::AppRegion;
@@ -13755,66 +13756,6 @@ pub(crate) fn emit_event_full(
 
 // ── Batch processing ─────────────────────────────────────────────
 
-/// Parsed batch operation — typed enum for atomic validation.
-/// All ops are parsed and validated BEFORE any tree mutation occurs.
-/// This prevents partial application on malformed batches.
-enum BatchOp<'a> {
-    CreateElement {
-        id: u64,
-        element_type: String,
-    },
-    DestroyElement {
-        id: u64,
-    },
-    DetachChild {
-        id: u64,
-    },
-    AppendChild {
-        parent_id: u64,
-        child_id: u64,
-    },
-    InsertBefore {
-        parent_id: u64,
-        child_id: u64,
-        before_id: u64,
-    },
-    /// The payload stays as raw JSON until apply time.
-    ///
-    /// Two reasons. A parsed `StyleDesc` is ~1.4 KB, and a `Vec<BatchOp>` is as
-    /// wide as its widest variant, so inlining one made a 220k-op mount reserve
-    /// over 300 MB before it parsed a single op. And the tree hash-conses
-    /// styles by content, so it needs the bytes: hashing ~110 bytes is far
-    /// cheaper than building 80 `Option` fields and throwing 99.8% of them away.
-    SetStyle {
-        id: u64,
-        style: &'a serde_json::value::RawValue,
-    },
-    SetText {
-        id: u64,
-        content: String,
-    },
-    SetEventListener {
-        id: u64,
-        event_type: String,
-        has_handler: bool,
-    },
-    SetRoot {
-        id: u64,
-    },
-    SetKeyboardFocusDim {
-        enabled: bool,
-    },
-    /// Raw for the same reasons as `SetStyle`. `None` clears the layer.
-    SetUniversalStyle {
-        style: Option<&'a serde_json::value::RawValue>,
-    },
-    SetCustomProp {
-        id: u64,
-        key: String,
-        value: serde_json::Value,
-    },
-}
-
 /// A batch failure. The message names the op index, so it survives the trip
 /// back to JS as a plain `Error`.
 pub type BatchResult<T> = std::result::Result<T, String>;
@@ -13836,7 +13777,7 @@ pub type BatchResult<T> = std::result::Result<T, String>;
 /// * `hasHandler` is accepted as a bool or a number
 /// * errors still name the op index. `serde_json` reports a byte offset, which
 ///   is useless when you are chasing a desync
-fn parse_batch_ops(bytes: &[u8]) -> BatchResult<Vec<BatchOp<'_>>> {
+pub(crate) fn parse_batch_ops(bytes: &[u8]) -> BatchResult<Vec<BatchOp<'_>>> {
     serde_json::from_slice::<BatchOps>(bytes)
         .map(|batch| batch.0)
         .map_err(|error| format!("Failed to parse batch: {error}"))
@@ -13985,7 +13926,8 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
                     },
                     "setStyle" => BatchOp::SetStyle {
                         id: next_id(&mut seq, "id")?,
-                        style: next_arg(&mut seq, "style")?,
+                        style: next_arg::<A, &serde_json::value::RawValue>(&mut seq, "style")?
+                            .get(),
                     },
                     "setText" => BatchOp::SetText {
                         id: next_id(&mut seq, "id")?,
@@ -14005,7 +13947,10 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
                         enabled: next_arg(&mut seq, "enabled")?,
                     },
                     "setUniversalStyle" => BatchOp::SetUniversalStyle {
-                        style: next_arg(&mut seq, "style")?,
+                        style: next_arg::<A, Option<&serde_json::value::RawValue>>(
+                            &mut seq, "style",
+                        )?
+                        .map(serde_json::value::RawValue::get),
                     },
                     "setCustomProp" => BatchOp::SetCustomProp {
                         id: next_id(&mut seq, "id")?,
@@ -14032,10 +13977,9 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
 /// Turn one raw `setStyle` or `setUniversalStyle` payload into a shared style.
 fn intern_style_payload(
     styles: &mut StyleTable,
-    payload: &serde_json::value::RawValue,
+    payload: &str,
 ) -> BatchResult<Arc<StyleDesc>> {
-    let raw = payload.get().trim();
-    styles.intern(raw.as_bytes())
+    styles.intern(payload.trim().as_bytes())
 }
 
 /// The styles a batch's payloads resolved to, in op order.

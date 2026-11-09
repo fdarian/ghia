@@ -1614,6 +1614,12 @@ export interface CompositionLayerReading {
   visible: boolean
 }
 
+/** `Debug` of every op the JSON decoder reads from `json`. */
+export declare function debugDecodeJsonBatch(json: string): Array<string>
+
+/** `Debug` of every op the binary decoder reads from `bytes`. */
+export declare function debugDecodeWireBatch(bytes: Uint8Array): Array<string>
+
 /** Recorded draw times from the debug frame overlay. */
 export interface DebugFrameOverlayStats {
   currentMs?: number
