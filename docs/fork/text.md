@@ -225,6 +225,19 @@ A font with no GPOS table (`FontMetrics::legacy_kerning`, found with font-kit's 
 
 **Text nodes.** An item is a text node, not a font run: `Quick brown ` + `fox jumps` is 8601/64 of a pixel as two nodes in Chrome and 8600/64 as one (`Hello {name}` in React is two). `paragraph::styles` keeps a run per text node (it used to merge neighbours of one style, which only saved runs; a paragraph of one node with no restyling is still plain). `shape_text_inline` passes the byte where each `TextRun` after the first of a line starts, and the cache key of a wrapped line holds them. Shaping is unchanged: runs of one font are one font run, so ligatures and kerning across the edge of two nodes stay. A kern pair across the edge is split between the two items as one inside a node is (Blink's split applies within the shaped run): the item before ends `k - (k >> 1)` earlier and the one after is that much wider, so `SnapMarks` measures every glyph, an item edge included, without the share of the kern before it and from the same measure of its item's start.
 
+## The children plan is kept per element
+
+`plan_children_at` (`src/text/inline.rs`) turns the children of a host element into paragraphs and blocks, and a build asks for it for every host with children. The answer is kept on the element (`RetainedElement::kept_plan`, `src/text/plan_cache.rs`, with the text a `<text>` host reads out to accessibility, which is a function of the plan) and found again while its key is the same, so it dies with the element and needs no eviction. What the planner reads, and how each input is keyed:
+
+| input | key |
+|---|---|
+| the element and what the paragraph builder walks below it: children and their order, content, styles (`display`, `position`, `white-space`, `overflow`, padding, border and margin along the line), listeners and props that make a `<text>` a box, `tabIndex`, `highlight`, `display: contents` splices | `subtree_revision`, which every mutation of the element or a descendant moves |
+| the `white-space` the element inherits | its computed value (`white_space::computed`, which walks the ancestors), the one input outside the subtree |
+| the `display` and `order` that `@container` blocks gave the elements it reads (`container_display`, `container_order`), written by a build after the revision was taken | a count of the times `layout::container::settle` found one changed (per thread: a change anywhere plans every host again, which is more than the plan reads and never less) |
+| the elements a `display` transition keeps rendered (`box_generation::hold_display`) | not keyed: while there are any, the plan is made and not kept |
+
+The key is complete only as far as these are the planner's inputs: a new one (a thing `plan_flow`, `table::plan_children` or `is_inline_box` reads that no mutation of the subtree moves) has to join the key. The cache follows the style cache's switch (`setStyleCache`, `GPUIX_STYLE_CACHE_OFF`): off plans every time, and verify (`GPUIX_RETAIN_VERIFY=1`) plans again for every plan it finds kept and panics when the two differ. `getBuildCounters()` has `plansKept` and `plansComputed`. `build_plan` borrows the kept plan, so a frame that changed nothing clones none of it. Search, selection and accessibility of skipped content call `plan_children_at` themselves and are not cached.
+
 ## What a text is built as
 
 `selectable_text` (`src/text/paint.rs`) builds every text and paragraph. The glyphs are a gpui `StyledText` (a run of the inherited style) or an `InlineText` (a paragraph with a style per run), and two closures go with them: the underlay's prepaint (announces the find matches, publishes the boxes of the inline elements in a layout-only pass) and its paint (the washes under the glyphs, the selection wash, the entry in the text registry and the painted-text log, the hit targets, bounds and focus presses of the inline boxes, the link listener). The underlay is the same code in both shapes below.

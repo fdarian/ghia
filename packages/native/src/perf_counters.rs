@@ -13,6 +13,8 @@ thread_local! {
     static STYLE_DESC_CLONES: Cell<u64> = const { Cell::new(0) };
     static STYLE_APPLIES_COMPUTED: Cell<u64> = const { Cell::new(0) };
     static STYLE_APPLIES_REPLAYED: Cell<u64> = const { Cell::new(0) };
+    static PLANS_KEPT: Cell<u64> = const { Cell::new(0) };
+    static PLANS_COMPUTED: Cell<u64> = const { Cell::new(0) };
     static INHERITED_CLONES: Cell<u64> = const { Cell::new(0) };
     static RETAINABLE_ROOTS: Cell<u64> = const { Cell::new(0) };
     static RETAINABLE_ELEMENTS_LARGE: Cell<u64> = const { Cell::new(0) };
@@ -39,6 +41,9 @@ pub(crate) struct Counts {
     pub style_applies_computed: u64,
     /// The same, replayed from what an earlier element of the style had made.
     pub style_applies_replayed: u64,
+    /// Children plans of host elements found kept on the element, and planned, see `text::plan_cache`.
+    pub plans_kept: u64,
+    pub plans_computed: u64,
     pub inherited_clones: u64,
     /// The maximal unchanged, retainable subtrees of the builds, see `retain`.
     pub retainable_roots: u64,
@@ -73,6 +78,11 @@ pub(crate) fn element_built() {
 
 pub(crate) fn style_applied(replayed: bool) {
     let counter = if replayed { &STYLE_APPLIES_REPLAYED } else { &STYLE_APPLIES_COMPUTED };
+    counter.with(|count| count.set(count.get() + 1));
+}
+
+pub(crate) fn plan_made(kept: bool) {
+    let counter = if kept { &PLANS_KEPT } else { &PLANS_COMPUTED };
     counter.with(|count| count.set(count.get() + 1));
 }
 
@@ -152,6 +162,8 @@ pub(crate) fn snapshot() -> Counts {
         style_desc_clones: STYLE_DESC_CLONES.with(Cell::get),
         style_applies_computed: STYLE_APPLIES_COMPUTED.with(Cell::get),
         style_applies_replayed: STYLE_APPLIES_REPLAYED.with(Cell::get),
+        plans_kept: PLANS_KEPT.with(Cell::get),
+        plans_computed: PLANS_COMPUTED.with(Cell::get),
         inherited_clones: INHERITED_CLONES.with(Cell::get),
         retainable_roots: RETAINABLE_ROOTS.with(Cell::get),
         retainable_elements: RETAIN_SLOTS.with(|slots| slots.borrow()[crate::retain::RETAINED]),
@@ -172,6 +184,8 @@ pub(crate) fn reset() {
     STYLE_DESC_CLONES.with(|count| count.set(0));
     STYLE_APPLIES_COMPUTED.with(|count| count.set(0));
     STYLE_APPLIES_REPLAYED.with(|count| count.set(0));
+    PLANS_KEPT.with(|count| count.set(0));
+    PLANS_COMPUTED.with(|count| count.set(0));
     INHERITED_CLONES.with(|count| count.set(0));
     RETAINABLE_ROOTS.with(|count| count.set(0));
     RETAINABLE_ELEMENTS_LARGE.with(|count| count.set(0));

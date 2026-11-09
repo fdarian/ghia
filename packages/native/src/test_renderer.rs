@@ -43,6 +43,9 @@ pub struct BuildCounters {
     /// result for an earlier element of the same style (`css/style_cache.rs`).
     pub style_applies_computed: f64,
     pub style_applies_replayed: f64,
+    /// Children plans of host elements found kept on the element, and planned (`text/plan_cache.rs`).
+    pub plans_kept: f64,
+    pub plans_computed: f64,
     pub inherited_clones: f64,
     /// The maximal unchanged subtrees a retained replay could have reused, see `retain`.
     pub retainable_roots: f64,
@@ -963,6 +966,8 @@ impl TestGpuixRenderer {
             style_desc_clones: counts.style_desc_clones as f64,
             style_applies_computed: counts.style_applies_computed as f64,
             style_applies_replayed: counts.style_applies_replayed as f64,
+            plans_kept: counts.plans_kept as f64,
+            plans_computed: counts.plans_computed as f64,
             inherited_clones: counts.inherited_clones as f64,
             retainable_roots: counts.retainable_roots as f64,
             retainable_elements: counts.retainable_elements as f64,

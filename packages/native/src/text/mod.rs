@@ -22,6 +22,7 @@ pub mod inline_region;
 mod leaf;
 pub mod paint;
 pub mod paragraph;
+pub(crate) mod plan_cache;
 pub mod runs;
 pub mod search;
 pub mod selection;
