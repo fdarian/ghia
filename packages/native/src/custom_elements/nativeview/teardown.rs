@@ -7,16 +7,17 @@
 //! ending an element twice is the same as once.
 use std::{
     cell::RefCell,
-    collections::HashMap,
     rc::{Rc, Weak},
 };
+
+use rustc_hash::FxHashMap;
 
 use super::Shared;
 
 type Key = (u64, u64);
 
 thread_local! {
-    static LIVE: RefCell<HashMap<Key, Weak<RefCell<Shared>>>> = RefCell::new(HashMap::new());
+    static LIVE: RefCell<FxHashMap<Key, Weak<RefCell<Shared>>>> = RefCell::new(FxHashMap::default());
 }
 
 /// Makes `shared` findable as element `key.1` of tree `key.0`.
@@ -33,6 +34,10 @@ pub(super) fn forget(key: Key) {
 /// Ends the nativeviews among `ids`, the elements a batch destroyed in tree `tree`: `detach` is
 /// told to JS and then the surfaces go. Call it with the tree unlocked: the listener runs JS.
 pub(crate) fn destroyed(tree: u64, ids: &[f64]) {
+    // Most batches destroy no nativeview, so the table is usually empty and each id would cost a probe for nothing.
+    if LIVE.with(|live| live.borrow().is_empty()) {
+        return;
+    }
     let ended: Vec<Rc<RefCell<Shared>>> = LIVE.with(|live| {
         let mut live = live.borrow_mut();
         ids.iter()
