@@ -319,6 +319,48 @@ each entry or applies it again.
 - **Also taken, same bump** (zed `0f2308a120`, `a8f385f381`, slice Z4c): `Scene::finish` moves each item of a sorted vector once, and a patch that a list scroll follows in the same draw leaves the scene to the translate (`PatchCounters::deferred_scene_rebuilds`, `getPatchCounters().deferredSceneRebuilds`), which made the frame again twice.
 - **How to carry it on a sync.** The additions are beside upstream's code: the field `exact_size` and the counters in `StateInner`, `measure_unshown` and `note_laid_out` where `layout_all_items`, `layout_items` and the overdraw measured a row, and the two functions of `scroll_patch.rs`. Run the `exact_sizes` filter of `cargo test -p gpui --lib --features test-support` and `list-exact-sizes.test.tsx`.
 
+### A Div keeps an element state only when something reads it (zed `2c3cda3566`, `elements/div.rs`)
+
+- **Decision.** The owner approved this on 2026-11-09, always on and with no opt-in per element or per window, as an exception to
+  the rule above: it changes `Interactivity` in upstream's `div.rs`, and any GPUI app would gain from it. It is a candidate for a
+  PR to `zed-industries/zed` (made in a separate worktree from upstream `main`, per [AGENTS.md](../../AGENTS.md)); until it lands
+  the fork carries it.
+- **Before.** A Div with an id kept an `InteractiveElementState` and took it out of the window's element-state map and put it back
+  in each of its three phases (request layout, prepaint, paint: a hash remove, an insert and a compare of the id path), whether
+  or not anything read it. The state is `Default` and unused on a plain host div; the elements of a Ghia tree all have an id.
+- **After.** `Interactivity::state_id` hands the three `with_optional_element_state` calls the id only when a field of the state
+  has a reader on the element, and `None` otherwise, which is what a Div with no id always did, so every reader already handles
+  it. The readers, by field (each clause of `state_id` is one of these): `focus_handle` (`focusable`, which `track_focus` and
+  `tab_index` set), `scroll_offset` and `ongoing_scroll` (`overflow: scroll` on either axis in the base style; a tracked
+  scroll handle owns its own and reads no state), `pending_mouse_down`, `pending_keyboard_down` and `clicked_state` (a click,
+  aux-click or drag listener), `clicked_state` (an active or group active style), `hover_state` (a hover or group hover style),
+  `hover_listener_state` (a hover listener), `active_tooltip` (a tooltip). Nothing else in gpui or `packages/native` names the
+  type. A new reader of the state needs a clause, and `every_feature_that_reads_the_interactive_state_keeps_it` lists them.
+- **Considerations.**
+  - What is read is the same in the three phases: `paint_mouse_listeners` drains the listeners, and the paint phase reads
+    `state_id` before it does.
+  - The state of an element that has the feature in one frame and not in the next is dropped by the frame that does not access it
+    (as for any element state), so a click in progress, a scroll offset of an `overflow: scroll` that is switched off and on, or
+    a focus handle made by `focusable` does not survive a frame without the feature. Before, the state lived as long as the
+    element's id did. A tooltip that loses its builder is dropped with the state where it was dropped by `take()`.
+  - Two differences a plain Div shows: `Interactivity::active` (nothing in gpui or Ghia reads it) stays `None`, and a mouse down
+    or up over it no longer calls `Window::refresh`, which the `clicked_state` handlers bound for every element with a state did
+    unconditionally (their purpose is the active style, which has its own clause). A Div whose pointer handlers matter
+    schedules its own frame, as a Ghia host does through its dispatch.
+  - A tuning that any GPUI app gets is not a reason for an engine change by the rule above; this one is carried because the
+    owner chose to, for the per-element cost of a host tree.
+- **Reasoning.** The element state was 32k instructions of a 917k row (the S4.13 split of a retain-off column
+  of 50 rows by sampling) and none of it was used by a row's plain divs. Release addon, instructions per row of 50 rows, before
+  (zed `f880c8e462`) and after: column retain off 916.7k to 895.7k, retain on 1130.0k to 1108.5k, list retain off 973.0k to
+  949.8k, list retain on 1265.6k to 1243.5k (-2.3% to -1.7%); the list's patched crossing 3.110M to 2.993M (-3.8%); the column's
+  crossing 46.44M to 45.29M.
+- **Tests.** `a_plain_div_with_an_id_keeps_no_interactive_state`, `an_element_without_an_id_keeps_no_interactive_state`,
+  `every_feature_that_reads_the_interactive_state_keeps_it` (click, aux click, drag, hover, group hover, active, group active,
+  hover listener, tooltip, overflow scroll on each axis, tracked handle with overflow scroll, focusable, tab index) and
+  `a_click_listener_added_after_a_plain_frame_gets_its_state` in `div.rs`. The splice tests of `several_roots`
+  (`splice_patch_tests.rs`) count the element states a frame accesses and gave their plain divs a hover style so that they have
+  some. A sync that replaces `div.rs` has to keep `state_id` and its three call sites.
+
 ## Procedure
 
 1. Fetch the upstreams: `git fetch upstream` in the repo root and in `zed/`, and `git fetch zed-industries main` in `zed/`.
