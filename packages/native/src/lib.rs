@@ -72,6 +72,10 @@ mod updater;
 ))]
 mod test_renderer;
 
+/// Raw GPUI rows for measuring what an element costs without a Ghia tree, see `oracle/mod.rs`.
+#[cfg(all(feature = "test-support", target_os = "macos"))]
+mod oracle;
+
 /// Runs a real `WKWebView` through a load, a title, history and scripts, on the main thread
 /// (`cargo run --example webview_smoke`). Panics if the page misbehaves.
 #[cfg(all(target_os = "macos", feature = "test-support"))]

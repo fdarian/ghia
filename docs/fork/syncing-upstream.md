@@ -71,6 +71,13 @@ cannot do without); the engine otherwise stays as upstream ships it, and upstrea
 needs the owner's explicit permission and an entry here: the decision, the considerations and the reasoning. A sync keeps
 each entry or applies it again.
 
+### Partial redraw (zed `window/damage.rs`, `scene.rs`, `platform.rs`, `composition/present.rs`, `gpui_apple/src/metal_renderer.rs`, `gpui_macos/src/window.rs`; zed `0cad85379a`, `0800fee7da`, always on in the merge of `claude/s4-dirty-regions`)
+
+- **Decision.** Approved by the owner (2026-11-08, "GPU damage from patches" in the Stage 4 plan, to be built at the end and compared with and without). It was built opt-in and measured; Farrel 2026-11-09: always on, no opt-in. There is no `Window::set_partial_redraw`, no `GPUIX_PARTIAL_REDRAW`, no renderer option and no `TestRenderer.setPartialRedraw`: every window computes its damage and hands it to `PlatformWindow::draw_with_damage` (a defaulted method that calls `draw`, so a platform that cannot draw in part is as upstream draws it). Metal draws a frame whole when the scene has an effect group or a surface, the window is transparent, it has native surfaces (`draw_composed`), the size changed, the damage is unknown (a rebuild no site said) or the target was left stale; a sync that touches those conditions has to keep them. `GPUI_GPU_TIMES=<file>` stays as a documented measurement switch ([testing.md](testing.md#driving-a-live-window)).
+- **What it changes.** The window computes the damage from what the patches write (`PaintOperation::extent`, the old and the new area of each operation, a shadow's with its blur), a scroll translate's moved runs and a thumb's repaint, and any rebuild it was not told of is all of the window (`Scene::revision`). Metal keeps the picture in a texture of its own, loads it, draws the scene under a scissor of the damage after painting the scissor black, and copies it to the drawable. See [paint-and-transforms.md](paint-and-transforms.md#partial-redraw).
+- **Considerations.** Upstream tried it and none merged: https://github.com/zed-industries/zed/pull/53932 (damage bubbled up from the elements), /pull/59441 (a diff of two consecutive scenes, `SceneDamage::between`, wgpu on Linux with `present_with_damage`), /pull/59461 (the property test of that diff) and /pull/62455 (`GPUI_EXPERIMENTAL_PARTIAL_RENDER`: a persistent target, a scissored draw per rectangle of up to 8, a copy; Linux only; it reports a 4x GPU and power cut for editing and 7x for a hover that changes nothing), all closed unmerged; issues /issues/15166 and /issues/8043 are open. A diff of scenes costs a pass over the primitives of every frame, which a patch frame does not pay now (a patch knows what it wrote), so the damage here comes from the patches, and a frame that is not a patch is all of the window. A mistake is a stale pixel, so every site that writes over the rendered scene says what it wrote, a rebuild that no site said is all of the window, and the tests compare the damage with what differs between the scenes and the pictures with a whole draw. Not done: more than one rectangle (the damage is the union), a group or backdrop that does not meet the damage (any group is all of the window, which is more than it needs to be; tested for opacity, blur, backdrop blur and drop shadow), a drawable that is reused without a copy (buffer age: a drawable's contents after it is presented are not defined), a transparent window.
+- **Reasoning.** The mailbox of ghia-bench in a live window, 1280 x 800 at scale 1: a frame costs 0.85 ms of GPU whatever it changes, and 0.28 ms for a patch of two rows with the patch; a hover phase goes from 25 to 12.6 ms of GPU time in 4 s and idle from 16 to 4.5 ms in 10 s, the scroll phase (frames built whole) is the same. Costs, measured on and off back to back (two runs each): a frame built whole costs +8% GPU for the copy (0.85 to 0.92 ms), a hover patch frame goes from 0.84 to 0.28 ms, a thumb repaint 0.86 to 0.23 ms and a scroll translate 0.86 to 0.61 ms; the encode of a patch frame costs 0.1 ms more CPU (0.53 to 0.65). The GPU is busy 0.2 to 0.6% of the wall time in those phases, so the saving is small in absolute terms on this display; it grows with the pixels of the window. Always on at the owner's decision, with the 2x display and the energy (needs root) not measured.
+
 ### Atlas tile sizing (zed `13f5c1d1b7`, `gpui_apple/src/metal_atlas.rs`)
 
 - **Decision.** A tile wider or taller than 512 px (`DEDICATED_TEXTURE_THRESHOLD`) gets an atlas texture of exactly its
@@ -233,7 +240,7 @@ each entry or applies it again.
   replays it. What cannot be made what a frame built whole records is dropped as before: a root recorded to be put elsewhere,
   one that handed elements to a stacking context outside it, one whose listeners report to their owner without an `on_replay`
   hook, one with an accessibility recording, and the roots recorded inside it. A root that published (`note_publication`: any
-  element with an `on_painted`, `on_painted_layout` or prepaint listener, which every host element of Ghia has) keeps the rewritten
+  element with an `on_painted`, `on_painted_layout`, prepaint listener or layout probe, which every host element of Ghia has) keeps the rewritten
   recording when it has an `on_replay` hook, as a frame built whole accepts for the recording (`c4590da472`), so consecutive
   commits in a root are all patches. The patch cannot update the key the root was recorded with.
 - **Prepared patches (`52f5a22f76`).** The relayout path of a patch is split into `prepare_unit` (surroundings, request_layout, the
@@ -318,6 +325,48 @@ each entry or applies it again.
 - **Why it is exact.** The owner answers only when its style leaves no doubt (`list_sizes.rs`), and every shown row is checked, in release too (the counter); `window/membership_patch_tests.rs` (`exact_sizes`) compares wheels, writes, the extent and `measure_all` of a list with declared sizes with the same list measured by layout, and `react/src/__tests__/list-exact-sizes.test.tsx` does it for 30 row styles.
 - **Also taken, same bump** (zed `0f2308a120`, `a8f385f381`, slice Z4c): `Scene::finish` moves each item of a sorted vector once, and a patch that a list scroll follows in the same draw leaves the scene to the translate (`PatchCounters::deferred_scene_rebuilds`, `getPatchCounters().deferredSceneRebuilds`), which made the frame again twice.
 - **How to carry it on a sync.** The additions are beside upstream's code: the field `exact_size` and the counters in `StateInner`, `measure_unshown` and `note_laid_out` where `layout_all_items`, `layout_items` and the overdraw measured a row, and the two functions of `scroll_patch.rs`. Run the `exact_sizes` filter of `cargo test -p gpui --lib --features test-support` and `list-exact-sizes.test.tsx`.
+
+### A Div keeps an element state only when something reads it (zed `2c3cda3566`, `elements/div.rs`)
+
+- **Decision.** The owner approved this on 2026-11-09, always on and with no opt-in per element or per window, as an exception to
+  the rule above: it changes `Interactivity` in upstream's `div.rs`, and any GPUI app would gain from it. It is a candidate for a
+  PR to `zed-industries/zed` (made in a separate worktree from upstream `main`, per [AGENTS.md](../../AGENTS.md)); until it lands
+  the fork carries it.
+- **Before.** A Div with an id kept an `InteractiveElementState` and took it out of the window's element-state map and put it back
+  in each of its three phases (request layout, prepaint, paint: a hash remove, an insert and a compare of the id path), whether
+  or not anything read it. The state is `Default` and unused on a plain host div; the elements of a Ghia tree all have an id.
+- **After.** `Interactivity::state_id` hands the three `with_optional_element_state` calls the id only when a field of the state
+  has a reader on the element, and `None` otherwise, which is what a Div with no id always did, so every reader already handles
+  it. The readers, by field (each clause of `state_id` is one of these): `focus_handle` (`focusable`, which `track_focus` and
+  `tab_index` set), `scroll_offset` and `ongoing_scroll` (`overflow: scroll` on either axis in the base style; a tracked
+  scroll handle owns its own and reads no state), `pending_mouse_down`, `pending_keyboard_down` and `clicked_state` (a click,
+  aux-click or drag listener), `clicked_state` (an active or group active style), `hover_state` (a hover or group hover style),
+  `hover_listener_state` (a hover listener), `active_tooltip` (a tooltip). Nothing else in gpui or `packages/native` names the
+  type. A new reader of the state needs a clause, and `every_feature_that_reads_the_interactive_state_keeps_it` lists them.
+- **Considerations.**
+  - What is read is the same in the three phases: `paint_mouse_listeners` drains the listeners, and the paint phase reads
+    `state_id` before it does.
+  - The state of an element that has the feature in one frame and not in the next is dropped by the frame that does not access it
+    (as for any element state), so a click in progress, a scroll offset of an `overflow: scroll` that is switched off and on, or
+    a focus handle made by `focusable` does not survive a frame without the feature. Before, the state lived as long as the
+    element's id did. A tooltip that loses its builder is dropped with the state where it was dropped by `take()`.
+  - Two differences a plain Div shows: `Interactivity::active` (nothing in gpui or Ghia reads it) stays `None`, and a mouse down
+    or up over it no longer calls `Window::refresh`, which the `clicked_state` handlers bound for every element with a state did
+    unconditionally (their purpose is the active style, which has its own clause). A Div whose pointer handlers matter
+    schedules its own frame, as a Ghia host does through its dispatch.
+  - A tuning that any GPUI app gets is not a reason for an engine change by the rule above; this one is carried because the
+    owner chose to, for the per-element cost of a host tree.
+- **Reasoning.** The element state was 32k instructions of a 917k row (the S4.13 split of a retain-off column
+  of 50 rows by sampling) and none of it was used by a row's plain divs. Release addon, instructions per row of 50 rows, before
+  (zed `f880c8e462`) and after: column retain off 916.7k to 895.7k, retain on 1130.0k to 1108.5k, list retain off 973.0k to
+  949.8k, list retain on 1265.6k to 1243.5k (-2.3% to -1.7%); the list's patched crossing 3.110M to 2.993M (-3.8%); the column's
+  crossing 46.44M to 45.29M.
+- **Tests.** `a_plain_div_with_an_id_keeps_no_interactive_state`, `an_element_without_an_id_keeps_no_interactive_state`,
+  `every_feature_that_reads_the_interactive_state_keeps_it` (click, aux click, drag, hover, group hover, active, group active,
+  hover listener, tooltip, overflow scroll on each axis, tracked handle with overflow scroll, focusable, tab index) and
+  `a_click_listener_added_after_a_plain_frame_gets_its_state` in `div.rs`. The splice tests of `several_roots`
+  (`splice_patch_tests.rs`) count the element states a frame accesses and gave their plain divs a hover style so that they have
+  some. A sync that replaces `div.rs` has to keep `state_id` and its three call sites.
 
 ## Procedure
 

@@ -66,6 +66,8 @@ export interface BuildCounters {
   elementsBuilt: number
   elementsSkipped: number
   styleDescClones: number
+  styleAppliesComputed: number
+  styleAppliesReplayed: number
   inheritedClones: number
   retainableRoots: number
   retainableElements: number
@@ -329,13 +331,18 @@ interface NativeTestRendererApi
   setRetainPlanning(planning: boolean): void
   setRetainEnabled(enabled: boolean): void
   setPatchEnabled(enabled: boolean): void
+  presentFrame(): void
+  capturePartialPicture(path: string): boolean
   setScrollPatchEnabled(enabled: boolean): void
   setListSizesEnabled(enabled: boolean): void
+  setTextLeafEnabled(enabled: boolean): void
+  setStyleCache(mode: "on" | "off" | "verify"): void
   getPatchCounters(): PatchCounters
   setRetainLift(names: string[]): void
   getRetainMismatches(): string[]
   getPaintedFrameCount(): number
   getLayoutPassCount(): number
+  getRegistrySlots(): number[]
   getCulledSubtreeCount(): number
   setA11yActive(active: boolean): void
   setInlineDraws(enabled: boolean): void
@@ -1284,6 +1291,21 @@ export class TestRenderer implements NativeRenderer {
     this.native.setListSizesEnabled(enabled)
   }
 
+  /** Whether a text with nothing else to place is built as one element and not as a wrapper holding a
+   *  canvas and the glyphs (on by default, as `GPUIX_TEXT_LEAF_OFF` turns off for the whole run).
+   *  Process wide and read at every build: set it before content is mounted. */
+  setTextLeafEnabled(enabled: boolean): void {
+    this.native.setTextLeafEnabled(enabled)
+  }
+
+  /** Whether the step that applies a declared style to a host element is kept for the next element of
+   *  the style (`on`, the default; `GPUIX_STYLE_CACHE_OFF` turns it off for the whole run), run again
+   *  and asserted equal (`verify`, which `GPUIX_RETAIN_VERIFY` selects) or not kept (`off`). Process
+   *  wide and read at every build. */
+  setStyleCache(mode: "on" | "off" | "verify"): void {
+    this.native.setStyleCache(mode)
+  }
+
   /** How ticks were drawn by patching since the window was made: the frames and roots patched, the
    *  ticks gpui drew whole after the patch was tried (`declines`, by reason, as JSON) and the ones
    *  gpuix did not try to patch (`unpatchable`, by kind, as JSON), and `scrollPatch`: the frames drawn
@@ -1328,6 +1350,13 @@ export class TestRenderer implements NativeRenderer {
    *  once regardless. */
   getLayoutPassCount(): number {
     return this.native.getLayoutPassCount()
+  }
+
+  /** How many writes and replays each registry that a frame resets holds, without reading it: the text, the start regions, the painted
+   *  text and the paragraphs. Patches repeated with no frame built whole between them must not grow them. */
+  getRegistrySlots(): { text: number; startRegions: number; painted: number; paragraphs: number } {
+    const [text, startRegions, painted, paragraphs] = this.native.getRegistrySlots() as [number, number, number, number]
+    return { text, startRegions, painted, paragraphs }
   }
 
   /** Pretends a screen reader is connected, as the test window starts out,
@@ -2113,6 +2142,17 @@ export class TestRenderer implements NativeRenderer {
    *  captures a frame built whole; this captures what a patched tick or a frame that moved the rows in place left. */
   captureShownFrame(path: string): void {
     this.native.captureShownFrame(path)
+  }
+
+  /** Presents the frame that was drawn and not shown, as the display link of a live window does after a tick (an offscreen window has none). */
+  presentFrame(): void {
+    this.native.presentFrame()
+  }
+
+  /** Save the picture that the frames drawn in part add up to, and say whether the window has one: it is what `captureShownFrame` draws of the
+   *  scene when the damage of each frame covered what changed. */
+  capturePartialPicture(path: string): boolean {
+    return this.native.capturePartialPicture(path)
   }
 
   /** Whether the native GPUI test renderer is available. Always true. */

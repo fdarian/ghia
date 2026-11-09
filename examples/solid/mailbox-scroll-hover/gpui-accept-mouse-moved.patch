@@ -1,0 +1,38 @@
+--- a/apps/gpui/src/main.rs
++++ b/apps/gpui/src/main.rs
+@@ -541,6 +541,7 @@
+             )
+             .expect("open window");
+         cx.activate(true);
++        accept_mouse_moved_events();
+ 
+         #[cfg(feature = "snapshot")]
+         snapshot::run(window, cx);
+@@ -548,3 +549,27 @@
+         let _ = window;
+     });
+ }
++
++// Scratch variant of the bench's GPUI app (not part of ghia-bench): upstream gpui sets acceptsMouseMovedEvents to NO for a normal window and
++// takes hover from an NSTrackingArea, so mouse-moved events that CGEventPostToPid posts are dropped by AppKit before they reach the view.
++// This turns it on, which makes the posted moves reach GPUI's mouse-move handler as a real pointer's would.
++fn accept_mouse_moved_events() {
++    use std::ffi::{c_char, c_void};
++    extern "C" {
++        fn objc_getClass(name: *const c_char) -> *mut c_void;
++        fn sel_registerName(name: *const c_char) -> *mut c_void;
++        fn objc_msgSend();
++    }
++    unsafe {
++        let send_object: unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void = std::mem::transmute(objc_msgSend as *const ());
++        let send_count: unsafe extern "C" fn(*mut c_void, *mut c_void) -> usize = std::mem::transmute(objc_msgSend as *const ());
++        let send_at: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> *mut c_void = std::mem::transmute(objc_msgSend as *const ());
++        let send_bool: unsafe extern "C" fn(*mut c_void, *mut c_void, bool) = std::mem::transmute(objc_msgSend as *const ());
++        let app = send_object(objc_getClass(c"NSApplication".as_ptr()), sel_registerName(c"sharedApplication".as_ptr()));
++        let windows = send_object(app, sel_registerName(c"windows".as_ptr()));
++        for index in 0..send_count(windows, sel_registerName(c"count".as_ptr())) {
++            let window = send_at(windows, sel_registerName(c"objectAtIndex:".as_ptr()), index);
++            send_bool(window, sel_registerName(c"setAcceptsMouseMovedEvents:".as_ptr()), true);
++        }
++    }
++}

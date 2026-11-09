@@ -182,6 +182,11 @@ pub(crate) fn replace(window: WindowId, old: &crate::tape::Roots, new: &[crate::
     PARAGRAPHS.with(|paragraphs| paragraphs.borrow_mut().entry(window).or_default().replace(old, new, Kind::Paragraph, entry_of));
 }
 
+#[cfg(feature = "test-support")]
+pub(crate) fn paragraph_slots(window: WindowId) -> usize {
+    PARAGRAPHS.with(|paragraphs| paragraphs.borrow().get(&window).map_or(0, Layered::slots))
+}
+
 /// A frame brought rows in: the paragraphs they painted go where the rows of each of `rows` (in the order of
 /// the list) have theirs.
 pub(crate) fn order_by_rows(window: WindowId, rows: &[crate::tape::Roots]) {

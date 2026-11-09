@@ -136,11 +136,22 @@ impl GpuixView {
                     scratch.iter().zip(&moved).all(|((id, tape), moved)| anchors.contains(id) || tapes.same_as_recorded(*id, tape, *moved))
                 }
             };
+            // The thumbs of the list bars that fade are written in the same draw, which is a tick the
+            // rows have no part in: a bar that cannot be repainted alone draws the tick whole.
+            let _sampling = crate::scrollbar::sample_at(view.read(app).frame_instant);
+            let thumbs = match window.plan_scroll_thumb_repaints() {
+                Ok(thumbs) => thumbs,
+                Err(miss) => {
+                    view.update(app, |view, _| view.patch.decline(format!("Thumb:{miss:?}")));
+                    return false;
+                }
+            };
             let rewritten_before = window.patch_counters().rewritten_recordings;
             let done = if finishing { window.finish_prepared_patch(app, accepted) } else { window.repaint_in_place(units, app, accepted) };
             let Ok(outcome) = done else {
                 return false;
             };
+            window.repaint_scroll_thumbs(thumbs, app);
             let rewritten = window.patch_counters().rewritten_recordings - rewritten_before >= anchors.len() as u64;
             // An anchor laid out again wrote other boxes, texts and paragraphs than the frame did: they
             // take the place of the ones it wrote. A row repainted wrote the same, but its text layouts are the

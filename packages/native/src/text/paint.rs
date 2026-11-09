@@ -33,6 +33,7 @@ use gpui::{
 use crate::automation::{moved_matrix, window_point_in};
 
 use super::in_place::InPlace;
+use super::leaf::Glyphs;
 use super::selection::{self, SelectionState};
 use crate::tape::{Kind, Layered};
 
@@ -130,6 +131,13 @@ pub(crate) fn replace(window: WindowId, old: &crate::tape::Roots, new: &[crate::
         frame.start_regions.replace(old, new, Kind::StartRegion, start_region);
         frame.painted.replace(old, new, Kind::Painted, painted_text_of);
     });
+}
+
+/// How many writes and replays each registry of `window` holds, in the order text, start regions, painted text, paragraphs.
+#[cfg(feature = "test-support")]
+pub(crate) fn registry_slots(window: WindowId) -> [usize; 4] {
+    let (text, start_regions, painted) = with_frame(window, |frame| (frame.registry.slots(), frame.start_regions.slots(), frame.painted.slots()));
+    [text, start_regions, painted, super::inline_hit::paragraph_slots(window)]
 }
 
 /// A frame brought rows in, and what they wrote is at the end of the registries: it goes where the rows of
@@ -648,6 +656,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         runs.is_none() || run_styles.is_empty(),
         "a text has either explicit runs or inline run styles"
     );
+    let has_atomics = !atomics.is_empty();
     let (layout, glyphs) = if run_styles.is_empty() {
         let styled = match runs {
             Some(runs) => StyledText::new(text.clone()).with_runs(runs),
@@ -658,7 +667,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
             None => styled,
         }
         .with_text_box_trim(text_box_trim);
-        (styled.layout().clone(), styled.into_any_element())
+        (styled.layout().clone(), Glyphs::Plain(styled))
     } else {
         let inline = super::paragraph::InlineText::new(text.clone(), run_styles)
             .with_boxes(aligned_boxes, atomics);
@@ -667,7 +676,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
             None => inline,
         }
         .with_text_box_trim(text_box_trim);
-        (inline.layout().clone(), inline.into_any_element())
+        (inline.layout().clone(), Glyphs::Paragraph(inline))
     };
     super::atomic::note(element_id, &layout);
 
@@ -693,12 +702,20 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         .iter()
         .map(|focusable| (focusable.id, focusable.handle.clone()))
         .collect();
+    // The wrapper exists to hold the underlay and what is placed around the glyphs; with none of
+    // that the leaf runs the same two closures from one element.
+    let alone = decorations.is_none()
+        && groups.is_none()
+        && cursor_hitboxes.is_none()
+        && region_hitboxes.is_none()
+        && press_focus.is_empty()
+        && !has_atomics;
     let announced = highlight.clone().map(|source| (source, key.clone(), doc.clone(), text.clone()));
     let inline_boxes = std::rc::Rc::new(inline_boxes);
     let layout_of_boxes = layout.clone();
     let boxes_to_record = inline_boxes.clone();
-    let mut underlay = canvas(
-        move |_, window, _| {
+    let (prepaint, paint) = (
+        move |window: &mut Window| {
             // Numbers the find matches in document order, which needs every run's matches
             // before the first one paints. See `search::wash`.
             if window.visibility() == gpui::Visibility::Hidden {
@@ -728,7 +745,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                 }
             }
         },
-        move |_, _, window, cx| {
+        move |window: &mut Window, cx: &mut gpui::App| {
             // Hidden text is not on screen: it takes no part in selection, links, search washes
             // or the painted-text log.
             if window.visibility() == gpui::Visibility::Hidden {
@@ -804,8 +821,13 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                 register_link_listener(window, &layout, &links, on_link, &selection);
             }
         },
-    )
-    .keeps_no_position();
+    );
+
+    if alone && super::leaf::enabled() {
+        return super::leaf::TextLeaf::new(glyphs, prepaint, paint, cull_outset).into_any_element();
+    }
+    let mut underlay = canvas(move |_, window, _| prepaint(window), move |_, _, window, cx| paint(window, cx))
+        .keeps_no_position();
     InPlace::new(&mut underlay).absolute().unlifted().size_full();
 
     // Positioned only to hold the underlay. Lifted, every text run would rise above the
@@ -818,7 +840,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     };
     wrapper_in_place
         .child(underlay)
-        .child(glyphs)
+        .child(glyphs.into_any())
         .children(decorations)
         .children(groups)
         .children(cursor_hitboxes)

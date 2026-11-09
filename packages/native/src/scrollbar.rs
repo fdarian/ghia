@@ -466,6 +466,10 @@ pub(crate) struct State {
     needs_frames: bool,
     /// The bar is a virtual list's.
     list: bool,
+    /// The frames the bar asks for are steps of the alpha of its thumb alone (no thickening, no
+    /// gutter to settle), which `repaint_thumb` writes over the frame shown: they are ticks, and no
+    /// frame is built for them.
+    steps_thumb: Rc<Cell<bool>>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -487,6 +491,7 @@ thread_local! {
     static DRAW: Cell<u64> = const { Cell::new(0) };
     static NOW: Cell<Option<Instant>> = const { Cell::new(None) };
     static CLOCK: RefCell<Option<crate::automation::AutomationClock>> = const { RefCell::new(None) };
+    static TICK: Cell<Option<Instant>> = const { Cell::new(None) };
     static SCROLLER: Cell<ScrollerStyle> = const { Cell::new(ScrollerStyle::Overlay) };
 }
 
@@ -518,6 +523,24 @@ fn now() -> Instant {
     NOW.get().unwrap_or_else(Instant::now)
 }
 
+/// Makes the thumbs that a tick repaints sample the bars at `instant`, the one the tick's patch was built at and the
+/// frame that checks it is built at, until the guard is dropped.
+pub(crate) fn sample_at(instant: Option<Instant>) -> impl Drop {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            TICK.set(None);
+        }
+    }
+    TICK.set(instant);
+    Guard
+}
+
+/// The instant a repaint of a thumb samples at: the tick's, or the clock's.
+fn repaint_now() -> Instant {
+    TICK.get().unwrap_or_else(clock_now)
+}
+
 /// The clock's instant, which a frame that builds nothing has no `now` of its own to sample at.
 fn clock_now() -> Instant {
     CLOCK.with(|cell| {
@@ -530,7 +553,7 @@ fn clock_now() -> Instant {
 
 /// Whether a bar of the last frame asked for another frame: it fades, grows or settles its gutter.
 pub(crate) fn needs_frames() -> bool {
-    STATES.with(|states| states.borrow().values().any(|state| state.borrow().needs_frames))
+    STATES.with(|states| states.borrow().values().any(|state| state.borrow().needs_frames_of_a_build()))
 }
 
 /// Whether a bar of a scroll container (a list's are planned, see [`plan_thumb`]) was painted at
@@ -555,7 +578,7 @@ pub(crate) fn stale_at(now: Instant) -> bool {
     STATES.with(|states| {
         states.borrow().values().any(|state| {
             let st = state.borrow();
-            st.seen == frame && st.stale_at(now)
+            st.seen == frame && st.stale_for_a_build(now)
         })
     })
 }
@@ -578,9 +601,28 @@ fn alpha_at(last_active: Option<Instant>, now: Instant) -> f32 {
 
 impl State {
     fn stale_at(&self, now: Instant) -> bool {
+        self.alpha_stale(now) || self.grow_stale(now)
+    }
+
+    fn alpha_stale(&self, now: Instant) -> bool {
         let alpha = if self.pinned { 1.0 } else { alpha_at(self.last_active, now) };
         alpha != self.painted.alpha
-            || (0..2).any(|axis| self.grow[axis].value(now) != self.painted.grow[axis])
+    }
+
+    fn grow_stale(&self, now: Instant) -> bool {
+        (0..2).any(|axis| self.grow[axis].value(now) != self.painted.grow[axis])
+    }
+
+    /// Whether the frames the bar asks for have to be built: a bar whose thumb only fades is
+    /// repainted in the frame shown instead (`repaint_thumb`), so that the rows keep the
+    /// recordings they have.
+    fn needs_frames_of_a_build(&self) -> bool {
+        self.needs_frames && !self.steps_thumb.get()
+    }
+
+    /// Whether the clock has changed what the bar painted in a way a build is needed to show.
+    fn stale_for_a_build(&self, now: Instant) -> bool {
+        self.grow_stale(now) || (self.alpha_stale(now) && !self.steps_thumb.get())
     }
 
     /// Has one timer wait for `ends`, the end of the hold, and none when there is no hold. A timer
@@ -597,6 +639,7 @@ impl State {
         let clock = CLOCK
             .with(|cell| cell.borrow().clone())
             .expect("a frame began before its bars are prepainted");
+        let steps_thumb = self.steps_thumb.clone();
         // The clock the bar samples is not the executor's, which is what the timer counts: a timer
         // that fires before the clock got to `at` waits for the rest.
         let task = window.spawn(cx, async move |cx| {
@@ -607,7 +650,12 @@ impl State {
                 }
                 cx.background_executor().timer(remaining).await;
             }
-            cx.update(|_, cx| cx.notify_paint_only(view)).ok();
+            // A tick, for a bar whose thumb only fades: it draws the step without a view to build.
+            cx.update(|window, cx| match steps_thumb.get() {
+                true => window.request_tick(),
+                false => cx.notify_paint_only(view),
+            })
+            .ok();
         });
         self.hold_timer = Some(HoldTimer { at, _task: task });
     }
@@ -911,8 +959,14 @@ fn prepaint(
     // with the new one.
     let unsettled = settling && crate::layout::container::last_pass(window);
     st.needs_frames = activity.fading(now) || growing || unsettled;
+    // A list's thumb that only fades, with nothing thickening: a step is a tick (`repaint_thumb`).
+    st.steps_thumb.set(st.list && !growing && !unsettled && (0..2).all(|axis| st.grow[axis].value(now) == 0.0));
     if st.needs_frames {
-        window.request_animation_frame();
+        if st.steps_thumb.get() {
+            window.on_next_frame(|window, _| window.request_tick());
+        } else {
+            window.request_animation_frame();
+        }
     }
 }
 
@@ -1014,6 +1068,74 @@ fn plan_thumb(
     Ok((drawn != Some(thumb)).then_some(thumb))
 }
 
+/// What a list's bar says when its thumb is the only thing that changed, with no scroll: the color
+/// the thumb is painted with now if the clock changed its alpha, or why it cannot be written over
+/// the frame shown. Only the alpha of a thumb that stays where it is, as long and as thick, is a
+/// repaint; anything else is a frame built, as for a scroll (`plan_thumb`).
+fn repaint_thumb(
+    state: &Rc<RefCell<State>>,
+    source: &Source,
+    look: Look,
+    bounds: gpui::Bounds<gpui::Pixels>,
+    shown: &ShownBar,
+    shown_alpha: &Rc<Cell<f32>>,
+    view: gpui::EntityId,
+    window: &gpui::Window,
+    drawn: Option<gpui::Bounds<gpui::Pixels>>,
+) -> Result<Option<gpui::ScrollThumbRepaint>, gpui::ScrollThumbMiss> {
+    use gpui::ScrollThumbMiss as Miss;
+
+    let now = repaint_now();
+    let st = state.borrow();
+    let (_, offset) = source.extent();
+    let activity = st.activity(offset, now, look.classic());
+    let alpha = activity.alpha;
+    if alpha == shown_alpha.get() {
+        return Ok(None);
+    }
+    // A bar that is scrolled has the scroll's frame to show it (`plan_thumb`).
+    if st.last_offset.is_some_and(|last| moved(last, offset)) {
+        return Err(Miss::Track);
+    }
+    if shown_alpha.get() <= 0.0 {
+        return Err(Miss::Appear);
+    }
+    let (Some(painted), Some(placed)) = (shown.layout, lay_out(source, look, bounds).layout[1]) else {
+        return Err(Miss::Size);
+    };
+    if !placed.same_track(&painted) {
+        return Err(Miss::Track);
+    }
+    if placed.thumb_len != painted.thumb_len || shown.grow != 0.0 || st.grow[1].value(now) != 0.0 {
+        return Err(Miss::Size);
+    }
+    let (rest, _) = look.thickness();
+    if drawn != Some(bar_rect(&placed, true, placed.thumb_start, placed.thumb_len, rest)) {
+        return Err(Miss::Track);
+    }
+    let (thumb_color, _) = look.colors.unwrap_or_else(|| default_colors(window, look.classic()));
+    let background: gpui::Hsla = gpui::Rgba { a: thumb_color.a * alpha, ..thumb_color }.into();
+    let (state, source, shown_alpha) = (state.clone(), source.clone(), shown_alpha.clone());
+    let classic = look.classic();
+    Ok(Some(gpui::ScrollThumbRepaint {
+        background: background.into(),
+        done: Box::new(move |window, cx| {
+            shown_alpha.set(alpha);
+            let now = repaint_now();
+            let mut st = state.borrow_mut();
+            let (_, offset) = source.extent();
+            let activity = st.activity(offset, now, classic);
+            st.alpha = alpha;
+            st.painted.alpha = alpha;
+            st.needs_frames = activity.fading(now);
+            if st.needs_frames {
+                window.on_next_frame(|window, _| window.request_tick());
+            }
+            st.wake_at(activity.hold_ends(now), view, window, cx);
+        }),
+    }))
+}
+
 /// What prepaint takes from a list's new position, for a frame that moved the rows and built
 /// nothing: where the bar is, what it is doing, and the end of its hold. The listeners of the
 /// bar read this, and the hold of the bar is a second after the scroll and not after the frame
@@ -1065,10 +1187,21 @@ fn paint(
     // A list tells gpui how a scroll moves its thumb, whether or not it paints one.
     let note_thumb = |window: &mut gpui::Window, thumb: Option<gpui::PaintQuad>| {
         let Source::List(list, _) = source else { return };
+        // The alpha the frame shows the thumb at, which a repaint of the thumb changes.
+        let shown_alpha = Rc::new(Cell::new(alpha));
         let shown = ShownBar { layout: layout[1], alpha, grow: painted.grow[1] };
         let plan = {
-            let (state, source) = (state.clone(), source.clone());
-            Rc::new(move |_: &gpui::Window, drawn| plan_thumb(&state, &source, look, bounds, &shown, drawn))
+            let (state, source, shown_alpha) = (state.clone(), source.clone(), shown_alpha.clone());
+            Rc::new(move |_: &gpui::Window, drawn| {
+                let shown = ShownBar { alpha: shown_alpha.get(), ..shown };
+                plan_thumb(&state, &source, look, bounds, &shown, drawn)
+            })
+        };
+        let repaint = {
+            let (state, source, shown_alpha) = (state.clone(), source.clone(), shown_alpha.clone());
+            Rc::new(move |window: &gpui::Window, drawn| {
+                repaint_thumb(&state, &source, look, bounds, &shown, &shown_alpha, view, window, drawn)
+            })
         };
         let moved = {
             let (state, source) = (state.clone(), source.clone());
@@ -1076,7 +1209,11 @@ fn paint(
                 move_thumb(&state, &source, look, bounds, view, window, cx)
             })
         };
-        window.paint_scroll_thumb(list, thumb, plan, moved);
+        let noted = window.paint_scroll_thumb(list, thumb, plan, moved, repaint);
+        // A window that does not note thumbs (its scroll patch is off) has nothing to repaint: the bar's steps are builds.
+        if !noted {
+            state.borrow().steps_thumb.set(false);
+        }
     };
     if alpha <= 0.0 {
         note_thumb(window, None);
@@ -1184,6 +1321,11 @@ fn paint(
                 return;
             }
             let mut st = state.borrow_mut();
+            // The hitbox of a bar whose thumb faded away in the frame shown (`repaint_thumb`) is still there
+            // until a frame is built: it takes no press, and the move that entered it builds that frame.
+            if st.alpha <= 0.0 {
+                return;
+            }
             for index in 0..2 {
                 let (Some(hitbox), Some(axis)) = (&hitboxes[index], st.layout[index]) else {
                     continue;
@@ -1386,6 +1528,28 @@ mod tests {
         st.pinned = false;
         st.painted.alpha = 0.0;
         assert!(!st.stale_at(at(60_000)), "a bar that is gone stays gone");
+    }
+
+    #[test]
+    fn a_thumb_that_only_fades_is_repainted_and_a_bar_that_thickens_is_built() {
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        let mut st = State {
+            last_active: Some(start),
+            needs_frames: true,
+            painted: Painted { alpha: 1.0, grow: [0.0; 2] },
+            ..State::default()
+        };
+        assert!(st.needs_frames_of_a_build(), "a bar whose steps are not repaints asks for frames that are built");
+        assert!(st.stale_for_a_build(at(1100)));
+        st.steps_thumb.set(true);
+        assert!(!st.needs_frames_of_a_build(), "the steps of a fade are written over the frame shown");
+        assert!(st.stale_at(at(1100)) && !st.stale_for_a_build(at(1100)), "a fade step does not stale the frame for a build");
+
+        // The pointer leaves while the bar thickens: the track under the thumb changes too, which is a frame built.
+        st.grow[1].aim(1.0, start);
+        st.painted.grow = [0.0, 0.0];
+        assert!(st.stale_for_a_build(at(75)));
     }
 
     #[test]

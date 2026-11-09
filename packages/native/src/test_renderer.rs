@@ -39,6 +39,10 @@ pub struct BuildCounters {
     pub elements_skipped: f64,
     /// `StyleDesc` values cloned, a state style inside a style counted as its own.
     pub style_desc_clones: f64,
+    /// Declared styles applied to a host `div` by running the step, and replayed from the step's
+    /// result for an earlier element of the same style (`css/style_cache.rs`).
+    pub style_applies_computed: f64,
+    pub style_applies_replayed: f64,
     pub inherited_clones: f64,
     /// The maximal unchanged subtrees a retained replay could have reused, see `retain`.
     pub retainable_roots: f64,
@@ -427,7 +431,7 @@ fn update_view_or_defer(
 
 /// Every window option unset, so the test window's own defaults apply. `WindowOptions::default`
 /// is the live renderer's (800x600, focused), not this window's.
-fn unset_window_options() -> WindowOptions {
+pub(crate) fn unset_window_options() -> WindowOptions {
     WindowOptions {
         title: None,
         app_name: None,
@@ -456,7 +460,7 @@ fn unset_window_options() -> WindowOptions {
 /// What a headless Chrome window is, whatever display the machine has.
 const DEFAULT_SCALE_FACTOR: f64 = 1.;
 
-fn window_scale_factor(scale_factor: f64) -> Result<f32> {
+pub(crate) fn window_scale_factor(scale_factor: f64) -> Result<f32> {
     if !(scale_factor.is_finite() && scale_factor > 0.) {
         return Err(Error::from_reason(format!("scale factor must be positive, got {scale_factor}")));
     }
@@ -957,6 +961,8 @@ impl TestGpuixRenderer {
             elements_built: counts.elements_built as f64,
             elements_skipped: counts.elements_skipped as f64,
             style_desc_clones: counts.style_desc_clones as f64,
+            style_applies_computed: counts.style_applies_computed as f64,
+            style_applies_replayed: counts.style_applies_replayed as f64,
             inherited_clones: counts.inherited_clones as f64,
             retainable_roots: counts.retainable_roots as f64,
             retainable_elements: counts.retainable_elements as f64,
@@ -1180,6 +1186,31 @@ impl TestGpuixRenderer {
         Ok(())
     }
 
+    /// Whether the step that applies a declared style to a host `div` is kept for the next element
+    /// of the style (`css/style_cache.rs`): `"on"`, `"off"`, or `"verify"`, which runs it as well and
+    /// panics when the two differ. Process wide; the first is the default, `GPUIX_STYLE_CACHE_OFF`
+    /// and `GPUIX_RETAIN_VERIFY` say otherwise, and the next build takes the change.
+    #[napi]
+    pub fn set_style_cache(&self, mode: String) -> Result<()> {
+        use crate::css::style_cache::Mode;
+        crate::css::style_cache::set_mode(match mode.as_str() {
+            "on" => Mode::On,
+            "off" => Mode::Off,
+            "verify" => Mode::Verify,
+            other => return Err(napi::Error::from_reason(format!("style cache mode {other:?} is not on, off or verify"))),
+        });
+        Ok(())
+    }
+
+    /// Whether a text with nothing else to place is built as one element (`text/leaf.rs`) and not as
+    /// a wrapper that holds a canvas and the glyphs. On unless `GPUIX_TEXT_LEAF_OFF`; process wide, and
+    /// read at every build, so set it before content is mounted.
+    #[napi]
+    pub fn set_text_leaf_enabled(&self, enabled: bool) -> Result<()> {
+        crate::text::set_leaf_enabled(enabled);
+        Ok(())
+    }
+
     /// How ticks were patched since the window was made: subtract two reads for a span of frames.
     #[napi]
     pub fn get_patch_counters(&self) -> Result<PatchCounters> {
@@ -1197,6 +1228,13 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_painted_frame_count(&self) -> Result<f64> {
         update_view(|view, _window, _cx| view.painted_frame_count() as f64)
+    }
+
+    /// How many writes and replays each of the registries that the frame resets holds: the text, the start regions, the painted text and the
+    /// paragraphs. A patch repeated many times with no frame built whole must leave these as they were.
+    #[napi]
+    pub fn get_registry_slots(&self) -> Result<Vec<f64>> {
+        Ok(crate::text::registry_slots(test_window_id()?).into_iter().map(|slots| slots as f64).collect())
     }
 
     /// How many layout-only passes the window has run: what a bounds or scroll read makes of a
@@ -2628,6 +2666,34 @@ impl TestGpuixRenderer {
                 .save(&path)
                 .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {}", e)))?;
             Ok(())
+        })
+    }
+
+    /// Presents the frame that was drawn and not shown, as the display link of a live window does after a tick
+    /// (an offscreen window has none): this draws what the frame changed into the
+    /// picture the window keeps.
+    #[napi]
+    pub fn present_frame(&self) -> Result<()> {
+        with_test_state(|cx, window, _view| {
+            cx.update_window(window, |_, window, _app| window.present_if_needed())
+                .map_err(|e| Error::from_reason(e.to_string()))
+        })
+    }
+
+    /// Save the picture that frames drawn in part add up to as a PNG, and say whether there is one: it is
+    /// what `captureShownFrame` draws of the scene when the damage covered what changed.
+    #[napi]
+    pub fn capture_partial_picture(&self, path: String) -> Result<bool> {
+        with_test_state(|cx, window, _view| {
+            let picture = cx
+                .update_window(window, |_, window, _app| window.shown_picture())
+                .map_err(|e| Error::from_reason(e.to_string()))?
+                .map_err(|e| Error::from_reason(format!("Reading the picture failed: {}", e)))?;
+            let Some(image) = picture else { return Ok(false) };
+            image
+                .save(&path)
+                .map_err(|e| Error::from_reason(format!("Failed to save picture: {}", e)))?;
+            Ok(true)
         })
     }
 

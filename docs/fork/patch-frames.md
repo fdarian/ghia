@@ -142,7 +142,9 @@ Installed once per window from `render`. For a tick it takes `now` from the cloc
 A tick is patchable when, since the last frame built whole: only time-driven ids changed (running `dynamic`, motion that runs or
 ended, not yet built), each in a unit or dormant; the root revision is the same; no layout-only pass ran; no scroll animation runs;
 no scrollbar is fading or thickening (`scrollbar::needs_frames`) or was painted at an alpha or thickness that the clock has since
-changed, which is what the end of its hold is (`scrollbar::stale_at(now)`: the hold itself is steady, so a tick in it is patched);
+changed, which is what the end of its hold is (`scrollbar::stale_at(now)`: the hold itself is steady, so a tick in it is patched).
+Neither counts for the thumb of a list's bar that only fades (no thickening, no gutter settling): its steps are ticks that the
+patcher answers by writing the thumb over the frame shown ([A step of the fade is a thumb repaint](#a-step-of-the-scrollbars-fade-is-a-thumb-repaint-s43b));
 no `layout` box has a glide in flight or events to send (`LayoutFlips::needs_frames`, asked of the live
 flips and not recorded); and that frame built no element that follows the clock (`Exclusion::varies_with_time`). An element with no
 box (`display: none` or below one, `box_generation::is_hidden`) is skipped as a dormant one is.
@@ -151,7 +153,7 @@ The reasons it says no are `Unpatchable`:
 
 | Key | Meaning |
 |---|---|
-| `NoFrame`, `LayoutPass`, `Unsteady`, `Gliding`, `ScrollAnimation`, `Edited`, `Everything` | no frame to patch, a layout-only pass ran, the last frame held an element that follows the clock, a `layout` glide is in flight or its events are to be sent, a scroll animation runs, a scrollbar fades or thickens or its hold has ended since it was painted, the tree was edited by something other than a restyle a patch follows (`RetainedTree::patch_barrier` is newer than the frame), everything changed |
+| `NoFrame`, `LayoutPass`, `Unsteady`, `Gliding`, `ScrollAnimation`, `Edited`, `Everything` | no frame to patch, a layout-only pass ran, the last frame held an element that follows the clock, a `layout` glide is in flight or its events are to be sent, a scroll animation runs, a scrollbar fades or thickens or its hold has ended since it was painted (not the thumb of a list's bar that only fades: that is a thumb repaint), the tree was edited by something other than a restyle a patch follows (`RetainedTree::patch_barrier` is newer than the frame), everything changed |
 | `Sourced` | the pointer, focus, a scroll, a custom element, a measurement, a link or a command changed |
 | `Outside` | a time-driven change outside every unit that is not dormant, on an element that has a box and the last build gives no reason for |
 | `Refused` | the element is no unit: `Excluded:<kind>` (`Excluded:fixed` for `position: fixed`; gpui has no root placed by the viewport, `Escape::Viewport` is declined `Surroundings`), `ExcludedBelow:<kind>`, `Escapes`, `Lifts`, `Scrolls`, `LayoutAnimation`, `TooLarge`. What runs on the element is looked at first, so an absolute element whose `top` runs is `LayoutAnimation`, and so is a tick made `Sourced` by the measurement of a layout animation |
@@ -448,7 +450,9 @@ over the page, each in something that did not move.
   a tree. The comparison of what an operation paints with its recording (`PaintOperation::differs_from`) used to format both through
   `Debug` to two strings for every operation of every unit, 8% of a tick of the tile; it formats the recorded one once and writes the
   other through a comparison that stops at the first character that differs, which is early for what changes (a colour, an opacity).
-  The answer is the one of comparing the two strings.
+  The answer is the one of comparing the two strings. A kind whose fields are all compared (`fields_equal`: `Quad`, `MonochromeSprite`,
+  `StartLayer`, `WidenGroups`) answers "differs" from its fields too and does not format: the hover crossing of the mailbox, whose
+  every changed quad took the debug form, went from 3.65M to 3.46M (median of the crossing, two runs each).
 - **A tick samples the values that move and parses no binding.** `MotionValueStore::step` samples again what moved by itself when it
   was last sampled (the values elements bind and the ones read for a drag) and the values a write since can have changed, and leaves
   the rest as the frame left them, since only time and a write move a value. A tick does that while the bindings, appearance and
@@ -483,7 +487,7 @@ states, `reuse_subtree`, and gpuix's tape writing each replayed root into the re
 Nothing is built or drawn for an animation nobody sees.
 
 - **An element is dormant** when everything that runs on it only changes what it paints and the last frame that reached it walked it
-  culled (`ElementBounds::culled`, taken from `Window::is_culling` in the prepaint listener of `capture_layout_box` and written
+  culled (`ElementBounds::culled`, taken from `Window::is_culling` in the prepaint of the layout probe (`automation::read_layout`) and written
   through the tape like the rest of the box, so a replayed root republishes it; a verified frame leaves it out of what it compares,
   since a root kept near a scroller's clip is walked culled when it replays an old recording and unculled when it is built whole).
   `Dormancy::holds` decides it from live state: culled, no span, no `layout`, and the animations, transitions, `motion` and
@@ -751,6 +755,20 @@ keeps what builds it again.
   of its last build, so the first hover of a row that came into view is a patch like any other. (The record was tried: the
   pass that rebuilds a frame to compare it sees the record the first pass made, and has to build the roots in it as the first pass
   did.)
+- **An element the tree destroyed is not left unbuilt (hover after a wheel).** A frame built whole puts the elements that changed
+  since the frame before, and their ancestors, on the spine, and what the frame did not enter stays in `Retain::unbuilt`, so that a
+  tick finds a change nobody built. The rows a hover patched during a wheel (`hover_patched`, one pair for each crossing, 24 or more
+  by the time the window of a list moves) are in the next frame built whole, which is the frame that moves the window and destroys
+  most of them. An id the tree no longer holds has no ancestor to walk and no build to enter it, yet it was kept (`is_none_or`) and
+  seeded every spine after it: each tick with a hover to paint was `Outside` (`preview`, `retain.rs`) and built whole, for good,
+  after the first wheel that moved the window (a list with a scrollbar: the frame built whole that sees them was the fade's). `unbuilt` keeps
+  the elements the tree holds. Pinned in `retain.rs` (`a_changed_element_the_tree_destroyed_is_not_left_unbuilt`) and in
+  `hover-after-wheel.test.tsx` (solid): a windowed list of the mailbox's shape, wheeled 360 down and 360 up under a still pointer,
+  and two sweeps of the pointer down it; no tick is `Outside`, the second sweep is patched at each crossing, the pictures equal
+  those of patching off. Measured (`AFTER_SCROLL=1 PHASE=hover A11Y=0`, two runs each): 0 of 480 ticks patched, row crossing median
+  7.8M (24 elements built, 140 replayed), phase 243.7M before; 11 of 480, crossing median 4.2M and 4.8M, phase 220.8M and 199.9M after
+  (a fresh window: 18 of 480, 3.45M, 125M). The scrollbar's fade was a whole frame of its own after the wheel and replayed the rows with a delta
+  (`Hover:Relocated` below); a step of it is a thumb repaint now ([A step of the scrollbar's fade](#a-step-of-the-scrollbars-fade-is-a-thumb-repaint-s43b)).
 
 **Cost of the wider roots.** Rows of a list and roots with nothing worth a root in them are patch roots (the `PatchUnit` and surroundings
 gpui keeps for each) without a hover. The mailbox rows were hover roots already, so it measures as the same page, two runs each back to
@@ -789,7 +807,7 @@ marks `Replaced` with `derived: true`, which a build at the row's own place does
 - A hover that adds or takes away a primitive (a shadow, a border colour from transparent, a text colour from transparent, a
   background that is more than a colour) is a frame built whole; so is a group, a root that might lift, a size by an intrinsic keyword, a root of more than 64 elements, and a
   row that a frame built whole replayed from a recording made elsewhere (`Hover:Relocated`: a whole frame after a scroll replays the rows with
-  a delta, and builds one again only when something changes it, so the hover of that row is a frame built whole, which records it where it stands; a row a translate moved is patched).
+  a delta, and builds one again only when something changes it, so the hover of that row is a frame built whole, which records it where it stands; a row a translate moved is patched). After a wheel phase and back (`AFTER_SCROLL=1`) six of the ten rows that show are such rows, one is rebuilt by each crossing that meets one (`retained.relocations` 6, 5, 4 ...), and those crossings cost 7.4M, not 3.4M.
 - A page of at most 64 elements is one root: a patch builds all of it, as a frame built whole does.
 - A patch root that a frame built whole rebuilds builds everything in it.
 - The children of a relocatable row cannot keep their own recordings (`Retained::prepaint_in_scope`), so a rebuilt row builds all its
@@ -894,7 +912,7 @@ the patcher turns it on with `Window::set_contained_patches`.
   `Hitboxes` and `Registrations`. An anchor that holds roots (text, boxes with children) and a keyed swap of the content with
   another number of elements are patched. gpui then rewrites the recording of the anchor from the patch
   (`rewrittenRecordings`), which is what lets the next commit patch it again. A root that published (every host element of Ghia
-  reports its box through an `on_painted_layout` listener) keeps its rewritten recording when it has an `on_replay` hook, as a frame built
+  reports its box through a layout probe) keeps its rewritten recording when it has an `on_replay` hook, as a frame built
   whole accepts for the recording (zed `c4590da472`), so consecutive commits in an anchor are all patches. Ghia reads the outcome after
   each patch (the counter moved by the number of anchors patched) and keeps an anchor whose recording was dropped as `Plan::unrecorded`:
   the next commit that changes it is `Anchor:StaleRecording`, decided before anything is built, and the frame built whole after it
@@ -1014,7 +1032,7 @@ that holds is counted in `held`, so what else would stop the frame is known too:
 | `Place`, `Region`, `Clip` | `Recorded::place` would not put a row there (a `Region` or `Clip` miss of a row that stays is built again in the translate when the list has a builder, which Ghia's lists have, though since [slice G4a](#a-row-of-a-list-is-recorded-for-its-travel-slice-g4a) a row of a list does not miss `Region` while it shows, so for them only `Place` holds the frame, [slice G3d](#overdraw-measured-and-rows-built-again-slice-g3d)): what it reads of its surroundings differs in more than the offset (a scale factor that is not a power of two, an exact or rounded clip around, a general transform), the region the row was recorded in no longer covers the clip around it, or a rounded clip in it meets the clip differently (`ReplayKey::relocates_by`, `RelocationInfo::fits`, asked of the recording by `RetainedState::would_place`). `held` also counts `Region.top`, `Region.bottom` and `Region.side`: the edge of the clip the moved region leaves bare (the rows moved up by more than the overscan leave the bottom bare) |
 | `Focus` | the frame shown, or a layout there, builds a row outside the viewport for the focus it holds |
 | `A11y` | the accessibility tree is being built |
-| `ScrollAnimation` | a smooth scroll or a scrollbar fade has frames of its own (the owner says it) |
+| `ScrollAnimation` | a smooth scroll, or a scrollbar that thickens or fades and is not a list's (a list's fades by thumb repaints, which the owner does not say), has frames of its own (the owner says it) |
 | `Clock` | something that follows the clock has a frame to draw: a tick was requested for this draw (`Window::request_tick`: a transition, a keyframe animation, a motion value, the blink of a caret, a hover paint), or the owner says its last frame asked for another (`ClockAsked`, published by the frame that ran: a transition, animation or motion running, a motion value that wants frames). A translate builds nothing, and `draw` takes the tick (`patch.tick`) before it classifies, so a translate that took it would leave nothing to ask for the next frame and what runs would stand still until a frame built whole. The tick is kept as a flag of the draw (`ScrollPatchWindow::ticked`) and refused, not left set, so the tick is drawn by the frame that is built whole |
 | `Thumb` | the thumb of a bar cannot be put where the scroll puts it ([The thumb](#the-thumb)): the bar of a list would be painted at another alpha, size or track than the frame shown painted it, would appear where the frame shown painted none, or is painted in a way that cannot be moved in place; or a bar of a scroll container is due a frame (`scrollbar::container_bar_stale`, said by the owner's gate). `held` also counts `Thumb.size`, `Thumb.alpha`, `Thumb.appear` and `Thumb.track` |
 | `NotRelocatable` | a row of the frame shown has no run (it is not a relocatable root, or holds several: the runs are not the rows), a run has no recording, or its recording cannot be put elsewhere (built late, a hole, a position kept past the frame). `held` also counts `NotRelocatable.noRun`, `.noRecording` and `.unmovable` |
@@ -1053,7 +1071,7 @@ count and the translate off. The pixels, boxes and hits are the same either way 
 - **`NotRelocatable` was a run for each root nested in a row that was built.** The frame that brings a row in builds it, and the six `retained` roots inside it (four in the row and two in them) were prepainted inside the recording of the row, where a root keeps no recording of its own; each had a run (`replayed` false, no recording), and the frame shown that built a new row was `NotRelocatable` (300 frames: the row that came in, the last after a scroll down and the first after one up). The row roots themselves always had a movable recording. A root prepainted inside the recording of another is no run now.
 - **`Region` is a row that moved more than the overscan since it was recorded.** The overscan is half the viewport (358 of 716 px, `Scroller::overscan`), so a row recorded where it came in has its region used up after 360 px (12 ticks): it is the row at the middle of the viewport (index 5 and 6 of the rows shown when scrolling down, 4 when scrolling up) that the next frame would build late (`retained.relocationMisses.Region`, 0.8 a tick), and once again 360 px later near the edge it leaves by (rows 0 and 1 down, 9 up). 581 row runs in 297 frames, `Region.bottom` for the rows that moved up and `Region.top` for the rows that moved down. Not a row that just came in with too little overscan: a row that traveled farther than the overscan reaches.
 - **The three coincide.** Rows come in every 72 px, the pointer meets a new row every 72 px and a row has traveled 360 px (five rows) every 72 px: in this proxy `Membership`, `Hover` and `Region` hold on the same frames, so `Membership` alone is 382 frames, `Membership` or `Hover` 386 (`Hover` alone adds 4, both 296), and `Membership` or `Hover` or `Region` 392. `Region` is the first reason of 6 frames only. With the old `Hover` (`HitboxChain`) the union with `Membership` is all 720. A row coming in at an edge (`Membership`) is what stops the other 382, and a translate that builds that row is the next step.
-- With the pointer in the scrollbar gutter of the list (`SCROLL_X=637`, outside the hover-styled boxes of the rows) `Hover` holds for 1 frame, and 323 are eligible: the scrollbar fade makes 9 of the frames `ScrollAnimation` first (19 held).
+- With the pointer in the scrollbar gutter of the list (`SCROLL_X=637`, outside the hover-styled boxes of the rows) `Hover` holds for 1 frame, and 323 are eligible: the scrollbar fade made 9 of the frames `ScrollAnimation` first (19 held), measured before a step of the fade became a thumb repaint.
 
 With the test window's pretend screen reader on (`A11Y` unset) `A11y` holds for all 720 and none is eligible; the rest is the same. Instructions per tick (whole `drawFrame` plus input, two runs each back to back): 11.83M and 11.82M on, 11.58M and 11.63M with `GPUIX_SCROLL_PATCH_OFF=1`: the recording and the classification cost about 0.2M a tick (1.9%), the hit tests of the hover included.
 
@@ -1208,7 +1226,9 @@ The two things G3c's measurement left holding the translate are done by zed (`32
 
 A frame that keeps no row in place and builds every row it shows (every kept row missed its region) has moved the rows all the same: `settle_rows` runs for it too (`Rows::rebuilt`), where it used to run only for a frame that moved a row in place, and the rows that left have their writes taken out. Found by the retention verifier with the registries compared: the boxes of the rows that left were still there.
 
-**A patch of a row costs what the registry has read.** `Layered::replace` (a patch that lays an anchor out again, one that repaints a row, and the rows that left) took every replay a registry had not read yet out of its box to look at each write, and asked for each write whether the old roots hold it. It now looks at the replay as a whole, and keeps what `new` writes as a replay at the place of the first old one, and remembers the answer for the owner it just asked about: a hover that crosses two rows of the mailbox 4.70M a crossing, 4.62M.
+**A patch of a row costs what the registry has read.** `Layered::replace` (a patch that lays an anchor out again, one that repaints a row, and the rows that left) took every replay a registry had not read yet out of its box to look at each write, and asked for each write whether the old roots hold it. It now looks at the replay as a whole, and keeps what `new` writes as a replay at the place of the first old one, and remembers the answer for the owner it just asked about: a hover that crosses two rows of the mailbox 4.70M a crossing, 4.62M. It also works in place: it asks once for each owner it meets, drains the runs of writes the old roots hold (a registry that was not rebuilt since many patches holds thousands of replays, and moving the rest of them into new vectors was most of the call), and puts the replays of `new` where the first run was with one splice, which moves nothing after it when it takes out as many as it puts in. The call is a few microseconds on the mailbox crossing (the registries hold about fifty slots); the change shows in a run of patches with no frame built whole between them (`PHASE=hover RAW=1 LOOPS=300`), where the start region registry used to grow by a slot for each patched row (see the next paragraph) and the call was 16% of the draw's self time, 2.6% with the growth in place.
+
+**A prepared patch writes no start region from its publications.** A patch is prepared (`prepare_resolved`) by laying out and prepainting its roots into the scratch frame, and the publications that prepaint queued (the painted boxes of `track_host_bounds`, which a read between the preparation and the draw needs) run at once, in `Window::publish_prepared`, outside the tape of the root: nothing records them and `owner()` is 0. A box is replaced by its id, but `record_start_region` adds to the start region registry, and the copy it made belonged to no root, so no patch took it out: one slot for each element of each patched row, for as long as no frame was built whole (300 loops of 18 crossings of the mailbox made `pending` 10,811 slots long, and every patch walked it). The paint of the patch writes the start region too, on the captured tape, and the registry takes that one (`replace_recorded_paint` for a row, `publish_captured_start_region` for a unit). So `track_host_bounds` writes it from paint only, not in a pass that only lays out (`Window::is_layout_pass`), which is what the replay of a layout tape already assumed (`Phase::Layout` puts back the writes of `write_in_layout` alone). **Pinned** by `hover-patch-registries.test.tsx` (react): forty crossings of a list and of a column of rows (every second row `userSelect: "none"`) after three, patched, leave `getRegistrySlots()` (the slots each registry holds, test-support) as they were, and a press on a row selects, or does not, as it does on a page never hovered. It failed before (start regions 28 to 348 in the list, 156 to 2076 in the column). Text, painted text and paragraphs were not growing.
 
 **Measured, slice G3d** (release addon, `A11Y=0`, ghia-bench's data, two runs). The navigate proxy (`mailbox-navigate/profile.tsx`): App median of keys 2 to 30 **38.3M and 38.3M** (G3c: 44.9M and 43.4M; G3b: 39.5M and 40.4M), keys 2 to 8 31.8M and 31.4M, keys 9 to 30 **39.0M and 39.2M** (45.7M and 44.8M). 29 of 29 keys are patches (`patchedFrames` and `relayoutPatches`), and of the 22 keys that scroll the list **21 are composed** (a patch and a translate in one draw, 21 membership frames, 42 rows built of which 21 were built again, 21 removed) and one is whole after its patch: the first scroll, which shows the scrollbar thumb (`Thumb.appear`). No key holds `Membership.unmeasuredOverdraw` or `Region`. App-noreveal median 26.3M and 26.5M (G3c: the same). The scroll proxy (`mailbox-scroll-hover/profile.tsx`, `PHASE=scroll`): median **5.557M and 5.554M** (6.846M and 6.849M), mean 7.588M and 7.613M (7.609M and 7.582M): 396 of 720 ticks are translates, 43 of them with membership (0 in G3b) that built 58 rows, 43 of them again, and took out 14; the 324 frames built whole are held by the `Hover` of the row under the pointer for 302 (the largest cause now), by `Membership.unmeasuredOverdraw` for 14 (the first scroll over rows the list has not laid out, which measuring the overdraw cannot do while a row that shows is unmeasured) and by `Edited` for 29. `PHASE=hover` row crossings median **4.617M and 4.615M** (4.702M and 4.708M; G3b 4.118M and 4.113M).
 
@@ -1398,11 +1418,47 @@ after those keys; the list shows the selected row at keys 52, 70 and 120).
 which were blank before: median **25.6M and 25.2M**, mean 28.6M and 28.6M. The scroll proxy (`PHASE=scroll`), which wheels, reports the same events as before and is
 median 3.171M and 3.192M, mean 5.004M and 5.018M (3.185M and 3.182M, 5.008M and 5.017M).
 
+### A step of the scrollbar's fade is a thumb repaint (S4.3b)
+
+The hold of a list's bar ends and the bar fades over 200 ms. Each step was a frame built whole (`request_animation_frame`, then `ScrollAnimation`
+for the patcher and `Thumb.alpha` for a translate): 32M for the first (43 elements built), 5M to 9M for each of the rest, and, since the rows of a
+list after a wheel are held by recordings made where they were, each of those frames replayed them with a delta and **relocated** them, so the
+hover crossings after a wheel met `Hover:Relocated` (7.4M each instead of 3.5M, [Hover patches](#patch-roots)). Nothing but the alpha of the
+thumb changes in a step, so a step is not built.
+
+- **The owner says what the thumb is painted as now** (`ScrollThumbRepainter`, the third closure `Window::paint_scroll_thumb` takes, beside `plan` and
+  `moved`). Ghia's is `scrollbar::repaint_thumb`: the color of the thumb at the instant of the tick, or a `ScrollThumbMiss` when more than the alpha
+  changed (the thumb would move, grow, appear or lie on another track; the pointer thickens the bar, which paints a track under the thumb; the offset moved,
+  which is a scroll's frame). `paint_scroll_thumb` returns whether the frame notes the bar, and a window that does not (scroll patch off) keeps asking for built frames.
+- **`Window::plan_scroll_thumb_repaints`, then `Window::repaint_scroll_thumbs`.** The first asks every bar of the frame shown and writes nothing; the second
+  writes the color over the operation of each thumb that differs (the quad's background under the element opacity it was painted with, nothing else of it),
+  in place in the scene when the operation fits (`Scene::patch_in_place`) and by making the scene again otherwise, sets that the frame is presented, counts
+  `PatchCounters::thumb_repaints` (`getPatchCounters().thumbRepaints`) and runs the owner's `done`: the bar's alpha and `painted` state, the next tick while it fades, the
+  timer for a hold that began again. A miss is a tick the patcher declines (`unpatchable["Thumb:Alpha"]` and the like), drawn whole in the same draw.
+- **The ticks.** A bar that only fades (`State::steps_thumb`: a list's, nothing thickening, no gutter to settle, and the frame noted its thumb) asks for its next
+  step with `request_tick` (`on_next_frame`) and not `request_animation_frame`, and its hold timer fires `Window::request_tick` and not `notify_paint_only`, so no view is
+  queued (`PendingView`). `scrollbar::needs_frames()` and `scrollbar::stale_at()`, which `preview_tick` and the translate's gate read, leave such a bar out
+  (`needs_frames_of_a_build`, `stale_for_a_build`): the tick is `Retain::preview`'s like any other, with no unit when nothing but the bar changed (`emptyTicks` and `thumbRepaints`
+  both count it, 0.16M a step) or with the units of a hover in the same draw (the crossing and the step are one patch). The patcher plans the thumbs after it built the units
+  and writes them after `repaint_in_place` accepted, at the instant the units were built at (`scrollbar::sample_at`), which the frame that checks the patch is built at too.
+- **The last step leaves the thumb a quad with no color,** where a frame built whole paints none: the hitbox of the bar stays until a frame is built (the pointer
+  that enters the strip builds it: the bar's move listener sees the hitbox hovered, notifies the view, and the prepaint of that frame has no hitbox; a press in the meantime
+  is ignored, `State::alpha` is 0), and the draw orders after the quad are one apart from that frame's. The verifier compares pictures there and not scenes
+  (`PatchWindow::thumb_vanished` keeps the written-in-place scene out of the comparison until a frame is built whole).
+- **A wheel while the bar fades** is the same `Thumb.alpha` translate decline as before (the hold starts again at alpha 1; the closure the translate reads is
+  given the alpha the repaints left, `shown_alpha`, so it compares against what is on screen).
+
+Tests: gpui `scroll_patch_tests.rs` (`a_thumb_repainted_with_no_scroll_is_the_frame_built_whole`, `a_thumb_that_is_the_same_writes_nothing_and_tells_no_one`,
+`a_bar_that_says_it_cannot_be_repainted_alone_writes_nothing`), `scrollbar.rs` (`a_thumb_that_only_fades_is_repainted_and_a_bar_that_thickens_is_built`), Solid
+`hover-after-wheel.test.tsx` (a windowed list wheeled 360 down and up under a still pointer, then 170 ticks: no frame built whole during the hold and the fade, steps
+counted as `thumbRepaints`, no tick declined, the pictures of every sixth tick equal those of patching off, and the first sweep of the pointer is patched at each crossing,
+also under `GPUIX_RETAIN_VERIFY=1`). Measured (`AFTER_SCROLL=1 PHASE=hover A11Y=0`, release addon): see the plan log of S4.3b.
+
 ## Limits
 
 - **A tick that gpui or gpuix cannot patch is a full frame, and says why.** A subtree of more than 256 elements is built whole
   (`unitsOversized`, `TooLarge`). A `position: fixed` element is no unit (`Excluded:fixed`), where an absolute one is. A loop on an
-  element that holds an absolute box against a block outside it is `Escapes`. A scroll animation, a scrollbar fade (not its hold), a layout-only
+  element that holds an absolute box against a block outside it is `Escapes`. A scroll animation, a scrollbar that thickens or a bar of a scroll container that fades (not its hold; a list's fade is a thumb repaint), a layout-only
   pass since the last full frame, the pointer, focus, a scroll, a measurement or any change that is not the clock (a hover or a
   commit that only paints is answered by a patch, see [Commit patches](#commit-patches)) make the tick a
   full frame (`getPatchCounters().unpatchable`). A scroll animation is always asked for as `request_animation_frame` and drawn

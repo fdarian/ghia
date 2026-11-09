@@ -10627,8 +10627,7 @@ fn taped(tapes: &crate::tape::Tapes, id: u64, element: gpui::AnyElement, window:
     use gpui::IntoElement;
 
     if window.retention_records() {
-        let tape = crate::tape::SharedTape::default();
-        tapes.set(id, tape.clone());
+        let tape = tapes.renew(id);
         crate::tape::Taped::new(element, tape).into_any_element()
     } else if window.is_layout_pass() && window.retention_allowed() {
         let tape = crate::tape::Tape::laid_out();
@@ -12060,7 +12059,7 @@ pub(crate) fn build_host_container(
     };
 
     if let Some(style) = style {
-        el = apply_interactive_styles(el, style, &ctx.inherited.colors, &ctx.inherited.lengths);
+        el = crate::css::style_cache::apply(el, element.style.as_ref(), style, &ctx.inherited.colors, &ctx.inherited.lengths);
 
         if let Some(features) = ctx.inherited.font_features.clone() {
             el = el.font_features(features);
@@ -14716,6 +14715,9 @@ pub struct PatchCounters {
     pub deferred_scene_rebuilds: f64,
     /// Primitives that patches wrote over their place in the scene.
     pub in_place_primitives: f64,
+    /// Thumbs of a list's scrollbar that a tick painted another alpha in the frame shown, with the rows
+    /// as they were and no frame built (a step of the bar's fade).
+    pub thumb_repaints: f64,
     /// Scrollers that patches laid out again and repainted (contained-layout patches), counted by gpui
     /// when it accepts one.
     pub relayout_patches: f64,
@@ -14798,6 +14800,7 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
         scene_rebuilds: counters.scene_rebuilds as f64,
         deferred_scene_rebuilds: counters.deferred_scene_rebuilds as f64,
         in_place_primitives: counters.in_place_primitives as f64,
+        thumb_repaints: counters.thumb_repaints as f64,
         relayout_patches: counters.relayout_patches as f64,
         rewritten_recordings: counters.rewritten_recordings as f64,
         declines: object(

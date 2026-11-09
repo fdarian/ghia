@@ -153,6 +153,19 @@ impl ColorContext {
         reads::note(self.current_origin);
     }
 
+    /// Runs `build`, and says what it read of the colour this context has.
+    pub(crate) fn watch_reads<R>(&self, build: impl FnOnce() -> R) -> (R, ColorReads) {
+        let (built, seen) = reads::watch(build);
+        let reads = if seen == u64::MAX {
+            ColorReads::None
+        } else if seen == self.current_origin {
+            ColorReads::Own
+        } else {
+            ColorReads::Other
+        };
+        (built, reads)
+    }
+
     /// The text colour this element sets on gpui, which is not a read: it sets it.
     pub(crate) fn declared(&self) -> Option<gpui::Rgba> {
         self.declared
@@ -230,6 +243,26 @@ pub(crate) mod reads {
     pub(super) fn note(origin: u64) {
         LOWEST.set(LOWEST.get().min(origin));
     }
+
+    /// Runs `build` and says the least place it noted (`u64::MAX` for none), which goes on to the
+    /// element being built as if `build` had run unwatched.
+    pub(super) fn watch<R>(build: impl FnOnce() -> R) -> (R, u64) {
+        let outer = LOWEST.replace(u64::MAX);
+        let built = build();
+        let seen = LOWEST.replace(outer.min(LOWEST.get()));
+        (built, seen)
+    }
+}
+
+/// What a piece of work read of the colour a context inherits, see [`ColorContext::watch_reads`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ColorReads {
+    None,
+    /// Only the colour of the context it was run with: noting the read again, on any context that
+    /// resolves alike, is the same read.
+    Own,
+    /// A place of another context, which a context that resolves alike does not share.
+    Other,
 }
 
 /// CSS `CanvasText`: the initial `color`, black on a light scheme and white on a dark one.

@@ -780,6 +780,7 @@ module.exports.__napiBindingTarget = __napiStampBindingTarget(nativeBinding, __n
 module.exports = nativeBinding
 module.exports.AvailableUpdate = nativeBinding.AvailableUpdate
 module.exports.GpuixRenderer = nativeBinding.GpuixRenderer
+module.exports.RowOracle = nativeBinding.RowOracle
 module.exports.TestGpuixRenderer = nativeBinding.TestGpuixRenderer
 module.exports.checkUpdate = nativeBinding.checkUpdate
 module.exports.getAllDisplays = nativeBinding.getAllDisplays

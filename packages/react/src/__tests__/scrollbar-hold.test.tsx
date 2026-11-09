@@ -22,7 +22,11 @@ const FADE_FRAMES = Math.ceil(FADE / VSYNC) + 2
 
 type Renderer = ReturnType<typeof createTestRoot>["renderer"]
 
-const frameCount = (renderer: Renderer) => renderer.getPaintedFrameCount() + renderer.getPatchCounters().patchedFrames
+/** A step of the fade of a list's thumb is a draw that writes the thumb over the frame shown (`thumbRepaints`) where a page that cannot be patched builds a frame. */
+const frameCount = (renderer: Renderer) => {
+  const patches = renderer.getPatchCounters()
+  return renderer.getPaintedFrameCount() + patches.patchedFrames + patches.thumbRepaints
+}
 
 /** A frame built whole: the view is told, as a commit does. */
 function whole(renderer: Renderer) {

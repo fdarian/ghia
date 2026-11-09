@@ -114,7 +114,7 @@ AppKit events are only drained inside `tick()`, and a 100 ms fallback timer tick
   thread by adding a sentinel `CFMachPort` source to that mode alone, taking the port set that holds it and removing the
   sentinel (a panic if there is not exactly one). When a knote fires the helper calls the hook, so a wake is input (see
   [below](#input-to-an-idle-window-93)), a main-queue block (the display link's frame step included) or a run-loop timer.
-  `run_loop_pumped()` enables the knotes again, and a message still pending fires at once, so nothing is lost.
+  `run_loop_pumped()` enables both knotes again in one `kevent` call (it runs at the end of every tick), and a message still pending fires at once, so nothing is lost.
   `set_run_loop_wake_hook(None)` stops the thread through an `EVFILT_USER` knote and joins it.
 - **gpuix.** `renderer.setFrameWakeCallback(fn)` registers a non-blocking, weak N-API threadsafe function behind the hook
   and returns whether the platform has one (`true` on macOS); dropping the renderer clears the hook, and clearing the
@@ -207,6 +207,15 @@ second wake went from 5% to nearly all between runs of the same build. `-NSUpdat
 **Design.** `pump_app_nonblocking` calls `[CATransaction flush]` after each `sendEvent:`. The update cycle's next pass
 then finds no transaction to commit and arms nothing. Nothing else in the pump changed: the run-until-unhandled loop
 stays as it is and nothing blocks (#39).
+
+**What the pump does not do.** `pump_app_nonblocking` does not call `[NSApplication updateWindows]`. `sendEvent:` sets
+`windowsNeedUpdate`, which installs a one-shot run loop observer that calls `updateWindows` in the next pass of the loop;
+the polls of `nextEventMatchingMask:` and the run-until-unhandled loop are passes, so the windows are updated once per
+event, as in `[NSApplication run]` (the GPUI samples show that observer, not a call of the loop's own). The pump's own call
+made 2.6 updates per mouse move (`NSApplicationDidUpdateNotification`, `tests/pump_window_updates.rs`: 100 for 100 moves
+now). The flush stays once per event: with one event in a tick it is also once per tick, and it has to come before the poll
+that follows `sendEvent:`, because that poll's pass is the one that arms the update cycle's timer (see the first alternative
+below).
 
 **Alternatives rejected.**
 
@@ -558,6 +567,8 @@ drew.
 - react `events.test.tsx` "wakes JS once per mouse move, not again when the frame boundary comes" opens a visible window
   with `focus: false`, posts 240 mouse moves from NSEventThread at random points of 120 Hz periods and allows 1.15 wakes
   per move. Without the flush after `sendEvent:` it saw 352 and 339 wakes for 240 moves (1.47 and 1.41).
+- zed `gpui_macos` `tests/pump_window_updates.rs` (`harness = false`): 100 mouse moves posted to a window through
+  `pump_app_nonblocking` make 100 `NSApplicationDidUpdateNotification`, not 260 as with a `updateWindows` call in the pump.
 - zed `gpui_macos` `run_loop_wake` lib (1: the set is found twice alike, is not the main queue's port and has members)
   and `tests/run_loop_wake.rs` (`harness = false`, it pumps the main run loop on the main thread): a `dispatch_async` from
   another thread and a `CFRunLoopTimer` each wake the hook while nothing runs the loop, neither runs before the pump, the
