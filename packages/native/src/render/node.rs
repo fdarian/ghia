@@ -1,14 +1,37 @@
 //! What a direct root keeps per node. The nodes are in a `Vec`, children by index, so an element
-//! that walks them holds no borrow of one while it visits another.
+//! that walks them holds no borrow of one while it visits another. The arena is shared (`Rc`) by the
+//! root and by the elements of its positioned nodes, each of which walks the part of it below its
+//! node, so what changes per frame is in cells.
 
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use gpui::{AnyElement, Bounds, Hitbox, LayoutId, LayoutSample, Pixels, Style};
+use gpui::{AnyElement, Bounds, Escape, Hitbox, LayoutId, LayoutSample, Pixels, Style};
 
 #[derive(Clone, Copy)]
 pub(super) enum Child {
     Node(usize),
     Content(usize),
+    /// A node `Div` hands to the stacking context around it, or draws without the clip of its
+    /// parent: the walk of an element of its own ([`super::element::DirectRoot`]), as a `Div`
+    /// child is one.
+    Positioned(usize),
+}
+
+/// How a node is placed: what `Element::lift_z` and `Element::escapes_to` say of a `Div`, and whether
+/// its children are drawn in a positioned frame (`Window::with_frame`).
+#[derive(Clone, Copy, Default)]
+pub(super) struct Placement {
+    pub lift_z: Option<i32>,
+    pub escape: Option<Escape>,
+    /// `Some(contains_fixed)` for a positioned box or a box that contains fixed ones.
+    pub frame: Option<bool>,
+}
+
+impl Placement {
+    pub fn is_positioned(self) -> bool {
+        self.lift_z.is_some() || self.escape.is_some()
+    }
 }
 
 pub(super) struct Node {
@@ -17,21 +40,27 @@ pub(super) struct Node {
     /// Shared so that paint can hold the style while it walks the children, which borrow the arena.
     pub style: Rc<Style>,
     pub children: Vec<Child>,
-    pub layout_id: Option<LayoutId>,
-    pub bounds: Bounds<Pixels>,
+    pub placement: Placement,
+    /// Whether a positioned node is below it, so that its element id is on the stack of the walks
+    /// of layout and paint as it is in prepaint (the id of a positioned node is checked against it).
+    pub holds_positioned: bool,
     /// The hitbox is only a link in the chain of a descendant that is hit (`pointer-events: none`).
     pub passes_pointer: bool,
     /// What `crate::automation::host_bounds_flags` says of the node's `user-select`.
     pub bounds_flags: u8,
+    pub layout_id: Cell<Option<LayoutId>>,
+    pub bounds: Cell<Bounds<Pixels>>,
+    /// Set in prepaint: a box below escaped the clip of the node, which paint then does not make exact.
+    pub escape_inside: Cell<bool>,
     /// Set in prepaint, which paint reads back.
-    pub hitbox: Option<Hitbox>,
-    pub sample: Option<LayoutSample>,
+    pub hitbox: RefCell<Option<Hitbox>>,
+    pub sample: Cell<Option<LayoutSample>>,
 }
 
 /// A text, a paragraph or an empty line: an element of its own that the node lays out among its children.
 pub(super) struct Content {
-    pub element: AnyElement,
-    pub layout_id: Option<LayoutId>,
+    pub element: RefCell<AnyElement>,
+    pub layout_id: Cell<Option<LayoutId>>,
 }
 
 #[derive(Default)]
@@ -40,24 +69,41 @@ pub(super) struct Arena {
     pub contents: Vec<Content>,
 }
 
+pub(super) struct NodeSpec {
+    pub id: u64,
+    pub style: Style,
+    pub children: Vec<Child>,
+    pub placement: Placement,
+    pub passes_pointer: bool,
+    pub bounds_flags: u8,
+}
+
 impl Arena {
-    pub fn push_node(&mut self, id: u64, style: Style, children: Vec<Child>, passes_pointer: bool, bounds_flags: u8) -> usize {
+    pub fn push_node(&mut self, spec: NodeSpec) -> usize {
+        let holds_positioned = spec.children.iter().any(|child| match *child {
+            Child::Positioned(_) => true,
+            Child::Node(node) => self.nodes[node].holds_positioned,
+            Child::Content(_) => false,
+        });
         self.nodes.push(Node {
-            id,
-            style: Rc::new(style),
-            children,
-            layout_id: None,
-            bounds: Bounds::default(),
-            passes_pointer,
-            bounds_flags,
-            hitbox: None,
-            sample: None,
+            id: spec.id,
+            style: Rc::new(spec.style),
+            children: spec.children,
+            placement: spec.placement,
+            holds_positioned,
+            passes_pointer: spec.passes_pointer,
+            bounds_flags: spec.bounds_flags,
+            layout_id: Cell::new(None),
+            bounds: Cell::new(Bounds::default()),
+            escape_inside: Cell::new(false),
+            hitbox: RefCell::new(None),
+            sample: Cell::new(None),
         });
         self.nodes.len() - 1
     }
 
     pub fn push_content(&mut self, element: AnyElement) -> Child {
-        self.contents.push(Content { element, layout_id: None });
+        self.contents.push(Content { element: RefCell::new(element), layout_id: Cell::new(None) });
         Child::Content(self.contents.len() - 1)
     }
 }

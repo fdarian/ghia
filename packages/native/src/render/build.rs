@@ -9,7 +9,7 @@
 use gpui::{AnyElement, IntoElement, Refineable, Style, StyleRefinement, Styled};
 
 use super::element::DirectRoot;
-use super::node::{Arena, Child};
+use super::node::{Arena, Child, NodeSpec, Placement};
 use crate::layout::cull::Subtree;
 use crate::renderer::{BuildCtx, GpuixView};
 use crate::resolved_style::Resolved;
@@ -30,17 +30,19 @@ pub(crate) fn build_direct(
     let mut arena = Arena::default();
     ctx.retain.shape(SHAPE);
     note_plain(element.id, ctx);
-    let root_style = resolve_style(element, style, ctx);
+    note_listeners(element, ctx);
+    let (root_style, placement) = resolve_style(element, style, ctx);
     let children = build_children(element, ctx, window, cx, &mut arena);
     ctx.subtree = Subtree::of_element(ctx.subtree, style, &ctx.inherited.colors, &ctx.inherited.lengths);
     let cull_outset = ctx.subtree.outset();
-    let root = arena.push_node(
-        element.id,
-        root_style,
+    let root = arena.push_node(NodeSpec {
+        id: element.id,
+        style: root_style,
         children,
-        ctx.inherited.pointer_events_none,
-        crate::automation::host_bounds_flags(crate::renderer::selection_start_flag(style)),
-    );
+        placement,
+        passes_pointer: ctx.inherited.pointer_events_none,
+        bounds_flags: crate::automation::host_bounds_flags(crate::renderer::selection_start_flag(style)),
+    });
     crate::perf_counters::direct_built(arena.nodes.len() as u64);
     DirectRoot::new(crate::events::ids::host_element_id(element.id), arena, root, cull_outset).into_any_element()
 }
@@ -66,21 +68,30 @@ fn build_node(
     let resolved = Resolved::of(element, style, &ctx.inherited.colors, &ctx.inherited.lengths);
     tree.resolved.borrow_mut().record(id, resolved);
     note_plain(id, ctx);
-    let node_style = resolve_style(element, style, ctx);
+    let (node_style, placement) = resolve_style(element, style, ctx);
     let children = build_children(element, ctx, window, cx, arena);
     ctx.subtree = Subtree::of_element(ctx.subtree, style, &ctx.inherited.colors, &ctx.inherited.lengths);
-    ctx.retain.direct_descendant(id);
+    ctx.retain.direct_descendant(id, placement.lift_z.is_some());
     let pointer_events_none = ctx.inherited.pointer_events_none;
     ctx.inherited = parent_inherited;
     let below = std::mem::replace(&mut ctx.subtree, enclosing);
     ctx.subtree.merge(below);
-    arena.push_node(
+    arena.push_node(NodeSpec {
         id,
-        node_style,
+        style: node_style,
         children,
-        pointer_events_none,
-        crate::automation::host_bounds_flags(crate::renderer::selection_start_flag(style)),
-    )
+        placement,
+        passes_pointer: pointer_events_none,
+        bounds_flags: crate::automation::host_bounds_flags(crate::renderer::selection_start_flag(style)),
+    })
+}
+
+/// What `build_host_container` does for the listeners of a host that is not inert and has no focus handle,
+/// scroll handle or accessibility node, which is every host a direct root holds: the pointer, wheel and click
+/// events are the dispatcher's (`crate::events`), and the window's a11y being off, the click is not wired.
+fn note_listeners(element: &RetainedElement, ctx: &mut BuildCtx) {
+    ctx.note_host_clip_origin(element);
+    ctx.retain.shape(crate::renderer::click_path(ctx.tree, element).len() as u64);
 }
 
 /// What `build_host_container` tells the registries about a host that has no scroller, no
@@ -92,8 +103,9 @@ fn note_plain(id: u64, ctx: &mut BuildCtx) {
 }
 
 /// The style of a host as `compute_style_internal` makes it from the `Div` that `build_host_container`
-/// makes, which has only its base style set: `Style::default()` refined by what the build applied.
-fn resolve_style(element: &RetainedElement, style: Option<&StyleDesc>, ctx: &BuildCtx) -> Style {
+/// makes, which has only its base style set: `Style::default()` refined by what the build applied. With how
+/// that `Div` is placed: `Element::lift_z` and `Element::escapes_to` read its base style, the refinement.
+fn resolve_style(element: &RetainedElement, style: Option<&StyleDesc>, ctx: &BuildCtx) -> (Style, Placement) {
     let mut refinement = StyleRefinement::default();
     if let Some(style) = style {
         refinement = crate::css::style_cache::apply(
@@ -114,9 +126,16 @@ fn resolve_style(element: &RetainedElement, style: Option<&StyleDesc>, ctx: &Bui
     if style.and_then(|style| style.position.as_deref()).is_none() {
         refinement.position = Some(gpui::Position::Static);
     }
+    let contains_fixed = refinement.contain_layout.unwrap_or_default() || refinement.contain_positioned.unwrap_or_default();
+    let positioned = refinement.position != Some(gpui::Position::Static);
+    let placement = Placement {
+        lift_z: refinement.lift_z(),
+        escape: refinement.escape(),
+        frame: (positioned || contains_fixed).then_some(contains_fixed),
+    };
     let mut resolved = Style::default();
     resolved.refine(&refinement);
-    resolved
+    (resolved, placement)
 }
 
 /// What `build_content` builds for the children of `element`, with `ctx.inherited` the element's own.
@@ -144,7 +163,7 @@ fn build_children(
         match child {
             Planned::Block(id) => {
                 let node = build_node(id, ctx, window, cx, arena);
-                children.push(Child::Node(node));
+                children.push(if arena.nodes[node].placement.is_positioned() { Child::Positioned(node) } else { Child::Node(node) });
             }
             Planned::Paragraph(paragraph) => {
                 let (content, subtree) = crate::renderer::paragraph_content(&paragraph, Default::default(), ctx, window, cx);

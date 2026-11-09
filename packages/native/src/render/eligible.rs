@@ -1,10 +1,16 @@
 //! Which host subtrees are drawn direct.
 //!
 //! A root is direct when it and everything it builds is *plain*: a node needs nothing from a `Div`
-//! that the arena does not give. It has a hitbox, a cursor and a bounds record per node, and no lifting, so
-//! a node is plain only when none of the rest could show: no listener, prop, focus, scroll, positioned
-//! box, stacking context, pointer state, transition or animation, and nothing the build of a `Div`
-//! registers for an accessibility node (the window's a11y being off is checked at the root).
+//! that the arena does not give. It has a hitbox, a cursor, a bounds record and a positioned frame per
+//! node, and an element of its own where it is handed to a stacking context, so a node is plain only
+//! when none of the rest could show: no listener (but the root's, which the dispatcher runs), prop,
+//! focus, scroll, sticky or fixed box, stacking context, pointer state, transition or animation, and
+//! nothing the build of a `Div` registers for an accessibility node (the window's a11y being off is
+//! checked at the root).
+//!
+//! A `position: absolute` box is placed by the nearest positioned ancestor, and a recording of a root
+//! (`Retain`) can only be kept if that is in it: a node is plain with an absolute box below it only
+//! where that has a positioned ancestor at or below the root.
 //!
 //! What a subtree is does not depend on what is above it, so it is judged once per revision of the
 //! element and remembered ([`node_is_plain`]). What the subtree inherits is judged at the root
@@ -24,8 +30,23 @@ use crate::text::inline::{Child, Paragraph};
 const MEMO_LIMIT: usize = 1 << 16;
 
 thread_local! {
-    /// `(tree, element)` to the revision of its subtree when it was judged, and the verdict.
-    static MEMO: RefCell<FxHashMap<(u64, u64), (u64, bool)>> = RefCell::new(FxHashMap::default());
+    /// `(tree, element)` to the revision of its subtree when it was judged, and the verdicts.
+    static MEMO: RefCell<FxHashMap<(u64, u64), (u64, Verdict)>> = RefCell::new(FxHashMap::default());
+}
+
+/// Whether a subtree is plain, given where the nearest positioned ancestor is.
+#[derive(Clone, Copy)]
+struct Verdict {
+    /// There is a positioned ancestor, at or below the root, above the subtree.
+    positioned_above: bool,
+    /// There is none.
+    unpositioned_above: bool,
+}
+
+impl Verdict {
+    fn at(self, positioned_above: bool) -> bool {
+        if positioned_above { self.positioned_above } else { self.unpositioned_above }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -72,24 +93,38 @@ pub(crate) fn is_direct_root(
         && plain_inheritance
         && !ctx.focus_handles.contains_key(&element.id)
         && own_is_plain(element, style, Kind::Root)
-        && children_are_plain(ctx.tree, element)
+        && children_are_plain(ctx.tree, element, is_positioned(style))
 }
 
-fn node_is_plain(tree: &RetainedTree, element: &RetainedElement) -> bool {
+/// Whether the box is a containing block for an absolute descendant (`position: static` is not).
+fn is_positioned(style: Option<&StyleDesc>) -> bool {
+    matches!(style.and_then(|style| style.position.as_deref()), Some("relative" | "absolute"))
+}
+
+fn is_absolute(style: Option<&StyleDesc>) -> bool {
+    style.and_then(|style| style.position.as_deref()) == Some("absolute")
+}
+
+fn node_is_plain(tree: &RetainedTree, element: &RetainedElement, positioned_above: bool) -> bool {
     let key = (tree.id(), element.id);
     let revision = element.subtree_revision;
     let known = MEMO.with_borrow(|memo| memo.get(&key).copied());
-    if let Some((_, plain)) = known.filter(|(judged_at, _)| *judged_at == revision) {
-        return plain;
+    if let Some((_, verdict)) = known.filter(|(judged_at, _)| *judged_at == revision) {
+        return verdict.at(positioned_above);
     }
-    let plain = own_is_plain(element, element.style.as_deref(), Kind::Descendant) && children_are_plain(tree, element);
+    let style = element.style.as_deref();
+    let own = own_is_plain(element, style, Kind::Descendant);
+    let verdict = Verdict {
+        positioned_above: own && children_are_plain(tree, element, true),
+        unpositioned_above: own && !is_absolute(style) && children_are_plain(tree, element, is_positioned(style)),
+    };
     MEMO.with_borrow_mut(|memo| {
         if memo.len() >= MEMO_LIMIT {
             memo.clear();
         }
-        memo.insert(key, (revision, plain));
+        memo.insert(key, (revision, verdict));
     });
-    plain
+    verdict.at(positioned_above)
 }
 
 fn own_is_plain(element: &RetainedElement, style: Option<&StyleDesc>, kind: Kind) -> bool {
@@ -99,17 +134,18 @@ fn own_is_plain(element: &RetainedElement, style: Option<&StyleDesc>, kind: Kind
     };
     typed
         && element.custom_props().is_empty()
-        && element.events().is_empty()
+        && (kind == Kind::Root || element.events().is_empty())
         && !element.auto_focus
         && style.is_none_or(|style| style_is_plain(style, kind))
 }
 
-fn children_are_plain(tree: &RetainedTree, element: &RetainedElement) -> bool {
+/// `positioned`: an absolute box below is placed by a box at or below the root.
+fn children_are_plain(tree: &RetainedTree, element: &RetainedElement, positioned: bool) -> bool {
     if element.children.is_empty() {
         return true;
     }
     crate::text::inline::plan_children_at(tree, element).into_iter().all(|(child, _)| match child {
-        Child::Block(id) => tree.elements.get(&id).is_some_and(|child| node_is_plain(tree, child)),
+        Child::Block(id) => tree.elements.get(&id).is_some_and(|child| node_is_plain(tree, child, positioned)),
         Child::Paragraph(paragraph) => paragraph_is_plain(tree, &paragraph),
         Child::EmptyLine => true,
         Child::AnonymousCell(_) | Child::AnonymousTable(_) => false,
@@ -234,7 +270,11 @@ fn style_is_plain(style: &StyleDesc, kind: Kind) -> bool {
         && style.keyboard_focus_dim.is_none()
         && style.visibility.is_none()
         && style.z_index.is_none()
-        && matches!(style.position.as_deref(), None | Some("static"))
+        && match kind {
+            // A box inside a paragraph is painted by it, in its place.
+            Kind::Inline => matches!(style.position.as_deref(), None | Some("static")),
+            Kind::Root | Kind::Descendant => matches!(style.position.as_deref(), None | Some("static" | "relative" | "absolute")),
+        }
         && style.app_region.is_none()
         && style.user_select.is_none()
         && transitions

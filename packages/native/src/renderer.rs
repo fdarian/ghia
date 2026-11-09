@@ -7857,6 +7857,11 @@ pub(crate) struct BuildCtx<'a> {
 }
 
 impl BuildCtx<'_> {
+    /// `ObserverReports::note_clip_origin` for a host that is no part of a paragraph (for `crate::render`).
+    pub(crate) fn note_host_clip_origin(&self, element: &crate::retained_tree::RetainedElement) {
+        self.paint_reports.borrow_mut().observers.note_clip_origin(element.id, element.events(), None);
+    }
+
     /// Where the element being built sits in the document, which orders its text in selection and find.
     pub fn doc_path(&self) -> crate::text::selection::DocPath {
         crate::text::selection::DocPath::new(self.doc_hosts.clone(), self.doc_path.as_slice().into())

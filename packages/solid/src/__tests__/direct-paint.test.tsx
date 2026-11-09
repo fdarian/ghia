@@ -3,14 +3,18 @@
  * Each scene is mounted in a window of its own with the switch off and on and taken through commits that move text, style and size,
  * with a frame drawn again after each (which a retained root replays), and the pictures, the automation trees (with the boxes a
  * direct node records as a `Div` does) and the painted text of every step are compared. The scenes hold roots that are direct
- * and, in the last, one that is not, which must be drawn as it always was. The last scene has the pointer cross a root that
- * holds nodes with a cursor and with `pointer-events`, and compares the target, the path of the event and the cursor.
+ * and, in the last, one that is not, which must be drawn as it always was. The scenes with a pointer have it cross the roots
+ * and click them, and compare what the page hears: the box of the target and of each element of the path of the event. The
+ * rows of a mailbox (a positioned root with a click listener and a hover style, absolute children, one-line texts) and boxes
+ * that overlap their siblings (the z order of a positioned descendant, and where it is hit) are scenes of their own. The last
+ * test has the pointer cross the nodes of a root that hold a cursor and `pointer-events`, and compares the target, the path
+ * of the event and the cursor.
  */
 
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { createSignal, type Accessor, type JSX } from "solid-js"
+import { createSignal, Show, type Accessor, type JSX } from "solid-js"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import type { HostElement } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
@@ -25,6 +29,10 @@ type Scene = {
   view: (step: Accessor<number>) => JSX.Element
   /** The roots the page has that are drawn direct. */
   directRoots: number
+  /** The nodes they hold, at least. */
+  directNodes?: number
+  /** The pointer is on the page: what it heard in each frame is compared, and some frame heard it. */
+  hears?: boolean
   /** What the pointer does after the step is drawn. */
   act?: (renderer: ReturnType<typeof createTestRoot>["renderer"], step: number) => void
 }
@@ -38,6 +46,72 @@ const CARD = {
   color: "#223344",
   fontSize: 14,
   lineHeight: "18px",
+}
+
+/** What the page heard of the pointer since the last frame: the boxes of the target and of the path of the event. */
+const heard: string[] = []
+const box = (target: unknown) => {
+  const { x, y, width, height } = (target as HostElement).getBoundingClientRect()
+  return `${x},${y} ${width}x${height}`
+}
+const hear = (label: string) => (event: { target: unknown; composedPath: () => unknown[] }) =>
+  void heard.push(`${label} ${box(event.target)} < ${event.composedPath().map(box).join(" < ")}`)
+
+const ROW_HEIGHT = 72
+const ONE_LINE = { whiteSpace: "nowrap", textOverflow: "ellipsis" } as const
+const AVATAR_COLORS = ["#F87171", "#FB923C", "#FBBF24", "#34D399", "#22D3EE", "#60A5FA", "#A78BFA", "#F472B6"]
+const MESSAGES = [
+  { from: "Ada Lovelace", time: "9:41", subject: "Notes on the Analytical Engine, translated and extended", snippet: "The Engine might act upon other things besides number, were objects found whose mutual fundamental relations could be expressed", unread: true },
+  { from: "Grace Hopper", time: "Mon", subject: "Nanoseconds", snippet: "Here is a piece of wire a foot long, which is how far light goes in a nanosecond", unread: false },
+  { from: "Alan Turing", time: "Sun", subject: "Can machines think?", snippet: "I propose to consider the question, and the answer depends on the definitions", unread: true },
+  { from: "Edsger Dijkstra", time: "Fri", subject: "Go To Statement Considered Harmful", snippet: "For a number of years I have been familiar with the observation", unread: false },
+]
+
+/** A row of the bench's mailbox: a positioned root with a click listener and a hover style, whose children are absolute. */
+function MailRow(props: { index: number; step: Accessor<number>; selected: Accessor<number> }) {
+  const message = () => MESSAGES[(props.index + props.step()) % MESSAGES.length]
+  const unread = () => message().unread
+  return (
+    <div
+      style={{
+        position: "relative",
+        height: ROW_HEIGHT,
+        borderBottom: "1px solid #F4F4F5",
+        backgroundColor: props.selected() === props.index ? "#DBEAFE" : "#FFFFFF",
+        hover: { backgroundColor: props.selected() === props.index ? "#DBEAFE" : "#F4F4F5" },
+      }}
+      onClick={() => heard.push(`click row ${props.index}`)}
+    >
+      <Show when={unread()}>
+        <div style={{ position: "absolute", left: 4, top: 17, width: 8, height: 8, borderRadius: 4, backgroundColor: "#2563EB" }} />
+      </Show>
+      <div
+        style={{
+          position: "absolute",
+          left: 16,
+          top: 12,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+          width: 36,
+          height: 36,
+          borderRadius: 18,
+          backgroundColor: AVATAR_COLORS[(props.index + props.step()) % 8],
+        }}
+      >
+        <text style={{ fontSize: 13, fontWeight: 600, color: "#FFFFFF" }}>{message().from.slice(0, 2)}</text>
+      </div>
+      <div style={{ position: "absolute", left: 64, right: 16, top: 12, display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, height: 18 }}>
+          <text style={{ ...ONE_LINE, minWidth: 0, fontSize: 13, fontWeight: unread() ? 600 : 500, color: unread() ? "#18181B" : "#3F3F46" }}>{message().from}</text>
+          <text style={{ flexShrink: 0, fontSize: 12, color: "#71717A" }}>{message().time}</text>
+        </div>
+        <text style={{ ...ONE_LINE, height: 18, lineHeight: "18px", fontSize: 13, color: "#27272A" }}>{message().subject}</text>
+        <text style={{ ...ONE_LINE, height: 16, lineHeight: "16px", fontSize: 12, color: "#71717A" }}>{message().snippet}</text>
+      </div>
+    </div>
+  )
 }
 
 const scenes: Scene[] = [
@@ -186,12 +260,10 @@ const scenes: Scene[] = [
     view: (step) => (
       <div style={{ width: 300, backgroundColor: "#ffffff" }}>
         <div style={{ ...CARD, overflow: "hidden", height: 20 }} />
-        <div style={{ ...CARD, position: "relative", height: 20 }}>
-          <div style={{ position: "absolute", top: [2, 6, 10][step()], right: 4, width: 20, height: 12, backgroundColor: "#cc4444" }} />
-        </div>
+        <div style={{ ...CARD, position: "sticky", top: 0, height: 20 }} />
+        <div style={{ ...CARD, position: "relative", zIndex: 2, height: 20 }} />
         <div style={{ ...CARD, opacity: [1, 0.5, 1][step()], height: 20 }} />
-        <div style={{ ...CARD, height: 20 }} onClick={() => {}} />
-        <div style={{ ...CARD, height: 20 }} tabIndex={0} />
+        <div style={{ ...CARD, height: 20 }} onClick={() => {}} tabIndex={0} />
         <div style={{ ...CARD, height: 20, userSelect: "none" }} />
         <div style={{ ...CARD, height: 20, transform: ["rotate(0deg)", "rotate(2deg)", "rotate(0deg)"][step()] }} />
         <div style={{ ...CARD, height: 20, overflow: "auto" }} />
@@ -203,8 +275,10 @@ const scenes: Scene[] = [
     steps: 3,
     width: 320,
     height: 300,
-    // The page root is a context of its own, and so is the clipped box: the plain boxes around it are direct.
-    directRoots: 3,
+    // The page root is a context of its own, and so is the clipped box: the plain boxes around it are direct, and so is the
+    // positioned one with an absolute child, which is lifted to the context of the page. A static box with an absolute child is
+    // not (what places the child is outside it), and the child, a root of its own, is.
+    directRoots: 5,
     view: (step) => (
       <div style={{ width: 300, backgroundColor: "#ffffff" }}>
         <div style={{ ...CARD, backgroundColor: ["#eef3f8", "#ffeedd", "#eef3f8"][step()] }}>
@@ -221,6 +295,9 @@ const scenes: Scene[] = [
         <div style={{ ...CARD, opacity: [1, 0.5, 1][step()] }}>
           <text>faded</text>
         </div>
+        <div style={{ ...CARD, height: 20 }}>
+          <div style={{ position: "absolute", top: [2, 6, 10][step()], right: 4, width: 20, height: 12, backgroundColor: "#cc4444" }} />
+        </div>
         <div style={{ ...CARD }}>
           <div style={{ padding: 4, backgroundColor: "#ddd" }}>
             <text>nested plain</text>
@@ -228,6 +305,70 @@ const scenes: Scene[] = [
         </div>
       </div>
     ),
+  },  {
+    name: "mail-rows",
+    steps: 4,
+    width: 320,
+    height: 4 * ROW_HEIGHT,
+    directRoots: 4,
+    directNodes: 4 * 9,
+    hears: true,
+    view: (step) => {
+      const selected = () => [0, 2, 2, 3][step()]
+      return (
+        <div style={{ width: 300, display: "flex", flexDirection: "column", backgroundColor: "#ffffff" }} onPointerMove={hear("page")}>
+          {[0, 1, 2, 3].map((index) => (
+            <MailRow index={index} step={step} selected={selected} />
+          ))}
+        </div>
+      )
+    },
+    act: (renderer, step) => {
+      // Over the avatar, the text column and the bare row of one row, then out; a click on each.
+      const row = [1, 2, 0, 3][step]
+      for (const [x, y] of [[30, 20], [100, 30], [100, 62], [280, 66], [400, 400]]) {
+        renderer.nativeSimulateMouseMove(x, row * ROW_HEIGHT + y)
+        renderer.dispatchNativeEvents()
+      }
+      renderer.nativeSimulateClick(30, row * ROW_HEIGHT + 20)
+      renderer.nativeSimulateClick(160, row * ROW_HEIGHT + 66)
+      renderer.dispatchNativeEvents()
+    },
+  },
+  {
+    name: "z-order",
+    steps: 4,
+    width: 320,
+    height: 220,
+    directRoots: 4,
+    hears: true,
+    view: (step) => (
+      <div style={{ width: 300, backgroundColor: "#ffffff" }} onPointerMove={hear("page")}>
+        <div style={{ ...CARD, position: "relative", height: 40, backgroundColor: ["#eef3f8", "#f8eef3", "#eef3f8", "#f3f8ee"][step()] }}>
+          <div style={{ position: "absolute", top: [28, 24, 28, 30][step()], left: 20, width: 120, height: 30, backgroundColor: "#cc4444" }} />
+          <text>{() => `positioned above the static box ${step()}`}</text>
+        </div>
+        <div style={{ ...CARD, height: 40, backgroundColor: "#fdeeee" }}>
+          <text>static, below the child above</text>
+        </div>
+        <div style={{ ...CARD, position: "relative", height: 40 }}>
+          <div style={{ position: "absolute", top: 28, left: [160, 150, 160, 120][step()], width: 100, height: 30, backgroundColor: "#4444cc" }}>
+            <text style={{ color: "#ffffff", fontSize: 11 }}>child of D</text>
+          </div>
+        </div>
+        <div style={{ ...CARD, position: "relative", height: 40, backgroundColor: "#fdfbe0" }}>
+          <text>positioned later, above the child before</text>
+        </div>
+      </div>
+    ),
+    act: (renderer, step) => {
+      // Over the child that overlaps the static box, over the child that a later positioned box covers, and over the cover.
+      const points = [[40, 66], [40, 80], [200, 128], [200, 150], [130, 150], [400, 400]]
+      for (const [x, y] of [...points.slice(step % 2), ...points.slice(0, step % 2)]) {
+        renderer.nativeSimulateMouseMove(x, y)
+        renderer.dispatchNativeEvents()
+      }
+    },
   },
 ]
 
@@ -254,6 +395,7 @@ function run(scene: Scene, direct: boolean) {
   renderer.setDirectPaint(direct)
   renderer.clockPause()
   try {
+    heard.length = 0
     const [step, setStep] = createSignal(0)
     app.render(() => scene.view(step))
     renderer.resetBuildCounters()
@@ -267,9 +409,10 @@ function run(scene: Scene, direct: boolean) {
       for (const frame of ["changed", "again"]) {
         if (frame === "again") scene.act?.(renderer, index)
         renderer.drawFrame()
+        const heardNow = heard.splice(0)
         const file = path.join(shots, `${scene.name}-${index}-${frame}-${direct ? "on" : "off"}.png`)
         renderer.captureScreenshot(file)
-        frames.push({ label: `step ${index}, ${frame}`, picture: fs.readFileSync(file), painted: renderer.getPaintedText(), tree: JSON.parse(renderer.getAutomationTree()) })
+        frames.push({ label: `step ${index}, ${frame}`, picture: fs.readFileSync(file), painted: renderer.getPaintedText(), tree: JSON.parse(renderer.getAutomationTree()), heard: heardNow })
       }
     }
     const counters = renderer.getBuildCounters()
@@ -294,14 +437,16 @@ describeNative("direct paint", { timeout: 120_000 }, () => {
       expect(off.roots, "nothing is direct with the switch off").toBe(0)
       if (scene.directRoots === 0) expect(on.roots, "nothing here is plain").toBe(0)
       else expect(on.roots, "the plain roots are drawn direct").toBeGreaterThanOrEqual(scene.directRoots)
-      expect(on.nodes, "a direct root holds its nodes").toBeGreaterThanOrEqual(on.roots)
+      expect(on.nodes, "a direct root holds its nodes").toBeGreaterThanOrEqual(scene.directNodes ?? on.roots)
       expect(on.mismatches, "what a retained root replays is what is built").toEqual([])
       for (let index = 0; index < off.frames.length; index++) {
         const frame = off.frames[index].label
         expect(Buffer.compare(on.frames[index].picture, off.frames[index].picture), `the picture of ${frame}`).toBe(0)
         expect(on.frames[index].painted, `the painted text of ${frame}`).toEqual(off.frames[index].painted)
         expect(on.frames[index].tree, `the automation tree of ${frame}`).toEqual(off.frames[index].tree)
+        expect(on.frames[index].heard, `what the page heard in ${frame}`).toEqual(off.frames[index].heard)
       }
+      if (scene.hears) expect(off.frames.flatMap((frame) => frame.heard).length, "the pointer reached the page").toBeGreaterThan(0)
     })
   }
 
