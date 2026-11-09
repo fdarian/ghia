@@ -10,6 +10,7 @@
 /// the injected framework event dispatcher.
 
 import {
+  debugDecodeWireBatch,
   hasTestGpuixRenderer,
   TestGpuixRenderer,
   measureMotionAnimation,
@@ -58,6 +59,16 @@ export {
   readMacCpuThrottle,
 } from "./cpu-throttle.js"
 export type { MacCpuThrottle } from "./cpu-throttle.js"
+
+export { decodeWireBatchForTest, encodeWireBatchForTest, type DecodedOp } from "./wire-testing.js"
+
+/**
+ * One JSON array per op that native's binary decoder reads from `bytes`, for the
+ * round-trip tests of `wire.ts`. Needs a build with `test-support`.
+ */
+export function decodeWireBatchWithNativeForTest(bytes: Uint8Array): string[] {
+  return debugDecodeWireBatch(bytes)
+}
 
 // The release index.d.ts has no test-support types, so these mirror the generated
 // interfaces of the test-support build (fields documented in src/test_renderer.rs).

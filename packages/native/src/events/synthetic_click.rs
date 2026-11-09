@@ -72,7 +72,7 @@ mod tests {
                 ["createElement",2,"{control_type}"],["appendChild",1,2],["setCustomProp",2,"disabled",{disabled}],
                 ["createElement",3,"div"],["appendChild",2,3]]"#
         );
-        crate::renderer::apply_batch_to_tree(&mut tree, batch.as_bytes()).unwrap();
+        crate::batch::test_json::apply(&mut tree, &batch).unwrap();
         for id in [1, 2, 3] {
             tree.set_event_listener(id, "click".to_string(), true);
         }

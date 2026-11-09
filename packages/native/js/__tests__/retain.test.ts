@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { TestRenderer, hasNativeTestRenderer } from "../testing.js"
+import { TestRenderer, encodeWireBatchForTest, hasNativeTestRenderer } from "../testing.js"
 
 // A column of three cards, each with two lines of text.
 const mount = (skipping = false) => {
@@ -22,7 +22,7 @@ const mount = (skipping = false) => {
       batch.push(["createElement", id, "div"], ["appendChild", card, id], ["createElement", id * 10, "text"], ["setText", id * 10, "some words"], ["appendChild", id, id * 10])
     }
   }
-  renderer.applyBatch(JSON.stringify(batch))
+  renderer.applyBatch(encodeWireBatchForTest(batch))
   renderer.setRetainVerify(!skipping)
   renderer.flush()
   return renderer
@@ -59,7 +59,7 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
 
   it("counts an element that cannot be reused under the reason, and counts it as reusable once the reason is lifted", () => {
     const renderer = mount()
-    renderer.applyBatch(JSON.stringify([["setStyle", 20, { height: 40, overflow: "scroll" }]]))
+    renderer.applyBatch(encodeWireBatchForTest([["setStyle", 20, { height: 40, overflow: "scroll" }]]))
     renderer.flush()
     renderer.flush()
     renderer.resetBuildCounters()
@@ -76,7 +76,7 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
 
   it("does not count an overflow: hidden element as an obstacle", () => {
     const renderer = mount()
-    renderer.applyBatch(JSON.stringify([["setStyle", 20, { height: 40, overflow: "hidden" }]]))
+    renderer.applyBatch(encodeWireBatchForTest([["setStyle", 20, { height: 40, overflow: "hidden" }]]))
     renderer.flush()
     renderer.flush()
     renderer.resetBuildCounters()
@@ -167,13 +167,13 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
           ["appendChild", row + 1, row + 3],
         )
       }
-      renderer.applyBatch(JSON.stringify(batch))
+      renderer.applyBatch(encodeWireBatchForTest(batch))
       for (let frame = 0; frame < 4; frame++) renderer.flush()
       return renderer
     }
 
     const restyle = (renderer: TestRenderer, index: number) => {
-      renderer.applyBatch(JSON.stringify([["setStyle", rowId(index) + 2, { width: 100, height: 40, backgroundColor: "#aa0000" }]]))
+      renderer.applyBatch(encodeWireBatchForTest([["setStyle", rowId(index) + 2, { width: 100, height: 40, backgroundColor: "#aa0000" }]]))
     }
 
     it("builds the changed row and the chain, and skips the rows around it", () => {
@@ -227,7 +227,7 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
     const misses = (counters: { relocationMisses: string }) => JSON.parse(counters.relocationMisses) as Record<string, number>
 
     const growRow = (renderer: TestRenderer, index: number) => {
-      renderer.applyBatch(JSON.stringify([["setStyle", rowId(index), { height: 60, flexShrink: 0, display: "flex", flexDirection: "row" }]]))
+      renderer.applyBatch(encodeWireBatchForTest([["setStyle", rowId(index), { height: 60, flexShrink: 0, display: "flex", flexDirection: "row" }]]))
     }
 
     it("builds one row and the chain for a read before the frame, and publishes the rows it skipped", () => {
@@ -469,7 +469,7 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
           batch.push(["createElement", row + 5, "text"], ["setText", row + 5, `n${index}`], ["appendChild", row + 2, row + 5])
         }
       }
-      renderer.applyBatch(JSON.stringify(batch))
+      renderer.applyBatch(encodeWireBatchForTest(batch))
       for (let frame = 0; frame < 4; frame++) renderer.flush()
       return renderer
     }
@@ -511,7 +511,7 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
         for (let index = top; index < top + 7; index++) {
           ops.push(["setStyle", rowId(index) + 1, { width: 100, height: ROW_HEIGHT, backgroundColor: `#33557${top % 10}` }])
         }
-        renderer.applyBatch(JSON.stringify(ops))
+        renderer.applyBatch(encodeWireBatchForTest(ops))
         renderer.flush()
         renderer.flush()
         most = Math.max(most, recordCount(renderer))

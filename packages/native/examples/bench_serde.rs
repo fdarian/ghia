@@ -1,8 +1,10 @@
 //! Rust half of the applyBatch serialization benchmark.
 //!
 //! `examples/bench-serialization.ts` captures the real mutation queue that
-//! `ChatApp` produces and writes it to `tmp/batch-fixture.json`. This program
-//! reads that exact file, so both halves measure the same bytes.
+//! `ChatApp` produces and writes it to `tmp/batch-fixture.json` (the ops as JSON
+//! tuples, for the formats this bench compares) and `tmp/batch-fixture.wire`
+//! (the same ops in the wire format that ships). This program reads both, so
+//! both halves measure the same ops.
 //!
 //! It answers two questions the JS half cannot:
 //!
@@ -14,9 +16,9 @@
 //! `size_of` guess.
 //!
 //! ```text
+//!   tmp/batch-fixture.wire ─ apply_batch_to_tree ──► Vec<BatchOp> ──► RetainedTree   (shipped)
 //!   tmp/batch-fixture.json
 //!        │
-//!        ├─ apply_batch_to_tree ──► Vec<BatchOp> ──► RetainedTree              (shipped)
 //!        ├─ serde_json ──► Vec<Value> ──► clone ──► from_value ──► StyleDesc   (the old path)
 //!        ├─ serde_json ──► Vec<Op<StyleDesc>>                                  (typed)
 //!        ├─ serde_json ──► Vec<Op<CompactStyle>>                               (compact)
@@ -779,7 +781,7 @@ where
 
 // ── Tree construction ────────────────────────────────────────────────
 
-/// The real production path: `parse_batch_ops` then the apply loop.
+/// The real production path: the wire decoder, then the apply loop.
 ///
 /// This calls `apply_batch_to_tree` itself rather than replaying the ops by
 /// hand, so the numbers describe shipped code. An earlier version of this bench
@@ -1036,6 +1038,10 @@ fn main() {
     });
     let interned_path = path.replace("batch-fixture.json", "batch-fixture-interned.json");
 
+    let wire_path = path.replace("batch-fixture.json", "batch-fixture.wire");
+    let wire = std::fs::read(&wire_path).unwrap_or_else(|error| {
+        panic!("cannot read {wire_path}: {error}\nrun `bun bench-serialization.ts` in examples/ first")
+    });
     let json = std::fs::read_to_string(&path).unwrap_or_else(|error| {
         panic!("cannot read {path}: {error}\nrun `bun bench-serialization.ts` in examples/ first")
     });
@@ -1061,7 +1067,8 @@ fn main() {
     println!("# applyBatch decode — Rust side\n");
     println!("fixture: {path}");
     println!(
-        "{op_count} ops · JSON {:.2} MB · msgpack {:.2} MB · interned msgpack {:.2} MB · {iterations} iterations\n",
+        "{op_count} ops · wire {:.2} MB · JSON {:.2} MB · msgpack {:.2} MB · interned msgpack {:.2} MB · {iterations} iterations\n",
+        wire.len() as f64 / 1e6,
         json.len() as f64 / 1e6,
         msgpack.len() as f64 / 1e6,
         interned_msgpack.len() as f64 / 1e6,
@@ -1112,18 +1119,21 @@ fn main() {
     println!("## Decode\n");
     reset_interners();
     let mut rows = vec![
-        // The shipped path, end to end, minus only the napi String copy:
-        // `serde_json` to `Vec<Value>`, then `parse_batch_ops`, then the apply
-        // loop. Everything below it is a proposal; this row is production.
+        // The shipped path, end to end, minus only the napi call: the wire
+        // decoder, style interning, then the apply loop. Every other row is a
+        // JSON format that is not shipped; this row is production.
         time(
-            "REAL apply_batch_to_tree (parse + apply)",
+            "REAL apply_batch_to_tree (wire decode + apply)",
             iterations,
             || {
                 let mut tree = RetainedTree::new();
-                gpuix_native::apply_batch_to_tree(&mut tree, json.as_bytes()).expect("apply");
+                gpuix_native::apply_batch_to_tree(&mut tree, &wire).expect("apply");
                 tree.elements.len()
             },
         ),
+        time("wire decode only (batch::wire::decode)", iterations, || {
+            gpuix_native::batch::wire::decode(&wire).expect("decode").len()
+        }),
         time(
             "the old path — Vec<Value> + clone + from_value",
             iterations,
@@ -1171,7 +1181,7 @@ fn main() {
     println!("## Retained tree memory\n");
     reset_interners();
     let fat_start = heap_mark();
-    let fat = build_fat_tree(json.as_bytes());
+    let fat = build_fat_tree(&wire);
     let fat_heap = heap_since(fat_start);
     let fat_elements = fat.elements.len();
 

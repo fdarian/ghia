@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { animate, motionValue } from "../host.js"
 import type { AnimationPlaybackControlsWithThen, MotionCurve } from "../host.js"
-import { TestRenderer, hasNativeTestRenderer } from "../testing.js"
+import { TestRenderer, encodeWireBatchForTest, hasNativeTestRenderer } from "../testing.js"
 
 /**
  * The playback controls of an animation on the real addon, against Motion 14.1.0 itself: the same
@@ -325,7 +325,7 @@ describe.skipIf(!hasNativeTestRenderer)("playback controls on the addon", () => 
   it("asks for no frame while held, and keeps the value for the elements that bind it", () => {
     const renderer = mount()
     renderer.applyBatch(
-      JSON.stringify([
+      encodeWireBatchForTest([
         ["createElement", 1, "div"],
         ["setRoot", 1],
         ["setStyle", 1, { display: "flex" }],
@@ -336,7 +336,7 @@ describe.skipIf(!hasNativeTestRenderer)("playback controls on the addon", () => 
     )
     const x = motionValue(10)
     x.bind(renderer)
-    renderer.applyBatch(JSON.stringify([["setCustomProp", 2, "motionValues", { width: x.id }]]))
+    renderer.applyBatch(encodeWireBatchForTest([["setCustomProp", 2, "motionValues", { width: x.id }]]))
     renderer.flush()
     const controls = x.animate(110, linear)
     frame(renderer, 500)

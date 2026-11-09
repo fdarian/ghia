@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { TestRenderer, hasNativeTestRenderer } from "../testing.js"
+import { TestRenderer, encodeWireBatchForTest, hasNativeTestRenderer } from "../testing.js"
 
 const motion = {
   initial: { opacity: 0.5 },
@@ -11,7 +11,7 @@ const mount = (type: string) => {
   const renderer = new TestRenderer({ width: 400, height: 300 })
   renderer.clockPause()
   renderer.applyBatch(
-    JSON.stringify([
+    encodeWireBatchForTest([
       ["createElement", 1, "div"],
       ["setRoot", 1],
       ["setStyle", 1, { display: "flex", flexDirection: "row" }],

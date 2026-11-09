@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { inflateSync } from "node:zlib"
-import { TestRenderer, hasNativeTestRenderer } from "../testing.js"
+import { TestRenderer, encodeWireBatchForTest, hasNativeTestRenderer } from "../testing.js"
 
 /** The colour, as hex, of the window pixel (x, y) in a screenshot. Reads 8-bit RGB or RGBA PNGs without interlacing. */
 function colourAt(renderer: TestRenderer, x: number, y: number): string {
@@ -53,7 +53,7 @@ const mount = (layout: unknown) => {
   const renderer = new TestRenderer({ width: 400, height: 400 })
   renderer.clockPause()
   renderer.applyBatch(
-    JSON.stringify([
+    encodeWireBatchForTest([
       ["createElement", 1, "div"],
       ["setRoot", 1],
       ["setStyle", 1, { display: "flex", flexDirection: "column", width: 100 }],
@@ -71,7 +71,7 @@ const mount = (layout: unknown) => {
 }
 
 const pushDown = (renderer: TestRenderer) => {
-  renderer.applyBatch(JSON.stringify([["setStyle", 2, { height: 120, width: 50 }]]))
+  renderer.applyBatch(encodeWireBatchForTest([["setStyle", 2, { height: 120, width: 50 }]]))
   renderer.flush()
 }
 
@@ -104,7 +104,7 @@ describe.skipIf(!hasNativeTestRenderer)("native layout flip", () => {
   it("does not glide a box twice when an enclosing one already carries it", () => {
     const renderer = mount({ mode: true, transition: linear })
     renderer.applyBatch(
-      JSON.stringify([
+      encodeWireBatchForTest([
         ["createElement", 4, "div"],
         ["appendChild", 3, 4],
         ["setStyle", 4, { height: 10, width: 10 }],
@@ -129,7 +129,7 @@ describe.skipIf(!hasNativeTestRenderer)("native layout flip", () => {
 
   it("leaves an element without the prop where layout put it", () => {
     const renderer = mount("size")
-    renderer.applyBatch(JSON.stringify([["setCustomProp", 3, "layout", null]]))
+    renderer.applyBatch(encodeWireBatchForTest([["setCustomProp", 3, "layout", null]]))
     pushDown(renderer)
     expect(topOf(renderer, 3)).toBe(120)
   })
@@ -164,7 +164,7 @@ describe.skipIf(!hasNativeTestRenderer)("native layout drag", () => {
   it("paints a held box above the siblings after it, and keeps it there on the way home", () => {
     const renderer = mount(null)
     renderer.applyBatch(
-      JSON.stringify([
+      encodeWireBatchForTest([
         ["setCustomProp", 2, "layout", { mode: true, transition: linear, dragOffset: drag }],
         ["setStyle", 2, { height: 20, width: 50, backgroundColor: "#ff0000" }],
         ["setStyle", 3, { height: 20, width: 50, backgroundColor: "#0000ff" }],
@@ -227,7 +227,7 @@ describe.skipIf(!hasNativeTestRenderer)("native layoutId", () => {
     const renderer = new TestRenderer({ width: 400, height: 100 })
     renderer.clockPause()
     renderer.applyBatch(
-      JSON.stringify([
+      encodeWireBatchForTest([
         ["createElement", 1, "div"],
         ["setRoot", 1],
         ["setStyle", 1, { display: "flex", flexDirection: "row", width: 400 }],
@@ -256,7 +256,7 @@ describe.skipIf(!hasNativeTestRenderer)("native layoutId", () => {
 
   it("starts a box that replaces another from where the old one was shown", () => {
     const renderer = mountRow()
-    renderer.applyBatch(JSON.stringify([["destroyElement", 2], ...addBox()]))
+    renderer.applyBatch(encodeWireBatchForTest([["destroyElement", 2], ...addBox()]))
     renderer.flush()
     expect(leftOf(renderer, 4)).toBeCloseTo(0, 1)
     renderer.clockFastForward(500)
@@ -269,25 +269,25 @@ describe.skipIf(!hasNativeTestRenderer)("native layoutId", () => {
 
   it("starts from the old box one frame later too, but not after that", () => {
     const renderer = mountRow()
-    renderer.applyBatch(JSON.stringify([["destroyElement", 2]]))
+    renderer.applyBatch(encodeWireBatchForTest([["destroyElement", 2]]))
     renderer.flush()
-    renderer.applyBatch(JSON.stringify(addBox()))
+    renderer.applyBatch(encodeWireBatchForTest(addBox()))
     renderer.flush()
     expect(leftOf(renderer, 4)).toBeCloseTo(0, 1)
 
     const late = mountRow()
-    late.applyBatch(JSON.stringify([["destroyElement", 2]]))
+    late.applyBatch(encodeWireBatchForTest([["destroyElement", 2]]))
     late.flush()
     late.flush()
     late.flush()
-    late.applyBatch(JSON.stringify(addBox()))
+    late.applyBatch(encodeWireBatchForTest(addBox()))
     late.flush()
     expect(leftOf(late, 4)).toBe(200)
   })
 
   it("lets a box take over from one that is still mounted", () => {
     const renderer = mountRow()
-    renderer.applyBatch(JSON.stringify(addBox()))
+    renderer.applyBatch(encodeWireBatchForTest(addBox()))
     renderer.flush()
     expect(leftOf(renderer, 4)).toBeCloseTo(0, 1)
     expect(leftOf(renderer, 2)).toBe(0)
@@ -301,7 +301,7 @@ describe.skipIf(!hasNativeTestRenderer)("native layoutId", () => {
   it("does not share between different ids or when the id is left out", () => {
     for (const other of [{ ...shared, layoutId: "other" }, { mode: true, transition: linear }]) {
       const renderer = mountRow()
-      renderer.applyBatch(JSON.stringify([["destroyElement", 2], ...addBox(other)]))
+      renderer.applyBatch(encodeWireBatchForTest([["destroyElement", 2], ...addBox(other)]))
       renderer.flush()
       expect(leftOf(renderer, 4)).toBe(200)
     }
@@ -310,7 +310,7 @@ describe.skipIf(!hasNativeTestRenderer)("native layoutId", () => {
   it("jumps under reduced motion", () => {
     const reduced = { ...shared, reducedMotion: true }
     const renderer = mountRow(reduced)
-    renderer.applyBatch(JSON.stringify([["destroyElement", 2], ...addBox(reduced)]))
+    renderer.applyBatch(encodeWireBatchForTest([["destroyElement", 2], ...addBox(reduced)]))
     renderer.flush()
     expect(leftOf(renderer, 4)).toBe(200)
   })
@@ -318,7 +318,7 @@ describe.skipIf(!hasNativeTestRenderer)("native layoutId", () => {
   it("reports when a glide starts and when it completes, to those who listen", () => {
     const renderer = mountRow()
     renderer.applyBatch(
-      JSON.stringify([
+      encodeWireBatchForTest([
         ["destroyElement", 2],
         ...addBox(),
         ["setEventListener", 4, "layoutAnimationStart", true],
@@ -341,7 +341,7 @@ describe.skipIf(!hasNativeTestRenderer)("native layoutId", () => {
 
   it("stays silent without a listener", () => {
     const renderer = mountRow()
-    renderer.applyBatch(JSON.stringify([["destroyElement", 2], ...addBox()]))
+    renderer.applyBatch(encodeWireBatchForTest([["destroyElement", 2], ...addBox()]))
     renderer.flush()
     renderer.clockFastForward(1100)
     renderer.flush()

@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest"
 import type { EventPayload } from "../../index.js"
-import { TestRenderer, hasNativeTestRenderer } from "../testing.js"
+import { TestRenderer, encodeWireBatchForTest, hasNativeTestRenderer } from "../testing.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -20,15 +20,15 @@ function nativeOf(renderer: TestRenderer): Native {
   return (renderer as unknown as { native: Native }).native
 }
 
-function setHeight(height: number): string {
-  return JSON.stringify([["setStyle", BOX, { height, width: 50 }]])
+function setHeight(height: number): Uint8Array {
+  return encodeWireBatchForTest([["setStyle", BOX, { height, width: 50 }]])
 }
 
 function mount(options: { dispatchSyncEvent?: (event: EventPayload) => { defaultPrevented: boolean; propagationStopped: boolean } } = {}) {
   const renderer = new TestRenderer({ width: 200, height: 200, ...options })
   renderer.clockPause()
   renderer.applyBatch(
-    JSON.stringify([
+    encodeWireBatchForTest([
       ["createElement", 1, "div"],
       ["setRoot", 1],
       ["setStyle", 1, { display: "flex", flexDirection: "column", width: 100 }],

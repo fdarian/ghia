@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest"
+import { decodeWireBatchForTest } from "../wire-testing.js"
 import { createMutationQueue } from "../host.js"
 
 function setup() {
   const batches: unknown[][] = []
   const images: { id: number; bytes: number[] }[] = []
   const renderer = {
-    applyBatch(json: string) {
-      batches.push(JSON.parse(json))
+    applyBatch(bytes: Uint8Array) {
+      batches.push(decodeWireBatchForTest(bytes))
       return []
     },
     setImage(id: number, bytes: Uint8Array) {

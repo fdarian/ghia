@@ -16,6 +16,7 @@
 import { dlopen, ptr } from "bun:ffi"
 import { existsSync, readFileSync } from "node:fs"
 import { createTestRoot } from "@ghia/solid/testing"
+import { decodeWireBatchForTest } from "@ghia/native/testing"
 import { writeFileSync } from "node:fs"
 import type { Message } from "./types"
 
@@ -232,13 +233,10 @@ function snapshotCounters(): Numbers {
   return out
 }
 
-function summarizeBatch(json: string): string {
-  const ops = JSON.parse(json) as Array<Record<string, unknown> | unknown[]>
+function summarizeBatch(bytes: Uint8Array): string {
+  const ops = decodeWireBatchForTest(bytes)
   const counts = new Map<string, number>()
-  for (const op of ops) {
-    const name = String(Array.isArray(op) ? op[0] : (op.op ?? op.type ?? Object.keys(op)[0]))
-    counts.set(name, (counts.get(name) ?? 0) + 1)
-  }
+  for (const op of ops) counts.set(op[0], (counts.get(op[0]) ?? 0) + 1)
   const sample = ops.length <= 4 ? " " + JSON.stringify(ops).slice(0, 400) : ""
   return `${ops.length} ops: ${[...counts].map(([name, count]) => `${name}x${count}`).join(" ")}${sample}`
 }
@@ -265,7 +263,7 @@ if (PHASES) {
   for (const name of names) {
     const original = target[name]!.bind(renderer)
     target[name] = (...args) => {
-      if (TRACE_KEY && phase.recording && name === "applyBatch") phase.trace(`    [applyBatch ${summarizeBatch(String(args[0]))}]`)
+      if (TRACE_KEY && phase.recording && name === "applyBatch") phase.trace(`    [applyBatch ${summarizeBatch(args[0] as Uint8Array)}]`)
       return phase.run(`native:${name}`, () => original(...args))
     }
   }

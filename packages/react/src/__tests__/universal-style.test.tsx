@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { UniversalStyle } from "../index.js"
+import { decodeWireBatchForTest } from "@ghia/native/testing"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import { readLogicalPixels, SHOTS_DIR } from "./test-utils.js"
 
@@ -63,7 +64,13 @@ describeNative("UniversalStyle", () => {
 
   it("does not resend a layer that an inline style object repeats", () => {
     const { render, renderer, unmount } = createTestRoot({ width: 300, height: 100 })
-    const sent = vi.spyOn(renderer, "applyBatch")
+    // A batch is a view of a buffer the queue reuses, so it is read when it is sent.
+    const sentOps: string[][] = []
+    const applyBatch = renderer.applyBatch.bind(renderer)
+    vi.spyOn(renderer, "applyBatch").mockImplementation((bytes) => {
+      sentOps.push(decodeWireBatchForTest(bytes).map((op) => op[0]))
+      return applyBatch(bytes)
+    })
     function Counter() {
       const [count, setCount] = useState(0)
       return row(
@@ -73,7 +80,7 @@ describeNative("UniversalStyle", () => {
     }
     render(<Counter />)
     const layers = () =>
-      sent.mock.calls.filter(([json]) => json.includes("setUniversalStyle")).length
+      sentOps.filter((ops) => ops.includes("setUniversalStyle")).length
     expect(layers()).toBe(1)
     renderer.clickElement(renderer.findByTestId("bare").id)
     renderer.dispatchNativeEvents()

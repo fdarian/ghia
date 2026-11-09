@@ -7,7 +7,7 @@ import {
 } from "../keyframes.js"
 import { GpuixRenderer } from "../../index.js"
 import { createNativeRenderer } from "../runtime.js"
-import { TestRenderer, hasNativeTestRenderer } from "../testing.js"
+import { TestRenderer, encodeWireBatchForTest, hasNativeTestRenderer } from "../testing.js"
 
 const fakeHost = () => {
   const calls: Array<[string, unknown]> = []
@@ -150,7 +150,7 @@ describe.skipIf(!hasNativeTestRenderer)("keyframes on the native test renderer",
     const live = new TestRenderer({ width: 100, height: 100 })
     defineKeyframes("kf-live", { to: { opacity: 0.5 } })
     live.applyBatch(
-      JSON.stringify([
+      encodeWireBatchForTest([
         ["createElement", 1, "div"],
         ["setRoot", 1],
         ["setStyle", 1, { animation: "kf-live 1s linear" }],
@@ -164,17 +164,17 @@ describe.skipIf(!hasNativeTestRenderer)("keyframes on the native test renderer",
   it("accepts the animation shorthand and longhands in a style and rejects a bad one", () => {
     const renderer = new TestRenderer({ width: 100, height: 100 })
     renderer.applyBatch(
-      JSON.stringify([
+      encodeWireBatchForTest([
         ["createElement", 1, "div"],
         ["setRoot", 1],
         ["setStyle", 1, { animation: "spin 1s linear infinite alternate", hover: { animationPlayState: "paused" } }],
       ])
     )
     expect(() =>
-      renderer.applyBatch(JSON.stringify([["setStyle", 1, { animationDuration: "fast" }]]))
+      renderer.applyBatch(encodeWireBatchForTest([["setStyle", 1, { animationDuration: "fast" }]]))
     ).toThrow(/animationDuration/)
     expect(() =>
-      renderer.applyBatch(JSON.stringify([["setStyle", 1, { hover: { animation: "a b 1s" } }]]))
+      renderer.applyBatch(encodeWireBatchForTest([["setStyle", 1, { hover: { animation: "a b 1s" } }]]))
     ).toThrow(/hover\.animation/)
     renderer.flush()
   })

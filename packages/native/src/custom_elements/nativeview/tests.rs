@@ -158,7 +158,7 @@ impl Page {
     fn destroy_in_batch(&self, id: u64) {
         let mut tree = self.tree.lock().unwrap();
         let batch = format!(r#"[["destroyElement", {id}]]"#);
-        let destroyed = crate::renderer::apply_batch_to_tree(&mut tree, batch.as_bytes()).unwrap();
+        let destroyed = crate::batch::test_json::apply(&mut tree, &batch).unwrap();
         let tree_id = tree.id();
         drop(tree);
         super::teardown::tell_destroyed(tree_id, &destroyed).unwrap();

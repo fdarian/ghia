@@ -716,12 +716,13 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { AvailableUpdate, GpuixRenderer, RowOracle, TestGpuixRenderer, checkUpdate, getAllDisplays, getPrimaryDisplay, hasTestGpuixRenderer, measureMotionAnimation, validateKeyframes } = nativeBinding
+const { AvailableUpdate, GpuixRenderer, RowOracle, TestGpuixRenderer, checkUpdate, debugDecodeWireBatch, getAllDisplays, getPrimaryDisplay, hasTestGpuixRenderer, measureMotionAnimation, validateKeyframes } = nativeBinding
 export { AvailableUpdate }
 export { GpuixRenderer }
 export { RowOracle }
 export { TestGpuixRenderer }
 export { checkUpdate }
+export { debugDecodeWireBatch }
 export { getAllDisplays }
 export { getPrimaryDisplay }
 export { hasTestGpuixRenderer }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { createMutationQueue } from "../host.js"
-import { forEachBlobUrl } from "../style-images.js"
+import { createStyleImageLoader, forEachBlobUrl } from "../style-images.js"
 
 function setup() {
   const images: { url: string; bytes: number[] }[] = []
@@ -105,6 +105,21 @@ describe("style images from blob: URLs", () => {
     expect(failures).toHaveLength(1)
     expect(failures[0]?.url).toBe(url)
     expect(typeof failures[0]?.message).toBe("string")
+  })
+
+  it("walks a style only when its JSON text can name a blob", () => {
+    const loader = createStyleImageLoader({ setStyleImage() {}, failStyleImage() {} })
+    let reads = 0
+    const style = {
+      get background() {
+        reads++
+        return "red"
+      },
+    }
+    loader.style(style, '{"background":"red"}')
+    expect(reads).toBe(0)
+    loader.style(style, '{"background":"url(blob:x)"}')
+    expect(reads).toBe(1)
   })
 
   it("does nothing for a style without a blob", async () => {

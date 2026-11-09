@@ -1,6 +1,7 @@
 import { createSignal, For, Show } from "solid-js"
 import { describe, expect, it } from "vitest"
 import { AnimatePresence, motion } from "../index.js"
+import { decodeWireBatchForTest } from "@ghia/native/testing"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 describe.skipIf(!hasNativeTestRenderer)("Solid renderer", () => {
@@ -98,15 +99,15 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renderer", () => {
         <For each={items()}>{(item) => <div testId={item} />}</For>
       </div>
     ))
-    const batches: string[] = []
+    const sentOps: string[] = []
     const applyBatch = app.renderer.applyBatch.bind(app.renderer)
-    app.renderer.applyBatch = (batch: string) => {
-      batches.push(batch)
+    app.renderer.applyBatch = (batch: Uint8Array) => {
+      for (const op of decodeWireBatchForTest(batch)) sentOps.push(op[0])
       return applyBatch(batch)
     }
     // Moving the first to the end makes Solid replace it, then insert it again.
     app.flushSync(() => setItems(["b", "c", "a"]))
-    expect(batches.join("")).not.toContain("destroyElement")
+    expect(sentOps).not.toContain("destroyElement")
     expect(app.renderer.findByType("div").map((div) => div.testId)).toEqual([undefined, "b", "c", "a"])
   })
 

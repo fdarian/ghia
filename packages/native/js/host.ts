@@ -2868,7 +2868,11 @@ export interface MutationRenderer {
   detachChild(id: number): void
   appendChild(parentId: number, childId: number): void
   insertBefore(parentId: number, childId: number, beforeId: number): void
-  setStyle(id: number, style: object): void
+  /**
+   * `styleJson` is `JSON.stringify(style)` when the caller already has it (a host that compares
+   * writes by that text): the queue sends it as it is instead of stringifying again.
+   */
+  setStyle(id: number, style: object, styleJson?: string): void
   setText(id: number, content: string): void
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
   setRoot(id: number): void

@@ -9,7 +9,7 @@ description: >
 
 # applyBatch serialization benchmark
 
-Every React commit turns into one `applyBatch(json)` call. This benchmark
+Every React or Solid commit turns into one `applyBatch` call (JSON text when most of this page was measured, the binary [wire format](#the-binary-wire-format) now). This benchmark
 measures what that costs on both sides of the FFI boundary, on the real
 `ChatApp` queue rather than a synthetic one.
 
@@ -49,6 +49,30 @@ Four changes, in the order they landed:
 
 Rejected, with reasons, in [what was not done](#deliberately-not-doing).
 
+## The binary wire format
+
+`applyBatch` takes the batch as bytes (`docs/reference.md`, "Wire format"): ids are varints, strings are length
+prefixed UTF-8, and a style stays its JSON text so Rust still interns it by raw bytes. The tables above were measured
+on JSON; these are the same fixture (10 000 turns, safe-mdx: **252 291 ops**, 72 010 elements) through the wire format,
+on the same machine, JSON rows measured in the same runs. Medians of 9.
+
+| step | JSON (before) | wire (after) | per op, before ► after |
+|---|---:|---:|---:|
+| JS encode (`JSON.stringify(queue)` ► `WireWriter`) | 39.99 ms | **17.03 ms** | 158 ► 67 ns |
+| bytes | 14.65 MB | **9.57 MB** (0.65x) | 58 ► 38 B |
+| JS heap while alive | 29.3 MB (2 B per char: the text has non-latin1) | 9.6 MB (outside the JS heap) | |
+| napi call, an empty batch | 310 ns | 343 ns | the string transcode is gone, the call is not cheaper |
+| Rust decode, `Vec<BatchOp>` | about 36 ms (parse + style resolve, by difference) | **10.1 ms** | 143 ► 40 ns |
+| Rust `apply_batch_to_tree` (decode + style resolve + apply) | 65.9 ms | **39.5 ms** | 261 ► 157 ns |
+| heap churn / allocations of that call | 110.8 MB / 259 822 | 109.8 MB / 259 821 | the same: strings are still owned |
+
+- The wire encode includes a `JSON.stringify` of each style (62 364 of them). The queue only does that for a host that does not pass the text: Solid passes the text its write comparison already made, so a written style is stringified once.
+- The decode is no longer the cost of an op: a `setRoot` costs 48 ns through the test renderer as JSON and 9 ns as bytes (decode and apply together), and a real batch is dominated by `create_element`, `set_style` and `destroy_element`.
+- The decoder allocates what it did: every string but a style is copied into its op, which is why churn and allocations did not move. Borrowing them is the next step if the allocator shows up in a profile.
+- The "decode" column of `bun bench-serialization.ts` for the wire row is the JS test decoder (`decodeWireBatchForTest`), which parses styles with `JSON.parse`; it prices nothing production runs.
+
+On the Mailbox key proxy the gain is smaller than the fixture's, because a key's batch is a few hundred ops and the rest of the key is Solid, layout and paint: see "Slice 2 results" in `~/.claude/notes/plans/ghia-binary-batch.md` (a list-changing type key about 4% fewer instructions, bytes sent 31 KB ► 19 KB, allocation per key about 40% lower under `bun` and 12% under the compiled executable).
+
 ## Running it
 
 Two halves. The JS half writes the fixture the Rust half reads, so both measure
@@ -63,15 +87,16 @@ cargo run --release --example bench_serde
 ```
 
 `examples/bench-serialization.ts` installs a stub `NativeRenderer` that owns
-`applyBatch`, so `wrapWithBatching` hands it the exact tuples production sends.
+`applyBatch`, so the mutation queue hands it the exact ops production sends.
 Nothing about the fixture is invented.
 
 ```
-ChatApp ► reconciler ► wrapWithBatching ► CaptureRenderer.applyBatch(json)
+ChatApp ► reconciler ► mutation queue ► CaptureRenderer.applyBatch(bytes)
                                                  │
                                     ┌────────────┴────────────┐
                                     ▼                         ▼
-                            JS codec bench          tmp/batch-fixture.json
+                            JS codec bench          tmp/batch-fixture.json   (the ops as JSON tuples)
+                                                    tmp/batch-fixture.wire   (the same ops, wire format)
                                                               │
                                                               ▼
                                                 packages/native/examples/bench_serde.rs

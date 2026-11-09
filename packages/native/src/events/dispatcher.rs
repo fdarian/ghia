@@ -1556,9 +1556,9 @@ mod tests {
     #[test]
     fn a_click_inside_a_label_with_a_control_is_emitted_with_no_listener() {
         let mut tree = RetainedTree::new();
-        crate::renderer::apply_batch_to_tree(
+        crate::batch::test_json::apply(
             &mut tree,
-            br#"[["createElement",1,"div"],["setRoot",1],
+            r#"[["createElement",1,"div"],["setRoot",1],
                 ["createElement",2,"label"],["appendChild",1,2],["setCustomProp",2,"htmlFor","email"],
                 ["createElement",3,"input"],["appendChild",1,3],["setCustomProp",3,"id","email"],
                 ["createElement",4,"div"],["appendChild",2,4]]"#,
@@ -1621,7 +1621,7 @@ mod tests {
                 ["createElement",2,"{control_type}"],["appendChild",1,2],["setCustomProp",2,"disabled",{disabled}],
                 ["createElement",3,"div"],["appendChild",2,3]]"#
         );
-        crate::renderer::apply_batch_to_tree(&mut tree, batch.as_bytes()).unwrap();
+        crate::batch::test_json::apply(&mut tree, &batch).unwrap();
         for id in [1, 2, 3] {
             for event_type in [
                 "pointerdown", "mousedown", "pointerup", "mouseup", "click", "dblclick", "auxclick",

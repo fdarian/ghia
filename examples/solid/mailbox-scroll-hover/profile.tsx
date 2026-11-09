@@ -122,12 +122,12 @@ if (!RAW) {
     for (const event of events) emitted.set(event.eventType, (emitted.get(event.eventType) ?? 0) + 1)
     return events
   }
-  const target = renderer as unknown as { applyBatch: (json: string) => number[] }
+  const target = renderer as unknown as { applyBatch: (bytes: Uint8Array) => number[] }
   const apply = target.applyBatch
-  target.applyBatch = (json) => {
+  target.applyBatch = (bytes) => {
     batches.calls++
-    batches.bytes += json.length
-    return apply(json)
+    batches.bytes += bytes.length
+    return apply(bytes)
   }
 }
 
@@ -488,7 +488,7 @@ function summarize(name: string, list: Tick[]) {
   for (const tick of list) for (const type of Object.keys(tick.emitted)) types.add(type)
   const emittedLine = [...types].sort().map((type) => `${type} ${(sum(list.map((t) => t.emitted[type] ?? 0)) / list.length).toFixed(3)}`)
   console.log(`  native->JS events per tick: ${emittedLine.join("  ") || "none"}  (total ${sum(list.map((t) => sum(Object.values(t.emitted))))}; ${VISIBLE_RANGE} total ${sum(list.map(visibleRangeOf))})`)
-  console.log(`  applyBatch per tick: ${(sum(list.map((t) => t.batchCalls)) / list.length).toFixed(3)} calls, ${(sum(list.map((t) => t.batchBytes)) / list.length).toFixed(0)} chars`)
+  console.log(`  applyBatch per tick: ${(sum(list.map((t) => t.batchCalls)) / list.length).toFixed(3)} calls, ${(sum(list.map((t) => t.batchBytes)) / list.length).toFixed(0)} bytes`)
   const counterNames = new Set<string>()
   for (const tick of list) for (const key of Object.keys(tick.counters)) counterNames.add(key)
   if (counterNames.size === 0) console.log("  counters: no change on any tick")

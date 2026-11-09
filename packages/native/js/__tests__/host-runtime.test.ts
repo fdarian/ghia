@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { decodeWireBatchForTest } from "../wire-testing.js"
 import {
   createElementMethods,
   createMutationQueue,
@@ -20,9 +21,9 @@ class RecordingRenderer implements MutationHost, WindowSizeHost, WindowInsetsHos
   width = 320
   height = 200
 
-  applyBatch(json: string): number[] {
+  applyBatch(bytes: Uint8Array): number[] {
     if (this.fail) throw new Error("native failure")
-    this.batches.push(JSON.parse(json))
+    this.batches.push(decodeWireBatchForTest(bytes))
     return [9]
   }
 
@@ -61,8 +62,8 @@ describe("shared host runtime", () => {
   it("queues mutations from an applyBatch-only host", () => {
     const batches: unknown[][] = []
     const renderer: MutationHost = {
-      applyBatch(json) {
-        batches.push(JSON.parse(json))
+      applyBatch(bytes) {
+        batches.push(decodeWireBatchForTest(bytes))
         return []
       },
     }
@@ -100,8 +101,8 @@ describe("shared host runtime", () => {
     const batches: unknown[][] = []
     let mutations!: ReturnType<typeof createMutationQueue>
     const renderer: MutationHost = {
-      applyBatch(json) {
-        batches.push(JSON.parse(json))
+      applyBatch(bytes) {
+        batches.push(decodeWireBatchForTest(bytes))
         if (batches.length === 1) mutations.setText(1, "after the focus event")
         return []
       },
@@ -153,8 +154,8 @@ describe("shared host runtime", () => {
   it("applies the rest of a batch without the style native rejects, and still reports it", () => {
     const rejecting = {
       batches: [] as unknown[][],
-      applyBatch(json: string): number[] {
-        const batch: unknown[][] = JSON.parse(json)
+      applyBatch(bytes: Uint8Array): number[] {
+        const batch: unknown[][] = decodeWireBatchForTest(bytes)
         const index = batch.findIndex(
           (mutation) => mutation[0] === "setStyle" && JSON.stringify(mutation[2]).includes("banana")
         )
@@ -184,8 +185,8 @@ describe("shared host runtime", () => {
   it("drops every rejected style from a batch, whatever the shifted indices", () => {
     const rejecting = {
       batches: [] as unknown[][],
-      applyBatch(json: string): number[] {
-        const batch: unknown[][] = JSON.parse(json)
+      applyBatch(bytes: Uint8Array): number[] {
+        const batch: unknown[][] = decodeWireBatchForTest(bytes)
         const index = batch.findIndex(
           (mutation) => mutation[0] === "setStyle" && JSON.stringify(mutation[2]).includes("banana")
         )

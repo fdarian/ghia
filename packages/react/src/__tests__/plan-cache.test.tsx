@@ -11,6 +11,7 @@ import fs from "node:fs"
 import path from "node:path"
 import React from "react"
 import { afterAll, describe, expect, it } from "vitest"
+import { encodeWireBatchForTest } from "@ghia/native/testing"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
 import { SHOTS_DIR } from "./test-utils.js"
 
@@ -371,7 +372,7 @@ describeNative("the children plan cache", { timeout: 120_000 }, () => {
         renderer.resetBuildCounters()
         const frames = [{ ...read(), picture: null }]
         for (const [index, batch] of batches.entries()) {
-          renderer.applyBatch(JSON.stringify(batch))
+          renderer.applyBatch(encodeWireBatchForTest(batch))
           renderer.flush()
           renderer.drawFrame()
           const file = path.join(SHOTS_DIR, `plan-cache-moved-${index}-${mode}.png`)

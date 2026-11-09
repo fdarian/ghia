@@ -12,7 +12,7 @@ import {
   wireMotionTransition,
 } from "../host.js"
 import type { MotionValueRenderer } from "../host.js"
-import { TestRenderer, hasNativeTestRenderer } from "../testing.js"
+import { TestRenderer, encodeWireBatchForTest, hasNativeTestRenderer } from "../testing.js"
 
 type FakeNode = {
   kind: "source" | "spring" | "transform" | "follower"
@@ -736,7 +736,7 @@ describe.skipIf(!hasNativeTestRenderer)("on the native test renderer", () => {
     const renderer = new TestRenderer({ width: 400, height: 300 })
     renderer.clockPause()
     renderer.applyBatch(
-      JSON.stringify([
+      encodeWireBatchForTest([
         ["createElement", 1, "div"],
         ["setRoot", 1],
         ["setStyle", 1, { display: "flex" }],
@@ -766,7 +766,7 @@ describe.skipIf(!hasNativeTestRenderer)("on the native test renderer", () => {
     const doubled = computedValue(() => x.get() * 2)
 
     const releases = [width, speed, doubled].map((value) => value.bind(renderer))
-    renderer.applyBatch(JSON.stringify([["setCustomProp", 2, "motionValues", { width: width.id }]]))
+    renderer.applyBatch(encodeWireBatchForTest([["setCustomProp", 2, "motionValues", { width: width.id }]]))
     renderer.flush()
     expect(widthOf(renderer)).toBe(10)
 
@@ -958,7 +958,7 @@ describe.skipIf(!hasNativeTestRenderer)("on the native test renderer", () => {
       const renderer = mount()
       const x = motionValue(10)
       x.bind(renderer)
-      renderer.applyBatch(JSON.stringify([["setCustomProp", 2, "motionValues", { width: x.id }]]))
+      renderer.applyBatch(encodeWireBatchForTest([["setCustomProp", 2, "motionValues", { width: x.id }]]))
       renderer.flush()
       x.animate([10, 110], { ...linear, repeat: Infinity, repeatType: "mirror" })
       frame(renderer, 500)

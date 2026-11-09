@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { createMutationQueue } from "../mutations.js"
-import { TestRenderer, hasNativeTestRenderer } from "../testing.js"
+import {
+  TestRenderer,
+  decodeWireBatchForTest,
+  encodeWireBatchForTest,
+  hasNativeTestRenderer,
+  type DecodedOp,
+} from "../testing.js"
 import { pushUniversalStyle } from "../universal-style.js"
 import type { StyleDesc } from "../host.js"
 
@@ -89,12 +95,13 @@ describe("pushUniversalStyle", () => {
 })
 
 describe("the mutation queue", () => {
-  function queueOver(applied: string[], reject?: (batch: string) => string | undefined) {
+  function queueOver(applied: DecodedOp[][], reject?: (batch: DecodedOp[]) => string | undefined) {
     return createMutationQueue({
-      applyBatch(json: string) {
-        const rejection = reject?.(json)
+      applyBatch(bytes: Uint8Array) {
+        const batch = decodeWireBatchForTest(bytes)
+        const rejection = reject?.(batch)
         if (rejection) throw new Error(rejection)
-        applied.push(json)
+        applied.push(batch)
         return []
       },
       createImageFromBlob: () => {
@@ -104,14 +111,14 @@ describe("the mutation queue", () => {
   }
 
   it("orders the layer with the element mutations", () => {
-    const applied: string[] = []
+    const applied: DecodedOp[][] = []
     const queue = queueOver(applied)
     queue.createElement(1, "div")
     queue.setUniversalStyle({ opacity: 0.5 })
     queue.createElement(2, "div")
     queue.setUniversalStyle(null)
     queue.flushMutations()
-    expect(JSON.parse(applied[0])).toEqual([
+    expect(applied[0]).toEqual([
       ["createElement", 1, "div"],
       ["setUniversalStyle", { opacity: 0.5 }],
       ["createElement", 2, "div"],
@@ -120,9 +127,9 @@ describe("the mutation queue", () => {
   })
 
   it("drops a layer native rejects and sends the rest, like a rejected setStyle", () => {
-    const applied: string[] = []
+    const applied: DecodedOp[][] = []
     const queue = queueOver(applied, (batch) =>
-      batch.includes('"setUniversalStyle"')
+      batch.some((op) => op[0] === "setUniversalStyle")
         ? "Batch op 1 setUniversalStyle parse error: invalid type"
         : undefined
     )
@@ -130,7 +137,7 @@ describe("the mutation queue", () => {
     queue.setUniversalStyle({ color: 5 } as never)
     queue.setStyle(1, { opacity: 1 })
     expect(() => queue.flushMutations()).toThrow(/setUniversalStyle parse error/)
-    expect(applied.map((batch) => JSON.parse(batch))).toEqual([
+    expect(applied).toEqual([
       [
         ["createElement", 1, "div"],
         ["setStyle", 1, { opacity: 1 }],
@@ -144,7 +151,7 @@ const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 describeNative("setUniversalStyle on the test renderer", () => {
   const apply = (renderer: TestRenderer, ops: unknown[]) => {
-    renderer.applyBatch(JSON.stringify(ops))
+    renderer.applyBatch(encodeWireBatchForTest(ops))
     renderer.flush()
   }
   const sizeOf = (renderer: TestRenderer, id: number) => {
@@ -204,7 +211,7 @@ describeNative("setUniversalStyle on the test renderer", () => {
       apply(renderer, [["setUniversalStyle", { width: 50, height: 20, flexShrink: 0 }]])
       expect(() =>
         renderer.applyBatch(
-          JSON.stringify([
+          encodeWireBatchForTest([
             ["setStyle", 2, { width: 99 }],
             ["setUniversalStyle", { width: "wide" }],
           ])

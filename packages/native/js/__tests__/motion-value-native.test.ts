@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { TestRenderer, hasNativeTestRenderer } from "../testing.js"
+import { TestRenderer, encodeWireBatchForTest, hasNativeTestRenderer } from "../testing.js"
 
 const linear = { duration: 1, ease: "linear" }
 
@@ -7,7 +7,7 @@ const mount = () => {
   const renderer = new TestRenderer({ width: 400, height: 300 })
   renderer.clockPause()
   renderer.applyBatch(
-    JSON.stringify([
+    encodeWireBatchForTest([
       ["createElement", 1, "div"],
       ["setRoot", 1],
       ["setStyle", 1, { display: "flex" }],
@@ -21,7 +21,7 @@ const mount = () => {
 }
 
 const bind = (renderer: TestRenderer, binding: Record<string, number>) => {
-  renderer.applyBatch(JSON.stringify([["setCustomProp", 2, "motionValues", binding]]))
+  renderer.applyBatch(encodeWireBatchForTest([["setCustomProp", 2, "motionValues", binding]]))
   renderer.flush()
 }
 

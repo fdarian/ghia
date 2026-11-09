@@ -46,8 +46,12 @@ export function createStyleImageLoader(host: StyleImageHost) {
   }
 
   return {
-    /** Call for every style a mutation carries, before it is queued. */
-    style(style: unknown) {
+    /**
+     * Call for every style a mutation carries, before it is queued, with its JSON text: a style
+     * whose text has no `blob:` names none, and is not walked.
+     */
+    style(style: unknown, json: string) {
+      if (!json.includes("blob:")) return
       forEachBlobUrl(style, (url) => {
         if (requested.has(url)) return
         requested.add(url)

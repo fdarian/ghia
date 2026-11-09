@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import React from "react"
 import type { EventPayload } from "@ghia/native"
+import { decodeWireBatchForTest } from "@ghia/native/testing"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -289,11 +290,11 @@ describeNative("custom element: nativeview", () => {
 
   describe("handlers", () => {
     it("a new function replaces the old without a second native listener, and gets a queued attach", () => {
-      const batches: string[] = []
-      const native = renderer() as unknown as { applyBatch(batch: string): unknown }
+      const batches: string[][] = []
+      const native = renderer() as unknown as { applyBatch(batch: Uint8Array): unknown }
       const applyBatch = native.applyBatch.bind(native)
       native.applyBatch = (batch) => {
-        batches.push(batch)
+        batches.push(decodeWireBatchForTest(batch).map((op) => op[0]))
         return applyBatch(batch)
       }
       const first: string[] = []

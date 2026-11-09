@@ -2053,7 +2053,7 @@ mod tests {
     use super::*;
 
     fn apply(tree: &mut RetainedTree, json: &str) {
-        crate::renderer::apply_batch_to_tree(tree, json.as_bytes()).expect("valid batch");
+        crate::batch::test_json::apply(tree, json).expect("valid batch");
     }
 
     fn tree_with_child() -> RetainedTree {
@@ -3429,9 +3429,9 @@ mod tests {
     fn an_invalid_layer_rejects_the_batch_and_changes_nothing() {
         let mut tree = layered_tree();
         let revision = tree.next_revision;
-        let error = crate::renderer::apply_batch_to_tree(
+        let error = crate::batch::test_json::apply(
             &mut tree,
-            br##"[["setStyle",2,{"color":"#abcdef"}],["setUniversalStyle",{"color":5}]]"##,
+            r##"[["setStyle",2,{"color":"#abcdef"}],["setUniversalStyle",{"color":5}]]"##,
         )
         .expect_err("a layer is validated like any style");
         assert!(error.starts_with("Batch op 1 setUniversalStyle parse error:"), "{error}");
@@ -3439,16 +3439,13 @@ mod tests {
         assert_eq!(tree.next_revision, revision);
         assert!(tree.universal.is_none());
 
-        let error = crate::renderer::apply_batch_to_tree(
+        let error = crate::batch::test_json::apply(
             &mut tree,
-            br#"[["setUniversalStyle",{"transition":"width not-a-time"}]]"#,
+            r#"[["setUniversalStyle",{"transition":"width not-a-time"}]]"#,
         )
         .expect_err("transitions are validated too");
         assert!(error.contains("setUniversalStyle parse error"), "{error}");
 
-        let error = crate::renderer::apply_batch_to_tree(&mut tree, br#"[["setUniversalStyle"]]"#)
-            .expect_err("a missing style is not a null one");
-        assert!(error.contains("missing style"), "{error}");
         assert!(tree.universal.is_none());
     }
 
@@ -3594,7 +3591,7 @@ mod tests {
                 ["appendChild",1,2],["appendChild",2,3],["setRoot",1],["detachChild",2]]"##,
         );
         let removals = tree.removals();
-        let destroyed = crate::renderer::apply_batch_to_tree(&mut tree, br#"[["destroyElement",2]]"#)
+        let destroyed = crate::batch::test_json::apply(&mut tree, r#"[["destroyElement",2]]"#)
             .expect("valid batch");
         assert_eq!(destroyed, vec![2.0, 3.0]);
         assert_eq!(tree.removals(), removals + 2);
