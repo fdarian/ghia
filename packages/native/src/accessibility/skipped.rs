@@ -98,7 +98,8 @@ fn node_of(tree: &RetainedTree, element: &RetainedElement) -> Option<(gpui::acce
         element.custom_props(),
         super::default_role(element),
     );
-    probe = super::describe_text(probe, element, &plan);
+    let text = crate::text::inline::accessible_text(plan.iter().map(|(child, _)| child));
+    probe = super::describe_text(probe, element, text.as_deref());
     if element.element_type == "label" {
         probe = super::label::describe(probe, element.id);
     }

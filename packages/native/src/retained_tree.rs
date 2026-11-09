@@ -111,6 +111,8 @@ pub struct RetainedElement {
     /// [`Self::container_display`] for `order`, which the parent sorts its flex or grid items by.
     /// Read it through [`Self::order`].
     pub container_order: std::cell::RefCell<Option<Option<f64>>>,
+    /// The children plan of the last build, with what it was made from, see `text::plan_cache`.
+    pub(crate) kept_plan: crate::text::plan_cache::Slot,
     /// Counts the times the effective style of the element was replaced: all that a build of
     /// the child of a `display: contents` element reads of it is its style, and not the
     /// revisions that its descendants move. Not zero once the element has a style.
@@ -300,6 +302,7 @@ impl RetainedElement {
             svg_written: std::cell::Cell::new(false),
             container_display: Default::default(),
             container_order: Default::default(),
+            kept_plan: Default::default(),
             style_serial: 0,
             subtree_revision: revision,
             search_revision: revision,
@@ -721,6 +724,12 @@ pub struct RetainedTree {
     /// reparent as well. Gone once the element is attached again or destroyed.
     detached_from: HashMap<u64, u64>,
 }
+
+// `init_threaded` moves the tree into a thread: nothing kept on an element may be `Rc`.
+const _: fn() = || {
+    fn is_send<T: Send>() {}
+    is_send::<RetainedTree>();
+};
 
 impl RetainedTree {
     pub fn new() -> Self {

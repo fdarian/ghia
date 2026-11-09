@@ -144,19 +144,21 @@ pub(crate) fn default_role(element: &crate::retained_tree::RetainedElement) -> O
     }
 }
 
-/// The text a host `<text>` reads out, from the paragraphs `plan` made of its children.
-pub(crate) fn describe_text<E>(
-    el: E,
-    element: &crate::retained_tree::RetainedElement,
-    plan: &[(crate::text::inline::Child, u32)],
-) -> E
+/// A `<text>` that holds children and no string of its own: what it reads out is the text of the
+/// paragraphs of those children.
+pub(crate) fn is_text_host(element: &crate::retained_tree::RetainedElement) -> bool {
+    element.element_type == "text" && element.content.is_none()
+}
+
+/// The text a host `<text>` reads out: `text`, the text of the paragraphs of its children
+/// (`text::inline::accessible_text`).
+pub(crate) fn describe_text<E>(el: E, element: &crate::retained_tree::RetainedElement, text: Option<&str>) -> E
 where
     E: StatefulInteractiveElement,
 {
-    let is_text_host = element.element_type == "text" && element.content.is_none();
-    if is_text_host && element.custom_props().get("aria-valuetext").is_none() {
-        if let Some(content) = crate::text::inline::accessible_text(plan.iter().map(|(child, _)| child)) {
-            return el.aria_value(content);
+    if is_text_host(element) && element.custom_props().get("aria-valuetext").is_none() {
+        if let Some(text) = text {
+            return el.aria_value(text.to_string());
         }
     }
     el

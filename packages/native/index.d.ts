@@ -1536,6 +1536,9 @@ export interface BuildCounters {
    */
   styleAppliesComputed: number
   styleAppliesReplayed: number
+  /** Children plans of host elements found kept on the element, and planned (`text/plan_cache.rs`). */
+  plansKept: number
+  plansComputed: number
   inheritedClones: number
   /** The maximal unchanged subtrees a retained replay could have reused, see `retain`. */
   retainableRoots: number
