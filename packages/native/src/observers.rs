@@ -668,8 +668,6 @@ fn sweep(
     if callback.is_none() {
         return;
     }
-    // The scrolls of the frame come first, as the DOM runs its scroll steps before the observers.
-    crate::renderer::emit_pending_scrolls(reports, callback);
     let tree = tree.lock().unwrap();
     let mut shared = reports.borrow_mut();
     let observers = &mut shared.observers;
