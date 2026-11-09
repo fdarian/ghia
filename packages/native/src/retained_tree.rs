@@ -8,6 +8,7 @@
 /// passes them as numbers across napi (no string allocation).
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::{Arc, LazyLock};
 
 use crate::accessibility::relations::RelationRegistry;
@@ -641,22 +642,22 @@ pub struct RetainedTree {
     /// which a later tree can reuse. Caches that outlive a tree key on it.
     id: u64,
     pub elements: ElementMap,
-    pub motion_ids: HashSet<u64>,
+    pub motion_ids: FxHashSet<u64>,
     /// Every `<img>`, so a frame can find the ones that `display: none` kept out
     /// of the build without walking the tree.
-    pub image_ids: HashSet<u64>,
+    pub image_ids: FxHashSet<u64>,
     /// Elements that bind motion values to style properties.
-    pub motion_value_ids: HashSet<u64>,
+    pub motion_value_ids: FxHashSet<u64>,
     /// Every form control, which `ControlStyles` walks up from, so a frame does not scan
     /// every element for them.
-    control_ids: HashSet<u64>,
+    control_ids: FxHashSet<u64>,
     /// Elements that `needs_focus`, in id order. Kept as mutations arrive so the
     /// per-frame focus sync visits these few instead of every retained element:
     /// a large tree retains thousands, and nearly none are focusable.
     pub focusable_ids: std::collections::BTreeSet<u64>,
     /// Elements with an `onLayout`, `ResizeObserver` or `IntersectionObserver` listener, which
     /// `observers::frame_sweep` reads the published boxes of.
-    pub geometry_ids: HashSet<u64>,
+    pub geometry_ids: FxHashSet<u64>,
     /// How many elements carry `inert`. While it is zero, no mutation has to
     /// look at ancestors to decide what is focusable.
     inert_count: usize,
@@ -722,7 +723,7 @@ pub struct RetainedTree {
     reparents: u64,
     /// The parent each detached element left, so that putting it under another one counts as a
     /// reparent as well. Gone once the element is attached again or destroyed.
-    detached_from: HashMap<u64, u64>,
+    detached_from: FxHashMap<u64, u64>,
 }
 
 // `init_threaded` moves the tree into a thread: nothing kept on an element may be `Rc`.
@@ -737,12 +738,12 @@ impl RetainedTree {
         Self {
             id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             elements: ElementMap::default(),
-            motion_ids: HashSet::new(),
-            image_ids: HashSet::new(),
-            motion_value_ids: HashSet::new(),
-            control_ids: HashSet::new(),
+            motion_ids: FxHashSet::default(),
+            image_ids: FxHashSet::default(),
+            motion_value_ids: FxHashSet::default(),
+            control_ids: FxHashSet::default(),
             focusable_ids: Default::default(),
-            geometry_ids: Default::default(),
+            geometry_ids: FxHashSet::default(),
             inert_count: 0,
             visibility_count: 0,
             anchored_count: 0,
@@ -768,7 +769,7 @@ impl RetainedTree {
             auto_focus_requested: false,
             removals: 0,
             reparents: 0,
-            detached_from: HashMap::new(),
+            detached_from: FxHashMap::default(),
         }
     }
 
@@ -1151,7 +1152,8 @@ impl RetainedTree {
                 parent.children.retain(|child| *child != id);
             }
         }
-        let mut destroyed = Vec::new();
+        // A row of a list is about 15 nodes.
+        let mut destroyed = Vec::with_capacity(16);
         self.destroy_element_recursive(id, &mut destroyed);
         self.shrink_tables();
         // The batch that detached it said that the frame changed, and the frame it asks for is drawn without the element: a
