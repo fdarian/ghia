@@ -573,6 +573,71 @@ mod tests {
         assert_eq!(kind(&batch(1, &ops)), WireErrorKind::InvalidId(u64::MAX));
     }
 
+    /// Every opcode that carries ids, with `ids` ids and the bytes that follow the last one.
+    fn id_ops() -> Vec<(u8, usize, Vec<u8>)> {
+        let mut text = Vec::new();
+        string(&mut text, "x");
+        let mut text_then_bool = text.clone();
+        text_then_bool.push(1);
+        vec![
+            (opcode::CREATE_ELEMENT, 1, text.clone()),
+            (opcode::DESTROY_ELEMENT, 1, vec![]),
+            (opcode::DETACH_CHILD, 1, vec![]),
+            (opcode::APPEND_CHILD, 2, vec![]),
+            (opcode::INSERT_BEFORE, 3, vec![]),
+            (opcode::SET_STYLE, 1, {
+                let mut style = Vec::new();
+                string(&mut style, "{}");
+                style
+            }),
+            (opcode::SET_TEXT, 1, text.clone()),
+            (opcode::SET_EVENT_LISTENER, 1, text_then_bool),
+            (opcode::SET_ROOT, 1, vec![]),
+            (opcode::SET_CUSTOM_PROP, 1, {
+                let mut prop = Vec::new();
+                string(&mut prop, "key");
+                prop.push(value_tag::NULL);
+                prop
+            }),
+        ]
+    }
+
+    #[test]
+    fn an_invalid_id_is_rejected_at_every_id_position_of_every_opcode() {
+        // Ids always lead an op, so the bad id goes in each leading position in turn; the rest of the op is valid.
+        for (opcode, ids, rest) in id_ops() {
+            for bad_position in 0..ids {
+                let mut ops = vec![opcode];
+                for position in 0..ids {
+                    varint(
+                        &mut ops,
+                        if position == bad_position {
+                            MAX_ELEMENT_ID + 1
+                        } else {
+                            1
+                        },
+                    );
+                }
+                ops.extend_from_slice(&rest);
+                let error = decode(&batch(1, &ops)).unwrap_err();
+                assert_eq!(
+                    error.kind,
+                    WireErrorKind::InvalidId(MAX_ELEMENT_ID + 1),
+                    "opcode {opcode}, id {bad_position}"
+                );
+                assert_eq!(error.op, Some(0), "opcode {opcode}, id {bad_position}");
+
+                // The same op with every id valid decodes, so the bad id is the only fault.
+                let mut valid = vec![opcode];
+                for _ in 0..ids {
+                    varint(&mut valid, MAX_ELEMENT_ID);
+                }
+                valid.extend_from_slice(&rest);
+                assert_eq!(decode(&batch(1, &valid)).unwrap().len(), 1, "opcode {opcode}");
+            }
+        }
+    }
+
     #[test]
     fn varints_may_be_padded_but_not_overflow() {
         // 5 as a three byte varint.
@@ -628,6 +693,41 @@ mod tests {
             kind(&batch(1, &[opcode::SET_KEYBOARD_FOCUS_DIM, 2])),
             WireErrorKind::InvalidBool(2)
         );
+    }
+
+    #[test]
+    fn has_handler_is_zero_or_one() {
+        let listener = |has_handler: u8| {
+            let mut ops = vec![opcode::SET_EVENT_LISTENER];
+            varint(&mut ops, 1);
+            string(&mut ops, "click");
+            ops.push(has_handler);
+            batch(1, &ops)
+        };
+        assert!(matches!(
+            decode(&listener(0)).unwrap()[0],
+            BatchOp::SetEventListener {
+                has_handler: false,
+                ..
+            }
+        ));
+        assert!(matches!(
+            decode(&listener(1)).unwrap()[0],
+            BatchOp::SetEventListener {
+                has_handler: true,
+                ..
+            }
+        ));
+        for byte in [2, 3, 0x80, 0xff] {
+            let error = decode(&listener(byte)).unwrap_err();
+            assert_eq!(error.kind, WireErrorKind::InvalidBool(byte));
+            assert_eq!(error.op, Some(0));
+        }
+        // A bool byte that is missing is truncation, not false.
+        let mut ops = vec![opcode::SET_EVENT_LISTENER];
+        varint(&mut ops, 1);
+        string(&mut ops, "click");
+        assert_eq!(kind(&batch(1, &ops)), WireErrorKind::Truncated);
     }
 
     #[test]

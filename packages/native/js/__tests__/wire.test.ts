@@ -211,6 +211,16 @@ describe("WireWriter round trip", () => {
     expectRoundTrip(tuples)
   })
 
+  it("keeps a leading U+FEFF in a string, as native does", () => {
+    const tuples: Tuple[] = [
+      ["setText", 1, "\uFEFF"],
+      ["setText", 2, "\uFEFFtext"],
+      ["setCustomProp", 3, "\uFEFFkey", "\uFEFFvalue"],
+    ]
+    expectRoundTrip(tuples)
+    expect(decodeWireBatchForTest(encode(tuples))[1]).toEqual(["setText", 2, "\uFEFFtext"])
+  })
+
   it("reads every style shape as the exact JSON text", () => {
     const tuples: Tuple[] = STYLES.map((style, index): Tuple => ["setStyle", index + 1, style])
     tuples.push(...STYLES.map((style): Tuple => ["setUniversalStyle", style]))

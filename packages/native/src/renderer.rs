@@ -7,7 +7,7 @@
 //! Desktop lifecycle:
 //!   const renderer = new GpuixRenderer(eventCallback)
 //!   renderer.init({ title: 'My App', width: 800, height: 600 })
-//!   renderer.applyBatch(json)             // one atomic React commit
+//!   renderer.applyBatch(bytes)            // one atomic React commit, a wire-format Uint8Array
 //!   startFrameLoop(renderer)             // macOS wakes on vsync; Win/Linux polls UI thread
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use futures::channel::oneshot;

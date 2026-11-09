@@ -600,7 +600,7 @@ fn install_test_image_http_client(cx: &mut gpui::App) {
 ///
 /// Usage from JS:
 ///   const r = new TestGpuixRenderer()
-///   r.applyBatch('[["createElement",1,"div"],["setRoot",1]]')
+///   r.applyBatch(encodeWireBatchForTest([["createElement", 1, "div"], ["setRoot", 1]]))
 ///   r.flush()                  // triggers GpuixView::render() on the GPU
 ///   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
 ///   const events = r.drainEvents()

@@ -523,10 +523,25 @@ The queue (`createMutationQueue`) writes each op as it is enqueued and hands nat
 while native applies a batch (an `autoFocus` handler, a failed blob image) goes into another buffer, so the batch in
 flight is never overwritten. A batch that fails is put back in front of what was written since, except that a
 `setStyle` or `setUniversalStyle` native rejects is cut out by its byte range and the rest is sent again. Where there
-is no `TextEncoder` (Hermes) the writer encodes UTF-8 by hand. A string that is not well formed UTF-16 (an unpaired surrogate) is written with
-U+FFFD in its place. The unknown-opcode, unknown-tag, unknown-version, truncation, overflow and invalid-id cases are all
-errors that name the op index and byte (`Batch op 3: unknown operation 200 (at byte 41)`); native never skips what it
+is no `TextEncoder` (Hermes) the writer encodes UTF-8 by hand. A plain string (an element type, text, an event type, a custom prop key or string value) that is not well formed
+UTF-16 (an unpaired surrogate) is written with U+FFFD in its place. A style or a JSON-valued custom prop is written as its JSON text, where
+`JSON.stringify` has turned an unpaired surrogate into the escape `\ud800`; native's JSON parser rejects that, so the batch fails (it is not repaired).
+The unknown-opcode, unknown-tag, truncation, overflow, invalid-id and invalid-boolean cases are errors that name the op index and
+byte (`Batch op 3: unknown operation 200 (at byte 41)`); an unknown version and bytes left after the last op are
+errors too, but outside any op, so they name only the byte (`Failed to decode batch: format version 2, this build reads version 1 (at byte 1)`). Native never skips what it
 does not understand.
+
+**`bytes` is a view of a buffer the queue reuses**, valid only while `applyBatch` runs: the next batch overwrites it. A fake
+renderer or a spy that keeps what it was given must copy the bytes (`bytes.slice()`) or decode them
+(`decodeWireBatchForTest`) inside the call.
+
+`MutationRenderer.setStyle(id, style, styleJson?)` takes the style's JSON text as an optional third argument for a host that
+already stringified the style to compare writes: the queue writes that text as it is instead of stringifying again. It must be
+`JSON.stringify(style)` exactly.
+
+For tests, `@ghia/native/testing` exports `encodeWireBatchForTest(ops)`, which turns tuples (`["createElement", 1, "div"]`,
+`["setStyle", 1, { ... }]`) into the bytes a renderer takes, and `decodeWireBatchForTest(bytes)`, which reads a batch back into those tuples
+with styles parsed. The decoder shares no code with `WireWriter`, so it checks what a queue sent against this section.
 
 ## Event Flow
 

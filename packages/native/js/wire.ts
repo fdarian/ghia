@@ -384,7 +384,8 @@ export class WireWriter {
   }
 
   private encodeFrom(value: string, start: number): number {
-    // Unpaired surrogates become U+FFFD, where `JSON.stringify` would have escaped them and native refused the batch.
+    // Unpaired surrogates in a plain string become U+FFFD. A style or JSON-valued custom prop is already JSON text, where
+    // `JSON.stringify` wrote the unpaired surrogate as the escape `\ud800`; native's JSON parser rejects that and refuses the batch.
     if (this.encoder === undefined) return encodeUtf8(value, this.bytes, start)
     return start + this.encoder.encodeInto(value, this.bytes.subarray(start)).written
   }

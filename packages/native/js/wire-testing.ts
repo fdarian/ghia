@@ -16,7 +16,7 @@ for (const [name, code] of Object.entries(WIRE_OPCODE)) OP_NAMES[code] = name
  */
 export function decodeWireBatchForTest(bytes: Uint8Array): DecodedOp[] {
   let position = 0
-  const decoder = new TextDecoder("utf-8", { fatal: true })
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
 
   const byte = (): number => {
     if (position >= bytes.length) throw new Error(`Batch ends early at byte ${position}`)
