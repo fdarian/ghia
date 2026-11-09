@@ -58,15 +58,26 @@ struct Walk<'a> {
 }
 
 impl Walk<'_> {
-    /// Calls `f` with the host id of `node` on the element id stack where the id of a positioned node
-    /// below it is checked against it: its element is made in layout and drawn in paint with the same
-    /// stack that it is prepainted with (`prepaint_node` has every id).
+    /// Calls `f` with the host id of `node` on the element id stack, as a `Div` has its own id there in every phase:
+    /// the id of a positioned node below it is checked against the stack, and the hitbox is named by it.
+    /// The root's is pushed by gpui.
     fn on_path<R>(&mut self, node: usize, window: &mut Window, f: impl FnOnce(&mut Self, &mut Window) -> R) -> R {
-        let target = &self.arena.nodes[node];
-        if node != self.root && target.holds_positioned {
-            window.with_id(crate::events::ids::host_element_id(target.id), |window| f(self, window))
-        } else {
+        if node == self.root {
             f(self, window)
+        } else {
+            window.with_id(crate::events::ids::host_element_id(self.arena.nodes[node].id), |window| f(self, window))
+        }
+    }
+
+    /// [`Self::on_path`] for a phase that requests layout (layout, and prepaint for what is measured there): the requests
+    /// of the node are numbered under the scope of its own id, as gpui does for an element that has one. Under the scope
+    /// of the root they would be numbered by their order in it, so a node that comes or goes before another gives
+    /// the other its number, and its layout node (the one scroll anchoring follows).
+    fn in_scope<R>(&mut self, node: usize, window: &mut Window, f: impl FnOnce(&mut Self, &mut Window) -> R) -> R {
+        if node == self.root {
+            f(self, window)
+        } else {
+            window.with_layout_scope_of(crate::events::ids::host_element_id(self.arena.nodes[node].id), |window| f(self, window))
         }
     }
 
@@ -78,7 +89,7 @@ impl Walk<'_> {
         let arena = self.arena;
         let target = &arena.nodes[node];
         let style = target.style.clone();
-        let layout_id = self.on_path(node, window, |walk, window| {
+        let layout_id = self.in_scope(node, window, |walk, window| {
             window.with_text_style(style.text_style().cloned(), |window| {
                 let mut ids = Vec::with_capacity(target.children.len());
                 for child in &target.children {
@@ -114,14 +125,9 @@ impl Walk<'_> {
     }
 
     /// The host's id is on the element id stack while its node is prepainted, as `Element::id` of a `Div` puts it there,
-    /// since the hitbox is named by it and the dispatcher maps a hit to a host by it. The root's is pushed by gpui.
+    /// since the hitbox is named by it and the dispatcher maps a hit to a host by it.
     fn prepaint_node(&mut self, node: usize, window: &mut Window, cx: &mut App) {
-        if node == self.root {
-            self.prepaint_host(node, window, cx);
-        } else {
-            let id = crate::events::ids::host_element_id(self.arena.nodes[node].id);
-            window.with_id(id, |window| self.prepaint_host(node, window, cx));
-        }
+        self.in_scope(node, window, |walk, window| walk.prepaint_host(node, window, cx));
     }
 
     fn prepaint_host(&mut self, node: usize, window: &mut Window, cx: &mut App) {
@@ -217,6 +223,10 @@ impl Walk<'_> {
     /// What a `Div` does for a subtree that is culled (`Window::is_culling`): nothing of its own is drawn or
     /// hit, and what is in it is still prepainted, to publish what layout readers see of it.
     fn prepaint_node_culled(&mut self, node: usize, window: &mut Window, cx: &mut App) {
+        self.in_scope(node, window, |walk, window| walk.prepaint_host_culled(node, window, cx));
+    }
+
+    fn prepaint_host_culled(&mut self, node: usize, window: &mut Window, cx: &mut App) {
         let arena = self.arena;
         let target = &arena.nodes[node];
         let layout_id = target.layout_id.get().expect("a node is requested before it is prepainted");
@@ -245,15 +255,17 @@ impl Walk<'_> {
     }
 
     fn paint_node_culled(&mut self, node: usize, window: &mut Window, cx: &mut App) {
-        let arena = self.arena;
-        paint_bounds(&arena.nodes[node], window);
-        for child in &arena.nodes[node].children {
-            match *child {
-                Child::Node(child) => self.paint_node_culled(child, window, cx),
-                Child::Content(content) => arena.contents[content].element.borrow_mut().paint(window, cx),
-                Child::Positioned(child) => self.paint_positioned(child, window, cx),
+        self.on_path(node, window, |walk, window| {
+            let arena = walk.arena;
+            paint_bounds(&arena.nodes[node], window);
+            for child in &arena.nodes[node].children {
+                match *child {
+                    Child::Node(child) => walk.paint_node_culled(child, window, cx),
+                    Child::Content(content) => arena.contents[content].element.borrow_mut().paint(window, cx),
+                    Child::Positioned(child) => walk.paint_positioned(child, window, cx),
+                }
             }
-        }
+        });
     }
 
     fn paint_node(&mut self, node: usize, window: &mut Window, cx: &mut App) {

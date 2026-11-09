@@ -51,9 +51,6 @@ pub(super) struct Node {
     pub style: Rc<Style>,
     pub children: Vec<Child>,
     pub placement: Placement,
-    /// Whether a positioned node is below it, so that its element id is on the stack of the walks
-    /// of layout and paint as it is in prepaint (the id of a positioned node is checked against it).
-    pub holds_positioned: bool,
     /// The hitbox is only a link in the chain of a descendant that is hit (`pointer-events: none`).
     pub passes_pointer: bool,
     /// What `crate::automation::host_bounds_flags` says of the node's `user-select` and of whether it scrolls.
@@ -92,17 +89,11 @@ pub(super) struct NodeSpec {
 
 impl Arena {
     pub fn push_node(&mut self, spec: NodeSpec) -> usize {
-        let holds_positioned = spec.children.iter().any(|child| match *child {
-            Child::Positioned(_) => true,
-            Child::Node(node) => self.nodes[node].holds_positioned,
-            Child::Content(_) => false,
-        });
         self.nodes.push(Node {
             id: spec.id,
             style: Rc::new(spec.style),
             children: spec.children,
             placement: spec.placement,
-            holds_positioned,
             passes_pointer: spec.passes_pointer,
             bounds_flags: spec.bounds_flags,
             scroller: spec.scroller.map(|(handle, programmatic)| Scroller { handle, programmatic, frame: RefCell::new(None) }),

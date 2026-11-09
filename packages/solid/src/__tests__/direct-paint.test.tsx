@@ -11,13 +11,15 @@
  * of the event and the cursor. The `user-select` scene drags a selection from each card (none, text, and a descendant that
  * reopens or closes it) and copies it, so the start regions and the selectable text must come out as the `Div` build's.
  * The `overflow-hidden` scene scrolls boxes that clip (one inside another, and a text that clips with an ellipsis) from script
- * and reads what they report back, with steps that leave the offset alone and replay the boxes.
+ * and reads what they report back, with steps that leave the offset alone and replay the boxes. The `scroll-anchoring` scene has
+ * rows inserted and removed above the first row in view of an `overflow: auto` scroller, whose rows are direct (in a wrapper,
+ * which is one root that holds them, and as roots of their own): the scroller must anchor to the row it did with `Div`s.
  */
 
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { createSignal, Show, type Accessor, type JSX } from "solid-js"
+import { createSignal, For, Show, type Accessor, type JSX } from "solid-js"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import type { HostElement } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
@@ -474,6 +476,48 @@ const scenes: Scene[] = [
         renderer.nativeSimulateMouseMove(x, y)
         renderer.dispatchNativeEvents()
       }
+    },
+  },
+  {
+    name: "scroll-anchoring",
+    steps: 5,
+    width: 340,
+    height: 320,
+    directRoots: 2,
+    view: (step) => {
+      // The ids of the rows of each step: rows come and go above the first one in view, and one is put in its middle.
+      const ids = () => {
+        const rows = Array.from({ length: 20 }, (_, index) => `r${index}`)
+        if (step() >= 4) rows.splice(8, 0, "n2")
+        if (step() >= 1) rows.unshift("n0")
+        if (step() >= 2) rows.unshift("n1")
+        return step() >= 3 ? rows.filter((id) => id !== "n0") : rows
+      }
+      const row = (id: string) => (
+        <div style={{ height: id === "n2" ? 30 : id.startsWith("n") ? 100 : 50, flexShrink: 0, backgroundColor: id.startsWith("n") ? "#ddeedd" : "#eef3f8", borderBottom: "1px solid #335577" }}>
+          <text style={{ fontSize: 12 }}>{id}</text>
+        </div>
+      )
+      return (
+        <div style={{ display: "flex", flexDirection: "row", gap: 10, backgroundColor: "#ffffff" }}>
+          <div ref={named("wrapped")} style={{ width: 150, height: 300, overflow: "auto" }}>
+            <div>
+              <For each={ids()}>{row}</For>
+            </div>
+          </div>
+          <div ref={named("bare")} style={{ width: 150, height: 300, overflow: "auto", display: "flex", flexDirection: "column" }}>
+            <For each={ids()}>{row}</For>
+          </div>
+        </div>
+      )
+    },
+    act: (_renderer, step) => {
+      // Scrolled away from the start, a scroller anchors to the first row in view and holds it when rows are inserted above.
+      if (step === 0) {
+        hosts.wrapped.scrollTop = 400
+        hosts.bare.scrollTop = 400
+      }
+      heard.push(...["wrapped", "bare"].map(scrollState))
     },
   },
 ]
