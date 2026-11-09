@@ -7,8 +7,8 @@
 //! sticky and lifted children, the transform space, `visibility`, and the stacking context.
 
 use gpui::{
-    App, Bounds, CornerRadii, CornerRadius, Corners, Edges, Element, ElementId, GlobalElementId,
-    HitboxBehavior, InspectorElementId, IntoElement, LayoutId, Pixels, Style, Window,
+    AnyElement, App, Bounds, CornerRadii, CornerRadius, Corners, Edges, Element, ElementId, GlobalElementId,
+    HitboxBehavior, InspectorElementId, IntoElement, LayoutId, Pixels, Style, Window, px,
 };
 
 use super::node::{Arena, Child};
@@ -68,7 +68,13 @@ impl DirectRoot {
                         match self.arena.nodes[node].children[position] {
                             Child::Node(child) => self.prepaint_node(child, window, cx),
                             Child::Content(content) => {
-                                self.arena.contents[content].element.prepaint(window, cx);
+                                let content = &mut self.arena.contents[content];
+                                match content.layout_id.filter(|layout_id| is_outside_the_mask(&content.element, *layout_id, window)) {
+                                    Some(_) => content.element.prepaint_culled(window, cx),
+                                    None => {
+                                        content.element.prepaint(window, cx);
+                                    }
+                                }
                             }
                         }
                     }
@@ -79,6 +85,28 @@ impl DirectRoot {
                 }
             })
         });
+    }
+
+    /// What a `Div` does for a subtree that is culled (`Window::is_culling`): nothing of its own is drawn or
+    /// hit, and what is in it is still prepainted, to publish what layout readers see of it.
+    fn prepaint_node_culled(&mut self, node: usize, window: &mut Window, cx: &mut App) {
+        for position in 0..self.arena.nodes[node].children.len() {
+            match self.arena.nodes[node].children[position] {
+                Child::Node(child) => self.prepaint_node_culled(child, window, cx),
+                Child::Content(content) => {
+                    self.arena.contents[content].element.prepaint(window, cx);
+                }
+            }
+        }
+    }
+
+    fn paint_node_culled(&mut self, node: usize, window: &mut Window, cx: &mut App) {
+        for position in 0..self.arena.nodes[node].children.len() {
+            match self.arena.nodes[node].children[position] {
+                Child::Node(child) => self.paint_node_culled(child, window, cx),
+                Child::Content(content) => self.arena.contents[content].element.paint(window, cx),
+            }
+        }
     }
 
     fn paint_node(&mut self, node: usize, window: &mut Window, cx: &mut App) {
@@ -97,6 +125,28 @@ impl DirectRoot {
             })
         });
     }
+}
+
+/// Whether a `Div` would prepaint this child of a node as the top of a culled subtree
+/// (`prepaint_unlifted_child`): its box, inflated by how far it draws, lies outside the content mask. gpui
+/// keeps `Window::lies_outside_the_mask` to itself, so this restates it for a child that is a text, whose
+/// extent is its own box: it has no answer under a transform, which gpui's has, and none while the pointer
+/// is captured, where gpui's never culls.
+fn is_outside_the_mask(content: &AnyElement, layout_id: LayoutId, window: &mut Window) -> bool {
+    let Some(outset) = content.cull_outset() else { return false };
+    if window.is_culling() || content.escapes_to().is_some() || content.lift_z().is_some() || !window.transform().is_identity() {
+        return false;
+    }
+    let mask = window.content_mask().bounds;
+    if mask.size.width <= px(0.) || mask.size.height <= px(0.) {
+        return true;
+    }
+    let bounds = window.layout_bounds(layout_id);
+    let slack = px(1.);
+    bounds.right() + outset.right + slack < mask.left()
+        || bounds.left() - outset.left - slack > mask.right()
+        || bounds.bottom() + outset.bottom + slack < mask.top()
+        || bounds.top() - outset.top - slack > mask.bottom()
 }
 
 /// `Style::border_box_radii`, which gpui keeps to itself: the corners of the border box, fitted to it.
@@ -167,6 +217,31 @@ impl Element for DirectRoot {
         cx: &mut App,
     ) {
         self.prepaint_node(self.root, window, cx);
+    }
+
+    fn prepaint_culled(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        _request_layout: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.prepaint_node_culled(self.root, window, cx);
+    }
+
+    fn paint_culled(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        _request_layout: &mut (),
+        _prepaint: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.paint_node_culled(self.root, window, cx);
     }
 
     fn paint(
