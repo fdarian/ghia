@@ -1,9 +1,10 @@
 /**
  * A plain subtree can be drawn by one element that owns its nodes (`render/`, `setDirectPaint`) where each host would be a `Div`.
  * Each scene is mounted in a window of its own with the switch off and on and taken through commits that move text, style and size,
- * with a frame drawn again after each (which a retained root replays), and the pictures, the automation trees (without the boxes,
- * which a direct node does not record yet) and the painted text of every step are compared. The scenes hold roots that are direct
- * and, in the last, one that is not, which must be drawn as it always was.
+ * with a frame drawn again after each (which a retained root replays), and the pictures, the automation trees (with the boxes a
+ * direct node records as a `Div` does) and the painted text of every step are compared. The scenes hold roots that are direct
+ * and, in the last, one that is not, which must be drawn as it always was. The last scene has the pointer cross a root that
+ * holds nodes with a cursor and with `pointer-events`, and compares the target, the path of the event and the cursor.
  */
 
 import fs from "node:fs"
@@ -11,6 +12,7 @@ import os from "node:os"
 import path from "node:path"
 import { createSignal, type Accessor, type JSX } from "solid-js"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import type { HostElement } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -168,7 +170,7 @@ const scenes: Scene[] = [
         <div style={{ ...CARD, opacity: [1, 0.5, 1][step()], height: 20 }} />
         <div style={{ ...CARD, height: 20 }} onClick={() => {}} />
         <div style={{ ...CARD, height: 20 }} tabIndex={0} />
-        <div style={{ ...CARD, height: 20, cursor: "pointer" }} />
+        <div style={{ ...CARD, height: 20, userSelect: "none" }} />
         <div style={{ ...CARD, height: 20, transform: ["rotate(0deg)", "rotate(2deg)", "rotate(0deg)"][step()] }} />
         <div style={{ ...CARD, height: 20, overflow: "auto" }} />
       </div>
@@ -223,10 +225,6 @@ afterAll(() => {
   if (process.env.DIRECT_PAINT_SHOTS === undefined) fs.rmSync(shots, { recursive: true, force: true })
 })
 
-/** The automation tree as JSON, without the boxes. */
-function structure(tree: string) {
-  return JSON.parse(tree, (key, value) => (key === "bounds" ? undefined : value))
-}
 
 function run(scene: Scene, direct: boolean) {
   const app = createTestRoot({ width: scene.width ?? 400, height: scene.height ?? 300 })
@@ -248,7 +246,7 @@ function run(scene: Scene, direct: boolean) {
         renderer.drawFrame()
         const file = path.join(shots, `${scene.name}-${index}-${frame}-${direct ? "on" : "off"}.png`)
         renderer.captureScreenshot(file)
-        frames.push({ label: `step ${index}, ${frame}`, picture: fs.readFileSync(file), painted: renderer.getPaintedText(), tree: structure(renderer.getAutomationTree()) })
+        frames.push({ label: `step ${index}, ${frame}`, picture: fs.readFileSync(file), painted: renderer.getPaintedText(), tree: JSON.parse(renderer.getAutomationTree()) })
       }
     }
     const counters = renderer.getBuildCounters()
@@ -283,4 +281,76 @@ describeNative("direct paint", { timeout: 120_000 }, () => {
       }
     })
   }
+
+  it("has the pointer cross the nodes of a root as it crosses Divs", () => {
+    const run = (direct: boolean) => {
+      const app = createTestRoot({ width: 320, height: 240 })
+      const renderer = app.renderer
+      renderer.setDirectPaint(direct)
+      renderer.clockPause()
+      renderer.resetBuildCounters()
+      const hosts: Record<string, HostElement> = {}
+      const named = (name: string) => (host: HostElement) => void (hosts[name] = host)
+      const nameOf = (target: unknown) => Object.keys(hosts).find((name) => hosts[name] === target) ?? String(target)
+      const heard: string[] = []
+      try {
+        app.render(() => (
+          <div
+            ref={named("page")}
+            style={{ width: 300, height: 220, backgroundColor: "#ffffff" }}
+            onPointerMove={(event) => heard.push(`${nameOf(event.target)} < ${event.composedPath().map(nameOf).join(" < ")}`)}
+          >
+            <div ref={named("a")} style={{ ...CARD, margin: 10, width: 200, padding: 0, cursor: "text" }}>
+              <div ref={named("a1")} style={{ width: 80, height: 40, backgroundColor: "#99bbdd", cursor: "pointer" }} />
+              <div ref={named("a2")} style={{ width: 80, height: 40, backgroundColor: "#ddbb99", pointerEvents: "none" }}>
+                <div ref={named("a2x")} style={{ width: 30, height: 30, backgroundColor: "#bbdd99", pointerEvents: "auto", cursor: "grab" }} />
+              </div>
+              <div ref={named("a3")} style={{ width: 80, height: 20, backgroundColor: "#dd99bb" }}>
+                <text ref={named("a3t")} style={{ fontSize: 11 }}>label</text>
+              </div>
+            </div>
+          </div>
+        ))
+        renderer.dispatchNativeEvents()
+        renderer.flush()
+        renderer.setA11yActive(false)
+        renderer.drawFrame()
+        const crossings = [
+          [10, 20],
+          [20, 30],
+          [30, 60],
+          [60, 70],
+          [60, 100],
+          [150, 20],
+          [250, 20],
+          [400, 400],
+        ].map(([x, y]) => {
+          renderer.nativeSimulateMouseMove(x, y)
+          renderer.drawFrame()
+          return { x, y, heard: heard.splice(0), cursor: renderer.getCursor() }
+        })
+        const boxes = Object.fromEntries(Object.entries(hosts).map(([name, host]) => [name, host.getBoundingClientRect()]))
+        return { crossings, boxes, roots: renderer.getBuildCounters().directRoots }
+      } finally {
+        app.unmount()
+      }
+    }
+    const off = run(false)
+    const on = run(true)
+    expect(off.roots).toBe(0)
+    expect(on.roots, "the card is a root of its own").toBeGreaterThanOrEqual(1)
+    expect(on.crossings).toEqual(off.crossings)
+    expect(on.boxes).toEqual(off.boxes)
+    expect(on.crossings.map((crossing) => crossing.heard)).toEqual([
+      ["a < a < page"],
+      ["a1 < a1 < a < page"],
+      ["a2x < a2x < a2 < a < page"],
+      ["a < a < page"],
+      ["a3t < a3t < a3 < a < page"],
+      ["a < a < page"],
+      ["page < page"],
+      [],
+    ])
+    expect(on.crossings.map((crossing) => crossing.cursor)).toEqual(["text", "pointer", "grab", "text", "text", "text", "default", "default"])
+  })
 })

@@ -2,9 +2,9 @@
 //! makes them, around a node's children: the text style, the clip, the box of the node.
 //!
 //! What a `Div` does that this does not, and why that is no difference for a plain node (see
-//! [`super::eligible`]): a hitbox, element state and layout probe per node (only the root has a
-//! hitbox, below it the pointer is over the root), the listeners, focus, tab stops, scroll offset,
-//! sticky and lifted children, the transform space, `visibility`, and the stacking context.
+//! [`super::eligible`]): element state, the listeners, focus, tab stops, scroll offset, sticky and
+//! lifted children, the transform space, `visibility`, and the stacking context. The hitbox, the
+//! cursor and the layout probe are done per node.
 
 use gpui::{
     AnyElement, App, Bounds, CornerRadii, CornerRadius, Corners, Edges, Element, ElementId, GlobalElementId,
@@ -46,23 +46,31 @@ impl DirectRoot {
         layout_id
     }
 
+    /// The host's id is on the element id stack while its node is prepainted, as `Element::id` of a `Div` puts it there,
+    /// since the hitbox is named by it and the dispatcher maps a hit to a host by it. The root's is pushed by gpui.
     fn prepaint_node(&mut self, node: usize, window: &mut Window, cx: &mut App) {
+        if node == self.root {
+            self.prepaint_host(node, window, cx);
+        } else {
+            let id = crate::events::ids::host_element_id(self.arena.nodes[node].id);
+            window.with_id(id, |window| self.prepaint_host(node, window, cx));
+        }
+    }
+
+    fn prepaint_host(&mut self, node: usize, window: &mut Window, cx: &mut App) {
         let layout_id = self.arena.nodes[node].layout_id.expect("a node is requested before it is prepainted");
         let bounds = window.layout_bounds(layout_id);
         self.arena.nodes[node].bounds = bounds;
+        self.sample_layout(node, layout_id, bounds, window);
         let style = self.arena.nodes[node].style.clone();
         let rem_size = window.rem_size();
-        let is_root = node == self.root;
+        let behavior = if self.arena.nodes[node].passes_pointer { HitboxBehavior::PassThrough } else { HitboxBehavior::Normal };
         window.with_text_style(style.text_style().cloned(), |window| {
             window.with_exact_hit_mask(style.overflow_mask(bounds, rem_size), |window| {
-                let hitbox = (is_root && window.dom_hit_testing()).then(|| {
-                    window.insert_hitbox_shaped(
-                        bounds,
-                        HitboxBehavior::Normal,
-                        border_box_radii(&style, bounds, rem_size),
-                        None,
-                    )
-                });
+                // `Interactivity::should_insert_hitbox` for a host that is not a text node, which `always_hitbox` makes of
+                // every one, and has nothing of the rest that asks for one (listener, focus, scroll, group, clip path).
+                let hitbox = (behavior != HitboxBehavior::Normal || window.dom_hit_testing() || style.mouse_cursor.is_some())
+                    .then(|| window.insert_hitbox_shaped(bounds, behavior, border_box_radii(&style, bounds, rem_size), None));
                 let mut prepaint_children = |window: &mut Window| {
                     for position in 0..self.arena.nodes[node].children.len() {
                         match self.arena.nodes[node].children[position] {
@@ -83,13 +91,27 @@ impl DirectRoot {
                     Some(parent) => window.with_hitbox_parent(parent, prepaint_children),
                     None => prepaint_children(window),
                 }
+                self.arena.nodes[node].hitbox = hitbox;
             })
         });
+    }
+
+    /// What `Interactivity::run_prepaint_listeners` and the publication of `prepaint_with` do for the layout probe of
+    /// `HostBoundsProbe`: the box is read where layout left it, and a pass that does not paint reports it from here.
+    fn sample_layout(&mut self, node: usize, layout_id: LayoutId, bounds: Bounds<Pixels>, window: &mut Window) {
+        let sample = crate::automation::read_layout(window, layout_id, false);
+        let node = &mut self.arena.nodes[node];
+        node.sample = Some(sample);
+        crate::automation::publish_host_bounds(node.id, node.bounds_flags, sample, bounds, layout_id, window);
     }
 
     /// What a `Div` does for a subtree that is culled (`Window::is_culling`): nothing of its own is drawn or
     /// hit, and what is in it is still prepainted, to publish what layout readers see of it.
     fn prepaint_node_culled(&mut self, node: usize, window: &mut Window, cx: &mut App) {
+        let layout_id = self.arena.nodes[node].layout_id.expect("a node is requested before it is prepainted");
+        let bounds = window.layout_bounds(layout_id);
+        self.arena.nodes[node].bounds = bounds;
+        self.sample_layout(node, layout_id, bounds, window);
         for position in 0..self.arena.nodes[node].children.len() {
             match self.arena.nodes[node].children[position] {
                 Child::Node(child) => self.prepaint_node_culled(child, window, cx),
@@ -101,6 +123,7 @@ impl DirectRoot {
     }
 
     fn paint_node_culled(&mut self, node: usize, window: &mut Window, cx: &mut App) {
+        self.paint_bounds(node, window);
         for position in 0..self.arena.nodes[node].children.len() {
             match self.arena.nodes[node].children[position] {
                 Child::Node(child) => self.paint_node_culled(child, window, cx),
@@ -109,9 +132,21 @@ impl DirectRoot {
         }
     }
 
+    fn paint_bounds(&self, node: usize, window: &mut Window) {
+        let node = &self.arena.nodes[node];
+        let layout_id = node.layout_id.expect("a node is requested before it is painted");
+        let sample = node.sample.expect("a node is prepainted before it is painted");
+        crate::automation::paint_host_bounds(node.id, node.bounds_flags, sample, node.bounds, layout_id, window);
+    }
+
     fn paint_node(&mut self, node: usize, window: &mut Window, cx: &mut App) {
         let bounds = self.arena.nodes[node].bounds;
         let style = self.arena.nodes[node].style.clone();
+        self.paint_bounds(node, window);
+        // Where an active drag of the platform (files from outside) decides the cursor, a `Div` sets none.
+        if let (Some(cursor), Some(hitbox), false) = (style.mouse_cursor, self.arena.nodes[node].hitbox.as_ref(), cx.has_active_drag()) {
+            window.set_cursor_style(cursor, hitbox);
+        }
         style.paint_box_with_effects(bounds, bounds, window, cx, |window, cx| {
             window.with_text_style(style.text_style().cloned(), |window| {
                 window.with_exact_content_mask(style.overflow_mask(bounds, window.rem_size()), |window| {

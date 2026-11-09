@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use gpui::{AnyElement, Bounds, LayoutId, Pixels, Style};
+use gpui::{AnyElement, Bounds, Hitbox, LayoutId, LayoutSample, Pixels, Style};
 
 #[derive(Clone, Copy)]
 pub(super) enum Child {
@@ -12,11 +12,20 @@ pub(super) enum Child {
 }
 
 pub(super) struct Node {
+    /// The host id of the element, which names its hitbox.
+    pub id: u64,
     /// Shared so that paint can hold the style while it walks the children, which borrow the arena.
     pub style: Rc<Style>,
     pub children: Vec<Child>,
     pub layout_id: Option<LayoutId>,
     pub bounds: Bounds<Pixels>,
+    /// The hitbox is only a link in the chain of a descendant that is hit (`pointer-events: none`).
+    pub passes_pointer: bool,
+    /// What `crate::automation::host_bounds_flags` says of the node's `user-select`.
+    pub bounds_flags: u8,
+    /// Set in prepaint, which paint reads back.
+    pub hitbox: Option<Hitbox>,
+    pub sample: Option<LayoutSample>,
 }
 
 /// A text, a paragraph or an empty line: an element of its own that the node lays out among its children.
@@ -32,12 +41,17 @@ pub(super) struct Arena {
 }
 
 impl Arena {
-    pub fn push_node(&mut self, style: Style, children: Vec<Child>) -> usize {
+    pub fn push_node(&mut self, id: u64, style: Style, children: Vec<Child>, passes_pointer: bool, bounds_flags: u8) -> usize {
         self.nodes.push(Node {
+            id,
             style: Rc::new(style),
             children,
             layout_id: None,
             bounds: Bounds::default(),
+            passes_pointer,
+            bounds_flags,
+            hitbox: None,
+            sample: None,
         });
         self.nodes.len() - 1
     }

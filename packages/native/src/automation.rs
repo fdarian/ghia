@@ -702,7 +702,7 @@ impl LaidOutBox {
 
 /// Reads the box layout gave the element, in prepaint. `scrolls`: the element is a scroller, whose
 /// overflow is measured; it walks the subtree, so it is not asked of the others.
-fn read_layout(window: &mut Window, layout_id: gpui::LayoutId, scrolls: bool) -> gpui::LayoutSample {
+pub(crate) fn read_layout(window: &mut Window, layout_id: gpui::LayoutId, scrolls: bool) -> gpui::LayoutSample {
     let border_box = window.layout_unsnapped_bounds(layout_id);
     let content = match scrolls.then(|| window.layout_unsnapped_scrollable_overflow(layout_id)).flatten() {
         Some(reach) => {
@@ -782,17 +782,12 @@ pub fn track_host_bounds<E>(
 where
     E: gpui::InteractiveElement + gpui::Styled,
 {
-    let mut flags = 0;
+    let mut flags = host_bounds_flags(selection_start);
     if scrolls {
         flags |= HostFlags::SCROLLS;
     }
     if collapsed_table {
         flags |= HostFlags::COLLAPSED_TABLE;
-    }
-    match selection_start {
-        Some(false) => flags |= HostFlags::START_REGION,
-        Some(true) => flags |= HostFlags::START_REGION | HostFlags::SELECTABLE,
-        None => {}
     }
     let el = el.layout_probe(HOST_BOUNDS_PROBE.with(Rc::clone), id, flags);
     match report {
@@ -800,6 +795,17 @@ where
             report(bounds, window.layout_insets(layout_id), window, cx);
         }),
         None => el,
+    }
+}
+
+/// What [`track_host_bounds`] tells the probe of an element that is neither a scroller nor a collapsed table, which
+/// is all a direct node (`crate::render`) can be: it makes the probe's calls itself ([`paint_host_bounds`],
+/// [`publish_host_bounds`]) with these flags.
+pub(crate) fn host_bounds_flags(selection_start: Option<bool>) -> u8 {
+    match selection_start {
+        Some(false) => HostFlags::START_REGION,
+        Some(true) => HostFlags::START_REGION | HostFlags::SELECTABLE,
+        None => 0,
     }
 }
 
@@ -844,20 +850,50 @@ impl gpui::LayoutProbe for HostBoundsProbe {
         window: &mut Window,
         _cx: &mut App,
     ) {
-        let insets = window.layout_insets(layout_id);
-        let window_id = window.window_handle().window_id();
-        note_host_node(window, id, layout_id);
-        let laid_out = LaidOut { collapsed_table: flags & HostFlags::COLLAPSED_TABLE != 0, ..sample.into() };
-        let to_window = laid_out.to_window;
-        record_bounds(window_id, id, laid_out, bounds.origin, insets);
-        let visible = window.visibility() == gpui::Visibility::Visible;
-        // A pass that only lays out (a read, or a patch prepared ahead of its draw) runs this from the publications that prepaint
-        // queued, outside the tape of any subtree, and only writes what it can write again: the boxes are replaced by id, but a start
-        // region is added to the registry, once more at every pass, and nothing takes the copy out. Paint writes it, on the tape.
-        if flags & HostFlags::START_REGION != 0 && visible && !window.is_layout_pass() {
-            crate::text::record_start_region(window_id, id, bounds, flags & HostFlags::SELECTABLE != 0, to_window);
-        }
+        paint_host_bounds(id, flags, sample, bounds, layout_id, window);
     }
+}
+
+/// What the probe of a host element writes when the element is painted, or reports as if it was
+/// ([`publish_host_bounds`]).
+pub(crate) fn paint_host_bounds(
+    id: u64,
+    flags: u8,
+    sample: gpui::LayoutSample,
+    bounds: Bounds<Pixels>,
+    layout_id: gpui::LayoutId,
+    window: &mut Window,
+) {
+    let insets = window.layout_insets(layout_id);
+    let window_id = window.window_handle().window_id();
+    note_host_node(window, id, layout_id);
+    let laid_out = LaidOut { collapsed_table: flags & HostFlags::COLLAPSED_TABLE != 0, ..sample.into() };
+    let to_window = laid_out.to_window;
+    record_bounds(window_id, id, laid_out, bounds.origin, insets);
+    let visible = window.visibility() == gpui::Visibility::Visible;
+    // A pass that only lays out (a read, or a patch prepared ahead of its draw) runs this from the publications that prepaint
+    // queued, outside the tape of any subtree, and only writes what it can write again: the boxes are replaced by id, but a start
+    // region is added to the registry, once more at every pass, and nothing takes the copy out. Paint writes it, on the tape.
+    if flags & HostFlags::START_REGION != 0 && visible && !window.is_layout_pass() {
+        crate::text::record_start_region(window_id, id, bounds, flags & HostFlags::SELECTABLE != 0, to_window);
+    }
+}
+
+/// [`paint_host_bounds`] for a pass that does not paint: it runs once the tree is prepainted
+/// ([`Window::publish_layout`], which does nothing in a pass that paints), under the visibility
+/// the element has.
+pub(crate) fn publish_host_bounds(
+    id: u64,
+    flags: u8,
+    sample: gpui::LayoutSample,
+    bounds: Bounds<Pixels>,
+    layout_id: gpui::LayoutId,
+    window: &mut Window,
+) {
+    let visibility = window.visibility();
+    window.publish_layout(move |window, _cx| {
+        window.with_visibility(visibility, |window| paint_host_bounds(id, flags, sample, bounds, layout_id, window));
+    });
 }
 
 /// Called with an element's painted box and the padding and border it was laid

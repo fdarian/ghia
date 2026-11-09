@@ -1,10 +1,10 @@
 //! Which host subtrees are drawn direct.
 //!
 //! A root is direct when it and everything it builds is *plain*: a node needs nothing from a `Div`
-//! that the arena does not give. Slice 1 has no hitbox below the root, no cursor, no bounds record and
-//! no lifting, so a node is plain only when none of those could show: no listener, prop, focus, scroll,
-//! positioned box, stacking context, pointer state, transition or animation, and nothing the build
-//! of a `Div` registers for an accessibility node (the window's a11y being off is checked at the root).
+//! that the arena does not give. It has a hitbox, a cursor and a bounds record per node, and no lifting, so
+//! a node is plain only when none of the rest could show: no listener, prop, focus, scroll, positioned
+//! box, stacking context, pointer state, transition or animation, and nothing the build of a `Div`
+//! registers for an accessibility node (the window's a11y being off is checked at the root).
 //!
 //! What a subtree is does not depend on what is above it, so it is judged once per revision of the
 //! element and remembered ([`node_is_plain`]). What the subtree inherits is judged at the root
@@ -61,7 +61,6 @@ pub(crate) fn is_direct_root(
         && !ctx.text_box_trim.end;
     let inherited = &ctx.inherited;
     let plain_inheritance = !inherited.inert
-        && !inherited.pointer_events_none
         && !inherited.visibility_hidden
         && inherited.highlight.is_none()
         && !inherited.table.collapse
@@ -236,8 +235,6 @@ fn style_is_plain(style: &StyleDesc, kind: Kind) -> bool {
         && style.visibility.is_none()
         && style.z_index.is_none()
         && matches!(style.position.as_deref(), None | Some("static"))
-        && style.cursor.is_none()
-        && style.pointer_events.is_none()
         && style.app_region.is_none()
         && style.user_select.is_none()
         && transitions

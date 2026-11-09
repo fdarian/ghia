@@ -13209,7 +13209,7 @@ fn focusable_inline_boxes(
 
 /// Explicit `userSelect` on this node. `None` means inherit; the ancestor
 /// that set the value already owns the start region.
-fn selection_start_flag(style: Option<&StyleDesc>) -> Option<bool> {
+pub(crate) fn selection_start_flag(style: Option<&StyleDesc>) -> Option<bool> {
     match style.and_then(|style| style.user_select.as_deref()) {
         Some("none") => Some(false),
         Some("text") | Some("auto") => Some(true),

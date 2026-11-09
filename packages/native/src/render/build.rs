@@ -34,7 +34,13 @@ pub(crate) fn build_direct(
     let children = build_children(element, ctx, window, cx, &mut arena);
     ctx.subtree = Subtree::of_element(ctx.subtree, style, &ctx.inherited.colors, &ctx.inherited.lengths);
     let cull_outset = ctx.subtree.outset();
-    let root = arena.push_node(root_style, children);
+    let root = arena.push_node(
+        element.id,
+        root_style,
+        children,
+        ctx.inherited.pointer_events_none,
+        crate::automation::host_bounds_flags(crate::renderer::selection_start_flag(style)),
+    );
     crate::perf_counters::direct_built(arena.nodes.len() as u64);
     DirectRoot::new(crate::events::ids::host_element_id(element.id), arena, root, cull_outset).into_any_element()
 }
@@ -64,10 +70,17 @@ fn build_node(
     let children = build_children(element, ctx, window, cx, arena);
     ctx.subtree = Subtree::of_element(ctx.subtree, style, &ctx.inherited.colors, &ctx.inherited.lengths);
     ctx.retain.direct_descendant(id);
+    let pointer_events_none = ctx.inherited.pointer_events_none;
     ctx.inherited = parent_inherited;
     let below = std::mem::replace(&mut ctx.subtree, enclosing);
     ctx.subtree.merge(below);
-    arena.push_node(node_style, children)
+    arena.push_node(
+        id,
+        node_style,
+        children,
+        pointer_events_none,
+        crate::automation::host_bounds_flags(crate::renderer::selection_start_flag(style)),
+    )
 }
 
 /// What `build_host_container` tells the registries about a host that has no scroller, no
