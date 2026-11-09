@@ -725,6 +725,12 @@ pub struct RetainedTree {
     detached_from: HashMap<u64, u64>,
 }
 
+// `init_threaded` moves the tree into a thread: nothing kept on an element may be `Rc`.
+const _: fn() = || {
+    fn is_send<T: Send>() {}
+    is_send::<RetainedTree>();
+};
+
 impl RetainedTree {
     pub fn new() -> Self {
         static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);

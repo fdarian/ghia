@@ -330,6 +330,77 @@ describeNative("the children plan cache", { timeout: 120_000 }, () => {
     })
   }
 
+  // Moving an element to another parent marks the two parent chains and leaves the element's own `subtree_revision` alone, so the
+  // `white-space` it inherits is all that tells its kept plan the move happened. React recreates an instance it moves, hence the
+  // moves go to the renderer, the way a portal-like host would make them.
+  it("plans again an element moved between a normal and a pre parent", () => {
+    const play = (mode: "off" | "on" | "verify") => {
+      const root = createTestRoot({ width: 360, height: 200 })
+      const renderer = root.renderer
+      renderer.setStyleCache(mode)
+      renderer.clockPause()
+      try {
+        root.render(
+          <div style={{ width: 340, backgroundColor: "#ffffff", ...TEXT }}>
+            <div style={{ ...BOX, whiteSpace: "normal" }}>
+              <div>
+                {"a   b\n  c  d "}
+                <span style={{ fontWeight: "bold" }}>{"  bold   words "}</span>
+              </div>
+            </div>
+            <div style={{ ...BOX, whiteSpace: "pre" }}>
+              <div style={{ height: 14 }} />
+            </div>
+          </div>,
+        )
+        renderer.dispatchNativeEvents()
+        renderer.flush()
+        renderer.drawFrame()
+        const page = renderer.toJSON()
+        const normal = page.children[0].id
+        const pre = page.children[1].id
+        const placeholder = page.children[1].children[0].id
+        const x = page.children[0].children[0].id
+        const batches = [
+          [["appendChild", pre, x]],
+          [["appendChild", normal, x]],
+          [["insertBefore", pre, x, placeholder]],
+          [["appendChild", normal, x]],
+        ]
+        const read = () => ({ boxes: boxes(renderer), painted: renderer.getPaintedText(), tree: renderer.getAutomationTree() })
+        renderer.resetBuildCounters()
+        const frames = [{ ...read(), picture: null }]
+        for (const [index, batch] of batches.entries()) {
+          renderer.applyBatch(JSON.stringify(batch))
+          renderer.flush()
+          renderer.drawFrame()
+          const file = path.join(SHOTS_DIR, `plan-cache-moved-${index}-${mode}.png`)
+          renderer.captureScreenshot(file)
+          frames.push({ ...read(), picture: fs.readFileSync(file) })
+        }
+        const counters = renderer.getBuildCounters()
+        return { frames, kept: counters.plansKept }
+      } finally {
+        root.unmount()
+        renderer.setStyleCache(defaultMode())
+      }
+    }
+    const off = play("off")
+    const on = play("on")
+    const verified = play("verify")
+    expect(off.frames[1].painted, "the move to the pre parent keeps the spaces").not.toEqual(off.frames[0].painted)
+    expect(off.frames[2].painted, "and back to the normal parent collapses them again").toEqual(off.frames[0].painted)
+    expect(on.kept, "what did not move is found kept").toBeGreaterThan(0)
+    for (const other of [on, verified]) {
+      for (let step = 0; step < off.frames.length; step++) {
+        expect(other.frames[step].boxes, `the boxes of step ${step}`).toEqual(off.frames[step].boxes)
+        expect(other.frames[step].painted, `the painted text of step ${step}`).toEqual(off.frames[step].painted)
+        expect(other.frames[step].tree, `the automation tree of step ${step}`).toEqual(off.frames[step].tree)
+        if (step > 0) expect(Buffer.compare(other.frames[step].picture, off.frames[step].picture), `the picture of step ${step}`).toBe(0)
+      }
+    }
+  })
+
   it("plans only the host whose subtree changed", () => {
     const root = createTestRoot({ width: 360, height: 240 })
     const renderer = root.renderer

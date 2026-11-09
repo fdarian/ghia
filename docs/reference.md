@@ -9618,7 +9618,9 @@ Counters you read off the renderer:
   whole the ones it builds and the ones a hover or focus reached, not those in skipped
   content or under `display: none`; in a patched tick those that move) and the
   motion values sampled for the elements that bind them (`motionValuesSampled`): all of
-  them in a frame built whole, only those that move or were written in a patched tick.
+  them in a frame built whole, only those that move or were written in a patched tick;
+  `styleAppliesComputed` and `styleAppliesReplayed` (the style cache) and `plansKept` and
+  `plansComputed` (the children plans found kept on their element and made anew).
 - `getLayoutCounters()`: layout nodes made, found again and freed, styles and
   child lists set, passes, and measure calls, `nodesLaidOut` (nodes whose layout
   algorithm ran to place them: a change to one leaf costs its ancestors and what

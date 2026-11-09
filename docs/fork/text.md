@@ -232,7 +232,7 @@ A font with no GPOS table (`FontMetrics::legacy_kerning`, found with font-kit's 
 | input | key |
 |---|---|
 | the element and what the paragraph builder walks below it: children and their order, content, styles (`display`, `position`, `white-space`, `overflow`, padding, border and margin along the line), listeners and props that make a `<text>` a box, `tabIndex`, `highlight`, `display: contents` splices | `subtree_revision`, which every mutation of the element or a descendant moves |
-| the `white-space` the element inherits | its computed value (`white_space::computed`, which walks the ancestors), the one input outside the subtree |
+| the `white-space` the element inherits | its computed value (`white_space::computed`, which walks the ancestors), the one input outside the subtree. An ancestor's change already moves the revision of everything below it, so this is what catches an element moved to another parent: `append_child` and `insert_before` mark the old and new parent chains and leave the moved element's own revision alone |
 | the `display` and `order` that `@container` blocks gave the elements it reads (`container_display`, `container_order`), written by a build after the revision was taken | a count of the times `layout::container::settle` found one changed (per thread: a change anywhere plans every host again, which is more than the plan reads and never less) |
 | the elements a `display` transition keeps rendered (`box_generation::hold_display`) | not keyed: while there are any, the plan is made and not kept |
 

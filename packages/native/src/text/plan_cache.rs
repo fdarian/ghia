@@ -23,7 +23,7 @@
 //! and verifying plans again for every plan it finds kept and panics when the two differ.
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use super::inline::{self, Child};
 use super::white_space::{self, WhiteSpace};
@@ -47,7 +47,7 @@ pub(crate) struct Planned {
 }
 
 /// What `RetainedElement` keeps, empty until its first plan.
-pub(crate) type Slot = RefCell<Option<Rc<Planned>>>;
+pub(crate) type Slot = RefCell<Option<Arc<Planned>>>;
 
 // The build runs on the one thread that owns the window, and so does `settle`.
 thread_local! {
@@ -69,7 +69,7 @@ fn compute(tree: &RetainedTree, element: &RetainedElement, key: Key) -> Planned 
 }
 
 /// `plan_children_at(tree, element)`, and what `<text>` reads out of it, kept on the element.
-pub(crate) fn planned(tree: &RetainedTree, element: &RetainedElement) -> Rc<Planned> {
+pub(crate) fn planned(tree: &RetainedTree, element: &RetainedElement) -> Arc<Planned> {
     let mode = style_cache::mode();
     let key = Key {
         revision: element.subtree_revision,
@@ -78,7 +78,7 @@ pub(crate) fn planned(tree: &RetainedTree, element: &RetainedElement) -> Rc<Plan
     };
     if mode == Mode::Off || crate::layout::box_generation::any_display_held() {
         crate::perf_counters::plan_made(false);
-        return Rc::new(compute(tree, element, key));
+        return Arc::new(compute(tree, element, key));
     }
     let kept = element.kept_plan.borrow().as_ref().filter(|kept| kept.key == key).cloned();
     if let Some(kept) = kept {
@@ -96,7 +96,7 @@ pub(crate) fn planned(tree: &RetainedTree, element: &RetainedElement) -> Rc<Plan
         return kept;
     }
     crate::perf_counters::plan_made(false);
-    let planned = Rc::new(compute(tree, element, key));
+    let planned = Arc::new(compute(tree, element, key));
     *element.kept_plan.borrow_mut() = Some(planned.clone());
     planned
 }
@@ -104,7 +104,6 @@ pub(crate) fn planned(tree: &RetainedTree, element: &RetainedElement) -> Rc<Plan
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     fn tree() -> RetainedTree {
         let mut tree = RetainedTree::new();
@@ -131,7 +130,7 @@ mod tests {
         assert_eq!(text(&first), "Hello world");
         assert_eq!(first.accessible_text.as_deref(), Some("Hello world"));
         if style_cache::mode() != Mode::Off {
-            assert!(Rc::ptr_eq(&first, &planned(&tree, &tree.elements[&1])));
+            assert!(Arc::ptr_eq(&first, &planned(&tree, &tree.elements[&1])));
         }
         tree.set_text(3, "there".to_string());
         let second = planned(&tree, &tree.elements[&1]);
@@ -151,6 +150,26 @@ mod tests {
         tree.append_child(2, 3);
         assert_eq!(text(&planned(&tree, &tree.elements[&2])), "a b");
         tree.set_style(1, Arc::new(serde_json::from_value(serde_json::json!({ "whiteSpace": "pre" })).unwrap()));
+        assert_eq!(text(&planned(&tree, &tree.elements[&2])), "a   b");
+    }
+
+    #[test]
+    fn the_white_space_key_catches_an_element_moved_to_another_parent() {
+        let mut tree = RetainedTree::new();
+        for id in [1, 4] {
+            tree.create_element(id, "div".to_string());
+        }
+        tree.set_style(4, Arc::new(serde_json::from_value(serde_json::json!({ "whiteSpace": "pre" })).unwrap()));
+        tree.create_element(2, "div".to_string());
+        tree.create_element(3, "text".to_string());
+        tree.set_text(3, "a   b".to_string());
+        tree.append_child(2, 3);
+        tree.append_child(1, 2);
+        assert_eq!(text(&planned(&tree, &tree.elements[&2])), "a b");
+        let revision = tree.elements[&2].subtree_revision;
+        tree.append_child(4, 2);
+        // A move marks the parent chains, not the element: only the key's white space tells.
+        assert_eq!(tree.elements[&2].subtree_revision, revision);
         assert_eq!(text(&planned(&tree, &tree.elements[&2])), "a   b");
     }
 
