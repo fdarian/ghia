@@ -16,7 +16,7 @@ A layout-only pass reports nothing. A forced layout delivers no `ResizeObserver`
 
 ### The order of a frame's reports
 
-The order is the DOM's rendering steps, stated rather than an effect of how many times each report was deferred. Scroll events come first, then `onLayout` and `ResizeObserver` (gpuix's `onLayout` is `ResizeObserver` for an element, so it is delivered with it), then `IntersectionObserver`, as in "update the rendering": run the scroll steps, then the resize observation loop, then the intersection observation steps.
+The order is the DOM's rendering steps, stated rather than an effect of how many times each report was deferred. Scroll events come first (they run in the frame steps before the draw, [scroll.md](scroll.md#onscroll), and the sweep after it reports the boxes), then `onLayout` and `ResizeObserver` (gpuix's `onLayout` is `ResizeObserver` for an element, so it is delivered with it), then `IntersectionObserver`, as in "update the rendering": run the scroll steps, then the resize observation loop, then the intersection observation steps.
 
 - `report_scroll` queues into `PaintReports::pending_scrolls` at paint, in paint order (the DOM's is the order the scrolls happened in, which is the same for the scroller one input moves). `observers::sweep` drains the queue first, and a deferred flush drains it when nothing listens for boxes.
 - The sweep emits `onLayout` and resize reports in document order (`onLayout` before the resize report of one element), then intersection reports. An element that is gone comes after the ones that are there of its phase.

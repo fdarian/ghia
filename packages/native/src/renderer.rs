@@ -306,7 +306,7 @@ fn scroll_write_lays_out_first(
 }
 
 /// Makes the scroll writes recorded since the last render, before it builds (see `scroll_write`).
-fn settle_scroll_writes() {
+pub(crate) fn settle_scroll_writes() {
     SCROLL_HANDLES.with(|cell| crate::scroll_write::settle_containers(&cell.borrow()));
 }
 
@@ -6146,14 +6146,9 @@ pub(crate) struct MotionStep {
 
 #[derive(Default)]
 pub(crate) struct PaintReports {
-    /// Scroll offset last seen for `onScroll`. Recorded on the first paint
-    /// without an event, so only movement is reported.
-    scrolls: HashMap<u64, (f32, f32)>,
-    /// The scrolls the frame painted, in paint order, until the events are emitted: by the sweep of
-    /// the frame (`observers::frame_sweep`), which emits them before it reports the boxes, or by a
-    /// deferred flush if nothing listens for boxes.
-    pending_scrolls: Vec<(u64, (f32, f32))>,
-    scroll_flush_queued: bool,
+    /// The scrollers with an `onScroll` listener and what each last reported: the frame steps
+    /// (`frame_steps`) emit the events.
+    pub(crate) scrolls: crate::frame_steps::ScrollReports,
     /// What `onLayout`, `ResizeObserver` and `IntersectionObserver` last saw.
     pub(crate) observers: crate::observers::ObserverReports,
 }
@@ -9938,6 +9933,7 @@ impl gpui::Render for GpuixView {
 
         self.apply_window_title(window);
         settle_scroll_writes();
+        self.paint_reports.borrow_mut().scrolls.begin_pass();
         self.note_pass(window);
         self.apply_pointer_lock(window, cx);
         layout_is_drawn(cx.entity_id());
@@ -9956,6 +9952,14 @@ impl gpui::Render for GpuixView {
             // there is no commit to survey that the update has not just made.
             move |_: &gpui::Window| tree.try_lock().is_ok_and(|tree| flips.wants_survey(tree.revision()))
         })));
+        window.set_frame_steps(Some(crate::frame_steps::steps(
+            self.paint_reports.clone(),
+            self.event_callback.clone(),
+            {
+                let clock = self.clock.clone();
+                move || clock.now()
+            },
+        )));
         window.set_scroll_patch_registries(verifies.then(|| {
             let window_id = window.window_handle().window_id();
             let tapes = self.tapes.clone();
@@ -10019,13 +10023,11 @@ impl gpui::Render for GpuixView {
         // back reports the size again, like a fresh observer.
         {
             let mut reports = self.paint_reports.borrow_mut();
-            if !reports.scrolls.is_empty() {
-                reports.scrolls.retain(|id, _| {
-                    tree.elements
-                        .get(id)
-                        .is_some_and(|element| element.events().contains("scroll"))
-                });
-            }
+            reports.scrolls.retain(|id| {
+                tree.elements
+                    .get(&id)
+                    .is_some_and(|element| element.events().contains("scroll"))
+            });
             crate::observers::prune(
                 &mut reports.observers,
                 |id| tree.elements.contains_key(&id),
@@ -10057,7 +10059,8 @@ impl gpui::Render for GpuixView {
                 .unwrap_or_else(|| crate::scrollbar::ScrollerStyle::of_system(cx)),
             window.draw_pass(),
         );
-        let scroll_animating = crate::scroll::advance_animations(now);
+        // Stepped by the frame steps, before the frame that paints it.
+        let scroll_animating = crate::scroll::animating();
         // Before the motion sync reads them, so an element that stopped being
         // measured does not seed its motion from a size laid out long ago.
         self.measurements
@@ -13612,16 +13615,10 @@ pub(crate) fn mouse_button_to_u32(button: gpui::MouseButton) -> u32 {
     }
 }
 
-/// `onScroll`: the scroll offset of the element each time it differs from the last paint,
-/// whatever moved it. The wheel is only one cause; a scrollbar drag or `scrollTo` moves it
-/// too, and gpui raises no event for those. `None` for an element that listens for nothing
-/// or has no scroll handle.
-///
-/// Events are queued after the paint that saw the change, never from inside it.
-/// The browser build calls the listener synchronously, and a handler that sets
-/// state would re-enter the frame that is being painted. They go out before the frame's
-/// `onLayout` and observer reports, as the DOM's scroll events precede its observers: see
-/// [`emit_pending_scrolls`].
+/// `onScroll`: registers the scroller at paint, for the frame steps to report (`frame_steps`). An
+/// offset that this paint shows and the steps did not report (layout clamped it, anchoring moved
+/// it) asks for a frame whose steps do. `None` for an element that listens for nothing or has no
+/// scroll handle.
 ///
 /// `onLayout` and the observers are not here: they are read from the published boxes after
 /// the draw, see `observers::frame_sweep`.
@@ -13634,68 +13631,18 @@ fn scroll_reporter(
         return None;
     }
     let handle = ctx.scroll_handles.get(&id)?.clone();
-    let callback = ctx.event_callback.clone()?;
     let reports = ctx.paint_reports.clone();
-    Some(Rc::new(move |_, _, window, cx| {
+    Some(Rc::new(move |_, _, window, _| {
         // A layout-only pass paints nothing, and the event of the offset it left is the next
         // frame's, as the DOM's is: an anchoring adjustment of a forced layout runs it a frame later.
         if window.is_layout_pass() {
+            reports.borrow_mut().scrolls.note_laid_out(id);
             return;
         }
-        report_scroll(id, handle.offset(), &reports, &callback, cx);
+        if reports.borrow_mut().scrolls.note_painted(id, &handle) {
+            window.request_animation_frame();
+        }
     }))
-}
-
-fn report_scroll(
-    id: u64,
-    offset: gpui::Point<gpui::Pixels>,
-    reports: &SharedPaintReports,
-    callback: &EventCallback,
-    cx: &mut gpui::App,
-) {
-    let offset = (f32::from(offset.x), f32::from(offset.y));
-    let mut shared = reports.borrow_mut();
-    match shared.scrolls.get(&id).copied() {
-        // The first paint only sets the baseline.
-        None => {
-            shared.scrolls.insert(id, offset);
-            return;
-        }
-        Some(last)
-            if (last.0 - offset.0).abs() < PAINT_REPORT_EPSILON
-                && (last.1 - offset.1).abs() < PAINT_REPORT_EPSILON =>
-        {
-            return;
-        }
-        Some(_) => {
-            shared.scrolls.insert(id, offset);
-        }
-    }
-    shared.pending_scrolls.push((id, offset));
-    if !shared.scroll_flush_queued {
-        shared.scroll_flush_queued = true;
-        let reports = reports.clone();
-        let callback = Some(callback.clone());
-        cx.defer(move |_| emit_pending_scrolls(&reports, &callback));
-    }
-}
-
-/// Emits the scroll events the frame painted. Whichever runs first after the draw, the frame's
-/// sweep or this flush, emits them all; the other finds none. The sweep goes first when anything
-/// listens for boxes, which is what puts scroll before `onLayout`, `ResizeObserver` and
-/// `IntersectionObserver` in a frame. Scrollers are in paint order.
-pub(crate) fn emit_pending_scrolls(reports: &SharedPaintReports, callback: &Option<EventCallback>) {
-    let pending = {
-        let mut shared = reports.borrow_mut();
-        shared.scroll_flush_queued = false;
-        std::mem::take(&mut shared.pending_scrolls)
-    };
-    for (id, offset) in pending {
-        emit_event_full(callback, id, "scroll", |payload| {
-            payload.scroll_x = Some(f64::from(offset.0));
-            payload.scroll_y = Some(f64::from(offset.1));
-        });
-    }
 }
 
 /// The retained path a non-pointer click on `element` bubbles along. Empty when
@@ -13715,10 +13662,6 @@ pub(crate) fn click_path(tree: &RetainedTree, element: &crate::retained_tree::Re
         Vec::new()
     }
 }
-
-/// Values closer than this are the same value. Layout is deterministic, so this
-/// only absorbs float noise from fractional scale factors.
-const PAINT_REPORT_EPSILON: f32 = 0.01;
 
 /// General-purpose event emitter. Builds a default EventPayload, lets the
 /// caller customize it via a closure, then sends it through the callback.

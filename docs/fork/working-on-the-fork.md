@@ -63,6 +63,8 @@ The notes below are grouped by the topic doc that describes the behaviour; read 
 
 See [frames-and-wakes.md](frames-and-wakes.md).
 
+- **Frame steps (zed).** `Window::set_frame_steps` runs first in `Window::draw`, before the commit survey and not when `draw_in_progress()`. If `draw` is restructured, keep it there, or a scroll handler's mutations miss the draw that paints the offset. Gpuix: `frame_steps.rs`, installed in `GpuixView::render`.
+
 - **Present log (zed).** `GPUIX_PRESENT_LOG` is a debug log in `gpui_apple`'s `metal_renderer.rs`. If upstream restructures
   how drawables are presented, re-add the log around the present call.
 - **`flush_effects` guard (zed).** If `GpuiMode` or the inline draw block moved, keep the draw under
@@ -164,8 +166,8 @@ See [layout.md](layout.md) and [scroll.md](scroll.md).
 - **Scroll anchoring** (zed `elements/scroll_anchoring.rs` and its state on `ScrollHandleState`): the anchor is picked in
   `before_layout`, called by `compute_layout_in` before the layout is computed and never at the end of a prepaint; `step` only
   compensates, after the offset is clamped; an offset other than the one the step left is an explicit scroll and drops the
-  anchor; the suppression flags set in `reuse_node` are cleared at `end_pass`. Gpuix's `scroll_reporter` reports nothing in a
-  layout-only pass. `scroll-anchoring.test.tsx` (the Chrome scenes) is the check.
+  anchor; the suppression flags set in `reuse_node` are cleared at `end_pass`. Gpuix's `scroll_reporter` only registers
+  the scroller (`frame_steps.rs` reports), and in a layout-only pass notes what the pass moved. `scroll-anchoring.test.tsx` (the Chrome scenes) is the check.
 - **Layout-only passes** (zed `window.rs`): `build_next_frame` passes (`draw_pass`, `refreshing`, `layout_pass`, `measuring`),
   `draw_if_dirty` / `paint_if_dirty`, `publish_layout`, the recording and replay of the frame's index ranges, and
   `lies_outside_the_mask`. A layout-only pass must not swap frames or record a frame (it leaves layout records only). See

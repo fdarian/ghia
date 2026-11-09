@@ -45,7 +45,13 @@ Arrow, Page, Home, End and Space scroll the nearest scroller as a default action
 
 ## `onScroll`
 
-`onScroll` fires on any offset change (wheel, scrollbar drag, keys, `scrollTo`, anchoring) and does not bubble. `scroll_reporter` reports nothing in a layout-only pass, so the event of a write runs in the frame after the one that laid it out, as in Chrome, and a write after a mutation fires once. A frame reports the offset it paints when that differs from the last painted one.
+`onScroll` fires on any offset change (wheel, scrollbar drag, keys, `scrollTo`, a smooth animation, anchoring) and does not bubble. It runs in the steps before the frame that paints the offset ([frames-and-wakes.md](frames-and-wakes.md#the-steps-before-a-frame-windowset_frame_steps)), as a browser runs `scroll` in "update the rendering": the handler's mutations (a signal, a React state, `applyBatch`) are in that frame, so a window that follows the offset (a virtualizer) paints the rows of the offset it shows, with no frame between.
+
+- **One source of truth: the reported offset per scroller (`frame_steps.rs`, `ScrollReports`).** The paint reporter of an element with `onScroll` (`scroll_reporter`) does not emit. It registers the handle at paint, in paint order, and the first paint sets the baseline, which is no event. The frame steps compare each registered handle's offset with the one reported (epsilon 0.01) and emit, in paint order, the scrollers that differ. The payload is the offset the handle has then. A wheel, a write that was made (`settle_scroll_writes` is the first step) and a smooth scroll's tick all reach the event through the same comparison.
+- **What a layout moved is the frame after.** An offset the pass itself changed (a clamp, anchoring, content that shrank) was not in the steps, so the paint that shows it finds an offset that is not the reported one and asks for a frame (`request_animation_frame`); the steps of that frame report it. A layout-only pass (a forced read, `scroll_reporter` is told it is one) that moves the offset leaves the reporter with the offset the pass began with until a paint, so a `scrollTop` read after a mutation reports in the second frame, as Chrome (`scroll-anchoring-oracle.json`, scene `forcedRead`); a write after that pass is reported as it stands. A write and the adjustment of a forced layout before it are one event, as in Chrome.
+- **Events that are not from a handle** (`wheel`, input) are unchanged. A handler that is not sync (no sync handler registered, outside a native call) goes through the event queue as before.
+- **`<virtual-list>`** has no `onScroll`; `onVisibleRange` keeps its timing (below).
+- **`PaintReporter` still excludes a scroller from retention,** as before: it paints every frame so that it is registered.
 
 ## Scroll writes (#70)
 
