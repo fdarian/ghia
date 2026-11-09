@@ -16,7 +16,7 @@
 //                        a live window; PACE=0 runs the keys back to back (the JIT then races the main thread)
 //   A11Y=0               takes the pretend screen reader away (as a bench run has none); on by default here
 //   THREADS=1            prints each thread's CPU time over the keys (two snapshots, nothing polled while the keys run)
-//   PER_KEY=1            prints every key's instructions
+//   PER_KEY=1            prints every key's instructions (and, with BATCHES=1, its mutation ops: a key that changes the list window has hundreds)
 //   PRE_GC=1             Bun.gc(true) before the first key (separates startup garbage from the keys')
 //   HEAP=1               prints bun:jsc heapStats and the JIT compile counters before and after the keys
 //   MARK_RUNS=1          prints "=== run n done" on stderr after each run of the sequence, to split BUN_JSC_reportCompileTimes=1 output
@@ -188,6 +188,7 @@ if (process.env.PRE_GC === "1") Bun.gc(true)
 if (HEAP) await jscStats("before keys")
 
 const perKey: number[] = []
+const opsPerKey: number[] = []
 batchStats.calls = batchStats.chars = batchStats.ops = 0
 /**
  * CPU ms by thread name since the first poll. JavaScriptCore's compiler threads exit when idle and a new one starts later, so a
@@ -228,8 +229,10 @@ for (let index = 0; index < TOTAL_KEYS; index++) {
   const key = SEQUENCE[index % SEQUENCE.length]
   if (key === undefined) throw new Error("empty key sequence")
   const before = readInstructions()
+  const opsBefore = batchStats.ops
   pressKey(key, restOfPeriod)
   perKey.push(readInstructions() - before)
+  opsPerKey.push(batchStats.ops - opsBefore)
   if (MARK_RUNS && (index + 1) % SEQUENCE.length === 0) console.error(`=== run ${(index + 1) / SEQUENCE.length} done`)
   if (THREADS) pollThreads()
   if (runStart && (index + 1) % SEQUENCE.length === 0) {
@@ -271,6 +274,7 @@ console.log(`${PHASE}: ${TOTAL_KEYS} keys, ${M(totalInstructions, 1)}M instructi
   }
 }
 if (PER_KEY) console.log(`  per key (M): ${perKey.map((value) => M(value, 2)).join(" ")}`)
+if (PER_KEY && BATCHES) console.log(`  ops per key: ${opsPerKey.join(" ")}`)
 if (BATCHES) {
   console.log(`  applyBatch per key: ${(batchStats.calls / TOTAL_KEYS).toFixed(2)} calls, ${(batchStats.chars / TOTAL_KEYS / 1024).toFixed(1)} KB of wire bytes, ${(batchStats.ops / TOTAL_KEYS).toFixed(0)} ops (the wrapper parses each batch: not for instruction counts)`)
 }
