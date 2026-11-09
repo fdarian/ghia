@@ -1308,6 +1308,10 @@ frame in the app, or call `renderer.flush()` in a test.
 Use it when an ordering bug depends on the commit landing first: an unmount
 before a remount, or a state change before you feed the next event.
 
+### Partial redraw (experimental)
+
+`GPUIX_PARTIAL_REDRAW=1` in the environment of an app makes its windows draw only the part of the picture that a frame changed (a hover patch, a list scroll, a scrollbar's fade) and keep the rest of the picture of the frame before. macOS only, off by default, and the picture is the same: it changes the GPU work. On the mailbox of ghia-bench (1280 x 800 at scale 1) a patch frame is 0.28 ms of GPU time instead of 0.84, a frame built whole 0.92 instead of 0.85; whether it is worth turning on is in [docs/fork/paint-and-transforms.md](fork/paint-and-transforms.md#partial-redraw). `TestRenderer` has `setPartialRedraw(enabled)`, `presentFrame()` and `capturePartialPicture(path)` for tests.
+
 ## Debug frame overlay
 
 GPUI paints frame-time stats into the window after layout. The overlay is not

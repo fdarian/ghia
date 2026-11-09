@@ -785,6 +785,7 @@ impl TestGpuixRenderer {
                         view.set_frameless(frameless);
                         crate::events::enable_dom_hit_testing(window);
                         crate::focus_emulation::apply(window, cx);
+                        crate::partial_redraw::apply(window);
                         crate::layout::container::allow_redraw_passes(window);
                         view.install_key_interception(window, cx);
                         view
@@ -2666,6 +2667,41 @@ impl TestGpuixRenderer {
                 .save(&path)
                 .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {}", e)))?;
             Ok(())
+        })
+    }
+
+    /// Whether the window draws only the part of the picture that a frame changed (`Window::set_partial_redraw`).
+    /// Off unless `GPUIX_PARTIAL_REDRAW=1` at window creation.
+    #[napi]
+    pub fn set_partial_redraw(&self, enabled: bool) -> Result<()> {
+        update_view(move |_view, window, _cx| window.set_partial_redraw(enabled))
+    }
+
+    /// Presents the frame that was drawn and not shown, as the display link of a live window does after a tick
+    /// (an offscreen window has none): with `setPartialRedraw`, this draws what the frame changed into the
+    /// picture the window keeps.
+    #[napi]
+    pub fn present_frame(&self) -> Result<()> {
+        with_test_state(|cx, window, _view| {
+            cx.update_window(window, |_, window, _app| window.present_if_needed())
+                .map_err(|e| Error::from_reason(e.to_string()))
+        })
+    }
+
+    /// Save the picture that frames drawn in part add up to as a PNG, and say whether there is one: it is
+    /// what `captureShownFrame` draws of the scene when the damage covered what changed.
+    #[napi]
+    pub fn capture_partial_picture(&self, path: String) -> Result<bool> {
+        with_test_state(|cx, window, _view| {
+            let picture = cx
+                .update_window(window, |_, window, _app| window.shown_picture())
+                .map_err(|e| Error::from_reason(e.to_string()))?
+                .map_err(|e| Error::from_reason(format!("Reading the picture failed: {}", e)))?;
+            let Some(image) = picture else { return Ok(false) };
+            image
+                .save(&path)
+                .map_err(|e| Error::from_reason(format!("Failed to save picture: {}", e)))?;
+            Ok(true)
         })
     }
 
