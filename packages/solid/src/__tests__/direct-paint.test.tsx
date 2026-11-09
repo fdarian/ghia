@@ -14,6 +14,9 @@
  * and reads what they report back, with steps that leave the offset alone and replay the boxes. The `scroll-anchoring` scene has
  * rows inserted and removed above the first row in view of an `overflow: auto` scroller, whose rows are direct (in a wrapper,
  * which is one root that holds them, and as roots of their own): the scroller must anchor to the row it did with `Div`s.
+ * The rows of a `<virtual-list>` are stacking roots (their positioned descendants are lifted to the row, and nothing leaves it), and a
+ * row is a direct root all the same: the `list-*` scenes have the bench's rows in a list, rows whose absolute children overlap the next
+ * row (and one with a `z-index` of its own, below and above its content), the pointer crossing them and a scroll that mounts others.
  */
 
 import fs from "node:fs"
@@ -275,7 +278,7 @@ const scenes: Scene[] = [
       <div style={{ width: 300, backgroundColor: "#ffffff" }}>
         <div style={{ ...CARD, overflow: "scroll", height: 20 }} />
         <div style={{ ...CARD, position: "sticky", top: 0, height: 20 }} />
-        <div style={{ ...CARD, position: "relative", zIndex: 2, height: 20 }} />
+        <div style={{ ...CARD, position: "relative", zIndex: 2, height: 20, opacity: 0.9 }} />
         <div style={{ ...CARD, opacity: [1, 0.5, 1][step()], height: 20 }} />
         <div style={{ ...CARD, height: 20 }} onClick={() => {}} tabIndex={0} />
         <div style={{ ...CARD, height: 20, visibility: "hidden" }} />
@@ -479,6 +482,129 @@ const scenes: Scene[] = [
     },
   },
   {
+    name: "list-mail-rows",
+    steps: 4,
+    width: 320,
+    height: 4 * ROW_HEIGHT,
+    directRoots: 6,
+    directNodes: 6 * 9,
+    hears: true,
+    view: (step) => {
+      const start = () => [0, 0, 3, 5][step()]
+      const selected = () => [0, 2, 2, 3][step()]
+      return (
+        <div style={{ width: 300 }} onPointerMove={hear("page")}>
+          <virtual-list testId="list" itemCount={40} windowStart={start()} estimatedItemHeight={ROW_HEIGHT} style={{ width: 300, height: 4 * ROW_HEIGHT, backgroundColor: "#ffffff" }}>
+            <For each={Array.from({ length: 8 }, (_, offset) => start() + offset)}>
+              {(index) => <MailRow index={index} step={step} selected={selected} />}
+            </For>
+          </virtual-list>
+        </div>
+      )
+    },
+    act: (renderer, step) => {
+      // The pointer crosses the rows (the avatar, the text column, the bare row) and clicks, then the list scrolls to mount others.
+      const list = renderer.findByTestId("list")!.id
+      for (const [x, y] of [[30, 20], [100, 30], [100, 62], [280, 66], [30, 100], [100, 150], [400, 400]]) {
+        renderer.nativeSimulateMouseMove(x, y + (step % 2) * 10)
+        renderer.dispatchNativeEvents()
+      }
+      renderer.nativeSimulateClick(30, 20 + ROW_HEIGHT * (step % 3))
+      renderer.dispatchNativeEvents()
+      renderer.scrollToItem(list, [0, 1, 3, 5][step])
+      renderer.drawFrame()
+      heard.push(`scroll ${renderer.getListScrollTop(list)?.join(",")}`)
+    },
+  },
+  {
+    name: "list-z-order",
+    steps: 4,
+    width: 320,
+    height: 280,
+    directRoots: 5,
+    hears: true,
+    view: (step) => {
+      const start = () => [0, 0, 2, 3][step()]
+      // The absolute child of a row hangs over the next row, which paints after it: a row is a context of its own.
+      const row = (index: number) => {
+        const kind = index % 4
+        const shade = ["#eef3f8", "#f8eef3", "#f3f8ee", "#fdfbe0"][(index + step()) % 4]
+        const overhang = <div style={{ position: "absolute", top: [26, 30, 26, 22][step()], left: 20 + 30 * kind, width: 90, height: 26, backgroundColor: "#cc4444" }} />
+        return (
+          <div
+            style={{
+              ...CARD,
+              position: kind === 3 ? "static" : "relative",
+              zIndex: kind === 1 ? 2 : undefined,
+              height: 40,
+              backgroundColor: shade,
+            }}
+          >
+            <text>{() => `row ${index}, kind ${kind}, step ${step()}`}</text>
+            {overhang}
+            <Show when={kind === 2}>
+              <div style={{ position: "absolute", top: 4, left: 150, width: 60, height: 20, zIndex: -1, backgroundColor: "#44aa44" }} />
+              <div style={{ position: "relative", top: 6, width: 80, height: 14, zIndex: 3, backgroundColor: "#4444cc" }} />
+            </Show>
+          </div>
+        )
+      }
+      return (
+        <div style={{ width: 300, backgroundColor: "#ffffff" }} onPointerMove={hear("page")}>
+          <virtual-list testId="list" itemCount={30} windowStart={start()} estimatedItemHeight={46} style={{ width: 300, height: 280 }}>
+            <For each={Array.from({ length: 8 }, (_, offset) => start() + offset)}>{row}</For>
+          </virtual-list>
+        </div>
+      )
+    },
+    act: (renderer, step) => {
+      // Over the child that hangs over the next row, over that row beside it, and over the lifted children.
+      const points = [[40, 66], [40, 80], [100, 52], [200, 130], [60, 120], [170, 20], [400, 400]]
+      for (const [x, y] of [...points.slice(step % 3), ...points.slice(0, step % 3)]) {
+        renderer.nativeSimulateMouseMove(x, y)
+        renderer.dispatchNativeEvents()
+      }
+      renderer.scrollToItem(renderer.findByTestId("list")!.id, [0, 1, 2, 3][step])
+      renderer.drawFrame()
+    },
+  },
+  {
+    name: "z-index-root",
+    steps: 4,
+    width: 320,
+    height: 240,
+    directRoots: 4,
+    hears: true,
+    // A positioned root with a `z-index` is a stacking context: what is lifted below it stays in it, and it sorts among its siblings.
+    view: (step) => (
+      <div style={{ width: 300, backgroundColor: "#ffffff" }} onPointerMove={hear("page")}>
+        <div style={{ ...CARD, position: "relative", zIndex: [2, 2, 1, 3][step()], height: 40, backgroundColor: "#eef3f8" }}>
+          <div style={{ position: "absolute", top: [28, 24, 28, 30][step()], left: 20, width: 120, height: 30, backgroundColor: "#cc4444" }} />
+          <div style={{ position: "absolute", top: 10, left: 200, width: 60, height: 40, backgroundColor: "#44aa44" }} />
+          <text>{() => `context ${step()}`}</text>
+        </div>
+        <div style={{ ...CARD, position: "relative", zIndex: [1, 1, 2, 1][step()], height: 40, backgroundColor: "#f8eef3" }}>
+          <div style={{ position: "absolute", top: -16, left: 60, width: 100, height: 30, backgroundColor: "#4444cc" }} />
+          <text>covers or is covered</text>
+        </div>
+        <div style={{ ...CARD, position: "relative", height: 40, backgroundColor: "#fdfbe0" }}>
+          <div style={{ position: "absolute", top: [-20, -10, -20, -30][step()], left: 100, width: 90, height: 40, backgroundColor: "#aa44aa" }} />
+          <text>auto, lifted to the page</text>
+        </div>
+        <div style={{ ...CARD, position: "relative", zIndex: -1, height: 40, backgroundColor: "#eeeeee" }}>
+          <text>below the page content</text>
+        </div>
+      </div>
+    ),
+    act: (renderer, step) => {
+      const points = [[40, 60], [40, 90], [230, 40], [100, 40], [100, 130], [150, 190], [400, 400]]
+      for (const [x, y] of [...points.slice(step % 3), ...points.slice(0, step % 3)]) {
+        renderer.nativeSimulateMouseMove(x, y)
+        renderer.dispatchNativeEvents()
+      }
+    },
+  },
+  {
     name: "scroll-anchoring",
     steps: 5,
     width: 340,
@@ -599,6 +725,33 @@ describeNative("direct paint", { timeout: 120_000 }, () => {
       if (scene.hears) expect(off.frames.flatMap((frame) => frame.heard).length, "the pointer reached the page").toBeGreaterThan(0)
     })
   }
+
+  it("draws each row of a list as one direct root", () => {
+    const app = createTestRoot({ width: 320, height: 4 * ROW_HEIGHT })
+    const renderer = app.renderer
+    renderer.setDirectPaint(true)
+    renderer.clockPause()
+    try {
+      const [step] = createSignal(0)
+      const [selected] = createSignal(1)
+      renderer.setA11yActive(false)
+      renderer.resetBuildCounters()
+      app.render(() => (
+        <virtual-list itemCount={40} estimatedItemHeight={ROW_HEIGHT} style={{ width: 300, height: 4 * ROW_HEIGHT, backgroundColor: "#ffffff" }}>
+          <For each={[0, 1, 2, 3, 4, 5]}>{(index) => <MailRow index={index} step={step} selected={selected} />}</For>
+        </virtual-list>
+      ))
+      renderer.drawFrame()
+      const counters = renderer.getBuildCounters()
+      // A row is the root, the avatar and its text, the column, its two rows and texts, the subject and the snippet, and the
+      // dot of an unread one: nine nodes at least, and none of them a root of its own, so the roots are the rows.
+      expect(counters.directRoots, "the rows are roots").toBeGreaterThanOrEqual(4)
+      expect(counters.directNodes, "every node is in the root of its row").toBeGreaterThanOrEqual(counters.directRoots * 9)
+      expect(counters.directNodes, "and no more than a row holds").toBeLessThanOrEqual(counters.directRoots * 10)
+    } finally {
+      app.unmount()
+    }
+  })
 
   it("draws each row of the mailbox as one direct root", () => {
     const app = createTestRoot({ width: 320, height: 4 * ROW_HEIGHT })

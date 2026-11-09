@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, Bounds, CornerRadii, CornerRadius, Corners, Edges, Element, ElementId, Escape, GlobalElementId,
-    HitboxBehavior, InspectorElementId, IntoElement, LayoutId, OverflowAnchor, Pixels, Point, Style, Window,
+    HitboxBehavior, InspectorElementId, IntoElement, LayoutId, OverflowAnchor, Pixels, Point, StackingLifts, Style, Window,
 };
 
 use super::node::{Arena, Child, Content, Node};
@@ -26,6 +26,8 @@ pub(super) struct DirectRoot {
     cull_outset: Option<Edges<Pixels>>,
     /// The elements of the positioned nodes this one walks to, made in layout.
     lifted: Vec<Lifted>,
+    /// What the node of this root was handed as a stacking context, in prepaint, for paint.
+    lifts: StackingLifts,
 }
 
 struct Lifted {
@@ -38,16 +40,16 @@ struct Lifted {
 
 impl DirectRoot {
     pub fn new(id: ElementId, arena: Arena, root: usize, cull_outset: Option<Edges<Pixels>>) -> Self {
-        Self { id, arena: Rc::new(arena), root, cull_outset, lifted: Vec::new() }
+        Self { id, arena: Rc::new(arena), root, cull_outset, lifted: Vec::new(), lifts: StackingLifts::default() }
     }
 
     fn positioned(arena: Rc<Arena>, node: usize) -> Self {
         let id = crate::events::ids::host_element_id(arena.nodes[node].id);
-        Self { id, arena, root: node, cull_outset: None, lifted: Vec::new() }
+        Self { id, arena, root: node, cull_outset: None, lifted: Vec::new(), lifts: StackingLifts::default() }
     }
 
     fn walk(&mut self) -> Walk<'_> {
-        Walk { arena: &self.arena, root: self.root, lifted: &mut self.lifted }
+        Walk { arena: &self.arena, root: self.root, lifted: &mut self.lifted, lifts: &mut self.lifts }
     }
 }
 
@@ -55,6 +57,7 @@ struct Walk<'a> {
     arena: &'a Rc<Arena>,
     root: usize,
     lifted: &'a mut Vec<Lifted>,
+    lifts: &'a mut StackingLifts,
 }
 
 impl Walk<'_> {
@@ -190,7 +193,19 @@ impl Walk<'_> {
         }
     }
 
+    /// A node that is a stacking context takes the positioned boxes below it (`Div::prepaint_with`): it hands out what it
+    /// is given when its children are done, for paint.
     fn prepaint_children(&mut self, node: usize, window: &mut Window, cx: &mut App) {
+        if self.arena.nodes[node].placement.context {
+            let context = window.begin_stacking_context();
+            self.prepaint_children_in(node, window, cx);
+            *self.lifts = window.end_stacking_context(context);
+        } else {
+            self.prepaint_children_in(node, window, cx);
+        }
+    }
+
+    fn prepaint_children_in(&mut self, node: usize, window: &mut Window, cx: &mut App) {
         let arena = self.arena;
         let lifting = window.lifting();
         for child in &arena.nodes[node].children {
@@ -234,6 +249,9 @@ impl Walk<'_> {
         target.bounds.set(bounds);
         self.begin_scroller_prepaint(node, layout_id, bounds, window);
         sample_layout(target, layout_id, bounds, window);
+        if target.placement.context {
+            self.lifts.clear();
+        }
         let scroll_offset = clamp_scroll_position(target, &target.style, window);
         let mut prepaint_children = |walk: &mut Self, window: &mut Window| {
             for child in &target.children {
@@ -282,17 +300,30 @@ impl Walk<'_> {
             style.paint_box_with_effects(bounds, bounds, window, cx, |window, cx| {
                 window.with_text_style(style.text_style().cloned(), |window| {
                     window.with_overflow_clip(style.overflow_mask(bounds, window.rem_size()), target.escape_inside.get(), |window| {
-                        for child in &target.children {
-                            match *child {
-                                Child::Node(child) => walk.paint_node(child, window, cx),
-                                Child::Content(content) => arena.contents[content].element.borrow_mut().paint(window, cx),
-                                Child::Positioned(child) => walk.paint_positioned(child, window, cx),
-                            }
+                        if target.placement.context {
+                            // The boxes lifted to the context are painted around its children, as `Div::paint_with` does.
+                            let mut lifts = std::mem::take(walk.lifts);
+                            window.paint_stacking_context(&mut lifts, true, cx, |window, cx, _in_flow_start| {
+                                walk.paint_children(node, window, cx)
+                            })
+                        } else {
+                            walk.paint_children(node, window, cx)
                         }
                     })
                 })
             });
         });
+    }
+
+    fn paint_children(&mut self, node: usize, window: &mut Window, cx: &mut App) {
+        let arena = self.arena;
+        for child in &arena.nodes[node].children {
+            match *child {
+                Child::Node(child) => self.paint_node(child, window, cx),
+                Child::Content(content) => arena.contents[content].element.borrow_mut().paint(window, cx),
+                Child::Positioned(child) => self.paint_positioned(child, window, cx),
+            }
+        }
     }
 
     /// A lifted child is painted by the stacking context that took it, and is skipped here (`mark_lifted`).

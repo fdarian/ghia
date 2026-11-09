@@ -26,6 +26,9 @@ pub(super) struct Placement {
     pub escape: Option<Escape>,
     /// `Some(contains_fixed)` for a positioned box or a box that contains fixed ones.
     pub frame: Option<bool>,
+    /// The node is a stacking context: what is lifted below it is painted and hit by it. Only the root of a direct
+    /// root is one.
+    pub context: bool,
 }
 
 impl Placement {

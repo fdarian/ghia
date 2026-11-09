@@ -11553,8 +11553,8 @@ fn build_element_unpumped(
                     &ctx.inherited.colors,
                     &ctx.inherited.lengths,
                 );
-                if crate::render::is_direct_root(element, style, stacking_root || atomic_root, ctx, window) {
-                    crate::render::build_direct(element, style, ctx, window, cx)
+                if crate::render::is_direct_root(element, style, stacking_root, atomic_root, ctx, window) {
+                    crate::render::build_direct(element, style, stacking_root, ctx, window, cx)
                 } else {
                     build_host_container(element, style, stacking_root, ctx, window, cx)
                 }

@@ -4,7 +4,7 @@
 //! that the arena does not give. It has a hitbox, a cursor, a bounds record and a positioned frame per
 //! node, and an element of its own where it is handed to a stacking context, so a node is plain only
 //! when none of the rest could show: no listener (but the root's, which the dispatcher runs), prop,
-//! focus, scroller the user scrolls, sticky or fixed box, stacking context, pointer state, transition or animation, and
+//! focus, scroller the user scrolls, sticky or fixed box, stacking context (but the root's), pointer state, transition or animation, and
 //! nothing the build of a `Div` registers for an accessibility node (the window's a11y being off is
 //! checked at the root).
 //!
@@ -58,16 +58,21 @@ enum Kind {
 }
 
 /// Whether `element`, about to be built as a host with `style` (the one the build resolved: the pointer
-/// states folded in), is drawn direct. `forced_context` is whether it is a stacking context whatever
-/// its style says (the root of the page or of a list row, or an atomic inline).
+/// states folded in), is drawn direct. `stacking_root` is whether it is a stacking context whatever its style
+/// says (the root of the page or of a list row), `atomic_root` whether it is an atomic inline. Of the roots
+/// that form a context only the row of a virtual list is direct.
 pub(crate) fn is_direct_root(
     element: &RetainedElement,
     style: Option<&StyleDesc>,
-    forced_context: bool,
+    stacking_root: bool,
+    atomic_root: bool,
     ctx: &BuildCtx,
     window: &gpui::Window,
 ) -> bool {
-    if !super::enabled() || forced_context || window.is_a11y_active() {
+    if !super::enabled() || atomic_root || window.is_a11y_active() {
+        return false;
+    }
+    if stacking_root && !crate::layout::stacking::is_virtual_row(ctx.tree, element) {
         return false;
     }
     // The build around the element hands it nothing that a paragraph or a box inside it would take
@@ -271,7 +276,8 @@ fn style_is_plain(style: &StyleDesc, kind: Kind) -> bool {
         }
         && style.keyboard_focus_dim.is_none()
         && style.visibility.is_none()
-        && style.z_index.is_none()
+        // A root may form a stacking context of its own (`z-index` on a positioned one), which is the node's to be.
+        && (kind == Kind::Root || style.z_index.is_none())
         && match kind {
             // A box inside a paragraph is painted by it, in its place.
             Kind::Inline => matches!(style.position.as_deref(), None | Some("static")),
@@ -298,5 +304,6 @@ fn style_is_plain(style: &StyleDesc, kind: Kind) -> bool {
         && !style.lays_out_unstably()
         && !style.atomic_inline
         && !style.animating_opacity
-        && !style.lift_absorbed
+        // The row of a virtual list hands nothing to the context around the list.
+        && (kind == Kind::Root || !style.lift_absorbed)
 }

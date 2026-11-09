@@ -23,6 +23,7 @@ const SHAPE: u64 = 0xD1EC_7000;
 pub(crate) fn build_direct(
     element: &RetainedElement,
     style: Option<&StyleDesc>,
+    stacking_root: bool,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -32,7 +33,9 @@ pub(crate) fn build_direct(
     note_plain(element.id, ctx);
     note_listeners(element, ctx);
     let scroller = enter_scroller(element.id, style, ctx, window);
-    let (root_style, placement) = resolve_style(element, style, ctx);
+    let (root_style, mut placement) = resolve_style(element, style, ctx);
+    // As `build_host_container` flags the host: the style says so, or it is the root of a list row.
+    placement.context = crate::layout::stacking::forms_context(style, stacking_root, &ctx.inherited.colors, &ctx.inherited.lengths);
     let children = build_children(element, ctx, window, cx, &mut arena);
     let scroller = leave_scroller(scroller, ctx);
     ctx.subtree = Subtree::of_element(ctx.subtree, style, &ctx.inherited.colors, &ctx.inherited.lengths);
@@ -182,6 +185,7 @@ fn resolve_style(element: &RetainedElement, style: Option<&StyleDesc>, ctx: &Bui
         lift_z: refinement.lift_z(),
         escape: refinement.escape(),
         frame: (positioned || contains_fixed).then_some(contains_fixed),
+        context: false,
     };
     let mut resolved = Style::default();
     resolved.refine(&refinement);
