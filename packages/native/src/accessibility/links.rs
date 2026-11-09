@@ -347,7 +347,7 @@ mod tests {
 
     fn tree_with(batch: &str) -> RetainedTree {
         let mut tree = RetainedTree::new();
-        crate::renderer::apply_batch_to_tree(&mut tree, batch.as_bytes()).expect("valid batch");
+        crate::batch::test_json::apply(&mut tree, batch).expect("valid batch");
         tree
     }
 
@@ -444,7 +444,7 @@ mod tests {
     }
 
     fn apply(tree: &mut RetainedTree, batch: &str) {
-        crate::renderer::apply_batch_to_tree(tree, batch.as_bytes()).expect("valid batch");
+        crate::batch::test_json::apply(tree, batch).expect("valid batch");
     }
 
     #[test]

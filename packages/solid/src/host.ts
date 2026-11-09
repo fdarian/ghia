@@ -149,7 +149,7 @@ export class HostElement {
   writeStyle(): void {
     if (!this.root || !this.mounted) return
     const style = this.appliedStyle()
-    if (this.sent.writesStyle(style)) this.root.mutations.setStyle(this.id, style)
+    if (this.sent.writesStyle(style)) this.root.mutations.setStyle(this.id, style, this.sent.styleJson)
   }
 
   setPointerCapture(pointerId: number): void {

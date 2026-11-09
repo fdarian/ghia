@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { UniversalStyle } from "../index.js"
+import { decodeWireBatchForTest } from "@ghia/native/testing"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import { readLogicalPixels, SHOTS_DIR } from "./test-utils.js"
 
@@ -73,7 +74,7 @@ describeNative("UniversalStyle", () => {
     }
     render(<Counter />)
     const layers = () =>
-      sent.mock.calls.filter(([json]) => json.includes("setUniversalStyle")).length
+      sent.mock.calls.filter(([bytes]) => decodeWireBatchForTest(bytes).some((op) => op[0] === "setUniversalStyle")).length
     expect(layers()).toBe(1)
     renderer.clickElement(renderer.findByTestId("bare").id)
     renderer.dispatchNativeEvents()

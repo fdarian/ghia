@@ -4,10 +4,10 @@ import { createBlobImageLoader, type BlobImageHost } from "./blob-images.js"
 import type { MutationHost, MutationRenderer } from "./host.js"
 import { createStyleImageLoader, type StyleImageHost } from "./style-images.js"
 import { SVG_TEXT_PROPS } from "./svg.js"
+import { WIRE_OPCODE, WireWriter } from "./wire.js"
 import { cancelAnimationsOfElements } from "./web-animations.js"
 
 export type MutationValue = number | string | boolean | object | null
-export type MutationTuple = [string, ...MutationValue[]]
 
 let appliedBatches = 0
 
@@ -30,7 +30,7 @@ export function createMutationQueue(
   onDestroyed: (ids: readonly number[]) => void = () => {},
   scheduleFlush?: (flush: () => void) => void
 ): MutationQueue {
-  let queue: MutationTuple[] = []
+  const writer = new WireWriter()
   let flushScheduled = false
 
   const requestFlush = () => {
@@ -43,15 +43,11 @@ export function createMutationQueue(
     })
   }
 
-  const enqueue = (mutation: MutationTuple) => {
-    queue.push(mutation)
-    requestFlush()
-  }
-
   const blobImages = createBlobImageLoader(renderer, {
     flush: () => mutations.flushMutations(),
     fail: (id, message, ticket) => {
-      enqueue(["setCustomProp", id, "srcError", { message, ticket }])
+      writer.setCustomProp(id, "srcError", { message, ticket })
+      requestFlush()
       if (!scheduleFlush) mutations.flushMutations()
     },
   })
@@ -60,65 +56,77 @@ export function createMutationQueue(
 
   const mutations: MutationQueue = {
     get pending() {
-      return queue.length
+      return writer.opCount
     },
     createElement(id, elementType) {
       blobImages.created(id, elementType)
-      enqueue(["createElement", id, elementType])
+      writer.createElement(id, elementType)
+      requestFlush()
     },
     destroyElement(id) {
       blobImages.destroyed(id)
-      enqueue(["destroyElement", id])
+      writer.destroyElement(id)
+      requestFlush()
       return []
     },
     detachChild(id) {
-      enqueue(["detachChild", id])
+      writer.detachChild(id)
+      requestFlush()
     },
     appendChild(parentId, childId) {
-      enqueue(["appendChild", parentId, childId])
+      writer.appendChild(parentId, childId)
+      requestFlush()
     },
     insertBefore(parentId, childId, beforeId) {
-      enqueue(["insertBefore", parentId, childId, beforeId])
+      writer.insertBefore(parentId, childId, beforeId)
+      requestFlush()
     },
-    setStyle(id, style) {
+    setStyle(id, style, styleJson) {
       styleImages.style(style)
-      enqueue(["setStyle", id, style])
+      writer.setStyle(id, styleJson ?? JSON.stringify(style))
+      requestFlush()
     },
     setText(id, content) {
-      enqueue(["setText", id, content])
+      writer.setText(id, content)
+      requestFlush()
     },
     setEventListener(id, eventType, hasHandler) {
-      enqueue(["setEventListener", id, eventType, hasHandler])
+      writer.setEventListener(id, eventType, hasHandler)
+      requestFlush()
     },
     setRoot(id) {
-      enqueue(["setRoot", id])
+      writer.setRoot(id)
+      requestFlush()
     },
     setKeyboardFocusDim(enabled) {
-      enqueue(["setKeyboardFocusDim", enabled])
+      writer.setKeyboardFocusDim(enabled)
+      requestFlush()
     },
     setUniversalStyle(style) {
       styleImages.style(style)
-      enqueue(["setUniversalStyle", style])
+      writer.setUniversalStyle(style === null ? null : JSON.stringify(style))
+      requestFlush()
     },
     setCustomProp(id, key, value) {
       blobImages.prop(id, key, value)
-      enqueue(["setCustomProp", id, key, value])
+      writer.setCustomProp(id, key, value)
+      requestFlush()
     },
     requestFlush,
     flushMutations() {
       flushScheduled = false
-      if (queue.length === 0) return
+      if (writer.opCount === 0) return
       appliedBatches++
       // Taken before the call: applying a batch can run JS (the focus events of
-      // an `autoFocus` element), and what that enqueues belongs to the next batch.
-      const batch = queue
-      queue = []
+      // an `autoFocus` element), and what that enqueues belongs to the next batch,
+      // which the writer builds in another buffer.
+      const batch = writer.finish()
       let rejection: unknown
       let applied = false
       try {
         for (;;) {
           try {
-            const destroyed = renderer.applyBatch(JSON.stringify(batch))
+            const destroyed = renderer.applyBatch(batch.wire)
             cancelAnimationsOfElements(renderer, destroyed)
             onDestroyed(destroyed)
             applied = true
@@ -129,23 +137,24 @@ export function createMutationQueue(
             // the rest of the batch is intact: resend it without that op. It must
             // be dropped, not blanked: `set_style` replaces the whole style, so an
             // empty one would wipe the element's last valid style. Native numbers
-            // ops by position in what it was sent, which is the batch as spliced,
-            // so a second rejection names its index in the shortened batch.
+            // ops by position in what it was sent, which is the batch as cut, so
+            // a second rejection names its index in the shortened batch.
             const index = rejectedStyleIndex(error)
-            const mutation = index === undefined ? undefined : batch[index]
             if (
               index === undefined ||
-              mutation === undefined ||
-              (mutation[0] !== "setStyle" && mutation[0] !== "setUniversalStyle")
+              index >= batch.count ||
+              (batch.opcodeAt(index) !== WIRE_OPCODE.setStyle &&
+                batch.opcodeAt(index) !== WIRE_OPCODE.setUniversalStyle)
             ) {
               throw error
             }
             rejection ??= error
-            batch.splice(index, 1)
+            batch.dropOp(index)
           }
         }
       } finally {
-        if (!applied) queue = batch.concat(queue)
+        if (applied) writer.release(batch)
+        else writer.recover(batch)
       }
       if (rejection !== undefined) throw rejection
     },

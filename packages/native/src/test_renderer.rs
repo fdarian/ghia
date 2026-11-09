@@ -1265,13 +1265,12 @@ impl TestGpuixRenderer {
     }
 
     /// Apply a batch of mutations in a single FFI call.
-    /// Same format as GpuixRenderer::apply_batch (string op names).
+    /// Same wire format as GpuixRenderer::apply_batch.
     /// Returns accumulated destroyed IDs from all destroyElement ops.
     #[napi]
-    pub fn apply_batch(&self, json: String) -> Result<Vec<f64>> {
+    pub fn apply_batch(&self, bytes: Uint8Array) -> Result<Vec<f64>> {
         let mut tree = self.tree.lock().unwrap();
-        let destroyed =
-            apply_batch_to_tree(&mut tree, json.as_bytes()).map_err(Error::from_reason)?;
+        let destroyed = apply_batch_to_tree(&mut tree, &bytes).map_err(Error::from_reason)?;
         let dirty = tree.take_dirty();
         let auto_focus = tree.take_auto_focus_request();
         let tree_id = tree.id();

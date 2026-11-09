@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { decodeWireBatchForTest } from "../wire-testing.js"
 import {
   createMutationQueue,
   flushPendingMutations,
@@ -10,8 +11,8 @@ import type { MutationHost, NativeRenderer } from "../host.js"
 function recordingRenderer() {
   const batches: unknown[][] = []
   const renderer: MutationHost = {
-    applyBatch(json) {
-      batches.push(JSON.parse(json))
+    applyBatch(bytes) {
+      batches.push(decodeWireBatchForTest(bytes))
       return []
     },
   }

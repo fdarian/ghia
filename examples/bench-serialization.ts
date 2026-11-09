@@ -3,19 +3,19 @@
 /// Captures the REAL op queue that `ChatApp` produces through the real React
 /// reconciler, then measures every candidate wire format on it. Nothing here is
 /// synthetic: `captureBatches()` installs a stub NativeRenderer that owns
-/// `applyBatch`, so `wrapWithBatching` hands it the exact tuples production
-/// sends.
+/// `applyBatch`, so the mutation queue hands it the exact ops production sends.
 ///
 /// It also writes `tmp/batch-fixture.json`, which the Rust half of the bench
 /// (`packages/native/examples/bench_serde.rs`) reads. Both sides must measure
 /// the same bytes or the comparison is meaningless.
 ///
-///   ChatApp ► reconciler ► wrapWithBatching ► CaptureRenderer.applyBatch(json)
+///   ChatApp ► reconciler ► mutation queue ► CaptureRenderer.applyBatch(bytes)
 ///                                                    │
 ///                                                    ▼
 ///                                            op tuples (ground truth)
 ///                                              │            │
-///                                   JS codec bench     tmp/batch-fixture.json ► Rust
+///                                   JS codec bench     tmp/batch-fixture.json  ► Rust (the old formats)
+///                                                      tmp/batch-fixture.wire  ► Rust (the shipped format)
 ///
 /// Run:  bun bench-serialization.ts            (default 2000 turns)
 ///       TURNS=10000 bun bench-serialization.ts
@@ -25,9 +25,11 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { createRoot, flushSync } from '@ghia/react'
 import type { NativeRenderer } from '@ghia/react'
+import { decodeWireBatchForTest } from '@ghia/native/testing'
 import { Packr } from 'msgpackr'
 import { Encoder as CborEncoder } from 'cbor-x'
 import { ChatApp } from './chat'
+import { WireWriter } from '../packages/native/js/wire'
 
 type Op = unknown[]
 
@@ -38,8 +40,8 @@ type Op = unknown[]
 class CaptureRenderer implements NativeRenderer {
   ops: Op[] = []
 
-  applyBatch(json: string): number[] {
-    for (const op of JSON.parse(json) as Op[]) this.ops.push(op)
+  applyBatch(bytes: Uint8Array): number[] {
+    for (const op of decodeWireBatchForTest(bytes)) this.ops.push(op)
     return []
   }
   getWindowSize(): { width: number; height: number } {
@@ -205,6 +207,42 @@ interface Codec {
   decode(payload: Uint8Array | string): unknown
 }
 
+/** Writes every op the way the mutation queue does, a style as its JSON text. */
+function writeWire(ops: Op[], writer: WireWriter): void {
+  for (const op of ops) {
+    switch (op[0]) {
+      case 'createElement': writer.createElement(op[1] as number, op[2] as string); break
+      case 'destroyElement': writer.destroyElement(op[1] as number); break
+      case 'detachChild': writer.detachChild(op[1] as number); break
+      case 'appendChild': writer.appendChild(op[1] as number, op[2] as number); break
+      case 'insertBefore': writer.insertBefore(op[1] as number, op[2] as number, op[3] as number); break
+      case 'setStyle': writer.setStyle(op[1] as number, JSON.stringify(op[2])); break
+      case 'setText': writer.setText(op[1] as number, op[2] as string); break
+      case 'setEventListener': writer.setEventListener(op[1] as number, op[2] as string, op[3] as boolean); break
+      case 'setRoot': writer.setRoot(op[1] as number); break
+      case 'setKeyboardFocusDim': writer.setKeyboardFocusDim(op[1] as boolean); break
+      case 'setUniversalStyle': writer.setUniversalStyle(op[1] === null ? null : JSON.stringify(op[1])); break
+      case 'setCustomProp': writer.setCustomProp(op[1] as number, op[2] as string, op[3] as never); break
+      default: throw new Error(`no wire opcode for ${String(op[0])}`)
+    }
+  }
+}
+
+const wireWriter = new WireWriter()
+
+/** The shipped format. Only the "today" ops are the ones it carries, so the interned variants have no row. */
+const WIRE_CODEC: Codec = {
+  name: 'wire (WireWriter)',
+  encode: (ops) => {
+    writeWire(ops, wireWriter)
+    const batch = wireWriter.finish()
+    const bytes = batch.wire.slice()
+    wireWriter.release(batch)
+    return bytes
+  },
+  decode: (p) => decodeWireBatchForTest(p as Uint8Array),
+}
+
 const CODECS: Codec[] = [
   {
     name: 'JSON.stringify',
@@ -263,9 +301,9 @@ interface Row {
   retainedMb: number
 }
 
-function bench(ops: Op[], iterations: number): Row[] {
+function bench(ops: Op[], iterations: number, withWire: boolean): Row[] {
   const rows: Row[] = []
-  for (const codec of CODECS) {
+  for (const codec of withWire ? [...CODECS, WIRE_CODEC] : CODECS) {
     for (let i = 0; i < 3; i++) codec.decode(codec.encode(ops))
 
     const encodes: number[] = []
@@ -417,7 +455,7 @@ const baseline = Buffer.byteLength(JSON.stringify(ops))
 for (const variant of variants) {
   console.log(`## ${variant.label}\n`)
   console.log(`ops: ${variant.ops.length.toLocaleString()}`)
-  console.log(table(bench(variant.ops, iterations), baseline))
+  console.log(table(bench(variant.ops, iterations, variant.ops === ops), baseline))
   console.log()
 }
 
@@ -428,6 +466,11 @@ console.log()
 const fixturePath = resolve(import.meta.dir, '../tmp/batch-fixture.json')
 mkdirSync(dirname(fixturePath), { recursive: true })
 writeFileSync(fixturePath, JSON.stringify(ops))
+{
+  const writer = new WireWriter()
+  writeWire(ops, writer)
+  writeFileSync(resolve(import.meta.dir, '../tmp/batch-fixture.wire'), writer.finish().wire)
+}
 writeFileSync(
   resolve(import.meta.dir, '../tmp/batch-fixture-interned.json'),
   JSON.stringify(internStyles(ops)),

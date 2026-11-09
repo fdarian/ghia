@@ -90,7 +90,7 @@ mod tests {
 
     fn tree_with(batch: &str) -> RetainedTree {
         let mut tree = RetainedTree::new();
-        crate::renderer::apply_batch_to_tree(&mut tree, batch.as_bytes()).expect("valid batch");
+        crate::batch::test_json::apply(&mut tree, batch).expect("valid batch");
         tree
     }
 
@@ -127,15 +127,15 @@ mod tests {
     #[test]
     fn a_disabled_or_inert_control_is_not_activated() {
         let mut tree = tree_with(SIBLING);
-        crate::renderer::apply_batch_to_tree(
+        crate::batch::test_json::apply(
             &mut tree,
-            br#"[["setCustomProp",3,"disabled",true]]"#,
+            r#"[["setCustomProp",3,"disabled",true]]"#,
         )
         .unwrap();
         assert_eq!(activated_control(&tree, &[2, 1]), None);
 
         let mut tree = tree_with(SIBLING);
-        crate::renderer::apply_batch_to_tree(&mut tree, br#"[["setCustomProp",3,"inert",true]]"#)
+        crate::batch::test_json::apply(&mut tree, r#"[["setCustomProp",3,"inert",true]]"#)
             .unwrap();
         assert_eq!(activated_control(&tree, &[2, 1]), None);
     }

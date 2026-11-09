@@ -327,7 +327,7 @@ mod tests {
     }
 
     fn apply(tree: &mut crate::retained_tree::RetainedTree, json: &str) {
-        crate::renderer::apply_batch_to_tree(tree, json.as_bytes()).expect("valid batch");
+        crate::batch::test_json::apply(tree, json).expect("valid batch");
     }
 
     fn halfway(text: &str) -> bool {

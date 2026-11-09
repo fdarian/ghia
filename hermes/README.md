@@ -46,7 +46,7 @@ The 22 MB sidecar is the GPUIX native addon. Hermes itself is the 12 MB exe.
 ## What works
 
 - `process.dlopen` of a napi-rs addon
-- `GpuixRenderer` construct, `init`, `applyBatch`, `tick`
+- `GpuixRenderer` construct, `init`, `applyBatch`, `tick`. `applyBatch` takes the binary mutation batch as a `Uint8Array` (a JSI host object passes it as an `ArrayBuffer` view). Hermes has no `TextEncoder`, so `WireWriter` writes UTF-8 itself there.
 - React 19 + `react-reconciler` after a CJS bundle
 - Clickable counter (`useState`)
 - `--build-bundle` and `--build-exe`

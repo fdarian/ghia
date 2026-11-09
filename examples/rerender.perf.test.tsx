@@ -14,6 +14,7 @@ import React from 'react'
 import { describe, expect, it } from 'vitest'
 import { flushSync } from '@ghia/react'
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from '@ghia/react/testing'
+import { decodeWireBatchForTest } from '@ghia/native/testing'
 import { App } from './rerender-fixture'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -29,10 +30,10 @@ function measure(
   let ops = 0
   let bytes = 0
   const original = renderer.applyBatch.bind(renderer)
-  renderer.applyBatch = (json: string) => {
-    bytes += json.length
-    ops += (JSON.parse(json) as unknown[]).length
-    return original(json)
+  renderer.applyBatch = (batch: Uint8Array) => {
+    bytes += batch.length
+    ops += decodeWireBatchForTest(batch).length
+    return original(batch)
   }
   // `ms` is React rendering and committing, which includes `applyBatch`.
   // `frameMs` is the native frame that follows. A real window only runs one when

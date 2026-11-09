@@ -40,27 +40,15 @@ export declare class GpuixRenderer {
   /**
    * Apply a batch of mutations in a single FFI call.
    *
-   * Accepts a JSON array of mutation tuples. Each tuple is an array where
-   * the first element is the operation name (string) and remaining elements
-   * are the arguments:
-   *
-   *   ["createElement",    id, "type"]
-   *   ["destroyElement",   id]
-   *   ["detachChild",      id]
-   *   ["appendChild",      parentId, childId]
-   *   ["insertBefore",     parentId, childId, beforeId]
-   *   ["setStyle",         id, { ...style }]
-   *   ["setText",          id, "content"]
-   *   ["setEventListener", id, "eventType", true|false]
-   *   ["setRoot",          id]
-   *   ["setKeyboardFocusDim", true|false]
-   *   ["setUniversalStyle", { ...style } | null]
-   *   ["setCustomProp",    id, "key", value]
+   * `bytes` is the binary batch `packages/native/js/wire.ts` writes, read in
+   * place (no copy, no string): a version byte, the op count, then one op per
+   * opcode. `docs/reference.md` ("Wire format") is the spec, and
+   * `crate::batch::wire` the decoder.
    *
    * Returns accumulated destroyed IDs from all destroyElement ops.
    * Acquires the tree mutex ONCE for the entire batch.
    */
-  applyBatch(json: string): Array<number>
+  applyBatch(bytes: Uint8Array): Array<number>
   /** Pump the native event loop. Returns false after the last window closes. */
   tick(): boolean
   isInitialized(): boolean
@@ -869,10 +857,10 @@ export declare class TestGpuixRenderer {
   getCulledSubtreeCount(): number
   /**
    * Apply a batch of mutations in a single FFI call.
-   * Same format as GpuixRenderer::apply_batch (string op names).
+   * Same wire format as GpuixRenderer::apply_batch.
    * Returns accumulated destroyed IDs from all destroyElement ops.
    */
-  applyBatch(json: string): Array<number>
+  applyBatch(bytes: Uint8Array): Array<number>
   /**
    * Notify the view entity and run GPUI until parked.
    * This triggers GpuixView::render() → build_element() → GPUI layout.
@@ -1614,10 +1602,10 @@ export interface CompositionLayerReading {
   visible: boolean
 }
 
-/** `Debug` of every op the JSON decoder reads from `json`. */
-export declare function debugDecodeJsonBatch(json: string): Array<string>
-
-/** `Debug` of every op the binary decoder reads from `bytes`. */
+/**
+ * The ops the binary decoder reads from `bytes`, each as `["name", ...args]` JSON.
+ * Style payloads are the exact text native interns by.
+ */
 export declare function debugDecodeWireBatch(bytes: Uint8Array): Array<string>
 
 /** Recorded draw times from the debug frame overlay. */

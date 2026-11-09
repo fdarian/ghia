@@ -783,7 +783,6 @@ module.exports.GpuixRenderer = nativeBinding.GpuixRenderer
 module.exports.RowOracle = nativeBinding.RowOracle
 module.exports.TestGpuixRenderer = nativeBinding.TestGpuixRenderer
 module.exports.checkUpdate = nativeBinding.checkUpdate
-module.exports.debugDecodeJsonBatch = nativeBinding.debugDecodeJsonBatch
 module.exports.debugDecodeWireBatch = nativeBinding.debugDecodeWireBatch
 module.exports.getAllDisplays = nativeBinding.getAllDisplays
 module.exports.getPrimaryDisplay = nativeBinding.getPrimaryDisplay

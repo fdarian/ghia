@@ -25,6 +25,11 @@ export class SentWrites {
     this.props = undefined
   }
 
+  /** The JSON of the style written last: what `writesStyle` compared, and what native is sent. */
+  get styleJson(): string {
+    return this.style
+  }
+
   /** Whether `style` is not the style written last; remembers it when it is not. */
   writesStyle(style: object): boolean {
     const json = JSON.stringify(style)

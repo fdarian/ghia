@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { decodeWireBatchForTest } from "@ghia/native/testing"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -6,12 +7,12 @@ const describeNative = hasNativeTestRenderer ? describe : describe.skip
 type Op = [string, ...unknown[]]
 
 /** Every op that crossed into Rust, per `applyBatch` call. */
-function recordBatches(renderer: { applyBatch(json: string): unknown }) {
+function recordBatches(renderer: { applyBatch(bytes: Uint8Array): unknown }) {
   const batches: Op[][] = []
   const original = renderer.applyBatch.bind(renderer)
-  renderer.applyBatch = (json: string) => {
-    batches.push(JSON.parse(json) as Op[])
-    return original(json)
+  renderer.applyBatch = (bytes: Uint8Array) => {
+    batches.push(decodeWireBatchForTest(bytes) as Op[])
+    return original(bytes)
   }
   return {
     batches,

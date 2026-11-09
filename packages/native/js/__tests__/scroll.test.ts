@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { decodeWireBatchForTest } from "../wire-testing.js"
 import type { EventPayload } from "../../index.js"
 import {
   createMutationQueue,
@@ -91,8 +92,8 @@ describe("readScrollMetrics", () => {
   it("sends queued mutations before it asks native", () => {
     const sent: string[] = []
     const renderer = {
-      applyBatch: (json: string) => {
-        sent.push(`applyBatch ${JSON.parse(json).length}`)
+      applyBatch: (bytes: Uint8Array) => {
+        sent.push(`applyBatch ${decodeWireBatchForTest(bytes).length}`)
         return []
       },
       getScrollMetrics: () => {

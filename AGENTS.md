@@ -59,7 +59,7 @@ A "PR to Zed" means upstream [`zed-industries/zed`](https://github.com/zed-indus
 
 ## Where the code is
 
-A change reaches the screen like this: the adapter queues host mutations, `applyBatch` (`BatchOp` in `renderer.rs`) applies them to the Rust `RetainedTree` (`retained_tree.rs`), and every GPUI frame `GpuixView::render` walks that tree through `build_element` into GPUI elements. No element tree is serialized from JS. Events return as `EventPayload` (`element_tree.rs`), the one napi struct for every event type. [docs/reference.md](./docs/reference.md#architecture) has the picture. `build_element` resolves a style in a fixed order that [layout.md](./docs/fork/layout.md) lists; read it before adding a style stage.
+A change reaches the screen like this: the adapter queues host mutations as one binary batch (`WireWriter`, `js/wire.ts`), `applyBatch` decodes it (`batch/wire.rs` into `BatchOp`) and applies it (`apply_batch_to_tree` in `renderer.rs`) to the Rust `RetainedTree` (`retained_tree.rs`), and every GPUI frame `GpuixView::render` walks that tree through `build_element` into GPUI elements. No element tree is serialized from JS. Events return as `EventPayload` (`element_tree.rs`), the one napi struct for every event type. [docs/reference.md](./docs/reference.md#architecture) has the picture. `build_element` resolves a style in a fixed order that [layout.md](./docs/fork/layout.md) lists; read it before adding a style stage.
 
 | Area | `packages/native/src/` | `packages/native/js/` | `zed/crates/gpui/src/` |
 |---|---|---|---|

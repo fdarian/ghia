@@ -5,6 +5,9 @@
 
 pub mod wire;
 
+#[cfg(test)]
+pub(crate) mod test_json;
+
 #[cfg(all(
     feature = "test-support",
     any(target_os = "macos", target_os = "windows")

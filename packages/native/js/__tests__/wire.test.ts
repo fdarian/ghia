@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
-import { decodeJsonBatchForTest, decodeWireBatchForTest } from "../testing.js"
-import { WireWriter, type WireValue } from "../wire.js"
+import { describe, expect, it, vi } from "vitest"
+import { decodeWireBatchForTest, decodeWireBatchWithNativeForTest } from "../testing.js"
+import { WIRE_OPCODE, WireWriter, type WireValue } from "../wire.js"
 
 type Tuple =
   | ["createElement", number, string]
@@ -47,21 +47,28 @@ function write(writer: WireWriter, tuple: Tuple): void {
 
 function encode(tuples: readonly Tuple[], writer = new WireWriter()): Uint8Array {
   for (const tuple of tuples) write(writer, tuple)
-  return writer.finish()
+  return writer.finish().wire
 }
 
-/** What the JSON path makes of the ops, and what the binary path makes of the same ops. */
-function decodedBoth(tuples: readonly Tuple[]): { json: string[]; wire: string[] } {
-  return {
-    json: decodeJsonBatchForTest(JSON.stringify(tuples)),
-    wire: decodeWireBatchForTest(encode(tuples)),
-  }
+/**
+ * What a decoder must read back from `tuples`: what `JSON.stringify` makes of each op, which is
+ * what a custom prop or style is by definition (`undefined` is `null`, `NaN` is `null`, `-0` is 0).
+ */
+function expectedOps(tuples: readonly Tuple[]): unknown[] {
+  return JSON.parse(JSON.stringify(tuples))
 }
 
-function expectSameAsJson(tuples: readonly Tuple[]): void {
-  const decoded = decodedBoth(tuples)
-  expect(decoded.wire).toHaveLength(tuples.length)
-  expect(decoded.wire).toEqual(decoded.json)
+/** Both decoders, the native one and the test helper's, read exactly the ops that were written. */
+function expectRoundTrip(tuples: readonly Tuple[]): void {
+  const bytes = encode(tuples)
+  const expected = expectedOps(tuples)
+  expect(decodeWireBatchWithNativeForTest(bytes).map((line) => JSON.parse(line))).toEqual(expected)
+  expect(decodeWireBatchForTest(bytes)).toEqual(expected)
+}
+
+/** The ops of a batch as native reads them, in the tuple shape. */
+function nativeOps(bytes: Uint8Array): unknown[] {
+  return decodeWireBatchWithNativeForTest(bytes).map((line) => JSON.parse(line))
 }
 
 const MAX_SAFE = Number.MAX_SAFE_INTEGER
@@ -129,9 +136,9 @@ const CUSTOM_PROP_VALUES: WireValue[] = [
   { toJSON: () => ({ replaced: true }) },
 ]
 
-describe("WireWriter against the JSON decoder", () => {
-  it("reads every op kind as the JSON path does", () => {
-    expectSameAsJson([
+describe("WireWriter round trip", () => {
+  it("reads every op kind back", () => {
+    expectRoundTrip([
       ["createElement", 1, "div"],
       ["createElement", 2, "text"],
       ["appendChild", 1, 2],
@@ -152,7 +159,7 @@ describe("WireWriter against the JSON decoder", () => {
   })
 
   it("reads an empty batch", () => {
-    expect(decodeWireBatchForTest(new WireWriter().finish())).toEqual([])
+    expect(decodeWireBatchForTest(new WireWriter().finish().wire)).toEqual([])
   })
 
   it("reads ids around every varint width, 2^32 and the largest safe integer", () => {
@@ -167,7 +174,7 @@ describe("WireWriter against the JSON decoder", () => {
       ["destroyElement", id],
       ["setRoot", id],
     ])
-    expectSameAsJson(tuples)
+    expectRoundTrip(tuples)
   })
 
   it("reads strings of every shape", () => {
@@ -201,31 +208,32 @@ describe("WireWriter against the JSON decoder", () => {
       ["setEventListener", index, text, index % 2 === 0],
       ["setCustomProp", index, text, text],
     ])
-    expectSameAsJson(tuples)
+    expectRoundTrip(tuples)
   })
 
   it("reads every style shape as the exact JSON text", () => {
     const tuples: Tuple[] = STYLES.map((style, index): Tuple => ["setStyle", index + 1, style])
     tuples.push(...STYLES.map((style): Tuple => ["setUniversalStyle", style]))
-    expectSameAsJson(tuples)
+    expectRoundTrip(tuples)
   })
 
   it("hands native the style text byte for byte", () => {
     const style = { b: 1, a: undefined, c: { d: Number.NaN, e: -0 }, f: [1, 2] }
     const text = JSON.stringify(style)
-    const lines = decodeWireBatchForTest(encode([["setStyle", 9, style]]))
-    expect(lines).toEqual([`SetStyle { id: 9, style: ${JSON.stringify(text)} }`])
+    // The raw line keeps the style as the text that was written, which a parsed comparison cannot show.
+    const lines = decodeWireBatchWithNativeForTest(encode([["setStyle", 9, style]]))
+    expect(lines).toEqual([`["setStyle",9,${text}]`])
     // Key order is the order written.
     expect(text).toBe('{"b":1,"c":{"d":null,"e":0},"f":[1,2]}')
   })
 
-  it("reads every custom prop value as the JSON path does", () => {
-    expectSameAsJson(
+  it("reads every custom prop value back as its JSON", () => {
+    expectRoundTrip(
       CUSTOM_PROP_VALUES.map((value, index): Tuple => ["setCustomProp", index, "key", value])
     )
   })
 
-  it("reads random batches as the JSON path does", () => {
+  it("reads random batches back", () => {
     // A small seeded generator, so a failure is reproducible.
     let seed = 0x2545f491
     const next = (): number => {
@@ -259,7 +267,7 @@ describe("WireWriter against the JSON decoder", () => {
           : ["setCustomProp", id(), text(), pick(CUSTOM_PROP_VALUES)]
         )
       }
-      expectSameAsJson(tuples)
+      expectRoundTrip(tuples)
     }
   })
 
@@ -268,26 +276,55 @@ describe("WireWriter against the JSON decoder", () => {
     for (let index = 0; index < 20000; index++) {
       tuples.push(["createElement", index, "div"], ["setStyle", index, STYLES[4] as object])
     }
-    expectSameAsJson(tuples)
+    expectRoundTrip(tuples)
   })
 })
 
 describe("WireWriter", () => {
   it("replaces unpaired surrogates with U+FFFD", () => {
-    const lines = decodeWireBatchForTest(encode([["setText", 1, "a\ud800b"]]))
-    expect(lines).toEqual([`SetText { id: 1, content: ${JSON.stringify("a�b")} }`])
+    expect(nativeOps(encode([["setText", 1, "a\ud800b"]]))).toEqual([["setText", 1, "a�b"]])
   })
 
-  it("reuses its buffer: a batch is valid until the next write, and the next batch is unaffected", () => {
+  it("writes the next batch in another buffer, so a batch in flight is never overwritten", () => {
     const writer = new WireWriter()
-    const first = encode([["createElement", 1, "div"], ["setText", 1, "first"]], writer)
-    const firstLines = decodeWireBatchForTest(first)
-    const second = encode([["createElement", 2, "span"]], writer)
-    expect(second.buffer).toBe(first.buffer)
-    expect(decodeWireBatchForTest(second)).toEqual(decodeJsonBatchForTest('[["createElement",2,"span"]]'))
-    expect(firstLines).toHaveLength(2)
+    writer.createElement(1, "div")
+    writer.setText(1, "first")
+    const inFlight = writer.finish()
+    const before = inFlight.wire.slice()
+    writer.createElement(2, "span")
+    const second = writer.finish()
+    expect(second.bytes.buffer).not.toBe(inFlight.bytes.buffer)
+    expect(inFlight.wire).toEqual(before)
+    expect(decodeWireBatchForTest(inFlight.wire)).toEqual([["createElement", 1, "div"], ["setText", 1, "first"]])
+    expect(decodeWireBatchForTest(second.wire)).toEqual([["createElement", 2, "span"]])
     expect(writer.opCount).toBe(0)
     expect(writer.byteLength).toBe(0)
+  })
+
+  it("reuses the buffers of released batches and allocates none in the steady state", () => {
+    const writer = new WireWriter()
+    const seen = new Set<ArrayBufferLike>()
+    for (let round = 0; round < 6; round++) {
+      writer.createElement(round, "div")
+      const batch = writer.finish()
+      seen.add(batch.bytes.buffer)
+      writer.release(batch)
+    }
+    // The one it writes into and the one it hands out.
+    expect(seen.size).toBeLessThanOrEqual(2)
+  })
+
+  it("gives a batch finished inside another's apply a buffer of its own", () => {
+    const writer = new WireWriter()
+    writer.createElement(1, "div")
+    const outer = writer.finish()
+    writer.createElement(2, "div")
+    const inner = writer.finish()
+    writer.createElement(3, "div")
+    const next = writer.finish()
+    const buffers = new Set([outer.bytes.buffer, inner.bytes.buffer, next.bytes.buffer])
+    expect(buffers.size).toBe(3)
+    expect(decodeWireBatchForTest(outer.wire)).toEqual([["createElement", 1, "div"]])
   })
 
   it("counts ops and bytes written", () => {
@@ -304,20 +341,22 @@ describe("WireWriter", () => {
     writer.createElement(1, "div")
     writer.clear()
     writer.setRoot(5)
-    expect(decodeWireBatchForTest(writer.finish())).toEqual(decodeJsonBatchForTest('[["setRoot",5]]'))
+    expect(decodeWireBatchForTest(writer.finish().wire)).toEqual([["setRoot", 5]])
   })
 
   it("lets go of a buffer one huge batch grew", () => {
     const writer = new WireWriter()
-    const small = encode([["setRoot", 1]], writer)
-    const smallBuffer = small.buffer
     writer.setText(1, "x".repeat(2 * 1024 * 1024))
     const huge = writer.finish()
-    expect(huge.byteLength).toBeGreaterThan(2 * 1024 * 1024)
-    const after = encode([["setRoot", 1]], writer)
-    expect(after.buffer).not.toBe(huge.buffer)
-    expect(after.buffer.byteLength).toBeLessThan(1024 * 1024)
-    expect(smallBuffer.byteLength).toBeLessThan(1024 * 1024)
+    expect(huge.wire.byteLength).toBeGreaterThan(2 * 1024 * 1024)
+    writer.release(huge)
+    writer.setRoot(1)
+    const small = writer.finish()
+    writer.release(small)
+    writer.setRoot(2)
+    const after = writer.finish()
+    expect(after.bytes.byteLength).toBeLessThan(1024 * 1024)
+    expect(small.bytes.byteLength).toBeLessThan(1024 * 1024)
   })
 
   it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, MAX_SAFE + 1, 2 ** 53 + 2])(
@@ -330,9 +369,7 @@ describe("WireWriter", () => {
       expect(() => writer.insertBefore(1, 2, id)).toThrow(/Invalid element id/)
       expect(writer.opCount).toBe(1)
       writer.setRoot(1)
-      expect(decodeWireBatchForTest(writer.finish())).toEqual(
-        decodeJsonBatchForTest('[["createElement",1,"div"],["setRoot",1]]')
-      )
+      expect(decodeWireBatchForTest(writer.finish().wire)).toEqual([["createElement", 1, "div"], ["setRoot", 1]])
     }
   )
 
@@ -343,24 +380,112 @@ describe("WireWriter", () => {
   })
 })
 
+describe("WireWriter recovery", () => {
+  it("puts a batch that was not applied in front of what was written since", () => {
+    const writer = new WireWriter()
+    writer.createElement(1, "div")
+    writer.setText(1, "failed")
+    const failed = writer.finish()
+    writer.createElement(2, "span")
+    writer.setStyle(2, '{"width":1}')
+    writer.recover(failed)
+    expect(writer.opCount).toBe(4)
+    writer.setRoot(1)
+    const retried = writer.finish()
+    expect(decodeWireBatchForTest(retried.wire)).toEqual([
+      ["createElement", 1, "div"],
+      ["setText", 1, "failed"],
+      ["createElement", 2, "span"],
+      ["setStyle", 2, { width: 1 }],
+      ["setRoot", 1],
+    ])
+    // The offsets were moved with the bytes: a drop by index cuts the op that names it.
+    retried.dropOp(3)
+    expect(decodeWireBatchForTest(retried.wire).map((op) => op[0])).toEqual([
+      "createElement",
+      "setText",
+      "createElement",
+      "setRoot",
+    ])
+  })
+
+  it("recovers into an empty writer and one that must grow", () => {
+    const writer = new WireWriter()
+    const text = "y".repeat(30000)
+    writer.setText(1, text)
+    writer.setText(2, text)
+    const failed = writer.finish()
+    for (let index = 0; index < 2000; index++) writer.createElement(index, "div")
+    writer.recover(failed)
+    const ops = decodeWireBatchForTest(writer.finish().wire)
+    expect(ops).toHaveLength(2002)
+    expect(ops[0]).toEqual(["setText", 1, text])
+    expect(ops[1]).toEqual(["setText", 2, text])
+    expect(ops[2002 - 1]).toEqual(["createElement", 1999, "div"])
+  })
+
+  it("cuts an op out by its byte range", () => {
+    const writer = new WireWriter()
+    writer.createElement(1, "div")
+    writer.setStyle(1, '{"color":"red"}')
+    writer.setStyle(1, '{"width":5}')
+    writer.setText(1, "after")
+    const batch = writer.finish()
+    expect(batch.opcodeAt(1)).toBe(WIRE_OPCODE.setStyle)
+    const length = batch.length
+    batch.dropOp(1)
+    expect(batch.count).toBe(3)
+    expect(batch.length).toBeLessThan(length)
+    expect(decodeWireBatchForTest(batch.wire)).toEqual([
+      ["createElement", 1, "div"],
+      ["setStyle", 1, { width: 5 }],
+      ["setText", 1, "after"],
+    ])
+    batch.dropOp(2)
+    batch.dropOp(0)
+    expect(decodeWireBatchForTest(batch.wire)).toEqual([["setStyle", 1, { width: 5 }]])
+    batch.dropOp(0)
+    expect(decodeWireBatchForTest(batch.wire)).toEqual([])
+  })
+})
+
+describe("WireWriter without TextEncoder", () => {
+  it("writes the same bytes by hand", () => {
+    const texts = ["", "ascii", "é", "日本語", "😀", "a😀b", "x".repeat(100) + "é", "lone \ud800 and \udc00 and \ud83d"]
+    const tuples = texts.flatMap((text, index): Tuple[] => [
+      ["createElement", index, text],
+      ["setText", index, text],
+      ["setCustomProp", index, text, [text]],
+    ])
+    const withEncoder = encode(tuples).slice()
+    vi.stubGlobal("TextEncoder", undefined)
+    try {
+      const byHand = encode(tuples).slice()
+      expect(byHand).toEqual(withEncoder)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
 describe("native decoder on bytes JS did not write", () => {
   const valid = (): Uint8Array => encode([["createElement", 1, "div"], ["setText", 1, "hi"]])
 
   it("refuses truncated input at every length", () => {
     const bytes = valid()
     for (let end = 0; end < bytes.length; end++) {
-      expect(() => decodeWireBatchForTest(bytes.slice(0, end)), `${end} bytes`).toThrow()
+      expect(() => decodeWireBatchWithNativeForTest(bytes.slice(0, end)), `${end} bytes`).toThrow()
     }
   })
 
   it("refuses an unknown version, an unknown opcode and trailing bytes", () => {
     const wrongVersion = valid().slice()
     wrongVersion[0] = 99
-    expect(() => decodeWireBatchForTest(wrongVersion)).toThrow(/version 99/)
+    expect(() => decodeWireBatchWithNativeForTest(wrongVersion)).toThrow(/version 99/)
     const unknownOpcode = valid().slice()
     unknownOpcode[6] = 200
-    expect(() => decodeWireBatchForTest(unknownOpcode)).toThrow(/Batch op 0: unknown operation 200/)
+    expect(() => decodeWireBatchWithNativeForTest(unknownOpcode)).toThrow(/Batch op 0: unknown operation 200/)
     const trailing = new Uint8Array([...valid(), 0])
-    expect(() => decodeWireBatchForTest(trailing)).toThrow(/1 bytes remain/)
+    expect(() => decodeWireBatchWithNativeForTest(trailing)).toThrow(/1 bytes remain/)
   })
 })

@@ -8,6 +8,7 @@
 import fs from "fs"
 import { describe, expect, it } from "vitest"
 import { defineKeyframes } from "../index"
+import { encodeWireBatchForTest } from "@ghia/native/testing"
 import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -73,7 +74,7 @@ const NOT_CALLABLE_FROM_A_HANDLER = new Set([
 function calls(r, ids) {
   return {
     animateMotionValue: () => r.animateMotionValue(910, 5),
-    applyBatch: () => r.applyBatch("[]"),
+    applyBatch: () => r.applyBatch(encodeWireBatchForTest([])),
     blurElement: () => r.blurElement(ids.field),
     buildElementMap: () => r.buildElementMap?.(),
     cancelDrag: () => r.cancelDrag(),
