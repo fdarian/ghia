@@ -270,7 +270,8 @@ A native view from another library between the GPUI layers ([nativeview.md](nati
 
 Only with `GPUIX_DIRECT_PAINT=1` (an experiment, [direct-paint.md](direct-paint.md)); nothing here applies by default.
 
-- **A node below a direct root has no hitbox, no box record and no accessibility node.** The pointer is over the root (the `target` of an event is the root, and a descendant is never hovered), `getElementBounds` and the observers that read it find nothing for a descendant, and direct paint is off while a screen reader is connected. A subtree whose nodes need any of that (a listener, a cursor, a pointer state, focus, a scroller, a positioned box) is not direct.
+- **A node below a direct root has no accessibility node.** Direct paint is off while a screen reader is connected, and a window that connects one after a root was built direct keeps the root as it was built until the next build. A subtree whose nodes need an accessibility node, a listener, focus, a scroller, a positioned box, a stacking context or a pointer state below the root is not direct.
+- **A direct node has the hitbox, cursor and box a host has,** so `target`, hover and `getElementBounds` are as for a `Div`; what a `Div` does that a direct node does not repeat (element state, the `note_publication` count of a layout probe) is in [direct-paint.md](direct-paint.md#what-a-direct-node-has).
 
 ## Other platforms
 

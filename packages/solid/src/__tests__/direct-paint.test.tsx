@@ -25,6 +25,8 @@ type Scene = {
   view: (step: Accessor<number>) => JSX.Element
   /** The roots the page has that are drawn direct. */
   directRoots: number
+  /** What the pointer does after the step is drawn. */
+  act?: (renderer: ReturnType<typeof createTestRoot>["renderer"], step: number) => void
 }
 
 const CARD = {
@@ -156,6 +158,26 @@ const scenes: Scene[] = [
     ),
   },
   {
+    name: "rows-hover",
+    steps: 4,
+    width: 320,
+    height: 260,
+    directRoots: 8,
+    view: () => (
+      <div style={{ width: 300, display: "flex", flexDirection: "column", backgroundColor: "#ffffff" }}>
+        {[0, 1, 2, 3, 4, 5, 6, 7].map((index) => (
+          <div style={{ ...CARD, cursor: index % 2 ? "pointer" : "default", hover: { backgroundColor: "#ffddaa", borderColor: "#aa5500" } }}>
+            <text style={{ fontSize: 13, color: "#112233" }}>{`row ${index}`}</text>
+          </div>
+        ))}
+      </div>
+    ),
+    act: (renderer, step) => {
+      renderer.nativeSimulateMouseMove(40, [0, 40, 100, 400][step])
+      renderer.dispatchNativeEvents()
+    },
+  },
+  {
     name: "ineligible",
     steps: 3,
     width: 320,
@@ -243,6 +265,7 @@ function run(scene: Scene, direct: boolean) {
       // Direct paint is off while a screen reader is connected, which a test window pretends.
       renderer.setA11yActive(false)
       for (const frame of ["changed", "again"]) {
+        if (frame === "again") scene.act?.(renderer, index)
         renderer.drawFrame()
         const file = path.join(shots, `${scene.name}-${index}-${frame}-${direct ? "on" : "off"}.png`)
         renderer.captureScreenshot(file)
