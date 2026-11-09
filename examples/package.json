@@ -30,6 +30,7 @@
     "profile-mailbox": "ghia dev solid/mailbox-scroll-hover/profile.tsx",
     "profile-mailbox-keys": "ghia dev solid/mailbox-scroll-hover/profile-keys.tsx",
     "profile-row-cost": "ghia dev solid/row-cost/profile.tsx",
+    "profile-mount-cost": "ghia dev solid/mount-cost/profile.tsx",
     "mailbox-live": "ghia dev solid/mailbox-scroll-hover/live.tsx",
     "profile-navigate": "ghia dev solid/mailbox-navigate/profile.tsx",
     "compile": "bun compile-chat.ts",
