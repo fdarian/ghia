@@ -1,5 +1,36 @@
 # ghia
 
+## 0.12.1
+
+### Patch Changes
+
+- Updated dependencies [9100adc]
+- Updated dependencies [9100adc]
+- Updated dependencies [a1ba92a]
+- Updated dependencies [57bab8d]
+- Updated dependencies [5bf8afb]
+- Updated dependencies [14d6582]
+- Updated dependencies [14d6582]
+- Updated dependencies [4a139f0]
+- Updated dependencies [381e84f]
+- Updated dependencies [a5db856]
+- Updated dependencies [6c9f646]
+- Updated dependencies [a424e75]
+- Updated dependencies [3b381be]
+- Updated dependencies [14d6582]
+- Updated dependencies [6719139]
+- Updated dependencies [a0cfc02]
+- Updated dependencies [14d6582]
+- Updated dependencies [14d6582]
+- Updated dependencies [9282468]
+- Updated dependencies [14d6582]
+- Updated dependencies [e1c7649]
+- Updated dependencies [5a6650c]
+- Updated dependencies [14d6582]
+- Updated dependencies [14d6582]
+- Updated dependencies [afade40]
+  - @ghia/native@0.12.1
+
 ## 0.12.0
 
 ### Minor Changes
