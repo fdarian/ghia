@@ -194,11 +194,16 @@ interface Sample {
   frame: number
 }
 
+/** A named frame for `cpuprof-attr.mjs`: the samples under it are phases js and ops. */
+function profilePhaseJsAndOps(write: () => void) {
+  write()
+}
+
 async function step(kind: string, write: () => void): Promise<Sample> {
   sawFirstOp = false
   stampApplyStart = stampApplyEnd = 0
   const s0 = readInstructions()
-  write()
+  profilePhaseJsAndOps(write)
   const s1 = readInstructions()
   await Promise.resolve()
   const s2 = readInstructions()
