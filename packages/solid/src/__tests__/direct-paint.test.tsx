@@ -525,7 +525,8 @@ const scenes: Scene[] = [
     hears: true,
     view: (step) => {
       const start = () => [0, 0, 2, 3][step()]
-      // The absolute child of a row hangs over the next row, which paints after it: a row is a context of its own.
+      // The absolute child of a row hangs over the next row, which paints after it: a row is a context of its own. It comes before the bar
+      // that it overlaps, which a context paints below it (in document order it would be above).
       const row = (index: number) => {
         const kind = index % 4
         const shade = ["#eef3f8", "#f8eef3", "#f3f8ee", "#fdfbe0"][(index + step()) % 4]
@@ -540,8 +541,9 @@ const scenes: Scene[] = [
               backgroundColor: shade,
             }}
           >
-            <text>{() => `row ${index}, kind ${kind}, step ${step()}`}</text>
             {overhang}
+            <text>{() => `row ${index}, kind ${kind}, step ${step()}`}</text>
+            <div style={{ height: 12, marginTop: 2, backgroundColor: "#8899aa" }} />
             <Show when={kind === 2}>
               <div style={{ position: "absolute", top: 4, left: 150, width: 60, height: 20, zIndex: -1, backgroundColor: "#44aa44" }} />
               <div style={{ position: "relative", top: 6, width: 80, height: 14, zIndex: 3, backgroundColor: "#4444cc" }} />
