@@ -387,6 +387,7 @@ impl CustomElement for AnchoredElement {
         if let Some(style) = ctx.style {
             content = crate::renderer::apply_interactive_styles(content, style, &ctx.colors, &ctx.lengths);
         }
+        content = crate::layout::stacking::absorb_lift(content, ctx.lift_absorbed);
         // A deferred layer is prepainted with no context around it, so z-index inside the
         // popup needs this one.
         content = content.stacking_context();

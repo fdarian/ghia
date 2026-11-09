@@ -11551,7 +11551,7 @@ fn build_element_unpumped(
             ctx.custom_registry.destroy(id);
             ctx.subtree.block();
             ctx.retain.exclude(crate::retain::Exclusion::VirtualList);
-            build_virtual_list(element, ctx, window, cx)
+            build_virtual_list(element, lift_absorbed, ctx, window, cx)
         }
 
         // Polymorphic dispatch for all custom elements.
@@ -11690,6 +11690,7 @@ fn build_element_unpumped(
                 pointer_events_none: inherited.pointer_events_none,
                 app_region: inherited.app_region,
                 stacking_root,
+                lift_absorbed,
                 resolved,
             };
             // What an adapter paints is not read by the build: it takes its text colour, and the
@@ -11771,6 +11772,7 @@ fn build_element_unpumped(
 
 fn build_virtual_list(
     element: &crate::retained_tree::RetainedElement,
+    lift_absorbed: bool,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -11946,6 +11948,7 @@ fn build_virtual_list(
             list = list.font_variations(variations);
         }
     }
+    list = crate::layout::stacking::absorb_lift(list, lift_absorbed);
     if let Some(scope) = ctx.inherited.self_container.clone().filter(|scope| scope.is_sized()) {
         list = crate::layout::container::contain(list, scope, ctx.containers.clone());
     }

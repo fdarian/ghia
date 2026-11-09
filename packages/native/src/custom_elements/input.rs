@@ -593,6 +593,7 @@ impl CustomElement for TextEditorElement {
             // not rise above its later siblings.
             editor = editor.relative().unlifted();
         }
+        editor = crate::layout::stacking::absorb_lift(editor, ctx.lift_absorbed);
         let default_role = default_role(input_type, self.multiline);
         // Before `apply_accessibility`, so an explicit `aria-valuenow`, `-valuemin`
         // or `-valuemax` from the app wins.
