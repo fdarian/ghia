@@ -15,6 +15,11 @@ pub(crate) fn hold_display(ids: HashSet<u64>) {
     DISPLAY_HELD.with(|held| *held.borrow_mut() = ids);
 }
 
+/// Whether a `display` transition keeps any element rendered.
+pub(crate) fn any_display_held() -> bool {
+    DISPLAY_HELD.with(|held| !held.borrow().is_empty())
+}
+
 /// Whether a child produces a box at all: `display: none` generates none.
 ///
 /// Empty and white-space-only text is not decided here. Inline layout in

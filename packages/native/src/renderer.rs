@@ -12231,12 +12231,8 @@ pub(crate) fn build_host_container(
     }
     // A skipped `<text>` is still read out, though its paragraphs are not built.
     let reads_text = !skipped || (a11y_active && element.element_type == "text");
-    let plan = if element.children.is_empty() || !reads_text {
-        Vec::new()
-    } else {
-        crate::text::inline::plan_children_at(ctx.tree, element)
-    };
-    el = crate::accessibility::describe_text(el, element, &plan);
+    let planned = (!element.children.is_empty() && reads_text).then(|| crate::text::plan_cache::planned(ctx.tree, element));
+    el = crate::accessibility::describe_text(el, element, planned.as_ref().and_then(|planned| planned.accessible_text.as_deref()));
     if is_label && !inert {
         el = crate::accessibility::label::describe(el, element.id);
     }
@@ -12261,7 +12257,7 @@ pub(crate) fn build_host_container(
         ctx.text_box_trim = Default::default();
         Default::default()
     } else {
-        build_content(element, plan, ctx, window, cx)
+        build_content(element, planned.as_ref().map_or(&[], |planned| &planned.children), ctx, window, cx)
     };
     if collapsed_table {
         let key = crate::layout::table_grid::BoxKey::Element(element.id);
@@ -12506,7 +12502,7 @@ impl Placement {
 /// atomic inlines read the content height of the element from.
 fn build_content(
     element: &crate::retained_tree::RetainedElement,
-    plan: Vec<(crate::text::inline::Child, u32)>,
+    plan: &[(crate::text::inline::Child, u32)],
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -12554,7 +12550,7 @@ fn build_content(
 /// `anonymous` counts the anonymous cells and tables of `element` built so far.
 fn build_plan(
     element: &crate::retained_tree::RetainedElement,
-    plan: Vec<(crate::text::inline::Child, u32)>,
+    plan: &[(crate::text::inline::Child, u32)],
     trim: gpui::TextBoxTrim,
     probe: Option<&crate::text::atomic::Probe>,
     anonymous: &mut usize,
@@ -12578,7 +12574,8 @@ fn build_plan(
     };
     let first_in_flow = plan.iter().position(|(child, _)| in_flow(child));
     let last_in_flow = plan.iter().rposition(|(child, _)| in_flow(child));
-    for (index, (child, at)) in plan.into_iter().enumerate() {
+    for (index, (child, at)) in plan.iter().enumerate() {
+        let at = *at;
         let child_trim = gpui::TextBoxTrim {
             start: trim.start && Some(index) == first_in_flow,
             end: trim.end && Some(index) == last_in_flow,
@@ -12619,12 +12616,12 @@ fn build_plan(
                     let ids: Vec<u64> = parts.iter().map(|(id, _)| *id).collect();
                     resolve_collapsed_borders(ctx, CollapsedTable::Anonymous(key, &ids), window.scale_factor());
                 }
-                let blocks = parts.into_iter().map(|(id, at)| (crate::text::inline::Child::Block(id), at)).collect();
+                let blocks: Vec<_> = parts.iter().map(|(id, at)| (crate::text::inline::Child::Block(*id), *at)).collect();
                 let mut inside = Vec::new();
                 let mut inside_placements = Vec::new();
                 let outside = (ctx.inherited.table_row, ctx.inherited.table_cell);
                 (ctx.inherited.table_row, ctx.inherited.table_cell) = (Some(key.token()), None);
-                build_plan(element, blocks, gpui::TextBoxTrim::default(), probe, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
+                build_plan(element, &blocks, gpui::TextBoxTrim::default(), probe, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
                 (ctx.inherited.table_row, ctx.inherited.table_cell) = outside;
                 settle_collapsed_borders(ctx, key, used_from, window);
                 let mut table = crate::layout::table::anonymous_table(&ctx.inherited.table, ctx.collapsed.table(key));
@@ -12644,6 +12641,7 @@ fn build_plan(
         ctx.doc_path.push(at);
         match child {
             crate::text::inline::Child::Block(child_id) => {
+                let child_id = *child_id;
                 let item = crate::layout::stacking::is_flex_or_grid_container(ctx.tree, element);
                 let child_element = ctx.tree.elements.get(&child_id);
                 placements.push(Placement {
@@ -12711,7 +12709,7 @@ fn build_plan(
                         }
                     }
                 }
-                let (paragraph_element, subtree) = paragraph_content(&paragraph, child_trim, ctx, window, cx);
+                let (paragraph_element, subtree) = paragraph_content(paragraph, child_trim, ctx, window, cx);
                 content_elements.push(paragraph_element);
                 ctx.subtree.merge(subtree);
                 if let Some(outside) = outside {
@@ -12771,12 +12769,9 @@ fn build_contents_container(
     if let Some(variations) = ctx.inherited.font_variations.clone() {
         el = el.font_variations(variations);
     }
-    let plan = if element.children.is_empty() {
-        Vec::new()
-    } else {
-        crate::text::inline::plan_children_at(ctx.tree, element)
-    };
-    let (content, placements, containing_heights) = build_content(element, plan, ctx, window, cx);
+    let planned = (!element.children.is_empty()).then(|| crate::text::plan_cache::planned(ctx.tree, element));
+    let (content, placements, containing_heights) =
+        build_content(element, planned.as_ref().map_or(&[], |planned| &planned.children), ctx, window, cx);
     el = crate::text::atomic::report_containing_height(el, containing_heights);
     if ctx.inherited.table.collapse {
         ctx.subtree.block();

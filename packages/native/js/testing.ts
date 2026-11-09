@@ -68,6 +68,8 @@ export interface BuildCounters {
   styleDescClones: number
   styleAppliesComputed: number
   styleAppliesReplayed: number
+  plansKept: number
+  plansComputed: number
   inheritedClones: number
   retainableRoots: number
   retainableElements: number

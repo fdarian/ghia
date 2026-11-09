@@ -305,6 +305,9 @@ pub(crate) fn settle(element: &RetainedElement, declared: Option<&StyleDesc>) ->
     let changed = assumed_display != folded_display || assumed_order != folded_order;
     *element.container_display.borrow_mut() = Some(folded_display);
     *element.container_order.borrow_mut() = Some(folded_order);
+    if changed {
+        crate::text::plan_cache::settled();
+    }
     changed
 }
 
