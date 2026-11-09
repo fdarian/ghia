@@ -279,6 +279,27 @@ paint-only animation is offered to gpuix's patcher before gpui builds anything a
 tick the patcher declines is drawn whole, and an animation whose content is culled draws and presents nothing. A scroll
 animation is always asked for as `request_animation_frame` and drawn whole. See [patch-frames.md](patch-frames.md).
 
+### The steps before a frame (`Window::set_frame_steps`)
+
+The HTML "update the rendering" steps run before the frame they affect, so what they change is painted by that frame. gpui has
+no such point: its first hook is the commit survey inside `Window::draw`. The window takes one from the owner,
+`Window::set_frame_steps` (None by default, so other GPUI apps are unchanged), and `Window::draw` runs it first, before the
+commit survey and before anything is built or patched. It does not run in a layout pass, nor in a draw nested in another, and
+Ghia's steps (`frame_steps.rs`, installed by `GpuixView::render`) skip a draw that a JS handler's own call makes
+(`sync_dispatch::in_sync_call`), which leaves them to the next draw. The display link, `paint_if_dirty` and the test
+renderer's inline draws all go through `draw`.
+
+In order, the steps:
+
+1. make the scroll writes recorded since the last render (`settle_scroll_writes`; a render makes them too, for a pass a read
+   forces);
+2. advance smooth scrolls (`scroll::advance_animations`), so the offset an animation frame paints is reported before that paint;
+3. send `scroll` for every scroller whose offset is not the one it last reported ([scroll.md](scroll.md#onscroll)),
+   synchronously through the sync-dispatch path that input uses, so the handler's mutations (a Solid write, an `applyBatch`,
+   a React commit) are in the tree the draw builds.
+
+Nothing to do is no JS call. Smooth scrolls sample the clock at the steps, a little before the render's own instant.
+
 ### Windows that are not key (#78)
 
 gpui throttles a window that is visible but not key with `inactive_frame_interval`, 30 fps by default. A window of this

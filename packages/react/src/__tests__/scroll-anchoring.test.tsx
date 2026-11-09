@@ -120,17 +120,6 @@ function closeTo(label: string, seen: number | null, expected: number | null) {
   else expect.soft(Math.abs(seen - expected), `${label}: ${seen} / Chrome's ${expected}`).toBeLessThanOrEqual(UNIT)
 }
 
-/**
- * A scroll event of gpuix is reported by the frame that paints the offset (`observers::sweep`), and only when that offset
- * differs from the last one painted. So one for a write of the offset runs a frame after the one Chrome runs it in, which
- * queues it with the write, an adjustment is queued by the frame that lays it out in both, events painted in one frame are
- * one event, and an offset that is written away and compensated back in one frame is none.
- */
-function framesInGpuix(events: number[], writes: boolean, moved: boolean): number[] {
-  if (!moved) return []
-  return [...new Set(events.map((frame) => (writes && frame === 1 ? 2 : frame)))]
-}
-
 /** Scenes of Chrome's behaviour that gpuix does not follow. */
 const KNOWN_DEVIATIONS: Record<string, string> = {
   // After a second change of `top` Chrome compensates nothing in the next layout, as if the flag of the box stayed set until
@@ -201,7 +190,7 @@ describeNative("scroll anchoring against Chrome", { timeout: 120_000 }, () => {
           compare(`${name}, ${label}`, seen, expected)
           expect
             .soft(events, `${name}, ${label}: the frames the scroll events run in`)
-            .toEqual(framesInGpuix(expected.events, writes, seen.top !== previousTop))
+            .toEqual(expected.events)
           previousTop = seen.top
         }
 

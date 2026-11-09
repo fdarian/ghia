@@ -317,7 +317,7 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
     dispatchSync(received) {
       const root = active
       if (received.eventType === "focusin") noteFocusEvent(renderer)
-      const event = normalizeEventType(received)
+      const event = shapeScrollEvent(normalizeEventType(received))
       if (!root || !handlesEvent(root, event)) {
         // Nobody can accept a drop here, and native would otherwise leave the OS its default.
         return event.eventType === "dragover"

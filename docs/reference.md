@@ -2903,7 +2903,7 @@ Flex items shrink as in CSS, so a row of items in a flex scroller needs `flexShr
 
 `onWheel` is the DOM `wheel`: every tick over the element or a descendant, before any scroller applies it, with `deltaX`, `deltaY`, `deltaMode`, `clientX`, `clientY`, `offsetX`, `offsetY`, `buttons` and `modifiers`. `deltaY` is positive for down, and `deltaMode` is always `0`: a mouse wheel's lines are converted to pixels at 20 px a line. `touchPhase` and `precise` say how the tick arrived.
 
-`onScroll` is the DOM `scroll`: it fires whenever the scroll offset changes, whatever moved it: the wheel, a scrollbar drag, the keyboard, `scrollTo`, `scrollIntoView`, a smooth animation, or content that shrank under the offset. The payload is `{ scrollTop, scrollLeft }` of the target, and it does not bubble. The position at the first paint is not reported, only movement after it. It does not fire for `<virtual-list>`; use `onVisibleRange`.
+`onScroll` is the DOM `scroll`: it fires whenever the scroll offset changes, whatever moved it: the wheel, a scrollbar drag, the keyboard, `scrollTo`, `scrollIntoView`, a smooth animation, or content that shrank under the offset. The payload is `{ scrollTop, scrollLeft }` of the target, and it does not bubble. The position at the first paint is not reported, only movement after it. The event runs before the frame that paints the new offset, and what its handler changes (a signal, state, a mutation) is in that frame, so a list that renders the rows of the offset it is scrolled to has them in the first frame that shows the offset, as in a browser, where `scroll` runs in the rendering steps before the frame. A write (`scrollTo`, `scrollTop = n`) is reported by the next frame; an offset that layout moved (anchoring, a clamp) by the frame after the one that painted it. It does not fire for `<virtual-list>`; use `onVisibleRange`.
 
 ### Keyboard
 
@@ -5525,7 +5525,8 @@ the target. The test is geometry only, so
 a `visibility: "hidden"` target still intersects.
 
 Callbacks run once per batch of a frame's reports, after the frame, so state set
-in one paints a frame later. A frame's reports arrive in the order of the DOM's
+in one paints a frame later; `onScroll` is the exception, which runs before the frame
+it reports (see `onScroll` under Scrolling, Events). A frame's reports arrive in the order of the DOM's
 rendering steps: `onScroll` events first, then `onLayout` handlers and the
 `ResizeObserver` callbacks (`onLayout` is `ResizeObserver` for an element), then the
 `IntersectionObserver` callbacks. `onScroll` and `onLayout` run in document order
