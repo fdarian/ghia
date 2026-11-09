@@ -8,7 +8,8 @@
  * rows of a mailbox (a positioned root with a click listener and a hover style, absolute children, one-line texts) and boxes
  * that overlap their siblings (the z order of a positioned descendant, and where it is hit) are scenes of their own. The last
  * test has the pointer cross the nodes of a root that hold a cursor and `pointer-events`, and compares the target, the path
- * of the event and the cursor.
+ * of the event and the cursor. The `user-select` scene drags a selection from each card (none, text, and a descendant that
+ * reopens or closes it) and copies it, so the start regions and the selectable text must come out as the `Div` build's.
  */
 
 import fs from "node:fs"
@@ -67,7 +68,7 @@ const MESSAGES = [
   { from: "Edsger Dijkstra", time: "Fri", subject: "Go To Statement Considered Harmful", snippet: "For a number of years I have been familiar with the observation", unread: false },
 ]
 
-/** A row of the bench's mailbox: a positioned root with a click listener and a hover style, whose children are absolute. */
+/** A row of the bench's mailbox: a positioned root with `user-select: none`, a click listener and a hover style, whose children are absolute. */
 function MailRow(props: { index: number; step: Accessor<number>; selected: Accessor<number> }) {
   const message = () => MESSAGES[(props.index + props.step()) % MESSAGES.length]
   const unread = () => message().unread
@@ -77,6 +78,7 @@ function MailRow(props: { index: number; step: Accessor<number>; selected: Acces
         position: "relative",
         height: ROW_HEIGHT,
         borderBottom: "1px solid #F4F4F5",
+        userSelect: "none",
         backgroundColor: props.selected() === props.index ? "#DBEAFE" : "#FFFFFF",
         hover: { backgroundColor: props.selected() === props.index ? "#DBEAFE" : "#F4F4F5" },
       }}
@@ -264,7 +266,7 @@ const scenes: Scene[] = [
         <div style={{ ...CARD, position: "relative", zIndex: 2, height: 20 }} />
         <div style={{ ...CARD, opacity: [1, 0.5, 1][step()], height: 20 }} />
         <div style={{ ...CARD, height: 20 }} onClick={() => {}} tabIndex={0} />
-        <div style={{ ...CARD, height: 20, userSelect: "none" }} />
+        <div style={{ ...CARD, height: 20, visibility: "hidden" }} />
         <div style={{ ...CARD, height: 20, transform: ["rotate(0deg)", "rotate(2deg)", "rotate(0deg)"][step()] }} />
         <div style={{ ...CARD, height: 20, overflow: "auto" }} />
       </div>
@@ -332,6 +334,59 @@ const scenes: Scene[] = [
       }
       renderer.nativeSimulateClick(30, row * ROW_HEIGHT + 20)
       renderer.nativeSimulateClick(160, row * ROW_HEIGHT + 66)
+      renderer.dispatchNativeEvents()
+    },
+  },
+  {
+    name: "user-select",
+    steps: 4,
+    width: 320,
+    height: 240,
+    directRoots: 7,
+    directNodes: 7 * 2,
+    hears: true,
+    view: (step) => (
+      <div style={{ width: 300, display: "flex", flexDirection: "column", backgroundColor: "#ffffff" }}>
+        <div style={{ ...CARD }}>
+          <text>{() => `selectable ${step()}`}</text>
+        </div>
+        <div style={{ ...CARD, userSelect: "none" }}>
+          <text>not selectable</text>
+        </div>
+        <div style={{ ...CARD, userSelect: "none" }}>
+          <div>
+            <text>inherits none</text>
+          </div>
+        </div>
+        <div style={{ ...CARD, userSelect: "none" }}>
+          <text style={{ userSelect: "text" }}>reopened by its own text</text>
+        </div>
+        <div style={{ ...CARD, userSelect: (["none", "text", "auto", "none"] as const)[step()] }}>
+          <text>{() => `toggles ${step()}`}</text>
+        </div>
+        <div style={{ ...CARD, userSelect: "text" }}>
+          <div style={{ userSelect: "none" }}>
+            <text>none inside text</text>
+          </div>
+        </div>
+        <div style={{ ...CARD, userSelect: "text" }}>
+          <div>
+            <text>text inside text</text>
+          </div>
+        </div>
+      </div>
+    ),
+    act: (renderer) => {
+      // A drag that starts in each card, one across all of them, and the copy of what it selected.
+      for (let card = 0; card < 7; card++) {
+        const y = 15 + 30 * card
+        heard.push(`drag ${card}: ${renderer.dragSelect(12, y, 900, y)}`)
+        renderer.clearSelection()
+      }
+      heard.push(`drag all: ${renderer.dragSelect(12, 15, 900, 215)}`)
+      renderer.simulateKeystrokes("Meta+c")
+      heard.push(`copied: ${renderer.readClipboardText()}`)
+      renderer.clearSelection()
       renderer.dispatchNativeEvents()
     },
   },

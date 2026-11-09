@@ -276,7 +276,6 @@ fn style_is_plain(style: &StyleDesc, kind: Kind) -> bool {
             Kind::Root | Kind::Descendant => matches!(style.position.as_deref(), None | Some("static" | "relative" | "absolute")),
         }
         && style.app_region.is_none()
-        && style.user_select.is_none()
         && transitions
         && effects
         && transforms
