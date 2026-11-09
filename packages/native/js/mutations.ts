@@ -82,8 +82,9 @@ export function createMutationQueue(
       requestFlush()
     },
     setStyle(id, style, styleJson) {
-      styleImages.style(style)
-      writer.setStyle(id, styleJson ?? JSON.stringify(style))
+      const json = styleJson ?? JSON.stringify(style)
+      styleImages.style(style, json)
+      writer.setStyle(id, json)
       requestFlush()
     },
     setText(id, content) {
@@ -103,8 +104,9 @@ export function createMutationQueue(
       requestFlush()
     },
     setUniversalStyle(style) {
-      styleImages.style(style)
-      writer.setUniversalStyle(style === null ? null : JSON.stringify(style))
+      const json = style === null ? null : JSON.stringify(style)
+      if (json !== null) styleImages.style(style, json)
+      writer.setUniversalStyle(json)
       requestFlush()
     },
     setCustomProp(id, key, value) {
