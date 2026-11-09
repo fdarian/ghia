@@ -729,7 +729,7 @@ keeps what builds it again.
   the tree, so it has to be right for the roots that are recorded:
   - nothing in the subtree **might lift** (`hover_paint::may_lift`: positioned, a `z-index`, an opacity below 1, a transform,
     a filter, a mask, a clip path, `content-visibility`), unless the root is a row of a virtual list, which consumes whatever is
-    lifted in it (`lift_absorbed`): a root that lifts is recorded as one that hands elements to the stacking context around, and
+    lifted in it (`stacking::absorbs_lift`): a root that lifts is recorded as one that hands elements to the stacking context around, and
     leaving the roots in it unrecorded changed how it replays (found by the retention fuzz under the verifier);
   - nothing in it has a **size an intrinsic keyword gives** (`min-content`, `fit-content`, ...): its box is measured under another
     style and asked for again, and a retained root that holds one is laid out again by every frame unless the box is a root of its own
@@ -1344,7 +1344,7 @@ patch changes, and three pieces of it were the same question asked again of the 
   against one at 0.0 is the same where the words differed; they paint the same. The words stay under `cfg(test)` as the oracle.
 
 The profile's other costs of `build_element` (a `StyleDesc` clone and drop about 7%, allocation 11%) were looked at and not changed: the
-style derivations it reads (a container fold, `var()` resolution, content visibility, the underline offset, a row's `lift_absorbed`) clone
+style derivations it reads (a container fold, `var()` resolution, content visibility, the underline offset) clone
 only for a style that they change, and no clone of a style that stays the same was found. `getBuildCounters().styleDescClones` counts them.
 
 **Measured** (release addon, `A11Y=0`, ghia-bench's data, two runs, alternating with the build before the slice, which is the zed bump alone: the

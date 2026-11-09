@@ -38,7 +38,6 @@ macro_rules! overlay_fields {
             measure_natural_width: false,
             // What the element is, not a property: the style on top of it is the same element's.
             flex_or_grid_item: $base.flex_or_grid_item,
-            lift_absorbed: $base.lift_absorbed,
             keeps_background: $base.keeps_background,
             atomic_inline: false,
             animating_opacity: $base.animating_opacity,

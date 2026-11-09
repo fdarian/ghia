@@ -362,4 +362,33 @@ describeNative("the style cache", { timeout: 120_000 }, () => {
       }
     })
   }
+
+  it("applies the style of a virtual-list row root from the cache, and clones no style to say the row does not lift", () => {
+    const root = createTestRoot({ width: 320, height: 260 })
+    const renderer = root.renderer
+    renderer.setStyleCache("on")
+    renderer.clockPause()
+    try {
+      renderer.resetBuildCounters()
+      root.render(
+        <virtual-list overdraw={0} estimatedItemHeight={30} style={{ width: 300, height: 240 }}>
+          {Array.from({ length: 8 }, (_, index) => (
+            <div key={index} style={{ ...CARD, position: "relative", zIndex: 2 }}>
+              <text style={{ fontSize: 13, color: "#112233" }}>{`row ${index}`}</text>
+            </div>
+          ))}
+        </virtual-list>,
+      )
+      renderer.dispatchNativeEvents()
+      renderer.flush()
+      renderer.setA11yActive(false)
+      renderer.drawFrame()
+      const counters = renderer.getBuildCounters()
+      expect(counters.styleDescClones, "no StyleDesc is cloned to build a row").toBe(0)
+      expect(counters.styleAppliesReplayed, "the rows share the style of the first").toBeGreaterThan(counters.styleAppliesComputed)
+      expect(counters.styleAppliesComputed, "the row root and its text, once each").toBeLessThanOrEqual(4)
+    } finally {
+      root.unmount()
+    }
+  })
 })
