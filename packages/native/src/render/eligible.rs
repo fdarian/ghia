@@ -304,6 +304,4 @@ fn style_is_plain(style: &StyleDesc, kind: Kind) -> bool {
         && !style.lays_out_unstably()
         && !style.atomic_inline
         && !style.animating_opacity
-        // The row of a virtual list hands nothing to the context around the list.
-        && (kind == Kind::Root || !style.lift_absorbed)
 }

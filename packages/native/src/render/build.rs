@@ -24,6 +24,7 @@ pub(crate) fn build_direct(
     element: &RetainedElement,
     style: Option<&StyleDesc>,
     stacking_root: bool,
+    lift_absorbed: bool,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -33,7 +34,7 @@ pub(crate) fn build_direct(
     note_plain(element.id, ctx);
     note_listeners(element, ctx);
     let scroller = enter_scroller(element.id, style, ctx, window);
-    let (root_style, mut placement) = resolve_style(element, style, ctx);
+    let (root_style, mut placement) = resolve_style(element, style, lift_absorbed, ctx);
     // As `build_host_container` flags the host: the style says so, or it is the root of a list row.
     placement.context = crate::layout::stacking::forms_context(style, stacking_root, &ctx.inherited.colors, &ctx.inherited.lengths);
     let children = build_children(element, ctx, window, cx, &mut arena);
@@ -75,7 +76,7 @@ fn build_node(
     tree.resolved.borrow_mut().record(id, resolved);
     note_plain(id, ctx);
     let scroller = enter_scroller(id, style, ctx, window);
-    let (node_style, placement) = resolve_style(element, style, ctx);
+    let (node_style, placement) = resolve_style(element, style, false, ctx);
     let children = build_children(element, ctx, window, cx, arena);
     let scroller = leave_scroller(scroller, ctx);
     ctx.subtree = Subtree::of_element(ctx.subtree, style, &ctx.inherited.colors, &ctx.inherited.lengths);
@@ -154,7 +155,7 @@ fn bounds_flags(style: Option<&StyleDesc>, scroller: &Option<(gpui::ScrollHandle
 /// The style of a host as `compute_style_internal` makes it from the `Div` that `build_host_container`
 /// makes, which has only its base style set: `Style::default()` refined by what the build applied. With how
 /// that `Div` is placed: `Element::lift_z` and `Element::escapes_to` read its base style, the refinement.
-fn resolve_style(element: &RetainedElement, style: Option<&StyleDesc>, ctx: &BuildCtx) -> (Style, Placement) {
+fn resolve_style(element: &RetainedElement, style: Option<&StyleDesc>, lift_absorbed: bool, ctx: &BuildCtx) -> (Style, Placement) {
     let mut refinement = StyleRefinement::default();
     if let Some(style) = style {
         refinement = crate::css::style_cache::apply(
@@ -176,6 +177,7 @@ fn resolve_style(element: &RetainedElement, style: Option<&StyleDesc>, ctx: &Bui
         }
     }
     ctx.inherited.direction.apply(&mut refinement);
+    refinement = crate::layout::stacking::absorb_lift(refinement, lift_absorbed);
     if style.and_then(|style| style.position.as_deref()).is_none() {
         refinement.position = Some(gpui::Position::Static);
     }

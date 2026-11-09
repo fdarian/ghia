@@ -11386,11 +11386,7 @@ fn build_element_unpumped(
     // The list prepaints a row inside a lift barrier, which hands nothing to the context around the
     // list: the root of a row does not lift, whatever its position, `z-index` or composite, as
     // `stacking::lifted_z` says of the retained tree.
-    let lift_absorbed = stacking_root && crate::layout::stacking::is_virtual_row(tree, element);
-    let absorbed_style = style
-        .filter(|_| lift_absorbed)
-        .map(|style| StyleDesc { lift_absorbed: true, ..style.clone() });
-    let style = absorbed_style.as_ref().or(style);
+    let lift_absorbed = crate::layout::stacking::absorbs_lift(tree, element, stacking_root);
     // An underline sits where the box that declares it says, and that box inherits
     // its offset.
     let offset_style = style.and_then(|style| {
@@ -11554,9 +11550,9 @@ fn build_element_unpumped(
                     &ctx.inherited.lengths,
                 );
                 if crate::render::is_direct_root(element, style, stacking_root, atomic_root, ctx, window) {
-                    crate::render::build_direct(element, style, stacking_root, ctx, window, cx)
+                    crate::render::build_direct(element, style, stacking_root, lift_absorbed, ctx, window, cx)
                 } else {
-                    build_host_container(element, style, stacking_root, ctx, window, cx)
+                    build_host_container(element, style, stacking_root, lift_absorbed, ctx, window, cx)
                 }
             }
         }
@@ -12036,6 +12032,7 @@ pub(crate) fn build_host_container(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
     stacking_root: bool,
+    lift_absorbed: bool,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -12198,6 +12195,7 @@ pub(crate) fn build_host_container(
             &ctx.focus_styles,
         );
     }
+    el = crate::layout::stacking::absorb_lift(el, lift_absorbed);
 
     let is_label = element.element_type == "label";
     // Skipped content is in the accessibility tree, as Chrome has it: the element hosts a node for
