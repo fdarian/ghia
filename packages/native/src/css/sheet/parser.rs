@@ -88,6 +88,7 @@ impl Parser<'_> {
         let prelude = &self.tokens[start..open];
         match parse_selector_list(prelude, self.atoms, nesting) {
             Ok(selectors) => self.style_block(open + 1, contents_end, selectors, layer),
+            Err(_) if open == start => {}
             Err(_) => {
                 let text = self.src[self.tokens[start].start..self.tokens[open - 1].end].trim().to_owned();
                 self.sheet.unsupported.push(text);

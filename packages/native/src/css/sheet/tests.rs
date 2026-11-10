@@ -837,3 +837,30 @@ fn dnd_kit_declarations_go_through_the_style_table() {
     }
     println!("dropped or ignored by the style parser:\n{}", dropped.join("\n"));
 }
+
+#[test]
+fn a_block_with_no_prelude_is_skipped() {
+    let mut doc = Doc::new();
+    for text in ["{}", "{color:red}", "{} a { color: red }", "a { b { } {} color: red }"] {
+        doc.parse(text);
+    }
+    let sheet = doc.parse("{color:red} a { color: red }");
+    assert_eq!(sheet.rules.len(), 1);
+    assert!(sheet.unsupported.is_empty());
+}
+
+#[test]
+fn degenerate_sheets_do_not_panic() {
+    let texts = [
+        "", "}", "{", "{{", "}}", "{{}", ";", ";;", "@", "@layer", "@layer;", "@layer {", "@layer a {", "@layer a, ;",
+        "@layer {}", "@layer a b {}", "@media", "@media {", "a{", "a {color", "a {color:", "a {color: red", "a { & }",
+        "a { &{} }", "&{}", "& {color: red}", "&{", "> a {}", "a { > {} }", "a { { } }", "a { @x {", "a { @x", "a { --x: {",
+        "a { --x: { } }", "\"abc", "a { content: \"abc", "/* unterminated", "a /* x", "a { color: red /* x", "a[", "a[b",
+        "a:is(", "a:not({", ":is(){}", "a, {}", ",{}", "a,{}", "\\", "a\\", "url(", "a { b: url( }", "@layer a { { } }",
+        "@layer a { @layer { } }", "a { } }", "a { ) }", ") { }", "] { }", "a { ( }", "a { [ }", "a { b { c { d {",
+    ];
+    let mut doc = Doc::new();
+    for text in texts {
+        doc.parse(text);
+    }
+}
