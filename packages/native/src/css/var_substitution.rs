@@ -35,7 +35,7 @@ use rustc_hash::FxHashMap;
 
 use crate::css::covers::{self, KeyId};
 use crate::css::custom_properties::{self, CustomProperties};
-use crate::css::lenient::{json_string, number_text, object_text, recover, Declaration, Declarations};
+use crate::css::lenient::{is_unitless, json_string, number_text, object_text, recover, Declaration, Declarations};
 use crate::css::transform::{DEFAULT_ORIGIN_TEXT, DEFAULT_PERSPECTIVE_ORIGIN_TEXT};
 use crate::events::state_styles::{is_no_layer, laid_over, sets_property, without_invalid_values};
 use crate::retained_tree::parse_style;
@@ -404,9 +404,10 @@ fn parse_declaration(key: &str, text: &str) -> Option<Arc<StyleDesc>> {
     let alone = |value: &str| format!("{{{}:{}}}", json_string(key), value);
     let parsed = parse_style(alone(&json_string(text)).as_bytes())
         .ok()
-        // The property wants a number (`opacity`, `zIndex`, ...): the text is its text.
+        // The property's value is a `<number>` (`opacity`, `zIndex`, ...): the text is its text. For
+        // any other property a bare number is not a value, as in CSS.
         .or_else(|| {
-            let number = text.parse::<f64>().ok().filter(|number| number.is_finite())?;
+            let number = text.parse::<f64>().ok().filter(|number| number.is_finite() && is_unitless(key))?;
             parse_style(alone(&number.to_string()).as_bytes()).ok()
         })
         .map(Arc::new);
@@ -733,6 +734,19 @@ mod tests {
         assert_eq!(wrong.opacity, None);
         let infinite = resolved(r#"{"opacity":"var(--o)"}"#, &[("--o", "inf")]);
         assert_eq!(infinite.opacity, None);
+    }
+
+    #[test]
+    fn a_bare_number_is_not_a_length() {
+        for json in [r#"{"padding":"var(--n)"}"#, r#"{"gap":"var(--n)"}"#] {
+            let dropped = resolved(json, &[("--n", "8")]);
+            assert_eq!(dropped.padding, None, "{json}");
+            assert_eq!(dropped.gap, None, "{json}");
+        }
+        assert_eq!(style(r#"{"padding":"8"}"#).padding, None);
+        let zero = resolved(r#"{"padding":"var(--n)"}"#, &[("--n", "0")]);
+        assert_eq!(zero.padding, style(r#"{"padding":"0"}"#).padding);
+        assert!(zero.padding.is_some());
     }
 
     #[test]
