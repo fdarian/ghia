@@ -1,3 +1,5 @@
+import { cancelAnimationFrame, requestAnimationFrame } from "./animation-frame.js"
+import { ResizeObserver } from "./observers.js"
 import { document, window } from "./events/window-target.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
 import { isWebBuild } from "./web-build.js"
@@ -50,11 +52,18 @@ function install(): void {
         runtimeRemove?.call(globalThis, type, listener, options)
       }) satisfies RemoveListener,
     },
+    // The frame steps of a window run the callbacks, before the frame that paints what they change.
+    requestAnimationFrame: { value: requestAnimationFrame, configurable: true, writable: true },
+    cancelAnimationFrame: { value: cancelAnimationFrame, configurable: true, writable: true },
     // Ghia has no document scrolling element, so the viewport cannot scroll.
     scrollTo: { value: noScroll, configurable: true, writable: true },
     scroll: { value: noScroll, configurable: true, writable: true },
     scrollBy: { value: noScroll, configurable: true, writable: true },
   })
+  // A runtime that has its own keeps it, which is what a library that takes `window.ResizeObserver` gets elsewhere.
+  if (Reflect.get(globalThis, "ResizeObserver") === undefined) {
+    Object.defineProperty(globalThis, "ResizeObserver", { value: ResizeObserver, configurable: true, writable: true })
+  }
 }
 
 if (!isWebBuild) install()

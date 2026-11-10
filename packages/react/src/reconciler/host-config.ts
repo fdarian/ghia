@@ -10,6 +10,7 @@ import type { HostEventHandler } from "@ghia/native/host"
 import {
   assertSvgPlacement,
   createElementMethods,
+  defineDomMembers,
   defineScrollMembers,
   blurHostElement,
   createWebviewMethods,
@@ -60,11 +61,7 @@ import type {
   WebviewInstance,
 } from "../types/host.js"
 import { syncMotionBindings } from "./motion-bindings.js"
-import {
-  registerEventListener,
-  unregisterEventListener,
-  unregisterEventHandlers,
-} from "./event-registry.js"
+import { listenersOf, unregisterEventHandlers } from "./event-registry.js"
 
 let currentUpdatePriority = NoEventPriority
 
@@ -98,6 +95,11 @@ function attachHostMethods(instance: Instance): PublicInstance {
   defineScrollMembers(instance, () => ({
     renderer: container.nativeRenderer,
     id: instance.id,
+  }))
+  defineDomMembers(instance, () => ({
+    listeners: listenersOf(instance),
+    connected: container.instances.get(instance.id) === instance,
+    prop: (name) => (instance.props as Record<string, unknown>)[name],
   }))
   Object.assign(instance, createElementMethods(container.nativeRenderer, instance.id))
   instance.focus = (options) => focusHostElement(container.nativeRenderer, instance.id, options)
@@ -199,21 +201,19 @@ function assertPlacement(parent: Instance | undefined, child: Instance | TextIns
 
 // ── Event wiring helpers ─────────────────────────────────────────────
 
-function syncEventListeners(container: Container, id: number, type: ElementType, props: Props): void {
-  const record = props as Record<string, unknown>
-  if (type === "nativeview") syncNativeviewProps(container, id, record)
+function syncEventListeners(container: Container, instance: Instance): void {
+  const listeners = listenersOf(instance)
+  listeners.attach({
+    eventHandlers: container.eventHandlers,
+    renderer: container.renderer,
+    elementId: instance.id,
+  })
+  if (instance.type === "nativeview") syncNativeviewProps(container, instance.id, instance.props as Record<string, unknown>)
+  const record = instance.props as Record<string, unknown>
   for (const propName in record) {
     const eventType = EVENT_TYPE_BY_PROP.get(propName)
     const handler = record[propName]
-    if (eventType && handler) {
-      registerEventListener(
-        container.eventHandlers,
-        container.renderer,
-        id,
-        eventType,
-        handler as HostEventHandler
-      )
-    }
+    if (eventType && handler) listeners.setProp(eventType, handler as HostEventHandler)
   }
 }
 
@@ -247,12 +247,8 @@ function diffNativeviewProps(
  * Walks the props an element has, not every event GPUIX knows: this runs for
  * each re-rendered host element, and most have a few props and no handlers.
  */
-function diffEventListeners(
-  container: Container,
-  id: number,
-  oldProps: Props,
-  newProps: Props
-): void {
+function diffEventListeners(instance: Instance, oldProps: Props, newProps: Props): void {
+  const listeners = listenersOf(instance)
   const previous = oldProps as Record<string, unknown>
   const next = newProps as Record<string, unknown>
   for (const propName in next) {
@@ -261,23 +257,15 @@ function diffEventListeners(
     const oldHandler = previous[propName]
     const newHandler = next[propName]
     if (oldHandler && !newHandler) {
-      unregisterEventListener(container.eventHandlers, container.renderer, id, eventType)
+      listeners.setProp(eventType, undefined)
     } else if (newHandler && newHandler !== oldHandler) {
-      registerEventListener(
-        container.eventHandlers,
-        container.renderer,
-        id,
-        eventType,
-        newHandler as HostEventHandler
-      )
+      listeners.setProp(eventType, newHandler as HostEventHandler)
     }
   }
   for (const propName in previous) {
     if (propName in next) continue
     const eventType = EVENT_TYPE_BY_PROP.get(propName)
-    if (eventType && previous[propName]) {
-      unregisterEventListener(container.eventHandlers, container.renderer, id, eventType)
-    }
+    if (eventType && previous[propName]) listeners.setProp(eventType, undefined)
   }
 }
 
@@ -391,7 +379,7 @@ function materialize(node: HostNode): HostNodeState {
     if (state.hidden) renderer.setStyle(node.id, hiddenStyle(node.props.style))
     else sendStyle(renderer, node.id, node.props)
     syncMotionBindings(state.container, node.id, node.props.style, node.type)
-    syncEventListeners(state.container, node.id, node.type, node.props)
+    syncEventListeners(state.container, node)
     syncCustomProps(renderer, node.id, node.type, node.props)
   } else {
     renderer.createElement(node.id, "text")
@@ -617,7 +605,7 @@ export const hostConfig = {
       )
       syncMotionBindings(container, instance.id, newProps.style, instance.type)
     }
-    diffEventListeners(container, instance.id, oldProps, newProps)
+    diffEventListeners(instance, oldProps, newProps)
     if (instance.type === "nativeview") {
       diffNativeviewProps(container, instance.id, oldProps, newProps)
     }

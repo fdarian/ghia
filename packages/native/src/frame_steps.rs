@@ -8,6 +8,11 @@
 //! in a browser, where the `scroll` event of a wheel or a `scrollTo` runs in the rendering steps
 //! before the frame that shows it.
 //!
+//! Then, if JS asked for `requestAnimationFrame` callbacks (`AnimationFrame`), they run, after the
+//! scroll events as in the HTML steps. A request also schedules the steps for the next frame
+//! (`Window::on_next_frame`), so a window that nothing else draws still runs them. What a callback
+//! requests waits for the frame after, because the request is cleared before JS is called.
+//!
 //! The paint only registers a scroller and checks that it painted the offset it reported. An offset
 //! that layout moved (a clamp, anchoring) asks for the next frame, whose steps report it.
 
@@ -137,6 +142,27 @@ impl ScrollReports {
     }
 }
 
+/// Whether JS has `requestAnimationFrame` callbacks waiting for this window's next frame.
+#[derive(Default)]
+pub(crate) struct AnimationFrame {
+    requested: bool,
+}
+
+impl AnimationFrame {
+    /// True when the request is new, so a frame has to be scheduled for it.
+    pub(crate) fn request(&mut self) -> bool {
+        !std::mem::replace(&mut self.requested, true)
+    }
+
+    fn take(&mut self) -> bool {
+        std::mem::replace(&mut self.requested, false)
+    }
+}
+
+/// The event type JS runs the callbacks for. It goes the way of any sync event, so it is a call
+/// from native into JS made with the window stashed, which a callback that writes needs.
+const ANIMATION_FRAME_EVENT: &str = "animationframe";
+
 /// The steps a window runs before each draw. `now` is the clock the view's frames sample.
 pub(crate) fn steps(
     reports: SharedPaintReports,
@@ -152,6 +178,7 @@ pub(crate) fn steps(
         crate::renderer::settle_scroll_writes();
         crate::scroll::advance_animations(now());
         report_scrolls(&reports, &callback, window, cx);
+        run_animation_frame(&reports, &callback, window, cx);
     })
 }
 
@@ -173,6 +200,30 @@ fn report_scrolls(
     }
 }
 
+fn run_animation_frame(
+    reports: &SharedPaintReports,
+    callback: &Option<EventCallback>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if !reports.borrow_mut().animation_frame.take() {
+        return;
+    }
+    sync_dispatch::emit_full(window, cx, callback, 0, ANIMATION_FRAME_EVENT, |_| {});
+}
+
+/// Asks for the steps of the next frame to run the animation frame callbacks: the next frame
+/// is one even when nothing else asks for a draw.
+pub(crate) fn request_animation_frame(
+    reports: &SharedPaintReports,
+    steps: Rc<dyn Fn(&mut Window, &mut App)>,
+    window: &mut Window,
+) {
+    if reports.borrow_mut().animation_frame.request() {
+        window.on_next_frame(move |window, cx| steps(window, cx));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +233,16 @@ mod tests {
         let handle = ScrollHandle::new();
         handle.set_offset(point(px(0.0), px(y)));
         handle
+    }
+
+    #[test]
+    fn an_animation_frame_is_requested_once_until_it_runs() {
+        let mut frame = AnimationFrame::default();
+        assert!(frame.request(), "the first request schedules a frame");
+        assert!(!frame.request(), "a second one waits for the same frame");
+        assert!(frame.take());
+        assert!(!frame.take());
+        assert!(frame.request(), "a request made while the callbacks ran needs the next frame");
     }
 
     #[test]

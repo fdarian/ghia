@@ -32,6 +32,9 @@ export type {
 }
 
 export * from "./events/listeners.js"
+export * from "./events/element-listeners.js"
+export * from "./dom-members.js"
+export * from "./animation-frame.js"
 export * from "./events/types.js"
 export type { AriaProps }
 export * from "./clipboard.js"
@@ -2780,6 +2783,7 @@ export type NativeRenderer = MutationHost &
       | "blur"
       | "setWindowKeyEvents"
       | "setWindowEventListeners"
+      | "requestAnimationFrame"
       | "setSyncEventHandler"
       | "setWindowSelectionChange"
       | "setWindowAppearanceChange"

@@ -4083,6 +4083,24 @@ impl GpuixRenderer {
         self.pointer_requests.set_window_events(types);
     }
 
+    /// `requestAnimationFrame`: asks the window for its next frame's steps, which send JS the
+    /// `animationframe` event that runs the callbacks (see `frame_steps`). True when the window
+    /// took the request; false while it is not open, in which case JS asks again once it is.
+    #[napi]
+    pub fn request_animation_frame(&self) -> Result<bool> {
+        #[cfg(target_os = "macos")]
+        {
+            if !*self.initialized.lock().unwrap() {
+                return Ok(false);
+            }
+            update_window_or_defer(|view, window, _cx| view.request_animation_frame(window))?;
+            return Ok(true);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason("requestAnimationFrame needs macOS"))
+    }
+
     /// Capture the mouse for `element_id`. The request is recorded before this
     /// returns, so `hasPointerCapture` answers true and the next pointer input
     /// is already aimed at the element; that input fires `gotpointercapture`
@@ -6149,6 +6167,8 @@ pub(crate) struct PaintReports {
     /// The scrollers with an `onScroll` listener and what each last reported: the frame steps
     /// (`frame_steps`) emit the events.
     pub(crate) scrolls: crate::frame_steps::ScrollReports,
+    /// Whether `requestAnimationFrame` callbacks wait for the next frame's steps.
+    pub(crate) animation_frame: crate::frame_steps::AnimationFrame,
     /// What `onLayout`, `ResizeObserver` and `IntersectionObserver` last saw.
     pub(crate) observers: crate::observers::ObserverReports,
 }
@@ -9860,6 +9880,21 @@ impl GpuixView {
         });
     }
 
+    /// The steps of "update the rendering" this window runs before a draw, see `frame_steps`.
+    fn frame_steps(&self) -> Rc<dyn Fn(&mut gpui::Window, &mut gpui::App)> {
+        let clock = self.clock.clone();
+        crate::frame_steps::steps(
+            self.paint_reports.clone(),
+            self.event_callback.clone(),
+            move || clock.now(),
+        )
+    }
+
+    /// `requestAnimationFrame`: the next frame's steps run the callbacks JS holds.
+    pub(crate) fn request_animation_frame(&mut self, window: &mut gpui::Window) {
+        crate::frame_steps::request_animation_frame(&self.paint_reports, self.frame_steps(), window);
+    }
+
     /// Whether nothing is drawn of the motion at `id`: its element is culled and dormant, or it
     /// has no box (`display: none`, or the content of a `content-visibility` ancestor that skips).
     pub(crate) fn motion_sleeps(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
@@ -9952,14 +9987,7 @@ impl gpui::Render for GpuixView {
             // there is no commit to survey that the update has not just made.
             move |_: &gpui::Window| tree.try_lock().is_ok_and(|tree| flips.wants_survey(tree.revision()))
         })));
-        window.set_frame_steps(Some(crate::frame_steps::steps(
-            self.paint_reports.clone(),
-            self.event_callback.clone(),
-            {
-                let clock = self.clock.clone();
-                move || clock.now()
-            },
-        )));
+        window.set_frame_steps(Some(self.frame_steps()));
         window.set_scroll_patch_registries(verifies.then(|| {
             let window_id = window.window_handle().window_id();
             let tapes = self.tapes.clone();
