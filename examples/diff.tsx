@@ -9,8 +9,8 @@
  *
  * Key differences from opentui version:
  *   opentui <box>        → GPUIX <div>
- *   opentui <span fg>    → GPUIX <text style={{ color }}>  (inside flex-row div)
- *   opentui <span bg>    → GPUIX <text style={{ backgroundColor }}>
+ *   opentui <span fg>    → GPUIX <div style={{ color }}>  (inside flex-row div)
+ *   opentui <span bg>    → GPUIX <div style={{ backgroundColor }}>
  *   opentui RGBA.fromInts → hex string "#RRGGBBAA"
  *   opentui onMouse       → GPUIX onClick
  *
@@ -174,7 +174,7 @@ function calculateSimilarity(str1: string, str2: string): number {
 }
 
 // ── Token rendering ──────────────────────────────────────────────────
-// In GPUIX, each token is a <text> with its own color inside a flex-row <div>.
+// In GPUIX, each token is a <div> with its own color inside a flex-row <div>.
 // This replaces opentui's <text><span fg={color}>...</span></text> pattern.
 
 function HighlightedTokens({ tokens }: { tokens: ThemedToken[] }) {

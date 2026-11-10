@@ -331,7 +331,7 @@ describeNative("the accessibility tree of skipped content", { timeout: 120_000 }
     }
   })
 
-  it("reads out a skipped <text>", () => {
+  it("reads out a skipped element holding text", () => {
     const { root, renderer } = mount(
       <Page
         entry={(index) => (

@@ -503,8 +503,7 @@ Nothing is built or drawn for an animation nobody sees.
   which asks every sleeper again. A frame that does not record (retention off or resting, planning off) lets them all go, and a
   destroyed element is let go by `prune`. What `holds` reads of the tree (a span, an SVG element, a `layout` element, a
   `motionValues` binding that moves a box, the shapes an `<svg>` draws) is `PaintStatics`, kept per element while its
-  `subtree_revision` and its parent are the same and pruned when the map doubles; a `<text>` is read every time, since
-  what makes it an SVG element (an `<svg>` above it) is above its parent.
+  `subtree_revision` and its parent are the same and pruned when the map doubles.
 - **Their clocks advance without a build.** `CssAnimations::advance_clock(id, now)` and the same for transitions move the runs to
   `now` as the first half of a frame does (`Run::tick`, shared with `advance`), report iterations, ends and finishes, and note
   whether a run still moves. A dormant run is not ticked until something can be due: `Run::quiet_until` is the next of the start,

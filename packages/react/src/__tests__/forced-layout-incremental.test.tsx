@@ -303,7 +303,7 @@ describeNative("a forced read after a change that moves boxes", { timeout: 30_00
 /** The probe box, its row, its entry, the list and the page: the elements from the changed box to the window's root. */
 const CHAIN = 5
 
-/** An entry of ten elements, nine `div` and one `text`: the shape of a row of a long list. The first
+/** An entry of ten `div` (the line of text is a `#text` node, which is not an element): the shape of a row of a long list. The first
  *  entry's box is the only one that ever changes. */
 function Entry(props: { probe: number | null; icon?: boolean }) {
   return (

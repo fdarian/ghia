@@ -2,8 +2,8 @@
 /// stable GPUI element id and record its painted bounds.
 ///
 /// The gaps these cover were all invisible from JS: a prop type-checked, the
-/// listener was registered, and nothing ever happened. `<text onClick>` was
-/// dropped by a separate text builder, `hover` / `active` were parsed for every
+/// listener was registered, and nothing ever happened. `onClick` on an element
+/// holding a string was dropped by a separate text builder, `hover` / `active` were parsed for every
 /// element but only consumed by `<div>`, and `<img>` / `<svg>` / `<anchored>`
 /// appeared in the automation tree with no box to click.
 
@@ -33,14 +33,14 @@ function bounds(renderer: TestRoot["renderer"], testId: string) {
   return rect!
 }
 
-describeNative("text element identity", () => {
+describeNative("identity of an element holding text", () => {
   let testRoot: TestRoot
 
   beforeEach(() => {
     testRoot = createTestRoot()
   })
 
-  it("fires onClick on a <text> node", () => {
+  it("fires onClick on an element holding text", () => {
     function Clickable() {
       const [count, setCount] = useState(0)
       return (
@@ -60,7 +60,7 @@ describeNative("text element identity", () => {
     expect(testRoot.renderer.getAllText()).toEqual(["clicks: 1"])
   })
 
-  it("fires onMouseEnter and onMouseLeave on a <text> node", () => {
+  it("fires onMouseEnter and onMouseLeave on an element holding text", () => {
     function Hoverable() {
       const [hovered, setHovered] = useState(false)
       return (
@@ -84,7 +84,7 @@ describeNative("text element identity", () => {
     expect(testRoot.renderer.getAllText()).toEqual(["idle"])
   })
 
-  // A `<text>` runs through the same builder as `<div>`, so it is the target of
+  // An element holding a string is the target of
   // a click where it paints, and the click bubbles to its ancestors. An
   // unrelated element under it is not hit, as in HTML.
   it("is the target of a click and hides an unrelated element under it", () => {
@@ -122,7 +122,7 @@ describeNative("text element identity", () => {
     expect(ancestor).toHaveBeenCalledTimes(2)
   })
 
-  it("paints the hover style declared on a <text> node", () => {
+  it("paints the hover style declared on an element holding text", () => {
     testRoot.render(
       <div style={{ width: "100%", height: "100%", backgroundColor: "#11111b" }}>
         <div
