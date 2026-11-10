@@ -214,53 +214,55 @@ describe("document.adoptedStyleSheets", () => {
   })
 
   it("sends the text and the list to a renderer, and nothing when nothing changed", () => {
-    const { sent } = recordingRenderer()
+    const recording = recordingRenderer()
     const sheet = new CSSStyleSheet()
     sheet.replaceSync(".a { top: 0 }")
     document.adoptedStyleSheets = [sheet]
-    expect(sent()).toEqual([
+    expect(recording.sent()).toEqual([
       ["setStyleSheet", sheet.id, ".a { top: 0 }"],
       ["setAdoptedStyleSheets", [sheet.id]],
     ])
     document.adoptedStyleSheets = [sheet]
-    expect(sent()).toEqual([])
+    expect(recording.sent()).toEqual([])
   })
 
   it("takes effect through push, splice, unshift, index and length assignment", () => {
-    const { sent } = recordingRenderer()
-    const [a, b, c] = [new CSSStyleSheet(), new CSSStyleSheet(), new CSSStyleSheet()]
+    const recording = recordingRenderer()
+    const a = new CSSStyleSheet()
+    const b = new CSSStyleSheet()
+    const c = new CSSStyleSheet()
     const list = document.adoptedStyleSheets
-    list.push(a!)
-    expect(sent().at(-1)).toEqual(["setAdoptedStyleSheets", [a!.id]])
-    list.push(b!, c!)
-    expect(sent()).toEqual([
-      ["setStyleSheet", b!.id, ""],
-      ["setStyleSheet", c!.id, ""],
-      ["setAdoptedStyleSheets", [a!.id, b!.id, c!.id]],
+    list.push(a)
+    expect(recording.sent().at(-1)).toEqual(["setAdoptedStyleSheets", [a.id]])
+    list.push(b, c)
+    expect(recording.sent()).toEqual([
+      ["setStyleSheet", b.id, ""],
+      ["setStyleSheet", c.id, ""],
+      ["setAdoptedStyleSheets", [a.id, b.id, c.id]],
     ])
     list.splice(1, 1)
-    expect(sent()).toEqual([
-      ["setAdoptedStyleSheets", [a!.id, c!.id]],
-      ["setStyleSheet", b!.id, null],
+    expect(recording.sent()).toEqual([
+      ["setAdoptedStyleSheets", [a.id, c.id]],
+      ["setStyleSheet", b.id, null],
     ])
-    list.unshift(b!)
-    expect(sent().at(-1)).toEqual(["setAdoptedStyleSheets", [b!.id, a!.id, c!.id]])
-    list[0] = c!
+    list.unshift(b)
+    expect(recording.sent().at(-1)).toEqual(["setAdoptedStyleSheets", [b.id, a.id, c.id]])
+    list[0] = c
     expect(list.length).toBe(3)
-    expect(sent()).toEqual([
-      ["setAdoptedStyleSheets", [a!.id, c!.id]],
-      ["setStyleSheet", b!.id, null],
+    expect(recording.sent()).toEqual([
+      ["setAdoptedStyleSheets", [a.id, c.id]],
+      ["setStyleSheet", b.id, null],
     ])
     list.length = 1
-    expect(sent()).toEqual([
-      ["setAdoptedStyleSheets", [c!.id]],
-      ["setStyleSheet", a!.id, null],
+    expect(recording.sent()).toEqual([
+      ["setAdoptedStyleSheets", [c.id]],
+      ["setStyleSheet", a.id, null],
     ])
     list.reverse()
     list.pop()
-    expect(sent()).toEqual([
+    expect(recording.sent()).toEqual([
       ["setAdoptedStyleSheets", []],
-      ["setStyleSheet", c!.id, null],
+      ["setStyleSheet", c.id, null],
     ])
   })
 
@@ -300,7 +302,8 @@ describe("document.adoptedStyleSheets", () => {
   })
 
   it("lets only the last index be deleted, so there are no holes", () => {
-    const [a, b] = [new CSSStyleSheet(), new CSSStyleSheet()]
+    const a = new CSSStyleSheet()
+    const b = new CSSStyleSheet()
     document.adoptedStyleSheets = [a, b]
     expect(() => {
       "use strict"
@@ -311,35 +314,35 @@ describe("document.adoptedStyleSheets", () => {
   })
 
   it("sends every change of an adopted sheet's text, whole, and none for a sheet not adopted", () => {
-    const { sent } = recordingRenderer()
+    const recording = recordingRenderer()
     const sheet = new CSSStyleSheet()
     sheet.replaceSync(".a { top: 0 }")
-    expect(sent()).toEqual([])
+    expect(recording.sent()).toEqual([])
     document.adoptedStyleSheets = [sheet]
-    sent()
+    recording.sent()
     sheet.insertRule(".b { left: 1px }")
-    expect(sent()).toEqual([["setStyleSheet", sheet.id, ".b { left: 1px }\n.a { top: 0 }"]])
+    expect(recording.sent()).toEqual([["setStyleSheet", sheet.id, ".b { left: 1px }\n.a { top: 0 }"]])
     sheet.deleteRule(1)
-    expect(sent()).toEqual([["setStyleSheet", sheet.id, ".b { left: 1px }"]])
+    expect(recording.sent()).toEqual([["setStyleSheet", sheet.id, ".b { left: 1px }"]])
     void sheet.replace(".c { top: 3px }")
-    expect(sent()).toEqual([])
+    expect(recording.sent()).toEqual([])
   })
 
   it("deletes a sheet natively once it is not adopted, and sends its text again when it comes back", () => {
-    const { sent } = recordingRenderer()
+    const recording = recordingRenderer()
     const sheet = new CSSStyleSheet()
     sheet.replaceSync(".a { top: 0 }")
     document.adoptedStyleSheets = [sheet]
-    sent()
+    recording.sent()
     document.adoptedStyleSheets = []
-    expect(sent()).toEqual([
+    expect(recording.sent()).toEqual([
       ["setAdoptedStyleSheets", []],
       ["setStyleSheet", sheet.id, null],
     ])
     sheet.replaceSync(".a { top: 5px }")
-    expect(sent()).toEqual([])
+    expect(recording.sent()).toEqual([])
     document.adoptedStyleSheets = [sheet]
-    expect(sent()).toEqual([
+    expect(recording.sent()).toEqual([
       ["setStyleSheet", sheet.id, ".a { top: 5px }"],
       ["setAdoptedStyleSheets", [sheet.id]],
     ])
@@ -423,25 +426,26 @@ describe("document.adoptedStyleSheets", () => {
   })
 
   it("counts a sheet listed twice once, at its last place", () => {
-    const { sent } = recordingRenderer()
-    const [a, b] = [new CSSStyleSheet(), new CSSStyleSheet()]
+    const recording = recordingRenderer()
+    const a = new CSSStyleSheet()
+    const b = new CSSStyleSheet()
     document.adoptedStyleSheets = [a, b, a]
-    expect(sent().at(-1)).toEqual(["setAdoptedStyleSheets", [b.id, a.id]])
+    expect(recording.sent().at(-1)).toEqual(["setAdoptedStyleSheets", [b.id, a.id]])
   })
 
   it("leaves a disabled sheet out until it is enabled", () => {
-    const { sent } = recordingRenderer()
+    const recording = recordingRenderer()
     const sheet = new CSSStyleSheet({ disabled: true })
     sheet.replaceSync(".a { top: 0 }")
     document.adoptedStyleSheets = [sheet]
-    expect(sent().filter((op) => op[0] === "setStyleSheet")).toEqual([])
+    expect(recording.sent().filter((op) => op[0] === "setStyleSheet")).toEqual([])
     sheet.disabled = false
-    expect(sent()).toEqual([
+    expect(recording.sent()).toEqual([
       ["setStyleSheet", sheet.id, ".a { top: 0 }"],
       ["setAdoptedStyleSheets", [sheet.id]],
     ])
     sheet.disabled = true
-    expect(sent()).toEqual([
+    expect(recording.sent()).toEqual([
       ["setAdoptedStyleSheets", []],
       ["setStyleSheet", sheet.id, null],
     ])

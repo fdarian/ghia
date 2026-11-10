@@ -169,8 +169,7 @@ export class CSSStyleSheet implements SyncedSheet {
       )
     }
     const rules = [...this.rules]
-    const [removed] = rules.splice(position, 1)
-    removed![SHEET_OF] = null
+    rules.splice(position, 1)
     this.setRules(rules)
   }
 
