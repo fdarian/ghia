@@ -1,5 +1,3 @@
-import { reportUncaught } from "./events/dispatch.js"
-
 /** A window that can be asked for a frame: a renderer with a native window behind it. */
 export interface FrameSource {
   /** True when the window will run the callbacks in its next frame, false while it has no window yet. */
@@ -38,7 +36,12 @@ function frames(): Frames {
 function ask(source: FrameSource): void {
   const state = frames()
   if (state.asked.has(source) || !source.requestAnimationFrame) return
-  if (source.requestAnimationFrame()) state.asked.add(source)
+  try {
+    if (source.requestAnimationFrame()) state.asked.add(source)
+  } catch {
+    // `requestAnimationFrame` must not throw, as the DOM's does not. The callback stays queued and
+    // runs in the next frame steps of any window, or when a window is attached or opened.
+  }
 }
 
 /**
@@ -78,18 +81,22 @@ export function cancelAnimationFrame(handle: number): void {
 }
 
 /**
- * The frame steps of `source`'s window ran: calls the callbacks, which take the time of the frame,
- * in the order they were requested. The callbacks of a frame are the ones requested before it; what
- * they request waits for the next. With several windows the first whose steps run takes them all.
+ * The frame steps of `source`'s window ran at `time`, the clock they ran at: calls the callbacks with
+ * it, in the order they were requested, and gives an error one throws to `report`. The callbacks of
+ * a frame are the ones requested before it; what they request waits for the next. With several
+ * windows the first whose steps run takes them all.
  */
-export function runAnimationFrame(source: FrameSource): void {
+export function runAnimationFrame(
+  source: FrameSource,
+  time: number,
+  report: (error: unknown) => void
+): void {
   const state = frames()
   state.asked.delete(source)
   if (state.callbacks.size === 0) return
   const batch = state.callbacks
   state.callbacks = new Map()
   state.running = batch
-  const time = performance.now()
   try {
     for (const [handle, callback] of [...batch]) {
       if (!batch.has(handle)) continue
@@ -97,7 +104,7 @@ export function runAnimationFrame(source: FrameSource): void {
       try {
         callback(time)
       } catch (error) {
-        reportUncaught(error)
+        report(error)
       }
     }
   } finally {

@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { describe, expect, it } from "vitest"
 import type { ScrollEvent } from "@ghia/native/host"
+import type { EventPayload } from "@ghia/native"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -161,6 +162,33 @@ describeNative("the frame steps of a scroll", () => {
       expect(events).toEqual([300, 0])
     } finally {
       unmount()
+    }
+  })
+
+  it("flush what a synchronously dispatched handler changed, through the handler a live window installs", () => {
+    function Clicks() {
+      const [count, setCount] = useState(0)
+      return (
+        <div testId="button" style={{ width: 80, height: 20 }} onClick={() => setCount(count + 1)}>
+          {`clicks ${count}`}
+        </div>
+      )
+    }
+    const root = createTestRoot()
+    const renderer = root.renderer
+    try {
+      renderer.clockPause()
+      renderer.setInlineDraws(false)
+      root.render(<Clicks />)
+      renderer.drawFrame()
+      const id = renderer.findByTestId("button")!.id
+      // No flush and no await: the dispatch is all that runs between the event and the frame.
+      const sync = renderer as unknown as { dispatchSyncEvent(event: EventPayload): unknown }
+      sync.dispatchSyncEvent({ elementId: id, eventType: "click", path: [id], target: id })
+      renderer.drawFrame()
+      expect(renderer.getPaintedText()).toContain("clicks 1")
+    } finally {
+      root.unmount()
     }
   })
 })

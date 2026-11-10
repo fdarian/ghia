@@ -140,8 +140,8 @@ describeNative('@tanstack/solid-virtual list', () => {
     const app = mount(() => createComponent(MeasuredApp, { messages }))
     const renderer = app.renderer
     try {
-      // The `ref` measures in a microtask, the ResizeObserver reports in the frame steps, and the sizes it
-      // measured move the rows below in the frame after.
+      // The `ref` measures in a microtask, the ResizeObserver reports in the sweep after the draw, and the
+      // sizes it measured move the rows below in the frame after.
       for (let frame = 0; frame < 6; frame++) {
         await Promise.resolve()
         renderer.dispatchNativeEvents()
