@@ -291,8 +291,9 @@ export function isUniversalProp(name: string): boolean {
  * element with SVG attributes, so it forwards those too.
  */
 export function forwardsCustomProp(type: string, name: string): boolean {
-  // `class` reaches native through `setAttribute` alone: nothing in native reads it as a prop.
-  if (name === "class" || name === "className") return false
+  // `class` and `data-*` reach native through `setAttribute` alone: nothing in native reads them as props, and a copy of
+  // each as a custom prop would cost a second op per element for a value the attribute store already holds.
+  if (name === "class" || name === "className" || name.startsWith("data-")) return false
   return (
     !BUILT_IN_TYPES.has(type) ||
     isUniversalProp(name) ||
