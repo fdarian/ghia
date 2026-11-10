@@ -8650,8 +8650,13 @@ A key that starts with `--` is a CSS custom property, in a style, a state style 
   covering shorthand or a lower layer sets, though: `{ padding: 8, paddingTop: 'var(--missing)' }` keeps the top padding
   at 8, where CSS gives 0 ([deviations](fork/deviations.md#layout)). Written order decides between
   a `var()` declaration and the plain ones around it, as in CSS: `{ borderWidth: 2, border: 'var(--b)' }` has no
-  `borderWidth`, `{ border: 'var(--b)', borderWidth: 2 }` has. A state style that declares the property wins over a `var()` of
-  the base, as a plain value does. Only a string is substituted: a number is not a `var()`.
+  `borderWidth`, `{ border: 'var(--b)', borderWidth: 2 }` has, and `{ borderWidth: 'var(--w)', borderTop: '1px solid' }` gives the
+  top side `1px`, the other three `--w`, like the literal. An invalid declaration written after a `var()` one covers nothing:
+  `{ paddingTop: 'var(--p)', padding: '1px bogus' }` keeps the top padding. A state style that declares the property wins over
+  a `var()` of the base, as a plain value does, and a side shorthand of the state (`hover: { borderTop }`) wins over a
+  base `borderWidth: 'var(--w)'` on its side only. Only a string is substituted: a number is not a `var()`. What it
+  substitutes to is a number only for a property whose value is a `<number>` (`opacity`, `zIndex`, `flexGrow`, `order`);
+  `padding: 'var(--n)'` with `--n: 8` is dropped, as `padding: '8'` is.
 - **A normal property in `style()`** (`style(color: red)`, `style(display: block)`) is
   unknown, as in Chrome, which supports custom properties only.
 

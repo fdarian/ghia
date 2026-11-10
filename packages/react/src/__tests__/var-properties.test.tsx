@@ -422,7 +422,7 @@ describeNative("a custom property declared in a focus state", () => {
 })
 
 describeNative("a var() declaration against the plain ones written around it", () => {
-  const custom = { "--w": "4px", "--n": "none", "--p": "6px", "--line": "blue", "--b": "2px solid red" }
+  const custom = { "--w": "4px", "--n": "none", "--p": "6px", "--line": "blue", "--b": "2px solid red", "--num": "8" }
 
   const substituted = (value: unknown): unknown => {
     if (typeof value === "string") return value.replace(/var\((--[\w-]+)\)/g, (_, name) => custom[name])
@@ -465,6 +465,8 @@ describeNative("a var() declaration against the plain ones written around it", (
     ["a held longhand before an invalid state shorthand", { paddingTop: "var(--p)", hover: { padding: "1px bogus" } }],
     ["a held longhand before a valid shorthand", { paddingTop: "var(--p)", padding: 2 }],
     ["a held shorthand before a longhand", { padding: "var(--p)", paddingLeft: 3 }],
+    ["a bare number in a padding", { padding: "var(--num)" }],
+    ["a bare number in a gap", { display: "flex", gap: "var(--num)" }],
     ["a state side shorthand over an all-sides width", { borderWidth: "var(--w)", borderStyle: "solid", hover: { borderTop: "1px solid" } }],
     ["a state borderInline over an all-sides width", { borderWidth: "var(--w)", borderStyle: "solid", hover: { borderInline: "1px solid" } }],
     ["a state all-sides color over a held side", { borderTop: "var(--b)", hover: { borderColor: "green" } }],
@@ -478,6 +480,11 @@ describeNative("a var() declaration against the plain ones written around it", (
       }
     }, SLOW)
   }
+
+  it("drops a bare number from a length, as it does a plain one", () => {
+    expect(measure({ padding: "var(--num)" }, false).slice(2, 4)).toEqual([5, 5])
+    expect(measure({ padding: "8" }, false).slice(2, 4)).toEqual([5, 5])
+  }, SLOW)
 
   it("keeps the longhand that the literal keeps", () => {
     expect(measure({ paddingTop: "var(--p)", padding: "1px bogus" }, false)[3]).toBe(5 + 6)
