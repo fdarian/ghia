@@ -75,7 +75,7 @@ pub(crate) fn read(
     let parent = enter_ancestors(ctx, &chain);
     let style = if pseudo { StyleDesc::default() } else { crate::renderer::style_at_read(ctx, window, element) };
     let own = ctx.inherited.clone().descend(Some(&style), element.has_inert_prop());
-    let vars = crate::css::transform::resolve_vars(&style, &own.custom);
+    let vars = crate::css::var_substitution::resolve(&style, &own.custom);
     let style = vars.as_ref().unwrap_or(&style);
     let rtl = own.direction.direction.is_rtl();
     let mirrored = rtl.then(|| style.mirrored_inline_pairs()).flatten();
