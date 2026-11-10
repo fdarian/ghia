@@ -4953,9 +4953,27 @@ added before any root is mounted is accepted, though `width` and `height` throw 
 a `resize` event too: both are sent when the size of the window that mounted last changes
 (not for a change of OS preference), `visualViewport` first, from one subscription that
 exists only while either has a listener, and a listener added before any root is mounted
-starts to hear the first one that is. The event's `target` is the global `window`
-(`currentTarget` is the `window` object the adapters export, see
-[deviations](fork/deviations.md#events-and-input)) and `visualViewport` for its own.
+starts to hear the first one that is. The event's `target` and `currentTarget` are the
+global `window`, and `visualViewport` for its own.
+`MutationObserver` and `MutationRecord` are globals too, with the standard's semantics.
+`observe(node, { childList, attributes, characterData, subtree, attributeOldValue,
+characterDataOldValue, attributeFilter })` throws a `TypeError` for the option sets the standard
+rejects (none of the three kinds, `attributeOldValue` or `attributeFilter` with `attributes: false`),
+and observing the same node again replaces its options. Records go to the observer in one
+microtask per batch, in the order the observers were made, with `type`, `target`, `addedNodes`,
+`removedNodes`, `previousSibling`, `nextSibling`, `attributeName`, `attributeNamespace` (`null`)
+and `oldValue`; `takeRecords()` empties the queue and `disconnect()` drops it. The adapters report
+the changes they make to their tree: a node placed or removed (a move is a removal, then an
+insertion), a text change (`characterData`) and a prop change. An attribute is what `getAttribute`
+reads, so a record is made only when that string changed, with the old string as `oldValue`:
+`className` is the `class` attribute, and a handler, an object, `style` and `children` are no
+attribute and make no record. `html`, `head` and `body` are in the tree, so
+`observe(document.body, { childList: true, subtree: true })` sees the app's nodes. A subtree
+observer keeps hearing of changes inside a node that was removed from the subtree until its next
+delivery, as in the standard. With no observer alive each hook is one integer check and no node
+gets a field. Code that changes a host tree itself calls `queueChildListMutation`,
+`queueAttributeMutation` or `queueCharacterDataMutation` from `@ghia/native/host`
+([deviations](fork/deviations.md#observers-and-content-visibility) for what is not reported).
 Nothing else is installed: `location`, `localStorage` and the rest
 are missing, so reading them throws a `ReferenceError` or gives `undefined`. The browser (wasm) build runs in a real page and installs nothing.
 Installing twice is harmless. `isWebBuild`, exported by the adapters and

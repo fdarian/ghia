@@ -48,8 +48,10 @@ describe("the resize event", () => {
   it("sends window a resize, target the window, when the window size changes", () => {
     const fake = mountWindow()
     const seen: Array<{ type: string; target: unknown; width: number }> = []
-    const listener = (event: { type: string; target: unknown }) =>
+    const listener = (event: { type: string; target: unknown; currentTarget: unknown }) => {
+      expect(event.currentTarget).toBe(window)
       seen.push({ type: event.type, target: event.target, width: window.innerWidth })
+    }
     window.addEventListener("resize", listener)
     expect(fake.mediaChangeCalls).toEqual([true])
     fake.emitMediaChange()

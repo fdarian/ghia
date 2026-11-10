@@ -401,7 +401,7 @@ describe("shared host runtime", () => {
     }
     expect(seen).toEqual([
       ["pointerlockchange", document, document],
-      ["pointerlockerror", document, window],
+      ["pointerlockerror", document, globalThis],
     ])
   })
 

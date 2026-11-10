@@ -404,7 +404,8 @@ export function subscribeWindowEventTypes(listener: () => void): () => void {
   }
 }
 
-export const window = new GpuixEventTarget(notifyTypeSubscribers)
+/** Its listeners see the global object, which `dom-globals` installs as `window`, as `currentTarget`. */
+export const window = new GpuixEventTarget(notifyTypeSubscribers, globalThis)
 export const document = new GpuixDocument(notifyTypeSubscribers)
 registerDocument(document)
 
