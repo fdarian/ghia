@@ -5,7 +5,7 @@
 //! written order (`css::covers` drops the longhands written before a shorthand, so the order is
 //! part of the meaning), judges each declaration alone with the same check `intern` runs, and
 //! parses the declarations that passed. Web code hands over values a CSS engine would ignore
-//! (`border: 0` as a number, `height: "inherit"`, `width: "var(--anchor-width)"`), and one of them
+//! (`border: 0` as a number, `height: "inherit"`, `width: "wide"`), and one of them
 //! must not take down the app.
 //!
 //! A declaration that fails alone is:
@@ -34,7 +34,7 @@ const UNITLESS: &[&str] = &[
     "animationIterationCount", "aspectRatio", "borderImageOutset", "borderImageSlice", "borderImageWidth",
     "columnCount", "columns", "flex", "flexGrow", "flexShrink", "fontWeight", "gridArea", "gridColumn",
     "gridColumnEnd", "gridColumnStart", "gridRow", "gridRowEnd", "gridRowStart", "lineClamp", "lineHeight",
-    "opacity", "order", "orphans", "scale", "tabSize", "webkitLineClamp", "widows", "zIndex", "zoom",
+    "opacity", "order", "orphans", "scale", "tabSize", "widows", "zIndex", "zoom",
     "fillOpacity", "floodOpacity", "stopOpacity", "strokeDasharray", "strokeDashoffset", "strokeMiterlimit",
     "strokeOpacity", "strokeWidth",
 ];

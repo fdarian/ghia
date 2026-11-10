@@ -3928,7 +3928,7 @@ so search, selection and copy see `\t`, and it advances to the next tab stop.
   that holds the tab. A string is a CSS [length](#lengths) without a percentage:
   `px`, the absolute units, `em`, `rem`, `vw`, `vh`, `vmin`, `vmax` and `calc()` of
   them (`em` is the container's font size). `ch`, a percentage and a negative value
-  throw, like any style that cannot be parsed.
+  are not valid, so the `tabSize` declaration is dropped ([Invalid values](#invalid-values)).
 - The stops are measured from the start of the line of text the tab is on, not
   from the box: a newline starts a new count, and so does a soft wrap. Where a
   line breaks therefore decides where its tabs end, and a tab that pushes a word
@@ -4034,7 +4034,7 @@ a value of `whiteSpace` that wraps, and only a container sets them: a `<span>` o
   one a run of them overflows, unless `overflowWrap` cuts it.
 - `<input>` and `<textarea>` ignore both and break a long word at the edge, as a browser's
   `textarea` does.
-- A value CSS does not have throws, like any style that cannot be parsed.
+- A value CSS does not have drops the declaration ([Invalid values](#invalid-values)).
 - Text laid out by GPUI itself, as Zed does, keeps breaking such a word at the
   edge: its `TextStyle::overflow_wrap` defaults to `BreakWord`, and `Normal` is
   what Ghia sets for all of its text.
@@ -4052,7 +4052,7 @@ A hanging space at a soft wrap stays in the text, ICU4X breaks a few rare sequen
 either order (`"balance"`, `"nowrap"`, `"nowrap pretty"`). What it leaves out is the
 longhand's initial value, so `"balance"` also turns wrapping on. Of the shorthand and a
 longhand on the same element the one written later wins, and in a state style the
-shorthand resets the base's `textWrapMode` and `textWrapStyle`. A value CSS does not have throws.
+shorthand resets the base's `textWrapMode` and `textWrapStyle`. A value CSS does not have drops the declaration.
 The mode is inherited by the text of a `<span>` and can be set on one; the style is read from the
 container of the paragraph alone, as Chrome does, so a `textWrapStyle` on a `<span>` does nothing (it is
 inherited by a block inside it).
@@ -7116,7 +7116,7 @@ still drops the longhands written before it.
 - A CSS-wide keyword (`inherit`, `initial`, `unset`, `revert`, `revert-layer`) that the property does not take on its own is
   dropped. See [deviations](fork/deviations.md#layout) for where that is not what CSS does.
 - A state style (`hover`, ...) and an `@container` block are recovered the same way inside, one declaration at a time.
-- Each dropped declaration is logged once as a warning, by its property and value.
+- A dropped declaration is silent, as in a browser. `RUST_LOG=warn` lists each one, once, by its property and value.
 - A style that is not a JSON object, or is not JSON, still rejects the `setStyle`.
 
 ### Lengths
@@ -7196,7 +7196,7 @@ written later wins, as in CSS. The ones below take CSS's several-value syntax.
 | `borderBlock`, `borderInline` | Written like `border` (`"1px solid red"`), for top and bottom or left and right (both sides get the one value, so `direction` does not matter) |
 | `flex` | A number `n` is `n 1 0%`. `none` is `0 0 auto`, `auto` is `1 1 auto`, `initial` is `0 1 auto`. Otherwise `<grow> <shrink>? \|\| <basis>`: `"2 3"`, `"2 100px"`, `"100px 2"`, and a lone basis (`"100px"`, `"50%"`, `"fit-content"`) is `1 1 <basis>`. The basis is what `flexBasis` takes: `"1 1 content"` is a basis of the content size |
 | `flexFlow` | `"<direction> \|\| <wrap>"` in either order (`"column wrap"`); a part left out is `row` or `nowrap` |
-| `placeItems`, `placeContent`, `placeSelf` | `"<align> <justify>"`; one value is both (`"center"`, `"center end"`). Each value is one the longhand takes, so `placeItems: "left"` throws as in CSS |
+| `placeItems`, `placeContent`, `placeSelf` | `"<align> <justify>"`; one value is both (`"center"`, `"center end"`). Each value is one the longhand takes, so `placeItems: "left"` is dropped as in CSS |
 | `outline` | See [Outline](#outline) |
 
 - **The later key wins.** `{ paddingLeft: 4, padding: 8 }` pads the left by 8 and
@@ -7211,8 +7211,9 @@ written later wins, as in CSS. The ones below take CSS's several-value syntax.
 - **Numbers.** A JS number is px. A bare number written inside a string reads as px
   only in `margin` and `inset` (`margin: "0 8"`), like their longhands; elsewhere
   it needs a unit, except `0`. A `calc()` is one value however many spaces it holds.
-  A bad count, a bad value, or `auto` where the property takes none throws when
-  the style is set. A numeric `border: 1` throws too: write `"1px solid"`.
+  A bad count, a bad value, or `auto` where the property takes none drops the
+  declaration. A numeric `border: 1` is read as React DOM writes it, `border: "1px"`, so
+  it is a 1px border with the default style (`none`) and draws nothing: write `"1px solid"`.
 - **Percentages** in `padding` and `margin` are of the containing block's width on
   every side, as in CSS.
 - **`flex` and the longhands.** `flexGrow`, `flexShrink` and `flexBasis` win over
@@ -7371,7 +7372,7 @@ section 5.5). Lengths are any [length](#lengths), including a `calc()` that mixe
 length and a percentage: the length part resolves against the element's font size,
 the root's and the window when the style is applied, and the percentage stays per
 axis. A radius that is negative whatever the units are, or invalid, in a state style
-too, throws instead of being ignored; one that only comes out negative
+too, is dropped; one that only comes out negative
 (`calc(1em - 20px)`) is zero. The radius cuts the background,
 the border, the shadow, the `overflow` clip and the hit area. The `round` of
 `clipPath` `inset()`, `rect()` and `xywh()` takes the same `a / b` form.
@@ -8824,7 +8825,7 @@ layout space**, so a ring you add with `focusVisible` moves nothing. It follows
   nothing. With a style, the width defaults to `medium` (3px) and the colour to
   `currentColor`.
 - **`outline`** is `<width> <style> <colour>` in any order, each part at most
-  once. A part it leaves out is that default. `hidden` throws. `outlineWidth`,
+  once. A part it leaves out is that default. `hidden` drops the declaration. `outlineWidth`,
   `outlineStyle` and `outlineColor` win over it when written after it.
   `outlineOffset` is not part of it.
 - **Styles.** `solid`, `dashed`, `dotted`, `double`, `groove`, `ridge`, `inset` and
@@ -8863,8 +8864,8 @@ render per frame.
   `flex`, ...) cover their longhands. `transform`, `translate`, `rotate`, `scale` and
   `transform-origin`, `perspective` and `perspective-origin` transition too (see [Transforms](#transforms)); a valid CSS name
   Ghia does not animate (`transform-style`) is accepted and matches nothing. A camelCase name, a bad time or
-  timing function, or an unparsable value is rejected when the style is set, like
-  any other invalid style
+  timing function, or an unparsable value is dropped, like
+  any other invalid declaration
 - **Inline boxes.** A `<span>` transitions what an inline box shows too, and only that (see
   [Painting an inline box](#painting-an-inline-box))
 - **Discrete properties.** `display`, `visibility`, `position`, `overflow`, `overflowX`,
@@ -9025,8 +9026,8 @@ defineKeyframes('pulse', {
   `animationIterationCount`, `animationDirection`, `animationFillMode` and
   `animationPlayState` win over the shorthand when written after it, and shorter lists repeat to the
   length of `animationName`. The timing functions are the ones
-  [CSS transitions](#css-transitions) take. An invalid value is rejected when the
-  style is set. A name with no keyframes animates nothing, as in a browser
+  [CSS transitions](#css-transitions) take. An invalid value drops the
+  declaration. A name with no keyframes animates nothing, as in a browser
 - **Behaviour.** CSS Animations Level 1: `infinite` and fractional iteration
   counts, `reverse`, `alternate` and `alternate-reverse`, `backwards` / `forwards`
   / `both` fill, `paused` (freezes where it is and resumes from there), a negative
@@ -9209,8 +9210,9 @@ does not use a component.
 - **One restyle.** A change of the layer restyles every element once, in one
   frame, with no per-element JavaScript. The result is the same as having set
   every element's style to its new combined one
-- **Validation.** The style is checked exactly like `style` on an element. An
-  invalid one rejects the batch it is in and nothing changes
+- **Validation.** The style is read exactly like `style` on an element. An
+  invalid declaration is dropped and the layer keeps the rest; a layer that is not
+  a JSON object rejects the batch it is in and nothing changes
 
 The CSS transition rules hold, which is what makes the cross-fade work. With the
 layer's `transition` in place, an element whose `light-dark()` colour flips with

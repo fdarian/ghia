@@ -348,12 +348,6 @@ pub(crate) fn restore(style: &mut StyleDesc, from: &StyleDesc, keys: &[KeyId]) {
     }
 }
 
-/// `style`, in which the shorthand `key` was declared before the keys in `later`: what it covers
-/// that they do not is unset.
-pub(crate) fn cover(style: &mut StyleDesc, key: KeyId, later: &[KeyId]) {
-    COVERS.cover(style, key, later);
-}
-
 /// Parses a style object, then drops the longhands a shorthand covers that were written before it,
 /// and collects its `--name` keys, which no field names, as the custom properties.
 pub(crate) fn deserialize_ordered<'de, D: Deserializer<'de>>(deserializer: D) -> Result<StyleDesc, D::Error> {
