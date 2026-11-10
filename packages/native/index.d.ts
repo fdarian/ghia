@@ -656,6 +656,8 @@ export declare class RowOracle {
    * text leaves those renders made.
    */
   getCounters(): Array<number>
+  /** `[nodesCreated, measures, nodesLaidOut, nodesSized, passes]` of the window's layout engine since it was made. */
+  getLayoutCounters(): Array<number>
   /** How many layout-only passes the window has run. */
   getLayoutPassCount(): number
 }
