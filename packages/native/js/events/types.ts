@@ -60,6 +60,8 @@ export interface HostDomEvent extends RootEvent {
   readonly currentTarget: object | null
   /** The elements on the propagation path, target first. */
   composedPath(): object[]
+  /** The event itself: what a library that wraps events reads the DOM event from. */
+  readonly nativeEvent: HostDomEvent
   /** 1 capturing, 2 at target, 3 bubbling. */
   readonly eventPhase: number
   readonly bubbles: boolean
@@ -102,7 +104,10 @@ export interface HostMouseEvent extends HostDomEvent {
   pointerType: "mouse" | "pen" | "touch" | ""
 }
 
-export interface HostPointerEvent extends HostMouseEvent {}
+export interface HostPointerEvent extends HostMouseEvent {
+  /** Ghia has one pointer, so every pointer event is the primary one. */
+  readonly isPrimary: true
+}
 
 /**
  * A drag fires `dragenter`, `dragover`, `dragleave` and `drop` at what is under

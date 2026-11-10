@@ -93,6 +93,19 @@ const NON_CANCELABLE_TYPES: ReadonlySet<string> = new Set([
   "pointerlockerror",
 ])
 
+const POINTER_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "pointerdown",
+  "pointerup",
+  "pointermove",
+  "pointercancel",
+  "pointerover",
+  "pointerout",
+  "pointerenter",
+  "pointerleave",
+  "gotpointercapture",
+  "lostpointercapture",
+])
+
 export function eventBubbles(eventType: string): boolean {
   return !NON_BUBBLING_TYPES.has(eventType.toLowerCase())
 }
@@ -147,6 +160,10 @@ export interface DomEvent extends RootEvent {
   currentTarget: object | null
   /** The elements on the propagation path, target first, like the DOM's `composedPath()`. */
   composedPath(): object[]
+  /** The event itself, as a synthetic event wrapper's `nativeEvent` is the DOM event under it. */
+  readonly nativeEvent: DomEvent
+  /** `true` on a pointer event: Ghia has one pointer, so it is always the primary one. Absent on other events. */
+  readonly isPrimary?: true
   eventPhase: number
   readonly bubbles: boolean
   readonly cancelable: boolean
@@ -258,9 +275,13 @@ export function createDomEvent(
     ...(payload.formEntries && formSubmission(payload.formEntries)),
     // An edit has no data unless it inserted text, and the DOM says so with null.
     ...(payload.eventType === "change" && { data: payload.data ?? null }),
+    ...(POINTER_EVENT_TYPES.has(payload.eventType.toLowerCase()) && { isPrimary: true as const }),
     type: payload.eventType,
     currentTarget: null,
     composedPath: () => [...path],
+    get nativeEvent() {
+      return event
+    },
     eventPhase: EVENT_PHASE_NONE,
     bubbles: eventBubbles(payload.eventType),
     cancelable,
