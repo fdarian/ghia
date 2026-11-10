@@ -140,7 +140,7 @@ describe("WireWriter round trip", () => {
   it("reads every op kind back", () => {
     expectRoundTrip([
       ["createElement", 1, "div"],
-      ["createElement", 2, "text"],
+      ["createElement", 2, "#text"],
       ["appendChild", 1, 2],
       ["insertBefore", 1, 3, 2],
       ["detachChild", 3],
@@ -263,7 +263,7 @@ describe("WireWriter round trip", () => {
       for (let index = 0; index < 200; index++) {
         const roll = Math.floor(next() * 12)
         tuples.push(
-          roll === 0 ? ["createElement", id(), pick(["div", "text", "span", text()])]
+          roll === 0 ? ["createElement", id(), pick(["div", "text", "#text", "span", text()])]
           : roll === 1 ? ["destroyElement", id()]
           : roll === 2 ? ["detachChild", id()]
           : roll === 3 ? ["appendChild", id(), id()]

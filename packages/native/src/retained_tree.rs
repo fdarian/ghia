@@ -257,10 +257,9 @@ impl RetainedElement {
     }
 
     /// Whether the universal style layer applies to this element. CSS `*`
-    /// matches elements, not text nodes: a `text` element that holds a string is
-    /// one, a `<text>` that holds children is an element.
+    /// matches elements, not text nodes.
     fn takes_universal_style(&self) -> bool {
-        !(self.element_type == "text" && self.content.is_some())
+        self.element_type != crate::text::inline::TEXT_NODE
     }
 
     pub fn is_disabled(&self) -> bool {
@@ -2062,7 +2061,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
         tree.create_element(2, "text".to_string());
-        tree.create_element(3, "text".to_string());
+        tree.create_element(3, "#text".to_string());
         tree.append_child(1, 2);
         tree.append_child(2, 3);
         tree.set_text(3, "hello".to_string());
@@ -3298,7 +3297,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
         tree.create_element(2, "div".to_string());
-        tree.create_element(3, "text".to_string());
+        tree.create_element(3, "#text".to_string());
         tree.append_child(1, 2);
         tree.append_child(1, 3);
         tree.set_text(3, "hello".to_string());
@@ -3345,7 +3344,7 @@ mod tests {
         assert!(crate::text::inline::is_raw_text(&tree.elements[&3]));
 
         // A text node is created before its string arrives.
-        apply(&mut tree, r##"[["createElement",4,"text"],["createElement",5,"text"],["appendChild",4,5],["setText",5,"x"]]"##);
+        apply(&mut tree, r##"[["createElement",4,"text"],["createElement",5,"#text"],["appendChild",4,5],["setText",5,"x"]]"##);
         assert_eq!(style_of(&tree, 4).unwrap().opacity, Some(0.5), "a `<text>` element");
         assert!(style_of(&tree, 5).is_none());
         assert!(crate::text::inline::is_raw_text(&tree.elements[&5]));

@@ -196,8 +196,8 @@ describeNative("mutation lifecycle", () => {
         </div>
       )
 
-      expect(a.renderer.findByType("text")[0]?.id).toBe(1)
-      expect(b.renderer.findByType("text")[0]?.id).toBe(1)
+      expect(a.renderer.findByType("#text")[0]?.id).toBe(1)
+      expect(b.renderer.findByType("#text")[0]?.id).toBe(1)
       expect(a.renderer.getRoot()?.id).toBe(2)
       expect(b.renderer.getRoot()?.id).toBe(2)
 

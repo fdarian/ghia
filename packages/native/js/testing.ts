@@ -1190,7 +1190,7 @@ export class TestRenderer implements NativeRenderer {
     return this.buildElementMap().get(id)
   }
 
-  /** Find elements by type (e.g. "div", "text"). */
+  /** Find elements by type (e.g. "div", "#text" for a string node). */
   findByType(type: string): TestElement[] {
     return [...this.buildElementMap().values()].filter((el) => el.type === type)
   }

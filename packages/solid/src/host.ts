@@ -557,7 +557,7 @@ function mount(root: HostRoot, node: HostNode): void {
   if (node.mounted) return
   node.mounted = true
   if (node.kind === "element") root.elements.set(node.id, node)
-  root.mutations.createElement(node.id, node.kind === "text" ? "text" : node.type)
+  root.mutations.createElement(node.id, node.kind === "text" ? "#text" : node.type)
   if (node.kind === "text") {
     root.mutations.setText(node.id, node.text)
   } else {

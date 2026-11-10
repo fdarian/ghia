@@ -367,14 +367,7 @@ function matches(node: TreeNode, selector: Selector): boolean {
 }
 
 function isRawText(node: TreeNode): boolean {
-  return (
-    node.type === "text" &&
-    node.text != null &&
-    !node.children?.length &&
-    node.style === undefined &&
-    !node.events?.length &&
-    node.customProps === undefined
-  )
+  return node.type === "#text"
 }
 
 function nearestAncestorWithBounds(

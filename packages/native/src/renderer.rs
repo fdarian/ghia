@@ -12009,13 +12009,9 @@ fn virtual_row_ancestor(tree: &RetainedTree, list_id: u64, element_id: u64) -> O
     }
 }
 
-/// A text instance: a bare string with no style, children or listeners.
+/// A text instance: a bare string.
 fn is_text_node(element: &crate::retained_tree::RetainedElement) -> bool {
-    element.element_type == "text"
-        && element.content.is_some()
-        && element.style.is_none()
-        && element.children.is_empty()
-        && element.events().is_empty()
+    crate::text::inline::is_raw_text(element)
 }
 
 /// What the build of `element` reads of the layout and the frames before that its key has to
@@ -14870,7 +14866,7 @@ mod highlight_cache_tests {
     fn tree_with_text() -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
-        tree.create_element(2, "text".to_string());
+        tree.create_element(2, "#text".to_string());
         tree.append_child(1, 2);
         tree.set_text(2, "a fox and a fox".to_string());
         tree
@@ -15021,7 +15017,7 @@ mod batch_tests {
     }
 
     const MOUNT: &str = r##"[
-        ["createElement",1,"div"],["createElement",2,"text"],["createElement",3,"div"],
+        ["createElement",1,"div"],["createElement",2,"#text"],["createElement",3,"div"],
         ["appendChild",1,2],["appendChild",1,3],["setRoot",1],
         ["setStyle",1,{"width":100,"backgroundColor":"#112233"}],
         ["setStyle",3,{"height":10}],
@@ -16074,7 +16070,7 @@ mod font_size_cascade_tests {
                     tree.create_element(node.id, node.element_type.to_owned());
                     tree.set_style(node.id, Arc::new(style));
                     tree.create_element(probe(node.id), "div".to_owned());
-                    tree.create_element(probe(node.id) + 10_000, "text".to_owned());
+                    tree.create_element(probe(node.id) + 10_000, "#text".to_owned());
                     tree.set_text(probe(node.id) + 10_000, "m".to_owned());
                     tree.append_child(probe(node.id), probe(node.id) + 10_000);
                     tree.append_child(node.id, probe(node.id));
@@ -16531,7 +16527,7 @@ mod dimension_length_tests {
         fn add_text(&self, cx: &mut gpui::TestAppContext, id: u64, parent: u64, content: &str) {
             {
                 let mut tree = self.tree.lock().unwrap();
-                tree.create_element(id, "text".to_owned());
+                tree.create_element(id, "#text".to_owned());
                 tree.set_text(id, content.to_owned());
                 tree.append_child(parent, id);
             }
@@ -17935,14 +17931,14 @@ mod inline_run_size_tests {
             tree.create_element(1, "div".to_owned());
             tree.set_style(1, Arc::new(container));
             tree.set_root(1);
-            tree.create_element(2, "text".to_owned());
+            tree.create_element(2, "#text".to_owned());
             tree.set_text(2, text.to_owned());
             tree.append_child(1, 2);
             tree.create_element(3, "span".to_owned());
             let span: StyleDesc = serde_json::from_str(span_style).unwrap();
             tree.set_style(3, Arc::new(span));
             tree.append_child(1, 3);
-            tree.create_element(4, "text".to_owned());
+            tree.create_element(4, "#text".to_owned());
             tree.set_text(4, span_text.to_owned());
             tree.append_child(3, 4);
         }
@@ -18035,7 +18031,7 @@ mod inline_run_size_tests {
                 let span_style: StyleDesc = serde_json::from_str(span_style).unwrap();
                 tree.set_style(span, Arc::new(span_style));
                 tree.append_child(1, span);
-                tree.create_element(text_id, "text".to_owned());
+                tree.create_element(text_id, "#text".to_owned());
                 tree.set_text(text_id, (*text).to_owned());
                 tree.append_child(span, text_id);
             }
@@ -18161,7 +18157,7 @@ mod inline_run_size_tests {
                 let style: StyleDesc = serde_json::from_str(style).unwrap();
                 tree.set_style(span, Arc::new(style));
                 tree.append_child(1, span);
-                tree.create_element(span + 1, "text".to_owned());
+                tree.create_element(span + 1, "#text".to_owned());
                 tree.set_text(span + 1, text.to_owned());
                 tree.append_child(span, span + 1);
             }
@@ -18268,7 +18264,7 @@ mod stacking_build_tests {
         tree.create_element(id, "div".to_owned());
         tree.set_style(id, Arc::new(style));
         tree.append_child(parent, id);
-        tree.create_element(id + 100, "text".to_owned());
+        tree.create_element(id + 100, "#text".to_owned());
         tree.set_text(id + 100, label.to_owned());
         tree.append_child(id, id + 100);
     }
@@ -18733,14 +18729,14 @@ mod paint_integration_tests {
             tree.create_element(1, "div".to_owned());
             tree.set_style(1, Arc::new(container));
             tree.set_root(1);
-            tree.create_element(2, "text".to_owned());
+            tree.create_element(2, "#text".to_owned());
             tree.set_text(2, "a ".to_owned());
             tree.append_child(1, 2);
             tree.create_element(3, "span".to_owned());
             let span: StyleDesc = serde_json::from_str(span_style).unwrap();
             tree.set_style(3, Arc::new(span));
             tree.append_child(1, 3);
-            tree.create_element(4, "text".to_owned());
+            tree.create_element(4, "#text".to_owned());
             tree.set_text(4, "bbbbbbbb".to_owned());
             tree.append_child(3, 4);
         }
@@ -18942,7 +18938,7 @@ mod decoration_paint_tests {
             tree.create_element(2, "div".to_owned());
             tree.set_style(2, Arc::new(serde_json::from_str(r##"{"textDecoration": "underline wavy 2px #0000ff"}"##).unwrap()));
             tree.append_child(1, 2);
-            tree.create_element(3, "text".to_owned());
+            tree.create_element(3, "#text".to_owned());
             tree.set_text(3, "nested".to_owned());
             tree.append_child(2, 3);
         }

@@ -2666,7 +2666,7 @@ describeNative("events", () => {
                 {
                   "id": 1,
                   "text": "Hello",
-                  "type": "text",
+                  "type": "#text",
                 },
               ],
               "id": 2,
@@ -2679,7 +2679,7 @@ describeNative("events", () => {
                     {
                       "id": 3,
                       "text": "Click me",
-                      "type": "text",
+                      "type": "#text",
                     },
                   ],
                   "id": 4,

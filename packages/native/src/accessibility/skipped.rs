@@ -229,10 +229,10 @@ mod tests {
         let mut tree = tree();
         tree.create_element(2, "text".to_string());
         tree.append_child(1, 2);
-        tree.create_element(3, "text".to_string());
+        tree.create_element(3, "#text".to_string());
         tree.append_child(2, 3);
         tree.set_text(3, "Hello ".to_string());
-        tree.create_element(4, "text".to_string());
+        tree.create_element(4, "#text".to_string());
         tree.append_child(2, 4);
         tree.set_text(4, "there".to_string());
         tree.set_style(2, Arc::new(serde_json::from_value(serde_json::json!({ "height": 10 })).unwrap()));

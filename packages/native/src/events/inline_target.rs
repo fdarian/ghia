@@ -55,7 +55,7 @@ mod tests {
         tree.append_child(2, 4);
         tree.append_child(2, 7);
         for (id, text, parent) in [(3, "Hello ", 2), (5, "world", 4), (6, "!", 2), (8, "again", 7)] {
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "#text".to_string());
             tree.append_child(parent, id);
             tree.set_text(id, text.to_string());
         }
