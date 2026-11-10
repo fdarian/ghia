@@ -71,7 +71,22 @@ describe("splitRules", () => {
   })
 
   it("closes an unterminated block at the end of the text", () => {
-    expect(splitRules(".a { top: 0 ;; .b { left: 0 }").map((rule) => rule.text)).toEqual([".a { top: 0 ;; .b { left: 0 }"])
+    expect(splitRules(".a { top: 0 ;; .b { left: 0 }").map((rule) => rule.text)).toEqual([".a { top: 0 ;; .b { left: 0 } }"])
+  })
+
+  it("closes whatever is open at the end of the text, the way a browser serializes it", () => {
+    const texts = (css: string) => splitRules(css).map((rule) => rule.text)
+    expect(texts(".a { color: red")).toEqual([".a { color: red }"])
+    expect(texts('.a { content: "x')).toEqual(['.a { content: "x" }'])
+    expect(texts(".a { top: 0 /* x")).toEqual([".a { top: 0 /* x */ }"])
+    expect(texts(".a { background: url(x")).toEqual([".a { background: url(x) }"])
+    expect(texts("@media print { .a { top: 0 }")).toEqual(["@media print { .a { top: 0 } }"])
+    expect(texts("@layer a, b")).toEqual(["@layer a, b;"])
+  })
+
+  it("drops a style rule that has no block", () => {
+    expect(splitRules(".a")).toEqual([])
+    expect(splitRules(".a { top: 0 } .b").map((rule) => rule.text)).toEqual([".a { top: 0 }"])
   })
 
   it("does not end a style rule at a semicolon outside its block, so a stray one belongs to the next prelude", () => {
@@ -117,6 +132,21 @@ describe("CSSStyleSheet", () => {
     const sheet = new CSSStyleSheet()
     sheet.replaceSync('@import url("x.css"); .a { top: 0 }')
     expect(sheet.cssRules.length).toBe(1)
+  })
+
+  it("an unterminated rule does not swallow the rules around it", () => {
+    const sheet = new CSSStyleSheet()
+    sheet.replaceSync(".b { color: blue }")
+    expect(sheet.insertRule(".a { color: red", 0)).toBe(0)
+    expect(sheet.insertRule("@layer q", 2)).toBe(2)
+    expect([...sheet.cssRules].map((rule) => rule.cssText)).toEqual([".a { color: red }", ".b { color: blue }", "@layer q;"])
+    expect(sheet.sheetText()).toBe(".a { color: red }\n.b { color: blue }\n@layer q;")
+    sheet.replaceSync(".a { color: red\n.c { top: 0 }")
+    expect([...sheet.cssRules].map((rule) => rule.cssText)).toEqual([".a { color: red\n.c { top: 0 } }"])
+    sheet.replaceSync('.x { content: "a')
+    sheet.insertRule(".y { top: 0 }", 1)
+    expect(sheet.cssRules.length).toBe(2)
+    expect(errorName(() => sheet.insertRule(".z"))).toBe("SyntaxError")
   })
 
   it("replace answers with the sheet and takes effect after a microtask", async () => {
