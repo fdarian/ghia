@@ -60,6 +60,7 @@ export {
 } from "./cpu-throttle.js"
 export type { MacCpuThrottle } from "./cpu-throttle.js"
 
+export { getComputedStyle, type ComputedStyle } from "./computed-style.js"
 export { decodeWireBatchForTest, encodeWireBatchForTest, type DecodedOp } from "./wire-testing.js"
 
 /**
@@ -414,6 +415,7 @@ interface NativeTestRendererApi
   simulatePointerLockLost(): void
   takeSimulatedWindowActions(): string[]
   getScrollMetrics(elementId: number): number[] | null
+  getComputedStyle(elementId: number, pseudoElement: boolean): string[] | null
   scrollByKey(key: string, shift: boolean): void
   setImage(elementId: number, bytes: Buffer | Uint8Array): void
   /** Encoded bytes for the `blob:` URL a `url()` background names. */
@@ -1835,6 +1837,12 @@ export class TestRenderer implements NativeRenderer {
    *  null for an element that has not been painted. */
   getScrollMetrics(elementId: number): number[] | null {
     return this.native.getScrollMetrics(elementId)
+  }
+
+  /** `[name, value, name, value, ...]` of the computed style of an element, or null while it is not in
+   *  the document. See `getComputedStyle`. */
+  getComputedStyle(elementId: number, pseudoElement: boolean): string[] | null {
+    return this.native.getComputedStyle(elementId, pseudoElement)
   }
 
   setImage(elementId: number, bytes: Buffer | Uint8Array): void {

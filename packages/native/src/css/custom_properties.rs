@@ -231,6 +231,11 @@ impl CustomProperties {
         self.0.get(name).map(String::as_str)
     }
 
+    /// Every property with its value, names in order, `--` included.
+    pub(crate) fn entries(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0.iter().map(|(name, value)| (name.as_str(), value.as_str()))
+    }
+
     /// The declarations of one style object, in written order, a later one winning. Values are
     /// normalised. An empty value declares nothing, as React DOM removes the property for it. `None`
     /// when there are none.
