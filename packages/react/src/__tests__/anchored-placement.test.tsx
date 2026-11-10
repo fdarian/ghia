@@ -359,12 +359,12 @@ describeNative("<anchored> placement", () => {
       }
     })
 
-    it("rejects an unknown anchor-size axis", () => {
+    it("drops an unknown anchor-size axis and reports nothing", () => {
       const errors: Error[] = []
       const { render, unmount } = createTestRoot({ ...WINDOW, onUncaughtError: (error) => errors.push(error) })
       try {
         render(<div style={{ width: "anchor-size(depth)" }} />)
-        expect(errors.map((error) => error.message).join()).toMatch(/anchor-size/)
+        expect(errors).toEqual([])
       } finally {
         unmount()
       }

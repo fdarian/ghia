@@ -716,18 +716,18 @@ describeNative("DOM layout: display contents", () => {
 })
 
 describeNative("DOM layout: invalid values", () => {
-  it("reports an invalid track list as an uncaught error", () => {
+  it("drops an invalid track list and reports nothing", () => {
     const errors: Error[] = []
     const { render, unmount } = createTestRoot({ onUncaughtError: (error) => errors.push(error) })
     try {
       render(<div style={{ display: "grid", gridTemplateColumns: "minmax(1fr, 10px)" }} />)
-      expect(errors.map((error) => error.message).join()).toMatch(/gridTemplateColumns|minmax/)
+      expect(errors).toEqual([])
     } finally {
       unmount()
     }
   })
 
-  it("keeps an element's previous valid style when a re-render's style is rejected", () => {
+  it("applies the rest of a re-render's style when one declaration is dropped", () => {
     const errors: Error[] = []
     const { render, renderer, unmount } = createTestRoot({
       onUncaughtError: (error) => errors.push(error),
@@ -737,8 +737,8 @@ describeNative("DOM layout: invalid values", () => {
       expect(box(renderer, "box").width).toBe(50)
 
       render(<div testId="box" style={{ width: 80, height: 20, animation: "react-grow banana" }} />)
-      expect(errors.map((error) => error.message).join()).toMatch(/animation/)
-      expect(box(renderer, "box").width).toBe(50)
+      expect(errors).toEqual([])
+      expect(box(renderer, "box").width).toBe(80)
     } finally {
       unmount()
     }

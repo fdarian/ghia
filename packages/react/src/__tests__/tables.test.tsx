@@ -1596,22 +1596,22 @@ describeNative("tables: parts are elements", () => {
     }
   })
 
-  it("reports a borderSpacing, tableLayout, captionSide, borderCollapse or emptyCells that CSS rejects", () => {
-    for (const [style, message] of [
-      [{ borderSpacing: "-1px" }, /invalid borderSpacing "-1px"/],
-      [{ borderSpacing: "1px 2px 3px" }, /invalid borderSpacing "1px 2px 3px"/],
-      [{ borderSpacing: "10%" }, /invalid borderSpacing "10%"/],
-      [{ tableLayout: "balanced" }, /invalid tableLayout: "balanced"/],
-      [{ captionSide: "left" }, /invalid captionSide: "left"/],
-      [{ borderCollapse: "yes" }, /invalid borderCollapse: "yes"/],
-      [{ emptyCells: "none" }, /invalid emptyCells: "none"/],
-      [{ hover: { borderSpacing: -3 } }, /invalid borderSpacing/],
+  it("drops a borderSpacing, tableLayout, captionSide, borderCollapse or emptyCells that CSS rejects and reports nothing", () => {
+    for (const style of [
+      { borderSpacing: "-1px" },
+      { borderSpacing: "1px 2px 3px" },
+      { borderSpacing: "10%" },
+      { tableLayout: "balanced" },
+      { captionSide: "left" },
+      { borderCollapse: "yes" },
+      { emptyCells: "none" },
+      { hover: { borderSpacing: -3 } },
     ] as const) {
       const errors: Error[] = []
       const { render, unmount } = createTestRoot({ onUncaughtError: (error) => errors.push(error) })
       try {
         render(<Table id="t" style={style as Style} />)
-        expect(errors.map((error) => error.message).join("\n"), JSON.stringify(style)).toMatch(message)
+        expect(errors, JSON.stringify(style)).toEqual([])
       } finally {
         unmount()
       }

@@ -121,7 +121,7 @@ describeNative("outline shorthand", () => {
     expect(isBlue(shot.at(25, 25))).toBe(false)
   })
 
-  it("is an error for a value CSS would drop", () => {
+  it("drops a value CSS would drop and reports nothing", () => {
     const errorsOf = (style: Style) => {
       const errors: Error[] = []
       const { render, unmount } = createTestRoot({ onUncaughtError: (error) => errors.push(error) })
@@ -132,12 +132,12 @@ describeNative("outline shorthand", () => {
         unmount()
       }
     }
-    expect(errorsOf({ outline: "2px 3px" })).toMatch(/invalid outline "2px 3px"/)
-    expect(errorsOf({ outline: "solid dashed" })).toMatch(/invalid outline/)
-    expect(errorsOf({ outline: "hidden" })).toMatch(/invalid outline "hidden"/)
-    expect(errorsOf({ outline: "2px solid notacolour" })).toMatch(/not a colour/)
-    expect(errorsOf({ outline: "" })).toMatch(/invalid outline/)
-    expect(errorsOf({ hover: { outline: "50%" } })).toMatch(/invalid outline "50%"/)
+    expect(errorsOf({ outline: "2px 3px" })).toBe("")
+    expect(errorsOf({ outline: "solid dashed" })).toBe("")
+    expect(errorsOf({ outline: "hidden" })).toBe("")
+    expect(errorsOf({ outline: "2px solid notacolour" })).toBe("")
+    expect(errorsOf({ outline: "" })).toBe("")
+    expect(errorsOf({ hover: { outline: "50%" } })).toBe("")
   })
 
   describe("in a focus style", () => {

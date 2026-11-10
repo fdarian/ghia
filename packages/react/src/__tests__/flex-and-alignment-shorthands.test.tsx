@@ -176,13 +176,13 @@ describeNative("flex", () => {
     ])
   })
 
-  it("is an error for a value CSS would drop", () => {
-    expect(errorsOf({ flex: "1 2 3" })).toMatch(/invalid flex "1 2 3"/)
-    expect(errorsOf({ flex: -1 })).toMatch(/invalid flex -1/)
-    expect(errorsOf({ flex: "1 -1" })).toMatch(/invalid flex "1 -1"/)
-    expect(errorsOf({ flex: "1 auto 2" })).toMatch(/invalid flex/)
-    expect(errorsOf({ flex: "" })).toMatch(/invalid flex/)
-    expect(errorsOf({ hover: { flex: "bogus" } })).toMatch(/invalid flex "bogus"/)
+  it("drops a value CSS would drop and reports nothing", () => {
+    expect(errorsOf({ flex: "1 2 3" })).toBe("")
+    expect(errorsOf({ flex: -1 })).toBe("")
+    expect(errorsOf({ flex: "1 -1" })).toBe("")
+    expect(errorsOf({ flex: "1 auto 2" })).toBe("")
+    expect(errorsOf({ flex: "" })).toBe("")
+    expect(errorsOf({ hover: { flex: "bogus" } })).toBe("")
   })
 
   describe("in a hover state", () => {
@@ -275,11 +275,11 @@ describeNative("flexFlow", () => {
     ])
   })
 
-  it("is an error for a value CSS would drop", () => {
-    expect(errorsOf({ flexFlow: "row row" })).toMatch(/invalid flex-flow "row row"/)
-    expect(errorsOf({ flexFlow: "column column-reverse" })).toMatch(/invalid flex-flow/)
-    expect(errorsOf({ flexFlow: "sideways" })).toMatch(/invalid flex-flow "sideways"/)
-    expect(errorsOf({ flexFlow: "" })).toMatch(/invalid flex-flow/)
+  it("drops a value CSS would drop and reports nothing", () => {
+    expect(errorsOf({ flexFlow: "row row" })).toBe("")
+    expect(errorsOf({ flexFlow: "column column-reverse" })).toBe("")
+    expect(errorsOf({ flexFlow: "sideways" })).toBe("")
+    expect(errorsOf({ flexFlow: "" })).toBe("")
   })
 
   it("is replaced by a state's flexFlow", () => {
@@ -349,13 +349,13 @@ describeNative("placeItems, placeContent and placeSelf", () => {
     expect(laidOut({ ...GRID, placeItems: "center", alignItems: "start" }, [CHILD])).toEqual([[125, 0, 50, 20]])
   })
 
-  it("is an error for a value CSS would drop", () => {
-    expect(errorsOf({ placeItems: "left" })).toMatch(/invalid place-items "left"/)
-    expect(errorsOf({ placeItems: "space-between" })).toMatch(/invalid place-items "space-between"/)
-    expect(errorsOf({ placeContent: "auto" })).toMatch(/invalid place-content/)
-    expect(errorsOf({ placeSelf: "center end start" })).toMatch(/invalid place-self/)
-    expect(errorsOf({ placeSelf: "" })).toMatch(/invalid place-self/)
-    expect(errorsOf({ hover: { placeItems: "bogus" } })).toMatch(/invalid place-items "bogus"/)
+  it("drops a value CSS would drop and reports nothing", () => {
+    expect(errorsOf({ placeItems: "left" })).toBe("")
+    expect(errorsOf({ placeItems: "space-between" })).toBe("")
+    expect(errorsOf({ placeContent: "auto" })).toBe("")
+    expect(errorsOf({ placeSelf: "center end start" })).toBe("")
+    expect(errorsOf({ placeSelf: "" })).toBe("")
+    expect(errorsOf({ hover: { placeItems: "bogus" } })).toBe("")
   })
 
   it("is replaced by a state's placeItems", () => {
@@ -420,9 +420,9 @@ describeNative("grid placement shorthands", () => {
     ])
   })
 
-  it("is an error for a line CSS would drop", () => {
-    expect(errorsOf({ gridArea: "1 / 2 / 3 / 4 / 5" })).toMatch(/invalid grid-area/)
-    expect(errorsOf({ gridColumn: "span 0" })).toMatch(/invalid grid line/)
-    expect(errorsOf({ gridRow: "0" })).toMatch(/invalid grid line/)
+  it("drops a line CSS would drop and reports nothing", () => {
+    expect(errorsOf({ gridArea: "1 / 2 / 3 / 4 / 5" })).toBe("")
+    expect(errorsOf({ gridColumn: "span 0" })).toBe("")
+    expect(errorsOf({ gridRow: "0" })).toBe("")
   })
 })
