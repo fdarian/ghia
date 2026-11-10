@@ -2,7 +2,7 @@
 // handlers. It stands for what an app mounts once: startup, a route change, a dialog. Rows are components, as an app writes them.
 import type { Accessor, JSX } from "solid-js"
 
-export interface SettingsValues {
+export type SettingsValues = {
   name: Accessor<string>
   email: Accessor<string>
   plan: Accessor<string>

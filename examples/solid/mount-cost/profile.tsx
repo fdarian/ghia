@@ -27,7 +27,10 @@
 //                        settings: <Show> true <-> false). The two kinds of step are reported separately. Default swap for detail, toggle for settings
 //   K=300 WARMUP=100     measured and unmeasured mounts (a toggle does K mount steps and K unmount steps)
 //   INSTRUMENT=0         no stamps inside the step and no wrapped queue/renderer: one total per step, to see what the stamps cost
+//   SAME=1               detail toggle: the mount step always mounts the first message (its text is shaped once, so the frame has no new text to shape)
 //   COUNT=1              no timing: counts the ops of each kind of step by opcode, their wire bytes and the elements created (decodes each batch)
+//   MARK=1               prints "=== measured start" and "=== measured end" on stderr around the measured steps, to cut a BUN_JSC_logGC=1 log (alloc-per-step.sh)
+//   YIELD=1              turns the event loop after every step (setImmediate), so GC timers run as in an app; the collections that follow are in the mean
 //   PER_STEP=1           prints every step's total
 //   PRE_GC=1             Bun.gc(true) before the measured steps
 //   HOLD_MS=0            waits before the measured steps
@@ -52,6 +55,8 @@ const WARMUP = Number(process.env.WARMUP ?? "100")
 const INSTRUMENT = process.env.INSTRUMENT !== "0"
 const COUNT = process.env.COUNT === "1"
 const PER_STEP = process.env.PER_STEP === "1"
+// Bun runs JavaScriptCore's timer-driven collections from the event loop, which a loop of microtasks never lets turn.
+const YIELD = process.env.YIELD === "1"
 const HOLD_MS = Number(process.env.HOLD_MS ?? "0")
 
 const libSystem = dlopen("/usr/lib/libSystem.B.dylib", { proc_pid_rusage: { args: ["i32", "i32", "ptr"], returns: "i32" } })
@@ -66,7 +71,12 @@ function readInstructions(): number {
 const median = (values: number[]) => {
   const sorted = [...values].sort((a, b) => a - b)
   const middle = sorted.length >> 1
-  return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2
+  const at = (index: number) => {
+    const value = sorted[index]
+    if (value === undefined) throw new Error("median of no values")
+    return value
+  }
+  return sorted.length % 2 ? at(middle) : (at(middle - 1) + at(middle)) / 2
 }
 const mean = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length
 const readOverhead = median(Array.from({ length: 500 }, () => -readInstructions() + readInstructions()))
@@ -83,7 +93,7 @@ const [message, setMessage] = createSignal<Message | undefined>(undefined)
 const [open, setOpen] = createSignal(false)
 const [name, setName] = createSignal("Farrel Darian")
 const [email] = createSignal("farrel@example.com")
-const [plan] = createSignal("Pro")
+const [planName] = createSignal("Pro")
 const [theme] = createSignal("System")
 const [storage] = createSignal("1.2 GB of 15 GB")
 const [version] = createSignal("1.0.0")
@@ -109,7 +119,7 @@ function Fixture() {
     <div style={{ display: "flex", flexDirection: "row", width: "100%", height: "100%", backgroundColor: "#FFFFFF" }}>
       <Show when={open()}>
         <SettingsDialog
-          values={{ name, email, plan, theme, storage, version }}
+          values={{ name, email, plan: planName, theme, storage, version }}
           onClose={() => setOpen(false)}
           onSave={() => setName("changed")}
           onToggle={() => setName("toggled")}
@@ -133,16 +143,16 @@ settle()
 
 // ── the queue and the renderer, wrapped to stamp ────────────────────────────────
 
-interface Queue {
-  createElement(id: number, type: string): void
-}
+type Queue = { createElement(id: number, type: string): void }
 function findQueue(): Queue {
   const queues = Reflect.get(globalThis, Symbol.for("@ghia/native/mutation-queues")) as WeakMap<object, Set<WeakRef<Queue>>> | undefined
   const refs = queues?.get(renderer)
   if (!refs) throw new Error("no mutation queue is registered for the test renderer")
   const live = [...refs].map((ref) => ref.deref()).filter((queue): queue is Queue => queue !== undefined)
   if (live.length !== 1) throw new Error(`expected one mutation queue, found ${live.length}`)
-  return live[0]!
+  const only = live[0]
+  if (only === undefined) throw new Error("no live mutation queue")
+  return only
 }
 
 let stampFirstOp = 0
@@ -183,7 +193,7 @@ if (INSTRUMENT || COUNT) {
 
 // ── one step ────────────────────────────────────────────────────────────────────
 
-interface Sample {
+type Sample = {
   kind: string
   total: number
   js: number
@@ -209,7 +219,7 @@ async function step(kind: string, write: () => void): Promise<Sample> {
   const s2 = readInstructions()
   renderer.drawFrame()
   const s3 = readInstructions()
-  if (!INSTRUMENT) return { kind, total: s3 - s0 - readOverhead, js: 0, ops: 0, prep: 0, apply: 0, post: 0, frame: 0 }
+  if (!INSTRUMENT || COUNT) return { kind, total: s3 - s0 - readOverhead, js: 0, ops: 0, prep: 0, apply: 0, post: 0, frame: 0 }
   if (stampApplyStart === 0) throw new Error(`step ${kind} applied no batch`)
   const mounted = sawFirstOp
   return {
@@ -228,7 +238,7 @@ function writes(): [string, () => void][] {
   if (FIXTURE === "settings") return [["mount", () => setOpen(true)], ["unmount", () => setOpen(false)]]
   if (MODE === "toggle") {
     let next = 0
-    return [["mount", () => setMessage(messages[next++ % messages.length])], ["unmount", () => setMessage(undefined)]]
+    return [["mount", () => setMessage(messages[process.env.SAME === "1" ? 0 : next++ % messages.length])], ["unmount", () => setMessage(undefined)]]
   }
   let next = 1
   return [["swap", () => setMessage(messages[next++ % messages.length])]]
@@ -239,7 +249,10 @@ const stepsPerRound = plan.length
 async function run(count: number): Promise<Sample[]> {
   const samples: Sample[] = []
   for (let round = 0; round < count; round++) {
-    for (const [kind, write] of plan) samples.push(await step(kind, write))
+    for (const [kind, write] of plan) {
+      samples.push(await step(kind, write))
+      if (YIELD) await new Promise((resolve) => setImmediate(resolve))
+    }
   }
   return samples
 }
@@ -247,13 +260,26 @@ async function run(count: number): Promise<Sample[]> {
 // ── run ─────────────────────────────────────────────────────────────────────────
 
 if (COUNT) {
-  await run(WARMUP > 0 ? 4 : 0)
-  for (const [kind, write] of plan) {
-    currentOps = {}
-    currentBytes = 0
-    currentBatches = 0
-    await step(kind, write)
-    console.log(`${FIXTURE}/${kind}: ${currentBatches} batch(es), ${currentBytes} wire bytes, ops ${JSON.stringify(currentOps)}`)
+  await run(4)
+  const perKind = new Map<string, { ops: Record<string, number>; bytes: number; batches: number; steps: number }>()
+  for (let round = 0; round < K; round++) {
+    for (const [kind, write] of plan) {
+      currentOps = {}
+      currentBytes = 0
+      currentBatches = 0
+      await step(kind, write)
+      const total = perKind.get(kind) ?? { ops: {}, bytes: 0, batches: 0, steps: 0 }
+      for (const name of Object.keys(currentOps)) total.ops[name] = (total.ops[name] ?? 0) + (currentOps[name] ?? 0)
+      total.bytes += currentBytes
+      total.batches += currentBatches
+      total.steps++
+      perKind.set(kind, total)
+    }
+  }
+  for (const [kind, total] of perKind) {
+    const ops = Object.entries(total.ops).map(([name, count]) => `${name} ${(count / total.steps).toFixed(1)}`)
+    const sum = Object.values(total.ops).reduce((a, b) => a + b, 0)
+    console.log(`${FIXTURE}/${kind} per step over ${total.steps}: ${(total.batches / total.steps).toFixed(2)} batch, ${(total.bytes / total.steps).toFixed(0)} wire bytes, ${(sum / total.steps).toFixed(1)} ops: ${ops.join(", ")}`)
   }
   root.unmount()
   process.exit(0)
@@ -262,20 +288,24 @@ if (COUNT) {
 await run(WARMUP)
 if (process.env.PRE_GC === "1") Bun.gc(true)
 if (HOLD_MS > 0) await new Promise((resolve) => setTimeout(resolve, HOLD_MS))
+if (process.env.MARK === "1") console.error("=== measured start")
 const instructionsBefore = readInstructions()
 const samples = await run(K)
 const instructionsAll = readInstructions() - instructionsBefore
+if (process.env.MARK === "1") console.error("=== measured end")
 
 console.log(`fixture ${FIXTURE} mode ${MODE}: ${K} measured rounds (${stepsPerRound} step kind(s)) after ${WARMUP} warmup, instrument ${INSTRUMENT}, read overhead ${readOverhead.toFixed(0)}, pid ${process.pid}`)
-const results: Record<string, Record<string, { mean: number; median: number }>> = {}
+type PhaseStats = Record<string, { mean: number; median: number }>
+const results: Record<string, PhaseStats> = {}
 const phases = INSTRUMENT ? ["js", "ops", "prep", "apply", "post", "frame", "total"] : ["total"]
 for (const [kind] of plan) {
   const own = samples.filter((sample) => sample.kind === kind)
-  results[kind] = {}
+  const stats: PhaseStats = {}
+  results[kind] = stats
   const cells: string[] = []
   for (const phase of phases) {
     const values = own.map((sample) => sample[phase as keyof Sample] as number)
-    results[kind]![phase] = { mean: mean(values), median: median(values) }
+    stats[phase] = { mean: mean(values), median: median(values) }
     cells.push(`${phase} ${M(mean(values))} (med ${M(median(values))})`)
   }
   console.log(`  ${kind.padEnd(8)} M instr per step, mean: ${cells.join(" | ")}`)
