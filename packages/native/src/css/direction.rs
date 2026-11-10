@@ -164,9 +164,10 @@ mod tests {
     }
 
     #[test]
-    fn an_invalid_direction_is_an_error_naming_it() {
+    fn an_invalid_direction_is_dropped_and_the_rest_of_the_style_stays() {
         let mut table = crate::retained_tree::StyleTable::default();
-        let error = table.intern(br#"{"direction": "sideways"}"#).unwrap_err();
-        assert!(error.contains("invalid direction"), "{error}");
+        let style = table.intern(br#"{"direction": "sideways", "opacity": 0.5}"#).unwrap();
+        assert_eq!(style.direction, None);
+        assert_eq!(style.opacity, Some(0.5));
     }
 }

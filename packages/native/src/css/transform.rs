@@ -131,38 +131,8 @@ pub(crate) fn parse_backface_visibility(value: &str) -> Option<bool> {
     }
 }
 
-/// `style` with the `var()` in its transform properties replaced by what the element's computed
-/// custom properties say, so that the parsers and the readers of the transform (stacking, the
-/// containing block, painting) all see the same text. `None` when no such property has a `var()`.
-///
-/// A declaration whose `var()` cannot be resolved is invalid at computed-value time, which makes it
-/// the property's initial value: `none`, and `50% 50%` for the origin.
-///
-/// The focus styles are laid over the element when it is built, so they are substituted too. The
-/// pointer states are folded into the style before this runs.
-pub(crate) fn resolve_vars(style: &StyleDesc, custom: &CustomProperties) -> Option<StyleDesc> {
-    if !reads_vars(style) {
-        return None;
-    }
-    let mut resolved = style.clone();
-    resolve_vars_in(&mut resolved, custom);
-    Some(resolved)
-}
-
-fn own_texts(style: &mut StyleDesc) -> [(&mut Option<String>, &'static str); 7] {
-    [
-        (&mut style.transform, "none"),
-        (&mut style.translate, "none"),
-        (&mut style.rotate, "none"),
-        (&mut style.scale, "none"),
-        (&mut style.transform_origin, DEFAULT_ORIGIN_TEXT),
-        (&mut style.perspective, "none"),
-        (&mut style.perspective_origin, DEFAULT_PERSPECTIVE_ORIGIN_TEXT),
-    ]
-}
-
 pub(crate) const DEFAULT_ORIGIN_TEXT: &str = "50% 50%";
-const DEFAULT_PERSPECTIVE_ORIGIN_TEXT: &str = "50% 50%";
+pub(crate) const DEFAULT_PERSPECTIVE_ORIGIN_TEXT: &str = "50% 50%";
 
 /// Whether a transform property of the style has a `var()` in it, which its value depends on the
 /// custom properties for.
@@ -179,21 +149,6 @@ pub(crate) fn reads_vars(style: &StyleDesc) -> bool {
     .into_iter()
         .any(|text| text.as_deref().is_some_and(custom_properties::has_var))
         || [&style.focus_visible, &style.focus_within].into_iter().flatten().any(|state| reads_vars(state))
-}
-
-fn resolve_vars_in(style: &mut StyleDesc, custom: &CustomProperties) {
-    for (slot, initial) in own_texts(style) {
-        let Some(text) = slot.as_deref().filter(|text| custom_properties::has_var(text)) else {
-            continue;
-        };
-        *slot = Some(match custom_properties::substitute(text, custom) {
-            Some(substituted) => substituted.trim().to_owned(),
-            None => initial.to_owned(),
-        });
-    }
-    for state in [&mut style.focus_visible, &mut style.focus_within].into_iter().flatten() {
-        resolve_vars_in(state, custom);
-    }
 }
 
 /// The properties of a style that make the transform, each `None` where it is unset or invalid.
@@ -1524,7 +1479,7 @@ mod tests {
 
     fn resolved(json: &str, custom: &CustomProperties) -> Option<ElementTransform> {
         let style = style(json);
-        of(resolve_vars(&style, custom).as_ref().unwrap_or(&style), &lengths())
+        of(crate::css::var_substitution::resolve(&style, custom).as_ref().unwrap_or(&style), &lengths())
     }
 
     #[test]
@@ -1593,19 +1548,19 @@ mod tests {
         assert_eq!(transform.functions, [], "none, which a base transform does not survive");
         let invalid = resolved(r#"{"rotate":"var(--missing)"}"#, &custom).unwrap();
         assert_eq!(invalid.functions, []);
-        assert!(!is_active(&resolve_vars(&style(r#"{"transform":"translateX(var(--missing))"}"#), &custom).unwrap(), &lengths()));
+        assert!(!is_active(&crate::css::var_substitution::resolve(&style(r#"{"transform":"translateX(var(--missing))"}"#), &custom).unwrap(), &lengths()));
     }
 
     #[test]
     fn a_style_without_var_is_left_alone() {
-        assert!(resolve_vars(&style(r#"{"transform":"translateX(10px)"}"#), &custom(&[("--p", "1")])).is_none());
+        assert!(crate::css::var_substitution::resolve(&style(r#"{"transform":"translateX(10px)"}"#), &custom(&[("--p", "1")])).is_none());
     }
 
     #[test]
     fn the_focus_styles_are_substituted_too() {
         let custom = custom(&[("--s", "2")]);
         let style = style(r#"{"focusVisible":{"scale":"var(--s)"}}"#);
-        let resolved = resolve_vars(&style, &custom).unwrap();
+        let resolved = crate::css::var_substitution::resolve(&style, &custom).unwrap();
         assert_eq!(resolved.focus_visible.as_ref().unwrap().scale.as_deref(), Some("2"));
     }
 

@@ -140,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn a_style_reads_them_and_an_invalid_one_is_not_interned() {
+    fn a_style_reads_them_and_an_invalid_one_is_dropped() {
         let style: crate::style::StyleDesc =
             serde_json::from_str(r#"{"wordBreak": "keep-all", "overflowWrap": "anywhere"}"#)
                 .unwrap();
@@ -148,12 +148,16 @@ mod tests {
         assert_eq!(style.overflow_wrap, Some(OverflowWrap::Anywhere));
         let mut table = crate::retained_tree::StyleTable::default();
         assert!(table.intern(br#"{"wordBreak": "break-all"}"#).is_ok());
-        let error = table.intern(br#"{"wordBreak": "wide"}"#).unwrap_err();
-        assert!(error.contains("invalid wordBreak"), "{error}");
-        let error = table
-            .intern(br#"{"overflowWrap": "break-all"}"#)
-            .unwrap_err();
-        assert!(error.contains("invalid overflowWrap"), "{error}");
+        let style = table
+            .intern(br#"{"wordBreak": "wide", "overflowWrap": "anywhere"}"#)
+            .unwrap();
+        assert_eq!(style.word_break, None);
+        assert_eq!(style.overflow_wrap, Some(OverflowWrap::Anywhere));
+        let style = table
+            .intern(br#"{"overflowWrap": "break-all", "wordBreak": "keep-all"}"#)
+            .unwrap();
+        assert_eq!(style.overflow_wrap, None);
+        assert_eq!(style.word_break, Some(WordBreak::KeepAll));
     }
 
     #[test]

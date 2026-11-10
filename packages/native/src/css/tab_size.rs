@@ -132,13 +132,14 @@ mod tests {
     }
 
     #[test]
-    fn a_style_reads_it_and_an_invalid_one_is_not_interned() {
+    fn a_style_reads_it_and_an_invalid_one_is_dropped() {
         let style: crate::style::StyleDesc = serde_json::from_str(r#"{"tabSize": "40px"}"#).unwrap();
         assert_eq!(style.tab_size, Some(TabSize::Length(LinearLength::px(40.0))));
         let mut table = crate::retained_tree::StyleTable::default();
         assert!(table.intern(br#"{"tabSize": 4}"#).is_ok());
-        let error = table.intern(br#"{"tabSize": "wide"}"#).unwrap_err();
-        assert!(error.contains("invalid tabSize"), "{error}");
+        let style = table.intern(br#"{"tabSize": "wide", "opacity": 0.5}"#).unwrap();
+        assert_eq!(style.tab_size, None);
+        assert_eq!(style.opacity, Some(0.5));
     }
 
     #[test]

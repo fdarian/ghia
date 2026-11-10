@@ -147,7 +147,11 @@ pub(crate) fn apply<E: Styled>(
     lengths: &LengthContext,
 ) -> E {
     let mode = mode();
-    let shared = shared.filter(|shared| mode != Mode::Off && std::ptr::eq(Arc::as_ptr(shared), style));
+    // A declaration that reads custom properties is applied from what they say at the element, which
+    // the address of the style does not name; the build resolves it to a fresh style, never to this one.
+    let shared = shared.filter(|shared| {
+        mode != Mode::Off && std::ptr::eq(Arc::as_ptr(shared), style) && style.var_declarations.is_none()
+    });
     let Some(shared) = shared else {
         return crate::renderer::apply_styles(el, style, colors, lengths);
     };

@@ -161,7 +161,7 @@ describe.skipIf(!hasNativeTestRenderer)("keyframes on the native test renderer",
     live.dispose()
   })
 
-  it("accepts the animation shorthand and longhands in a style and rejects a bad one", () => {
+  it("accepts the animation shorthand and longhands in a style and drops a bad one", () => {
     const renderer = new TestRenderer({ width: 100, height: 100 })
     renderer.applyBatch(
       encodeWireBatchForTest([
@@ -170,12 +170,30 @@ describe.skipIf(!hasNativeTestRenderer)("keyframes on the native test renderer",
         ["setStyle", 1, { animation: "spin 1s linear infinite alternate", hover: { animationPlayState: "paused" } }],
       ])
     )
-    expect(() =>
-      renderer.applyBatch(encodeWireBatchForTest([["setStyle", 1, { animationDuration: "fast" }]]))
-    ).toThrow(/animationDuration/)
-    expect(() =>
-      renderer.applyBatch(encodeWireBatchForTest([["setStyle", 1, { hover: { animation: "a b 1s" } }]]))
-    ).toThrow(/hover\.animation/)
-    renderer.flush()
+    try {
+      expect(renderer.getElement(1)?.style).toMatchObject({
+        animation: "spin 1s linear infinite alternate",
+        hover: { animationPlayState: "paused" },
+      })
+
+      renderer.applyBatch(
+        encodeWireBatchForTest([["setStyle", 1, { animation: "spin 2s", animationDuration: "fast", width: 40 }]])
+      )
+      const dropped = renderer.getElement(1)?.style
+      expect(dropped).toMatchObject({ animation: "spin 2s", width: 40 })
+      expect(dropped).not.toHaveProperty("animationDuration")
+
+      renderer.applyBatch(
+        encodeWireBatchForTest([
+          ["setStyle", 1, { width: 40, hover: { animation: "a b 1s", animationPlayState: "paused", width: 60 } }],
+        ])
+      )
+      const state = renderer.getElement(1)?.style
+      expect(state).toMatchObject({ width: 40, hover: { animationPlayState: "paused", width: 60 } })
+      expect(state?.hover).toMatchObject({ animation: null })
+      renderer.flush()
+    } finally {
+      renderer.dispose()
+    }
   })
 })

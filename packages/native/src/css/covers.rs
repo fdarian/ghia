@@ -23,13 +23,14 @@ use crate::css::custom_properties::{self, CustomProperties};
 use crate::events::state_styles::{split_border_all_sides, without_invalid_values, AllSides};
 use crate::style::StyleDesc;
 
-type KeyId = usize;
+pub(crate) type KeyId = usize;
 
 struct Key {
     /// The field's name, in snake case.
     name: &'static str,
     is_set: fn(&StyleDesc) -> bool,
     clear: fn(&mut StyleDesc),
+    copy: fn(&mut StyleDesc, &StyleDesc),
 }
 
 macro_rules! key {
@@ -38,6 +39,7 @@ macro_rules! key {
             name: stringify!($field),
             is_set: |style| style.$field.is_some(),
             clear: |style| style.$field = None,
+            copy: |style, from| style.$field = from.$field.clone(),
         }
     };
 }
@@ -128,6 +130,14 @@ struct Covers {
     ids: FxHashMap<String, KeyId>,
     /// Every property a key covers, through shorthands it covers as well. Empty for a longhand.
     covered: Vec<Vec<KeyId>>,
+    /// What laying a declaration of the key over a style can overwrite: what it covers, and for a
+    /// border side shorthand the all-sides border values as well, which it splits down to the other
+    /// sides.
+    clobbered: Vec<Vec<KeyId>>,
+    /// The keys whose declaration is in the way of the key's either way round: what laying it
+    /// overwrites, and what overwrites it when it is laid first (a border side shorthand writes
+    /// over an all-sides border value from the sides it covers).
+    overlapping: Vec<Vec<KeyId>>,
     border_width: KeyId,
     border_color: KeyId,
     border_style: KeyId,
@@ -135,7 +145,7 @@ struct Covers {
 
 static COVERS: LazyLock<Covers> = LazyLock::new(Covers::build);
 
-fn camel_case(snake: &str) -> String {
+pub(crate) fn camel_case(snake: &str) -> String {
     let mut camel = String::with_capacity(snake.len());
     let mut upper = false;
     for character in snake.chars() {
@@ -190,14 +200,34 @@ impl Covers {
             }
         }
         let id = |name: &str| *ids.get(name).unwrap_or_else(|| panic!("{name} is in the covers table"));
-        Self {
+        let mut built = Self {
             border_width: id("borderWidth"),
             border_color: id("borderColor"),
             border_style: id("borderStyle"),
             keys,
             ids,
+            clobbered: covered.clone(),
+            overlapping: Vec::new(),
             covered,
+        };
+        for key in 0..built.keys.len() {
+            if built.border_sides(key).is_some() {
+                let all_sides = [built.border_width, built.border_color, built.border_style];
+                built.clobbered[key].extend(all_sides.into_iter().filter(|side| !built.covered[key].contains(side)));
+            }
         }
+        built.overlapping = (0..built.keys.len())
+            .map(|key| {
+                let mut overlapping = built.clobbered[key].clone();
+                for (other, clobbered) in built.clobbered.iter().enumerate() {
+                    if clobbered.contains(&key) && !overlapping.contains(&other) {
+                        overlapping.push(other);
+                    }
+                }
+                overlapping
+            })
+            .collect();
+        built
     }
 
     fn is_shorthand(&self, key: KeyId) -> bool {
@@ -238,22 +268,27 @@ impl Covers {
             if !self.is_shorthand(key) || !(self.keys[key].is_set)(style) || invalid.contains(&key) {
                 continue;
             }
-            let later = &written[index + 1..];
-            if let Some(sides) = self.border_sides(key) {
-                split_border_all_sides(
-                    style,
-                    sides,
-                    AllSides {
-                        width: !later.contains(&self.border_width),
-                        color: !later.contains(&self.border_color),
-                        style: !later.contains(&self.border_style),
-                    },
-                );
-            }
-            for &target in &self.covered[key] {
-                if !later.contains(&target) {
-                    (self.keys[target].clear)(style);
-                }
+            self.cover(style, key, &written[index + 1..]);
+        }
+    }
+
+    /// A shorthand written before the keys in `later` covers what they leave: the longhands it
+    /// covers that are not among them are cleared.
+    fn cover(&self, style: &mut StyleDesc, key: KeyId, later: &[KeyId]) {
+        if let Some(sides) = self.border_sides(key) {
+            split_border_all_sides(
+                style,
+                sides,
+                AllSides {
+                    width: !later.contains(&self.border_width),
+                    color: !later.contains(&self.border_color),
+                    style: !later.contains(&self.border_style),
+                },
+            );
+        }
+        for &target in &self.covered[key] {
+            if !later.contains(&target) {
+                (self.keys[target].clear)(style);
             }
         }
     }
@@ -276,6 +311,71 @@ impl Covers {
 /// A shorthand in `over` resets what it covers in `base`, as a later CSS declaration does.
 pub(crate) fn shadow(base: &mut Cow<'_, StyleDesc>, over: &StyleDesc) {
     COVERS.shadow(base, over);
+}
+
+/// The id of the property `name` (camel case, as written in a style object) when it is a shorthand
+/// or covered by one.
+pub(crate) fn key_id(name: &str) -> Option<KeyId> {
+    COVERS.ids.get(name).copied()
+}
+
+/// What `key` covers, through the shorthands it covers as well. Empty for a longhand.
+pub(crate) fn covered_by(key: KeyId) -> &'static [KeyId] {
+    &COVERS.covered[key]
+}
+
+/// Whether the order two declarations are written in decides what they leave: one covers the other,
+/// or one is a border side shorthand and the other an all-sides border value, which it splits.
+pub(crate) fn overlaps(key: KeyId, other: KeyId) -> bool {
+    key == other || COVERS.overlapping[key].contains(&other)
+}
+
+/// The keys `overlaps` holds for with `key`.
+pub(crate) fn overlapping(key: KeyId) -> &'static [KeyId] {
+    &COVERS.overlapping[key]
+}
+
+pub(crate) fn is_set(style: &StyleDesc, key: KeyId) -> bool {
+    (COVERS.keys[key].is_set)(style)
+}
+
+/// Whether a shorthand that `style` sets covers `key`.
+pub(crate) fn is_covered_in(style: &StyleDesc, key: KeyId) -> bool {
+    COVERS.covered.iter().enumerate().any(|(shorthand, covered)| covered.contains(&key) && is_set(style, shorthand))
+}
+
+/// A declaration of `key` that has no value: it and what it covers, but for the keys in `keep`, are
+/// unset.
+pub(crate) fn reset(style: &mut StyleDesc, key: KeyId, keep: &[KeyId]) {
+    (COVERS.keys[key].clear)(style);
+    for &target in &COVERS.covered[key] {
+        if !keep.contains(&target) {
+            (COVERS.keys[target].clear)(style);
+        }
+    }
+}
+
+/// `keys` of `style`, unset.
+pub(crate) fn clear(style: &mut StyleDesc, keys: &[KeyId]) {
+    for &key in keys {
+        (COVERS.keys[key].clear)(style);
+    }
+}
+
+/// `keys` and what they cover, through the shorthands they cover as well.
+pub(crate) fn with_covered(keys: &[KeyId]) -> Vec<KeyId> {
+    let mut all = keys.to_vec();
+    for &key in keys {
+        all.extend(COVERS.covered[key].iter().filter(|covered| !keys.contains(covered)));
+    }
+    all
+}
+
+/// `keys` of `style` as `from` has them.
+pub(crate) fn restore(style: &mut StyleDesc, from: &StyleDesc, keys: &[KeyId]) {
+    for &key in keys {
+        (COVERS.keys[key].copy)(style, from);
+    }
 }
 
 /// Parses a style object, then drops the longhands a shorthand covers that were written before it,
