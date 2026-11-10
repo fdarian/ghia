@@ -18,7 +18,10 @@ import {
   sameMutationValue,
   serializeCustomProp,
   forwardsCustomProp,
+  hasMutationObservers,
+  queueCharacterDataMutation,
   readTextControlSelection,
+  recordAttributeChanges,
   requestFormSubmit,
   selectTextControl,
   setTextControlSelectionRange,
@@ -596,7 +599,13 @@ export const hostConfig = {
     }
     // Custom prop diff (for non-div/text elements)
     diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
-    instance.props = newProps
+    if (hasMutationObservers()) {
+      recordAttributeChanges(instance, new Set([...Object.keys(oldProps), ...Object.keys(newProps)]), () => {
+        instance.props = newProps
+      })
+    } else {
+      instance.props = newProps
+    }
   },
 
   commitTextUpdate(
@@ -605,7 +614,9 @@ export const hostConfig = {
     newText: string
   ): void {
     rendererFor(textInstance).setText(textInstance.nativeId, newText)
+    const oldValue = textInstance.text
     textInstance.text = newText
+    queueCharacterDataMutation(textInstance, oldValue)
   },
 
   appendChildToContainer(container: Container, child: Instance): void {

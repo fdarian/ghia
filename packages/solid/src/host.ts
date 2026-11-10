@@ -22,6 +22,10 @@ import {
   isNativeviewHandlerProp,
   HOST_BINDING,
   HOST_MOUNT,
+  hasMutationObservers,
+  queueCharacterDataMutation,
+  queueChildListMutation,
+  recordAttributeChanges,
   ROOT_ELEMENT_STYLE,
   ROOT_HEAD_STYLE,
   ROOT_ELEMENT_TYPES,
@@ -653,7 +657,9 @@ export function createHostText(value: string): HostText {
 export function replaceHostText(node: HostText, value: string): void {
   const next = String(value)
   if (node.text === next) return
+  const previous = node.text
   node.text = next
+  queueCharacterDataMutation(node, previous)
   if (node.root && node.mounted) node.root.mutations.setText(node.nativeId, next)
 }
 
@@ -700,11 +706,16 @@ export function setHostProperty(
     node.listeners.setProp(eventType, isEventHandler(value) ? value : undefined)
     return
   }
-  if (value === undefined) node.props.delete(name)
-  else node.props.set(name, value)
+  if (hasMutationObservers()) recordAttributeChanges(node, [name], () => storeHostProp(node, name, value))
+  else storeHostProp(node, name, value)
   if (!node.root || !node.mounted || !customPropAllowed(node, name)) return
   const serialized = serializeCustomProp(value)
   if (node.sent.writesProp(name, serialized)) node.root.mutations.setCustomProp(node.nativeId, name, serialized)
+}
+
+function storeHostProp(node: HostElement, name: string, value: HostPropertyValue): void {
+  if (value === undefined) node.props.delete(name)
+  else node.props.set(name, value)
 }
 
 function syncNativeviewProps(root: HostRoot, node: HostElement): void {
@@ -757,6 +768,9 @@ function removeFromParent(node: HostNode): void {
   const index = parent.childList.indexOf(node)
   if (index >= 0) parent.childList.splice(index, 1)
   node.parent = null
+  if (index >= 0 && parent.kind === "element") {
+    queueChildListMutation(parent, [], [node], parent.childList[index - 1] ?? null, parent.childList[index] ?? null)
+  }
 }
 
 export function insertHostNode(
@@ -777,6 +791,7 @@ export function insertHostNode(
   const index = anchor ? parent.childList.indexOf(anchor) : parent.childList.length
   parent.childList.splice(index, 0, node)
   node.parent = parent
+  queueChildListMutation(parent, [node], [], parent.childList[index - 1] ?? null, parent.childList[index + 1] ?? null)
   const root = parent.root
   if (!root) return
   root.removals.delete(node)
