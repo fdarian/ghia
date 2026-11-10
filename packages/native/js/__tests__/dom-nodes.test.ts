@@ -78,11 +78,13 @@ defineDomMembers(FakeHtml.prototype, (element: FakeHtml) => ({
   listeners: undefined as never,
   connected: element.connected,
   prop: (name) => element.props[name],
+  propNames: () => Object.keys(element.props),
 }))
 defineDomMembers(FakeSvg.prototype, (element: FakeSvg) => ({
   listeners: undefined as never,
   connected: element.connected,
   prop: (name) => element.props[name],
+  propNames: () => Object.keys(element.props),
 }))
 
 function place(parent: FakeHtml, ...children: Array<FakeHtml | FakeText>): void {

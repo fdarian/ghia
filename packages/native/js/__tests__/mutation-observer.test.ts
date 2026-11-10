@@ -52,6 +52,7 @@ defineDomMembers(FakeElement.prototype, (element: FakeElement) => ({
   listeners: undefined as never,
   connected: true,
   prop: (name) => element.props[name],
+  propNames: () => Object.keys(element.props),
 }))
 
 type Child = FakeElement | FakeText
