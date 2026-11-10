@@ -20,7 +20,7 @@ MatchedRules + own style declarations ──merge──> JSON text ──StyleTa
                     RetainedElement::style (what the build, retention and getComputedStyle read)
 ```
 
-No sheet at all is a branch: every hook of the tree returns at `StyleSheets::enabled`, which is false until a `<style>` element or a constructed sheet exists and false again once the last is gone (`wind_down_sheets` frees the atoms, index and per-element data).
+No sheet at all is a branch: every hook of the tree returns at `StyleSheets::enabled`, which is false until a `<style>` element or a constructed sheet exists and false again once the last is gone (`wind_down_sheets` frees the interned names, the index, the matched-set table, the `[style]` texts, the cascade cache and every element's per-sheet data).
 
 ## Parsing a sheet
 
@@ -37,7 +37,7 @@ No sheet at all is a branch: every hook of the tree returns at `StyleSheets::ena
 
 ### Atoms
 
-`atoms.rs`. Tags, ids, class names and attribute names are interned to a `u32` once per document, so matching compares integers. The parser lower-cases tags and attribute names and keeps classes and ids as written. Every element's `ElementCss` holds its tag, id and class atoms while sheets exist; they are computed for all existing elements at the first flush after a sheet appears (`atoms_fresh`) and kept current by the hooks after that.
+`atoms.rs`. Tags, ids, class names and attribute names are interned to a `u32` once per document, so matching compares integers. The parser lower-cases tags and attribute names and keeps classes and ids as written. Every element's `ElementCss` holds its id and class atoms while sheets exist, and only for names a sheet mentions: a class or id no sheet names cannot match a selector, so `Atoms::get` finds nothing for it and the element stores nothing (an element with no named class or id has no `ElementCss`), which keeps the interner the size of the sheets and not of every name the app ever used. The atoms are computed for all existing elements at the first flush after a sheet appears and again after a sheet load that added names (`atoms_fresh`, `reload_sheets` compares the interner's size), and kept current by the hooks in between. A name that leaves the sheets stays interned until the last sheet goes, when `wind_down_sheets` starts a new interner.
 
 ### Validation
 
@@ -49,7 +49,7 @@ No sheet at all is a branch: every hook of the tree returns at `StyleSheets::ena
 
 `RuleIndex::matching(element)` visits the buckets of the element's id, its classes, every attribute name some selector reads (and the element has), its tag, and the universal list, runs the full right-to-left match (`matching.rs`, over the `ElementView` trait; `view.rs` is the retained tree's implementation) on each candidate, and sorts the matches by (layer rank, specificity, source number). A rule counts once, at the specificity of the most specific of its selectors that matched.
 
-`TreeView::attr` reads an attribute from the element's attribute store (`attributes.rs`, set by wire op 13) and, failing that, from the prop of the same name (`id`, `role`, `aria-*` arrive as props). `style` is special: the text is synthesized from the element's own style declarations (`kebab-key: value;`, cached per own-style `Arc` while any selector reads `style`, `StyleSheets::style_text`), so `[style*="--dnd-scale"]` works. A text node (a `text` element holding a string) is not matchable.
+`TreeView::attr` reads an attribute from the element's attribute store (`attributes.rs`, set by wire op 13) and, failing that, from the prop of the same name (`id`, `role`, `aria-*` arrive as props). `style` is special: the text is synthesized from the element's own style declarations (`kebab-key: value;`, cached per own-style `Arc`, `StyleSheets::style_text`, and handed to the matcher as a shared `AttrValue`), so `[style*="--dnd-scale"]` works. The attribute operators compare in place (ASCII case-insensitively for the `i` flag), so a check allocates nothing. The cached texts are released at the end of every flush for own styles no element holds, and cleared at wind-down. A text node (a `text` element holding a string) is not matchable.
 
 ### Matched sets are interned
 
@@ -67,7 +67,7 @@ A later declaration of a key removes the earlier one and is appended, which is w
 
 ### The cascade cache
 
-`CascadeCache`, `StyleTable::cascaded`: keyed by (matched `Arc` pointer, own style `Arc` pointer) and holding strong references to both, so addresses cannot be reused while an entry lives. N elements that match the same rules and share an own style cost one merge (`cascadesComputed` counts the misses). The cache is cleared when the sheets change; `release_unused` drops entries whose style only the cache and the style table hold, so the table can sweep it. No sheet matches an element: its effective style is the own style, the same `Arc`, and the cache is not asked.
+`CascadeCache`, `StyleTable::cascaded`: keyed by (matched `Arc` pointer, own style `Arc` pointer) and holding strong references to both, so addresses cannot be reused while an entry lives. N elements that match the same rules and share an own style cost one merge (`cascadesComputed` counts the misses). The cache is cleared when the sheets change. `release_unused` (run by `StyleTable::sweep`) counts, per style, the entries that hold it (as their style or as their own style: a merge that adds nothing to the own style is the own style itself, and entries whose merges coincide share one) and drops an entry when the style has no holder but those entries and the style table, so the table can sweep it. It repeats while an entry dropped lets go of another's style. No sheet matches an element: its effective style is the own style, the same `Arc`, and the cache is not asked.
 
 ## What a change marks
 
@@ -92,10 +92,12 @@ The tree's hooks (`tree.rs`) collect `(element, Reach)` marks:
 
 1. If the sources are dirty, `reload_sheets`: collect the texts of the connected `<style>` elements in tree order (`tree_path` compares positions among siblings), then the adopted constructed sheets in list order. If they equal the texts the index was built from nothing happens; otherwise `StyleSheets::load` parses all of them again with one `Atoms` and one `Layers`, validates, builds the index, clears the interner and the cascade cache and marks everything.
 2. If the atoms are not fresh, compute them for every element and mark everything.
-3. Expand the marks into the set of elements to match (`restyle_set`, `Expansion`): each reach becomes the element, its children or its subtree, and the next or following siblings, each element once and each subtree walked once. A mark of everything is the document in tree order plus the elements outside it (which match nothing).
-4. Match each (`elementsRematched` counts them), intern the result, and compare it to the element's current `matched` by pointer.
+3. Expand the marks into the set of elements to match (`restyle_set`, `Expansion`): each reach becomes the element, its children or its subtree, and the next or following siblings, each element once and each subtree walked once. The marks that reach siblings are grouped by parent (`expand_siblings`): one map of the parent's children gives their positions, and the following siblings are walked once from the first mark with the reaches of the marks before each folded together, so mounting n siblings under a sibling combinator is linear. A mark of everything is the document in tree order plus the elements outside it (which match nothing).
+4. Match each (`elementsRematched` counts them; `SiblingPositions` in `view.rs` gives `prev_sibling` the element's index among its siblings in O(1), mapping a parent's children the second time it is asked, so `+` and `~` do not scan the siblings per step), intern the result, and compare it to the element's current `matched` by pointer.
 5. `apply_matched` for the ones that changed: store `matched`, `refresh_effective_style`, `settle_style_change`. That is the path `set_style` takes, so retention, the transition source style and the paragraph grouping see an ordinary style change.
-6. Drop what is unused (`[style]` texts, cascade entries), and wind down if no sheet is left.
+6. Drop the `[style]` texts no element holds (the cascade entries go at the style table's next sweep), and wind down if no sheet is left.
+
+Whether a moved or removed element holds a `<style>` element (`contains_style_element`) is answered by walking its subtree when that is small next to the number of `<style>` elements, and from the `<style>` elements up to the root when it is not.
 
 An element that is not in the document, or is not matchable, matches nothing: removing a `<style>` element restores every element it styled.
 

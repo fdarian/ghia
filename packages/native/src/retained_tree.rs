@@ -397,6 +397,16 @@ impl RetainedElement {
         self.release_empty_extras();
     }
 
+    /// Sets the rules the sheets matched the element with, and lets go of the extras when that
+    /// leaves them empty.
+    pub(crate) fn set_matched(&mut self, matched: Option<Arc<crate::css::sheet::MatchedRules>>) {
+        if matched.is_none() && self.css().is_none() {
+            return;
+        }
+        self.css_mut().matched = matched;
+        self.release_empty_extras();
+    }
+
     /// Replaces the class atoms and returns the ones the element had.
     pub(crate) fn replace_css_classes(&mut self, classes: Vec<crate::css::sheet::Atom>) -> Vec<crate::css::sheet::Atom> {
         if classes.is_empty() && self.css().is_none_or(|css| css.classes.is_empty()) {
@@ -1493,7 +1503,7 @@ impl RetainedTree {
             let Some(element) = self.elements.get_mut(&id) else {
                 continue;
             };
-            element.css_mut().matched = matched;
+            element.set_matched(matched);
             let classify = self.commit_patching;
             let change = self.refresh_effective_style(id, classify);
             self.settle_style_change(id, change);

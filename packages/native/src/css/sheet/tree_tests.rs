@@ -856,6 +856,28 @@ fn a_style_element_deep_in_a_large_subtree_is_found_when_the_subtree_is_removed(
 }
 
 #[test]
+fn an_element_that_stops_matching_and_has_no_classes_lets_go_of_its_extras() {
+    let mut doc = Doc::new();
+    let item = doc.classed("div", ROOT, "a");
+    doc.style_element(ROOT, ".a { color: red }");
+    doc.flush();
+    assert!(doc.tree.elements[&item].css().is_some_and(|css| css.matched.is_some()));
+
+    doc.tree.set_attribute(item, "class", None);
+    doc.flush();
+    assert_eq!(doc.color(item), None);
+    assert!(doc.tree.elements[&item].css().is_none());
+}
+
+fn sibling_work() -> usize {
+    super::view::SIBLING_WORK.with(|work| work.get())
+}
+
+fn reset_sibling_work() {
+    super::view::SIBLING_WORK.with(|work| work.set(0));
+}
+
+#[test]
 fn the_universal_layer_goes_under_the_cascade() {
     let mut doc = Doc::new();
     let div = doc.classed("div", ROOT, "a");
