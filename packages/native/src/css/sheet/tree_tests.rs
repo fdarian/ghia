@@ -689,6 +689,42 @@ fn a_sheet_change_clears_the_cascade_cache() {
 }
 
 #[test]
+fn a_drag_over_a_rule_naming_the_dragged_keys_leaves_the_cascade_cache_and_style_table_bounded() {
+    let mut doc = Doc::new();
+    let item = doc.classed("div", ROOT, "item");
+    doc.style_element(ROOT, ".item { left: 0px; top: 0px }");
+    doc.flush();
+    for frame in 1..200 {
+        doc.inline(item, &format!(r#"{{"left":{frame},"top":{frame}}}"#));
+        doc.flush();
+        doc.tree.styles.sweep();
+    }
+    assert!(doc.tree.styles.cascaded.len() <= 2, "cascade entries: {}", doc.tree.styles.cascaded.len());
+    assert!(doc.tree.styles.len() <= 3, "interned styles: {}", doc.tree.styles.len());
+    assert!(doc.style(item).is_some_and(|style| style.left.is_some()));
+}
+
+#[test]
+fn entries_that_share_one_cascaded_style_are_released_once_no_element_uses_it() {
+    let mut doc = Doc::new();
+    let first = doc.classed("div", ROOT, "a");
+    let second = doc.classed("div", ROOT, "a");
+    doc.style_element(ROOT, ".a { color: red !important }");
+    doc.inline(first, r#"{"color":"blue"}"#);
+    doc.inline(second, r#"{"color":"green"}"#);
+    doc.flush();
+    assert_eq!(doc.tree.styles.cascaded.len(), 2);
+    assert!(Arc::ptr_eq(&doc.style_arc(first).unwrap(), &doc.style_arc(second).unwrap()));
+
+    doc.tree.set_attribute(first, "class", None);
+    doc.tree.set_attribute(second, "class", None);
+    doc.flush();
+    doc.tree.styles.sweep();
+    assert_eq!(doc.tree.styles.cascaded.len(), 0);
+    assert_eq!(doc.color(first), Some("blue"));
+}
+
+#[test]
 fn the_universal_layer_goes_under_the_cascade() {
     let mut doc = Doc::new();
     let div = doc.classed("div", ROOT, "a");

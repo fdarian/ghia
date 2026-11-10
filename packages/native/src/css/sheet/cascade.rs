@@ -158,10 +158,30 @@ impl CascadeCache {
         self.entries.clear();
     }
 
-    /// Forget the styles no element holds. The style table holds each one too, so an entry whose
-    /// style has only those two holders is unused; it would keep the table from sweeping it.
+    /// Forget the styles no element holds. The style table holds each one too, and so does every
+    /// entry that has it as its style or its own style (the merge of a sheet that names the keys
+    /// an inline style sets is the own style itself): an entry whose style has no other holder is
+    /// unused, and would keep the table from sweeping it.
     pub fn release_unused(&mut self) {
-        self.entries.retain(|_, entry| entry.style.as_ref().is_some_and(|style| Arc::strong_count(style) > 2));
+        loop {
+            let mut held_by_cache: FxHashMap<*const StyleDesc, usize> = FxHashMap::default();
+            for entry in self.entries.values() {
+                for style in entry.style.iter().chain(entry._own.iter()) {
+                    *held_by_cache.entry(Arc::as_ptr(style)).or_default() += 1;
+                }
+            }
+            let before = self.entries.len();
+            self.entries.retain(|_, entry| {
+                entry
+                    .style
+                    .as_ref()
+                    .is_some_and(|style| Arc::strong_count(style) > 1 + held_by_cache[&Arc::as_ptr(style)])
+            });
+            // Dropping an entry lets go of its own style, which can be another entry's style.
+            if self.entries.len() == before {
+                return;
+            }
+        }
     }
 
     #[cfg(test)]
