@@ -225,6 +225,10 @@ pub struct Paragraph {
     pub container: u64,
     pub index: usize,
     pub text: String,
+    /// The first child of the container that fed the paragraph, usually its first `#text` node: an id
+    /// that stays when a sibling is inserted before the paragraph. The container itself when only its
+    /// own `content` feeds it.
+    pub anchor: u64,
     pub pieces: Vec<Piece>,
     /// Every inline box that holds text, with the bytes it covers, outermost
     /// first. Hit-testing a character index back to its span reads this.
@@ -305,6 +309,8 @@ struct Builder {
     blockified: bool,
     /// Document position of the first child that fed the paragraph, see [`plan_children_at`].
     at: Option<u32>,
+    /// Id of that child, see [`Paragraph::anchor`].
+    anchor: Option<u64>,
 }
 
 impl Builder {
@@ -322,6 +328,7 @@ impl Builder {
             only_whitespace: true,
             blockified,
             at: None,
+            anchor: None,
         }
     }
 
@@ -514,6 +521,7 @@ impl Builder {
             container: builder.container,
             index: builder.index,
             text: builder.text,
+            anchor: builder.anchor.unwrap_or(builder.container),
             pieces: builder.pieces,
             boxes: builder.boxes,
         };
@@ -588,11 +596,13 @@ pub(crate) fn plan_flow(
             .unwrap_or_default();
         if is_raw_text(child) {
             paragraph.at.get_or_insert(at);
+            paragraph.anchor.get_or_insert(child.id);
             if let Some(content) = child.content.as_deref() {
                 paragraph.within(&contents, |paragraph, chain| paragraph.push_text(content, chain));
             }
         } else if !items && is_inline_box(tree, child) {
             paragraph.at.get_or_insert(at);
+            paragraph.anchor.get_or_insert(child.id);
             paragraph.within(&contents, |paragraph, chain| paragraph.push_element(tree, child, chain));
         } else {
             paragraph.finish(&mut out);

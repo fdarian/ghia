@@ -12246,7 +12246,7 @@ pub(crate) fn build_host_container(
             exposed,
         )
     };
-    el = crate::accessibility::describe_text(el, element, text.as_deref());
+    el = crate::accessibility::describe_text(el, element, default_role, text);
     if is_label && !inert {
         el = crate::accessibility::label::describe(el, element.id);
     }
@@ -12730,7 +12730,7 @@ fn build_plan(
                     .then(|| crate::text::inline::accessible_text(std::iter::once(child)))
                     .flatten();
                 content_elements.push(match label {
-                    Some(text) => crate::accessibility::paragraph_label(element.id, at, &text).child(paragraph_element).into_any_element(),
+                    Some(text) => crate::accessibility::paragraph_label(paragraph.anchor, text).child(paragraph_element).into_any_element(),
                     None => paragraph_element,
                 });
                 ctx.subtree.merge(subtree);

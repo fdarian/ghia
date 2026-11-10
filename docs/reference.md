@@ -4562,9 +4562,13 @@ gets a hidden `group` node to carry it.
 
 A paragraph is not an element, so the element that holds it reads it. A host
 element whose content is one paragraph (strings and `<span>`s, nothing else) has
-that text as its value (`aria-valuetext`) whatever its role, and is a `Label` when
-it has no role of its own. `<div>Saved</div>` is read as "Saved"; a `role="button"`
-div with the same content is a button whose value is "Saved".
+that text, and is a `Label` when it has no role of its own: the text is its value
+(`aria-valuetext` overrides it). With any other role the text is its name, as the
+DOM names a button, link or heading from its content, unless the author named it
+with `aria-label`, `aria-labelledby` or a `<label>`. `<div>Saved</div>` is read as
+"Saved"; a `role="button"` div with the same content is a button named "Saved";
+`<div aria-label="silent">Hello</div>` is a `Label` named "silent" whose value is
+"Hello".
 
 ```tsx
 <div>Saved <span style={{ fontWeight: 700 }}>3 files</span></div> // Label "Saved 3 files"
@@ -4575,8 +4579,7 @@ children gives each paragraph a `Label` node of its own, in document order, so t
 text between two blocks is read too. With no screen reader the tree does not hold
 them and a frame costs nothing for it. Inside a
 [`contentVisibility`](#skipping-content-with-contentvisibility) subtree that is
-skipped, paragraphs beside blocks are not separate nodes
-([deviations](./fork/deviations.md#observers-and-content-visibility)).
+skipped they are there too, as Chrome has them.
 
 ### `<label>`
 
