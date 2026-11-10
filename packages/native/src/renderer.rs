@@ -12957,10 +12957,11 @@ fn paragraph_content(
             ctx.inherited.pointer_events_none,
             ctx.inherited.inert,
             &states,
+            &motion,
             &insets,
         );
         let inline_regions = if ctx.inherited.frameless {
-            crate::text::inline_region::of(ctx.tree, paragraph, ctx.inherited.app_region, &states, &insets)
+            crate::text::inline_region::of(ctx.tree, paragraph, ctx.inherited.app_region, &states, &motion, &insets)
         } else {
             Vec::new()
         };

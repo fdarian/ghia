@@ -230,6 +230,33 @@ fn step(
 }
 
 #[cfg(test)]
+impl InlineStyles {
+    /// The styles of the boxes of `paragraph` in a frame where nothing moves, for the readers of
+    /// the boxes that are tested without a build.
+    pub(crate) fn at_rest(
+        tree: &RetainedTree,
+        paragraph: &Paragraph,
+        states: &dyn Fn(u64, &StyleDesc) -> PointerStates,
+    ) -> Self {
+        Self::resolve(
+            tree,
+            paragraph,
+            &ColorContext::root(crate::color::Scheme::Light),
+            &ParentValues::initial(),
+            states,
+            Timeline {
+                values: &MotionValueStore::default(),
+                transitions: &mut CssTransitions::default(),
+                animations: &mut CssAnimations::default(),
+                keyframes: &KeyframesRegistry::default(),
+                motion: &HashMap::new(),
+                now: Instant::now(),
+            },
+        )
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::sync::Arc;
     use std::time::Duration;

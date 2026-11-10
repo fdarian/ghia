@@ -388,6 +388,34 @@ describeNative("a var() in the style of an inline box", () => {
   }, SLOW)
 })
 
+describeNative("a var() as the cursor of an inline box", () => {
+  const cursors = (cursor: string, custom: Record<string, string>) => {
+    let seen: string[] = []
+    mounted(
+      <div style={{ position: "absolute", left: 0, top: 0, width: 600, ...custom }}>
+        <text testId="text" style={{ fontSize: 16, lineHeight: "20px" }}>
+          <span style={{ cursor }}>WWWWWWWW</span>
+        </text>
+      </div>,
+      (renderer) => {
+        const [x, y] = box(renderer, "text")
+        const at = (dx: number) => {
+          renderer.nativeSimulateMouseMove(x + dx, y + 10)
+          return renderer.getCursor()
+        }
+        seen = [at(8), at(500)]
+      },
+    )
+    return seen
+  }
+
+  it("shows what the custom properties around the span say, as the literal does", () => {
+    const literal = cursors("pointer", {})
+    expect(literal).toEqual(["pointer", "default"])
+    expect(cursors("var(--cursor)", { "--cursor": "pointer" })).toEqual(literal)
+  }, SLOW)
+})
+
 describeNative("a custom property declared in a focus state", () => {
   const tree = (focusVisible: Record<string, unknown>) => (
     <div style={{ position: "absolute", left: 0, top: 0, width: 600, "--w": "40px" }}>
