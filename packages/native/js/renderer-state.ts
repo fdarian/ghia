@@ -4,7 +4,7 @@ import { reportUncaught, type DomDispatchResult } from "./events/dispatch.js"
 import { createDragDispatcher } from "./events/drag.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
 import { elementOf, GpuixEventTarget, noteFocusEvent } from "./events/window-target.js"
-import { mountedRenderers } from "./mounted-renderer.js"
+import { mountedRenderers, notifyMountedRenderer } from "./mounted-renderer.js"
 import { deliverObservation } from "./observers.js"
 import type {
   ElementIdAllocator,
@@ -263,11 +263,13 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
           removeFrameSource = undefined
           const mounted = mountedRenderers()
           mounted.splice(mounted.indexOf(renderer), 1)
+          notifyMountedRenderer()
           return true
         },
       }
       active = binding
       mountedRenderers().push(renderer)
+      notifyMountedRenderer()
       removeFrameSource = addFrameSource(renderer)
       return binding
     },

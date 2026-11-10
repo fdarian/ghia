@@ -19,3 +19,26 @@ export function mountedRenderers(): NativeRenderer[] {
 export function mountedRenderer(): NativeRenderer | undefined {
   return mountedRenderers().at(-1)
 }
+
+const SUBSCRIBERS_KEY = Symbol.for("@ghia/native/mounted-renderer-subscribers")
+
+function subscribers(): Set<() => void> {
+  const existing = Reflect.get(globalThis, SUBSCRIBERS_KEY) as Set<() => void> | undefined
+  if (existing) return existing
+  const created = new Set<() => void>()
+  Reflect.set(globalThis, SUBSCRIBERS_KEY, created)
+  return created
+}
+
+/** Calls `listener` after a root mounts or unmounts, when `mountedRenderer()` may have changed. */
+export function subscribeMountedRenderer(listener: () => void): () => void {
+  subscribers().add(listener)
+  return () => {
+    subscribers().delete(listener)
+  }
+}
+
+/** @internal Tells the subscribers that the set of mounted renderers changed. */
+export function notifyMountedRenderer(): void {
+  for (const listener of [...subscribers()]) listener()
+}

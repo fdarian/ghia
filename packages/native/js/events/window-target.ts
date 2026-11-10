@@ -353,6 +353,14 @@ export function setDocumentAnimations(list: (renderer: object) => Animation[]): 
   Reflect.set(globalThis, DOCUMENT_ANIMATIONS_KEY, list)
 }
 
+/** Calls `listener` whenever a type gains its first listener or loses its last on `window` or `document`. */
+export function subscribeWindowEventTypes(listener: () => void): () => void {
+  typeSubscribers.add(listener)
+  return () => {
+    typeSubscribers.delete(listener)
+  }
+}
+
 export const window = new GpuixEventTarget(notifyTypeSubscribers)
 export const document = new GpuixDocument(notifyTypeSubscribers)
 registerDocument(document)
