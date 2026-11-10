@@ -10,7 +10,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renderer", () => {
     const app = createTestRoot()
     app.render(() => (
       <div testId="root" style={{ padding: count() }}>
-        <text>count {count()}</text>
+        <div>count {count()}</div>
       </div>
     ))
     expect(app.renderer.getAllText()).toEqual(["count ", "0"])
@@ -22,7 +22,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renderer", () => {
   it("flushes signal updates outside an event boundary", async () => {
     const [count, setCount] = createSignal(0)
     const app = createTestRoot()
-    app.render(() => <text>{count()}</text>)
+    app.render(() => <div>{count()}</div>)
 
     setCount(1)
     await Promise.resolve()
@@ -40,7 +40,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renderer", () => {
         onClick={() => setCount((value) => value + (alternate() ? 10 : 1))}
         style={{ width: 100, height: 40, backgroundColor: "#333333" }}
       >
-        <text>{count()}</text>
+        <div>{count()}</div>
       </div>
     ))
     const button = app.renderer.findByTestId("button")!
@@ -66,8 +66,8 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renderer", () => {
     const app = createTestRoot()
     app.render(() => (
       <div>
-        <Show when={show()}><text>shown</text></Show>
-        <For each={items()}>{(item) => <text>{item}</text>}</For>
+        <Show when={show()}><div>shown</div></Show>
+        <For each={items()}>{(item) => <div>{item}</div>}</For>
       </div>
     ))
     app.flushSync(() => {
@@ -82,7 +82,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renderer", () => {
     const app = createTestRoot()
     app.render(() => (
       <div>
-        <For each={items()}>{(item) => <text>{item}</text>}</For>
+        <For each={items()}>{(item) => <div>{item}</div>}</For>
       </div>
     ))
     app.flushSync(() => setItems(["a", "c", "b", "d"]))
@@ -117,7 +117,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renderer", () => {
       <div>
         <input value="hello" placeholder="Type" />
         <markdown source="**bold**" />
-        <virtual-list estimatedItemHeight={20}><text>row</text></virtual-list>
+        <virtual-list estimatedItemHeight={20}><div>row</div></virtual-list>
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

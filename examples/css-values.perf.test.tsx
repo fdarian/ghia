@@ -56,7 +56,7 @@ const SCENARIOS: Record<string, Style> = {
 function Grid({ cell, tick }: { cell: Style; tick: number }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: 1200, height: 800 }}>
-      <text>{`tick ${tick}`}</text>
+      <div>{`tick ${tick}`}</div>
       <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: 2 }}>
         {Array.from({ length: CELLS }, (_, index) => (
           <div key={index} style={{ width: 40, height: 20, ...cell }} />

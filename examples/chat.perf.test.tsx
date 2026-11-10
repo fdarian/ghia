@@ -178,7 +178,7 @@ describeNative('chat performance', () => {
   // (keying the group list on `subtree_revision` instead of `search_revision`)
   // moves a keystroke from 1.9ms to 2.7ms here, well inside any sane budget,
   // because most of this chat's text lives in native `<code>` / `<diff>` /
-  // `<markdown>` props rather than retained `<text>` nodes.
+  // `<markdown>` props rather than retained text.
   //
   // The proof is `highlight_cache_tests` in `packages/native/src/renderer.rs`,
   // which compares Arc identity and fails outright when the cache is broken.

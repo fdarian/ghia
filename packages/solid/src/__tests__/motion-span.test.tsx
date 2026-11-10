@@ -77,7 +77,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid motion.span", () => {
     const page = setup()
     page.app.render(() => (
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <motion.span
             style={{ paddingLeft: 12 }}
             initial={{ backgroundColor: RED }}
@@ -87,7 +87,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid motion.span", () => {
             aaaa
           </motion.span>{" "}
           tail
-        </text>
+        </div>
       </div>
     ))
     const before = page.paragraph()
@@ -115,11 +115,11 @@ describe.skipIf(!hasNativeTestRenderer)("Solid motion.span", () => {
     const page = setup()
     page.app.render(() => (
       <div style={PAGE}>
-        <text testId="p" style={{ ...TEXT, fontSize: 64, lineHeight: "70px" }}>
+        <div testId="p" style={{ ...TEXT, fontSize: 64, lineHeight: "70px" }}>
           <motion.span initial={{ color: RED }} animate={{ color: target() }} transition={LINEAR}>
             MM
           </motion.span>
-        </text>
+        </div>
       </div>
     ))
     expect(page.ink()).toEqual([255, 0, 0])
@@ -137,11 +137,11 @@ describe.skipIf(!hasNativeTestRenderer)("Solid motion.span", () => {
     const page = setup()
     page.app.render(() => (
       <div style={PAGE}>
-        <text testId="p" style={{ ...TEXT, fontSize: 64, lineHeight: "70px" }}>
+        <div testId="p" style={{ ...TEXT, fontSize: 64, lineHeight: "70px" }}>
           <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={LINEAR}>
             MM
           </motion.span>
-        </text>
+        </div>
       </div>
     ))
     expect(page.ink()).toEqual([255, 255, 255])
@@ -158,7 +158,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid motion.span", () => {
     const page = setup()
     page.app.render(() => (
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <motion.span
             style={{ paddingLeft: 12 }}
             variants={{
@@ -171,7 +171,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid motion.span", () => {
           >
             aaaa
           </motion.span>
-        </text>
+        </div>
       </div>
     ))
     expect(page.at(4, 10)).toEqual([255, 0, 0])
@@ -185,7 +185,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid motion.span", () => {
   describe("under AnimatePresence", () => {
     const chip = (show: () => boolean, exit: object | string) => () => (
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <AnimatePresence>
             <Show when={show()}>
               <motion.span
@@ -203,7 +203,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid motion.span", () => {
               </motion.span>
             </Show>
           </AnimatePresence>
-        </text>
+        </div>
       </div>
     )
 
@@ -238,13 +238,13 @@ describe.skipIf(!hasNativeTestRenderer)("Solid motion.span", () => {
       const page = setup()
       page.app.render(() => (
         <div style={PAGE}>
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             <AnimatePresence>
               <Show when={show()}>
                 <motion.span animate={{ color: RED }}>aaaa</motion.span>
               </Show>
             </AnimatePresence>
-          </text>
+          </div>
         </div>
       ))
       page.app.flushSync(() => setShow(false))
@@ -282,9 +282,9 @@ describe.skipIf(!hasNativeTestRenderer)("Solid motion.span", () => {
     for (const [name, props, message] of animating) {
       it(`a key of ${name} that a span cannot animate`, () => {
         const error = creationError(() => (
-          <text>
+          <div>
             <motion.span {...(props as object)}>aaaa</motion.span>
-          </text>
+          </div>
         ))
         expect(error.message).toContain(message)
         expect(error.message).toContain("inline box")
@@ -293,24 +293,24 @@ describe.skipIf(!hasNativeTestRenderer)("Solid motion.span", () => {
 
     it("a key of an exit function that a span cannot animate", () => {
       const error = creationError(() => (
-        <text>
+        <div>
           <AnimatePresence>
             <motion.span animate={{ color: RED }} exit={(() => ({ width: 20 })) as never}>
               aaaa
             </motion.span>
           </AnimatePresence>
-        </text>
+        </div>
       ))
       expect(error.message).toContain('cannot animate "width" in exit')
     })
 
     it("a variant name that variants do not define", () => {
       const error = creationError(() => (
-        <text>
+        <div>
           <motion.span animate="shown" variants={{ hidden: { color: RED } }}>
             aaaa
           </motion.span>
-        </text>
+        </div>
       ))
       expect(error.message).toContain('names the variant "shown"')
     })

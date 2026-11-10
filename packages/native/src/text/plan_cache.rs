@@ -5,7 +5,7 @@
 //! element with children, and it is the same answer until something it reads moves. It reads:
 //!
 //! - the element and everything the paragraph builder walks below it (children, content, styles,
-//!   `display: contents` splices, listeners and props that make a `<text>` a box): the element's
+//!   `display: contents` splices, listeners and props that make an inline box a box of its own): the element's
 //!   `subtree_revision`, which every mutation of it or a descendant moves;
 //! - the `white-space` the element inherits, from ancestors that `subtree_revision` does not
 //!   cover: its computed value is in the key;
@@ -16,7 +16,7 @@
 //! - the elements a `display` transition keeps rendered (`box_generation::hold_display`): while
 //!   there are any, the plan is made and not kept.
 //!
-//! Beside the plan is the text a `<text>` host reads out to accessibility, which is a function of
+//! Beside the plan is the text a host container reads out to accessibility, which is a function of
 //! the plan alone.
 //!
 //! The cache follows the style cache's switch (`css::style_cache::mode`): off plans every time,
@@ -42,7 +42,7 @@ pub(crate) struct Planned {
     key: Key,
     /// `plan_children_at`, see there.
     pub children: Vec<(Child, u32)>,
-    /// What the element reads out, when it is a `<text>` host (`accessibility::is_text_host`).
+    /// What the element reads out, when its content is one paragraph (`accessibility::carries_text`).
     pub accessible_text: Option<String>,
 }
 
@@ -62,13 +62,13 @@ pub(crate) fn settled() {
 
 fn compute(tree: &RetainedTree, element: &RetainedElement, key: Key) -> Planned {
     let children = inline::plan_children_at(tree, element);
-    let accessible_text = crate::accessibility::is_text_host(element)
-        .then(|| inline::accessible_text(children.iter().map(|(child, _)| child)))
+    let accessible_text = crate::accessibility::carries_text(element)
+        .then(|| inline::sole_paragraph_text(children.iter().map(|(child, _)| child)))
         .flatten();
     Planned { key, children, accessible_text }
 }
 
-/// `plan_children_at(tree, element)`, and what `<text>` reads out of it, kept on the element.
+/// `plan_children_at(tree, element)`, and what the element reads out of it, kept on the element.
 pub(crate) fn planned(tree: &RetainedTree, element: &RetainedElement) -> Arc<Planned> {
     let mode = style_cache::mode();
     let key = Key {
@@ -107,9 +107,9 @@ mod tests {
 
     fn tree() -> RetainedTree {
         let mut tree = RetainedTree::new();
-        tree.create_element(1, "text".to_string());
+        tree.create_element(1, "div".to_string());
         for (id, content) in [(2, "Hello "), (3, "world")] {
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "#text".to_string());
             tree.set_text(id, content.to_string());
             tree.append_child(1, id);
         }
@@ -145,7 +145,7 @@ mod tests {
             tree.create_element(id, "div".to_string());
         }
         tree.append_child(1, 2);
-        tree.create_element(3, "text".to_string());
+        tree.create_element(3, "#text".to_string());
         tree.set_text(3, "a   b".to_string());
         tree.append_child(2, 3);
         assert_eq!(text(&planned(&tree, &tree.elements[&2])), "a b");
@@ -161,7 +161,7 @@ mod tests {
         }
         tree.set_style(4, Arc::new(serde_json::from_value(serde_json::json!({ "whiteSpace": "pre" })).unwrap()));
         tree.create_element(2, "div".to_string());
-        tree.create_element(3, "text".to_string());
+        tree.create_element(3, "#text".to_string());
         tree.set_text(3, "a   b".to_string());
         tree.append_child(2, 3);
         tree.append_child(1, 2);
@@ -176,7 +176,7 @@ mod tests {
     #[test]
     fn a_display_a_container_block_gave_is_in_the_key() {
         let mut tree = RetainedTree::new();
-        for (id, kind) in [(1, "div"), (2, "text"), (3, "div"), (4, "text")] {
+        for (id, kind) in [(1, "div"), (2, "#text"), (3, "div"), (4, "#text")] {
             tree.create_element(id, kind.to_string());
         }
         tree.set_text(2, "a".to_string());

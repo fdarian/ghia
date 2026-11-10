@@ -144,7 +144,7 @@ function Page({ nodes, head, tail }: { nodes: number; head: React.ReactNode; tai
         <div key={row} style={{ display: "flex", flexDirection: "row", gap: 4, padding: 2 }}>
           {Array.from({ length: 4 }, (_, cell) => (
             <div key={cell} style={{ borderWidth: 1, borderColor: "#cccccc", padding: 2 }}>
-              <text style={{ fontSize: 11, color: "#333333" }}>{`r${row} c${cell}`}</text>
+              <div style={{ fontSize: 11, color: "#333333" }}>{`r${row} c${cell}`}</div>
             </div>
           ))}
         </div>
@@ -155,13 +155,13 @@ function Page({ nodes, head, tail }: { nodes: number; head: React.ReactNode; tai
 }
 
 const colourHead = (onIteration?: () => void) => (
-  <text
+  <div
     testId="animated"
     onAnimationIteration={onIteration}
     style={{ fontSize: 20, color: "#000000", animation: "afw-pulse 1.5s linear infinite" }}
   >
     animated
-  </text>
+  </div>
 )
 
 const spinnerHead = (
@@ -220,14 +220,14 @@ const motionHead = (
     animate={{ backgroundColor: ["#ff0000", "#0000ff", "#ff0000"] }}
     transition={{ duration: 1.5, ease: "linear", repeat: Infinity }}
   >
-    <text style={{ fontSize: 20, color: "#222222" }}>animated</text>
+    <div style={{ fontSize: 20, color: "#222222" }}>animated</div>
   </motion.div>
 )
 
 const motionOpacity = (
   opacity: number[],
   duration = 1.5,
-  children: React.ReactNode = <text style={{ fontSize: 20, color: "#222222" }}>animated</text>,
+  children: React.ReactNode = <div style={{ fontSize: 20, color: "#222222" }}>animated</div>,
 ) => (
   <motion.div
     testId="animated"
@@ -253,13 +253,13 @@ const opacityHoldingHead = motionOpacity(
   [0.8, 0.3, 0.8],
   1.5,
   <div style={{ position: "relative", zIndex: 2, width: 60, height: 12, backgroundColor: "#cc3333" }}>
-    <text style={{ fontSize: 10, color: "#222222" }}>inside</text>
+    <div style={{ fontSize: 10, color: "#222222" }}>inside</div>
   </div>,
 )
 
 const breatheHead = (
   <div testId="animated" style={{ height: 24, backgroundColor: "#99ccff", animation: "afw-breathe 1.5s linear infinite" }}>
-    <text style={{ fontSize: 20, color: "#222222" }}>animated</text>
+    <div style={{ fontSize: 20, color: "#222222" }}>animated</div>
   </div>
 )
 
@@ -283,14 +283,14 @@ defineKeyframes("afw-blink", {
 /** A loop through exactly 1 and exactly 0 (800 ms, the 50th tick of a 1.6 s loop of 16 ms ticks). */
 const blinkHead = (
   <div testId="animated" style={{ height: 24, backgroundColor: "#99ccff", animation: "afw-blink 1.6s linear infinite" }}>
-    <text style={{ fontSize: 20, color: "#222222" }}>animated</text>
+    <div style={{ fontSize: 20, color: "#222222" }}>animated</div>
   </div>
 )
 
 /** A box that is positioned without an index is lifted at 0 into the context around it, with nothing of its own to keep what is in it. */
 const relativeHead = (
   <div testId="animated" style={{ position: "relative", height: 24, animation: "afw-pulse 1.5s linear infinite", color: "#000000" }}>
-    <text style={{ fontSize: 20 }}>animated</text>
+    <div style={{ fontSize: 20 }}>animated</div>
   </div>
 )
 
@@ -299,14 +299,14 @@ const relativeIndexedHead = (
     testId="animated"
     style={{ position: "relative", zIndex: 3, height: 24, animation: "afw-pulse 1.5s linear infinite", color: "#000000" }}
   >
-    <text style={{ fontSize: 20 }}>animated</text>
+    <div style={{ fontSize: 20 }}>animated</div>
   </div>
 )
 
 /** An absolute badge in a relative card: the card is no unit, the badge is placed outside what it records. */
 const badgeHead = (
   <div style={{ position: "relative", height: 40, width: 200, backgroundColor: "#eeeeee" }}>
-    <text style={{ fontSize: 16, color: "#222222" }}>card</text>
+    <div style={{ fontSize: 16, color: "#222222" }}>card</div>
     <div
       testId="animated"
       style={{
@@ -333,12 +333,12 @@ const underAbsolute = (child: React.ReactNode) => wrapped({ position: "absolute"
 const underOpacity = (child: React.ReactNode) => wrapped({ opacity: 0.5 }, child)
 const underNested = (child: React.ReactNode) => underRelative(underOpacity(underRelative(child)))
 const selfAbsoluteHead = (
-  <text
+  <div
     testId="animated"
     style={{ fontSize: 14, color: "#000000", position: "absolute", left: 0, top: 0, animation: "afw-pulse 1.5s linear infinite" }}
   >
     animated
-  </text>
+  </div>
 )
 
 const selfAbsoluteSpinnerHead = (
@@ -365,12 +365,12 @@ function MovingBlockHead() {
       onClick={() => setMoved(true)}
       style={{ position: "relative", flexShrink: 0, height: 40, width: 300, marginLeft: moved ? 120 : 0, backgroundColor: "#eeeeee" }}
     >
-      <text
+      <div
         testId="animated"
         style={{ fontSize: 16, color: "#000000", position: "absolute", left: 6, top: 4, animation: "afw-pulse 1.5s linear infinite" }}
       >
         animated
-      </text>
+      </div>
     </div>
   )
 }
@@ -393,9 +393,9 @@ function TransitionHead() {
   const [on, setOn] = useState(false)
   return (
     <div testId="toggle" onClick={() => setOn(true)} style={{ height: 24 }}>
-      <text testId="animated" style={{ fontSize: 20, color: on ? "#ff0000" : "#0000ff", transition: "color 1.5s linear" }}>
+      <div testId="animated" style={{ fontSize: 20, color: on ? "#ff0000" : "#0000ff", transition: "color 1.5s linear" }}>
         transition
-      </text>
+      </div>
     </div>
   )
 }
@@ -409,7 +409,7 @@ function FadeOutHead() {
         testId="animated"
         style={{ height: 24, backgroundColor: "#99ccff", opacity: on ? 0 : 1, transition: "opacity 1.6s steps(1, jump-start)" }}
       >
-        <text style={{ fontSize: 20, color: "#222222" }}>fading</text>
+        <div style={{ fontSize: 20, color: "#222222" }}>fading</div>
       </div>
     </div>
   )
@@ -760,7 +760,7 @@ describeNative("a tick that cannot be patched", { timeout: TIMEOUT }, () => {
     function Counter() {
       const [count, setCount] = useState(0)
       commit = setCount
-      return <Page nodes={500} head={<>{colourHead()}<text testId="count">{`count ${count}`}</text></>} />
+      return <Page nodes={500} head={<>{colourHead()}<div testId="count">{`count ${count}`}</div></>} />
     }
     const root = createTestRoot(SIZE)
     const renderer = root.renderer
@@ -964,9 +964,9 @@ describeNative("a tick drawn whole says why", { timeout: TIMEOUT }, () => {
     "an animation that moves a box": [widthHead, "LayoutAnimation"],
     "an animation that moves an absolute box": [topAbsoluteHead, "LayoutAnimation"],
     "an element that is fixed to the viewport": [
-      <text testId="animated" style={{ fontSize: 14, color: "#000000", position: "fixed", left: 0, top: 0, animation: pulse }}>
+      <div testId="animated" style={{ fontSize: 14, color: "#000000", position: "fixed", left: 0, top: 0, animation: pulse }}>
         animated
-      </text>,
+      </div>,
       "Excluded:fixed",
     ],
     "a loop on an element that holds an absolute box against a block outside it": [
@@ -977,14 +977,14 @@ describeNative("a tick drawn whole says why", { timeout: TIMEOUT }, () => {
     ],
     "a scroller that runs a loop": [
       <div testId="animated" style={{ overflow: "scroll", width: 100, height: 24, color: "#000000", animation: pulse }}>
-        <text style={{ fontSize: 12 }}>scroller</text>
+        <div style={{ fontSize: 12 }}>scroller</div>
       </div>,
       "Excluded:scroller",
     ],
     "a loop on an element that holds a scroller": [
       <div testId="animated" style={{ height: 24, color: "#000000", animation: pulse }}>
         <div style={{ overflow: "scroll", width: 100, height: 20 }}>
-          <text style={{ fontSize: 12 }}>scroller</text>
+          <div style={{ fontSize: 12 }}>scroller</div>
         </div>
       </div>,
       "ExcludedBelow:scroller",
@@ -1274,7 +1274,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
       <virtual-list testId="list" itemCount={rows} estimatedItemHeight={30} style={{ width: 300, height: 150, flexShrink: 0 }}>
         {Array.from({ length: rows }, (_, index) => (
           <div key={index} style={{ height: 30 }}>
-            <text style={{ fontSize: 12, color: "#333333" }}>{`row ${index}`}</text>
+            <div style={{ fontSize: 12, color: "#333333" }}>{`row ${index}`}</div>
           </div>
         ))}
       </virtual-list>
@@ -1401,7 +1401,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
         <virtual-list testId="list" itemCount={20} estimatedItemHeight={30} style={{ width: 300, height: 150, flexShrink: 0 }}>
           {Array.from({ length: 20 }, (_, index) => (
             <div key={index} style={{ height: 30 }}>
-              <text style={{ fontSize: 14, color: "#000000", animation: index === 1 ? "afw-pulse 1.5s linear infinite" : undefined }}>{`row ${index}`}</text>
+              <div style={{ fontSize: 14, color: "#000000", animation: index === 1 ? "afw-pulse 1.5s linear infinite" : undefined }}>{`row ${index}`}</div>
             </div>
           ))}
         </virtual-list>
@@ -1676,29 +1676,29 @@ const boundTo = (name: string, initial, start, render) => ({ [name]: <BoundHead 
 /** What binds a motion value to a property that only paints, and the animation that drives it. */
 const boundHeads = {
   ...boundTo("a colour keyframes loop bound to color", "#000000", (value) => animate(value, swing, loop), (value) => (
-    <text testId="animated" style={{ fontSize: 20, color: value }}>
+    <div testId="animated" style={{ fontSize: 20, color: value }}>
       animated
-    </text>
+    </div>
   )),
   ...boundTo("a colour keyframes loop bound to backgroundColor", "#000000", (value) => animate(value, swing, loop), (value) => (
     <div testId="animated" style={{ height: 24, backgroundColor: value }}>
-      <text style={{ fontSize: 20, color: "#ffffff" }}>animated</text>
+      <div style={{ fontSize: 20, color: "#ffffff" }}>animated</div>
     </div>
   )),
   ...boundTo("a number keyframes loop bound to opacity", 0.8, (value) => animate(value, [0.8, 0.3, 0.8], loop), (value) => (
     <div testId="animated" style={{ height: 24, backgroundColor: "#99ccff", opacity: value }}>
-      <text style={{ fontSize: 20, color: "#222222" }}>animated</text>
+      <div style={{ fontSize: 20, color: "#222222" }}>animated</div>
     </div>
   )),
   ...boundTo("a spring bound to opacity", 0.9, (value) => animate(value, 0.5, spring), (value) => (
     <div testId="animated" style={{ height: 24, backgroundColor: "#99ccff", opacity: value }}>
-      <text style={{ fontSize: 20, color: "#222222" }}>animated</text>
+      <div style={{ fontSize: 20, color: "#222222" }}>animated</div>
     </div>
   )),
   ...boundTo("a spring bound to color", "#000000", (value) => animate(value, "#606060", spring), (value) => (
-    <text testId="animated" style={{ fontSize: 20, color: value }}>
+    <div testId="animated" style={{ fontSize: 20, color: value }}>
       animated
-    </text>
+    </div>
   )),
 }
 
@@ -1710,9 +1710,9 @@ function RangeHead() {
     return () => controls.stop()
   }, [x])
   return (
-    <text testId="animated" style={{ fontSize: 20, color }}>
+    <div testId="animated" style={{ fontSize: 20, color }}>
       animated
-    </text>
+    </div>
   )
 }
 
@@ -2021,7 +2021,7 @@ const culledLoops = (count: number) =>
         animate={{ backgroundColor: ["#ff0000", "#0000ff", "#ff0000"] }}
         transition={{ duration: 1.5, ease: "linear", repeat: Infinity }}
       />
-      <text style={{ fontSize: 11, color: "#000000", animation: "afw-pulse 1.5s linear infinite" }}>{`culled ${index}`}</text>
+      <div style={{ fontSize: 11, color: "#000000", animation: "afw-pulse 1.5s linear infinite" }}>{`culled ${index}`}</div>
     </React.Fragment>
   ))
 
@@ -2084,9 +2084,9 @@ describeNative("an animation of a motion value that ends beside values that rest
         initial="#000000"
         start={animation}
         render={(value) => (
-          <text testId="animated" style={{ fontSize: 20, color: value }}>
+          <div testId="animated" style={{ fontSize: 20, color: value }}>
             animated
-          </text>
+          </div>
         )}
       />
     </>
@@ -2161,9 +2161,9 @@ describeNative("a motion value bound to an element that is culled", { timeout: T
         }
       }}
       render={(value) => (
-        <text testId="animated" style={{ fontSize: 20, color: value }}>
+        <div testId="animated" style={{ fontSize: 20, color: value }}>
           animated
-        </text>
+        </div>
       )}
     />
   )
@@ -2266,7 +2266,7 @@ describeNative("a motion value bound to an element that is culled", { timeout: T
           controls.then(() => (finished = true))
           return controls
         }}
-        render={(value) => <text style={{ fontSize: 20, color: value }}>animated</text>}
+        render={(value) => <div style={{ fontSize: 20, color: value }}>animated</div>}
       />,
     )
     const page = await mount(head, 500)
@@ -2340,9 +2340,9 @@ describeNative("a motion value written by a script", { timeout: TIMEOUT }, () =>
           return { stop() {} }
         }}
         render={(value) => (
-          <text testId="animated" style={{ fontSize: 20, color: value }}>
+          <div testId="animated" style={{ fontSize: 20, color: value }}>
             animated
-          </text>
+          </div>
         )}
         {...props}
       />
@@ -2422,7 +2422,7 @@ describeNative("a motion value written by a script", { timeout: TIMEOUT }, () =>
           }}
           render={(value) => (
             <div testId="animated" style={{ height: 24, backgroundColor: "#99ccff", [prop]: value }}>
-              <text style={{ fontSize: 20, color: "#222222" }}>animated</text>
+              <div style={{ fontSize: 20, color: "#222222" }}>animated</div>
             </div>
           )}
         />
@@ -2483,9 +2483,9 @@ describeNative("a motion value written by a script", { timeout: TIMEOUT }, () =>
               }}
               render={() => <div style={{ width: 1, height: 1 }} />}
             />
-            <text testId="animated" style={{ fontSize: 20, color: target }}>
+            <div testId="animated" style={{ fontSize: 20, color: target }}>
               animated
-            </text>
+            </div>
           </>
         )}
       />
@@ -2832,7 +2832,7 @@ describeNative("an animation that nothing draws because its box is not generated
         transition={{ duration: 1.5, ease: "linear", repeat: Infinity }}
       />
     ),
-    "a keyframes colour loop": <text style={{ fontSize: 20, color: "#000000", animation: "afw-pulse 1.5s linear infinite" }}>hidden</text>,
+    "a keyframes colour loop": <div style={{ fontSize: 20, color: "#000000", animation: "afw-pulse 1.5s linear infinite" }}>hidden</div>,
     "a native motion colour loop under a box of its own": (
       <div style={{ position: "relative" }}>
         <motion.div

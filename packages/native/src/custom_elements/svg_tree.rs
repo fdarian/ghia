@@ -50,14 +50,12 @@ pub(crate) fn is_svg_child_type(tag: &str) -> bool {
 }
 
 /// Whether `element` is drawn by an `<svg>` instead of laid out: an SVG-only tag,
-/// or a `<text>` inside an SVG. A `<text>` with a string is that string, not an
-/// element.
+/// or a `<text>` inside an SVG. A string (`#text`) is character data, not an element.
 pub(crate) fn is_svg_element(tree: &RetainedTree, element: &crate::retained_tree::RetainedElement) -> bool {
     if is_svg_child_type(&element.element_type) {
         return true;
     }
     element.element_type == "text"
-        && element.content.is_none()
         && element
             .parent
             .and_then(|parent| tree.elements.get(&parent))
@@ -400,10 +398,9 @@ fn seed_from_before_update(
     );
 }
 
-/// The string of a text node: React and Solid make a `text` element with
-/// content for a string child, and one without for a `<text>` tag.
+/// The string of a text node: React and Solid make a `#text` element for a string child.
 fn text_node(element: &crate::retained_tree::RetainedElement) -> Option<&str> {
-    if element.element_type == "text" {
+    if element.element_type == crate::text::inline::TEXT_NODE {
         element.content.as_deref()
     } else {
         None
@@ -1424,7 +1421,7 @@ mod tests {
             tree.create_element(2, "text".to_string());
             tree.set_custom_prop(2, "x".to_string(), 3.into());
             tree.append_child(1, 2);
-            tree.create_element(3, "text".to_string());
+            tree.create_element(3, "#text".to_string());
             tree.set_text(3, "Hi".to_string());
             tree.append_child(2, 3);
         });
@@ -1447,12 +1444,12 @@ mod tests {
     #[test]
     fn a_string_that_is_not_in_a_text_element_is_not_drawn() {
         let tree = svg_tree(|tree| {
-            tree.create_element(2, "text".to_string());
+            tree.create_element(2, "#text".to_string());
             tree.set_text(2, "stray".to_string());
             tree.append_child(1, 2);
             tree.create_element(3, "g".to_string());
             tree.append_child(1, 3);
-            tree.create_element(4, "text".to_string());
+            tree.create_element(4, "#text".to_string());
             tree.set_text(4, "in a group".to_string());
             tree.append_child(3, 4);
         });

@@ -1423,10 +1423,10 @@ describeNative("tables: parts are elements", () => {
             loose a
             <Row id="r">
               <Cell id="c1">
-                <text>alpha</text>
+                <div>alpha</div>
               </Cell>
               <Cell id="c2">
-                <text>beta</text>
+                <div>beta</div>
               </Cell>
             </Row>
           </Table>
@@ -1470,18 +1470,18 @@ describeNative("tables: parts are elements", () => {
           <Table id="t">
             <Row id="r1">
               <Cell id="a">
-                <text>aa</text>
+                <div>aa</div>
               </Cell>
               <Cell id="b">
-                <text>bb</text>
+                <div>bb</div>
               </Cell>
             </Row>
             <Row id="r2">
               <Cell id="c">
-                <text>cc</text>
+                <div>cc</div>
               </Cell>
               <Cell id="d">
-                <text>dd</text>
+                <div>dd</div>
               </Cell>
             </Row>
           </Table>,
@@ -1494,10 +1494,10 @@ describeNative("tables: parts are elements", () => {
         copy(
           <div>
             <Cell id="a">
-              <text>x</text>
+              <div>x</div>
             </Cell>
             <Cell id="b">
-              <text>y</text>
+              <div>y</div>
             </Cell>
           </div>,
           "a",
@@ -1511,10 +1511,10 @@ describeNative("tables: parts are elements", () => {
             loose
             <Row id="r">
               <Cell id="a">
-                <text>aa</text>
+                <div>aa</div>
               </Cell>
               <Cell id="b">
-                <text>bb</text>
+                <div>bb</div>
               </Cell>
             </Row>
           </Table>,

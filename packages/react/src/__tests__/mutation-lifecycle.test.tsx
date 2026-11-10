@@ -143,9 +143,9 @@ describeNative("mutation lifecycle", () => {
 
     try {
       render(
-        <Suspense fallback={<text>fallback</text>}>
+        <Suspense fallback={<div>fallback</div>}>
           <div>
-            <text>abandoned</text>
+            <div>abandoned</div>
           </div>
           <Suspend />
         </Suspense>
@@ -196,8 +196,8 @@ describeNative("mutation lifecycle", () => {
         </div>
       )
 
-      expect(a.renderer.findByType("text")[0]?.id).toBe(1)
-      expect(b.renderer.findByType("text")[0]?.id).toBe(1)
+      expect(a.renderer.findByType("#text")[0]?.id).toBe(1)
+      expect(b.renderer.findByType("#text")[0]?.id).toBe(1)
       expect(a.renderer.getRoot()?.id).toBe(2)
       expect(b.renderer.getRoot()?.id).toBe(2)
 
@@ -263,7 +263,7 @@ describeNative("mutation lifecycle", () => {
       render(
         <div style={{ width: 100, height: 100 }}>
           <div>
-            <text>deep</text>
+            <div>deep</div>
           </div>
         </div>
       )
@@ -310,7 +310,7 @@ describeNative("mutation lifecycle", () => {
   it("allows a new root once the previous one unmounts", () => {
     const renderer = new TestRenderer()
     const first = createRoot(renderer)
-    flushSync(() => first.render(<text>first</text>))
+    flushSync(() => first.render(<div>first</div>))
     renderer.flush()
     first.unmount()
 

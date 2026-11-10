@@ -1,4 +1,5 @@
 import type { EventPayload } from "../index.js"
+import { addFrameSource, runAnimationFrame } from "./animation-frame.js"
 import { reportUncaught, type DomDispatchResult } from "./events/dispatch.js"
 import { createDragDispatcher } from "./events/drag.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
@@ -167,6 +168,9 @@ export type ActiveRoot = RendererRootBinding & {
   scoped: GpuixEventTarget
 }
 
+/** What native sends in the frame steps of a window that was asked for `requestAnimationFrame`. */
+const ANIMATION_FRAME_EVENT = "animationframe"
+
 const STATE_KEY = Symbol.for("@ghia/native/renderer-states")
 const MOUNTED_KEY = Symbol.for("@ghia/native/mounted-renderer")
 
@@ -227,9 +231,21 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       dispatchDrag,
     })
 
+  let removeFrameSource: (() => void) | undefined
   let onError: ((error: unknown) => void) | undefined
   const mediaListeners = new Set<() => void>()
   const motionValueSinks = new Map<number, MotionValueSink>()
+
+  /** The callbacks run as a handler does, so the framework flushes what they changed before the frame builds. */
+  const runFrameCallbacks = (event: EventPayload) => {
+    if (event.timelineTime === undefined) {
+      throw new Error("An animationframe event arrived without its timelineTime")
+    }
+    const time = event.timelineTime
+    const run = () => runAnimationFrame(renderer, time, (error) => state.reportError(error))
+    if (active?.handlers.schedule) active.handlers.schedule(run)
+    else run()
+  }
 
   const state: RendererState = {
     ids,
@@ -263,6 +279,8 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         detach() {
           if (active !== binding) return false
           active = undefined
+          removeFrameSource?.()
+          removeFrameSource = undefined
           const mounted = mountedRenderers()
           mounted.splice(mounted.indexOf(renderer), 1)
           return true
@@ -270,9 +288,15 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       }
       active = binding
       mountedRenderers().push(renderer)
+      removeFrameSource = addFrameSource(renderer)
       return binding
     },
     dispatch(received) {
+      if (received.eventType === ANIMATION_FRAME_EVENT) {
+        // Not a DOM event: no app listener, `on*` prop or `onEvent` hears it.
+        runFrameCallbacks(received)
+        return false
+      }
       if (received.eventType === "mediaChange") {
         for (const listener of [...mediaListeners]) listener()
         return mediaListeners.size > 0
@@ -315,9 +339,13 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       return true
     },
     dispatchSync(received) {
+      if (received.eventType === ANIMATION_FRAME_EVENT) {
+        runFrameCallbacks(received)
+        return { defaultPrevented: false, propagationStopped: false }
+      }
       const root = active
       if (received.eventType === "focusin") noteFocusEvent(renderer)
-      const event = normalizeEventType(received)
+      const event = shapeScrollEvent(normalizeEventType(received))
       if (!root || !handlesEvent(root, event)) {
         // Nobody can accept a drop here, and native would otherwise leave the OS its default.
         return event.eventType === "dragover"
@@ -329,7 +357,9 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         result = runEvent(root, event)
         root.handlers.onEvent?.(received)
       }
-      if (root.handlers.schedule) root.handlers.schedule(run)
+      // `attach` runs inside the frame, where no renderer call can be made (see `<nativeview>`): a
+      // framework flush there would call one. A state write in `onAttach` is a later batch.
+      if (root.handlers.schedule && received.eventType !== "attach") root.handlers.schedule(run)
       else run()
       if (!result) {
         throw new Error(

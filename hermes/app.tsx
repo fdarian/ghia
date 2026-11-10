@@ -19,9 +19,9 @@ function App() {
         gap: 16,
       }}
     >
-      <text style={{ fontSize: 28, color: '#cdd6f4', fontWeight: 700 }}>
+      <div style={{ fontSize: 28, color: '#cdd6f4', fontWeight: 700 }}>
         GPUIX on Hermes
-      </text>
+      </div>
       <div
         testId="count"
         onClick={() => setCount((c) => c + 1)}
@@ -32,9 +32,9 @@ function App() {
           cursor: 'pointer',
         }}
       >
-        <text style={{ color: '#1e1e2e', fontWeight: 700, fontSize: 20 }}>
+        <div style={{ color: '#1e1e2e', fontWeight: 700, fontSize: 20 }}>
           {String(count)}
-        </text>
+        </div>
       </div>
     </div>
   )

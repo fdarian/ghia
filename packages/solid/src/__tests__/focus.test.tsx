@@ -394,7 +394,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid focus model", () => {
         <div style={{ width: 200, height: 100 }}>
           <div testId="auto" tabIndex={0} autoFocus style={box} onFocus={() => setLabel("after")} />
           <div testId="label" style={box}>
-            <text>{label()}</text>
+            <div>{label()}</div>
           </div>
         </div>
       ))

@@ -272,6 +272,7 @@ interface NativeTestRendererApi
   focusPreviousWithin(elementId: number): void
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
   setWindowEventListeners(types: string[]): void
+  requestAnimationFrame(): boolean
   setWindowSelectionChange(enabled: boolean, eventId: number): void
   setWindowAppearanceChange(enabled: boolean, eventId: number): void
   setAppearance(appearance: string): void
@@ -757,6 +758,11 @@ export class TestRenderer implements NativeRenderer {
     bindClipboard(this)
   }
 
+  /** Asks the window for its next frame's steps, which run the `requestAnimationFrame` callbacks. */
+  requestAnimationFrame(): boolean {
+    return this.native.requestAnimationFrame()
+  }
+
   /** Releases the sync event handler, which captures this renderer, and tears the native
    *  window down. Call it after the root is unmounted. Native calls that need the window
    *  throw afterwards; the retained tree stays readable. Without it the window is leaked
@@ -1184,7 +1190,7 @@ export class TestRenderer implements NativeRenderer {
     return this.buildElementMap().get(id)
   }
 
-  /** Find elements by type (e.g. "div", "text"). */
+  /** Find elements by type (e.g. "div", "#text" for a string node). */
   findByType(type: string): TestElement[] {
     return [...this.buildElementMap().values()].filter((el) => el.type === type)
   }
@@ -2099,7 +2105,7 @@ export class TestRenderer implements NativeRenderer {
 
   /** Every string painted in the last frame, in paint order.
    *
-   *  `getAllText()` only sees `<text>` nodes in the retained tree. Native
+   *  `getAllText()` only sees string nodes in the retained tree. Native
    *  elements like `<code>` and `<diff>` paint their text inside GPUI, so this
    *  is the only way to assert on what they rendered. */
   getPaintedText(): string[] {

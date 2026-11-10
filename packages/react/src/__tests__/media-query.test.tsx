@@ -10,7 +10,7 @@ import {
 import { createTestRoot } from "../testing.js"
 
 function Reduced() {
-  return <text>{useReducedMotion() ? "reduced" : "full"}</text>
+  return <div>{useReducedMotion() ? "reduced" : "full"}</div>
 }
 
 describe("matchMedia", () => {
@@ -50,7 +50,7 @@ describe("matchMedia", () => {
       const wide = useMediaQuery("(min-width: 1px)")
       const huge = useMediaQuery("(min-width: 100000px)")
       const contrast = useMediaQuery("(prefers-contrast: more)")
-      return <text>{`${wide} ${huge} ${contrast}`}</text>
+      return <div>{`${wide} ${huge} ${contrast}`}</div>
     }
     const { render, renderer, unmount } = createTestRoot()
     render(<Probe />)
@@ -65,7 +65,7 @@ describe("matchMedia", () => {
     let list: MediaQueryList | undefined
     function Probe() {
       list = useMatchMedia()("(prefers-reduced-motion: reduce)")
-      return <text>probe</text>
+      return <div>probe</div>
     }
     const { render, renderer, unmount } = createTestRoot()
     render(<Probe />)
@@ -81,7 +81,7 @@ describe("matchMedia", () => {
 
   it("the global matchMedia uses the mounted root's window", () => {
     const { render, renderer, unmount } = createTestRoot()
-    render(<text>x</text>)
+    render(<div>x</div>)
     expect(matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(false)
     renderer.setMediaFeatures({ reducedMotion: true })
     expect(matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(true)
@@ -94,7 +94,7 @@ describe("matchMedia", () => {
 
   it("the test window is a hover-capable fine-pointer screen", () => {
     const { render, unmount } = createTestRoot()
-    render(<text>x</text>)
+    render(<div>x</div>)
     expect(matchMedia("screen and (hover: hover) and (pointer: fine)").matches).toBe(true)
     unmount()
   })
@@ -109,7 +109,7 @@ describe("matchMedia", () => {
     it("fires change when a size query flips, and not when the size changes but the result does not", () => {
       const interval = vi.spyOn(globalThis, "setInterval")
       const { render, renderer, unmount } = createTestRoot()
-      render(<text>x</text>)
+      render(<div>x</div>)
       renderer.setWindowSize(1280, 800)
       const seen: boolean[] = []
       const list = listen("(max-width: 1000px)", seen)
@@ -131,7 +131,7 @@ describe("matchMedia", () => {
 
     it("re-evaluates orientation and aspect-ratio from the new size", () => {
       const { render, renderer, unmount } = createTestRoot()
-      render(<text>x</text>)
+      render(<div>x</div>)
       renderer.setWindowSize(1280, 800)
       const portrait: boolean[] = []
       const square: boolean[] = []
@@ -149,7 +149,7 @@ describe("matchMedia", () => {
 
     it("a window opened at a size reports it in matches before any resize", () => {
       const { render, unmount } = createTestRoot()
-      render(<text>x</text>)
+      render(<div>x</div>)
       expect(matchMedia("(width: 1280px) and (height: 800px)").matches).toBe(true)
       unmount()
     })

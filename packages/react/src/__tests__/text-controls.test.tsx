@@ -27,7 +27,7 @@ describeNative("text control selection", () => {
           onChange={(event: EventPayload) => setText(event.value ?? "")}
           {...rest}
         />
-        <text>{`Value: ${text}`}</text>
+        <div>{`Value: ${text}`}</div>
       </div>
     )
   }
@@ -156,7 +156,7 @@ describeNative("text control selection", () => {
             onFocus={() => ref.current.select()}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -215,7 +215,7 @@ describeNative("<input disabled>", () => {
           onKeyDown={() => props.log.push("keydown")}
         />
         <div tabIndex={0} testId="after" style={{ width: 50, height: 20 }} />
-        <text>{`Value: ${text}`}</text>
+        <div>{`Value: ${text}`}</div>
       </div>
     )
   }
@@ -313,7 +313,7 @@ describeNative("<input type>", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -453,7 +453,7 @@ describeNative("maxLength", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -474,7 +474,7 @@ describeNative("maxLength", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -498,7 +498,7 @@ describeNative("maxLength", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -519,7 +519,7 @@ describeNative("maxLength", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }

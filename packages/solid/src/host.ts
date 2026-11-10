@@ -4,7 +4,9 @@ import {
   assertSvgPlacement,
   createElementMethods,
   createWebviewMethods,
+  defineDomMembers,
   defineScrollMembers,
+  ElementListeners,
   EVENT_PROP_NAMES,
   blurHostElement,
   eventTypesWithOverrides,
@@ -12,7 +14,6 @@ import {
   hostElementMatches,
   forwardsCustomProp,
   isNativeviewHandlerProp,
-  registerEventListener,
   HOST_BINDING,
   HOST_MOUNT,
   readBoundingClientRect,
@@ -24,7 +25,6 @@ import {
   syncMotionBindings,
   syncNativeviewListeners,
   unregisterEventHandlers,
-  unregisterEventListener,
   readTextControlSelection,
   requestFormSubmit,
   selectTextControl,
@@ -32,6 +32,7 @@ import {
 } from "@ghia/native/host"
 import type {
   Animation,
+  DomElement,
   ElementMethods,
   GetAnimationsOptions,
   BoundingClientRect,
@@ -132,6 +133,8 @@ export class HostElement {
   /** The `style` entries that are motion values, bound while the element is mounted. */
   motionValues: Record<string, MotionValue> | undefined
   readonly sent = new SentWrites()
+  /** The event listeners of the element, and its `on*` props among them: see `ElementListeners`. */
+  readonly listeners = new ElementListeners()
 
   constructor(readonly type: ElementType) {}
 
@@ -363,11 +366,28 @@ export class HostElement {
 }
 
 /** The DOM scroll members: `scrollTop`, `scrollTo`, `scrollIntoView` and the rest. */
-export interface HostElement extends ScrollableElement {}
+export interface HostElement extends ScrollableElement, DomElement {}
+defineDomMembers(HostElement.prototype, (element: HostElement) => ({
+  listeners: element.listeners,
+  connected: isConnected(element),
+  layout: element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.id } : undefined,
+  prop: (name) => element.props.get(name),
+  propNames: () => element.props.keys(),
+}))
 defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
   renderer: element.root?.nativeRenderer,
   id: element.id,
 }))
+
+/** In the tree of a root: every ancestor up to the root still holds it, as `removeChild` takes a node out of the DOM. */
+function isConnected(node: HostNode): boolean {
+  let current: HostNode | HostRoot = node
+  while (current.kind !== "root") {
+    if (current.parent === null) return false
+    current = current.parent
+  }
+  return true
+}
 
 export class HostText {
   readonly kind = "text" as const
@@ -508,18 +528,7 @@ export function setHostProperty(
   if (eventType) {
     if (isEventHandler(value)) node.props.set(name, value)
     else node.props.delete(name)
-    if (!node.root || !node.mounted) return
-    if (isEventHandler(value)) {
-      registerEventListener(
-        node.root.eventHandlers,
-        node.root.mutations,
-        node.id,
-        eventType,
-        value
-      )
-    } else if (isEventHandler(previous)) {
-      unregisterEventListener(node.root.eventHandlers, node.root.mutations, node.id, eventType)
-    }
+    node.listeners.setProp(eventType, isEventHandler(value) ? value : undefined)
     return
   }
   if (value === undefined) node.props.delete(name)
@@ -548,18 +557,16 @@ function mount(root: HostRoot, node: HostNode): void {
   if (node.mounted) return
   node.mounted = true
   if (node.kind === "element") root.elements.set(node.id, node)
-  root.mutations.createElement(node.id, node.kind === "text" ? "text" : node.type)
+  root.mutations.createElement(node.id, node.kind === "text" ? "#text" : node.type)
   if (node.kind === "text") {
     root.mutations.setText(node.id, node.text)
   } else {
     node.sent.reset()
     node.writeStyle()
     if (node.motionValues) syncMotionBindings(root, root.mutations, node.id, node.motionValues, node.type)
+    node.listeners.attach({ eventHandlers: root.eventHandlers, renderer: root.mutations, elementId: node.id })
     for (const [name, value] of node.props) {
-      const eventType = eventTypeFor(name)
-      if (eventType && isEventHandler(value)) {
-        registerEventListener(root.eventHandlers, root.mutations, node.id, eventType, value)
-      } else if (!EVENT_PROP_NAMES.has(name) && customPropAllowed(node, name)) {
+      if (!EVENT_PROP_NAMES.has(name) && customPropAllowed(node, name)) {
         const serialized = serializeCustomProp(value)
         if (node.sent.writesProp(name, serialized)) root.mutations.setCustomProp(node.id, name, serialized)
       }
@@ -617,6 +624,7 @@ function markUnmounted(node: HostNode): void {
     // after this: it stays known until `createRoot` releases the destroyed ids.
     if (!(node.kind === "element" && node.type === "nativeview")) {
       node.root.elements.delete(node.id)
+      if (node.kind === "element") node.listeners.detach()
       unregisterEventHandlers(node.root.eventHandlers, node.id)
     }
     // Retired now, released after the batch: an element mounted again before

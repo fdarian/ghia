@@ -711,7 +711,7 @@ describeNative("gesture callbacks", () => {
   it("calls the hover and tap callbacks of a motion.span", () => {
     const calls: string[] = []
     const page = setup(
-      <text testId="p" style={{ fontSize: 16, lineHeight: "20px", fontFamily: "Menlo", color: "#000000" }}>
+      <div testId="p" style={{ fontSize: 16, lineHeight: "20px", fontFamily: "Menlo", color: "#000000" }}>
         <motion.span
           testId="s"
           onHoverStart={() => calls.push("hover")}
@@ -720,7 +720,7 @@ describeNative("gesture callbacks", () => {
         >
           aaaa
         </motion.span>
-      </text>
+      </div>
     )
     page.hover("s")
     page.press("s")

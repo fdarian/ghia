@@ -70,6 +70,7 @@ import type {
   DiffProps as NativeDiffProps,
   MarkdownProps as NativeMarkdownProps,
   AnchoredProps as NativeAnchoredProps,
+  DomElement,
   MotionBinding,
   MotionValueStyle,
   MutationRenderer,
@@ -191,11 +192,7 @@ export type SvgFeSpotLightProps = SvgShapeElementProps<NativeSvgFeSpotLightProps
 export type SvgFeTileProps = SvgShapeElementProps<NativeSvgFeTileProps>
 export type SvgFeTurbulenceProps = SvgShapeElementProps<NativeSvgFeTurbulenceProps>
 
-/**
- * `<text>` is the host text element too, so its props are the host ones plus
- * the SVG attributes the host element does not have.
- */
-export type SvgTextProps = Props & Omit<NativeSvgTextProps, keyof Props>
+export type SvgTextProps = SvgShapeElementProps<NativeSvgTextProps>
 
 export interface CodeProps extends ReactHostProps<NativeCodeProps> {
   key?: Key | null
@@ -317,10 +314,10 @@ export interface TextInstance {
 export type PublicInstance = Instance &
   FocusableElement &
   ScrollableElement &
+  DomElement &
   Required<Pick<Instance, "getBoundingClientRect" | "getAnimations" | typeof HOST_BINDING>>
 
-export interface HostContext {
-  isInsideText: boolean
-}
+/** The reconciler keeps no context per host parent. */
+export type HostContext = Record<string, never>
 
 export type { ElementIdAllocator, EventHandlerMap, NativeRenderer, RootEventHandlers }

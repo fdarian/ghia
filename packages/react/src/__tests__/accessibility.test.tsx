@@ -76,8 +76,8 @@ describeNative("accessibility", () => {
     expect(buttons[0]?.on_action).toEqual(expect.arrayContaining(["Click"]))
   })
 
-  it("reports a <text> node as Label with its content", () => {
-    testRoot.render(<text style={{ width: 200, height: 24 }}>Hello</text>)
+  it("reports an element holding text as Label with its content", () => {
+    testRoot.render(<div style={{ width: 200, height: 24 }}>Hello</div>)
 
     const labels = withRole(testRoot.renderer.getA11yTree(), "Label")
     expect(labels.some((aria) => aria.value === "Hello")).toBe(true)
@@ -86,7 +86,7 @@ describeNative("accessibility", () => {
   it("omits a div with no role from the tree", () => {
     testRoot.render(
       <div style={{ width: 120, height: 40 }} aria-label="silent">
-        Hello
+        <div style={{ width: 20, height: 20 }} />
       </div>,
     )
 
@@ -210,7 +210,7 @@ describeNative("accessibility", () => {
         aria-label="Messages"
         style={{ width: 200, height: 80 }}
       >
-        <text>one</text>
+        <div>one</div>
       </virtual-list>,
     )
 
@@ -219,25 +219,105 @@ describeNative("accessibility", () => {
     )
   })
 
-  it("joins interpolated <text> children into one Label", () => {
+  it("joins interpolated strings into one Label", () => {
     const name = "Ada"
-    testRoot.render(<text style={{ width: 200, height: 24 }}>Hello {name}!</text>)
+    testRoot.render(<div style={{ width: 200, height: 24 }}>Hello {name}!</div>)
 
     const labels = withRole(testRoot.renderer.getA11yTree(), "Label")
     expect(labels.filter((aria) => aria.value === "Hello Ada!")).toHaveLength(1)
   })
 
-  it("lets an explicit role override the <text> default", () => {
+  it("gives each paragraph beside a block its own Label, in order", () => {
     testRoot.render(
-      <text role="heading" aria-level={1} style={{ width: 200, height: 24 }}>
-        Title
-      </text>,
+      <div role="group" aria-label="host" style={{ width: 200, height: 120 }}>
+        Before
+        <div role="button" aria-label="Go" style={{ width: 80, height: 24 }} />
+        After
+      </div>,
     )
 
     const tree = testRoot.renderer.getA11yTree()
-    expect(withRole(tree, "Heading")[0]).toEqual(
-      expect.objectContaining({ role: "Heading", value: "Title", level: 1 }),
+    const nodes = tree.nodes ?? {}
+    const host = Object.values(nodes).find((node) => node.aria?.label === "host")
+    if (!host) throw new Error("no host node")
+    const children = host.children.map((key) => nodes[key]?.aria)
+    expect(children.map((aria) => [aria?.role, aria?.value ?? aria?.label])).toEqual([
+      ["Label", "Before"],
+      ["Button", "Go"],
+      ["Label", "After"],
+    ])
+  })
+
+  it("makes the paragraph nodes when the screen reader turns on after the page", () => {
+    testRoot.renderer.setA11yActive(false)
+    testRoot.render(
+      <div role="group" aria-label="host" style={{ width: 200, height: 120 }}>
+        Before
+        <div role="button" aria-label="Go" style={{ width: 80, height: 24 }} />
+        After
+      </div>,
     )
+    testRoot.renderer.setA11yActive(true)
+
+    const labels = withRole(testRoot.renderer.getA11yTree(), "Label")
+    expect(labels.map((aria) => aria.value)).toEqual(expect.arrayContaining(["Before", "After"]))
+  })
+
+  it("lets an explicit role override the Label default, and names the node by the text", () => {
+    testRoot.render(
+      <div role="heading" aria-level={1} style={{ width: 200, height: 24 }}>
+        Title
+      </div>,
+    )
+
+    const heading = withRole(testRoot.renderer.getA11yTree(), "Heading")[0]
+    expect(heading).toEqual(expect.objectContaining({ role: "Heading", label: "Title", level: 1 }))
+    expect(heading?.value).toBeUndefined()
+  })
+
+  it("names a button by its text, since a screen reader names it from its label alone", () => {
+    testRoot.render(
+      <div role="button" onClick={() => {}} style={{ width: 80, height: 24 }}>
+        Save
+      </div>,
+    )
+
+    const button = withRole(testRoot.renderer.getA11yTree(), "Button")[0]
+    expect(button).toEqual(expect.objectContaining({ role: "Button", label: "Save" }))
+    expect(button?.value).toBeUndefined()
+  })
+
+  it("reads the text of a role ARIA does not name from content as its value", () => {
+    testRoot.render(
+      <div role="list" style={{ width: 80, height: 24 }}>
+        Items
+      </div>,
+    )
+
+    const list = withRole(testRoot.renderer.getA11yTree(), "List")[0]
+    expect(list).toEqual(expect.objectContaining({ role: "List", value: "Items" }))
+    expect(list?.label).toBeUndefined()
+  })
+
+  it("keeps the author's name on a node with text, and reads the text as its value", () => {
+    testRoot.render(
+      <div style={{ width: 300, height: 80 }}>
+        <div id="silent" aria-label="silent" style={{ width: 80, height: 20 }}>
+          Hello
+        </div>
+        <div id="named" role="button" aria-label="Go" onClick={() => {}} style={{ width: 80, height: 20 }}>
+          Save
+        </div>
+      </div>,
+    )
+
+    const tree = testRoot.renderer.getA11yTree()
+    expect(byAuthorId(tree, "silent")).toEqual(
+      expect.objectContaining({ role: "Label", label: "silent", value: "Hello" }),
+    )
+    const named = byAuthorId(tree, "named")
+    expect(named).toEqual(expect.objectContaining({ role: "Button", label: "Go" }))
+    expect(named.value).toBeUndefined()
   })
 
   it("updates aria-label when React state changes", () => {
@@ -435,7 +515,7 @@ describeNative("accessibility", () => {
           aria-owns="title"
           style={{ width: 80, height: 24 }}
         />
-        <text id="title" style={{ height: 20 }}>Title</text>
+        <div id="title" style={{ height: 20 }}>Title</div>
         <div id="hint" role="note" style={{ width: 80, height: 20 }} />
         <div id="list" role="listbox" style={{ width: 80, height: 20 }} />
         <div id="error" role="alert" style={{ width: 80, height: 20 }} />
@@ -455,6 +535,10 @@ describeNative("accessibility", () => {
         owns: [key("title")],
       }),
     )
+    expect(byAuthorId(tree, "title")).toEqual(
+      expect.objectContaining({ role: "Group", label: "Title" }),
+    )
+    expect(byAuthorId(tree, "title").value).toBeUndefined()
   })
 
   it("gives a role-less element an aria reference names a node named by its text", () => {
@@ -462,7 +546,7 @@ describeNative("accessibility", () => {
       <div style={{ width: 300, height: 100 }}>
         <div id="field" role="textbox" aria-describedby="hint" style={{ width: 80, height: 24 }} />
         <div id="hint" style={{ width: 120, height: 20 }}>
-          <text>Be brief</text>
+          <div>Be brief</div>
         </div>
         <div id="unreferenced" style={{ width: 80, height: 20 }} />
       </div>,
@@ -472,6 +556,7 @@ describeNative("accessibility", () => {
     expect(byAuthorId(tree, "hint")).toEqual(
       expect.objectContaining({ role: "Group", label: "Be brief" }),
     )
+    expect(byAuthorId(tree, "hint").value).toBeUndefined()
     expect(byAuthorId(tree, "field").described_by).toEqual([keyOf(tree, "hint")])
     expect(ariaOf(tree).some((aria) => aria.author_id === "unreferenced")).toBe(false)
   })
@@ -527,7 +612,7 @@ describeNative("accessibility", () => {
         <input id="a" aria-label="Own name" value="" style={{ width: 100, height: 24 }} />
         <label htmlFor="b" style={{ height: 20 }}>Two</label>
         <input id="b" aria-labelledby="other" value="" style={{ width: 100, height: 24 }} />
-        <text id="other" style={{ height: 20 }}>Other</text>
+        <div id="other" style={{ height: 20 }}>Other</div>
       </div>,
     )
 

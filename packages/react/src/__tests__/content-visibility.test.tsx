@@ -246,7 +246,7 @@ const Rows = ({ count }: { count: number }) => (
   <>
     {Array.from({ length: count }, (_, index) => (
       <div key={index} style={{ height: 18, display: "block" }}>
-        <text style={{ fontSize: 13, color: "#222222" }}>{`Row ${index} of the page that is not shown`}</text>
+        <div style={{ fontSize: 13, color: "#222222" }}>{`Row ${index} of the page that is not shown`}</div>
       </div>
     ))}
   </>

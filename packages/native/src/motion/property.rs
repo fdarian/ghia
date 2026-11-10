@@ -1117,7 +1117,7 @@ impl AnimProp {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Scope {
     Element,
-    /// A `<span>`, or a `<text>` inside text: it has no layout node of its own, so
+    /// A `<span>`: it has no layout node of its own, so
     /// only what CSS lets an inline box show moves: its colours and opacity, the
     /// font of its text, its padding, margins, borders and outline, the corners of
     /// its background and the lines drawn over its text. Its paragraph reads those

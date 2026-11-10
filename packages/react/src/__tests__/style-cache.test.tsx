@@ -54,7 +54,7 @@ const scenes: Scene[] = [
       <div style={{ width: 300, display: "flex", flexDirection: "column", backgroundColor: "#ffffff" }}>
         {Array.from({ length: 8 }, (_, index) => (
           <div key={index} style={{ ...CARD, hover: { backgroundColor: "#ffddaa", borderColor: "#aa5500" } }}>
-            <text style={{ fontSize: 13, color: "#112233" }}>{`row ${index}`}</text>
+            <div style={{ fontSize: 13, color: "#112233" }}>{`row ${index}`}</div>
           </div>
         ))}
       </div>
@@ -201,7 +201,7 @@ const scenes: Scene[] = [
             textAlign: "start",
           }}
         >
-          <text style={{ fontSize: 13, color: "#000000" }}>{key}</text>
+          <div style={{ fontSize: 13, color: "#000000" }}>{key}</div>
         </div>
       )
       return (
@@ -374,7 +374,7 @@ describeNative("the style cache", { timeout: 120_000 }, () => {
         <virtual-list overdraw={0} estimatedItemHeight={30} style={{ width: 300, height: 240 }}>
           {Array.from({ length: 8 }, (_, index) => (
             <div key={index} style={{ ...CARD, position: "relative", zIndex: 2 }}>
-              <text style={{ fontSize: 13, color: "#112233" }}>{`row ${index}`}</text>
+              <div style={{ fontSize: 13, color: "#112233" }}>{`row ${index}`}</div>
             </div>
           ))}
         </virtual-list>,

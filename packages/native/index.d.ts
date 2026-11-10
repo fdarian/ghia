@@ -435,6 +435,12 @@ export declare class GpuixRenderer {
   /** The event types `window` or `document` listens for. Replaces the set. */
   setWindowEventListeners(types: Array<string>): void
   /**
+   * `requestAnimationFrame`: asks the window for its next frame's steps, which send JS the
+   * `animationframe` event that runs the callbacks (see `frame_steps`). True when the window
+   * took the request; false while it is not open, in which case JS asks again once it is.
+   */
+  requestAnimationFrame(): boolean
+  /**
    * Capture the mouse for `element_id`. The request is recorded before this
    * returns, so `hasPointerCapture` answers true and the next pointer input
    * is already aimed at the element; that input fires `gotpointercapture`
@@ -656,6 +662,8 @@ export declare class RowOracle {
    * text leaves those renders made.
    */
   getCounters(): Array<number>
+  /** `[nodesCreated, measures, nodesLaidOut, nodesSized, passes]` of the window's layout engine since it was made. */
+  getLayoutCounters(): Array<number>
   /** How many layout-only passes the window has run. */
   getLayoutPassCount(): number
 }
@@ -1055,7 +1063,7 @@ export declare class TestGpuixRenderer {
   /**
    * Every string painted in the last frame, in paint order.
    *
-   * `getAllText()` only sees `<text>` nodes in the retained tree. Native
+   * `getAllText()` only sees string nodes in the retained tree. Native
    * elements such as `<code>` and `<diff>` draw their text inside gpui, so
    * this is the only way to assert on what they actually rendered.
    */
@@ -1101,6 +1109,11 @@ export declare class TestGpuixRenderer {
   scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null, behavior?: string | undefined | null): void
   /** The event types `window` or `document` listens for. Replaces the set. */
   setWindowEventListeners(types: Array<string>): void
+  /**
+   * `GpuixRenderer::requestAnimationFrame`. The callbacks run in the steps of the next frame:
+   * `flush` and `drawFrame` deliver it, or any draw that comes first runs them.
+   */
+  requestAnimationFrame(): boolean
   /**
    * Capture the mouse for `element_id`; recorded before this returns, and the
    * next simulated pointer input fires `gotpointercapture`. Ignored while no
@@ -1287,7 +1300,7 @@ export declare class TestGpuixRenderer {
   drainEvents(): Array<EventPayload>
   /** Get all text content in the tree (depth-first order). */
   getAllText(): Array<string>
-  /** Find element IDs matching the given type (e.g. "div", "text"). */
+  /** Find element IDs matching the given type (e.g. "div", "span"). */
   findByType(elementType: string): Array<number>
   /** Check if an element has a specific event listener. */
   hasEventListener(id: number, eventType: string): boolean
@@ -1680,6 +1693,12 @@ export interface ElementBounds {
    */
   clientLeft: number
   clientTop: number
+  /**
+   * The border box's size before any transform, which `offsetWidth` and `offsetHeight` round:
+   * `width` and `height` are the box after the transforms.
+   */
+  layoutWidth: number
+  layoutHeight: number
 }
 
 /** A [`WebAnimationInfo`] with the element the run is of, for a read that spans elements. */
@@ -2013,7 +2032,8 @@ export interface EventPayload {
   /**
    * Milliseconds on the renderer's clock, the `timelineTime` of the
    * `AnimationPlaybackEvent`: the timeline time the event was made at. Populated for:
-   * webanimationfinish, webanimationcancel.
+   * webanimationfinish, webanimationcancel, and animationframe, where it is the clock the frame
+   * steps ran at: the timestamp `requestAnimationFrame` callbacks are given.
    */
   timelineTime?: number
   /**
@@ -2109,7 +2129,7 @@ export declare function hasTestGpuixRenderer(): boolean
 export interface HighlightMatch {
   /** Numeric id of the element that painted the run. */
   elementId: number
-  /** Index of the run within that element. 0 for a plain `<text>`. */
+  /** Index of the run within that element. 0 for a plain string. */
   sub: number
   /** The full string of the run, so `text.slice(start, end)` is the match. */
   text: string

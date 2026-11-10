@@ -180,6 +180,7 @@ function calls(r, ids) {
     registerFont: () => r.registerFont(SQUARE_FONT),
     releaseAnimation: () => r.releaseAnimation(r.getAnimations(ids.box)[0].id),
     releasePointerCapture: () => r.releasePointerCapture(ids.box, 1),
+    requestAnimationFrame: () => r.requestAnimationFrame(),
     requestPointerLock: () => r.requestPointerLock(ids.box),
     requestSubmit: () => r.requestSubmit(ids.form),
     requiresTick: () => r.requiresTick(),

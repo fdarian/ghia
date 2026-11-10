@@ -247,9 +247,9 @@ describeNative("custom element: img", () => {
               }}
               onClick={() => setLoaded(true)}
             >
-              <text style={{ color: "#b3bddf", fontSize: 13 }}>
+              <div style={{ color: "#b3bddf", fontSize: 13 }}>
                 click panel to load image
-              </text>
+              </div>
               <img
                 src={loaded ? IMAGE_FIXTURE_PATH : ""}
                 objectFit="cover"

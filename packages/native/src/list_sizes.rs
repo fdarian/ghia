@@ -346,7 +346,7 @@ mod tests {
         let tree = row("div", r#"{"height":40}"#);
         assert!(RowBox::of(&tree.elements[&1], false).is_some());
         assert!(RowBox::of(&tree.elements[&1], true).is_none());
-        for kind in ["text", "img", "input", "virtual-list", "button"] {
+        for kind in ["img", "input", "virtual-list", "button"] {
             let tree = row(kind, r#"{"height":40}"#);
             assert!(RowBox::of(&tree.elements[&1], false).is_none(), "{kind}");
         }

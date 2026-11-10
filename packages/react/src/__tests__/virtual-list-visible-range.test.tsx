@@ -24,7 +24,7 @@ function listWith(onVisibleRange: (event: DomEvent) => void) {
     >
       {Array.from({ length: 20 }, (_, index) => (
         <div key={index} style={{ height: ROW, flexShrink: 0 }}>
-          <text>{`row-${index}`}</text>
+          <div>{`row-${index}`}</div>
         </div>
       ))}
     </virtual-list>
@@ -215,7 +215,7 @@ function sizedList(exact: boolean, onVisibleRange: (event: DomEvent) => void, al
     >
       {Array.from({ length: ROWS }, (_, index) => (
         <div key={index} testId={`row-${index}`} style={exact ? { height: ROW, flexShrink: 0 } : undefined}>
-          {exact ? <text>{`row-${index}`}</text> : <div style={{ height: ROW, flexShrink: 0 }} />}
+          {exact ? <div>{`row-${index}`}</div> : <div style={{ height: ROW, flexShrink: 0 }} />}
         </div>
       ))}
     </virtual-list>
@@ -460,7 +460,7 @@ const rowColor = (index: number) => `rgb(${(index * 37) % 256}, ${(index * 91) %
 function Row({ index }: { index: number }) {
   return (
     <div testId={`row-${index}`} style={{ width: 150, height: WINDOW_ROW, flexShrink: 0, backgroundColor: rowColor(index) }}>
-      <text style={{ color: "#ffffff" }}>{`row-${index}`}</text>
+      <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
     </div>
   )
 }

@@ -40,9 +40,9 @@ function setup(body: () => JSX.Element, width = 300) {
   renderer.clockPause()
   app.render(() => (
     <div style={{ width: 400, height: 200 }}>
-      <text testId="p" style={{ ...TEXT, width }}>
+      <div testId="p" style={{ ...TEXT, width }}>
         {body()}
-      </text>
+      </div>
     </div>
   ))
   const bounds = (testId: string) => {
@@ -238,12 +238,12 @@ describe.skipIf(!hasNativeTestRenderer)("Solid whileHover, whileTap, whileFocus 
     app.render(() => (
       <div style={{ width: 400, height: 200 }}>
         <div style={{ height: spacer() }} />
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <motion.span testId="s" whileInView={{ paddingLeft: 30 }} transition={{ duration: 0 }}>
             aaaa
           </motion.span>
           <span testId="n">bbbb</span>
-        </text>
+        </div>
       </div>
     ))
     const left = () => {

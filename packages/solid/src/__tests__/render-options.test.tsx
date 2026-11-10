@@ -22,8 +22,8 @@ describe.skipIf(!hasNativeTestRenderer)("render() options", () => {
   it("reports a native error to the onUncaughtError of the latest render", () => {
     const first = vi.fn()
     const second = vi.fn()
-    render(() => <text>one</text>, { onUncaughtError: first })
-    render(() => <text>two</text>, { onUncaughtError: second })
+    render(() => <div>one</div>, { onUncaughtError: first })
+    render(() => <div>two</div>, { onUncaughtError: second })
 
     expect(created.onErrors).toHaveLength(1)
     const failure = new Error("native failure")
@@ -36,8 +36,8 @@ describe.skipIf(!hasNativeTestRenderer)("render() options", () => {
 
   it("stops reporting when the latest render has no onUncaughtError", () => {
     const first = vi.fn()
-    render(() => <text>one</text>, { onUncaughtError: first })
-    render(() => <text>two</text>)
+    render(() => <div>one</div>, { onUncaughtError: first })
+    render(() => <div>two</div>)
 
     created.onErrors[0](new Error("native failure"))
 

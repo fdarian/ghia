@@ -31,7 +31,7 @@ function paint(node: React.ReactNode) {
 function measureSpace() {
   const testRoot = paint(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   return testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -56,32 +56,32 @@ describeNative("white-space", () => {
 
     it("collapses across span edges and keeps the space in the first run", () => {
       const testRoot = paint(
-        <text style={{ width: 400, ...TEXT }}>
+        <div style={{ width: 400, ...TEXT }}>
           {"a  "}
           <span style={{ fontWeight: 700 }}>{"  b  "}</span>
           {"  c"}
-        </text>
+        </div>
       )
       expect(testRoot.renderer.getPaintedText()).toEqual(["a b c"])
     })
 
     it("keeps one space for a span of spaces between words", () => {
       const testRoot = paint(
-        <text style={{ width: 400, ...TEXT }}>
+        <div style={{ width: 400, ...TEXT }}>
           {"a"}
           <span>{"   "}</span>
           {"b"}
-        </text>
+        </div>
       )
       expect(testRoot.renderer.getPaintedText()).toEqual(["a b"])
     })
 
     it("strips the space at the start and end of a paragraph", () => {
       const testRoot = paint(
-        <text testId="p" style={{ width: 400, ...TEXT }}>
+        <div testId="p" style={{ width: 400, ...TEXT }}>
           {"  \n  hello "}
           <span>{"world \n "}</span>
-        </text>
+        </div>
       )
       expect(testRoot.renderer.getPaintedText()).toEqual(["hello world"])
       expect(lines(testRoot, "p")).toBe(1)
@@ -203,7 +203,7 @@ describeNative("white-space", () => {
         <div style={{ width: 400, whiteSpace: "pre", ...TEXT }}>
           <div>{"a  b"}</div>
           <div style={{ whiteSpace: "normal" }}>{"a  b"}</div>
-          <text>{"c  d"}</text>
+          <div>{"c  d"}</div>
         </div>
       )
       expect(testRoot.renderer.getPaintedText()).toEqual(["a  b", "a b", "c  d"])
@@ -211,11 +211,11 @@ describeNative("white-space", () => {
 
     it("lets a span declare its own", () => {
       const testRoot = paint(
-        <text style={{ width: 400, ...TEXT }}>
+        <div style={{ width: 400, ...TEXT }}>
           {"a  "}
           <span style={{ whiteSpace: "pre" }}>{"b  c"}</span>
           {"  d"}
-        </text>
+        </div>
       )
       expect(testRoot.renderer.getPaintedText()).toEqual(["a b  c d"])
     })
@@ -235,12 +235,12 @@ describeNative("white-space", () => {
   describe("search, selection and lookup after collapsing", () => {
     const view = (query: string) => (
       <div style={{ width: 600 }} highlight={{ query }}>
-        <text style={{ ...TEXT, fontSize: 20 }}>
+        <div style={{ ...TEXT, fontSize: 20 }}>
           {"alpha   \n  "}
           <span style={{ fontWeight: 700 }}>{"  beta  "}</span>
           {"   gamma"}
           <span style={{ backgroundColor: "#ffff00" }}>{"   \n  delta  "}</span>
-        </text>
+        </div>
       </div>
     )
 
@@ -279,7 +279,7 @@ describeNative("white-space", () => {
     })
 
     it("finds an element by its collapsed text", () => {
-      const testRoot = paint(<text style={TEXT}>{"hello  \n   world"}</text>)
+      const testRoot = paint(<div style={TEXT}>{"hello  \n   world"}</div>)
       expect(testRoot.renderer.findByText("hello world")).toBeDefined()
       expect(testRoot.renderer.findByText("hello   world")).toBeDefined()
     })
@@ -301,11 +301,11 @@ describeNative("white-space", () => {
 
     it("reads the collapsed text in the accessibility value", () => {
       const testRoot = paint(
-        <text style={{ ...TEXT, width: 300 }}>
+        <div style={{ ...TEXT, width: 300 }}>
           {"  Hello  "}
           <span>{"  big \n"}</span>
           {" world "}
-        </text>
+        </div>
       )
       const labels = Object.values(testRoot.renderer.getA11yTree().nodes ?? {})
         .map((node) => node.aria)
@@ -328,9 +328,9 @@ describeNative("white-space", () => {
           highlight={{ query: "Z", caseSensitive: true }}
           style={{ width: options.width ?? 400, ...options.container }}
         >
-          <text testId="t" style={{ whiteSpace: "pre", ...TEXT, ...style }}>
+          <div testId="t" style={{ whiteSpace: "pre", ...TEXT, ...style }}>
             {text}
-          </text>
+          </div>
         </div>
       )
       const hits = testRoot.renderer.getPaintedHighlights()
@@ -348,7 +348,7 @@ describeNative("white-space", () => {
         ["normal", "ab Z"],
         ["nowrap", "ab Z"],
       ] as const) {
-        const testRoot = paint(<text style={{ whiteSpace, ...TEXT }}>{"ab\tZ"}</text>)
+        const testRoot = paint(<div style={{ whiteSpace, ...TEXT }}>{"ab\tZ"}</div>)
         expect(testRoot.renderer.getPaintedText(), whiteSpace).toEqual([painted])
       }
     })
@@ -411,7 +411,7 @@ describeNative("white-space", () => {
     it("selects and copies the tab, and a press hits the characters by stop", () => {
       const testRoot = paint(
         <div style={{ width: 400 }}>
-          <text style={{ whiteSpace: "pre", tabSize: 4, ...TEXT }}>{"ab\tZ"}</text>
+          <div style={{ whiteSpace: "pre", tabSize: 4, ...TEXT }}>{"ab\tZ"}</div>
         </div>
       )
       const y = LINE / 2
@@ -430,7 +430,7 @@ describeNative("white-space", () => {
           onUncaughtError: (error) => errors.push(error),
         })
         try {
-          render(<text style={{ whiteSpace: "pre", tabSize: tabSize as never }}>{"a\tb"}</text>)
+          render(<div style={{ whiteSpace: "pre", tabSize: tabSize as never }}>{"a\tb"}</div>)
           expect(errors, String(tabSize)).toEqual([])
         } finally {
           unmount()
@@ -455,7 +455,7 @@ describeNative("white-space", () => {
     function rows(whiteSpace: string, textAlign: string, text: string) {
       return (
         <div style={BOX}>
-          <text style={{ whiteSpace, textAlign, ...INK }}>{text}</text>
+          <div style={{ whiteSpace, textAlign, ...INK }}>{text}</div>
         </div>
       )
     }
@@ -490,7 +490,7 @@ describeNative("white-space", () => {
     it("does not wrap a line that only its trailing space overflows", () => {
       const testRoot = paint(
         <div testId="p" style={BOX}>
-          <text style={{ whiteSpace: "pre-wrap", ...INK }}>{"aaaa "}</text>
+          <div style={{ whiteSpace: "pre-wrap", ...INK }}>{"aaaa "}</div>
         </div>
       )
       expect(lines(testRoot, "p")).toBe(1)
@@ -500,7 +500,7 @@ describeNative("white-space", () => {
       const spaces = " ".repeat(6)
       const testRoot = paint(
         <div testId="p" style={BOX}>
-          <text style={{ whiteSpace: "pre-wrap", ...INK }}>{`aaaa${spaces}bbbb`}</text>
+          <div style={{ whiteSpace: "pre-wrap", ...INK }}>{`aaaa${spaces}bbbb`}</div>
         </div>
       )
       expect(lines(testRoot, "p")).toBe(2)
@@ -524,7 +524,7 @@ describeNative("white-space", () => {
     it("selects a hanging space past the edge of the box", () => {
       const testRoot = paint(
         <div highlight={{ query: "aaaa ", caseSensitive: true }} style={BOX}>
-          <text testId="t" style={{ whiteSpace: "pre-wrap", ...INK }}>{"aaaa bbbb"}</text>
+          <div testId="t" style={{ whiteSpace: "pre-wrap", ...INK }}>{"aaaa bbbb"}</div>
         </div>
       )
       const hits = testRoot.renderer.getPaintedHighlights()
@@ -552,7 +552,7 @@ describeNative("white-space", () => {
     function rows(whiteSpace: string, textAlign: string, text: string) {
       return (
         <div style={BOX}>
-          <text style={{ whiteSpace, textAlign, ...INK }}>{text}</text>
+          <div style={{ whiteSpace, textAlign, ...INK }}>{text}</div>
         </div>
       )
     }
@@ -567,7 +567,7 @@ describeNative("white-space", () => {
     ) {
       const testRoot = paint(
         <div highlight={{ query, caseSensitive: true }} testId="p" style={{ width: columns * space }}>
-          <text testId="t" style={{ whiteSpace, ...TEXT, ...extra }}>{text}</text>
+          <div testId="t" style={{ whiteSpace, ...TEXT, ...extra }}>{text}</div>
         </div>
       )
       const hits = testRoot.renderer.getPaintedHighlights()
@@ -582,7 +582,7 @@ describeNative("white-space", () => {
     }
 
     it("keeps the spaces, tabs and line feeds like pre-wrap", () => {
-      const testRoot = paint(<text style={{ whiteSpace: "break-spaces", ...TEXT }}>{"  a  \tb \n  c  "}</text>)
+      const testRoot = paint(<div style={{ whiteSpace: "break-spaces", ...TEXT }}>{"  a  \tb \n  c  "}</div>)
       expect(testRoot.renderer.getPaintedText()).toEqual(["  a  \tb \n  c  "])
     })
 
@@ -610,7 +610,7 @@ describeNative("white-space", () => {
     it("wraps a line of nothing but spaces", () => {
       const testRoot = paint(
         <div testId="p" style={{ width: 3.5 * space }}>
-          <text style={{ whiteSpace: "break-spaces", ...TEXT }}>{" ".repeat(10)}</text>
+          <div style={{ whiteSpace: "break-spaces", ...TEXT }}>{" ".repeat(10)}</div>
         </div>
       )
       expect(lines(testRoot, "p")).toBe(4)
@@ -653,9 +653,9 @@ describeNative("white-space", () => {
       // selecting it stays inside the box instead of reaching past the edge.
       const testRoot = paint(
         <div highlight={{ query: "aaaa ", caseSensitive: true }} style={BOX}>
-          <text testId="t" style={{ whiteSpace: "break-spaces", overflowWrap: "break-word", ...INK }}>
+          <div testId="t" style={{ whiteSpace: "break-spaces", overflowWrap: "break-word", ...INK }}>
             {"aaaa bbbb"}
-          </text>
+          </div>
         </div>
       )
       const hits = testRoot.renderer.getPaintedHighlights()
@@ -669,14 +669,14 @@ describeNative("white-space", () => {
     it("is inherited, and a nearer pre-wrap hangs again", () => {
       const inherited = paint(
         <div testId="p" style={{ whiteSpace: "break-spaces", overflowWrap: "break-word", width: 4.5 * space }}>
-          <text style={INK}>{"aaaa bbbb"}</text>
+          <div style={INK}>{"aaaa bbbb"}</div>
         </div>
       )
       // The space begins a line of its own: "aaaa", " ", "bbbb".
       expect(lines(inherited, "p")).toBe(3)
       const nearer = paint(
         <div testId="p" style={{ whiteSpace: "break-spaces", overflowWrap: "break-word", width: 4.5 * space }}>
-          <text style={{ whiteSpace: "pre-wrap", ...INK }}>{"aaaa bbbb"}</text>
+          <div style={{ whiteSpace: "pre-wrap", ...INK }}>{"aaaa bbbb"}</div>
         </div>
       )
       expect(lines(nearer, "p")).toBe(2)
@@ -687,7 +687,7 @@ describeNative("white-space", () => {
       // does not begin a line of its own as it does when the word is cut.
       const testRoot = paint(
         <div testId="p" style={{ whiteSpace: "break-spaces", width: 4.5 * space }}>
-          <text style={INK}>{"aaaa bbbb"}</text>
+          <div style={INK}>{"aaaa bbbb"}</div>
         </div>
       )
       expect(lines(testRoot, "p")).toBe(2)
@@ -702,7 +702,7 @@ describeNative("white-space", () => {
     function lay(style: Record<string, unknown>, text: string, query: string, width: number) {
       const testRoot = paint(
         <div highlight={{ query, caseSensitive: true }} testId="p" style={{ width }}>
-          <text testId="t" style={{ ...TEXT, ...style }}>{text}</text>
+          <div testId="t" style={{ ...TEXT, ...style }}>{text}</div>
         </div>
       )
       const hits = testRoot.renderer.getPaintedHighlights()
@@ -782,7 +782,7 @@ describeNative("white-space", () => {
       const nested = (outer: Record<string, unknown>, inner: Record<string, unknown>) => {
         const testRoot = paint(
           <div testId="p" style={{ width, ...outer }}>
-            <text style={{ ...TEXT, ...inner }}>{"aaaaaaaaaa bbb"}</text>
+            <div style={{ ...TEXT, ...inner }}>{"aaaaaaaaaa bbb"}</div>
           </div>
         )
         return lines(testRoot, "p")
@@ -798,10 +798,10 @@ describeNative("white-space", () => {
       const paragraph = (span: Record<string, unknown>) => {
         const testRoot = paint(
           <div testId="p" style={{ width }}>
-            <text style={TEXT}>
+            <div style={TEXT}>
               {"aaaaaaaaaa "}
               <span style={span}>{"bbbb"}</span>
-            </text>
+            </div>
           </div>
         )
         return lines(testRoot, "p")
@@ -839,7 +839,7 @@ describeNative("white-space", () => {
           onUncaughtError: (error) => errors.push(error),
         })
         try {
-          render(<text style={{ [property]: value } as never}>{"a b"}</text>)
+          render(<div style={{ [property]: value } as never}>{"a b"}</div>)
           expect(errors, `${property} ${value}`).toEqual([])
         } finally {
           unmount()
@@ -864,12 +864,12 @@ describeNative("white-space", () => {
             testId="p"
             style={{ width: (columns + 0.25) * space }}
           >
-            <text
+            <div
               testId="t"
               style={{ ...TEXT, textOverflow: "ellipsis", lineClamp: 2, ...style }}
             >
               {text}
-            </text>
+            </div>
           </div>
         )
         const rect = testRoot.renderer.getPaintedHighlights()[0]?.rects[0]

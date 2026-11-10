@@ -13,8 +13,8 @@ describe("selection hit testing across layouts", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "row", padding: 20, gap: 200 }}>
-        <text style={{ fontSize: 20 }}>LEFTSIDE</text>
-        <text style={{ fontSize: 20 }}>RIGHTSIDE</text>
+        <div style={{ fontSize: 20 }}>LEFTSIDE</div>
+        <div style={{ fontSize: 20 }}>RIGHTSIDE</div>
       </div>
     )
 
@@ -30,8 +30,8 @@ describe("selection hit testing across layouts", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "row", padding: 20, gap: 200 }}>
-        <text style={{ fontSize: 20 }}>LEFTSIDE</text>
-        <text style={{ fontSize: 20 }}>RIGHTSIDE</text>
+        <div style={{ fontSize: 20 }}>LEFTSIDE</div>
+        <div style={{ fontSize: 20 }}>RIGHTSIDE</div>
       </div>
     )
 
@@ -52,9 +52,9 @@ describe("selection hit testing across layouts", () => {
             backgroundColor: "#333333",
           }}
         >
-          <text style={{ fontSize: 20 }}>SIDEBAR</text>
+          <div style={{ fontSize: 20 }}>SIDEBAR</div>
         </div>
-        <text style={{ fontSize: 20 }}>message text here</text>
+        <div style={{ fontSize: 20 }}>message text here</div>
       </div>
     )
 
@@ -65,7 +65,7 @@ describe("selection hit testing across layouts", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "row", padding: 20, gap: 40 }}>
-        <text style={{ fontSize: 20 }}>DOCUMENT</text>
+        <div style={{ fontSize: 20 }}>DOCUMENT</div>
         <input value="typed" style={{ width: 220, height: 32 }} />
       </div>
     )
@@ -77,8 +77,8 @@ describe("selection hit testing across layouts", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "row", padding: 40, gap: 200 }}>
-        <text style={{ fontSize: 20 }}>LEFTSIDE</text>
-        <text style={{ fontSize: 20 }}>RIGHTSIDE</text>
+        <div style={{ fontSize: 20 }}>LEFTSIDE</div>
+        <div style={{ fontSize: 20 }}>RIGHTSIDE</div>
       </div>
     )
 
@@ -92,8 +92,8 @@ describe("selection hit testing across layouts", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "row", padding: 20, gap: 200 }}>
-        <text style={{ fontSize: 20 }}>AAAA</text>
-        <text style={{ fontSize: 20 }}>BBBB</text>
+        <div style={{ fontSize: 20 }}>AAAA</div>
+        <div style={{ fontSize: 20 }}>BBBB</div>
       </div>
     )
 
@@ -106,9 +106,9 @@ describe("selection hit testing across layouts", () => {
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, gap: 8 }}>
         <div style={{ userSelect: "none" }}>
-          <text style={{ fontSize: 20 }}>chrome</text>
+          <div style={{ fontSize: 20 }}>chrome</div>
         </div>
-        <text style={{ fontSize: 20 }}>content</text>
+        <div style={{ fontSize: 20 }}>content</div>
       </div>
     )
 
@@ -122,8 +122,8 @@ describe("selection hit testing across layouts", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "row", padding: 20, fontSize: 20 }}>
-        <text>one</text>
-        <text>two</text>
+        <div>one</div>
+        <div>two</div>
       </div>
     )
 
@@ -139,7 +139,7 @@ describe("copy listener", () => {
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
         {Array.from({ length: 30 }, (_, i) => (
-          <text key={i} style={{ fontSize: 12 }}>{`line ${i}`}</text>
+          <div key={i} style={{ fontSize: 12 }}>{`line ${i}`}</div>
         ))}
       </div>
     )
@@ -158,7 +158,7 @@ describe("painted text log", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, userSelect: "none" }}>
-        <text style={{ fontSize: 20 }}>chrome label</text>
+        <div style={{ fontSize: 20 }}>chrome label</div>
         <code code={"x = 1"} language="python" showLineNumbers />
       </div>
     )

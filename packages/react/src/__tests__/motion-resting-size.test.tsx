@@ -37,7 +37,7 @@ function Page({ target, sized }: { target: Record<string, number>; sized: boolea
         <div key={row} style={{ display: "flex", flexDirection: "row", gap: 4, padding: 2, marginTop: row === 0 ? 40 : 0 }}>
           {Array.from({ length: 4 }, (_, cell) => (
             <div key={cell} style={{ borderWidth: 1, borderColor: "#cccccc", padding: 2 }}>
-              <text style={{ fontSize: 11, color: "#333333" }}>{`r${row} c${cell}`}</text>
+              <div style={{ fontSize: 11, color: "#333333" }}>{`r${row} c${cell}`}</div>
             </div>
           ))}
         </div>

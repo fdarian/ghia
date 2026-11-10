@@ -16,6 +16,7 @@ import type {
 } from "../types/host.js"
 import {
   attachRoot,
+  detachListeners,
   detachRoot,
   idAllocatorFor,
   unregisterEventHandlers,
@@ -79,6 +80,8 @@ export function createRoot(
   const batchedRenderer = createMutationQueue(renderer, (destroyedIds) => {
     for (const id of destroyedIds) {
       unregisterEventHandlers(gpuixContainer.eventHandlers, id)
+      const instance = gpuixContainer.instances.get(id)
+      if (instance) detachListeners(instance)
       gpuixContainer.instances.delete(id)
     }
     releaseMotionBindings(gpuixContainer, destroyedIds)
@@ -98,7 +101,8 @@ export function createRoot(
     onEvent: rootEventHandlers.onEvent,
     onUncaughtError,
   }
-  attachRoot(renderer, gpuixContainer)
+  // The flush stands in for the microtask checkpoint a browser runs before it renders.
+  attachRoot(renderer, gpuixContainer, (run) => flushSync(run))
   // Sent on every root, so a remount without the option restores the default.
   batchedRenderer.setKeyboardFocusDim(rootEventHandlers.keyboardFocusDim !== false)
   const windowKeyEventId = gpuixContainer.windowKeyEventId

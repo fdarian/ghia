@@ -19,7 +19,7 @@ const mount = (skipping = false) => {
     batch.push(["createElement", card, "div"], ["appendChild", 1, card], ["setStyle", card, { height: 40, hover: { backgroundColor: "#aa0000" } }])
     for (const line of [1, 2]) {
       const id = card + line
-      batch.push(["createElement", id, "div"], ["appendChild", card, id], ["createElement", id * 10, "text"], ["setText", id * 10, "some words"], ["appendChild", id, id * 10])
+      batch.push(["createElement", id, "div"], ["appendChild", card, id], ["createElement", id * 10, "#text"], ["setText", id * 10, "some words"], ["appendChild", id, id * 10])
     }
   }
   renderer.applyBatch(encodeWireBatchForTest(batch))
@@ -162,7 +162,7 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
           ["createElement", row + 4, "div"],
           ["appendChild", row, row + 4],
           ["setStyle", row + 4, boxes[2]],
-          ["createElement", row + 3, "text"],
+          ["createElement", row + 3, "#text"],
           ["setText", row + 3, `row ${index}`],
           ["appendChild", row + 1, row + 3],
         )
@@ -449,7 +449,7 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
           ["createElement", row + 1, "div"],
           ["appendChild", row, row + 1],
           ["setStyle", row + 1, { width: 100, height: ROW_HEIGHT, backgroundColor: "#335577" }],
-          ["createElement", row + 3, "text"],
+          ["createElement", row + 3, "#text"],
           ["setText", row + 3, `row ${index}`],
           ["appendChild", row + 1, row + 3],
           ["createElement", row + 2, "div"],
@@ -461,12 +461,12 @@ describe.skipIf(!hasNativeTestRenderer)("native retain counters", () => {
             ["createElement", row + 5, "div"],
             ["appendChild", row + 2, row + 5],
             ["setStyle", row + 5, { width: 50, height: 20, backgroundColor: "#112233" }],
-            ["createElement", row + 6, "text"],
+            ["createElement", row + 6, "#text"],
             ["setText", row + 6, `nested ${index}`],
             ["appendChild", row + 5, row + 6],
           )
         } else {
-          batch.push(["createElement", row + 5, "text"], ["setText", row + 5, `n${index}`], ["appendChild", row + 2, row + 5])
+          batch.push(["createElement", row + 5, "#text"], ["setText", row + 5, `n${index}`], ["appendChild", row + 2, row + 5])
         }
       }
       renderer.applyBatch(encodeWireBatchForTest(batch))

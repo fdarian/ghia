@@ -131,9 +131,9 @@ describeNative("a row that breaks at a soft hyphen is laid out with its hyphen a
         root.render(
           stack(cases, (c) => (
             <div highlight={{ query: c.text }}>
-              <text testId={`text${cases.indexOf(c)}`} style={{ textAlign: c.align }}>
+              <div testId={`text${cases.indexOf(c)}`} style={{ textAlign: c.align }}>
                 <span testId={`span-${c.id}`}>{c.text}</span>
-              </text>
+              </div>
             </div>
           ))
         )
@@ -187,7 +187,7 @@ describeNative("a row that breaks at a soft hyphen is laid out with its hyphen a
           root.render(
             <div style={{ width: 700, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
               <div testId="box" style={{ width: "min-content", ...fontOf({ family, size: parseFloat(size) }) }}>
-                <text>{TEXTS[Number(textIx)]}</text>
+                <div>{TEXTS[Number(textIx)]}</div>
               </div>
             </div>
           )
@@ -229,9 +229,9 @@ describeNative("a row wider than its box starts at the start edge of a right to 
         root.render(
           stack(cases, (c) => (
             <div highlight={{ query: c.text }}>
-              <text testId={`text${cases.indexOf(c)}`} style={{ textAlign: c.align }}>
+              <div testId={`text${cases.indexOf(c)}`} style={{ textAlign: c.align }}>
                 {c.text}
-              </text>
+              </div>
             </div>
           ))
         )
@@ -273,7 +273,7 @@ describeNative("the hyphen of a row that breaks at a soft hyphen is painted", ()
       try {
         root.render(
           stack(cases, (c) => (
-            <text style={{ textAlign: c.align }}>{c.text}</text>
+            <div style={{ textAlign: c.align }}>{c.text}</div>
           ))
         )
         root.renderer.dispatchNativeEvents()
@@ -311,11 +311,11 @@ describeNative("the hyphen of a row that breaks at a soft hyphen is painted", ()
     try {
       root.render(
         <div style={{ width: 62, backgroundColor: "#ffffff", fontFamily: "Inter Variable", fontSize: 16, lineHeight: "24px" }}>
-          <text>
+          <div>
             <span style={{ color: "#ff0000", textDecorationLine: "underline", textDecorationThickness: "2px" }}>
               {`Extra${SOFT_HYPHEN}ordinary`}
             </span>
-          </text>
+          </div>
         </div>
       )
       root.renderer.dispatchNativeEvents()
@@ -345,7 +345,7 @@ describeNative("the hyphen of a row that breaks at a soft hyphen is painted", ()
       try {
         root.render(
           <div style={{ width: 200, backgroundColor: "#ffffff", fontFamily: "Inter Variable", fontSize: 16, lineHeight: "24px" }}>
-            <text>{text}</text>
+            <div>{text}</div>
           </div>
         )
         root.renderer.dispatchNativeEvents()

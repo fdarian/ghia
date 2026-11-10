@@ -16,7 +16,7 @@ function shot(style: Record<string, unknown>, textStyle: Record<string, unknown>
     const tree: ReactElement = (
       <div style={{ width: 160, height: 100, backgroundColor: "#808080", ...style }}>
         <div>
-          <text style={{ fontSize: 60, ...textStyle }}>MW</text>
+          <div style={{ fontSize: 60, ...textStyle }}>MW</div>
         </div>
       </div>
     )

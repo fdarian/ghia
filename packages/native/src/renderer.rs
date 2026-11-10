@@ -306,7 +306,7 @@ fn scroll_write_lays_out_first(
 }
 
 /// Makes the scroll writes recorded since the last render, before it builds (see `scroll_write`).
-fn settle_scroll_writes() {
+pub(crate) fn settle_scroll_writes() {
     SCROLL_HANDLES.with(|cell| crate::scroll_write::settle_containers(&cell.borrow()));
 }
 
@@ -4083,6 +4083,24 @@ impl GpuixRenderer {
         self.pointer_requests.set_window_events(types);
     }
 
+    /// `requestAnimationFrame`: asks the window for its next frame's steps, which send JS the
+    /// `animationframe` event that runs the callbacks (see `frame_steps`). True when the window
+    /// took the request; false while it is not open, in which case JS asks again once it is.
+    #[napi]
+    pub fn request_animation_frame(&self) -> Result<bool> {
+        #[cfg(target_os = "macos")]
+        {
+            if !*self.initialized.lock().unwrap() {
+                return Ok(false);
+            }
+            update_window_or_defer(|view, window, _cx| view.request_animation_frame(window))?;
+            return Ok(true);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason("requestAnimationFrame needs macOS"))
+    }
+
     /// Capture the mouse for `element_id`. The request is recorded before this
     /// returns, so `hasPointerCapture` answers true and the next pointer input
     /// is already aimed at the element; that input fires `gotpointercapture`
@@ -6146,14 +6164,11 @@ pub(crate) struct MotionStep {
 
 #[derive(Default)]
 pub(crate) struct PaintReports {
-    /// Scroll offset last seen for `onScroll`. Recorded on the first paint
-    /// without an event, so only movement is reported.
-    scrolls: HashMap<u64, (f32, f32)>,
-    /// The scrolls the frame painted, in paint order, until the events are emitted: by the sweep of
-    /// the frame (`observers::frame_sweep`), which emits them before it reports the boxes, or by a
-    /// deferred flush if nothing listens for boxes.
-    pending_scrolls: Vec<(u64, (f32, f32))>,
-    scroll_flush_queued: bool,
+    /// The scrollers with an `onScroll` listener and what each last reported: the frame steps
+    /// (`frame_steps`) emit the events.
+    pub(crate) scrolls: crate::frame_steps::ScrollReports,
+    /// Whether `requestAnimationFrame` callbacks wait for the next frame's steps.
+    pub(crate) animation_frame: crate::frame_steps::AnimationFrame,
     /// What `onLayout`, `ResizeObserver` and `IntersectionObserver` last saw.
     pub(crate) observers: crate::observers::ObserverReports,
 }
@@ -9717,9 +9732,6 @@ struct Fixed {
     excluded: bool,
     /// The shapes an `<svg>` draws, whose animations change its picture.
     shapes: Vec<u64>,
-    /// A `<text>` in a `<text>`: whether it is an SVG element depends on the elements above its
-    /// parent, which a change there does not tell it.
-    unkept: bool,
 }
 
 impl Fixed {
@@ -9738,16 +9750,11 @@ impl Fixed {
             parent: element.parent,
             excluded,
             shapes: crate::custom_elements::svg_tree::shapes(tree, element).map(|shape| shape.id).collect(),
-            unkept: element.element_type == "text"
-                && element
-                    .parent
-                    .and_then(|parent| tree.elements.get(&parent))
-                    .is_some_and(|parent| parent.element_type == "text"),
         }
     }
 
     fn holds_for(&self, element: &crate::retained_tree::RetainedElement) -> bool {
-        !self.unkept && self.revision == element.subtree_revision && self.parent == element.parent
+        self.revision == element.subtree_revision && self.parent == element.parent
     }
 }
 
@@ -9883,6 +9890,20 @@ impl GpuixView {
         });
     }
 
+    /// The steps of "update the rendering" this window runs, see `frame_steps`.
+    fn frame_steps(&self) -> crate::frame_steps::FrameSteps {
+        crate::frame_steps::FrameSteps::new(
+            self.paint_reports.clone(),
+            self.event_callback.clone(),
+            self.clock.clone(),
+        )
+    }
+
+    /// `requestAnimationFrame`: the next frame's steps run the callbacks JS holds.
+    pub(crate) fn request_animation_frame(&mut self, window: &mut gpui::Window) {
+        self.frame_steps().request_animation_frame(window);
+    }
+
     /// Whether nothing is drawn of the motion at `id`: its element is culled and dormant, or it
     /// has no box (`display: none`, or the content of a `content-visibility` ancestor that skips).
     pub(crate) fn motion_sleeps(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
@@ -9956,6 +9977,7 @@ impl gpui::Render for GpuixView {
 
         self.apply_window_title(window);
         settle_scroll_writes();
+        self.paint_reports.borrow_mut().scrolls.begin_pass();
         self.note_pass(window);
         self.apply_pointer_lock(window, cx);
         layout_is_drawn(cx.entity_id());
@@ -9974,6 +9996,7 @@ impl gpui::Render for GpuixView {
             // there is no commit to survey that the update has not just made.
             move |_: &gpui::Window| tree.try_lock().is_ok_and(|tree| flips.wants_survey(tree.revision()))
         })));
+        window.set_frame_steps(Some(self.frame_steps().before_draw()));
         window.set_scroll_patch_registries(verifies.then(|| {
             let window_id = window.window_handle().window_id();
             let tapes = self.tapes.clone();
@@ -10037,13 +10060,11 @@ impl gpui::Render for GpuixView {
         // back reports the size again, like a fresh observer.
         {
             let mut reports = self.paint_reports.borrow_mut();
-            if !reports.scrolls.is_empty() {
-                reports.scrolls.retain(|id, _| {
-                    tree.elements
-                        .get(id)
-                        .is_some_and(|element| element.events().contains("scroll"))
-                });
-            }
+            reports.scrolls.retain(|id| {
+                tree.elements
+                    .get(&id)
+                    .is_some_and(|element| element.events().contains("scroll"))
+            });
             crate::observers::prune(
                 &mut reports.observers,
                 |id| tree.elements.contains_key(&id),
@@ -10075,7 +10096,8 @@ impl gpui::Render for GpuixView {
                 .unwrap_or_else(|| crate::scrollbar::ScrollerStyle::of_system(cx)),
             window.draw_pass(),
         );
-        let scroll_animating = crate::scroll::advance_animations(now);
+        // Stepped by the frame steps, before the frame that paints it.
+        let scroll_animating = crate::scroll::animating();
         // Before the motion sync reads them, so an element that stopped being
         // measured does not seed its motion from a size laid out long ago.
         self.measurements
@@ -10434,7 +10456,6 @@ fn build_element_in(
                 opacity_runs(known, ctx.css_animations, ctx.css_transitions, ctx.motion_states, ctx.motion_values, ctx.now)
                     || transform_runs(known, ctx.css_animations, ctx.css_transitions, ctx.motion_states, ctx.motion_values, ctx.now)
             },
-            costly: crate::retain::costly(known),
             patch_root,
         });
         if let Some(skip) = skip {
@@ -10486,7 +10507,12 @@ fn build_element_in(
     // built in list layout, so this is the one place that sees both.
     crate::background_images::pump(window, cx);
     let anchor = anchor_env.and_then(|env| ctx.retain.end_anchor().map(|subtree| (env, subtree)));
-    let recording = if ctx.tree.elements.contains_key(&id) { ctx.retain.exit() } else { None };
+    let recording = if let Some(known) = ctx.tree.elements.get(&id) {
+        ctx.retain.costly(|| crate::retain::costly(ctx.tree, known));
+        ctx.retain.exit()
+    } else {
+        None
+    };
     match (unit, recording) {
         (Some((env, subtree, lift_z)), _) => unit_root(id, env, subtree, lift_z, element, ctx),
         (None, _) if anchor.is_some() => {
@@ -11574,11 +11600,10 @@ fn build_element_unpumped(
     // What the element holds is its own to say; the element above hears it once it is built.
     let enclosing = std::mem::replace(&mut ctx.subtree, crate::layout::cull::Subtree::empty());
     let built = match element.element_type.as_str() {
-        // `<text>` is a `<div>` that happens to carry a string. Giving it its
-        // own builder meant every interaction prop on the shared `Props` type
-        // (onClick, hover, focus, tabIndex) type-checked, registered a JS
-        // listener, and then silently did nothing. `<span>` is the same box;
-        // it only differs in being inline inside a paragraph.
+        // A separate builder per host type meant every interaction prop on the shared `Props`
+        // type (onClick, hover, focus, tabIndex) type-checked, registered a JS listener, and
+        // then silently did nothing. `<span>` is the same box as `<div>`; it only differs in
+        // being inline inside a paragraph.
         host if crate::text::inline::is_host_type(host) => {
             ctx.custom_registry.destroy_unless(id, host);
             if crate::layout::contents::is_display_contents(element) {
@@ -12038,15 +12063,6 @@ fn virtual_row_ancestor(tree: &RetainedTree, list_id: u64, element_id: u64) -> O
     }
 }
 
-/// A text instance: a bare string with no style, children or listeners.
-fn is_text_node(element: &crate::retained_tree::RetainedElement) -> bool {
-    element.element_type == "text"
-        && element.content.is_some()
-        && element.style.is_none()
-        && element.children.is_empty()
-        && element.events().is_empty()
-}
-
 /// What the build of `element` reads of the layout and the frames before that its key has to
 /// carry: the size layout gave it as a query container, and whether its `content-visibility`
 /// skips. Nothing above the element has them.
@@ -12064,7 +12080,7 @@ fn container_key(element: &crate::retained_tree::RetainedElement, ctx: &BuildCtx
     }
 }
 
-/// The one builder for `<div>`, `<text>` and `<span>`.
+/// The one builder for `<div>` and `<span>`.
 ///
 /// Both get the same stable GPUI id, so gpui keeps their interactive element
 /// state (hover, active, pointer capture, scroll, accessibility node) across
@@ -12088,7 +12104,7 @@ pub(crate) fn build_host_container(
     // Everything up to the children goes through the slot: the element is 1.6 KB, and a helper
     // that took and returned it copied it twice.
     let mut el = crate::slot::Slot::new(&mut host);
-    if !is_text_node(element) {
+    if !crate::text::inline::is_raw_text(element) {
         el = crate::events::ids::host_hitbox(el, ctx.inherited.pointer_events_none);
         el = crate::events::app_region::mark(el, ctx.inherited.app_region);
     }
@@ -12260,16 +12276,7 @@ pub(crate) fn build_host_container(
     } else {
         Vec::new()
     };
-    let default_role = crate::accessibility::default_role(element);
-    el = if exposed.is_empty() {
-        apply_accessibility(el, element.id, element.custom_props(), default_role)
-    } else {
-        crate::accessibility::skipped::host(
-            crate::accessibility::apply_hosting(el, element.id, element.custom_props(), default_role),
-            exposed,
-        )
-    };
-    // Planned once: the label below and the children further down read the same
+    // Planned once: the text below and the children further down read the same
     // paragraphs. A node with no children paints its own `content` instead.
     if !skipped {
         crate::layout::container::settle_children(
@@ -12279,10 +12286,25 @@ pub(crate) fn build_host_container(
             window,
         );
     }
-    // A skipped `<text>` is still read out, though its paragraphs are not built.
-    let reads_text = !skipped || (a11y_active && element.element_type == "text");
+    // A skipped element is still read out, though its paragraphs are not built.
+    let reads_text = !skipped || (a11y_active && crate::accessibility::carries_text(element));
     let planned = (!element.children.is_empty() && reads_text).then(|| crate::text::plan_cache::planned(ctx.tree, element));
-    el = crate::accessibility::describe_text(el, element, planned.as_ref().and_then(|planned| planned.accessible_text.as_deref()));
+    // Only a screen reader reads it, and the retained replay key has `a11y_active`.
+    let text = if a11y_active && reads_text {
+        crate::accessibility::read_text(element, planned.as_deref())
+    } else {
+        None
+    };
+    let default_role = crate::accessibility::role_without_props(element, text.as_deref());
+    el = if exposed.is_empty() {
+        apply_accessibility(el, element.id, element.custom_props(), default_role)
+    } else {
+        crate::accessibility::skipped::host(
+            crate::accessibility::apply_hosting(el, element.id, element.custom_props(), default_role),
+            exposed,
+        )
+    };
+    el = crate::accessibility::describe_text(el, element, default_role, text);
     if is_label && !inert {
         el = crate::accessibility::label::describe(el, element.id);
     }
@@ -12558,7 +12580,7 @@ fn build_content(
     cx: &mut gpui::Context<GpuixView>,
 ) -> (Vec<gpui::AnyElement>, Vec<Placement>, Vec<Rc<Cell<gpui::Pixels>>>) {
     let outer_heights = std::mem::take(&mut ctx.containing_heights);
-    // Text content — selectable, same as a <text> leaf.
+    // Text content — selectable, same as a string child.
     // An empty string paints no glyphs, so it must take no space: gpui's text
     // layout still reserves a full line for "", and Solid's universal renderer
     // creates an empty placeholder text node for every dynamic hole (`<Show>`,
@@ -12590,7 +12612,8 @@ fn build_content(
             .as_ref()
             .filter(|probe| probe.container == element.id)
             .map(crate::text::atomic::Probe::clone_handle);
-        build_plan(element, plan, trim, probe.as_ref(), &mut 0, &mut content_elements, &mut placements, ctx, window, cx);
+        let label_paragraphs = crate::accessibility::labels_paragraphs(window.is_a11y_active(), element, plan);
+        build_plan(element, plan, trim, probe.as_ref(), label_paragraphs, &mut 0, &mut content_elements, &mut placements, ctx, window, cx);
     }
     let containing_heights = std::mem::replace(&mut ctx.containing_heights, outer_heights);
     (content_elements, placements, containing_heights)
@@ -12603,6 +12626,7 @@ fn build_plan(
     plan: &[(crate::text::inline::Child, u32)],
     trim: gpui::TextBoxTrim,
     probe: Option<&crate::text::atomic::Probe>,
+    label_paragraphs: bool,
     anonymous: &mut usize,
     content_elements: &mut Vec<gpui::AnyElement>,
     placements: &mut Vec<Placement>,
@@ -12642,7 +12666,7 @@ fn build_plan(
                     .inherited
                     .table_row
                     .map(|row| crate::text::selection::TableCell { row, cell: key.token() });
-                build_plan(element, cell, gpui::TextBoxTrim::default(), probe, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
+                build_plan(element, cell, gpui::TextBoxTrim::default(), probe, label_paragraphs, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
                 ctx.inherited.table_cell = outside;
                 let halves = ctx.inherited.table.collapse.then(|| ctx.collapsed.cell(key));
                 let mut cell = crate::layout::table::anonymous_cell(halves);
@@ -12671,7 +12695,7 @@ fn build_plan(
                 let mut inside_placements = Vec::new();
                 let outside = (ctx.inherited.table_row, ctx.inherited.table_cell);
                 (ctx.inherited.table_row, ctx.inherited.table_cell) = (Some(key.token()), None);
-                build_plan(element, &blocks, gpui::TextBoxTrim::default(), probe, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
+                build_plan(element, &blocks, gpui::TextBoxTrim::default(), probe, label_paragraphs, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
                 (ctx.inherited.table_row, ctx.inherited.table_cell) = outside;
                 settle_collapsed_borders(ctx, key, used_from, window);
                 let mut table = crate::layout::table::anonymous_table(&ctx.inherited.table, ctx.collapsed.table(key));
@@ -12760,7 +12784,13 @@ fn build_plan(
                     }
                 }
                 let (paragraph_element, subtree) = paragraph_content(paragraph, child_trim, ctx, window, cx);
-                content_elements.push(paragraph_element);
+                let label = label_paragraphs
+                    .then(|| crate::text::inline::accessible_text(std::iter::once(child)))
+                    .flatten();
+                content_elements.push(match label {
+                    Some(text) => crate::accessibility::paragraph_label(paragraph.anchor, text).child(paragraph_element).into_any_element(),
+                    None => paragraph_element,
+                });
                 ctx.subtree.merge(subtree);
                 if let Some(outside) = outside {
                     ctx.inherited = outside;
@@ -12843,7 +12873,7 @@ fn build_contents_container(
 /// text keeps inheriting colour, weight and family from ancestor styles.
 ///
 /// The run's group is its parent host element, because React makes a separate
-/// host node for every interpolated string. `<text>Hello {name}!</text>` is one
+/// host node for every interpolated string. `<div>Hello {name}!</div>` is one
 /// logical line painted as three runs that all share the parent's id.
 /// A `userSelect: "none"` run still paints highlight washes, because a browser
 /// still finds that text with Ctrl+F. Element chrome that must never be found,
@@ -13683,16 +13713,10 @@ pub(crate) fn mouse_button_to_u32(button: gpui::MouseButton) -> u32 {
     }
 }
 
-/// `onScroll`: the scroll offset of the element each time it differs from the last paint,
-/// whatever moved it. The wheel is only one cause; a scrollbar drag or `scrollTo` moves it
-/// too, and gpui raises no event for those. `None` for an element that listens for nothing
-/// or has no scroll handle.
-///
-/// Events are queued after the paint that saw the change, never from inside it.
-/// The browser build calls the listener synchronously, and a handler that sets
-/// state would re-enter the frame that is being painted. They go out before the frame's
-/// `onLayout` and observer reports, as the DOM's scroll events precede its observers: see
-/// [`emit_pending_scrolls`].
+/// `onScroll`: registers the scroller at paint, for the frame steps to report (`frame_steps`). An
+/// offset that this paint shows and the steps did not report (layout clamped it, anchoring moved
+/// it) asks for a frame whose steps do. `None` for an element that listens for nothing or has no
+/// scroll handle.
 ///
 /// `onLayout` and the observers are not here: they are read from the published boxes after
 /// the draw, see `observers::frame_sweep`.
@@ -13705,68 +13729,18 @@ fn scroll_reporter(
         return None;
     }
     let handle = ctx.scroll_handles.get(&id)?.clone();
-    let callback = ctx.event_callback.clone()?;
     let reports = ctx.paint_reports.clone();
-    Some(Rc::new(move |_, _, window, cx| {
+    Some(Rc::new(move |_, _, window, _| {
         // A layout-only pass paints nothing, and the event of the offset it left is the next
         // frame's, as the DOM's is: an anchoring adjustment of a forced layout runs it a frame later.
         if window.is_layout_pass() {
+            reports.borrow_mut().scrolls.note_laid_out(id);
             return;
         }
-        report_scroll(id, handle.offset(), &reports, &callback, cx);
+        if reports.borrow_mut().scrolls.note_painted(id, &handle) {
+            window.request_animation_frame();
+        }
     }))
-}
-
-fn report_scroll(
-    id: u64,
-    offset: gpui::Point<gpui::Pixels>,
-    reports: &SharedPaintReports,
-    callback: &EventCallback,
-    cx: &mut gpui::App,
-) {
-    let offset = (f32::from(offset.x), f32::from(offset.y));
-    let mut shared = reports.borrow_mut();
-    match shared.scrolls.get(&id).copied() {
-        // The first paint only sets the baseline.
-        None => {
-            shared.scrolls.insert(id, offset);
-            return;
-        }
-        Some(last)
-            if (last.0 - offset.0).abs() < PAINT_REPORT_EPSILON
-                && (last.1 - offset.1).abs() < PAINT_REPORT_EPSILON =>
-        {
-            return;
-        }
-        Some(_) => {
-            shared.scrolls.insert(id, offset);
-        }
-    }
-    shared.pending_scrolls.push((id, offset));
-    if !shared.scroll_flush_queued {
-        shared.scroll_flush_queued = true;
-        let reports = reports.clone();
-        let callback = Some(callback.clone());
-        cx.defer(move |_| emit_pending_scrolls(&reports, &callback));
-    }
-}
-
-/// Emits the scroll events the frame painted. Whichever runs first after the draw, the frame's
-/// sweep or this flush, emits them all; the other finds none. The sweep goes first when anything
-/// listens for boxes, which is what puts scroll before `onLayout`, `ResizeObserver` and
-/// `IntersectionObserver` in a frame. Scrollers are in paint order.
-pub(crate) fn emit_pending_scrolls(reports: &SharedPaintReports, callback: &Option<EventCallback>) {
-    let pending = {
-        let mut shared = reports.borrow_mut();
-        shared.scroll_flush_queued = false;
-        std::mem::take(&mut shared.pending_scrolls)
-    };
-    for (id, offset) in pending {
-        emit_event_full(callback, id, "scroll", |payload| {
-            payload.scroll_x = Some(f64::from(offset.0));
-            payload.scroll_y = Some(f64::from(offset.1));
-        });
-    }
 }
 
 /// The retained path a non-pointer click on `element` bubbles along. Empty when
@@ -13786,10 +13760,6 @@ pub(crate) fn click_path(tree: &RetainedTree, element: &crate::retained_tree::Re
         Vec::new()
     }
 }
-
-/// Values closer than this are the same value. Layout is deterministic, so this
-/// only absorbs float noise from fractional scale factors.
-const PAINT_REPORT_EPSILON: f32 = 0.01;
 
 /// General-purpose event emitter. Builds a default EventPayload, lets the
 /// caller customize it via a closure, then sends it through the callback.
@@ -14193,6 +14163,10 @@ pub struct ElementBounds {
     /// pixels as the DOM does.
     pub client_left: f64,
     pub client_top: f64,
+    /// The border box's size before any transform, which `offsetWidth` and `offsetHeight` round:
+    /// `width` and `height` are the box after the transforms.
+    pub layout_width: f64,
+    pub layout_height: f64,
 }
 
 /// A [`WebAnimationInfo`] with the element the run is of, for a read that spans elements.
@@ -14438,6 +14412,8 @@ impl ElementBounds {
             height,
             client_left: bounds.client_left.round(),
             client_top: bounds.client_top.round(),
+            layout_width: bounds.width,
+            layout_height: bounds.height,
         }
     }
 }
@@ -14455,6 +14431,8 @@ fn element_bounds_js(
         ("height", height),
         ("clientLeft", bounds.client_left.round()),
         ("clientTop", bounds.client_top.round()),
+        ("layoutWidth", bounds.width),
+        ("layoutHeight", bounds.height),
     ] {
         js_sys::Reflect::set(
             &object,
@@ -14963,7 +14941,7 @@ mod highlight_cache_tests {
     fn tree_with_text() -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
-        tree.create_element(2, "text".to_string());
+        tree.create_element(2, "#text".to_string());
         tree.append_child(1, 2);
         tree.set_text(2, "a fox and a fox".to_string());
         tree
@@ -15114,7 +15092,7 @@ mod batch_tests {
     }
 
     const MOUNT: &str = r##"[
-        ["createElement",1,"div"],["createElement",2,"text"],["createElement",3,"div"],
+        ["createElement",1,"div"],["createElement",2,"#text"],["createElement",3,"div"],
         ["appendChild",1,2],["appendChild",1,3],["setRoot",1],
         ["setStyle",1,{"width":100,"backgroundColor":"#112233"}],
         ["setStyle",3,{"height":10}],
@@ -16202,7 +16180,7 @@ mod font_size_cascade_tests {
                     tree.create_element(node.id, node.element_type.to_owned());
                     tree.set_style(node.id, Arc::new(style));
                     tree.create_element(probe(node.id), "div".to_owned());
-                    tree.create_element(probe(node.id) + 10_000, "text".to_owned());
+                    tree.create_element(probe(node.id) + 10_000, "#text".to_owned());
                     tree.set_text(probe(node.id) + 10_000, "m".to_owned());
                     tree.append_child(probe(node.id), probe(node.id) + 10_000);
                     tree.append_child(node.id, probe(node.id));
@@ -16659,7 +16637,7 @@ mod dimension_length_tests {
         fn add_text(&self, cx: &mut gpui::TestAppContext, id: u64, parent: u64, content: &str) {
             {
                 let mut tree = self.tree.lock().unwrap();
-                tree.create_element(id, "text".to_owned());
+                tree.create_element(id, "#text".to_owned());
                 tree.set_text(id, content.to_owned());
                 tree.append_child(parent, id);
             }
@@ -18063,14 +18041,14 @@ mod inline_run_size_tests {
             tree.create_element(1, "div".to_owned());
             tree.set_style(1, Arc::new(container));
             tree.set_root(1);
-            tree.create_element(2, "text".to_owned());
+            tree.create_element(2, "#text".to_owned());
             tree.set_text(2, text.to_owned());
             tree.append_child(1, 2);
             tree.create_element(3, "span".to_owned());
             let span: StyleDesc = serde_json::from_str(span_style).unwrap();
             tree.set_style(3, Arc::new(span));
             tree.append_child(1, 3);
-            tree.create_element(4, "text".to_owned());
+            tree.create_element(4, "#text".to_owned());
             tree.set_text(4, span_text.to_owned());
             tree.append_child(3, 4);
         }
@@ -18163,7 +18141,7 @@ mod inline_run_size_tests {
                 let span_style: StyleDesc = serde_json::from_str(span_style).unwrap();
                 tree.set_style(span, Arc::new(span_style));
                 tree.append_child(1, span);
-                tree.create_element(text_id, "text".to_owned());
+                tree.create_element(text_id, "#text".to_owned());
                 tree.set_text(text_id, (*text).to_owned());
                 tree.append_child(span, text_id);
             }
@@ -18289,7 +18267,7 @@ mod inline_run_size_tests {
                 let style: StyleDesc = serde_json::from_str(style).unwrap();
                 tree.set_style(span, Arc::new(style));
                 tree.append_child(1, span);
-                tree.create_element(span + 1, "text".to_owned());
+                tree.create_element(span + 1, "#text".to_owned());
                 tree.set_text(span + 1, text.to_owned());
                 tree.append_child(span, span + 1);
             }
@@ -18396,7 +18374,7 @@ mod stacking_build_tests {
         tree.create_element(id, "div".to_owned());
         tree.set_style(id, Arc::new(style));
         tree.append_child(parent, id);
-        tree.create_element(id + 100, "text".to_owned());
+        tree.create_element(id + 100, "#text".to_owned());
         tree.set_text(id + 100, label.to_owned());
         tree.append_child(id, id + 100);
     }
@@ -18861,14 +18839,14 @@ mod paint_integration_tests {
             tree.create_element(1, "div".to_owned());
             tree.set_style(1, Arc::new(container));
             tree.set_root(1);
-            tree.create_element(2, "text".to_owned());
+            tree.create_element(2, "#text".to_owned());
             tree.set_text(2, "a ".to_owned());
             tree.append_child(1, 2);
             tree.create_element(3, "span".to_owned());
             let span: StyleDesc = serde_json::from_str(span_style).unwrap();
             tree.set_style(3, Arc::new(span));
             tree.append_child(1, 3);
-            tree.create_element(4, "text".to_owned());
+            tree.create_element(4, "#text".to_owned());
             tree.set_text(4, "bbbbbbbb".to_owned());
             tree.append_child(3, 4);
         }
@@ -19070,7 +19048,7 @@ mod decoration_paint_tests {
             tree.create_element(2, "div".to_owned());
             tree.set_style(2, Arc::new(serde_json::from_str(r##"{"textDecoration": "underline wavy 2px #0000ff"}"##).unwrap()));
             tree.append_child(1, 2);
-            tree.create_element(3, "text".to_owned());
+            tree.create_element(3, "#text".to_owned());
             tree.set_text(3, "nested".to_owned());
             tree.append_child(2, 3);
         }

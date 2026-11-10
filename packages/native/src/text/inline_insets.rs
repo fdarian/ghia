@@ -579,7 +579,7 @@ mod tests {
     /// text is "a bc d", span 3 covers 2..4 and span 5 covers 3..4.
     fn fixture(styles: &[(u64, serde_json::Value)]) -> RetainedTree {
         let mut tree = RetainedTree::new();
-        for (id, kind) in [(1, "div"), (2, "text"), (3, "span"), (4, "text"), (5, "span"), (6, "text"), (7, "text")] {
+        for (id, kind) in [(1, "div"), (2, "#text"), (3, "span"), (4, "#text"), (5, "span"), (6, "#text"), (7, "#text")] {
             tree.create_element(id, kind.to_string());
         }
         for (parent, child) in [(1, 2), (1, 3), (3, 4), (3, 5), (5, 6), (1, 7)] {
@@ -929,7 +929,7 @@ mod tests {
     fn nested_boxes_that_start_on_the_same_byte_put_the_outer_first() {
         // div(1) > ["a ", span(3) > span(5) > "c"]: both spans cover 2..3.
         let mut tree = RetainedTree::new();
-        for (id, kind) in [(1, "div"), (2, "text"), (3, "span"), (5, "span"), (6, "text")] {
+        for (id, kind) in [(1, "div"), (2, "#text"), (3, "span"), (5, "span"), (6, "#text")] {
             tree.create_element(id, kind.to_string());
         }
         for (parent, child) in [(1, 2), (1, 3), (3, 5), (5, 6)] {

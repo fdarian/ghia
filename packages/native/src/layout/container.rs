@@ -360,7 +360,7 @@ fn settle_among(tree: &RetainedTree, parent: &RetainedElement, containers: &dyn 
             let folded = fold(style, containers);
             *changed |= settle(child, folded.as_ref().or(Some(style)));
         }
-        if crate::text::inline::is_inline_wrapper(child, parent) {
+        if crate::text::inline::is_inline_wrapper(child) {
             settle_among(tree, child, containers, changed);
         }
     }

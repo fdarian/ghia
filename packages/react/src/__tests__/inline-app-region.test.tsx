@@ -25,7 +25,7 @@ function measureColumn() {
   const testRoot = createTestRoot()
   testRoot.render(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   const width = testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -45,9 +45,9 @@ describeNative("appRegion on inline boxes", () => {
     const testRoot = createTestRoot({ titlebarTransparent: true })
     testRoot.render(
       <div style={{ width: 12 * width, paddingTop: 40 }}>
-        <text testId="p" style={{ ...TEXT, appRegion: paragraphRegion }}>
+        <div testId="p" style={{ ...TEXT, appRegion: paragraphRegion }}>
           aaaa <span style={spanStyle}>{spanChild}</span> dddd
-        </text>
+        </div>
       </div>
     )
     return testRoot
@@ -111,9 +111,9 @@ describeNative("appRegion on inline boxes", () => {
     const testRoot = createTestRoot()
     testRoot.render(
       <div style={{ width: 12 * width, paddingTop: 40 }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           aaaa <span style={{ appRegion: "drag" }}>bbbb cccc</span> dddd
-        </text>
+        </div>
       </div>
     )
     expect(pressAt(testRoot, 6, 0)).toEqual([])

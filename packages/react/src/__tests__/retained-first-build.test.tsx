@@ -202,7 +202,7 @@ describeNative("a root recorded by the frame that builds it", () => {
           >
             {sections.map((color, index) => (
               <div key={index} testId={`section-${index}`} style={{ height: 80, backgroundColor: color, padding: 16 }}>
-                <text style={{ color: "#ffffff", fontSize: 20 }}>{`Section ${index + 1}`}</text>
+                <div style={{ color: "#ffffff", fontSize: 20 }}>{`Section ${index + 1}`}</div>
               </div>
             ))}
           </div>

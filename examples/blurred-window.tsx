@@ -17,8 +17,8 @@ const muted = '#FFFFFF99'
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ ...glass, flexGrow: 1, gap: 7, padding: 16 }}>
-      <text style={{ color: muted, fontSize: 12 }}>{label}</text>
-      <text style={{ color: '#FFFFFF', fontSize: 22, fontWeight: 600 }}>{value}</text>
+      <div style={{ color: muted, fontSize: 12 }}>{label}</div>
+      <div style={{ color: '#FFFFFF', fontSize: 22, fontWeight: 600 }}>{value}</div>
     </div>
   )
 }
@@ -55,8 +55,8 @@ function App() {
           }}
         >
           <div style={{ gap: 5 }}>
-            <text style={{ color: muted, fontSize: 12, fontWeight: 600 }}>SUNDAY, AUGUST 30</text>
-            <text style={{ color: '#FFFFFF', fontSize: 30, fontWeight: 650 }}>Good morning, Tommy</text>
+            <div style={{ color: muted, fontSize: 12, fontWeight: 600 }}>SUNDAY, AUGUST 30</div>
+            <div style={{ color: '#FFFFFF', fontSize: 30, fontWeight: 650 }}>Good morning, Tommy</div>
           </div>
           <div
             style={{
@@ -67,7 +67,7 @@ function App() {
               paddingRight: 14,
             }}
           >
-            <text style={{ color: '#FFFFFFCC', fontSize: 13 }}>Cupertino · 21°</text>
+            <div style={{ color: '#FFFFFFCC', fontSize: 13 }}>Cupertino · 21°</div>
           </div>
         </div>
 
@@ -88,8 +88,8 @@ function App() {
               }}
             >
               <div style={{ gap: 4 }}>
-                <text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: 600 }}>Today</text>
-                <text style={{ color: muted, fontSize: 13 }}>A light plan for a quiet Sunday</text>
+                <div style={{ color: '#FFFFFF', fontSize: 18, fontWeight: 600 }}>Today</div>
+                <div style={{ color: muted, fontSize: 13 }}>A light plan for a quiet Sunday</div>
               </div>
               <div style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: '#79E6B3' }} />
             </div>
@@ -104,8 +104,8 @@ function App() {
                 style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
               >
                 <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-                  <text style={{ width: 48, color: '#FFFFFF73', fontSize: 12 }}>{time}</text>
-                  <text style={{ color: '#FFFFFFE8', fontSize: 14 }}>{task}</text>
+                  <div style={{ width: 48, color: '#FFFFFF73', fontSize: 12 }}>{time}</div>
+                  <div style={{ color: '#FFFFFFE8', fontSize: 14 }}>{task}</div>
                 </div>
                 {index < 2 && <div style={{ height: 1, backgroundColor: '#FFFFFF17' }} />}
               </div>
@@ -115,26 +115,26 @@ function App() {
           <div style={{ display: 'flex', flexDirection: 'column', width: 220, gap: 14 }}>
             <div style={{ ...glass, flexGrow: 1, padding: 18, justifyContent: 'space-between' }}>
               <div style={{ gap: 5 }}>
-                <text style={{ color: muted, fontSize: 12, fontWeight: 600 }}>NOW PLAYING</text>
-                <text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: 600 }}>Soft Focus</text>
-                <text style={{ color: '#FFFFFF80', fontSize: 13 }}>Leavv</text>
+                <div style={{ color: muted, fontSize: 12, fontWeight: 600 }}>NOW PLAYING</div>
+                <div style={{ color: '#FFFFFF', fontSize: 18, fontWeight: 600 }}>Soft Focus</div>
+                <div style={{ color: '#FFFFFF80', fontSize: 13 }}>Leavv</div>
               </div>
               <div style={{ gap: 8 }}>
                 <div style={{ height: 3, borderRadius: 2, backgroundColor: '#FFFFFF29' }}>
                   <div style={{ width: '62%', height: '100%', borderRadius: 2, backgroundColor: '#FFFFFFD9' }} />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between' }}>
-                  <text style={{ color: '#FFFFFF70', fontSize: 11 }}>2:08</text>
-                  <text style={{ color: '#FFFFFF70', fontSize: 11 }}>3:24</text>
+                  <div style={{ color: '#FFFFFF70', fontSize: 11 }}>2:08</div>
+                  <div style={{ color: '#FFFFFF70', fontSize: 11 }}>3:24</div>
                 </div>
               </div>
             </div>
 
             <div style={{ ...glass, padding: 18, gap: 7 }}>
-              <text style={{ color: muted, fontSize: 12, fontWeight: 600 }}>INTENTION</text>
-              <text style={{ color: '#FFFFFFE8', fontSize: 14, lineHeight: "21px" }}>
+              <div style={{ color: muted, fontSize: 12, fontWeight: 600 }}>INTENTION</div>
+              <div style={{ color: '#FFFFFFE8', fontSize: 14, lineHeight: "21px" }}>
                 Make one thing clear and useful.
-              </text>
+              </div>
             </div>
           </div>
         </div>

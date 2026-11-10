@@ -44,9 +44,9 @@ describeNative("text wrapping", () => {
           backgroundColor: "#111",
         }}
       >
-        <text testId="prose" style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>
+        <div testId="prose" style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>
           {PROSE}
-        </text>
+        </div>
       </div>,
     )
 
@@ -61,18 +61,18 @@ describeNative("text wrapping", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ width: 160 }}>
-        <text testId="prose" style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>
+        <div testId="prose" style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>
           {PROSE}
-        </text>
+        </div>
       </div>,
     )
     const narrowHeight = rect(renderer, "prose").height
 
     render(
       <div style={{ width: 480 }}>
-        <text testId="prose" style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>
+        <div testId="prose" style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>
           {PROSE}
-        </text>
+        </div>
       </div>,
     )
     expect(narrowHeight).toBeGreaterThan(rect(renderer, "prose").height)
@@ -85,12 +85,12 @@ describeNative("text wrapping", () => {
         testId="box"
         style={{ width: 140, padding: 4, backgroundColor: "#111" }}
       >
-        <text
+        <div
           testId="token"
           style={{ fontSize: 14, lineHeight: "20px", color: "#eee", overflowWrap: "break-word" }}
         >
           pneumonoultramicroscopicsilicovolcanoconiosis
-        </text>
+        </div>
       </div>,
     )
 
@@ -104,21 +104,21 @@ describeNative("text wrapping", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ width: 120 }}>
-        <text testId="line" style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>
+        <div testId="line" style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>
           {PROSE}
-        </text>
+        </div>
       </div>,
     )
     const wrappedHeight = rect(renderer, "line").height
 
     render(
       <div style={{ width: 120 }}>
-        <text
+        <div
           testId="line"
           style={{ fontSize: 14, lineHeight: "20px", color: "#eee", whiteSpace: "nowrap" }}
         >
           {PROSE}
-        </text>
+        </div>
       </div>,
     )
     const nowrapHeight = rect(renderer, "line").height
@@ -139,7 +139,7 @@ describeNative("text wrapping", () => {
         }}
       >
         <div style={{ width: 48, flexShrink: 0, backgroundColor: "#333" }} />
-        <text
+        <div
           testId="prose"
           style={{
             fontSize: 14,
@@ -150,7 +150,7 @@ describeNative("text wrapping", () => {
           }}
         >
           {PROSE}
-        </text>
+        </div>
       </div>,
     )
 
@@ -273,7 +273,7 @@ describeNative("text wrapping", () => {
       <div testId="scroller" style={{ width: 240, height: 120, overflowY: "scroll" }}>
         <markdown source={"```ts\n" + "const wide = '".padEnd(200, "x") + "'\n```"} />
         <div style={{ height: 400 }}>
-          <text>below</text>
+          <div>below</div>
         </div>
       </div>,
     )
@@ -362,7 +362,7 @@ describeNative("test window size", () => {
       root.render(
         <div style={{ width: "100%", flexDirection: "row", justifyContent: "center" }}>
           <div testId="column" style={{ width: cap, maxWidth: "100%" }}>
-            <text style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>{PROSE}</text>
+            <div style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>{PROSE}</div>
           </div>
         </div>,
       )

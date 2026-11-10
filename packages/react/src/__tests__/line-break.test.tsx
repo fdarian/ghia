@@ -29,7 +29,7 @@ function rowWidthsOf(text: string, columns: number, style: Record<string, string
   try {
     render(
       <div highlight={{ query: text }} style={{ width: (columns + 0.5) * ORACLE.column }}>
-        <text style={{ ...TEXT, ...style }}>{text}</text>
+        <div style={{ ...TEXT, ...style }}>{text}</div>
       </div>
     )
     const hit = renderer.getPaintedHighlights()[0]
@@ -45,7 +45,7 @@ function minContentOf(text: string, style: Record<string, string>) {
   try {
     render(
       <div testId="box" style={{ width: "min-content" }}>
-        <text style={{ ...TEXT, ...style }}>{text}</text>
+        <div style={{ ...TEXT, ...style }}>{text}</div>
       </div>
     )
     return renderer.getElementBounds(renderer.findByTestId("box").id).width

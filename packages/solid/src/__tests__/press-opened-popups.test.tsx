@@ -37,11 +37,11 @@ describe.skipIf(!hasNativeTestRenderer)("a Select opened by a press on its trigg
         <input testId="before" style={{ width: 100, height: 20 }} />
         <Select defaultValue="a">
           <SelectTrigger testId="trigger" style={triggerStyle}>
-            <text>open</text>
+            <div>open</div>
           </SelectTrigger>
           <SelectContent testId="content" style={{ width: 120, backgroundColor: "#222222" }}>
-            <SelectItem value="a"><text>A</text></SelectItem>
-            <SelectItem value="b"><text>B</text></SelectItem>
+            <SelectItem value="a"><div>A</div></SelectItem>
+            <SelectItem value="b"><div>B</div></SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -107,10 +107,10 @@ describe.skipIf(!hasNativeTestRenderer)("a Select opened by a press on its trigg
                 setOpen(true)
               }}
             >
-              <text>open</text>
+              <div>open</div>
             </SelectTrigger>
             <SelectContent testId="content" style={{ width: 120, backgroundColor: "#222222" }}>
-              <SelectItem value="a"><text>A</text></SelectItem>
+              <SelectItem value="a"><div>A</div></SelectItem>
             </SelectContent>
           </Select>
         ))
@@ -138,12 +138,12 @@ describe.skipIf(!hasNativeTestRenderer)("a Combobox opened by a press", () => {
         <div style={{ display: "flex", flexDirection: "row", width: 400, height: 40 }}>
           <ComboboxInput testId="input" style={{ width: 180, height: 32 }} />
           <ComboboxTrigger testId="trigger" style={{ width: 40, height: 32, backgroundColor: "#333333" }}>
-            <text>v</text>
+            <div>v</div>
           </ComboboxTrigger>
         </div>
         <ComboboxContent testId="content" style={{ width: 180, backgroundColor: "#222222" }}>
           <ComboboxList>
-            {(item: string) => <ComboboxItem value={item}><text>{item}</text></ComboboxItem>}
+            {(item: string) => <ComboboxItem value={item}><div>{item}</div></ComboboxItem>}
           </ComboboxList>
         </ComboboxContent>
       </Combobox>

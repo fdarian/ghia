@@ -101,7 +101,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid text decoration lines against Chr
       try {
         app.render(() => (
           <div style={{ width: 600, height: source.height, backgroundColor: "#ffffff" }}>
-            <text style={{ ...BAND, ...spec.band } as never}>{spec.body()}</text>
+            <div style={{ ...BAND, ...spec.band } as never}>{spec.body()}</div>
           </div>
         ))
         const file = path.join(shots, `${name.replaceAll(" ", "-")}.png`)

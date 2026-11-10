@@ -137,7 +137,7 @@ describeNative("native color functions", () => {
           active: { backgroundColor: "lch(60% 80 40)" },
         }}
       >
-        <text>Full color path</text>
+        <div>Full color path</div>
       </div>
     )
 

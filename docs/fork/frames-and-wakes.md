@@ -279,6 +279,37 @@ paint-only animation is offered to gpuix's patcher before gpui builds anything a
 tick the patcher declines is drawn whole, and an animation whose content is culled draws and presents nothing. A scroll
 animation is always asked for as `request_animation_frame` and drawn whole. See [patch-frames.md](patch-frames.md).
 
+### The steps before a frame (`Window::set_frame_steps`)
+
+The HTML "update the rendering" steps run before the frame they affect, so what they change is painted by that frame. gpui has
+no such point: its first hook is the commit survey inside `Window::draw`. The window takes one from the owner,
+`Window::set_frame_steps` (None by default, so other GPUI apps are unchanged), and `Window::draw` runs it first, before the
+commit survey and before anything is built or patched. It does not run in a layout pass, nor in a draw nested in another, and
+Ghia's steps (`frame_steps.rs`, installed by `GpuixView::render`) run once per frame and only for a frame: a draw that
+answers the display link (`Window::drawing_for_frame_request`) or, in the test renderer, one of its explicit frames (`flush`,
+`drawFrame`, a simulated input). A draw an update, a layout read, `getPaintedText` or the automation API makes runs none, and
+asks for the next frame if its paint shows an offset nobody reported, so a `scrollTo` or a read is not a frame. The steps that
+ran in the `on_next_frame` of `requestAnimationFrame` and left the window dirty are skipped by the draw that follows in the
+same frame (`AnimationFrame::mark_stepped`), so a smooth scroll does not advance or report twice. Steps also skip a draw a JS
+handler's own call makes (`sync_dispatch::in_sync_call`).
+
+In order, the steps:
+
+1. make the scroll writes recorded since the last render (`settle_scroll_writes`; a render makes them too, for a pass a read
+   forces);
+2. advance smooth scrolls (`scroll::advance_animations`), so the offset an animation frame paints is reported before that paint;
+3. send `scroll` for every scroller whose offset is not the one it last reported ([scroll.md](scroll.md#onscroll)),
+   synchronously through the sync-dispatch path that input uses, so the handler's mutations (a Solid write, an `applyBatch`,
+   a React commit) are in the tree the draw builds.
+
+4. run the `requestAnimationFrame` callbacks, if JS asked (below).
+
+Nothing to do is no JS call. Smooth scrolls sample the clock at the steps, a little before the render's own instant.
+
+#### `requestAnimationFrame`
+
+The callback list is global JS state in `@ghia/native` (`animation-frame.ts`), like the DOM's one per window. `requestAnimationFrame(cb)` adds to it and asks each mounted renderer, once until its frame runs, for the next frame's steps (`renderer.requestAnimationFrame()`). Native (`frame_steps::AnimationFrame`) sets a flag for the window and registers `Window::on_next_frame` with the same steps, so a window nothing else draws still gets a frame; JS also asks a renderer again after `init()`, and a renderer that mounts after the request, so a callback requested before the window exists waits for it. Step 4 clears the flag and sends the `animationframe` event through the sync-dispatch path, with the steps' clock (the renderer's, so `clockPause` and `clockFastForward` apply) as its `timelineTime` (not an element event: `renderer-state.ts` takes it before any handler map). The adapters pass `schedule` when they attach (`flushSync` in React; Solid runs the callbacks, then finishes removals and sends its pending mutations), so every synchronous dispatch and the callbacks flush as a handler does, and a React commit or a Solid flush lands before the draw builds, as a microtask checkpoint would in a browser. JS takes the list before it runs the callbacks, in order, all with that time as their timestamp, so what a callback requests waits for the next frame, and `cancelAnimationFrame` reaches a callback of the running frame that has not run yet. An error a callback throws goes to the renderer's error handler, like any handler's, and the other callbacks still run. `requestAnimationFrame` never throws: a native request that fails leaves the callback queued for the next steps of any window or the next window that attaches. The callbacks run after the scroll events of the same steps, as in HTML. With several windows there is still one list: the first window whose steps run takes it (a deviation, [deviations.md](deviations.md#events-and-input)). A frame that comes by `on_next_frame` runs the steps before the draw and the draw's own steps skip; where JS cannot be called synchronously the event goes through the event queue and the callbacks run a turn later. The test renderer runs them in its next explicit frame (`flush`, `drawFrame`).
+
 ### Windows that are not key (#78)
 
 gpui throttles a window that is visible but not key with `inactive_frame_interval`, 30 fps by default. A window of this

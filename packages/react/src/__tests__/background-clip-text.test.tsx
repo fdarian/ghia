@@ -79,7 +79,7 @@ describeNative("backgroundClip: text", () => {
       "gradient",
       stage(
         { backgroundImage: GRADIENT, backgroundClip: "text", color: "transparent" },
-        <text style={GLYPHS}>MMM</text>
+        <div style={GLYPHS}>MMM</div>
       )
     )
     const found = solidInk(pixels)
@@ -104,12 +104,12 @@ describeNative("backgroundClip: text", () => {
       "longhand",
       stage(
         { backgroundImage: GRADIENT, backgroundClip: "text", color: "transparent" },
-        <text style={GLYPHS}>MMM</text>
+        <div style={GLYPHS}>MMM</div>
       )
     )
     const shorthand = shoot(
       "shorthand",
-      stage({ background: `${GRADIENT} text`, color: "transparent" }, <text style={GLYPHS}>MMM</text>)
+      stage({ background: `${GRADIENT} text`, color: "transparent" }, <div style={GLYPHS}>MMM</div>)
     )
     const expected = inked(longhand)
     expect(expected.length).toBeGreaterThan(200)
@@ -121,9 +121,9 @@ describeNative("backgroundClip: text", () => {
       "nested-span",
       stage(
         { backgroundImage: GRADIENT, backgroundClip: "text", color: "transparent" },
-        <text style={{ ...GLYPHS, fontWeight: 400 }}>
+        <div style={{ ...GLYPHS, fontWeight: 400 }}>
           <span style={{ fontWeight: 900 }}>MM</span>M
-        </text>
+        </div>
       )
     )
     const found = solidInk(pixels)
@@ -141,7 +141,7 @@ describeNative("backgroundClip: text", () => {
       "solid-color",
       stage(
         { backgroundColor: "#00aa00", backgroundClip: "text", color: "transparent" },
-        <text style={GLYPHS}>MMM</text>
+        <div style={GLYPHS}>MMM</div>
       )
     )
     const found = solidInk(pixels)
@@ -158,7 +158,7 @@ describeNative("backgroundClip: text", () => {
   it("without the clip the same background fills the whole box", () => {
     const pixels = shoot(
       "unclipped",
-      stage({ backgroundImage: GRADIENT, color: "transparent" }, <text style={GLYPHS}>MMM</text>)
+      stage({ backgroundImage: GRADIENT, color: "transparent" }, <div style={GLYPHS}>MMM</div>)
     )
     expect(pixels.at(1, 1)[0]).toBeGreaterThan(200)
     expect(pixels.at(1, 1)[2]).toBeLessThan(60)

@@ -92,7 +92,7 @@ function App() {
           hover: { backgroundColor: '#2c2c2c' },
         }}
       >
-        <text style={{ color: '#e2e2e2' }}>Count: {count()}</text>
+        <div style={{ color: '#e2e2e2' }}>Count: {count()}</div>
       </div>
     </div>
   )
@@ -101,7 +101,7 @@ function App() {
 render(() => <App />, { title: 'Solid Ghia', width: 800, height: 600 })
 ```
 
-Give every **`<text>`** a `color`. GPUI does not inherit color from a parent. Text with no color paints black and disappears on a dark surface.
+Set a `color` for text on a dark surface. `color` is inherited: put it on the element that holds the text or on an ancestor. Text with no color paints black and disappears on a dark surface.
 
 Read signals with **`count()`**. `render` takes a function, not a pre-built element: `render(() => <App />)`.
 
@@ -265,7 +265,7 @@ function App() {
         onClick={async () => mutate(await client.increment({ by: 1 }))}
         style={{ padding: 12, borderRadius: 8, cursor: 'pointer', backgroundColor: '#232323' }}
       >
-        <text style={{ color: '#e2e2e2' }}>Server count: {count()}</text>
+        <div style={{ color: '#e2e2e2' }}>Server count: {count()}</div>
       </div>
     </div>
   )
@@ -389,7 +389,7 @@ import { TestRenderer } from '@ghia/solid/testing'
 
 const renderer = new TestRenderer()
 const root = createRoot(renderer)
-root.render(() => <text>hello</text>)
+root.render(() => <div>hello</div>)
 root.flush()
 ```
 
@@ -417,13 +417,13 @@ function WindowControls() {
   return (
     <div style={{ display: 'flex', gap: 8 }}>
       <div onClick={() => renderer.minimizeWindow?.()}>
-        <text style={{ color: '#e2e2e2' }}>Minimize</text>
+        <div style={{ color: '#e2e2e2' }}>Minimize</div>
       </div>
       <div onClick={() => renderer.zoomWindow?.()}>
-        <text style={{ color: '#e2e2e2' }}>Zoom</text>
+        <div style={{ color: '#e2e2e2' }}>Zoom</div>
       </div>
       <div onClick={() => renderer.toggleFullscreen?.()}>
-        <text style={{ color: '#e2e2e2' }}>Fullscreen</text>
+        <div style={{ color: '#e2e2e2' }}>Fullscreen</div>
       </div>
     </div>
   )
@@ -443,7 +443,7 @@ function AttachFiles() {
   }
   return (
     <div onClick={attach}>
-      <text style={{ color: '#e2e2e2' }}>Attach files</text>
+      <div style={{ color: '#e2e2e2' }}>Attach files</div>
     </div>
   )
 }
@@ -490,9 +490,9 @@ function Layout() {
   const insets = createWindowInsets()
   return (
     <div style={{ width: size().width, paddingBottom: insets().ime.bottom }}>
-      <text style={{ color: '#e2e2e2' }}>
+      <div style={{ color: '#e2e2e2' }}>
         {size().width} x {size().height}
-      </text>
+      </div>
     </div>
   )
 }
@@ -507,7 +507,7 @@ import { createSelectedText } from '@ghia/solid'
 
 function SelectionLabel() {
   const selected = createSelectedText()
-  return <text style={{ color: '#e2e2e2' }}>{selected() ?? 'none'}</text>
+  return <div style={{ color: '#e2e2e2' }}>{selected() ?? 'none'}</div>
 }
 ```
 
@@ -518,7 +518,7 @@ import { createAppearance } from '@ghia/solid'
 
 function Scheme() {
   const appearance = createAppearance()
-  return <text style={{ color: appearance() === 'dark' ? '#e2e2e2' : '#1a1a1a' }}>{appearance()}</text>
+  return <div style={{ color: appearance() === 'dark' ? '#e2e2e2' : '#1a1a1a' }}>{appearance()}</div>
 }
 ```
 
@@ -539,11 +539,11 @@ function FindBar() {
         value={query()}
         onChange={(event) => setQuery(event.value ?? '')}
       />
-      <text style={{ color: '#e2e2e2' }}>
+      <div style={{ color: '#e2e2e2' }}>
         {search.active + 1} / {search.total}
-      </text>
+      </div>
       <div onClick={() => search.next()}>
-        <text style={{ color: '#e2e2e2' }}>Next</text>
+        <div style={{ color: '#e2e2e2' }}>Next</div>
       </div>
     </div>
   )
@@ -568,7 +568,7 @@ function WelcomeCard() {
       transition={{ duration: 0.25, ease: 'easeOut' }}
       style={{ overflow: 'hidden' }}
     >
-      <text style={{ color: '#ffffff' }}>Welcome</text>
+      <div style={{ color: '#ffffff' }}>Welcome</div>
     </motion.div>
   )
 }
@@ -582,7 +582,7 @@ function Toast(props: { visible: boolean }) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          <text style={{ color: '#e2e2e2' }}>Saved</text>
+          <div style={{ color: '#e2e2e2' }}>Saved</div>
         </motion.div>
       </Show>
     </AnimatePresence>
@@ -631,11 +631,11 @@ function Controls() {
   return (
     <Select value={value()} onValueChange={setValue}>
       <SelectTrigger style={{ width: 220, height: 36, backgroundColor: '#1e293b' }}>
-        <SelectValue placeholder={<text style={{ color: '#94a3b8' }}>Pick</text>} />
+        <SelectValue placeholder={<div style={{ color: '#94a3b8' }}>Pick</div>} />
       </SelectTrigger>
       <SelectContent style={{ width: 220, backgroundColor: '#0f172a' }}>
-        <SelectItem value="a"><text style={{ color: '#e2e8f0' }}>Alpha</text></SelectItem>
-        <SelectItem value="b"><text style={{ color: '#e2e8f0' }}>Beta</text></SelectItem>
+        <SelectItem value="a"><div style={{ color: '#e2e8f0' }}>Alpha</div></SelectItem>
+        <SelectItem value="b"><div style={{ color: '#e2e8f0' }}>Beta</div></SelectItem>
       </SelectContent>
     </Select>
   )
@@ -699,7 +699,7 @@ import { createTestRoot, hasNativeTestRenderer } from '@ghia/solid/testing'
 const app = createTestRoot()
 app.render(() => (
   <div testId="bump" onClick={() => {}}>
-    <text>hi</text>
+    <div>hi</div>
   </div>
 ))
 app.renderer.nativeSimulateClick(50, 20)
@@ -725,7 +725,7 @@ interface TestRoot {
 
 > **Info.** Prefer `createTestRoot()` when you can. Reach for `launch()` plus `focus: false` when the check needs a real window or a real process.
 
-`getAllText()` only sees **`<text>`** nodes. For `<code>`, `<diff>`, and `<markdown>`, use `renderer.getPaintedText()`.
+`getAllText()` only sees the string (`#text`) nodes. For `<code>`, `<diff>`, and `<markdown>`, use `renderer.getPaintedText()`.
 
 The subpath re-exports **`@ghia/native/testing`**, including `TestRenderer` and `hasNativeTestRenderer`.
 

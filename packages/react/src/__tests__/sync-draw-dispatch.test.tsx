@@ -107,7 +107,7 @@ describeNative("layout reads inside an input handler", () => {
             }}
           >
             <div style={{ width: 200, height: 500, flexShrink: 0 }}>
-              <text>{`wheels ${wheels}`}</text>
+              <div>{`wheels ${wheels}`}</div>
             </div>
           </div>
         )
