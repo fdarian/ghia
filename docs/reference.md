@@ -2903,7 +2903,7 @@ Flex items shrink as in CSS, so a row of items in a flex scroller needs `flexShr
 
 `onWheel` is the DOM `wheel`: every tick over the element or a descendant, before any scroller applies it, with `deltaX`, `deltaY`, `deltaMode`, `clientX`, `clientY`, `offsetX`, `offsetY`, `buttons` and `modifiers`. `deltaY` is positive for down, and `deltaMode` is always `0`: a mouse wheel's lines are converted to pixels at 20 px a line. `touchPhase` and `precise` say how the tick arrived.
 
-`onScroll` is the DOM `scroll`: it fires whenever the scroll offset changes, whatever moved it: the wheel, a scrollbar drag, the keyboard, `scrollTo`, `scrollIntoView`, a smooth animation, or content that shrank under the offset. The payload is `{ scrollTop, scrollLeft }` of the target, and it does not bubble. The position at the first paint is not reported, only movement after it. The event runs before the frame that paints the new offset, and what its handler changes (a signal, state, a mutation) is in that frame, so a list that renders the rows of the offset it is scrolled to has them in the first frame that shows the offset, as in a browser, where `scroll` runs in the rendering steps before the frame. A write (`scrollTo`, `scrollTop = n`) is reported by the next frame; an offset that layout moved (anchoring, a clamp) by the frame after the one that painted it. It does not fire for `<virtual-list>`; use `onVisibleRange`.
+`onScroll` is the DOM `scroll` (so is `element.addEventListener('scroll', ...)`, see [Listeners and DOM members](#listeners-and-dom-members-on-an-element)): it fires whenever the scroll offset changes, whatever moved it: the wheel, a scrollbar drag, the keyboard, `scrollTo`, `scrollIntoView`, a smooth animation, or content that shrank under the offset. The payload is `{ scrollTop, scrollLeft }` of the target, and it does not bubble. The position at the first paint is not reported, only movement after it. The event runs before the frame that paints the new offset, and what its handler changes (a signal, state, a mutation) is in that frame, so a list that renders the rows of the offset it is scrolled to has them in the first frame that shows the offset, as in a browser, where `scroll` runs in the rendering steps before the frame. A write (`scrollTo`, `scrollTop = n`) is reported by the next frame; an offset that layout moved (anchoring, a clamp) by the frame after the one that painted it. It does not fire for `<virtual-list>`; use `onVisibleRange`.
 
 ### Keyboard
 
@@ -4867,6 +4867,31 @@ every edit of a composition, the commit included: it comes before `compositionen
 Setting `value` from code fires nothing. `data` is `null` rather than absent when
 the edit inserted no text. The handler's event is typed `HostInputEvent`.
 
+### Listeners and DOM members on an element
+
+A host element (a React ref, a Solid `HostElement`) has the members a library written for the DOM reaches for:
+
+| Member | |
+|---|---|
+| `addEventListener(type, listener, options?)`, `removeEventListener(type, listener, options?)` | For any event type, with the DOM's arguments: `listener` is a function or an object with `handleEvent`, `options` is `{ capture, once, passive, signal }` or the `capture` boolean. The same function in the same phase is added once. `once` removes it before it runs, `passive` makes `event.preventDefault()` do nothing while it runs, and a `signal` removes it when it aborts (an aborted one adds nothing). A listener is called with the element as `this`. A type native never emits (`touchstart`, `touchend`, `touchcancel`) is accepted and never fires. |
+| `ownerDocument` | The `document` object the adapters export. Its `defaultView` is the global `window` (`globalThis`), which has `setTimeout`, `requestAnimationFrame` and `ResizeObserver`, so `element.ownerDocument.defaultView` works as the window of a library that asks for it. |
+| `isConnected` | True while the element is in the tree of a mounted root. |
+| `getAttribute(name)` | The prop of that name as a string, or `null` when the element was not given it (or its value is not a string, number or `true`). `data-index={5}` reads `"5"`. |
+
+The `on*` prop and the listeners of one type and phase are one list, called in the order the DOM gives: a listener in the order it was added, the prop where it was first set (so before the listeners added after it), and a prop that is set again after it was unset last. A change of the prop replaces its handler in place. At the target the capture listeners run first, then the bubble ones, as in current browsers.
+
+```tsx
+const scroller = useRef<PublicInstance>(null)
+useEffect(() => {
+  const element = scroller.current!
+  const onScroll = () => setOffset(element.scrollTop)
+  element.addEventListener('scroll', onScroll, { passive: true })
+  return () => element.removeEventListener('scroll', onScroll)
+}, [])
+```
+
+A `scroll` listener is the `onScroll` event: it runs before the frame that paints the offset (see Events under Scrolling). It reports from the first paint after it was added.
+
 ### `window` and `document`
 
 Listen above the element tree with the `window` and `document` objects the
@@ -4904,7 +4929,19 @@ Installing twice is harmless. `isWebBuild`, exported by the adapters and
 build; use it to tell them apart, not `typeof window`.
 
 `document.getAnimations()` lists the CSS transitions and animations of every
-window ([Web Animations](#web-animations)).
+window ([Web Animations](#web-animations)). `document.defaultView` is the global
+`window`, and an element's `ownerDocument` is `document`
+([Listeners and DOM members on an element](#listeners-and-dom-members-on-an-element)).
+
+`requestAnimationFrame(callback)` and `cancelAnimationFrame(handle)` are globals too,
+and so is `ResizeObserver` (unless the runtime has one). A callback gets the time of the
+frame, as `performance.now()` reads it, and runs in the steps before the frame
+that paints what it changes: after the frame's `scroll` events and before anything is built,
+so a state write or a mutation it makes is in that frame. What a callback requests runs in
+the next frame, and `cancelAnimationFrame` stops a callback that has not run yet, one of
+the frame that is running included. Callbacks wait for the first window when none is open yet.
+There is one list for the whole app, not one per window
+([deviations](fork/deviations.md#events-and-input)).
 
 A `window` or `document` listener hears every event that bubbles to the top of
 the tree (pointer, mouse, click, wheel), whether or not any element on the path

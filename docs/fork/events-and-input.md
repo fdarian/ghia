@@ -30,6 +30,12 @@ Every element needs a host-derived GPUI id (`events::ids::host_element_id`, `hos
 
 JS propagation is `dispatchDomEvent` in `packages/native/js/events/dispatch.ts`: capture, target, bubble along `payload.path`, with `stopPropagation`, `stopImmediatePropagation`, `preventDefault` and `on<Event>Capture` props. Native sends element ids; JS resolves them through the adapter's element source, so `target`, `currentTarget` and `relatedTarget` are the objects a `ref` gives (`null` for an event aimed at the window). `path` is `composedPath()`, `elementId` keeps the numeric id, and window-level callbacks get the same resolution. The raw `onEvent` tap keeps ids.
 
+### Listener lists (`addEventListener` on an element)
+
+An element has `addEventListener` and `removeEventListener` for any type, in `packages/native/js/events/element-listeners.ts` (`ElementListeners`, kept on the element for its life; `defineDomMembers` in `dom-members.ts` puts the members on a Solid `HostElement` and a React instance, as `defineScrollMembers` does the scroll ones). For one type and phase the element has one list, and the `on*` prop is an entry of it, placed where it was first set, replaced in place and taken out when unset, which is how the DOM orders an event handler attribute. The dispatch visit loop (`dispatchDomEvent`) is the only place that calls them: the handler map (`EventHandlerMap`) holds, under the key of the prop (`click`, `clickCapture`), either the prop's handler itself, while it is the only entry (an element with no listener costs what it did before), or a runner (`LISTENER_RUNNER`) the loop calls with the state of the dispatch, so `stopImmediatePropagation` ends the list, a throw of one entry goes to `onError` and the rest run, an entry removed during the dispatch is not called and one added during it waits. A runner is also callable as a plain handler, for the callers that read the map by key (`keyboard-defaults.ts`). `once` takes the entry out before it runs, `passive` makes `preventDefault()` a no-op while it runs, `signal` removes it when it aborts (an aborted signal adds nothing), and the same function in the same phase is added once. Any type is accepted: one native never emits (`touchstart`) is stored and never fires.
+
+Native's listened set is the types whose list is not empty, in either phase (`registerEventListener`'s refcount), so adding the first listener of a type is what turns it on, as it is for a prop. A Solid element is created natively on every insertion, so it `attach`es its lists to the root's map and native on mount and drops them on unmount; the lists stay on the element. Because a React root sends its batch at the end of a commit and a listener is usually added after it (a ref, an effect), `addEventListener` and `removeEventListener` send the pending batch themselves.
+
 Handler errors go to `onError` if the renderer has one, else `reportError`, for element, window and document listeners alike. Dispatch continues after a throw, and simulate calls no longer rethrow.
 
 ### Events and payload
@@ -211,6 +217,7 @@ Focus, keyboard and forms. The zed commits are small and independent (a11y relat
 - `focus.test.tsx` pins the focus order on a press.
 - The keyboard handoff of a `<webview>` is pinned in the `webview.test.tsx` files of the adapters (scripted pages) and on real pages by the e2e ([testing.md](testing.md#the-webview-e2e)).
 - `offsetX`/`offsetY` are tested through the React and Solid handlers, on a bordered target and a nested one (#40).
+- `element-listeners.test.ts` (native) pins the list: order against the prop, phases, `once`, `signal`, `passive`, removal and addition during a dispatch, attach and detach. `dom-members.test.tsx` in both adapters runs it through a click, a scroll and `requestAnimationFrame` on the test renderer.
 
 The Chrome oracles and test-renderer commands are in [testing.md](testing.md).
 
