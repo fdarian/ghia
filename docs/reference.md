@@ -512,7 +512,8 @@ empty value is a present attribute, not a removal.
 
 **A `setStyleSheet` sets the text of a constructed stylesheet**; 0 deletes it. Sheet ids are their own namespace, not element
 ids. A sheet applies only while `setAdoptedStyleSheets` lists it (the list replaces the previous one; the order is the order of
-the cascade, after the sheets of the document's `<style>` elements).
+the cascade, after the sheets of the document's `<style>` elements). `CSSStyleSheet` and `document.adoptedStyleSheets` send both
+([Stylesheets](#stylesheets)).
 
 **A `setCustomProp` value** is a tag byte and its payload:
 
@@ -4900,20 +4901,7 @@ compared ASCII case-insensitively. Native reads an attribute from what was sent,
 (`true` is `""`, `false` and `null` are absent). Setting an attribute changes nothing drawn by itself. `className` is no longer
 a prop of the native element on any element type: `class` is its attribute.
 
-**Stylesheets.** A `<style>` element in the tree (`<style>{css}</style>` in Solid and React) is a stylesheet: its text children
-are the CSS, it takes part while it is connected to the root, in tree order, and it is `display: none` and never drawn. The
-constructed sheets of wire ops 14 and 15 come after them, in the order of the adopted list. Native matches the rules against
-the tree (type, universal, class, id and attribute selectors, `:is()`, `:where()`, `:not()`, `:root`, the four combinators,
-nesting, `@layer`) and the declarations of the rules that match take part in the cascade with the element's `style` prop:
-normal declarations of the rules in order of layer, specificity and source, then the `style` prop, then `!important`
-declarations (the first layer wins there, unlayered styles lose). A declaration whose value is a CSS-wide keyword
-(`unset`, `initial`, `inherit`, `revert`, `revert-layer`) takes back what an earlier declaration of its property (and of the
-longhands it covers) set and sets nothing. The result goes through the same parser as the `style` prop, so a declaration that
-does not parse is dropped alone. A `[style*="..."]` selector reads the element's `style` prop as `kebab-case: value;` text.
-Changes to a class, an `id`, an attribute a selector names, the tree's structure and the text of a `<style>` element match
-again at the end of the batch that made them (`getBuildCounters().elementsRematched`, `cascadesComputed`). What is not
-implemented (other pseudo-classes and pseudo-elements, `@media`, `@keyframes`, `@supports`, `@container` and `@import` in a
-sheet) is skipped with its rule. The JS `CSSStyleSheet` and `document.adoptedStyleSheets` are not there yet.
+A `<style>` element and `CSSStyleSheet` add CSS rules that read these attributes: see [Stylesheets](#stylesheets).
 
 ### DOM classes and the tree
 
@@ -6204,6 +6192,7 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `anchored`      | Positioned overlay                               |
 | `webview`       | A web page in a native view of the window (macOS) |
 | `nativeview`    | A `div` with an AppKit view from another library in it (macOS) |
+| `style`         | A stylesheet: its text is the CSS, never drawn (see [Stylesheets](#stylesheets)) |
 | `canvas`        | Custom drawing (planned)                         |
 
 ## Images and icons
@@ -8397,7 +8386,7 @@ way, overflow included.
 
 ### Group state styles
 
-There is no stylesheet, so an element cannot react to a hovered ancestor with a
+A stylesheet has no `:hover` yet ([Stylesheets](#stylesheets)), so an element cannot react to a hovered ancestor with a
 selector. Mark the ancestor with `group` and style the descendants with
 `groupHover`, `groupActive` and `groupFocusWithin`, like Tailwind's
 `group-hover:`, `group-active:` and `group-focus-within:`:
@@ -8481,7 +8470,7 @@ can hold works: layout, `position`, `color` (which reaches the descendants'
 that `hover` does, including an inline `<span>`: a span restyles while a span
 inside it is hovered.
 
-There is no stylesheet, so this is not the whole of `:has()`. It cannot express:
+A stylesheet has no `:has()` either, so this is not the whole of it. It cannot express:
 
 - An arbitrary selector. `:has(.error)`, `:has(img)` and `:has(+ x)` need a
   selector engine; the six keys cover the pseudo-classes Ghia tracks
@@ -9065,8 +9054,8 @@ render per frame.
 
 ### CSS animations
 
-`animation` and its longhands take CSS syntax, as in a DOM inline style. There is
-no stylesheet to hold `@keyframes`, so `defineKeyframes` is its analogue. The
+`animation` and its longhands take CSS syntax, as in a DOM inline style. A
+stylesheet skips `@keyframes` rules, so `defineKeyframes` is the way to declare them. The
 animation then runs natively, with no React render per frame.
 
 ```tsx
@@ -9316,10 +9305,71 @@ Costs and limits ([deviations](./fork/deviations.md#paint-and-transforms)):
 - A layer with a `transition` makes every element track transitions, which costs
   a little per element per frame. Name the properties as above instead of `all`
 - It is one layer. There are no selectors, no specificity and no cascade between
-  rules, so it cannot say "every `<text>`" or "every child of a card"
+  rules (a [stylesheet](#stylesheets) has them), so it cannot say "every `<text>`" or "every child of a card"
 - An element that had no style when the layer first gave it a `transition` has
   no earlier style to fade from, so a colour the same change gives it appears at
   once. Later changes fade
+
+## Stylesheets
+
+Ghia matches CSS rules against the tree natively, so a library that injects a stylesheet works unchanged: `@dnd-kit/dom` styles a dragged item with `[data-dnd-dragging]` rules it adds as a constructed sheet. A rule's declarations take part in the cascade with the element's `style` prop and go through the same parser, so everything under [Supported Styles](#supported-styles) is available in a sheet, `var()` included.
+
+There are two ways to add a sheet, and any number of each:
+
+- **A `<style>` element** (`<style>{css}</style>` in Solid and React): its text children are the CSS. It takes part while it is connected to the root, in tree order, follows changes to its text and stops applying when it is removed. It is `display: none` and never drawn. Its `media`, `type`, `disabled` and `nonce` attributes are not read.
+- **A constructed sheet**: `new CSSStyleSheet()`, then put it in `document.adoptedStyleSheets`. Constructed sheets come after every `<style>` element in the cascade, in the order of the adopted list.
+
+```ts
+const sheet = new CSSStyleSheet()
+sheet.replaceSync(`
+  .card { padding: 8px; border-radius: 6px }
+  .card[data-selected] { outline: 2px solid var(--accent) }
+`)
+document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
+```
+
+### `CSSStyleSheet`
+
+`CSSStyleSheet`, `CSSRule`, `CSSStyleRule` and `CSSRuleList` are exported by `@ghia/native/host` and installed as globals where the runtime has none (not on the browser build, which has the browser's).
+
+| Member | |
+|---|---|
+| `new CSSStyleSheet(options?)` | `options.disabled` starts the sheet disabled; `baseURL` and `media` are accepted and ignored. |
+| `replaceSync(text)` | Replaces every rule. `@import` rules are left out, as the spec says of a constructed sheet. |
+| `replace(text)` | The same one microtask later; resolves with the sheet. |
+| `insertRule(rule, index = 0)` | Puts one rule at `index` and returns the index. Throws a `DOMException` named `SyntaxError` unless the text is exactly one rule (or is an `@import`), and `IndexSizeError` when `index` is past the end. |
+| `deleteRule(index)` | Throws `IndexSizeError` for an index that is not a rule. |
+| `cssRules` | A live, read-only, array-like list: `length`, `item(i)`, index access and iteration. Each entry is a `CSSRule` with `cssText`, `type` (`1` for a style rule, `4` `@media`, `5` `@font-face`, `7` `@keyframes`, `12` `@supports`, `3` `@import`, `0` for the others, `@layer` and `@container` included), `parentRule` (`null`) and `parentStyleSheet`; a style rule is a `CSSStyleRule` and has `selectorText`. |
+| `disabled` | A disabled sheet does not apply, adopted or not. |
+| `ownerNode`, `ownerRule`, `parentStyleSheet`, `href`, `title` | `null`. `type` is `"text/css"`. |
+
+Native parses the sheet, so JS keeps only the text of each rule to answer `cssRules`. `cssText` is the rule as it was written, comments inside it included, not a re-serialization, and a rule with a selector native rejects is still listed. Every change sends the whole sheet to native. There is no `CSSStyleRule.style`, `CSSGroupingRule` or `CSSMediaRule`; see [deviations](./fork/deviations.md#stylesheets).
+
+### `document.adoptedStyleSheets`
+
+An observable array of `CSSStyleSheet`: assigning the property, assigning an index or `length`, and `push`, `pop`, `shift`, `unshift`, `splice`, `sort`, `reverse`, `fill` and `copyWithin` all take effect, and a value that is not a `CSSStyleSheet` throws a `TypeError` before anything changes. Only the last index can be deleted, so the array has no holes. A sheet listed twice counts once, at its last place. It is one array for the document, which spans every window: each window gets the same list, and a window opened later gets it too. A sheet that leaves the list is gone from native, and comes back with its current text when it is adopted again.
+
+### What matches
+
+| | Supported |
+|---|---|
+| Simple selectors | type (`div`), universal (`*`), `.class`, `#id`, `[attr]`, `[attr=v]`, `[attr~=v]`, `[attr\|=v]`, `[attr^=v]`, `[attr$=v]`, `[attr*=v]`, with the `i` and `s` flags |
+| Combinators | descendant, `>`, `+`, `~` |
+| Pseudo-classes | `:is()` and `:where()` (forgiving lists, `:where` has no specificity), `:not()` (a selector list), `:root` (the `<html>` of the window), `:host` (never matches: there are no shadow roots) |
+| Pseudo-elements | parse and never match |
+| Nesting | nested rules with `&` and the implicit `&` of a relative selector (`.a { .b { } }`, `.a { &:is(.c) { } }`), with the specificity of the parent's `:is()` |
+| At-rules | `@layer name { }`, `@layer a, b;`, anonymous `@layer { }`, nested layers (`a.b`) |
+| Declarations | `!important`; `var()`; every property of the style prop, with the kebab-case names CSS writes (`background-color`, `-webkit-user-select`) |
+
+Anything else makes the selector invalid and drops its rule (a list is all or nothing, except inside `:is()` and `:where()`): `:hover`, `:focus`, `:first-child`, `:nth-child()`, `:has()`, `:checked` and the other pseudo-classes. At-rules that are skipped with their block: `@media`, `@keyframes`, `@container`, `@supports`, `@font-face`, `@import`, `@namespace`, `@property`, and any at-rule inside a style rule. A declaration the style parser rejects is dropped alone, as CSS drops it. Each skipped rule is logged once. The full list of differences is in [deviations](./fork/deviations.md#stylesheets).
+
+**Attributes.** A selector reads the attributes an element has on native: `class` (from `class` or `className`), every `data-*` and every other string, number or boolean attribute the adapters send (`setAttribute`, wire op 13), plus the props native reads (`id`, `role`, `aria-*`, `tabIndex`...) under their own names. Names compare ASCII case-insensitively, values case-sensitively unless the selector says `i`. `[style*="--x"]` reads the element's `style` prop as `kebab-case: value;` text. See [Listeners and DOM members](#listeners-and-dom-members-on-an-element) for what is sent.
+
+**The cascade.** The normal declarations of the matching rules apply first, ordered by layer (layers in the order first declared, unlayered rules last and so strongest), then specificity, then source order across the sheets. Then the element's `style` prop, so an inline value beats a normal rule of any specificity. Then the `!important` declarations of the rules, with the layers the other way round (the first layer wins, unlayered rules lose). A later declaration of a property replaces an earlier one, and a shorthand replaces the longhands before it, as written order does in the `style` prop. A CSS-wide keyword (`unset`, `initial`, `inherit`, `revert`, `revert-layer`) takes back what an earlier declaration of its property, and of the longhands it covers, set, and sets nothing. In the dnd-kit sheet that is `right: unset !important` removing an inline `right`; with the item dropped, the inline value is back.
+
+**Restyling.** An element is matched again when a class, its `id`, an attribute a selector names, its place among its siblings or the text of a `<style>` element changes, and only the elements a selector can reach from the change (a descendant rule reaches the subtree, a sibling rule the following siblings). The work happens once at the end of the batch that made the changes, so toggling a class on one of fifty items matches that one. Elements that match the same rules and have the same `style` share one cascade. A document with no sheet pays nothing. `renderer.getBuildCounters()` has `elementsRematched` and `cascadesComputed` for tests.
+
+Reading the result: `getComputedStyle` answers its fixed list of properties. The test renderer's `getElement(id).style` is the style the cascade produced, `cursor` and `pointerEvents` included.
 
 ## Automation
 
