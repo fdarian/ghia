@@ -120,6 +120,20 @@ describe("getSelection", () => {
       expect(seen).toEqual(["window capture", "document capture", "document:true:true:2"])
     })
 
+    it("does not bubble and cannot be cancelled", () => {
+      const { eventId, state } = mountWindow()
+      const seen: Array<{ bubbles: boolean; cancelable: boolean }> = []
+      const listener = (event: { bubbles: boolean; cancelable: boolean }) =>
+        seen.push({ bubbles: event.bubbles, cancelable: event.cancelable })
+      document.addEventListener("selectionchange", listener)
+      try {
+        state.dispatch(selectionChange(eventId, "text"))
+      } finally {
+        document.removeEventListener("selectionchange", listener)
+      }
+      expect(seen).toEqual([{ bubbles: false, cancelable: false }])
+    })
+
     it("is ignored when nobody listens, and for another root's event id", () => {
       const { eventId, state } = mountWindow()
       expect(state.dispatch(selectionChange(eventId))).toBe(false)

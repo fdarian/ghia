@@ -42,6 +42,7 @@ const PLAIN_NOTIFICATIONS: ReadonlySet<string> = new Set([
   "load",
   "error",
   "scroll",
+  "selectionchange",
   "did-start-loading",
   "did-stop-loading",
   "did-navigate",

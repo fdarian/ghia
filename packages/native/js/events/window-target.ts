@@ -532,25 +532,10 @@ export function syncWindowSelectionChange(
  * it in the capture phase only. `payload.value` is the selected text, absent after a clear.
  */
 export function dispatchSelectionChange(root: DomEventRoot, payload: EventPayload): void {
-  const { event, state } = createDomEvent(
-    root,
-    { ...payload, eventType: "selectionchange", elementId: 0 },
-    [],
-    document
-  )
-  const errors: unknown[] = []
-  const fail = (error: unknown) => errors.push(error)
-  window.run(event, state, true, EVENT_PHASE_CAPTURING, fail)
-  if (!state.propagationStopped) {
-    document.run(event, state, true, EVENT_PHASE_AT_TARGET, fail)
-    document.run(event, state, false, EVENT_PHASE_AT_TARGET, fail)
-  }
-  event.currentTarget = null
-  event.eventPhase = EVENT_PHASE_NONE
-  reportHandlerErrors(root, errors)
+  dispatchPropagating(root, { ...payload, eventType: "selectionchange", elementId: 0 })
 }
 
-const DOCUMENT_EVENT_TYPES: ReadonlySet<string> = new Set(["pointerlockchange", "pointerlockerror"])
+const DOCUMENT_EVENT_TYPES: ReadonlySet<string> = new Set(["pointerlockchange", "pointerlockerror", "selectionchange"])
 
 /** Whether the DOM aims the event at `document` itself, with no element on the path. */
 export function isDocumentEvent(eventType: string): boolean {
@@ -612,7 +597,11 @@ export function dispatchPropagating(
   const errors: unknown[] = []
   const fail = (error: unknown) => errors.push(error)
   capture(event, state, fail)
-  if (event.bubbles && !state.propagationStopped) bubble(event, state, fail)
+  if (!state.propagationStopped) {
+    if (event.bubbles) bubble(event, state, fail)
+    // A non-bubbling event still reaches the bubble listeners of its own target.
+    else if (event.target === document) document.run(event, state, false, EVENT_PHASE_AT_TARGET, fail)
+  }
   event.currentTarget = null
   event.eventPhase = EVENT_PHASE_NONE
   reportHandlerErrors(root, errors)
