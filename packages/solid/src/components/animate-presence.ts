@@ -14,7 +14,7 @@ import {
 import type { DomEvent } from "@ghia/native/host"
 import { measurePopLayout } from "@ghia/native/host"
 import type { MotionProps, PresenceMode } from "@ghia/native/host"
-import { HostElement, setHostProperty, type HostNode } from "../host.js"
+import { isHostElement, setHostProperty, type HostElement, type HostNode } from "../host.js"
 import {
   anchorHost,
   disposePresenceScope,
@@ -239,8 +239,8 @@ export function AnimatePresence(props: AnimatePresenceProps): JSX.Element {
         entry[1](true)
         disposeRetained(item)
       } else presence.set(item, createSignal(true))
-      if (item instanceof HostElement) unpop(item)
-      if (initial && props.initial === false && item instanceof HostElement) {
+      if (isHostElement(item)) unpop(item)
+      if (initial && props.initial === false && isHostElement(item)) {
         const motion = item.props.get("motion") as MotionProps | undefined
         if (motion) setHostProperty(item, "motion", { ...motion, initial: false }, motion)
       }
@@ -253,8 +253,8 @@ export function AnimatePresence(props: AnimatePresenceProps): JSX.Element {
         consumer.leaving = item
         consumer.present[1](false)
       }
-      if (item instanceof HostElement && props.mode === "popLayout") pop(item)
-      if (!(item instanceof HostElement)) {
+      if (isHostElement(item) && props.mode === "popLayout") pop(item)
+      if (!(isHostElement(item))) {
         settle(item)
         continue
       }

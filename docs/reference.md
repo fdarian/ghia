@@ -4879,6 +4879,22 @@ A host element (a React ref, a Solid `HostElement`) has the members a library wr
 | `getAttribute(name)` | The prop of that name as a string, or `null` when the element was not given it (or its value is not a string, number or `true`). `data-index={5}` reads `"5"`. |
 | `offsetWidth`, `offsetHeight` | The border box's layout size, rounded half up, before any `transform` (a `scale(2)` element has the offset size it had without it; `getBoundingClientRect()` is the transformed box). The read lays out first, as `getBoundingClientRect` does. `0` for an element that is not mounted or has no box. `renderer.getElementBounds(id)` carries the unrounded size as `layoutWidth` and `layoutHeight`. |
 
+### DOM classes and the tree
+
+Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `Element` and `Node` hold for every host element, `SVGElement` replaces `HTMLElement` for an `<svg>` and the shapes in it, and a text child is a `Text` (a `CharacterData`). `Node`, `Element`, `HTMLElement`, `SVGElement`, `Text`, `CharacterData`, `Document`, `DocumentFragment` and `ShadowRoot` are exported by `@ghia/native/host` and installed as globals where the runtime has none (not on the browser build). Two copies of `@ghia/native` share one set of classes. `new HTMLElement()` and the other public classes throw `TypeError: Illegal constructor`. `document` is a `Document`. `DocumentFragment` and `ShadowRoot` are never instantiated, so an `instanceof` check against them is `false`.
+
+| Member | |
+|---|---|
+| `nodeType`, `nodeName` | `1` and the tag name for an element, `3` and `#text` for text, `9` and `#document` for `document`. |
+| `tagName`, `localName` | `localName` is the element type as written. `tagName` is it uppercased for an HTML element (`DIV`, `VIRTUAL-LIST`) and as written for an SVG one (`linearGradient`). |
+| `parentNode`, `parentElement`, `childNodes`, `firstChild`, `lastChild`, `previousSibling`, `nextSibling`, `hasChildNodes()` | The tree as the framework built it, text included. `childNodes` is a copy: an array, not a live `NodeList`. |
+| `children`, `childElementCount`, `firstElementChild`, `lastElementChild`, `previousElementSibling`, `nextElementSibling` | The same, elements only. `children` is an array, not an `HTMLCollection`. |
+| `contains(node)`, `getRootNode()`, `compareDocumentPosition(node)` | `contains` includes the node itself. `getRootNode()` is `document` for a mounted node and the top of its tree otherwise. `compareDocumentPosition` gives the `DOCUMENT_POSITION_*` bits (`DISCONNECTED`, `PRECEDING`, `FOLLOWING`, `CONTAINS`, `CONTAINED_BY`); two trees that are not in one document are `DISCONNECTED` and `IMPLEMENTATION_SPECIFIC` with a stable order. `document.contains(node)` is `node.isConnected`. |
+| `textContent` | The text of the node and its descendants. Read only: there is no setter yet. |
+| `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `className` or `class` prop (`""` without one), an attribute exists where `getAttribute` is not `null`, and `className` is the attribute `class`. `dataset` is a frozen read-only snapshot of the `data-*` props with the names in camel case (`data-row-id` is `rowId`). |
+
+The top-level element of a window has no `parentNode` yet (`document.documentElement` and `document.body` do not exist), and nothing here changes the tree: `setAttribute`, `appendChild` and the other writing members are not there. A host element's `id` stays the number native knows it by (`renderer.scrollToItem(ref.id, i)`), so `el.id` is not the DOM's `id` attribute; read the prop with `getAttribute("id")`.
+
 The `on*` prop and the listeners of one type and phase are one list, called in the order the DOM gives: a listener in the order it was added, the prop where it was first set (so before the listeners added after it), and a prop that is set again after it was unset last. A change of the prop replaces its handler in place. At the target the capture listeners run first, then the bubble ones, as in current browsers.
 
 ```tsx

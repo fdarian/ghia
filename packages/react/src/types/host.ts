@@ -13,6 +13,7 @@ import type {
   FormProps as NativeFormProps,
   HostBinding,
   HostProps,
+  HTMLElement,
   ImagePixelsOptions,
   InputProps as NativeInputProps,
   LabelProps as NativeLabelProps,
@@ -76,6 +77,7 @@ import type {
   MutationRenderer,
   NativeRenderer,
   RootEventHandlers,
+  Text,
   TextControlSelection,
   ScrollableElement,
   WindowKeyEventHandlers,
@@ -255,8 +257,12 @@ export interface Container {
   portalTarget?: Instance
 }
 
-/** Host methods are attached when React hands out a ref, not per instance. */
-export interface Instance extends Partial<FocusableElement> {
+/**
+ * A host element: an `HTMLElement` or an `SVGElement`, whose members sit on the class. The
+ * members of its type (`<input>`'s selection, `<form>`'s `requestSubmit`) are attached when
+ * React hands out a ref.
+ */
+export interface Instance extends Partial<FocusableElement>, HTMLElement {
   id: number
   type: ElementType
   props: Props
@@ -308,7 +314,7 @@ export interface FormInstance extends PublicInstance, FormMethods {
   type: "form"
 }
 
-export interface TextInstance {
+export interface TextInstance extends Text {
   id: number
   text: string
   parentId: number | null

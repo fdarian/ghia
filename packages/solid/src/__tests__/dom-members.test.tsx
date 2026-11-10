@@ -5,7 +5,7 @@
  */
 import { createSignal, Show } from "solid-js"
 import { describe, expect, it } from "vitest"
-import { document } from "@ghia/native/host"
+import { document, Element, HTMLElement, Node, SVGElement, Text } from "@ghia/native/host"
 import type { ScrollEvent } from "@ghia/native/host"
 import type { HostElement } from "../host.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
@@ -144,6 +144,92 @@ describe.skipIf(!hasNativeTestRenderer)("DOM members of a Solid element", () => 
     app.renderer.flush()
     expect([unmounted.offsetWidth, unmounted.offsetHeight]).toEqual([0, 0])
     app.unmount()
+  })
+
+  describe("DOM node shape", () => {
+    it("is an HTMLElement, Element and Node, and an svg and its shapes are SVGElements", () => {
+      let box!: HostElement
+      let svg!: HostElement
+      let path!: HostElement
+      const app = setup(() => (
+        <div ref={box} style={{ width: 40, height: 40 }}>
+          <svg ref={svg} width={20} height={20}>
+            <path ref={path} d="M0 0L10 10" />
+          </svg>
+        </div>
+      ))
+      expect(box instanceof HTMLElement).toBe(true)
+      expect(box instanceof Element).toBe(true)
+      expect(box instanceof Node).toBe(true)
+      expect(box instanceof SVGElement).toBe(false)
+      expect(svg instanceof SVGElement).toBe(true)
+      expect(svg instanceof HTMLElement).toBe(false)
+      expect(path instanceof SVGElement).toBe(true)
+      expect(path instanceof Element).toBe(true)
+      expect(box.tagName).toBe("DIV")
+      expect(box.localName).toBe("div")
+      expect(path.tagName).toBe("path")
+      expect(path.localName).toBe("path")
+      // The twin class carries the host methods and the mounted state.
+      expect(typeof path.focus).toBe("function")
+      expect(typeof path.getBoundingClientRect).toBe("function")
+      expect(path.isConnected).toBe(true)
+      expect(path.getAttribute("d")).toBe("M0 0L10 10")
+      app.unmount()
+    })
+
+    it("walks the tree, with text nodes among the child nodes", () => {
+      let root!: HostElement
+      let first!: HostElement
+      let last!: HostElement
+      const app = setup(() => (
+        <div ref={root} style={{ width: 80, height: 40 }}>
+          <span ref={first}>one</span>
+          two
+          <span ref={last}>three</span>
+        </div>
+      ))
+      expect(root.childNodes).toHaveLength(3)
+      const text = root.childNodes[1]
+      expect(text instanceof Text).toBe(true)
+      expect(text.nodeType).toBe(3)
+      expect(text.textContent).toBe("two")
+      expect(text.previousSibling).toBe(first)
+      expect(text.nextSibling).toBe(last)
+      expect(text.parentNode).toBe(root)
+      expect(text.parentElement).toBe(root)
+      expect(text.isConnected).toBe(true)
+      expect(root.children).toEqual([first, last])
+      expect(root.childElementCount).toBe(2)
+      expect(first.nextElementSibling).toBe(last)
+      expect(last.previousElementSibling).toBe(first)
+      expect(root.textContent).toBe("onetwothree")
+      expect(root.contains(last)).toBe(true)
+      expect(root.contains(root)).toBe(true)
+      expect(last.contains(root)).toBe(false)
+      expect(first.compareDocumentPosition(last)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      expect(root.compareDocumentPosition(first)).toBe(Node.DOCUMENT_POSITION_CONTAINED_BY | Node.DOCUMENT_POSITION_FOLLOWING)
+      expect(first.getRootNode()).toBe(document)
+      app.unmount()
+    })
+
+    it("reads attributes and dataset from the props", () => {
+      let box!: HostElement
+      const app = setup(() => (
+        <div ref={box} className="card" data-row-id="r1" data-index={3} style={{ width: 10, height: 10 }} />
+      ))
+      expect(box.className).toBe("card")
+      expect(box.getAttributeNames().sort()).toEqual(["class", "data-index", "data-row-id"])
+      expect(box.hasAttribute("data-index")).toBe(true)
+      expect(box.hasAttribute("data-missing")).toBe(false)
+      expect(box.dataset).toEqual({ rowId: "r1", index: "3" })
+      app.unmount()
+    })
+
+    it("throws Illegal constructor for the public classes", () => {
+      expect(() => new (HTMLElement as unknown as new () => object)()).toThrow("Illegal constructor")
+      expect(() => new (Node as unknown as new () => object)()).toThrow("Illegal constructor")
+    })
   })
 
   describe("requestAnimationFrame", () => {

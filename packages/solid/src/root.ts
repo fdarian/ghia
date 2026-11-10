@@ -159,7 +159,7 @@ export function createRoot(
     dispose = undefined
     // A component can render several top-level nodes (a Dialog is its trigger and its
     // portal's layer), and removing one leaves the others in the native tree.
-    for (const mounted of [...container.children]) removeHostNode(container, mounted)
+    for (const mounted of [...container.childList]) removeHostNode(container, mounted)
     flush()
     eventHandlers.clear()
   }

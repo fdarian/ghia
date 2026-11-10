@@ -9,17 +9,9 @@ import { DefaultEventPriority } from "react-reconciler/constants.js"
 import type { HostEventHandler } from "@ghia/native/host"
 import {
   assertSvgPlacement,
-  createElementMethods,
-  defineDomMembers,
-  defineScrollMembers,
-  blurHostElement,
   createWebviewMethods,
   eventTypesWithOverrides,
-  focusHostElement,
-  HOST_BINDING,
-  hostElementMatches,
   isReservedProp,
-  readBoundingClientRect,
   sameMutationValue,
   serializeCustomProp,
   forwardsCustomProp,
@@ -62,57 +54,29 @@ import type {
 } from "../types/host.js"
 import { syncMotionBindings } from "./motion-bindings.js"
 import { listenersOf, unregisterEventHandlers } from "./event-registry.js"
+import {
+  containerFor,
+  createHostElement,
+  createHostText,
+  linkChild,
+  stateFor,
+  unlinkChild,
+  type HostNode,
+} from "./host-nodes.js"
 
 let currentUpdatePriority = NoEventPriority
 
-type HostNode = Instance | TextInstance
-
-interface HostNodeState {
-  container: Container
-  initialChildren?: HostNode[]
-  mounted: boolean
-  /**
-   * React hid this element (Suspense, Activity). Its native style carries
-   * `visibility: hidden`, so a style update must keep that rather than
-   * overwrite it with the visible one.
-   */
-  hidden: boolean
-}
-
-const hostNodeStates = new WeakMap<HostNode, HostNodeState>()
-
-function isPublicInstance(instance: Instance): instance is PublicInstance {
-  return Boolean(instance.focus && instance.blur && instance.matches)
-}
-
+/** The members every instance has sit on its prototype; the ones of its type are attached when its ref is handed out. */
 function attachHostMethods(instance: Instance): PublicInstance {
-  if (isPublicInstance(instance)) return instance
-  const state = hostNodeStates.get(instance)
-  if (!state) {
-    throw new Error(`Host element ${instance.id} was handed out before it was mounted.`)
+  const state = stateFor(instance)
+  if (!state.typeMembersAttached) {
+    attachTypeMembers(instance, state.container)
+    state.typeMembersAttached = true
   }
-  const container = state.container
-  defineScrollMembers(instance, () => ({
-    renderer: container.nativeRenderer,
-    id: instance.id,
-  }))
-  defineDomMembers(instance, () => ({
-    listeners: listenersOf(instance),
-    connected: container.instances.get(instance.id) === instance,
-    layout: state.mounted ? { renderer: container.nativeRenderer, id: instance.id } : undefined,
-    prop: (name) => (instance.props as Record<string, unknown>)[name],
-  }))
-  Object.assign(instance, createElementMethods(container.nativeRenderer, instance.id))
-  instance.focus = (options) => focusHostElement(container.nativeRenderer, instance.id, options)
-  instance.blur = () => blurHostElement(container.nativeRenderer, instance.id)
-  instance.matches = (selector) =>
-    hostElementMatches(container.nativeRenderer, instance.id, selector)
-  instance.getBoundingClientRect = () =>
-    readBoundingClientRect(container.nativeRenderer, instance.id)
-  instance[HOST_BINDING] = () =>
-    state.mounted
-      ? { renderer: container.nativeRenderer, mutations: container.renderer }
-      : undefined
+  return instance as PublicInstance
+}
+
+function attachTypeMembers(instance: Instance, container: Container): void {
   if (instance.type === "input" || instance.type === "textarea") {
     attachTextControlMethods(instance as TextControlInstance, container)
   } else if (instance.type === "form") {
@@ -147,10 +111,6 @@ function attachHostMethods(instance: Instance): PublicInstance {
       )
     }
   }
-  if (!isPublicInstance(instance)) {
-    throw new Error(`Host element ${instance.id} is missing its focus methods.`)
-  }
-  return instance
 }
 
 function attachTextControlMethods(control: TextControlInstance, container: Container): void {
@@ -173,18 +133,6 @@ function adopt(parent: Instance | undefined, child: Instance | TextInstance): vo
   if (!("type" in child)) return
   if (parent) child.parentId = parent.id
   else delete child.parentId
-}
-
-function stateFor(node: HostNode): HostNodeState {
-  const state = hostNodeStates.get(node)
-  if (!state) {
-    throw new Error(`GPUIX host node ${node.id} does not belong to a root`)
-  }
-  return state
-}
-
-function containerFor(node: HostNode): Container {
-  return stateFor(node).container
 }
 
 function rendererFor(node: HostNode): MutationRenderer {
@@ -369,7 +317,7 @@ function diffCustomProps(
  * the commit phase. Abandoned concurrent renders stay as collectable JS
  * objects and never enter the native mutation queue.
  */
-function materialize(node: HostNode): HostNodeState {
+function materialize(node: HostNode): ReturnType<typeof stateFor> {
   const state = stateFor(node)
   if (state.mounted) return state
 
@@ -440,17 +388,7 @@ export const hostConfig = {
     rootContainerInstance: Container,
     _hostContext: HostContext
   ): Instance {
-    const instance: Instance = {
-      id: nextId(rootContainerInstance),
-      type,
-      props,
-    }
-    hostNodeStates.set(instance, {
-      container: rootContainerInstance,
-      mounted: false,
-      hidden: false,
-    })
-    return instance
+    return createHostElement(nextId(rootContainerInstance), type, props, rootContainerInstance)
   },
 
   appendChild(parent: Instance, child: Instance | TextInstance): void {
@@ -458,6 +396,7 @@ export const hostConfig = {
     const parentState = materialize(parent)
     materialize(child)
     adopt(parent, child)
+    linkChild(parent, child)
     parentState.container.renderer.appendChild(parent.id, child.id)
   },
 
@@ -467,6 +406,7 @@ export const hostConfig = {
   // only, so nothing else would ever destroy a `HostText`.
   removeChild(parent: Instance, child: Instance | TextInstance): void {
     const container = containerFor(parent)
+    unlinkChild(child)
     const destroyed = container.renderer.destroyElement(child.id)
     for (const id of destroyed) {
       unregisterEventHandlers(container.eventHandlers, id)
@@ -482,6 +422,7 @@ export const hostConfig = {
     const parentState = materialize(parent)
     materialize(child)
     adopt(parent, child)
+    linkChild(parent, child, beforeChild)
     parentState.container.renderer.insertBefore(parent.id, child.id, beforeChild.id)
   },
 
@@ -498,10 +439,12 @@ export const hostConfig = {
     assertPlacement(target, child)
     materialize(child)
     adopt(target, child)
+    linkChild(target, child, beforeChild)
     container.renderer.insertBefore(target.id, child.id, beforeChild.id)
   },
 
   removeChildFromContainer(parent: Container, child: Instance): void {
+    unlinkChild(child)
     const destroyed = parent.renderer.destroyElement(child.id)
     for (const id of destroyed) {
       unregisterEventHandlers(parent.eventHandlers, id)
@@ -549,17 +492,7 @@ export const hostConfig = {
     rootContainerInstance: Container,
     _hostContext: HostContext
   ): TextInstance {
-    const instance: TextInstance = {
-      id: nextId(rootContainerInstance),
-      text,
-      parentId: null,
-    }
-    hostNodeStates.set(instance, {
-      container: rootContainerInstance,
-      mounted: false,
-      hidden: false,
-    })
-    return instance
+    return createHostText(nextId(rootContainerInstance), text, rootContainerInstance)
   },
 
   scheduleTimeout: setTimeout,
@@ -631,6 +564,7 @@ export const hostConfig = {
     adopt(target, child)
     if (target) {
       materialize(target)
+      linkChild(target, child)
       container.renderer.appendChild(target.id, child.id)
     } else {
       container.renderer.setRoot(child.id)
@@ -640,6 +574,7 @@ export const hostConfig = {
   appendInitialChild(parent: Instance, child: Instance | TextInstance): void {
     assertPlacement(parent, child)
     adopt(parent, child)
+    linkChild(parent, child)
     const state = stateFor(parent)
     state.initialChildren ??= []
     state.initialChildren.push(child)

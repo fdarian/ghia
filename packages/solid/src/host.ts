@@ -5,6 +5,11 @@ import {
   createElementMethods,
   createWebviewMethods,
   defineDomMembers,
+  DOM_BINDING,
+  HTMLElement,
+  SVG_CHILD_TYPES,
+  SVGElement,
+  Text,
   defineScrollMembers,
   ElementListeners,
   EVENT_PROP_NAMES,
@@ -33,6 +38,7 @@ import {
 import type {
   Animation,
   DomElement,
+  ElementBinding,
   ElementMethods,
   GetAnimationsOptions,
   BoundingClientRect,
@@ -48,9 +54,11 @@ import type {
   MotionValueStyle,
   MutationRenderer,
   NativeRenderer,
+  NodeBinding,
   SelectionDirection,
   ScrollableElement,
   StyleDesc,
+  TextBinding,
   TextControlHost,
   WebviewMethods,
 } from "@ghia/native/host"
@@ -77,7 +85,7 @@ export function isHostPropertyValue<Value>(
 
 export class HostRoot implements MotionBindingHost {
   readonly kind = "root" as const
-  readonly children: HostNode[] = []
+  readonly childList: HostNode[] = []
   readonly motionBindings = new Map<number, MotionBinding>()
   readonly motionReleases: Array<() => void> = []
   /** Nodes taken out of the tree whose element is destroyed at the next flush, unless they are inserted again first. */
@@ -114,9 +122,13 @@ export class HostRoot implements MotionBindingHost {
   }
 }
 
-export class HostElement {
+export class HostElement extends HTMLElement {
   readonly kind = "element" as const
-  readonly children: HostNode[] = []
+  /**
+   * The nodes inside it, in order. Not `children`, which is the DOM's: the elements only.
+   * Not `childNodes` either, which hands out a copy that cannot corrupt this one.
+   */
+  readonly childList: HostNode[] = []
   readonly props = new Map<string, HostPropertyValue>()
   parent: HostParent | null = null
   root: HostRoot | null = null
@@ -136,7 +148,16 @@ export class HostElement {
   /** The event listeners of the element, and its `on*` props among them: see `ElementListeners`. */
   readonly listeners = new ElementListeners()
 
-  constructor(readonly type: ElementType) {}
+  private domBinding: ElementBinding | undefined
+
+  constructor(readonly type: ElementType) {
+    super()
+  }
+
+  [DOM_BINDING](): ElementBinding {
+    this.domBinding ??= new ElementDomBinding(this)
+    return this.domBinding
+  }
 
   /** What the renderer is given: `style` under `pin`. */
   appliedStyle(): StyleDesc {
@@ -366,7 +387,10 @@ export class HostElement {
 }
 
 /** The DOM scroll members: `scrollTop`, `scrollTo`, `scrollIntoView` and the rest. */
-export interface HostElement extends ScrollableElement, DomElement {}
+export interface HostElement extends ScrollableElement, Omit<DomElement, "ownerDocument"> {
+  /** Narrower than `Node.ownerDocument`: the app's `document`, whose `defaultView` is the window. */
+  readonly ownerDocument: DomElement["ownerDocument"]
+}
 defineDomMembers(HostElement.prototype, (element: HostElement) => ({
   listeners: element.listeners,
   connected: isConnected(element),
@@ -378,6 +402,19 @@ defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
   id: element.id,
 }))
 
+/**
+ * What an `<svg>` and its shapes are built from: an `SVGElement` that has the members of
+ * `HostElement`. Made by constructing a `HostElement` with this as `new.target`, so the
+ * fields come from one constructor and the prototype chain from this one.
+ */
+abstract class SvgHostElement extends SVGElement {}
+for (const key of Reflect.ownKeys(HostElement.prototype)) {
+  if (key === "constructor") continue
+  const descriptor = Object.getOwnPropertyDescriptor(HostElement.prototype, key)
+  if (descriptor === undefined) throw new Error(`HostElement.prototype has no own ${String(key)}`)
+  Object.defineProperty(SvgHostElement.prototype, key, descriptor)
+}
+
 /** In the tree of a root: every ancestor up to the root still holds it, as `removeChild` takes a node out of the DOM. */
 function isConnected(node: HostNode): boolean {
   let current: HostNode | HostRoot = node
@@ -388,19 +425,92 @@ function isConnected(node: HostNode): boolean {
   return true
 }
 
-export class HostText {
+export class HostText extends Text {
   readonly kind = "text" as const
-  readonly children: HostNode[] = []
+  readonly childList: HostNode[] = []
   parent: HostParent | null = null
   root: HostRoot | null = null
   id = 0
   mounted = false
+  private domBinding: TextBinding | undefined
 
-  constructor(public text: string) {}
+  constructor(public text: string) {
+    super()
+  }
+
+  [DOM_BINDING](): TextBinding {
+    this.domBinding ??= new TextDomBinding(this)
+    return this.domBinding
+  }
+}
+
+/** A tree's top is `null` for now: a root's child has no parent node until the root has a `body`. */
+function parentNodeOf(node: HostNode): HostElement | null {
+  const parent = node.parent
+  return parent === null || parent.kind === "root" ? null : parent
+}
+
+class ElementDomBinding implements ElementBinding {
+  constructor(private readonly element: HostElement) {}
+
+  get parent(): NodeBinding["parent"] {
+    return parentNodeOf(this.element)
+  }
+
+  get children(): NodeBinding["children"] {
+    return this.element.childList
+  }
+
+  get connected(): boolean {
+    return isConnected(this.element)
+  }
+
+  get root(): object | null {
+    return this.element.root
+  }
+
+  get type(): string {
+    return this.element.type
+  }
+
+  prop(name: string): unknown {
+    return this.element.props.get(name)
+  }
+
+  propNames(): Iterable<string> {
+    return this.element.props.keys()
+  }
+}
+
+class TextDomBinding implements TextBinding {
+  constructor(private readonly text: HostText) {}
+
+  get parent(): NodeBinding["parent"] {
+    return parentNodeOf(this.text)
+  }
+
+  get children(): NodeBinding["children"] {
+    return this.text.childList
+  }
+
+  get connected(): boolean {
+    return isConnected(this.text)
+  }
+
+  get root(): object | null {
+    return this.text.root
+  }
+
+  get data(): string {
+    return this.text.text
+  }
 }
 
 export function createHostElement(type: string): HostElement {
   if (!isElementType(type)) throw new Error(`Unsupported GPUIX element <${type}>`)
+  if (type === "svg" || SVG_CHILD_TYPES.has(type)) {
+    return Reflect.construct(HostElement, [type], SvgHostElement) as HostElement
+  }
   return new HostElement(type)
 }
 
@@ -575,7 +685,7 @@ function mount(root: HostRoot, node: HostNode): void {
   if (node.kind === "element") {
     if (node.mountListeners.size > 0) for (const listener of [...node.mountListeners]) listener()
   }
-  for (const child of node.children) {
+  for (const child of node.childList) {
     mount(root, child)
     root.mutations.appendChild(node.id, child.id)
   }
@@ -584,8 +694,8 @@ function mount(root: HostRoot, node: HostNode): void {
 function removeFromParent(node: HostNode): void {
   const parent = node.parent
   if (!parent) return
-  const index = parent.children.indexOf(node)
-  if (index >= 0) parent.children.splice(index, 1)
+  const index = parent.childList.indexOf(node)
+  if (index >= 0) parent.childList.splice(index, 1)
   node.parent = null
 }
 
@@ -604,8 +714,8 @@ export function insertHostNode(
     assertSvgPlacement(parent.kind === "root" ? undefined : parent.type, node.type)
   }
   removeFromParent(node)
-  const index = anchor ? parent.children.indexOf(anchor) : parent.children.length
-  parent.children.splice(index, 0, node)
+  const index = anchor ? parent.childList.indexOf(anchor) : parent.childList.length
+  parent.childList.splice(index, 0, node)
   node.parent = parent
   const root = parent.kind === "root" ? parent : parent.root
   if (!root) return
@@ -630,7 +740,7 @@ function markUnmounted(node: HostNode): void {
     // the flush binds its values afresh, and a shared value is never freed between.
     if (node.root.motionBindings.size > 0) retireMotionBindings(node.root, [node.id])
   }
-  for (const child of node.children) markUnmounted(child)
+  for (const child of node.childList) markUnmounted(child)
 }
 
 /**
@@ -657,14 +767,14 @@ export function getParentNode(node: HostNode): HostParent | undefined {
 }
 
 export function getFirstChild(parent: HostParent): HostNode | undefined {
-  return parent.children[0]
+  return parent.childList[0]
 }
 
 export function getNextSibling(node: HostNode): HostNode | undefined {
   const parent = node.parent
   if (!parent) return undefined
-  const index = parent.children.indexOf(node)
-  return index < 0 ? undefined : parent.children[index + 1]
+  const index = parent.childList.indexOf(node)
+  return index < 0 ? undefined : parent.childList[index + 1]
 }
 
 export function isHostText(node: HostNode | HostParent): node is HostText {

@@ -2,7 +2,7 @@
 // `ownerDocument`, `isConnected`, `getAttribute`, and the window's `requestAnimationFrame`.
 import { useState } from "react"
 import { describe, expect, it } from "vitest"
-import { document, type PublicInstance, type ScrollEvent } from "@ghia/native/host"
+import { document, Element, HTMLElement, Node, SVGElement, Text, type PublicInstance, type ScrollEvent } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -134,6 +134,165 @@ describeNative("DOM members of a React host instance", () => {
     const scaledBounds = root.renderer.getElementBounds(root.renderer.findByTestId("scaled")!.id)!
     expect(scaledBounds.width).toBe(100)
     root.unmount()
+  })
+
+  describe("DOM node shape", () => {
+    it("is an HTMLElement, Element and Node, and an svg and its shapes are SVGElements", () => {
+      let box: PublicInstance | null = null
+      let svg: PublicInstance | null = null
+      let path: PublicInstance | null = null
+      const root = createTestRoot()
+      root.render(
+        <div
+          ref={(instance) => {
+            box = instance as PublicInstance | null
+          }}
+          style={{ width: 40, height: 40 }}
+        >
+          <svg
+            ref={(instance) => {
+              svg = instance as PublicInstance | null
+            }}
+            width={20}
+            height={20}
+          >
+            <path
+              ref={(instance) => {
+                path = instance as PublicInstance | null
+              }}
+              d="M0 0L10 10"
+            />
+          </svg>
+        </div>
+      )
+      expect(box instanceof HTMLElement).toBe(true)
+      expect(box instanceof Element).toBe(true)
+      expect(box instanceof Node).toBe(true)
+      expect(box instanceof SVGElement).toBe(false)
+      expect(svg instanceof SVGElement).toBe(true)
+      expect(svg instanceof HTMLElement).toBe(false)
+      expect(path instanceof SVGElement).toBe(true)
+      expect(path instanceof Element).toBe(true)
+      expect(box!.tagName).toBe("DIV")
+      expect(box!.localName).toBe("div")
+      expect(path!.tagName).toBe("path")
+      expect(path!.localName).toBe("path")
+      expect(typeof path!.focus).toBe("function")
+      expect(typeof path!.getBoundingClientRect).toBe("function")
+      expect(path!.isConnected).toBe(true)
+      expect(path!.getAttribute("d")).toBe("M0 0L10 10")
+      root.unmount()
+    })
+
+    it("walks the tree, with text nodes among the child nodes", () => {
+      let parent: PublicInstance | null = null
+      let first: PublicInstance | null = null
+      let last: PublicInstance | null = null
+      const root = createTestRoot()
+      root.render(
+        <div
+          ref={(instance) => {
+            parent = instance as PublicInstance | null
+          }}
+          style={{ width: 80, height: 40 }}
+        >
+          <span
+            ref={(instance) => {
+              first = instance as PublicInstance | null
+            }}
+          >
+            one
+          </span>
+          {"two"}
+          <span
+            ref={(instance) => {
+              last = instance as PublicInstance | null
+            }}
+          >
+            three
+          </span>
+        </div>
+      )
+      expect(parent!.childNodes).toHaveLength(3)
+      const text = parent!.childNodes[1]
+      expect(text instanceof Text).toBe(true)
+      expect(text.nodeType).toBe(3)
+      expect(text.textContent).toBe("two")
+      expect(text.previousSibling).toBe(first)
+      expect(text.nextSibling).toBe(last)
+      expect(text.parentNode).toBe(parent)
+      expect(text.isConnected).toBe(true)
+      expect(parent!.children).toEqual([first, last])
+      expect(parent!.childElementCount).toBe(2)
+      expect(first!.nextElementSibling).toBe(last)
+      expect(last!.previousElementSibling).toBe(first)
+      expect(parent!.textContent).toBe("onetwothree")
+      expect(parent!.contains(last)).toBe(true)
+      expect(parent!.contains(parent)).toBe(true)
+      expect(last!.contains(parent)).toBe(false)
+      expect(first!.compareDocumentPosition(last!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      expect(parent!.compareDocumentPosition(first!)).toBe(
+        Node.DOCUMENT_POSITION_CONTAINED_BY | Node.DOCUMENT_POSITION_FOLLOWING
+      )
+      expect(first!.getRootNode()).toBe(document)
+      root.unmount()
+    })
+
+    it("keeps the order and the parent when children are inserted, reordered and removed", () => {
+      let parent: PublicInstance | null = null
+      const row = (key: string) => <i key={key} data-key={key} />
+      const view = (keys: string[]) => (
+        <div
+          ref={(instance) => {
+            parent = instance as PublicInstance | null
+          }}
+          style={{ width: 80, height: 40 }}
+        >
+          {keys.map(row)}
+        </div>
+      )
+      const keysOf = () => parent!.children.map((child) => child.getAttribute("data-key"))
+      const root = createTestRoot()
+      root.render(view(["a", "b", "c"]))
+      const [a, b] = parent!.children
+      expect(keysOf()).toEqual(["a", "b", "c"])
+      root.render(view(["c", "a", "x", "b"]))
+      expect(keysOf()).toEqual(["c", "a", "x", "b"])
+      expect(a.parentNode).toBe(parent)
+      expect(b.previousElementSibling).toBe(parent!.children[2])
+      root.render(view(["b"]))
+      expect(keysOf()).toEqual(["b"])
+      expect(a.parentNode).toBeNull()
+      expect(a.isConnected).toBe(false)
+      root.unmount()
+    })
+
+    it("reads attributes and dataset from the props", () => {
+      let box: PublicInstance | null = null
+      const root = createTestRoot()
+      root.render(
+        <div
+          ref={(instance) => {
+            box = instance as PublicInstance | null
+          }}
+          className="card"
+          data-row-id="r1"
+          data-index={3}
+          style={{ width: 10, height: 10 }}
+        />
+      )
+      expect(box!.className).toBe("card")
+      expect(box!.getAttributeNames().sort()).toEqual(["class", "data-index", "data-row-id"])
+      expect(box!.hasAttribute("data-index")).toBe(true)
+      expect(box!.hasAttribute("data-missing")).toBe(false)
+      expect(box!.dataset).toEqual({ rowId: "r1", index: "3" })
+      root.unmount()
+    })
+
+    it("throws Illegal constructor for the public classes", () => {
+      expect(() => new (HTMLElement as unknown as new () => object)()).toThrow("Illegal constructor")
+      expect(() => new (Node as unknown as new () => object)()).toThrow("Illegal constructor")
+    })
   })
 
   it("runs requestAnimationFrame callbacks before the draw that paints what they change", () => {

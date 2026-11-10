@@ -1,5 +1,6 @@
 import type { EventPayload } from "../../index.js"
 import type { Animation } from "../web-animations.js"
+import { Document, DOM_BINDING, registerDocument, type NodeBinding } from "../dom/nodes.js"
 import {
   createDomEvent,
   EVENT_PHASE_AT_TARGET,
@@ -40,8 +41,15 @@ interface Registration {
 export class GpuixEventTarget {
   private readonly registrations = new Map<string, Registration[]>()
 
-  /** @param onTypesChange Called when a type gains its first listener or loses its last. */
-  constructor(private readonly onTypesChange?: () => void) {}
+  /**
+   * @param onTypesChange Called when a type gains its first listener or loses its last.
+   * @param owner What `event.currentTarget` is while this target runs its listeners, when it
+   * stands in for another object (a `document` that holds its target by composition).
+   */
+  constructor(
+    private readonly onTypesChange?: () => void,
+    private readonly owner?: object
+  ) {}
 
   addEventListener(
     type: string,
@@ -103,7 +111,7 @@ export class GpuixEventTarget {
   ): void {
     const registrations = this.registrations.get(event.type.toLowerCase())
     if (!registrations) return
-    event.currentTarget = this
+    event.currentTarget = this.owner ?? this
     event.eventPhase = phase
     // A listener may add or remove listeners; this call sees the ones that
     // were there when the phase started.
@@ -162,14 +170,66 @@ const elementSources: Map<object, ElementSourceEntry> = (() => {
 })()
 let focusClock = 0
 
+/** The document is the top of every tree for now: nothing is under it until it has `body`. */
+const DOCUMENT_BINDING: NodeBinding = { parent: null, children: [], connected: true, root: null }
+
 /**
- * The `document` of a GPUIX app: the `window` target plus `activeElement` and
- * `pointerLockElement`.
+ * The `document` of a GPUIX app: a DOM `Document` node that is also the `window` target,
+ * plus `activeElement` and `pointerLockElement`.
  *
  * `Element` is what the adapter hands out for an element: React's host
  * instance, Solid's element.
  */
-export class GpuixDocument<Element = unknown> extends GpuixEventTarget {
+export class GpuixDocument<Element = unknown> extends Document {
+  private readonly target: GpuixEventTarget
+
+  /** @param onTypesChange Called when a type gains its first listener or loses its last. */
+  constructor(onTypesChange?: () => void) {
+    super()
+    this.target = new GpuixEventTarget(onTypesChange, this)
+  }
+
+  [DOM_BINDING](): NodeBinding {
+    return DOCUMENT_BINDING
+  }
+
+  addEventListener(
+    type: string,
+    listener: WindowEventListener,
+    options?: boolean | AddEventListenerOptions
+  ): void {
+    this.target.addEventListener(type, listener, options)
+  }
+
+  removeEventListener(
+    type: string,
+    listener: WindowEventListener,
+    options?: boolean | Pick<AddEventListenerOptions, "capture">
+  ): void {
+    this.target.removeEventListener(type, listener, options)
+  }
+
+  /** Whether any listener is registered for `type` in either phase. */
+  hasListeners(type: string): boolean {
+    return this.target.hasListeners(type)
+  }
+
+  /** @internal The types with a listener in either phase. */
+  listenedTypes(): string[] {
+    return this.target.listenedTypes()
+  }
+
+  /** @internal Calls the listeners of one phase: see `GpuixEventTarget.run`. */
+  run(
+    event: DomEvent,
+    state: DomEventState,
+    capture: boolean,
+    phase: number,
+    fail: (error: unknown) => void
+  ): void {
+    this.target.run(event, state, capture, phase, fail)
+  }
+
   /**
    * The global object, which `dom-globals` installs as `window`: where a library that takes
    * `element.ownerDocument.defaultView` as its window finds `setTimeout`, `requestAnimationFrame`
@@ -245,6 +305,7 @@ export function setDocumentAnimations(list: (renderer: object) => Animation[]): 
 
 export const window = new GpuixEventTarget(notifyTypeSubscribers)
 export const document = new GpuixDocument(notifyTypeSubscribers)
+registerDocument(document)
 
 /**
  * Lets the runtime see the elements of the root that drives `renderer`, through

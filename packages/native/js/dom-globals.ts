@@ -1,5 +1,16 @@
 import { cancelAnimationFrame, requestAnimationFrame } from "./animation-frame.js"
 import { ResizeObserver } from "./observers.js"
+import {
+  CharacterData,
+  Document,
+  DocumentFragment,
+  Element,
+  HTMLElement,
+  Node,
+  ShadowRoot,
+  SVGElement,
+  Text,
+} from "./dom/nodes.js"
 import { document, window } from "./events/window-target.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
 import { isWebBuild } from "./web-build.js"
@@ -14,6 +25,18 @@ type RemoveListener = (
   listener: WindowEventListener,
   options?: boolean | Pick<AddEventListenerOptions, "capture">
 ) => void
+
+const DOM_CLASSES = {
+  Node,
+  CharacterData,
+  Text,
+  Element,
+  HTMLElement,
+  SVGElement,
+  Document,
+  DocumentFragment,
+  ShadowRoot,
+}
 
 /**
  * Marks the install as done on `globalThis`, so a second evaluation of this module
@@ -63,6 +86,15 @@ function install(): void {
   // A runtime that has its own keeps it, which is what a library that takes `window.ResizeObserver` gets elsewhere.
   if (Reflect.get(globalThis, "ResizeObserver") === undefined) {
     Object.defineProperty(globalThis, "ResizeObserver", { value: ResizeObserver, configurable: true, writable: true })
+  }
+  // Same for the DOM classes: `element instanceof HTMLElement` is what a library checks for.
+  for (const name of Object.keys(DOM_CLASSES)) {
+    if (Reflect.get(globalThis, name) !== undefined) continue
+    Object.defineProperty(globalThis, name, {
+      value: DOM_CLASSES[name as keyof typeof DOM_CLASSES],
+      configurable: true,
+      writable: true,
+    })
   }
 }
 
