@@ -8,6 +8,7 @@ import {
   createElementMethods,
   defineDomMembers,
   defineScrollMembers,
+  document,
   DOM_BINDING,
   focusHostElement,
   HOST_BINDING,
@@ -201,9 +202,11 @@ class ElementDomBinding implements ElementBinding {
     private readonly state: HostNodeState
   ) {}
 
-  /** A window's top-level element has no parent node until the window has a `body`. */
+  /** `<html>` is in the document, which is the top of every mounted tree. */
   get parent(): NodeBinding["parent"] {
-    return this.state.parent
+    const parent = this.state.parent
+    if (parent !== null) return parent
+    return this.state.container.html === this.instance ? document : null
   }
 
   get children(): NodeBinding["children"] {

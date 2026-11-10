@@ -269,8 +269,8 @@ describeNative("a skipped subtree", { timeout: 120_000 }, () => {
       const first = work(renderer, () => root.render(page("hidden", ROWS)))
       expect(first.shapes, "shapes").toBe(0)
       expect(first.measures, "measures").toBe(0)
-      expect(first.nodesCreated, "layout nodes: the page and the element itself").toBe(2)
-      expect(first.elementsBuilt, "elements built: the same two").toBe(2)
+      expect(first.nodesCreated, "layout nodes: html, body, the page and the element itself").toBe(4)
+      expect(first.elementsBuilt, "elements built: the same four").toBe(4)
       // Its height is the intrinsic one, whatever the rows would have been (a block is as wide as its parent).
       expect([skipperBox().width, skipperBox().height]).toEqual([500, 40])
 

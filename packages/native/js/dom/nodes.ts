@@ -8,8 +8,23 @@
  * class implements. The members on the prototypes read only that.
  */
 
+import type { ElementType } from "../host.js"
+
 /** Where `[DOM_BINDING]()` is read, so two copies of this package find each other's nodes. */
 export const DOM_BINDING: unique symbol = Symbol.for("@ghia/native/dom-binding")
+
+/**
+ * The element types of what every window root is made of, `html` and `body` in it, which each
+ * adapter builds through its own host machinery. `ElementType` lists what an app writes, so
+ * these are typed as what the adapters' constructors take.
+ */
+export const ROOT_ELEMENT_TYPES = { html: "html", body: "body" } as unknown as {
+  html: ElementType
+  body: ElementType
+}
+
+/** Both fill the window: the box above the root is the window, and the app's top element sizes against it. */
+export const ROOT_ELEMENT_STYLE = { display: "block", width: "100%", height: "100%" } as const
 
 /** What an adapter tells the DOM members about one of its nodes. */
 export type NodeBinding = {
@@ -158,8 +173,6 @@ abstract class NodeClass {
   /** Whether `other` is this node or one of its descendants, as the DOM has it. */
   contains(other: Node | null): boolean {
     if (other === null) return false
-    // The document holds every mounted element, though a top-level element has no parent yet.
-    if (this.nodeType === DOCUMENT_NODE && other.isConnected) return true
     for (let current: Node | null = other; current !== null; current = current.parentNode) {
       if (current === (this as unknown as Node)) return true
     }
@@ -178,13 +191,6 @@ abstract class NodeClass {
   compareDocumentPosition(other: Node): number {
     const self = this as unknown as Node
     if (other === self) return 0
-    const selfIsDocument = this.nodeType === DOCUMENT_NODE
-    if (selfIsDocument && other.isConnected) {
-      return DOCUMENT_POSITION_CONTAINED_BY | DOCUMENT_POSITION_FOLLOWING
-    }
-    if (other.nodeType === DOCUMENT_NODE && this.isConnected) {
-      return DOCUMENT_POSITION_CONTAINS | DOCUMENT_POSITION_PRECEDING
-    }
     const selfChain = ancestorsOf(self)
     const otherChain = ancestorsOf(other)
     const selfTop = selfChain[selfChain.length - 1]

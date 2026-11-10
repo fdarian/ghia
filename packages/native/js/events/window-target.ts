@@ -1,6 +1,7 @@
 import type { EventPayload } from "../../index.js"
 import type { Animation } from "../web-animations.js"
-import { Document, DOM_BINDING, registerDocument, type NodeBinding } from "../dom/nodes.js"
+import { Document, DOM_BINDING, registerDocument, type Node, type NodeBinding } from "../dom/nodes.js"
+import { mountedRenderer } from "../mounted-renderer.js"
 import {
   createDomEvent,
   EVENT_PHASE_AT_TARGET,
@@ -145,6 +146,14 @@ type ElementSource = {
   pointerLockId(): number | null
   /** The object the adapter hands out for that element (a ref's value), or `undefined` once the root has dropped it. */
   elementById(id: number): object | undefined
+  /** The `<html>` and `<body>` elements the root's adapter made for its window, or `null` for a source that has none. */
+  documentElements(): DocumentElements | null
+}
+
+/** The elements every window root is made of: `html`, and `body` in it, holding the app. */
+export type DocumentElements = {
+  html: object
+  body: object
 }
 
 type ElementSourceEntry = {
@@ -170,8 +179,28 @@ const elementSources: Map<object, ElementSourceEntry> = (() => {
 })()
 let focusClock = 0
 
-/** The document is the top of every tree for now: nothing is under it until it has `body`. */
-const DOCUMENT_BINDING: NodeBinding = { parent: null, children: [], connected: true, root: null }
+/**
+ * The document is the top of every mounted tree. It lists the `<html>` of each window, the
+ * most recent of which is `document.documentElement`: one document spans every window.
+ */
+const DOCUMENT_BINDING: NodeBinding = {
+  parent: null,
+  get children(): readonly Node[] {
+    return [...elementSources.values()].flatMap((entry) => {
+      const elements = entry.source.documentElements()
+      return elements === null ? [] : [elements.html as Node]
+    })
+  },
+  connected: true,
+  root: null,
+}
+
+/** The elements of the window `document` stands for: the most recently mounted root's. */
+function currentDocumentElements(): DocumentElements | null {
+  const renderer = mountedRenderer()
+  if (renderer === undefined) return null
+  return elementSources.get(renderer)?.source.documentElements() ?? null
+}
 
 /**
  * The `document` of a GPUIX app: a DOM `Document` node that is also the `window` target,
@@ -228,6 +257,21 @@ export class GpuixDocument<Element = unknown> extends Document {
     fail: (error: unknown) => void
   ): void {
     this.target.run(event, state, capture, phase, fail)
+  }
+
+  /** The `<html>` element of the window that mounted last, or `null` while nothing is mounted. */
+  get documentElement(): Element | null {
+    return (currentDocumentElements()?.html as Element | undefined) ?? null
+  }
+
+  /** The `<body>` element of the window that mounted last: where the app's top-level nodes are. */
+  get body(): Element | null {
+    return (currentDocumentElements()?.body as Element | undefined) ?? null
+  }
+
+  /** The element that scrolls the document, which is `documentElement` as in standards mode. */
+  get scrollingElement(): Element | null {
+    return this.documentElement
   }
 
   /**
@@ -311,13 +355,15 @@ registerDocument(document)
  * Lets the runtime see the elements of the root that drives `renderer`, through
  * `elementById`: the object the adapter gives for an element id, as a `ref`
  * does. `document.activeElement` and the `target`, `currentTarget` and
- * `relatedTarget` of every event read it. The returned function takes the root
+ * `relatedTarget` of every event read it, and `document.documentElement` and
+ * `document.body` read `documentElements`. The returned function takes the root
  * out again. A renderer that cannot report focus still names its elements; it
  * just never has an `activeElement`.
  */
 export function installElementSource(
   renderer: { getFocusedElementId?: () => number | null; pointerLockElement?: () => number | null },
-  elementById: (id: number) => object | undefined
+  elementById: (id: number) => object | undefined,
+  documentElements?: () => DocumentElements
 ): () => void {
   const getFocusedElementId = renderer.getFocusedElementId
   const getPointerLockElement = renderer.pointerLockElement
@@ -326,6 +372,7 @@ export function installElementSource(
       focusedId: () => (getFocusedElementId ? getFocusedElementId.call(renderer) : null),
       pointerLockId: () => (getPointerLockElement ? getPointerLockElement.call(renderer) : null),
       elementById,
+      documentElements: () => (documentElements ? documentElements() : null),
     },
     windowGone: false,
     focusedAt: 0,

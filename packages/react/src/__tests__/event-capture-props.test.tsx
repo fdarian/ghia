@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { hostConfig } from "../reconciler/host-config.js"
+import { hostConfig, installDocumentElements } from "../reconciler/host-config.js"
 import type { Container, HostContext, MutationRenderer, Props } from "../types/host.js"
 
 function setup() {
@@ -22,7 +22,7 @@ function setup() {
     requestFlush() {},
     flushMutations() {},
   }
-  const container: Container = {
+  const container: Container = installDocumentElements({
     nativeRenderer: {},
     renderer,
     ids: { nextElementId: 0 },
@@ -33,7 +33,7 @@ function setup() {
     motionBindings: new Map(),
     motionReleases: [],
     instances: new Map(),
-  }
+  })
   const create = (props: Props) => {
     const instance = hostConfig.createInstance(
       "div",

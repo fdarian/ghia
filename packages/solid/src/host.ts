@@ -5,6 +5,7 @@ import {
   createElementMethods,
   createWebviewMethods,
   defineDomMembers,
+  document,
   DOM_BINDING,
   HTMLElement,
   SVG_CHILD_TYPES,
@@ -21,6 +22,8 @@ import {
   isNativeviewHandlerProp,
   HOST_BINDING,
   HOST_MOUNT,
+  ROOT_ELEMENT_STYLE,
+  ROOT_ELEMENT_TYPES,
   readBoundingClientRect,
   toBoundingClientRect,
   retireMotionBindings,
@@ -37,6 +40,7 @@ import {
 } from "@ghia/native/host"
 import type {
   Animation,
+  Document,
   DomElement,
   ElementBinding,
   ElementMethods,
@@ -85,7 +89,6 @@ export function isHostPropertyValue<Value>(
 
 export class HostRoot implements MotionBindingHost {
   readonly kind = "root" as const
-  readonly childList: HostNode[] = []
   readonly motionBindings = new Map<number, MotionBinding>()
   readonly motionReleases: Array<() => void> = []
   /** Nodes taken out of the tree whose element is destroyed at the next flush, unless they are inserted again first. */
@@ -98,6 +101,11 @@ export class HostRoot implements MotionBindingHost {
   readonly eventHandlers: EventHandlerMap
   readonly allocateId: () => number
 
+  /** The window's `<html>`: its native root. A child of this root only in that it is mounted through it. */
+  html: HostElement
+  /** The `<body>` in `html`, where the app's top-level nodes are. */
+  body: HostElement
+
   constructor(options: {
     mutations: MutationRenderer
     nativeRenderer: NativeRenderer
@@ -108,6 +116,31 @@ export class HostRoot implements MotionBindingHost {
     this.nativeRenderer = options.nativeRenderer
     this.eventHandlers = options.eventHandlers
     this.allocateId = options.allocateId
+    const elements = this.mountDocumentElements()
+    this.html = elements.html
+    this.body = elements.body
+  }
+
+  /** The app's top-level nodes: what `body` holds. */
+  get childList(): HostNode[] {
+    return this.body.childList
+  }
+
+  /** Makes the `<html>` and `<body>` again for a root that was torn down and renders once more. */
+  ensureDocumentElements(): void {
+    if (this.html.mounted) return
+    const elements = this.mountDocumentElements()
+    this.html = elements.html
+    this.body = elements.body
+  }
+
+  /** Destroys `<html>` and `<body>`, once the app's nodes are out of them. */
+  destroyDocumentElements(): void {
+    this.finishRemovals()
+    if (!this.html.mounted) return
+    markUnmounted(this.html)
+    this.html.parent = null
+    this.mutations.destroyElement(this.html.id)
   }
 
   /** Destroys the removed nodes that stayed out of the tree. Call before each flush. */
@@ -119,6 +152,20 @@ export class HostRoot implements MotionBindingHost {
       markUnmounted(node)
       this.mutations.destroyElement(node.id)
     }
+  }
+
+  /** Built through the host machinery an app's elements go through, then mounted as the window's root. */
+  private mountDocumentElements(): { html: HostElement; body: HostElement } {
+    const html = createHostElement(ROOT_ELEMENT_TYPES.html)
+    const body = createHostElement(ROOT_ELEMENT_TYPES.body)
+    html.style = { ...ROOT_ELEMENT_STYLE }
+    body.style = { ...ROOT_ELEMENT_STYLE }
+    html.parent = this
+    html.childList.push(body)
+    body.parent = html
+    mount(this, html)
+    this.mutations.setRoot(html.id)
+    return { html, body }
   }
 }
 
@@ -444,10 +491,11 @@ export class HostText extends Text {
   }
 }
 
-/** A tree's top is `null` for now: a root's child has no parent node until the root has a `body`. */
-function parentNodeOf(node: HostNode): HostElement | null {
+/** `<html>` is in the document, which is the top of every mounted tree. */
+function parentNodeOf(node: HostNode): HostElement | Document | null {
   const parent = node.parent
-  return parent === null || parent.kind === "root" ? null : parent
+  if (parent === null) return null
+  return parent.kind === "root" ? document : parent
 }
 
 class ElementDomBinding implements ElementBinding {
@@ -516,6 +564,8 @@ export function createHostElement(type: string): HostElement {
 
 function isElementType(type: string): type is ElementType {
   switch (type) {
+    case "html":
+    case "body":
     case "div":
     case "text":
     case "span":
@@ -700,29 +750,28 @@ function removeFromParent(node: HostNode): void {
 }
 
 export function insertHostNode(
-  parent: HostParent,
+  requestedParent: HostParent,
   node: HostNode,
   requestedAnchor?: HostNode | null
 ): void {
+  // The app's top-level nodes are `body`'s.
+  const parent = requestedParent.kind === "root" ? requestedParent.body : requestedParent
   // Like the DOM, inserting a node before itself leaves it where it is. Solid's
   // list reconcile does it when it swaps two neighbours.
   const anchor = requestedAnchor === node ? getNextSibling(node) : requestedAnchor
   if (anchor && anchor.parent !== parent) {
     throw new Error("GPUIX Solid anchor is not a child of its parent")
   }
-  if (node.kind === "element") {
-    assertSvgPlacement(parent.kind === "root" ? undefined : parent.type, node.type)
-  }
+  if (node.kind === "element") assertSvgPlacement(parent.type, node.type)
   removeFromParent(node)
   const index = anchor ? parent.childList.indexOf(anchor) : parent.childList.length
   parent.childList.splice(index, 0, node)
   node.parent = parent
-  const root = parent.kind === "root" ? parent : parent.root
+  const root = parent.root
   if (!root) return
   root.removals.delete(node)
   mount(root, node)
-  if (parent.kind === "root") root.mutations.setRoot(node.id)
-  else if (anchor) root.mutations.insertBefore(parent.id, node.id, anchor.id)
+  if (anchor) root.mutations.insertBefore(parent.id, node.id, anchor.id)
   else root.mutations.appendChild(parent.id, node.id)
 }
 
@@ -749,16 +798,16 @@ function markUnmounted(node: HostNode): void {
  * capture and layout animation would be gone. It is destroyed when the
  * batch is flushed, unless the node came back.
  */
-export function removeHostNode(parent: HostParent, node: HostNode): void {
+export function removeHostNode(requestedParent: HostParent, node: HostNode): void {
+  const parent = requestedParent.kind === "root" ? requestedParent.body : requestedParent
   if (node.parent !== parent) return
   removeFromParent(node)
-  const root = parent.kind === "root" ? parent : parent.root
+  const root = parent.root
   if (!root || !node.mounted) return
   root.removals.add(node)
   // Native is told now, not at the flush: a layout read in this turn flushes the queue and
-  // must not lay out a subtree the DOM would already have taken out of the document. A root's
-  // child has no native parent to leave.
-  if (parent.kind === "element") root.mutations.detachChild(node.id)
+  // must not lay out a subtree the DOM would already have taken out of the document.
+  root.mutations.detachChild(node.id)
   root.mutations.requestFlush()
 }
 

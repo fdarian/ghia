@@ -1180,11 +1180,17 @@ export class TestRenderer implements NativeRenderer {
     return map
   }
 
-  /** Get the root element. */
+  /** Get the root element of the app: the last top-level node, which is in `<body>` in `<html>`,
+   *  the native root. */
   getRoot(): TestElement | undefined {
     const rootId = this.native.getRootId()
     if (rootId == null) return undefined
-    return this.buildElementMap().get(rootId)
+    const elements = this.buildElementMap()
+    const html = elements.get(rootId)
+    if (html?.type !== "html") return html
+    const body = elements.get(html.children[0])
+    const top = body?.children.at(-1)
+    return top === undefined ? undefined : elements.get(top)
   }
 
   /** Get an element by ID. */

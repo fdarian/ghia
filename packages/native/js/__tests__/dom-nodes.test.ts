@@ -13,7 +13,9 @@ import {
   type ElementBinding,
   type TextBinding,
 } from "../dom/nodes.js"
-import { document, GpuixDocument } from "../events/window-target.js"
+import { document, GpuixDocument, installElementSource } from "../events/window-target.js"
+import { mountedRenderers } from "../mounted-renderer.js"
+import type { NativeRenderer } from "../host.js"
 import { defineDomMembers } from "../dom-members.js"
 import "../dom-globals.js"
 
@@ -21,7 +23,7 @@ type Props = Record<string, unknown>
 
 /** An element of the shape an adapter builds, with the tree kept the way an adapter keeps it. */
 class FakeHtml extends HTMLElement {
-  parent: FakeHtml | null = null
+  parent: Node | null = null
   readonly kids: Array<FakeHtml | FakeText> = []
   connected = true
   constructor(
@@ -328,19 +330,60 @@ describe("document", () => {
     expect(document.ownerDocument).toBeNull()
     expect(document.textContent).toBeNull()
     expect(document.childNodes).toEqual([])
-    expect(Reflect.get(document, "documentElement")).toBeUndefined()
+    expect(document.documentElement).toBeNull()
+    expect(document.body).toBeNull()
+    expect(document.scrollingElement).toBeNull()
+  })
+
+  /** A window whose root is `html` > `body`, the most recently mounted. */
+  function mountWindow() {
+    const renderer = {} as NativeRenderer
+    const html = new FakeHtml("html")
+    const body = new FakeHtml("body")
+    html.parent = document
+    place(html, body)
+    const remove = installElementSource(renderer, () => undefined, () => ({ html, body }))
+    mountedRenderers().push(renderer)
+    return {
+      html,
+      body,
+      unmount() {
+        mountedRenderers().splice(mountedRenderers().indexOf(renderer), 1)
+        remove()
+      },
+    }
+  }
+
+  it("has the html and body of the window that mounted last", () => {
+    const first = mountWindow()
+    const second = mountWindow()
+    expect(document.documentElement).toBe(second.html)
+    expect(document.body).toBe(second.body)
+    expect(document.scrollingElement).toBe(second.html)
+    expect(document.childNodes).toEqual([first.html, second.html])
+    expect(second.html.parentNode).toBe(document)
+    second.unmount()
+    expect(document.documentElement).toBe(first.html)
+    first.unmount()
+    expect(document.documentElement).toBeNull()
+    expect(document.body).toBeNull()
   })
 
   it("contains a mounted node, and compares against it", () => {
+    const window = mountWindow()
     const mounted = new FakeHtml("div")
+    place(window.body, mounted)
     const loose = new FakeHtml("div")
     loose.connected = false
     expect(document.contains(mounted)).toBe(true)
+    expect(document.contains(window.html)).toBe(true)
     expect(document.contains(loose)).toBe(false)
     expect(document.compareDocumentPosition(mounted)).toBe(
       Node.DOCUMENT_POSITION_CONTAINED_BY | Node.DOCUMENT_POSITION_FOLLOWING
     )
     expect(mounted.compareDocumentPosition(document)).toBe(Node.DOCUMENT_POSITION_CONTAINS | Node.DOCUMENT_POSITION_PRECEDING)
+    expect(mounted.getRootNode()).toBe(document)
+    window.unmount()
   })
 
   it("keeps its event-target behaviour, with itself as currentTarget", () => {

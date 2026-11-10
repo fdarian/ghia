@@ -21,7 +21,12 @@ import {
   idAllocatorFor,
   unregisterEventHandlers,
 } from "./event-registry.js"
-import { hostConfig, publicInstanceById } from "./host-config.js"
+import {
+  destroyDocumentElements,
+  hostConfig,
+  installDocumentElements,
+  publicInstanceById,
+} from "./host-config.js"
 import { releaseMotionBindings } from "./motion-bindings.js"
 
 // Cast to any because @types/react-reconciler is out of date with react-reconciler 0.31.0
@@ -86,7 +91,7 @@ export function createRoot(
     }
     releaseMotionBindings(gpuixContainer, destroyedIds)
   })
-  gpuixContainer = {
+  gpuixContainer = installDocumentElements({
     nativeRenderer: renderer,
     renderer: batchedRenderer,
     ids,
@@ -100,7 +105,7 @@ export function createRoot(
     windowAppearanceEventId: 0,
     onEvent: rootEventHandlers.onEvent,
     onUncaughtError,
-  }
+  })
   attachRoot(renderer, gpuixContainer)
   // Sent on every root, so a remount without the option restores the default.
   batchedRenderer.setKeyboardFocusDim(rootEventHandlers.keyboardFocusDim !== false)
@@ -126,8 +131,10 @@ export function createRoot(
       windowAppearanceEventId
     )
     stopWindowEventListeners = syncWindowEventListeners(renderer)
-    stopElementSource = installElementSource(renderer, (id) =>
-      publicInstanceById(gpuixContainer, id)
+    stopElementSource = installElementSource(
+      renderer,
+      (id) => publicInstanceById(gpuixContainer, id),
+      () => ({ html: gpuixContainer.html, body: gpuixContainer.body })
     )
   } catch (error) {
     detachRoot(renderer, gpuixContainer)
@@ -142,6 +149,7 @@ export function createRoot(
       })
       container = null
     }
+    destroyDocumentElements(gpuixContainer)
     if (detachRoot(renderer, gpuixContainer)) {
       renderer.setWindowKeyEvents?.(false, false, windowKeyEventId)
       stopWindowEventListeners?.()

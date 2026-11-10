@@ -193,11 +193,14 @@ const recolour = (kind: (index: number) => React.ReactNode, name: string) => {
   }
 }
 
+/** `<html>` and `<body>` are built above the page in every frame. */
+const WINDOW_ROOTS = 2
+
 /** The page and nothing below it: the cards are replayed. */
 const expectReplayed = (frames: object, message: string) => {
-  expect(frames.builds, message).toBeLessThanOrEqual(1)
+  expect(frames.builds, message).toBeLessThanOrEqual(1 + WINDOW_ROOTS)
   expect(frames.hits, message).toBeGreaterThanOrEqual(COUNT)
-  expect(frames.built, message).toBeLessThan(5)
+  expect(frames.built, message).toBeLessThan(5 + WINDOW_ROOTS)
 }
 
 /** The cards are built, and what is beside what reads the colour in them is replayed or not as it reads. */
@@ -264,7 +267,7 @@ describeNative("a colour handed down by the page", () => {
   it("is read by what is above a colour declared in the card", () => {
     const { changed } = recolour(readAboveTheDeclaration, "read-above")
     if (retained && !verifying) {
-      expect(changed.built, "the card is built").toBe(COUNT + 1)
+      expect(changed.built, "the card is built").toBe(COUNT + 1 + WINDOW_ROOTS)
       expect(changed.hits, "the row that declares the colour is replayed").toBe(COUNT)
     }
   })

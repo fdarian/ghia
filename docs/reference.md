@@ -4893,7 +4893,9 @@ Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `
 | `textContent` | The text of the node and its descendants. Read only: there is no setter yet. |
 | `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `className` or `class` prop (`""` without one), an attribute exists where `getAttribute` is not `null`, and `className` is the attribute `class`. `dataset` is a frozen read-only snapshot of the `data-*` props with the names in camel case (`data-row-id` is `rowId`). |
 
-The top-level element of a window has no `parentNode` yet (`document.documentElement` and `document.body` do not exist), and nothing here changes the tree: `setAttribute`, `appendChild` and the other writing members are not there. A host element's `id` stays the number native knows it by (`renderer.scrollToItem(ref.id, i)`), so `el.id` is not the DOM's `id` attribute; read the prop with `getAttribute("id")`.
+Every window root is a real `<html>` with a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; all three are `null` while no root is mounted, and with several windows they are those of the window that mounted last (the rule `matchMedia` follows). `html.parentNode` is `document`, `body.parentNode` is `html`, a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin; they add no accessibility node. `document.head` does not exist.
+
+Nothing here changes the tree: `setAttribute`, `appendChild` and the other writing members are not there. A host element's `id` stays the number native knows it by (`renderer.scrollToItem(ref.id, i)`), so `el.id` is not the DOM's `id` attribute; read the prop with `getAttribute("id")`.
 
 The `on*` prop and the listeners of one type and phase are one list, called in the order the DOM gives: a listener in the order it was added, the prop where it was first set (so before the listeners added after it), and a prop that is set again after it was unset last. A change of the prop replaces its handler in place. At the target the capture listeners run first, then the bubble ones, as in current browsers.
 
@@ -4963,11 +4965,8 @@ There is one list for the whole app, not one per window
 A `window` or `document` listener hears every event that bubbles to the top of
 the tree (pointer, mouse, click, wheel), whether or not any element on the path
 listens. `window.addEventListener('pointermove', fn)` fires while the pointer is
-over bare background, where the event's `target` is the root element. A
-`pointermove` or `mousemove` inside the window but outside the root element's box
-has no element under it: it is aimed at the window, like a key with nothing
-focused, so `event.target` is `null` and only the `window` and `document`
-listeners run (no element handler, the root's included). Nothing fires while the
+over bare background, where the event's `target` is the element under it, `body`
+at the least (it fills the window). Nothing fires while the
 pointer is outside the window or over an `appRegion` drag area. Native produces
 only the types that have a listener on `window`, `document` or an element on the
 path, so adding the first listener of a type is what turns it on.
@@ -6799,11 +6798,10 @@ event: the same object a `ref` gives in that adapter (React's host instance,
 Solid's element), so they compare with `===` and a handler can call
 `event.target.getBoundingClientRect()`. During the `window` and `document`
 phases `currentTarget` is that object. `target` is `null` only for an event
-aimed at the window (a key with nothing focused, a pointer move outside the
-root), and `relatedTarget` is `null` when there is no other element. A native
+aimed at the window (a key with nothing focused), and `relatedTarget` is `null` when there is no other element. A native
 element id is still there as `event.elementId`, for the renderer methods that
 take one (`renderer.scrollTo(elementId, ...)`). `composedPath()` lists the
-elements the event travels through, target first and the root last, without
+elements the event travels through, target first and `html` last, without
 `window` and `document`.
 `x`/`y` are the same as `clientX`/`clientY`. `offsetX`/`offsetY` are relative
 to the target's padding edge, read from its laid-out border. Native only produces an event type when the

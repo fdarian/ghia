@@ -241,6 +241,10 @@ export interface Container {
   motionReleases: Array<() => void>
   /** Mounted host elements by id, for `document.activeElement`. A portal container shares its root's. */
   instances: Map<number, Instance>
+  /** The window's `<html>`: its native root. A portal container shares its root's. */
+  html: Instance
+  /** The `<body>` in `html`, where the app's top-level nodes are. */
+  body: Instance
   windowKeyEventHandlers: WindowKeyEventHandlers
   windowKeyEventId: number
   windowSelectionEventId: number
@@ -250,7 +254,7 @@ export interface Container {
   onUncaughtError: (error: Error, errorInfo: { componentStack?: string }) => void
   /**
    * Set on a portal's container. Its children mount under this element instead
-   * of becoming the window's root. The container inherits everything else from
+   * of under `body`. The container inherits everything else from
    * the root container it was made from, so both share one mutation queue and
    * one event map.
    */

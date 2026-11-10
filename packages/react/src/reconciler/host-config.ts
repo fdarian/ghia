@@ -12,6 +12,8 @@ import {
   createWebviewMethods,
   eventTypesWithOverrides,
   isReservedProp,
+  ROOT_ELEMENT_STYLE,
+  ROOT_ELEMENT_TYPES,
   sameMutationValue,
   serializeCustomProp,
   forwardsCustomProp,
@@ -352,6 +354,44 @@ export function publicInstanceById(container: Container, id: number): PublicInst
   return instance && attachHostMethods(instance)
 }
 
+/**
+ * Makes the window's `<html>` and `<body>` as React makes an element and mounts them as the
+ * native root, so a root's content and a portal into `document.body` go through the same
+ * `body`. `base` is the container before it has them.
+ */
+export function installDocumentElements(base: Omit<Container, "html" | "body">): Container {
+  // `html` and `body` are assigned below, before anything reads them.
+  const container = base as Container
+  const html = createHostElement(
+    nextId(container),
+    ROOT_ELEMENT_TYPES.html,
+    { style: { ...ROOT_ELEMENT_STYLE } },
+    container
+  )
+  const body = createHostElement(
+    nextId(container),
+    ROOT_ELEMENT_TYPES.body,
+    { style: { ...ROOT_ELEMENT_STYLE } },
+    container
+  )
+  container.html = html
+  container.body = body
+  adopt(html, body)
+  linkChild(html, body)
+  materialize(html)
+  materialize(body)
+  container.renderer.appendChild(html.id, body.id)
+  container.renderer.setRoot(html.id)
+  return container
+}
+
+/** Destroys `<html>` and, with it, `<body>`, once the app's nodes are out of them. */
+export function destroyDocumentElements(container: Container): void {
+  if (container.instances.get(container.html.id) !== container.html) return
+  container.renderer.destroyElement(container.html.id)
+  container.renderer.flushMutations()
+}
+
 const portalContainers = new WeakMap<Instance, Container>()
 
 /**
@@ -426,16 +466,15 @@ export const hostConfig = {
     parentState.container.renderer.insertBefore(parent.id, child.id, beforeChild.id)
   },
 
-  // A window's root has one child, so there is nothing to order. A portal's
-  // children share their target with whatever else it holds, and React places
-  // one before another whenever their keys reorder.
+  // The children of a window's root and of a portal share their target, `body` or the
+  // portal's, with whatever else it holds, and React places one before another whenever
+  // their keys reorder.
   insertInContainerBefore(
     container: Container,
     child: Instance,
     beforeChild: Instance
   ): void {
-    const target = container.portalTarget
-    if (!target) return
+    const target = container.portalTarget ?? container.body
     assertPlacement(target, child)
     materialize(child)
     adopt(target, child)
@@ -558,17 +597,13 @@ export const hostConfig = {
   },
 
   appendChildToContainer(container: Container, child: Instance): void {
-    const target = container.portalTarget
+    const target = container.portalTarget ?? container.body
     assertPlacement(target, child)
     materialize(child)
     adopt(target, child)
-    if (target) {
-      materialize(target)
-      linkChild(target, child)
-      container.renderer.appendChild(target.id, child.id)
-    } else {
-      container.renderer.setRoot(child.id)
-    }
+    materialize(target)
+    linkChild(target, child)
+    container.renderer.appendChild(target.id, child.id)
   },
 
   appendInitialChild(parent: Instance, child: Instance | TextInstance): void {

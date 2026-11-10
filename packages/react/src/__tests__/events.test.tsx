@@ -2664,41 +2664,63 @@ describeNative("events", () => {
             {
               "children": [
                 {
-                  "id": 1,
-                  "text": "Hello",
-                  "type": "text",
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "id": 3,
+                          "text": "Hello",
+                          "type": "text",
+                        },
+                      ],
+                      "id": 4,
+                      "type": "text",
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "id": 5,
+                              "text": "Click me",
+                              "type": "text",
+                            },
+                          ],
+                          "id": 6,
+                          "type": "text",
+                        },
+                      ],
+                      "events": [
+                        "click",
+                      ],
+                      "id": 7,
+                      "type": "div",
+                    },
+                  ],
+                  "id": 8,
+                  "style": {
+                    "display": "flex",
+                    "gap": 8,
+                  },
+                  "type": "div",
                 },
               ],
               "id": 2,
-              "type": "text",
-            },
-            {
-              "children": [
-                {
-                  "children": [
-                    {
-                      "id": 3,
-                      "text": "Click me",
-                      "type": "text",
-                    },
-                  ],
-                  "id": 4,
-                  "type": "text",
-                },
-              ],
-              "events": [
-                "click",
-              ],
-              "id": 5,
-              "type": "div",
+              "style": {
+                "display": "block",
+                "height": "100%",
+                "width": "100%",
+              },
+              "type": "body",
             },
           ],
-          "id": 6,
+          "id": 1,
           "style": {
-            "display": "flex",
-            "gap": 8,
+            "display": "block",
+            "height": "100%",
+            "width": "100%",
           },
-          "type": "div",
+          "type": "html",
         }
       `)
     })

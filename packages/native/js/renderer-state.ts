@@ -4,6 +4,7 @@ import { reportUncaught, type DomDispatchResult } from "./events/dispatch.js"
 import { createDragDispatcher } from "./events/drag.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
 import { elementOf, GpuixEventTarget, noteFocusEvent } from "./events/window-target.js"
+import { mountedRenderers } from "./mounted-renderer.js"
 import { deliverObservation } from "./observers.js"
 import type {
   ElementIdAllocator,
@@ -171,26 +172,9 @@ export type ActiveRoot = RendererRootBinding & {
 /** What native sends in the frame steps of a window that was asked for `requestAnimationFrame`. */
 const ANIMATION_FRAME_EVENT = "animationframe"
 
+export { mountedRenderer } from "./mounted-renderer.js"
+
 const STATE_KEY = Symbol.for("@ghia/native/renderer-states")
-const MOUNTED_KEY = Symbol.for("@ghia/native/mounted-renderer")
-
-/** Mount order, oldest first. Shared through `globalThis` like the renderer states. */
-function mountedRenderers(): NativeRenderer[] {
-  const existing = Reflect.get(globalThis, MOUNTED_KEY) as NativeRenderer[] | undefined
-  if (existing) return existing
-  const created: NativeRenderer[] = []
-  Reflect.set(globalThis, MOUNTED_KEY, created)
-  return created
-}
-
-/**
- * The renderer of the most recently mounted root that is still mounted, which
- * is "the window" for code that has no component to ask, such as the global
- * `matchMedia`.
- */
-export function mountedRenderer(): NativeRenderer | undefined {
-  return mountedRenderers().at(-1)
-}
 
 /** Register an open overlay on this renderer's layer stack. */
 export function pushDismissLayer(

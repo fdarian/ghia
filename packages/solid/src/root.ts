@@ -130,7 +130,11 @@ export function createRoot(
       binding.windowKeyEventId
     )
     stopWindowEventListeners = syncWindowEventListeners(renderer)
-    stopElementSource = installElementSource(renderer, (id) => container.elements.get(id))
+    stopElementSource = installElementSource(
+      renderer,
+      (id) => container.elements.get(id),
+      () => ({ html: container.html, body: container.body })
+    )
     // Sent on every attach, so a remount without the option restores the default.
     mutations.setKeyboardFocusDim(rootHandlers.keyboardFocusDim !== false)
     syncSelection()
@@ -160,6 +164,7 @@ export function createRoot(
     // A component can render several top-level nodes (a Dialog is its trigger and its
     // portal's layer), and removing one leaves the others in the native tree.
     for (const mounted of [...container.childList]) removeHostNode(container, mounted)
+    container.destroyDocumentElements()
     flush()
     eventHandlers.clear()
   }
@@ -171,6 +176,7 @@ export function createRoot(
         detach()
         attach()
       }
+      container.ensureDocumentElements()
       dispose = universalRender(
         () => createComponent(GpuixContext.Provider, {
           value: {

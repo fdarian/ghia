@@ -360,7 +360,8 @@ describeNative("a keyframes animation of one text on a page of 3000 nodes", { ti
       }
       for (let frame = 0; frame < 10; frame++) {
         const done = work(renderer, () => renderer.clockFastForward(16))
-        expect(done.elementsBuilt, `frame ${frame}`).toBeLessThanOrEqual(3)
+        // The text and its parent, under html and body.
+        expect(done.elementsBuilt, `frame ${frame}`).toBeLessThanOrEqual(3 + 2)
         expect(done.builds, `frame ${frame}`).toBeLessThanOrEqual(3)
         expect(done.prepainted, `frame ${frame}`).toBeLessThanOrEqual(20)
         expect(done.measures, `frame ${frame}`).toBe(0)
