@@ -21,6 +21,13 @@ describe("dom globals of the native build", () => {
     expect(window.document).toBe(document)
   })
 
+  it("has requestAnimationFrame, cancelAnimationFrame and ResizeObserver, and a document whose view is the window", () => {
+    expect(typeof globalThis.requestAnimationFrame).toBe("function")
+    expect(typeof globalThis.cancelAnimationFrame).toBe("function")
+    expect(typeof globalThis.ResizeObserver).toBe("function")
+    expect(document.defaultView).toBe(globalThis)
+  })
+
   it("turns scrolling the viewport into a no-op", () => {
     expect(window.scrollTo(0, 100)).toBeUndefined()
     expect(window.scroll({ top: 10 })).toBeUndefined()
