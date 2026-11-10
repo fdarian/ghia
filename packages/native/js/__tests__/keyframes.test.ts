@@ -161,7 +161,7 @@ describe.skipIf(!hasNativeTestRenderer)("keyframes on the native test renderer",
     live.dispose()
   })
 
-  it("accepts the animation shorthand and longhands in a style and rejects a bad one", () => {
+  it("accepts the animation shorthand and longhands in a style and drops a bad one", () => {
     const renderer = new TestRenderer({ width: 100, height: 100 })
     renderer.applyBatch(
       encodeWireBatchForTest([
@@ -172,10 +172,10 @@ describe.skipIf(!hasNativeTestRenderer)("keyframes on the native test renderer",
     )
     expect(() =>
       renderer.applyBatch(encodeWireBatchForTest([["setStyle", 1, { animationDuration: "fast" }]]))
-    ).toThrow(/animationDuration/)
+    ).not.toThrow()
     expect(() =>
       renderer.applyBatch(encodeWireBatchForTest([["setStyle", 1, { hover: { animation: "a b 1s" } }]]))
-    ).toThrow(/hover\.animation/)
+    ).not.toThrow()
     renderer.flush()
   })
 })

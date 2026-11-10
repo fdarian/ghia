@@ -100,12 +100,12 @@ describeNative("padding takes one to four values", () => {
     expect(laidOut("1px 2px", { paddingLeft: 9 })[0]).toEqual([9, 1, 20, 10])
   })
 
-  it("is an error for a value CSS would drop", () => {
-    expect(errorsOf({ padding: "1px auto" })).toMatch(/invalid padding "auto"/)
-    expect(errorsOf({ padding: "1px 12" })).toMatch(/invalid padding "12"/)
-    expect(errorsOf({ padding: "1px 2px 3px 4px 5px" })).toMatch(/one to four values/)
-    expect(errorsOf({ padding: "" })).toMatch(/one to four values/)
-    expect(errorsOf({ hover: { padding: "1px bogus" } })).toMatch(/invalid padding "bogus"/)
+  it("drops a value CSS would drop and reports nothing", () => {
+    expect(errorsOf({ padding: "1px auto" })).toBe("")
+    expect(errorsOf({ padding: "1px 12" })).toBe("")
+    expect(errorsOf({ padding: "1px 2px 3px 4px 5px" })).toBe("")
+    expect(errorsOf({ padding: "" })).toBe("")
+    expect(errorsOf({ hover: { padding: "1px bogus" } })).toBe("")
   })
 })
 
@@ -141,8 +141,8 @@ describeNative("margin takes one to four values, each of which may be auto", () 
     expect(placed("0 auto", { marginLeft: 7 })).toEqual([7, 1, 100, 10])
   })
 
-  it("is an error for an intrinsic size keyword in any value", () => {
-    expect(errorsOf({ margin: "0 max-content" })).toMatch(/invalid margin "max-content"/)
+  it("drops an intrinsic size keyword in any value and reports nothing", () => {
+    expect(errorsOf({ margin: "0 max-content" })).toBe("")
   })
 })
 
@@ -177,8 +177,8 @@ describeNative("inset takes one to four values", () => {
     expect(placed("10px 20px", { left: 0, bottom: 50 })).toEqual([0, 10, 280, 140])
   })
 
-  it("is an error for an intrinsic size keyword", () => {
-    expect(errorsOf({ inset: "10px fit-content" })).toMatch(/invalid inset "fit-content"/)
+  it("drops an intrinsic size keyword and reports nothing", () => {
+    expect(errorsOf({ inset: "10px fit-content" })).toBe("")
   })
 })
 
@@ -232,9 +232,9 @@ describeNative("gap takes a row and a column", () => {
     ])
   })
 
-  it("is an error for three values and for auto", () => {
-    expect(errorsOf({ gap: "1px 2px 3px" })).toMatch(/one or two values/)
-    expect(errorsOf({ gap: "1px auto" })).toMatch(/invalid gap "auto"/)
+  it("drops three values and auto and reports nothing", () => {
+    expect(errorsOf({ gap: "1px 2px 3px" })).toBe("")
+    expect(errorsOf({ gap: "1px auto" })).toBe("")
   })
 })
 
@@ -279,9 +279,9 @@ describeNative("borderWidth takes one to four values", () => {
     expect(bordered("1px 2px 3px 4px", { borderLeftWidth: 10 })[0]).toEqual([10, 1, 20, 10])
   })
 
-  it("is an error for a percentage and for five values", () => {
-    expect(errorsOf({ borderWidth: "1px 10%" })).toMatch(/invalid border width "10%"/)
-    expect(errorsOf({ borderWidth: "1px 1px 1px 1px 1px" })).toMatch(/one to four values/)
+  it("drops a percentage and five values and reports nothing", () => {
+    expect(errorsOf({ borderWidth: "1px 10%" })).toBe("")
+    expect(errorsOf({ borderWidth: "1px 1px 1px 1px 1px" })).toBe("")
   })
 })
 

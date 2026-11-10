@@ -227,6 +227,20 @@ struct ContainerRule {
 }
 
 impl ContainerRules {
+    /// The blocks as they were written, a style for each query.
+    pub(crate) fn from_blocks(blocks: Vec<(String, StyleDesc)>) -> Result<Self, String> {
+        let mut rules = Vec::with_capacity(blocks.len());
+        for (source, style) in blocks {
+            let query = ContainerQuery::parse(&source).map_err(|error| error.to_string())?;
+            rules.push(ContainerRule { source, query, style });
+        }
+        Ok(Self(rules.into()))
+    }
+
+    pub(crate) fn any_style(&self, test: impl Fn(&StyleDesc) -> bool) -> bool {
+        self.0.iter().any(|rule| test(&rule.style))
+    }
+
     /// `earlier`'s blocks, then `later`'s: the order a layered style cascades in.
     pub(crate) fn concat(earlier: Option<&Self>, later: Option<&Self>) -> Option<Self> {
         match (earlier, later) {

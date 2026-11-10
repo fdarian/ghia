@@ -302,8 +302,18 @@ mod tests {
             (r#"{"emptyCells": "none"}"#, "emptyCells"),
             (r#"{"borderSpacing": "1px 2px 3px"}"#, "borderSpacing"),
         ] {
-            let error = table.intern(json.as_bytes()).unwrap_err();
-            assert!(error.contains(&format!("invalid {name}")), "{error}");
+            let invalid = table.intern(json.as_bytes()).unwrap();
+            let with_sibling = json.replace('{', r#"{"opacity": 0.5, "#);
+            let kept = table.intern(with_sibling.as_bytes()).unwrap();
+            assert_eq!(kept.opacity, Some(0.5), "{name}");
+            for style in [&invalid, &kept] {
+                assert_eq!(
+                    (style.table_layout, style.caption_side, style.border_collapse, style.empty_cells),
+                    (None, None, None, None),
+                    "{name} is dropped"
+                );
+                assert!(style.border_spacing.is_none(), "{name} is dropped");
+            }
         }
     }
 

@@ -423,7 +423,7 @@ describeNative("white-space", () => {
       expect(testRoot.renderer.dragSelect(at(4), y, 399, y)).toBe("Z")
     })
 
-    it("reports a tabSize that is not a number of spaces or a length as an uncaught error", () => {
+    it("drops a tabSize that is not a number of spaces or a length and reports nothing", () => {
       for (const tabSize of [-1, "-1", "50%", "2ch", "wide"]) {
         const errors: Error[] = []
         const { render, unmount } = createTestRoot({
@@ -431,7 +431,7 @@ describeNative("white-space", () => {
         })
         try {
           render(<text style={{ whiteSpace: "pre", tabSize: tabSize as never }}>{"a\tb"}</text>)
-          expect(errors.map((error) => error.message).join(), String(tabSize)).toMatch(/tabSize/)
+          expect(errors, String(tabSize)).toEqual([])
         } finally {
           unmount()
         }
@@ -826,7 +826,7 @@ describeNative("white-space", () => {
       expect(height(8 * space)).toBeGreaterThan(height(100 * space))
     })
 
-    it("reports a value CSS does not have as an uncaught error", () => {
+    it("drops a value CSS does not have and reports nothing", () => {
       for (const [property, value] of [
         ["wordBreak", "anywhere"],
         ["wordBreak", "wide"],
@@ -840,9 +840,7 @@ describeNative("white-space", () => {
         })
         try {
           render(<text style={{ [property]: value } as never}>{"a b"}</text>)
-          expect(errors.map((error) => error.message).join(), `${property} ${value}`).toMatch(
-            new RegExp(`invalid ${property}`)
-          )
+          expect(errors, `${property} ${value}`).toEqual([])
         } finally {
           unmount()
         }

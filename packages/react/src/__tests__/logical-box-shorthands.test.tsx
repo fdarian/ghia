@@ -127,11 +127,11 @@ describeNative("paddingBlock and paddingInline", () => {
     ])
   })
 
-  it("is an error for a value CSS would drop", () => {
-    expect(errorsOf({ paddingBlock: "1px 2px 3px" })).toMatch(/one or two values/)
-    expect(errorsOf({ paddingInline: "1px auto" })).toMatch(/invalid padding-inline "auto"/)
-    expect(errorsOf({ paddingBlock: "" })).toMatch(/one or two values/)
-    expect(errorsOf({ hover: { paddingBlock: "1px bogus" } })).toMatch(/invalid padding-block "bogus"/)
+  it("drops a value CSS would drop and reports nothing", () => {
+    expect(errorsOf({ paddingBlock: "1px 2px 3px" })).toBe("")
+    expect(errorsOf({ paddingInline: "1px auto" })).toBe("")
+    expect(errorsOf({ paddingBlock: "" })).toBe("")
+    expect(errorsOf({ hover: { paddingBlock: "1px bogus" } })).toBe("")
   })
 
   it("is replaced by a state's padding, paddingBlock or side", () => {
@@ -185,10 +185,10 @@ describeNative("marginBlock and marginInline", () => {
     expect(placed({ marginBlock: "10px 20px", marginTop: 4 })[0]).toEqual([0, 4, 100, 10])
   })
 
-  it("is an error for a value CSS would drop", () => {
-    expect(errorsOf({ marginBlock: "0 max-content" })).toMatch(/invalid margin-block "max-content"/)
-    expect(errorsOf({ marginInline: "1px 2px 3px" })).toMatch(/one or two values/)
-    expect(errorsOf({ hover: { marginInline: "bogus" } })).toMatch(/invalid dimension: bogus/)
+  it("drops a value CSS would drop and reports nothing", () => {
+    expect(errorsOf({ marginBlock: "0 max-content" })).toBe("")
+    expect(errorsOf({ marginInline: "1px 2px 3px" })).toBe("")
+    expect(errorsOf({ hover: { marginInline: "bogus" } })).toBe("")
   })
 
   it("is replaced by a state's margin, marginInline or side", () => {
@@ -234,9 +234,9 @@ describeNative("insetBlock and insetInline", () => {
     expect(placed({ insetBlock: "10px 20px", top: 50, insetInline: 0 })).toEqual([0, 50, 300, 130])
   })
 
-  it("is an error for a value CSS would drop", () => {
-    expect(errorsOf({ insetBlock: "10px fit-content" })).toMatch(/invalid inset-block "fit-content"/)
-    expect(errorsOf({ insetInline: "1px 2px 3px" })).toMatch(/one or two values/)
+  it("drops a value CSS would drop and reports nothing", () => {
+    expect(errorsOf({ insetBlock: "10px fit-content" })).toBe("")
+    expect(errorsOf({ insetInline: "1px 2px 3px" })).toBe("")
   })
 
   it("is replaced by a state's inset, insetBlock or side", () => {
