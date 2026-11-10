@@ -18,19 +18,27 @@ function indexOf(key: string | symbol): number | undefined {
   return Number.isInteger(index) && index >= 0 && String(index) === key ? index : undefined
 }
 
-/** The values a mutating method puts into the array, which are the ones to check. */
-function incoming(method: string, args: readonly unknown[]): readonly unknown[] {
+/** The arguments of a mutating method with every value it would store converted, `fill`'s missing value included. */
+function convertedArgs<T>(method: string, args: readonly unknown[], convert: (value: unknown) => T): unknown[] {
   switch (method) {
     case "push":
     case "unshift":
-      return args
+      return args.map(convert)
     case "splice":
-      return args.slice(2)
+      return [...args.slice(0, 2), ...args.slice(2).map(convert)]
     case "fill":
-      return args.slice(0, 1)
+      return [convert(args[0]), ...args.slice(1)]
     default:
-      return []
+      return [...args]
   }
+}
+
+function indexError(index: number, length: number): RangeError {
+  return new RangeError(`Failed to set the ${index} property on an ObservableArray: the index is beyond the length (${length}).`)
+}
+
+function lengthError(): RangeError {
+  return new RangeError("Failed to set the 'length' property on an ObservableArray: it can only be made smaller.")
 }
 
 function changed(before: readonly unknown[], after: readonly unknown[]): boolean {
@@ -44,10 +52,15 @@ function changed(before: readonly unknown[], after: readonly unknown[]): boolean
 export function observableArray<T>(convert: (value: unknown) => T, onChange: () => void): ObservableArray<T> {
   const target: T[] = []
 
-  const mutate = (change: () => boolean): boolean => {
-    const before = target.slice()
-    const result = change()
-    if (changed(before, target)) onChange()
+  // The change runs on a copy that replaces the contents only once it has not thrown, so a throw leaves the array as it was.
+  const mutate = <R>(change: (draft: T[]) => R): R => {
+    const draft = target.slice()
+    const result = change(draft)
+    if (changed(target, draft)) {
+      target.length = 0
+      for (const value of draft) target.push(value)
+      onChange()
+    }
     return result
   }
 
@@ -56,33 +69,40 @@ export function observableArray<T>(convert: (value: unknown) => T, onChange: () 
       if (typeof key === "string" && MUTATORS.has(key)) {
         const method = Reflect.get(Array.prototype, key) as (...args: unknown[]) => unknown
         return (...args: unknown[]) => {
-          const values = incoming(key, args).map(convert)
-          if (key === "push" || key === "unshift") args = values
-          else if (key === "splice") args = [...args.slice(0, 2), ...values]
-          else if (key === "fill") args = [values[0], ...args.slice(1)]
-          let result: unknown
-          mutate(() => {
-            result = method.apply(target, args)
-            return true
-          })
-          return result === target ? receiver : result
+          const values = convertedArgs(key, args, convert)
+          const result = mutate((draft) => ({ value: method.apply(draft, values), draft }))
+          return result.value === result.draft ? receiver : result.value
         }
       }
       return Reflect.get(target, key, target)
     },
     set(_, key, value) {
       if (key === "length") {
-        return mutate(() => Reflect.set(target, key, value))
+        mutate((draft) => {
+          draft.length = value
+          if (draft.length > target.length) throw lengthError()
+        })
+        return true
       }
-      if (indexOf(key) === undefined) return Reflect.set(target, key, value, target)
+      const index = indexOf(key)
+      if (index === undefined) return Reflect.set(target, key, value, target)
       const converted = convert(value)
-      return mutate(() => Reflect.set(target, key, converted, target))
+      mutate((draft) => {
+        if (index > draft.length) throw indexError(index, draft.length)
+        draft[index] = converted
+      })
+      return true
     },
     defineProperty(_, key, descriptor) {
-      if (indexOf(key) !== undefined && "value" in descriptor) {
-        return mutate(() => Reflect.defineProperty(target, key, { ...descriptor, value: convert(descriptor.value) }))
-      }
-      return Reflect.defineProperty(target, key, descriptor)
+      const index = indexOf(key)
+      if (index === undefined) return Reflect.defineProperty(target, key, descriptor)
+      if (!("value" in descriptor)) return false
+      const converted = convert(descriptor.value)
+      mutate((draft) => {
+        if (index > draft.length) throw indexError(index, draft.length)
+        draft[index] = converted
+      })
+      return true
     },
     deleteProperty(_, key) {
       const index = indexOf(key)
@@ -90,10 +110,10 @@ export function observableArray<T>(convert: (value: unknown) => T, onChange: () 
       if (index >= target.length) return true
       // A hole would leave an entry that is not a sheet, so only the last one can go.
       if (index !== target.length - 1) return false
-      return mutate(() => {
-        target.length = index
-        return true
+      mutate((draft) => {
+        draft.length = index
       })
+      return true
     },
   })
 
@@ -101,9 +121,8 @@ export function observableArray<T>(convert: (value: unknown) => T, onChange: () 
     array,
     replace(values) {
       const converted = [...values].map(convert)
-      mutate(() => {
-        target.splice(0, target.length, ...converted)
-        return true
+      mutate((draft) => {
+        draft.splice(0, draft.length, ...converted)
       })
     },
   }

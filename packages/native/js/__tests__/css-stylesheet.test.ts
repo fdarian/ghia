@@ -248,6 +248,26 @@ describe("document.adoptedStyleSheets", () => {
     expect([...list]).toEqual([sheet])
   })
 
+  it("throws RangeError for an index past the end or a longer length, TypeError for a missing value, and never changes", () => {
+    const first = new CSSStyleSheet()
+    const second = new CSSStyleSheet()
+    document.adoptedStyleSheets = [first, second]
+    const list = document.adoptedStyleSheets
+    expect(() => {
+      list[5] = first
+    }).toThrow(RangeError)
+    expect(() => {
+      list.length = 3
+    }).toThrow(RangeError)
+    expect(() => list.fill(undefined as unknown as CSSStyleSheet)).toThrow(TypeError)
+    expect(() => (list.fill as () => unknown)()).toThrow(TypeError)
+    expect(() => Object.defineProperty(list, 4, { value: first })).toThrow(RangeError)
+    expect([...list]).toEqual([first, second])
+    expect(Object.keys(list)).toEqual(["0", "1"])
+    list[2] = first
+    expect(list.length).toBe(3)
+  })
+
   it("lets only the last index be deleted, so there are no holes", () => {
     const [a, b] = [new CSSStyleSheet(), new CSSStyleSheet()]
     document.adoptedStyleSheets = [a, b]
