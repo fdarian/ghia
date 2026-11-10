@@ -1,4 +1,5 @@
 import type { EventPayload } from "../index.js"
+import { addFrameSource, runAnimationFrame } from "./animation-frame.js"
 import { reportUncaught, type DomDispatchResult } from "./events/dispatch.js"
 import { createDragDispatcher } from "./events/drag.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
@@ -167,6 +168,9 @@ export type ActiveRoot = RendererRootBinding & {
   scoped: GpuixEventTarget
 }
 
+/** What native sends in the frame steps of a window that was asked for `requestAnimationFrame`. */
+const ANIMATION_FRAME_EVENT = "animationframe"
+
 const STATE_KEY = Symbol.for("@ghia/native/renderer-states")
 const MOUNTED_KEY = Symbol.for("@ghia/native/mounted-renderer")
 
@@ -227,9 +231,17 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       dispatchDrag,
     })
 
+  let removeFrameSource: (() => void) | undefined
   let onError: ((error: unknown) => void) | undefined
   const mediaListeners = new Set<() => void>()
   const motionValueSinks = new Map<number, MotionValueSink>()
+
+  /** The callbacks run as a handler does, so the framework flushes what they changed before the frame builds. */
+  const runFrameCallbacks = () => {
+    const run = () => runAnimationFrame(renderer)
+    if (active?.handlers.schedule) active.handlers.schedule(run)
+    else run()
+  }
 
   const state: RendererState = {
     ids,
@@ -263,6 +275,8 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         detach() {
           if (active !== binding) return false
           active = undefined
+          removeFrameSource?.()
+          removeFrameSource = undefined
           const mounted = mountedRenderers()
           mounted.splice(mounted.indexOf(renderer), 1)
           return true
@@ -270,9 +284,15 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       }
       active = binding
       mountedRenderers().push(renderer)
+      removeFrameSource = addFrameSource(renderer)
       return binding
     },
     dispatch(received) {
+      if (received.eventType === ANIMATION_FRAME_EVENT) {
+        // Not a DOM event: no app listener, `on*` prop or `onEvent` hears it.
+        runFrameCallbacks()
+        return false
+      }
       if (received.eventType === "mediaChange") {
         for (const listener of [...mediaListeners]) listener()
         return mediaListeners.size > 0
@@ -315,6 +335,10 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       return true
     },
     dispatchSync(received) {
+      if (received.eventType === ANIMATION_FRAME_EVENT) {
+        runFrameCallbacks()
+        return { defaultPrevented: false, propagationStopped: false }
+      }
       const root = active
       if (received.eventType === "focusin") noteFocusEvent(renderer)
       const event = shapeScrollEvent(normalizeEventType(received))

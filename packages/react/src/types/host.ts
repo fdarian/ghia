@@ -70,6 +70,7 @@ import type {
   DiffProps as NativeDiffProps,
   MarkdownProps as NativeMarkdownProps,
   AnchoredProps as NativeAnchoredProps,
+  DomElement,
   MotionBinding,
   MotionValueStyle,
   MutationRenderer,
@@ -317,6 +318,7 @@ export interface TextInstance {
 export type PublicInstance = Instance &
   FocusableElement &
   ScrollableElement &
+  DomElement &
   Required<Pick<Instance, "getBoundingClientRect" | "getAnimations" | typeof HOST_BINDING>>
 
 export interface HostContext {

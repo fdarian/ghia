@@ -2098,6 +2098,14 @@ impl TestGpuixRenderer {
         self.pointer_requests.set_window_events(types);
     }
 
+    /// `GpuixRenderer::requestAnimationFrame`. The callbacks run in the steps of the next frame:
+    /// `flush` and `drawFrame` deliver it, or any draw that comes first runs them.
+    #[napi]
+    pub fn request_animation_frame(&self) -> Result<bool> {
+        update_view(|view, window, _cx| view.request_animation_frame(window))?;
+        Ok(true)
+    }
+
     /// Capture the mouse for `element_id`; recorded before this returns, and the
     /// next simulated pointer input fires `gotpointercapture`. Ignored while no
     /// button is down.

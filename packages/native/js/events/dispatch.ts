@@ -1,6 +1,26 @@
 import type { EventPayload } from "../../index.js"
-import type { EventHandlerMap } from "../host.js"
+import type { EventHandlerMap, HostEventHandler } from "../host.js"
 import type { HostDropEffect } from "./types.js"
+
+/**
+ * What the handler map holds under a key that has an event listener list (`ElementListeners`). It
+ * is callable like any handler; the dispatch calls the function under `LISTENER_RUNNER` instead, to
+ * give it the state of the dispatch.
+ */
+export const LISTENER_RUNNER = Symbol.for("@ghia/native/listener-runner")
+
+export interface ListenerRunner {
+  (event: DomEvent): void
+  readonly [LISTENER_RUNNER]: (
+    event: DomEvent,
+    state: DomEventState | undefined,
+    fail: (error: unknown) => void
+  ) => void
+}
+
+function isListenerRunner(handler: HostEventHandler): handler is HostEventHandler & ListenerRunner {
+  return LISTENER_RUNNER in handler
+}
 
 export const EVENT_PHASE_NONE = 0
 export const EVENT_PHASE_CAPTURING = 1
@@ -307,6 +327,7 @@ export function dispatchDomEvent(
   const elements = path.map((id) => requireElement(root, id, payload.eventType))
   const { event, state } = createDomEvent(root, payload, elements, null)
   const errors: unknown[] = []
+  const fail = (error: unknown) => errors.push(error)
   const captureKey = captureHandlerKey(payload.eventType)
   const visit = (index: number, phase: number, keys: string[]) => {
     event.currentTarget = elements[index]
@@ -315,15 +336,18 @@ export function dispatchDomEvent(
     if (!handlers) return
     for (const key of keys) {
       if (state.immediatePropagationStopped) return
+      const handler = handlers.get(key)
+      if (!handler) continue
       try {
-        handlers.get(key)?.(event)
+        // An element with listeners on this type keeps a list, which needs the state of the dispatch.
+        if (isListenerRunner(handler)) handler[LISTENER_RUNNER](event, state, fail)
+        else handler(event)
       } catch (error) {
-        errors.push(error)
+        fail(error)
       }
     }
   }
 
-  const fail = (error: unknown) => errors.push(error)
   hooks?.beforeCapture?.(event, state, fail)
   for (let index = path.length - 1; index > 0 && !state.propagationStopped; index--) {
     visit(index, EVENT_PHASE_CAPTURING, [captureKey])

@@ -171,6 +171,15 @@ let focusClock = 0
  */
 export class GpuixDocument<Element = unknown> extends GpuixEventTarget {
   /**
+   * The global object, which `dom-globals` installs as `window`: where a library that takes
+   * `element.ownerDocument.defaultView` as its window finds `setTimeout`, `requestAnimationFrame`
+   * and `ResizeObserver`. There is one window object for every window of the app.
+   */
+  get defaultView(): typeof globalThis {
+    return globalThis
+  }
+
+  /**
    * The focused element, the same object a `ref` gives, or `null` when nothing
    * is focused. With several windows (one root each), the window that holds
    * focus decides: of the roots that have a focused element, the one that heard

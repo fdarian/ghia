@@ -435,6 +435,12 @@ export declare class GpuixRenderer {
   /** The event types `window` or `document` listens for. Replaces the set. */
   setWindowEventListeners(types: Array<string>): void
   /**
+   * `requestAnimationFrame`: asks the window for its next frame's steps, which send JS the
+   * `animationframe` event that runs the callbacks (see `frame_steps`). True when the window
+   * took the request; false while it is not open, in which case JS asks again once it is.
+   */
+  requestAnimationFrame(): boolean
+  /**
    * Capture the mouse for `element_id`. The request is recorded before this
    * returns, so `hasPointerCapture` answers true and the next pointer input
    * is already aimed at the element; that input fires `gotpointercapture`
@@ -1101,6 +1107,11 @@ export declare class TestGpuixRenderer {
   scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null, behavior?: string | undefined | null): void
   /** The event types `window` or `document` listens for. Replaces the set. */
   setWindowEventListeners(types: Array<string>): void
+  /**
+   * `GpuixRenderer::requestAnimationFrame`. The callbacks run in the steps of the next frame:
+   * `flush` and `drawFrame` deliver it, or any draw that comes first runs them.
+   */
+  requestAnimationFrame(): boolean
   /**
    * Capture the mouse for `element_id`; recorded before this returns, and the
    * next simulated pointer input fires `gotpointercapture`. Ignored while no
