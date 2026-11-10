@@ -274,10 +274,11 @@ function syncCustomProps(
 }
 
 function syncAttributes(renderer: MutationRenderer, id: number, type: string, props: Props): void {
-  for (const [key, value] of Object.entries(props)) {
+  const record = props as Record<string, unknown>
+  for (const key in record) {
     const name = attributeNameOfProp(type, key)
     if (name === undefined) continue
-    const text = attributeValue(name, value)
+    const text = attributeValue(name, record[key])
     if (text !== null) renderer.setAttribute(id, name, text)
   }
 }
