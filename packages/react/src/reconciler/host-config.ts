@@ -533,11 +533,11 @@ export const hostConfig = {
   },
 
   getChildHostContext(
-    _parentHostContext: HostContext,
+    parentHostContext: HostContext,
     _type: ElementType,
     _rootContainerInstance: Container
   ): HostContext {
-    return {}
+    return parentHostContext
   },
 
   shouldSetTextContent(_type: ElementType, _props: Props): boolean {

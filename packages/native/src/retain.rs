@@ -456,7 +456,7 @@ struct Record {
     /// transform with a `var()`, a `style()` query on the parent. A subtree that read none is the
     /// same build under other custom properties.
     reads_custom: bool,
-    /// The element is costly to build, see [`Entry::costly`]: all that makes a root of one worth it.
+    /// The element is costly to build, see [`costly`]: all that makes a root of a few elements worth it.
     costly: bool,
     subtree: crate::layout::cull::Subtree,
     effects: Option<Rc<[BuildEffect]>>,
@@ -728,16 +728,17 @@ struct Node {
 }
 
 /// Whether building the element alone costs more than replaying it: it carries text (its own, or a
-/// `#text` child it lays out as a paragraph) or is not a plain host box (an image, an `<svg>`), see
-/// [`Entry::costly`].
+/// `#text` child it lays out as a paragraph, or an inline `span` that holds some) or is not a plain host
+/// box (an image, an `<svg>`). Only a root of fewer elements than `min_root` is judged by it, see
+/// [`Retain::costly`].
 pub(crate) fn costly(tree: &crate::retained_tree::RetainedTree, element: &crate::retained_tree::RetainedElement) -> bool {
     element.content.is_some()
         || !crate::text::inline::is_host_type(&element.element_type)
-        || element
-            .children
-            .iter()
-            .filter_map(|id| tree.elements.get(id))
-            .any(crate::text::inline::is_raw_text)
+        || element.children.iter().filter_map(|id| tree.elements.get(id)).any(|child| {
+            // Solid keeps an empty `#text` where an expression has no value yet: it lays out nothing.
+            child.element_type == "span"
+                || (crate::text::inline::is_raw_text(child) && child.content.as_deref().is_some_and(|text| !text.trim().is_empty()))
+        })
 }
 
 /// What `Retain::scan_patch_root` finds in a subtree.
@@ -1214,9 +1215,6 @@ pub(crate) struct Entry<'a> {
     /// that moves with the clock and not with a revision: a record made on the other side of the
     /// start or the end of a run says the element is lifted, or is not, wrongly.
     pub lift_run: &'a dyn Fn() -> bool,
-    /// Whether building the element alone costs more than replaying it: it carries text or is
-    /// not a plain host box (an image, an `<svg>`). Only a root of one element needs this.
-    pub costly: bool,
     /// Whether the element, or something in its subtree, declares a hover that only changes how it
     /// paints (`Retain::can_be_patch_root`): a root built for it is a patch root.
     pub patch_root: bool,
@@ -2202,7 +2200,7 @@ impl Retain {
         if scan.lifts {
             return false;
         }
-        scan.hovers || (self.quiet && !scan.root_below && self.worth(scan.size, costly(tree, element)))
+        scan.hovers || (self.quiet && !scan.root_below && (self.worth(scan.size, false) || costly(tree, element)))
     }
 
     /// What a subtree holds that a patch root is judged by: whether `id` or something below it declares a hover that
@@ -2242,7 +2240,7 @@ impl Retain {
         let scanned = if size > PATCH_ROOT_MAX_ELEMENTS {
             PatchRootScan { hovers: false, size: PATCH_ROOT_MAX_ELEMENTS + 1, lifts, root_below: true, rooted: true, unfit }
         } else {
-            let rooted = root_below || self.worth(size, costly(tree, element));
+            let rooted = root_below || self.worth(size, false) || costly(tree, element);
             PatchRootScan { hovers, size, lifts, root_below, rooted, unfit }
         };
         self.patch_root_scans.insert(id, (element.subtree_revision, scanned));
@@ -2661,7 +2659,7 @@ impl Retain {
             absolute: false,
             moved,
             scroller: entry.scroller,
-            costly: entry.costly,
+            costly: false,
             patch_root: entry.patch_root,
             anchor: false,
             digest: 0,
@@ -2700,6 +2698,7 @@ impl Retain {
                 node.lift_z = record.lift_z;
                 node.forms_context = record.forms_context;
                 node.lift_run = record.lift_run;
+                node.costly = record.costly;
                 node.reads_colors = record.reads_colors;
                 node.reads_custom = record.reads_custom;
                 node.subtree = record.subtree;
@@ -3189,6 +3188,18 @@ impl Retain {
         }
         if let Some(node) = self.top() {
             node.vol.dynamic |= bits;
+        }
+    }
+
+    /// Whether the element just built is costly (see [`costly`]), asked only of a root too small to be
+    /// worth one for its size: the answer reads the element's children, which every element of a
+    /// large page would pay for.
+    pub(crate) fn costly(&mut self, costly: impl FnOnce() -> bool) {
+        let Some(at) = self.stack.last().map(|at| *at as usize) else {
+            return;
+        };
+        if !self.worth(self.below[at].size + 1, false) {
+            self.nodes[at].costly = costly();
         }
     }
 
@@ -3753,7 +3764,6 @@ mod tests {
             prekeyed: None,
             scroller: None,
             lift_run: &|| false,
-            costly: true,
                 patch_root: false,
         });
         retain.stacking(|| (None, true));
@@ -3833,7 +3843,6 @@ mod tests {
             prekeyed: None,
             scroller: None,
             lift_run: &|| false,
-            costly: true,
                 patch_root: false,
         };
         let mut recordings = Vec::new();
@@ -3908,7 +3917,6 @@ mod tests {
                 prekeyed: None,
                 scroller: None,
                 lift_run: &|| false,
-                costly: true,
                 patch_root: false,
             })
             .expect("the root is skipped by the frame after the one that built it");
@@ -3996,7 +4004,6 @@ mod tests {
                     prekeyed: None,
                     scroller: None,
                     lift_run: &|| lift_run,
-                    costly: true,
                 patch_root: false,
                 })
                 .is_some();
@@ -4131,7 +4138,6 @@ mod tests {
                 prekeyed: None,
                 scroller: None,
                 lift_run: &|| false,
-                costly: true,
                 patch_root: false,
             });
             retain.stacking(|| (None, true));
@@ -4281,7 +4287,6 @@ mod tests {
                 prekeyed: None,
                 scroller: None,
                 lift_run: &|| false,
-                costly: true,
                 patch_root: false,
             })
         };
@@ -4339,6 +4344,35 @@ mod tests {
         // A `display: none` element is not entered by a pass that skips it, and its children can be.
         let hidden = tree_of(&[(1, None, "div", None), (2, Some(1), "div", Some("none")), (3, Some(2), "div", None)]);
         assert_eq!(carried(&hidden, 3, &[1]), vec![2, 3]);
+    }
+
+    fn costly_of(children: &[(&str, &str)]) -> bool {
+        let mut tree = RetainedTree::new();
+        tree.create_element(1, "div".to_string());
+        for (index, (kind, content)) in children.iter().enumerate() {
+            let id = 2 + index as u64;
+            tree.create_element(id, kind.to_string());
+            tree.append_child(1, id);
+            if *kind == "#text" {
+                tree.set_text(id, content.to_string());
+            }
+        }
+        costly(&tree, &tree.elements[&1])
+    }
+
+    #[test]
+    fn a_container_is_costly_for_a_string_or_an_inline_span_it_holds() {
+        assert!(costly_of(&[("#text", "Error")]));
+        assert!(costly_of(&[("span", "")]));
+        assert!(costly_of(&[("#text", ""), ("span", "")]));
+    }
+
+    #[test]
+    fn a_container_with_a_blank_placeholder_string_or_only_boxes_is_not_costly() {
+        assert!(!costly_of(&[("#text", "")]));
+        assert!(!costly_of(&[("#text", "  ")]));
+        assert!(!costly_of(&[("div", "")]));
+        assert!(!costly_of(&[]));
     }
 
     /// An element of the page under test.
@@ -5539,7 +5573,6 @@ mod tests {
                     prekeyed: None,
                     scroller,
                     lift_run: &|| false,
-                    costly: true,
                     patch_root: self.patch_roots.contains(&id),
                 })
         }

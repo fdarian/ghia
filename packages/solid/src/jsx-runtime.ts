@@ -102,7 +102,7 @@ export namespace JSX {
   export interface ElementChildrenAttribute { children: {} }
   export interface IntrinsicElements {
     div: SolidHostProps
-    text: SolidHostProps<HostProps & Omit<SvgTextProps, keyof HostProps>>
+    text: SolidHostProps<SvgTextProps>
     span: SolidHostProps
     img: SolidHostProps<ImgProps>
     webview: SolidHostProps<WebviewProps>

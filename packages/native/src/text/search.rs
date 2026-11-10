@@ -1,7 +1,7 @@
 //! Highlight ranges painted behind text: search matches and explicit ranges.
 //!
 //! There is deliberately no joined "document" for the `query` case. React makes
-//! a separate host node for every interpolated string, so `<text>Hello {name}!`
+//! a separate host node for every interpolated string, so `<div>Hello {name}!</div>`
 //! is three painted runs of ONE logical line. Those runs are merged into a
 //! [`Group`]; a match never crosses a group. Chrome's find behaves the same way
 //! across a paragraph boundary, and it means a 5k-row list is 5k small strings
@@ -494,7 +494,7 @@ pub fn settle_frame(window: WindowId) -> Vec<u64> {
 ///
 /// Numbering at build time cannot work: retained matches are located before the
 /// frame, native text only exists during it, and a subtree can interleave them
-/// (`<code>` then `<text>`). Numbering each kind separately made `activeIndex`
+/// (`<code>` then a string). Numbering each kind separately made `activeIndex`
 /// point at the wrong match whenever a native element came first.
 ///
 /// Numbering in paint order cannot work either: a positioned element paints after the
@@ -540,7 +540,7 @@ fn wash(
     }
 }
 
-/// Washes for a retained `<text>` run, looked up by selection key.
+/// Washes for a retained text run, looked up by selection key.
 pub fn washes_for_retained_run(
     window: WindowId,
     ctx: &HighlightContext,
@@ -721,20 +721,11 @@ impl GroupList {
     }
 }
 
-/// True for a primitive text node, the kind React makes for a raw string.
-///
-/// Shape only: an empty one is transparent rather than a run boundary, so
-/// `{'a'}{''}{'b'}` stays one line. Copy uses the same predicate through
-/// [`group_id`], which is the only way the two can agree.
-pub fn is_text_leaf(element: &RetainedElement) -> bool {
-    super::inline::is_raw_text(element)
-}
-
 /// The adjacent primitive text leaves of `parent` that `id` is one of, or an
 /// empty slice when `id` is not a leaf. A non-text sibling ends the run for search,
 /// so it must end it for copy too, and this is the one place that decides.
 fn leaf_siblings<'a>(tree: &RetainedTree, parent: &'a RetainedElement, id: u64) -> &'a [u64] {
-    let is_leaf = |id: &u64| tree.elements.get(id).is_some_and(is_text_leaf);
+    let is_leaf = |id: &u64| tree.elements.get(id).is_some_and(super::inline::is_raw_text);
     let Some(position) = parent.children.iter().position(|child| *child == id) else {
         return &[];
     };
@@ -853,7 +844,7 @@ fn collect_content(tree: &RetainedTree, element: &RetainedElement, out: &mut Vec
         let Some(child) = tree.elements.get(&child_id) else {
             continue;
         };
-        if is_text_leaf(child) {
+        if super::inline::is_raw_text(child) {
             run.push(child_id);
             continue;
         }
@@ -1225,7 +1216,7 @@ mod tests {
         tree
     }
 
-    /// Text nodes of a `<text>` are one paragraph, painted as one string under
+    /// The `#text` children of a `<div>` are one paragraph, painted as one string under
     /// the key of their container.
     #[test]
     fn interpolated_children_form_one_group() {
@@ -1594,7 +1585,7 @@ mod tests {
 
     /// The blocker a review caught: a native element and retained text share one numbering, so
     /// the native element's matches come before the text's exactly when it comes first in the
-    /// DOCUMENT. Numbering retained matches first made `activeIndex: 0` mark the `<text>` match.
+    /// DOCUMENT. Numbering retained matches first made `activeIndex: 0` mark the retained text match.
     /// Paint order does not decide it: a positioned element paints late.
     #[test]
     fn ordinals_follow_document_order_across_both_kinds() {
@@ -1863,7 +1854,7 @@ mod tests {
 
     // ── content-visibility ───────────────────────────────────────────
 
-    /// `<div><text auto>alpha a</text><text hidden>alpha b</text><text>alpha c</text></div>`
+    /// `<div><div auto>alpha a</div><div hidden>alpha b</div><div>alpha c</div></div>`
     fn skipping_tree() -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());

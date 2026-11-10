@@ -192,8 +192,7 @@ export type SvgFeSpotLightProps = SvgShapeElementProps<NativeSvgFeSpotLightProps
 export type SvgFeTileProps = SvgShapeElementProps<NativeSvgFeTileProps>
 export type SvgFeTurbulenceProps = SvgShapeElementProps<NativeSvgFeTurbulenceProps>
 
-/** `<text>` is valid only inside an `<svg>`: the host props plus the SVG attributes of a text. */
-export type SvgTextProps = Props & Omit<NativeSvgTextProps, keyof Props>
+export type SvgTextProps = SvgShapeElementProps<NativeSvgTextProps>
 
 export interface CodeProps extends ReactHostProps<NativeCodeProps> {
   key?: Key | null
