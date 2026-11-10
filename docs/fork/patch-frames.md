@@ -915,6 +915,16 @@ the patcher turns it on with `Window::set_contained_patches`.
   the recording cannot be put elsewhere changed) the record goes with the recording, and the box is a root again
   only on the build after the next frame built whole. The first layout edit of a box root that no frame built whole has made one is a frame
   built whole too; the edits after it are patches, also after a frame built whole that an edit outside every root made.
+  **Scroll anchoring.** A scroller that was scrolled (`overflow-anchor: auto`, the default) moves its offset after a layout by what moved the
+  box it anchors to, in its own prepaint ([scroll.md](scroll.md#scroll-anchoring-82)), which a patch of a root inside it never runs. gpui's
+  relayout patch therefore makes the scrollers above the root pick their anchor before the patch's layout (`TaffyLayoutEngine::pick_anchors_of`,
+  from the boxes of the layout before it, as a frame's pick is) and asks after it what the step would do (`ScrollAnchoring::would_act`): one
+  that would scroll the scroller or drop its anchor is declined `NotContained` and the frame built whole in the same draw does it. That is an edit
+  that moves a box the scroller anchors to inside the root (a taller box above the anchor in a fixed-height row at the top of the view) or restyles
+  it; an edit that moves nothing the scroller anchors to (the anchor is another row, the row itself, or the root is out of view) is a patch. A decline
+  has set the styles, so the frame after it finds no restyle where a frame built whole from the page before drops the anchor: the flags of the pass
+  are held across the patch's end of pass and released when the patch is kept (`hold_anchor_restyles`, `release_anchor_restyles`). Tests:
+  `splice_patch_tests.rs` (5 edits at 5 offsets, offset and frame equal to a page built whole), `box-root-patch.test.tsx` (the anchored case).
   **Measured** (`examples/solid/layout-scale/profile.tsx`, release addon, instructions per op; a1 is a text edit in the header
   that holds a focused input, a2 a text edit in a row of the scroller): a1 at 1000, 3000 and 10000 rows 26.2M, 73.3M and 241.0M
   before, 2.23M, 3.68M and 9.13M after (a patch of the header, `relayoutPatches` 1, nothing declined); a2 35.4M, 99.8M and 328M

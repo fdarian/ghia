@@ -27,7 +27,7 @@ const ROWS = Number(process.env.ROWS ?? "230")
 const WATCHED_FAR = 30
 const WHEEL_TICK = 30
 
-type Page = { title: string; headerHeight: number; row: string; footer: string }
+type Page = { title: string; headerHeight: number; row: string; footer: string; shift: number }
 
 function open(initial: Page, watched: number) {
   const [page, setPage] = createSignal(initial)
@@ -47,7 +47,7 @@ function open(initial: Page, watched: number) {
             >
               <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, minWidth: 0 }}>
                 <text style={{ fontSize: 14, color: "#18181b", whiteSpace: "nowrap" }}>{`Message ${index}`}</text>
-                <text style={{ fontSize: 12, color: "#71717a", whiteSpace: "nowrap" }}>{index === watched ? page().row : "preview"}</text>
+                <text style={{ fontSize: 12, color: "#71717a", whiteSpace: "nowrap", marginTop: index === watched ? page().shift : 0 }}>{index === watched ? page().row : "preview"}</text>
               </div>
               <text style={{ width: 72, fontSize: 12, color: "#2563eb", textAlign: "right" }}>{`r${index}`}</text>
             </div>
@@ -78,7 +78,7 @@ function boundsOf(renderer: TestRenderer, testId: string) {
 
 const reason = (reasons: string, key: string) => (JSON.parse(reasons) as Record<string, number>)[key] ?? 0
 
-const BASE: Page = { title: "230 items", headerHeight: 56, row: "a preview of the body", footer: "ready" }
+const BASE: Page = { title: "230 items", headerHeight: 56, row: "a preview of the body", footer: "ready", shift: 0 }
 
 type Scrolled = { top: number; tickBetweenEdits: boolean }
 
@@ -127,6 +127,7 @@ function run(name: string, patch: boolean, changes: Partial<Page>[], scrolled?: 
         picture: picture(renderer, `${name}-${patch}-${step}`),
         header: boundsOf(renderer, "header"),
         row: boundsOf(renderer, `row-${watched}`),
+        scrollTop: renderer.getScrollMetrics(scroller.id)?.[1],
       })
     }
     return { steps, mismatches: renderer.getRetainedCounters().mismatches, counters: renderer.getPatchCounters() }
@@ -196,6 +197,27 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a box of a fixed
     for (const step of on.steps) expect(step.patched + step.whole).toBe(1)
     expect(reason(on.counters.declines, "Relocated")).toBe(0)
     expect(reason(on.counters.unpatchable, "Box:Relocated")).toBe(0)
+  }, TIMEOUT)
+
+  // Skipped under the retention verifier: with patching off too (`GPUIX_PATCH_OFF=1 GPUIX_RETAIN_VERIFY=1`) a frame that anchoring scrolls
+  // replays a row whose published box is the scroll's distance (6 px) from the one a build gives, so the verifier reports it. Not the patch's.
+  it.skipIf(verifying)("an edit inside a row that moves the box a scroller anchors to (scroll anchoring, the default) leaves the offset and the picture that patching off does", () => {
+    // The scroller sits at 1450 after the wheel tick, which is 10 px into the watched row: the preview text, fully in view, is the anchor,
+    // and `shift` moves it inside a row that keeps its box. A frame built whole scrolls by what moved the anchor; a patch has to as well.
+    const changes: Partial<Page>[] = [{ shift: 6 }, { shift: 0 }, { shift: 12 }, { row: "edit 4", shift: 12 }]
+    const scrolled: Scrolled = { top: 1420, tickBetweenEdits: false }
+    const on = run("anchored", true, changes, scrolled)
+    const off = run("anchored", false, changes, scrolled)
+    expect(on.mismatches).toBe(0)
+    expect(on.steps.map((step) => step.scrollTop)).toEqual(off.steps.map((step) => step.scrollTop))
+    expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+    expect(on.steps.map((step) => step.row)).toEqual(off.steps.map((step) => step.row))
+    if (!counted) return
+    // The anchor is inside the row and `shift` moves it, so the patch is declined and the frame built whole scrolls the scroller (the offset
+    // moves 1450 -> 1447 and back). Whether the edit after the declines is a patch is the retention's (`Sourced`, `Hover:Relocated`), not anchoring's.
+    expect(on.steps[0]?.whole, JSON.stringify(on.counters)).toBeGreaterThan(0)
+    expect(on.steps[0]?.patched).toBe(0)
+    expect(reason(on.counters.declines, "NotContained")).toBeGreaterThan(0)
   }, TIMEOUT)
 
   it("an edit that changes the box (the header's height) is declined NotContained and the frame is built whole", () => {
