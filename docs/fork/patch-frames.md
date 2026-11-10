@@ -886,8 +886,8 @@ the patcher turns it on with `Window::set_contained_patches`.
   nothing runs in it, nothing in it is lifted out or placed against a block outside it, it is not itself absolute or lifted,
   and it holds at most `ANCHOR_MAX_ELEMENTS` (1024). An anchor is tried before a patch root for a scroller: a scroller is never
   recorded as a root.
-- **Box roots.** A layout edit outside every scroller anchor, or in a scroller too big to be one (more than `ANCHOR_MAX_ELEMENTS`),
-  is patched at a *box root*: a plain `div` whose own border box what is in it cannot change (`layout/box_root.rs`: a definite height,
+- **Box roots.** A layout edit in a box whose border box what is in it cannot change is patched at that *box root*, whether a scroller
+  anchor holds it or none does: a plain `div` whose own border box what is in it cannot change (`layout/box_root.rs`: a definite height,
   a length or `min-height` equal to `max-height`; a width that is a length, or auto and stretched across a block or a column flex
   parent, with `align-self` stretching and no auto inline margin; not positioned or lifted, no intrinsic size keyword, group,
   `@container` rule or `aspect-ratio`; a flex, grid or block box). It is a root like any other, recorded by the frame built whole,
@@ -900,8 +900,25 @@ the patcher turns it on with `Window::set_contained_patches`.
   was made with) becomes one when a frame built whole builds it again, which an edit in it makes, so the first layout edit of a box
   root is a frame built whole. A unit or a patch root that meets the rule is the same root with `patchable_relayout()` (`Plan::box_ids`
   names every box root, whichever list holds it) and counts as a root a hover or a running animation repaints too: only a root that
-  holds a changed element is laid out again (`Retain::is_relaid`). A scroller that becomes an anchor takes the box roots inside it
-  out of the plan (`end_anchor`: its patch lays all of it out). gpui verifies the box (`NotContained` when it changed): the decline
+  holds a changed element is laid out again (`Retain::is_relaid`). The innermost relayout root wins: a scroller that is an anchor
+  keeps the box roots in it (`Retain::relayout_holding`), so a text edit in a fixed-height row of a 100-row scroller builds the row (5 elements,
+  1.7M instructions) and not the 501 of the anchor (32M, more than the 5M of a frame built whole). The anchor holds what no box root does: a
+  child added to or removed from the scroller, an edit of a child that is no box root. The two coexist as follows.
+  - A patch of a box root in an anchor splices what it paints, and gpui forgets the recordings made around the root, the anchor's: the next
+    patch of the anchor would be declined `StaleRecording` after it was built, so `Retain::anchor_repainted` notes the anchors above the root
+    (`Plan::enclosing_forgotten`) and the preview declines them `Anchor:StaleRecording` before anything is built; the frame built whole in the
+    same draw records the anchor again. The box roots beside the patched one are untouched, so edits of other rows go on being patches.
+  - A patch of the anchor builds and paints all of it flat, so the box roots in it are of the layout before: their records are dropped
+    (`anchor_repainted`) and none is patched (`Unpatchable::AnchorStale`, `Retain::nested_in_repainted`) until a frame built whole has built and
+    recorded them.
+  - An anchor patch leaves no record, so a row edit that the anchor would hold, while the row is a box that a frame could make a root and is none
+    yet, is drawn whole instead (`Retain::box_candidates`, `is_anchor_beside_candidate`, counted `Structure`): the frame builds that row alone,
+    makes it a root, and the edits after it are patches. Without it every edit would be an anchor patch, which never leaves a record to judge a box
+    by (a1-a4 at 100 rows stayed at 32M). A box that no frame records (one element, not worth a root) is no candidate.
+  So after an anchor patch (a row appended) the first edit of a row is `AnchorStale` and the next a candidate `Structure`: two frames built
+  whole before that row is patched again. Tests: `retain.rs` (`an_edit_in_a_box_root_in_an_anchor_...`, `a_box_root_patch_in_an_anchor_...`,
+  `an_anchor_patch_makes_the_box_roots_...`, `an_edit_in_a_box_that_is_a_candidate_...`), `box-root-patch.test.tsx` (the 100-row cases).
+  gpui verifies the box (`NotContained` when it changed): the decline
   is a frame built whole in the same draw, as the anchors' is. `GPUIX_BOX_ROOTS_OFF=1` makes none.
   A box that something runs in that only paints (a focused input's caret) is built by every frame and so is never recorded or
   replayed: it is wrapped keyed by the frame, as a unit is (`Retain::unrecorded_box_root`, `box_root_unrecorded`), and a patch builds

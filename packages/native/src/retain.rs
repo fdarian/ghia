@@ -696,6 +696,8 @@ struct Node {
     anchor: bool,
     /// The element is a candidate box root, see [`Entry::box_root`], and nothing above it is one.
     box_root: bool,
+    /// Its style and its parent's make it a box root candidate (`Entry::box_root`), whether the frame could make it one.
+    box_candidate: bool,
     /// Only with `verify`: a hash of what the build made of the element itself.
     digest: u64,
     /// The element was built as a `display: none` host, which paints and lays out nothing.
@@ -1121,6 +1123,10 @@ pub(crate) struct Retain {
     /// The node a box root began at, while it is being built: nothing in it is made another (the outermost box
     /// that qualifies holds the edit).
     box_open: Option<u32>,
+    /// The elements whose last build found them a box a frame can make a box root once it builds them again, those that are
+    /// none yet included. Not dropped with the records an anchor patch drops, so that an edit in one, that the anchor would hold, is
+    /// drawn by a frame built whole (5M, and the roots are made) and not by the anchor's patch, which builds all of it and leaves none.
+    box_candidates: FxHashSet<u64>,
     plan: Plan,
     /// The elements that patches repainted for a hover since the last frame built whole, whose
     /// roots hold the paint of before in their recordings: that frame builds them again.
@@ -1369,6 +1375,7 @@ impl Retain {
             unit: None,
             patch_root_unit: None,
             box_open: None,
+            box_candidates: FxHashSet::default(),
             plan: Plan::default(),
             hover_patched: Vec::new(),
             makes_patch_roots: true,
@@ -1627,6 +1634,7 @@ impl Retain {
         }
         self.pruned_at = tree.removals();
         self.records.retain(|id, _| tree.elements.contains_key(id));
+        self.box_candidates.retain(|id| tree.elements.contains_key(id));
         self.dynamic.retain(|id, _| tree.elements.contains_key(id));
         self.unbuilt.retain(|id| tree.elements.contains_key(id));
         let moves = &mut self.moves;
@@ -2073,6 +2081,7 @@ impl Retain {
         self.plan.box_ids.retain(|id| !gone.contains(id));
         self.plan.repainted.retain(|id| !gone.contains(id));
         self.plan.enclosing_forgotten.retain(|id| !gone.contains(id));
+        self.box_candidates.retain(|id| !gone.contains(id));
         self.plan.unrecorded.retain(|id| !gone.contains(id));
     }
 
@@ -2529,6 +2538,23 @@ impl Retain {
         None
     }
 
+    /// Whether the anchor `holder` holds the edit of `id` for want of a box root that a frame built whole would make: a box between
+    /// them that is a candidate and no root yet. The anchor's patch builds all of it and leaves no record of what is in it, so
+    /// the edits after it would be its patches again; the frame built whole builds the box (and only it) and makes the root.
+    fn is_anchor_beside_candidate(&self, tree: &crate::retained_tree::RetainedTree, id: u64, holder: u64) -> bool {
+        if !self.plan.anchor_ids.contains(&holder) || self.plan.box_ids.contains(&holder) {
+            return false;
+        }
+        let mut at = Some(id);
+        while let Some(up) = at.filter(|up| *up != holder) {
+            if self.box_candidates.contains(&up) {
+                return true;
+            }
+            at = tree.elements.get(&up).and_then(|element| element.parent);
+        }
+        false
+    }
+
     /// Whether `id`, which the root `holder` holds (`holder` is `id` for a root that is patched itself), is in what a patch
     /// of a root laid out again since the frame built whole: gpui forgot the recordings nested in such a root, so one
     /// of them is patched again only after a frame built whole. The repainted root itself is patched again when gpui
@@ -2682,7 +2708,11 @@ impl Retain {
         let mut relaid = FxHashSet::default();
         for id in sources.tree.pending_structure() {
             if sources.tree.elements.contains_key(&id) {
-                relaid.insert(self.relayout_holding(sources.tree, id).ok_or(Unpatchable::Structure(id))?);
+                let holder = self.relayout_holding(sources.tree, id).ok_or(Unpatchable::Structure(id))?;
+                if self.is_anchor_beside_candidate(sources.tree, id, holder) {
+                    return Err(Unpatchable::Structure(id));
+                }
+                relaid.insert(holder);
             }
         }
         let covered = |id: u64| !relaid.is_empty() && self.relayout_holding(sources.tree, id).is_some_and(|holder| relaid.contains(&holder));
@@ -2848,6 +2878,7 @@ impl Retain {
             patch_root: entry.patch_root,
             anchor: false,
             box_root: false,
+            box_candidate: entry.box_root,
             digest: 0,
             absent: false,
             absent_children: Vec::new(),
@@ -3052,6 +3083,12 @@ impl Retain {
         self.settle(at);
         let recording = self.to_record(at);
         self.nodes[at].wrapped = recording.as_ref().map(|recording| recording.overscan);
+        let id = self.nodes[at].id;
+        if self.recording_as(at, self.nodes[at].box_candidate, true).is_some_and(|recording| recording.box_root) {
+            self.box_candidates.insert(id);
+        } else {
+            self.box_candidates.remove(&id);
+        }
         recording
     }
 
@@ -3062,13 +3099,19 @@ impl Retain {
     /// frame, and the element is not one that a frame builds again anyway (a motion runs in it:
     /// recording it every frame costs, and no frame replays it).
     fn to_record(&self, at: usize) -> Option<Recording> {
+        self.recording_as(at, self.nodes[at].box_root, false)
+    }
+
+    /// [`Self::to_record`] for the box root that `box_root` says it is. With `candidate` it is what the frame would record if
+    /// it could judge the box by a record of it (`Retain::box_candidates`), whether or not this frame records, and a scroller that moved it is no reason.
+    fn recording_as(&self, at: usize, box_root: bool, candidate: bool) -> Option<Recording> {
         let node = &self.nodes[at];
         let own = &self.below[at];
         // A box root that a scroller moved is recorded where it is built, as `skippable` takes the record of one: the
         // frame after a patch of a row builds it (the record the patch kept is of the build before the edit), and it has
         // to be a recorded root again for the next edit of the row to be a patch.
-        let moved = node.moved && !(node.box_root && self.relocates(node, self.records.get(&node.id)));
-        if !node.records || node.absent || moved || own.dynamic || node.vol.dynamic != 0 {
+        let moved = node.moved && !(box_root && (candidate || self.relocates(node, self.records.get(&node.id))));
+        if !(node.records || candidate) || node.absent || moved || own.dynamic || node.vol.dynamic != 0 {
             return None;
         }
         if crate::background_images::still_loading() != node.loading {
@@ -3096,7 +3139,7 @@ impl Retain {
             subtree: node.subtree,
             overscan,
             patch_root: node.patch_root && !lifts && own.size <= PATCH_ROOT_MAX_ELEMENTS,
-            box_root: node.box_root && !lifts && own.size <= UNIT_MAX_ELEMENTS,
+            box_root: box_root && !lifts && own.size <= UNIT_MAX_ELEMENTS,
         })
     }
 
@@ -7184,6 +7227,20 @@ mod tests {
     }
 
     #[test]
+    fn an_edit_in_a_box_that_is_a_candidate_and_no_root_yet_is_not_held_by_the_anchor() {
+        let mut page = Units::new();
+        page.box_roots = [2].into_iter().collect();
+        page.tree.set_commit_patching(true);
+        anchor_frame(&mut page);
+        assert!(page.retain.is_anchor(1) && !page.retain.is_box_root(2), "the first build has no record to judge the box by");
+        page.tree.set_text(3, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Structure(3)), "a frame built whole makes the root; an anchor patch would not");
+        page.tree.take_structure();
+        page.tree.set_text(5, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "what no box holds is the anchor's");
+    }
+
+    #[test]
     fn a_box_root_patch_in_an_anchor_leaves_its_siblings_patchable_and_the_anchor_around_it_waits_for_a_frame_built_whole() {
         let mut page = anchored_page();
         page.tree.set_text(3, "words".to_owned());
@@ -7219,7 +7276,7 @@ mod tests {
         anchor_frame(&mut page);
         assert!(page.retain.is_anchor(1) && !page.retain.is_box_root(2), "no record of the box after the anchor patch");
         page.tree.set_text(3, "last".to_owned());
-        assert_eq!(page.preview(&[], false), Ok(vec![1]));
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Structure(3)), "the box is a candidate: a frame built whole makes it a root, an anchor patch would not");
         page.tree.take_structure();
         page.edit(1);
         page.edit(2);
