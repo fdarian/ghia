@@ -2670,7 +2670,7 @@ describeNative("events", () => {
                 },
               ],
               "id": 2,
-              "type": "text",
+              "type": "div",
             },
             {
               "children": [
@@ -2683,7 +2683,7 @@ describeNative("events", () => {
                     },
                   ],
                   "id": 4,
-                  "type": "text",
+                  "type": "div",
                 },
               ],
               "events": [

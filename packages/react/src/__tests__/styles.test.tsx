@@ -1729,7 +1729,7 @@ describeNative("motion", () => {
         animate={{ width: 260, opacity: 1 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
       >
-        <div>Sidebar</div>
+        <span>Sidebar</span>
       </motion.div>
     )
 
