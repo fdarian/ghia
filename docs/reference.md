@@ -7116,7 +7116,9 @@ still drops the longhands written before it.
   `zIndex`, `flexGrow`, `fontWeight`, `lineHeight`, `order`, ...) is the number as text, and any other is `<n>px`.
   `border: 0` is `border: "0"`. A number that is still invalid is dropped.
 - A CSS-wide keyword (`inherit`, `initial`, `unset`, `revert`, `revert-layer`) that the property does not take on its own is
-  dropped. See [deviations](fork/deviations.md#layout) for where that is not what CSS does.
+  dropped, so inside a state style, the universal style or an `@container` block the value of the layer below stays
+  (`hover: { width: 'unset' }` over `width: 50` keeps 50, where CSS gives `auto`). See
+  [deviations](fork/deviations.md#layout).
 - A state style (`hover`, ...) and an `@container` block are recovered the same way inside, one declaration at a time.
 - A dropped declaration is silent, as in a browser. `RUST_LOG=warn` lists each one, once, by its property and value.
 - A style that is not a JSON object, or is not JSON, still rejects the `setStyle`.

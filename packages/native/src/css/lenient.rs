@@ -16,9 +16,11 @@
 //! - anything else, the CSS-wide keywords (`inherit`, `initial`, `unset`, `revert`,
 //!   `revert-layer`) among them: dropped, and logged once.
 //!
-//! Dropping is CSS's answer for `unset` and `revert` and for `initial` on a property that is not
-//! inherited. `initial` on an inherited property, and `inherit`, would need a value from the
-//! parent; see `docs/fork/deviations.md`.
+//! Dropping is CSS's answer for `unset`, `revert` and `initial` on a property that is not inherited
+//! only where no layer below sets it: in a state style, the universal style or an `@container`
+//! block the declaration is gone before it is laid over the layer below, so that layer's value
+//! stays. `initial` on an inherited property, and `inherit`, would need a value from the parent;
+//! see `docs/fork/deviations.md`.
 
 use std::collections::HashSet;
 use std::sync::{LazyLock, Mutex, PoisonError};
