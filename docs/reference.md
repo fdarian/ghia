@@ -3778,7 +3778,8 @@ bubbles up, and `stopPropagation()` on the span keeps it from there.
   innermost box around the glyph that sets one wins, and a glyph in no box that
   sets one keeps the container's cursor (`hover` and `active` can carry it too).
   A `display: contents` span has no box but its descendants inherit its cursor.
-  The value may be a `var()` (`cursor: 'var(--cursor)'`), read from the custom properties around the span.
+  The value may be a `var()` (`cursor: 'var(--cursor)'`), read from the custom properties around the span, as may
+  `pointerEvents` and `appRegion`.
   A span that wraps shows it on every line it covers, and, like events, not on the
   blank area of the lines. A paragraph whose container has `pointerEvents: "none"`
   or is `inert` shows none.

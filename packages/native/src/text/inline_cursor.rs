@@ -66,7 +66,7 @@ pub fn of(
     // the box holds, so the first one decides.
     let mut inherited_by: HashMap<u64, Option<CursorStyle>> = HashMap::new();
     for piece in &paragraph.pieces {
-        let targets = piece_targets(tree, &with_box, piece, false, false);
+        let targets = piece_targets(tree, &with_box, piece, false, false, states, motion);
         let mut inherited = None;
         for id in &piece.boxes {
             let Some(base) = tree

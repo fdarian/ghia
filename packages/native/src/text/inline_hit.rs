@@ -27,6 +27,10 @@ use gpui::{Bounds, Pixels, Point, TextLayout, WindowId};
 
 use crate::retained_tree::RetainedTree;
 
+use crate::events::state_styles::PointerStates;
+use crate::motion::InlineStyles;
+use crate::style::StyleDesc;
+
 use super::inline::{Paragraph, Piece};
 use super::inline_bounds::border_box_rows;
 use std::rc::Rc;
@@ -55,12 +59,15 @@ impl Targets {
     ///
     /// `pointer_events_none` and `inert` are the container's, and a box takes
     /// itself out of the hit test the way an element does: `pointerEvents: "none"`
-    /// until a descendant says `auto`, and `inert` for good.
+    /// until a descendant says `auto`, and `inert` for good. `states` and `motion` give the style
+    /// a box shows, its `var()` substituted, as for [`super::inline_cursor::of`].
     pub fn of(
         tree: &RetainedTree,
         paragraph: &Paragraph,
         pointer_events_none: bool,
         inert: bool,
+        states: &dyn Fn(u64, &StyleDesc) -> PointerStates,
+        motion: &InlineStyles,
         insets: &Rc<InsetSpec>,
     ) -> Option<Self> {
         let with_box = boxes_with_a_box(paragraph);
@@ -68,7 +75,7 @@ impl Targets {
             .pieces
             .iter()
             .map(|piece| {
-                let targets = piece_targets(tree, &with_box, piece, pointer_events_none, inert);
+                let targets = piece_targets(tree, &with_box, piece, pointer_events_none, inert, states, motion);
                 (piece.range.clone(), targets)
             })
             .filter(|(_, targets)| !targets.is_empty())
@@ -123,6 +130,8 @@ pub(super) fn piece_targets(
     piece: &Piece,
     pointer_events_none: bool,
     inert: bool,
+    states: &dyn Fn(u64, &StyleDesc) -> PointerStates,
+    motion: &InlineStyles,
 ) -> Vec<u64> {
     let (mut none, mut inert) = (pointer_events_none, inert);
     let mut targets = Vec::new();
@@ -131,11 +140,8 @@ pub(super) fn piece_targets(
             continue;
         };
         inert |= element.has_inert_prop();
-        match element
-            .style
-            .as_deref()
-            .and_then(|style| style.pointer_events.as_deref())
-        {
+        let shown = element.style.as_deref().map(|base| motion.declared(*id, base, states(*id, base)));
+        match shown.as_ref().and_then(|declared| declared.pointer_events.as_deref()) {
             Some("none") => none = true,
             Some("auto") => none = false,
             _ => {}
@@ -291,9 +297,27 @@ mod tests {
             tree.set_text(id, text.to_string());
         }
         for (id, style) in styles {
-            tree.set_style(*id, Arc::new(serde_json::from_value(style.clone()).expect("a style")));
+            let text = style.to_string();
+            let style = if crate::css::var_substitution::mentions_var(text.as_bytes()) {
+                crate::css::var_substitution::parse(text.as_bytes()).expect("a style")
+            } else {
+                serde_json::from_value(style.clone()).expect("a style")
+            };
+            tree.set_style(*id, Arc::new(style));
         }
         tree
+    }
+
+    fn at_rest(
+        tree: &RetainedTree,
+        paragraph: &Paragraph,
+        pointer_events_none: bool,
+        inert: bool,
+        insets: &Rc<InsetSpec>,
+    ) -> Option<Targets> {
+        let states = |_: u64, _: &StyleDesc| PointerStates::default();
+        let motion = InlineStyles::at_rest(tree, paragraph, &states);
+        Targets::of(tree, paragraph, pointer_events_none, inert, &states, &motion, insets)
     }
 
     fn spec_of(paragraph: &Paragraph, tree: &RetainedTree) -> Rc<InsetSpec> {
@@ -306,7 +330,7 @@ mod tests {
             panic!("a paragraph")
         };
         assert_eq!(paragraph.text, "a bc d");
-        Targets::of(tree, paragraph, none, inert, &spec_of(paragraph, tree))
+        at_rest(tree, paragraph, none, inert, &spec_of(paragraph, tree))
     }
 
     /// Ten pixels to a byte, one line.
@@ -340,7 +364,7 @@ mod tests {
         let crate::text::inline::Child::Paragraph(paragraph) = &plan[0] else {
             panic!("a paragraph")
         };
-        assert_eq!(Targets::of(&tree, paragraph, false, false, &spec_of(paragraph, &tree)), None);
+        assert_eq!(at_rest(&tree, paragraph, false, false, &spec_of(paragraph, &tree)), None);
     }
 
     #[test]
@@ -378,6 +402,17 @@ mod tests {
         assert_eq!(ids(targets.around(3, over(3), rows)), vec![5]);
     }
 
+    #[test]
+    fn pointer_events_read_through_a_var_take_a_box_out_as_the_literal_does() {
+        let tree = fixture(&[(3, serde_json::json!({"pointerEvents": "var(--pe, none)"}))]);
+        assert_eq!(plan_targets(&tree, false, false), None);
+        let tree = fixture(&[
+            (3, serde_json::json!({"pointerEvents": "var(--pe, none)"})),
+            (5, serde_json::json!({"pointerEvents": "var(--pe, auto)"})),
+        ]);
+        assert_eq!(ids(targets_of(&tree).around(3, over(3), rows)), vec![5]);
+    }
+
     fn targets_of(tree: &RetainedTree) -> Targets {
         plan_targets(tree, false, false).unwrap()
     }
@@ -413,7 +448,7 @@ mod tests {
             panic!("a paragraph")
         };
         let insets = spec_of(paragraph, &tree);
-        let targets = Targets::of(&tree, paragraph, false, false, &insets).unwrap();
+        let targets = at_rest(&tree, paragraph, false, false, &insets).unwrap();
         let at = |byte: usize, x: f32| ids(targets.around(byte, point(px(x), px(10.0)), rows));
 
         assert!(at(2, 22.0).is_empty(), "in the margin before the box");
@@ -431,7 +466,7 @@ mod tests {
             panic!("a paragraph")
         };
         let insets = spec_of(paragraph, &tree);
-        let targets = Targets::of(&tree, paragraph, false, false, &insets).unwrap();
+        let targets = at_rest(&tree, paragraph, false, false, &insets).unwrap();
         // Span 3 ends with 5, but 5's margin is inside it.
         assert_eq!(ids(targets.around(3, point(px(36.0), px(10.0)), rows)), vec![3]);
         assert_eq!(ids(targets.around(3, point(px(32.0), px(10.0)), rows)), vec![5, 3]);
@@ -482,7 +517,7 @@ mod tests {
         let crate::text::inline::Child::Paragraph(paragraph) = &plan[0] else {
             panic!("a paragraph")
         };
-        let targets = Targets::of(&tree, paragraph, false, false, &insets).unwrap();
+        let targets = at_rest(&tree, paragraph, false, false, &insets).unwrap();
         let at = |y: f32| ids(targets.around(2, point(px(25.0), px(y)), tall_rows));
         assert!(at(3.0).is_empty(), "above the border");
         assert_eq!(at(4.5), vec![3], "on the border, 8 above the content area");
@@ -498,7 +533,7 @@ mod tests {
             panic!("a paragraph")
         };
         let insets = spec_of(paragraph, &tree);
-        let targets = Targets::of(&tree, paragraph, false, false, &insets).unwrap();
+        let targets = at_rest(&tree, paragraph, false, false, &insets).unwrap();
         let around = targets.around(2, over(2), rows);
         assert_eq!(around[0].1.origin.x, px(24.0));
     }

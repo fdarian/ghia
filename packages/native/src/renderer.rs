@@ -13014,6 +13014,8 @@ fn paragraph_content(
                 paragraph,
                 ctx.inherited.pointer_events_none,
                 ctx.inherited.inert,
+                &states,
+                &motion,
                 &insets,
             )
             .map(Arc::new),

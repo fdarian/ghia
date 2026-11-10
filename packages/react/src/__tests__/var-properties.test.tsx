@@ -817,3 +817,32 @@ describeNative("a var() that resolves to no motion", () => {
   }, SLOW)
 })
 
+describeNative("a var() as the pointerEvents of an inline box", () => {
+  const hits = (pointerEvents: string, custom: Record<string, string>) => {
+    let count = 0
+    mounted(
+      <div style={{ position: "absolute", left: 0, top: 0, width: 600, ...custom }}>
+        <text testId="text" style={{ fontSize: 16, lineHeight: "20px" }}>
+          <span style={{ pointerEvents }} onPointerDown={() => count++}>
+            WWWWWWWW
+          </span>
+        </text>
+      </div>,
+      (renderer) => {
+        renderer.drawFrame()
+        const bounds = box(renderer, "text")
+        renderer.nativeSimulateClick(bounds[0] + 8, bounds[1] + 10)
+        renderer.dispatchNativeEvents()
+        renderer.flush()
+      },
+    )
+    return count
+  }
+
+  it("keeps the pointer off the span, as the literal does", () => {
+    expect(hits("auto", {})).toBe(1)
+    expect(hits("none", {})).toBe(0)
+    expect(hits("var(--pe)", { "--pe": "none" })).toBe(0)
+    expect(hits("var(--pe)", { "--pe": "auto" })).toBe(1)
+  }, SLOW)
+})
