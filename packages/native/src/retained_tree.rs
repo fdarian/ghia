@@ -1512,8 +1512,7 @@ impl RetainedTree {
                 false
             };
             // Which listeners exist decides how the element is built, so it takes a revision:
-            // `retain` keys what it reuses by it. For a `<text>` it also decides whether it is
-            // raw text (`is_raw_text`), which the paragraph builder and search read it by.
+            // `retain` keys what it reuses by it. A `<text>` takes a structural revision for it.
             if changed {
                 if geometry {
                     let reports = self
