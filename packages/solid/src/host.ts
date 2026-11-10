@@ -372,6 +372,7 @@ defineDomMembers(HostElement.prototype, (element: HostElement) => ({
   connected: isConnected(element),
   layout: element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.id } : undefined,
   prop: (name) => element.props.get(name),
+  propNames: () => element.props.keys(),
 }))
 defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
   renderer: element.root?.nativeRenderer,
