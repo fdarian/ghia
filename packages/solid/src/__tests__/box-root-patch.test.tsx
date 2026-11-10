@@ -130,10 +130,11 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a box of a fixed
     expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
     expect(on.steps.map((step) => step.row)).toEqual(off.steps.map((step) => step.row))
     if (!counted) return
-    // gpui drops the recording of a root a scroller moves (a row) when a patch lays it out again, so the edit after the first is a frame
-    // built whole (`Anchor:StaleRecording`): only the first is a patch.
-    expect(on.steps[0].relaid, JSON.stringify(on.counters)).toBe(1)
-    expect(on.steps[0].whole).toBe(0)
+    // gpui rewrites the recording of a root a scroller moves (a row) after a patch lays it out again, so every edit is a patch.
+    expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 1, 1])
+    expect(on.steps.map((step) => step.whole)).toEqual([0, 0, 0])
+    expect(reason(on.counters.unpatchable, "Structure")).toBe(0)
+    expect(reason(on.counters.unpatchable, "Box:StaleRecording")).toBe(0)
   }, TIMEOUT)
 
   it("an edit that changes the box (the header's height) is declined NotContained and the frame is built whole", () => {

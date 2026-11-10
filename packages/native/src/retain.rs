@@ -2498,15 +2498,20 @@ impl Retain {
 
     /// An anchor was patched: what the recordings of its content hold is of the layout before, so
     /// no element of it is skipped by the next frame built whole, which builds and records it all.
-    /// `rewritten` says gpui rewrote the recording of the anchor itself, which is then patched again.
+    /// `rewritten` says gpui rewrote the recording of the anchor itself, which is then patched again. A box root keeps its
+    /// own record then: it is what makes the box a root again in the frame built whole after the patch (the record
+    /// qualifies a box, `Retain::may_be_box_root`), and gpui holds the recording that record describes.
     pub(crate) fn anchor_repainted(&mut self, tree: &crate::retained_tree::RetainedTree, id: u64, rewritten: bool) {
         self.plan.repainted.insert(id);
         if !rewritten {
             self.plan.unrecorded.insert(id);
         }
+        let keeps_own_record = rewritten && self.plan.box_ids.contains(&id);
         let mut pending = vec![id];
         while let Some(next) = pending.pop() {
-            self.records.remove(&next);
+            if !(keeps_own_record && next == id) {
+                self.records.remove(&next);
+            }
             self.patch_root_scans.remove(&next);
             if let Some(element) = tree.elements.get(&next) {
                 pending.extend(element.children.iter().copied());
@@ -7095,6 +7100,18 @@ mod tests {
         assert_eq!(page.preview(&[], false), Ok(vec![2]), "gpui rewrote its recording");
         page.retain.anchor_repainted(&page.tree, 2, false);
         assert_eq!(page.preview(&[], false), Err(Unpatchable::AnchorStale(2)), "it lost it");
+    }
+
+    #[test]
+    fn a_box_root_whose_recording_gpui_rewrote_is_one_again_in_the_frame_built_whole_after_the_patch() {
+        for (rewritten, again) in [(true, true), (false, false)] {
+            let mut page = boxed_page();
+            page.retain.anchor_repainted(&page.tree, 2, rewritten);
+            page.edit(1);
+            page.edit(2);
+            box_frame(&mut page, two_leaves);
+            assert_eq!(page.retain.is_box_root(2), again, "rewritten {rewritten}");
+        }
     }
 
     #[test]
