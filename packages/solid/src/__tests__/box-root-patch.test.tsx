@@ -27,10 +27,13 @@ const ROWS = Number(process.env.ROWS ?? "230")
 const WATCHED_FAR = 30
 const WHEEL_TICK = 30
 
-type Page = { title: string; headerHeight: number; row: string; footer: string; shift: number }
+type Page = { title: string; headerHeight: number; row: string; footer: string; shift: number; appended: number }
 
-function open(initial: Page, watched: number) {
+function open(initial: Page, watched: number, rows: number) {
   const [page, setPage] = createSignal(initial)
+  // A `white-space` declared on an element that comes changes the text of everything below it, which no element is named for: a row appended
+  // with one is a frame built whole, so the rows appended by the anchor case declare none.
+  const nowrap = (index: number) => (index < rows ? ("nowrap" as const) : undefined)
   const app = createTestRoot({ width: 600, height: 400 })
   app.render(() => (
     <div style={{ display: "flex", flexDirection: "column", width: 600, height: 400, backgroundColor: "#ffffff" }}>
@@ -39,15 +42,15 @@ function open(initial: Page, watched: number) {
         <text style={{ marginLeft: 16, fontSize: 12, color: "#71717a", whiteSpace: "nowrap" }}>{page().title}</text>
       </div>
       <div testId="scroller" style={{ display: "flex", flexDirection: "column", flexGrow: 1, minHeight: 0, overflowY: "auto" }}>
-        <For each={Array.from({ length: ROWS }, (_, index) => index)}>
+        <For each={Array.from({ length: rows + page().appended }, (_, index) => index)}>
           {(index) => (
             <div
-              testId={`row-${index}`}
+              testId={index === watched ? `row-${index}` : undefined}
               style={{ display: "flex", flexDirection: "row", alignItems: "center", flexShrink: 0, height: 48, paddingLeft: 16, backgroundColor: "#ffffff", hover: { backgroundColor: "#f4f4f5" } }}
             >
               <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, minWidth: 0 }}>
-                <text style={{ fontSize: 14, color: "#18181b", whiteSpace: "nowrap" }}>{`Message ${index}`}</text>
-                <text style={{ fontSize: 12, color: "#71717a", whiteSpace: "nowrap", marginTop: index === watched ? page().shift : 0 }}>{index === watched ? page().row : "preview"}</text>
+                <text style={{ fontSize: 14, color: "#18181b", whiteSpace: nowrap(index) }}>{`Message ${index}`}</text>
+                <text style={{ fontSize: 12, color: "#71717a", whiteSpace: nowrap(index), marginTop: index === watched ? page().shift : 0 }}>{index === watched ? page().row : "preview"}</text>
               </div>
               <text style={{ width: 72, fontSize: 12, color: "#2563eb", textAlign: "right" }}>{`r${index}`}</text>
             </div>
@@ -78,13 +81,13 @@ function boundsOf(renderer: TestRenderer, testId: string) {
 
 const reason = (reasons: string, key: string) => (JSON.parse(reasons) as Record<string, number>)[key] ?? 0
 
-const BASE: Page = { title: "230 items", headerHeight: 56, row: "a preview of the body", footer: "ready", shift: 0 }
+const BASE: Page = { title: "230 items", headerHeight: 56, row: "a preview of the body", footer: "ready", shift: 0, appended: 0 }
 
 type Scrolled = { top: number; tickBetweenEdits: boolean }
 
-function run(name: string, patch: boolean, changes: Partial<Page>[], scrolled?: Scrolled) {
+function run(name: string, patch: boolean, changes: Partial<Page>[], scrolled?: Scrolled, rows = ROWS) {
   const watched = scrolled ? WATCHED_FAR : 5
-  const { app, renderer, set } = open(BASE, watched)
+  const { app, renderer, set } = open(BASE, watched, rows)
   try {
     renderer.setPatchEnabled(patch)
     renderer.clockPause()
@@ -117,10 +120,12 @@ function run(name: string, patch: boolean, changes: Partial<Page>[], scrolled?: 
       if (scrolled?.tickBetweenEdits) tick()
       const before = renderer.getPatchCounters()
       const frames = renderer.getPaintedFrameCount()
+      const built = renderer.getBuildCounters().elementsBuilt
       set(change)
       renderer.drawFrame()
       const after = renderer.getPatchCounters()
       steps.push({
+        built: renderer.getBuildCounters().elementsBuilt - built,
         patched: after.patchedFrames - before.patchedFrames,
         relaid: after.relayoutPatches - before.relayoutPatches,
         whole: renderer.getPaintedFrameCount() - frames,
@@ -163,6 +168,72 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a box of a fixed
     expect(on.steps.map((step) => step.whole)).toEqual([0, 0, 0])
     expect(reason(on.counters.unpatchable, "Structure")).toBe(0)
     expect(reason(on.counters.unpatchable, "Box:StaleRecording")).toBe(0)
+  }, TIMEOUT)
+
+  it("a text edit in a fixed-height row of a scroller small enough to be an anchor is a relayout patch of the row, not of the anchor", () => {
+    const rows = 100
+    const changes: Partial<Page>[] = [{ row: "edit 1" }, { row: "edit 2, a much longer preview of the body" }, { row: "" }]
+    const on = run("anchor", true, changes, undefined, rows)
+    const off = run("anchor", false, changes, undefined, rows)
+    expect(on.mismatches).toBe(0)
+    expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+    expect(on.steps.map((step) => step.row)).toEqual(off.steps.map((step) => step.row))
+    if (!counted) return
+    // The row is a root of its own inside the anchor, so an edit builds the row (5 elements) and not the 501 of the scroller.
+    for (const step of on.steps) {
+      expect(step.relaid, JSON.stringify(on.counters)).toBe(1)
+      expect(step.whole).toBe(0)
+      expect(step.built, JSON.stringify(on.counters)).toBeLessThan(20)
+    }
+    // The one Structure is the edit that warms the page up: the header is no box root before a frame built whole has judged it.
+    expect(reason(on.counters.unpatchable, "Structure")).toBe(1)
+  }, TIMEOUT)
+
+  // Skipped under the retention verifier: with patching off too (`GPUIX_PATCH_OFF=1 GPUIX_RETAIN_VERIFY=1`) a frame built whole after a row was
+  // edited to an empty text and a row was appended to an anchor replays a root that differs from a build; with `GPUIX_ANCHORS_OFF=1` it does not.
+  // Not the patch's. The row edits alone above run under it.
+  it.skipIf(verifying)("a row appended after rows were patched is drawn whole: gpui forgot the recording of the anchor around the patched rows", () => {
+    const rows = 100
+    const changes: Partial<Page>[] = [{ row: "edit 1" }, { row: "edit 2, a much longer preview of the body" }, { row: "" }, { appended: 1 }, { appended: 1, row: "edit 5" }]
+    const on = run("anchor-stale", true, changes, undefined, rows)
+    const off = run("anchor-stale", false, changes, undefined, rows)
+    expect(on.mismatches).toBe(0)
+    expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+    expect(on.steps.map((step) => step.row)).toEqual(off.steps.map((step) => step.row))
+    if (!counted) return
+    const [first, second, third, append, after] = on.steps
+    for (const step of [first, second, third, after]) {
+      expect(step?.relaid, JSON.stringify(on.counters)).toBe(1)
+      expect(step?.whole).toBe(0)
+    }
+    // A child added to the scroller is the anchor's, which is declined before anything is built (its recording is gone), and the frame built
+    // whole records the anchor again, so the edit after it is a patch of the row.
+    expect(append?.patched).toBe(0)
+    expect(append?.whole, JSON.stringify(on.counters)).toBe(1)
+    expect(reason(on.counters.unpatchable, "Anchor:StaleRecording")).toBe(1)
+  }, TIMEOUT)
+
+  // Skipped under the retention verifier, as the one above: an anchor patch of this page is reported there with patching on and
+  // not with `GPUIX_ANCHORS_OFF=1` (an off-screen row the patch paints and a frame built whole culls).
+  it.skipIf(verifying)("a row appended to a scroller small enough to be an anchor is a patch of the anchor, and the edit of a row after it is drawn whole", () => {
+    const rows = 100
+    const changes: Partial<Page>[] = [{ appended: 1 }, { appended: 2 }, { appended: 2, row: "edit 3" }, { appended: 3 }]
+    const on = run("anchor-append", true, changes, undefined, rows)
+    const off = run("anchor-append", false, changes, undefined, rows)
+    expect(on.mismatches).toBe(0)
+    expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+    expect(on.steps.map((step) => step.row)).toEqual(off.steps.map((step) => step.row))
+    if (!counted) return
+    const [first, second, edit] = on.steps
+    // The anchor holds what no row does, and builds all of it (100 rows of 5 elements).
+    for (const step of [first, second]) {
+      expect(step?.relaid, JSON.stringify(on.counters)).toBe(1)
+      expect(step?.whole).toBe(0)
+      expect(step?.built).toBeGreaterThan(400)
+    }
+    // What a patch of the anchor laid out is of the layout before: the rows in it are no root to patch until a frame built whole has made them.
+    expect(edit?.patched).toBe(0)
+    expect(reason(on.counters.unpatchable, "Anchor:StaleRecording")).toBeGreaterThan(0)
   }, TIMEOUT)
 
   it("a text edit in a row of a scroller that was scrolled and then moved by a wheel tick is a relayout patch of the row", () => {

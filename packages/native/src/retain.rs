@@ -971,6 +971,10 @@ struct Plan {
     /// The anchors patches laid out again since the frame: what gpui recorded of the roots in them is
     /// of the layout before, so none of those is patched until a frame is built whole.
     repainted: FxHashSet<u64>,
+    /// The anchors around a root that a patch laid out again since the frame: gpui forgets the recordings made around a root it
+    /// splices, and the layout of the anchor is not the one it recorded, so none is patched until a frame is built whole. The roots
+    /// beside the patched one are not touched.
+    enclosing_forgotten: FxHashSet<u64>,
     /// Of those, the anchors whose own recording gpui dropped (it rewrites one only when it can, see
     /// `RecordingRewrite`): none is patched again until a frame is built whole.
     unrecorded: FxHashSet<u64>,
@@ -2068,6 +2072,7 @@ impl Retain {
         self.plan.box_roots.retain(|unit| !gone.contains(&unit.id));
         self.plan.box_ids.retain(|id| !gone.contains(id));
         self.plan.repainted.retain(|id| !gone.contains(id));
+        self.plan.enclosing_forgotten.retain(|id| !gone.contains(id));
         self.plan.unrecorded.retain(|id| !gone.contains(id));
     }
 
@@ -2491,6 +2496,13 @@ impl Retain {
         if !rewritten {
             self.plan.unrecorded.insert(id);
         }
+        let mut above = tree.elements.get(&id).and_then(|element| element.parent);
+        while let Some(up) = above {
+            if self.plan.anchor_ids.contains(&up) {
+                self.plan.enclosing_forgotten.insert(up);
+            }
+            above = tree.elements.get(&up).and_then(|element| element.parent);
+        }
         let keeps_own_record = rewritten && self.plan.box_ids.contains(&id);
         let mut pending = vec![id];
         while let Some(next) = pending.pop() {
@@ -2709,6 +2721,9 @@ impl Retain {
             .map(|unit| unit.id)
             .filter(|id| relaid.contains(id))
             .collect();
+        if let Some(&id) = anchors.iter().find(|id| self.plan.enclosing_forgotten.contains(id)) {
+            return Err(Unpatchable::AnchorStale(id));
+        }
         if !self.plan.repainted.is_empty() {
             // What is nested in a root that a patch spliced was forgotten by gpui, and is neither replayed nor
             // patched until a frame built whole records it. The root itself is patched again when gpui rewrote its
@@ -7169,9 +7184,8 @@ mod tests {
     }
 
     #[test]
-    fn a_box_root_patch_in_an_anchor_leaves_both_patchable_and_an_anchor_patch_makes_the_box_root_wait_for_a_frame_built_whole() {
+    fn a_box_root_patch_in_an_anchor_leaves_its_siblings_patchable_and_the_anchor_around_it_waits_for_a_frame_built_whole() {
         let mut page = anchored_page();
-        // A box root patch: gpui rewrote its recording.
         page.tree.set_text(3, "words".to_owned());
         assert_eq!(page.preview(&[], false), Ok(vec![2]));
         page.retain.anchor_repainted(&page.tree, 2, true);
@@ -7180,10 +7194,18 @@ mod tests {
         assert_eq!(page.preview(&[], false), Ok(vec![2]), "the box root is patched again");
         page.tree.take_structure();
         page.tree.set_text(5, "words".to_owned());
-        assert_eq!(page.preview(&[], false), Ok(vec![1]), "and the anchor around it is patched, or declined by gpui");
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::AnchorStale(1)), "gpui forgot the recording of the anchor around the patched root");
         page.tree.take_structure();
+        page.edit(1);
+        page.edit(2);
+        anchor_frame(&mut page);
+        page.tree.set_text(5, "again".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "the frame built whole recorded the anchor again");
+    }
 
-        // An anchor patch: what is nested in it is of the layout before.
+    #[test]
+    fn an_anchor_patch_makes_the_box_roots_in_it_wait_for_a_frame_built_whole_and_a_second_to_judge_them_by_its_records() {
+        let mut page = anchored_page();
         page.retain.anchor_repainted(&page.tree, 1, true);
         page.tree.set_text(3, "again".to_owned());
         assert_eq!(page.preview(&[], false), Err(Unpatchable::AnchorStale(2)), "a box root nested in a patched anchor");
@@ -7194,7 +7216,6 @@ mod tests {
         assert_eq!(page.preview(&[], false), Err(Unpatchable::AnchorStale(1)), "the one it dropped");
         page.tree.take_structure();
 
-        // The frame built whole takes the box root back only once it has records to judge it by.
         anchor_frame(&mut page);
         assert!(page.retain.is_anchor(1) && !page.retain.is_box_root(2), "no record of the box after the anchor patch");
         page.tree.set_text(3, "last".to_owned());
