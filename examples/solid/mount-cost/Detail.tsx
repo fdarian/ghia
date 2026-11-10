@@ -35,7 +35,7 @@ function Avatar(props: { name: string; size: number; fontSize: number; style?: S
         ...props.style,
       }}
     >
-      <text style={{ fontSize: props.fontSize, fontWeight: 600, color: "#FFFFFF" }}>{initials(props.name)}</text>
+      <div style={{ fontSize: props.fontSize, fontWeight: 600, color: "#FFFFFF" }}>{initials(props.name)}</div>
     </div>
   )
 }
@@ -60,13 +60,13 @@ export function Detail(props: { message: Message | undefined; ref: (element: Hos
         keyed
         fallback={
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flexGrow: 1 }}>
-            <text style={{ fontSize: 14, color: "#A1A1AA" }}>No message selected</text>
+            <div style={{ fontSize: 14, color: "#A1A1AA" }}>No message selected</div>
           </div>
         }
       >
         {(message) => (
           <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
-            <text style={{ fontSize: 22, lineHeight: "28px", fontWeight: 600, color: "#18181B" }}>{message.subject}</text>
+            <div style={{ fontSize: 22, lineHeight: "28px", fontWeight: 600, color: "#18181B" }}>{message.subject}</div>
             <div
               style={{
                 display: "flex",
@@ -79,16 +79,16 @@ export function Detail(props: { message: Message | undefined; ref: (element: Hos
             >
               <Avatar name={message.fromName} size={40} fontSize={15} />
               <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                <text style={{ height: 20, lineHeight: "20px", fontSize: 14, fontWeight: 600, color: "#18181B" }}>
+                <div style={{ height: 20, lineHeight: "20px", fontSize: 14, fontWeight: 600, color: "#18181B" }}>
                   {message.fromName}
-                </text>
-                <text style={{ height: 20, lineHeight: "20px", fontSize: 13, color: "#71717A" }}>{message.fromEmail}</text>
+                </div>
+                <div style={{ height: 20, lineHeight: "20px", fontSize: 13, color: "#71717A" }}>{message.fromEmail}</div>
               </div>
-              <text style={{ marginLeft: "auto", flexShrink: 0, fontSize: 12, color: "#71717A" }}>{message.dateLong}</text>
+              <div style={{ marginLeft: "auto", flexShrink: 0, fontSize: 12, color: "#71717A" }}>{message.dateLong}</div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 24 }}>
               <For each={message.body}>
-                {(paragraph) => <text style={{ fontSize: 14, lineHeight: "22px", color: "#27272A" }}>{paragraph}</text>}
+                {(paragraph) => <div style={{ fontSize: 14, lineHeight: "22px", color: "#27272A" }}>{paragraph}</div>}
               </For>
             </div>
           </div>
