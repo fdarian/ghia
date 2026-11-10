@@ -932,10 +932,11 @@ the patcher turns it on with `Window::set_contained_patches`.
   empty; what was left at 10000 was taffy's flexbox pass over the scroller's children, which a row that answers its parent as it did no longer starts: 2.23M, 3.01M and 6.27M, [layout](layout.md#relayout-boundaries)); a hover (d) 1.53M, 1.94M and 3.37M (as before). The scroller scrolled to its middle and
   moved one wheel tick, a row edited (a3): 3.28M, 3.24M and 6.54M; a row edited after a wheel tick that moved a recording a patch had rewritten (a4,
   alternating up and down): 2.37M, 4.26M and 9.13M, a patch every op at each count (before: a frame built whole, 28M, 100M and 245M, `Box:Relocated`).
-  At 230 rows (a scroller of 1151 elements, the size of `box-root-patch.test.tsx`) a4 is a patch on every second op: the edit after a wheel
-  tick that moves the row away from where gpui rewrote it is a patch, the one after the tick that brings it back is `Structure` (the frame
-  built whole after the wheel left the rows no box roots, which the retention's `Backoff` or `learn_relocation` decides; not a gpui decline,
-  `declines` is empty).
+  At 230 rows (a scroller of 1151 elements, the size of `box-root-patch.test.tsx`) a4 is a patch every op as well. The tick after a patch
+  moves the row, and the frame it builds finds the row's record (the one the patch kept) of the build before the edit, so it builds the row
+  while its scroller moves it. A box root that a scroller moved is recorded all the same, when `skippable` would take its record
+  (`Retain::to_record`: `relocates`): the row is a recorded box root of the frame shown, not an unrecorded plain element, and the next edit
+  is a patch, not a `Structure` frame built whole (it used to be every second one, at 230 and at 1000 rows).
 
 - **Which commits.** The tree notes the elements a commit changed (`RetainedTree::pending_structure`: props, style, text and children
   other than a strict restyle by paint; a created element is covered by the element it is put under, a destroyed one by the

@@ -3053,7 +3053,11 @@ impl Retain {
     fn to_record(&self, at: usize) -> Option<Recording> {
         let node = &self.nodes[at];
         let own = &self.below[at];
-        if !node.records || node.absent || node.moved || own.dynamic || node.vol.dynamic != 0 {
+        // A box root that a scroller moved is recorded where it is built, as `skippable` takes the record of one: the
+        // frame after a patch of a row builds it (the record the patch kept is of the build before the edit), and it has
+        // to be a recorded root again for the next edit of the row to be a patch.
+        let moved = node.moved && !(node.box_root && self.relocates(node, self.records.get(&node.id)));
+        if !node.records || node.absent || moved || own.dynamic || node.vol.dynamic != 0 {
             return None;
         }
         if crate::background_images::still_loading() != node.loading {

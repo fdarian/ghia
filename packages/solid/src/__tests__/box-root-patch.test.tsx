@@ -181,7 +181,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a box of a fixed
     expect(reason(on.counters.unpatchable, "Box:Relocated")).toBe(0)
   }, TIMEOUT)
 
-  it("a row that a patch rewrote and a wheel tick then moved is edited by a patch again where gpui keeps its recording, and no frame shows anything but what patching off shows", () => {
+  it("a row that a patch rewrote and a wheel tick then moved is edited by a patch every time, and no frame shows anything but what patching off shows", () => {
     const changes: Partial<Page>[] = [{ row: "edit 1" }, { row: "edit 2, a much longer preview of the body" }, { row: "" }, { row: "edit 4" }, { row: "edit 5" }]
     const scrolled: Scrolled = { top: 1400, tickBetweenEdits: true }
     const on = run("scrolled-ticks", true, changes, scrolled)
@@ -190,10 +190,11 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a box of a fixed
     expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
     expect(on.steps.map((step) => step.row)).toEqual(off.steps.map((step) => step.row))
     if (!counted) return
-    // The edits that follow a tick that moved the row away from where gpui rewrote its recording are patches (gpui puts the patch
-    // where the recording is and the result where the frame has the row). The others meet a page that the retention left unrecorded
-    // after the wheel (`Backoff`, `learn_relocation`), which a frame built whole answers, and so a root that is no box root yet.
-    expect(on.steps.filter((step) => step.relaid === 1).length, JSON.stringify(on.counters)).toBeGreaterThanOrEqual(3)
+    // The tick after a patch moves the row away from where gpui rewrote its recording, and the frame that tick builds
+    // builds the row again (its record is of the build before the edit) while the scroller moves it: recorded all the same,
+    // so the row is a box root of the frame shown, and every edit is a patch.
+    expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 1, 1, 1, 1])
+    expect(on.steps.map((step) => step.whole)).toEqual([0, 0, 0, 0, 0])
     for (const step of on.steps) expect(step.patched + step.whole).toBe(1)
     expect(reason(on.counters.declines, "Relocated")).toBe(0)
     expect(reason(on.counters.unpatchable, "Box:Relocated")).toBe(0)
