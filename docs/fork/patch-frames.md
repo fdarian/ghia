@@ -884,16 +884,33 @@ the patcher turns it on with `Window::set_contained_patches`.
   nothing runs in it, nothing in it is lifted out or placed against a block outside it, it is not itself absolute or lifted,
   and it holds at most `ANCHOR_MAX_ELEMENTS` (1024). An anchor is tried before a patch root for a scroller: a scroller is never
   recorded as a root.
+- **Box roots.** A layout edit outside every scroller anchor, or in a scroller too big to be one (more than `ANCHOR_MAX_ELEMENTS`),
+  is patched at a *box root*: a plain `div` whose own border box what is in it cannot change (`layout/box_root.rs`: a definite height,
+  a length or `min-height` equal to `max-height`; a width that is a length, or auto and stretched across a block or a column flex
+  parent, with `align-self` stretching and no auto inline margin; not positioned or lifted, no intrinsic size keyword, group,
+  `@container` rule or `aspect-ratio`; a flex, grid or block box). It is a root like any other, recorded by the frame built whole,
+  replayed by the frames that find it unchanged and wrapped as `retained(..).patchable_relayout()`, with its `FrameEnv` in
+  `Plan::box_roots` (`Retain::begin_box_root`, `add_box_root`); no scroller is involved, so what is in it keeps the roots it has,
+  as in an anchor. The element is one when the build before judged it recordable (`Record::eligible`: nothing excluded in it, not
+  lifted, at most `UNIT_MAX_ELEMENTS`) and it is built in a plain context outside a unit, a patch root, a row of a virtual list (gpui
+  lays a row out as a root of its own and declines it) and another box root: the outermost box that qualifies holds the edit. A
+  root that was recorded before it qualified (the first frame has no record to judge by, and a root a frame skips keeps the record it
+  was made with) becomes one when a frame built whole builds it again, which an edit in it makes, so the first layout edit of a box
+  root is a frame built whole. A unit or a patch root that meets the rule is the same root with `patchable_relayout()` (`Plan::box_ids`
+  names every box root, whichever list holds it) and counts as a root a hover or a running animation repaints too: only a root that
+  holds a changed element is laid out again (`Retain::is_relaid`). A scroller that becomes an anchor takes the box roots inside it
+  out of the plan (`end_anchor`: its patch lays all of it out). gpui verifies the box (`NotContained` when it changed): the decline
+  is a frame built whole in the same draw, as the anchors' is. `GPUIX_BOX_ROOTS_OFF=1` makes none.
 - **Which commits.** The tree notes the elements a commit changed (`RetainedTree::pending_structure`: props, style, text and children
   other than a strict restyle by paint; a created element is covered by the element it is put under, a destroyed one by the
   parent it left) and moves `patch_barrier` only for a change no element is named for (`setRoot`, the universal style,
-  `autoFocus`, `testId`, `white-space` below an element). While the frame shown has anchors (`RetainedTree::set_anchors`, published
+  `autoFocus`, `testId`, `white-space` below an element). While the frame shown has anchors or box roots (`RetainedTree::set_anchors`, published
   by `Retain::publish_anchors` when the frame is over) a batch whose changes are all attributed is `Dirty::LayoutPatchable`:
   `invalidate_after_mutation` asks for a tick (`Window::request_tick`) and notes the view in `LAYOUT_PENDING`, where a batch with
   an unattributed change notifies as before.
-- **The preview.** `Retain::preview` maps each pending changed element, still in the tree, to the innermost anchor of the frame shown
-  that holds it (walking up); one that no anchor holds is `Unpatchable::Structure` and the frame is built whole in the same
-  draw, which makes the anchors the next commit is patched in. A restyle by paint, a hover or a running animation that lies in a
+- **The preview.** `Retain::preview` maps each pending changed element, still in the tree, to the innermost anchor or box root of the
+  frame shown that holds it (walking up); one that no such root holds is `Unpatchable::Structure` and the frame is built whole in the
+  same draw, which makes the roots the next commit is patched in. A restyle by paint, a hover or a running animation that lies in a
   relaid anchor needs no root of its own: the anchor builds everything in it, so it is dropped from the units. Anchors come
   after the units in the list handed to the patcher.
 - **The patch.** `GpuixView::build_patch` builds each anchor with `build_unit` (retention suspended: everything in the anchor is
@@ -923,7 +940,7 @@ the patcher turns it on with `Window::set_contained_patches`.
 - **Declines.** gpui declines `NotContained` when something outside the anchor moved or the anchor's own box changed (a detail
   that is as wide as its content, with a sibling that shrinks), `StaleRecording` when it has no recording of the anchor (only
   when Ghia could not tell: Ghia declines first), and `LayoutMismatch` while an accessibility tree is built. Ghia declines before
-  building: `Structure`, `Anchor:StaleRecording`, and `Anchor:<blocker>` for what `Window::patch_blocker` says. A declined patch is
+  building: `Structure`, `Anchor:StaleRecording`, and `Anchor:<blocker>` or `Box:<blocker>` for what `Window::patch_blocker` says of a root that is laid out again. A declined patch is
   drawn whole in the same draw, with the layout work of the patch kept.
 - **Reads.** A batch that moved boxes (`LayoutPatchable`) leaves the layout older than the tree while its tick is waiting. A read of
   boxes or scroll metrics before the draw (`settle_pending_layout`, called by every read that lays out) prepares the patch instead of
@@ -942,7 +959,7 @@ the patcher turns it on with `Window::set_contained_patches`.
   so the frame after a discard is built whole (`StaleRecording`) and records it again. A decline of the prepare (gpui's, `NotContained`
   for one) falls back to what a read did before: the view is notified, a pass runs, and the tick is drawn whole (`PendingView`); a
   preview that declines is counted in `unpatchable` as `Read:<kind>`.
-- **Counters.** `getPatchCounters().relayoutPatches` (anchors repainted after a layout), `rewrittenRecordings` (of those, the ones
+- **Counters.** `getPatchCounters().relayoutPatches` (anchors and box roots repainted after a layout), `rewrittenRecordings` (of those, the ones
   whose recording gpui made again), the `declines` above of gpui, and in `unpatchable`: `Structure`, `Anchor:StaleRecording`,
   `Anchor:Relocated` and the like.
 

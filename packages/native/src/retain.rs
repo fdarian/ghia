@@ -448,6 +448,9 @@ struct Record {
     /// runs on it. A scroller in it is no reason: its offset is a source, and a tick that finds it
     /// moved is built whole.
     patch_root: bool,
+    /// The element is a box root: a plain box whose border box what is in it cannot change (`layout::box_root`),
+    /// small enough, nothing in it excluded or lifted. gpui may lay it out again in a patch (`Plan::box_ids`).
+    box_root: bool,
     /// The build read the colour the element inherits (`color::reads`): a text that sets no colour of
     /// its own, a `currentColor`, an element that paints as it likes. A colour is part of the key of
     /// the record only then.
@@ -691,6 +694,11 @@ struct Node {
     patch_root: bool,
     /// The element was entered as a candidate patch anchor (`Retain::begin_anchor`).
     anchor: bool,
+    /// The anchor's candidate: how many box roots the frame had made when it was entered, which an anchor that holds
+    /// them takes out of the plan (`Retain::end_anchor`).
+    box_log_from: usize,
+    /// The element is a candidate box root, see [`Entry::box_root`], and nothing above it is one.
+    box_root: bool,
     /// Only with `verify`: a hash of what the build made of the element itself.
     digest: u64,
     /// The element was built as a `display: none` host, which paints and lays out nothing.
@@ -955,6 +963,14 @@ struct Plan {
     /// as a retained root that gpui records as a source for a patch and never replays.
     anchors: Vec<Unit>,
     anchor_ids: FxHashSet<u64>,
+    /// The box roots of the frame that are neither a patch root nor a unit (those are kept in their lists): plain boxes
+    /// of a size that what is in them cannot change, which a patch lays out again and repaints where the edit is
+    /// (`Retain::begin_box_root`). Wrapped as `retained(..).patchable_relayout()` and recorded or skipped like any root.
+    box_roots: Vec<Unit>,
+    /// Every box root of the frame, those kept in the other lists too, and the order they were made in: an anchor that
+    /// holds some takes them out (`Retain::end_anchor`), a patch of the anchor lays the whole of it out.
+    box_ids: FxHashSet<u64>,
+    box_log: Vec<u64>,
     /// The anchors patches laid out again since the frame: what gpui recorded of the roots in them is
     /// of the layout before, so none of those is patched until a frame is built whole.
     repainted: FxHashSet<u64>,
@@ -1101,6 +1117,9 @@ pub(crate) struct Retain {
     /// inside it is skipped or recorded either, since a patch builds the root as one piece and what
     /// it lays out, registers and paints has to be what the recording of the root holds.
     patch_root_unit: Option<u32>,
+    /// The node a box root began at, while it is being built: nothing in it is made another (the outermost box
+    /// that qualifies holds the edit).
+    box_open: Option<u32>,
     plan: Plan,
     /// The elements that patches repainted for a hover since the last frame built whole, whose
     /// roots hold the paint of before in their recordings: that frame builds them again.
@@ -1110,6 +1129,8 @@ pub(crate) struct Retain {
     makes_patch_roots: bool,
     /// Whether scrollers are wrapped as anchors, which patches lay out again (`set_patch_roots`).
     makes_anchors: bool,
+    /// Whether plain boxes of a fixed size are made box roots (`set_patch_roots`).
+    makes_box_roots: bool,
     /// Whether an element or something below it declares a hover that only paints, and how many
     /// elements the subtree holds (up to one more than a patch root may), by the revision of the subtree
     /// (`can_be_patch_root`).
@@ -1218,6 +1239,9 @@ pub(crate) struct Entry<'a> {
     /// Whether the element, or something in its subtree, declares a hover that only changes how it
     /// paints (`Retain::can_be_patch_root`): a root built for it is a patch root.
     pub patch_root: bool,
+    /// Whether the style of the element and of its parent make it a box whose border box what is in it cannot change
+    /// (`layout::box_root::is_candidate`): a root built for it is a box root if the build agrees.
+    pub box_root: bool,
 }
 
 /// An element built whole that gpui records in the frame, under the key the frame after enters it
@@ -1232,6 +1256,8 @@ pub(crate) struct Recording {
     /// A patch can repaint the root, see [`Record::patch_root`]: gpui keeps what a patch needs of
     /// its surroundings, and the frame keeps what builds it again.
     pub patch_root: bool,
+    /// A patch can lay the root out again, see [`Record::box_root`].
+    pub box_root: bool,
 }
 
 /// An element that was skipped, and what its parent and the frame need of it.
@@ -1250,6 +1276,8 @@ pub(crate) struct Skip {
     pub overscan: Option<gpui::Pixels>,
     /// See [`Recording::patch_root`].
     pub patch_root: bool,
+    /// See [`Recording::box_root`].
+    pub box_root: bool,
 }
 
 /// Why an element that is entered is built and not skipped; `getRetainDebug` reports the ones
@@ -1339,10 +1367,12 @@ impl Retain {
             reference: false,
             unit: None,
             patch_root_unit: None,
+            box_open: None,
             plan: Plan::default(),
             hover_patched: Vec::new(),
             makes_patch_roots: true,
             makes_anchors: true,
+            makes_box_roots: true,
             patch_root_scans: FxHashMap::default(),
             hover_scans: Default::default(),
             row: false,
@@ -1514,6 +1544,7 @@ impl Retain {
         self.reference = sources.reference;
         self.unit = None;
         self.patch_root_unit = None;
+        self.box_open = None;
         self.plan.serial += 1;
         if sources.layout_only {
             self.plan.layout_since = true;
@@ -1941,6 +1972,7 @@ impl Retain {
         self.deferred_forced = forced;
         self.unit = None;
         self.patch_root_unit = None;
+        self.box_open = None;
         self.inside_relocatable = inside_relocatable;
         self.nodes.clear();
         self.below.clear();
@@ -1970,6 +2002,7 @@ impl Retain {
         self.row_parent_shape = parent_shape;
         self.unit = None;
         self.patch_root_unit = None;
+        self.box_open = None;
         self.inside_relocatable = false;
         self.nodes.clear();
         self.below.clear();
@@ -2035,6 +2068,9 @@ impl Retain {
         self.plan.patch_root_ids.retain(|id| !gone.contains(id));
         self.plan.anchors.retain(|unit| !gone.contains(&unit.id));
         self.plan.anchor_ids.retain(|id| !gone.contains(id));
+        self.plan.box_roots.retain(|unit| !gone.contains(&unit.id));
+        self.plan.box_ids.retain(|id| !gone.contains(id));
+        self.plan.box_log.retain(|id| !gone.contains(id));
         self.plan.repainted.retain(|id| !gone.contains(id));
         self.plan.unrecorded.retain(|id| !gone.contains(id));
     }
@@ -2169,7 +2205,13 @@ impl Retain {
     /// The unit of the last frame built whole that is the element `id`: one that a running paint-only
     /// animation changes, or a root that a patch repaints.
     pub(crate) fn unit(&self, id: u64) -> Option<&Unit> {
-        self.plan.units.iter().chain(&self.plan.patch_roots).chain(&self.plan.anchors).find(|unit| unit.id == id)
+        self.plan
+            .units
+            .iter()
+            .chain(&self.plan.patch_roots)
+            .chain(&self.plan.anchors)
+            .chain(&self.plan.box_roots)
+            .find(|unit| unit.id == id)
     }
 
     /// Whether the element `id` is made a patch root if the build leaves it recorded: a patch can repaint it
@@ -2297,6 +2339,7 @@ impl Retain {
             return None;
         }
         node.anchor = true;
+        node.box_log_from = self.plan.box_log.len();
         Some(EnterKey(node.enter))
     }
 
@@ -2324,7 +2367,18 @@ impl Retain {
             || node.skipped.is_some()
             || crate::background_images::still_loading() != node.loading
             || own.size + 1 > ANCHOR_MAX_ELEMENTS;
-        (!refused).then_some(node.subtree)
+        if refused {
+            return None;
+        }
+        let (subtree, from) = (node.subtree, node.box_log_from);
+        // A patch of the anchor lays all of it out, so the box roots that its content made are no root to patch at:
+        // gpui would lose the recording of the anchor around the one it rewrites.
+        let nested: FxHashSet<u64> = self.plan.box_log.drain(from..).collect();
+        if !nested.is_empty() {
+            self.plan.box_ids.retain(|id| !nested.contains(id));
+            self.plan.box_roots.retain(|unit| !nested.contains(&unit.id));
+        }
+        Some(subtree)
     }
 
     /// Keeps the anchor built since `begin_anchor` for the patches that follow the frame.
@@ -2341,13 +2395,74 @@ impl Retain {
         self.plan.anchor_ids.contains(&id)
     }
 
-    /// Tells the tree which scrollers are anchors, once the frame built whole is over: a batch whose
-    /// changes lie in them asks for a patch (`RetainedTree::structure_attributed`).
+    /// Whether the element just entered may be a box root (`layout::box_root` says its style does): it is built in
+    /// a plain context of a frame that plans, outside a unit, a patch root and a row of a virtual list, outside the
+    /// box root that holds it (the outermost box holds an edit), and the build of it before found what is in it
+    /// recordable, not lifted and small enough. Nothing else is known before the build: `to_record` judges that one.
+    fn may_be_box_root(&self, node: &Node) -> bool {
+        self.makes_box_roots
+            && node.records
+            && !self.layout_only
+            && !self.row
+            && self.box_open.is_none()
+            && self.records.get(&node.id).is_some_and(|record| record.eligible && !record.lifts && record.size <= UNIT_MAX_ELEMENTS)
+    }
+
+    /// The element just entered is a box root if the build leaves it recorded (`Recording::box_root`): the key it was
+    /// entered with, for it to be built again from. What is in it is built and recorded as it is, as in an anchor.
+    pub(crate) fn begin_box_root(&mut self) -> Option<EnterKey> {
+        if !self.open || !self.planning || self.layout_only {
+            return None;
+        }
+        let node = &self.nodes[*self.stack.last()? as usize];
+        node.box_root.then_some(EnterKey(node.enter))
+    }
+
+    /// The unit `end_unit` accepted is a box root too: the root that holds it is the one a layout edit is patched at.
+    /// Asked before the element is left.
+    pub(crate) fn unit_is_box_root(&self) -> bool {
+        self.stack.last().is_some_and(|at| {
+            let node = &self.nodes[*at as usize];
+            node.box_root && node.lift_z.is_none()
+        })
+    }
+
+    /// Keeps the box root that is no unit or patch root, for the ticks that follow the frame.
+    pub(crate) fn add_box_root(&mut self, unit: Unit) {
+        if self.reference {
+            return;
+        }
+        self.plan.box_ids.insert(unit.id);
+        self.plan.box_log.push(unit.id);
+        self.plan.box_roots.push(unit);
+    }
+
+    /// The unit or patch root `id`, which the frame keeps in its own list, is a box root too.
+    pub(crate) fn note_box_root(&mut self, id: u64) {
+        if self.reference {
+            return;
+        }
+        self.plan.box_ids.insert(id);
+        self.plan.box_log.push(id);
+    }
+
+    /// Whether plain boxes are made box roots, for a build to ask whether an element is a candidate.
+    pub(crate) fn makes_box_roots(&self) -> bool {
+        self.makes_box_roots && self.open && self.planning && !self.layout_only
+    }
+
+    /// Whether the last frame built whole has the element `id` as a box root.
+    pub(crate) fn is_box_root(&self, id: u64) -> bool {
+        self.plan.box_ids.contains(&id)
+    }
+
+    /// Tells the tree which roots a patch lays out again (the anchors and the box roots), once the frame built whole is
+    /// over: a batch whose changes lie in them asks for a patch (`RetainedTree::structure_attributed`).
     pub(crate) fn publish_anchors(&self, tree: &crate::retained_tree::RetainedTree) {
         if self.reference || self.layout_only || !self.plan.recorded {
             return;
         }
-        tree.set_anchors(self.plan.anchor_ids.clone(), self.plan.revision);
+        tree.set_anchors(self.plan.anchor_ids.union(&self.plan.box_ids).copied().collect(), self.plan.revision);
     }
 
     /// An anchor was patched: what the recordings of its content hold is of the layout before, so
@@ -2368,16 +2483,24 @@ impl Retain {
         }
     }
 
-    /// The anchor of the last frame built whole that holds `id`, walking up.
-    fn anchor_holding(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> Option<u64> {
+    /// The innermost root of the last frame built whole that a patch lays out again (an anchor or a box root) that
+    /// holds `id`, walking up.
+    fn relayout_holding(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> Option<u64> {
         let mut at = Some(id);
         while let Some(up) = at {
-            if self.plan.anchor_ids.contains(&up) {
+            if self.plan.anchor_ids.contains(&up) || self.plan.box_ids.contains(&up) {
                 return Some(up);
             }
             at = tree.elements.get(&up).and_then(|element| element.parent);
         }
         None
+    }
+
+    /// Whether the patch that `preview` plans lays the root `id` out again: it holds an element a commit changed
+    /// beyond a restyle by paint, which is the innermost relayout root of it. A unit or a patch root that is a box
+    /// root too is also one a hover or a running animation repaints, which is no layout.
+    pub(crate) fn is_relaid(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
+        tree.pending_structure().into_iter().any(|changed| tree.elements.contains_key(&changed) && self.relayout_holding(tree, changed) == Some(id))
     }
 
     /// Whether frames are recorded to be patched: the retention is planning.
@@ -2389,6 +2512,7 @@ impl Retain {
     pub(crate) fn set_patch_roots(&mut self, on: bool) {
         self.makes_patch_roots = on;
         self.makes_anchors = on && std::env::var_os("GPUIX_ANCHORS_OFF").is_none();
+        self.makes_box_roots = on && std::env::var_os("GPUIX_BOX_ROOTS_OFF").is_none();
     }
 
     /// Whether the last frame built whole has the element `id` as a root that a patch repaints.
@@ -2505,15 +2629,15 @@ impl Retain {
             }
         }
         // The root that holds an element a hover or a commit restyled by paint, or the unit it is in.
-        // The anchors that hold what a commit changed beyond a restyle by paint: they are laid out again, and
-        // build everything in them, so what else changed in them needs no root of its own.
+        // The innermost anchor or box root that holds what a commit changed beyond a restyle by paint: it is laid out
+        // again, and builds everything in it, so what else changed in it needs no root of its own.
         let mut relaid = FxHashSet::default();
         for id in sources.tree.pending_structure() {
             if sources.tree.elements.contains_key(&id) {
-                relaid.insert(self.anchor_holding(sources.tree, id).ok_or(Unpatchable::Structure(id))?);
+                relaid.insert(self.relayout_holding(sources.tree, id).ok_or(Unpatchable::Structure(id))?);
             }
         }
-        let covered = |id: u64| !relaid.is_empty() && self.anchor_holding(sources.tree, id).is_some_and(|anchor| relaid.contains(&anchor));
+        let covered = |id: u64| !relaid.is_empty() && self.relayout_holding(sources.tree, id).is_some_and(|holder| relaid.contains(&holder));
         for &id in &sources.hover_paint {
             if !covered(id) {
                 touched.insert(self.root_holding(sources.tree, id).ok_or(Unpatchable::Hover(id))?);
@@ -2539,11 +2663,24 @@ impl Retain {
             .map(|unit| unit.id)
             .filter(|id| touched.contains(id) && !covered(*id))
             .collect();
-        let anchors: Vec<u64> = self.plan.anchors.iter().map(|unit| unit.id).filter(|id| relaid.contains(id)).collect();
+        let anchors: Vec<u64> = self
+            .plan
+            .anchors
+            .iter()
+            .chain(&self.plan.box_roots)
+            .chain(&self.plan.units)
+            .chain(&self.plan.patch_roots)
+            .map(|unit| unit.id)
+            .filter(|id| relaid.contains(id))
+            .collect();
         if !self.plan.repainted.is_empty() {
-            // What is nested in an anchor that a patch spliced was forgotten by gpui, and is neither replayed nor
-            // patched until a frame built whole records it.
-            let stale = |id: u64| self.anchor_holding(sources.tree, id).is_some_and(|anchor| self.plan.repainted.contains(&anchor));
+            // What is nested in a root that a patch spliced was forgotten by gpui, and is neither replayed nor
+            // patched until a frame built whole records it. The root itself is patched again when gpui rewrote its
+            // recording.
+            let stale = |id: u64| {
+                self.relayout_holding(sources.tree, id)
+                    .is_some_and(|holder| self.plan.repainted.contains(&holder) && (holder != id || self.plan.unrecorded.contains(&holder)))
+            };
             if let Some(&id) = units.iter().find(|id| stale(**id)).or_else(|| anchors.iter().find(|id| self.plan.unrecorded.contains(id))) {
                 return Err(Unpatchable::AnchorStale(id));
             }
@@ -2662,6 +2799,8 @@ impl Retain {
             costly: false,
             patch_root: entry.patch_root,
             anchor: false,
+            box_log_from: 0,
+            box_root: false,
             digest: 0,
             absent: false,
             absent_children: Vec::new(),
@@ -2691,6 +2830,7 @@ impl Retain {
                 && entry.prekeyed.is_none(),
         };
         let at = self.nodes.len() as u32;
+        node.box_root = entry.box_root && self.may_be_box_root(&node);
         match self.skippable(&node, &entry) {
             Ok(record) => {
                 node.key = record.key;
@@ -2731,6 +2871,7 @@ impl Retain {
                     effects: record.effects.clone(),
                     overscan,
                     patch_root: record.patch_root,
+                    box_root: record.box_root && node.box_root,
                 };
                 self.nodes.push(node);
                 self.below.push(Below::default());
@@ -2745,6 +2886,9 @@ impl Retain {
         }
         node.colors_frame = Some(crate::color::reads::open());
         node.custom_reads_at = crate::css::custom_properties::reads::count();
+        if node.box_root {
+            self.box_open = Some(at);
+        }
         self.stack.push(at);
         self.nodes.push(node);
         self.below.push(Below::default());
@@ -2848,6 +2992,9 @@ impl Retain {
         if self.patch_root_unit == Some(at as u32) {
             self.patch_root_unit = None;
         }
+        if self.box_open == Some(at as u32) {
+            self.box_open = None;
+        }
         let end = self.nodes.len() as u32;
         let node = &mut self.nodes[at];
         node.end = end;
@@ -2898,6 +3045,7 @@ impl Retain {
             subtree: node.subtree,
             overscan,
             patch_root: node.patch_root && !lifts && own.size <= PATCH_ROOT_MAX_ELEMENTS,
+            box_root: node.box_root && !lifts && own.size <= UNIT_MAX_ELEMENTS,
         })
     }
 
@@ -3489,6 +3637,7 @@ impl Retain {
                     holes,
                     size: own.size,
                     patch_root: node.patch_root && eligible && !lifts && own.size <= PATCH_ROOT_MAX_ELEMENTS && node.vol.dynamic == 0 && !own.dynamic,
+                    box_root: node.box_root && eligible && !lifts && own.size <= UNIT_MAX_ELEMENTS && node.vol.dynamic == 0 && !own.dynamic,
                     reads_colors: node.reads_colors,
                     reads_custom: node.reads_custom,
                     costly: node.costly,
@@ -3765,6 +3914,7 @@ mod tests {
             scroller: None,
             lift_run: &|| false,
                 patch_root: false,
+                box_root: false,
         });
         retain.stacking(|| (None, true));
         retain.digest(|| built.to_owned());
@@ -3844,6 +3994,7 @@ mod tests {
             scroller: None,
             lift_run: &|| false,
                 patch_root: false,
+                box_root: false,
         };
         let mut recordings = Vec::new();
         let skipped = retain.enter(entry(1, 0)).is_some();
@@ -3918,6 +4069,7 @@ mod tests {
                 scroller: None,
                 lift_run: &|| false,
                 patch_root: false,
+                box_root: false,
             })
             .expect("the root is skipped by the frame after the one that built it");
         assert_eq!(skip.token, parent);
@@ -4005,6 +4157,7 @@ mod tests {
                     scroller: None,
                     lift_run: &|| lift_run,
                 patch_root: false,
+                box_root: false,
                 })
                 .is_some();
             if !skipped {
@@ -4139,6 +4292,7 @@ mod tests {
                 scroller: None,
                 lift_run: &|| false,
                 patch_root: false,
+                box_root: false,
             });
             retain.stacking(|| (None, true));
         }
@@ -4288,6 +4442,7 @@ mod tests {
                 scroller: None,
                 lift_run: &|| false,
                 patch_root: false,
+                box_root: false,
             })
         };
         enter(retain, 1, revision);
@@ -5502,6 +5657,8 @@ mod tests {
         customs: Vec<(u64, Option<u64>)>,
         /// The elements that declare a hover that only paints, or hold one.
         patch_roots: FxHashSet<u64>,
+        /// The elements whose style and parent's make them candidates for a box root.
+        box_roots: FxHashSet<u64>,
         /// The elements a hover restyled by paint, which the next preview and frame find.
         hover_paint: Vec<u64>,
     }
@@ -5527,6 +5684,7 @@ mod tests {
                 revisions: HashMap::new(),
                 customs: Vec::new(),
                 patch_roots: FxHashSet::default(),
+                box_roots: FxHashSet::default(),
                 hover_paint: Vec::new(),
             }
         }
@@ -5574,6 +5732,7 @@ mod tests {
                     scroller,
                     lift_run: &|| false,
                     patch_root: self.patch_roots.contains(&id),
+                    box_root: self.box_roots.contains(&id),
                 })
         }
 
@@ -5585,6 +5744,9 @@ mod tests {
                 if skip.patch_root {
                     let env = crate::renderer::FrameEnv::for_test(self.inherited.clone(), skip.enter, web_time::Instant::now());
                     self.retain.add_patch_root(Unit { id, env });
+                    if skip.box_root {
+                        self.retain.note_box_root(id);
+                    }
                 }
                 return None;
             }
@@ -5593,11 +5755,38 @@ mod tests {
             inside(self);
             let recording = self.retain.exit();
             let hover = enter.zip(recording).filter(|(_, recording)| recording.patch_root);
-            if let Some((enter, _)) = hover {
+            let is_patch_root = hover.is_some();
+            if let Some((enter, recording)) = hover {
                 let env = crate::renderer::FrameEnv::for_test(self.inherited.clone(), enter, web_time::Instant::now());
                 self.retain.add_patch_root(Unit { id, env });
+                if recording.box_root {
+                    self.retain.note_box_root(id);
+                }
             }
-            Some(hover.is_some())
+            Some(is_patch_root)
+        }
+
+        /// Builds the element `id` the way `build_element_in` does for a box root that is no patch root, with `inside`
+        /// building what is in it. Says whether it is one. Nothing if the frame skipped it, in which case the skip
+        /// says whether it is and it is kept as one.
+        fn box_root(&mut self, id: u64, inside: impl FnOnce(&mut Self)) -> Option<bool> {
+            if let Some(skip) = self.enter_in(id, None) {
+                if skip.box_root {
+                    let env = crate::renderer::FrameEnv::for_test(self.inherited.clone(), skip.enter, web_time::Instant::now());
+                    self.retain.add_box_root(Unit { id, env });
+                }
+                return None;
+            }
+            self.retain.stacking(|| (None, false));
+            let enter = self.retain.begin_box_root();
+            inside(self);
+            let recording = self.retain.exit();
+            let boxed = enter.zip(recording).filter(|(_, recording)| recording.box_root);
+            if let Some((enter, _)) = boxed {
+                let env = crate::renderer::FrameEnv::for_test(self.inherited.clone(), enter, web_time::Instant::now());
+                self.retain.add_box_root(Unit { id, env });
+            }
+            Some(boxed.is_some())
         }
 
         /// Builds the element `id` the way `build_element_in` does, with `inside` building what is
@@ -6651,6 +6840,190 @@ mod tests {
         // What no element is named for is a barrier: the tree is not the one the frame was built from.
         page.tree.set_universal_style(Some(restyled(r##"{"color":"#123456"}"##)));
         assert_eq!(page.preview(&[], false), Err(Unpatchable::Edited));
+    }
+
+    /// A page of `1 > (2 > (3, 4), 5)` whose frame `build`s the box root 2 (if it is a candidate) in 1.
+    fn box_frame(page: &mut Units, inside: impl Fn(&mut Units)) {
+        page.frame(&[], false, |page| {
+            page.element(1, None, |page| {
+                page.box_root(2, |page| inside(page));
+                page.leaf(5);
+            });
+        });
+    }
+
+    fn two_leaves(page: &mut Units) {
+        page.leaf(3);
+        page.leaf(4);
+    }
+
+    /// The box root 2, recorded by a frame and made one by the frame that builds it again with that record to judge it by.
+    fn boxed_page() -> Units {
+        let mut page = Units::new();
+        page.box_roots = [2].into_iter().collect();
+        page.tree.set_commit_patching(true);
+        box_frame(&mut page, two_leaves);
+        assert!(!page.retain.is_box_root(2), "the first build has no record to judge the box by");
+        page.edit(1);
+        page.edit(2);
+        box_frame(&mut page, two_leaves);
+        page
+    }
+
+    #[test]
+    fn a_layout_edit_in_a_box_root_previews_to_it_and_one_outside_every_root_is_structure() {
+        let mut page = boxed_page();
+        assert!(page.retain.is_box_root(2));
+        page.tree.set_text(3, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![2]));
+        assert!(page.retain.is_relaid(&page.tree, 2));
+        page.tree.set_text(5, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Structure(5)));
+    }
+
+    #[test]
+    fn a_box_root_is_replayed_by_the_frame_after_and_is_still_one() {
+        let mut page = boxed_page();
+        page.edit(1);
+        box_frame(&mut page, two_leaves);
+        assert!(page.retain.nodes[1].skipped.is_some(), "a box root is a root like any other, replayed when nothing changed");
+        assert!(page.retain.is_box_root(2));
+        page.tree.set_text(4, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![2]));
+    }
+
+    #[test]
+    fn an_element_whose_style_is_no_candidate_is_no_box_root() {
+        let mut page = Units::new();
+        page.tree.set_commit_patching(true);
+        box_frame(&mut page, two_leaves);
+        page.edit(1);
+        page.edit(2);
+        box_frame(&mut page, two_leaves);
+        assert!(!page.retain.is_box_root(2));
+        page.tree.set_text(3, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Structure(3)));
+    }
+
+    #[test]
+    fn a_box_with_more_elements_than_a_unit_holds_is_no_box_root() {
+        let mut page = Units::new();
+        page.box_roots = [2].into_iter().collect();
+        page.tree.set_commit_patching(true);
+        let big = |page: &mut Units| {
+            two_leaves(page);
+            for id in 100..100 + u64::from(UNIT_MAX_ELEMENTS) {
+                page.leaf(id);
+            }
+        };
+        box_frame(&mut page, big);
+        page.edit(1);
+        page.edit(2);
+        box_frame(&mut page, big);
+        assert!(!page.retain.is_box_root(2));
+        page.tree.set_text(3, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Structure(3)));
+    }
+
+    #[test]
+    fn a_box_with_something_excluded_or_lifted_in_it_is_no_box_root() {
+        for lifted in [false, true] {
+            let mut page = Units::new();
+            page.box_roots = [2].into_iter().collect();
+            page.tree.set_commit_patching(true);
+            let inside = |page: &mut Units| {
+                page.leaf(3);
+                page.element(4, None, |page| {
+                    if lifted {
+                        page.retain.stacking(|| (Some(1), false));
+                    } else {
+                        page.retain.exclude(Exclusion::CustomElement);
+                    }
+                });
+            };
+            box_frame(&mut page, inside);
+            page.edit(1);
+            page.edit(2);
+            box_frame(&mut page, inside);
+            assert!(!page.retain.is_box_root(2), "lifted: {lifted}");
+        }
+    }
+
+    #[test]
+    fn a_box_in_a_row_of_a_virtual_list_is_no_box_root() {
+        let mut page = Units::new();
+        page.box_roots = [3].into_iter().collect();
+        let shape = page.list_frame(false);
+        page.row(shape, 3, |_| {});
+        page.edit(3);
+        let shape = page.list_frame(false);
+        page.retain.begin_row(shape, 3);
+        assert!(!page.enter(3));
+        assert!(page.retain.begin_box_root().is_none(), "gpui lays a row out as a root of its own and declines a patch of it");
+        assert!(page.retain.exit().is_some_and(|recording| !recording.box_root));
+        page.retain.finish_row();
+        assert!(!page.retain.is_box_root(3));
+    }
+
+    #[test]
+    fn a_box_inside_a_box_root_is_none_and_the_outer_one_holds_the_edit() {
+        let mut page = Units::new();
+        page.box_roots = [1, 2].into_iter().collect();
+        page.tree.set_commit_patching(true);
+        let nested = |page: &mut Units| {
+            page.box_root(1, |page| {
+                page.box_root(2, |page| two_leaves(page));
+                page.leaf(5);
+            });
+        };
+        page.frame(&[], false, nested);
+        for id in [1, 2] {
+            page.edit(id);
+        }
+        page.frame(&[], false, nested);
+        assert!(page.retain.is_box_root(1));
+        assert!(!page.retain.is_box_root(2));
+        page.tree.set_text(3, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![1]));
+    }
+
+    #[test]
+    fn a_patch_root_that_is_a_box_root_is_one_root_a_hover_repaints_and_a_layout_edit_lays_out_again() {
+        let mut page = Units::new();
+        page.patch_roots = [2].into_iter().collect();
+        page.box_roots = [2].into_iter().collect();
+        page.tree.set_commit_patching(true);
+        let build = |page: &mut Units| {
+            page.frame(&[], false, |page| {
+                page.element(1, None, |page| {
+                    page.patch_root(2, |page| two_leaves(page));
+                    page.leaf(5);
+                });
+            });
+        };
+        build(&mut page);
+        page.edit(1);
+        page.edit(2);
+        build(&mut page);
+        assert!(page.retain.is_patch_root(2) && page.retain.is_box_root(2));
+        assert!(page.retain.plan.box_roots.is_empty(), "kept once, in the list of the patch roots");
+        page.hover_paint = vec![3];
+        assert_eq!(page.preview(&[], false), Ok(vec![2]));
+        assert!(!page.retain.is_relaid(&page.tree, 2), "a hover paints, and lays nothing out");
+        page.hover_paint = Vec::new();
+        page.tree.set_text(3, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![2]));
+        assert!(page.retain.is_relaid(&page.tree, 2));
+    }
+
+    #[test]
+    fn a_box_root_that_a_patch_laid_out_is_patched_again_and_what_is_nested_in_it_waits_for_a_frame_built_whole() {
+        let mut page = boxed_page();
+        page.retain.anchor_repainted(&page.tree, 2, true);
+        page.tree.set_text(3, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![2]), "gpui rewrote its recording");
+        page.retain.anchor_repainted(&page.tree, 2, false);
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::AnchorStale(2)), "it lost it");
     }
 
     #[test]

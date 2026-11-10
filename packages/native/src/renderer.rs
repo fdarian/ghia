@@ -10418,6 +10418,7 @@ fn build_element_in(
 ) -> gpui::AnyElement {
     let mut unit = None;
     let mut patch_root_env = None;
+    let mut box_root_env = None;
     let mut anchor_env = None;
     if let Some(known) = ctx.tree.elements.get(&id) {
         let plain = ctx.baseline_probe.is_none()
@@ -10436,6 +10437,7 @@ fn build_element_in(
             )
         );
         let patch_root = ctx.retain.can_be_patch_root(ctx.tree, id);
+        let box_root = ctx.retain.makes_box_roots() && crate::layout::box_root::is_candidate(ctx.tree, known);
         let skip = ctx.retain.enter(crate::retain::Entry {
             id,
             revision: known.subtree_revision,
@@ -10457,6 +10459,7 @@ fn build_element_in(
                     || transform_runs(known, ctx.css_animations, ctx.css_transitions, ctx.motion_states, ctx.motion_values, ctx.now)
             },
             patch_root,
+            box_root,
         });
         if let Some(skip) = skip {
             ctx.contents_overlay = None;
@@ -10492,6 +10495,14 @@ fn build_element_in(
                     relocatable: false,
                     forced: false,
                 });
+                if patch_root_env.is_none() {
+                    box_root_env = ctx.retain.begin_box_root().map(|enter| FrameEnv {
+                        start: BuildStart::of(ctx),
+                        enter,
+                        relocatable: false,
+                        forced: false,
+                    });
+                }
             }
         }
     }
@@ -10503,6 +10514,7 @@ fn build_element_in(
         ctx.inherited = outside;
     }
     let unit = unit.and_then(|env| ctx.retain.end_unit().map(|(subtree, lift_z)| (env, subtree, lift_z)));
+    let unit_is_box_root = unit.is_some() && ctx.retain.unit_is_box_root();
     // Every style resolves while its element is built, and a virtual-list row is
     // built in list layout, so this is the one place that sees both.
     crate::background_images::pump(window, cx);
@@ -10514,12 +10526,12 @@ fn build_element_in(
         None
     };
     match (unit, recording) {
-        (Some((env, subtree, lift_z)), _) => unit_root(id, env, subtree, lift_z, element, ctx),
+        (Some((env, subtree, lift_z)), _) => unit_root(id, env, subtree, lift_z, unit_is_box_root, element, ctx),
         (None, _) if anchor.is_some() => {
             let (env, subtree) = anchor.expect("checked");
             anchor_root(id, env, subtree, element, ctx)
         }
-        (None, Some(recording)) => recorded_root(id, recording, patch_root_env, element, ctx),
+        (None, Some(recording)) => recorded_root(id, recording, patch_root_env, box_root_env, element, ctx),
         (None, None) => element,
     }
 }
@@ -10646,8 +10658,14 @@ fn retained_root(
         retained = retained.lift_z(z);
     }
     if skip.patch_root {
-        retained = retained.patchable();
+        retained = if skip.box_root { retained.patchable_relayout() } else { retained.patchable() };
         ctx.retain.add_patch_root(crate::retain::Unit { id, env: patch_root_env });
+        if skip.box_root {
+            ctx.retain.note_box_root(id);
+        }
+    } else if skip.box_root {
+        retained = retained.patchable_relayout();
+        ctx.retain.add_box_root(crate::retain::Unit { id, env: patch_root_env });
     }
     retained.into_any_element()
 }
@@ -10712,6 +10730,7 @@ fn unit_root(
     env: FrameEnv,
     subtree: crate::layout::cull::Subtree,
     lift_z: Option<i32>,
+    box_root: bool,
     element: gpui::AnyElement,
     ctx: &mut BuildCtx,
 ) -> gpui::AnyElement {
@@ -10724,8 +10743,11 @@ fn unit_root(
     if let Some(z) = lift_z {
         retained = retained.lift_z(z);
     }
-    retained = retained.patchable();
+    retained = if box_root { retained.patchable_relayout() } else { retained.patchable() };
     ctx.retain.add_unit(crate::retain::Unit { id, env });
+    if box_root {
+        ctx.retain.note_box_root(id);
+    }
     retained.into_any_element()
 }
 
@@ -10759,6 +10781,7 @@ fn recorded_root(
     id: u64,
     recording: crate::retain::Recording,
     patch_root_env: Option<FrameEnv>,
+    box_root_env: Option<FrameEnv>,
     element: gpui::AnyElement,
     ctx: &mut BuildCtx,
 ) -> gpui::AnyElement {
@@ -10777,9 +10800,24 @@ fn recorded_root(
     if let Some(z) = recording.lift_z {
         retained = retained.lift_z(z);
     }
-    if let Some(env) = patch_root_env.filter(|_| recording.patch_root) {
-        retained = retained.patchable();
-        ctx.retain.add_patch_root(crate::retain::Unit { id, env });
+    if let Some(env) = patch_root_env.or(box_root_env) {
+        match (recording.patch_root, recording.box_root) {
+            // A box root that is a patch root is one root: a patch lays it out again when a commit edits it.
+            (true, true) => {
+                retained = retained.patchable_relayout();
+                ctx.retain.add_patch_root(crate::retain::Unit { id, env });
+                ctx.retain.note_box_root(id);
+            }
+            (true, false) => {
+                retained = retained.patchable();
+                ctx.retain.add_patch_root(crate::retain::Unit { id, env });
+            }
+            (false, true) => {
+                retained = retained.patchable_relayout();
+                ctx.retain.add_box_root(crate::retain::Unit { id, env });
+            }
+            (false, false) => {}
+        }
     }
     retained.into_any_element()
 }

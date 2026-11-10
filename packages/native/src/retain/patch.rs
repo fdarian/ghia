@@ -267,10 +267,12 @@ impl GpuixView {
             }
         };
         let by_commit = !self.tree.lock().unwrap().pending_restyles().is_empty();
-        for &id in ids.iter().filter(|id| self.retain.is_patch_root(**id) || self.retain.is_anchor(**id)) {
+        for &id in ids.iter().filter(|id| self.retain.is_patch_root(**id) || self.retain.is_anchor(**id) || self.retain.is_box_root(**id)) {
             if let Some(blocker) = window.patch_blocker(&crate::renderer::retained_id(id)) {
                 let by = if self.retain.is_anchor(id) {
                     "Anchor"
+                } else if self.retain.is_box_root(id) && self.relays_out(id) {
+                    "Box"
                 } else if by_commit {
                     "Commit"
                 } else {
@@ -285,7 +287,7 @@ impl GpuixView {
 
     /// Builds `ids`, which [`Self::plan_patch`] chose, at `now`.
     fn build_units(&mut self, ids: Vec<u64>, now: web_time::Instant, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Option<Built> {
-        let anchors: Vec<u64> = ids.iter().copied().filter(|id| self.retain.is_anchor(*id)).collect();
+        let anchors: Vec<u64> = ids.iter().copied().filter(|id| self.relays_out(*id)).collect();
         if !anchors.is_empty() && !self.focus_follows_tree() {
             // What a frame built whole does before it builds: an anchor is built without the pass that gives
             // the elements that came their focus handles, and takes the ones that went.
@@ -378,6 +380,12 @@ impl GpuixView {
             at = tree.elements.get(&up).and_then(|element| element.parent);
         }
         gpui::Point::default()
+    }
+
+    /// Whether the patch of the commit's changes lays the root `id` out again: an anchor or a box root that holds one.
+    fn relays_out(&self, id: u64) -> bool {
+        let tree = self.tree.lock().unwrap();
+        self.retain.is_relaid(&tree, id)
     }
 
     /// Whether the focus handles are the ones a build of the tree would use. An anchor is built without the
