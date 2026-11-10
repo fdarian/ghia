@@ -1524,23 +1524,16 @@ impl RetainedTree {
         let Some(element) = self.elements.get(&id) else {
             return StyleChange::default();
         };
-        if let Some(matched) = element.css().and_then(|css| css.matched.as_ref()) {
-            let declared = self.sheets.cascaded(&mut self.styles, matched, element.own_style.as_ref());
-            let effective = match (&self.universal, declared) {
-                (Some(universal), declared) if element.takes_universal_style() => Some(match declared {
-                    Some(declared) => self.styles.layered.effective(universal, &declared),
-                    None => universal.clone(),
-                }),
-                (_, declared) => declared,
-            };
-            return self.assign_style(id, effective, classify);
-        }
-        let effective = match (&self.universal, &element.own_style) {
-            (Some(universal), own) if element.takes_universal_style() => Some(match own {
-                Some(own) => self.styles.layered.effective(universal, own),
+        let declared = match element.css().and_then(|css| css.matched.as_ref()) {
+            Some(matched) => self.sheets.cascaded(&mut self.styles, matched, element.own_style.as_ref()),
+            None => element.own_style.clone(),
+        };
+        let effective = match (&self.universal, declared) {
+            (Some(universal), declared) if element.takes_universal_style() => Some(match declared {
+                Some(declared) => self.styles.layered.effective(universal, &declared),
                 None => universal.clone(),
             }),
-            (_, own) => own.clone(),
+            (_, declared) => declared,
         };
         self.assign_style(id, effective, classify)
     }
