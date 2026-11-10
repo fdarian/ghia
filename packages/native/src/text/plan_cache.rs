@@ -42,7 +42,7 @@ pub(crate) struct Planned {
     key: Key,
     /// `plan_children_at`, see there.
     pub children: Vec<(Child, u32)>,
-    /// What the element reads out, when it is a `<text>` host (`accessibility::is_text_host`).
+    /// What the element reads out, when its content is one paragraph (`accessibility::carries_text`).
     pub accessible_text: Option<String>,
 }
 
@@ -62,13 +62,13 @@ pub(crate) fn settled() {
 
 fn compute(tree: &RetainedTree, element: &RetainedElement, key: Key) -> Planned {
     let children = inline::plan_children_at(tree, element);
-    let accessible_text = crate::accessibility::is_text_host(element)
-        .then(|| inline::accessible_text(children.iter().map(|(child, _)| child)))
+    let accessible_text = crate::accessibility::carries_text(element)
+        .then(|| inline::sole_paragraph_text(children.iter().map(|(child, _)| child)))
         .flatten();
     Planned { key, children, accessible_text }
 }
 
-/// `plan_children_at(tree, element)`, and what `<text>` reads out of it, kept on the element.
+/// `plan_children_at(tree, element)`, and what the element reads out of it, kept on the element.
 pub(crate) fn planned(tree: &RetainedTree, element: &RetainedElement) -> Arc<Planned> {
     let mode = style_cache::mode();
     let key = Key {
@@ -107,7 +107,7 @@ mod tests {
 
     fn tree() -> RetainedTree {
         let mut tree = RetainedTree::new();
-        tree.create_element(1, "text".to_string());
+        tree.create_element(1, "div".to_string());
         for (id, content) in [(2, "Hello "), (3, "world")] {
             tree.create_element(id, "#text".to_string());
             tree.set_text(id, content.to_string());

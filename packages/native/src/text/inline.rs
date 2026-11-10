@@ -683,6 +683,14 @@ pub fn accessible_text<'a>(plan: impl IntoIterator<Item = &'a Child>) -> Option<
     (!text.is_empty()).then_some(text)
 }
 
+/// [`accessible_text`] of `plan` when its only content is paragraphs, and `None` when it has a block
+/// or a table: those are read as the elements they are, and each paragraph beside them is its own
+/// node (`accessibility::paragraph_label`).
+pub fn sole_paragraph_text<'a>(plan: impl IntoIterator<Item = &'a Child> + Clone) -> Option<String> {
+    let only_paragraphs = plan.clone().into_iter().all(|child| matches!(child, Child::Paragraph(_) | Child::EmptyLine));
+    only_paragraphs.then(|| accessible_text(plan)).flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

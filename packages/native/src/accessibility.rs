@@ -142,23 +142,77 @@ pub(crate) fn default_role(element: &crate::retained_tree::RetainedElement) -> O
     }
 }
 
-/// A `<text>`: what it reads out is the text of the paragraphs of its children.
-pub(crate) fn is_text_host(element: &crate::retained_tree::RetainedElement) -> bool {
-    element.element_type == "text"
+/// Whether `element` carries the text of its paragraph: a host container that is not a string child.
+pub(crate) fn carries_text(element: &crate::retained_tree::RetainedElement) -> bool {
+    crate::text::inline::is_host_container(element) && element.element_type != crate::text::inline::TEXT_NODE
 }
 
-/// The text a host `<text>` reads out: `text`, the text of the paragraphs of its children
-/// (`text::inline::accessible_text`).
+/// What a host container reads out when its content is one paragraph: that paragraph's text. A
+/// childless one reads its own `content`.
+pub(crate) fn read_text(
+    tree: &crate::retained_tree::RetainedTree,
+    element: &crate::retained_tree::RetainedElement,
+    planned: Option<&crate::text::plan_cache::Planned>,
+) -> Option<String> {
+    if !carries_text(element) {
+        return None;
+    }
+    match planned {
+        Some(planned) => planned.accessible_text.clone(),
+        None => crate::text::inline::own_text(tree, element).filter(|text| !text.is_empty()),
+    }
+}
+
+/// [`read_text`] for an element nobody planned: one below a skipped subtree, or one a reference names.
+pub(crate) fn read_text_unplanned(
+    tree: &crate::retained_tree::RetainedTree,
+    element: &crate::retained_tree::RetainedElement,
+) -> Option<String> {
+    if !carries_text(element) || element.children.is_empty() {
+        return read_text(tree, element, None);
+    }
+    let plan = crate::text::inline::plan_children_at(tree, element);
+    crate::text::inline::sole_paragraph_text(plan.iter().map(|(child, _)| child))
+}
+
+/// The role of `element` when its props give none: its type's, or `Label` when it reads out text.
+pub(crate) fn role_without_props(element: &crate::retained_tree::RetainedElement, text: Option<&str>) -> Option<Role> {
+    default_role(element).or(text.map(|_| Role::Label))
+}
+
+/// The text a host container reads out, `text`, unless the author gave `aria-valuetext`.
 pub(crate) fn describe_text<E>(el: E, element: &crate::retained_tree::RetainedElement, text: Option<&str>) -> E
 where
     E: StatefulInteractiveElement,
 {
-    if is_text_host(element) && element.custom_props().get("aria-valuetext").is_none() {
+    if element.custom_props().get("aria-valuetext").is_none() {
         if let Some(text) = text {
             return el.aria_value(text.to_string());
         }
     }
     el
+}
+
+/// Whether each paragraph of `element` gets a node of its own: with a screen reader on, when blocks
+/// stand beside the paragraphs, which then have no element to carry their text.
+pub(crate) fn labels_paragraphs(
+    a11y_active: bool,
+    element: &crate::retained_tree::RetainedElement,
+    plan: &[(crate::text::inline::Child, u32)],
+) -> bool {
+    use crate::text::inline::Child;
+    a11y_active
+        && carries_text(element)
+        && plan.iter().any(|(child, _)| !matches!(child, Child::Paragraph(_) | Child::EmptyLine))
+}
+
+/// The node of a paragraph that sits beside blocks in `host`, which has no element of its own to carry
+/// its text: `index` is where the paragraph sits among the children of `host`.
+pub(crate) fn paragraph_label(host: u64, index: u32, text: &str) -> gpui::Stateful<gpui::Div> {
+    gpui::div()
+        .id(gpui::ElementId::Name(gpui::SharedString::from(format!("__gpuix_paragraph_{host}_{index}"))))
+        .role(Role::Label)
+        .aria_value(text.to_string())
 }
 
 /// What `apply_accessibility` reads of the elements around `host_id` rather than of it: the labels
@@ -310,5 +364,55 @@ mod tests {
         assert_eq!(role_from_aria("presentation"), Some(Role::GenericContainer));
         assert_eq!(role_from_aria("Button"), None);
         assert_eq!(role_from_aria("not-a-role"), None);
+    }
+
+    fn container(children: &[(&str, &str)]) -> crate::retained_tree::RetainedTree {
+        let mut tree = crate::retained_tree::RetainedTree::new();
+        tree.create_element(1, "div".to_string());
+        for (index, (kind, text)) in children.iter().enumerate() {
+            let id = 2 + index as u64;
+            tree.create_element(id, kind.to_string());
+            tree.append_child(1, id);
+            if *kind == "#text" {
+                tree.set_text(id, text.to_string());
+            }
+        }
+        tree
+    }
+
+    #[test]
+    fn paragraphs_beside_blocks_are_labelled_only_with_a_screen_reader() {
+        let tree = container(&[("#text", "Before"), ("div", ""), ("#text", "After")]);
+        let host = &tree.elements[&1];
+        let plan = crate::text::inline::plan_children_at(&tree, host);
+        assert!(super::labels_paragraphs(true, host, &plan));
+        assert!(!super::labels_paragraphs(false, host, &plan));
+        let one = container(&[("#text", "Only")]);
+        let host = &one.elements[&1];
+        let plan = crate::text::inline::plan_children_at(&one, host);
+        assert!(!super::labels_paragraphs(true, host, &plan));
+    }
+
+    #[test]
+    fn a_container_reads_out_its_one_paragraph_and_has_the_label_role_unless_it_has_another() {
+        let tree = container(&[("#text", "Hello")]);
+        let host = &tree.elements[&1];
+        let text = super::read_text_unplanned(&tree, host);
+        assert_eq!(text.as_deref(), Some("Hello"));
+        assert_eq!(super::role_without_props(host, text.as_deref()), Some(Role::Label));
+        let mut form = container(&[("#text", "Hello")]);
+        form.create_element(9, "form".to_string());
+        form.append_child(1, 9);
+        form.create_element(10, "#text".to_string());
+        form.set_text(10, "Hi".to_string());
+        form.append_child(9, 10);
+        let host = &form.elements[&9];
+        let text = super::read_text_unplanned(&form, host);
+        assert_eq!(text.as_deref(), Some("Hi"));
+        assert_eq!(super::role_without_props(host, text.as_deref()), Some(Role::Form));
+        let blank = container(&[("#text", "  ")]);
+        assert_eq!(super::read_text_unplanned(&blank, &blank.elements[&1]), None);
+        let beside_block = container(&[("#text", "Before"), ("div", "")]);
+        assert_eq!(super::read_text_unplanned(&beside_block, &beside_block.elements[&1]), None);
     }
 }
