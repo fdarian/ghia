@@ -232,17 +232,19 @@ impl RetainedTree {
         }
     }
 
-    /// Positions of `id` and its ancestors among their siblings, from the top: tree order.
-    fn tree_path(&self, id: u64) -> Vec<usize> {
+    /// Positions of `id` and its ancestors among their siblings, from the top: tree order. `None`
+    /// when an ancestor does not list the element, which a batch that appends to a parent before
+    /// creating it leaves behind: such an element is not in the document.
+    fn tree_path(&self, id: u64) -> Option<Vec<usize>> {
         let mut path = Vec::new();
         let mut at = id;
         while let Some(parent) = self.elements.get(&at).and_then(|element| element.parent) {
-            let position = self.elements.get(&parent).and_then(|parent| parent.children.iter().position(|child| *child == at));
-            path.push(position.expect("an element is among its parent's children"));
+            let position = self.elements.get(&parent)?.children.iter().position(|child| *child == at)?;
+            path.push(position);
             at = parent;
         }
         path.reverse();
-        path
+        Some(path)
     }
 
     fn text_content(&self, id: u64) -> String {
@@ -260,12 +262,16 @@ impl RetainedTree {
 
     /// Parses the sheets again when their texts differ from the ones the index was built from.
     fn reload_sheets(&mut self) {
-        let mut connected: Vec<u64> =
-            self.sheets.style_elements.iter().copied().filter(|id| self.is_connected(*id)).collect();
-        if connected.len() > 1 {
-            connected.sort_by_cached_key(|id| self.tree_path(*id));
-        }
-        let texts = self.sheets.texts_with(connected.iter().map(|id| self.text_content(*id)).collect());
+        let mut connected: Vec<(Vec<usize>, u64)> = self
+            .sheets
+            .style_elements
+            .iter()
+            .copied()
+            .filter(|id| self.is_connected(*id))
+            .filter_map(|id| self.tree_path(id).map(|path| (path, id)))
+            .collect();
+        connected.sort();
+        let texts = self.sheets.texts_with(connected.iter().map(|(_, id)| self.text_content(*id)).collect());
         if texts == self.sheets.loaded {
             return;
         }

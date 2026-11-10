@@ -212,6 +212,25 @@ fn style_elements_apply_in_tree_order_not_creation_order() {
 }
 
 #[test]
+fn a_style_element_appended_to_a_parent_created_later_is_not_in_the_document() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    let first = doc.make("style");
+    let second = doc.make("style");
+    let parent = 900;
+    doc.tree.append_child(parent, first);
+    doc.tree.append_child(parent, second);
+    doc.tree.create_element(parent, "div".into());
+    doc.tree.append_child(ROOT, parent);
+    doc.flush();
+    assert_eq!(doc.color(div), None);
+
+    doc.style_element(ROOT, ".a { color: red }");
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+}
+
+#[test]
 fn layers_rank_below_unlayered_styles_and_important_reverses() {
     let mut doc = Doc::new();
     let div = doc.classed("div", ROOT, "a");
