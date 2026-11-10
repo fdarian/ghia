@@ -101,6 +101,7 @@ function attachHostMethods(instance: Instance): PublicInstance {
     connected: container.instances.get(instance.id) === instance,
     layout: state.mounted ? { renderer: container.nativeRenderer, id: instance.id } : undefined,
     prop: (name) => (instance.props as Record<string, unknown>)[name],
+    propNames: () => Object.keys(instance.props),
   }))
   Object.assign(instance, createElementMethods(container.nativeRenderer, instance.id))
   instance.focus = (options) => focusHostElement(container.nativeRenderer, instance.id, options)

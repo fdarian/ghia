@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest"
 import { document } from "@ghia/native/host"
 import type { ScrollEvent } from "@ghia/native/host"
 import type { HostElement } from "../host.js"
+import type { EventPayload } from "@ghia/native"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 describe.skipIf(!hasNativeTestRenderer)("DOM members of a Solid element", () => {
@@ -195,5 +196,43 @@ describe.skipIf(!hasNativeTestRenderer)("DOM members of a Solid element", () => 
       expect(order).toEqual(["first"])
       app.unmount()
     })
+  })
+
+  it("flushes what a synchronously dispatched handler changed, through the handler a live window installs", () => {
+    const [count, setCount] = createSignal(0)
+    const app = setup(() => (
+      <div testId="button" style={{ width: 80, height: 20 }} onClick={() => setCount(count() + 1)}>
+        {`clicks ${count()}`}
+      </div>
+    ))
+    const id = app.renderer.findByTestId("button")!.id
+    // No flush and no await: the dispatch is all that runs between the event and the frame.
+    const sync = app.renderer as unknown as { dispatchSyncEvent(event: EventPayload): unknown }
+    sync.dispatchSyncEvent({ elementId: id, eventType: "click", path: [id], target: id })
+    app.renderer.drawFrame()
+    expect(app.renderer.getPaintedText()).toContain("clicks 1")
+    app.unmount()
+  })
+
+  it("answers getAttribute case-insensitively, with the strings the DOM holds for booleans", () => {
+    let row!: HostElement
+    const app = setup(() => (
+      <div
+        ref={(element: HostElement) => (row = element)}
+        data-Flag={false}
+        data-on={true}
+        aria-expanded={false}
+        hidden={true}
+        title="t"
+        style={{ width: 10, height: 10 }}
+      />
+    ))
+    expect(row.getAttribute("DATA-flag")).toBe("false")
+    expect(row.getAttribute("data-on")).toBe("true")
+    expect(row.getAttribute("Aria-Expanded")).toBe("false")
+    expect(row.getAttribute("hidden")).toBe("")
+    expect(row.getAttribute("TITLE")).toBe("t")
+    expect(row.getAttribute("data-absent")).toBeNull()
+    app.unmount()
   })
 })
