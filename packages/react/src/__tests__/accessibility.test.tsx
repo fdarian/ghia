@@ -86,7 +86,7 @@ describeNative("accessibility", () => {
   it("omits a div with no role from the tree", () => {
     testRoot.render(
       <div style={{ width: 120, height: 40 }} aria-label="silent">
-        Hello
+        <div style={{ width: 20, height: 20 }} />
       </div>,
     )
 

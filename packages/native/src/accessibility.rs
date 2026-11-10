@@ -176,8 +176,13 @@ pub(crate) fn read_text_unplanned(
 }
 
 /// The role of `element` when its props give none: its type's, or `Label` when it reads out text.
+/// An element an `aria-*` reference names has none from its text: it is a `Group` named by it
+/// (`links::referenced_text`).
 pub(crate) fn role_without_props(element: &crate::retained_tree::RetainedElement, text: Option<&str>) -> Option<Role> {
-    default_role(element).or(text.map(|_| Role::Label))
+    default_role(element).or_else(|| {
+        text.filter(|_| links::current().referenced_text(element.id).is_none())
+            .map(|_| Role::Label)
+    })
 }
 
 /// The text a host container reads out, `text`, unless the author gave `aria-valuetext`.
