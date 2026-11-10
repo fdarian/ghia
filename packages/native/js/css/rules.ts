@@ -97,7 +97,7 @@ export function splitRules(text: string): RuleText[] {
       index = skipComment(text, index)
       continue
     }
-    if (char === ";" || /\s/.test(char)) {
+    if (/\s/.test(char)) {
       index++
       continue
     }

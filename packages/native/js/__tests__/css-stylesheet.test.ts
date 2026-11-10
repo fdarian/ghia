@@ -69,12 +69,13 @@ describe("splitRules", () => {
     expect(splitRules(".a /* x */, .b > c { top: 0 }")[0]!.prelude).toBe(".a , .b > c")
   })
 
-  it("closes an unterminated block at the end of the text and skips stray semicolons", () => {
-    expect(splitRules(";; .a { top: 0 ;; .b { left: 0 }").map((rule) => rule.text)).toEqual([".a { top: 0 ;; .b { left: 0 }"])
+  it("closes an unterminated block at the end of the text", () => {
+    expect(splitRules(".a { top: 0 ;; .b { left: 0 }").map((rule) => rule.text)).toEqual([".a { top: 0 ;; .b { left: 0 }"])
   })
 
-  it("does not end a style rule at a semicolon outside its block", () => {
+  it("does not end a style rule at a semicolon outside its block, so a stray one belongs to the next prelude", () => {
     expect(splitRules("a; .b { top: 0 }").map((rule) => rule.prelude)).toEqual(["a; .b"])
+    expect(splitRules("@layer a;; .b { top: 0 }").map((rule) => rule.prelude)).toEqual(["@layer a", ";; .b"])
   })
 
   it("is empty for blank text and comments", () => {
