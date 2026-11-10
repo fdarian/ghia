@@ -174,7 +174,7 @@ impl StyleSheets {
     /// result is kept in `styles.cascaded`. A merge that does not parse leaves the element its own
     /// style alone, as CSS ignores a declaration it cannot read.
     pub(crate) fn cascaded(
-        &self,
+        &mut self,
         styles: &mut StyleTable,
         matched: &Arc<MatchedRules>,
         own: Option<&Arc<StyleDesc>>,
@@ -186,9 +186,10 @@ impl StyleSheets {
         let declarations = match own {
             Some(own) => {
                 let raw = styles.raw_of(own).expect("an own style comes from StyleTable::intern");
-                serde_json::from_slice::<crate::css::lenient::Declarations>(&raw)
+                let own = serde_json::from_slice::<crate::css::lenient::Declarations>(&raw)
                     .expect("an interned style is a JSON object")
-                    .0
+                    .0;
+                self.validator.filter_own(own)
             }
             None => Vec::new(),
         };

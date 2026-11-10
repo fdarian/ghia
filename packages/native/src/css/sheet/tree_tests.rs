@@ -272,6 +272,38 @@ fn unset_important_removes_the_inline_value() {
 }
 
 #[test]
+fn an_inline_value_that_is_no_value_does_not_erase_a_sheet_declaration() {
+    let mut doc = Doc::new();
+    let empty = doc.classed("div", ROOT, "x");
+    let null = doc.classed("div", ROOT, "x");
+    let bogus = doc.classed("div", ROOT, "x");
+    doc.inline(empty, r#"{"display":"","opacity":0.5}"#);
+    doc.inline(null, r#"{"color":null,"opacity":0.5}"#);
+    doc.inline(bogus, r#"{"color":"bogus","opacity":0.5}"#);
+    doc.style_element(ROOT, ".x { display: flex; color: red }");
+    doc.flush();
+    assert_eq!(doc.style(empty).and_then(|style| style.display.as_deref()), Some("flex"));
+    assert_eq!(doc.color(null), Some("red"));
+    assert_eq!(doc.color(bogus), Some("red"));
+    for id in [empty, null, bogus] {
+        assert_eq!(doc.style(id).and_then(|style| style.opacity), Some(0.5));
+    }
+}
+
+#[test]
+fn a_valid_inline_value_still_wins_and_state_styles_and_custom_properties_pass_through() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "x");
+    doc.inline(div, r##"{"color":"blue","--k":"1","hover":{"backgroundColor":"green"}}"##);
+    doc.style_element(ROOT, ".x { color: red }");
+    doc.flush();
+    let style = doc.style(div).expect("the element has a style");
+    assert_eq!(style.color.as_deref(), Some("blue"));
+    assert!(style.custom_properties.is_some());
+    assert_eq!(style.hover.as_ref().and_then(|hover| hover.background_color.as_deref()), Some("green"));
+}
+
+#[test]
 fn a_css_wide_keyword_takes_back_what_a_shorthand_covered() {
     let mut doc = Doc::new();
     let div = doc.classed("div", ROOT, "a");

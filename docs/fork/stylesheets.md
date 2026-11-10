@@ -41,7 +41,7 @@ No sheet at all is a branch: every hook of the tree returns at `StyleSheets::ena
 
 ### Validation
 
-`validate.rs`. The cascade merges declarations before any style is parsed, so a declaration that cannot parse must be removed first, or `right: bogus !important` would erase an inline `right`. `Validator::filter` judges each declaration once, when its sheet is loaded, by the check `StyleTable::intern` runs on a style: it must parse to a style that is not empty. Custom properties, `var()` values and CSS-wide keywords are accepted without a check (the first two are only known at build time, the keyword is the cascade's own). A key the style does not know parses to the empty style and is dropped, as CSS drops an unknown property. Verdicts are cached by the declaration's JSON text, bounded at 4096. A rule left with no declaration is dropped.
+`validate.rs`. The cascade merges declarations before any style is parsed, so a declaration that cannot parse must be removed first, or `right: bogus !important` would erase an inline `right`. `Validator::filter` judges each declaration once, when its sheet is loaded, by the check `StyleTable::intern` runs on a style: it must parse to a style that is not empty, keep every value of it past the check a state style gets when it layers over its base (`without_invalid_values`: a transform, a filter, a background, a border shorthand that does not parse), and for `color`, `outlineColor` and `textDecorationColor` resolve as a colour. Custom properties, `var()` values and CSS-wide keywords are accepted without a check (the first two are only known at build time, the keyword is the cascade's own). A key the style does not know parses to the empty style and is dropped, as CSS drops an unknown property. Verdicts are cached by the declaration's JSON text, bounded at 4096. A rule left with no declaration is dropped.
 
 ## The rule index and matching
 
@@ -60,7 +60,7 @@ No sheet at all is a branch: every hook of the tree returns at `StyleSheets::ena
 `cascade::merge` works on declarations as the style prop's JSON would hold them:
 
 1. the normal declarations of each matched rule, in `matched.normal` order;
-2. the element's own declarations, in written order (`StyleTable::raw_of` gives the own style's JSON, read back with the lenient parser's `Declarations`);
+2. the element's own declarations, in written order (`StyleTable::raw_of` gives the own style's JSON, read back with the lenient parser's `Declarations`), less the ones that are no inline value: `null`, `""` (React DOM's "no value") and a value the validator rejects, so `{color: "bogus"}` does not take back a sheet's `color`. A nested object (a state style) and a custom property pass;
 3. the important declarations of each rule in `matched.important` order.
 
 A later declaration of a key removes the earlier one and is appended, which is where `css/covers.rs` reads "written order" from when the merged text is interned: a shorthand drops the longhands before it, a longhand after it stays. A CSS-wide keyword (`apply`) removes the key and the longhands it covers from what came before and appends nothing. The merged text goes through `StyleTable::intern` and the universal layer (`<UniversalStyle>`) is put under the result exactly as for an element with no sheet match (`refresh_effective_style`). A merge whose text does not parse leaves the element its own style and is logged.
