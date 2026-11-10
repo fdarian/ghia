@@ -14,9 +14,12 @@
 //   JSON=1             prints the results as JSON on the last line
 //
 // Phases. Each is reported twice: "batch" is only the mutation and its batch apply (Solid's update, the mutation queue's flush,
-// native applyBatch with flush_styles; for mount the whole `root.render`), and "end-to-end" adds the view's flush and the frame that
+// native applyBatch with flush_styles), and "end-to-end" adds the view's flush and the frame that
 // paints it, which runs after the batch window closes:
-//   mount  a fresh root: render N items and draw the first frame
+//   mount  N items added to a root that already has its `<style>` element (mounted and drawn in an earlier, unmeasured batch, as an
+//          app loads its sheet once and mounts rows later) and the first frame that draws them
+//   sheet-load  the `<style>` element added to a root that already shows N items (sheet modes only): a sheet add matches every
+//          element by design; the off half of each pair, which winds the sheets down, is unmeasured
 //   class  one item's class gains / loses `active` (inline: its style object is swapped)
 //   data   one item's data-active attribute is set / removed (inline: its style object is swapped)
 //   many   all N items at once, on and off (class on all / style on all)
@@ -86,6 +89,8 @@ const UNRELATED_SHEET = Array.from(
 ).join("\n")
 
 interface Control {
+  setShowItems(on: boolean): void
+  setShowStyle(on: boolean): void
   setClassIndex(index: number): void
   setDataIndex(index: number): void
   setAll(on: boolean): void
@@ -93,13 +98,19 @@ interface Control {
 }
 
 const newControl = (): Control => ({
+  setShowItems: () => { throw new Error("not rendered") },
+  setShowStyle: () => { throw new Error("not rendered") },
   setClassIndex: () => { throw new Error("not rendered") },
   setDataIndex: () => { throw new Error("not rendered") },
   setAll: () => { throw new Error("not rendered") },
   items: [],
 })
 
-function Items(props: { count: number; mode: string; control: Control }) {
+function Items(props: { count: number; mode: string; control: Control; items: boolean; style: boolean }) {
+  const [showItems, setShowItems] = createSignal(props.items)
+  const [showStyle, setShowStyle] = createSignal(props.style)
+  props.control.setShowItems = setShowItems
+  props.control.setShowStyle = setShowStyle
   const [classIndex, setClassIndex] = createSignal(-1)
   const [dataIndex, setDataIndex] = createSignal(-1)
   const [all, setAll] = createSignal(false)
@@ -112,9 +123,9 @@ function Items(props: { count: number; mode: string; control: Control }) {
   const sheetText = props.mode === "sheet" ? SHEET : props.mode === "inline+sheet" ? UNRELATED_SHEET : null
   return (
     <div style={{ display: "flex", flexDirection: "column", width: WIDTH }}>
-      {sheetText === null ? null : <style>{sheetText}</style>}
+      {sheetText === null || !showStyle() ? null : <style>{sheetText}</style>}
       <div style={{ display: "flex", flexDirection: "row", flexWrap: "wrap", width: WIDTH }}>
-        <For each={indexes}>
+        <For each={showItems() ? indexes : []}>
           {(index) =>
             props.mode === "sheet" ? (
               <div
@@ -210,9 +221,11 @@ function runMode(mode: string, count: number) {
   for (let i = 0; i < 2 + MOUNT_REPS; i++) {
     const app = openRoot(count)
     const control = newControl()
+    app.render(() => <Items count={count} mode={mode} control={control} items={false} style={true} />)
+    for (let frames = 0; frames < 3; frames++) frame(app)
     const measured = sample(
       app,
-      () => app.root.render(() => <Items count={count} mode={mode} control={control} />),
+      () => app.root.flushSync(() => control.setShowItems(true)),
       () => {
         app.renderer.flush()
         frame(app)
@@ -224,9 +237,34 @@ function runMode(mode: string, count: number) {
   }
   record("mount", summarize(mounts))
 
+  if (mode !== "inline") {
+    const app = openRoot(count)
+    const control = newControl()
+    app.render(() => <Items count={count} mode={mode} control={control} items={true} style={false} />)
+    for (let i = 0; i < 5; i++) frame(app)
+    const loads: Sample[] = []
+    for (let i = 0; i < SETTLE + REPS; i++) {
+      const measured = sample(
+        app,
+        () => app.root.flushSync(() => control.setShowStyle(true)),
+        () => {
+          app.renderer.flush()
+          frame(app)
+        }
+      )
+      if (mode === "sheet") expectBackground(control, 0, "rgb(59, 130, 246)", "sheet sheet-load")
+      if (i >= SETTLE) loads.push(measured)
+      app.root.flushSync(() => control.setShowStyle(false))
+      app.renderer.flush()
+      frame(app)
+    }
+    record("sheet-load", summarize(loads))
+    app.unmount()
+  }
+
   const app = openRoot(count)
   const control = newControl()
-  app.render(() => <Items count={count} mode={mode} control={control} />)
+  app.render(() => <Items count={count} mode={mode} control={control} items={true} style={true} />)
   for (let i = 0; i < 5; i++) frame(app)
   const toggle = (name: string, index: number, on: () => void, off: () => void) => {
     const samples: Sample[] = []
