@@ -4948,9 +4948,13 @@ error before any root is mounted, as for `matchMedia`), `visualViewport`,
 `frameElement` (`null`) and `parent`, `top` and `self` (the global object, unless the
 runtime defines them). `visualViewport` has `width` and `height` equal to the inner size,
 `offsetLeft`, `offsetTop`, `pageLeft` and `pageTop` of 0 (the document cannot scroll),
-`scale` of 1, and `addEventListener` and `removeEventListener` for `resize`, which is sent
-when the window's size changes (not for a change of OS preference), to a listener on the
-window that mounted last when it was added. There is no `resize` event on `window` yet.
+`scale` of 1, and `addEventListener` and `removeEventListener` for `resize`. `window` gets
+a `resize` event too: both are sent when the size of the window that mounted last changes
+(not for a change of OS preference), `visualViewport` first, from one subscription that
+exists only while either has a listener, and a listener added before any root is mounted
+starts to hear the first one that is. The event's `target` is the global `window`
+(`currentTarget` is the `window` object the adapters export, see
+[deviations](fork/deviations.md#events-and-input)) and `visualViewport` for its own.
 Nothing else is installed: `location`, `localStorage` and the rest
 are missing, so reading them throws a `ReferenceError` or gives `undefined`. The browser (wasm) build runs in a real page and installs nothing.
 Installing twice is harmless. `isWebBuild`, exported by the adapters and
@@ -4986,6 +4990,33 @@ path, so adding the first listener of a type is what turns it on.
 It is current inside a `mousedown` handler, where it is still the element the
 press is about to take focus from. With several windows (one root each), it is
 the focused element of the window that heard a focus event last.
+
+`document.elementFromPoint(x, y)` and `document.elementsFromPoint(x, y)` take client
+coordinates in CSS pixels from the top left of the window that mounted last, and answer
+as [`getElementsAt`](#find-what-is-under-a-point) does, with the elements a `ref` gives:
+`elementsFromPoint` lists them topmost first and ends with `body` then `html`, and
+`elementFromPoint` is its first, or `null` for a point outside the window (the list is
+empty there). They are forced reads: the pending mutations are flushed and the window is
+laid out first, so an element mounted in the same turn is found, and an element with
+`pointer-events: none`, `visibility: hidden` or `display: none` is left out. A coordinate
+that is not finite throws a `TypeError`, and both throw before a root is mounted.
+
+`document.getSelection()` and `window.getSelection()` give the one `Selection` of the app
+(`Selection` is a global, and its constructor throws `Illegal constructor`). It is
+the [text selection](#text-selection) of the window that mounted last: `rangeCount` is 1
+while text is selected and 0 otherwise, `isCollapsed` is the opposite of that, `type` is
+`"Range"` or `"None"` (never `"Caret"`), `toString()` is the selected text (`""` for none),
+and `removeAllRanges()` and `empty()` clear it. Every member needs a mounted root. The rest
+of the DOM `Selection` (`getRangeAt`, `addRange`, `anchorNode`, ...) does not exist, because
+a selection here is a set of spans over painted text and not a range of nodes
+([deviations](fork/deviations.md#events-and-input)).
+
+`document` hears `selectionchange` when the selected text changes, by a drag, a
+clear, `removeAllRanges()` or `renderer.clearSelection()`. Like the event of `onSelectionChange`
+(`event.value` is the selected text, absent after a clear) it comes from the frame that
+changed the selection, and it is the one native signal: a `selectionchange` listener on
+`document` or `window` turns it on, as a root's `onSelectionChange` does. It does not bubble, so
+`window` hears it in the capture phase only, and `target` is `document`.
 
 ### `getComputedStyle(element, pseudoElt?)`
 
@@ -6985,7 +7016,11 @@ ancestors' `onClick`. A host ref has the same `click()`, and
 `select` that is `disabled`, or on an element inside one, as in HTML. A disabled
 `Button` or `SelectTrigger` is one too (see [Form control state](#form-control-state-disabled-enabled)).
 Every mouse and pointer event type has `pointerId` and `pointerType` as required
-fields: `1` and `"mouse"` for the mouse.
+fields: `1` and `"mouse"` for the mouse. A pointer event (`pointerdown`, `pointermove`,
+`pointerup`, `pointercancel`, `pointerover`, `pointerout`, `pointerenter`, `pointerleave`,
+`gotpointercapture`, `lostpointercapture`) also has `isPrimary`, always `true`: Ghia has one
+pointer. Every event has `nativeEvent`, the event itself, which is what a library that wraps
+events reads the DOM event from (a React synthetic event has the same member).
 
 ### Pointer capture
 
