@@ -2,6 +2,10 @@
 // handlers. It stands for what an app mounts once: startup, a route change, a dialog. Rows are components, as an app writes them.
 import type { Accessor, JSX } from "solid-js"
 
+/** profile.tsx sets `value` to make every string of a mount a new one (nothing to find in the line layout cache or the shape store). */
+export const textSalt = { value: "" }
+const salted = (text: string) => text + textSalt.value
+
 export type SettingsValues = {
   name: Accessor<string>
   email: Accessor<string>
@@ -48,8 +52,8 @@ function Row(props: { label: string; hint: string; children: JSX.Element }) {
       }}
     >
       <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flexGrow: 1 }}>
-        <text style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{props.label}</text>
-        <text style={{ fontSize: 12, color: "#71717A" }}>{props.hint}</text>
+        <text style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{salted(props.label)}</text>
+        <text style={{ fontSize: 12, color: "#71717A" }}>{salted(props.hint)}</text>
       </div>
       <div style={{ display: "flex", flexDirection: "row", alignItems: "center", flexShrink: 0 }}>{props.children}</div>
     </div>
@@ -57,7 +61,7 @@ function Row(props: { label: string; hint: string; children: JSX.Element }) {
 }
 
 function Value(props: { text: string }) {
-  return <text style={{ fontSize: 13, color: "#3F3F46" }}>{props.text}</text>
+  return <text style={{ fontSize: 13, color: "#3F3F46" }}>{salted(props.text)}</text>
 }
 
 function ActionButton(props: { label: string; onClick: () => void }) {
@@ -76,7 +80,7 @@ function ActionButton(props: { label: string; onClick: () => void }) {
         border: "1px solid #E4E4E7",
       }}
     >
-      <text style={{ fontSize: 13, color: "#18181B" }}>{props.label}</text>
+      <text style={{ fontSize: 13, color: "#18181B" }}>{salted(props.label)}</text>
     </div>
   )
 }
@@ -84,8 +88,8 @@ function ActionButton(props: { label: string; onClick: () => void }) {
 function Section(props: { title: string; description: string; children: JSX.Element }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", marginBottom: 28 }}>
-      <text style={{ fontSize: 16, fontWeight: 600, color: "#18181B" }}>{props.title}</text>
-      <text style={{ fontSize: 12, color: "#71717A", marginBottom: 8 }}>{props.description}</text>
+      <text style={{ fontSize: 16, fontWeight: 600, color: "#18181B" }}>{salted(props.title)}</text>
+      <text style={{ fontSize: 12, color: "#71717A", marginBottom: 8 }}>{salted(props.description)}</text>
       {props.children}
     </div>
   )
@@ -130,7 +134,7 @@ export function SettingsDialog(props: { values: SettingsValues; onClose: () => v
             borderBottom: "1px solid #E4E4E7",
           }}
         >
-          <text style={{ fontSize: 18, fontWeight: 600, color: "#18181B" }}>Settings</text>
+          <text style={{ fontSize: 18, fontWeight: 600, color: "#18181B" }}>{salted("Settings")}</text>
           <ActionButton label="Close" onClick={props.onClose} />
         </div>
         <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, minHeight: 0, padding: 24, overflowY: "auto" }}>
