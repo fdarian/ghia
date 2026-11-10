@@ -93,6 +93,16 @@ impl RuleIndex {
         }
     }
 
+    /// Whether any rule can match an element with this id and these classes: not when every rule
+    /// is keyed by an id or a class and the element has neither.
+    pub fn may_match(&self, id: Option<Atom>, classes: &[Atom]) -> bool {
+        id.is_some()
+            || !classes.is_empty()
+            || !self.by_attribute.is_empty()
+            || !self.by_tag.is_empty()
+            || !self.universal.is_empty()
+    }
+
     /// The rules that match `element` with the specificity of the most specific selector of each
     /// that does, in cascade order for normal declarations: layer, then specificity, then source.
     pub fn matching<E: ElementView>(

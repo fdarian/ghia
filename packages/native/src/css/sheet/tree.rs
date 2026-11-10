@@ -356,8 +356,8 @@ impl RetainedTree {
                 continue;
             };
             let css = element.css();
-            let matched = if connected && element.is_matchable() {
-                let (element_id, classes) = css.map_or((None, &[][..]), |css| (css.id, &css.classes[..]));
+            let (element_id, classes) = css.map_or((None, &[][..]), |css| (css.id, &css.classes[..]));
+            let matched = if connected && element.is_matchable() && self.sheets.index.may_match(element_id, classes) {
                 self.sheets.index.matching(&TreeView::new(self, id), element_id, classes)
             } else {
                 Vec::new()
