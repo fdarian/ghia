@@ -272,6 +272,7 @@ interface NativeTestRendererApi
   focusPreviousWithin(elementId: number): void
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
   setWindowEventListeners(types: string[]): void
+  requestAnimationFrame(): boolean
   setWindowSelectionChange(enabled: boolean, eventId: number): void
   setWindowAppearanceChange(enabled: boolean, eventId: number): void
   setAppearance(appearance: string): void
@@ -755,6 +756,11 @@ export class TestRenderer implements NativeRenderer {
     )
     this.native.setSyncEventHandler((event) => this.dispatchSyncEvent(event))
     bindClipboard(this)
+  }
+
+  /** Asks the window for its next frame's steps, which run the `requestAnimationFrame` callbacks. */
+  requestAnimationFrame(): boolean {
+    return this.native.requestAnimationFrame()
   }
 
   /** Releases the sync event handler, which captures this renderer, and tears the native

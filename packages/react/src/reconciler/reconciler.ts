@@ -16,6 +16,7 @@ import type {
 } from "../types/host.js"
 import {
   attachRoot,
+  detachListeners,
   detachRoot,
   idAllocatorFor,
   unregisterEventHandlers,
@@ -79,6 +80,8 @@ export function createRoot(
   const batchedRenderer = createMutationQueue(renderer, (destroyedIds) => {
     for (const id of destroyedIds) {
       unregisterEventHandlers(gpuixContainer.eventHandlers, id)
+      const instance = gpuixContainer.instances.get(id)
+      if (instance) detachListeners(instance)
       gpuixContainer.instances.delete(id)
     }
     releaseMotionBindings(gpuixContainer, destroyedIds)

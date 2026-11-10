@@ -1,6 +1,7 @@
 import type { EventPayload } from "@ghia/native"
 import {
   createRendererState,
+  ElementListeners,
   registerEventHandler,
   registerEventListener,
   unregisterEventHandler,
@@ -11,8 +12,25 @@ import type {
   Container,
   ElementIdAllocator,
   EventHandlerMap,
+  Instance,
   NativeRenderer,
 } from "../types/host.js"
+
+const listenersByInstance = new WeakMap<Instance, ElementListeners>()
+
+/** The event listeners of a host instance, and its `on*` props among them. */
+export function listenersOf(instance: Instance): ElementListeners {
+  const existing = listenersByInstance.get(instance)
+  if (existing) return existing
+  const created = new ElementListeners()
+  listenersByInstance.set(instance, created)
+  return created
+}
+
+/** The element is gone natively: its listeners stay on the instance but register nowhere. */
+export function detachListeners(instance: Instance): void {
+  listenersByInstance.get(instance)?.detach()
+}
 
 const bindings = new WeakMap<Container, { detach(): boolean }>()
 
