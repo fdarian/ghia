@@ -1,6 +1,6 @@
 /** A `<style>` element's text is a sheet native matches against the tree, so classes and attributes style elements. */
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { createSignal } from "solid-js"
+import { For, createSignal } from "solid-js"
 import { getComputedStyle } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
@@ -28,7 +28,7 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in Solid", () => {
         `}</style>
         <div ref={(element: unknown) => (plain = element)} />
         <div ref={(element: unknown) => (card = element)} class="card big" />
-        <div ref={(element: unknown) => (inline = element)} id="lone" class="card" style={{ opacity: 0.9, "padding-top": 1 }} />
+        <div ref={(element: unknown) => (inline = element)} id="lone" class="card" style={{ opacity: 0.9, paddingTop: 1 }} />
       </div>
     ))
     expect(getComputedStyle(plain).opacity).toBe("1")
@@ -67,6 +67,29 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in Solid", () => {
     })
     expect(getComputedStyle(box).opacity).toBe("1")
     expect(getComputedStyle(child).paddingTop).toBe("0px")
+  })
+
+  it("matches one element again when a class toggles on one of fifty items", () => {
+    const [active, setActive] = createSignal(-1)
+    const items: unknown[] = []
+    app.render(() => (
+      <div>
+        <style>{`.on { opacity: 0.25 } .item { padding-top: 2px }`}</style>
+        <For each={Array.from({ length: 50 }, (_, index) => index)}>
+          {(index) => <div ref={(element: unknown) => (items[index] = element)} class={active() === index ? "item on" : "item"} />}
+        </For>
+      </div>
+    ))
+    app.renderer.resetBuildCounters()
+    app.flushSync(() => setActive(7))
+    expect(getComputedStyle(items[7] as any).opacity).toBe("0.25")
+    expect(app.renderer.getBuildCounters().elementsRematched).toBe(1)
+
+    app.renderer.resetBuildCounters()
+    app.flushSync(() => setActive(8))
+    expect(getComputedStyle(items[7] as any).opacity).toBe("1")
+    expect(getComputedStyle(items[8] as any).opacity).toBe("0.25")
+    expect(app.renderer.getBuildCounters().elementsRematched).toBe(2)
   })
 
   it("follows the text of the style element and its removal", () => {
