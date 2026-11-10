@@ -8293,9 +8293,30 @@ impl Inherited {
         self
     }
 
+    /// The custom properties an element styled by `style` computes to, below this context.
+    fn custom_of(&self, style: Option<&StyleDesc>) -> crate::css::custom_properties::CustomProperties {
+        match style.and_then(|style| style.custom_properties.as_ref()) {
+            Some(declared) => self.custom.descend(declared),
+            None => self.custom.clone(),
+        }
+    }
+
     /// Apply the inheritable parts of `style` for the subtree below it.
-    pub(crate) fn descend(mut self, style: Option<&StyleDesc>, inert: bool) -> Self {
+    pub(crate) fn descend(self, style: Option<&StyleDesc>, inert: bool) -> Self {
+        let custom = self.custom_of(style);
+        self.descend_with_custom(style, inert, custom)
+    }
+
+    /// [`descend`](Self::descend) for an element whose `custom`, what `custom_of` says of its
+    /// style, is known already: its `var()` was substituted from it.
+    fn descend_with_custom(
+        mut self,
+        style: Option<&StyleDesc>,
+        inert: bool,
+        custom: crate::css::custom_properties::CustomProperties,
+    ) -> Self {
         self = self.enter_children();
+        self.custom = custom;
         self.lengths = self
             .lengths
             .descend(style.and_then(|style| style.font_size.as_ref()), self.above_root);
@@ -8310,9 +8331,6 @@ impl Inherited {
             self.pointer_events_none = true;
         }
         let Some(style) = style else { return self };
-        if let Some(declared) = &style.custom_properties {
-            self.custom = self.custom.descend(declared);
-        }
         self.underline_offset = self
             .underline_offset
             .inherit(style.text_underline_offset.as_ref(), &self.lengths);
@@ -11075,9 +11093,6 @@ fn animate_style_at(
     if motion_binding.is_some() {
         dynamic |= Dynamic::MotionValues as u8;
     }
-    if animations_wanted {
-        dynamic |= Dynamic::Animation as u8;
-    }
     let transitioned = (transitions_wanted || animations_wanted).then(|| {
         let focus_visible = crate::motion::FocusVisible {
             own: ctx.focus_handles.contains_key(&id) && ctx.focus_styles.is_focus_visible(id),
@@ -11098,6 +11113,7 @@ fn animate_style_at(
                 .shared
                 .map_or_else(|| input.declared.unwrap_or(&EMPTY_STYLE).into(), crate::motion::StyleRef::from),
             focus_visible,
+            Some(&ctx.focus_styles),
             measurement.as_ref(),
             ctx.inherited.interpolate_size,
             crate::motion::Scope::Element,
@@ -11120,7 +11136,14 @@ fn animate_style_at(
             svg_css: Vec::new(),
             measured,
             measurement,
-            dynamic,
+            dynamic: dynamic
+                | if animations_wanted
+                    && crate::motion::CssAnimations::declares(transitioned.as_ref().map(|declared| &*declared.style))
+                {
+                    Dynamic::Animation as u8
+                } else {
+                    0
+                },
         };
     }
     if transitioned.as_ref().is_some_and(|declared| declared.transitions.is_some()) {
@@ -11170,6 +11193,11 @@ fn animate_style_at(
             )
         })
         .flatten();
+    // Decided from the style as resolved and the state the update kept: a held `animation*` that
+    // came to no animation (`animation: var(--a)` with `--a: none`) has nothing to run.
+    if animations_wanted && ctx.css_animations.wants(id, declared_style) {
+        dynamic |= Dynamic::Animation as u8;
+    }
     // What the transitions and animations of an `<svg>` write on its root, for its shapes to inherit.
     let running = transitioned.as_ref().and_then(|declared| declared.transitions.as_ref());
     let mut svg_css = css_values.as_ref().map(|values| values.svg_attributes_beneath(running)).unwrap_or_default();
@@ -11368,7 +11396,8 @@ fn contents_frame(
         || wrapper.custom_props().contains_key("motionValues")
         || ctx.css_transitions.wants(wrapper.id, declared)
         || ctx.css_animations.wants(wrapper.id, declared);
-    if !moves {
+    let reads_vars = declared.is_some_and(crate::css::var_substitution::reads_vars);
+    if !moves && !reads_vars {
         return ContentsFrame {
             now: ctx.now,
             style: wrapper.style.clone(),
@@ -11381,6 +11410,22 @@ fn contents_frame(
         inherited.descend(frame.style.as_deref(), above.has_inert_prop())
     });
     let outside = std::mem::replace(&mut ctx.inherited, inside);
+    let var_style = declared.and_then(|style| {
+        let custom = ctx.focus_styles.custom_of(wrapper.id, style, false, &ctx.inherited.custom);
+        crate::css::var_substitution::resolve(style, &custom)
+    });
+    if var_style.is_some() {
+        crate::css::custom_properties::reads::note();
+    }
+    let base = var_style.as_ref().or(declared);
+    if !moves {
+        ctx.inherited = outside;
+        return ContentsFrame {
+            now: ctx.now,
+            style: base.map(|style| Arc::new(style.clone())),
+            handed: crate::layout::contents::Handed::new(wrapper.id, base, 0),
+        };
+    }
     let animated = animate_style(
         ctx,
         window,
@@ -11388,7 +11433,7 @@ fn contents_frame(
         StyleInputs {
             declared,
             shared: wrapper.style.as_ref(),
-            base: declared,
+            base,
             before_transition: wrapper.style_before_transition(),
             pointer_states: Default::default(),
             provisional: false,
@@ -11396,10 +11441,14 @@ fn contents_frame(
         },
     );
     ctx.inherited = outside;
-    let shown = animated.current(declared);
+    let shown = animated.current(base);
     ContentsFrame {
         now: ctx.now,
-        style: if animated.restyled() { shown.map(|style| Arc::new(style.clone())) } else { wrapper.style.clone() },
+        style: if animated.restyled() || var_style.is_some() {
+            shown.map(|style| Arc::new(style.clone()))
+        } else {
+            wrapper.style.clone()
+        },
         handed: crate::layout::contents::Handed::new(wrapper.id, shown, animated.dynamic),
     }
 }
@@ -11480,6 +11529,18 @@ fn build_element_unpumped(
             .then(|| crate::events::state_styles::resolve_pointer_states(style, pointer_states))
     });
     let base_style = state_style.as_ref().or(declared);
+    // A `var()` reads the custom properties the element computes to, its own included, and those
+    // of the focus variants that apply to it. It is substituted before anything reads the style, so inheritance, transitions, animations and
+    // motion see what the element declares.
+    let own_custom = match base_style {
+        Some(style) => ctx.focus_styles.custom_of(id, style, ctx.focus_handles.contains_key(&id), &ctx.inherited.custom),
+        None => ctx.inherited.custom.clone(),
+    };
+    let var_style = base_style.and_then(|style| crate::css::var_substitution::resolve(style, &own_custom));
+    if var_style.is_some() {
+        crate::css::custom_properties::reads::note();
+    }
+    let base_style = var_style.as_ref().or(base_style);
     ctx.retain.pointer(pointer_states);
     ctx.retain.focus(&ctx.focus_styles, id, ctx.focus_handles.contains_key(&id));
     if let Some(links) = crate::accessibility::links_key(id) {
@@ -11586,14 +11647,12 @@ fn build_element_unpumped(
 
     // Inheritable style resolves once here so both built-ins and custom
     // elements see the same cascade.
-    let descended = ctx.inherited.clone().descend(style, element.has_inert_prop());
+    debug_assert!(
+        style.is_none_or(|style| style.var_declarations.is_none()),
+        "a held var() declaration reached the build unresolved"
+    );
+    let descended = ctx.inherited.clone().descend_with_custom(style, element.has_inert_prop(), own_custom);
     let parent_inherited = std::mem::replace(&mut ctx.inherited, descended);
-    // The transform properties read the custom properties the element computes to, its own included.
-    let var_style = style.and_then(|style| crate::css::transform::resolve_vars(style, &ctx.inherited.custom));
-    if var_style.is_some() {
-        crate::css::custom_properties::reads::note();
-    }
-    let style = var_style.as_ref().or(style);
     crate::layout::table::enter(&mut ctx.inherited.table_row, &mut ctx.inherited.table_cell, element);
     // The start of a logical inline pair is the right side in an rtl element.
     let rtl_style = style
@@ -13046,7 +13105,7 @@ fn paragraph_content(
             mixed
         };
         ctx.retain.inline_pointer(inline_pointer);
-        if motion.is_active(ctx.tree, &ctx.inline_states()) {
+        if motion.is_active() {
             ctx.retain.dynamic(crate::retain::Dynamic::InlineMotion);
         }
     }
@@ -13107,10 +13166,11 @@ fn paragraph_content(
             ctx.inherited.pointer_events_none,
             ctx.inherited.inert,
             &states,
+            &motion,
             &insets,
         );
         let inline_regions = if ctx.inherited.frameless {
-            crate::text::inline_region::of(ctx.tree, paragraph, ctx.inherited.app_region, &states, &insets)
+            crate::text::inline_region::of(ctx.tree, paragraph, ctx.inherited.app_region, &states, &motion, &insets)
         } else {
             Vec::new()
         };
@@ -13152,6 +13212,8 @@ fn paragraph_content(
                 paragraph,
                 ctx.inherited.pointer_events_none,
                 ctx.inherited.inert,
+                &states,
+                &motion,
                 &insets,
             )
             .map(Arc::new),
@@ -13248,7 +13310,16 @@ fn build_atomics(
                 Box::new(overlay)
             });
             let own = tree.elements.get(&id).and_then(|element| element.style.as_deref());
-            let declared = own.map(|base| crate::events::state_styles::folded(base, states(id, base)));
+            let declared = own.map(|base| {
+                let declared = crate::events::state_styles::folded(base, states(id, base));
+                match crate::css::var_substitution::resolve(&declared, &inherited.custom_of(Some(&*declared))) {
+                    Some(resolved) => {
+                        crate::css::custom_properties::reads::note();
+                        std::borrow::Cow::Owned(resolved)
+                    }
+                    None => declared,
+                }
+            });
             let lengths = inherited
                 .lengths
                 .descend(declared.as_ref().and_then(|style| style.font_size.as_ref()), false);
@@ -15545,9 +15616,9 @@ mod batch_tests {
         let mut tree = RetainedTree::new();
         let error = apply(
             &mut tree,
-            r#"[["createElement",1,"div"],["setStyle",1,{"color":"red"}],["setStyle",1,{"color":5}]]"#,
+            r#"[["createElement",1,"div"],["setStyle",1,{"color":"red"}],["setStyle",1,5]]"#,
         )
-        .expect_err("a bad style rejects the batch");
+        .expect_err("a style that is not an object rejects the batch");
         assert!(
             error.starts_with("Batch op 2 setStyle parse error:"),
             "{error}"
@@ -16081,6 +16152,41 @@ fn check_font(bytes: &[u8]) -> std::result::Result<(), String> {
         return Err("font has no glyph for \"m\"".to_string());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod inherited_var_tests {
+    use super::*;
+
+    fn root() -> Inherited {
+        Inherited::root(&Theme::dark(), gpui::WindowAppearance::Dark, true, TEST_VIEWPORT)
+    }
+
+    fn declared(json: &str) -> StyleDesc {
+        crate::css::var_substitution::parse(json.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn a_var_color_and_font_size_are_inherited_once_the_style_is_resolved() {
+        let style = declared(r##"{"fontSize":"var(--s)","color":"var(--c)","--s":"20px","--c":"#ff0000"}"##);
+        let parent = root();
+        let custom = parent.custom_of(Some(&style));
+        let resolved = crate::css::var_substitution::resolve(&style, &custom).expect("it holds vars");
+        let below = parent.clone().descend_with_custom(Some(&resolved), false, custom);
+        assert_eq!(below.lengths.font_size, 20.0);
+        assert_eq!(below.colors.resolve("currentColor"), below.colors.resolve("#ff0000"));
+
+        let unresolved = parent.descend(Some(&style), false);
+        assert_ne!(unresolved.lengths.font_size, 20.0);
+    }
+
+    #[test]
+    fn descend_computes_the_custom_properties_the_element_computes_to() {
+        let style = declared(r#"{"--a":"1px","width":"var(--a)"}"#);
+        let parent = root();
+        assert_eq!(parent.custom_of(Some(&style)), parent.clone().descend(Some(&style), false).custom);
+        assert_eq!(parent.custom_of(None), parent.custom);
+    }
 }
 
 #[cfg(test)]

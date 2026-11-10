@@ -525,7 +525,8 @@ An integer beyond 2^53 travels as a float.
 The queue (`createMutationQueue`) writes each op as it is enqueued and hands native the finished batch. What is enqueued
 while native applies a batch (an `autoFocus` handler, a failed blob image) goes into another buffer, so the batch in
 flight is never overwritten. A batch that fails is put back in front of what was written since, except that a
-`setStyle` or `setUniversalStyle` native rejects is cut out by its byte range and the rest is sent again. Where there
+`setStyle` or `setUniversalStyle` native rejects (a style that is not a JSON object; a value that does not parse is dropped by
+native, see [Invalid values](#invalid-values)) is cut out by its byte range and the rest is sent again. Where there
 is no `TextEncoder` (Hermes) the writer encodes UTF-8 by hand. A plain string (an element type, text, an event type, a custom prop key or string value) that is not well formed
 UTF-16 (an unpaired surrogate) is written with U+FFFD in its place. A style or a JSON-valued custom prop is written as its JSON text, where
 `JSON.stringify` has turned an unpaired surrogate into the escape `\ud800`; native's JSON parser rejects that, so the batch fails (it is not repaired).
@@ -3780,6 +3781,8 @@ bubbles up, and `stopPropagation()` on the span keeps it from there.
   innermost box around the glyph that sets one wins, and a glyph in no box that
   sets one keeps the container's cursor (`hover` and `active` can carry it too).
   A `display: contents` span has no box but its descendants inherit its cursor.
+  The value may be a `var()` (`cursor: 'var(--cursor)'`), read from the custom properties around the span, as may
+  `pointerEvents` and `appRegion`.
   A span that wraps shows it on every line it covers, and, like events, not on the
   blank area of the lines. A paragraph whose container has `pointerEvents: "none"`
   or is `inert` shows none.
@@ -3930,7 +3933,7 @@ so search, selection and copy see `\t`, and it advances to the next tab stop.
   that holds the tab. A string is a CSS [length](#lengths) without a percentage:
   `px`, the absolute units, `em`, `rem`, `vw`, `vh`, `vmin`, `vmax` and `calc()` of
   them (`em` is the container's font size). `ch`, a percentage and a negative value
-  throw, like any style that cannot be parsed.
+  are not valid, so the `tabSize` declaration is dropped ([Invalid values](#invalid-values)).
 - The stops are measured from the start of the line of text the tab is on, not
   from the box: a newline starts a new count, and so does a soft wrap. Where a
   line breaks therefore decides where its tabs end, and a tab that pushes a word
@@ -4036,7 +4039,7 @@ inside a paragraph uses the paragraph's, because it is one string.
   one a run of them overflows, unless `overflowWrap` cuts it.
 - `<input>` and `<textarea>` ignore both and break a long word at the edge, as a browser's
   `textarea` does.
-- A value CSS does not have throws, like any style that cannot be parsed.
+- A value CSS does not have drops the declaration ([Invalid values](#invalid-values)).
 - Text laid out by GPUI itself, as Zed does, keeps breaking such a word at the
   edge: its `TextStyle::overflow_wrap` defaults to `BreakWord`, and `Normal` is
   what Ghia sets for all of its text.
@@ -4054,7 +4057,7 @@ A hanging space at a soft wrap stays in the text, ICU4X breaks a few rare sequen
 either order (`"balance"`, `"nowrap"`, `"nowrap pretty"`). What it leaves out is the
 longhand's initial value, so `"balance"` also turns wrapping on. Of the shorthand and a
 longhand on the same element the one written later wins, and in a state style the
-shorthand resets the base's `textWrapMode` and `textWrapStyle`. A value CSS does not have throws.
+shorthand resets the base's `textWrapMode` and `textWrapStyle`. A value CSS does not have drops the declaration.
 The mode is inherited by the text of a `<span>` and can be set on one; the style is read from the
 container of the paragraph alone, as Chrome does, so a `textWrapStyle` on a `<span>` does nothing (it is
 inherited by a block inside it).
@@ -7266,14 +7269,33 @@ CSS-like styling via the `style` prop:
 
 **Transform:** `transform`, `translate`, `rotate`, `scale`, `transformOrigin`, `perspective`, `perspectiveOrigin`, `transformStyle` (`"flat"` | `"preserve-3d"`) and `backfaceVisibility` (`"visible"` | `"hidden"`); see [Transforms](#transforms) and [Three dimensions](#three-dimensions)
 
+### Invalid values
+
+A value that does not parse drops its own declaration and nothing else, as in CSS: the element keeps every other property
+of the style, and nothing throws. `{ border: 0, height: "inherit", width: "wide", backgroundColor: "red" }`
+paints the red background, with no `height` or `width`. Native reads the declarations in written order, so a shorthand
+still drops the longhands written before it.
+
+- A number a property does not take is read as React DOM writes it: `0` is `"0"`, a unitless property (`opacity`,
+  `zIndex`, `flexGrow`, `fontWeight`, `lineHeight`, `order`, ...) is the number as text, and any other is `<n>px`.
+  `border: 0` is `border: "0"`. A number that is still invalid is dropped.
+- A CSS-wide keyword (`inherit`, `initial`, `unset`, `revert`, `revert-layer`) that the property does not take on its own is
+  dropped, so the value of the layer below stays. In an element's own style that is the same as no declaration, which
+  differs from CSS only where the universal style sets the property. A state style (`hover`, ...) or an `@container` block
+  over the element's own style also keeps the lower value: `hover: { width: 'unset' }` over `width: 50` keeps 50, where
+  CSS gives `auto`. See [deviations](fork/deviations.md#layout).
+- A state style (`hover`, ...) and an `@container` block are recovered the same way inside, one declaration at a time.
+- A dropped declaration is silent, as in a browser. `RUST_LOG=warn` lists each one, once, by its property and value.
+- A style that is not a JSON object, or is not JSON, still rejects the `setStyle`.
+
 ### Lengths
 
 Every length-typed style field takes a number (pixels) or a CSS string: `px`,
 `in`, `cm`, `mm`, `q`, `pt`, `pc`, `%`, `em`, `rem`, `vw`, `vh`, `vmin`, `vmax`, or
 a `calc()` that adds and subtracts any of them and multiplies or divides by a
 number. A length and a `%` mixed in one `calc()` works wherever the property has a
-basis to resolve the percentage against. Invalid strings throw from `setStyle`
-like any other invalid value. A bare number written as a string (`"12"`) is
+basis to resolve the percentage against. An invalid string is dropped like any
+other [invalid value](#invalid-values). A bare number written as a string (`"12"`) is
 accepted only on the sizes (`width`, `height`, `min*`, `max*`) and, like them, the
 margins and insets; every other field needs a unit or a JS number.
 
@@ -7343,7 +7365,7 @@ written later wins, as in CSS. The ones below take CSS's several-value syntax.
 | `borderBlock`, `borderInline` | Written like `border` (`"1px solid red"`), for top and bottom or left and right (both sides get the one value, so `direction` does not matter) |
 | `flex` | A number `n` is `n 1 0%`. `none` is `0 0 auto`, `auto` is `1 1 auto`, `initial` is `0 1 auto`. Otherwise `<grow> <shrink>? \|\| <basis>`: `"2 3"`, `"2 100px"`, `"100px 2"`, and a lone basis (`"100px"`, `"50%"`, `"fit-content"`) is `1 1 <basis>`. The basis is what `flexBasis` takes: `"1 1 content"` is a basis of the content size |
 | `flexFlow` | `"<direction> \|\| <wrap>"` in either order (`"column wrap"`); a part left out is `row` or `nowrap` |
-| `placeItems`, `placeContent`, `placeSelf` | `"<align> <justify>"`; one value is both (`"center"`, `"center end"`). Each value is one the longhand takes, so `placeItems: "left"` throws as in CSS |
+| `placeItems`, `placeContent`, `placeSelf` | `"<align> <justify>"`; one value is both (`"center"`, `"center end"`). Each value is one the longhand takes, so `placeItems: "left"` is dropped as in CSS |
 | `outline` | See [Outline](#outline) |
 
 - **The later key wins.** `{ paddingLeft: 4, padding: 8 }` pads the left by 8 and
@@ -7358,8 +7380,9 @@ written later wins, as in CSS. The ones below take CSS's several-value syntax.
 - **Numbers.** A JS number is px. A bare number written inside a string reads as px
   only in `margin` and `inset` (`margin: "0 8"`), like their longhands; elsewhere
   it needs a unit, except `0`. A `calc()` is one value however many spaces it holds.
-  A bad count, a bad value, or `auto` where the property takes none throws when
-  the style is set. A numeric `border: 1` throws too: write `"1px solid"`.
+  A bad count, a bad value, or `auto` where the property takes none drops the
+  declaration. A numeric `border: 1` is read as React DOM writes it, `border: "1px"`, so
+  it is a 1px border with the default style (`none`) and draws nothing: write `"1px solid"`.
 - **Percentages** in `padding` and `margin` are of the containing block's width on
   every side, as in CSS.
 - **`flex` and the longhands.** `flexGrow`, `flexShrink` and `flexBasis` win over
@@ -7518,7 +7541,7 @@ section 5.5). Lengths are any [length](#lengths), including a `calc()` that mixe
 length and a percentage: the length part resolves against the element's font size,
 the root's and the window when the style is applied, and the percentage stays per
 axis. A radius that is negative whatever the units are, or invalid, in a state style
-too, throws instead of being ignored; one that only comes out negative
+too, is dropped; one that only comes out negative
 (`calc(1em - 20px)`) is zero. The radius cuts the background,
 the border, the shadow, the `overflow` clip and the hit area. The `round` of
 `clipPath` `inset()`, `rect()` and `xywh()` takes the same `a / b` form.
@@ -7648,7 +7671,7 @@ so that animation starts at `0`.
 `none`. `fit-content()` takes a length or a `%`, not a `calc()` that mixes the
 two. `gridAutoColumns` and `gridAutoRows` take the same track sizes. A bare number `n` still means `repeat(n, minmax(0, 1fr))` (with
 `gridColumnMin` / `gridRowMin` to pick the minimum). A track list that does not
-parse makes the batch throw, like any other invalid style value.
+parse is dropped, like any other [invalid value](#invalid-values).
 
 ```tsx
 <div style={{
@@ -7709,7 +7732,7 @@ CSS Tables 3 as Chrome draws it, on any `div` or `span`:
   `borderCollapse` and `emptyCells` inherit as in CSS (a table inside a cell has
   the spacing of the table around it), `tableLayout` does not. `verticalAlign` on
   a `table-cell` is `"top"`, `"middle"`, `"bottom"` or `"baseline"` (the default);
-  any other value is `"baseline"` there. An invalid value throws. A cell on the baseline lines up by the first line
+  any other value is `"baseline"` there. An invalid value is dropped. A cell on the baseline lines up by the first line
   of its text, or by the bottom of its content when it has children but no text (a box, an image, an empty block);
   a cell with nothing in it (white space only counts as nothing) is not on the baseline.
 - **Layout.** The table is shrink-to-fit, or `max(width, least width of the
@@ -7862,7 +7885,7 @@ size, since a moving transform lays nothing out.
   element computes to, its own included, with a fallback (`var(--gap, 8px)`). A `--p` set from JS on an ancestor moves
   the box like the literal value does, which makes `translateX(calc(-100% * var(--p)))` a carousel track. A `var()` that
   cannot be resolved (a missing name with no fallback, a cycle) makes the property `none`, as in CSS, and not "ignored". A
-  custom property whose value holds `var()` is computed where it is declared. Other properties do not substitute `var()`
+  custom property whose value holds `var()` is computed where it is declared. Every other property takes `var()` too
   (see [`style()` and custom properties](#style-and-custom-properties)).
 - **`translate`, `rotate` and `scale`** are the individual properties. `translate` takes one or two lengths or percentages and
   a length along z. `rotate` takes an angle, a number of degrees, or an axis (`x`, `y`, `z` or three numbers) and an angle
@@ -8738,7 +8761,7 @@ too, since the app has to render and the frame draws afterwards.
 #### `style()` and custom properties
 
 A key that starts with `--` is a CSS custom property, in a style, a state style or an
-`"@container"` block. They inherit, and `style()` queries and the `var()` of the [transform properties](#transforms) read them:
+`"@container"` block. They inherit, and `style()` queries and `var()` read them:
 
 ```tsx
 <div style={{ '--density': 'compact', '--columns': 3 }}>
@@ -8785,15 +8808,39 @@ A key that starts with `--` is a CSS custom property, in a style, a state style 
   `"@container card"`, finds); with a size feature in the same query, the one container
   that answers the size feature (see above), which then answers the `style()` part too.
   The element's own custom properties are never what its own query reads.
+- **`var(--name)` and `var(--name, fallback)`** work in the value of any property, in a style, a state
+  style and an `"@container"` block: `width: 'var(--anchor-width)'`, `maxHeight: 'calc(var(--available-height) - 8px)'`,
+  `backgroundColor: 'var(--bg)'`, `border: 'var(--b)'`, `transformOrigin: 'var(--transform-origin)'`. The
+  value is read against the custom properties the element computes to, its own included, so one set inline on an
+  ancestor (`@base-ui/react` sets them on its Positioner) sizes what is below it, and changing it lays the
+  element out again. The fallback may hold `var()`. A declaration that cannot be resolved (a missing name with no
+  fallback, a cycle) or whose text is not a value of the property once substituted is invalid at computed-value time, as
+  in CSS: the property is unset, and a shorthand resets what it covers. An unresolvable longhand does not reset what its
+  covering shorthand or a lower layer sets, though: `{ padding: 8, paddingTop: 'var(--missing)' }` keeps the top padding
+  at 8, where CSS gives 0 ([deviations](fork/deviations.md#layout)). Written order decides between
+  a `var()` declaration and the plain ones around it, as in CSS: `{ borderWidth: 2, border: 'var(--b)' }` has no
+  `borderWidth`, `{ border: 'var(--b)', borderWidth: 2 }` has, and `{ borderWidth: 'var(--w)', borderTop: '1px solid' }` gives the
+  top side `1px`, the other three `--w`, like the literal. An invalid declaration written after a `var()` one covers nothing:
+  `{ paddingTop: 'var(--p)', padding: '1px bogus' }` keeps the top padding. A state style that declares the property wins over
+  a `var()` of the base, as a plain value does, and a side shorthand of the state (`hover: { borderTop }`) wins over a
+  base `borderWidth: 'var(--w)'` on its side only. Only a string is substituted: a number is not a `var()`. What it
+  substitutes to is a number only for a property whose value is a `<number>` (`opacity`, `zIndex`, `flexGrow`, `order`);
+  `padding: 'var(--n)'` with `--n: 8` is dropped, as `padding: '8'` is.
+  A custom property set in a focus style that applies (`focusVisible`, `focusWithin`, `hasFocusVisible`) is the
+  element's, as for `:focus-visible { --ring: ... }` in CSS: the element's own `var(--ring)`, in its base style and
+  in the other focus styles that apply with it, and its descendants read it while it applies, and the value it
+  covers is back after a blur. An element with a `transition` or an `animation` reads the same set. Where two focus styles that apply set one, the later of `focusWithin`,
+  `hasFocusVisible`, `focusVisible` wins.
 - **A normal property in `style()`** (`style(color: red)`, `style(display: block)`) is
   unknown, as in Chrome, which supports custom properties only.
 
 Differences from the browser:
 
 - `scroll-state()` is unknown (false), and `container-type: scroll-state` does not exist.
-  `var()` is substituted in the [transform properties](#transforms) only: elsewhere a
-  custom property is only read by `style()`. A change of a custom property alone is a
-  paint-only frame while no `"@container"` rule is in the tree. `style(--x: inherit)`, `unset` and `revert` are unknown, there is no `@property`
+  A change of a custom property alone is a paint-only frame while no `"@container"` rule
+  and no declaration with a `var()` is in the tree. A transition runs from and to the computed value
+  of a `var()` (`width: 'var(--w)'` under `transition: 'width 1s'`); a keyframe's `var()` is read in the
+  [transform properties](#transforms) and not checked elsewhere ([deviations](fork/deviations.md#layout)). `style(--x: inherit)`, `unset` and `revert` are unknown, there is no `@property`
   registration (every value is text, and none transitions or animates), and a custom
   property cannot be set to `""` (that declares nothing)
 - Which elements are containers follows CSS. A `div`, `label`, `form`, an atomic
@@ -8957,7 +9004,7 @@ layout space**, so a ring you add with `focusVisible` moves nothing. It follows
   nothing. With a style, the width defaults to `medium` (3px) and the colour to
   `currentColor`.
 - **`outline`** is `<width> <style> <colour>` in any order, each part at most
-  once. A part it leaves out is that default. `hidden` throws. `outlineWidth`,
+  once. A part it leaves out is that default. `hidden` drops the declaration. `outlineWidth`,
   `outlineStyle` and `outlineColor` win over it when written after it.
   `outlineOffset` is not part of it.
 - **Styles.** `solid`, `dashed`, `dotted`, `double`, `groove`, `ridge`, `inset` and
@@ -8996,8 +9043,8 @@ render per frame.
   `flex`, ...) cover their longhands. `transform`, `translate`, `rotate`, `scale` and
   `transform-origin`, `perspective` and `perspective-origin` transition too (see [Transforms](#transforms)); a valid CSS name
   Ghia does not animate (`transform-style`) is accepted and matches nothing. A camelCase name, a bad time or
-  timing function, or an unparsable value is rejected when the style is set, like
-  any other invalid style
+  timing function, or an unparsable value is dropped, like
+  any other invalid declaration
 - **Inline boxes.** A `<span>` transitions what an inline box shows too, and only that (see
   [Painting an inline box](#painting-an-inline-box))
 - **Discrete properties.** `display`, `visibility`, `position`, `overflow`, `overflowX`,
@@ -9158,8 +9205,8 @@ defineKeyframes('pulse', {
   `animationIterationCount`, `animationDirection`, `animationFillMode` and
   `animationPlayState` win over the shorthand when written after it, and shorter lists repeat to the
   length of `animationName`. The timing functions are the ones
-  [CSS transitions](#css-transitions) take. An invalid value is rejected when the
-  style is set. A name with no keyframes animates nothing, as in a browser
+  [CSS transitions](#css-transitions) take. An invalid value drops the
+  declaration. A name with no keyframes animates nothing, as in a browser
 - **Behaviour.** CSS Animations Level 1: `infinite` and fractional iteration
   counts, `reverse`, `alternate` and `alternate-reverse`, `backwards` / `forwards`
   / `both` fill, `paused` (freezes where it is and resumes from there), a negative
@@ -9342,8 +9389,9 @@ does not use a component.
 - **One restyle.** A change of the layer restyles every element once, in one
   frame, with no per-element JavaScript. The result is the same as having set
   every element's style to its new combined one
-- **Validation.** The style is checked exactly like `style` on an element. An
-  invalid one rejects the batch it is in and nothing changes
+- **Validation.** The style is read exactly like `style` on an element. An
+  invalid declaration is dropped and the layer keeps the rest; a layer that is not
+  a JSON object rejects the batch it is in and nothing changes
 
 The CSS transition rules hold, which is what makes the cross-fade work. With the
 layer's `transition` in place, an element whose `light-dark()` colour flips with

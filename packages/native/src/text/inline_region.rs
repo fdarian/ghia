@@ -17,7 +17,8 @@ use std::rc::Rc;
 use gpui::{canvas, prelude::*, HitboxBehavior, TextLayout, WindowControlArea};
 
 use crate::events::app_region::AppRegion;
-use crate::events::state_styles::{folded, PointerStates};
+use crate::events::state_styles::PointerStates;
+use crate::motion::InlineStyles;
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
 
@@ -38,12 +39,14 @@ pub struct RegionBox {
 /// of the element holding the paragraph, which is what text in no box has; a box that ends up
 /// with the value of the box directly around it (or `container`) registers nothing more.
 ///
-/// `states` says which pointer states apply to a box, as for [`super::inline_cursor::of`].
+/// `states` says which pointer states apply to a box and `motion` has the style it shows, as for
+/// [`super::inline_cursor::of`].
 pub fn of(
     tree: &RetainedTree,
     paragraph: &Paragraph,
     container: Option<AppRegion>,
     states: &dyn Fn(u64, &StyleDesc) -> PointerStates,
+    motion: &InlineStyles,
     insets: &Rc<InsetSpec>,
 ) -> Vec<RegionBox> {
     let with_box = boxes_with_a_box(paragraph);
@@ -64,7 +67,7 @@ pub fn of(
                 }
                 continue;
             };
-            let declared = folded(base, states(*id, base));
+            let declared = motion.declared(*id, base, states(*id, base));
             value = declared
                 .app_region
                 .as_deref()
@@ -149,7 +152,13 @@ mod tests {
             tree.set_text(id, text.to_string());
         }
         for (id, style) in styles {
-            tree.set_style(*id, Arc::new(serde_json::from_value(style.clone()).expect("a style")));
+            let text = style.to_string();
+            let style = if crate::css::var_substitution::mentions_var(text.as_bytes()) {
+                crate::css::var_substitution::parse(text.as_bytes()).expect("a style")
+            } else {
+                serde_json::from_value(style.clone()).expect("a style")
+            };
+            tree.set_style(*id, Arc::new(style));
         }
         tree
     }
@@ -164,7 +173,8 @@ mod tests {
             panic!("a paragraph")
         };
         let insets = InsetSpec::of(tree, paragraph, &crate::color::ColorContext::root(crate::color::Scheme::Light), &LengthContext::initial(800.0, 600.0), states);
-        of(tree, paragraph, container, states, &insets)
+        let motion = InlineStyles::at_rest(tree, paragraph, states);
+        of(tree, paragraph, container, states, &motion, &insets)
             .into_iter()
             .map(|inline| (inline.range, inline.region))
             .collect()
@@ -198,6 +208,18 @@ mod tests {
         assert_eq!(resting(&tree, Some(AppRegion::Drag)), vec![]);
         let tree = fixture(&[(3, region("drag")), (5, region("drag"))]);
         assert_eq!(resting(&tree, None), vec![(2..4, AppRegion::Drag)]);
+    }
+
+    #[test]
+    fn a_value_that_a_var_declares_is_the_one_the_custom_properties_of_the_boxes_say() {
+        let tree = fixture(&[
+            (3, serde_json::json!({"--own": "no-drag", "--region": "drag", "appRegion": "var(--own)"})),
+            (5, region("var(--region)")),
+        ]);
+        assert_eq!(
+            resting(&tree, None),
+            vec![(2..4, AppRegion::NoDrag), (3..4, AppRegion::Drag)]
+        );
     }
 
     #[test]

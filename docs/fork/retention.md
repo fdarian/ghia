@@ -251,7 +251,7 @@ The key of a root held all of `Inherited`, colours included, so a `color` on the
 
 On r11b with a `color` changed on the page: 1902 elements built to 2, 17 ms to 1.6 ms (recording every root on first build alone made these frames 60% dearer, since each now recorded every root).
 
-**Only colour and custom properties have a read set.** A change to the lengths, font state, direction, groups, containers or scheme still keys every root below it as changed. A custom property is in the key of a record only when something built in the subtree read one (`Record::reads_custom`: a transform with a `var()`, a `style()` query on the parent), so a `--p` set above a page of rows builds the rows that read it and not the others.
+**Only colour and custom properties have a read set.** A change to the lengths, font state, direction, groups, containers or scheme still keys every root below it as changed. A custom property is in the key of a record only when something built in the subtree read one (`Record::reads_custom`: a `var()` in any property, a `style()` query on the parent), so a `--p` set above a page of rows builds the rows that read it and not the others.
 
 ## Invalidation rules
 

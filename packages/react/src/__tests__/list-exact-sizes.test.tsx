@@ -58,6 +58,12 @@ const STYLES: Array<[string, Row, boolean]> = [
   ["an absolute position", (i) => ({ height: tall(i), position: "absolute" }), false],
   ["a hover that pads", (i) => ({ height: tall(i), hover: { paddingTop: 10 } }), false],
   ["a transition of the height", (i) => ({ height: tall(i), transition: "height 0.2s" }), false],
+  ["a min height from a var", (i) => ({ "--m": "40px", height: tall(i), minHeight: "var(--m)" }), false],
+  ["a padding from a var", (i) => ({ "--p": "9px", height: tall(i), padding: "var(--p)" }), false],
+  ["a border from a var", (i) => ({ "--b": "4px solid red", height: tall(i), borderBottom: "var(--b)" }), false],
+  ["a position from a var", (i) => ({ "--o": "absolute", height: tall(i), position: "var(--o)" }), false],
+  ["a display from a var", (i) => ({ "--d": "inline-block", height: tall(i), display: "var(--d)" }), false],
+  ["a hover that pads by a var", (i) => ({ "--p": "10px", height: tall(i), hover: { paddingTop: "var(--p)" } }), false],
 ]
 
 function Rows({ row, count = 30, estimated = false, extra = {} }: { row: Row; count?: number; estimated?: boolean; extra?: object }) {

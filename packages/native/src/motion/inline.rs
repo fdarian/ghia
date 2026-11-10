@@ -44,19 +44,26 @@ pub(crate) struct Timeline<'a> {
 }
 
 /// The style of each inline box of a paragraph that has a transition or an
-/// animation, as it shows in this frame. A box that has none is not here.
+/// animation, as it shows in this frame, and of each that holds a `var()`. A box that has neither
+/// is not here.
 #[derive(Default)]
-pub(crate) struct InlineStyles(HashMap<u64, StyleDesc>);
+pub(crate) struct InlineStyles {
+    sampled: HashMap<u64, StyleDesc>,
+    /// The boxes with no transition, animation or `motion` whose style holds a `var()`: the style
+    /// they declare with the states folded in and the `var()` substituted, which `build_element`
+    /// does for an element and no build does for a box.
+    substituted: HashMap<u64, StyleDesc>,
+    /// Whether a box of `sampled` shows something other than what it declares at rest, or declares
+    /// an animation, so the paragraph paints differently from one frame to the next without the
+    /// tree changing. What it declares at rest has its `var()` substituted, as `sampled` has.
+    moving: bool,
+}
 
 impl InlineStyles {
     /// Whether a box shows something other than what it declares, or declares an animation: the
     /// paragraph paints differently from one frame to the next without the tree changing.
-    pub(crate) fn is_active(&self, tree: &RetainedTree, states: &dyn Fn(u64, &StyleDesc) -> PointerStates) -> bool {
-        self.0.iter().any(|(id, sampled)| {
-            tree.elements.get(id).and_then(|element| element.style.as_deref()).is_none_or(|style| {
-                *sampled != *folded(style, states(*id, style)) || super::css_animation::declares_animation(style)
-            })
-        })
+    pub(crate) fn is_active(&self) -> bool {
+        self.moving
     }
 
     /// The style the box `id` declares. A box that declares none and has `motion`
@@ -66,7 +73,7 @@ impl InlineStyles {
             .get(&id)?
             .style
             .as_deref()
-            .or_else(|| self.0.get(&id))
+            .or_else(|| self.sampled.get(&id))
     }
 
     /// `base` as the box `id` shows it: the sampled style when a transition or an
@@ -77,8 +84,8 @@ impl InlineStyles {
         base: &'a StyleDesc,
         states: PointerStates,
     ) -> Cow<'a, StyleDesc> {
-        match self.0.get(&id) {
-            Some(sampled) => Cow::Borrowed(sampled),
+        match self.sampled.get(&id).or_else(|| self.substituted.get(&id)) {
+            Some(shown) => Cow::Borrowed(shown),
             None => folded(base, states),
         }
     }
@@ -96,6 +103,8 @@ impl InlineStyles {
         timeline: Timeline,
     ) -> Self {
         let mut sampled = HashMap::new();
+        let mut substituted = HashMap::new();
+        let mut moving = false;
         // A box is declared the same way around every piece of text it holds, so
         // the first piece that holds it steps it.
         let mut stepped = HashSet::new();
@@ -127,20 +136,48 @@ impl InlineStyles {
                             timeline.keyframes,
                             timeline.now,
                         );
+                        moving |= is_moving(element.style.as_deref(), &resolved, *id, &font, states);
                         sampled.insert(*id, resolved);
                     }
                 }
-                let declared = match (sampled.get(id), style) {
-                    (Some(sampled), _) => Cow::Borrowed(sampled),
-                    (None, Some(base)) => folded(base, states(*id, base)),
+                let declared = match (sampled.get(id).or_else(|| substituted.get(id)), style) {
+                    (Some(shown), _) => Cow::Borrowed(shown),
+                    (None, Some(base)) => {
+                        let folded = folded(base, states(*id, base));
+                        match super::resolve_vars(&folded, *id, &font, None) {
+                            Some(resolved) => Cow::Borrowed(&*substituted.entry(*id).or_insert(resolved)),
+                            None => folded,
+                        }
+                    }
                     (None, None) => continue,
                 };
                 colors = colors.descend(&declared);
                 font = font.descend(Some(&declared));
             }
         }
-        Self(sampled)
+        Self { sampled, substituted, moving }
     }
+}
+
+/// Whether `shown`, the style a box with a transition, an animation or `motion` has in this frame,
+/// is other than what it declares at rest (`style` with the states folded in and the `var()`
+/// substituted from the custom properties around it), or it declares an animation.
+fn is_moving(
+    style: Option<&StyleDesc>,
+    shown: &StyleDesc,
+    id: u64,
+    font: &ParentValues,
+    states: &dyn Fn(u64, &StyleDesc) -> PointerStates,
+) -> bool {
+    let Some(style) = style else {
+        return true;
+    };
+    let at_rest = folded(style, states(id, style));
+    let at_rest = match super::resolve_vars(&at_rest, id, font, None) {
+        Some(substituted) => Cow::Owned(substituted),
+        None => at_rest,
+    };
+    *shown != *at_rest || super::css_animation::declares_animation(&at_rest)
 }
 
 /// One box's style after its transitions, then `motion`, then its animations,
@@ -172,6 +209,7 @@ fn step(
         id,
         style,
         super::FocusVisible::default(),
+        None,
         None,
         InterpolateSize::default(),
         Scope::InlineBox,
@@ -212,6 +250,33 @@ fn step(
             resolved
         }
         None => moved.unwrap_or_else(|| Arc::unwrap_or_clone(declared.style)),
+    }
+}
+
+#[cfg(test)]
+impl InlineStyles {
+    /// The styles of the boxes of `paragraph` in a frame where nothing moves, for the readers of
+    /// the boxes that are tested without a build.
+    pub(crate) fn at_rest(
+        tree: &RetainedTree,
+        paragraph: &Paragraph,
+        states: &dyn Fn(u64, &StyleDesc) -> PointerStates,
+    ) -> Self {
+        Self::resolve(
+            tree,
+            paragraph,
+            &ColorContext::root(crate::color::Scheme::Light),
+            &ParentValues::initial(),
+            states,
+            Timeline {
+                values: &MotionValueStore::default(),
+                transitions: &mut CssTransitions::default(),
+                animations: &mut CssAnimations::default(),
+                keyframes: &KeyframesRegistry::default(),
+                motion: &HashMap::new(),
+                now: Instant::now(),
+            },
+        )
     }
 }
 
@@ -393,6 +458,23 @@ mod tests {
     }
 
     #[test]
+    fn a_box_with_no_motion_reads_the_custom_properties_of_the_boxes_around_it() {
+        let mut page = Page::new();
+        let held = |json: &str| Arc::new(crate::css::var_substitution::parse(json.as_bytes()).expect("a style"));
+        page.tree.set_style(3, held(r#"{ "--outer": "red", "--len": "7px", "paddingLeft": "var(--len)" }"#));
+        page.tree.set_style(5, held(r#"{ "--own": "lime", "backgroundColor": "var(--outer)", "color": "var(--own)" }"#));
+        let before = crate::css::custom_properties::reads::count();
+        let styles = page.frame(0);
+        assert!(crate::css::custom_properties::reads::count() > before, "a read of the custom properties is noted");
+        assert!(styles.sampled.is_empty(), "nothing was stepped");
+        assert_eq!(page.shown(&styles, 3).padding_left, LinearLength::px(7.0).into());
+        let inner = page.shown(&styles, 5);
+        is(&inner.background_color, "red");
+        is(&inner.color, "lime");
+        assert_eq!(inner.var_declarations, None);
+    }
+
+    #[test]
     fn a_background_between_two_colours_shows_neither_while_it_transitions() {
         let mut page = Page::new();
         let style = |color: &str| {
@@ -476,7 +558,7 @@ mod tests {
         page.style(3, r#"{ "backgroundColor": "blue" }"#);
         let styles = page.frame(0);
         is(&page.shown(&styles, 3).background_color, "blue");
-        assert!(styles.0.is_empty(), "nothing was stepped");
+        assert!(styles.sampled.is_empty(), "nothing was stepped");
         assert!(!page.transitions.take_active());
     }
 

@@ -359,12 +359,28 @@ describeNative("<anchored> placement", () => {
       }
     })
 
-    it("rejects an unknown anchor-size axis", () => {
+    it("drops an unknown anchor-size axis and reports nothing", () => {
       const errors: Error[] = []
       const { render, unmount } = createTestRoot({ ...WINDOW, onUncaughtError: (error) => errors.push(error) })
       try {
         render(<div style={{ width: "anchor-size(depth)" }} />)
-        expect(errors.map((error) => error.message).join()).toMatch(/anchor-size/)
+        expect(errors).toEqual([])
+      } finally {
+        unmount()
+      }
+    })
+
+    it("drops only the width with an unknown anchor-size axis: the rest of the style lays the box out", () => {
+      const { render, renderer, unmount } = createTestRoot(WINDOW)
+      try {
+        const sized = (width: string | undefined) => {
+          render(<div testId="box" style={{ width, height: 20, paddingLeft: 6 }}>{null}</div>)
+          renderer.flush()
+          return box(renderer, "box")
+        }
+        const without = sized(undefined)
+        expect(without.height).toBe(20)
+        expect(sized("anchor-size(depth)")).toEqual(without)
       } finally {
         unmount()
       }

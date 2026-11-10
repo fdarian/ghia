@@ -121,7 +121,8 @@ fn px(value: &DimensionValue) -> Option<f32> {
 
 /// Nothing in `style`, in any state, can give the border box another size than its own height,
 /// width, padding and border: a `div` that is a block, flex or grid container in the flow, with no
-/// bound, ratio, query block, state style or motion that touches the box.
+/// bound, ratio, query block, state style or motion that touches the box. A held `var()` is not
+/// known until the row is built, and any of them may be a bound, the display or the padding.
 fn declares_the_box_alone(style: &StyleDesc) -> bool {
     let unbounded = |value: &Option<DimensionValue>| matches!(value, None | Some(DimensionValue::Auto));
     matches!(style.display.as_deref(), None | Some("block" | "flex" | "grid" | "flow-root"))
@@ -132,6 +133,7 @@ fn declares_the_box_alone(style: &StyleDesc) -> bool {
         && unbounded(&style.max_height)
         && style.aspect_ratio.is_none()
         && style.container_rules.is_none()
+        && !style.holds_var_declarations()
         && paints_in_every_state(style)
         && crate::motion::leaves_box_size(style)
 }
@@ -321,6 +323,21 @@ mod tests {
             r##"{"height":40,"transition":"opacity 0.2s ease","userSelect":"none","cursor":"pointer"}"##,
         ] {
             assert_eq!(declared(style, Some(300.0), 1.0), Some((300.0, 40.0)), "{style}");
+        }
+    }
+
+    #[test]
+    fn a_var_in_the_style_or_a_state_of_it_declares_nothing() {
+        for style in [
+            r#"{"height":40,"minHeight":"var(--m)"}"#,
+            r#"{"height":40,"padding":"var(--p)"}"#,
+            r#"{"height":40,"display":"var(--d)"}"#,
+            r#"{"height":40,"hover":{"borderWidth":"var(--b)"}}"#,
+        ] {
+            let mut tree = RetainedTree::new();
+            tree.create_element(1, "div".to_string());
+            tree.set_style(1, Arc::new(crate::css::var_substitution::parse(style.as_bytes()).expect("a style")));
+            assert!(RowBox::of(&tree.elements[&1], false).is_none(), "{style}");
         }
     }
 
