@@ -132,6 +132,22 @@ fn an_id_that_arrives_as_a_prop_matches() {
 }
 
 #[test]
+fn data_and_aria_booleans_match_as_true_and_false() {
+    let mut doc = Doc::new();
+    let div = doc.element("div", ROOT);
+    doc.tree.set_attribute(div, "data-open", Some("true".into()));
+    doc.tree.set_custom_prop(div, "aria-expanded".into(), serde_json::json!(false));
+    doc.style_element(ROOT, "[data-open=\"true\"] { color: red } [aria-expanded=\"false\"] { background-color: blue }");
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+    assert_eq!(doc.background(div), Some("blue"));
+
+    doc.tree.set_custom_prop(div, "aria-expanded".into(), serde_json::json!(true));
+    doc.flush();
+    assert_eq!(doc.background(div), None);
+}
+
+#[test]
 fn combinators_follow_the_tree() {
     let mut doc = Doc::new();
     let parent = doc.classed("div", ROOT, "p");

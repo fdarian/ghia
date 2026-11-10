@@ -26,9 +26,17 @@ describe.skipIf(!hasNativeTestRenderer)("attributes on native in React", () => {
     expect([read("class"), read("data-x"), read("title")]).toEqual(["c", "2", null])
 
     app.render(view({ className: "c", "data-x": true }))
-    expect(read("data-x")).toBe("")
+    expect(read("data-x")).toBe("true")
 
-    app.render(view({ "data-x": false }))
+    app.render(view({ className: "c", "data-x": false }))
+    expect(read("data-x")).toBe("false")
+
+    app.render(view({ className: "c", "data-x": true, hidden: true }))
+    expect(read("hidden")).toBe("")
+    app.render(view({ className: "c", "data-x": true, hidden: false }))
+    expect(read("hidden")).toBeNull()
+
+    app.render(view({}))
     expect([read("class"), read("data-x")]).toEqual([null, null])
   })
 

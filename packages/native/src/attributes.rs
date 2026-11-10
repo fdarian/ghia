@@ -64,12 +64,21 @@ impl AttributeStore {
     }
 }
 
-/// The text of a custom prop read as an attribute: `id`, `role` and `aria-*` arrive as props,
-/// not through `setAttribute`.
-fn attribute_text(value: &serde_json::Value) -> Option<Cow<'_, str>> {
+/// Whether the DOM prints a boolean for this attribute as its text: React and Solid stringify
+/// `data-*` and `aria-*`, where every other attribute is present (empty) or absent.
+fn stringifies_booleans(name: &str) -> bool {
+    name.starts_with("data-") || name.starts_with("aria-")
+}
+
+/// The text of a custom prop read as the attribute `name`: `id`, `role` and `aria-*` arrive as
+/// props, not through `setAttribute`.
+fn attribute_text<'a>(name: &str, value: &'a serde_json::Value) -> Option<Cow<'a, str>> {
     match value {
         serde_json::Value::String(text) => Some(Cow::Borrowed(text)),
         serde_json::Value::Number(number) => Some(Cow::Owned(number.to_string())),
+        serde_json::Value::Bool(flag) if stringifies_booleans(name) => {
+            Some(Cow::Borrowed(if *flag { "true" } else { "false" }))
+        }
         serde_json::Value::Bool(true) => Some(Cow::Borrowed("")),
         serde_json::Value::Bool(false) | serde_json::Value::Null => None,
         serde_json::Value::Array(_) | serde_json::Value::Object(_) => None,
@@ -83,7 +92,7 @@ impl RetainedElement {
         if let Some(value) = self.attribute_store().and_then(|store| store.get(name)) {
             return Some(Cow::Borrowed(value));
         }
-        attribute_text(self.custom_props().get(name)?)
+        attribute_text(name, self.custom_props().get(name)?)
     }
 }
 
@@ -118,7 +127,7 @@ impl RetainedTree {
             .map(|store| store.names().map(str::to_owned).collect())
             .unwrap_or_default();
         for (name, value) in element.custom_props() {
-            if attribute_text(value).is_some() && !names.iter().any(|stored| stored == name) {
+            if attribute_text(name, value).is_some() && !names.iter().any(|stored| stored == name) {
                 names.push(name.clone());
             }
         }
@@ -208,13 +217,18 @@ mod tests {
         tree.set_custom_prop(1, "data-obj".into(), serde_json::json!({ "a": 1 }));
         assert_eq!(tree.attribute(1, "id").as_deref(), Some("root"));
         assert_eq!(tree.attribute(1, "tabindex").as_deref(), Some("3"));
-        assert_eq!(tree.attribute(1, "aria-hidden").as_deref(), Some(""));
-        assert_eq!(tree.attribute(1, "aria-busy"), None);
+        assert_eq!(tree.attribute(1, "aria-hidden").as_deref(), Some("true"));
+        assert_eq!(tree.attribute(1, "aria-busy").as_deref(), Some("false"));
+        tree.set_custom_prop(1, "hidden".into(), serde_json::json!(true));
+        tree.set_custom_prop(1, "disabled".into(), serde_json::json!(false));
+        assert_eq!(tree.attribute(1, "hidden").as_deref(), Some(""));
+        assert_eq!(tree.attribute(1, "disabled"), None);
+        tree.set_custom_prop(1, "hidden".into(), serde_json::Value::Null);
         assert_eq!(tree.attribute(1, "data-obj"), None);
 
         let mut names = tree.attribute_names(1);
         names.sort();
-        assert_eq!(names, ["aria-hidden", "id", "tabindex"]);
+        assert_eq!(names, ["aria-busy", "aria-hidden", "id", "tabindex"]);
 
         tree.set_attribute(1, "id", Some("stored".into()));
         assert_eq!(

@@ -315,7 +315,8 @@ export function attributeNameOfProp(type: string, name: string): string | undefi
 /**
  * What the attribute `name` holds for a prop value, `null` for none. A string is itself, a number
  * its text and `true` the empty string, as the DOM prints a boolean attribute; `false`, `null` and
- * `undefined` remove it, and so does an object or a function, which no attribute holds. `class`
+ * `undefined` remove it, except on `data-*` and `aria-*`, where React and Solid print `"true"` and
+ * `"false"`, and so does an object or a function, which no attribute holds. `class`
  * converts whatever else it is with `String`.
  */
 export function attributeValue(name: string, value: unknown): string | null {
@@ -325,6 +326,7 @@ export function attributeValue(name: string, value: unknown): string | null {
     case "number":
       return String(value)
     case "boolean":
+      if (name.startsWith("data-") || name.startsWith("aria-")) return String(value)
       return value ? "" : null
     case "undefined":
       return null

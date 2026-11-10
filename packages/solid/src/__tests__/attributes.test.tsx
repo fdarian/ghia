@@ -33,10 +33,13 @@ describe.skipIf(!hasNativeTestRenderer)("attributes on native in Solid", () => {
     expect([read("class"), read("data-x"), read("title")]).toEqual(["c", "2", null])
 
     app.flushSync(() => setData(true))
-    expect(read("data-x")).toBe("")
+    expect(read("data-x")).toBe("true")
+
+    app.flushSync(() => setData(false))
+    expect(read("data-x")).toBe("false")
 
     app.flushSync(() => {
-      setData(false)
+      setData(undefined)
       setKlass(undefined)
     })
     expect([read("class"), read("data-x")]).toEqual([null, null])
