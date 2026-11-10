@@ -55,6 +55,7 @@ export { preventEventDefault, type DomEvent, type RootEvent } from "./events/dis
 export * from "./focus.js"
 export * from "./forms.js"
 export * from "./bounds.js"
+export { CSSRule, CSSRuleList, CSSStyleRule, CSSStyleSheet, type CSSStyleSheetInit } from "./css/index.js"
 export * from "./computed-style.js"
 export * from "./host-runtime.js"
 export * from "./keyframes.js"

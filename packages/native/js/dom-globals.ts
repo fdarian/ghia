@@ -1,5 +1,6 @@
 import { cancelAnimationFrame, requestAnimationFrame } from "./animation-frame.js"
 import { ResizeObserver } from "./observers.js"
+import { CSSRule, CSSRuleList, CSSStyleRule, CSSStyleSheet } from "./css/index.js"
 import {
   CharacterData,
   Document,
@@ -36,6 +37,10 @@ const DOM_CLASSES = {
   Document,
   DocumentFragment,
   ShadowRoot,
+  CSSStyleSheet,
+  CSSRule,
+  CSSStyleRule,
+  CSSRuleList,
 }
 
 /**

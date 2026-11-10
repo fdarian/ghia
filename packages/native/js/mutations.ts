@@ -1,5 +1,6 @@
 import { DOM_DISPATCHED_HANDLER_PROPS, KEYBOARD_FOCUS_EVENT_PROPS } from "./events/event-props.js"
 import { registerMutationQueue } from "./bounds.js"
+import { registerSheetSink } from "./css/index.js"
 import { createBlobImageLoader, type BlobImageHost } from "./blob-images.js"
 import type { MutationHost, MutationRenderer } from "./host.js"
 import { createStyleImageLoader, type StyleImageHost } from "./style-images.js"
@@ -174,6 +175,7 @@ export function createMutationQueue(
     },
   }
   registerMutationQueue(renderer, mutations)
+  registerSheetSink(renderer, mutations)
   return mutations
 }
 
