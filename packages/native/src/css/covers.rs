@@ -362,6 +362,15 @@ pub(crate) fn clear(style: &mut StyleDesc, keys: &[KeyId]) {
     }
 }
 
+/// `keys` and what they cover, through the shorthands they cover as well.
+pub(crate) fn with_covered(keys: &[KeyId]) -> Vec<KeyId> {
+    let mut all = keys.to_vec();
+    for &key in keys {
+        all.extend(COVERS.covered[key].iter().filter(|covered| !keys.contains(covered)));
+    }
+    all
+}
+
 /// `keys` of `style` as `from` has them.
 pub(crate) fn restore(style: &mut StyleDesc, from: &StyleDesc, keys: &[KeyId]) {
     for &key in keys {

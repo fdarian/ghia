@@ -653,7 +653,7 @@ describeNative("a custom property set in focusWithin on an element that transiti
 })
 
 describeNative("a var() declaration against the plain ones written around it", () => {
-  const custom = { "--w": "4px", "--n": "none", "--p": "6px", "--line": "blue", "--b": "2px solid red", "--num": "8" }
+  const custom = { "--w": "4px", "--n": "none", "--p": "6px", "--line": "blue", "--b": "2px solid red", "--num": "8", "--s": "solid", "--c": "#ff0000" }
 
   const substituted = (value: unknown): unknown => {
     if (typeof value === "string") return value.replace(/var\((--[\w-]+)\)/g, (_, name) => custom[name])
@@ -702,6 +702,18 @@ describeNative("a var() declaration against the plain ones written around it", (
     ["a state borderInline over an all-sides width", { borderWidth: "var(--w)", borderStyle: "solid", hover: { borderInline: "1px solid" } }],
     ["a state all-sides color over a held side", { borderTop: "var(--b)", hover: { borderColor: "green" } }],
     ["a state longhand over a held shorthand", { padding: "var(--p)", hover: { paddingTop: 3 } }],
+    [
+      "a state side shorthand and its longhand over a held all-sides color",
+      { borderColor: "var(--c)", borderStyle: "solid", borderWidth: 1, hover: { borderTop: "2px solid", borderTopWidth: "5px" } },
+    ],
+    [
+      "a state borderInline and a side longhand over a held all-sides style",
+      { borderWidth: 3, borderStyle: "var(--s)", hover: { borderInline: "2px solid", borderLeftWidth: "9px" } },
+    ],
+    [
+      "a state side shorthand and its longhand over a held all-sides width",
+      { borderWidth: "var(--w)", borderStyle: "solid", hover: { borderBottom: "2px solid", borderBottomWidth: "7px" } },
+    ],
   ]
 
   for (const [name, style] of cases) {
@@ -711,6 +723,11 @@ describeNative("a var() declaration against the plain ones written around it", (
       }
     }, SLOW)
   }
+
+  it("keeps the longhand a state wrote after its side shorthand over a held all-sides border", () => {
+    const hover = { borderTop: "2px solid", borderTopWidth: "5px" }
+    expect(measure({ borderColor: "var(--c)", borderStyle: "solid", borderWidth: 1, hover }, true).slice(2, 4)).toEqual([5 + 2, 5 + 5 + 1])
+  }, SLOW)
 
   it("drops a bare number from a length, as it does a plain one", () => {
     expect(measure({ padding: "var(--num)" }, false).slice(2, 4)).toEqual([5, 5])

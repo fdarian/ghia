@@ -375,7 +375,11 @@ fn lay_declarations(style: &mut StyleDesc, held: &[VarDeclaration], custom: &Cus
                         let mut beneath = style.clone();
                         covers::clear(&mut beneath, &declaration.kept);
                         let mut above = StyleDesc::default();
-                        covers::restore(&mut above, plain, &declaration.kept);
+                        // The longhands a kept shorthand covers are the layer's own, written after
+                        // it (a longhand written before it is gone from `plain`): laid over the
+                        // shorthand they are what the layer shows, which `laid_over` would drop
+                        // from `beneath`'s copy of them otherwise.
+                        covers::restore(&mut above, plain, &covers::with_covered(&declaration.kept));
                         laid_over(&laid_over(&beneath, &parsed), &above)
                     }
                     _ => laid_over(style, &parsed),
@@ -920,6 +924,46 @@ mod tests {
             );
             assert!(held.border_bottom_width.is_some(), "{over}");
         }
+    }
+
+    #[test]
+    fn a_longhand_written_after_a_side_shorthand_of_the_layer_above_stays_over_a_held_all_sides_border_value() {
+        let cases = [
+            (
+                r##"{"borderColor":"var(--c)","borderStyle":"solid","borderWidth":1"##,
+                r##"{"borderColor":"#ff0000","borderStyle":"solid","borderWidth":1"##,
+                r#""borderTop":"2px solid","borderTopWidth":"5px""#,
+            ),
+            (
+                r#"{"borderWidth":3,"borderStyle":"var(--s)""#,
+                r#"{"borderWidth":3,"borderStyle":"solid""#,
+                r#""borderInline":"2px solid","borderLeftWidth":"9px""#,
+            ),
+        ];
+        for (held, literal, over) in cases {
+            let held = hovered(&format!(r#"{held},"hover":{{{over}}}}}"#), &[("--c", "#ff0000"), ("--s", "solid")]);
+            let literal = hovered(&format!(r#"{literal},"hover":{{{over}}}}}"#), &[]);
+            macro_rules! same {
+                ($($field:ident),+) => {$(assert_eq!(held.$field, literal.$field, "{over}: {}", stringify!($field));)+};
+            }
+            same!(
+                border_top, border_inline, border_top_width, border_left_width, border_right_width,
+                border_bottom_width, border_top_style, border_left_style, border_top_color
+            );
+            assert!(held.border_top_width.is_some() || held.border_left_width.is_some(), "{over}");
+        }
+    }
+
+    #[test]
+    fn a_longhand_after_a_side_shorthand_of_the_layer_above_survives_the_universal_layering() {
+        let universal = style(r#"{"borderWidth":"var(--w)","borderStyle":"solid"}"#);
+        let own = style(r#"{"borderLeft":"2px solid","borderLeftWidth":"9px"}"#);
+        let layered = crate::universal_style::layer_under(&universal, &own);
+        let layered = resolve(&layered, &custom(&[("--w", "4px")])).unwrap();
+        let literal = crate::universal_style::layer_under(&style(r#"{"borderWidth":"4px","borderStyle":"solid"}"#), &own);
+        assert_eq!(layered.border_left_width, literal.border_left_width);
+        assert!(layered.border_left_width.is_some());
+        assert_eq!(layered.border_top_width, literal.border_top_width);
     }
 
     #[test]
