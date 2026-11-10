@@ -460,6 +460,9 @@ describeNative("a var() declaration against the plain ones written around it", (
     ["borderInline after an all-sides width", { borderWidth: "var(--w)", borderStyle: "solid", borderInline: "1px solid" }],
     ["a side shorthand after an all-sides color", { borderStyle: "solid", borderColor: "var(--line)", borderBottom: "10px solid #00ff00" }],
     ["a held side shorthand before an all-sides width", { borderTop: "var(--b)", borderWidth: 3 }],
+    ["a held longhand before an invalid shorthand", { paddingTop: "var(--p)", padding: "1px bogus" }],
+    ["a held border side before an invalid border", { borderStyle: "solid", borderTopWidth: "var(--w)", border: "1px wobbly 2px 3px" }],
+    ["a held longhand before an invalid state shorthand", { paddingTop: "var(--p)", hover: { padding: "1px bogus" } }],
     ["a held longhand before a valid shorthand", { paddingTop: "var(--p)", padding: 2 }],
     ["a held shorthand before a longhand", { padding: "var(--p)", paddingLeft: 3 }],
     ["a state side shorthand over an all-sides width", { borderWidth: "var(--w)", borderStyle: "solid", hover: { borderTop: "1px solid" } }],
@@ -477,6 +480,7 @@ describeNative("a var() declaration against the plain ones written around it", (
   }
 
   it("keeps the longhand that the literal keeps", () => {
+    expect(measure({ paddingTop: "var(--p)", padding: "1px bogus" }, false)[3]).toBe(5 + 6)
     expect(measure({ borderWidth: "var(--w)", borderStyle: "solid", borderTop: "1px solid" }, false).slice(2, 4)).toEqual([5 + 8, 5 + 1 + 4])
   }, SLOW)
 })

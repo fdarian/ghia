@@ -847,6 +847,13 @@ mod tests {
     }
 
     #[test]
+    fn an_invalid_plain_declaration_overlapping_a_held_one_is_dropped_not_held() {
+        let held = style(r#"{"paddingTop":"var(--p)","padding":"1px bogus"}"#);
+        assert_eq!(held.var_declarations.as_deref().map(<[_]>::len), Some(1));
+        assert_eq!(held.padding, None);
+    }
+
+    #[test]
     fn a_plain_declaration_that_overlaps_nothing_held_stays_plain() {
         let held = style(r#"{"paddingTop":"var(--p)","borderTop":"1px solid","paddingBottom":3}"#);
         assert_eq!(held.var_declarations.as_deref().map(<[_]>::len), Some(1));
@@ -859,6 +866,30 @@ mod tests {
         assert_eq!(held.var_declarations, None);
         assert!(held.padding.is_some());
         assert_eq!(held.padding_left, None);
+    }
+
+    #[test]
+    fn a_held_longhand_survives_a_later_shorthand_that_is_invalid() {
+        for (with_var, literal) in [
+            (r#"{"paddingTop":"var(--p)","padding":"1px bogus"}"#, r#"{"paddingTop":"6px","padding":"1px bogus"}"#),
+            (
+                r#"{"borderStyle":"solid","borderTopWidth":"var(--w)","border":"1px wobbly 2px 3px"}"#,
+                r#"{"borderStyle":"solid","borderTopWidth":"4px","border":"1px wobbly 2px 3px"}"#,
+            ),
+        ] {
+            let held = resolved(with_var, &[("--p", "6px"), ("--w", "4px")]);
+            let twin = style(literal);
+            assert!(held.padding_top.is_some() || held.border_top_width.is_some(), "{with_var}");
+            assert_eq!(held.padding_top, twin.padding_top, "{with_var}");
+            assert_eq!(held.border_top_width, twin.border_top_width, "{with_var}");
+        }
+    }
+
+    #[test]
+    fn a_held_longhand_survives_an_invalid_shorthand_of_a_state_style() {
+        let held = hovered(r#"{"paddingTop":"var(--p)","hover":{"padding":"1px bogus"}}"#, &[("--p", "6px")]);
+        assert_eq!(held.padding_top, style(r#"{"paddingTop":"6px"}"#).padding_top);
+        assert!(held.padding_top.is_some());
     }
 
     #[test]
