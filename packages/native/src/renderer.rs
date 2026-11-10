@@ -13095,7 +13095,16 @@ fn build_atomics(
                 Box::new(overlay)
             });
             let own = tree.elements.get(&id).and_then(|element| element.style.as_deref());
-            let declared = own.map(|base| crate::events::state_styles::folded(base, states(id, base)));
+            let declared = own.map(|base| {
+                let declared = crate::events::state_styles::folded(base, states(id, base));
+                match crate::css::var_substitution::resolve(&declared, &inherited.custom_of(Some(base))) {
+                    Some(resolved) => {
+                        crate::css::custom_properties::reads::note();
+                        std::borrow::Cow::Owned(resolved)
+                    }
+                    None => declared,
+                }
+            });
             let lengths = inherited
                 .lengths
                 .descend(declared.as_ref().and_then(|style| style.font_size.as_ref()), false);

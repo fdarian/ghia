@@ -324,3 +324,64 @@ describeNative("a var() that the element inherits, animates or is animated over"
     expectNear(hovered.at(13, 40), RED)
   }, SLOW)
 })
+
+describeNative("a var() in the style of an inline box", () => {
+  const tree = (style: Record<string, unknown>, custom: Record<string, string>) => (
+    <div style={{ position: "absolute", left: 0, top: 0, width: 600, ...custom }}>
+      <text testId="text">
+        ab
+        <span testId="span" style={style}>
+          WWWW
+        </span>
+        cd
+      </text>
+    </div>
+  )
+  const boxes = (renderer: Renderer) => [box(renderer, "text"), box(renderer, "span")]
+
+  it.each([
+    ["fontSize", { fontSize: "var(--s)" }, { fontSize: "40px" }, { "--s": "40px" }, { "--s": "20px" }, { fontSize: "20px" }],
+    ["paddingLeft", { paddingLeft: "var(--s)" }, { paddingLeft: "40px" }, { "--s": "40px" }, { "--s": "20px" }, { paddingLeft: "20px" }],
+  ])("sizes a span by %s, and again when the custom property above it changes", (_, viaVar, literal, custom, changed, changedLiteral) => {
+    let unset: unknown
+    mounted(tree({}, custom), (renderer) => {
+      unset = boxes(renderer)
+    })
+    mounted(tree(viaVar, custom), (renderer, root) => {
+      expect(boxes(renderer)).not.toEqual(unset)
+      let expected: unknown
+      mounted(tree(literal, {}), (literalRenderer) => {
+        expected = boxes(literalRenderer)
+      })
+      expect(boxes(renderer)).toEqual(expected)
+      update(root, tree(viaVar, changed))
+      mounted(tree(changedLiteral, {}), (literalRenderer) => {
+        expected = boxes(literalRenderer)
+      })
+      expect(boxes(renderer)).toEqual(expected)
+    })
+  }, SLOW)
+
+  it("paints a span in a color that a var() declares", () => {
+    const painted = (color: string, custom: Record<string, string>) =>
+      paint(
+        `span-color-${color.replace(/\W/g, "")}`,
+        <div style={{ position: "absolute", left: 0, top: 0, width: 600, fontSize: 80, ...custom }}>
+          <text>
+            <span style={{ color }}>WWWW</span>
+          </text>
+        </div>,
+      )
+    const viaVar = painted("var(--c)", { "--c": "#ff0000" })
+    const literal = painted("#ff0000", {})
+    let red = 0
+    for (let x = 0; x < 300; x += 2) {
+      for (let y = 0; y < 100; y += 2) {
+        const pixel = viaVar.at(x, y)
+        expectNear(pixel, literal.at(x, y))
+        if (pixel[0] > 200 && pixel[1] < 60) red++
+      }
+    }
+    expect(red).toBeGreaterThan(20)
+  }, SLOW)
+})

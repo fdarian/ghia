@@ -1452,11 +1452,17 @@ pub(crate) struct DeclaredStyle {
 /// changes is a change of the property, from the value the last style computed to the one this
 /// does.
 fn with_vars(style: Arc<StyleDesc>, parent_font: &ParentValues) -> Arc<StyleDesc> {
-    if !crate::css::var_substitution::reads_vars(&style) {
-        return style;
+    resolve_vars(&style, parent_font).map_or(style, Arc::new)
+}
+
+/// What [`with_vars`] makes of `style`, or `None` when it holds nothing to substitute. A box with
+/// no transition, animation or `motion` that does not go through it calls this itself.
+fn resolve_vars(style: &StyleDesc, parent_font: &ParentValues) -> Option<StyleDesc> {
+    if !crate::css::var_substitution::reads_vars(style) {
+        return None;
     }
     crate::css::custom_properties::reads::note();
-    crate::css::var_substitution::resolve(&style, &parent_font.custom_of(&style)).map_or(style, Arc::new)
+    crate::css::var_substitution::resolve(style, &parent_font.custom_of(style))
 }
 
 /// The style as `style` has it after the state styles that apply. Shared with `style` when it

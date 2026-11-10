@@ -44,15 +44,22 @@ pub(crate) struct Timeline<'a> {
 }
 
 /// The style of each inline box of a paragraph that has a transition or an
-/// animation, as it shows in this frame. A box that has none is not here.
+/// animation, as it shows in this frame, and of each that holds a `var()`. A box that has neither
+/// is not here.
 #[derive(Default)]
-pub(crate) struct InlineStyles(HashMap<u64, StyleDesc>);
+pub(crate) struct InlineStyles {
+    sampled: HashMap<u64, StyleDesc>,
+    /// The boxes with no transition, animation or `motion` whose style holds a `var()`: the style
+    /// they declare with the states folded in and the `var()` substituted, which `build_element`
+    /// does for an element and no build does for a box.
+    substituted: HashMap<u64, StyleDesc>,
+}
 
 impl InlineStyles {
     /// Whether a box shows something other than what it declares, or declares an animation: the
     /// paragraph paints differently from one frame to the next without the tree changing.
     pub(crate) fn is_active(&self, tree: &RetainedTree, states: &dyn Fn(u64, &StyleDesc) -> PointerStates) -> bool {
-        self.0.iter().any(|(id, sampled)| {
+        self.sampled.iter().any(|(id, sampled)| {
             tree.elements.get(id).and_then(|element| element.style.as_deref()).is_none_or(|style| {
                 *sampled != *folded(style, states(*id, style)) || super::css_animation::declares_animation(style)
             })
@@ -66,7 +73,7 @@ impl InlineStyles {
             .get(&id)?
             .style
             .as_deref()
-            .or_else(|| self.0.get(&id))
+            .or_else(|| self.sampled.get(&id))
     }
 
     /// `base` as the box `id` shows it: the sampled style when a transition or an
@@ -77,8 +84,8 @@ impl InlineStyles {
         base: &'a StyleDesc,
         states: PointerStates,
     ) -> Cow<'a, StyleDesc> {
-        match self.0.get(&id) {
-            Some(sampled) => Cow::Borrowed(sampled),
+        match self.sampled.get(&id).or_else(|| self.substituted.get(&id)) {
+            Some(shown) => Cow::Borrowed(shown),
             None => folded(base, states),
         }
     }
@@ -96,6 +103,7 @@ impl InlineStyles {
         timeline: Timeline,
     ) -> Self {
         let mut sampled = HashMap::new();
+        let mut substituted = HashMap::new();
         // A box is declared the same way around every piece of text it holds, so
         // the first piece that holds it steps it.
         let mut stepped = HashSet::new();
@@ -130,16 +138,22 @@ impl InlineStyles {
                         sampled.insert(*id, resolved);
                     }
                 }
-                let declared = match (sampled.get(id), style) {
-                    (Some(sampled), _) => Cow::Borrowed(sampled),
-                    (None, Some(base)) => folded(base, states(*id, base)),
+                let declared = match (sampled.get(id).or_else(|| substituted.get(id)), style) {
+                    (Some(shown), _) => Cow::Borrowed(shown),
+                    (None, Some(base)) => {
+                        let folded = folded(base, states(*id, base));
+                        match super::resolve_vars(&folded, &font) {
+                            Some(resolved) => Cow::Borrowed(&*substituted.entry(*id).or_insert(resolved)),
+                            None => folded,
+                        }
+                    }
                     (None, None) => continue,
                 };
                 colors = colors.descend(&declared);
                 font = font.descend(Some(&declared));
             }
         }
-        Self(sampled)
+        Self { sampled, substituted }
     }
 }
 
