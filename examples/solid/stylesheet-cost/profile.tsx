@@ -13,12 +13,14 @@
 //   MODES=inline,sheet,inline+sheet   what runs, in this order, in this process
 //   JSON=1             prints the results as JSON on the last line
 //
-// Phases (each is the mutation, its flush and the frame that paints it):
+// Phases. Each is reported twice: "batch" is only the mutation and its batch apply (Solid's update, the mutation queue's flush,
+// native applyBatch with flush_styles; for mount the whole `root.render`), and "end-to-end" adds the view's flush and the frame that
+// paints it, which runs after the batch window closes:
 //   mount  a fresh root: render N items and draw the first frame
 //   class  one item's class gains / loses `active` (inline: its style object is swapped)
 //   data   one item's data-active attribute is set / removed (inline: its style object is swapped)
 //   many   all N items at once, on and off (class on all / style on all)
-// `matched` and `cascades` are the build counters elementsRematched and cascadesComputed of one repetition (sheet modes).
+// `matched` and `cascades` (counted over the whole phase) are the build counters elementsRematched and cascadesComputed of one repetition (sheet modes).
 import { dlopen, ptr } from "bun:ffi"
 import { For, createSelector, createSignal } from "solid-js"
 import type { StyleDesc } from "@ghia/solid"
@@ -134,25 +136,25 @@ function Items(props: { count: number; mode: string; control: Control }) {
 }
 
 interface Sample {
+  /** the mutation and its batch apply only: Solid's update, the mutation queue's flush, native applyBatch with flush_styles */
+  batchInstructions: number
+  batchMs: number
+  /** the batch, then the view's flush and the frame that paints it */
   instructions: number
   ms: number
   rematched: number
   cascades: number
 }
-interface Phase {
-  instructions: number
-  ms: number
-  rematched: number
-  cascades: number
-}
-const summarize = (samples: Sample[]): Phase => ({
+const summarize = (samples: Sample[]): Sample => ({
+  batchInstructions: median(samples.map((s) => s.batchInstructions)),
+  batchMs: median(samples.map((s) => s.batchMs)),
   instructions: median(samples.map((s) => s.instructions)),
   ms: median(samples.map((s) => s.ms)),
   rematched: median(samples.map((s) => s.rematched)),
   cascades: median(samples.map((s) => s.cascades)),
 })
 
-const results: Record<string, Record<string, Record<string, Phase>>> = {}
+const results: Record<string, Record<string, Record<string, Sample>>> = {}
 
 function openRoot(count: number) {
   const rows = Math.ceil(count / Math.floor(WIDTH / (ITEM_WIDTH + 8)))
@@ -169,16 +171,26 @@ function frame(app: ReturnType<typeof createTestRoot>) {
   app.renderer.drawFrame()
 }
 
-/** Instructions, wall time and counters of `step` (the mutation, its flush and the frame). */
-function sample(app: ReturnType<typeof createTestRoot>, step: () => void): Sample {
+/** `mutate` is the batch window; `paint` (the view's flush and the frame) runs after it, outside the batch numbers. */
+function sample(app: ReturnType<typeof createTestRoot>, mutate: () => void, paint: () => void): Sample {
   app.renderer.resetBuildCounters()
   const t0 = performance.now()
   const a = readInstructions()
-  step()
+  mutate()
   const b = readInstructions()
-  const ms = performance.now() - t0
+  const t1 = performance.now()
+  paint()
+  const c = readInstructions()
+  const t2 = performance.now()
   const counters = app.renderer.getBuildCounters()
-  return { instructions: b - a - readOverhead, ms, rematched: counters.elementsRematched, cascades: counters.cascadesComputed }
+  return {
+    batchInstructions: b - a - readOverhead,
+    batchMs: t1 - t0,
+    instructions: c - a - 2 * readOverhead,
+    ms: t2 - t0,
+    rematched: counters.elementsRematched,
+    cascades: counters.cascadesComputed,
+  }
 }
 
 function expectBackground(control: Control, index: number, expected: string, where: string) {
@@ -187,7 +199,7 @@ function expectBackground(control: Control, index: number, expected: string, whe
 }
 
 function runMode(mode: string, count: number) {
-  const record = (phase: string, value: Phase) => {
+  const record = (phase: string, value: Sample) => {
     const byMode = (results[mode] ??= {})
     const byCount = (byMode[String(count)] ??= {})
     byCount[phase] = value
@@ -198,10 +210,14 @@ function runMode(mode: string, count: number) {
   for (let i = 0; i < 2 + MOUNT_REPS; i++) {
     const app = openRoot(count)
     const control = newControl()
-    const measured = sample(app, () => {
-      app.render(() => <Items count={count} mode={mode} control={control} />)
-      frame(app)
-    })
+    const measured = sample(
+      app,
+      () => app.root.render(() => <Items count={count} mode={mode} control={control} />),
+      () => {
+        app.renderer.flush()
+        frame(app)
+      }
+    )
     expectBackground(control, 0, "rgb(59, 130, 246)", `${mode} mount`)
     if (i >= 2) mounts.push(measured)
     app.unmount()
@@ -216,10 +232,14 @@ function runMode(mode: string, count: number) {
     const samples: Sample[] = []
     for (let i = 0; i < SETTLE + REPS; i++) {
       const turnOn = i % 2 === 0
-      const measured = sample(app, () => {
-        app.flushSync(turnOn ? on : off)
-        frame(app)
-      })
+      const measured = sample(
+        app,
+        () => app.root.flushSync(turnOn ? on : off),
+        () => {
+          app.renderer.flush()
+          frame(app)
+        }
+      )
       expectBackground(control, index, turnOn ? ACTIVE_BACKGROUND : "rgb(59, 130, 246)", `${mode} ${name} ${turnOn ? "on" : "off"}`)
       if (i >= SETTLE) samples.push(measured)
     }
@@ -236,12 +256,12 @@ for (const mode of MODES) for (const count of COUNTS) runMode(mode, count)
 
 const M = (value: number) => (value / 1e6).toFixed(3)
 console.log(`items ${ITEM_WIDTH} x ${ROW_HEIGHT} in a ${WIDTH}-wide wrapping row, REPS ${REPS} after ${SETTLE} unmeasured (mount ${MOUNT_REPS} after 2), rusage read overhead ${readOverhead} instr`)
-console.log("mode\tphase\tN\tMinstr\tms\tmatched\tcascades")
+console.log("mode\tphase\tN\tbatch Minstr\tbatch ms\tend-to-end Minstr\tend-to-end ms\tmatched\tcascades")
 for (const mode of Object.keys(results)) {
   for (const count of Object.keys(results[mode]!)) {
     for (const phase of Object.keys(results[mode]![count]!)) {
       const p = results[mode]![count]![phase]!
-      console.log(`${mode}\t${phase}\t${count}\t${M(p.instructions)}\t${p.ms.toFixed(2)}\t${p.rematched}\t${p.cascades}`)
+      console.log(`${mode}\t${phase}\t${count}\t${M(p.batchInstructions)}\t${p.batchMs.toFixed(2)}\t${M(p.instructions)}\t${p.ms.toFixed(2)}\t${p.rematched}\t${p.cascades}`)
     }
   }
 }
