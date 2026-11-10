@@ -740,6 +740,11 @@ export declare class TestGpuixRenderer {
    */
   getRetainedElementCount(): number
   /**
+   * The attribute `name` the native tree holds for an element (see `RetainedTree::attribute`),
+   * or null. Reads the tree as it is: a mutation JS has queued and not flushed is not in it.
+   */
+  getAttribute(elementId: number, name: string): string | null
+  /**
    * What the element build has done since the last `resetBuildCounters`. A draw builds every
    * element, so divide by the frames drawn to get the per-frame figure.
    */

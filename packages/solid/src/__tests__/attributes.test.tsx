@@ -25,19 +25,20 @@ describe.skipIf(!hasNativeTestRenderer)("attributes on native in Solid", () => {
     const read = (name: string) => app.renderer.getAttribute(box.nativeId, name)
     expect([read("class"), read("data-x"), read("title")]).toEqual(["a b", "1", "t"])
 
-    setKlass("c")
-    setData(2)
-    setTitle(undefined)
-    app.renderer.flush()
+    app.flushSync(() => {
+      setKlass("c")
+      setData(2)
+      setTitle(undefined)
+    })
     expect([read("class"), read("data-x"), read("title")]).toEqual(["c", "2", null])
 
-    setData(true)
-    app.renderer.flush()
+    app.flushSync(() => setData(true))
     expect(read("data-x")).toBe("")
 
-    setData(false)
-    setKlass(undefined)
-    app.renderer.flush()
+    app.flushSync(() => {
+      setData(false)
+      setKlass(undefined)
+    })
     expect([read("class"), read("data-x")]).toEqual([null, null])
   })
 
