@@ -2032,7 +2032,8 @@ export interface EventPayload {
   /**
    * Milliseconds on the renderer's clock, the `timelineTime` of the
    * `AnimationPlaybackEvent`: the timeline time the event was made at. Populated for:
-   * webanimationfinish, webanimationcancel.
+   * webanimationfinish, webanimationcancel, and animationframe, where it is the clock the frame
+   * steps ran at: the timestamp `requestAnimationFrame` callbacks are given.
    */
   timelineTime?: number
   /**

@@ -25,10 +25,10 @@ function Page(props: { behavior?: "smooth"; onScroll?: (event: ScrollEvent) => v
   )
 }
 
-function setup(props: Parameters<typeof Page>[0] = {}) {
+function setup(props: Parameters<typeof Page>[0] = {}, clock: "paused" | "running" = "paused") {
   const root = createTestRoot()
   const renderer = root.renderer
-  renderer.clockPause()
+  if (clock === "paused") renderer.clockPause()
   renderer.setInlineDraws(false)
   root.render(<Page {...props} />)
   renderer.drawFrame()
@@ -95,6 +95,57 @@ describeNative("the frame steps of a scroll", () => {
       expect(seen.at(-1)).toBe(300)
     } finally {
       unmount()
+    }
+  })
+
+  it("run once per frame when a smooth scroll and a requestAnimationFrame loop share it", async () => {
+    const events: number[] = []
+    const { renderer, id, top, unmount } = setup(
+      { behavior: "smooth", onScroll: (event) => events.push(Math.round(event.scrollTop)) },
+      "running",
+    )
+    let ticks = 0
+    let handle = 0
+    const loop = () => {
+      ticks++
+      handle = requestAnimationFrame(loop)
+    }
+    try {
+      handle = requestAnimationFrame(loop)
+      renderer.scrollTo(id, 0, 300)
+      const perFrame: number[] = []
+      for (let frame = 0; frame < 200 && top() < 300; frame++) {
+        await new Promise((resolve) => setTimeout(resolve, 8))
+        const before = events.length
+        renderer.drawFrame()
+        perFrame.push(events.length - before)
+      }
+      expect(top()).toBe(300)
+      expect(Math.max(...perFrame), "scroll events in one frame").toBe(1)
+      expect(events.length, "a scroll event for each frame that moved the offset").toBeGreaterThan(1)
+      expect(ticks, "the loop ran in every frame").toBeGreaterThanOrEqual(perFrame.length)
+      expect(events.at(-1)).toBe(300)
+    } finally {
+      cancelAnimationFrame(handle)
+      unmount()
+    }
+  })
+
+  it("leave the draw of an update that is not a frame to the next frame", () => {
+    const events: number[] = []
+    const root = createTestRoot()
+    const renderer = root.renderer
+    try {
+      renderer.clockPause()
+      root.render(<Page onScroll={(event) => events.push(Math.round(event.scrollTop))} />)
+      renderer.flush()
+      const id = renderer.findByTestId("scroller")!.id
+      renderer.scrollTo(id, 0, 300)
+      expect(events, "the draw the write made inline is not a frame").toEqual([])
+      renderer.drawFrame()
+      expect(events).toEqual([300])
+    } finally {
+      root.unmount()
     }
   })
 
