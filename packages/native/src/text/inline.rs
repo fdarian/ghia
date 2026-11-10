@@ -44,11 +44,16 @@ pub fn is_blank(text: &str) -> bool {
     text.chars().all(is_collapsible_whitespace)
 }
 
+/// The element type of a string child. A `#text` node cannot hold children, a style, a listener or
+/// a prop, so every path that handles it as a host element reads it the way it reads an empty `div`
+/// with a string.
+pub const TEXT_NODE: &str = "#text";
+
 /// Whether `element_type` is built by `build_host_container`, the retained
 /// tree's own `div` rules. Paint dispatches on this and search collects by it, so
 /// the two cannot disagree about which elements lay out a paragraph.
 pub fn is_host_type(element_type: &str) -> bool {
-    matches!(element_type, "div" | "text" | "label" | "form" | "span" | "nativeview")
+    matches!(element_type, TEXT_NODE | "div" | "text" | "label" | "form" | "span" | "nativeview")
 }
 
 pub fn is_host_container(element: &RetainedElement) -> bool {
@@ -66,15 +71,9 @@ fn is_display_none(element: &RetainedElement) -> bool {
     crate::layout::box_generation::is_display_none(element)
 }
 
-/// What a React/Solid string child is: a `text` node with no box of its own.
-/// A `<text>` that carries a style, listener or prop is a host element even when
-/// it has no children yet.
+/// What a React/Solid string child is: a `#text` node, with no box of its own.
 pub fn is_raw_text(element: &RetainedElement) -> bool {
-    element.element_type == "text"
-        && element.children.is_empty()
-        && element.style.is_none()
-        && element.events().is_empty()
-        && element.custom_props().is_empty()
+    element.element_type == TEXT_NODE
 }
 
 /// Whether children of a container with this style are blockified into flex or
@@ -711,7 +710,7 @@ mod tests {
         }
 
         fn text(&mut self, parent: u64, id: u64, content: &str) -> &mut Self {
-            self.add(parent, id, "text");
+            self.add(parent, id, TEXT_NODE);
             self.tree.set_text(id, content.to_string());
             self
         }
@@ -1146,7 +1145,7 @@ mod tests {
 
     #[test]
     fn label_and_form_are_host_containers_and_never_inline_boxes() {
-        for kind in ["div", "text", "span", "label", "form"] {
+        for kind in ["div", "text", "#text", "span", "label", "form"] {
             assert!(is_host_type(kind), "{kind}");
         }
         for kind in ["img", "svg", "input", "virtual-list", "markdown"] {
@@ -1201,6 +1200,15 @@ mod tests {
         f.add(3, 4, "span").styled(4, serde_json::json!({"display": "contents"}));
         f.add(4, 5, "div");
         assert_eq!(f.plan(1)[1], Child::Block(3));
+    }
+
+    #[test]
+    fn a_text_node_is_told_by_its_type_and_a_text_element_is_a_box() {
+        let mut f = Fixture::new();
+        f.text(1, 2, "a");
+        f.add(1, 3, "text");
+        assert!(is_raw_text(&f.tree.elements[&2]));
+        assert!(!is_raw_text(&f.tree.elements[&3]));
     }
 
     #[test]

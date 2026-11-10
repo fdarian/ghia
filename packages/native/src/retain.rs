@@ -4348,6 +4348,8 @@ mod tests {
         El { id, parent, element_type: "div", style, text: None, props: Vec::new() }
     }
 
+    /// A styled `<text>` holding a string: a host element of its own, which the counts of built
+    /// elements below include (a `#text` node is not one).
     fn text(id: u64, parent: u64, content: &'static str) -> El {
         El { id, parent: Some(parent), element_type: "text", style: "{}", text: Some(content), props: Vec::new() }
     }

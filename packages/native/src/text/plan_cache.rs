@@ -109,7 +109,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "text".to_string());
         for (id, content) in [(2, "Hello "), (3, "world")] {
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "#text".to_string());
             tree.set_text(id, content.to_string());
             tree.append_child(1, id);
         }
@@ -145,7 +145,7 @@ mod tests {
             tree.create_element(id, "div".to_string());
         }
         tree.append_child(1, 2);
-        tree.create_element(3, "text".to_string());
+        tree.create_element(3, "#text".to_string());
         tree.set_text(3, "a   b".to_string());
         tree.append_child(2, 3);
         assert_eq!(text(&planned(&tree, &tree.elements[&2])), "a b");
@@ -161,7 +161,7 @@ mod tests {
         }
         tree.set_style(4, Arc::new(serde_json::from_value(serde_json::json!({ "whiteSpace": "pre" })).unwrap()));
         tree.create_element(2, "div".to_string());
-        tree.create_element(3, "text".to_string());
+        tree.create_element(3, "#text".to_string());
         tree.set_text(3, "a   b".to_string());
         tree.append_child(2, 3);
         tree.append_child(1, 2);
@@ -176,7 +176,7 @@ mod tests {
     #[test]
     fn a_display_a_container_block_gave_is_in_the_key() {
         let mut tree = RetainedTree::new();
-        for (id, kind) in [(1, "div"), (2, "text"), (3, "div"), (4, "text")] {
+        for (id, kind) in [(1, "div"), (2, "#text"), (3, "div"), (4, "#text")] {
             tree.create_element(id, kind.to_string());
         }
         tree.set_text(2, "a".to_string());

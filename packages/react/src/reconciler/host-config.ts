@@ -384,7 +384,7 @@ function materialize(node: HostNode): HostNodeState {
     syncEventListeners(state.container, node)
     syncCustomProps(renderer, node.id, node.type, node.props)
   } else {
-    renderer.createElement(node.id, "text")
+    renderer.createElement(node.id, "#text")
     renderer.setText(node.id, node.text)
   }
   state.mounted = true

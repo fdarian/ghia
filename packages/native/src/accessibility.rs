@@ -123,10 +123,8 @@ where
 pub(crate) fn default_role(element: &crate::retained_tree::RetainedElement) -> Option<Role> {
     match element.element_type.as_str() {
         "form" => Some(Role::Form),
-        // A text instance (`createTextInstance`) is also type `text` and holds `content`; the
-        // host `<text>` is the one that is read. The text instances stay out of the tree so
-        // that VoiceOver does not hear the same string twice.
-        "text" if element.content.is_none() => Some(Role::Label),
+        // A text instance (`#text`) has no role, so that VoiceOver does not hear the same string twice.
+        "text" => Some(Role::Label),
         "label" => Some(Role::Label),
         "img" => Some(Role::Image),
         "input" | "textarea" => {
@@ -144,10 +142,9 @@ pub(crate) fn default_role(element: &crate::retained_tree::RetainedElement) -> O
     }
 }
 
-/// A `<text>` that holds children and no string of its own: what it reads out is the text of the
-/// paragraphs of those children.
+/// A `<text>`: what it reads out is the text of the paragraphs of its children.
 pub(crate) fn is_text_host(element: &crate::retained_tree::RetainedElement) -> bool {
-    element.element_type == "text" && element.content.is_none()
+    element.element_type == "text"
 }
 
 /// The text a host `<text>` reads out: `text`, the text of the paragraphs of its children

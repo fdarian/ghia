@@ -242,7 +242,7 @@ fn compute(tree: &RetainedTree) -> A11yLinks {
         let Some(element) = first_with_id(tree, id) else {
             continue;
         };
-        let is_text_host = element.element_type == "text" && element.content.is_none();
+        let is_text_host = element.element_type == "text";
         if !has_role(element) && !is_text_host && element.element_type != "label" {
             links
                 .referenced_text
@@ -418,14 +418,14 @@ mod tests {
     #[test]
     fn referenced_role_less_elements_are_listed_with_their_text() {
         let tree = tree_with(
-            r#"[["createElement",1,"div"],["setRoot",1],
+            r##"[["createElement",1,"div"],["setRoot",1],
                 ["createElement",2,"input"],["appendChild",1,2],
                 ["setCustomProp",2,"aria-describedby","hint other"],
                 ["createElement",3,"div"],["appendChild",1,3],["setCustomProp",3,"id","hint"],
-                ["createElement",4,"text"],["appendChild",3,4],["setText",4,"Be brief"],
+                ["createElement",4,"#text"],["appendChild",3,4],["setText",4,"Be brief"],
                 ["createElement",5,"div"],["appendChild",1,5],["setCustomProp",5,"id","other"],
                 ["setCustomProp",5,"role","note"],
-                ["createElement",6,"div"],["appendChild",1,6],["setCustomProp",6,"id","unused"]]"#,
+                ["createElement",6,"div"],["appendChild",1,6],["setCustomProp",6,"id","unused"]]"##,
         );
         let links = links_of(&tree);
         assert_eq!(links.referenced_text(3), Some("Be brief"));
@@ -436,9 +436,9 @@ mod tests {
     #[test]
     fn label_text_skips_nested_controls() {
         let tree = tree_with(
-            r#"[["createElement",1,"label"],["setRoot",1],
-                ["createElement",2,"text"],["appendChild",1,2],["setText",2,"Full name "],
-                ["createElement",3,"input"],["appendChild",1,3],["setText",3,"typed"]]"#,
+            r##"[["createElement",1,"label"],["setRoot",1],
+                ["createElement",2,"#text"],["appendChild",1,2],["setText",2,"Full name "],
+                ["createElement",3,"input"],["appendChild",1,3],["setText",3,"typed"]]"##,
         );
         assert_eq!(links_of(&tree).label_text(1), Some("Full name"));
     }
@@ -450,9 +450,9 @@ mod tests {
     #[test]
     fn a_tree_without_labels_or_references_reads_nothing() {
         let mut tree = tree_with(
-            r#"[["createElement",1,"div"],["setRoot",1],
+            r##"[["createElement",1,"div"],["setRoot",1],
                 ["createElement",2,"div"],["appendChild",1,2],["setCustomProp",2,"id","a"],
-                ["createElement",3,"text"],["appendChild",2,3],["setText",3,"hello"]]"#,
+                ["createElement",3,"#text"],["appendChild",2,3],["setText",3,"hello"]]"##,
         );
         sync(&tree);
         apply(&mut tree, r#"[["setText",3,"bye"],["setStyle",2,{"width":10}],["destroyElement",3]]"#);
@@ -463,11 +463,11 @@ mod tests {
     #[test]
     fn a_change_that_no_link_reads_computes_nothing_again() {
         let mut tree = tree_with(
-            r#"[["createElement",1,"div"],["setRoot",1],
+            r##"[["createElement",1,"div"],["setRoot",1],
                 ["createElement",2,"label"],["appendChild",1,2],
                 ["createElement",3,"input"],["appendChild",2,3],
                 ["createElement",4,"div"],["appendChild",1,4],
-                ["createElement",5,"text"],["appendChild",4,5],["setText",5,"elsewhere"]]"#,
+                ["createElement",5,"#text"],["appendChild",4,5],["setText",5,"elsewhere"]]"##,
         );
         sync(&tree);
         let visits = tree.relations().visits();
@@ -480,13 +480,13 @@ mod tests {
     #[test]
     fn the_text_of_a_label_and_of_a_referenced_element_follow_their_text() {
         let mut tree = tree_with(
-            r#"[["createElement",1,"div"],["setRoot",1],
+            r##"[["createElement",1,"div"],["setRoot",1],
                 ["createElement",2,"label"],["appendChild",1,2],
-                ["createElement",3,"text"],["appendChild",2,3],["setText",3,"Name"],
+                ["createElement",3,"#text"],["appendChild",2,3],["setText",3,"Name"],
                 ["createElement",4,"input"],["appendChild",2,4],["setCustomProp",4,"aria-describedby","hint"],
                 ["createElement",5,"div"],["appendChild",1,5],["setCustomProp",5,"id","hint"],
                 ["createElement",6,"div"],["appendChild",5,6],
-                ["createElement",7,"text"],["appendChild",6,7],["setText",7,"Short"]]"#,
+                ["createElement",7,"#text"],["appendChild",6,7],["setText",7,"Short"]]"##,
         );
         assert_eq!(links_of(&tree).label_text(2), Some("Name"));
         assert_eq!(links_of(&tree).referenced_text(5), Some("Short"));

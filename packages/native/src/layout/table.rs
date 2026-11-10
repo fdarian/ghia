@@ -564,10 +564,10 @@ mod tests {
             tree.append_child(1, id);
         }
         assert!(is_empty(&tree, &tree.elements[&1]));
-        add(&mut tree, 2, "text", Some(" \n "), None);
+        add(&mut tree, 2, "#text", Some(" \n "), None);
         add(&mut tree, 3, "div", None, Some(serde_json::json!({"display": "none"})));
         assert!(is_empty(&tree, &tree.elements[&1]));
-        add(&mut tree, 4, "text", Some("\u{a0}"), None);
+        add(&mut tree, 4, "#text", Some("\u{a0}"), None);
         assert!(!is_empty(&tree, &tree.elements[&1]), "a no-break space is content");
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
@@ -596,7 +596,7 @@ mod tests {
         }
 
         fn text(&mut self, parent: u64, id: u64, content: &str) -> &mut Self {
-            self.add(parent, id, "text");
+            self.add(parent, id, "#text");
             self.tree.set_text(id, content.to_string());
             self
         }
