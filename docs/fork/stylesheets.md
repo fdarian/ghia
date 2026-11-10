@@ -49,7 +49,7 @@ No sheet at all is a branch: every hook of the tree returns at `StyleSheets::ena
 
 `RuleIndex::matching(element)` visits the buckets of the element's id, its classes, every attribute name some selector reads (and the element has), its tag, and the universal list, runs the full right-to-left match (`matching.rs`, over the `ElementView` trait; `view.rs` is the retained tree's implementation) on each candidate, and sorts the matches by (layer rank, specificity, source number). A rule counts once, at the specificity of the most specific of its selectors that matched.
 
-`TreeView::attr` reads an attribute from the element's attribute store (`attributes.rs`, set by wire op 13) and, failing that, from the prop of the same name (`id`, `role`, `aria-*` arrive as props). `style` is special: the text is synthesized from the element's own style declarations (`kebab-key: value;`, cached per own-style `Arc`, `StyleSheets::style_text`, and handed to the matcher as a shared `AttrValue`), so `[style*="--dnd-scale"]` works. The attribute operators compare in place (ASCII case-insensitively for the `i` flag), so a check allocates nothing. The cached texts are released at the end of every flush for own styles no element holds, and cleared at wind-down. A text node (a `text` element holding a string) is not matchable.
+`TreeView::attr` reads an attribute from the element's attribute store (`attributes.rs`, set by wire op 13) and, failing that, from the prop of the same name (`id`, `role`, `aria-*` arrive as props; a boolean `data-*`/`aria-*` is `"true"`/`"false"`), where `attributes.rs` keeps one table of the props whose DOM attribute is named otherwise (`tabIndex` is `tabindex`, `htmlFor` is `for`, `colSpan`, `rowSpan`, `autoFocus`) that the lookup and `sheets_prop_changed` both use. `style` is special: the text is synthesized from the element's own style declarations (`kebab-key: value;`, cached per own-style `Arc`, `StyleSheets::style_text`, and handed to the matcher as a shared `AttrValue`), so `[style*="--dnd-scale"]` works. The attribute operators compare in place (ASCII case-insensitively for the `i` flag), so a check allocates nothing. The cached texts are released at the end of every flush for own styles no element holds, and cleared at wind-down. A text node (a `text` element holding a string) is not matchable.
 
 ### Matched sets are interned
 
@@ -79,7 +79,7 @@ The tree's hooks (`tree.rs`) collect `(element, Reach)` marks:
 
 | Change | Mark |
 |---|---|
-| class attribute (symmetric difference of the atom sets, plus the reach of `[class]`), `id`, any other attribute, `id`/`role`/`aria-*` prop | the reach of what changed |
+| class attribute (symmetric difference of the atom sets, plus the reach of `[class]`), `id`, any other attribute, `id`/`role`/`aria-*`/`tabIndex`... prop (under its attribute name) | the reach of what changed |
 | own style change | the reach of `[style]`, which is empty unless a selector reads it |
 | element inserted or moved | the element and its subtree, plus `structure` |
 | element about to be removed | the next matchable sibling, with `structure`, since what follows matches without it |
