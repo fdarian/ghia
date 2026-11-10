@@ -53,17 +53,17 @@ pub(crate) struct InlineStyles {
     /// they declare with the states folded in and the `var()` substituted, which `build_element`
     /// does for an element and no build does for a box.
     substituted: HashMap<u64, StyleDesc>,
+    /// Whether a box of `sampled` shows something other than what it declares at rest, or declares
+    /// an animation, so the paragraph paints differently from one frame to the next without the
+    /// tree changing. What it declares at rest has its `var()` substituted, as `sampled` has.
+    moving: bool,
 }
 
 impl InlineStyles {
     /// Whether a box shows something other than what it declares, or declares an animation: the
     /// paragraph paints differently from one frame to the next without the tree changing.
-    pub(crate) fn is_active(&self, tree: &RetainedTree, states: &dyn Fn(u64, &StyleDesc) -> PointerStates) -> bool {
-        self.sampled.iter().any(|(id, sampled)| {
-            tree.elements.get(id).and_then(|element| element.style.as_deref()).is_none_or(|style| {
-                *sampled != *folded(style, states(*id, style)) || super::css_animation::declares_animation(style)
-            })
-        })
+    pub(crate) fn is_active(&self) -> bool {
+        self.moving
     }
 
     /// The style the box `id` declares. A box that declares none and has `motion`
@@ -104,6 +104,7 @@ impl InlineStyles {
     ) -> Self {
         let mut sampled = HashMap::new();
         let mut substituted = HashMap::new();
+        let mut moving = false;
         // A box is declared the same way around every piece of text it holds, so
         // the first piece that holds it steps it.
         let mut stepped = HashSet::new();
@@ -135,6 +136,7 @@ impl InlineStyles {
                             timeline.keyframes,
                             timeline.now,
                         );
+                        moving |= is_moving(element.style.as_deref(), &resolved, *id, &font, states);
                         sampled.insert(*id, resolved);
                     }
                 }
@@ -153,8 +155,29 @@ impl InlineStyles {
                 font = font.descend(Some(&declared));
             }
         }
-        Self { sampled, substituted }
+        Self { sampled, substituted, moving }
     }
+}
+
+/// Whether `shown`, the style a box with a transition, an animation or `motion` has in this frame,
+/// is other than what it declares at rest (`style` with the states folded in and the `var()`
+/// substituted from the custom properties around it), or it declares an animation.
+fn is_moving(
+    style: Option<&StyleDesc>,
+    shown: &StyleDesc,
+    id: u64,
+    font: &ParentValues,
+    states: &dyn Fn(u64, &StyleDesc) -> PointerStates,
+) -> bool {
+    let Some(style) = style else {
+        return true;
+    };
+    let at_rest = folded(style, states(id, style));
+    let at_rest = match super::resolve_vars(&at_rest, id, font, None) {
+        Some(substituted) => Cow::Owned(substituted),
+        None => at_rest,
+    };
+    *shown != *at_rest || super::css_animation::declares_animation(&at_rest)
 }
 
 /// One box's style after its transitions, then `motion`, then its animations,

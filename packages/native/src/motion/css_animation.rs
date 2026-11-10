@@ -1852,13 +1852,19 @@ impl CssAnimations {
     /// Whether `id` takes part in animations: it declares one, in its own style
     /// or a state style, or already has animation state to keep.
     pub(crate) fn wants(&self, id: u64, style: Option<&StyleDesc>) -> bool {
-        self.states.contains_key(&id)
-            || style.is_some_and(|style| {
-                declares_animation(style)
-                    || super::state_styles(style)
-                        .into_iter()
-                        .any(|(_, state)| state.is_some_and(declares_animation))
-            })
+        self.states.contains_key(&id) || Self::declares(style)
+    }
+
+    /// Whether `style`, or a state style in it, declares an animation. For a style whose `var()`
+    /// are substituted, this says whether the held `animation*` declarations came to one: `wants`
+    /// is true for the declarations alone.
+    pub(crate) fn declares(style: Option<&StyleDesc>) -> bool {
+        style.is_some_and(|style| {
+            declares_animation(style)
+                || super::state_styles(style)
+                    .into_iter()
+                    .any(|(_, state)| state.is_some_and(declares_animation))
+        })
     }
 
     /// The first half of a frame: brings the animations of `declared` (the

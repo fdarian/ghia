@@ -10948,9 +10948,6 @@ fn animate_style_at(
     if motion_binding.is_some() {
         dynamic |= Dynamic::MotionValues as u8;
     }
-    if animations_wanted {
-        dynamic |= Dynamic::Animation as u8;
-    }
     let transitioned = (transitions_wanted || animations_wanted).then(|| {
         let focus_visible = crate::motion::FocusVisible {
             own: ctx.focus_handles.contains_key(&id) && ctx.focus_styles.is_focus_visible(id),
@@ -10994,7 +10991,14 @@ fn animate_style_at(
             svg_css: Vec::new(),
             measured,
             measurement,
-            dynamic,
+            dynamic: dynamic
+                | if animations_wanted
+                    && crate::motion::CssAnimations::declares(transitioned.as_ref().map(|declared| &*declared.style))
+                {
+                    Dynamic::Animation as u8
+                } else {
+                    0
+                },
         };
     }
     if transitioned.as_ref().is_some_and(|declared| declared.transitions.is_some()) {
@@ -11044,6 +11048,11 @@ fn animate_style_at(
             )
         })
         .flatten();
+    // Decided from the style as resolved and the state the update kept: a held `animation*` that
+    // came to no animation (`animation: var(--a)` with `--a: none`) has nothing to run.
+    if animations_wanted && ctx.css_animations.wants(id, declared_style) {
+        dynamic |= Dynamic::Animation as u8;
+    }
     // What the transitions and animations of an `<svg>` write on its root, for its shapes to inherit.
     let running = transitioned.as_ref().and_then(|declared| declared.transitions.as_ref());
     let mut svg_css = css_values.as_ref().map(|values| values.svg_attributes_beneath(running)).unwrap_or_default();
@@ -12898,7 +12907,7 @@ fn paragraph_content(
             mixed
         };
         ctx.retain.inline_pointer(inline_pointer);
-        if motion.is_active(ctx.tree, &ctx.inline_states()) {
+        if motion.is_active() {
             ctx.retain.dynamic(crate::retain::Dynamic::InlineMotion);
         }
     }

@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import { verifying } from "./retained-harness.js"
 import { readLogicalPixels, SHOTS_DIR } from "./test-utils.js"
-import { motion } from "../index"
+import { defineKeyframes, motion } from "../index"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -739,3 +739,81 @@ describeNative("a var() declaration against the plain ones written around it", (
     expect(measure({ borderWidth: "var(--w)", borderStyle: "solid", borderTop: "1px solid" }, false).slice(2, 4)).toEqual([5 + 8, 5 + 1 + 4])
   }, SLOW)
 })
+
+describeNative("a var() that resolves to no motion", () => {
+  /// How many elements 5 updates of an unrelated box build, with 20 cells that hold `cell` around it.
+  const builtOver = (cell: Record<string, unknown>, span?: Record<string, unknown>) => {
+    const root = createTestRoot({ width: 800, height: 600 })
+    const renderer = root.renderer
+    try {
+      const tree = (n: number) => (
+        <div style={{ position: "absolute", left: 0, top: 0, width: 600, "--a": "none", "--d": "200ms", "--t": "none", "--c": "#ff0000" }}>
+          {Array.from({ length: 20 }, (_, i) => (
+            <div key={i} style={{ padding: 2 }}>
+              {span ? (
+                <text>
+                  row <span style={span}>span</span> tail
+                </text>
+              ) : (
+                <div style={{ padding: 1 }}>
+                  <div style={{ height: 5, width: 10, ...cell }} />
+                </div>
+              )}
+            </div>
+          ))}
+          <div testId="other" style={{ width: n, height: 10, backgroundColor: "blue" }} />
+        </div>
+      )
+      root.render(tree(10))
+      renderer.flush()
+      renderer.drawFrame()
+      renderer.drawFrame()
+      const before = renderer.getBuildCounters().elementsBuilt
+      for (let i = 0; i < 5; i++) {
+        root.render(tree(11 + i))
+        renderer.flush()
+        renderer.drawFrame()
+      }
+      return renderer.getBuildCounters().elementsBuilt - before
+    } finally {
+      root.unmount()
+    }
+  }
+
+  it.each([
+    ["animation", { animation: "var(--a)" }, { animation: "none" }],
+    ["animationDuration", { animationDuration: "var(--d)" }, { animationDuration: "200ms" }],
+    ["transition", { transition: "var(--t)" }, { transition: "none" }],
+  ])("builds no more for a held %s than for the literal", (_, held, literal) => {
+    const baseline = builtOver(literal)
+    expect(baseline).toBe(builtOver({}))
+    expect(builtOver(held)).toBe(baseline)
+  }, SLOW)
+
+  it.each([
+    ["a transition", { color: "var(--c)", transition: "color 1s" }, { color: "#ff0000", transition: "color 1s" }],
+    ["an animation", { color: "var(--c)", animation: "var(--a)" }, { color: "#ff0000", animation: "none" }],
+  ])("builds no more for a span with %s and a var() than for the literal", (_, held, literal) => {
+    const baseline = builtOver({}, literal)
+    expect(builtOver({}, held)).toBe(baseline)
+  }, SLOW)
+
+  it("still runs an animation that a var() names", () => {
+    defineKeyframes("var-grow", { from: { width: 100 }, to: { width: 200 } })
+    mounted(
+      <div style={{ position: "absolute", left: 0, top: 0, width: 600, "--a": "var-grow 1s linear infinite" }}>
+        <div testId="slider" style={{ height: 10, width: 50, animation: "var(--a)" }} />
+      </div>,
+      (renderer) => {
+        renderer.clockPause()
+        renderer.drawFrame()
+        renderer.clockFastForward(500)
+        renderer.dispatchNativeEvents()
+        renderer.flush()
+        renderer.drawFrame()
+        expect(box(renderer, "slider")[2]).toBeCloseTo(150, 0)
+      },
+    )
+  }, SLOW)
+})
+
