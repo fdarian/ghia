@@ -1444,9 +1444,13 @@ pub(crate) struct DeclaredStyle {
     pub(crate) transitions: Option<TransitionStyle>,
 }
 
-/// `style` with its `var()` substituted from the custom properties the element computes to. Transitions and animations compare and blend computed values, so they are
-/// given the style after this: a `--p` that changes is a change of the property, from the value
-/// the last style computed to the one this does.
+/// `style` with its `var()` substituted from the custom properties the element computes to. The
+/// style a transition or an animation compares and blends is the one folded here from the style
+/// table's, which no build has substituted (the build resolves the style with only the pointer
+/// states folded in); a style this runs for that no build resolves first (a text span, an
+/// `<svg>`) needs it too. Transitions and animations compare computed values, so a `--p` that
+/// changes is a change of the property, from the value the last style computed to the one this
+/// does.
 fn with_vars(style: Arc<StyleDesc>, parent_font: &ParentValues) -> Arc<StyleDesc> {
     if !crate::css::var_substitution::reads_vars(&style) {
         return style;

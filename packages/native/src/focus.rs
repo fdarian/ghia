@@ -48,6 +48,16 @@ pub(crate) fn gpui_tab_stop(dom_tab_index: isize) -> (isize, bool) {
     }
 }
 
+/// Calls `$each!` with the field of each focus variant of a style: the ones
+/// `FocusStyles::applying` lays over an element. Whatever has to reach all of them (the
+/// substitution of a `var()` in `css::var_substitution`) is written over this list.
+macro_rules! focus_variant_fields {
+    ($each:ident) => {
+        $each!(focus_within, has_focus_visible, focus_visible)
+    };
+}
+pub(crate) use focus_variant_fields;
+
 /// A style with the focus variants laid over it, or the style itself when none applies. Not a
 /// `Cow<StyleDesc>`: that is a `StyleDesc` wide (~13 KB) even when borrowed, and moves as one.
 pub(crate) enum FocusFolded<'a> {
@@ -766,6 +776,23 @@ impl GpuixView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_focus_variant_list_is_the_one_a_focused_element_lays_over_it() {
+        // Element 1 is focus-visible and element 2 has it as a descendant.
+        let focus = FocusStyles { visible: Some(1), within: Arc::from([1_u64, 2]), ..Default::default() };
+        let mut listed = 0;
+        macro_rules! each_alone {
+            ($($field:ident),+) => {$({
+                let style = StyleDesc { $field: Some(Box::new(StyleDesc::default())), ..Default::default() };
+                let applied = [1_u64, 2].into_iter().map(|id| focus.applying(id, &style, true).count()).sum::<usize>();
+                assert!(applied > 0, "{} is laid over an element", stringify!($field));
+                listed += 1;
+            })+};
+        }
+        focus_variant_fields!(each_alone);
+        assert_eq!(listed, 3);
+    }
 
     fn tree_with(elements: &[(u64, &str)]) -> RetainedTree {
         let mut tree = RetainedTree::new();

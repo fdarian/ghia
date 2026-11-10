@@ -15,10 +15,15 @@
 //! Written order decides between a held declaration and the others, as it does in CSS
 //! (`css::covers`): one laid over the style covers what it covers, except what was written after
 //! it ([`VarDeclaration::kept`]), and one that a later shorthand covers is dropped when it is held.
+//! The same holds between layers (a state style, an `@container` block, the universal style over
+//! or under an element's own): [`merge`] adds what the layer above sets to what a held declaration
+//! of the layer below keeps.
 //!
-//! What is not done: a held declaration is not a value a transition or an animation can start from,
-//! and what the engine reads of the declared style before the build (see `docs/fork/deviations.md`)
-//! does not see it.
+//! The renderer resolves a style right after the pointer states are folded into it and before
+//! anything reads it (`renderer::build_element`): inheritance, transitions, animations and motion
+//! all see the values. What the engine reads of the declared style before that (the retained tree,
+//! the parents' pass over their children) does not see a held declaration, see
+//! `docs/fork/deviations.md`.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -29,7 +34,7 @@ use crate::css::covers::{self, KeyId};
 use crate::css::custom_properties::{self, CustomProperties};
 use crate::css::lenient::{json_string, object_text, recover, Declaration, Declarations};
 use crate::css::transform::{DEFAULT_ORIGIN_TEXT, DEFAULT_PERSPECTIVE_ORIGIN_TEXT};
-use crate::events::state_styles::laid_over;
+use crate::events::state_styles::{is_no_layer, laid_over, sets_property};
 use crate::retained_tree::parse_style;
 use crate::style::StyleDesc;
 
@@ -46,7 +51,8 @@ pub(crate) struct VarDeclaration {
     /// The property, as written in a style object (camel case).
     key: String,
     text: String,
-    /// What this declaration covers that was written after it, as plain declarations: they win.
+    /// What laying this declaration would overwrite (`covers::clobbered_by`) that is set by a plain
+    /// declaration written after it, in its own object or in a layer above: those win.
     kept: Box<[KeyId]>,
 }
 
@@ -97,7 +103,7 @@ fn parse_object(text: &str) -> Result<StyleDesc, String> {
                 continue;
             }
             if declaration.key == "@container" {
-                blocks = Some(parse_blocks(&declaration.value)?);
+                blocks = Some(parse_blocks(&declaration.value));
                 continue;
             }
         }
@@ -128,7 +134,7 @@ fn parse_object(text: &str) -> Result<StyleDesc, String> {
                     .iter()
                     .filter(|other| !other.held)
                     .filter_map(|other| other.key_id)
-                    .filter(|other| covers::covered_by(id).contains(other))
+                    .filter(|other| covers::clobbered_by(id).contains(other))
                     .collect()
             });
             Some(VarDeclaration { key, text, kept: kept.into() })
@@ -151,14 +157,19 @@ fn held_text(declaration: &Declaration) -> Option<String> {
     custom_properties::has_var(&text).then_some(text)
 }
 
-fn parse_blocks(text: &str) -> Result<crate::layout::container::ContainerRules, String> {
-    let declarations = serde_json::from_str::<Declarations>(text).map_err(|error| error.to_string())?;
-    let blocks = declarations
-        .0
-        .into_iter()
-        .map(|block| Ok((block.key, parse_object(&block.value)?)))
-        .collect::<Result<Vec<_>, String>>()?;
-    crate::layout::container::ContainerRules::from_blocks(blocks)
+/// The `@container` blocks of `text`. A block whose query or style does not parse is dropped, and
+/// the rest stay, as the lenient parse of a style without a `var()` does.
+fn parse_blocks(text: &str) -> crate::layout::container::ContainerRules {
+    let blocks = serde_json::from_str::<Declarations>(text).map(|declarations| declarations.0).unwrap_or_default();
+    crate::layout::container::ContainerRules::from_blocks(blocks.into_iter().filter_map(|block| {
+        match parse_object(&block.value) {
+            Ok(style) => Some((block.key, style)),
+            Err(error) => {
+                log::warn!("Dropped style declaration @container.{}: {error}", block.key);
+                None
+            }
+        }
+    }))
 }
 
 fn state_slot<'a>(style: &'a mut StyleDesc, key: &str) -> Option<&'a mut Option<Box<StyleDesc>>> {
@@ -184,36 +195,67 @@ fn state_slot<'a>(style: &'a mut StyleDesc, key: &str) -> Option<&'a mut Option<
 
 /// The held declarations of `base` that survive `over` laid on it, then those of `over`. A plain
 /// declaration of `over` for a property wins over a held one of `base`, as does a shorthand of
-/// `over` that covers it; a held declaration of `over` is read after, so it wins by its place.
+/// `over` that covers it; a held declaration of `over` is read after, so it wins by its place. What
+/// `over` sets that a surviving declaration of `base` would overwrite is kept from it.
 pub(crate) fn merge(base: &StyleDesc, over: &StyleDesc) -> Option<Arc<[VarDeclaration]>> {
     let Some(held) = &base.var_declarations else {
         return over.var_declarations.clone();
     };
-    let mut written = None;
-    let survivors: Vec<&VarDeclaration> =
-        held.iter().filter(|declaration| !is_overridden(declaration, over, &mut written)).collect();
-    let after = over.var_declarations.as_deref().unwrap_or_default();
-    if survivors.len() == held.len() && after.is_empty() {
+    if is_no_layer(over) {
         return base.var_declarations.clone();
     }
-    let merged: Vec<VarDeclaration> = survivors.into_iter().chain(after).cloned().collect();
-    (!merged.is_empty()).then(|| merged.into())
-}
-
-fn is_overridden(declaration: &VarDeclaration, over: &StyleDesc, written: &mut Option<serde_json::Value>) -> bool {
-    if let Some(id) = covers::key_id(&declaration.key) {
-        return covers::is_set(over, id) || covers::is_covered_in(over, id);
+    let after = over.var_declarations.as_deref().unwrap_or_default();
+    let mut changed = !after.is_empty();
+    let mut merged: Vec<VarDeclaration> = Vec::with_capacity(held.len() + after.len());
+    for declaration in held.iter() {
+        let Some(id) = covers::key_id(&declaration.key) else {
+            if sets_property(over, &declaration.key) {
+                changed = true;
+            } else {
+                merged.push(declaration.clone());
+            }
+            continue;
+        };
+        if covers::is_set(over, id) || covers::is_covered_in(over, id) {
+            changed = true;
+            continue;
+        }
+        let newly_kept: Vec<KeyId> = covers::clobbered_by(id)
+            .iter()
+            .copied()
+            .filter(|other| covers::is_set(over, *other) && !declaration.kept.contains(other))
+            .collect();
+        if newly_kept.is_empty() {
+            merged.push(declaration.clone());
+        } else {
+            changed = true;
+            let kept = declaration.kept.iter().copied().chain(newly_kept).collect();
+            merged.push(VarDeclaration { kept, ..declaration.clone() });
+        }
     }
-    let written = written.get_or_insert_with(|| serde_json::to_value(over).expect("a style serializes"));
-    written.get(&declaration.key).is_some_and(|value| !value.is_null())
+    if !changed {
+        return base.var_declarations.clone();
+    }
+    merged.extend(after.iter().cloned());
+    (!merged.is_empty()).then(|| merged.into())
 }
 
 /// Whether `style` has a `var()` that the custom properties of its element substitute, in a
 /// transform text or a held declaration, or in a focus style, which is laid over it when it is built.
 pub(crate) fn reads_vars(style: &StyleDesc) -> bool {
+    macro_rules! any_variant {
+        ($($field:ident),+) => { false $(|| style.$field.as_deref().is_some_and(reads_vars))+ };
+    }
     style.var_declarations.is_some()
         || crate::css::transform::reads_vars(style)
-        || [&style.focus_visible, &style.focus_within].into_iter().flatten().any(|state| reads_vars(state))
+        || crate::focus::focus_variant_fields!(any_variant)
+}
+
+/// Whether `style` holds a declaration of a property whose name starts with `family` (`transition`,
+/// `animation`), which is not a field of it until it is resolved: the style may still declare what
+/// that family does.
+pub(crate) fn holds_family(style: &StyleDesc, family: &str) -> bool {
+    style.var_declarations.as_deref().is_some_and(|held| held.iter().any(|declaration| declaration.key.starts_with(family)))
 }
 
 /// `style` with every `var()` in it substituted by what `custom`, the custom properties its element
@@ -258,14 +300,19 @@ fn resolve_in(style: &mut StyleDesc, custom: &CustomProperties) {
     if let Some(held) = style.var_declarations.take() {
         lay_declarations(style, &held, custom);
     }
-    for state in [&mut style.focus_visible, &mut style.focus_within].into_iter().flatten() {
-        resolve_in(state, custom);
+    macro_rules! resolve_variants {
+        ($($field:ident),+) => {$(
+            if let Some(variant) = style.$field.as_mut() {
+                resolve_in(variant, custom);
+            }
+        )+};
     }
+    crate::focus::focus_variant_fields!(resolve_variants);
 }
 
 /// The held declarations laid over `style`, one after the other.
 fn lay_declarations(style: &mut StyleDesc, held: &[VarDeclaration], custom: &CustomProperties) {
-    // What a shorthand covers but was written before the plain declarations after it.
+    // What a declaration clobbers but a plain declaration written after it keeps.
     let plain = held.iter().any(|declaration| !declaration.kept.is_empty()).then(|| style.clone());
     for declaration in held {
         let key_id = covers::key_id(&declaration.key);
@@ -273,11 +320,19 @@ fn lay_declarations(style: &mut StyleDesc, held: &[VarDeclaration], custom: &Cus
             .and_then(|text| parse_declaration(&declaration.key, text.trim()));
         match parsed {
             Some(parsed) => {
-                let mut laid = laid_over(style, &parsed);
-                if let Some(plain) = &plain {
-                    covers::restore(&mut laid, plain, &declaration.kept);
-                }
-                *style = laid;
+                *style = match &plain {
+                    Some(plain) if !declaration.kept.is_empty() => {
+                        // Laid on a style without them, so that nothing that is done for what
+                        // came before (the all-sides border values pushed down to the sides a side
+                        // shorthand leaves, the longhands it covers cleared) touches them.
+                        let mut beneath = style.clone();
+                        covers::clear(&mut beneath, &declaration.kept);
+                        let mut laid = laid_over(&beneath, &parsed);
+                        covers::restore(&mut laid, plain, &declaration.kept);
+                        laid
+                    }
+                    _ => laid_over(style, &parsed),
+                };
             }
             None => {
                 if let Some(id) = key_id {
@@ -299,8 +354,15 @@ fn parse_declaration(key: &str, text: &str) -> Option<Arc<StyleDesc>> {
     if let Some(known) = PARSED.with_borrow(|parsed| parsed.get(&memo_key).cloned()) {
         return known;
     }
-    let alone = format!("{{{}:{}}}", json_string(key), json_string(text));
-    let parsed = parse_style(alone.as_bytes()).ok().map(Arc::new);
+    let alone = |value: &str| format!("{{{}:{}}}", json_string(key), value);
+    let parsed = parse_style(alone(&json_string(text)).as_bytes())
+        .ok()
+        // The property wants a number (`opacity`, `zIndex`, ...): the text is its text.
+        .or_else(|| {
+            let number = text.parse::<f64>().ok().filter(|number| number.is_finite())?;
+            parse_style(alone(&number.to_string()).as_bytes()).ok()
+        })
+        .map(Arc::new);
     PARSED.with_borrow_mut(|memory| {
         if memory.len() >= PARSED_LIMIT {
             memory.clear();
@@ -529,5 +591,149 @@ mod tests {
     fn a_length_is_what_the_property_reads() {
         let sized = resolved(r#"{"width":"var(--w)"}"#, &[("--w", "120px")]);
         assert_eq!(sized.width, Some(crate::style::DimensionValue::Pixels(120.0)));
+    }
+
+    fn hovered(json: &str, entries: &[(&str, &str)]) -> StyleDesc {
+        let folded = crate::events::state_styles::resolve_state_styles(&style(json), true, false);
+        resolve(&folded, &custom(entries)).unwrap_or(folded)
+    }
+
+    #[test]
+    fn a_longhand_of_a_state_style_beats_a_held_shorthand_it_covers() {
+        let bordered = hovered(
+            r#"{"border":"1px solid var(--line)","hover":{"borderColor":"red"}}"#,
+            &[("--line", "blue")],
+        );
+        assert!(bordered.border.as_deref().is_some_and(|border| border.contains("blue")));
+        assert_eq!(bordered.border_color.as_deref(), Some("red"));
+
+        let painted = hovered(
+            r#"{"background":"var(--bg)","hover":{"backgroundColor":"blue"}}"#,
+            &[("--bg", "red")],
+        );
+        assert_eq!(painted.background_color.as_deref(), Some("blue"));
+        assert!(painted.background.is_some());
+
+        let at_rest = {
+            let folded = crate::events::state_styles::resolve_state_styles(
+                &style(r#"{"border":"1px solid var(--line)","hover":{"borderColor":"red"}}"#),
+                false,
+                false,
+            );
+            resolve(&folded, &custom(&[("--line", "blue")])).unwrap()
+        };
+        assert_eq!(at_rest.border_color, None);
+    }
+
+    #[test]
+    fn a_longhand_of_the_layer_above_beats_a_held_shorthand_below() {
+        let universal = style(r#"{"borderColor":"var(--x)"}"#);
+        let own = style(r#"{"borderTopColor":"red"}"#);
+        let layered = crate::universal_style::layer_under(&universal, &own);
+        let layered = resolve(&layered, &custom(&[("--x", "blue")])).unwrap();
+        assert_eq!(layered.border_top_color.as_deref(), Some("red"));
+        assert_eq!(layered.border_color.as_deref(), Some("blue"));
+
+        let base = style(r#"{"padding":"var(--p)"}"#);
+        let block = style(r#"{"paddingTop":3}"#);
+        let folded = crate::universal_style::layer_under(&base, &block);
+        let folded = resolve(&folded, &custom(&[("--p", "9px")])).unwrap();
+        assert_eq!(folded.padding_top, style(r#"{"paddingTop":3}"#).padding_top);
+        assert!(folded.padding.is_some());
+    }
+
+    #[test]
+    fn what_a_layer_sets_is_kept_from_a_held_declaration_only_once() {
+        let base = style(r#"{"padding":"var(--p)"}"#);
+        let over = style(r#"{"paddingTop":3}"#);
+        let merged = merge(&base, &over).unwrap();
+        assert_eq!(merged.len(), 1);
+        let again = merge(&StyleDesc { var_declarations: Some(merged.clone()), ..base.clone() }, &over).unwrap();
+        assert_eq!(again[0].kept, merged[0].kept);
+        assert!(Arc::ptr_eq(&merge(&base, &StyleDesc::default()).unwrap(), base.var_declarations.as_ref().unwrap()));
+    }
+
+    #[test]
+    fn a_plain_border_color_written_after_a_held_side_shorthand_gives_four_sides() {
+        let sides = resolved(r#"{"borderTop":"var(--t)","borderColor":"red"}"#, &[("--t", "1px solid blue")]);
+        let twin = style(r#"{"borderTop":"1px solid blue","borderColor":"red"}"#);
+        assert_eq!(sides.border_top, twin.border_top);
+        assert_eq!(sides.border_color, twin.border_color);
+        assert_eq!(
+            [&sides.border_right_color, &sides.border_bottom_color, &sides.border_left_color],
+            [&twin.border_right_color, &twin.border_bottom_color, &twin.border_left_color]
+        );
+
+        let before = resolved(r#"{"borderColor":"red","borderTop":"var(--t)"}"#, &[("--t", "1px solid blue")]);
+        assert_eq!(before.border_top.as_deref(), Some("1px solid blue"));
+        assert_eq!(before.border_color, None);
+        assert_eq!(before.border_right_color.as_deref(), Some("red"));
+    }
+
+    #[test]
+    fn a_number_resolves_for_a_property_that_wants_one() {
+        let numbers = resolved(
+            r#"{"opacity":"var(--o)","zIndex":"var(--z)","flexGrow":"var(--g)","flexShrink":"var(--s)","order":"var(--n)","lineClamp":"var(--c)"}"#,
+            &[("--o", "0.5"), ("--z", "3"), ("--g", "2"), ("--s", "0"), ("--n", "-1"), ("--c", "4")],
+        );
+        assert_eq!(numbers.opacity, Some(0.5));
+        assert_eq!(numbers.z_index, Some(3.0));
+        assert_eq!(numbers.flex_grow, Some(2.0));
+        assert_eq!(numbers.flex_shrink, Some(0.0));
+        assert_eq!(numbers.order, Some(-1.0));
+        assert_eq!(numbers.line_clamp, Some(4.0));
+        let wrong = resolved(r#"{"opacity":"var(--o)"}"#, &[("--o", "half")]);
+        assert_eq!(wrong.opacity, None);
+        let infinite = resolved(r#"{"opacity":"var(--o)"}"#, &[("--o", "inf")]);
+        assert_eq!(infinite.opacity, None);
+    }
+
+    #[test]
+    fn a_container_block_with_a_bad_query_is_dropped_and_the_rest_stay() {
+        let blocks = style(
+            r#"{"width":10,"@container":{"not a query":{"width":"var(--w)"},"(min-width: 10px)":{"width":"var(--w)"}}}"#,
+        );
+        let rules = serde_json::to_value(blocks.container_rules.as_ref().expect("the good block stays")).unwrap();
+        let queries: Vec<&String> = rules.as_object().unwrap().keys().collect();
+        assert_eq!(queries, ["(min-width: 10px)"]);
+        assert!(blocks.width.is_some());
+    }
+
+    #[test]
+    fn every_focus_variant_resolves() {
+        let focused = resolved(
+            r#"{"focusVisible":{"width":"var(--w)"},"focusWithin":{"height":"var(--w)"},"hasFocusVisible":{"opacity":"var(--o)"}}"#,
+            &[("--w", "5px"), ("--o", "0.5")],
+        );
+        assert_eq!(focused.focus_visible.as_ref().unwrap().width, style(r#"{"width":"5px"}"#).width);
+        assert_eq!(focused.focus_within.as_ref().unwrap().height, style(r#"{"height":"5px"}"#).height);
+        assert_eq!(focused.has_focus_visible.as_ref().unwrap().opacity, Some(0.5));
+        assert!(!focused.holds_var_declarations());
+    }
+
+    #[test]
+    fn a_property_is_read_by_the_name_a_style_object_writes() {
+        use crate::events::state_styles::sets_property;
+        let set = style(r#"{"width":10,"borderTopLeftRadius":3,"fontVariantNumeric":"tabular-nums"}"#);
+        assert!(sets_property(&set, "width"));
+        assert!(sets_property(&set, "borderTopLeftRadius"));
+        assert!(sets_property(&set, "fontVariantNumeric"));
+        assert!(!sets_property(&set, "height"));
+        assert!(!sets_property(&set, "notAProperty"));
+    }
+
+    #[test]
+    fn a_held_property_outside_the_covers_table_is_overridden_by_a_layer_that_sets_it() {
+        let base = style(r#"{"opacity":"var(--o)","width":"var(--w)"}"#);
+        let merged = merge(&base, &style(r#"{"opacity":0.5}"#)).unwrap();
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].key, "width");
+    }
+
+    #[test]
+    fn a_family_of_held_properties_is_found_by_prefix() {
+        let held = style(r#"{"transitionDuration":"var(--d)","width":"var(--w)"}"#);
+        assert!(holds_family(&held, "transition"));
+        assert!(!holds_family(&held, "animation"));
     }
 }

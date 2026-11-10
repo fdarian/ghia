@@ -1696,11 +1696,13 @@ impl AnimationStyle {
     }
 }
 
-/// Whether `style` sets an animation name that is not `none`.
+/// Whether `style` sets an animation name that is not `none`, or holds an `animation*` declaration
+/// with a `var()`, which says what it is once the custom properties are known.
 pub(super) fn declares_animation(style: &StyleDesc) -> bool {
-    [&style.animation, &style.animation_name]
-        .into_iter()
-        .any(|text| text.as_deref().is_some_and(|text| !text.trim().eq_ignore_ascii_case("none")))
+    crate::css::var_substitution::holds_family(style, "animation")
+        || [&style.animation, &style.animation_name]
+            .into_iter()
+            .any(|text| text.as_deref().is_some_and(|text| !text.trim().eq_ignore_ascii_case("none")))
 }
 
 /// Whether an animation of `style` has keyframes for `width`, which at `auto`

@@ -8645,7 +8645,9 @@ A key that starts with `--` is a CSS custom property, in a style, a state style 
   ancestor (`@base-ui/react` sets them on its Positioner) sizes what is below it, and changing it lays the
   element out again. The fallback may hold `var()`. A declaration that cannot be resolved (a missing name with no
   fallback, a cycle) or whose text is not a value of the property once substituted is invalid at computed-value time, as
-  in CSS: the property has its initial value, and a shorthand resets what it covers. Written order decides between
+  in CSS: the property is unset, and a shorthand resets what it covers. An unresolvable longhand does not reset what its
+  covering shorthand or a lower layer sets, though: `{ padding: 8, paddingTop: 'var(--missing)' }` keeps the top padding
+  at 8, where CSS gives 0 ([deviations](fork/deviations.md#layout)). Written order decides between
   a `var()` declaration and the plain ones around it, as in CSS: `{ borderWidth: 2, border: 'var(--b)' }` has no
   `borderWidth`, `{ border: 'var(--b)', borderWidth: 2 }` has. A state style that declares the property wins over a `var()` of
   the base, as a plain value does. Only a string is substituted: a number is not a `var()`.
