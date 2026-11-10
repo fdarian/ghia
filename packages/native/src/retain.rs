@@ -2427,6 +2427,37 @@ impl Retain {
         })
     }
 
+    /// The element being built, which `begin_box_root` entered, is a box root that no recording stands for: something
+    /// that only paints runs in it (a caret blinks), so every frame builds it and `to_record` leaves it unrecorded. Its
+    /// wrapper is keyed by the frame, as a unit's is, and replayed by none. The subtree is for the wrapper to cull by.
+    /// Asked before the element is left. Judged by the build as `end_anchor` is: nothing excluded, lifted or placed
+    /// against a block outside it, and what runs in it moves no box.
+    pub(crate) fn unrecorded_box_root(&self) -> Option<crate::layout::cull::Subtree> {
+        let at = *self.stack.last()? as usize;
+        let node = &self.nodes[at];
+        let own = &self.below[at];
+        let runs = node.vol.dynamic != 0 || own.dynamic;
+        let escaped = node.absolute || (!node.positioned && own.escapes);
+        let lifts = node.lift_z.is_some() || (!node.forms_context && own.lifts);
+        let only_paints = self.nodes[at..].iter().all(|inner| inner.vol.dynamic == 0 || inner.paints_only);
+        let refused = !node.box_root
+            || !runs
+            || !only_paints
+            || node.absent
+            || node.moved
+            || node.skipped.is_some()
+            || node.exclusion.is_some()
+            || own.excluded.is_some()
+            || escaped
+            || lifts
+            || node.forced_host
+            || node.under_forced
+            || self.nodes[at..].iter().any(|inner| inner.vol.scroll != 0)
+            || crate::background_images::still_loading() != node.loading
+            || own.size + 1 > UNIT_MAX_ELEMENTS;
+        (!refused).then_some(node.subtree)
+    }
+
     /// Keeps the box root that is no unit or patch root, for the ticks that follow the frame.
     pub(crate) fn add_box_root(&mut self, unit: Unit) {
         if self.reference {
@@ -5780,9 +5811,10 @@ mod tests {
             self.retain.stacking(|| (None, false));
             let enter = self.retain.begin_box_root();
             inside(self);
+            let unrecorded = self.retain.unrecorded_box_root().is_some();
             let recording = self.retain.exit();
-            let boxed = enter.zip(recording).filter(|(_, recording)| recording.box_root);
-            if let Some((enter, _)) = boxed {
+            let boxed = enter.filter(|_| unrecorded || recording.as_ref().is_some_and(|recording| recording.box_root));
+            if let Some(enter) = boxed {
                 let env = crate::renderer::FrameEnv::for_test(self.inherited.clone(), enter, web_time::Instant::now());
                 self.retain.add_box_root(Unit { id, env });
             }
@@ -6947,6 +6979,45 @@ mod tests {
             box_frame(&mut page, inside);
             assert!(!page.retain.is_box_root(2), "lifted: {lifted}");
         }
+    }
+
+    #[test]
+    fn a_box_that_something_paints_in_every_frame_is_a_box_root_nothing_replays_and_a_layout_edit_beside_it_is_patched_at_it() {
+        let mut page = Units::new();
+        page.box_roots = [2].into_iter().collect();
+        page.tree.set_commit_patching(true);
+        let blinking = |page: &mut Units| {
+            page.element(3, Some(true), |_| {});
+            page.leaf(4);
+        };
+        for _ in 0..2 {
+            box_frame(&mut page, blinking);
+            page.edit(1);
+            page.edit(2);
+        }
+        box_frame(&mut page, blinking);
+        assert!(page.retain.is_box_root(2));
+        assert!(page.ids().contains(&3), "the caret is a unit in it");
+        page.tree.set_text(4, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![2]), "the box holds the unit, which its patch builds");
+        assert!(page.retain.is_relaid(&page.tree, 2));
+    }
+
+    #[test]
+    fn a_box_that_runs_something_that_moves_a_box_is_no_box_root() {
+        let mut page = Units::new();
+        page.box_roots = [2].into_iter().collect();
+        page.tree.set_commit_patching(true);
+        let moving = |page: &mut Units| {
+            page.element(3, Some(false), |_| {});
+            page.leaf(4);
+        };
+        for _ in 0..3 {
+            box_frame(&mut page, moving);
+            page.edit(1);
+            page.edit(2);
+        }
+        assert!(!page.retain.is_box_root(2));
     }
 
     #[test]

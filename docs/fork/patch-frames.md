@@ -901,6 +901,18 @@ the patcher turns it on with `Window::set_contained_patches`.
   holds a changed element is laid out again (`Retain::is_relaid`). A scroller that becomes an anchor takes the box roots inside it
   out of the plan (`end_anchor`: its patch lays all of it out). gpui verifies the box (`NotContained` when it changed): the decline
   is a frame built whole in the same draw, as the anchors' is. `GPUIX_BOX_ROOTS_OFF=1` makes none.
+  A box that something runs in that only paints (a focused input's caret) is built by every frame and so is never recorded or
+  replayed: it is wrapped keyed by the frame, as a unit is (`Retain::unrecorded_box_root`, `box_root_unrecorded`), and a patch builds
+  the caret's unit flat with the rest. Limit: gpui rewrites the recording of a root that a patch laid out again only when the root is
+  not recorded to be put elsewhere (`PatchSource::rewritable`, zed `elements/retained.rs`), and the rows of a scroller are, so the edit
+  after the first in such a row is `Anchor:StaleRecording` (a frame built whole, which makes the row a box root again only on the
+  build after it, as a record is what qualifies a box): a row of a scroller too big to be an anchor is patched on one edit in
+  three until zed rewrites a relocatable root's recording.
+  **Measured** (`examples/solid/layout-scale/profile.tsx`, release addon, instructions per op; a1 is a text edit in the header
+  that holds a focused input, a2 a text edit in a row of the scroller): a1 at 1000, 3000 and 10000 rows 26.2M, 73.3M and 241.0M
+  before, 2.23M, 3.68M and 9.14M after (a patch of the header, `relayoutPatches` 1, nothing declined); a2 35.4M, 99.8M and 328M
+  (323M before, the rows are the limit above); a hover (d) 1.54M, 1.94M and 3.37M (as before).
+
 - **Which commits.** The tree notes the elements a commit changed (`RetainedTree::pending_structure`: props, style, text and children
   other than a strict restyle by paint; a created element is covered by the element it is put under, a destroyed one by the
   parent it left) and moves `patch_barrier` only for a change no element is named for (`setRoot`, the universal style,

@@ -10519,6 +10519,7 @@ fn build_element_in(
     // built in list layout, so this is the one place that sees both.
     crate::background_images::pump(window, cx);
     let anchor = anchor_env.and_then(|env| ctx.retain.end_anchor().map(|subtree| (env, subtree)));
+    let unrecorded_box = if patch_root_env.is_some() || box_root_env.is_some() { ctx.retain.unrecorded_box_root() } else { None };
     let recording = if let Some(known) = ctx.tree.elements.get(&id) {
         ctx.retain.costly(|| crate::retain::costly(ctx.tree, known));
         ctx.retain.exit()
@@ -10532,7 +10533,10 @@ fn build_element_in(
             anchor_root(id, env, subtree, element, ctx)
         }
         (None, Some(recording)) => recorded_root(id, recording, patch_root_env, box_root_env, element, ctx),
-        (None, None) => element,
+        (None, None) => match (unrecorded_box, patch_root_env.or(box_root_env)) {
+            (Some(subtree), Some(env)) => box_root_unrecorded(id, env, subtree, element, ctx),
+            _ => element,
+        },
     }
 }
 
@@ -10770,6 +10774,26 @@ fn anchor_root(
         .cull_outset(subtree.outset())
         .patchable_relayout();
     ctx.retain.add_anchor(crate::retain::Unit { id, env });
+    retained.into_any_element()
+}
+
+/// `element`, the box root `id` that runs something that paints (a caret) and so is built by every frame, as a root that
+/// gpui records as a source for a patch that lays it out again and never replays: its key is the frame's, as a unit's is.
+fn box_root_unrecorded(
+    id: u64,
+    env: FrameEnv,
+    subtree: crate::layout::cull::Subtree,
+    element: gpui::AnyElement,
+    ctx: &mut BuildCtx,
+) -> gpui::AnyElement {
+    use gpui::IntoElement;
+
+    let hook = replay_hook(id, ctx.tapes.clone(), ctx.measurements.clone());
+    let retained = gpui::retained(retained_id(id), ctx.retain.unit_key(), taped_build(id, element, ctx.tapes.clone()))
+        .on_replay_translated(hook)
+        .cull_outset(subtree.outset())
+        .patchable_relayout();
+    ctx.retain.add_box_root(crate::retain::Unit { id, env });
     retained.into_any_element()
 }
 
