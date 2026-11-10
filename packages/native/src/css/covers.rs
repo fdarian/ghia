@@ -23,13 +23,14 @@ use crate::css::custom_properties::{self, CustomProperties};
 use crate::events::state_styles::{split_border_all_sides, without_invalid_values, AllSides};
 use crate::style::StyleDesc;
 
-type KeyId = usize;
+pub(crate) type KeyId = usize;
 
 struct Key {
     /// The field's name, in snake case.
     name: &'static str,
     is_set: fn(&StyleDesc) -> bool,
     clear: fn(&mut StyleDesc),
+    copy: fn(&mut StyleDesc, &StyleDesc),
 }
 
 macro_rules! key {
@@ -38,6 +39,7 @@ macro_rules! key {
             name: stringify!($field),
             is_set: |style| style.$field.is_some(),
             clear: |style| style.$field = None,
+            copy: |style, from| style.$field = from.$field.clone(),
         }
     };
 }
@@ -238,22 +240,27 @@ impl Covers {
             if !self.is_shorthand(key) || !(self.keys[key].is_set)(style) || invalid.contains(&key) {
                 continue;
             }
-            let later = &written[index + 1..];
-            if let Some(sides) = self.border_sides(key) {
-                split_border_all_sides(
-                    style,
-                    sides,
-                    AllSides {
-                        width: !later.contains(&self.border_width),
-                        color: !later.contains(&self.border_color),
-                        style: !later.contains(&self.border_style),
-                    },
-                );
-            }
-            for &target in &self.covered[key] {
-                if !later.contains(&target) {
-                    (self.keys[target].clear)(style);
-                }
+            self.cover(style, key, &written[index + 1..]);
+        }
+    }
+
+    /// A shorthand written before the keys in `later` covers what they leave: the longhands it
+    /// covers that are not among them are cleared.
+    fn cover(&self, style: &mut StyleDesc, key: KeyId, later: &[KeyId]) {
+        if let Some(sides) = self.border_sides(key) {
+            split_border_all_sides(
+                style,
+                sides,
+                AllSides {
+                    width: !later.contains(&self.border_width),
+                    color: !later.contains(&self.border_color),
+                    style: !later.contains(&self.border_style),
+                },
+            );
+        }
+        for &target in &self.covered[key] {
+            if !later.contains(&target) {
+                (self.keys[target].clear)(style);
             }
         }
     }
@@ -276,6 +283,50 @@ impl Covers {
 /// A shorthand in `over` resets what it covers in `base`, as a later CSS declaration does.
 pub(crate) fn shadow(base: &mut Cow<'_, StyleDesc>, over: &StyleDesc) {
     COVERS.shadow(base, over);
+}
+
+/// The id of the property `name` (camel case, as written in a style object) when it is a shorthand
+/// or covered by one.
+pub(crate) fn key_id(name: &str) -> Option<KeyId> {
+    COVERS.ids.get(name).copied()
+}
+
+/// What `key` covers, through the shorthands it covers as well. Empty for a longhand.
+pub(crate) fn covered_by(key: KeyId) -> &'static [KeyId] {
+    &COVERS.covered[key]
+}
+
+pub(crate) fn is_set(style: &StyleDesc, key: KeyId) -> bool {
+    (COVERS.keys[key].is_set)(style)
+}
+
+/// Whether a shorthand that `style` sets covers `key`.
+pub(crate) fn is_covered_in(style: &StyleDesc, key: KeyId) -> bool {
+    COVERS.covered.iter().enumerate().any(|(shorthand, covered)| covered.contains(&key) && is_set(style, shorthand))
+}
+
+/// A declaration of `key` that has no value: it and what it covers, but for the keys in `keep`, are
+/// unset.
+pub(crate) fn reset(style: &mut StyleDesc, key: KeyId, keep: &[KeyId]) {
+    (COVERS.keys[key].clear)(style);
+    for &target in &COVERS.covered[key] {
+        if !keep.contains(&target) {
+            (COVERS.keys[target].clear)(style);
+        }
+    }
+}
+
+/// `keys` of `style` as `from` has them.
+pub(crate) fn restore(style: &mut StyleDesc, from: &StyleDesc, keys: &[KeyId]) {
+    for &key in keys {
+        (COVERS.keys[key].copy)(style, from);
+    }
+}
+
+/// `style`, in which the shorthand `key` was declared before the keys in `later`: what it covers
+/// that they do not is unset.
+pub(crate) fn cover(style: &mut StyleDesc, key: KeyId, later: &[KeyId]) {
+    COVERS.cover(style, key, later);
 }
 
 /// Parses a style object, then drops the longhands a shorthand covers that were written before it,

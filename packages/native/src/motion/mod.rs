@@ -1444,16 +1444,15 @@ pub(crate) struct DeclaredStyle {
     pub(crate) transitions: Option<TransitionStyle>,
 }
 
-/// `style` with the `var()` of its transform properties substituted from the custom properties the
-/// element computes to. Transitions and animations compare and blend computed values, so they are
-/// given the style after this: a `--p` that changes is a change of the transform, from the value
+/// `style` with its `var()` substituted from the custom properties the element computes to. Transitions and animations compare and blend computed values, so they are
+/// given the style after this: a `--p` that changes is a change of the property, from the value
 /// the last style computed to the one this does.
 fn with_vars(style: Arc<StyleDesc>, parent_font: &ParentValues) -> Arc<StyleDesc> {
-    if !crate::css::transform::reads_vars(&style) {
+    if !crate::css::var_substitution::reads_vars(&style) {
         return style;
     }
     crate::css::custom_properties::reads::note();
-    crate::css::transform::resolve_vars(&style, &parent_font.custom_of(&style)).map_or(style, Arc::new)
+    crate::css::var_substitution::resolve(&style, &parent_font.custom_of(&style)).map_or(style, Arc::new)
 }
 
 /// The style as `style` has it after the state styles that apply. Shared with `style` when it

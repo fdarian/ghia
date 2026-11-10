@@ -11394,8 +11394,8 @@ fn build_element_unpumped(
     // elements see the same cascade.
     let descended = ctx.inherited.clone().descend(style, element.has_inert_prop());
     let parent_inherited = std::mem::replace(&mut ctx.inherited, descended);
-    // The transform properties read the custom properties the element computes to, its own included.
-    let var_style = style.and_then(|style| crate::css::transform::resolve_vars(style, &ctx.inherited.custom));
+    // A `var()` reads the custom properties the element computes to, its own included.
+    let var_style = style.and_then(|style| crate::css::var_substitution::resolve(style, &ctx.inherited.custom));
     if var_style.is_some() {
         crate::css::custom_properties::reads::note();
     }

@@ -427,6 +427,10 @@ fn has_container_rules(element: &RetainedElement) -> bool {
     element.style.as_deref().is_some_and(|style| style.container_rules.is_some())
 }
 
+fn holds_var_declarations(element: &RetainedElement) -> bool {
+    element.style.as_deref().is_some_and(StyleDesc::holds_var_declarations)
+}
+
 /// The one check a style payload passes: the strict parse, then the validations that run on the
 /// result. `css::lenient` calls it again to judge each declaration alone.
 pub(crate) fn parse_style(raw: &[u8]) -> Result<StyleDesc, String> {
@@ -454,9 +458,13 @@ impl StyleTable {
                 return Ok(hit.style.clone());
             }
         }
-        let style = match parse_style(raw) {
-            Ok(style) => style,
-            Err(error) => crate::css::lenient::recover(raw, error)?,
+        let style = if crate::css::var_substitution::mentions_var(raw) {
+            crate::css::var_substitution::parse(raw)?
+        } else {
+            match parse_style(raw) {
+                Ok(style) => style,
+                Err(error) => crate::css::lenient::recover(raw, error)?,
+            }
         };
         let shared = Arc::new(style);
         self.entries.entry(key).or_default().push(InternedStyle {
@@ -684,6 +692,9 @@ pub struct RetainedTree {
     /// How many elements have `@container` blocks, so a tree without any skips looking for
     /// the children they keep from being built.
     container_rule_count: usize,
+    /// How many elements hold a declaration that reads custom properties (`var()`), which makes a
+    /// change of custom properties a change of layout as well as of paint.
+    var_style_count: usize,
     /// The elements the accessibility links start from, see [`RelationRegistry`].
     relations: RelationRegistry,
     pub styles: StyleTable,
@@ -760,6 +771,7 @@ impl RetainedTree {
             escaping_count: 0,
             style_serials: 0,
             container_rule_count: 0,
+            var_style_count: 0,
             relations: RelationRegistry::default(),
             styles: StyleTable::default(),
             resolved: Default::default(),
@@ -1210,6 +1222,7 @@ impl RetainedTree {
             self.anchored_count -= usize::from(element.element_type == "anchored");
             self.escaping_count -= usize::from(containing_block::may_escape(&element));
             self.container_rule_count -= usize::from(has_container_rules(&element));
+            self.var_style_count -= usize::from(holds_var_declarations(&element));
             self.relations.destroyed(&element);
             self.resolved.get_mut().forget(id);
             destroyed.push(id);
@@ -1407,7 +1420,7 @@ impl RetainedTree {
             return StyleChange::default();
         }
         let paints_only = match (element.style.as_deref(), style.as_deref()) {
-            (Some(old), Some(new)) if self.container_rule_count == 0 => {
+            (Some(old), Some(new)) if self.container_rule_count == 0 && self.var_style_count == 0 => {
                 old.differs_only_in_paint_or_custom_properties(new)
             }
             (Some(old), Some(new)) => old.differs_only_in_paint(new),
@@ -1427,6 +1440,7 @@ impl RetainedTree {
             != style.as_deref().and_then(|new| new.white_space.as_deref());
         let escaped_before = containing_block::may_escape(element);
         let container_rules_before = has_container_rules(element);
+        let var_declarations_before = holds_var_declarations(element);
         let before = element.style.take().filter(|old| {
             !crate::motion::declares_transitions(old)
                 && style.as_deref().is_some_and(crate::motion::declares_transitions)
@@ -1447,6 +1461,8 @@ impl RetainedTree {
         self.escaping_count -= usize::from(escaped_before);
         self.container_rule_count += usize::from(has_container_rules(element));
         self.container_rule_count -= usize::from(container_rules_before);
+        self.var_style_count += usize::from(holds_var_declarations(element));
+        self.var_style_count -= usize::from(var_declarations_before);
         let now_declared = element.declared_hidden();
         let visibility_changed = was_declared != now_declared;
         if visibility_changed {

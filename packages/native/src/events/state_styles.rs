@@ -34,6 +34,7 @@ macro_rules! overlay_fields {
                 $base.custom_properties.as_ref(),
                 $over.custom_properties.as_ref(),
             ),
+            var_declarations: crate::css::var_substitution::merge(&$base, $over),
             contents_levels: None,
             measure_natural_width: false,
             // What the element is, not a property: the style on top of it is the same element's.
@@ -201,6 +202,31 @@ pub fn resolve_pointer_states(style: &StyleDesc, states: PointerStates) -> Style
         };
     }
     resolved
+}
+
+/// `over`'s set fields on top of `base`, which is an element's own style: what `overlay` clears
+/// (the state styles, `@container` blocks and what the element is) stays as `base` has it. Keep in
+/// step with `is_overlay_fixed_point`.
+pub(crate) fn laid_over(base: &StyleDesc, over: &StyleDesc) -> StyleDesc {
+    StyleDesc {
+        hover: base.hover.clone(),
+        active: base.active.clone(),
+        group_hover: base.group_hover.clone(),
+        group_active: base.group_active.clone(),
+        group_focus_within: base.group_focus_within.clone(),
+        has_hover: base.has_hover.clone(),
+        has_active: base.has_active.clone(),
+        has_focus: base.has_focus.clone(),
+        disabled: base.disabled.clone(),
+        enabled: base.enabled.clone(),
+        has_disabled: base.has_disabled.clone(),
+        has_enabled: base.has_enabled.clone(),
+        container_rules: base.container_rules.clone(),
+        contents_levels: base.contents_levels.clone(),
+        measure_natural_width: base.measure_natural_width,
+        atomic_inline: base.atomic_inline,
+        ..overlay(base, over)
+    }
 }
 
 /// `over`'s set fields on top of `base`, with every state refinement cleared.

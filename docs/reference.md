@@ -7106,7 +7106,7 @@ CSS-like styling via the `style` prop:
 ### Invalid values
 
 A value that does not parse drops its own declaration and nothing else, as in CSS: the element keeps every other property
-of the style, and nothing throws. `{ border: 0, height: "inherit", width: "var(--anchor-width)", backgroundColor: "red" }`
+of the style, and nothing throws. `{ border: 0, height: "inherit", width: "wide", backgroundColor: "red" }`
 paints the red background, with no `height` or `width`. Native reads the declarations in written order, so a shorthand
 still drops the longhands written before it.
 
@@ -7715,7 +7715,7 @@ size, since a moving transform lays nothing out.
   element computes to, its own included, with a fallback (`var(--gap, 8px)`). A `--p` set from JS on an ancestor moves
   the box like the literal value does, which makes `translateX(calc(-100% * var(--p)))` a carousel track. A `var()` that
   cannot be resolved (a missing name with no fallback, a cycle) makes the property `none`, as in CSS, and not "ignored". A
-  custom property whose value holds `var()` is computed where it is declared. Other properties do not substitute `var()`
+  custom property whose value holds `var()` is computed where it is declared. Every other property takes `var()` too
   (see [`style()` and custom properties](#style-and-custom-properties)).
 - **`translate`, `rotate` and `scale`** are the individual properties. `translate` takes one or two lengths or percentages and
   a length along z. `rotate` takes an angle, a number of degrees, or an axis (`x`, `y`, `z` or three numbers) and an angle
@@ -8591,7 +8591,7 @@ too, since the app has to render and the frame draws afterwards.
 #### `style()` and custom properties
 
 A key that starts with `--` is a CSS custom property, in a style, a state style or an
-`"@container"` block. They inherit, and `style()` queries and the `var()` of the [transform properties](#transforms) read them:
+`"@container"` block. They inherit, and `style()` queries and `var()` read them:
 
 ```tsx
 <div style={{ '--density': 'compact', '--columns': 3 }}>
@@ -8638,15 +8638,27 @@ A key that starts with `--` is a CSS custom property, in a style, a state style 
   `"@container card"`, finds); with a size feature in the same query, the one container
   that answers the size feature (see above), which then answers the `style()` part too.
   The element's own custom properties are never what its own query reads.
+- **`var(--name)` and `var(--name, fallback)`** work in the value of any property, in a style, a state
+  style and an `"@container"` block: `width: 'var(--anchor-width)'`, `maxHeight: 'calc(var(--available-height) - 8px)'`,
+  `backgroundColor: 'var(--bg)'`, `border: 'var(--b)'`, `transformOrigin: 'var(--transform-origin)'`. The
+  value is read against the custom properties the element computes to, its own included, so one set inline on an
+  ancestor (`@base-ui/react` sets them on its Positioner) sizes what is below it, and changing it lays the
+  element out again. The fallback may hold `var()`. A declaration that cannot be resolved (a missing name with no
+  fallback, a cycle) or whose text is not a value of the property once substituted is invalid at computed-value time, as
+  in CSS: the property has its initial value, and a shorthand resets what it covers. Written order decides between
+  a `var()` declaration and the plain ones around it, as in CSS: `{ borderWidth: 2, border: 'var(--b)' }` has no
+  `borderWidth`, `{ border: 'var(--b)', borderWidth: 2 }` has. A state style that declares the property wins over a `var()` of
+  the base, as a plain value does. Only a string is substituted: a number is not a `var()`.
 - **A normal property in `style()`** (`style(color: red)`, `style(display: block)`) is
   unknown, as in Chrome, which supports custom properties only.
 
 Differences from the browser:
 
 - `scroll-state()` is unknown (false), and `container-type: scroll-state` does not exist.
-  `var()` is substituted in the [transform properties](#transforms) only: elsewhere a
-  custom property is only read by `style()`. A change of a custom property alone is a
-  paint-only frame while no `"@container"` rule is in the tree. `style(--x: inherit)`, `unset` and `revert` are unknown, there is no `@property`
+  A change of a custom property alone is a paint-only frame while no `"@container"` rule
+  and no declaration with a `var()` is in the tree. A transition runs from and to the computed value
+  of a `var()` (`width: 'var(--w)'` under `transition: 'width 1s'`); a keyframe's `var()` is read in the
+  [transform properties](#transforms) and not checked elsewhere ([deviations](fork/deviations.md#layout)). `style(--x: inherit)`, `unset` and `revert` are unknown, there is no `@property`
   registration (every value is text, and none transitions or animates), and a custom
   property cannot be set to `""` (that declares nothing)
 - Which elements are containers follows CSS. A `div`, `text`, `label`, `form`, an atomic

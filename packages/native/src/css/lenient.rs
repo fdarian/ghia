@@ -44,13 +44,14 @@ const REPORTED_LIMIT: usize = 1024;
 
 static REPORTED: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Mutex::default);
 
-struct Declaration {
-    key: String,
+pub(crate) struct Declaration {
+    pub(crate) key: String,
     /// The JSON text of the value.
-    value: String,
+    pub(crate) value: String,
 }
 
-struct Declarations(Vec<Declaration>);
+/// The declarations of a style object in written order.
+pub(crate) struct Declarations(pub(crate) Vec<Declaration>);
 
 impl<'de> Deserialize<'de> for Declarations {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -161,11 +162,11 @@ impl Recovery {
     }
 }
 
-fn json_string(text: &str) -> String {
+pub(crate) fn json_string(text: &str) -> String {
     serde_json::to_string(text).expect("a string serializes")
 }
 
-fn object_text(declarations: &[Declaration]) -> String {
+pub(crate) fn object_text(declarations: &[Declaration]) -> String {
     let members: Vec<String> = declarations
         .iter()
         .map(|declaration| format!("{}:{}", json_string(&declaration.key), declaration.value))

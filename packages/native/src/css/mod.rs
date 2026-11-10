@@ -46,5 +46,6 @@ pub(crate) mod text_underline_offset;
 pub(crate) mod text_wrap;
 pub(crate) mod transform;
 pub(crate) mod url;
+pub(crate) mod var_substitution;
 pub(crate) mod vertical_align;
 pub(crate) mod word_break;
