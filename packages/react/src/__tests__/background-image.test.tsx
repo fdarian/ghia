@@ -370,7 +370,7 @@ describeNative("url() in backgroundImage", () => {
             color: "transparent",
           }}
         >
-          <text style={{ fontSize: 80, lineHeight: "90px", fontWeight: 900 }}>MMM</text>
+          <div style={{ fontSize: 80, lineHeight: "90px", fontWeight: 900 }}>MMM</div>
         </div>
       </div>
     )

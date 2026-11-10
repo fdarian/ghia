@@ -117,9 +117,9 @@ const inkOf = (view) => {
 }
 
 const wordOf = (style: object = {}) => (
-  <text testId="word" style={{ position: "absolute", left: 0, top: 58, lineHeight: "40px", fontFamily: "Menlo", fontWeight: "bold", ...style }}>
+  <div testId="word" style={{ position: "absolute", left: 0, top: 58, lineHeight: "40px", fontFamily: "Menlo", fontWeight: "bold", ...style }}>
     WWWW
-  </text>
+  </div>
 )
 
 const box = (testId: string, style: object = {}) => (
@@ -802,10 +802,10 @@ describeNative("an overlay placed from getBoundingClientRect after each frame", 
 
 const TEXT = { fontSize: 16, lineHeight: "20px", fontFamily: "Menlo", color: "#000000" }
 const paragraph = (span: React.ReactNode) => (
-  <text testId="p" style={{ ...TEXT, position: "absolute", left: 0, top: 58, width: 130 }}>
+  <div testId="p" style={{ ...TEXT, position: "absolute", left: 0, top: 58, width: 130 }}>
     aaaa{span}
     <span testId="n">cccc</span>
-  </text>
+  </div>
 )
 const spanBox = (view) => view.bounds("s")
 

@@ -468,7 +468,7 @@ function SidebarAction({
       >
         <Icon name={icon} size={14} color={C.secondary} />
       </div>
-      <text style={{ fontSize: 13, color: C.secondary }}>{label}</text>
+      <div style={{ fontSize: 13, color: C.secondary }}>{label}</div>
     </Button>
   )
 }
@@ -500,7 +500,7 @@ function ConversationRow({
       }}
       onClick={() => onSelect(conversation.id)}
     >
-      <text
+      <div
         style={{
           fontSize: 13.5,
           lineHeight: "18px",
@@ -510,10 +510,10 @@ function ConversationRow({
         }}
       >
         {conversation.title}
-      </text>
+      </div>
       <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
         <Icon name="folder" size={12.5} color={C.tertiary} />
-        <text
+        <div
           style={{
             fontSize: 13,
             lineHeight: "15px",
@@ -525,8 +525,8 @@ function ConversationRow({
           }}
         >
           {conversation.project}
-        </text>
-        <text style={{ fontSize: 12.5, color: C.ghost, flexShrink: 0 }}>{conversation.time}</text>
+        </div>
+        <div style={{ fontSize: 12.5, color: C.ghost, flexShrink: 0 }}>{conversation.time}</div>
       </div>
     </Button>
   )
@@ -652,7 +652,7 @@ function Sidebar({
                 paddingRight: 8,
               }}
             >
-              <text
+              <div
                 style={{
                   fontSize: 13,
                   fontWeight: 500,
@@ -662,7 +662,7 @@ function Sidebar({
                 }}
               >
                 {group.name}
-              </text>
+              </div>
               {groupIndex === 0 && (
                 <Button
                   testId="thread-filter"
@@ -735,7 +735,7 @@ function UserTurn({ text }: { text: string }) {
           paddingRight: 12,
         }}
       >
-        <text style={{ fontSize: 14, lineHeight: "20px", color: C.text, minWidth: 0, maxWidth: '100%' }}>{text}</text>
+        <div style={{ fontSize: 14, lineHeight: "20px", color: C.text, minWidth: 0, maxWidth: '100%' }}>{text}</div>
       </div>
     </div>
   )
@@ -768,17 +768,17 @@ function WorkedFor({ duration }: { duration: string }) {
             flexShrink: 0,
           }}
         >
-          <text style={{ fontSize: 13.5, lineHeight: "18px", fontWeight: 500, color: C.tertiary }}>
+          <div style={{ fontSize: 13.5, lineHeight: "18px", fontWeight: 500, color: C.tertiary }}>
             {duration}
-          </text>
+          </div>
           <Icon name={open ? 'chevronDown' : 'chevronRight'} size={11.5} color={C.tertiary} />
         </div>
         <div style={{ height: 1, flexGrow: 1, backgroundColor: C.border }} />
       </Button>
       {open && (
-        <text style={{ fontSize: 13, lineHeight: "18px", color: C.secondary }}>
+        <div style={{ fontSize: 13, lineHeight: "18px", color: C.secondary }}>
           Demo reasoning. No model ran. The fold is here so the chrome has something to open.
-        </text>
+        </div>
       )}
     </div>
   )
@@ -864,7 +864,7 @@ function CodeBlock({
     <div style={CODE_CARD_STYLE}>
       {language && (
         <div style={CODE_HEADER_STYLE}>
-          <text style={{ fontSize: 12, color: C.secondary }}>{language}</text>
+          <div style={{ fontSize: 12, color: C.secondary }}>{language}</div>
         </div>
       )}
       <code
@@ -966,11 +966,11 @@ function Inspector({
         gap: 10,
       }}
     >
-      <text style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Inspector</text>
+      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Inspector</div>
       {rows.map(([label, value]) => (
         <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <text style={{ fontSize: 11.5, color: C.ghost }}>{label}</text>
-          <text style={{ fontSize: 13, color: C.secondary }}>{value}</text>
+          <div style={{ fontSize: 11.5, color: C.ghost }}>{label}</div>
+          <div style={{ fontSize: 13, color: C.secondary }}>{value}</div>
         </div>
       ))}
     </div>
@@ -1017,7 +1017,7 @@ function OverlayCard({
         >
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center' }}>
             <DialogTitle style={{ flexGrow: 1 }}>
-              <text style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{title}</text>
+              <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{title}</div>
             </DialogTitle>
             <DialogClose
               testId="overlay-close"
@@ -1033,7 +1033,7 @@ function OverlayCard({
                 hover: { backgroundColor: C.overlay },
               }}
             >
-              <text style={{ fontSize: 12, color: C.secondary }}>Close</text>
+              <div style={{ fontSize: 12, color: C.secondary }}>Close</div>
             </DialogClose>
           </div>
           {children}
@@ -1135,7 +1135,7 @@ function Header({
           </div>
         </>
       )}
-      <text
+      <div
         style={{
           fontSize: 13,
           fontWeight: 500,
@@ -1147,9 +1147,9 @@ function Header({
         }}
       >
         {title}
-      </text>
+      </div>
       {turnCount > TURNS.length && (
-        <text
+        <div
           style={{
             fontSize: 12,
             fontWeight: 500,
@@ -1159,7 +1159,7 @@ function Header({
           }}
         >
           {turnCount.toLocaleString('en-US')} messages
-        </text>
+        </div>
       )}
         <div style={{ flexGrow: 1 }} />
         <IconButton
@@ -1228,7 +1228,7 @@ const MenuRow = React.forwardRef<PublicInstance, MenuRowProps>(function MenuRow(
     >
       {icon && <Icon name={icon} size={14} color={C.tertiary} />}
       <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 }}>
-        <text
+        <div
           style={{
             fontSize: 12.5,
             fontWeight: selected ? 600 : 500,
@@ -1238,14 +1238,14 @@ const MenuRow = React.forwardRef<PublicInstance, MenuRowProps>(function MenuRow(
           }}
         >
           {label}
-        </text>
+        </div>
         {description && (
-          <text style={{ fontSize: 12.5, lineHeight: "14px", color: C.tertiary, paddingTop: 2 }}>
+          <div style={{ fontSize: 12.5, lineHeight: "14px", color: C.tertiary, paddingTop: 2 }}>
             {description}
-          </text>
+          </div>
         )}
       </div>
-      {hint && <text style={{ fontSize: 11.5, color: C.ghost, flexShrink: 0 }}>{hint}</text>}
+      {hint && <div style={{ fontSize: 11.5, color: C.ghost, flexShrink: 0 }}>{hint}</div>}
       {selected && <Icon name="check" size={11} color={C.tertiary} />}
     </div>
   )
@@ -1294,7 +1294,7 @@ function ChipSelect({
           })}
         >
           <Icon name={icon} size={12} color={accent ? C.accent : C.tertiary} />
-          <text
+          <div
             style={{
               fontSize: 13,
               lineHeight: "16px",
@@ -1304,7 +1304,7 @@ function ChipSelect({
             }}
           >
             {label}
-          </text>
+          </div>
           {caret && <Icon name="chevronDown" size={10.5} color={C.ghost} />}
         </SelectTrigger>
         <SelectContent side="top" sideOffset={4} style={{ ...MENU, minWidth: menuWidth ?? 220 }}>
@@ -1350,7 +1350,7 @@ function ModelPicker({ value, onChange }: { value: string; onChange: (next: stri
               alignItems: 'center',
             }}
           >
-            <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>{group.name}</text>
+            <div style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>{group.name}</div>
           </SelectLabel>
           {group.items.map((model) => (
             <SelectItem
@@ -1390,7 +1390,7 @@ function ReasoningPicker({ value, onChange }: { value: string; onChange: (next: 
           alignItems: 'center',
         }}
       >
-        <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Reasoning</text>
+        <div style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Reasoning</div>
       </SelectLabel>
       {REASONING.map((option) => (
         <SelectItem
@@ -1488,7 +1488,7 @@ function WorkspacePicker({ value, onChange }: { value: string; onChange: (next: 
           alignItems: 'center',
         }}
       >
-        <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Work in</text>
+        <div style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Work in</div>
       </SelectLabel>
       {WORKSPACES.map((option) => (
         <SelectItem
@@ -1558,9 +1558,9 @@ function ModeToggle({
       onClick={() => onChange(plan ? 'build' : 'plan')}
     >
       <Icon name={plan ? 'list' : 'wrench'} size={12} color={plan ? C.accent : C.tertiary} />
-      <text style={{ fontSize: 13, lineHeight: "16px", color: plan ? C.accent : C.secondary }}>
+      <div style={{ fontSize: 13, lineHeight: "16px", color: plan ? C.accent : C.secondary }}>
         {plan ? 'Plan' : 'Build'}
-      </text>
+      </div>
     </Button>
   )
 }
@@ -1795,7 +1795,7 @@ function GhostButton({
       onClick={onClick}
     >
       <Icon name={icon} size={16} color={color} />
-      {label && <text style={{ fontSize: 12.5, color }}>{label}</text>}
+      {label && <div style={{ fontSize: 12.5, color }}>{label}</div>}
     </Button>
   )
 }
@@ -1859,7 +1859,7 @@ function ActionBar({ onRetry }: { onRetry?: () => void }) {
           onClick={() => setNote('More actions are a demo.')}
         />
       </div>
-      {note && <text style={{ fontSize: 12, color: C.tertiary, paddingLeft: 9 }}>{note}</text>}
+      {note && <div style={{ fontSize: 12, color: C.tertiary, paddingLeft: 9 }}>{note}</div>}
     </div>
   )
 }
@@ -1936,7 +1936,7 @@ const MD_TEXT = {
 } as const
 
 function MdxInline({ children, style }: MdxChildren & { style?: StyleDesc }) {
-  return <text style={{ ...MD_TEXT, ...style }}>{children}</text>
+  return <div style={{ ...MD_TEXT, ...style }}>{children}</div>
 }
 
 function mdxStringChild(children: React.ReactNode) {
@@ -1950,7 +1950,7 @@ function mdxStringChild(children: React.ReactNode) {
 function MdxParagraph({ children }: MdxChildren) {
   const only = mdxStringChild(children)
   if (only != null) {
-    return <text style={{ ...MD_TEXT, width: '100%' }}>{only}</text>
+    return <div style={{ ...MD_TEXT, width: '100%' }}>{only}</div>
   }
   return (
     <div
@@ -1972,7 +1972,7 @@ function MdxParagraph({ children }: MdxChildren) {
     >
       {React.Children.map(children, (child) =>
         typeof child === 'string' || typeof child === 'number' ? (
-          <text style={MD_TEXT}>{child}</text>
+          <div style={MD_TEXT}>{child}</div>
         ) : (
           child
         ),
@@ -1983,19 +1983,19 @@ function MdxParagraph({ children }: MdxChildren) {
 
 const SAFE_MDX_COMPONENTS = {
   h1: ({ children }: MdxChildren) => (
-    <text style={{ fontSize: 22, lineHeight: "30px", fontWeight: 700, color: C.text, maxWidth: '100%', minWidth: 0 }}>
+    <div style={{ fontSize: 22, lineHeight: "30px", fontWeight: 700, color: C.text, maxWidth: '100%', minWidth: 0 }}>
       {children}
-    </text>
+    </div>
   ),
   h2: ({ children }: MdxChildren) => (
-    <text style={{ fontSize: 18, lineHeight: "26px", fontWeight: 700, color: C.text, maxWidth: '100%', minWidth: 0 }}>
+    <div style={{ fontSize: 18, lineHeight: "26px", fontWeight: 700, color: C.text, maxWidth: '100%', minWidth: 0 }}>
       {children}
-    </text>
+    </div>
   ),
   h3: ({ children }: MdxChildren) => (
-    <text style={{ fontSize: 16, lineHeight: "24px", fontWeight: 700, color: C.text, maxWidth: '100%', minWidth: 0 }}>
+    <div style={{ fontSize: 16, lineHeight: "24px", fontWeight: 700, color: C.text, maxWidth: '100%', minWidth: 0 }}>
       {children}
-    </text>
+    </div>
   ),
   h4: MdxInline,
   h5: MdxInline,
@@ -2019,11 +2019,11 @@ const SAFE_MDX_COMPONENTS = {
     const only = mdxStringChild(children)
     return (
       <div style={{ display: 'flex', flexDirection: 'row', gap: 9, width: '100%', minWidth: 0 }}>
-        <text style={{ fontSize: 15, lineHeight: "26px", color: C.secondary, flexShrink: 0 }}>
+        <div style={{ fontSize: 15, lineHeight: "26px", color: C.secondary, flexShrink: 0 }}>
           {checked === undefined ? '•' : checked ? '✓' : '○'}
-        </text>
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 }}>
-          {only != null ? <text style={{ ...MD_TEXT, width: '100%' }}>{only}</text> : children}
+          {only != null ? <div style={{ ...MD_TEXT, width: '100%' }}>{only}</div> : children}
         </div>
       </div>
     )
@@ -2089,7 +2089,7 @@ const SAFE_MDX_COMPONENTS = {
         borderStyle: 'solid',
       }}
     >
-      <text style={{ fontSize: 13, fontWeight: 700, color: C.accent }}>{title}</text>
+      <div style={{ fontSize: 13, fontWeight: 700, color: C.accent }}>{title}</div>
       {children}
     </div>
   ),
@@ -2453,15 +2453,15 @@ export function ChatApp({
                 hover: { backgroundColor: C.overlay },
               }}
             >
-              <text style={{ fontSize: 13, color: C.text }}>{conversation.title}</text>
+              <div style={{ fontSize: 13, color: C.text }}>{conversation.title}</div>
             </Button>
           ))}
         </div>
       </OverlayCard>
       <OverlayCard title="Settings" open={overlay === 'settings'} onClose={() => setOverlay(null)}>
-        <text style={{ fontSize: 13, lineHeight: "18px", color: C.secondary }}>
+        <div style={{ fontSize: 13, lineHeight: "18px", color: C.secondary }}>
           This is the GPUIX chat demo. Threads, drafts, and replies stay in this window.
-        </text>
+        </div>
         <Button
           testId="cycle-overlay"
           onClick={() => renderer?.cycleDebugFrameOverlay?.()}
@@ -2476,7 +2476,7 @@ export function ChatApp({
             hover: { backgroundColor: C.overlayStrong },
           }}
         >
-          <text style={{ fontSize: 13, color: C.text }}>Cycle frame overlay</text>
+          <div style={{ fontSize: 13, color: C.text }}>Cycle frame overlay</div>
         </Button>
       </OverlayCard>
     </div>

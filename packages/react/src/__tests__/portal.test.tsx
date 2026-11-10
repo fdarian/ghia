@@ -16,9 +16,9 @@ function Screen({ items, mounted = true }: { items: string[]; mounted?: boolean 
           layer &&
           createPortal(
             items.map((item) => (
-              <text key={item} testId={`item-${item}`}>
+              <div key={item} testId={`item-${item}`}>
                 {item}
-              </text>
+              </div>
             )),
             layer
           )}

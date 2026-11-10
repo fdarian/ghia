@@ -21,7 +21,7 @@ function Entry({ text }: { text: string }) {
       <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8 }}>
         <div style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: "#999999" }} />
         <div style={{ display: "flex", flexDirection: "column" }}>
-          <text style={{ fontSize: 14, color: "#222222" }}>{text}</text>
+          <div style={{ fontSize: 14, color: "#222222" }}>{text}</div>
         </div>
       </div>
       <div style={{ height: 1, backgroundColor: "#dddddd" }} />
@@ -43,7 +43,7 @@ function Page() {
 
 /** The tree between two visits: one text that changes every frame, so every frame looks up a line the frame before did not. */
 function Elsewhere({ frame }: { frame: number }) {
-  return <text style={{ fontSize: 14, fontFamily: "GpuixTestSquare" }}>{`frame ${frame}`}</text>
+  return <div style={{ fontSize: 14, fontFamily: "GpuixTestSquare" }}>{`frame ${frame}`}</div>
 }
 
 type Step = { ms: number; shapes: number; wrapped: number; hits: number; shapeCacheHits: number }

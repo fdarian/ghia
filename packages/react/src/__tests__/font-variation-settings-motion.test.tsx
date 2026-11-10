@@ -52,9 +52,9 @@ function staticWidth(fontVariationSettings: string): number {
   try {
     render(
       <div style={column}>
-        <text testId="text" style={{ fontVariationSettings }}>
+        <div testId="text" style={{ fontVariationSettings }}>
           WWWWWWWWWW
-        </text>
+        </div>
       </div>
     )
     return width()
@@ -63,7 +63,7 @@ function staticWidth(fontVariationSettings: string): number {
   }
 }
 
-const text = <text testId="text">WWWWWWWWWW</text>
+const text = <div testId="text">WWWWWWWWWW</div>
 
 describeNative("animating fontVariationSettings", () => {
   it("motion animate moves the width of the text with the axis, monotonically", () => {
@@ -212,9 +212,9 @@ describeNative("transitioning fontVariationSettings", () => {
 describeNative("fontVariationSettings of a span in motion", () => {
   const paragraph = (settings: string, extra: Record<string, unknown> = {}) => (
     <div style={column}>
-      <text testId="text">
+      <div testId="text">
         WWWW<span style={{ fontVariationSettings: settings, ...extra }}>WWWWWW</span>WWWW
-      </text>
+      </div>
     </div>
   )
 
@@ -270,13 +270,13 @@ describeNative("fontVariationSettings of a span in motion", () => {
     try {
       render(
         <div style={column}>
-          <text testId="text">
+          <div testId="text">
             WWWW
             <motion.span initial={{ fontVariationSettings: LIGHT }} animate={{ fontVariationSettings: HEAVY }} transition={linear}>
               WWWWWW
             </motion.span>
             WWWW
-          </text>
+          </div>
         </div>
       )
       expect(width()).toBeCloseTo(light, 1)

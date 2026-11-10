@@ -809,7 +809,7 @@ describeNative("container queries: what a pass before present must not report", 
           onLayout={onLayout}
           style={{ width: 100, height: 20, "@container": { "(min-width: 300px)": { width: 300 } } }}
         >
-          <text>hello</text>
+          <div>hello</div>
         </div>
       </div>
     </div>
@@ -875,12 +875,12 @@ describeNative("container queries: text and virtual lists", () => {
     const app = (width: number) => (
       <div style={{ width }}>
         <div style={{ containerType: "inline-size" }}>
-          <text testId="plain" style={{ fontSize: "10cqw" }}>
+          <div testId="plain" style={{ fontSize: "10cqw" }}>
             m
-          </text>
-          <text testId="spanned">
+          </div>
+          <div testId="spanned">
             <span style={{ fontSize: "10cqw" }}>m</span>
-          </text>
+          </div>
         </div>
       </div>
     )

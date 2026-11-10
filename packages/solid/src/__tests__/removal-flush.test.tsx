@@ -17,7 +17,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid removal-only updates", () => {
       <div>
         <Show when={shown()}>
           <div testId="panel" onClick={() => clicks++} style={box}>
-            <text>panel</text>
+            <div>panel</div>
           </div>
         </Show>
       </div>
@@ -44,7 +44,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid removal-only updates", () => {
     const app = createTestRoot()
     app.render(() => (
       <div>
-        <For each={names()}>{(name) => <text>{name}</text>}</For>
+        <For each={names()}>{(name) => <div>{name}</div>}</For>
       </div>
     ))
     expect(app.renderer.getAllText()).toEqual(["a", "b", "c"])

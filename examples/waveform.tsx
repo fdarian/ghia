@@ -76,9 +76,9 @@ export function WaveformApp({
         backgroundColor: '#11111b',
       }}
     >
-      <text style={{ color: '#cdd6f4', fontSize: 18, fontWeight: 600 }}>
+      <div style={{ color: '#cdd6f4', fontSize: 18, fontWeight: 600 }}>
         Waveform
-      </text>
+      </div>
       <Waveform phase={phase} />
       <div
         testId="clip-list"

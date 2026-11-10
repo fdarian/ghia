@@ -34,8 +34,8 @@ function capture(name: string, tree: ReactElement) {
 function digits(style: Record<string, unknown>, parent: Record<string, unknown> = {}) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", fontSize: 32, ...parent }}>
-      <text testId="ones" style={style}>1111111111</text>
-      <text testId="zeros" style={style}>0000000000</text>
+      <div testId="ones" style={style}>1111111111</div>
+      <div testId="zeros" style={style}>0000000000</div>
     </div>
   )
 }
@@ -99,8 +99,8 @@ describeNative("fontFeatureSettings", () => {
   it("keeps an inherited property when a descendant sets the other", () => {
     const tree = (
       <div style={{ fontSize: 32, fontFeatureSettings: '"tnum" 1', display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-        <text testId="ones" style={{ fontVariantNumeric: "slashed-zero" }}>1111111111</text>
-        <text testId="zeros" style={{ fontVariantNumeric: "slashed-zero" }}>0000000000</text>
+        <div testId="ones" style={{ fontVariantNumeric: "slashed-zero" }}>1111111111</div>
+        <div testId="zeros" style={{ fontVariantNumeric: "slashed-zero" }}>0000000000</div>
       </div>
     )
     const shot = capture("inherit-other", tree)
@@ -141,12 +141,12 @@ describeNative("an invalid font feature declaration is ignored, not reset", () =
   it("leaves the settings the box around a span declares", () => {
     const tree = (inner: string) => (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", fontSize: 32 }}>
-        <text testId="ones">
+        <div testId="ones">
           <span style={TABULAR}>
             11111<span style={{ fontFeatureSettings: inner }}>11111</span>
           </span>
-        </text>
-        <text testId="zeros">0000000000</text>
+        </div>
+        <div testId="zeros">0000000000</div>
       </div>
     )
     expect(capture("invalid-span", tree("tnum 1")).width("ones")).toBeCloseTo(capture("invalid-span-ref", tree('"tnum" 1')).width("ones"), 1)

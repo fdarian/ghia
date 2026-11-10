@@ -255,7 +255,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid MotionConfig", () => {
     const app = createTestRoot()
     function Probe() {
       const reduced = createReducedMotionConfig()
-      return <text>{reduced() ? "reduced" : "full"}</text>
+      return <div>{reduced() ? "reduced" : "full"}</div>
     }
     app.render(() => (
       <MotionConfig reducedMotion="user">

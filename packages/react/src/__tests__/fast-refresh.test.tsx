@@ -38,7 +38,7 @@ describeNative("react fast refresh", () => {
         const [count, setCount] = useState(0)
         return (
           <div style={{ width: 200, height: 50 }} onClick={() => setCount((value) => value + 1)}>
-            <text>{`${label} ${count}`}</text>
+            <div>{`${label} ${count}`}</div>
           </div>
         )
       }

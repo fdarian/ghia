@@ -124,7 +124,7 @@ function Card({ index, kind, onIteration }: { index: number; kind: Kind; onItera
         testId={`card-${index}`}
         style={{ height: 120, flexShrink: 0, padding: 8, marginBottom: 8, backgroundColor: "#f4f4f4", borderRadius: 8, flexDirection: "column", gap: 4 }}
       >
-        <text style={{ fontSize: 14, color: "#222222" }}>{`Card title ${index}`}</text>
+        <div style={{ fontSize: 14, color: "#222222" }}>{`Card title ${index}`}</div>
         <svg testId={`svg-${index}`} viewBox="0 0 24 24" width={24} height={24} style={{ flexShrink: 0 }}>
           {filler ? <path d={filler} fill="#aabbcc" /> : null}
           <circle
@@ -154,14 +154,14 @@ function Card({ index, kind, onIteration }: { index: number; kind: Kind; onItera
           animate={{ opacity: [1, 0.25, 1] }}
           transition={{ duration: 1, ease: "linear", repeat: Infinity }}
         >
-          <text style={{ fontSize: 14, color: "#222222" }}>{`Card title ${index}`}</text>
+          <div style={{ fontSize: 14, color: "#222222" }}>{`Card title ${index}`}</div>
         </motion.div>
       ) : (
-        <text testId={`label-${index}`} onAnimationIteration={onIteration ? () => onIteration(index) : undefined} style={{ ...shared, animation }}>
+        <div testId={`label-${index}`} onAnimationIteration={onIteration ? () => onIteration(index) : undefined} style={{ ...shared, animation }}>
           {`Card title ${index}`}
-        </text>
+        </div>
       )}
-      <text style={{ fontSize: 12, color: "#666666" }}>{`Description line of card ${index}`}</text>
+      <div style={{ fontSize: 12, color: "#666666" }}>{`Description line of card ${index}`}</div>
       <div
         testId={`swatch-${index}`}
         style={{ width: kind === "width" ? undefined : 60, height: 18, borderRadius: 9, backgroundColor: "#ff0000", animation }}
@@ -177,7 +177,7 @@ function SidebarPage({ cards, kind, place, onIteration }: { cards: number; kind:
       <div style={{ width: 200, flexDirection: "column", flexShrink: 0, padding: 4 }}>
         {Array.from({ length: ROWS }, (_, index) => (
           <div key={index} style={{ height: ROW, flexShrink: 0, padding: 1, display: "flex", borderRadius: 4, hover: { backgroundColor: "#e5e5e5" } }}>
-            <text style={{ fontSize: 12, color: "#222222" }}>{`Sidebar item ${index}`}</text>
+            <div style={{ fontSize: 12, color: "#222222" }}>{`Sidebar item ${index}`}</div>
           </div>
         ))}
       </div>
@@ -346,13 +346,13 @@ describeNative("a loop that is culled", { timeout: TIMEOUT }, () => {
       <div style={{ width: SIZE.width, height: SIZE.height, flexDirection: "column" }}>
         {shown ? null : <div style={{ height: SIZE.height + BEFORE, flexShrink: 0 }} />}
         {LOOPS.map((loop, index) => (
-          <text
+          <div
             key={index}
             testId={`timed-${index}`}
             onAnimationIteration={(event) => onEvent(`iteration:${index}:${event.elapsedTime}`)}
             onAnimationEnd={(event) => onEvent(`end:${index}:${event.elapsedTime}`)}
             style={{ fontSize: 14, color: "#ff0000", animation: `offscreen-pulse ${loop}` }}
-          >{`timed ${index}`}</text>
+          >{`timed ${index}`}</div>
         ))}
       </div>
     )
@@ -559,7 +559,7 @@ function LoopCard({ index, onComplete }: { index: number; onComplete?: (index: n
         transition={{ duration: 1, ease: "linear", repeat: Infinity }}
         onMotionComplete={() => onComplete?.(index)}
       >
-        <text style={{ fontSize: 14, color: "#222222" }}>{`Loop card ${index}`}</text>
+        <div style={{ fontSize: 14, color: "#222222" }}>{`Loop card ${index}`}</div>
       </motion.div>
       <motion.div
         testId={`tint-${index}`}
@@ -585,7 +585,7 @@ function FiniteCard({ index, onComplete }: { index: number; onComplete: (index: 
         transition={{ duration: 0.5, ease: "linear" }}
         onMotionComplete={() => onComplete(index)}
       >
-        <text style={{ fontSize: 14, color: "#222222" }}>{`Finite card ${index}`}</text>
+        <div style={{ fontSize: 14, color: "#222222" }}>{`Finite card ${index}`}</div>
       </motion.div>
     </div>
   )
@@ -816,9 +816,9 @@ describeNative("a CSS loop that nobody sees", { timeout: TIMEOUT }, () => {
   function EndingCard({ index, onEnd }: { index: number; onEnd: (index: number) => void }) {
     return (
       <div testId={`ending-card-${index}`} style={{ height: 120, flexShrink: 0, padding: LOOP_SPACE, marginBottom: 8, backgroundColor: "#f4f4f4", borderRadius: 8, flexDirection: "column" }}>
-        <text testId={`ending-${index}`} onAnimationEnd={() => onEnd(index)} style={{ fontSize: 14, color: "#ff0000", animation: "offscreen-pulse 500ms linear forwards" }}>
+        <div testId={`ending-${index}`} onAnimationEnd={() => onEnd(index)} style={{ fontSize: 14, color: "#ff0000", animation: "offscreen-pulse 500ms linear forwards" }}>
           {`Ending card ${index}`}
-        </text>
+        </div>
       </div>
     )
   }
@@ -854,11 +854,11 @@ describeNative("a CSS loop that nobody sees", { timeout: TIMEOUT }, () => {
         place="hidden"
         card={(index) => (
           <div testId={`turning-card-${index}`} style={{ height: 120, flexShrink: 0, padding: LOOP_SPACE, marginBottom: 8, backgroundColor: "#f4f4f4", borderRadius: 8, flexDirection: "column" }}>
-            <text
+            <div
               testId={`turning-${index}`}
               onTransitionEnd={() => onEnd(index)}
               style={{ fontSize: 14, color: on ? "#0000ff" : "#ff0000", transition: "color 500ms linear" }}
-            >{`Turning card ${index}`}</text>
+            >{`Turning card ${index}`}</div>
           </div>
         )}
       />
@@ -911,7 +911,7 @@ describeNative("a motion value bound to an element that nobody sees", { timeout:
     }, [value])
     return (
       <div style={{ height: 120, flexShrink: 0 }}>
-        <text style={{ fontSize: 14, color: value }}>bound</text>
+        <div style={{ fontSize: 14, color: value }}>bound</div>
       </div>
     )
   }

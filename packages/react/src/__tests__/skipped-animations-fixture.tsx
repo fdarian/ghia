@@ -73,7 +73,7 @@ export function Sidebar() {
     <div style={{ width: 100, flexShrink: 0, display: "flex", flexDirection: "column" }}>
       {Array.from({ length: ROWS }, (_, row) => (
         <div key={row} testId={`row-${row}`} style={{ height: ROW, flexShrink: 0, hover: { backgroundColor: "#e5e5e5" } }}>
-          <text style={{ fontSize: 8, color: "#222222" }}>{`Item ${row}`}</text>
+          <div style={{ fontSize: 8, color: "#222222" }}>{`Item ${row}`}</div>
         </div>
       ))}
     </div>
@@ -86,7 +86,7 @@ export function Filler() {
     <div style={{ height: 30, flexShrink: 0, overflow: "hidden" }}>
       {Array.from({ length: 150 }, (_, row) => (
         <div key={row} style={{ height: 10, flexShrink: 0 }}>
-          <text style={{ fontSize: 8, color: "#222222" }}>{`Filler ${row}`}</text>
+          <div style={{ fontSize: 8, color: "#222222" }}>{`Filler ${row}`}</div>
         </div>
       ))}
     </div>

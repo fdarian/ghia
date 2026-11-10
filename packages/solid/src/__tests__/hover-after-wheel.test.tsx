@@ -48,7 +48,7 @@ function open() {
       <For each={Array.from({ length: WINDOW }, (_, offset) => windowStart() + offset)}>
         {(index) => (
           <div testId={`row-${index}`} style={{ height: ROW, flexShrink: 0, backgroundColor: "#223344", hover: { backgroundColor: "#664422" } }}>
-            <text style={{ color: "#ffffff" }}>{`row-${index}`}</text>
+            <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
           </div>
         )}
       </For>

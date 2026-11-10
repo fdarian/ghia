@@ -54,7 +54,7 @@ describeNative("simulated keystrokes", () => {
       return (
         <div style={{ width: 400, height: 100 }}>
           <input value={text} style={{ width: 300, height: 40 }} onChange={(event) => setText(event.value)} />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }

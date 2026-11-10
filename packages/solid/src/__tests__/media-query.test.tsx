@@ -14,7 +14,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid matchMedia", () => {
     const app = createTestRoot()
     app.render(() => {
       const reduced = createReducedMotion()
-      return <text>{reduced() ? "reduced" : "full"}</text>
+      return <div>{reduced() ? "reduced" : "full"}</div>
     })
     expect(app.renderer.getAllText()).toEqual(["full"])
 
@@ -33,7 +33,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid matchMedia", () => {
     const app = createTestRoot()
     app.render(() => {
       const matches = createMediaQuery(query)
-      return <text>{String(matches())}</text>
+      return <div>{String(matches())}</div>
     })
     expect(app.renderer.getAllText()).toEqual(["true"])
     app.flushSync(() => setQuery("(min-width: 100000px)"))
@@ -46,7 +46,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid matchMedia", () => {
     let list: MediaQueryList | undefined
     app.render(() => {
       list = createMatchMedia()("(prefers-contrast: more)")
-      return <text>probe</text>
+      return <div>probe</div>
     })
     expect(list).toBeInstanceOf(MediaQueryList)
     expect(list?.matches).toBe(false)
@@ -62,7 +62,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid matchMedia", () => {
     const app = createTestRoot()
     app.render(() => {
       createReducedMotion()
-      return <text>x</text>
+      return <div>x</div>
     })
     app.unmount()
     app.renderer.setMediaFeatures({ reducedMotion: true })
@@ -71,7 +71,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid matchMedia", () => {
 
   it("the global matchMedia uses the mounted root's window", () => {
     const app = createTestRoot()
-    app.render(() => <text>x</text>)
+    app.render(() => <div>x</div>)
     expect(matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(false)
     app.renderer.setMediaFeatures({ reducedMotion: true })
     expect(matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(true)

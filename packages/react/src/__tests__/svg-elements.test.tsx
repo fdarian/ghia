@@ -349,7 +349,7 @@ describeNative("svg text", () => {
     const view = painter(path.join(SHOTS_DIR, "svg-text-host.png"), renderer)
     render(
       <div style={FRAME}>
-        <text style={{ color: "#ffffff", fontSize: 30 }}>Hi</text>
+        <div style={{ color: "#ffffff", fontSize: 30 }}>Hi</div>
       </div>
     )
     expect(view.ink(0, 0, 60, 50)).toBeGreaterThan(30)

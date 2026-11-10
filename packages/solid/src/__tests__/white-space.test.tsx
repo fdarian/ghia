@@ -35,11 +35,11 @@ describe.skipIf(!hasNativeTestRenderer)("Solid white-space", () => {
   it("collapses across span edges and strips the paragraph's ends, as a signal changes", () => {
     const [word, setWord] = createSignal("  b  ")
     const app = paint(() => (
-      <text testId="p" style={{ width: 400, ...TEXT }}>
+      <div testId="p" style={{ width: 400, ...TEXT }}>
         {"  \n a  "}
         <span style={{ fontWeight: 700 }}>{word()}</span>
         {"  c \n"}
-      </text>
+      </div>
     ))
     expect(app.renderer.getPaintedText()).toEqual(["a b c"])
 
@@ -96,10 +96,10 @@ describe.skipIf(!hasNativeTestRenderer)("Solid white-space", () => {
       <div style={{ width: 400, whiteSpace: "pre", ...TEXT }}>
         <div>{"a  b"}</div>
         <div style={{ whiteSpace: "normal" }}>{"a  b"}</div>
-        <text>
+        <div>
           {"c  "}
           <span style={{ whiteSpace: "normal" }}>{"d   e"}</span>
-        </text>
+        </div>
       </div>
     ))
     expect(app.renderer.getPaintedText()).toEqual(["a  b", "a b", "c  d e"])
@@ -118,12 +118,12 @@ describe.skipIf(!hasNativeTestRenderer)("Solid white-space", () => {
   describe("search, selection and lookup after collapsing", () => {
     const view = (query: string) => () => (
       <div style={{ width: 600 }} highlight={{ query }}>
-        <text style={{ ...TEXT, fontSize: 20 }}>
+        <div style={{ ...TEXT, fontSize: 20 }}>
           {"alpha   \n  "}
           <span style={{ fontWeight: 700 }}>{"  beta  "}</span>
           {"   gamma"}
           <span style={{ backgroundColor: "#ffff00" }}>{"   \n  delta  "}</span>
-        </text>
+        </div>
       </div>
     )
 
@@ -148,7 +148,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid white-space", () => {
     })
 
     it("finds an element by its collapsed text", () => {
-      const app = paint(() => <text style={TEXT}>{"hello  \n   world"}</text>)
+      const app = paint(() => <div style={TEXT}>{"hello  \n   world"}</div>)
       expect(app.renderer.findByText("hello world")).toBeDefined()
     })
   })

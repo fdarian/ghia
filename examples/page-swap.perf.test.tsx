@@ -24,7 +24,7 @@ function Row({ index }: { index: number }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'row', gap: 4, height: 18, padding: 2, backgroundColor: index % 2 === 0 ? '#202428' : '#262b30' }}>
       <div style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: '#4c9' }} />
-      <text style={{ fontSize: 12, color: '#ddd' }}>{`row ${index}`}</text>
+      <div style={{ fontSize: 12, color: '#ddd' }}>{`row ${index}`}</div>
     </div>
   )
 }

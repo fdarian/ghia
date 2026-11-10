@@ -19,7 +19,7 @@ describe("highlight", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ padding: 20 }}>
-        <text>the quick brown fox</text>
+        <div>the quick brown fox</div>
       </div>
     )
     expect(renderer.getPaintedHighlights()).toEqual([])
@@ -29,7 +29,7 @@ describe("highlight", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ padding: 20 }} highlight={{ query: "quick" }}>
-        <text style={{ fontSize: 20 }}>the quick brown fox</text>
+        <div style={{ fontSize: 20 }}>the quick brown fox</div>
       </div>
     )
 
@@ -46,14 +46,14 @@ describe("highlight", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div highlight={{ query: "fox" }}>
-        <text>Fox fox FOX</text>
+        <div>Fox fox FOX</div>
       </div>
     )
     expect(matched(renderer)).toEqual(["Fox", "fox", "FOX"])
 
     render(
       <div highlight={{ query: "fox", caseSensitive: true }}>
-        <text>Fox fox FOX</text>
+        <div>Fox fox FOX</div>
       </div>
     )
     expect(matched(renderer)).toEqual(["fox"])
@@ -64,10 +64,10 @@ describe("highlight", () => {
     render(
       <div style={{ display: "flex", flexDirection: "column" }}>
         <div highlight={{ query: "fox" }}>
-          <text>searched fox</text>
+          <div>searched fox</div>
         </div>
         <div>
-          <text>ignored fox</text>
+          <div>ignored fox</div>
         </div>
       </div>
     )
@@ -81,9 +81,9 @@ describe("highlight", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column" }} highlight={{ query: "outer" }}>
-        <text>outer only here</text>
+        <div>outer only here</div>
         <div highlight={{ query: "inner" }}>
-          <text>outer and inner</text>
+          <div>outer and inner</div>
         </div>
       </div>
     )
@@ -97,7 +97,7 @@ describe("highlight", () => {
     const name = "Tommy"
     render(
       <div highlight={{ query: "Hello Tommy" }}>
-        <text>Hello {name}!</text>
+        <div>Hello {name}!</div>
       </div>
     )
 
@@ -110,8 +110,8 @@ describe("highlight", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column" }} highlight={{ query: "quick brown" }}>
-        <text>quick </text>
-        <text>brown</text>
+        <div>quick </div>
+        <div>brown</div>
       </div>
     )
     expect(renderer.getPaintedHighlights()).toEqual([])
@@ -122,7 +122,7 @@ describe("highlight", () => {
     const name = "Tommy"
     render(
       <div highlight={{ ranges: [[6, 11]] }}>
-        <text>Hello {name}!</text>
+        <div>Hello {name}!</div>
       </div>
     )
     expect(matched(renderer)).toEqual(["Tommy"])
@@ -132,7 +132,7 @@ describe("highlight", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div highlight={{ ranges: [[1, 2]] }}>
-        <text>a👋b</text>
+        <div>a👋b</div>
       </div>
     )
     expect(renderer.getPaintedHighlights()).toEqual([])
@@ -142,7 +142,7 @@ describe("highlight", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div highlight={{ query: "fox", activeIndex: 1 }}>
-        <text>fox fox fox</text>
+        <div>fox fox fox</div>
       </div>
     )
 
@@ -155,7 +155,7 @@ describe("highlight", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div highlight={[{ query: "fox" }, { query: "dog" }]}>
-        <text>fox and dog</text>
+        <div>fox and dog</div>
       </div>
     )
     expect(matched(renderer).sort()).toEqual(["dog", "fox"])
@@ -165,14 +165,14 @@ describe("highlight", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div highlight={{ query: "fox" }}>
-        <text>a fox</text>
+        <div>a fox</div>
       </div>
     )
     expect(renderer.getPaintedHighlights()).toHaveLength(1)
 
     render(
       <div>
-        <text>a fox</text>
+        <div>a fox</div>
       </div>
     )
     expect(renderer.getPaintedHighlights()).toEqual([])
@@ -182,7 +182,7 @@ describe("highlight", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ userSelect: "none" }} highlight={{ query: "label" }}>
-        <text>a label</text>
+        <div>a label</div>
       </div>
     )
     expect(matched(renderer)).toEqual(["label"])
@@ -193,7 +193,7 @@ describe("highlight", () => {
     const counts: number[] = []
     const app = (query: string) => (
       <div highlight={{ query }} onHighlight={(event) => counts.push(event.matchCount ?? -1)}>
-        <text>fox fox dog</text>
+        <div>fox fox dog</div>
       </div>
     )
 
@@ -247,9 +247,9 @@ describe("highlight", () => {
         style={{ display: "flex", flexDirection: "column" }}
         highlight={{ query: "x", activeIndex: 0 }}
       >
-        {first === "text" ? <text>x here</text> : null}
+        {first === "text" ? <div>x here</div> : null}
         <code code={"x again"} language="typescript" showHeader={false} />
-        {first === "code" ? <text>x here</text> : null}
+        {first === "code" ? <div>x here</div> : null}
       </div>
     )
 
@@ -275,8 +275,8 @@ describe("highlight", () => {
         style={{ display: "flex", flexDirection: "column" }}
         highlight={{ query: "x", activeIndex: 0 }}
       >
-        <text style={{ position: "relative" }}>x first</text>
-        <text>x second</text>
+        <div style={{ position: "relative" }}>x first</div>
+        <div>x second</div>
       </div>
     )
 
@@ -293,7 +293,7 @@ describe("highlight", () => {
         highlight={{ query: "x", activeIndex: 1 }}
       >
         <code code={"x again"} language="typescript" showHeader={false} style={{ position: "relative" }} />
-        <text>x here</text>
+        <div>x here</div>
       </div>
     )
 
@@ -309,8 +309,8 @@ describe("highlight", () => {
         style={{ display: "flex", flexDirection: "column" }}
         highlight={{ query: "x", activeIndex: 0 }}
       >
-        <text style={{ order: 1 }}>x first</text>
-        <text>x second</text>
+        <div style={{ order: 1 }}>x first</div>
+        <div>x second</div>
       </div>
     )
 
@@ -325,14 +325,14 @@ describe("highlight", () => {
 
     render(
       <div highlight={{ query: "fox" }}>
-        <text>fox and fox</text>
+        <div>fox and fox</div>
       </div>
     )
     renderer.dispatchNativeEvents()
 
     render(
       <div highlight={{ query: "fox" }} onHighlight={(e) => counts.push(e.matchCount ?? -1)}>
-        <text>fox and fox</text>
+        <div>fox and fox</div>
       </div>
     )
     renderer.dispatchNativeEvents()
@@ -392,7 +392,7 @@ describe("highlight", () => {
         >
           {Array.from({ length: 4 }, (_, offset) => (
             <div key={start + offset} style={{ height: 40, flexShrink: 0 }}>
-              <text>{`fox ${start + offset}`}</text>
+              <div>{`fox ${start + offset}`}</div>
             </div>
           ))}
         </virtual-list>
@@ -442,7 +442,7 @@ describe("highlight", () => {
           >
             {rows.slice(windowStart).map((text, offset) => (
               <div key={windowStart + offset} style={{ height: 40, flexShrink: 0 }}>
-                <text>{text || " "}</text>
+                <div>{text || " "}</div>
               </div>
             ))}
           </virtual-list>
@@ -468,7 +468,7 @@ describe("highlight", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div highlight={{ query: "fox", activeIndex: 1, matchIndexOffset: 0 }}>
-        <text>fox fox fox</text>
+        <div>fox fox fox</div>
       </div>
     )
     expect(renderer.getPaintedHighlights().map((hit) => hit.active)).toEqual([
@@ -484,9 +484,9 @@ describe("useTextSearch", () => {
     const search = useTextSearch({ query })
     return (
       <div style={{ display: "flex", flexDirection: "column" }}>
-        <text>{`count:${search.total}`}</text>
+        <div>{`count:${search.total}`}</div>
         <div {...search.props}>
-          <text>fox and fox</text>
+          <div>fox and fox</div>
         </div>
       </div>
     )
@@ -582,7 +582,7 @@ describe("findRanges", () => {
     const text = "İstanbul and fox and Fox"
     render(
       <div highlight={{ query: "fox" }}>
-        <text>{text}</text>
+        <div>{text}</div>
       </div>
     )
 

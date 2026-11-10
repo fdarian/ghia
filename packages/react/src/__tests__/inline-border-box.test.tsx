@@ -44,7 +44,7 @@ function measureColumn() {
   const testRoot = createTestRoot()
   testRoot.render(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   const width = testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -84,9 +84,9 @@ describeNative("border box of an inline element", () => {
     try {
       t.render(
         <div style={{ width: 400 }}>
-          <text ref={t.ref("text")} style={TEXT}>
+          <div ref={t.ref("text")} style={TEXT}>
             aa <span ref={t.ref("span")} style={SPACE}>bb</span>cc
-          </text>
+          </div>
         </div>
       )
       const column = columnWidth()
@@ -106,7 +106,7 @@ describeNative("border box of an inline element", () => {
     try {
       t.render(
         <div style={{ width: 400 }}>
-          <text ref={t.ref("text")} style={TEXT}>
+          <div ref={t.ref("text")} style={TEXT}>
             aa{" "}
             <span ref={t.ref("outer")} style={{ marginLeft: 2, paddingLeft: 3, paddingRight: 5, marginRight: 7 }}>
               <span
@@ -123,7 +123,7 @@ describeNative("border box of an inline element", () => {
                 bb
               </span>
             </span>
-          </text>
+          </div>
         </div>
       )
       const column = columnWidth()
@@ -147,12 +147,12 @@ describeNative("border box of an inline element", () => {
     try {
       t.render(
         <div style={{ width: 400 }}>
-          <text ref={t.ref("text")} style={{ ...TEXT, width: Math.ceil(11.5 * column) }}>
+          <div ref={t.ref("text")} style={{ ...TEXT, width: Math.ceil(11.5 * column) }}>
             ab{" "}
             <span ref={t.ref("span")} style={{ marginLeft: 8, paddingRight: 20 }}>
               cdefg hijk
             </span>
-          </text>
+          </div>
         </div>
       )
       // "ab " and 8 more: cdefg fits on the first line, hijk and its 20 are the second.
@@ -176,9 +176,9 @@ describeNative("border box of an inline element", () => {
       }
       t.render(
         <div style={{ width: 400 }}>
-          <text testId="p" style={TEXT} onClick={hear("text")}>
+          <div testId="p" style={TEXT} onClick={hear("text")}>
             aa <span style={span} onClick={hear("span")}>bb</span>cc
-          </text>
+          </div>
         </div>
       )
       return { ...t, seen }
@@ -210,9 +210,9 @@ describeNative("border box of an inline element", () => {
       try {
         t.render(
           <div style={{ width: 400 }}>
-            <text testId="p" style={TEXT}>
+            <div testId="p" style={TEXT}>
               aa <span style={SPACE} onClick={(event) => offsets.push(event.offsetX)}>bb</span>
-            </text>
+            </div>
           </div>
         )
         const x = 3 * column + LEADING + 0.5 * column
@@ -232,12 +232,12 @@ describeNative("border box of an inline element", () => {
       try {
         t.render(
           <div style={{ width: 400 }}>
-            <text testId="p" style={{ ...TEXT, width: Math.ceil(11.5 * column) }}>
+            <div testId="p" style={{ ...TEXT, width: Math.ceil(11.5 * column) }}>
               ab{" "}
               <span style={{ marginLeft: 8, marginRight: 20 }} onClick={() => seen.push("span")}>
                 cdefg hijk
               </span>
-            </text>
+            </div>
           </div>
         )
         t.click(3 * column + 4, 0) // the margin before c
@@ -256,9 +256,9 @@ describeNative("border box of an inline element", () => {
       try {
         t.render(
           <div style={{ width: 400 }}>
-            <text testId="p" style={TEXT}>
+            <div testId="p" style={TEXT}>
               aa <span style={{ ...SPACE, cursor: "pointer" }}>bb</span>cc
-            </text>
+            </div>
           </div>
         )
         const start = 3 * column
@@ -281,12 +281,12 @@ describeNative("border box of an inline element", () => {
       try {
         t.render(
           <div style={{ width: 400 }}>
-            <text testId="p" style={TEXT}>
+            <div testId="p" style={TEXT}>
               <span style={{ cursor: "pointer" }}>
                 ab
                 <span style={{ cursor: "text", marginLeft: 12, paddingLeft: 4 }}>cd</span>
               </span>
-            </text>
+            </div>
           </div>
         )
         expect(t.cursorAt(2 * column + 6), "the margin of the inner box").toBe("pointer")
@@ -304,7 +304,7 @@ describeNative("border box of an inline element", () => {
     try {
       t.render(
         <div style={{ width: 300, height: 100, padding: 20, backgroundColor: "#ffffff" }}>
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             aa{" "}
             <span
               tabIndex={0}
@@ -312,7 +312,7 @@ describeNative("border box of an inline element", () => {
             >
               bb
             </span>
-          </text>
+          </div>
         </div>
       )
       t.renderer.simulateKeystrokes("Tab")
@@ -348,7 +348,7 @@ describeNative("lengths of an inline element", () => {
     try {
       t.render(
         <div style={{ width: 400 }}>
-          <text style={{ ...TEXT, fontSize: 20, lineHeight: "24px" }}>
+          <div style={{ ...TEXT, fontSize: 20, lineHeight: "24px" }}>
             aa{" "}
             <span
               ref={t.ref("em")}
@@ -359,7 +359,7 @@ describeNative("lengths of an inline element", () => {
             <span ref={t.ref("rem")} style={{ paddingLeft: "2rem", borderLeftWidth: "0.25em", borderLeftStyle: "solid" }}>
               cc
             </span>
-          </text>
+          </div>
         </div>
       )
       const wide = (column * 20) / 16
@@ -381,13 +381,13 @@ describeNative("lengths of an inline element", () => {
       try {
         t.render(
           <div style={{ width }}>
-            <text style={TEXT}>
+            <div style={TEXT}>
               aa{" "}
               <span ref={t.ref("span")} style={{ paddingLeft: "10%", marginRight: "calc(5% + 1px)" }}>
                 bb
               </span>
               cc
-            </text>
+            </div>
           </div>
         )
         const span = t.rect("span")

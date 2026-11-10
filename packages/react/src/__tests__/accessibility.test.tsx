@@ -77,7 +77,7 @@ describeNative("accessibility", () => {
   })
 
   it("reports a <text> node as Label with its content", () => {
-    testRoot.render(<text style={{ width: 200, height: 24 }}>Hello</text>)
+    testRoot.render(<div style={{ width: 200, height: 24 }}>Hello</div>)
 
     const labels = withRole(testRoot.renderer.getA11yTree(), "Label")
     expect(labels.some((aria) => aria.value === "Hello")).toBe(true)
@@ -210,7 +210,7 @@ describeNative("accessibility", () => {
         aria-label="Messages"
         style={{ width: 200, height: 80 }}
       >
-        <text>one</text>
+        <div>one</div>
       </virtual-list>,
     )
 
@@ -221,7 +221,7 @@ describeNative("accessibility", () => {
 
   it("joins interpolated <text> children into one Label", () => {
     const name = "Ada"
-    testRoot.render(<text style={{ width: 200, height: 24 }}>Hello {name}!</text>)
+    testRoot.render(<div style={{ width: 200, height: 24 }}>Hello {name}!</div>)
 
     const labels = withRole(testRoot.renderer.getA11yTree(), "Label")
     expect(labels.filter((aria) => aria.value === "Hello Ada!")).toHaveLength(1)
@@ -229,9 +229,9 @@ describeNative("accessibility", () => {
 
   it("lets an explicit role override the <text> default", () => {
     testRoot.render(
-      <text role="heading" aria-level={1} style={{ width: 200, height: 24 }}>
+      <div role="heading" aria-level={1} style={{ width: 200, height: 24 }}>
         Title
-      </text>,
+      </div>,
     )
 
     const tree = testRoot.renderer.getA11yTree()
@@ -435,7 +435,7 @@ describeNative("accessibility", () => {
           aria-owns="title"
           style={{ width: 80, height: 24 }}
         />
-        <text id="title" style={{ height: 20 }}>Title</text>
+        <div id="title" style={{ height: 20 }}>Title</div>
         <div id="hint" role="note" style={{ width: 80, height: 20 }} />
         <div id="list" role="listbox" style={{ width: 80, height: 20 }} />
         <div id="error" role="alert" style={{ width: 80, height: 20 }} />
@@ -462,7 +462,7 @@ describeNative("accessibility", () => {
       <div style={{ width: 300, height: 100 }}>
         <div id="field" role="textbox" aria-describedby="hint" style={{ width: 80, height: 24 }} />
         <div id="hint" style={{ width: 120, height: 20 }}>
-          <text>Be brief</text>
+          <div>Be brief</div>
         </div>
         <div id="unreferenced" style={{ width: 80, height: 20 }} />
       </div>,
@@ -527,7 +527,7 @@ describeNative("accessibility", () => {
         <input id="a" aria-label="Own name" value="" style={{ width: 100, height: 24 }} />
         <label htmlFor="b" style={{ height: 20 }}>Two</label>
         <input id="b" aria-labelledby="other" value="" style={{ width: 100, height: 24 }} />
-        <text id="other" style={{ height: 20 }}>Other</text>
+        <div id="other" style={{ height: 20 }}>Other</div>
       </div>,
     )
 

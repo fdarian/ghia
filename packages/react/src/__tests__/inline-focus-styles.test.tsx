@@ -29,7 +29,7 @@ function measureColumn() {
   const testRoot = createTestRoot()
   testRoot.render(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   const width = testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -62,13 +62,13 @@ describeNative("focus styles on inline boxes", () => {
   /** `ab[cd]ef`: the span is columns 2-3. Something else to Tab to follows it. */
   const sentence = (span: object) => (
     <div style={PAGE}>
-      <text testId="p" style={TEXT}>
+      <div testId="p" style={TEXT}>
         ab
         <span tabIndex={0} style={span}>
           cd
         </span>
         ef
-      </text>
+      </div>
       <div tabIndex={0} style={{ width: 10, height: 10 }} />
     </div>
   )
@@ -109,7 +109,7 @@ describeNative("focus styles on inline boxes", () => {
   it("restyles a span for focusWithin while a span nested in it has focus", () => {
     const { testRoot, shoot, cornerOf, tab } = setup(
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           ab
           <span style={{ focusWithin: { backgroundColor: "#0000ff" } }}>
             cd
@@ -118,7 +118,7 @@ describeNative("focus styles on inline boxes", () => {
             </span>
           </span>
           gh
-        </text>
+        </div>
       </div>
     )
     expect(cornerOf(shoot("within-before"), 2)).toEqual(WHITE)

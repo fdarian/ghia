@@ -63,7 +63,7 @@ function Card(props: { index: number; children?: JSX.Element }) {
         </div>
       </div>
       <div style={{ height: 24, backgroundColor: "#223344" }}>
-        <text>{`card ${props.index}`}</text>
+        <div>{`card ${props.index}`}</div>
       </div>
     </div>
   )

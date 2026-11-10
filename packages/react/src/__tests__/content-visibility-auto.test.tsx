@@ -559,7 +559,7 @@ function TextEntry({ index, value, events, intrinsic = "auto 40px" }: { index: n
       <div testId={`row-${index}`} style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8 }}>
         <div testId={`bar-${index}`} style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: "#999999" }} />
         <div style={{ display: "flex", flexDirection: "column" }}>
-          <text style={{ fontSize: 14, lineHeight: "16px", color: "#222222" }}>{`Entry ${index}: the sidebar row keeps its fluid hover while the page behind it swaps`}</text>
+          <div style={{ fontSize: 14, lineHeight: "16px", color: "#222222" }}>{`Entry ${index}: the sidebar row keeps its fluid hover while the page behind it swaps`}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "row", gap: 2 }}>
           <div style={{ width: 6, height: 6, backgroundColor: "#dddddd" }} />
@@ -590,7 +590,7 @@ function BesideSidebar({ rows, events }: { rows: number; events: Events }) {
       <div style={{ width: 160, flexShrink: 0, display: "flex", flexDirection: "column" }}>
         {Array.from({ length: rows }, (_, index) => (
           <div key={index} style={{ height: 24, padding: 4 }}>
-            <text style={{ fontSize: 14, color: "#555555" }}>{`Sidebar row ${index}`}</text>
+            <div style={{ fontSize: 14, color: "#555555" }}>{`Sidebar row ${index}`}</div>
           </div>
         ))}
       </div>
@@ -1556,7 +1556,7 @@ describeNative("consecutive reads and a layout animation that does not move the 
       renderer.clockPause()
       root.render(
         <Page>
-          <text style={TEXT}>
+          <div style={TEXT}>
             {"Before the box "}
             <div testId="inline" style={{ display: "inline-block", width: 200, height: 160, flexDirection: "column" }}>
               <motion.div testId="growing" style={{ width: 20, height: grow, flexShrink: 0 }} />
@@ -1565,7 +1565,7 @@ describeNative("consecutive reads and a layout animation that does not move the 
               </div>
             </div>
             {" and after it"}
-          </text>
+          </div>
         </Page>
       )
       renderer.flush()
@@ -1600,11 +1600,11 @@ describeNative("consecutive reads and a layout animation that does not move the 
           <motion.div testId="wrapper" style={{ fontFamily: "Menlo", fontSize: size, width: 400, height: 200, flexShrink: 0, overflow: "hidden" }}>
             <div testId="held" style={HELD}>
               <div testId="label" style={{ alignSelf: "flex-start" }}>
-                <text>Hello world</text>
+                <div>Hello world</div>
               </div>
             </div>
             <div testId="control" style={{ alignSelf: "flex-start" }}>
-              <text>Hello world</text>
+              <div>Hello world</div>
             </div>
           </motion.div>
         </Page>
@@ -2214,7 +2214,7 @@ describeNative("content a read forced keeps its layout across the draws that ski
           {Array.from({ length: CARDS }, (_, card) => (
             <div key={card} testId={`card-${card}`} style={{ margin: 3, padding: 2, flexShrink: 0, width: 160 }}>
               <div testId={`words-${card}`} style={{ flexShrink: 0 }}>
-                <text style={{ fontSize: 14 }}>{`Card ${card} has enough words in it to wrap onto more than one line`}</text>
+                <div style={{ fontSize: 14 }}>{`Card ${card} has enough words in it to wrap onto more than one line`}</div>
               </div>
               <div testId={`scroller-${card}`} style={{ height: 24 + card, width: 60, overflow: "hidden", flexShrink: 0 }}>
                 <div style={{ height: 90, width: 40, flexShrink: 0 }} />
@@ -2284,7 +2284,7 @@ describeNative("content a read forced keeps its layout across the draws that ski
           {Array.from({ length: CARDS }, (_, card) => (
             <div key={card} testId={`card-${card}`} style={{ height: 50, width: 160, marginLeft: 30, flexShrink: 0 }}>
               <div testId={`part-${card}`} style={{ height: 20, width: 100, flexShrink: 0 }} />
-              <text style={{ fontSize: 12, lineHeight: "12px" }}>{`Card ${card}`}</text>
+              <div style={{ fontSize: 12, lineHeight: "12px" }}>{`Card ${card}`}</div>
             </div>
           ))}
         </div>

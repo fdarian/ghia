@@ -72,7 +72,7 @@ function painted(source: OracleCase): { scale: number; marks: Marks } {
   try {
     testRoot.render(
       <div style={{ width: 600, height: source.height, backgroundColor: "#ffffff" }}>
-        <text
+        <div
           style={
             {
               width: 600,
@@ -86,7 +86,7 @@ function painted(source: OracleCase): { scale: number; marks: Marks } {
           }
         >
           {nodesOf(source.html)}
-        </text>
+        </div>
       </div>
     )
     const file = `${SHOTS_DIR}/text-decoration-lines-${shots++}.png`

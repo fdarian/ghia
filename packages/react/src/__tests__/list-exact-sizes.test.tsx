@@ -72,7 +72,7 @@ function Rows({ row, count = 30, estimated = false, extra = {} }: { row: Row; co
       >
         {Array.from({ length: count }, (_, index) => (
           <div key={index} testId={`row-${index}`} style={{ backgroundColor: index % 2 ? "#eeeeee" : "#ffffff", ...row(index) }}>
-            <text style={{ color: "#222222" }}>{`row ${index}`}</text>
+            <div style={{ color: "#222222" }}>{`row ${index}`}</div>
           </div>
         ))}
       </virtual-list>

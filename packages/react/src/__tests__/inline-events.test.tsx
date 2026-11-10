@@ -26,7 +26,7 @@ function measureColumn() {
   const testRoot = createTestRoot()
   testRoot.render(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   const width = testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -68,14 +68,14 @@ describeNative("events on inline boxes", () => {
     }
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text
+        <div
           testId="p"
           ref={(element) => (elements.text = element)}
           style={TEXT}
           onClick={(event) => seen.push({ type: "text", target: event.target, currentTarget: event.currentTarget })}
         >
           Hello <span ref={(element) => (elements.span = element)} onClick={record("span")}>world</span>!
-        </text>
+        </div>
       </div>
     )
     return { testRoot, seen, elements }
@@ -123,9 +123,9 @@ describeNative("events on inline boxes", () => {
     const columns = 10
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text testId="p" style={{ ...TEXT, width: Math.ceil((columns + 0.5) * columnWidth()) }}>
+        <div testId="p" style={{ ...TEXT, width: Math.ceil((columns + 0.5) * columnWidth()) }}>
           aaaa <span onClick={() => seen.push("span")}>bbbb cccc</span>
-        </text>
+        </div>
       </div>
     )
     expect(testRoot.renderer.getPaintedText()).toEqual(["aaaa bbbb cccc"])
@@ -145,7 +145,7 @@ describeNative("events on inline boxes", () => {
     const record = (name: string) => () => seen.push(name)
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text
+        <div
           testId="p"
           style={TEXT}
           onMouseEnter={record("text enter")}
@@ -157,7 +157,7 @@ describeNative("events on inline boxes", () => {
           <span onMouseEnter={record("b enter")} onMouseLeave={record("b leave")}>
             two
           </span>
-        </text>
+        </div>
       </div>
     )
     // "one two": a is columns 0-2, the space is 3, b is 4-6.
@@ -182,7 +182,7 @@ describeNative("events on inline boxes", () => {
     const elements: Record<string, unknown> = {}
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text
+        <div
           testId="p"
           style={TEXT}
           onMouseOver={(event) => seen.push(["over", event.target, event.relatedTarget])}
@@ -190,7 +190,7 @@ describeNative("events on inline boxes", () => {
         >
           <span ref={(element) => (elements.a = element)}>one</span>{" "}
           <span ref={(element) => (elements.b = element)}>two</span>
-        </text>
+        </div>
       </div>
     )
     const move = (column: number) => {
@@ -210,7 +210,7 @@ describeNative("events on inline boxes", () => {
     const elements: Record<string, unknown> = {}
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text
+        <div
           testId="p"
           style={TEXT}
           onClick={(event) => seen.push({ path: event.composedPath(), target: event.target })}
@@ -218,7 +218,7 @@ describeNative("events on inline boxes", () => {
           <span ref={(element) => (elements.outer = element)}>
             out <span ref={(element) => (elements.inner = element)}>in</span>
           </span>
-        </text>
+        </div>
       </div>
     )
     click(testRoot, cell(testRoot, "p", 4))
@@ -234,9 +234,9 @@ describeNative("events on inline boxes", () => {
     const seen: string[] = []
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text testId="p" style={TEXT}>
-          Hello <text onClick={() => seen.push("nested")}>world</text>
-        </text>
+        <div testId="p" style={TEXT}>
+          Hello <span onClick={() => seen.push("nested")}>world</span>
+        </div>
       </div>
     )
     expect(testRoot.renderer.getPaintedText()).toEqual(["Hello world"])
@@ -249,9 +249,9 @@ describeNative("events on inline boxes", () => {
     const seen: string[] = []
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text testId="p" style={TEXT} onClick={(event) => seen.push(String(event.target === event.currentTarget))}>
+        <div testId="p" style={TEXT} onClick={(event) => seen.push(String(event.target === event.currentTarget))}>
           Hello <span style={{ pointerEvents: "none" }} onClick={() => seen.push("span")}>world</span>
-        </text>
+        </div>
       </div>
     )
     click(testRoot, cell(testRoot, "p", 8))
@@ -263,12 +263,12 @@ describeNative("events on inline boxes", () => {
     let span: { id: number } | undefined
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text testId="p" style={TEXT} onClick={(event) => seen.push(["text", event.target])}>
+        <div testId="p" style={TEXT} onClick={(event) => seen.push(["text", event.target])}>
           Hello{" "}
           <span ref={(element) => (span = element as unknown as { id: number })} onClick={() => seen.push(["span", null])}>
             world
           </span>
-        </text>
+        </div>
       </div>
     )
     testRoot.renderer.clickElement(span!.id)
@@ -280,7 +280,7 @@ describeNative("events on inline boxes", () => {
     const prevent = { value: false }
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           Hello{" "}
           <span
             onMouseDown={(event) => {
@@ -289,7 +289,7 @@ describeNative("events on inline boxes", () => {
           >
             world
           </span>
-        </text>
+        </div>
       </div>
     )
     const drag = () => {
@@ -334,9 +334,9 @@ describeNative("events on inline boxes", () => {
     function paragraph(style: Record<string, unknown>) {
       return setup(
         <div style={{ width: 400, backgroundColor: "#ffffff" }}>
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             Hello <span style={style}>world</span>!
-          </text>
+          </div>
         </div>
       )
     }
@@ -366,9 +366,9 @@ describeNative("events on inline boxes", () => {
     it("paints a span's groupHover when the pointer is on the group around it", () => {
       const testRoot = setup(
         <div style={{ width: 400, backgroundColor: "#ffffff" }}>
-          <text testId="p" style={{ ...TEXT, group: true }}>
+          <div testId="p" style={{ ...TEXT, group: true }}>
             Hello <span style={{ groupHover: { color: "#0000ff" } }}>world</span>!
-          </text>
+          </div>
         </div>
       )
       expect(bluePixels(testRoot, "group-off")).toBe(0)

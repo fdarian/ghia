@@ -44,12 +44,12 @@ describeNative("text element identity", () => {
     function Clickable() {
       const [count, setCount] = useState(0)
       return (
-        <text
+        <div
           style={{ width: 200, height: 60 }}
           onClick={() => setCount((value) => value + 1)}
         >
           {`clicks: ${count}`}
-        </text>
+        </div>
       )
     }
 
@@ -64,13 +64,13 @@ describeNative("text element identity", () => {
     function Hoverable() {
       const [hovered, setHovered] = useState(false)
       return (
-        <text
+        <div
           style={{ width: 200, height: 100 }}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
         >
           {hovered ? "hovered" : "idle"}
-        </text>
+        </div>
       )
     }
 
@@ -97,7 +97,7 @@ describeNative("text element identity", () => {
           style={{ position: "absolute", top: 0, left: 0, width: 200, height: 100 }}
           onClick={under}
         />
-        <text
+        <div
           ref={(element) => (label = element)}
           style={{
             position: "absolute",
@@ -109,7 +109,7 @@ describeNative("text element identity", () => {
           }}
         >
           label
-        </text>
+        </div>
       </div>,
     )
 
@@ -125,7 +125,7 @@ describeNative("text element identity", () => {
   it("paints the hover style declared on a <text> node", () => {
     testRoot.render(
       <div style={{ width: "100%", height: "100%", backgroundColor: "#11111b" }}>
-        <text
+        <div
           style={{
             width: 400,
             height: 120,
@@ -134,7 +134,7 @@ describeNative("text element identity", () => {
           }}
         >
           hover target
-        </text>
+        </div>
       </div>,
     )
 
@@ -235,7 +235,7 @@ describeNative("events on native surfaces", () => {
             style={{ width: 120, height: 80, color: "#5ca9ff" }}
             onClick={() => setCount((value) => value + 1)}
           />
-          <text>{`clicks: ${count}`}</text>
+          <div>{`clicks: ${count}`}</div>
         </div>
       )
     }
@@ -263,7 +263,7 @@ describeNative("events on native surfaces", () => {
             onMouseEnter={() => setHovered(true)}
             onMouseLeave={() => setHovered(false)}
           />
-          <text>{hovered ? "hovered" : "idle"}</text>
+          <div>{hovered ? "hovered" : "idle"}</div>
         </div>
       )
     }
@@ -283,13 +283,13 @@ describeNative("events on native surfaces", () => {
       const [count, setCount] = useState(0)
       return (
         <div style={{ width: 800, height: 500 }}>
-          <text>{`picked: ${count}`}</text>
+          <div>{`picked: ${count}`}</div>
           <anchored
             position={{ x: 300, y: 200 }}
             style={{ width: 240, height: 100, backgroundColor: "#1e1e2e" }}
             onClick={() => setCount((value) => value + 1)}
           >
-            <text>item</text>
+            <div>item</div>
           </anchored>
         </div>
       )
@@ -354,13 +354,13 @@ describeNative("painted bounds for leaf surfaces", () => {
     testRoot.render(
       <div style={{ width: 800, height: 400 }}>
         <div testId="trigger" style={{ width: 120, height: 40 }}>
-          <text>trigger</text>
+          <div>trigger</div>
           <anchored
             testId="overlay"
             position={{ x: 300, y: 200 }}
             style={{ width: 260, height: 90, backgroundColor: "#1e1e2e" }}
           >
-            <text>overlay</text>
+            <div>overlay</div>
           </anchored>
         </div>
       </div>,

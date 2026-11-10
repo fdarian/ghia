@@ -401,10 +401,10 @@ describeNative("the shorthands on an inline span", () => {
       try {
         render(
           <div style={{ width: 400 }}>
-            <text style={TEXT}>
+            <div style={TEXT}>
               aa <span style={style}>bb</span>
               <span ref={(instance: PublicInstance | null) => instance && refs.set("after", instance)}>cc</span>
-            </text>
+            </div>
           </div>
         )
         return refs.get("after")!.getBoundingClientRect().x

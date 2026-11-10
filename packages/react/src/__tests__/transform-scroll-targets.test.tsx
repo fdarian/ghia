@@ -22,7 +22,7 @@ function ScaledList({ factor }: { factor: number }) {
       <virtual-list testId="list" overdraw={0} estimatedItemHeight={40} style={{ width: 200, height: 160 }}>
         {Array.from({ length: 30 }, (_, index) => (
           <div key={index} testId={`row-${index}`} style={{ display: "flex", height: 40, flexShrink: 0, alignItems: "center" }}>
-            <text>{`row-${index}`}</text>
+            <div>{`row-${index}`}</div>
           </div>
         ))}
       </virtual-list>

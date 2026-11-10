@@ -33,7 +33,7 @@ const WIDE = { "@container": { "(min-width: 400px)": { backgroundColor: "#00ff00
 /** A line of text that a container query hides without moving anything. */
 const Sign = ({ id, hideFrom }: { id: string; hideFrom: number }) => (
   <div testId={id} style={{ height: 14, width: 60, "@container": { [`(min-width: ${hideFrom}px)`]: { visibility: "hidden" } } }}>
-    <text>{id}</text>
+    <div>{id}</div>
   </div>
 )
 

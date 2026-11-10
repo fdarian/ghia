@@ -26,8 +26,8 @@ function Card({ index }: { index: number }) {
         <span style={{ gridColumn: 1, gridRow: 1, fontWeight: 400 }}>AAAA {index}</span>
         <span style={{ gridColumn: 1, gridRow: 1, fontWeight: 700, opacity: 0 }}>AAAA {index}</span>
       </div>
-      <text style={{ visibility: "hidden" }}>AA AAA {index}</text>
-      <text style={{ opacity: 0 }}>AAAA AAAA {index}</text>
+      <div style={{ visibility: "hidden" }}>AA AAA {index}</div>
+      <div style={{ opacity: 0 }}>AAAA AAAA {index}</div>
       <div style={{ width: 120 }}>AAAA AAAA AAAA AAAA AAAA {index}</div>
     </div>
   )
@@ -73,8 +73,8 @@ function Page({ mover }: { mover: Mover }) {
           transition={{ duration: 10, ease: "linear" }}
           style={{ position: "absolute", left: 300, top: 0, width: 200 }}
         >
-          <text>AAA AAA</text>
-          <text style={{ opacity: 0 }}>AAA AAAA</text>
+          <div>AAA AAA</div>
+          <div style={{ opacity: 0 }}>AAA AAAA</div>
         </motion.div>
       ) : null}
       {mover === "left" ? (
@@ -85,8 +85,8 @@ function Page({ mover }: { mover: Mover }) {
           transition={{ duration: 10, ease: "linear" }}
           style={{ position: "absolute", top: 0, width: 200 }}
         >
-          <text>AAA AAA</text>
-          <text style={{ opacity: 0 }}>AAA AAAA</text>
+          <div>AAA AAA</div>
+          <div style={{ opacity: 0 }}>AAA AAAA</div>
         </motion.div>
       ) : null}
       {mover === "margin" ? (
@@ -98,8 +98,8 @@ function Page({ mover }: { mover: Mover }) {
             transition={{ duration: 10, ease: "linear" }}
             style={{ width: 200 }}
           >
-            <text>AAA AAA</text>
-            <text style={{ opacity: 0 }}>AAA AAAA</text>
+            <div>AAA AAA</div>
+            <div style={{ opacity: 0 }}>AAA AAAA</div>
           </motion.div>
         </div>
       ) : null}

@@ -73,7 +73,7 @@ function Page({
             >
               {["Name", "Role", "Status"].map((label) => (
                 <div key={label} style={{ display: "table-cell", verticalAlign: "middle", padding: 8 }}>
-                  <text style={{ fontSize: 14, color: "#222222" }}>{label}</text>
+                  <div style={{ fontSize: 14, color: "#222222" }}>{label}</div>
                 </div>
               ))}
             </div>
@@ -87,7 +87,7 @@ function Page({
       </div>
       {Array.from({ length: siblings }, (_, index) => (
         <div key={index} style={{ height: 24, padding: 4 }}>
-          <text style={{ fontSize: 14, color: "#555555" }}>{`Sibling row ${index}`}</text>
+          <div style={{ fontSize: 14, color: "#555555" }}>{`Sibling row ${index}`}</div>
         </div>
       ))}
     </div>
