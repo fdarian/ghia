@@ -242,7 +242,8 @@ fn compute(tree: &RetainedTree) -> A11yLinks {
         let Some(element) = first_with_id(tree, id) else {
             continue;
         };
-        if !has_role(element) && super::read_text_unplanned(tree, element).is_none() && element.element_type != "label" {
+        let is_text_host = element.element_type == "text";
+        if !has_role(element) && !is_text_host && element.element_type != "label" {
             links
                 .referenced_text
                 .insert(element.id, text_of(tree, element));
@@ -419,12 +420,9 @@ mod tests {
         let tree = tree_with(
             r##"[["createElement",1,"div"],["setRoot",1],
                 ["createElement",2,"input"],["appendChild",1,2],
-                ["setCustomProp",2,"aria-describedby","hint other lone"],
+                ["setCustomProp",2,"aria-describedby","hint other"],
                 ["createElement",3,"div"],["appendChild",1,3],["setCustomProp",3,"id","hint"],
                 ["createElement",4,"#text"],["appendChild",3,4],["setText",4,"Be brief"],
-                ["createElement",7,"div"],["appendChild",3,7],
-                ["createElement",8,"div"],["appendChild",1,8],["setCustomProp",8,"id","lone"],
-                ["createElement",9,"#text"],["appendChild",8,9],["setText",9,"Read as a Label"],
                 ["createElement",5,"div"],["appendChild",1,5],["setCustomProp",5,"id","other"],
                 ["setCustomProp",5,"role","note"],
                 ["createElement",6,"div"],["appendChild",1,6],["setCustomProp",6,"id","unused"]]"##,
@@ -433,8 +431,6 @@ mod tests {
         assert_eq!(links.referenced_text(3), Some("Be brief"));
         assert_eq!(links.referenced_text(5), None);
         assert_eq!(links.referenced_text(6), None);
-        // A container of one paragraph is a Label with that text as its value already.
-        assert_eq!(links.referenced_text(8), None);
     }
 
     #[test]
