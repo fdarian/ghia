@@ -10,7 +10,8 @@
 // Env:
 //   COUNTS=1000,5000   items of each run
 //   REPS=15            measured repetitions of each phase (after SETTLE=3 unmeasured ones); mount repeats MOUNT_REPS=7 times
-//   MODES=inline,sheet,inline+sheet   what runs, in this order, in this process
+//   MODES=inline,sheet,inline+sheet   what runs, in this order, in this process. `attrs` and `attrs-canvas` are the inline look
+//          with a class and two data-* attributes on each item, a div and a canvas, and no sheet: what an app without a sheet pays
 //   JSON=1             prints the results as JSON on the last line
 //
 // Phases. Each is reported twice: "batch" is only the mutation and its batch apply (Solid's update, the mutation queue's flush,
@@ -127,7 +128,23 @@ function Items(props: { count: number; mode: string; control: Control; items: bo
       <div style={{ display: "flex", flexDirection: "row", flexWrap: "wrap", width: WIDTH }}>
         <For each={showItems() ? indexes : []}>
           {(index) =>
-            props.mode === "sheet" ? (
+            props.mode === "attrs" ? (
+              <div
+                ref={(element: unknown) => (props.control.items[index] = element)}
+                class="item"
+                data-index={index}
+                data-kind="cell"
+                style={isClass(index) || isData(index) || all() ? ACTIVE : BASE}
+              />
+            ) : props.mode === "attrs-canvas" ? (
+              <canvas
+                ref={(element: unknown) => (props.control.items[index] = element)}
+                class="item"
+                data-index={index}
+                data-kind="cell"
+                style={isClass(index) || isData(index) || all() ? ACTIVE : BASE}
+              />
+            ) : props.mode === "sheet" ? (
               <div
                 ref={(element: unknown) => (props.control.items[index] = element)}
                 class={isClass(index) || all() ? "item active" : "item"}
@@ -149,6 +166,8 @@ function Items(props: { count: number; mode: string; control: Control; items: bo
 interface Sample {
   /** the mutation and its batch apply only: Solid's update, the mutation queue's flush, native applyBatch with flush_styles */
   batchInstructions: number
+  /** the part of the batch spent inside native `applyBatch`; the rest is the adapter's and the wire writer's */
+  nativeInstructions: number
   batchMs: number
   /** the batch, then the view's flush and the frame that paints it */
   instructions: number
@@ -158,6 +177,7 @@ interface Sample {
 }
 const summarize = (samples: Sample[]): Sample => ({
   batchInstructions: median(samples.map((s) => s.batchInstructions)),
+  nativeInstructions: median(samples.map((s) => s.nativeInstructions)),
   batchMs: median(samples.map((s) => s.batchMs)),
   instructions: median(samples.map((s) => s.instructions)),
   ms: median(samples.map((s) => s.ms)),
@@ -167,12 +187,21 @@ const summarize = (samples: Sample[]): Sample => ({
 
 const results: Record<string, Record<string, Record<string, Sample>>> = {}
 
+let nativeInstructions = 0
+
 function openRoot(count: number) {
   const rows = Math.ceil(count / Math.floor(WIDTH / (ITEM_WIDTH + 8)))
   const app = createTestRoot({ width: WIDTH, height: rows * ROW_HEIGHT + 100, appearance: "light" })
   app.renderer.setA11yActive(false)
   app.renderer.clockPause()
   app.renderer.setInlineDraws(false)
+  const applyBatch = app.renderer.applyBatch
+  app.renderer.applyBatch = (wire) => {
+    const before = readInstructions()
+    const destroyed = applyBatch(wire)
+    nativeInstructions += readInstructions() - before - readOverhead
+    return destroyed
+  }
   return app
 }
 
@@ -185,6 +214,7 @@ function frame(app: ReturnType<typeof createTestRoot>) {
 /** `mutate` is the batch window; `paint` (the view's flush and the frame) runs after it, outside the batch numbers. */
 function sample(app: ReturnType<typeof createTestRoot>, mutate: () => void, paint: () => void): Sample {
   app.renderer.resetBuildCounters()
+  nativeInstructions = 0
   const t0 = performance.now()
   const a = readInstructions()
   mutate()
@@ -196,6 +226,7 @@ function sample(app: ReturnType<typeof createTestRoot>, mutate: () => void, pain
   const counters = app.renderer.getBuildCounters()
   return {
     batchInstructions: b - a - readOverhead,
+    nativeInstructions,
     batchMs: t1 - t0,
     instructions: c - a - 2 * readOverhead,
     ms: t2 - t0,
@@ -237,7 +268,7 @@ function runMode(mode: string, count: number) {
   }
   record("mount", summarize(mounts))
 
-  if (mode !== "inline") {
+  if (mode !== "inline" && !mode.startsWith("attrs")) {
     const app = openRoot(count)
     const control = newControl()
     app.render(() => <Items count={count} mode={mode} control={control} items={true} style={false} />)
@@ -294,12 +325,12 @@ for (const mode of MODES) for (const count of COUNTS) runMode(mode, count)
 
 const M = (value: number) => (value / 1e6).toFixed(3)
 console.log(`items ${ITEM_WIDTH} x ${ROW_HEIGHT} in a ${WIDTH}-wide wrapping row, REPS ${REPS} after ${SETTLE} unmeasured (mount ${MOUNT_REPS} after 2), rusage read overhead ${readOverhead} instr`)
-console.log("mode\tphase\tN\tbatch Minstr\tbatch ms\tend-to-end Minstr\tend-to-end ms\tmatched\tcascades")
+console.log("mode\tphase\tN\tbatch Minstr\tnative Minstr\tbatch ms\tend-to-end Minstr\tend-to-end ms\tmatched\tcascades")
 for (const mode of Object.keys(results)) {
   for (const count of Object.keys(results[mode]!)) {
     for (const phase of Object.keys(results[mode]![count]!)) {
       const p = results[mode]![count]![phase]!
-      console.log(`${mode}\t${phase}\t${count}\t${M(p.batchInstructions)}\t${p.batchMs.toFixed(2)}\t${M(p.instructions)}\t${p.ms.toFixed(2)}\t${p.rematched}\t${p.cascades}`)
+      console.log(`${mode}\t${phase}\t${count}\t${M(p.batchInstructions)}\t${M(p.nativeInstructions)}\t${p.batchMs.toFixed(2)}\t${M(p.instructions)}\t${p.ms.toFixed(2)}\t${p.rematched}\t${p.cascades}`)
     }
   }
 }
