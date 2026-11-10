@@ -1693,6 +1693,12 @@ export interface ElementBounds {
    */
   clientLeft: number
   clientTop: number
+  /**
+   * The border box's size before any transform, which `offsetWidth` and `offsetHeight` round:
+   * `width` and `height` are the box after the transforms.
+   */
+  layoutWidth: number
+  layoutHeight: number
 }
 
 /** A [`WebAnimationInfo`] with the element the run is of, for a read that spans elements. */

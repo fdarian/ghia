@@ -115,6 +115,27 @@ describeNative("DOM members of a React host instance", () => {
     root.unmount()
   })
 
+  it("answers offsetWidth and offsetHeight with the layout size, whatever transform the element has", () => {
+    const boxes: Record<string, PublicInstance | null> = {}
+    const ref = (name: string) => (instance: unknown) => {
+      boxes[name] = instance as PublicInstance | null
+    }
+    const root = createTestRoot()
+    root.render(
+      <div style={{ width: 400, height: 400 }}>
+        <div ref={ref("plain")} style={{ width: 33.4, height: 20.6 }} />
+        <div ref={ref("moved")} style={{ width: 50, height: 30, transform: "translate(40px, 12px)" }} />
+        <div ref={ref("scaled")} testId="scaled" style={{ width: 50, height: 30, transform: "scale(2)" }} />
+      </div>
+    )
+    expect([boxes.plain!.offsetWidth, boxes.plain!.offsetHeight]).toEqual([33, 21])
+    expect([boxes.moved!.offsetWidth, boxes.moved!.offsetHeight]).toEqual([50, 30])
+    expect([boxes.scaled!.offsetWidth, boxes.scaled!.offsetHeight]).toEqual([50, 30])
+    const scaledBounds = root.renderer.getElementBounds(root.renderer.findByTestId("scaled")!.id)!
+    expect(scaledBounds.width).toBe(100)
+    root.unmount()
+  })
+
   it("runs requestAnimationFrame callbacks before the draw that paints what they change", () => {
     let setLabel!: (label: string) => void
     function Page() {

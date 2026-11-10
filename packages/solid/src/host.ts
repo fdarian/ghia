@@ -370,6 +370,7 @@ export interface HostElement extends ScrollableElement, DomElement {}
 defineDomMembers(HostElement.prototype, (element: HostElement) => ({
   listeners: element.listeners,
   connected: isConnected(element),
+  layout: element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.id } : undefined,
   prop: (name) => element.props.get(name),
 }))
 defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
