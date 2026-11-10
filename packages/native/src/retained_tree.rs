@@ -1512,7 +1512,7 @@ impl RetainedTree {
                 false
             };
             // Which listeners exist decides how the element is built, so it takes a revision:
-            // `retain` keys what it reuses by it. A `<text>` takes a structural revision for it.
+            // `retain` keys what it reuses by it.
             if changed {
                 if geometry {
                     let reports = self
@@ -1525,15 +1525,7 @@ impl RetainedTree {
                         self.geometry_ids.remove(&id);
                     }
                 }
-                if self
-                    .elements
-                    .get(&id)
-                    .is_some_and(|element| element.element_type == "text")
-                {
-                    self.mark_changed(id);
-                } else {
-                    self.mark_render_changed(id);
-                }
+                self.mark_render_changed(id);
             }
         }
     }
@@ -1622,14 +1614,6 @@ impl RetainedTree {
         }
         if affects_focusability {
             self.track_focusable(id);
-            // A focusable `<text>` is a block rather than an inline box.
-            if self
-                .elements
-                .get(&id)
-                .is_some_and(|element| element.element_type == "text")
-            {
-                self.mark_changed(id);
-            }
         }
         if is_form_control {
             if self.elements.get(&id).is_some_and(|element| element.control_disabled().is_some()) {
@@ -2059,7 +2043,7 @@ mod tests {
     fn tree_with_child() -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
-        tree.create_element(2, "text".to_string());
+        tree.create_element(2, "div".to_string());
         tree.create_element(3, "#text".to_string());
         tree.append_child(1, 2);
         tree.append_child(2, 3);
@@ -3343,8 +3327,8 @@ mod tests {
         assert!(crate::text::inline::is_raw_text(&tree.elements[&3]));
 
         // A text node is created before its string arrives.
-        apply(&mut tree, r##"[["createElement",4,"text"],["createElement",5,"#text"],["appendChild",4,5],["setText",5,"x"]]"##);
-        assert_eq!(style_of(&tree, 4).unwrap().opacity, Some(0.5), "a `<text>` element");
+        apply(&mut tree, r##"[["createElement",4,"div"],["createElement",5,"#text"],["appendChild",4,5],["setText",5,"x"]]"##);
+        assert_eq!(style_of(&tree, 4).unwrap().opacity, Some(0.5), "a `<div>` element");
         assert!(style_of(&tree, 5).is_none());
         assert!(crate::text::inline::is_raw_text(&tree.elements[&5]));
     }

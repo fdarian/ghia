@@ -123,8 +123,6 @@ where
 pub(crate) fn default_role(element: &crate::retained_tree::RetainedElement) -> Option<Role> {
     match element.element_type.as_str() {
         "form" => Some(Role::Form),
-        // A text instance (`#text`) has no role, so that VoiceOver does not hear the same string twice.
-        "text" => Some(Role::Label),
         "label" => Some(Role::Label),
         "img" => Some(Role::Image),
         "input" | "textarea" => {

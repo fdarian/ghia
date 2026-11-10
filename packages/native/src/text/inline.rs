@@ -2,9 +2,8 @@
 //! paragraph of text, and which are boxes of their own.
 //!
 //! The rules follow CSS, not the shape of the retained tree:
-//! - A raw text node is inline. So is a `<span>`, and so is a `<text>` whose
-//!   parent is a `<text>` or `<span>`, unless it is focusable. A `<text>`
-//!   anywhere else is a block that starts its own inline formatting context.
+//! - A raw text node is inline. So is a `<span>`; a `<div>` is a block that
+//!   starts its own inline formatting context unless its `display` says inline.
 //!   Listeners and state styles do not make a box a block: the pointer finds an
 //!   inline box through the paragraph's text ([`super::inline_hit`]).
 //! - In a block container, each maximal run of consecutive inline-level children
@@ -53,7 +52,7 @@ pub const TEXT_NODE: &str = "#text";
 /// tree's own `div` rules. Paint dispatches on this and search collects by it, so
 /// the two cannot disagree about which elements lay out a paragraph.
 pub fn is_host_type(element_type: &str) -> bool {
-    matches!(element_type, TEXT_NODE | "div" | "text" | "label" | "form" | "span" | "nativeview")
+    matches!(element_type, TEXT_NODE | "div" | "label" | "form" | "span" | "nativeview")
 }
 
 pub fn is_host_container(element: &RetainedElement) -> bool {
@@ -135,10 +134,10 @@ pub fn is_atomic(element: &RetainedElement) -> bool {
         && !matches!(element.element_type.as_str(), "anchored" | "virtual-list")
 }
 
-/// Whether `element`, a child of `parent` in a block container, is inline-level
+/// Whether `element`, a child in a block container, is inline-level
 /// together with everything inside it. An inline box holding a block is itself
 /// laid out as a block, so a paragraph never has to split around it.
-fn is_inline_box(tree: &RetainedTree, element: &RetainedElement, parent: &RetainedElement) -> bool {
+fn is_inline_box(tree: &RetainedTree, element: &RetainedElement) -> bool {
     if is_raw_text(element) {
         return true;
     }
@@ -149,9 +148,9 @@ fn is_inline_box(tree: &RetainedTree, element: &RetainedElement, parent: &Retain
     // It generates no box, so its children are inline when they would be
     // children of `parent`.
     if is_host_container(element) && is_display_contents(element) && !is_special_host(element) {
-        return children_are_inline(tree, element, parent);
+        return children_are_inline(tree, element);
     }
-    is_inline_wrapper(element, parent) && children_are_inline(tree, element, element)
+    is_inline_wrapper(element) && children_are_inline(tree, element)
 }
 
 /// Whether the paragraph of the container above `element` takes it in as text or as an inline
@@ -161,7 +160,7 @@ pub fn is_part_of_paragraph(tree: &RetainedTree, element: &RetainedElement) -> b
         return true;
     }
     let Some(container) = crate::layout::contents::splice_parent(tree, element.id) else { return false };
-    !element_lays_out_items(container) && !is_atomic(element) && is_inline_box(tree, element, container)
+    !element_lays_out_items(container) && !is_atomic(element) && is_inline_box(tree, element)
 }
 
 /// A host that is a block whatever its style says, or that is not a box to begin with. A
@@ -170,28 +169,18 @@ fn is_special_host(element: &RetainedElement) -> bool {
     matches!(element.element_type.as_str(), "label" | "form" | "nativeview") || element.custom_props().contains_key("highlight")
 }
 
-/// Whether `element`, a child of `parent` in a block container, is an inline box that holds the
+/// Whether `element`, a child in a block container, is an inline box that holds the
 /// text and inline boxes inside it in the paragraph of its parent, as far as its own
 /// style and kind say. Whether everything it holds is inline is up to [`is_inline_box`].
-pub fn is_inline_wrapper(element: &RetainedElement, parent: &RetainedElement) -> bool {
+pub fn is_inline_wrapper(element: &RetainedElement) -> bool {
     // A label or a form has behaviour of its own, so it is a block.
     if !is_host_container(element) || is_special_host(element) {
-        return false;
-    }
-    // A focusable `<span>` stays inline: its paragraph anchors the focus handle
-    // ([`super::inline_focus`]). A focusable `<text>` is a block, an element of
-    // its own with the handle.
-    if element.element_type == "text" && element.needs_focus() {
         return false;
     }
     if is_out_of_flow(element) {
         return false;
     }
-    let inline_by_default = match element.element_type.as_str() {
-        "span" => true,
-        "text" => matches!(parent.element_type.as_str(), "text" | "span"),
-        _ => false,
-    };
+    let inline_by_default = element.element_type == "span";
     let inline = match display_of(element).as_deref() {
         Some("inline") => true,
         Some(_) => false,
@@ -200,13 +189,13 @@ pub fn is_inline_wrapper(element: &RetainedElement, parent: &RetainedElement) ->
     inline && !element_lays_out_items(element)
 }
 
-fn children_are_inline(tree: &RetainedTree, element: &RetainedElement, parent: &RetainedElement) -> bool {
+fn children_are_inline(tree: &RetainedTree, element: &RetainedElement) -> bool {
     element
         .children
         .iter()
         .filter_map(|id| tree.elements.get(id))
         .filter(|child| !is_display_none(child))
-        .all(|child| is_inline_box(tree, child, parent))
+        .all(|child| is_inline_box(tree, child))
 }
 
 /// One text node of a paragraph.
@@ -602,7 +591,7 @@ pub(crate) fn plan_flow(
             if let Some(content) = child.content.as_deref() {
                 paragraph.within(&contents, |paragraph, chain| paragraph.push_text(content, chain));
             }
-        } else if !items && is_inline_box(tree, child, container) {
+        } else if !items && is_inline_box(tree, child) {
             paragraph.at.get_or_insert(at);
             paragraph.within(&contents, |paragraph, chain| paragraph.push_element(tree, child, chain));
         } else {
@@ -789,17 +778,17 @@ mod tests {
     }
 
     #[test]
-    fn a_text_is_inline_only_inside_text_or_span() {
+    fn a_div_is_a_block_and_a_span_in_a_span_is_inline() {
         let mut f = Fixture::new();
         f.text(1, 2, "a");
-        f.add(1, 3, "text").text(3, 4, "block");
+        f.add(1, 3, "div").text(3, 4, "block");
         let plan = f.plan(1);
         assert_eq!(plan.len(), 2, "a paragraph, then the block");
         assert_eq!(plan[1], Child::Block(3));
 
         let mut f = Fixture::new();
-        f.add(1, 2, "text").text(2, 3, "a");
-        f.add(2, 4, "text").text(4, 5, "b");
+        f.add(1, 2, "div").text(2, 3, "a");
+        f.add(2, 4, "span").text(4, 5, "b");
         let plan = f.plan(2);
         assert_eq!(paragraphs(&plan)[0].text, "ab");
         assert_eq!(plan.len(), 1);
@@ -1012,11 +1001,11 @@ mod tests {
     }
 
     #[test]
-    fn a_flex_container_blockifies_spans_and_texts() {
+    fn a_flex_container_blockifies_spans_and_divs() {
         let mut f = Fixture::new();
         f.styled(1, serde_json::json!({"display": "flex"}));
         f.add(1, 2, "span").text(2, 3, "s");
-        f.add(1, 4, "text").text(4, 5, "t");
+        f.add(1, 4, "div").text(4, 5, "t");
         assert_eq!(f.plan(1), vec![Child::Block(2), Child::Block(4)]);
     }
 
@@ -1057,7 +1046,7 @@ mod tests {
     #[test]
     fn a_span_inside_a_grid_or_flex_item_stays_in_the_items_paragraph() {
         for container in ["grid", "flex"] {
-            for item in ["div", "span", "text"] {
+            for item in ["div", "span"] {
                 let mut f = Fixture::new();
                 f.styled(1, serde_json::json!({"display": container}));
                 f.add(1, 2, item);
@@ -1153,7 +1142,7 @@ mod tests {
 
     #[test]
     fn label_and_form_are_host_containers_and_never_inline_boxes() {
-        for kind in ["div", "text", "#text", "span", "label", "form"] {
+        for kind in ["div", "#text", "span", "label", "form"] {
             assert!(is_host_type(kind), "{kind}");
         }
         for kind in ["img", "svg", "input", "virtual-list", "markdown"] {
@@ -1214,7 +1203,7 @@ mod tests {
     fn a_text_node_is_told_by_its_type_and_a_text_element_is_a_box() {
         let mut f = Fixture::new();
         f.text(1, 2, "a");
-        f.add(1, 3, "text");
+        f.add(1, 3, "div");
         assert!(is_raw_text(&f.tree.elements[&2]));
         assert!(!is_raw_text(&f.tree.elements[&3]));
     }
@@ -1222,7 +1211,7 @@ mod tests {
     #[test]
     fn a_styled_empty_text_is_a_box_not_a_text_node() {
         let mut f = Fixture::new();
-        f.add(1, 2, "text");
+        f.add(1, 2, "div");
         f.styled(2, serde_json::json!({"width": 10}));
         assert_eq!(f.plan(1), vec![Child::Block(2)]);
     }
@@ -1271,19 +1260,19 @@ mod tests {
         assert!(!same_paragraphs(Some(&flex), None));
     }
 
-    /// `<text>one <text>two</text> three</text>` with `configure` applied to the
-    /// nested text (id 3), and the plan of the outer one.
+    /// `<div>one <span>two</span> three</div>` with `configure` applied to the
+    /// span (id 3), and the plan of the div.
     fn nested_text_plan(configure: impl FnOnce(&mut Fixture)) -> Vec<Child> {
         let mut f = Fixture::new();
-        f.add(1, 2, "text").text(2, 4, "one ");
-        f.add(2, 3, "text").text(3, 5, "two");
+        f.add(1, 2, "div").text(2, 4, "one ");
+        f.add(2, 3, "span").text(3, 5, "two");
         f.text(2, 6, " three");
         configure(&mut f);
         f.plan(2)
     }
 
     #[test]
-    fn a_nested_text_stays_inline_whatever_it_listens_for() {
+    fn a_nested_span_stays_inline_whatever_it_listens_for() {
         let plain = nested_text_plan(|f| {
             f.styled(3, serde_json::json!({"color": "red"}));
         });
@@ -1315,22 +1304,18 @@ mod tests {
     }
 
     #[test]
-    fn a_focusable_nested_text_stays_a_block() {
+    fn a_focusable_span_stays_inline() {
         let plan = nested_text_plan(|f| {
             f.tree.set_custom_prop(3, "tabIndex".into(), serde_json::json!(0));
         });
-        assert_eq!(plan.len(), 3, "paragraph, block, paragraph");
-        assert_eq!(plan[1], Child::Block(3));
-        // The space at the end of a line, and the one at the start of the
-        // next, are removed.
-        assert_eq!(paragraphs(&plan)[0].text, "one");
-        assert_eq!(paragraphs(&plan)[1].text, "three");
+        assert_eq!(plan.len(), 1);
+        assert_eq!(paragraphs(&plan)[0].text, "one two three");
     }
 
     #[test]
     fn a_span_with_behaviour_is_still_inline() {
         let mut f = Fixture::new();
-        f.add(1, 2, "text").text(2, 4, "one ");
+        f.add(1, 2, "div").text(2, 4, "one ");
         f.add(2, 3, "span").text(3, 5, "two");
         f.tree.set_event_listener(3, "click".into(), true);
         f.styled(3, serde_json::json!({"hover": {"color": "red"}}));
@@ -1758,7 +1743,7 @@ mod tests {
     #[test]
     fn the_placeholder_is_not_read_out() {
         let mut f = Fixture::new();
-        f.add(1, 2, "text").text(2, 3, "a ");
+        f.add(1, 2, "div").text(2, 3, "a ");
         inline_block(&mut f, 2, 4, "inline-block");
         assert_eq!(accessible_text(&f.plan(2)).as_deref(), Some("a "));
     }
@@ -1775,9 +1760,9 @@ mod tests {
     #[test]
     fn accessible_text_reads_nested_inline_text() {
         let mut f = Fixture::new();
-        f.add(1, 2, "text").text(2, 3, "Hello ");
+        f.add(1, 2, "div").text(2, 3, "Hello ");
         f.add(2, 4, "span").text(4, 5, "big ");
-        f.add(4, 6, "text").text(6, 7, "world");
+        f.add(4, 6, "span").text(6, 7, "world");
         f.add(2, 8, "div").text(8, 9, "block");
         let text = accessible_text(&f.plan(2));
         assert_eq!(text.as_deref(), Some("Hello big world"));
@@ -1908,7 +1893,7 @@ mod tests {
     #[test]
     fn a_placeholder_is_not_read_out_and_changes_the_paragraphs_with_the_space() {
         let mut f = Fixture::new();
-        f.add(1, 2, "text").text(2, 3, "a");
+        f.add(1, 2, "div").text(2, 3, "a");
         f.add(2, 4, "span").styled(4, serde_json::json!({"paddingLeft": 5}));
         assert_eq!(accessible_text(&f.plan(2)).as_deref(), Some("a"));
         let none = style(serde_json::json!({"color": "red"}));

@@ -3,7 +3,6 @@ import { registerMutationQueue } from "./bounds.js"
 import { createBlobImageLoader, type BlobImageHost } from "./blob-images.js"
 import type { MutationHost, MutationRenderer } from "./host.js"
 import { createStyleImageLoader, type StyleImageHost } from "./style-images.js"
-import { SVG_TEXT_PROPS } from "./svg.js"
 import { WIRE_OPCODE, WireWriter } from "./wire.js"
 import { cancelAnimationsOfElements } from "./web-animations.js"
 
@@ -246,7 +245,7 @@ export const RESERVED_PROPS: ReadonlySet<string> = new Set([
   "ref",
 ])
 
-export const BUILT_IN_TYPES: ReadonlySet<string> = new Set(["div", "text", "label", "form", "span"])
+export const BUILT_IN_TYPES: ReadonlySet<string> = new Set(["div", "label", "form", "span"])
 
 const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "autoFocus",
@@ -266,22 +265,14 @@ const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "htmlFor",
 ])
 
-/** Props a `div`, `text`, `label` or `form` forwards to native; every other prop is dropped. */
+/** Props a `div`, `span`, `label` or `form` forwards to native; every other prop is dropped. */
 export function isUniversalProp(name: string): boolean {
   return UNIVERSAL_PROPS.has(name) || name.startsWith("aria-")
 }
 
-/**
- * Whether a prop of an element of this type reaches native. A host element
- * forwards only its universal props; an SVG `<text>` is the `text` host
- * element with SVG attributes, so it forwards those too.
- */
+/** Whether a prop of an element of this type reaches native. A host element forwards only its universal props. */
 export function forwardsCustomProp(type: string, name: string): boolean {
-  return (
-    !BUILT_IN_TYPES.has(type) ||
-    isUniversalProp(name) ||
-    (type === "text" && SVG_TEXT_PROPS.has(name))
-  )
+  return !BUILT_IN_TYPES.has(type) || isUniversalProp(name)
 }
 
 export function isReservedProp(name: string): boolean {

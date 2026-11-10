@@ -44,10 +44,10 @@ mod tests {
     use crate::events::state::PointerState;
     use crate::retained_tree::RetainedTree;
 
-    /// root(1) > text(2) > ["Hello ", span(4) > "world", "!", span(7) > "again"]
+    /// root(1) > div(2) > ["Hello ", span(4) > "world", "!", span(7) > "again"]
     fn paragraph(listening: &[(u64, &str)]) -> RetainedTree {
         let mut tree = RetainedTree::new();
-        for (id, kind) in [(1, "div"), (2, "text"), (4, "span"), (7, "span")] {
+        for (id, kind) in [(1, "div"), (2, "div"), (4, "span"), (7, "span")] {
             tree.create_element(id, kind.to_string());
         }
         tree.set_root(1);

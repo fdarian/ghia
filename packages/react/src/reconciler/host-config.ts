@@ -529,16 +529,15 @@ export const hostConfig = {
   },
 
   getRootHostContext(_rootContainerInstance: Container): HostContext {
-    return { isInsideText: false }
+    return {}
   },
 
   getChildHostContext(
-    parentHostContext: HostContext,
-    type: ElementType,
+    _parentHostContext: HostContext,
+    _type: ElementType,
     _rootContainerInstance: Container
   ): HostContext {
-    const isInsideText = type === "text" || type === "span"
-    return { ...parentHostContext, isInsideText }
+    return {}
   },
 
   shouldSetTextContent(_type: ElementType, _props: Props): boolean {

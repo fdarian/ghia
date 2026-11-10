@@ -9714,9 +9714,6 @@ struct Fixed {
     excluded: bool,
     /// The shapes an `<svg>` draws, whose animations change its picture.
     shapes: Vec<u64>,
-    /// A `<text>` in a `<text>`: whether it is an SVG element depends on the elements above its
-    /// parent, which a change there does not tell it.
-    unkept: bool,
 }
 
 impl Fixed {
@@ -9735,16 +9732,11 @@ impl Fixed {
             parent: element.parent,
             excluded,
             shapes: crate::custom_elements::svg_tree::shapes(tree, element).map(|shape| shape.id).collect(),
-            unkept: element.element_type == "text"
-                && element
-                    .parent
-                    .and_then(|parent| tree.elements.get(&parent))
-                    .is_some_and(|parent| parent.element_type == "text"),
         }
     }
 
     fn holds_for(&self, element: &crate::retained_tree::RetainedElement) -> bool {
-        !self.unkept && self.revision == element.subtree_revision && self.parent == element.parent
+        self.revision == element.subtree_revision && self.parent == element.parent
     }
 }
 
@@ -10446,7 +10438,7 @@ fn build_element_in(
                 opacity_runs(known, ctx.css_animations, ctx.css_transitions, ctx.motion_states, ctx.motion_values, ctx.now)
                     || transform_runs(known, ctx.css_animations, ctx.css_transitions, ctx.motion_states, ctx.motion_values, ctx.now)
             },
-            costly: crate::retain::costly(known),
+            costly: crate::retain::costly(ctx.tree, known),
             patch_root,
         });
         if let Some(skip) = skip {
@@ -11545,11 +11537,10 @@ fn build_element_unpumped(
     // What the element holds is its own to say; the element above hears it once it is built.
     let enclosing = std::mem::replace(&mut ctx.subtree, crate::layout::cull::Subtree::empty());
     let built = match element.element_type.as_str() {
-        // `<text>` is a `<div>` that happens to carry a string. Giving it its
-        // own builder meant every interaction prop on the shared `Props` type
-        // (onClick, hover, focus, tabIndex) type-checked, registered a JS
-        // listener, and then silently did nothing. `<span>` is the same box;
-        // it only differs in being inline inside a paragraph.
+        // A separate builder per host type meant every interaction prop on the shared `Props`
+        // type (onClick, hover, focus, tabIndex) type-checked, registered a JS listener, and
+        // then silently did nothing. `<span>` is the same box as `<div>`; it only differs in
+        // being inline inside a paragraph.
         host if crate::text::inline::is_host_type(host) => {
             ctx.custom_registry.destroy_unless(id, host);
             if crate::layout::contents::is_display_contents(element) {
@@ -12031,7 +12022,7 @@ fn container_key(element: &crate::retained_tree::RetainedElement, ctx: &BuildCtx
     }
 }
 
-/// The one builder for `<div>`, `<text>` and `<span>`.
+/// The one builder for `<div>` and `<span>`.
 ///
 /// Both get the same stable GPUI id, so gpui keeps their interactive element
 /// state (hover, active, pointer capture, scroll, accessibility node) across
@@ -12531,7 +12522,7 @@ fn build_content(
     cx: &mut gpui::Context<GpuixView>,
 ) -> (Vec<gpui::AnyElement>, Vec<Placement>, Vec<Rc<Cell<gpui::Pixels>>>) {
     let outer_heights = std::mem::take(&mut ctx.containing_heights);
-    // Text content — selectable, same as a <text> leaf.
+    // Text content — selectable, same as a string child.
     // An empty string paints no glyphs, so it must take no space: gpui's text
     // layout still reserves a full line for "", and Solid's universal renderer
     // creates an empty placeholder text node for every dynamic hole (`<Show>`,
@@ -12824,7 +12815,7 @@ fn build_contents_container(
 /// text keeps inheriting colour, weight and family from ancestor styles.
 ///
 /// The run's group is its parent host element, because React makes a separate
-/// host node for every interpolated string. `<text>Hello {name}!</text>` is one
+/// host node for every interpolated string. `<div>Hello {name}!</div>` is one
 /// logical line painted as three runs that all share the parent's id.
 /// A `userSelect: "none"` run still paints highlight washes, because a browser
 /// still finds that text with Ctrl+F. Element chrome that must never be found,

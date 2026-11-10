@@ -192,7 +192,7 @@ function runtimeErrorOverlay(
       },
     },
     React.createElement(
-      "text",
+      "div",
       {
         style: {
           fontSize: 32,
@@ -222,7 +222,7 @@ function runtimeErrorOverlay(
         },
       },
       React.createElement(
-        "text",
+        "div",
         {
           style: {
             fontSize: 20,
@@ -236,7 +236,7 @@ function runtimeErrorOverlay(
       ),
       ...lines.map((line) =>
         React.createElement(
-          "text",
+          "div",
           {
             style: {
               fontSize: 13,
@@ -266,7 +266,7 @@ function runtimeErrorOverlay(
         },
       },
       React.createElement(
-        "text",
+        "div",
         { style: { fontSize: 14, fontWeight: 700, color: "#ffffff" } },
         "Reload",
       ),

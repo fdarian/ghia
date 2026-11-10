@@ -502,7 +502,7 @@ impl Default for EventModifiers {
 pub struct HighlightMatch {
     /// Numeric id of the element that painted the run.
     pub element_id: f64,
-    /// Index of the run within that element. 0 for a plain `<text>`.
+    /// Index of the run within that element. 0 for a plain string.
     pub sub: f64,
     /// The full string of the run, so `text.slice(start, end)` is the match.
     pub text: String,

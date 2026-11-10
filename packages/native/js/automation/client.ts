@@ -561,7 +561,7 @@ export class Locator {
 
   /**
    * Own text plus every descendant's, concatenated in document order, like
-   * DOM `textContent`. `<text>{value}</text>` puts the string on a child node,
+   * DOM `textContent`. `<div>{value}</div>` puts the string on a child node,
    * so reading only `node.text` returned an empty string for every wrapper.
    */
   async textContent(): Promise<string> {

@@ -1063,7 +1063,7 @@ export declare class TestGpuixRenderer {
   /**
    * Every string painted in the last frame, in paint order.
    *
-   * `getAllText()` only sees `<text>` nodes in the retained tree. Native
+   * `getAllText()` only sees string nodes in the retained tree. Native
    * elements such as `<code>` and `<diff>` draw their text inside gpui, so
    * this is the only way to assert on what they actually rendered.
    */
@@ -1300,7 +1300,7 @@ export declare class TestGpuixRenderer {
   drainEvents(): Array<EventPayload>
   /** Get all text content in the tree (depth-first order). */
   getAllText(): Array<string>
-  /** Find element IDs matching the given type (e.g. "div", "text"). */
+  /** Find element IDs matching the given type (e.g. "div", "span"). */
   findByType(elementType: string): Array<number>
   /** Check if an element has a specific event listener. */
   hasEventListener(id: number, eventType: string): boolean
@@ -2129,7 +2129,7 @@ export declare function hasTestGpuixRenderer(): boolean
 export interface HighlightMatch {
   /** Numeric id of the element that painted the run. */
   elementId: number
-  /** Index of the run within that element. 0 for a plain `<text>`. */
+  /** Index of the run within that element. 0 for a plain string. */
   sub: number
   /** The full string of the run, so `text.slice(start, end)` is the match. */
   text: string
