@@ -781,17 +781,28 @@ mod tests {
     fn the_focus_variant_list_is_the_one_a_focused_element_lays_over_it() {
         // Element 1 is focus-visible and element 2 has it as a descendant.
         let focus = FocusStyles { visible: Some(1), within: Arc::from([1_u64, 2]), ..Default::default() };
-        let mut listed = 0;
-        macro_rules! each_alone {
-            ($($field:ident),+) => {$({
-                let style = StyleDesc { $field: Some(Box::new(StyleDesc::default())), ..Default::default() };
-                let applied = [1_u64, 2].into_iter().map(|id| focus.applying(id, &style, true).count()).sum::<usize>();
-                assert!(applied > 0, "{} is laid over an element", stringify!($field));
-                listed += 1;
-            })+};
+        macro_rules! names {
+            ($($field:ident),+) => { vec![$(stringify!($field)),+] };
         }
-        focus_variant_fields!(each_alone);
-        assert_eq!(listed, 3);
+        // Every state style a `StyleDesc` has, each alone on a style.
+        macro_rules! each_state_alone {
+            ($($field:ident),+ $(,)?) => {
+                vec![$((stringify!($field), StyleDesc { $field: Some(Box::new(StyleDesc::default())), ..Default::default() })),+]
+            };
+        }
+        let states = each_state_alone!(
+            hover, active, focus_visible, focus_within, group_hover, group_active, group_focus_within,
+            has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
+        );
+        let mut applied: Vec<&str> = states
+            .iter()
+            .filter(|(_, style)| [1_u64, 2].into_iter().any(|id| focus.applying(id, style, true).next().is_some()))
+            .map(|(field, _)| *field)
+            .collect();
+        let mut listed: Vec<&str> = focus_variant_fields!(names);
+        applied.sort_unstable();
+        listed.sort_unstable();
+        assert_eq!(applied, listed, "left: laid over an element by `applying`; right: in `focus_variant_fields!`");
     }
 
     fn tree_with(elements: &[(u64, &str)]) -> RetainedTree {
