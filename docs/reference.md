@@ -4948,7 +4948,8 @@ error before any root is mounted, as for `matchMedia`), `visualViewport`,
 `frameElement` (`null`) and `parent`, `top` and `self` (the global object, unless the
 runtime defines them). `visualViewport` has `width` and `height` equal to the inner size,
 `offsetLeft`, `offsetTop`, `pageLeft` and `pageTop` of 0 (the document cannot scroll),
-`scale` of 1, and `addEventListener` and `removeEventListener` for `resize`. `window` gets
+`scale` of 1, and `addEventListener` and `removeEventListener` for `resize` (a listener
+added before any root is mounted is accepted, though `width` and `height` throw until one is). `window` gets
 a `resize` event too: both are sent when the size of the window that mounted last changes
 (not for a change of OS preference), `visualViewport` first, from one subscription that
 exists only while either has a listener, and a listener added before any root is mounted

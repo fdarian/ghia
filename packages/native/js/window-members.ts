@@ -115,8 +115,6 @@ class VisualViewport {
     listener: WindowEventListener,
     options?: boolean | AddEventListenerOptions
   ): void {
-    // Read first, so a window that cannot be watched leaves no listener behind.
-    if (type.toLowerCase() === "resize") currentWindowSize("visualViewport.addEventListener")
     this.listeners.addEventListener(type, listener, options)
     resizeWatch.sync()
   }

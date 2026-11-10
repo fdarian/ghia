@@ -109,6 +109,22 @@ describe("the resize event", () => {
     }
   })
 
+  it("lets visualViewport take a resize listener before a root mounts, and starts at the first mount", () => {
+    const seen: number[] = []
+    const listener = () => seen.push(window.visualViewport!.width)
+    window.visualViewport!.addEventListener("resize", listener)
+    try {
+      expect(() => window.visualViewport!.width).toThrow(/mounted/)
+      const fake = mountWindow()
+      expect(fake.mediaChangeCalls).toEqual([true])
+      fake.width = 640
+      fake.emitMediaChange()
+      expect(seen).toEqual([640])
+    } finally {
+      window.visualViewport!.removeEventListener("resize", listener)
+    }
+  })
+
   it("stops after a once listener has run", () => {
     const fake = mountWindow()
     let calls = 0

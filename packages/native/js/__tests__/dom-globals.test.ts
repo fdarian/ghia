@@ -126,7 +126,6 @@ describe("window size members", () => {
     expect(() => window.innerWidth).toThrow(/mounted/)
     expect(() => window.innerHeight).toThrow(/mounted/)
     expect(() => window.visualViewport!.width).toThrow(/mounted/)
-    expect(() => window.visualViewport!.addEventListener("resize", () => {})).toThrow(/mounted/)
   })
 
   it("reads innerWidth and innerHeight live from the window that mounted last", () => {
