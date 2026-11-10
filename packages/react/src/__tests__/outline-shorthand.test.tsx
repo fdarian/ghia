@@ -140,6 +140,15 @@ describeNative("outline shorthand", () => {
     expect(errorsOf({ hover: { outline: "50%" } })).toBe("")
   })
 
+  it("drops only the bad outline: the longhands written after it still paint", () => {
+    const longhands = { outlineWidth: 6, outlineStyle: "solid", outlineColor: "#0000ff" }
+    for (const [index, outline] of ["2px 3px", "solid dashed", "hidden", "2px solid notacolour", ""].entries()) {
+      const shot = paint(`bad-${index}`, boxed({ outline, ...longhands }))
+      expect(isBlue(shot.at(27, 50)), outline).toBe(true)
+      expect(isBlue(shot.at(23, 50)), `${outline} outside the ring`).toBe(false)
+    }
+  })
+
   describe("in a focus style", () => {
     const tab = (renderer: TestRoot["renderer"]) => renderer.simulateKeystrokes("Tab")
 
@@ -185,6 +194,16 @@ describeNative("outline shorthand", () => {
       expect(isBlue(at.at(27, 50))).toBe(false)
       const on = paint("state-none-hover", boxed({ hover: { outline: "6px solid #0000ff" } }), hoverBox)
       expect(isBlue(on.at(27, 50))).toBe(true)
+    })
+
+    it("leaves the outline as it was for a bad state outline, and applies the rest of the state", () => {
+      const base = { outline: "6px solid #0000ff" }
+      const bad = { ...base, hover: { outline: "50%" } }
+      expect(isBlue(paint("state-bad-rest", boxed(bad)).at(27, 50))).toBe(true)
+      expect(isBlue(paint("state-bad-hover", boxed(bad), hoverBox).at(27, 50))).toBe(true)
+      const withColor = { ...base, hover: { outline: "50%", outlineColor: "#00ff00" } }
+      expect(isBlue(paint("state-bad-color-rest", boxed(withColor)).at(27, 50))).toBe(true)
+      expect(isGreen(paint("state-bad-color-hover", boxed(withColor), hoverBox).at(27, 50))).toBe(true)
     })
 
     it("goes away with a state's outlineStyle none", () => {

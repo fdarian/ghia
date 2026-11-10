@@ -134,6 +134,24 @@ describeNative("paddingBlock and paddingInline", () => {
     expect(errorsOf({ hover: { paddingBlock: "1px bogus" } })).toBe("")
   })
 
+  it("drops only the bad padding: the box is as without it, with the rest of the style applied", () => {
+    const without = padded({ paddingLeft: 9 })
+    expect(without[0]).toEqual([9, 0, 20, 10])
+    for (const bad of [{ paddingBlock: "1px 2px 3px" }, { paddingInline: "1px auto" }, { paddingBlock: "" }]) {
+      expect(padded({ ...bad, paddingLeft: 9 }), JSON.stringify(bad)).toEqual(without)
+    }
+  })
+
+  it("leaves the box as it was for a bad state paddingBlock, and applies the rest of the state", () => {
+    const base = { paddingBlock: 2, paddingInline: 3 }
+    const hover = (state: Style) =>
+      laidOut(hosted({ ...base, hover: state }), childAndHost, { over: "host", at: [1, 1] })
+    const bad = hover({ paddingBlock: "1px bogus" })
+    expect(bad.on).toEqual(bad.at)
+    expect(bad.at[0]).toEqual([3, 2, 20, 10])
+    expect(hover({ paddingBlock: "1px bogus", paddingTop: 7 }).on[0]).toEqual([3, 7, 20, 10])
+  })
+
   it("is replaced by a state's padding, paddingBlock or side", () => {
     const base = { paddingBlock: 2, paddingInline: 3 }
     const hover = (state: Style) =>
@@ -191,6 +209,31 @@ describeNative("marginBlock and marginInline", () => {
     expect(errorsOf({ hover: { marginInline: "bogus" } })).toBe("")
   })
 
+  it("drops only the bad margin: the box is as without it, with the rest of the style applied", () => {
+    const without = placed({ marginLeft: 7 })
+    expect(without[0]).toEqual([7, 0, 100, 10])
+    for (const bad of [{ marginBlock: "0 max-content" }, { marginInline: "1px 2px 3px" }]) {
+      expect(placed({ ...bad, marginLeft: 7 }), JSON.stringify(bad)).toEqual(without)
+    }
+  })
+
+  it("leaves the box as it was for a bad state marginInline, and applies the rest of the state", () => {
+    const hover = (state: Style) =>
+      laidOut(
+        scene(
+          <div testId="host" style={{ display: "flex", width: 300 }}>
+            <div testId="child" style={{ width: 100, height: 10, marginInline: "auto", hover: state }} />
+          </div>
+        ),
+        childAndHost,
+        { over: "child", at: [1, 1] }
+      )
+    const bad = hover({ marginInline: "bogus" })
+    expect(bad.on).toEqual(bad.at)
+    expect(bad.at[0]).toEqual([100, 0, 100, 10])
+    expect(hover({ marginInline: "bogus", marginLeft: 4 }).on[0]).toEqual([4, 0, 100, 10])
+  })
+
   it("is replaced by a state's margin, marginInline or side", () => {
     const base = { marginInline: "auto" }
     const hover = (state: Style) =>
@@ -237,6 +280,29 @@ describeNative("insetBlock and insetInline", () => {
   it("drops a value CSS would drop and reports nothing", () => {
     expect(errorsOf({ insetBlock: "10px fit-content" })).toBe("")
     expect(errorsOf({ insetInline: "1px 2px 3px" })).toBe("")
+  })
+
+  it("drops only the bad inset: the box is as without it, with the rest of the style applied", () => {
+    const without = placed({ left: 5, top: 0 })
+    expect(without.slice(0, 2)).toEqual([5, 0])
+    for (const bad of [{ insetBlock: "10px fit-content" }, { insetInline: "1px 2px 3px" }]) {
+      expect(placed({ ...bad, left: 5, top: 0 }), JSON.stringify(bad)).toEqual(without)
+    }
+  })
+
+  it("leaves the box as it was for a bad state insetBlock, and applies the rest of the state", () => {
+    const hover = (state: Style) =>
+      laidOut(
+        scene(
+          <div testId="child" style={{ position: "absolute", insetBlock: "10px 20px", insetInline: 0, hover: state }} />
+        ),
+        (renderer) => rect(renderer, "child"),
+        { over: "child", at: [10, 20] }
+      )
+    const bad = hover({ insetBlock: "10px fit-content" })
+    expect(bad.on).toEqual(bad.at)
+    expect(bad.at).toEqual([0, 10, 300, 170])
+    expect(hover({ insetBlock: "10px fit-content", top: 30 }).on).toEqual([0, 30, 300, 150])
   })
 
   it("is replaced by a state's inset, insetBlock or side", () => {

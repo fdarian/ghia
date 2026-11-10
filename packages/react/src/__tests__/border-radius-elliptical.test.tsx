@@ -10,10 +10,11 @@ const FILL = "#ff0000"
 const PAGE = "#ffffff"
 const MARGIN = 40
 
-function shoot(name: string, tree: ReactNode) {
+function shoot(name: string, tree: ReactNode, interact?: (renderer: ReturnType<typeof createTestRoot>["renderer"]) => void) {
   const { render, renderer, unmount } = createTestRoot()
   try {
     render(tree)
+    interact?.(renderer)
     renderer.dispatchNativeEvents()
     const file = path.join(SHOTS_DIR, `border-radius-elliptical-${name}.png`)
     renderer.captureScreenshot(file)
@@ -257,6 +258,42 @@ describeNative("an invalid border radius is dropped like CSS drops it", () => {
 
   it("drops it inside a state style too", () => {
     expect(errorsOf({ hover: { borderRadius: "bogus" } })).toBe("")
+  })
+
+  it("drops only the bad radius: the corner stays square and the rest of the style paints", () => {
+    const bad = [
+      { borderRadius: "1ch" },
+      { borderRadius: "-4px" },
+      { borderRadius: "10px /" },
+      { borderTopLeftRadius: "1px 2px 3px" },
+      { borderTopLeftRadius: -1 },
+    ]
+    for (const [index, style] of bad.entries()) {
+      const pixels = shoot(`bad-${index}`, boxed(100, 100, { ...style, borderBottomRightRadius: 40 }))
+      expect(painted(pixels, 1, 1), JSON.stringify(style)).toBe(true)
+      expect(painted(pixels, 99, 1), JSON.stringify(style)).toBe(true)
+      expect(painted(pixels, 99, 99), `${JSON.stringify(style)} the valid corner`).toBe(false)
+    }
+  })
+
+  const hoverBox = (renderer: ReturnType<typeof createTestRoot>["renderer"]) => {
+    renderer.nativeSimulateMouseMove(MARGIN + 50, MARGIN + 50)
+    renderer.clockFastForward(16)
+  }
+
+  it("leaves the corners as they were for a bad state radius, and applies the rest of the state", () => {
+    const round = { borderRadius: "50%", hover: { borderRadius: "bogus" } }
+    for (const interact of [undefined, hoverBox]) {
+      const pixels = shoot(`state-round-${interact ? "on" : "at"}`, boxed(100, 100, round), interact)
+      expect(painted(pixels, 1, 1)).toBe(false)
+      expect(painted(pixels, 50, 50)).toBe(true)
+    }
+    const square = { hover: { borderRadius: "bogus", borderBottomRightRadius: 40 } }
+    const at = shoot("state-square-at", boxed(100, 100, square))
+    expect(painted(at, 99, 99)).toBe(true)
+    const on = shoot("state-square-on", boxed(100, 100, square), hoverBox)
+    expect(painted(on, 1, 1)).toBe(true)
+    expect(painted(on, 99, 99)).toBe(false)
   })
 
   it("applies the rest of a re-render's style when its radius is dropped", () => {

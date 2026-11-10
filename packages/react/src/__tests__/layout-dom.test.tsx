@@ -727,6 +727,28 @@ describeNative("DOM layout: invalid values", () => {
     }
   })
 
+  it("drops only the invalid track list: the grid lays its items out as without it", () => {
+    const laidOut = (columns: string | undefined) => {
+      const { render, renderer, unmount } = createTestRoot()
+      try {
+        render(
+          <div testId="grid" style={{ display: "grid", gridTemplateColumns: columns, gridTemplateRows: "20px 30px", width: 100 }}>
+            <div testId="a" style={{ height: 10 }} />
+            <div testId="b" style={{ height: 10 }} />
+          </div>
+        )
+        return ["grid", "a", "b"].map((id) => box(renderer, id))
+      } finally {
+        unmount()
+      }
+    }
+    const without = laidOut(undefined)
+    expect(laidOut("minmax(1fr, 10px)")).toEqual(without)
+    expect(without[2].y - without[1].y).toBe(20)
+    const valid = laidOut("30px 70px")
+    expect(valid[2].x - valid[1].x).toBe(30)
+  })
+
   it("applies the rest of a re-render's style when one declaration is dropped", () => {
     const errors: Error[] = []
     const { render, renderer, unmount } = createTestRoot({

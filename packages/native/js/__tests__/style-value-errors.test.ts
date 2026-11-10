@@ -21,7 +21,7 @@ describeNative("a style value that does not parse", () => {
     const renderer = mount({
       border: 0,
       height: "inherit",
-      width: "var(--x)",
+      width: "wide",
       backgroundColor: "red",
     })
     try {
