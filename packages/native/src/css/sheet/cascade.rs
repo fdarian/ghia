@@ -56,7 +56,7 @@ impl MatchedInterner {
 
 /// Whether the JSON text of a value is a CSS-wide keyword string. Such a declaration takes back
 /// what earlier declarations of its property set and gives nothing in return.
-fn is_css_wide(value: &str) -> bool {
+pub(super) fn is_css_wide(value: &str) -> bool {
     if !value.starts_with('"') {
         return false;
     }

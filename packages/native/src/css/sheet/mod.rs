@@ -18,6 +18,7 @@ mod cascade;
 mod declarations;
 mod document;
 mod index;
+mod invalidation;
 mod layers;
 mod matching;
 mod parser;
@@ -25,6 +26,7 @@ mod selector;
 mod selector_parse;
 mod tokenizer;
 mod tree;
+mod validate;
 mod view;
 
 #[cfg(test)]
@@ -36,6 +38,7 @@ pub use atoms::{Atom, Atoms};
 pub use cascade::{CascadeCache, MatchedRules};
 pub use document::{ElementCss, StyleSheets};
 pub use declarations::render_declarations;
+pub use invalidation::{Invalidation, Reach};
 pub use layers::{LayerId, LayerOrder, Layers};
 pub use matching::{matches, ElementView};
 pub use parser::parse_sheet;

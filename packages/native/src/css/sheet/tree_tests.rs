@@ -335,6 +335,10 @@ fn a_change_no_selector_reads_matches_nothing_again() {
 
     doc.tree.set_attribute(div, "class", Some("a b".into()));
     doc.flush();
+    assert_eq!(counts().elements_rematched, 0, "`.b` is not read either");
+
+    doc.tree.set_attribute(div, "class", Some("b".into()));
+    doc.flush();
     assert_eq!(counts().elements_rematched, 1);
 }
 
@@ -631,4 +635,268 @@ fn a_restyle_marks_the_tree_like_set_style() {
     doc.flush();
     assert_ne!(doc.tree.elements[&div].subtree_revision, revision, "the style changed, so the element is dirty");
     assert_ne!(doc.tree.take_dirty(), crate::retained_tree::Dirty::Clean);
+}
+
+// Invalidation: what a change marks.
+
+impl Doc {
+    /// How many elements matched again for what `change` did and the flush that followed.
+    fn rematched(&mut self, change: impl FnOnce(&mut Doc)) -> u64 {
+        crate::perf_counters::reset();
+        change(self);
+        self.flush();
+        counts().elements_rematched
+    }
+
+    fn class(&mut self, id: u64, class: &str) {
+        self.tree.set_attribute(id, "class", Some(class.into()));
+    }
+
+    /// `count` elements of `tag` under `parent`, classed `class`.
+    fn run(&mut self, count: usize, tag: &str, parent: u64, class: &str) -> Vec<u64> {
+        (0..count).map(|_| self.classed(tag, parent, class)).collect()
+    }
+
+    /// The sheet comes first, so the elements built after it have no `<style>` among their siblings.
+    fn settled(css: &str, build: impl FnOnce(&mut Doc)) -> Doc {
+        let mut doc = Doc::new();
+        doc.style_element(ROOT, css);
+        build(&mut doc);
+        doc.flush();
+        doc
+    }
+}
+
+#[test]
+fn a_class_only_the_subject_reads_matches_one_element_again() {
+    let mut list = Vec::new();
+    let mut doc = Doc::settled(".a { color: red }", |doc| list = doc.run(20, "div", ROOT, "x"));
+    assert_eq!(doc.rematched(|doc| doc.class(list[7], "x a")), 1);
+    assert_eq!(doc.color(list[7]), Some("red"));
+    assert_eq!(doc.rematched(|doc| doc.class(list[7], "x")), 1);
+    assert_eq!(doc.color(list[7]), None);
+}
+
+#[test]
+fn a_class_read_through_a_descendant_combinator_matches_the_descendants_again() {
+    let (mut parent, mut child, mut grandchild, mut other_child, mut elsewhere) = (0, 0, 0, 0, 0);
+    let mut doc = Doc::settled(".a .b { color: red }", |doc| {
+        parent = doc.classed("div", ROOT, "x");
+        child = doc.classed("div", parent, "b");
+        grandchild = doc.classed("div", child, "b");
+        other_child = doc.classed("div", parent, "x");
+        let unrelated = doc.classed("div", ROOT, "x");
+        elsewhere = doc.classed("div", unrelated, "b");
+    });
+    assert_eq!(doc.rematched(|doc| doc.class(parent, "x a")), 3, "the three below it, not itself");
+    assert_eq!(doc.color(child), Some("red"));
+    assert_eq!(doc.color(grandchild), Some("red"));
+    assert_eq!(doc.color(other_child), None);
+    assert_eq!(doc.color(elsewhere), None);
+}
+
+#[test]
+fn a_class_read_through_a_child_combinator_matches_only_the_children_again() {
+    let (mut parent, mut child, mut grandchild) = (0, 0, 0);
+    let mut doc = Doc::settled(".a > .b { color: red }", |doc| {
+        parent = doc.classed("div", ROOT, "x");
+        child = doc.classed("div", parent, "b");
+        doc.classed("div", parent, "b");
+        grandchild = doc.classed("div", child, "b");
+    });
+    assert_eq!(doc.rematched(|doc| doc.class(parent, "a")), 2);
+    assert_eq!(doc.color(child), Some("red"));
+    assert_eq!(doc.color(grandchild), None);
+}
+
+#[test]
+fn a_class_read_through_sibling_combinators_matches_the_siblings_again() {
+    let mut siblings = Vec::new();
+    let mut doc = Doc::settled(".a + .b { color: red } .c ~ .d { background-color: blue }", |doc| {
+        siblings = doc.run(5, "span", ROOT, "b d");
+    });
+    assert_eq!(doc.rematched(|doc| doc.class(siblings[1], "b d a")), 1, "only the next one");
+    assert_eq!(doc.color(siblings[2]), Some("red"));
+    assert_eq!(doc.color(siblings[3]), None);
+
+    assert_eq!(doc.rematched(|doc| doc.class(siblings[1], "b d c")), 3, "all that follow");
+    assert_eq!(doc.background(siblings[2]), Some("blue"));
+    assert_eq!(doc.background(siblings[4]), Some("blue"));
+    assert_eq!(doc.background(siblings[0]), None);
+    assert_eq!(doc.color(siblings[2]), None, "no longer after an .a");
+}
+
+#[test]
+fn a_sibling_combinator_followed_by_a_descendant_one_matches_below_the_siblings_again() {
+    let (mut first, mut second, mut inside, mut later) = (0, 0, 0, 0);
+    let mut doc = Doc::settled(".a + .b .c { color: red }", |doc| {
+        first = doc.classed("div", ROOT, "x");
+        second = doc.classed("div", ROOT, "b");
+        inside = doc.classed("div", second, "c");
+        later = doc.classed("div", ROOT, "b");
+        doc.classed("div", later, "c");
+    });
+    assert_eq!(doc.rematched(|doc| doc.class(first, "a")), 1, "what is below the next sibling");
+    assert_eq!(doc.color(inside), Some("red"));
+    assert_eq!(doc.rematched(|doc| doc.class(second, "x")), 1, "what is below an element read as `.b`");
+    assert_eq!(doc.color(inside), None);
+}
+
+#[test]
+fn a_class_no_selector_names_matches_nothing_again() {
+    let mut list = Vec::new();
+    let mut doc = Doc::settled(".a .b + .c { color: red }", |doc| list = doc.run(10, "div", ROOT, "x"));
+    assert_eq!(doc.rematched(|doc| doc.class(list[3], "x other")), 0);
+    assert_eq!(doc.rematched(|doc| doc.class(list[3], "")), 0);
+}
+
+#[test]
+fn an_attribute_that_is_set_or_removed_marks_what_a_selector_reads_it_for() {
+    let mut list = Vec::new();
+    let mut doc = Doc::settled("[data-x] { color: red }", |doc| list = doc.run(10, "div", ROOT, "x"));
+    assert_eq!(doc.rematched(|doc| drop(doc.tree.set_attribute(list[2], "data-x", Some(String::new())))), 1);
+    assert_eq!(doc.color(list[2]), Some("red"));
+    assert_eq!(doc.rematched(|doc| drop(doc.tree.set_attribute(list[2], "data-x", None))), 1);
+    assert_eq!(doc.color(list[2]), None);
+    assert_eq!(doc.rematched(|doc| drop(doc.tree.set_attribute(list[2], "data-y", Some(String::new())))), 0);
+}
+
+#[test]
+fn an_attribute_prop_marks_like_an_attribute() {
+    let mut list = Vec::new();
+    let mut doc = Doc::settled("[aria-busy=true] { color: red }", |doc| list = doc.run(10, "div", ROOT, "x"));
+    assert_eq!(doc.rematched(|doc| doc.tree.set_custom_prop(list[4], "aria-busy".into(), serde_json::json!("true"))), 1);
+    assert_eq!(doc.color(list[4]), Some("red"));
+    assert_eq!(doc.rematched(|doc| doc.tree.set_custom_prop(list[4], "aria-label".into(), serde_json::json!("x"))), 0);
+}
+
+#[test]
+fn an_id_change_marks_the_old_and_the_new_id() {
+    let mut list = Vec::new();
+    let mut doc = Doc::settled("#one { color: red } #two { background-color: blue }", |doc| {
+        list = doc.run(10, "div", ROOT, "x");
+    });
+    fn set(id: u64, value: Option<&'static str>) -> impl FnOnce(&mut Doc) {
+        move |doc| drop(doc.tree.set_attribute(id, "id", value.map(String::from)))
+    }
+    assert_eq!(doc.rematched(set(list[1], Some("one"))), 1);
+    assert_eq!(doc.color(list[1]), Some("red"));
+    assert_eq!(doc.rematched(set(list[1], Some("two"))), 1);
+    assert_eq!(doc.color(list[1]), None);
+    assert_eq!(doc.background(list[1]), Some("blue"));
+    assert_eq!(doc.rematched(set(list[1], Some("three"))), 1, "the old one was named");
+    assert_eq!(doc.background(list[1]), None);
+    assert_eq!(doc.rematched(set(list[1], Some("four"))), 0, "neither is");
+    assert_eq!(doc.rematched(set(list[1], None)), 0);
+}
+
+#[test]
+fn a_negated_class_marks_the_subject() {
+    let mut list = Vec::new();
+    let mut doc = Doc::settled(":not(.a) { color: red }", |doc| list = doc.run(10, "div", ROOT, "x"));
+    assert_eq!(doc.color(list[0]), Some("red"));
+    assert_eq!(doc.rematched(|doc| doc.class(list[5], "a")), 1);
+    assert_eq!(doc.color(list[5]), None);
+    assert_eq!(doc.color(list[6]), Some("red"));
+}
+
+#[test]
+fn a_selector_inside_is_reaches_through_its_own_combinators() {
+    let (mut parent, mut child, mut grandchild, mut other) = (0, 0, 0, 0);
+    let mut doc = Doc::settled(":is(.a .b) { color: red }", |doc| {
+        parent = doc.classed("div", ROOT, "x");
+        child = doc.classed("div", parent, "b");
+        grandchild = doc.classed("div", child, "x");
+        other = doc.classed("div", ROOT, "b");
+    });
+    assert_eq!(doc.rematched(|doc| doc.class(parent, "a")), 2, "what is below it");
+    assert_eq!(doc.color(child), Some("red"));
+    assert_eq!(doc.color(other), None);
+    assert_eq!(doc.rematched(|doc| doc.class(child, "b y")), 0, "`.b` stays, `.y` is read by nothing");
+}
+
+#[test]
+fn an_insert_matches_the_new_subtree_and_siblings_only_when_a_selector_looks_at_them() {
+    let mut list = Vec::new();
+    let mut doc = Doc::settled(".a { color: red }", |doc| list = doc.run(10, "div", ROOT, "x"));
+    let inserted = doc.make("div");
+    let child = doc.make("div");
+    doc.tree.append_child(inserted, child);
+    assert_eq!(doc.rematched(|doc| doc.tree.insert_before(ROOT, inserted, list[2])), 2, "it and what it holds");
+    assert_eq!(doc.rematched(|doc| doc.tree.detach_child(inserted)), 2, "out of the document, it and what it holds");
+
+    let mut doc = Doc::settled(".a + .b { color: red }", |doc| list = doc.run(10, "div", ROOT, "x"));
+    let inserted = doc.make("div");
+    assert_eq!(doc.rematched(|doc| doc.tree.insert_before(ROOT, inserted, list[2])), 2, "it and the one it now precedes");
+    assert_eq!(doc.rematched(|doc| drop(doc.tree.destroy_element(inserted))), 1, "the one after it");
+}
+
+#[test]
+fn a_general_sibling_combinator_matches_the_following_siblings_on_insert_and_removal() {
+    let mut list = Vec::new();
+    let mut doc = Doc::settled(".a ~ .b { color: red }", |doc| list = doc.run(10, "div", ROOT, "x"));
+    let inserted = doc.make("div");
+    assert_eq!(doc.rematched(|doc| doc.tree.insert_before(ROOT, inserted, list[6])), 5, "it and the four after");
+    assert_eq!(doc.rematched(|doc| drop(doc.tree.destroy_element(list[6]))), 3, "what follows it");
+}
+
+#[test]
+fn the_dnd_kit_attribute_marks_the_element_and_what_is_below_it() {
+    let mut items = Vec::new();
+    let mut doc = Doc::settled(include_str!("fixtures/dnd-kit.css"), |doc| {
+        let list = doc.classed("div", ROOT, "list");
+        items = doc.run(100, "div", list, "item");
+        for item in &items {
+            let child = doc.element("div", *item);
+            doc.element("div", child);
+        }
+    });
+    let dragged = items[40];
+    assert_eq!(
+        doc.rematched(|doc| drop(doc.tree.set_attribute(dragged, "data-dnd-dragging", Some(String::new())))),
+        3,
+        "the item, its child and its grandchild: `[data-dnd-dragging] *`"
+    );
+    assert_eq!(doc.rematched(|doc| drop(doc.tree.set_attribute(dragged, "data-dnd-dragging", None))), 3);
+    assert_eq!(doc.rematched(|doc| drop(doc.tree.set_attribute(items[41], "data-dnd-overlay", Some(String::new())))), 1);
+    assert_eq!(doc.rematched(|doc| drop(doc.tree.set_attribute(items[41], "data-unrelated", Some(String::new())))), 0);
+}
+
+#[test]
+fn an_invalid_important_declaration_does_not_take_part_in_the_cascade() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.inline(div, r#"{"right":"5px","top":"1px"}"#);
+    doc.style_element(ROOT, ".a { right: bogus !important; top: 2px !important; color: red }");
+    doc.flush();
+    assert!(doc.style(div).unwrap().right.is_some(), "the inline `right` stays");
+    assert_eq!(doc.color(div), Some("red"));
+    let top = doc.style(div).unwrap().top.clone();
+    let wins = doc.tree.styles.intern(br#"{"top":"2px"}"#).unwrap().top.clone();
+    assert_eq!(top, wins, "a valid important declaration still wins");
+}
+
+#[test]
+fn a_declaration_with_an_unknown_property_is_ignored() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.style_element(ROOT, ".a { frobnicate: 1px !important; color: red }");
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+
+    let only = doc.classed("div", ROOT, "b");
+    doc.style_element(ROOT, ".b { frobnicate: 1px }");
+    doc.flush();
+    assert!(doc.tree.elements[&only].css().is_some_and(|css| css.matched.is_none()), "nothing is left of the rule");
+}
+
+#[test]
+fn custom_properties_var_and_css_wide_keywords_stay_in_the_cascade() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.inline(div, r#"{"color":"green"}"#);
+    doc.style_element(ROOT, ".a { --x: whatever; width: var(--w, 4px); color: unset !important }");
+    doc.flush();
+    assert_eq!(doc.color(div), None, "`unset` took the inline color back");
+    assert!(doc.style(div).is_some_and(|style| style.var_declarations.is_some()), "the `var()` is held for build time");
 }

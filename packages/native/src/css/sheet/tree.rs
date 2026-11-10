@@ -11,11 +11,11 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashSet;
 
-use crate::retained_tree::RetainedTree;
+use crate::retained_tree::{RetainedElement, RetainedTree};
 
 use super::atoms::{Atom, Atoms};
 use super::cascade::MatchedRules;
-use super::document::Mark;
+use super::invalidation::Reach;
 use super::selector::Specificity;
 use super::view::TreeView;
 
@@ -107,13 +107,10 @@ impl RetainedTree {
         if self.sheets.style_elements.contains(&parent_id) || self.contains_style_element(child) {
             self.sheets.sources_dirty = true;
         }
-        if self.sheets.atoms_fresh && self.sheets.index.features.siblings {
-            let next = self.elements.get(&parent_id).and_then(|parent| {
-                let position = parent.children.iter().position(|sibling| *sibling == child)?;
-                parent.children.get(position + 1).copied()
-            });
-            if let Some(next) = next {
-                self.sheets.mark(next, true, true);
+        let structure = self.sheets.index.invalidation.structure;
+        if self.sheets.atoms_fresh && !structure.is_empty() && self.elements.get(&child).is_some_and(RetainedElement::is_matchable) {
+            if let Some(next) = self.next_element_sibling(child) {
+                self.sheets.mark(next, structure.from_next_sibling());
             }
         }
     }
@@ -124,9 +121,9 @@ impl RetainedTree {
         if parent.is_some_and(|parent| self.sheets.style_elements.contains(&parent)) || self.contains_style_element(child) {
             self.sheets.sources_dirty = true;
         }
-        if self.sheets.atoms_fresh {
-            let siblings = self.sheets.index.features.siblings;
-            self.sheets.mark(child, true, siblings);
+        if self.sheets.atoms_fresh && self.elements.get(&child).is_some_and(RetainedElement::is_matchable) {
+            let structure = self.sheets.index.invalidation.structure;
+            self.sheets.mark(child, Reach::SELF | Reach::DESCENDANTS | structure);
         }
     }
 
@@ -136,7 +133,7 @@ impl RetainedTree {
             self.sheets.sources_dirty = true;
         }
         if self.sheets.atoms_fresh {
-            self.sheets.mark(id, false, false);
+            self.sheets.mark(id, Reach::SELF);
         }
     }
 
@@ -146,27 +143,34 @@ impl RetainedTree {
     }
 
     pub(crate) fn sheets_attribute_changed(&mut self, id: u64, name: &str) {
-        if !self.sheets.atoms_fresh {
-            return;
-        }
-        let name = lowercase(name);
-        if *name == *"class" {
-            self.refresh_class_atoms(id);
-        } else if *name == *"id" {
-            self.refresh_id_atom(id);
-        }
-        if self.sheets.reads_attribute(&name) {
-            let siblings = self.sheets.index.features.siblings;
-            self.sheets.mark(id, true, siblings);
+        if self.sheets.atoms_fresh {
+            self.attribute_changed(id, &lowercase(name));
         }
     }
 
     /// The own style of an element changed: only a `[style]` selector can tell.
     pub(crate) fn sheets_style_changed(&mut self, id: u64) {
-        if self.sheets.atoms_fresh && self.sheets.reads_style() {
-            let siblings = self.sheets.index.features.siblings;
-            self.sheets.mark(id, true, siblings);
+        if self.sheets.atoms_fresh {
+            let reach = self.sheets.style_reach();
+            self.sheets.mark(id, reach);
         }
+    }
+
+    fn attribute_changed(&mut self, id: u64, name: &str) {
+        let reach = match name {
+            "class" => {
+                let before = self.refresh_class_atoms(id);
+                let after = self.elements.get(&id).and_then(|element| element.css()).map_or(&[][..], |css| &css.classes[..]);
+                self.sheets.class_reach(&before, after)
+            }
+            "id" => {
+                let before = self.refresh_id_atom(id);
+                let after = self.elements.get(&id).and_then(|element| element.css()).and_then(|css| css.id);
+                self.sheets.id_reach(before, after)
+            }
+            _ => self.sheets.attribute_reach(name),
+        };
+        self.sheets.mark(id, reach);
     }
 
     fn contains_style_element(&self, ancestor: u64) -> bool {
@@ -198,36 +202,29 @@ impl RetainedTree {
         css.classes = classes;
     }
 
-    fn refresh_class_atoms(&mut self, id: u64) {
+    /// Reads the class atoms again, and returns the ones the element had.
+    fn refresh_class_atoms(&mut self, id: u64) -> Vec<Atom> {
         let atoms = &mut self.sheets.atoms;
         let Some(element) = self.elements.get_mut(&id) else {
-            return;
+            return Vec::new();
         };
         let classes = class_atoms(atoms, element.attribute("class"));
-        element.css_mut().classes = classes;
+        std::mem::replace(&mut element.css_mut().classes, classes)
     }
 
-    fn refresh_id_atom(&mut self, id: u64) {
+    /// Reads the id atom again, and returns the one the element had.
+    fn refresh_id_atom(&mut self, id: u64) -> Option<Atom> {
         let atoms = &mut self.sheets.atoms;
-        let Some(element) = self.elements.get_mut(&id) else {
-            return;
-        };
+        let element = self.elements.get_mut(&id)?;
         let element_id = id_atom(atoms, element.attribute("id"));
-        element.css_mut().id = element_id;
+        std::mem::replace(&mut element.css_mut().id, element_id)
     }
 
     /// An element's `id` arrives as a prop, not through `setAttribute`, and so do `role` and
     /// `aria-*`: they read as attributes of the same name.
     pub(crate) fn sheets_prop_changed(&mut self, id: u64, key: &str) {
-        if !self.sheets.atoms_fresh {
-            return;
-        }
-        if key == "id" {
-            self.refresh_id_atom(id);
-        }
-        if self.sheets.reads_attribute(key) {
-            let siblings = self.sheets.index.features.siblings;
-            self.sheets.mark(id, true, siblings);
+        if self.sheets.atoms_fresh {
+            self.attribute_changed(id, key);
         }
     }
 
@@ -305,8 +302,18 @@ impl RetainedTree {
         }
     }
 
+    /// The first sibling after `id` that selectors can match.
+    fn next_element_sibling(&self, id: u64) -> Option<u64> {
+        let parent = self.elements.get(self.elements.get(&id)?.parent.as_ref()?)?;
+        let position = parent.children.iter().position(|child| *child == id)?;
+        parent.children[position + 1..]
+            .iter()
+            .copied()
+            .find(|sibling| self.elements.get(sibling).is_some_and(RetainedElement::is_matchable))
+    }
+
     /// The elements to match again, each with whether it is in the document, once.
-    fn restyle_set(&self, marks: &[(u64, Mark)], all: bool) -> Vec<(u64, bool)> {
+    fn restyle_set(&self, marks: &[(u64, Reach)], all: bool) -> Vec<(u64, bool)> {
         let mut out: Vec<(u64, bool)> = Vec::new();
         if all {
             let mut seen: FxHashSet<u64> = FxHashSet::default();
@@ -317,38 +324,14 @@ impl RetainedTree {
             out.extend(self.elements.keys().filter(|id| !seen.contains(id)).map(|id| (*id, false)));
             return out;
         }
-        let mut visited: FxHashSet<u64> = FxHashSet::default();
-        let mut covered: FxHashSet<u64> = FxHashSet::default();
-        let mut expand = |id: u64, subtree: bool, connected: bool, out: &mut Vec<(u64, bool)>| {
-            if !subtree {
-                if visited.insert(id) {
-                    out.push((id, connected));
-                }
-                return;
-            }
-            if covered.contains(&id) {
-                return;
-            }
-            let mut stack = vec![id];
-            while let Some(at) = stack.pop() {
-                if !covered.insert(at) {
-                    continue;
-                }
-                if visited.insert(at) {
-                    out.push((at, connected));
-                }
-                if let Some(element) = self.elements.get(&at) {
-                    stack.extend(element.children.iter().copied());
-                }
-            }
-        };
-        for (id, mark) in marks {
+        let mut expansion = Expansion { tree: self, visited: FxHashSet::default(), covered: FxHashSet::default(), out };
+        for (id, reach) in marks {
             let Some(element) = self.elements.get(id) else {
                 continue;
             };
             let connected = self.is_connected(*id);
-            expand(*id, mark.subtree, connected, &mut out);
-            if !mark.following {
+            expansion.add(*id, reach.own(), connected);
+            if !reach.reaches_siblings() {
                 continue;
             }
             let Some(parent) = element.parent.and_then(|parent| self.elements.get(&parent)) else {
@@ -357,11 +340,18 @@ impl RetainedTree {
             let Some(position) = parent.children.iter().position(|child| child == id) else {
                 continue;
             };
-            for sibling in &parent.children[position + 1..] {
-                expand(*sibling, true, connected, &mut out);
+            let after = &parent.children[position + 1..];
+            let next = after.iter().copied().find(|sibling| self.elements.get(sibling).is_some_and(RetainedElement::is_matchable));
+            if let Some(next) = next.filter(|_| reach.next_sibling() != 0) {
+                expansion.add(next, reach.next_sibling(), connected);
+            }
+            if reach.following_siblings() != 0 {
+                for sibling in after {
+                    expansion.add(*sibling, reach.following_siblings(), connected);
+                }
             }
         }
-        out
+        expansion.out
     }
 
     /// Matches what the batch marked, and restyles the elements whose rules changed.
@@ -434,6 +424,57 @@ impl RetainedTree {
         self.styles.cascaded.clear();
         for element in self.elements.values_mut() {
             element.clear_css();
+        }
+    }
+}
+
+/// The elements a set of marks comes to, each once. `covered` holds the elements whose whole
+/// subtree is in `out`, so overlapping marks do not walk it again.
+struct Expansion<'a> {
+    tree: &'a RetainedTree,
+    visited: FxHashSet<u64>,
+    covered: FxHashSet<u64>,
+    out: Vec<(u64, bool)>,
+}
+
+impl Expansion<'_> {
+    fn visit(&mut self, id: u64, connected: bool) {
+        let Some(element) = self.tree.elements.get(&id) else {
+            return;
+        };
+        // An element that stopped being matchable (a text node given its string) still has to
+        // drop what it matched.
+        let relevant = element.is_matchable() || element.css().is_some_and(|css| css.matched.is_some());
+        if relevant && self.visited.insert(id) {
+            self.out.push((id, connected));
+        }
+    }
+
+    fn children(&self, id: u64) -> &[u64] {
+        self.tree.elements.get(&id).map_or(&[], |element| &element.children)
+    }
+
+    /// `depths` of `base`: bit 0 itself, bit 1 its children, bit 2 everything below it.
+    fn add(&mut self, base: u64, depths: u8, connected: bool) {
+        if depths & 1 != 0 {
+            self.visit(base, connected);
+        }
+        if depths & 0b100 != 0 {
+            if self.covered.contains(&base) {
+                return;
+            }
+            let mut stack: Vec<u64> = self.children(base).to_vec();
+            while let Some(at) = stack.pop() {
+                if !self.covered.insert(at) {
+                    continue;
+                }
+                self.visit(at, connected);
+                stack.extend_from_slice(self.children(at));
+            }
+        } else if depths & 0b10 != 0 {
+            for child in self.children(base).to_vec() {
+                self.visit(child, connected);
+            }
         }
     }
 }

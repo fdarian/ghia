@@ -6,14 +6,15 @@
 //! every attribute name a selector reads, plus the universal list. Matching then runs the whole
 //! selector on each candidate.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::css::lenient::Declaration;
 
 use super::atoms::Atom;
+use super::invalidation::Invalidation;
 use super::layers::LayerOrder;
 use super::matching::{matches, ElementView};
-use super::selector::{Combinator, ComplexSelector, Simple, Specificity};
+use super::selector::{ComplexSelector, Simple, Specificity};
 use super::StyleSheet;
 
 pub struct IndexedRule {
@@ -30,17 +31,6 @@ struct Entry {
     selector: u32,
 }
 
-/// What the selectors of the document read, so a change that none reads marks nothing.
-#[derive(Default)]
-pub struct Features {
-    pub classes: bool,
-    pub ids: bool,
-    /// Attribute names of `[attr]` selectors, `class` and `id` included when written that way.
-    pub attributes: FxHashSet<Atom>,
-    /// A `+` or `~` combinator exists, so an element's place among its siblings can matter.
-    pub siblings: bool,
-}
-
 #[derive(Default)]
 pub struct RuleIndex {
     pub rules: Vec<IndexedRule>,
@@ -50,7 +40,7 @@ pub struct RuleIndex {
     by_tag: FxHashMap<Atom, Vec<Entry>>,
     universal: Vec<Entry>,
     unlayered_rank: u32,
-    pub features: Features,
+    pub invalidation: Invalidation,
 }
 
 impl RuleIndex {
@@ -67,7 +57,7 @@ impl RuleIndex {
                 }
                 let number = u32::try_from(index.rules.len()).expect("fewer than 2^32 rules");
                 for (position, (selector, _)) in selectors.iter().enumerate() {
-                    index.features.read(selector);
+                    index.invalidation.read(selector);
                     let entry = Entry { rule: number, selector: position as u32 };
                     index.bucket(selector, entry);
                 }
@@ -157,27 +147,5 @@ impl RuleIndex {
             (self.unlayered_rank - self.rules[*rule as usize].layer_rank, *specificity, *rule)
         });
         important.into_iter().map(|(rule, _)| rule).collect()
-    }
-}
-
-impl Features {
-    fn read(&mut self, selector: &ComplexSelector) {
-        self.siblings |=
-            selector.links.iter().any(|link| matches!(link, Combinator::NextSibling | Combinator::SubsequentSibling));
-        for simple in selector.compounds.iter().flat_map(|compound| &compound.simples) {
-            match simple {
-                Simple::Class(_) => self.classes = true,
-                Simple::Id(_) => self.ids = true,
-                Simple::Attr(attr) => {
-                    self.attributes.insert(attr.name);
-                }
-                Simple::Is(list) | Simple::Where(list) | Simple::Not(list) => {
-                    for inner in list {
-                        self.read(inner);
-                    }
-                }
-                Simple::Tag(_) | Simple::Root | Simple::Host | Simple::PseudoElement => {}
-            }
-        }
     }
 }

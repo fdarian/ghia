@@ -17,8 +17,10 @@ use crate::style::StyleDesc;
 use super::atoms::{Atom, Atoms};
 use super::cascade::{merge, MatchedInterner, MatchedRules};
 use super::index::RuleIndex;
+use super::invalidation::Reach;
 use super::layers::Layers;
 use super::parser::parse_sheet;
+use super::validate::Validator;
 
 /// What an element has for the matcher, kept on the element while sheets exist.
 #[derive(Default)]
@@ -36,15 +38,6 @@ impl ElementCss {
     }
 }
 
-/// What to match again for an element.
-#[derive(Clone, Copy, Default)]
-pub struct Mark {
-    /// Everything below the element.
-    pub subtree: bool,
-    /// The siblings after it, with everything below them.
-    pub following: bool,
-}
-
 pub struct StyleSheets {
     /// A hook does nothing while this is false.
     pub(crate) enabled: bool,
@@ -53,7 +46,8 @@ pub struct StyleSheets {
     pub(crate) atoms_fresh: bool,
     pub(crate) sources_dirty: bool,
     pub(crate) mark_all: bool,
-    pub(crate) pending: Vec<(u64, Mark)>,
+    /// Elements to match again, each with the places around it a change reaches.
+    pub(crate) pending: Vec<(u64, Reach)>,
     pub(crate) atoms: Atoms,
     pub(crate) style: Atom,
     /// Every `<style>` element, connected or not.
@@ -64,6 +58,7 @@ pub struct StyleSheets {
     pub(crate) loaded: Vec<String>,
     pub(crate) index: RuleIndex,
     pub(crate) interner: MatchedInterner,
+    validator: Validator,
     /// The text `[style]` selectors read, per own style, kept while the style is.
     style_texts: RefCell<FxHashMap<usize, (Arc<StyleDesc>, Arc<str>)>>,
 }
@@ -86,6 +81,7 @@ impl Default for StyleSheets {
             loaded: Vec::new(),
             index: RuleIndex::default(),
             interner: MatchedInterner::default(),
+            validator: Validator::default(),
             style_texts: RefCell::default(),
         }
     }
@@ -96,23 +92,57 @@ impl StyleSheets {
         self.enabled && (self.sources_dirty || self.mark_all || !self.atoms_fresh || !self.pending.is_empty())
     }
 
-    pub(crate) fn mark(&mut self, id: u64, subtree: bool, following: bool) {
-        self.pending.push((id, Mark { subtree, following }));
-    }
-
-    /// Whether a change of the attribute `name` can change what a selector matches.
-    pub(crate) fn reads_attribute(&self, name: &str) -> bool {
-        let features = &self.index.features;
-        match name {
-            "class" if features.classes => true,
-            "id" if features.ids => true,
-            _ => self.atoms.get(name).is_some_and(|atom| features.attributes.contains(&atom)),
+    pub(crate) fn mark(&mut self, id: u64, reach: Reach) {
+        if reach.is_empty() || self.pending.last().is_some_and(|(last, held)| *last == id && held.contains(reach)) {
+            return;
         }
+        self.pending.push((id, reach));
     }
 
-    /// Whether the selectors read the style attribute.
+    /// Where a change of the attribute `name` can change what a selector matches.
+    pub(crate) fn attribute_reach(&self, name: &str) -> Reach {
+        self.atoms
+            .get(name)
+            .and_then(|atom| self.index.invalidation.attributes.get(&atom))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Where the classes that are in one list and not the other can be read.
+    pub(crate) fn class_reach(&self, before: &[Atom], after: &[Atom]) -> Reach {
+        let classes = &self.index.invalidation.classes;
+        let mut reach = self.attribute_reach("class");
+        if classes.is_empty() {
+            return reach;
+        }
+        for class in before.iter().filter(|class| !after.contains(class)) {
+            reach |= classes.get(class).copied().unwrap_or_default();
+        }
+        for class in after.iter().filter(|class| !before.contains(class)) {
+            reach |= classes.get(class).copied().unwrap_or_default();
+        }
+        reach
+    }
+
+    pub(crate) fn id_reach(&self, before: Option<Atom>, after: Option<Atom>) -> Reach {
+        let mut reach = self.attribute_reach("id");
+        if before != after {
+            let ids = &self.index.invalidation.ids;
+            for id in before.iter().chain(after.iter()) {
+                reach |= ids.get(id).copied().unwrap_or_default();
+            }
+        }
+        reach
+    }
+
+    /// Where a change of an own style can be read: only a `[style]` selector can tell.
+    pub(crate) fn style_reach(&self) -> Reach {
+        self.index.invalidation.attributes.get(&self.style).copied().unwrap_or_default()
+    }
+
+    /// Whether any selector reads an own style, which is what keeps the texts of own styles.
     pub(crate) fn reads_style(&self) -> bool {
-        self.index.features.attributes.contains(&self.style)
+        !self.style_reach().is_empty()
     }
 
     /// The sheets the document has now, one text each: the connected `<style>` elements' (given in
@@ -129,7 +159,8 @@ impl StyleSheets {
         let mut layers = Layers::default();
         let mut sheets = Vec::with_capacity(texts.len());
         for text in &texts {
-            let sheet = parse_sheet(text, &mut self.atoms, &mut layers);
+            let mut sheet = parse_sheet(text, &mut self.atoms, &mut layers);
+            self.validator.filter(&mut sheet.rules);
             for skipped in &sheet.unsupported {
                 log::warn!("Stylesheet: not supported, skipped: {skipped}");
             }
