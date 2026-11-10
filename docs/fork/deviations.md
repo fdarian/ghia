@@ -97,6 +97,8 @@ A new deviation goes in the section of its topic, as a bullet with a bold lead p
   - The automatic mappings of `opsz` (from the font size) and `wdth` (from `font-stretch`) are not done.
   - A keyframe track of three or more values whose tag sets differ flips as a whole, where Chrome decides each pair of keyframes on its own.
 
+- **`inherit`, and `initial` on an inherited property, are dropped.** A style value that does not parse is dropped on its own (`css/lenient.rs`), which is CSS's answer for `unset`, `revert`, `revert-layer` and `initial` on a property that is not inherited. `inherit`, and `initial` on an inherited property (`color`, `fontSize`, ...), should take the parent's value or the initial one; here the element keeps what it inherits. Reading `inherit` from the parent is a later change.
+
 ## Paint and transforms
 
 - **Masks: what is not built.** `image-set()` is skipped and the legacy `-webkit-mask-composite` keywords do not exist; `no-clip` and `margin-box` invalidate a value, `fill-box` is `content-box` and `stroke-box` and `view-box` are `border-box`, `mask` is not animatable, and an image mask's tiles are culled to the content mask at group start.

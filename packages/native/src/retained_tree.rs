@@ -427,6 +427,20 @@ fn has_container_rules(element: &RetainedElement) -> bool {
     element.style.as_deref().is_some_and(|style| style.container_rules.is_some())
 }
 
+/// The one check a style payload passes: the strict parse, then the validations that run on the
+/// result. `css::lenient` calls it again to judge each declaration alone.
+pub(crate) fn parse_style(raw: &[u8]) -> Result<StyleDesc, String> {
+    let mut style: StyleDesc = serde_json::from_slice(raw).map_err(|error| error.to_string())?;
+    // Read from the text: which container units a style names is a property of all of it,
+    // `@container` blocks and state styles included.
+    style.container_unit_axes = crate::css::length::LengthReads::container_axes(
+        std::str::from_utf8(raw).map_err(|error| error.to_string())?,
+    );
+    crate::motion::validate_transitions(&style)?;
+    crate::motion::validate_animations(&style)?;
+    Ok(style)
+}
+
 impl StyleTable {
     /// Parse a style payload, reusing the shared value when the same bytes
     /// arrived before. Hashing ~110 bytes is far cheaper than building the
@@ -440,14 +454,10 @@ impl StyleTable {
                 return Ok(hit.style.clone());
             }
         }
-        let mut style: StyleDesc = serde_json::from_slice(raw).map_err(|error| error.to_string())?;
-        // Read from the text: which container units a style names is a property of all of it,
-        // `@container` blocks and state styles included.
-        style.container_unit_axes = crate::css::length::LengthReads::container_axes(
-            std::str::from_utf8(raw).map_err(|error| error.to_string())?,
-        );
-        crate::motion::validate_transitions(&style)?;
-        crate::motion::validate_animations(&style)?;
+        let style = match parse_style(raw) {
+            Ok(style) => style,
+            Err(error) => crate::css::lenient::recover(raw, error)?,
+        };
         let shared = Arc::new(style);
         self.entries.entry(key).or_default().push(InternedStyle {
             raw: raw.into(),

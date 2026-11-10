@@ -522,7 +522,8 @@ An integer beyond 2^53 travels as a float.
 The queue (`createMutationQueue`) writes each op as it is enqueued and hands native the finished batch. What is enqueued
 while native applies a batch (an `autoFocus` handler, a failed blob image) goes into another buffer, so the batch in
 flight is never overwritten. A batch that fails is put back in front of what was written since, except that a
-`setStyle` or `setUniversalStyle` native rejects is cut out by its byte range and the rest is sent again. Where there
+`setStyle` or `setUniversalStyle` native rejects (a style that is not a JSON object; a value that does not parse is dropped by
+native, see [Invalid values](#invalid-values)) is cut out by its byte range and the rest is sent again. Where there
 is no `TextEncoder` (Hermes) the writer encodes UTF-8 by hand. A plain string (an element type, text, an event type, a custom prop key or string value) that is not well formed
 UTF-16 (an unpaired surrogate) is written with U+FFFD in its place. A style or a JSON-valued custom prop is written as its JSON text, where
 `JSON.stringify` has turned an unpaired surrogate into the escape `\ud800`; native's JSON parser rejects that, so the batch fails (it is not repaired).
@@ -7102,14 +7103,30 @@ CSS-like styling via the `style` prop:
 
 **Transform:** `transform`, `translate`, `rotate`, `scale`, `transformOrigin`, `perspective`, `perspectiveOrigin`, `transformStyle` (`"flat"` | `"preserve-3d"`) and `backfaceVisibility` (`"visible"` | `"hidden"`); see [Transforms](#transforms) and [Three dimensions](#three-dimensions)
 
+### Invalid values
+
+A value that does not parse drops its own declaration and nothing else, as in CSS: the element keeps every other property
+of the style, and nothing throws. `{ border: 0, height: "inherit", width: "var(--anchor-width)", backgroundColor: "red" }`
+paints the red background, with no `height` or `width`. Native reads the declarations in written order, so a shorthand
+still drops the longhands written before it.
+
+- A number a property does not take is read as React DOM writes it: `0` is `"0"`, a unitless property (`opacity`,
+  `zIndex`, `flexGrow`, `fontWeight`, `lineHeight`, `order`, ...) is the number as text, and any other is `<n>px`.
+  `border: 0` is `border: "0"`. A number that is still invalid is dropped.
+- A CSS-wide keyword (`inherit`, `initial`, `unset`, `revert`, `revert-layer`) that the property does not take on its own is
+  dropped. See [deviations](fork/deviations.md#layout) for where that is not what CSS does.
+- A state style (`hover`, ...) and an `@container` block are recovered the same way inside, one declaration at a time.
+- Each dropped declaration is logged once as a warning, by its property and value.
+- A style that is not a JSON object, or is not JSON, still rejects the `setStyle`.
+
 ### Lengths
 
 Every length-typed style field takes a number (pixels) or a CSS string: `px`,
 `in`, `cm`, `mm`, `q`, `pt`, `pc`, `%`, `em`, `rem`, `vw`, `vh`, `vmin`, `vmax`, or
 a `calc()` that adds and subtracts any of them and multiplies or divides by a
 number. A length and a `%` mixed in one `calc()` works wherever the property has a
-basis to resolve the percentage against. Invalid strings throw from `setStyle`
-like any other invalid value. A bare number written as a string (`"12"`) is
+basis to resolve the percentage against. An invalid string is dropped like any
+other [invalid value](#invalid-values). A bare number written as a string (`"12"`) is
 accepted only on the sizes (`width`, `height`, `min*`, `max*`) and, like them, the
 margins and insets; every other field needs a unit or a JS number.
 
@@ -7484,7 +7501,7 @@ so that animation starts at `0`.
 `none`. `fit-content()` takes a length or a `%`, not a `calc()` that mixes the
 two. `gridAutoColumns` and `gridAutoRows` take the same track sizes. A bare number `n` still means `repeat(n, minmax(0, 1fr))` (with
 `gridColumnMin` / `gridRowMin` to pick the minimum). A track list that does not
-parse makes the batch throw, like any other invalid style value.
+parse is dropped, like any other [invalid value](#invalid-values).
 
 ```tsx
 <div style={{
@@ -7545,7 +7562,7 @@ CSS Tables 3 as Chrome draws it, on any `div`, `text` or `span`:
   `borderCollapse` and `emptyCells` inherit as in CSS (a table inside a cell has
   the spacing of the table around it), `tableLayout` does not. `verticalAlign` on
   a `table-cell` is `"top"`, `"middle"`, `"bottom"` or `"baseline"` (the default);
-  any other value is `"baseline"` there. An invalid value throws. A cell on the baseline lines up by the first line
+  any other value is `"baseline"` there. An invalid value is dropped. A cell on the baseline lines up by the first line
   of its text, or by the bottom of its content when it has children but no text (a box, an image, an empty block);
   a cell with nothing in it (white space only counts as nothing) is not on the baseline.
 - **Layout.** The table is shrink-to-fit, or `max(width, least width of the
