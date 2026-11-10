@@ -185,10 +185,10 @@ mod tests {
     #[test]
     fn only_a_div_is_a_box_root_and_a_row_of_a_virtual_list_is_not() {
         let mut tree = page(COLUMN, r#"{"height": 56}"#);
-        tree.create_element(4, "text".to_owned());
+        tree.create_element(4, "span".to_owned());
         tree.append_child(1, 4);
         tree.set_style(4, style(r#"{"height": 56}"#));
-        assert!(!is_candidate(&tree, tree.elements.get(&4).expect("a text")));
+        assert!(!is_candidate(&tree, tree.elements.get(&4).expect("a span")));
         let mut list = page(r#"{}"#, r#"{"height": 56}"#);
         list.create_element(5, "virtual-list".to_owned());
         list.append_child(1, 5);

@@ -39,7 +39,7 @@ function open(initial: Page, watched: number, rows: number) {
     <div style={{ display: "flex", flexDirection: "column", width: 600, height: 400, backgroundColor: "#ffffff" }}>
       <div testId="header" style={{ display: "flex", flexDirection: "row", alignItems: "center", flexShrink: 0, height: page().headerHeight, padding: 12 }}>
         <input placeholder="Search" style={{ width: 120, height: 24, fontSize: 13, backgroundColor: "#f4f4f5" }} />
-        <text style={{ marginLeft: 16, fontSize: 12, color: "#71717a", whiteSpace: "nowrap" }}>{page().title}</text>
+        <span style={{ marginLeft: 16, fontSize: 12, color: "#71717a", whiteSpace: "nowrap" }}>{page().title}</span>
       </div>
       <div testId="scroller" style={{ display: "flex", flexDirection: "column", flexGrow: 1, minHeight: 0, overflowY: "auto" }}>
         <For each={Array.from({ length: rows + page().appended }, (_, index) => index)}>
@@ -49,15 +49,15 @@ function open(initial: Page, watched: number, rows: number) {
               style={{ display: "flex", flexDirection: "row", alignItems: "center", flexShrink: 0, height: 48, paddingLeft: 16, backgroundColor: "#ffffff", hover: { backgroundColor: "#f4f4f5" } }}
             >
               <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, minWidth: 0 }}>
-                <text style={{ fontSize: 14, color: "#18181b", whiteSpace: nowrap(index) }}>{`Message ${index}`}</text>
-                <text style={{ fontSize: 12, color: "#71717a", whiteSpace: nowrap(index), marginTop: index === watched ? page().shift : 0 }}>{index === watched ? page().row : "preview"}</text>
+                <span style={{ fontSize: 14, color: "#18181b", whiteSpace: nowrap(index) }}>{`Message ${index}`}</span>
+                <span style={{ fontSize: 12, color: "#71717a", whiteSpace: nowrap(index), marginTop: index === watched ? page().shift : 0 }}>{index === watched ? page().row : "preview"}</span>
               </div>
-              <text style={{ width: 72, fontSize: 12, color: "#2563eb", textAlign: "right" }}>{`r${index}`}</text>
+              <span style={{ width: 72, fontSize: 12, color: "#2563eb", textAlign: "right" }}>{`r${index}`}</span>
             </div>
           )}
         </For>
       </div>
-      <text testId="footer" style={{ fontSize: 12, color: "#71717a" }}>{page().footer}</text>
+      <span testId="footer" style={{ fontSize: 12, color: "#71717a" }}>{page().footer}</span>
     </div>
   ))
   app.renderer.setA11yActive(false)

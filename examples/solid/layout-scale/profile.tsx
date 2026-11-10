@@ -106,10 +106,10 @@ function Row(props: { index: number; counter: () => string }) {
   return (
     <div style={rowStyle}>
       <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, minWidth: 0 }}>
-        <text style={{ fontSize: 14, fontWeight: 600, color: "#18181B", whiteSpace: "nowrap" }}>{`Message title ${props.index}`}</text>
-        <text style={{ fontSize: 12, color: "#71717A", whiteSpace: "nowrap" }}>{`Sender ${props.index % 97}, a preview of the body`}</text>
+        <span style={{ fontSize: 14, fontWeight: 600, color: "#18181B", whiteSpace: "nowrap" }}>{`Message title ${props.index}`}</span>
+        <span style={{ fontSize: 12, color: "#71717A", whiteSpace: "nowrap" }}>{`Sender ${props.index % 97}, a preview of the body`}</span>
       </div>
-      <text style={{ width: 72, fontSize: 12, color: "#2563EB", textAlign: "right" }}>{props.counter()}</text>
+      <span style={{ width: 72, fontSize: 12, color: "#2563EB", textAlign: "right" }}>{props.counter()}</span>
     </div>
   )
 }
@@ -152,7 +152,7 @@ function App(props: { count: number; onReady: (page: Page) => void }) {
           placeholder="Search"
           style={{ width: 396, height: 32, paddingLeft: 10, paddingRight: 10, fontSize: 13, color: "#18181B", backgroundColor: "#F4F4F5", border: "1px solid #E4E4E7", borderRadius: 8 }}
         />
-        <text style={{ marginLeft: 16, fontSize: 12, color: "#71717A", whiteSpace: "nowrap" }}>{header()}</text>
+        <span style={{ marginLeft: 16, fontSize: 12, color: "#71717A", whiteSpace: "nowrap" }}>{header()}</span>
       </div>
       <div testId="scroller" style={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "auto", height: HEIGHT - HEADER_HEIGHT }}>
         <For each={indexes}>{(index) => <Row index={index} counter={counters[index]![0]} />}</For>
