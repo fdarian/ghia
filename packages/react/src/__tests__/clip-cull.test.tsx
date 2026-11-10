@@ -369,7 +369,7 @@ describeNative("content outside a clip", () => {
             onClick={() => {}}
             style={{ width: 120, height: 30, flexShrink: 0 }}
           >
-            <text style={{ fontSize: 12 }}>inside the button</text>
+            <div style={{ fontSize: 12 }}>inside the button</div>
           </div>
           <div id="clipped.hint" role="note" aria-label="Hint" style={{ width: 50, height: 10, flexShrink: 0 }} />
         </>
@@ -493,7 +493,7 @@ describeNative("content outside a clip whose ink reaches in, from round 6", () =
       clip(
         ref,
         <div style={{ width: 150, height: 20, marginTop: -52, flexShrink: 0 }}>
-          <text
+          <div
             style={{
               fontSize: 14,
               lineHeight: "20px",
@@ -504,7 +504,7 @@ describeNative("content outside a clip whose ink reaches in, from round 6", () =
             }}
           >
             Hello
-          </text>
+          </div>
         </div>,
         white
       )
@@ -543,7 +543,7 @@ describeNative("content outside a clip whose ink reaches in, from round 6", () =
           }}
         >
           <div style={{ textUnderlineOffset: "auto" }}>
-            <text>Hello</text>
+            <div>Hello</div>
           </div>
         </div>,
         white

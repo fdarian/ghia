@@ -44,7 +44,7 @@ function Row({ index, hover, onEnter }: { index: number; hover: Hover; onEnter: 
         hover: refinement,
       }}
     >
-      <text style={{ color: "#ffffff" }}>{`row-${index}`}</text>
+      <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
     </div>
   )
 }
@@ -302,7 +302,7 @@ function Outer({ outside, fillers = 300 }: { outside: "group" | "has"; fillers?:
               groupHover: outside === "group" ? { backgroundColor: "#ff0000" } : undefined,
             }}
           >
-            <text style={{ color: "#ffffff" }}>{`row-${index}`}</text>
+            <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
           </div>
         ))}
       </div>

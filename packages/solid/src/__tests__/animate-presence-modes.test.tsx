@@ -24,7 +24,7 @@ function boundsOf(renderer: TestRenderer, testId: string) {
 function Page(props: { name: string }) {
   return (
     <motion.div initial={false} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={linear} style={{ height: 20 }}>
-      <text>{props.name}</text>
+      <div>{props.name}</div>
     </motion.div>
   )
 }
@@ -64,7 +64,7 @@ describe.skipIf(!hasNativeTestRenderer)('Solid AnimatePresence mode="wait"', () 
       <div>
         <AnimatePresence mode="wait" onExitComplete={() => events.push("exited")}>
           <Show when={name()} keyed>
-            {(page) => <div><text>{page}</text></div>}
+            {(page) => <div><div>{page}</div></div>}
           </Show>
         </AnimatePresence>
       </div>
@@ -364,7 +364,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid AnimatePresence swaps", () => {
       <div>
         <AnimatePresence>
           <Show when={name()} keyed>
-            {(page) => <motion.div animate={{ opacity: 1 }}><text>{page}</text></motion.div>}
+            {(page) => <motion.div animate={{ opacity: 1 }}><div>{page}</div></motion.div>}
           </Show>
         </AnimatePresence>
       </div>
@@ -411,7 +411,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid AnimatePresence of an element wit
         <AnimatePresence>
           <Show when={shown()}>
             <motion.div exit={{ opacity: 0 }} transition={linear} style={{ height: 20 }}>
-              <text>leaving</text>
+              <div>leaving</div>
             </motion.div>
           </Show>
         </AnimatePresence>

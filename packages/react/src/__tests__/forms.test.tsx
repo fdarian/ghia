@@ -139,7 +139,7 @@ describeNative("form", () => {
             style={{ width: 200, height: 80 }}
             onChange={(event) => setText(event.value)}
           />
-          <text testId="out">{JSON.stringify(text)}</text>
+          <div testId="out">{JSON.stringify(text)}</div>
         </form>
       )
     }

@@ -26,7 +26,7 @@ describeNative("the parent content box of a replayed root", { timeout: TIMEOUT }
     return (
       <div testId={`block-${index}`} style={{ flexShrink: 0, height: 30, backgroundColor: "#335577" }}>
         <div style={{ height: 10, backgroundColor: "#223344" }}>
-          <text>{`block ${index}`}</text>
+          <div>{`block ${index}`}</div>
         </div>
       </div>
     )
@@ -47,7 +47,7 @@ describeNative("the parent content box of a replayed root", { timeout: TIMEOUT }
           style={{ flexShrink: 0, maxHeight: MAX_HEIGHT, overflow: "hidden", backgroundColor: "#335577" }}
         >
           <div style={{ height: 20, backgroundColor: "#223344" }}>
-            <text>mover</text>
+            <div>mover</div>
           </div>
           <div style={{ height: 20, backgroundColor: "#445566" }} />
         </motion.div>

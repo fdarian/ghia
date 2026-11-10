@@ -120,7 +120,7 @@ export function App() {
         }}
         style={{ position: "absolute", left: 200, top: 10, width: 80, height: 28, backgroundColor: "#aaaaaa" }}
       >
-        <text>{`button ${clicks}`}</text>
+        <div>{`button ${clicks}`}</div>
       </div>
       <div
         testId="hover-target"
@@ -136,7 +136,7 @@ export function App() {
           hover: { backgroundColor: "#00aaaa" },
         }}
       />
-      <text testId="label" style={{ position: "absolute", left: 380, top: 14 }}>{label}</text>
+      <div testId="label" style={{ position: "absolute", left: 380, top: 14 }}>{label}</div>
 
       <div
         testId="scroller"
@@ -231,7 +231,7 @@ export function App() {
           backgroundColor: "#333333",
         }}
       >
-        <text style={{ color: "#ffffff" }}>popover</text>
+        <div style={{ color: "#ffffff" }}>popover</div>
       </div>
     </div>
   )

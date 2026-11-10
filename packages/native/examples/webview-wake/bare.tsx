@@ -4,7 +4,7 @@ import { GpuixRenderer } from "@ghia/native"
 const wakes: number[] = []
 const set = GpuixRenderer.prototype.setFrameWakeCallback
 GpuixRenderer.prototype.setFrameWakeCallback = function (cb) { return set.call(this, cb ? () => { wakes.push(performance.now()); cb() } : cb) }
-render(<div style={{ width: 300, height: 200, backgroundColor: "#eee" }}><text>bare</text></div>, { title: "bare", width: 300, height: 200 })
+render(<div style={{ width: 300, height: 200, backgroundColor: "#eee" }}><div>bare</div></div>, { title: "bare", width: 300, height: 200 })
 await new Promise((r) => setTimeout(r, 8000))
 const from = performance.now(); const n0 = wakes.length
 await new Promise((r) => setTimeout(r, 15000))

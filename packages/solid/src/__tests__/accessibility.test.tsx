@@ -59,7 +59,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid accessibility", () => {
           aria-describedby="hint"
           style={{ width: 80, height: 24 }}
         />
-        <text id="title" style={{ height: 20 }}>Title</text>
+        <div id="title" style={{ height: 20 }}>Title</div>
         <div id="hint" role="note" style={{ width: 80, height: 20 }} />
       </div>
     ))
@@ -79,7 +79,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid accessibility", () => {
       <div style={{ width: 300, height: 100 }}>
         <div id="field" role="textbox" aria-labelledby="title" style={{ width: 80, height: 24 }} />
         <div id="title" style={{ width: 120, height: 20 }}>
-          <text>Name</text>
+          <div>Name</div>
         </div>
       </div>
     ))

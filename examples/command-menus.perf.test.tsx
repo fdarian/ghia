@@ -65,7 +65,7 @@ function Cap({ label }: { label: string }) {
         backgroundColor: C.hover,
       }}
     >
-      <text style={{ fontSize: 11, color: C.muted, whiteSpace: 'nowrap' }}>{label}</text>
+      <div style={{ fontSize: 11, color: C.muted, whiteSpace: 'nowrap' }}>{label}</div>
     </div>
   )
 }
@@ -103,10 +103,10 @@ function Row({ menu, index, hidden }: { menu: number; index: number; hidden: boo
           overflow: 'hidden',
         }}
       >
-        <text style={{ fontSize: 14, flexShrink: 0, color: C.fg, whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: 14, flexShrink: 0, color: C.fg, whiteSpace: 'nowrap' }}>
           {`Menu ${menu} action ${index}`}
-        </text>
-        <text
+        </div>
+        <div
           style={{
             fontSize: 14,
             minWidth: 0,
@@ -117,7 +117,7 @@ function Row({ menu, index, hidden }: { menu: number; index: number; hidden: boo
           }}
         >
           {`Description of action ${index}`}
-        </text>
+        </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', flexShrink: 0, gap: 2 }}>
         <Cap label="⌘" />
@@ -152,7 +152,7 @@ function Menu({ menu, variant }: { menu: number; variant: Variant }) {
         }}
       >
         <svg source={ICON} style={{ width: 16, height: 16, color: C.muted }} />
-        <text style={{ fontSize: 14, color: C.muted }}>Search…</text>
+        <div style={{ fontSize: 14, color: C.muted }}>Search…</div>
       </div>
       <div
         testId={`menu-${menu}-list`}
@@ -204,7 +204,7 @@ function Card({ menu, variant, far }: { menu: number; variant: Variant; far: boo
           borderTopStyle: 'solid',
         }}
       >
-        <text style={{ fontSize: 14, color: C.muted }}>{`Command menu ${menu}`}</text>
+        <div style={{ fontSize: 14, color: C.muted }}>{`Command menu ${menu}`}</div>
       </div>
     </div>
   )
@@ -226,7 +226,7 @@ function Page({ variant, tick }: { variant: Variant; tick: number }) {
       }}
     >
       <div style={{ height: PAGE_HEADER, display: 'flex', alignItems: 'center', paddingLeft: 20 }}>
-        <text style={{ fontSize: 20, color: C.fg }}>{`Command Menu ${tick}`}</text>
+        <div style={{ fontSize: 20, color: C.fg }}>{`Command Menu ${tick}`}</div>
       </div>
       <div
         testId="page"

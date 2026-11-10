@@ -32,10 +32,10 @@ const card = { width: 140, height: 60, backgroundColor: "#335577" }
 const own = (index: number) => (
   <div testId={`card-${index}`} style={card}>
     <div style={{ height: 20, backgroundColor: "#223344" }}>
-      <text style={{ color: "#ffffff" }}>{`own ${index}`}</text>
+      <div style={{ color: "#ffffff" }}>{`own ${index}`}</div>
     </div>
     <div style={{ height: 20 }}>
-      <text style={{ color: "#ffee00" }}>two</text>
+      <div style={{ color: "#ffee00" }}>two</div>
     </div>
   </div>
 )
@@ -44,10 +44,10 @@ const own = (index: number) => (
 const inherits = (index: number) => (
   <div testId={`card-${index}`} style={card}>
     <div style={{ height: 20, backgroundColor: "#223344" }}>
-      <text style={{ color: "#ffffff" }}>{`own ${index}`}</text>
+      <div style={{ color: "#ffffff" }}>{`own ${index}`}</div>
     </div>
     <div style={{ height: 20 }}>
-      <text>two</text>
+      <div>two</div>
     </div>
   </div>
 )
@@ -59,10 +59,10 @@ const border = (index: number) => (
     style={{ ...card, borderWidth: 3, borderStyle: "solid", borderColor: "currentColor" }}
   >
     <div style={{ height: 20 }}>
-      <text style={{ color: "#ffffff" }}>{`own ${index}`}</text>
+      <div style={{ color: "#ffffff" }}>{`own ${index}`}</div>
     </div>
     <div style={{ height: 20 }}>
-      <text style={{ color: "#ffee00" }}>two</text>
+      <div style={{ color: "#ffee00" }}>two</div>
     </div>
   </div>
 )
@@ -74,10 +74,10 @@ const borderOfItsOwn = (index: number) => (
     style={{ ...card, color: "#00aa44", borderWidth: 3, borderStyle: "solid", borderColor: "currentColor" }}
   >
     <div style={{ height: 20 }}>
-      <text>{`own ${index}`}</text>
+      <div>{`own ${index}`}</div>
     </div>
     <div style={{ height: 20 }}>
-      <text>two</text>
+      <div>two</div>
     </div>
   </div>
 )
@@ -86,10 +86,10 @@ const borderOfItsOwn = (index: number) => (
 const declaredAbove = (index: number) => (
   <div testId={`card-${index}`} style={{ ...card, color: "#00aa44" }}>
     <div style={{ height: 20, backgroundColor: "#223344" }}>
-      <text>{`own ${index}`}</text>
+      <div>{`own ${index}`}</div>
     </div>
     <div style={{ height: 20, borderWidth: 2, borderStyle: "solid", borderColor: "currentColor" }}>
-      <text>two</text>
+      <div>two</div>
     </div>
   </div>
 )
@@ -98,10 +98,10 @@ const declaredAbove = (index: number) => (
 const declaredBelow = (index: number) => (
   <div testId={`card-${index}`} style={card}>
     <div style={{ height: 20, backgroundColor: "#223344" }}>
-      <text>{`own ${index}`}</text>
+      <div>{`own ${index}`}</div>
     </div>
     <div style={{ height: 20, color: "#00aa44" }}>
-      <text>two</text>
+      <div>two</div>
     </div>
   </div>
 )
@@ -110,7 +110,7 @@ const declaredBelow = (index: number) => (
 const readAboveTheDeclaration = (index: number) => (
   <div testId={`card-${index}`} style={{ ...card, borderWidth: 3, borderStyle: "solid", borderColor: "currentColor" }}>
     <div style={{ height: 20, color: "#00aa44" }}>
-      <text>two</text>
+      <div>two</div>
     </div>
   </div>
 )
@@ -119,14 +119,14 @@ const readAboveTheDeclaration = (index: number) => (
 const currentColor = (index: number) => (
   <div testId={`card-${index}`} style={{ ...card, color: "currentColor" }}>
     <div style={{ height: 20 }}>
-      <text>{`own ${index}`}</text>
+      <div>{`own ${index}`}</div>
     </div>
   </div>
 )
 const mixed = (index: number) => (
   <div testId={`card-${index}`} style={{ ...card, color: "color-mix(in srgb, currentColor 50%, #ffffff)" }}>
     <div style={{ height: 20 }}>
-      <text>{`own ${index}`}</text>
+      <div>{`own ${index}`}</div>
     </div>
   </div>
 )
@@ -311,7 +311,7 @@ const ICON =
 
 /** Cards that set no colour and draw something with the colour they inherit, one way each. */
 const READERS: Record<string, (index: number) => React.ReactNode> = {
-  text: (index) => <text>{`text ${index}`}</text>,
+  text: (index) => <div>{`text ${index}`}</div>,
   "inline text": (index) => (
     <div>
       <span>one</span>

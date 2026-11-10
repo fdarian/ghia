@@ -181,7 +181,7 @@ function HighlightedTokens({ tokens }: { tokens: ThemedToken[] }) {
   return (
     <div style={{ display: "flex", flexDirection: "row" }}>
       {tokens.map((token, i) => (
-        <text
+        <div
           key={i}
           style={{
             color: token.color || "#e6edf3",
@@ -189,7 +189,7 @@ function HighlightedTokens({ tokens }: { tokens: ThemedToken[] }) {
           }}
         >
           {token.content}
-        </text>
+        </div>
       ))}
     </div>
   )
@@ -218,7 +218,7 @@ function WordDiffTokens({
           (mode === "add" && part.added)
 
         return (
-          <text
+          <div
             key={i}
             style={{
               color: CODE_FG,
@@ -227,7 +227,7 @@ function WordDiffTokens({
             }}
           >
             {part.value}
-          </text>
+          </div>
         )
       })}
     </div>
@@ -265,7 +265,7 @@ function LineNumberGutter({
         backgroundColor: bg,
       }}
     >
-      <text
+      <div
         style={{
           color: fg,
           whiteSpace: "pre",
@@ -273,7 +273,7 @@ function LineNumberGutter({
         }}
       >
         {` ${lineNumber.padStart(maxWidth)} `}
-      </text>
+      </div>
     </div>
   )
 }
@@ -403,7 +403,7 @@ function processHunkLines(
         // Too different — just use syntax highlighting
         const tokens = beforeTokens[i]
         result.push({
-          code: tokens ? <HighlightedTokens tokens={tokens} /> : <text style={{ color: CODE_FG, whiteSpace: "pre" }}>{removedText}</text>,
+          code: tokens ? <HighlightedTokens tokens={tokens} /> : <div style={{ color: CODE_FG, whiteSpace: "pre" }}>{removedText}</div>,
           type,
           oldLineNumber,
           newLineNumber,
@@ -430,7 +430,7 @@ function processHunkLines(
       if (similarity < 0.5) {
         const tokens = afterTokens[i]
         result.push({
-          code: tokens ? <HighlightedTokens tokens={tokens} /> : <text style={{ color: CODE_FG, whiteSpace: "pre" }}>{addedLine.code}</text>,
+          code: tokens ? <HighlightedTokens tokens={tokens} /> : <div style={{ color: CODE_FG, whiteSpace: "pre" }}>{addedLine.code}</div>,
           type,
           oldLineNumber,
           newLineNumber,
@@ -461,7 +461,7 @@ function processHunkLines(
           tokens && tokens.length > 0 ? (
             <HighlightedTokens tokens={tokens} />
           ) : (
-            <text style={{ color: CODE_FG, whiteSpace: "pre" }}>{code}</text>
+            <div style={{ color: CODE_FG, whiteSpace: "pre" }}>{code}</div>
           ),
         type,
         oldLineNumber,
@@ -573,7 +573,7 @@ function buildSplitLines(
         left: { ...line, lineNumber: line.oldLineNumber.padStart(leftMaxWidth) },
         right: {
           lineNumber: " ".repeat(rightMaxWidth),
-          code: <text>{""}</text>,
+          code: <div>{""}</div>,
           type: "empty",
           oldLineNumber: "",
           newLineNumber: "",
@@ -585,7 +585,7 @@ function buildSplitLines(
       splitLines.push({
         left: {
           lineNumber: " ".repeat(leftMaxWidth),
-          code: <text>{""}</text>,
+          code: <div>{""}</div>,
           type: "empty",
           oldLineNumber: "",
           newLineNumber: "",
@@ -634,9 +634,9 @@ function SplitSideGutter({
         backgroundColor: bg,
       }}
     >
-      <text style={{ color: fg, whiteSpace: "pre", fontSize: 13 }}>
+      <div style={{ color: fg, whiteSpace: "pre", fontSize: 13 }}>
         {` ${lineNumber} `}
-      </text>
+      </div>
     </div>
   )
 }
@@ -725,7 +725,7 @@ export function DiffViewer({
   if (hunks.length === 0) {
     return (
       <div style={{ padding: 16 }}>
-        <text style={{ color: LINE_NUMBER_FG_DIM }}>No changes</text>
+        <div style={{ color: LINE_NUMBER_FG_DIM }}>No changes</div>
       </div>
     )
   }
@@ -775,7 +775,7 @@ export function DiffViewer({
             )}
             {hunkIdx < hunks.length - 1 && (
               <div style={{ paddingLeft: 4 }}>
-                <text
+                <div
                   style={{
                     color: SEPARATOR_FG,
                     whiteSpace: "pre",
@@ -783,7 +783,7 @@ export function DiffViewer({
                   }}
                 >
                   {`${" ".repeat(maxWidth + 2)}...`}
-                </text>
+                </div>
               </div>
             )}
           </React.Fragment>
@@ -860,9 +860,9 @@ export function App() {
           backgroundColor: "#1e1e2e",
         }}
       >
-        <text style={{ color: "#cdd6f4", fontSize: 14, fontWeight: "bold" }}>
+        <div style={{ color: "#cdd6f4", fontSize: 14, fontWeight: "bold" }}>
           counter.tsx
-        </text>
+        </div>
       </div>
 
       {/* Scrollable diff — bg matches unchanged code so empty area below

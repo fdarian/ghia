@@ -42,12 +42,12 @@ describe("style props reach the renderer", () => {
     comparePixels(
       "text-padding",
       <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
-        <text style={{ fontSize: 20, color: "#ffffff" }}>indent me</text>
+        <div style={{ fontSize: 20, color: "#ffffff" }}>indent me</div>
       </div>,
       <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
-        <text style={{ fontSize: 20, color: "#ffffff", paddingLeft: 120, paddingTop: 60 }}>
+        <div style={{ fontSize: 20, color: "#ffffff", paddingLeft: 120, paddingTop: 60 }}>
           indent me
-        </text>
+        </div>
       </div>
     )
   })
@@ -56,10 +56,10 @@ describe("style props reach the renderer", () => {
     comparePixels(
       "text-box",
       <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
-        <text style={{ fontSize: 20, color: "#ffffff" }}>boxed</text>
+        <div style={{ fontSize: 20, color: "#ffffff" }}>boxed</div>
       </div>,
       <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
-        <text
+        <div
           style={{
             fontSize: 20,
             color: "#ffffff",
@@ -70,7 +70,7 @@ describe("style props reach the renderer", () => {
           }}
         >
           boxed
-        </text>
+        </div>
       </div>
     )
   })
@@ -80,14 +80,14 @@ describe("style props reach the renderer", () => {
     comparePixels(
       "text-align",
       <div style={{ display: "flex", flexDirection: "column", backgroundColor: "#101010" }}>
-        <text style={{ fontSize: 20, color: "#ffffff", width: 800, textAlign: "left" }}>
+        <div style={{ fontSize: 20, color: "#ffffff", width: 800, textAlign: "left" }}>
           aligned
-        </text>
+        </div>
       </div>,
       <div style={{ display: "flex", flexDirection: "column", backgroundColor: "#101010" }}>
-        <text style={{ fontSize: 20, color: "#ffffff", width: 800, textAlign: "right" }}>
+        <div style={{ fontSize: 20, color: "#ffffff", width: 800, textAlign: "right" }}>
           aligned
-        </text>
+        </div>
       </div>
     )
   })
@@ -98,10 +98,10 @@ describe("style props reach the renderer", () => {
     comparePixels(
       "div-font-size",
       <div style={{ display: "flex", padding: 20, fontSize: 12, backgroundColor: "#101010" }}>
-        <text style={{ color: "#ffffff" }}>inherited size</text>
+        <div style={{ color: "#ffffff" }}>inherited size</div>
       </div>,
       <div style={{ display: "flex", padding: 20, fontSize: 34, backgroundColor: "#101010" }}>
-        <text style={{ color: "#ffffff" }}>inherited size</text>
+        <div style={{ color: "#ffffff" }}>inherited size</div>
       </div>
     )
   })
@@ -328,7 +328,7 @@ describe("style props reach the renderer", () => {
           justifyContent: "center",
         }}
       >
-        <text style={{ color: "#ffffff", fontSize: 14 }}>{label}</text>
+        <div style={{ color: "#ffffff", fontSize: 14 }}>{label}</div>
       </div>
     )
     comparePixels(
@@ -434,12 +434,12 @@ describe("style props reach the renderer", () => {
     comparePixels(
       "text-decoration-underline",
       <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
-        <text style={{ fontSize: 20, color: "#ffffff" }}>underline me</text>
+        <div style={{ fontSize: 20, color: "#ffffff" }}>underline me</div>
       </div>,
       <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
-        <text style={{ fontSize: 20, color: "#ffffff", textDecoration: "underline" }}>
+        <div style={{ fontSize: 20, color: "#ffffff", textDecoration: "underline" }}>
           underline me
-        </text>
+        </div>
       </div>
     )
   })
@@ -448,12 +448,12 @@ describe("style props reach the renderer", () => {
     comparePixels(
       "text-decoration-line-through",
       <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
-        <text style={{ fontSize: 20, color: "#ffffff" }}>strike me</text>
+        <div style={{ fontSize: 20, color: "#ffffff" }}>strike me</div>
       </div>,
       <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
-        <text style={{ fontSize: 20, color: "#ffffff", textDecoration: "line-through" }}>
+        <div style={{ fontSize: 20, color: "#ffffff", textDecoration: "line-through" }}>
           strike me
-        </text>
+        </div>
       </div>
     )
   })

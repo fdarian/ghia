@@ -25,13 +25,13 @@ function measure(fonts?: string[]): { narrow: number; wide: number } {
         ["narrow", NARROW],
         ["wide", WIDE],
       ].map(([testId, content]) => (
-        <text
+        <div
           key={testId}
           testId={testId}
           style={{ fontSize: 16, fontFamily: "Lilex", color: "#fff" }}
         >
           {content}
-        </text>
+        </div>
       ))}
     </div>
   )

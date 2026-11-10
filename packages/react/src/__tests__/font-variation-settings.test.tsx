@@ -35,7 +35,7 @@ function capture(name: string, tree: ReactElement, testIds: string[] = ["text"])
 function line(style: Record<string, unknown>, parent: Record<string, unknown> = {}) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", fontSize: 32, ...parent }}>
-      <text testId="text" style={style}>WWWWWWWWWW</text>
+      <div testId="text" style={style}>WWWWWWWWWW</div>
     </div>
   )
 }
@@ -94,7 +94,7 @@ describeNative("fontVariationSettings", () => {
     const tree = (child: Record<string, unknown>) => (
       <div style={{ fontSize: 32, fontVariationSettings: HEAVY, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
         <div style={{ display: "flex" }}>
-          <text testId="text" style={child}>WWWWWWWWWW</text>
+          <div testId="text" style={child}>WWWWWWWWWW</div>
         </div>
       </div>
     )
@@ -109,8 +109,8 @@ describeNative("fontVariationSettings", () => {
   it("combines with fontFeatureSettings", () => {
     const digits = (style: Record<string, unknown>) => (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", fontSize: 32 }}>
-        <text testId="ones" style={style}>1111111111</text>
-        <text testId="zeros" style={style}>0000000000</text>
+        <div testId="ones" style={style}>1111111111</div>
+        <div testId="zeros" style={style}>0000000000</div>
       </div>
     )
     const tabular = capture("combined", digits({ fontFeatureSettings: '"tnum" 1', fontVariationSettings: HEAVY }), ["ones", "zeros"])
@@ -123,10 +123,10 @@ describeNative("fontVariationSettings", () => {
 describeNative("fontVariationSettings on a span", () => {
   const spans = (first: Record<string, unknown>, second: Record<string, unknown>) => (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", fontSize: 32 }}>
-      <text testId="text">
+      <div testId="text">
         <span style={first}>WWWWW</span>
         <span style={second}>WWWWW</span>
-      </text>
+      </div>
     </div>
   )
 
@@ -148,11 +148,11 @@ describeNative("fontVariationSettings on a span", () => {
   it("is inherited by a nested span, and normal resets it", () => {
     const tree = (inner: Record<string, unknown>) => (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", fontSize: 32 }}>
-        <text testId="text">
+        <div testId="text">
           <span style={{ fontVariationSettings: HEAVY }}>
             WWWWW<span style={inner}>WWWWW</span>
           </span>
-        </text>
+        </div>
       </div>
     )
     const inherited = capture("nested", tree({})).width()
@@ -163,9 +163,9 @@ describeNative("fontVariationSettings on a span", () => {
   it("is inherited from the paragraph's container by an unstyled span", () => {
     const tree = (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", fontSize: 32, fontVariationSettings: HEAVY }}>
-        <text testId="text">
+        <div testId="text">
           <span style={{ color: "red" }}>WWWWW</span>WWWWW
-        </text>
+        </div>
       </div>
     )
     expect(capture("container", tree).width()).toBeCloseTo(capture("container-ref", line({ fontVariationSettings: HEAVY })).width(), 0)
@@ -290,11 +290,11 @@ describeNative("an invalid fontVariationSettings is ignored, as an invalid decla
   it("leaves the value of the box around a span", () => {
     const tree = (inner: string) => (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", fontSize: 32 }}>
-        <text testId="text">
+        <div testId="text">
           <span style={{ fontVariationSettings: HEAVY }}>
             WWWWW<span style={{ fontVariationSettings: inner }}>WWWWW</span>
           </span>
-        </text>
+        </div>
       </div>
     )
     expect(capture("invalid-span", tree("wght 100")).width()).toBeCloseTo(capture("invalid-span-ref", tree(HEAVY)).width(), 0)

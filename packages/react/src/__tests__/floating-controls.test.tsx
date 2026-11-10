@@ -75,7 +75,7 @@ const FilledRow = React.forwardRef(function FilledRow(
         ...style,
       }}
     >
-      <text>{label}</text>
+      <div>{label}</div>
     </div>
   )
 })
@@ -113,7 +113,7 @@ describeNative("floating controls", () => {
             },
           }}
         >
-          <text>Rounded layer</text>
+          <div>Rounded layer</div>
         </FloatingLayer>
       </div>,
     )
@@ -193,7 +193,7 @@ describeNative("floating controls", () => {
               </SelectPrimitive.Group>
             </SelectPrimitive.Content>
           </SelectPrimitive.Root>
-          <text>{`Value: ${value}`}</text>
+          <div>{`Value: ${value}`}</div>
         </div>
       )
     }
@@ -255,7 +255,7 @@ describeNative("floating controls", () => {
             style={{ position: "absolute", top: 40, left: 20, width: 200, height: 80, backgroundColor: "#1e3a5f" }}
             onClick={() => setBehind((count) => count + 1)}
           >
-            <text>Behind</text>
+            <div>Behind</div>
           </div>
           <div
             style={{
@@ -268,9 +268,9 @@ describeNative("floating controls", () => {
             }}
             onClick={() => setOverlay((count) => count + 1)}
           >
-            <text>Overlay</text>
+            <div>Overlay</div>
           </div>
-          <text>{`Behind: ${behind} Overlay: ${overlay}`}</text>
+          <div>{`Behind: ${behind} Overlay: ${overlay}`}</div>
         </div>
       )
     }
@@ -289,7 +289,7 @@ describeNative("floating controls", () => {
             style={{ position: "absolute", top: 40, left: 20, width: 200, height: 80, backgroundColor: "#1e3a5f" }}
             onClick={() => setBehind((count) => count + 1)}
           >
-            <text>Behind</text>
+            <div>Behind</div>
           </div>
           <div
             style={{
@@ -302,9 +302,9 @@ describeNative("floating controls", () => {
               pointerEvents: "none",
             }}
           >
-            <text>Ghost</text>
+            <div>Ghost</div>
           </div>
-          <text>{`Behind: ${behind}`}</text>
+          <div>{`Behind: ${behind}`}</div>
         </div>
       )
     }
@@ -332,7 +332,7 @@ describeNative("floating controls", () => {
             }}
             onClick={() => setBehind((count) => count + 1)}
           >
-            <text>Behind</text>
+            <div>Behind</div>
           </div>
           <div
             style={{
@@ -345,7 +345,7 @@ describeNative("floating controls", () => {
               backgroundColor: "transparent",
             }}
           />
-          <text>{`Behind: ${behind}`}</text>
+          <div>{`Behind: ${behind}`}</div>
         </div>
       )
     }
@@ -365,7 +365,7 @@ describeNative("floating controls", () => {
             style={{ position: "absolute", top: 52, left: 12, width: 180, height: 90 }}
             onClick={() => setClicks((count) => count + 1)}
           >
-            <text>Behind</text>
+            <div>Behind</div>
           </div>
           <Select items={[{ value: "one", label: "One" }, { value: "two", label: "Two" }]} value={value} onValueChange={setValue}>
             <SelectTrigger style={triggerStyle}><SelectValue /></SelectTrigger>
@@ -374,7 +374,7 @@ describeNative("floating controls", () => {
               <SelectItem value="two" style={itemStyle}>Two</SelectItem>
             </SelectContent>
           </Select>
-          <text>{`Behind clicks: ${clicks}`}</text>
+          <div>{`Behind clicks: ${clicks}`}</div>
         </div>
       )
     }
@@ -412,7 +412,7 @@ describeNative("floating controls", () => {
               </SelectItem>
             </SelectContent>
           </Select>
-          <text>{`Value: ${value}`}</text>
+          <div>{`Value: ${value}`}</div>
         </div>
       )
     }
@@ -449,7 +449,7 @@ describeNative("floating controls", () => {
               </ComboboxPrimitive.List>
             </ComboboxPrimitive.Content>
           </ComboboxPrimitive.Root>
-          <text>{`Selected: ${value ?? "none"}`}</text>
+          <div>{`Selected: ${value ?? "none"}`}</div>
         </div>
       )
     }
@@ -492,7 +492,7 @@ describeNative("floating controls", () => {
               </ComboboxList>
             </ComboboxContent>
           </Combobox>
-          <text>{`Selected: ${value ?? "none"}`}</text>
+          <div>{`Selected: ${value ?? "none"}`}</div>
         </div>
       )
     }
@@ -550,7 +550,7 @@ describeNative("floating controls", () => {
               </ComboboxList>
             </ComboboxContent>
           </Combobox>
-          <text>{`Selected: ${value ?? "none"}`}</text>
+          <div>{`Selected: ${value ?? "none"}`}</div>
         </div>
       )
     }
@@ -575,7 +575,7 @@ describeNative("floating controls", () => {
               <ComboboxItem key={item} value={item}>{item}</ComboboxItem>
             )}</ComboboxList></ComboboxContent>
           </Combobox>
-          <text>{`Selected: ${value ?? "none"}`}</text>
+          <div>{`Selected: ${value ?? "none"}`}</div>
         </div>
       )
     }
@@ -651,7 +651,7 @@ describeNative("floating controls", () => {
           >
             Second
           </div>
-          <text>{`Focused: ${focused}`}</text>
+          <div>{`Focused: ${focused}`}</div>
         </div>
       )
     }
@@ -690,7 +690,7 @@ describeNative("floating controls", () => {
           >
             Second
           </div>
-          <text>{`Focused: ${focused}`}</text>
+          <div>{`Focused: ${focused}`}</div>
         </div>
       )
     }
@@ -717,7 +717,7 @@ describeNative("floating controls", () => {
               <SelectItem value="two" style={itemStyle}>Two</SelectItem>
             </SelectContent>
           </Select>
-          <text>{`Value: ${value}`}</text>
+          <div>{`Value: ${value}`}</div>
         </div>
       )
     }
@@ -753,7 +753,7 @@ describeNative("floating controls", () => {
               <StyledItem value="two">Two</StyledItem>
             </SelectContent>
           </Select>
-          <text>{`Value: ${value}`}</text>
+          <div>{`Value: ${value}`}</div>
         </div>
       )
     }
@@ -790,7 +790,7 @@ describeNative("floating controls", () => {
               </div>
             </SelectContent>
           </Select>
-          <text>{`Value: ${value}`}</text>
+          <div>{`Value: ${value}`}</div>
         </div>
       )
     }
@@ -818,7 +818,7 @@ describeNative("floating controls", () => {
               <SelectItem value="two" style={itemStyle}>Two</SelectItem>
             </SelectContent>
           </Select>
-          <text>{`Value: ${value}`}</text>
+          <div>{`Value: ${value}`}</div>
         </div>
       )
     }
@@ -853,7 +853,7 @@ describeNative("floating controls", () => {
               </div>
             </SelectContent>
           </Select>
-          <text>{`Value: ${value}`}</text>
+          <div>{`Value: ${value}`}</div>
         </div>
       )
     }
@@ -881,7 +881,7 @@ describeNative("floating controls", () => {
               <SelectItem value="two" testId="two" style={itemStyle}>Two</SelectItem>
             </SelectContent>
           </Select>
-          <text>{`Value: ${value}`}</text>
+          <div>{`Value: ${value}`}</div>
         </div>
       )
     }
@@ -1241,7 +1241,7 @@ describeNative("floating controls", () => {
               if (event.key === "Escape") event.preventDefault()
             }}
           >
-            <text>Unsaved</text>
+            <div>Unsaved</div>
           </DialogPrimitive.Popup>
         </DialogPrimitive.Portal>
       </DialogPrimitive.Root>
@@ -1257,7 +1257,7 @@ describeNative("floating controls", () => {
       <DialogPrimitive.Root defaultOpen>
         <DialogPrimitive.Portal>
           <DialogPrimitive.Popup style={{ width: 300, padding: 16, backgroundColor: "#1e293b" }}>
-            <text>Dialog</text>
+            <div>Dialog</div>
             <Select defaultOpen items={[{ value: "a", label: "Alpha" }]} defaultValue="a">
               <SelectTrigger style={triggerStyle}><SelectValue /></SelectTrigger>
               <SelectContent style={contentStyle}>

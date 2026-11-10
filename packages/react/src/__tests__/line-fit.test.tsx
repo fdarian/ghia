@@ -109,9 +109,9 @@ describeNative("a text breaks into lines where Chrome breaks it", () => {
                   .map((g) => [g.index, g.index + g.segment.length] as [number, number])
                 return (
                   <div key={i} style={{ width: row[1], flexShrink: 0 }} highlight={{ ranges }}>
-                    <text testId={`t${i}`} style={styleOf(c)}>
+                    <div testId={`t${i}`} style={styleOf(c)}>
                       {c.text}
-                    </text>
+                    </div>
                   </div>
                 )
               })}

@@ -47,7 +47,7 @@ export function ProseCard({
               <span>{" eeeeeeee"}</span>
             </>
           ) : (
-            <text>{text}</text>
+            <div>{text}</div>
           )}
         </div>
       }

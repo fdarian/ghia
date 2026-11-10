@@ -66,7 +66,7 @@ function open(overdraw: number) {
         <For each={indices}>
           {(index) => (
             <div testId={`row-${index}`} style={rowStyle(selected() === index)}>
-              <text style={{ color: "#ffffff" }}>{`row-${index}`}</text>
+              <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
             </div>
           )}
         </For>
@@ -78,9 +78,9 @@ function open(overdraw: number) {
         <Show when={swapping ? selected() : 6} keyed>
           {(current) => (
             <div testId={`message-${current}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <text style={{ fontSize: 16, color: "#18181b" }}>{`Message ${current}`}</text>
+              <div style={{ fontSize: 16, color: "#18181b" }}>{`Message ${current}`}</div>
               <For each={Array.from({ length: 2 + (current % 4) }, (_, index) => index)}>
-                {(index) => <text style={{ fontSize: 14, color: "#27272a" }}>{`${PARAGRAPH} `.repeat(1 + ((index + current) % 3))}</text>}
+                {(index) => <div style={{ fontSize: 14, color: "#27272a" }}>{`${PARAGRAPH} `.repeat(1 + ((index + current) % 3))}</div>}
               </For>
             </div>
           )}

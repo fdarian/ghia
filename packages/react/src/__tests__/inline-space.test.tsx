@@ -40,7 +40,7 @@ function measureColumn() {
   const testRoot = createTestRoot()
   testRoot.render(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   const width = testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -76,10 +76,10 @@ describeNative("space of an inline box", () => {
         try {
           t.render(
             <div style={{ width: 400 }}>
-              <text style={TEXT}>
+              <div style={TEXT}>
                 aa <span style={{ ...extra, ...space }}>bb</span>
                 <span ref={t.ref("after")}>cc</span>
-              </text>
+              </div>
             </div>
           )
           return t.rect("after").x
@@ -103,9 +103,9 @@ describeNative("space of an inline box", () => {
       try {
         t.render(
           <div style={{ display: "flex" }}>
-            <text ref={t.ref("text")} style={{ ...TEXT, whiteSpace: "nowrap" }}>
+            <div ref={t.ref("text")} style={{ ...TEXT, whiteSpace: "nowrap" }}>
               aa <span style={space}>bb</span> cc
-            </text>
+            </div>
           </div>
         )
         return t.rect("text").width
@@ -127,9 +127,9 @@ describeNative("space of an inline box", () => {
       try {
         t.render(
           <div style={{ width: 400 }}>
-            <text ref={t.ref("text")} style={{ ...TEXT, width: Math.ceil(9.5 * column) }}>
+            <div ref={t.ref("text")} style={{ ...TEXT, width: Math.ceil(9.5 * column) }}>
               aaaa <span style={space}>bbbb</span>
-            </text>
+            </div>
           </div>
         )
         return t.rect("text").height
@@ -152,9 +152,9 @@ describeNative("space of an inline box", () => {
     try {
       t.render(
         <div highlight={{ query: "bb" }}>
-          <text ref={t.ref("text")} style={TEXT}>
+          <div ref={t.ref("text")} style={TEXT}>
             aa <span style={SPACE}>bb</span>cc
-          </text>
+          </div>
         </div>
       )
       const text = t.rect("text")
@@ -173,10 +173,10 @@ describeNative("space of an inline box", () => {
     try {
       t.render(
         <div style={{ width: 400 }}>
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             aa <span style={{ hover: { paddingLeft: 20 } }}>bbbbbbbbbb</span>
             <span ref={t.ref("after")}>cc</span>
-          </text>
+          </div>
         </div>
       )
       const before = t.rect("after").x

@@ -38,7 +38,7 @@ function measureColumn() {
   const testRoot = createTestRoot()
   testRoot.render(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   const width = testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -77,7 +77,7 @@ describeNative("background and border on inline boxes", () => {
   it("paints a span's background and padding as the content area plus the padding", () => {
     const { testRoot, shoot, paragraph } = setup(
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           aaaa{" "}
           <span
             style={{ backgroundColor: "#00ff00", paddingLeft: 6, paddingRight: 6, paddingTop: 4, paddingBottom: 4 }}
@@ -85,7 +85,7 @@ describeNative("background and border on inline boxes", () => {
             bbbb
           </span>{" "}
           cccc
-        </text>
+        </div>
       </div>
     )
     const before = paragraph()
@@ -110,9 +110,9 @@ describeNative("background and border on inline boxes", () => {
   it("fills only the content area when the line is taller than the font", () => {
     const { testRoot, shoot } = setup(
       <div style={PAGE}>
-        <text testId="p" style={{ ...TEXT, lineHeight: "40px" }}>
+        <div testId="p" style={{ ...TEXT, lineHeight: "40px" }}>
           aa <span style={{ backgroundColor: "#00ff00" }}>bbbb</span> cc
-        </text>
+        </div>
       </div>
     )
     const shot = shoot("tall-line")
@@ -129,7 +129,7 @@ describeNative("background and border on inline boxes", () => {
   it("is as tall as the font plus the vertical padding and border, whatever the line height", () => {
     const { testRoot, bounds } = setup(
       <div style={PAGE}>
-        <text testId="p" style={{ ...TEXT, lineHeight: "40px" }}>
+        <div testId="p" style={{ ...TEXT, lineHeight: "40px" }}>
           aa{" "}
           <span testId="s" style={{
               paddingTop: 4,
@@ -142,7 +142,7 @@ describeNative("background and border on inline boxes", () => {
             bbbb
           </span>{" "}
           cc
-        </text>
+        </div>
       </div>
     )
     const paragraph = bounds("p")
@@ -157,10 +157,10 @@ describeNative("background and border on inline boxes", () => {
    *  columns 5-9 of line 0, the hanging space included, and columns 0-3 of line 1. */
   const wrapped = (span: object, before = "aaaa") => (
     <div style={PAGE}>
-      <text testId="p" style={{ ...TEXT, width: Math.ceil(10.5 * columnWidth()) }}>
+      <div testId="p" style={{ ...TEXT, width: Math.ceil(10.5 * columnWidth()) }}>
         {before}{" "}
         <span style={span}>bbbb cccc</span>
-      </text>
+      </div>
     </div>
   )
   const BOX = {
@@ -246,12 +246,12 @@ describeNative("background and border on inline boxes", () => {
   it("paints a nested span's background over the one around it", () => {
     const { testRoot, shoot } = setup(
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           a{" "}
           <span style={{ backgroundColor: "#ffff00", paddingLeft: 4, paddingRight: 4 }}>
             bb <span style={{ backgroundColor: "#ff0000", paddingLeft: 3, paddingRight: 3 }}>cc</span> dd
           </span>
-        </text>
+        </div>
       </div>
     )
     const shot = shoot("nested")
@@ -271,11 +271,11 @@ describeNative("background and border on inline boxes", () => {
     const green = { backgroundColor: "#00ff00", color: "#00ff00" } as const
     const { testRoot, shoot } = setup(
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <span style={green}>aaa</span>
           <span style={{ ...green, paddingLeft: 3.3, paddingRight: 2.7 }}>bbb</span>
           <span style={green}>ccc</span>
-        </text>
+        </div>
       </div>
     )
     const shot = shoot("seam")
@@ -294,12 +294,12 @@ describeNative("background and border on inline boxes", () => {
     }
     const { testRoot, renderer, paragraph } = setup(
       <div style={PAGE}>
-        <text testId="p" style={{ ...TEXT, lineHeight: "40px" }} onClick={hear("text")}>
+        <div testId="p" style={{ ...TEXT, lineHeight: "40px" }} onClick={hear("text")}>
           aa{" "}
           <span style={{ paddingTop: 6, paddingBottom: 6, cursor: "pointer" }} onClick={hear("span")}>
             bbbb
           </span>
-        </text>
+        </div>
       </div>
     )
     const box = paragraph()
@@ -325,9 +325,9 @@ describeNative("background and border on inline boxes", () => {
   it("shows a hover background only while the pointer is on the span", () => {
     const { testRoot, shoot, paragraph, renderer } = setup(
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           aa <span style={{ paddingLeft: 4, paddingRight: 4, hover: { backgroundColor: "#00ff00" } }}>bb</span>
-        </text>
+        </div>
       </div>
     )
     expect(shoot("hover-off").at(3, 10, 2)).toEqual(WHITE)
@@ -340,9 +340,9 @@ describeNative("background and border on inline boxes", () => {
   it("paints nothing for a border without a visible colour and keeps its space", () => {
     const { testRoot, shoot } = setup(
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           aa <span style={{ borderWidth: 3, borderStyle: "solid" }}>bb</span>
-        </text>
+        </div>
       </div>
     )
     const shot = shoot("no-colour")

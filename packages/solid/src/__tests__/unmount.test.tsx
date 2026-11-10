@@ -14,11 +14,11 @@ describe.skipIf(!hasNativeTestRenderer)("Solid unmount", () => {
     const app = createTestRoot()
     app.render(() => (
       <Dialog defaultOpen>
-        <DialogTrigger style={{ width: 80, height: 24 }}><text>Open</text></DialogTrigger>
+        <DialogTrigger style={{ width: 80, height: 24 }}><div>Open</div></DialogTrigger>
         <DialogPortal>
           <DialogBackdrop style={{ backgroundColor: "#00000080" }} />
           <DialogPopup style={{ width: 300, padding: 16, backgroundColor: "#1e293b" }}>
-            <DialogTitle><text>Settings</text></DialogTitle>
+            <DialogTitle><div>Settings</div></DialogTitle>
           </DialogPopup>
         </DialogPortal>
       </Dialog>

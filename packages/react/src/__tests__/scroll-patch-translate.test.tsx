@@ -49,7 +49,7 @@ function Page({ text, tint }: { text: boolean; tint: number }) {
             hover: { backgroundColor: "#664422" },
           }}
         >
-          {text ? <text style={{ color: "#ffffff" }}>{`row-${index}`}</text> : null}
+          {text ? <div style={{ color: "#ffffff" }}>{`row-${index}`}</div> : null}
         </div>
       ))}
     </virtual-list>

@@ -42,9 +42,9 @@ function setup(node: React.ReactNode, width = 300) {
   renderer.clockPause()
   testRoot.render(
     <div style={{ width: 400, height: 200, backgroundColor: "#ffffff" }}>
-      <text testId="p" style={{ ...TEXT, width }}>
+      <div testId="p" style={{ ...TEXT, width }}>
         {node}
-      </text>
+      </div>
     </div>
   )
   const bounds = (testId: string) => {
@@ -154,10 +154,10 @@ describeNative("a CSS transition on the style of a span", () => {
     renderer.clockPause()
     const tree = (padding: number) => (
       <div style={{ width: 400, height: 200 }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <span testId="s" style={style(padding)}>aaaa</span>
           <span testId="n">bbbb</span>
-        </text>
+        </div>
       </div>
     )
     testRoot.render(tree(0))
@@ -230,9 +230,9 @@ describeNative("motion values in the style of a span", () => {
     const testRoot = createTestRoot({ onUncaughtError: (error) => errors.push(error) })
     try {
       testRoot.render(
-        <text>
+        <div>
           <span style={{ width: motionValue(10) as never }}>aaaa</span>
-        </text>
+        </div>
       )
     } catch (error) {
       errors.push(error)
@@ -361,7 +361,7 @@ describeNative("whileInView on a motion.span", () => {
     return (
       <div style={{ width: 400, height: 200 }}>
         <div style={{ height: spacer }} />
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <motion.span
             testId="s"
             whileInView={{ paddingLeft: 30 }}
@@ -371,7 +371,7 @@ describeNative("whileInView on a motion.span", () => {
             aaaa
           </motion.span>
           <span testId="n">bbbb</span>
-        </text>
+        </div>
       </div>
     )
   }

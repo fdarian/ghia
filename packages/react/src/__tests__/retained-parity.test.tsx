@@ -253,11 +253,11 @@ describeNative("focus variants of position, z-index and opacity, read by hit tes
             extra={
               <div testId="wrapper" style={{ position: "relative", zIndex: 0, width: 200, height: 100, ...wrapper }}>
                 <div testId="a" tabIndex={0} style={{ width: 100, height: 100, backgroundColor: "#ff0000", keyboardFocusDim: false, ...a }}>
-                  <text>a</text>
+                  <div>a</div>
                   {c ? <div testId="c" style={{ position: "absolute", zIndex: 10, left: 60, top: 0, width: 20, height: 20, backgroundColor: "#ffff00" }} /> : null}
                 </div>
                 <div testId="b" style={{ position: "absolute", zIndex: 2, left: 50, top: 0, width: 100, height: 100, backgroundColor: "#0000ff" }}>
-                  <text>b</text>
+                  <div>b</div>
                 </div>
               </div>
             }

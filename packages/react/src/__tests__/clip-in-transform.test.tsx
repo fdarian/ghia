@@ -62,7 +62,7 @@ function Card(props: { trigger: Trigger; transform: string; text?: string; width
   if (props.trigger === "overflow") style.overflow = "hidden"
   if (props.trigger === "overflowX") style.overflowX = "hidden"
   if (props.trigger === "clipPath") style.clipPath = "inset(0 round 8px)"
-  const text = <text style={textStyle}>{props.text ?? TEXT}</text>
+  const text = <div style={textStyle}>{props.text ?? TEXT}</div>
   return (
     <div style={style}>
       {props.trigger === "child" ? (
@@ -227,7 +227,7 @@ describeNative("a clipped card moved by Motion's y", () => {
           paddingLeft: 14,
         }}
       >
-        <text style={textStyle}>{TEXT}</text>
+        <div style={textStyle}>{TEXT}</div>
       </motion.div>
     </div>
   )

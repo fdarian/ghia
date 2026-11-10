@@ -425,7 +425,7 @@ function Label({
   style?: StyleDesc
 }) {
   return (
-    <text
+    <div
       style={{
         fontSize: size,
         color,
@@ -436,7 +436,7 @@ function Label({
       }}
     >
       {children}
-    </text>
+    </div>
   )
 }
 
@@ -1476,18 +1476,18 @@ export function TimelineApp(props: TimelineAppProps = {}) {
               {cull ? 'cull on' : 'cull off'}
             </Label>
           </div>
-          <text testId="readout" style={{ fontSize: 10, color: C.faint, userSelect: 'none' }}>
+          <div testId="readout" style={{ fontSize: 10, color: C.faint, userSelect: 'none' }}>
             {readout}
-          </text>
-          <text
+          </div>
+          <div
             testId="selection"
             style={{ fontSize: 10, color: C.faint, userSelect: 'none' }}
           >
             {selectionReadout}
-          </text>
-          <text testId="events" style={{ fontSize: 10, color: C.faint, userSelect: 'none' }}>
+          </div>
+          <div testId="events" style={{ fontSize: 10, color: C.faint, userSelect: 'none' }}>
             {log.join(' ')}
-          </text>
+          </div>
         </div>
       </div>
     </div>

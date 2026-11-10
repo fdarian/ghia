@@ -36,10 +36,10 @@ function inkAt(trigger: (typeof TRIGGERS)[number], y: number) {
         <motion.div initial={false} animate={{ y }} transition={{ duration: 0 }} style={style as never}>
           {trigger === "child" ? (
             <div style={{ overflow: "hidden", flex: 1, minWidth: 0, height: "100%", display: "flex", alignItems: "center" }}>
-              <text style={TEXT_STYLE}>hello world hello world hello</text>
+              <div style={TEXT_STYLE}>hello world hello world hello</div>
             </div>
           ) : (
-            <text style={TEXT_STYLE}>hello world hello world hello</text>
+            <div style={TEXT_STYLE}>hello world hello world hello</div>
           )}
         </motion.div>
       </div>

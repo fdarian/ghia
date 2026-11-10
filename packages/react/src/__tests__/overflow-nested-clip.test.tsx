@@ -144,7 +144,7 @@ describeNative("nested overflow clips", () => {
       cutCorner(
         <>
           <div style={{ width: 30, height: 30, backgroundColor: "#00ff00" }} />
-          <text style={{ color: "#0000ff", fontSize: 16 }}>{"Hello, clip"}</text>
+          <div style={{ color: "#0000ff", fontSize: 16 }}>{"Hello, clip"}</div>
         </>,
       ),
     )

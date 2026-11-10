@@ -431,7 +431,7 @@ describeNative("clipPath clips the pointer on every kind of element", () => {
         <div style={{ width: 100, height: 300 }} />
       </div>
     )],
-    ["text", (box, onClick) => <text style={box} onClick={onClick}>clipped text</text>],
+    ["text", (box, onClick) => <div style={box} onClick={onClick}>clipped text</div>],
     ["img", (box, onClick) => <img src={SVG_DATA_URL} style={box} onClick={onClick} />],
     ["img without a source", (box, onClick) => <img style={box} onClick={onClick} />],
     ["svg", (box, onClick) => (

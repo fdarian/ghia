@@ -48,7 +48,7 @@ function Entry({ index, value = "auto", children }: EntryProps) {
     >
       <div role="heading" aria-level={2} aria-label={`Title ${index}`} style={{ height: 24 }} />
       <div role="button" id={`btn-${index}`} aria-label={`Go ${index}`} testId={`btn-${index}`} tabIndex={0} style={{ height: 24 }} />
-      <text style={{ height: 20 }}>Paragraph {index}</text>
+      <div style={{ height: 20 }}>Paragraph {index}</div>
       {children}
     </div>
   )
@@ -304,13 +304,13 @@ describeNative("the accessibility tree of skipped content", { timeout: 120_000 }
     const { root, renderer } = mount(
       <Page
         entry={(index) => (
-          <text
+          <div
             key={index}
             testId={`entry-${index}`}
             style={{ height: ENTRY, flexShrink: 0, contentVisibility: "auto", containIntrinsicSize: `auto ${ENTRY}px` } as CSSProperties}
           >
             Line {index}
-          </text>
+          </div>
         )}
       />
     )

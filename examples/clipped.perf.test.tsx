@@ -85,7 +85,7 @@ function Table({ clip }: { clip: Clip }) {
               key={column}
               style={{ width: 80, height: 28, flexShrink: 0, padding: 6, borderBottomWidth: 1, borderColor: '#2a2a2e', borderStyle: 'solid' }}
             >
-              <text style={{ fontSize: 12, color: '#f2f2f3' }}>{`r${row} c${column}`}</text>
+              <div style={{ fontSize: 12, color: '#f2f2f3' }}>{`r${row} c${column}`}</div>
             </div>
           ))}
         </div>
@@ -136,7 +136,7 @@ function Texts() {
   return (
     <div style={{ width: 400, height: 300, overflowY: 'auto', overflowX: 'auto', display: 'flex', flexDirection: 'row', flexWrap: 'wrap', alignContent: 'flex-start' }}>
       {Array.from({ length: 2000 }, (_, index) => (
-        <text key={index} style={{ fontSize: 12, color: '#fff', margin: 2 }}>{`t${index}`}</text>
+        <div key={index} style={{ fontSize: 12, color: '#fff', margin: 2 }}>{`t${index}`}</div>
       ))}
     </div>
   )
@@ -149,8 +149,8 @@ function Cards() {
         <div key={index} style={{ height: 60, padding: 8, display: 'flex', flexDirection: 'row', gap: 8 }}>
           <div style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#456' }} />
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <text style={{ fontSize: 14, color: '#fff' }}>{`Card ${index}`}</text>
-            <text style={{ fontSize: 12, color: '#aaa' }}>{`Some description for card ${index}`}</text>
+            <div style={{ fontSize: 14, color: '#fff' }}>{`Card ${index}`}</div>
+            <div style={{ fontSize: 12, color: '#aaa' }}>{`Some description for card ${index}`}</div>
           </div>
         </div>
       ))}

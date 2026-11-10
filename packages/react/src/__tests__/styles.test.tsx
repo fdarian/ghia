@@ -70,7 +70,7 @@ describeNative("style properties", () => {
                   flexShrink: 0,
                 }}
               >
-                <text style={{ color: "#6c7086", fontSize: 12 }}>01</text>
+                <div style={{ color: "#6c7086", fontSize: 12 }}>01</div>
               </div>
               {/* Content area */}
               <div
@@ -81,12 +81,12 @@ describeNative("style properties", () => {
                   gap: 4,
                 }}
               >
-                <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+                <div style={{ color: "#cdd6f4", fontSize: 14 }}>
                   Line content that may wrap
-                </text>
-                <text style={{ color: "#a6adc8", fontSize: 12 }}>
+                </div>
+                <div style={{ color: "#a6adc8", fontSize: 12 }}>
                   Second line of content
-                </text>
+                </div>
               </div>
             </div>
           </Center>
@@ -136,7 +136,7 @@ describeNative("style properties", () => {
                   padding: 8,
                 }}
               >
-                <text style={{ color: "#bac2de", fontSize: 12 }}>42</text>
+                <div style={{ color: "#bac2de", fontSize: 12 }}>42</div>
               </div>
               {/* Flexible content that CAN shrink */}
               <div
@@ -147,9 +147,9 @@ describeNative("style properties", () => {
                   backgroundColor: "#313244",
                 }}
               >
-                <text style={{ color: "#cdd6f4", fontSize: 12 }}>
+                <div style={{ color: "#cdd6f4", fontSize: 12 }}>
                   const x = someVeryLongVariableName
-                </text>
+                </div>
               </div>
             </div>
           </Center>
@@ -198,7 +198,7 @@ describeNative("style properties", () => {
                   padding: 8,
                 }}
               >
-                <text style={{ color: "#1e1e2e", fontSize: 12 }}>fixed</text>
+                <div style={{ color: "#1e1e2e", fontSize: 12 }}>fixed</div>
               </div>
               <div
                 style={{
@@ -207,7 +207,7 @@ describeNative("style properties", () => {
                   padding: 8,
                 }}
               >
-                <text style={{ color: "#1e1e2e", fontSize: 12 }}>grows</text>
+                <div style={{ color: "#1e1e2e", fontSize: 12 }}>grows</div>
               </div>
               <div
                 style={{
@@ -216,7 +216,7 @@ describeNative("style properties", () => {
                   padding: 8,
                 }}
               >
-                <text style={{ color: "#1e1e2e", fontSize: 12 }}>grows 2x</text>
+                <div style={{ color: "#1e1e2e", fontSize: 12 }}>grows 2x</div>
               </div>
             </div>
           </Center>
@@ -259,15 +259,15 @@ describeNative("style properties", () => {
                 borderRadius: 8,
               }}
             >
-              <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+              <div style={{ color: "#cdd6f4", fontSize: 14 }}>
                 Default font: The quick brown fox
-              </text>
-              <text
+              </div>
+              <div
                 style={{ color: "#cdd6f4", fontSize: 14, fontFamily: "Menlo" }}
               >
                 Menlo font: The quick brown fox
-              </text>
-              <text
+              </div>
+              <div
                 style={{
                   color: "#cdd6f4",
                   fontSize: 14,
@@ -275,7 +275,7 @@ describeNative("style properties", () => {
                 }}
               >
                 Courier: The quick brown fox
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -314,9 +314,9 @@ describeNative("style properties", () => {
                 borderRadius: 8,
               }}
             >
-              <text style={{ color: "#cdd6f4", fontSize: 16 }}>
+              <div style={{ color: "#cdd6f4", fontSize: 16 }}>
                 MMMWWW iiiiii
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -340,9 +340,9 @@ describeNative("style properties", () => {
                 borderRadius: 8,
               }}
             >
-              <text style={{ color: "#cdd6f4", fontSize: 16, fontFamily: MONO_FAMILY }}>
+              <div style={{ color: "#cdd6f4", fontSize: 16, fontFamily: MONO_FAMILY }}>
                 MMMWWW iiiiii
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -379,15 +379,15 @@ describeNative("style properties", () => {
                 borderRadius: 8,
               }}
             >
-              <text style={{ color: "#cdd6f4", fontSize: 16, fontWeight: "normal" }}>
+              <div style={{ color: "#cdd6f4", fontSize: 16, fontWeight: "normal" }}>
                 Normal weight text
-              </text>
-              <text style={{ color: "#cdd6f4", fontSize: 16, fontWeight: "bold" }}>
+              </div>
+              <div style={{ color: "#cdd6f4", fontSize: 16, fontWeight: "bold" }}>
                 Bold weight text
-              </text>
-              <text style={{ color: "#cdd6f4", fontSize: 16, fontWeight: "300" }}>
+              </div>
+              <div style={{ color: "#cdd6f4", fontSize: 16, fontWeight: "300" }}>
                 Light (300) weight text
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -427,18 +427,18 @@ describeNative("style properties", () => {
                 borderRadius: 8,
               }}
             >
-              <text style={{ color: "#cdd6f4", fontSize: 16, fontWeight: 400 }}>
+              <div style={{ color: "#cdd6f4", fontSize: 16, fontWeight: 400 }}>
                 fontWeight: 400 (normal)
-              </text>
-              <text style={{ color: "#cdd6f4", fontSize: 16, fontWeight: 700 }}>
+              </div>
+              <div style={{ color: "#cdd6f4", fontSize: 16, fontWeight: 700 }}>
                 fontWeight: 700 (bold)
-              </text>
-              <text style={{ color: "#cdd6f4", fontSize: 16, fontWeight: 300 }}>
+              </div>
+              <div style={{ color: "#cdd6f4", fontSize: 16, fontWeight: 300 }}>
                 fontWeight: 300 (light)
-              </text>
-              <text style={{ color: "#cdd6f4", fontSize: 16, fontWeight: 900 }}>
+              </div>
+              <div style={{ color: "#cdd6f4", fontSize: 16, fontWeight: 900 }}>
                 fontWeight: 900 (black)
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -482,7 +482,7 @@ describeNative("style properties", () => {
             >
               {/* Simulated diff line with word-level highlights */}
               <div style={{ display: "flex", flexDirection: "row" }}>
-                <text
+                <div
                   style={{
                     color: "#f38ba8",
                     backgroundColor: "#53222e",
@@ -490,9 +490,9 @@ describeNative("style properties", () => {
                   }}
                 >
                   removed
-                </text>
-                <text style={{ color: "#cdd6f4", fontSize: 13 }}> word </text>
-                <text
+                </div>
+                <div style={{ color: "#cdd6f4", fontSize: 13 }}> word </div>
+                <div
                   style={{
                     color: "#a6e3a1",
                     backgroundColor: "#1e3a2c",
@@ -500,17 +500,17 @@ describeNative("style properties", () => {
                   }}
                 >
                   added
-                </text>
+                </div>
               </div>
               {/* Another row with mixed highlights */}
               <div style={{ display: "flex", flexDirection: "row" }}>
-                <text style={{ color: "#89b4fa", backgroundColor: "#1e2d4a", fontSize: 13 }}>
+                <div style={{ color: "#89b4fa", backgroundColor: "#1e2d4a", fontSize: 13 }}>
                   keyword
-                </text>
-                <text style={{ color: "#cdd6f4", fontSize: 13 }}> = </text>
-                <text style={{ color: "#fab387", backgroundColor: "#3d2a1e", fontSize: 13 }}>
+                </div>
+                <div style={{ color: "#cdd6f4", fontSize: 13 }}> = </div>
+                <div style={{ color: "#fab387", backgroundColor: "#3d2a1e", fontSize: 13 }}>
                   "string value"
-                </text>
+                </div>
               </div>
             </div>
           </Center>
@@ -567,7 +567,7 @@ describeNative("style properties", () => {
                     borderRadius: 4,
                   }}
                 >
-                  <text style={{ color: "#cdd6f4", fontSize: 12 }}>{item}</text>
+                  <div style={{ color: "#cdd6f4", fontSize: 12 }}>{item}</div>
                 </div>
               ))}
             </div>
@@ -635,7 +635,7 @@ describeNative("style properties", () => {
                   padding: 4,
                 }}
               >
-                <text style={{ color: "#6c5060", fontSize: 12 }}>12</text>
+                <div style={{ color: "#6c5060", fontSize: 12 }}>12</div>
               </div>
               {/* Code tokens in a flex row */}
               <div
@@ -646,8 +646,8 @@ describeNative("style properties", () => {
                   padding: 4,
                 }}
               >
-                <text style={{ color: "#cba6f7", fontSize: 12 }}>const </text>
-                <text
+                <div style={{ color: "#cba6f7", fontSize: 12 }}>const </div>
+                <div
                   style={{
                     color: "#f38ba8",
                     backgroundColor: "#53222e",
@@ -655,11 +655,11 @@ describeNative("style properties", () => {
                   }}
                 >
                   oldName
-                </text>
-                <text style={{ color: "#cdd6f4", fontSize: 12 }}> = </text>
-                <text style={{ color: "#a6e3a1", fontSize: 12 }}>
+                </div>
+                <div style={{ color: "#cdd6f4", fontSize: 12 }}> = </div>
+                <div style={{ color: "#a6e3a1", fontSize: 12 }}>
                   "hello"
-                </text>
+                </div>
               </div>
             </div>
 
@@ -680,7 +680,7 @@ describeNative("style properties", () => {
                   padding: 4,
                 }}
               >
-                <text style={{ color: "#506c55", fontSize: 12 }}>13</text>
+                <div style={{ color: "#506c55", fontSize: 12 }}>13</div>
               </div>
               <div
                 style={{
@@ -690,8 +690,8 @@ describeNative("style properties", () => {
                   padding: 4,
                 }}
               >
-                <text style={{ color: "#cba6f7", fontSize: 12 }}>const </text>
-                <text
+                <div style={{ color: "#cba6f7", fontSize: 12 }}>const </div>
+                <div
                   style={{
                     color: "#a6e3a1",
                     backgroundColor: "#1e3a2c",
@@ -699,11 +699,11 @@ describeNative("style properties", () => {
                   }}
                 >
                   newName
-                </text>
-                <text style={{ color: "#cdd6f4", fontSize: 12 }}> = </text>
-                <text style={{ color: "#a6e3a1", fontSize: 12 }}>
+                </div>
+                <div style={{ color: "#cdd6f4", fontSize: 12 }}> = </div>
+                <div style={{ color: "#a6e3a1", fontSize: 12 }}>
                   "hello"
-                </text>
+                </div>
               </div>
             </div>
 
@@ -717,7 +717,7 @@ describeNative("style properties", () => {
                 gap: 8,
               }}
             >
-              <text
+              <div
                 style={{
                   color: "#cdd6f4",
                   fontSize: 13,
@@ -725,10 +725,10 @@ describeNative("style properties", () => {
                 }}
               >
                 src/renderer.rs
-              </text>
-              <text style={{ color: "#6c7086", fontSize: 13 }}>
+              </div>
+              <div style={{ color: "#6c7086", fontSize: 13 }}>
                 (2 changes)
-              </text>
+              </div>
             </div>
           </div>
           </Center>
@@ -780,7 +780,7 @@ describeNative("style properties", () => {
                 overflow: "hidden",
               }}
             >
-              <text
+              <div
                 style={{
                   color: "#cdd6f4",
                   fontSize: 13,
@@ -788,7 +788,7 @@ describeNative("style properties", () => {
                 }}
               >
                 This is a very long line of text that should never wrap to a second line regardless of container width
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -821,7 +821,7 @@ describeNative("style properties", () => {
                 borderRadius: 8,
               }}
             >
-              <text
+              <div
                 style={{
                   color: "#cdd6f4",
                   fontSize: 13,
@@ -829,7 +829,7 @@ describeNative("style properties", () => {
                 }}
               >
                 This text should wrap naturally within the narrow container width producing multiple lines
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -856,9 +856,9 @@ describeNative("style properties", () => {
                 padding: 8,
               }}
             >
-              <text style={{ color: "#cdd6f4", fontSize: 13, whiteSpace: "nowrap" }}>
+              <div style={{ color: "#cdd6f4", fontSize: 13, whiteSpace: "nowrap" }}>
                 The quick brown fox jumps over
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -875,9 +875,9 @@ describeNative("style properties", () => {
                 padding: 8,
               }}
             >
-              <text style={{ color: "#cdd6f4", fontSize: 13, whiteSpace: "normal" }}>
+              <div style={{ color: "#cdd6f4", fontSize: 13, whiteSpace: "normal" }}>
                 The quick brown fox jumps over
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -914,9 +914,9 @@ describeNative("style properties", () => {
                 overflow: "hidden",
               }}
             >
-              <text style={{ color: "#89b4fa", fontSize: 13 }}>
+              <div style={{ color: "#89b4fa", fontSize: 13 }}>
                 const longVariableName = calculateSomethingImportant()
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -951,7 +951,7 @@ describeNative("style properties", () => {
                 gap: 8,
               }}
             >
-              <text
+              <div
                 style={{
                   color: "#cdd6f4",
                   fontSize: 13,
@@ -961,10 +961,10 @@ describeNative("style properties", () => {
                 }}
               >
                 packages/native/src/renderer.rs — a very long file path that should be truncated
-              </text>
-              <text style={{ color: "#6c7086", fontSize: 11 }}>
+              </div>
+              <div style={{ color: "#6c7086", fontSize: 11 }}>
                 textOverflow: ellipsis
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -995,7 +995,7 @@ describeNative("style properties", () => {
                 gap: 8,
               }}
             >
-              <text
+              <div
                 style={{
                   color: "#cdd6f4",
                   fontSize: 13,
@@ -1005,10 +1005,10 @@ describeNative("style properties", () => {
                 }}
               >
                 packages/native/src/renderer.rs — a very long file path that should be truncated from start
-              </text>
-              <text style={{ color: "#6c7086", fontSize: 11 }}>
+              </div>
+              <div style={{ color: "#6c7086", fontSize: 11 }}>
                 textOverflow: ellipsis-start
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -1030,12 +1030,12 @@ describeNative("style properties", () => {
         return (
           <Center>
             <div style={{ width: 250, height: 50, backgroundColor: "#1e1e2e", padding: 8 }}>
-              <text style={{
+              <div style={{
                 color: "#cdd6f4", fontSize: 13,
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               }}>
                 {longText}
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -1045,12 +1045,12 @@ describeNative("style properties", () => {
         return (
           <Center>
             <div style={{ width: 250, height: 50, backgroundColor: "#1e1e2e", padding: 8 }}>
-              <text style={{
+              <div style={{
                 color: "#cdd6f4", fontSize: 13,
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis-start",
               }}>
                 {longText}
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -1085,7 +1085,7 @@ describeNative("style properties", () => {
                 borderRadius: 8,
               }}
             >
-              <text
+              <div
                 style={{
                   color: "#a6e3a1",
                   fontSize: 13,
@@ -1095,7 +1095,7 @@ describeNative("style properties", () => {
                 }}
               >
                 short.ts
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -1134,24 +1134,9 @@ describeNative("style properties", () => {
                 gap: 12,
               }}
             >
-              <text style={{ color: "#6c7086", fontSize: 11 }}>
+              <div style={{ color: "#6c7086", fontSize: 11 }}>
                 lineClamp: 2
-              </text>
-              <div
-                style={{
-                  width: 260,
-                  backgroundColor: "#313244",
-                  padding: 8,
-                  borderRadius: 4,
-                }}
-              >
-                <text style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 2 }}>
-                  This is a paragraph of text that should be clamped to exactly two lines. Any content beyond the second line will be hidden and not visible in the rendered output. It keeps going and going.
-                </text>
               </div>
-              <text style={{ color: "#6c7086", fontSize: 11 }}>
-                lineClamp: 1
-              </text>
               <div
                 style={{
                   width: 260,
@@ -1160,9 +1145,24 @@ describeNative("style properties", () => {
                   borderRadius: 4,
                 }}
               >
-                <text style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 1 }}>
+                <div style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 2 }}>
+                  This is a paragraph of text that should be clamped to exactly two lines. Any content beyond the second line will be hidden and not visible in the rendered output. It keeps going and going.
+                </div>
+              </div>
+              <div style={{ color: "#6c7086", fontSize: 11 }}>
+                lineClamp: 1
+              </div>
+              <div
+                style={{
+                  width: 260,
+                  backgroundColor: "#313244",
+                  padding: 8,
+                  borderRadius: 4,
+                }}
+              >
+                <div style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 1 }}>
                   Single line clamp — this text should be limited to one visible line only, truncating the rest.
-                </text>
+                </div>
               </div>
             </div>
           </Center>
@@ -1192,9 +1192,9 @@ describeNative("style properties", () => {
                 lineClamp: 3,
               }}
             >
-              <text style={{ color: "#cdd6f4", fontSize: 13 }}>
+              <div style={{ color: "#cdd6f4", fontSize: 13 }}>
                 Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -1216,9 +1216,9 @@ describeNative("style properties", () => {
         return (
           <Center>
             <div style={{ width: 200, height: 80, backgroundColor: "#1e1e2e", padding: 8 }}>
-              <text style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 1 }}>
+              <div style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 1 }}>
                 {longText}
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -1228,9 +1228,9 @@ describeNative("style properties", () => {
         return (
           <Center>
             <div style={{ width: 200, height: 80, backgroundColor: "#1e1e2e", padding: 8 }}>
-              <text style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 3 }}>
+              <div style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 3 }}>
                 {longText}
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -1265,9 +1265,9 @@ describeNative("style properties", () => {
                 borderRadius: 8,
               }}
             >
-              <text style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 0 }}>
+              <div style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 0 }}>
                 lineClamp zero should not clamp. This text should wrap and show fully without any line limit applied.
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -1314,13 +1314,13 @@ describeNative("style properties", () => {
                   },
                 }}
               >
-                <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+                <div style={{ color: "#cdd6f4", fontSize: 14 }}>
                   Hover me
-                </text>
+                </div>
               </div>
-              <text style={{ color: "#6c7086", fontSize: 11 }}>
+              <div style={{ color: "#6c7086", fontSize: 11 }}>
                 hover: backgroundColor changes on hover
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -1359,9 +1359,9 @@ describeNative("style properties", () => {
                 },
               }}
             >
-              <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+              <div style={{ color: "#cdd6f4", fontSize: 14 }}>
                 Color on hover
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -1424,13 +1424,13 @@ describeNative("style properties", () => {
                   },
                 }}
               >
-                <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+                <div style={{ color: "#cdd6f4", fontSize: 14 }}>
                   Hover target
-                </text>
+                </div>
               </div>
-              <text style={{ color: "#6c7086", fontSize: 11 }}>
+              <div style={{ color: "#6c7086", fontSize: 11 }}>
                 Should turn pink on hover
-              </text>
+              </div>
             </div>
           </div>
         )
@@ -1478,9 +1478,9 @@ describeNative("style properties", () => {
                 hover: {},
               }}
             >
-              <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+              <div style={{ color: "#cdd6f4", fontSize: 14 }}>
                 Empty hover
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -1525,13 +1525,13 @@ describeNative("style properties", () => {
                   },
                 }}
               >
-                <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+                <div style={{ color: "#cdd6f4", fontSize: 14 }}>
                   Press me
-                </text>
+                </div>
               </div>
-              <text style={{ color: "#6c7086", fontSize: 11 }}>
+              <div style={{ color: "#6c7086", fontSize: 11 }}>
                 active: backgroundColor changes on press
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -1592,9 +1592,9 @@ describeNative("style properties", () => {
                   },
                 }}
               >
-                <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+                <div style={{ color: "#cdd6f4", fontSize: 14 }}>
                   Interactive button
-                </text>
+                </div>
               </div>
             </div>
           </Center>
@@ -1633,9 +1633,9 @@ describeNative("style properties", () => {
               }}
               onClick={() => {}}
             >
-              <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+              <div style={{ color: "#cdd6f4", fontSize: 14 }}>
                 Hover + Click
-              </text>
+              </div>
             </div>
           </Center>
         )
@@ -1683,7 +1683,7 @@ describeNative("style properties", () => {
               }}
             >
               {code.map((line, i) => (
-                <text
+                <div
                   key={i}
                   style={{
                     color: "#cdd6f4",
@@ -1692,7 +1692,7 @@ describeNative("style properties", () => {
                   }}
                 >
                   {line}
-                </text>
+                </div>
               ))}
             </div>
           </Center>
@@ -1729,7 +1729,7 @@ describeNative("motion", () => {
         animate={{ width: 260, opacity: 1 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
       >
-        <text>Sidebar</text>
+        <div>Sidebar</div>
       </motion.div>
     )
 
@@ -1761,7 +1761,7 @@ describeNative("motion", () => {
 
     render(
       <div motion={{ animate: { width: "invalid" } }} style={{ width: 120 }}>
-        <text>Visible fallback</text>
+        <div>Visible fallback</div>
       </div>
     )
 

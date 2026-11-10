@@ -28,7 +28,7 @@ describeNative("style and custom prop updates", () => {
     const { render, renderer, unmount } = createTestRoot()
     const view = (color: string) => (
       <div style={{ width: 100, height: 40, backgroundColor: "#111", hover: { backgroundColor: color } }}>
-        <text style={{ color: "#fff" }}>hello</text>
+        <div style={{ color: "#fff" }}>hello</div>
       </div>
     )
     try {
@@ -53,7 +53,7 @@ describeNative("style and custom prop updates", () => {
             key={index}
             style={{ height: 20, borderBottom: "1px solid #eee", backgroundColor: selected === index ? "#dbeafe" : undefined }}
           >
-            <text style={{ color: selected === index ? "#000" : "#111" }}>row {index}</text>
+            <div style={{ color: selected === index ? "#000" : "#111" }}>row {index}</div>
           </div>
         ))}
       </div>

@@ -31,7 +31,7 @@ function Row({ index }: { index: number }) {
         hover: { backgroundColor: "#664422" },
       }}
     >
-      <text style={{ color: "#ffffff", userSelect: index % 2 === 0 ? "none" : "text" }}>{`row-${index}`}</text>
+      <div style={{ color: "#ffffff", userSelect: index % 2 === 0 ? "none" : "text" }}>{`row-${index}`}</div>
     </div>
   )
 }

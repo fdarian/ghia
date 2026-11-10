@@ -30,7 +30,7 @@ function measureColumn() {
   const testRoot = createTestRoot()
   testRoot.render(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   const width = testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -61,7 +61,7 @@ describeNative("min-content width of a paragraph", () => {
 
   it("is the longest word, without the space that hangs after it", () => {
     const column = columnWidth()
-    const box = minContentBox(<text style={TEXT}>{PROSE}</text>)
+    const box = minContentBox(<div style={TEXT}>{PROSE}</div>)
     expectNear(box.width, 6 * column)
     expect(box.height).toBeCloseTo(3 * LINE, 1)
   })
@@ -69,7 +69,7 @@ describeNative("min-content width of a paragraph", () => {
   it("is one letter with overflowWrap: anywhere, and the longest word with normal and break-word", () => {
     const column = columnWidth()
     const width = (overflowWrap: "normal" | "break-word" | "anywhere") =>
-      minContentBox(<text style={{ ...TEXT, overflowWrap }}>{PROSE}</text>).width
+      minContentBox(<div style={{ ...TEXT, overflowWrap }}>{PROSE}</div>).width
     expectNear(width("normal"), 6 * column)
     // break-word breaks a word only once it does not fit, so it is no narrower.
     expect(width("break-word")).toBeCloseTo(width("normal"), 1)
@@ -80,33 +80,33 @@ describeNative("min-content width of a paragraph", () => {
   it("is one letter with wordBreak: break-all or break-word", () => {
     const column = columnWidth()
     for (const wordBreak of ["break-all", "break-word"] as const) {
-      const box = minContentBox(<text style={{ ...TEXT, wordBreak }}>{PROSE}</text>)
+      const box = minContentBox(<div style={{ ...TEXT, wordBreak }}>{PROSE}</div>)
       expectNear(box.width, column, wordBreak)
     }
     // keep-all only keeps CJK together: text in letters is as wide as without it.
-    const kept = minContentBox(<text style={{ ...TEXT, wordBreak: "keep-all" }}>{PROSE}</text>)
+    const kept = minContentBox(<div style={{ ...TEXT, wordBreak: "keep-all" }}>{PROSE}</div>)
     expectNear(kept.width, 6 * column)
   })
 
   it("keeps the trailing space of a word when spaces do not hang", () => {
     const column = columnWidth()
-    const box = minContentBox(<text style={{ ...TEXT, whiteSpace: "break-spaces" }}>{"aaaa bb"}</text>)
+    const box = minContentBox(<div style={{ ...TEXT, whiteSpace: "break-spaces" }}>{"aaaa bb"}</div>)
     // break-spaces keeps the space at the end of the line, and it takes room.
     expectNear(box.width, 5 * column)
-    const hung = minContentBox(<text style={TEXT}>{"aaaa bb"}</text>)
+    const hung = minContentBox(<div style={TEXT}>{"aaaa bb"}</div>)
     expectNear(hung.width, 4 * column)
   })
 
   it("counts the tab stops of the text", () => {
     const column = columnWidth()
     const box = minContentBox(
-      <text style={{ ...TEXT, whiteSpace: "pre-wrap", tabSize: 4 }}>{"ab\tc"}</text>
+      <div style={{ ...TEXT, whiteSpace: "pre-wrap", tabSize: 4 }}>{"ab\tc"}</div>
     )
     // The tab goes to the stop at 4 columns, and it is a place to break after it; the
     // spaces and tabs at the end of a line hang in pre-wrap, so the line is "ab".
     expectNear(box.width, 2 * column)
     const unhung = minContentBox(
-      <text style={{ ...TEXT, whiteSpace: "break-spaces", tabSize: 4 }}>{"ab\tc"}</text>
+      <div style={{ ...TEXT, whiteSpace: "break-spaces", tabSize: 4 }}>{"ab\tc"}</div>
     )
     expectNear(unhung.width, 4 * column)
   })
@@ -114,9 +114,9 @@ describeNative("min-content width of a paragraph", () => {
   it("counts the space of the inline boxes in it, in the units of the style", () => {
     const column = columnWidth()
     const box = minContentBox(
-      <text style={{ ...TEXT, fontSize: 20 }}>
+      <div style={{ ...TEXT, fontSize: 20 }}>
         aa <span style={{ paddingLeft: "1em", paddingRight: "calc(0.5em + 2px)" }}>bb</span>
-      </text>
+      </div>
     )
     const col20 = (column * 20) / 16
     // The span's line is its two letters and its padding: 20 + 12 around them.

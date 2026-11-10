@@ -56,7 +56,7 @@ describe.skipIf(!hasNativeTestRenderer)("writes the host has already made", () =
               backgroundColor: selected() === index ? "#dbeafe" : undefined,
             }}
           >
-            <text style={{ color: selected() === index ? "#000" : "#111" }}>row {index}</text>
+            <div style={{ color: selected() === index ? "#000" : "#111" }}>row {index}</div>
           </div>
         ))}
       </div>

@@ -77,7 +77,7 @@ describeNative("motion.span", () => {
     const page = setup()
     page.testRoot.render(
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <motion.span
             style={{ paddingLeft: 12 }}
             initial={{ backgroundColor: RED }}
@@ -87,7 +87,7 @@ describeNative("motion.span", () => {
             aaaa
           </motion.span>{" "}
           tail
-        </text>
+        </div>
       </div>
     )
     const before = page.paragraph()
@@ -114,11 +114,11 @@ describeNative("motion.span", () => {
     const page = setup()
     const tree = (target: string) => (
       <div style={PAGE}>
-        <text testId="p" style={{ ...TEXT, fontSize: 64, lineHeight: "70px" }}>
+        <div testId="p" style={{ ...TEXT, fontSize: 64, lineHeight: "70px" }}>
           <motion.span initial={{ color: RED }} animate={{ color: target }} transition={LINEAR}>
             MM
           </motion.span>
-        </text>
+        </div>
       </div>
     )
     page.testRoot.render(tree(BLUE))
@@ -138,11 +138,11 @@ describeNative("motion.span", () => {
     const page = setup()
     page.testRoot.render(
       <div style={PAGE}>
-        <text testId="p" style={{ ...TEXT, fontSize: 64, lineHeight: "70px" }}>
+        <div testId="p" style={{ ...TEXT, fontSize: 64, lineHeight: "70px" }}>
           <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={LINEAR}>
             MM
           </motion.span>
-        </text>
+        </div>
       </div>
     )
     expect(page.ink(), "nothing is painted on the first frame").toEqual([255, 255, 255])
@@ -158,7 +158,7 @@ describeNative("motion.span", () => {
   it("animates from the span's own style when there is no initial, and shows animate at once with initial={false}", () => {
     const tree = (initial?: false) => (
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <motion.span
             style={{ paddingLeft: 12, backgroundColor: RED }}
             initial={initial}
@@ -167,7 +167,7 @@ describeNative("motion.span", () => {
           >
             aaaa
           </motion.span>
-        </text>
+        </div>
       </div>
     )
     const page = setup()
@@ -189,7 +189,7 @@ describeNative("motion.span", () => {
     const page = setup()
     page.testRoot.render(
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <motion.span
             style={{ borderWidth: 4, borderStyle: "solid", borderColor: RED }}
             initial={{ borderColor: RED }}
@@ -198,7 +198,7 @@ describeNative("motion.span", () => {
           >
             aaaa
           </motion.span>
-        </text>
+        </div>
       </div>
     )
     // The top border runs along the whole box, above the content area of the line.
@@ -214,7 +214,7 @@ describeNative("motion.span", () => {
     const page = setup()
     page.testRoot.render(
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <motion.span
             style={{ paddingLeft: 12 }}
             variants={{
@@ -227,7 +227,7 @@ describeNative("motion.span", () => {
           >
             aaaa
           </motion.span>
-        </text>
+        </div>
       </div>
     )
     expect(page.at(4, 10)).toEqual([255, 0, 0])
@@ -242,7 +242,7 @@ describeNative("motion.span", () => {
     const page = setup()
     page.testRoot.render(
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <motion.span
             style={{ paddingLeft: 12 }}
             custom={BLUE}
@@ -255,7 +255,7 @@ describeNative("motion.span", () => {
           >
             aaaa
           </motion.span>
-        </text>
+        </div>
       </div>
     )
     expect(page.at(4, 10)).toEqual([0, 0, 255])
@@ -266,7 +266,7 @@ describeNative("motion.span", () => {
     function App(props: { show: boolean }) {
       return (
         <div style={PAGE}>
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             <AnimatePresence>
               {props.show ? (
                 <motion.span
@@ -281,7 +281,7 @@ describeNative("motion.span", () => {
                 </motion.span>
               ) : null}
             </AnimatePresence>
-          </text>
+          </div>
         </div>
       )
     }
@@ -309,7 +309,7 @@ describeNative("motion.span", () => {
       const page = setup()
       const tree = (show: boolean) => (
         <div style={PAGE}>
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             <AnimatePresence>
               {show ? (
                 <motion.span key="chip" animate={{ color: RED }}>
@@ -317,7 +317,7 @@ describeNative("motion.span", () => {
                 </motion.span>
               ) : null}
             </AnimatePresence>
-          </text>
+          </div>
         </div>
       )
       page.testRoot.render(tree(true))
@@ -333,7 +333,7 @@ describeNative("motion.span", () => {
       const page = setup()
       const tree = (show: boolean) => (
         <div style={PAGE}>
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             <AnimatePresence>
               {show ? (
                 <motion.span
@@ -351,7 +351,7 @@ describeNative("motion.span", () => {
                 </motion.span>
               ) : null}
             </AnimatePresence>
-          </text>
+          </div>
         </div>
       )
       page.testRoot.render(tree(true))
@@ -397,9 +397,9 @@ describeNative("motion.span", () => {
     ])("a key of %s that a span cannot animate", (_name, props, message) => {
       const error = renderError(
         <div>
-          <text>
+          <div>
             <motion.span {...(props as object)}>aaaa</motion.span>
-          </text>
+          </div>
         </div>
       )
       expect(error.message).toContain(message)
@@ -408,24 +408,24 @@ describeNative("motion.span", () => {
 
     it("a key of an exit function that a span cannot animate", () => {
       const error = renderError(
-        <text>
+        <div>
           <AnimatePresence>
             <motion.span key="chip" animate={{ color: RED }} exit={() => ({ width: 20 }) as never}>
               aaaa
             </motion.span>
           </AnimatePresence>
-        </text>
+        </div>
       )
       expect(error.message).toContain('cannot animate "width" in exit')
     })
 
     it("a variant name that variants do not define", () => {
       const error = renderError(
-        <text>
+        <div>
           <motion.span animate="shown" variants={{ hidden: { color: RED } }}>
             aaaa
           </motion.span>
-        </text>
+        </div>
       )
       expect(error.message).toContain('names the variant "shown"')
     })

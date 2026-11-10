@@ -34,7 +34,7 @@ const COLUMN = (() => {
   const testRoot = createTestRoot()
   testRoot.render(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   const width = testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -49,9 +49,9 @@ function rowWidths(source: OracleCase, textStyle: object = {}) {
   try {
     testRoot.render(
       <div highlight={{ query: text }} style={{ width: (source.columns + 0.5) * COLUMN }}>
-        <text style={{ ...TEXT, ...styleOf(source.blockStyle), ...textStyle } as never}>
+        <div style={{ ...TEXT, ...styleOf(source.blockStyle), ...textStyle } as never}>
           {nodesOf(source.html)}
-        </text>
+        </div>
       </div>
     )
     const hit = testRoot.renderer.getPaintedHighlights()[0]
@@ -98,11 +98,11 @@ describeNative("text-wrap on spans, updated", () => {
     const render = (mode: "nowrap" | "wrap") =>
       testRoot.render(
         <div highlight={{ query: text }} style={{ width: (source.columns + 0.5) * COLUMN }}>
-          <text style={TEXT}>
+          <div style={TEXT}>
             {"aaaa bbbb "}
             <span style={{ textWrapMode: mode }}>{"cccc dddd eeee"}</span>
             {" ffff"}
-          </text>
+          </div>
         </div>
       )
     try {

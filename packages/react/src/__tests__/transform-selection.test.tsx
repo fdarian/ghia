@@ -49,7 +49,7 @@ const CASES: Case[] = [
 function Sentence({ style, textRef }: { style: React.CSSProperties; textRef?: (instance: PublicInstance | null) => void }) {
   return (
     <div ref={textRef} style={{ position: "absolute", transformOrigin: "0 0", ...style }}>
-      <text style={{ fontSize: 20, lineHeight: "24px", color: "#000000" }}>{SENTENCE}</text>
+      <div style={{ fontSize: 20, lineHeight: "24px", color: "#000000" }}>{SENTENCE}</div>
     </div>
   )
 }
@@ -159,7 +159,7 @@ describeNative("a selection dragged to the edge of a transformed list", () => {
         <virtual-list testId="list" overdraw={0} estimatedItemHeight={40} style={{ width: 200, height: 160 }}>
           {Array.from({ length: 30 }, (_, index) => (
             <div key={index} style={{ display: "flex", height: 40, flexShrink: 0, alignItems: "center" }}>
-              <text>{`row-${index}`}</text>
+              <div>{`row-${index}`}</div>
             </div>
           ))}
         </virtual-list>
@@ -214,12 +214,12 @@ describeNative("text selection after patched ticks of a moving transform", () =>
         <div style={{ display: "flex", flexDirection: "column", width: 200 }}>
           {Array.from({ length: 40 }, (_, row) => (
             <div key={row} style={{ borderWidth: 1, borderColor: "#cccccc", padding: 2 }}>
-              <text style={{ fontSize: 11, color: "#333333" }}>{`row ${row}`}</text>
+              <div style={{ fontSize: 11, color: "#333333" }}>{`row ${row}`}</div>
             </div>
           ))}
         </div>
         <div testId="slide" style={{ position: "absolute", left: 260, top: 20, animation }}>
-          <text style={{ fontSize: 20, lineHeight: "24px", color: "#000000" }}>{SENTENCE}</text>
+          <div style={{ fontSize: 20, lineHeight: "24px", color: "#000000" }}>{SENTENCE}</div>
         </div>
       </div>
     )

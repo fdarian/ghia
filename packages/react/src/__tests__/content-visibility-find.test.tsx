@@ -42,8 +42,8 @@ function Page({ highlight, counts, hidden = [HIDDEN] }: PageProps) {
             }
           >
             <div testId={`mark-${index}`} style={{ height: 1 }} />
-            <text>{`Entry ${index} alpha`}</text>
-            <text>{index === HIDDEN ? "only the hidden one has a zebra" : `row ${index}`}</text>
+            <div>{`Entry ${index} alpha`}</div>
+            <div>{index === HIDDEN ? "only the hidden one has a zebra" : `row ${index}`}</div>
           </div>
         ))}
       </div>
