@@ -545,6 +545,45 @@ describeNative("a custom property set in a focus variant that applies", () => {
     expect(seen).toEqual([40, 80, 40])
   }, SLOW)
 
+  it.each([
+    ["focusVisible", "declares the custom property and reads it", { "--ring": "0 0 0 4px #ff0000", boxShadow: "var(--ring)" }],
+    ["focusVisible", "only declares it, for the base to read", { "--ring": "0 0 0 4px #ff0000" }],
+  ])("settles a transitioning box-shadow on the one the literal gives: %s that %s", (name, _, variant) => {
+    const settled = (label: string, base: Record<string, unknown>, declared: Record<string, unknown>) =>
+      paint(
+        `focus-ring-transition-${label}`,
+        <div style={{ position: "absolute", left: 0, top: 0, width: 600, height: 300 }}>
+          <div
+            tabIndex={0}
+            testId="focusable"
+            style={{
+              position: "absolute",
+              left: 20,
+              top: 20,
+              width: 40,
+              height: 40,
+              transition: "box-shadow 100ms linear",
+              ...base,
+              [name]: declared,
+            }}
+          />
+        </div>,
+        (renderer) => {
+          renderer.clockPause()
+          tabTo(renderer, "focusable")
+          renderer.clockFastForward(500)
+          renderer.dispatchNativeEvents()
+        },
+      )
+    const base = "boxShadow" in variant ? {} : { boxShadow: "var(--ring)" }
+    const viaVar = settled(`${name}-var-${Object.keys(variant).length}`, base, variant)
+    const literal = settled(`${name}-literal-${Object.keys(variant).length}`, { boxShadow: "none" }, { boxShadow: "0 0 0 4px #ff0000" })
+    for (const [x, y] of [[18, 40], [62, 40], [40, 18], [40, 62], [5, 5]] as const) {
+      expectNear(viaVar.at(x, y), literal.at(x, y))
+    }
+    expectNear(viaVar.at(18, 40), RED)
+  }, SLOW)
+
   it("paints a box-shadow of the base style the way a literal in the variant does", () => {
     const ring = (shadow: string, focusVisible: Record<string, unknown>) =>
       paint(

@@ -11207,7 +11207,8 @@ fn contents_frame(
     });
     let outside = std::mem::replace(&mut ctx.inherited, inside);
     let var_style = declared.and_then(|style| {
-        crate::css::var_substitution::resolve(style, &ctx.inherited.custom_of(Some(style)))
+        let custom = ctx.focus_styles.custom_of(wrapper.id, style, false, &ctx.inherited.custom);
+        crate::css::var_substitution::resolve(style, &custom)
     });
     if var_style.is_some() {
         crate::css::custom_properties::reads::note();
@@ -13101,7 +13102,7 @@ fn build_atomics(
             let own = tree.elements.get(&id).and_then(|element| element.style.as_deref());
             let declared = own.map(|base| {
                 let declared = crate::events::state_styles::folded(base, states(id, base));
-                match crate::css::var_substitution::resolve(&declared, &inherited.custom_of(Some(base))) {
+                match crate::css::var_substitution::resolve(&declared, &inherited.custom_of(Some(&*declared))) {
                     Some(resolved) => {
                         crate::css::custom_properties::reads::note();
                         std::borrow::Cow::Owned(resolved)
