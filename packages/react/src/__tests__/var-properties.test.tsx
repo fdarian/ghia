@@ -6,6 +6,8 @@ import React from "react"
 import { describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import { verifying } from "./retained-harness.js"
+import { readLogicalPixels, SHOTS_DIR } from "./test-utils.js"
+import { motion } from "../index"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -177,5 +179,148 @@ describeNative("a transition of a property that reads a custom property", () => 
     } finally {
       root.unmount()
     }
+  }, SLOW)
+})
+
+type Rgba = [number, number, number, number]
+
+/** The pixels of `tree` in a fresh window, read after `before` ran (a pointer move, say). */
+function paint(name: string, tree: React.ReactElement, before?: (renderer: Renderer) => void) {
+  const root = createTestRoot({ width: 800, height: 600 })
+  try {
+    root.render(tree)
+    root.renderer.flush()
+    before?.(root.renderer)
+    const file = `${SHOTS_DIR}/var-properties-${name}.png`
+    root.renderer.captureScreenshot(file)
+    const pixels = readLogicalPixels(file, root.renderer)
+    return { at: (x: number, y: number) => pixels.at(x, y) as Rgba }
+  } finally {
+    root.unmount()
+  }
+}
+
+const RED: Rgba = [255, 0, 0, 255]
+const BLUE: Rgba = [0, 0, 255, 255]
+
+function expectNear(actual: Rgba, expected: Rgba, tolerance = 1) {
+  for (let i = 0; i < 4; i++) {
+    expect(Math.abs(actual[i]! - expected[i]!), `${actual} vs ${expected}`).toBeLessThanOrEqual(tolerance)
+  }
+}
+
+describeNative("a var() that the element inherits, animates or is animated over", () => {
+  it("reaches the text and the descendants through color and fontSize", () => {
+    const tree = (fontSize: string | number | undefined, color: string | undefined) => (
+      <div style={{ position: "absolute", left: 0, top: 0, "--s": "24px", "--c": "#ff0000" }}>
+        <div testId="host" style={{ position: "absolute", left: 0, top: 0, fontSize, color }}>
+          <div testId="em" style={{ width: "10em", height: 5 }} />
+          <div testId="swatch" style={{ width: 100, height: 100, backgroundColor: "currentColor" }} />
+        </div>
+        <div style={{ position: "absolute", left: 300, top: 0, width: 300, fontSize, color }}>
+          <text testId="text">measured text</text>
+        </div>
+      </div>
+    )
+    const measure = (fontSize: string | number | undefined, color: string | undefined) => {
+      let measured: { em: number; textHeight: number } | undefined
+      mounted(tree(fontSize, color), (renderer) => {
+        measured = { em: box(renderer, "em")[2], textHeight: box(renderer, "text")[3] }
+      })
+      return measured!
+    }
+    const viaVar = measure("var(--s)", "var(--c)")
+    const plain = measure(24, "#ff0000")
+    const unset = measure(undefined, undefined)
+    expect(viaVar).toEqual(plain)
+    expect(viaVar.em).toBe(240)
+    expect(viaVar.textHeight).toBeGreaterThan(unset.textHeight)
+    expectNear(paint("color", tree("var(--s)", "var(--c)")).at(50, 50), RED)
+  }, SLOW)
+
+  it("starts a transition that a var() declares", () => {
+    const sized = (width: number) => (
+      <div style={{ position: "absolute", left: 0, top: 0, width: 800, height: 600, "--d": "1s" }}>
+        <div testId="box" style={{ position: "absolute", left: 0, top: 0, width, height: 20, transition: "width var(--d) linear" }} />
+      </div>
+    )
+    const root = createTestRoot({ width: 800, height: 600 })
+    const renderer = root.renderer
+    try {
+      renderer.clockPause()
+      root.render(sized(100))
+      renderer.flush()
+      expect(box(renderer, "box")[2]).toBe(100)
+      root.render(sized(200))
+      renderer.flush()
+      expect(box(renderer, "box")[2]).toBe(100)
+      renderer.clockFastForward(500)
+      renderer.flush()
+      renderer.dispatchNativeEvents()
+      expect(box(renderer, "box")[2]).toBeCloseTo(150, 1)
+      renderer.clockFastForward(500)
+      renderer.flush()
+      renderer.dispatchNativeEvents()
+      expect(box(renderer, "box")[2]).toBe(200)
+    } finally {
+      root.unmount()
+    }
+  }, SLOW)
+
+  it("lets motion write a property that a var() declares", () => {
+    const root = createTestRoot({ width: 800, height: 600 })
+    const renderer = root.renderer
+    try {
+      renderer.clockPause()
+      root.render(
+        <div style={{ position: "absolute", left: 0, top: 0, "--w": "50px" }}>
+          <motion.div
+            testId="box"
+            style={{ width: "var(--w)", height: 20 }}
+            initial={{ width: 100 }}
+            animate={{ width: 300 }}
+            transition={{ duration: 1, ease: "linear" }}
+          />
+        </div>,
+      )
+      renderer.flush()
+      renderer.dispatchNativeEvents()
+      expect(box(renderer, "box")[2]).toBe(100)
+      renderer.clockFastForward(500)
+      renderer.dispatchNativeEvents()
+      expect(box(renderer, "box")[2]).toBeCloseTo(200, 0)
+      renderer.clockFastForward(1000)
+      renderer.dispatchNativeEvents()
+      expect(box(renderer, "box")[2]).toBeCloseTo(300, 0)
+    } finally {
+      root.unmount()
+    }
+  }, SLOW)
+
+  it("resolves a number through opacity", () => {
+    const shot = paint(
+      "opacity",
+      <div style={{ position: "absolute", left: 0, top: 0, "--o": "0.5" }}>
+        <div style={{ position: "absolute", left: 0, top: 0, width: 100, height: 100, backgroundColor: "#ff0000", opacity: "var(--o)" }} />
+        <div style={{ position: "absolute", left: 200, top: 0, width: 100, height: 100, backgroundColor: "#ff0000", opacity: 0.5 }} />
+        <div style={{ position: "absolute", left: 400, top: 0, width: 100, height: 100, backgroundColor: "#ff0000" }} />
+      </div>,
+    )
+    expectNear(shot.at(50, 50), shot.at(250, 50))
+    expect(shot.at(50, 50)).not.toEqual(shot.at(450, 50))
+  }, SLOW)
+
+  it("lets a hovered borderColor win over a border that a var() declares", () => {
+    const tree = (
+      <div style={{ position: "absolute", left: 10, top: 10, "--line": "#0000ff" }}>
+        <div testId="bordered" style={{ width: 60, height: 60, border: "6px solid var(--line)", hover: { borderColor: "#ff0000" } }} />
+      </div>
+    )
+    const at_rest = paint("border-rest", tree)
+    expectNear(at_rest.at(13, 40), BLUE)
+    const hovered = paint("border-hover", tree, (renderer) => {
+      renderer.nativeSimulateMouseMove(40, 40)
+    })
+    expectNear(hovered.at(13, 40), RED)
   }, SLOW)
 })
