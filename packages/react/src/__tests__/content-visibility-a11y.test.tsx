@@ -123,6 +123,37 @@ describeNative("the accessibility tree of skipped content", { timeout: 120_000 }
     }
   })
 
+  it("gives each paragraph beside a block in skipped content a Label, in order, as a built entry does", () => {
+    const { root, renderer, ids } = mount(
+      <Page
+        entry={(index) => (
+          <Entry key={index} index={index}>
+            <div role="group" aria-label={`Mixed ${index}`} style={{ height: 30 }}>
+              Before
+              <div role="button" aria-label={`Inside ${index}`} style={{ height: 10 }} />
+              After
+            </div>
+          </Entry>
+        )}
+      />
+    )
+    try {
+      expect(isBuilt(renderer, ids, "btn-3"), "an entry near the viewport is built").toBe(true)
+      expect(isBuilt(renderer, ids, "btn-30"), "a far entry is skipped").toBe(false)
+      const tree = renderer.getA11yTree()
+      const childrenOf = (index: number) =>
+        withLabel(tree, `Mixed ${index}`)[0]!.children.map((key) => {
+          const aria = tree.nodes![key]!.aria!
+          return [aria.role, aria.value ?? aria.label]
+        })
+      const expected = (index: number) => [["Label", "Before"], ["Button", `Inside ${index}`], ["Label", "After"]]
+      expect(childrenOf(3)).toEqual(expected(3))
+      expect(childrenOf(30)).toEqual(expected(30))
+    } finally {
+      finish(root, renderer)
+    }
+  })
+
   it("has the headings and buttons Chrome has with a screen reader on, and none from a hidden entry", () => {
     const { root, renderer } = mount(<Page entry={(index) => <Entry key={index} index={index} value={index === 31 ? "hidden" : "auto"} />} />)
     try {

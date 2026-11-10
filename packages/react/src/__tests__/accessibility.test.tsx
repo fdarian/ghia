@@ -263,17 +263,49 @@ describeNative("accessibility", () => {
     expect(labels.map((aria) => aria.value)).toEqual(expect.arrayContaining(["Before", "After"]))
   })
 
-  it("lets an explicit role override the <text> default", () => {
+  it("lets an explicit role override the Label default, and names the node by the text", () => {
     testRoot.render(
       <div role="heading" aria-level={1} style={{ width: 200, height: 24 }}>
         Title
       </div>,
     )
 
-    const tree = testRoot.renderer.getA11yTree()
-    expect(withRole(tree, "Heading")[0]).toEqual(
-      expect.objectContaining({ role: "Heading", value: "Title", level: 1 }),
+    const heading = withRole(testRoot.renderer.getA11yTree(), "Heading")[0]
+    expect(heading).toEqual(expect.objectContaining({ role: "Heading", label: "Title", level: 1 }))
+    expect(heading?.value).toBeUndefined()
+  })
+
+  it("names a button by its text, since a screen reader names it from its label alone", () => {
+    testRoot.render(
+      <div role="button" onClick={() => {}} style={{ width: 80, height: 24 }}>
+        Save
+      </div>,
     )
+
+    const button = withRole(testRoot.renderer.getA11yTree(), "Button")[0]
+    expect(button).toEqual(expect.objectContaining({ role: "Button", label: "Save" }))
+    expect(button?.value).toBeUndefined()
+  })
+
+  it("keeps the author's name on a node with text, and reads the text as its value", () => {
+    testRoot.render(
+      <div style={{ width: 300, height: 80 }}>
+        <div id="silent" aria-label="silent" style={{ width: 80, height: 20 }}>
+          Hello
+        </div>
+        <div id="named" role="button" aria-label="Go" onClick={() => {}} style={{ width: 80, height: 20 }}>
+          Save
+        </div>
+      </div>,
+    )
+
+    const tree = testRoot.renderer.getA11yTree()
+    expect(byAuthorId(tree, "silent")).toEqual(
+      expect.objectContaining({ role: "Label", label: "silent", value: "Hello" }),
+    )
+    const named = byAuthorId(tree, "named")
+    expect(named).toEqual(expect.objectContaining({ role: "Button", label: "Go" }))
+    expect(named.value).toBeUndefined()
   })
 
   it("updates aria-label when React state changes", () => {
@@ -491,6 +523,10 @@ describeNative("accessibility", () => {
         owns: [key("title")],
       }),
     )
+    expect(byAuthorId(tree, "title")).toEqual(
+      expect.objectContaining({ role: "Group", label: "Title" }),
+    )
+    expect(byAuthorId(tree, "title").value).toBeUndefined()
   })
 
   it("gives a role-less element an aria reference names a node named by its text", () => {
@@ -508,6 +544,7 @@ describeNative("accessibility", () => {
     expect(byAuthorId(tree, "hint")).toEqual(
       expect.objectContaining({ role: "Group", label: "Be brief" }),
     )
+    expect(byAuthorId(tree, "hint").value).toBeUndefined()
     expect(byAuthorId(tree, "field").described_by).toEqual([keyOf(tree, "hint")])
     expect(ariaOf(tree).some((aria) => aria.author_id === "unreferenced")).toBe(false)
   })
