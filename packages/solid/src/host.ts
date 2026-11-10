@@ -23,6 +23,7 @@ import {
   HOST_BINDING,
   HOST_MOUNT,
   ROOT_ELEMENT_STYLE,
+  ROOT_HEAD_STYLE,
   ROOT_ELEMENT_TYPES,
   readBoundingClientRect,
   toBoundingClientRect,
@@ -103,6 +104,8 @@ export class HostRoot implements MotionBindingHost {
 
   /** The window's `<html>`: its native root. A child of this root only in that it is mounted through it. */
   html: HostElement
+  /** The `<head>` in `html`, before `body`. */
+  head: HostElement
   /** The `<body>` in `html`, where the app's top-level nodes are. */
   body: HostElement
 
@@ -118,6 +121,7 @@ export class HostRoot implements MotionBindingHost {
     this.allocateId = options.allocateId
     const elements = this.mountDocumentElements()
     this.html = elements.html
+    this.head = elements.head
     this.body = elements.body
   }
 
@@ -126,15 +130,16 @@ export class HostRoot implements MotionBindingHost {
     return this.body.childList
   }
 
-  /** Makes the `<html>` and `<body>` again for a root that was torn down and renders once more. */
+  /** Makes the `<html>`, `<head>` and `<body>` again for a root that was torn down and renders once more. */
   ensureDocumentElements(): void {
     if (this.html.mounted) return
     const elements = this.mountDocumentElements()
     this.html = elements.html
+    this.head = elements.head
     this.body = elements.body
   }
 
-  /** Destroys `<html>` and `<body>`, once the app's nodes are out of them. */
+  /** Destroys `<html>` and, with it, `<head>` and `<body>`, once the app's nodes are out of them. */
   destroyDocumentElements(): void {
     this.finishRemovals()
     if (!this.html.mounted) return
@@ -155,17 +160,21 @@ export class HostRoot implements MotionBindingHost {
   }
 
   /** Built through the host machinery an app's elements go through, then mounted as the window's root. */
-  private mountDocumentElements(): { html: HostElement; body: HostElement } {
+  private mountDocumentElements(): { html: HostElement; head: HostElement; body: HostElement } {
     const html = createHostElement(ROOT_ELEMENT_TYPES.html)
+    const head = createHostElement(ROOT_ELEMENT_TYPES.head)
     const body = createHostElement(ROOT_ELEMENT_TYPES.body)
     html.style = { ...ROOT_ELEMENT_STYLE }
+    head.style = { ...ROOT_HEAD_STYLE }
     body.style = { ...ROOT_ELEMENT_STYLE }
     html.parent = this
-    html.childList.push(body)
-    body.parent = html
+    for (const child of [head, body]) {
+      html.childList.push(child)
+      child.parent = html
+    }
     mount(this, html)
     this.mutations.setRoot(html.nativeId)
-    return { html, body }
+    return { html, head, body }
   }
 }
 
@@ -565,6 +574,7 @@ export function createHostElement(type: string): HostElement {
 function isElementType(type: string): type is ElementType {
   switch (type) {
     case "html":
+    case "head":
     case "body":
     case "div":
     case "text":

@@ -146,13 +146,14 @@ type ElementSource = {
   pointerLockId(): number | null
   /** The object the adapter hands out for that element (a ref's value), or `undefined` once the root has dropped it. */
   elementById(id: number): object | undefined
-  /** The `<html>` and `<body>` elements the root's adapter made for its window, or `null` for a source that has none. */
+  /** The `<html>`, `<head>` and `<body>` elements the root's adapter made for its window, or `null` for a source that has none. */
   documentElements(): DocumentElements | null
 }
 
-/** The elements every window root is made of: `html`, and `body` in it, holding the app. */
+/** The elements every window root is made of: `html`, with `head` and `body` in it, the latter holding the app. */
 export type DocumentElements = {
   html: object
+  head: object
   body: object
 }
 
@@ -264,6 +265,11 @@ export class GpuixDocument<Element = unknown> extends Document {
     return (currentDocumentElements()?.html as Element | undefined) ?? null
   }
 
+  /** The `<head>` element of the window that mounted last, before `body` in `documentElement`. */
+  get head(): Element | null {
+    return (currentDocumentElements()?.head as Element | undefined) ?? null
+  }
+
   /** The `<body>` element of the window that mounted last: where the app's top-level nodes are. */
   get body(): Element | null {
     return (currentDocumentElements()?.body as Element | undefined) ?? null
@@ -355,8 +361,8 @@ registerDocument(document)
  * Lets the runtime see the elements of the root that drives `renderer`, through
  * `elementById`: the object the adapter gives for an element id, as a `ref`
  * does. `document.activeElement` and the `target`, `currentTarget` and
- * `relatedTarget` of every event read it, and `document.documentElement` and
- * `document.body` read `documentElements`. The returned function takes the root
+ * `relatedTarget` of every event read it, and `document.documentElement`,
+ * `document.head` and `document.body` read `documentElements`. The returned function takes the root
  * out again. A renderer that cannot report focus still names its elements; it
  * just never has an `activeElement`.
  */

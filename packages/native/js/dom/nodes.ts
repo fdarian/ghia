@@ -13,11 +13,18 @@ import type { ElementType } from "../host.js"
 /** Where `[DOM_BINDING]()` is read, so two copies of this package find each other's nodes. */
 export const DOM_BINDING: unique symbol = Symbol.for("@ghia/native/dom-binding")
 
-/** The element types of what every window root is made of, `html` and `body` in it. */
-export const ROOT_ELEMENT_TYPES = { html: "html", body: "body" } as const satisfies Record<string, ElementType>
+/** The element types of what every window root is made of: `html`, with `head` and `body` in it. */
+export const ROOT_ELEMENT_TYPES = {
+  html: "html",
+  head: "head",
+  body: "body",
+} as const satisfies Record<string, ElementType>
 
 /** Both fill the window: the box above the root is the window, and the app's top element sizes against it. */
 export const ROOT_ELEMENT_STYLE = { display: "block", width: "100%", height: "100%" } as const
+
+/** `head` has no box and its children are never drawn: it holds what the page loads, not what it shows. */
+export const ROOT_HEAD_STYLE = { display: "none" } as const
 
 /** What an adapter tells the DOM members about one of its nodes. */
 export type NodeBinding = {

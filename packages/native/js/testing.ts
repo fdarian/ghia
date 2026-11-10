@@ -1188,7 +1188,7 @@ export class TestRenderer implements NativeRenderer {
     const elements = this.buildElementMap()
     const html = elements.get(rootId)
     if (html?.type !== "html") return html
-    const body = elements.get(html.children[0])
+    const body = html.children.map((id) => elements.get(id)).find((child) => child?.type === "body")
     const top = body?.children.at(-1)
     return top === undefined ? undefined : elements.get(top)
   }

@@ -133,7 +133,7 @@ export function createRoot(
     stopElementSource = installElementSource(
       renderer,
       (id) => container.elements.get(id),
-      () => ({ html: container.html, body: container.body })
+      () => ({ html: container.html, head: container.head, body: container.body })
     )
     // Sent on every attach, so a remount without the option restores the default.
     mutations.setKeyboardFocusDim(rootHandlers.keyboardFocusDim !== false)

@@ -20,6 +20,7 @@ describe.skipIf(!hasNativeTestRenderer)("document.body in Solid", () => {
   it("is null with nothing mounted", () => {
     app.unmount()
     expect(document.documentElement).toBeNull()
+    expect(document.head).toBeNull()
     expect(document.body).toBeNull()
     expect(document.scrollingElement).toBeNull()
     app = createTestRoot()
@@ -37,7 +38,7 @@ describe.skipIf(!hasNativeTestRenderer)("document.body in Solid", () => {
     expect(html.parentElement).toBeNull()
     expect(body.parentNode).toBe(html)
     expect(box!.parentNode).toBe(body)
-    expect([...html.children]).toEqual([body])
+    expect([...html.children]).toEqual([document.head, body])
     expect([...body.children]).toEqual([box])
     expect([...document.childNodes]).toEqual([html])
     expect(box!.getRootNode()).toBe(document)
@@ -51,6 +52,28 @@ describe.skipIf(!hasNativeTestRenderer)("document.body in Solid", () => {
     expect(body.compareDocumentPosition(box!)).toBe(20)
     expect(box!.compareDocumentPosition(body)).toBe(10)
     expect(box!.ownerDocument).toBe(document)
+  })
+
+  it("has a head before body in html, which draws nothing", () => {
+    let box: HTMLElement | undefined
+    app.render(() => <div ref={(element) => (box = element as unknown as HTMLElement)} style={{ width: 40, height: 20 }} />)
+    const html = document.documentElement!
+    const head = document.head!
+    expect(head.tagName).toBe("HEAD")
+    expect(head.localName).toBe("head")
+    expect(head.parentNode).toBe(html)
+    expect(head.parentElement).toBe(html)
+    expect(head.nextSibling).toBe(document.body)
+    expect(document.body!.previousSibling).toBe(head)
+    expect(head.ownerDocument).toBe(document)
+    expect(head.getRootNode()).toBe(document)
+    expect(head.isConnected).toBe(true)
+    expect(head.children.length).toBe(0)
+    expect(html.contains(head)).toBe(true)
+    expect(head.contains(box!)).toBe(false)
+    expect(head.compareDocumentPosition(document.body!)).toBe(4)
+    expect(head.getBoundingClientRect()).toMatchObject({ width: 0, height: 0 })
+    expect(box!.getBoundingClientRect()).toMatchObject({ x: 0, y: 0, width: 40, height: 20 })
   })
 
   it("draws and lays out every top-level sibling, one under the other", () => {

@@ -13,6 +13,7 @@ import {
   eventTypesWithOverrides,
   isReservedProp,
   ROOT_ELEMENT_STYLE,
+  ROOT_HEAD_STYLE,
   ROOT_ELEMENT_TYPES,
   sameMutationValue,
   serializeCustomProp,
@@ -355,17 +356,23 @@ export function publicInstanceById(container: Container, id: number): PublicInst
 }
 
 /**
- * Makes the window's `<html>` and `<body>` as React makes an element and mounts them as the
+ * Makes the window's `<html>`, `<head>` and `<body>` as React makes an element and mounts them as the
  * native root, so a root's content and a portal into `document.body` go through the same
  * `body`. `base` is the container before it has them.
  */
-export function installDocumentElements(base: Omit<Container, "html" | "body">): Container {
-  // `html` and `body` are assigned below, before anything reads them.
+export function installDocumentElements(base: Omit<Container, "html" | "head" | "body">): Container {
+  // `html`, `head` and `body` are assigned below, before anything reads them.
   const container = base as Container
   const html = createHostElement(
     nextId(container),
     ROOT_ELEMENT_TYPES.html,
     { style: { ...ROOT_ELEMENT_STYLE } },
+    container
+  )
+  const head = createHostElement(
+    nextId(container),
+    ROOT_ELEMENT_TYPES.head,
+    { style: { ...ROOT_HEAD_STYLE } },
     container
   )
   const body = createHostElement(
@@ -375,17 +382,22 @@ export function installDocumentElements(base: Omit<Container, "html" | "body">):
     container
   )
   container.html = html
+  container.head = head
   container.body = body
-  adopt(html, body)
-  linkChild(html, body)
+  for (const child of [head, body]) {
+    adopt(html, child)
+    linkChild(html, child)
+  }
   materialize(html)
+  materialize(head)
   materialize(body)
+  container.renderer.appendChild(html.nativeId, head.nativeId)
   container.renderer.appendChild(html.nativeId, body.nativeId)
   container.renderer.setRoot(html.nativeId)
   return container
 }
 
-/** Destroys `<html>` and, with it, `<body>`, once the app's nodes are out of them. */
+/** Destroys `<html>` and, with it, `<head>` and `<body>`, once the app's nodes are out of them. */
 export function destroyDocumentElements(container: Container): void {
   if (container.instances.get(container.html.nativeId) !== container.html) return
   container.renderer.destroyElement(container.html.nativeId)

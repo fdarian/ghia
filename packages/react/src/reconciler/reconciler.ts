@@ -134,7 +134,7 @@ export function createRoot(
     stopElementSource = installElementSource(
       renderer,
       (id) => publicInstanceById(gpuixContainer, id),
-      () => ({ html: gpuixContainer.html, body: gpuixContainer.body })
+      () => ({ html: gpuixContainer.html, head: gpuixContainer.head, body: gpuixContainer.body })
     )
   } catch (error) {
     detachRoot(renderer, gpuixContainer)

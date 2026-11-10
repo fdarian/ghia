@@ -243,6 +243,8 @@ export interface Container {
   instances: Map<number, Instance>
   /** The window's `<html>`: its native root. A portal container shares its root's. */
   html: Instance
+  /** The `<head>` in `html`, before `body`. */
+  head: Instance
   /** The `<body>` in `html`, where the app's top-level nodes are. */
   body: Instance
   windowKeyEventHandlers: WindowKeyEventHandlers

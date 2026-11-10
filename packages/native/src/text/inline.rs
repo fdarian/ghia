@@ -48,7 +48,7 @@ pub fn is_blank(text: &str) -> bool {
 /// tree's own `div` rules. Paint dispatches on this and search collects by it, so
 /// the two cannot disagree about which elements lay out a paragraph.
 pub fn is_host_type(element_type: &str) -> bool {
-    matches!(element_type, "div" | "text" | "label" | "form" | "span" | "nativeview" | "html" | "body")
+    matches!(element_type, "div" | "text" | "label" | "form" | "span" | "nativeview" | "html" | "head" | "body")
 }
 
 pub fn is_host_container(element: &RetainedElement) -> bool {
@@ -1146,7 +1146,7 @@ mod tests {
 
     #[test]
     fn label_and_form_are_host_containers_and_never_inline_boxes() {
-        for kind in ["div", "text", "span", "label", "form", "html", "body"] {
+        for kind in ["div", "text", "span", "label", "form", "html", "head", "body"] {
             assert!(is_host_type(kind), "{kind}");
         }
         for kind in ["img", "svg", "input", "virtual-list", "markdown"] {

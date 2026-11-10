@@ -1560,6 +1560,7 @@ export type GroupStateStyleDesc = StateStyleDesc & { group?: string | true }
 export type ElementType =
   | "div"
   | "html"
+  | "head"
   | "body"
   | "text"
   | "span"
