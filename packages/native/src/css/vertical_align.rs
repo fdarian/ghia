@@ -229,12 +229,13 @@ mod tests {
     }
 
     #[test]
-    fn a_style_reads_it_and_an_invalid_one_is_not_interned() {
+    fn a_style_reads_it_and_an_invalid_one_is_dropped() {
         let style: crate::style::StyleDesc = serde_json::from_str(r#"{"verticalAlign": "middle"}"#).unwrap();
         assert_eq!(style.vertical_align, Some(VerticalAlign::Middle));
         let mut table = crate::retained_tree::StyleTable::default();
         assert!(table.intern(br#"{"verticalAlign": "-3px"}"#).is_ok());
-        let error = table.intern(br#"{"verticalAlign": "center"}"#).unwrap_err();
-        assert!(error.contains("invalid verticalAlign"), "{error}");
+        let style = table.intern(br#"{"verticalAlign": "center", "opacity": 0.5}"#).unwrap();
+        assert_eq!(style.vertical_align, None);
+        assert_eq!(style.opacity, Some(0.5));
     }
 }

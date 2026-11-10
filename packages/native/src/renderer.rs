@@ -15399,9 +15399,9 @@ mod batch_tests {
         let mut tree = RetainedTree::new();
         let error = apply(
             &mut tree,
-            r#"[["createElement",1,"div"],["setStyle",1,{"color":"red"}],["setStyle",1,{"color":5}]]"#,
+            r#"[["createElement",1,"div"],["setStyle",1,{"color":"red"}],["setStyle",1,5]]"#,
         )
-        .expect_err("a bad style rejects the batch");
+        .expect_err("a style that is not an object rejects the batch");
         assert!(
             error.starts_with("Batch op 2 setStyle parse error:"),
             "{error}"

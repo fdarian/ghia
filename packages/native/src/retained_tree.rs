@@ -3454,26 +3454,35 @@ mod tests {
     }
 
     #[test]
-    fn an_invalid_layer_rejects_the_batch_and_changes_nothing() {
+    fn an_invalid_layer_declaration_is_dropped_and_the_rest_of_the_batch_applies() {
+        let mut tree = layered_tree();
+        apply(
+            &mut tree,
+            r##"[["setStyle",2,{"color":"#abcdef"}],["setUniversalStyle",{"tabSize":"wide","opacity":0.5}]]"##,
+        );
+        assert_eq!(style_of(&tree, 2).unwrap().color.as_deref(), Some("#abcdef"));
+        assert_eq!(style_of(&tree, 2).unwrap().opacity, Some(0.5), "the valid declaration of the layer applies");
+        assert!(tree.universal.as_ref().unwrap().tab_size.is_none(), "the invalid one is dropped");
+        assert!(style_of(&tree, 2).unwrap().tab_size.is_none());
+
+        apply(&mut tree, r#"[["setUniversalStyle",{"transition":"width not-a-time","opacity":0.7}]]"#);
+        let layer = tree.universal.as_ref().unwrap();
+        assert!(layer.transition.is_none(), "transitions are validated too");
+        assert_eq!(layer.opacity, Some(0.7));
+    }
+
+    #[test]
+    fn a_layer_that_is_not_an_object_still_rejects_the_batch_and_changes_nothing() {
         let mut tree = layered_tree();
         let revision = tree.next_revision;
         let error = crate::batch::test_json::apply(
             &mut tree,
-            r##"[["setStyle",2,{"color":"#abcdef"}],["setUniversalStyle",{"color":5}]]"##,
+            r##"[["setStyle",2,{"color":"#abcdef"}],["setUniversalStyle",5]]"##,
         )
-        .expect_err("a layer is validated like any style");
+        .expect_err("a layer must be a style object");
         assert!(error.starts_with("Batch op 1 setUniversalStyle parse error:"), "{error}");
         assert_eq!(style_of(&tree, 2).unwrap().color.as_deref(), Some("#222222"));
         assert_eq!(tree.next_revision, revision);
-        assert!(tree.universal.is_none());
-
-        let error = crate::batch::test_json::apply(
-            &mut tree,
-            r#"[["setUniversalStyle",{"transition":"width not-a-time"}]]"#,
-        )
-        .expect_err("transitions are validated too");
-        assert!(error.contains("setUniversalStyle parse error"), "{error}");
-
         assert!(tree.universal.is_none());
     }
 
