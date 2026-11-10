@@ -16,7 +16,7 @@ function Rows({ count }: { count: number }) {
         alignItems: "center",
       }}
     >
-      <text>{`row-${index}`}</text>
+      <div>{`row-${index}`}</div>
     </div>
   ))
 }
@@ -39,7 +39,7 @@ function FocusableRows({ inputIndex = 0 }: { inputIndex?: number }) {
               onChange={(event) => setValue(event.value ?? "")}
             />
           ) : (
-            <text>{`row-${index}`}</text>
+            <div>{`row-${index}`}</div>
           )}
         </div>
       ))}
@@ -64,7 +64,7 @@ function DynamicFocusableRows({ enabled }: { enabled: boolean }) {
               onChange={(event) => setValue(event.value ?? "")}
             />
           ) : (
-            <text>{`row-${index}`}</text>
+            <div>{`row-${index}`}</div>
           )}
         </div>
       ))}
@@ -164,7 +164,7 @@ describe("<virtual-list>", () => {
       >
         {Array.from({ length: 30 }, (_, index) => (
           <div key={index} style={{ minHeight: 80, flexShrink: 0 }}>
-            {index === 20 ? <markdown source="# Lazy markdown" /> : <text>{`row-${index}`}</text>}
+            {index === 20 ? <markdown source="# Lazy markdown" /> : <div>{`row-${index}`}</div>}
           </div>
         ))}
       </virtual-list>
@@ -259,7 +259,7 @@ describe("<virtual-list>", () => {
               alignItems: "center",
             }}
           >
-            <text>{`row-${start + offset}`}</text>
+            <div>{`row-${start + offset}`}</div>
           </div>
         ))}
       </virtual-list>
@@ -312,7 +312,7 @@ describe("<virtual-list>", () => {
               alignItems: "center",
             }}
           >
-            <text>{`row-${index}`}</text>
+            <div>{`row-${index}`}</div>
           </div>
         ))}
       </virtual-list>,
@@ -346,7 +346,7 @@ describe("<virtual-list>", () => {
               alignItems: "center",
             }}
           >
-            <text>{`row-${start + offset}`}</text>
+            <div>{`row-${start + offset}`}</div>
           </div>
         ))}
       </virtual-list>
@@ -381,7 +381,7 @@ describe("<virtual-list>", () => {
               alignItems: "center",
             }}
           >
-            <text>{`row-${start + offset}`}</text>
+            <div>{`row-${start + offset}`}</div>
           </div>
         ))}
       </virtual-list>
@@ -421,7 +421,7 @@ describe("<virtual-list>", () => {
             alignItems: "center",
           }}
         >
-          <text>{`row-${count - index}`}</text>
+          <div>{`row-${count - index}`}</div>
         </div>
       ))}
     </virtual-list>
@@ -487,11 +487,11 @@ describe("<virtual-list>", () => {
       >
         <div style={{ width: "100%", height: 80, overflowX: "scroll" }}>
           <div style={{ width: 800, height: 80, flexShrink: 0 }}>
-            <text>wide row</text>
+            <div>wide row</div>
           </div>
         </div>
         <div style={{ height: 80 }}>
-          <text>below</text>
+          <div>below</div>
         </div>
       </virtual-list>
     )
@@ -564,7 +564,7 @@ describe("<virtual-list>", () => {
             }
             style={{ height: 40, flexShrink: 0 }}
           >
-            <text>{`row-${start + offset}`}</text>
+            <div>{`row-${start + offset}`}</div>
           </div>
         ))}
       </virtual-list>

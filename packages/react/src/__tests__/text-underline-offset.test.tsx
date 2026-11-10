@@ -65,7 +65,7 @@ const UNDERLINE = { textDecoration: "underline #ff0000" } as const
 
 /** `style` on the paragraph that declares the underline. */
 const own = (style: object) => (
-  <text style={{ ...TEXT, ...UNDERLINE, ...style } as never}>xxxx</text>
+  <div style={{ ...TEXT, ...UNDERLINE, ...style } as never}>xxxx</div>
 )
 
 describeNative("textUnderlineOffset", () => {
@@ -130,7 +130,7 @@ describeNative("textUnderlineOffset", () => {
       expect(
         underlineY(
           <div style={{ textUnderlineOffset: "4px" } as never}>
-            <text style={{ ...TEXT, ...UNDERLINE } as never}>xxxx</text>
+            <div style={{ ...TEXT, ...UNDERLINE } as never}>xxxx</div>
           </div>
         )
       ).toBe(y0 + 4)
@@ -138,7 +138,7 @@ describeNative("textUnderlineOffset", () => {
         underlineY(
           <div style={{ textUnderlineOffset: "4px" } as never}>
             <div>
-              <text style={{ ...TEXT, ...UNDERLINE } as never}>xxxx</text>
+              <div style={{ ...TEXT, ...UNDERLINE } as never}>xxxx</div>
             </div>
           </div>
         )
@@ -149,7 +149,7 @@ describeNative("textUnderlineOffset", () => {
       const y0 = baseline()
       const under = (parent: object, own: object) => (
         <div style={parent as never}>
-          <text style={{ ...TEXT, ...UNDERLINE, ...own } as never}>xxxx</text>
+          <div style={{ ...TEXT, ...UNDERLINE, ...own } as never}>xxxx</div>
         </div>
       )
       expect(underlineY(under({ textUnderlineOffset: "4px" }, { textUnderlineOffset: "7px" }))).toBe(y0 + 7)
@@ -161,7 +161,7 @@ describeNative("textUnderlineOffset", () => {
       // 0.25em of the parent's 16px is 4px, whatever the text's own size.
       const big = underlineTop(
         <div style={{ fontSize: 16, textUnderlineOffset: "0.25em" } as never}>
-          <text style={{ ...TEXT, ...UNDERLINE, fontSize: 32 } as never}>xxxx</text>
+          <div style={{ ...TEXT, ...UNDERLINE, fontSize: 32 } as never}>xxxx</div>
         </div>
       )
       expect(big).toBe(underlineTop(own({ textUnderlineOffset: "0px", fontSize: 32 })) + 4)
@@ -171,7 +171,7 @@ describeNative("textUnderlineOffset", () => {
     it("passes a percentage on as a percentage, of the box that draws the line", () => {
       const big = underlineTop(
         <div style={{ fontSize: 16, textUnderlineOffset: "25%" } as never}>
-          <text style={{ ...TEXT, ...UNDERLINE, fontSize: 32 } as never}>xxxx</text>
+          <div style={{ ...TEXT, ...UNDERLINE, fontSize: 32 } as never}>xxxx</div>
         </div>
       )
       expect(big).toBe(underlineTop(own({ textUnderlineOffset: "0px", fontSize: 32 })) + 8)
@@ -180,9 +180,9 @@ describeNative("textUnderlineOffset", () => {
 
   describe("on a span", () => {
     const inline = (paragraph: object, span: object) => (
-      <text style={{ ...TEXT, ...paragraph } as never}>
+      <div style={{ ...TEXT, ...paragraph } as never}>
         <span style={span as never}>xxxx</span>
-      </text>
+      </div>
     )
 
     it("is the decorating box's, inherited from the paragraph", () => {
@@ -199,9 +199,9 @@ describeNative("textUnderlineOffset", () => {
     it("is not moved by an offset below the box that declared the line", () => {
       const y0 = baseline()
       const below = underlineY(
-        <text style={{ ...TEXT, ...UNDERLINE, textUnderlineOffset: "4px" } as never}>
+        <div style={{ ...TEXT, ...UNDERLINE, textUnderlineOffset: "4px" } as never}>
           <span style={{ textUnderlineOffset: "10px" } as never}>xxxx</span>
-        </text>
+        </div>
       )
       expect(below).toBe(y0 + 4)
     })
@@ -219,9 +219,9 @@ describeNative("textUnderlineOffset", () => {
     it("sets each line of nested underlines by the box that declared it", () => {
       const y0 = baseline()
       const rows = underlineRows(
-        <text style={{ ...TEXT, ...UNDERLINE, textUnderlineOffset: "2px" } as never}>
+        <div style={{ ...TEXT, ...UNDERLINE, textUnderlineOffset: "2px" } as never}>
           <span style={{ ...UNDERLINE, textUnderlineOffset: "8px" } as never}>xxxx</span>
-        </text>
+        </div>
       )
       expect(rows).toEqual([y0 + 2, y0 + 8])
     })
@@ -231,7 +231,7 @@ describeNative("textUnderlineOffset", () => {
     it("takes a hover style's offset", () => {
       const y0 = baseline()
       const hovered = underlineRows(
-        <text style={{ ...TEXT, ...UNDERLINE, hover: { textUnderlineOffset: "6px" } } as never}>xxxx</text>,
+        <div style={{ ...TEXT, ...UNDERLINE, hover: { textUnderlineOffset: "6px" } } as never}>xxxx</div>,
         { x: 4, y: 4 }
       )
       expect(hovered).toEqual([y0 + 6])

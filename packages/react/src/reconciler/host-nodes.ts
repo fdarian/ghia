@@ -160,6 +160,7 @@ defineDomMembers(ReactHostElement.prototype, (instance: ReactHostElement) => ({
     ? { renderer: containerFor(instance).nativeRenderer, id: instance.nativeId }
     : undefined,
   prop: (name) => (instance.props as Record<string, unknown>)[name],
+  propNames: () => Object.keys(instance.props),
 }))
 
 /** Mounted, which a destroyed element is not any more. */

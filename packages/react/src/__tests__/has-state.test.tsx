@@ -539,7 +539,7 @@ function measureColumn() {
   const testRoot = createTestRoot()
   testRoot.render(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   const width = testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -554,13 +554,13 @@ describeNative("relational state on inline boxes", () => {
   /** `aa [bb [cc]] dd`: the outer span is columns 3-7, the inner one 6-7. */
   const sentence = (outer: object) => (
     <div style={{ width: 400 }}>
-      <text testId="p" style={TEXT}>
+      <div testId="p" style={TEXT}>
         aa{" "}
         <span style={outer}>
           bb <span>cc</span>
         </span>
         <span ref={tail}>dd</span>
-      </text>
+      </div>
     </div>
   )
   let tailInstance: PublicInstance | null = null

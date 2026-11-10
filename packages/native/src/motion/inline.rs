@@ -245,7 +245,7 @@ mod tests {
     impl Page {
         fn new() -> Self {
             let mut tree = RetainedTree::new();
-            for (id, kind) in [(1, "div"), (3, "span"), (4, "text"), (5, "span"), (6, "text")] {
+            for (id, kind) in [(1, "div"), (3, "span"), (4, "#text"), (5, "span"), (6, "#text")] {
                 tree.create_element(id, kind.to_string());
             }
             for (parent, child) in [(1, 3), (3, 4), (3, 5), (5, 6)] {

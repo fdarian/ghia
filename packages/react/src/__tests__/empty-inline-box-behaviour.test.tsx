@@ -48,11 +48,11 @@ describeNative("an empty inline box that takes space along the line", () => {
     const seen: string[] = []
     const { renderer, bounds, unmount } = setup(
       <div style={TEXT} onClick={() => seen.push("div")}>
-        <text style={{ fontFamily: "Menlo" }}>
+        <div style={{ fontFamily: "Menlo" }}>
           AA
           <span testId="x" style={BOX} onClick={() => seen.push("span")} />
           BB
-        </text>
+        </div>
       </div>
     )
     try {
@@ -74,12 +74,12 @@ describeNative("an empty inline box that takes space along the line", () => {
     const ref = (name: string) => (instance: any) => instance && refs.set(name, instance)
     const { unmount } = setup(
       <div style={TEXT}>
-        <text style={{ fontFamily: "Menlo" }}>
+        <div style={{ fontFamily: "Menlo" }}>
           AA
           <span ref={ref("x")} style={BOX} />
           BB
           <span ref={ref("none")} style={{ paddingTop: 4 }} />
-        </text>
+        </div>
       </div>
     )
     try {
@@ -94,11 +94,11 @@ describeNative("an empty inline box that takes space along the line", () => {
   it("is no text: selection copies the text around it, and the accessible name has none of it", () => {
     const { renderer, bounds, unmount } = setup(
       <div style={TEXT} role="note" testId="note">
-        <text testId="t" style={{ fontFamily: "Menlo" }}>
+        <div testId="t" style={{ fontFamily: "Menlo" }}>
           AA
           <span style={BOX} />
           BB
-        </text>
+        </div>
       </div>
     )
     try {
@@ -119,11 +119,11 @@ describeNative("an empty inline box that takes space along the line", () => {
       const render = (padding: number) =>
         root.render(
           <div style={TEXT}>
-            <text style={{ fontFamily: "Menlo" }}>
+            <div style={{ fontFamily: "Menlo" }}>
               AA
               <span testId="x" style={{ paddingLeft: padding, paddingRight: padding }} />
               BB
-            </text>
+            </div>
           </div>
         )
       const box = () => {

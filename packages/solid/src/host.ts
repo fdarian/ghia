@@ -456,6 +456,7 @@ defineDomMembers(HostElement.prototype, (element: HostElement) => ({
   connected: isConnected(element),
   layout: element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.nativeId } : undefined,
   prop: (name) => element.props.get(name),
+  propNames: () => element.props.keys(),
 }))
 defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
   renderer: element.root?.nativeRenderer,
@@ -737,7 +738,7 @@ function mount(root: HostRoot, node: HostNode): void {
   if (node.mounted) return
   node.mounted = true
   if (node.kind === "element") root.elements.set(node.nativeId, node)
-  root.mutations.createElement(node.nativeId, node.kind === "text" ? "text" : node.type)
+  root.mutations.createElement(node.nativeId, node.kind === "text" ? "#text" : node.type)
   if (node.kind === "text") {
     root.mutations.setText(node.nativeId, node.text)
   } else {

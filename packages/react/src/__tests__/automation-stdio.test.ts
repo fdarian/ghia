@@ -41,7 +41,7 @@ function fakeRenderer(): TestAutomationRenderer {
         type: "div",
         testId: "inc",
         bounds: { x: 0, y: 0, width: 40, height: 20 },
-        children: [{ id: 2, type: "text", text: `clicks:${clicks}` }],
+        children: [{ id: 2, type: "#text", text: `clicks:${clicks}` }],
       }),
     getElementBounds: () => ({ x: 0, y: 0, width: 40, height: 20 }),
     clockPause: () => 0,

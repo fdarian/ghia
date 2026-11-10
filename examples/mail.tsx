@@ -182,9 +182,9 @@ function Face({ src, letter, logo, size }: FaceSpec & { size: number }) {
       ) : logo ? (
         <Icon name="framer" size={size * 0.55} color="#FFFFFF" />
       ) : (
-        <text style={{ fontSize: size * 0.38, fontWeight: 600, color: C.text, fontFamily: FONT }}>
+        <div style={{ fontSize: size * 0.38, fontWeight: 600, color: C.text, fontFamily: FONT }}>
           {letter}
-        </text>
+        </div>
       )}
     </div>
   )
@@ -234,7 +234,7 @@ function MentionBadge({ count }: { count: number }) {
         flexShrink: 0,
       }}
     >
-      <text style={{ fontSize: 9, fontWeight: 700, color: '#FFFFFF', fontFamily: FONT }}>{count}</text>
+      <div style={{ fontSize: 9, fontWeight: 700, color: '#FFFFFF', fontFamily: FONT }}>{count}</div>
     </div>
   )
 }
@@ -573,7 +573,7 @@ function ChannelRow({
       }}
     >
       <Icon name={channel.icon} size={13} color={color} />
-      <text
+      <div
         style={{
           flexGrow: 1,
           minWidth: 0,
@@ -586,7 +586,7 @@ function ChannelRow({
         }}
       >
         {channel.label}
-      </text>
+      </div>
       <MentionBadge count={mentionCount} />
     </div>
   )
@@ -642,7 +642,7 @@ function SidebarThreadRow({
           backgroundColor: C.tree,
         }}
       />
-      <text
+      <div
         style={{
           flexGrow: 1,
           minWidth: 0,
@@ -655,7 +655,7 @@ function SidebarThreadRow({
         }}
       >
         {thread.senders}
-      </text>
+      </div>
       <MentionBadge count={thread.mentionCount ?? 0} />
     </div>
   )
@@ -699,7 +699,7 @@ function TimelineRow({
       <FaceStack faces={thread.faces} />
       <div style={{ flexGrow: 1, minWidth: 0, overflow: 'hidden', gap: 2 }}>
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <text
+          <div
             style={{
               flexGrow: 1,
               minWidth: 0,
@@ -712,12 +712,12 @@ function TimelineRow({
             }}
           >
             {thread.senders}
-          </text>
-          <text style={{ fontSize: 12, color: C.muted, fontFamily: FONT, flexShrink: 0 }}>
+          </div>
+          <div style={{ fontSize: 12, color: C.muted, fontFamily: FONT, flexShrink: 0 }}>
             {thread.date}
-          </text>
+          </div>
         </div>
-        <text
+        <div
           style={{
             fontSize: 12.5,
             lineHeight: "16px",
@@ -728,7 +728,7 @@ function TimelineRow({
           }}
         >
           {thread.snippet}
-        </text>
+        </div>
       </div>
     </div>
   )
@@ -750,7 +750,7 @@ function DayDivider({ label }: { label: string }) {
           borderStyle: 'solid',
         }}
       >
-        <text style={{ fontSize: 12, color: C.muted, fontFamily: FONT }}>{label}</text>
+        <div style={{ fontSize: 12, color: C.muted, fontFamily: FONT }}>{label}</div>
       </div>
       <div style={{ flexGrow: 1, height: 1, backgroundColor: C.divider }} />
     </div>
@@ -764,13 +764,13 @@ function DirectHeader({ thread }: { thread: MailThread }) {
       <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         <Face {...person} size={72} />
         <div style={{ minWidth: 0, gap: 2 }}>
-          <text style={{ fontSize: 18, fontWeight: 600, color: C.text, fontFamily: FONT }}>{thread.senders}</text>
-          <text style={{ fontSize: 13, color: C.muted, fontFamily: FONT }}>{thread.subject}</text>
+          <div style={{ fontSize: 18, fontWeight: 600, color: C.text, fontFamily: FONT }}>{thread.senders}</div>
+          <div style={{ fontSize: 13, color: C.muted, fontFamily: FONT }}>{thread.subject}</div>
         </div>
       </div>
-      <text style={{ fontSize: 13.5, lineHeight: "20px", color: C.secondary, fontFamily: FONT }}>
+      <div style={{ fontSize: 13.5, lineHeight: "20px", color: C.secondary, fontFamily: FONT }}>
         This conversation is only between you and {thread.senders}.
-      </text>
+      </div>
     </div>
   )
 }
@@ -781,17 +781,17 @@ function MessageRow({ message }: { message: Message }) {
       <Face {...message.face} size={28} />
       <div style={{ flexGrow: 1, minWidth: 0, gap: 2 }}>
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
-          <text style={{ fontSize: 13.5, fontWeight: 600, color: C.text, fontFamily: FONT }}>{message.from}</text>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: C.text, fontFamily: FONT }}>{message.from}</div>
           {message.time ? (
-            <text style={{ fontSize: 12.5, color: C.muted, fontFamily: FONT }}>{message.time}</text>
+            <div style={{ fontSize: 12.5, color: C.muted, fontFamily: FONT }}>{message.time}</div>
           ) : null}
         </div>
         {message.to ? (
-          <text style={{ fontSize: 12.5, color: C.muted, fontFamily: FONT, whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 12.5, color: C.muted, fontFamily: FONT, whiteSpace: 'nowrap' }}>
             {`To ${message.to}`}
-          </text>
+          </div>
         ) : null}
-        <text style={{ fontSize: 13.5, lineHeight: "20px", color: C.secondary, fontFamily: FONT }}>{message.body}</text>
+        <div style={{ fontSize: 13.5, lineHeight: "20px", color: C.secondary, fontFamily: FONT }}>{message.body}</div>
         {message.image ? (
           <img
             src={message.image}
@@ -976,7 +976,7 @@ export function MailApp() {
               gap: 8,
             }}
           >
-            <text
+            <div
               style={{
                 flexGrow: 1,
                 minWidth: 0,
@@ -989,7 +989,7 @@ export function MailApp() {
               }}
             >
               {thread.subject}
-            </text>
+            </div>
             <Pill>
               <IconButton icon="snooze" size={14} pad={24} />
             </Pill>
@@ -1048,10 +1048,10 @@ export function MailApp() {
             <Face {...maraFace} size={28} />
             <div style={{ flexGrow: 1, minWidth: 0, gap: 1 }}>
               <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <text style={{ fontSize: 13.5, fontWeight: 600, color: C.text, fontFamily: FONT }}>Mara Lin</text>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: C.text, fontFamily: FONT }}>Mara Lin</div>
                 <Icon name="chevronDown" size={12} color={C.muted} />
               </div>
-              <text
+              <div
                 style={{
                   fontSize: 11.5,
                   color: C.muted,
@@ -1061,7 +1061,7 @@ export function MailApp() {
                 }}
               >
                 mara@northlight...
-              </text>
+              </div>
             </div>
             <IconButton icon="compose" size={15} pad={28} />
           </div>
@@ -1126,9 +1126,9 @@ export function MailApp() {
             }}
           >
             <Icon name="hash" size={13} color={C.muted} />
-            <text style={{ flexGrow: 1, marginLeft: 8, fontSize: 13, color: C.muted, fontFamily: FONT }}>
+            <div style={{ flexGrow: 1, marginLeft: 8, fontSize: 13, color: C.muted, fontFamily: FONT }}>
               Feedback
-            </text>
+            </div>
             <Icon name="puzzle" size={14} color={C.muted} />
           </div>
         </div>

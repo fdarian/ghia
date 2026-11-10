@@ -107,7 +107,8 @@ export function createRoot(
     onEvent: rootEventHandlers.onEvent,
     onUncaughtError,
   })
-  attachRoot(renderer, gpuixContainer)
+  // The flush stands in for the microtask checkpoint a browser runs before it renders.
+  attachRoot(renderer, gpuixContainer, (run) => flushSync(run))
   // Sent on every root, so a remount without the option restores the default.
   batchedRenderer.setKeyboardFocusDim(rootEventHandlers.keyboardFocusDim !== false)
   const windowKeyEventId = gpuixContainer.windowKeyEventId

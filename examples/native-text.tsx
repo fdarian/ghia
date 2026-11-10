@@ -121,7 +121,7 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
           backgroundColor: '#ffffff05',
         }}
       >
-        <text style={{ fontSize: 11, color: '#b4b4b4' }}>{language}</text>
+        <div style={{ fontSize: 11, color: '#b4b4b4' }}>{language}</div>
       </div>
       <code
         code={code}

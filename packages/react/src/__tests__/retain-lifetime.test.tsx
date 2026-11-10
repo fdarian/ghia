@@ -22,7 +22,7 @@ describeNative("retain bookkeeping", () => {
         <div>
           {Array.from({ length: 20 }, (_, index) => (
             <div key={`${generation}-${index}`} style={{ height: 20, hover: { backgroundColor: "#ff0000" } }}>
-              <text>{`row ${generation} ${index}`}</text>
+              <div>{`row ${generation} ${index}`}</div>
               {index === 0 ? (
                 <motion.div
                   style={{ width: 10, height: 4 }}

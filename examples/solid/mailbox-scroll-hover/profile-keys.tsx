@@ -254,7 +254,7 @@ const wallMs = performance.now() - startWall
 const cpu = process.cpuUsage(cpuBefore)
 if (THREADS) pollThreads()
 
-const conversations = renderer.findByType("text").find((element) => element.text?.endsWith(" conversations"))?.text
+const conversations = renderer.findByType("#text").find((element) => element.text?.endsWith(" conversations"))?.text
 console.error(`after the keys: "${conversations}"`)
 console.log(`${PHASE}: ${TOTAL_KEYS} keys, ${M(totalInstructions, 1)}M instructions (${M(totalInstructions / TOTAL_KEYS)}M per key, median ${M(median(perKey))}M), wall ${wallMs.toFixed(0)} ms, process cpu user ${(cpu.user / 1000).toFixed(0)} ms system ${(cpu.system / 1000).toFixed(0)} ms`)
 {

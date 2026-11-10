@@ -38,7 +38,7 @@ function measure(node: React.ReactNode): { thickness: number; scale: number } {
 }
 
 const paragraph = (fontSize: number, style: object, children: React.ReactNode = "xxxx") => (
-  <text
+  <div
     style={
       {
         width: 300,
@@ -53,7 +53,7 @@ const paragraph = (fontSize: number, style: object, children: React.ReactNode = 
     }
   >
     {children}
-  </text>
+  </div>
 )
 
 function paintedThickness(

@@ -191,7 +191,7 @@ pub struct RegisteredText<'a> {
     /// to, or `None` for a run that never merges with a neighbour.
     ///
     /// React makes a separate host node for every interpolated string
-    /// (`shouldSetTextContent` is false), so `<text>Hello {name}!</text>` is
+    /// (`shouldSetTextContent` is false), so `<div>Hello {name}!</div>` is
     /// three painted runs of one logical line. They share a group, and copy
     /// must join them with nothing. Anything else is a separate line and joins
     /// with a newline.
@@ -551,7 +551,7 @@ fn clamp_boundary(text: &str, mut ix: usize) -> usize {
 /// Join spans in document order, with a newline between logical lines and
 /// nothing between runs of the same group.
 ///
-/// Without the group check, copying `<text>Hello {name}!</text>` yields
+/// Without the group check, copying `<div>Hello {name}!</div>` yields
 /// `"Hello\nTommy\n!"`, because React split one line into three host nodes.
 fn join_spans(spans: &[Span]) -> String {
     let mut out = String::new();
@@ -638,7 +638,7 @@ mod tests {
         ]
     }
 
-    /// `<text>Hello {name}!</text>`: one line, three host nodes, one group.
+    /// `<div>Hello {name}!</div>`: one line, three host nodes, one group.
     fn interpolated<'a>() -> Vec<RegisteredText<'a>> {
         vec![
             reg("2:0", "Hello ", Some(1)),

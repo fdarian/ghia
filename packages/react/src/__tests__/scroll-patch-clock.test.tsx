@@ -48,7 +48,7 @@ function Page({ hot, onEnd, field }: { hot: boolean; onEnd: () => void; field: b
               backgroundColor: index % 2 === 0 ? "#223344" : "#334455",
             }}
           >
-            <text style={{ color: "#ffffff" }}>{`row-${index}`}</text>
+            <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
           </div>
         ))}
       </virtual-list>

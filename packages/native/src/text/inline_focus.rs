@@ -133,7 +133,7 @@ mod tests {
     /// last span holds no text.
     fn paragraph() -> Paragraph {
         let mut tree = RetainedTree::new();
-        for (id, kind) in [(1, "div"), (2, "text"), (3, "span"), (4, "text"), (5, "span"), (6, "text"), (7, "span"), (8, "text"), (9, "span")] {
+        for (id, kind) in [(1, "div"), (2, "#text"), (3, "span"), (4, "#text"), (5, "span"), (6, "#text"), (7, "span"), (8, "#text"), (9, "span")] {
             tree.create_element(id, kind.to_string());
         }
         for (parent, child) in [(1, 2), (1, 3), (3, 4), (3, 5), (5, 6), (1, 7), (7, 8), (1, 9)] {

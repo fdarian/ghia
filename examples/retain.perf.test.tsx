@@ -84,7 +84,7 @@ function Choice({ label }: { label: string }) {
       }}
     >
       <div style={{ width: 14, height: 14, borderRadius: 3, borderWidth: 1, borderStyle: 'solid', borderColor: C.muted }} />
-      <text style={{ fontSize: 13, color: C.fg }}>{label}</text>
+      <div style={{ fontSize: 13, color: C.fg }}>{label}</div>
     </div>
   )
 }
@@ -93,7 +93,7 @@ function FormPage() {
   const [values, setValues] = useState<Record<string, string>>({})
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: WINDOW.width, height: WINDOW.height, padding: 24, gap: 20, backgroundColor: C.bg }}>
-      <text style={{ fontSize: 20, color: C.fg }}>Account settings</text>
+      <div style={{ fontSize: 20, color: C.fg }}>Account settings</div>
       <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
         {FIELDS.map((field) => (
           <Field key={field} label={field} value={values[field] ?? ''} onChange={(value) => setValues((all) => ({ ...all, [field]: value }))} />
@@ -107,7 +107,7 @@ function FormPage() {
       <div style={{ display: 'flex', flexDirection: 'row', gap: 8 }}>
         {['Save', 'Cancel'].map((label) => (
           <div key={label} tabIndex={0} style={{ height: 32, paddingLeft: 14, paddingRight: 14, borderRadius: 6, backgroundColor: C.chip, justifyContent: 'center', hover: { backgroundColor: C.border } }}>
-            <text style={{ fontSize: 13, color: C.fg }}>{label}</text>
+            <div style={{ fontSize: 13, color: C.fg }}>{label}</div>
           </div>
         ))}
       </div>
@@ -127,7 +127,7 @@ function TablePage() {
           <div style={{ display: 'table-row' }}>
             {COLUMNS.map((column) => (
               <div key={column} style={{ ...cell, display: 'table-cell' }}>
-                <text style={{ fontSize: 12, color: C.muted }}>{column}</text>
+                <div style={{ fontSize: 12, color: C.muted }}>{column}</div>
               </div>
             ))}
           </div>
@@ -137,7 +137,7 @@ function TablePage() {
             <div key={row} style={{ display: 'table-row', hover: { backgroundColor: C.surface } }}>
               {COLUMNS.map((column) => (
                 <div key={column} style={{ ...cell, display: 'table-cell' }}>
-                  <text style={{ fontSize: 13, color: C.fg }}>{`${column} ${row}`}</text>
+                  <div style={{ fontSize: 13, color: C.fg }}>{`${column} ${row}`}</div>
                 </div>
               ))}
             </div>

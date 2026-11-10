@@ -113,7 +113,7 @@ describeNative("MutationObserver in React", () => {
   })
 
   it("reports a text change as characterData with the old text", () => {
-    const setText = stateful("one", (text) => <text>{text}</text>)
+    const setText = stateful("one", (text) => <div>{text}</div>)
     const node = document.body!.firstElementChild!.firstChild!
     const observer = observe(node, { characterData: true, characterDataOldValue: true })
     setText("two")

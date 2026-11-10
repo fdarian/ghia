@@ -51,7 +51,7 @@ function Page({ rows, scrollbar }: { rows: Rows; scrollbar: boolean }) {
           }}
           {...(rows === "heard" ? { onPointerEnter: () => {} } : {})}
         >
-          <text style={{ color: "#ffffff" }}>{`row-${index}`}</text>
+          <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
         </div>
       ))}
     </virtual-list>

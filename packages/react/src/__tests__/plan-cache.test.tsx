@@ -41,7 +41,7 @@ const scenes: Scene[] = [
         <div style={{ width: 300, backgroundColor: "#ffffff", whiteSpace, ...TEXT }}>
           <div style={BOX}>{"a   b\n  c  d"}</div>
           <div style={BOX}>
-            <text>{"  x   y  "}</text>
+            <div>{"  x   y  "}</div>
             <span style={{ fontWeight: "bold" }}>{"  bold   words \n next"}</span>
             {"  tail   text  "}
           </div>
@@ -108,13 +108,13 @@ const scenes: Scene[] = [
               <React.Fragment key={piece}>{piece}</React.Fragment>
             ))}
           </div>
-          <text style={BOX}>
+          <div style={BOX}>
             {spans.map((id) => (
               <span key={id} style={{ fontWeight: id === "s2" ? "bold" : "normal", color: id === "s3" ? "#aa2200" : "#223344" }}>{`${id} `}</span>
             ))}
             {step % 3 === 0 ? <div style={{ display: "inline-block", width: 20, height: 12, backgroundColor: "#4488dd" }} /> : null}
             {step % 2 === 0 ? "tail" : null}
-          </text>
+          </div>
           <div style={BOX}>
             {spans.map((id) => (
               <div key={id} style={{ height: 14, backgroundColor: "#99bbdd" }}>{id}</div>
@@ -135,7 +135,7 @@ const scenes: Scene[] = [
         "just text ",
         <span key="k" style={{ color: "#aa2200" }}>{"a span "}</span>,
         <div key="k" style={{ backgroundColor: "#ffdd99" }}>{"a block"}</div>,
-        <text key="k">{"a text "}</text>,
+        <div key="k">{"a text "}</div>,
         "back to text ",
         <div key="k" style={{ display: "inline-block", width: 24, height: 12, backgroundColor: "#4488dd" }} />,
       ][step]
@@ -146,10 +146,10 @@ const scenes: Scene[] = [
             {child}
             {" last"}
           </div>
-          <text style={BOX}>
+          <div style={BOX}>
             {"lead "}
             {child}
-          </text>
+          </div>
           <div style={{ display: "flex", ...BOX }}>
             {child}
             {"and "}
@@ -233,16 +233,16 @@ const scenes: Scene[] = [
     height: 200,
     page: (step) => (
       <div style={{ width: 340, backgroundColor: "#ffffff", ...TEXT }}>
-        <text testId="read">
+        <div testId="read">
           {["Hello ", "Hello, ", "Hello, "][Math.min(step, 2)]}
           <span>{["world", "world", "there"][Math.min(step, 2)]}</span>
           {step >= 3 ? <div style={{ display: "inline-block" }}>{"atomic"}</div> : null}
-        </text>
-        <text aria-valuetext="given">{`given ${step}`}</text>
-        <text>
+        </div>
+        <div aria-valuetext="given">{`given ${step}`}</div>
+        <div>
           {step === 4 ? <div>{"block"}</div> : null}
           {"always"}
-        </text>
+        </div>
       </div>
     ),
   },
@@ -414,7 +414,7 @@ describeNative("the children plan cache", { timeout: 120_000 }, () => {
         <div style={{ width: 340 }}>
           {[0, 1, 2, 3].map((row) => (
             <div key={row}>
-              <text>{row === 2 ? word : "same"}</text>
+              <div>{row === 2 ? word : "same"}</div>
               <span>{`row ${row}`}</span>
             </div>
           ))}

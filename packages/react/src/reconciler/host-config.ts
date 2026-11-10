@@ -337,7 +337,7 @@ function materialize(node: HostNode): ReturnType<typeof stateFor> {
     syncEventListeners(state.container, node)
     syncCustomProps(renderer, node.nativeId, node.type, node.props)
   } else {
-    renderer.createElement(node.nativeId, "text")
+    renderer.createElement(node.nativeId, "#text")
     renderer.setText(node.nativeId, node.text)
   }
   state.mounted = true
@@ -525,16 +525,15 @@ export const hostConfig = {
   },
 
   getRootHostContext(_rootContainerInstance: Container): HostContext {
-    return { isInsideText: false }
+    return {}
   },
 
   getChildHostContext(
     parentHostContext: HostContext,
-    type: ElementType,
+    _type: ElementType,
     _rootContainerInstance: Container
   ): HostContext {
-    const isInsideText = type === "text" || type === "span"
-    return { ...parentHostContext, isInsideText }
+    return parentHostContext
   },
 
   shouldSetTextContent(_type: ElementType, _props: Props): boolean {

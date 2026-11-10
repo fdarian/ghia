@@ -33,7 +33,7 @@ describeNative("AnimatePresence", () => {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2, ease: "linear" }}
             >
-              <text>Leaving</text>
+              <div>Leaving</div>
             </motion.div>
           ) : null}
         </AnimatePresence>
@@ -70,7 +70,7 @@ describeNative("AnimatePresence", () => {
               exit={{ opacity: 0 }}
               transition={{ type: "spring", duration: 0.2, bounce: 0 }}
             >
-              <text>Leaving</text>
+              <div>Leaving</div>
             </motion.div>
           ) : null}
         </AnimatePresence>
@@ -104,7 +104,7 @@ describeNative("AnimatePresence", () => {
               exit={{ opacity: 0 }}
               transition={{ type: "spring", stiffness: -1 }}
             >
-              <text>Leaving</text>
+              <div>Leaving</div>
             </motion.div>
           ) : null}
         </AnimatePresence>
@@ -129,7 +129,7 @@ describeNative("AnimatePresence", () => {
           animate={{ opacity: 1 }}
           transition={{ type: "spring", stiffness }}
         >
-          <text>Card</text>
+          <div>Card</div>
         </motion.div>
       )
     }
@@ -153,7 +153,7 @@ describeNative("AnimatePresence", () => {
           transition={{ type: "spring", stiffness: 170, damping: 12 }}
           style={{ height: 20 }}
         >
-          <text>bar</text>
+          <div>bar</div>
         </motion.div>
       )
     }
@@ -192,7 +192,7 @@ describeNative("AnimatePresence", () => {
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2, ease: "linear" }}
         >
-          <text>Ready</text>
+          <div>Ready</div>
         </motion.div>
       </AnimatePresence>
     )
@@ -211,7 +211,7 @@ describeNative("AnimatePresence", () => {
         <AnimatePresence>
           {show ? (
             <motion.div key="card" initial={false} animate={{ opacity: 1 }}>
-              <text>Immediate</text>
+              <div>Immediate</div>
             </motion.div>
           ) : null}
         </AnimatePresence>
@@ -237,7 +237,7 @@ describeNative("AnimatePresence", () => {
               exit={{ opacity: version / 10 }}
               transition={{ duration: 0.2, ease: "linear" }}
             >
-              <text>{`Version ${version}`}</text>
+              <div>{`Version ${version}`}</div>
             </motion.div>
           ) : null}
         </AnimatePresence>
@@ -267,7 +267,7 @@ describeNative("AnimatePresence", () => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 1 }}
             >
-              <text>No movement</text>
+              <div>No movement</div>
             </motion.div>
           ) : null}
         </AnimatePresence>
@@ -294,7 +294,7 @@ describeNative("AnimatePresence", () => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 2 }}
             >
-              <text>Invalid target</text>
+              <div>Invalid target</div>
             </motion.div>
           ) : null}
         </AnimatePresence>
@@ -324,7 +324,7 @@ describeNative("AnimatePresence", () => {
               transition={{ duration: 0.2, ease: "linear" }}
               onMotionComplete={() => completions.push("complete")}
             >
-              <text>Current target</text>
+              <div>Current target</div>
             </motion.div>
           ) : null}
         </AnimatePresence>
@@ -369,12 +369,12 @@ describeNative("AnimatePresence", () => {
                       exit={{ opacity: 0 }}
                       transition={{ duration: 0.2, ease: "linear" }}
                     >
-                      <text>Offscreen exit</text>
+                      <div>Offscreen exit</div>
                     </motion.div>
                   ) : null}
                 </AnimatePresence>
               ) : (
-                <text>{`Row ${index}`}</text>
+                <div>{`Row ${index}`}</div>
               )}
             </div>
           ))}
@@ -409,7 +409,7 @@ describeNative("AnimatePresence", () => {
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.2, ease: "linear" }}
               >
-                <text>{item}</text>
+                <div>{item}</div>
               </motion.div>
             ))}
           </AnimatePresence>
@@ -441,7 +441,7 @@ describeNative("AnimatePresence", () => {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2, ease: "linear" }}
             >
-              <text>Coalesced frame</text>
+              <div>Coalesced frame</div>
             </motion.div>
           ) : null}
         </AnimatePresence>
@@ -470,7 +470,7 @@ describeNative("AnimatePresence", () => {
       useLayoutEffect(() => {
         if (!isPresent && safeToRemove) removers.set(name, safeToRemove)
       }, [isPresent, name, safeToRemove])
-      return <text>{name}</text>
+      return <div>{name}</div>
     }
 
     function App({ show, revision }: { show: boolean; revision: number }) {
@@ -509,7 +509,7 @@ describeNative("AnimatePresence", () => {
         if (immediate) safeToRemove()
         else removeLater = safeToRemove
       }, [immediate, isPresent, safeToRemove])
-      return <text>{immediate ? "first" : "second"}</text>
+      return <div>{immediate ? "first" : "second"}</div>
     }
 
     function App({ show }: { show: boolean }) {
@@ -541,7 +541,7 @@ describeNative("AnimatePresence", () => {
 
     function Participant() {
       usePresence()
-      return <text>participant</text>
+      return <div>participant</div>
     }
 
     function App({ show, replace }: { show: boolean; replace: boolean }) {
@@ -550,7 +550,7 @@ describeNative("AnimatePresence", () => {
           <AnimatePresence onExitComplete={() => exits++}>
             {show ? (
               <div key="group">
-                {replace ? <text>replacement</text> : <Participant />}
+                {replace ? <div>replacement</div> : <Participant />}
               </div>
             ) : null}
           </AnimatePresence>
@@ -577,7 +577,7 @@ describeNative("AnimatePresence", () => {
       useLayoutEffect(() => {
         if (!isPresent && safeToRemove) staleRemove = safeToRemove
       }, [isPresent, safeToRemove])
-      return <text>participant</text>
+      return <div>participant</div>
     }
 
     function App({ show, replace }: { show: boolean; replace: boolean }) {
@@ -586,7 +586,7 @@ describeNative("AnimatePresence", () => {
           <AnimatePresence>
             {show ? (
               <div key="group">
-                {replace ? <text>replacement</text> : <Participant />}
+                {replace ? <div>replacement</div> : <Participant />}
               </div>
             ) : null}
           </AnimatePresence>

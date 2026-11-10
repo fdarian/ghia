@@ -210,7 +210,7 @@ pub(crate) fn lifted_z(
 
 /// Whether `element` is an item of a flex or grid container: its box is a child of one. A
 /// `display: contents` parent makes no box, so its children are items of the container around
-/// it. Only a `div`, `text`, `span`, `label`, `form` or `anchored` parent counts, as those are
+/// it. Only a `div`, `span`, `label`, `form` or `anchored` parent counts, as those are
 /// the ones that lay their children out by their own `display`.
 pub(crate) fn is_item(tree: &RetainedTree, element: &RetainedElement) -> bool {
     if is_virtual_row(tree, element) {

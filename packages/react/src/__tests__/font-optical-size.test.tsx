@@ -37,7 +37,7 @@ function widthOf(scale: 1 | 2, size: number, settings: string | undefined) {
     root.renderer.setWindowScaleFactor(scale)
     root.render(
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", fontFamily: "Inter Variable", fontSize: size }}>
-        <text testId="text" style={settings === undefined ? {} : { fontVariationSettings: settings }}>{TEXT}</text>
+        <div testId="text" style={settings === undefined ? {} : { fontVariationSettings: settings }}>{TEXT}</div>
       </div>
     )
     const element = root.renderer.findByTestId("text")

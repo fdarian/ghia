@@ -61,6 +61,10 @@ pub enum RowKind {
     Div,
     /// One [`DirectRow`] element per row.
     Direct,
+    /// The Settings dialog of `mount-cost` as divs, a text being a div holding the string.
+    Settings,
+    /// The same, a text being a div holding a div holding the string (the text instance of a Ghia host element).
+    SettingsWrapped,
 }
 
 /// What Ghia puts on each of its host divs, one at a time, so that its price can be read off the
@@ -152,8 +156,13 @@ impl RawRows {
 }
 
 impl Render for RawRows {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         self.renders += 1;
+        match self.kind {
+            RowKind::Settings => return div().relative().size_full().bg(rgb(0xFFFFFF)).child(super::settings::dialog(super::settings::TextShape::Plain)).into_any_element(),
+            RowKind::SettingsWrapped => return div().relative().size_full().bg(rgb(0xFFFFFF)).child(super::settings::dialog(super::settings::TextShape::Wrapped)).into_any_element(),
+            RowKind::Div | RowKind::Direct => {}
+        }
         let rows: Vec<_> = (0..self.rows.len()).map(|position| self.render_row(position, cx)).collect();
         div()
             .flex()
@@ -162,6 +171,7 @@ impl Render for RawRows {
             .bg(rgb(0xFFFFFF))
             .when(self.decorations.stacking_root, |root| root.stacking_context())
             .children(rows)
+            .into_any_element()
     }
 }
 

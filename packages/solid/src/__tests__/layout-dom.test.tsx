@@ -47,11 +47,11 @@ describe.skipIf(!hasNativeTestRenderer)("DOM layout (solid)", () => {
             <div testId="a" style={{ width: 20, height: 20 }} />
             {" "}
             <div testId="b" style={{ width: 20, height: 20 }} />
-            <text>
+            <div>
               {"x"}
               {" "}
               {"y"}
-            </text>
+            </div>
           </div>
         ))
         expect(boundsOf(app, "b").x - boundsOf(app, "a").x).toBe(30)

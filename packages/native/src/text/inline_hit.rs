@@ -281,7 +281,7 @@ mod tests {
     /// text is "a bc d".
     fn fixture(styles: &[(u64, serde_json::Value)]) -> RetainedTree {
         let mut tree = RetainedTree::new();
-        for (id, kind) in [(1, "div"), (2, "text"), (3, "span"), (4, "text"), (5, "span"), (6, "text"), (7, "text")] {
+        for (id, kind) in [(1, "div"), (2, "#text"), (3, "span"), (4, "#text"), (5, "span"), (6, "#text"), (7, "#text")] {
             tree.create_element(id, kind.to_string());
         }
         for (parent, child) in [(1, 2), (1, 3), (3, 4), (3, 5), (5, 6), (1, 7)] {
@@ -333,7 +333,7 @@ mod tests {
     fn a_paragraph_of_plain_text_has_no_targets() {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
-        tree.create_element(2, "text".to_string());
+        tree.create_element(2, "#text".to_string());
         tree.append_child(1, 2);
         tree.set_text(2, "plain".to_string());
         let plan = crate::text::inline::plan_children(&tree, &tree.elements[&1]);

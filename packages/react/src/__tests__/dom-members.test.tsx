@@ -313,4 +313,95 @@ describeNative("DOM members of a React host instance", () => {
     expect(root.renderer.getPaintedText()).toContain("after")
     root.unmount()
   })
+
+  it("gives requestAnimationFrame callbacks the clock the frame steps ran at", () => {
+    const root = createTestRoot()
+    root.renderer.clockPause()
+    root.renderer.setInlineDraws(false)
+    root.render(<div style={{ width: 100, height: 20 }} />)
+    const times: number[] = []
+    requestAnimationFrame((time) => times.push(time))
+    root.renderer.clockSet(5000)
+    root.renderer.drawFrame()
+    requestAnimationFrame((time) => times.push(time))
+    root.renderer.clockFastForward(250)
+    root.renderer.drawFrame()
+    expect(times).toHaveLength(2)
+    expect(times[1] - times[0]).toBe(250)
+    root.unmount()
+  })
+
+  it("reports a requestAnimationFrame callback that throws as a handler error, and runs the others", () => {
+    const errors: unknown[] = []
+    const calls: string[] = []
+    const root = createTestRoot({ onError: (error) => errors.push(error) })
+    root.renderer.clockPause()
+    root.renderer.setInlineDraws(false)
+    root.render(<div style={{ width: 100, height: 20 }} />)
+    const boom = new Error("boom")
+    requestAnimationFrame(() => {
+      throw boom
+    })
+    requestAnimationFrame(() => calls.push("after"))
+    root.renderer.drawFrame()
+    expect(calls).toEqual(["after"])
+    expect(errors).toEqual([boom])
+    root.unmount()
+  })
+
+  it("fires a capture-only scroll listener, which has no bubble listener to make the event wanted", () => {
+    const heard: string[] = []
+    let scroller: PublicInstance | null = null
+    const root = createTestRoot()
+    root.renderer.clockPause()
+    root.renderer.setInlineDraws(false)
+    root.render(
+      <div
+        ref={(instance) => {
+          scroller = instance as PublicInstance | null
+        }}
+        testId="scroller"
+        style={{ width: 100, height: 50, overflow: "auto" }}
+      >
+        <div style={{ height: 500 }} />
+      </div>
+    )
+    scroller!.addEventListener("scroll", () => heard.push("capture"), { capture: true })
+    // A listener added late reports from the offset of the first paint after it (deviations.md).
+    root.renderer.drawFrame()
+    root.renderer.scrollTo(root.renderer.findByTestId("scroller")!.id, 0, 100)
+    root.renderer.drawFrame()
+    expect(heard).toEqual(["capture"])
+    root.unmount()
+  })
+
+  it("answers getAttribute case-insensitively, with the strings the DOM holds for booleans", () => {
+    let row: PublicInstance | null = null
+    const root = createTestRoot()
+    root.render(
+      <div
+        ref={(instance) => {
+          row = instance as PublicInstance | null
+        }}
+        data-Flag={false}
+        data-on={true}
+        aria-expanded={false}
+        hidden={true}
+        draggable={false}
+        title="t"
+        onClick={() => {}}
+        style={{ width: 10, height: 10 }}
+      />
+    )
+    expect(row!.getAttribute("onclick")).toBeNull()
+    expect(row!.getAttribute("style")).toBeNull()
+    expect(row!.getAttribute("DATA-flag")).toBe("false")
+    expect(row!.getAttribute("data-on")).toBe("true")
+    expect(row!.getAttribute("Aria-Expanded")).toBe("false")
+    expect(row!.getAttribute("hidden")).toBe("")
+    expect(row!.getAttribute("draggable")).toBeNull()
+    expect(row!.getAttribute("TITLE")).toBe("t")
+    expect(row!.getAttribute("data-absent")).toBeNull()
+    root.unmount()
+  })
 })

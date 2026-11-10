@@ -70,7 +70,7 @@ describeNative("text-box metrics from the OS/2 table", () => {
               cases.push(id)
               rows.push(
                 <div key={id} style={{ width: 300 }}>
-                  <text
+                  <div
                     ref={(element: PublicInstance | null) => {
                       if (element) refs.set(id, element)
                     }}
@@ -85,7 +85,7 @@ describeNative("text-box metrics from the OS/2 table", () => {
                     }}
                   >
                     Hxg
-                  </text>
+                  </div>
                 </div>
               )
             }

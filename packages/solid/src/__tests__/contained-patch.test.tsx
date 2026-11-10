@@ -53,13 +53,13 @@ function open(initial: Page, withList = false, onKey?: () => void): Open {
       style={{ display: "flex", flexDirection: "row", width: 600, height: 400, backgroundColor: "#ffffff" }}
     >
       <div testId="sidebar" style={{ width: 120, flexShrink: 0, height: "100%", backgroundColor: "#f4f4f5" }}>
-        <text style={{ color: "#18181b" }}>{page().side}</text>
+        <div style={{ color: "#18181b" }}>{page().side}</div>
         {withList && (
           <virtual-list testId="list" itemCount={40} estimatedItemHeight={30} overdraw={0} style={{ width: 120, height: 300, scrollbarWidth: "none" }}>
             <For each={Array.from({ length: 12 }, (_, index) => index)}>
               {(index) => (
                 <div testId={`row-${index}`} style={{ width: 100, height: 30, flexShrink: 0, backgroundColor: index % 2 ? "#e4e4e7" : "#d4d4d8" }}>
-                  <text style={{ fontSize: 12 }}>{`row ${index}`}</text>
+                  <div style={{ fontSize: 12 }}>{`row ${index}`}</div>
                 </div>
               )}
             </For>
@@ -99,9 +99,9 @@ function open(initial: Page, withList = false, onKey?: () => void): Open {
           )}
         </Show>
         <Show when={page().rooted}>
-          <text style={{ fontSize: 14, color: "#27272a", width: 280 }}>{PARAGRAPH}</text>
+          <div style={{ fontSize: 14, color: "#27272a", width: 280 }}>{PARAGRAPH}</div>
           <div style={{ width: 80, height: 40, backgroundColor: "#f0fdf4" }}>
-            <text style={{ fontSize: 12 }}>root</text>
+            <div style={{ fontSize: 12 }}>root</div>
           </div>
         </Show>
         <div style={{ width: 8, height: 400, flexShrink: 0 }} />
@@ -292,7 +292,7 @@ function openMailbox(): Mailbox {
     <div style={{ display: "flex", flexDirection: "row", width: 600, height: 400, backgroundColor: "#ffffff" }}>
       <div testId="sidebar" style={{ width: 120, flexShrink: 0, height: "100%", backgroundColor: "#f4f4f5" }}>
         <div testId="inbox" tabIndex={0} style={{ width: 100, height: 28 }}>
-          <text style={{ color: "#18181b" }}>Inbox</text>
+          <div style={{ color: "#18181b" }}>Inbox</div>
         </div>
       </div>
       <div
@@ -302,7 +302,7 @@ function openMailbox(): Mailbox {
         <Show when={message()} keyed>
           {(current) => (
             <div testId={`message-${current}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <text style={{ fontSize: 16, color: "#18181b" }}>{`Message ${current}`}</text>
+              <div style={{ fontSize: 16, color: "#18181b" }}>{`Message ${current}`}</div>
               <div
                 testId={`reply-${current}`}
                 tabIndex={0}
@@ -311,7 +311,7 @@ function openMailbox(): Mailbox {
                 onMouseEnter={() => log.push(`enter reply-${current}`)}
                 style={{ width: 80, height: 28, backgroundColor: "#dbeafe" }}
               >
-                <text style={{ fontSize: 12 }}>Reply</text>
+                <div style={{ fontSize: 12 }}>Reply</div>
               </div>
               <div
                 testId={`tail-${current}`}
@@ -321,7 +321,7 @@ function openMailbox(): Mailbox {
               />
               <For each={Array.from({ length: PARAGRAPHS[current] }, (_, index) => index)}>
                 {(index) => (
-                  <text style={{ fontSize: 14, color: "#27272a" }}>{`${PARAGRAPH} `.repeat(1 + ((index + current) % 3))}</text>
+                  <div style={{ fontSize: 14, color: "#27272a" }}>{`${PARAGRAPH} `.repeat(1 + ((index + current) % 3))}</div>
                 )}
               </For>
             </div>

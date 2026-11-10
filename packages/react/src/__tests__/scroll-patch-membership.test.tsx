@@ -71,7 +71,7 @@ function Rows({ overdraw, log }: Page) {
               backgroundColor: `hsl(${(index * 37) % 360}, 40%, ${index % 2 === 0 ? 40 : 55}%)`,
             }}
           >
-            <text style={{ color: "#ffffff" }}>{`row-${index}`}</text>
+            <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
           </div>
         ))}
       </virtual-list>
@@ -131,7 +131,7 @@ function picture(renderer, name: string): string {
 
 function boxes(renderer) {
   const out: Record<string, unknown> = {}
-  for (const element of [...renderer.findByType("div"), ...renderer.findByType("text")]) {
+  for (const element of renderer.findByType("div")) {
     const box = renderer.getElementBounds(element.id)
     if (box) out[String(element.testId ?? element.id)] = box
   }

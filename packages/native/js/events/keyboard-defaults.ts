@@ -2,6 +2,7 @@ import type { EventPayload } from "../../index.js"
 import type { NativeRenderer } from "../host.js"
 import type { ActiveRoot, DismissLayer } from "../renderer-state.js"
 import {
+  captureHandlerKey,
   createDomEvent,
   dispatchDomEvent,
   optionalElement,
@@ -88,7 +89,11 @@ export function handlesEvent(root: ActiveRoot, event: EventPayload): boolean {
     return window.hasListeners(event.eventType) || document.hasListeners(event.eventType)
   }
   if (event.path == null || isOutsidePress(event.eventType)) {
-    return root.eventHandlers.get(event.elementId)?.has(event.eventType) === true
+    const handlers = root.eventHandlers.get(event.elementId)
+    return (
+      handlers?.has(event.eventType) === true ||
+      (event.path == null && handlers?.has(captureHandlerKey(event.eventType)) === true)
+    )
   }
   return (
     hasDomListener(root.eventHandlers, event) ||

@@ -70,7 +70,7 @@ function Panel({
         gap: 10,
       }}
     >
-      <text
+      <div
         style={{
           fontSize: 10,
           color: "#8d8d8d",
@@ -78,7 +78,7 @@ function Panel({
         }}
       >
         {title}
-      </text>
+      </div>
       {children}
     </div>
   )

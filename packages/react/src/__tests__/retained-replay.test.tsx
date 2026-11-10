@@ -352,6 +352,7 @@ describeNative("a page of retained cards", () => {
       const id = idOf("clipped")
       const top = () => renderer.getScrollOffset(id)[1]
       renderer.scrollTo(id, 0, 100)
+      renderer.flush()
       expect(top(), "the first frame starts the animation").toBe(0)
       renderer.clockFastForward(100)
       renderer.flush()
@@ -364,6 +365,7 @@ describeNative("a page of retained cards", () => {
       settle()
       expect(counters().replays).toBeGreaterThan(before)
       renderer.scrollTo(id, 0, 0)
+      renderer.flush()
       renderer.clockFastForward(100)
       renderer.flush()
       expect(top()).toBeGreaterThan(0)

@@ -249,7 +249,7 @@ describeNative("motion values in style", () => {
       useMotionValueEvent(double, "change", (latest) =>
         setSeen((prev) => ({ ...prev, double: latest }))
       )
-      return <text>{`${seen.x.toFixed(2)} ${seen.double.toFixed(2)}`}</text>
+      return <div>{`${seen.x.toFixed(2)} ${seen.double.toFixed(2)}`}</div>
     }
     render(<App />)
     expect(renderer.getAllText()).toEqual(["0.00 0.00"])

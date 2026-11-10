@@ -63,7 +63,7 @@ function layout(parent: Style, box: Style, kids: Kid[], withParent = false) {
                   ...(kid.pre ? { whiteSpace: "pre" } : {}),
                 }}
               >
-                {kid.text !== undefined && <text style={TEXT}>{kid.text}</text>}
+                {kid.text !== undefined && <div style={TEXT}>{kid.text}</div>}
               </div>
             )
           )}
