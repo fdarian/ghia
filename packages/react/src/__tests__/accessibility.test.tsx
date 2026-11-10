@@ -227,6 +227,42 @@ describeNative("accessibility", () => {
     expect(labels.filter((aria) => aria.value === "Hello Ada!")).toHaveLength(1)
   })
 
+  it("gives each paragraph beside a block its own Label, in order", () => {
+    testRoot.render(
+      <div role="group" aria-label="host" style={{ width: 200, height: 120 }}>
+        Before
+        <div role="button" aria-label="Go" style={{ width: 80, height: 24 }} />
+        After
+      </div>,
+    )
+
+    const tree = testRoot.renderer.getA11yTree()
+    const nodes = tree.nodes ?? {}
+    const host = Object.values(nodes).find((node) => node.aria?.label === "host")
+    if (!host) throw new Error("no host node")
+    const children = host.children.map((key) => nodes[key]?.aria)
+    expect(children.map((aria) => [aria?.role, aria?.value ?? aria?.label])).toEqual([
+      ["Label", "Before"],
+      ["Button", "Go"],
+      ["Label", "After"],
+    ])
+  })
+
+  it("makes the paragraph nodes when the screen reader turns on after the page", () => {
+    testRoot.renderer.setA11yActive(false)
+    testRoot.render(
+      <div role="group" aria-label="host" style={{ width: 200, height: 120 }}>
+        Before
+        <div role="button" aria-label="Go" style={{ width: 80, height: 24 }} />
+        After
+      </div>,
+    )
+    testRoot.renderer.setA11yActive(true)
+
+    const labels = withRole(testRoot.renderer.getA11yTree(), "Label")
+    expect(labels.map((aria) => aria.value)).toEqual(expect.arrayContaining(["Before", "After"]))
+  })
+
   it("lets an explicit role override the <text> default", () => {
     testRoot.render(
       <div role="heading" aria-level={1} style={{ width: 200, height: 24 }}>

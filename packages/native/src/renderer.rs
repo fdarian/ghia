@@ -12227,16 +12227,7 @@ pub(crate) fn build_host_container(
     } else {
         Vec::new()
     };
-    let default_role = crate::accessibility::default_role(element);
-    el = if exposed.is_empty() {
-        apply_accessibility(el, element.id, element.custom_props(), default_role)
-    } else {
-        crate::accessibility::skipped::host(
-            crate::accessibility::apply_hosting(el, element.id, element.custom_props(), default_role),
-            exposed,
-        )
-    };
-    // Planned once: the label below and the children further down read the same
+    // Planned once: the text below and the children further down read the same
     // paragraphs. A node with no children paints its own `content` instead.
     if !skipped {
         crate::layout::container::settle_children(
@@ -12246,10 +12237,25 @@ pub(crate) fn build_host_container(
             window,
         );
     }
-    // A skipped `<text>` is still read out, though its paragraphs are not built.
-    let reads_text = !skipped || (a11y_active && element.element_type == "text");
+    // A skipped element is still read out, though its paragraphs are not built.
+    let reads_text = !skipped || (a11y_active && crate::accessibility::carries_text(element));
     let planned = (!element.children.is_empty() && reads_text).then(|| crate::text::plan_cache::planned(ctx.tree, element));
-    el = crate::accessibility::describe_text(el, element, planned.as_ref().and_then(|planned| planned.accessible_text.as_deref()));
+    // Only a screen reader reads it, and the retained replay key has `a11y_active`.
+    let text = if a11y_active && reads_text {
+        crate::accessibility::read_text(ctx.tree, element, planned.as_deref())
+    } else {
+        None
+    };
+    let default_role = crate::accessibility::role_without_props(element, text.as_deref());
+    el = if exposed.is_empty() {
+        apply_accessibility(el, element.id, element.custom_props(), default_role)
+    } else {
+        crate::accessibility::skipped::host(
+            crate::accessibility::apply_hosting(el, element.id, element.custom_props(), default_role),
+            exposed,
+        )
+    };
+    el = crate::accessibility::describe_text(el, element, text.as_deref());
     if is_label && !inert {
         el = crate::accessibility::label::describe(el, element.id);
     }
@@ -12557,7 +12563,8 @@ fn build_content(
             .as_ref()
             .filter(|probe| probe.container == element.id)
             .map(crate::text::atomic::Probe::clone_handle);
-        build_plan(element, plan, trim, probe.as_ref(), &mut 0, &mut content_elements, &mut placements, ctx, window, cx);
+        let label_paragraphs = crate::accessibility::labels_paragraphs(window.is_a11y_active(), element, plan);
+        build_plan(element, plan, trim, probe.as_ref(), label_paragraphs, &mut 0, &mut content_elements, &mut placements, ctx, window, cx);
     }
     let containing_heights = std::mem::replace(&mut ctx.containing_heights, outer_heights);
     (content_elements, placements, containing_heights)
@@ -12570,6 +12577,7 @@ fn build_plan(
     plan: &[(crate::text::inline::Child, u32)],
     trim: gpui::TextBoxTrim,
     probe: Option<&crate::text::atomic::Probe>,
+    label_paragraphs: bool,
     anonymous: &mut usize,
     content_elements: &mut Vec<gpui::AnyElement>,
     placements: &mut Vec<Placement>,
@@ -12609,7 +12617,7 @@ fn build_plan(
                     .inherited
                     .table_row
                     .map(|row| crate::text::selection::TableCell { row, cell: key.token() });
-                build_plan(element, cell, gpui::TextBoxTrim::default(), probe, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
+                build_plan(element, cell, gpui::TextBoxTrim::default(), probe, label_paragraphs, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
                 ctx.inherited.table_cell = outside;
                 let halves = ctx.inherited.table.collapse.then(|| ctx.collapsed.cell(key));
                 let mut cell = crate::layout::table::anonymous_cell(halves);
@@ -12638,7 +12646,7 @@ fn build_plan(
                 let mut inside_placements = Vec::new();
                 let outside = (ctx.inherited.table_row, ctx.inherited.table_cell);
                 (ctx.inherited.table_row, ctx.inherited.table_cell) = (Some(key.token()), None);
-                build_plan(element, &blocks, gpui::TextBoxTrim::default(), probe, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
+                build_plan(element, &blocks, gpui::TextBoxTrim::default(), probe, label_paragraphs, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
                 (ctx.inherited.table_row, ctx.inherited.table_cell) = outside;
                 settle_collapsed_borders(ctx, key, used_from, window);
                 let mut table = crate::layout::table::anonymous_table(&ctx.inherited.table, ctx.collapsed.table(key));
@@ -12727,7 +12735,13 @@ fn build_plan(
                     }
                 }
                 let (paragraph_element, subtree) = paragraph_content(paragraph, child_trim, ctx, window, cx);
-                content_elements.push(paragraph_element);
+                let label = label_paragraphs
+                    .then(|| crate::text::inline::accessible_text(std::iter::once(child)))
+                    .flatten();
+                content_elements.push(match label {
+                    Some(text) => crate::accessibility::paragraph_label(element.id, at, &text).child(paragraph_element).into_any_element(),
+                    None => paragraph_element,
+                });
                 ctx.subtree.merge(subtree);
                 if let Some(outside) = outside {
                     ctx.inherited = outside;

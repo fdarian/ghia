@@ -4,7 +4,7 @@
 //! from the DOM, no layout is needed) and leaves a `hidden` one out. Nothing below a skipped element is
 //! built here, so the element hosts a synthetic node for each element below it that has one, made from
 //! the retained tree by the code that makes the node of a built element ([`super::apply_accessibility`]):
-//! role, name, `aria-*`, relations and the text of a `<text>`. The nodes have no bounds and no actions.
+//! role, name, `aria-*`, relations and the text of an element whose content is one paragraph. The nodes have no bounds and no actions.
 
 use gpui::prelude::*;
 use gpui::{A11yRelation, A11ySubtreeBuilder, Element, SharedString};
@@ -87,18 +87,13 @@ fn skips_all(tree: &RetainedTree, element: &RetainedElement) -> bool {
 /// The node the build of `element` would give it, and the relations of the node. `None` for an
 /// element without a role.
 fn node_of(tree: &RetainedTree, element: &RetainedElement) -> Option<(gpui::accesskit::Node, Vec<(A11yRelation, Vec<SharedString>)>)> {
-    let plan = if element.element_type == "text" && !element.children.is_empty() {
-        crate::text::inline::plan_children_at(tree, element)
-    } else {
-        Vec::new()
-    };
+    let text = super::read_text_unplanned(tree, element);
     let mut probe = super::apply_accessibility(
         gpui::div().id(crate::events::ids::host_element_id(element.id)),
         element.id,
         element.custom_props(),
-        super::default_role(element),
+        super::role_without_props(element, text.as_deref()),
     );
-    let text = crate::text::inline::accessible_text(plan.iter().map(|(child, _)| child));
     probe = super::describe_text(probe, element, text.as_deref());
     if element.element_type == "label" {
         probe = super::label::describe(probe, element.id);
@@ -225,9 +220,9 @@ mod tests {
     }
 
     #[test]
-    fn a_text_host_reads_out_its_text_and_a_label_its_default_role() {
+    fn a_container_of_one_paragraph_reads_out_its_text_and_a_label_its_default_role() {
         let mut tree = tree();
-        tree.create_element(2, "text".to_string());
+        tree.create_element(2, "div".to_string());
         tree.append_child(1, 2);
         tree.create_element(3, "#text".to_string());
         tree.append_child(2, 3);
@@ -242,6 +237,29 @@ mod tests {
         assert_eq!(nodes.len(), 2);
         assert_eq!((nodes[0].node.role(), nodes[0].node.value()), (Role::Label, Some("Hello there")));
         assert_eq!(nodes[1].node.role(), Role::Label);
+    }
+
+    #[test]
+    fn a_container_with_a_block_or_only_blank_text_reads_out_none() {
+        let mut tree = tree();
+        add(&mut tree, 1, 2, &[], serde_json::json!({}));
+        for (id, content) in [(3, "Before"), (5, "After")] {
+            tree.create_element(id, "#text".to_string());
+            tree.append_child(2, id);
+            tree.set_text(id, content.to_string());
+        }
+        add(&mut tree, 2, 4, &role("button"), serde_json::json!({}));
+        add(&mut tree, 1, 6, &[], serde_json::json!({}));
+        tree.create_element(7, "#text".to_string());
+        tree.append_child(6, 7);
+        tree.set_text(7, "  ".to_string());
+        add(&mut tree, 1, 8, &role("group"), serde_json::json!({}));
+        tree.create_element(9, "#text".to_string());
+        tree.append_child(8, 9);
+        tree.set_text(9, "Group text".to_string());
+        assert_eq!(outline_of(&tree, 1), [(0, 4, Role::Button), (0, 8, Role::Group)]);
+        let nodes = exposed(&tree, &tree.elements[&1]);
+        assert_eq!(nodes[1].node.value(), Some("Group text"));
     }
 
     #[test]
