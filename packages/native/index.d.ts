@@ -1581,6 +1581,10 @@ export interface BuildCounters {
   listStatesCreated: number
   /** Items a change of a list's item count spliced out of or into its state. */
   listItemsSpliced: number
+  /** Elements a stylesheet flush matched against the rules again. */
+  elementsRematched: number
+  /** Cascades merged and parsed: the misses of the cascade cache. */
+  cascadesComputed: number
   /**
    * A JSON object: elements by the reason they are, or are not, in a retainable subtree, for
    * the builds since the reset. `retained` is the share that is; every built element is counted
