@@ -606,6 +606,52 @@ describeNative("a custom property set in a focus variant that applies", () => {
   }, SLOW)
 })
 
+describeNative("a custom property set in focusWithin on an element that transitions or animates", () => {
+  const focusedWidth = (host: Record<string, unknown>) => {
+    let widths: number[] = []
+    mounted(
+      <div style={{ position: "absolute", left: 0, top: 0, width: 600, "--w": "40px", "--a": "none" }}>
+        <div testId="host" style={{ height: 20, ...host }}>
+          <div testId="inner" tabIndex={0} style={{ width: 10, height: 10 }} />
+        </div>
+      </div>,
+      (renderer) => {
+        renderer.clockPause()
+        renderer.drawFrame()
+        const before = box(renderer, "host")[2]
+        renderer.simulateKeystrokes("Tab")
+        renderer.dispatchNativeEvents()
+        renderer.flush()
+        renderer.drawFrame()
+        renderer.clockFastForward(2000)
+        renderer.dispatchNativeEvents()
+        renderer.flush()
+        renderer.drawFrame()
+        widths = [before, box(renderer, "host")[2]]
+      },
+    )
+    return widths
+  }
+
+  const cases: [string, Record<string, unknown>][] = [
+    ["a transition of another property", { transition: "opacity 100ms" }],
+    ["an animation that resolves to none", { animation: "var(--a)" }],
+  ]
+
+  for (const [name, motion] of cases) {
+    it(`reaches the base style with ${name}, as it does without`, () => {
+      const literal = focusedWidth({ width: 40, focusWithin: { width: 80 }, ...motion })
+      expect(literal).toEqual([40, 80])
+      expect(focusedWidth({ width: "var(--w)", focusWithin: { "--w": "80px" }, ...motion })).toEqual(literal)
+      expect(focusedWidth({ width: 40, focusWithin: { "--v": "80px", width: "var(--v)" }, ...motion })).toEqual(literal)
+    }, SLOW)
+  }
+
+  it("transitions the width a custom property of focusWithin changes", () => {
+    expect(focusedWidth({ width: "var(--w)", transition: "width 100ms", focusWithin: { "--w": "80px" } })).toEqual([40, 80])
+  }, SLOW)
+})
+
 describeNative("a var() declaration against the plain ones written around it", () => {
   const custom = { "--w": "4px", "--n": "none", "--p": "6px", "--line": "blue", "--b": "2px solid red", "--num": "8" }
 

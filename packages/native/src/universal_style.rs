@@ -311,6 +311,7 @@ mod tests {
                 style,
                 crate::motion::FocusVisible::default(),
                 None,
+                None,
                 crate::motion::InterpolateSize::default(),
                 crate::motion::Scope::Element,
                 self.origin + std::time::Duration::from_millis(millis),

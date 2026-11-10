@@ -10971,6 +10971,7 @@ fn animate_style_at(
                 .shared
                 .map_or_else(|| input.declared.unwrap_or(&EMPTY_STYLE).into(), crate::motion::StyleRef::from),
             focus_visible,
+            Some(&ctx.focus_styles),
             measurement.as_ref(),
             ctx.inherited.interpolate_size,
             crate::motion::Scope::Element,
