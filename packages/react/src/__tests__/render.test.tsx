@@ -332,7 +332,7 @@ describeNative("render()", () => {
         `import { TestRenderer } from ${JSON.stringify(testingPath)}`,
         `import { render } from ${JSON.stringify(rendererPath)}`,
         "const renderer = new TestRenderer()",
-        'render(React.createElement("text", null, "ok"), { renderer })',
+        'render(React.createElement("div", null, "ok"), { renderer })',
         "renderer.flush()",
         'void Promise.reject(new Error("promise boom"))',
         "setTimeout(() => {",
