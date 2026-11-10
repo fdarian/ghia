@@ -13,6 +13,7 @@ import {
   SVGElement,
   Text,
 } from "./dom/nodes.js"
+import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
 import { Selection } from "./dom/selection.js"
 import { document, window } from "./events/window-target.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
@@ -41,6 +42,8 @@ const DOM_CLASSES = {
   DocumentFragment,
   ShadowRoot,
   Selection,
+  MutationObserver,
+  MutationRecord,
 }
 
 const getSelection = () => document.getSelection()
