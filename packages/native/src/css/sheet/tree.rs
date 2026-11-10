@@ -169,6 +169,10 @@ impl RetainedTree {
     }
 
     fn contains_style_element(&self, ancestor: u64) -> bool {
+        let is_leaf = self.elements.get(&ancestor).is_some_and(|element| element.children.is_empty());
+        if is_leaf && !self.sheets.style_elements.contains(&ancestor) {
+            return false;
+        }
         self.sheets.style_elements.iter().any(|style| {
             let mut at = Some(*style);
             while let Some(id) = at {
@@ -308,11 +312,23 @@ impl RetainedTree {
             covered: FxHashSet::default(),
             out,
         };
+        // Marks of siblings come in a run, so the last parent's answer is most often the one needed.
+        let mut last_parent: Option<(u64, bool)> = None;
         for (id, reach) in marks {
             let Some(element) = self.elements.get(id) else {
                 continue;
             };
-            let connected = self.is_connected(*id);
+            let connected = match element.parent {
+                Some(parent) if self.root_id != Some(*id) => match last_parent {
+                    Some((last, connected)) if last == parent => connected,
+                    _ => {
+                        let connected = self.is_connected(parent);
+                        last_parent = Some((parent, connected));
+                        connected
+                    }
+                },
+                _ => self.is_connected(*id),
+            };
             expansion.add(*id, reach.own(), connected);
             if !reach.reaches_siblings() {
                 continue;
