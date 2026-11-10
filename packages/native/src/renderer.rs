@@ -10438,7 +10438,6 @@ fn build_element_in(
                 opacity_runs(known, ctx.css_animations, ctx.css_transitions, ctx.motion_states, ctx.motion_values, ctx.now)
                     || transform_runs(known, ctx.css_animations, ctx.css_transitions, ctx.motion_states, ctx.motion_values, ctx.now)
             },
-            costly: crate::retain::costly(ctx.tree, known),
             patch_root,
         });
         if let Some(skip) = skip {
@@ -10490,7 +10489,12 @@ fn build_element_in(
     // built in list layout, so this is the one place that sees both.
     crate::background_images::pump(window, cx);
     let anchor = anchor_env.and_then(|env| ctx.retain.end_anchor().map(|subtree| (env, subtree)));
-    let recording = if ctx.tree.elements.contains_key(&id) { ctx.retain.exit() } else { None };
+    let recording = if let Some(known) = ctx.tree.elements.get(&id) {
+        ctx.retain.costly(|| crate::retain::costly(ctx.tree, known));
+        ctx.retain.exit()
+    } else {
+        None
+    };
     match (unit, recording) {
         (Some((env, subtree, lift_z)), _) => unit_root(id, env, subtree, lift_z, element, ctx),
         (None, _) if anchor.is_some() => {
@@ -12000,11 +12004,6 @@ fn virtual_row_ancestor(tree: &RetainedTree, list_id: u64, element_id: u64) -> O
     }
 }
 
-/// A text instance: a bare string.
-fn is_text_node(element: &crate::retained_tree::RetainedElement) -> bool {
-    crate::text::inline::is_raw_text(element)
-}
-
 /// What the build of `element` reads of the layout and the frames before that its key has to
 /// carry: the size layout gave it as a query container, and whether its `content-visibility`
 /// skips. Nothing above the element has them.
@@ -12046,7 +12045,7 @@ pub(crate) fn build_host_container(
     // Everything up to the children goes through the slot: the element is 1.6 KB, and a helper
     // that took and returned it copied it twice.
     let mut el = crate::slot::Slot::new(&mut host);
-    if !is_text_node(element) {
+    if !crate::text::inline::is_raw_text(element) {
         el = crate::events::ids::host_hitbox(el, ctx.inherited.pointer_events_none);
         el = crate::events::app_region::mark(el, ctx.inherited.app_region);
     }
@@ -12233,7 +12232,7 @@ pub(crate) fn build_host_container(
     let planned = (!element.children.is_empty() && reads_text).then(|| crate::text::plan_cache::planned(ctx.tree, element));
     // Only a screen reader reads it, and the retained replay key has `a11y_active`.
     let text = if a11y_active && reads_text {
-        crate::accessibility::read_text(ctx.tree, element, planned.as_deref())
+        crate::accessibility::read_text(element, planned.as_deref())
     } else {
         None
     };

@@ -490,7 +490,7 @@ pub fn selection_key(element_id: u64, sub: usize) -> Arc<str> {
 /// `render()` is matched against itself.
 #[derive(Clone)]
 pub enum HighlightSource {
-    /// Retained `<text>`. A match can span the several host nodes React makes
+    /// Retained text (`#text` nodes). A match can span the several host nodes React makes
     /// for one interpolated line, because they were merged before matching.
     Resolved(Arc<super::search::HighlightContext>),
     /// `<code>`, `<markdown>`, `<diff>`: text the retained tree never sees.
@@ -506,7 +506,7 @@ pub struct SelectableText {
     /// from the root through the retained tree, which for a virtual-list row start at the list's.
     pub path: selection::DocPath,
     pub text: SharedString,
-    /// `None` is the important case for plain `<text>` nodes: gpui then derives
+    /// `None` is the important case for plain `#text` nodes: gpui then derives
     /// one run from `window.text_style()`, so colour, weight and family keep
     /// inheriting from ancestor `style` props. Pass `Some(..)` only when the
     /// element owns its own colours, as `<code>` and `<diff>` do.

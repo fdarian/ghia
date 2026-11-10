@@ -5,7 +5,7 @@
 //! element with children, and it is the same answer until something it reads moves. It reads:
 //!
 //! - the element and everything the paragraph builder walks below it (children, content, styles,
-//!   `display: contents` splices, listeners and props that make a `<text>` a box): the element's
+//!   `display: contents` splices, listeners and props that make an inline box a box of its own): the element's
 //!   `subtree_revision`, which every mutation of it or a descendant moves;
 //! - the `white-space` the element inherits, from ancestors that `subtree_revision` does not
 //!   cover: its computed value is in the key;
@@ -16,7 +16,7 @@
 //! - the elements a `display` transition keeps rendered (`box_generation::hold_display`): while
 //!   there are any, the plan is made and not kept.
 //!
-//! Beside the plan is the text a `<text>` host reads out to accessibility, which is a function of
+//! Beside the plan is the text a host container reads out to accessibility, which is a function of
 //! the plan alone.
 //!
 //! The cache follows the style cache's switch (`css::style_cache::mode`): off plans every time,

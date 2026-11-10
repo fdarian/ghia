@@ -4,7 +4,7 @@
 
 use gpui::{div, prelude::*, px, rgb, rgba, AnyElement, Div, FontWeight, IntoElement, SharedString};
 
-/// How a `<text>` is built: a div holding the string (what a GPUI app writes), or a div holding a
+/// How a string-holding element is built: a div holding the string (what a GPUI app writes), or a div holding a
 /// div holding the string (the text instance Ghia puts in a host element).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextShape {

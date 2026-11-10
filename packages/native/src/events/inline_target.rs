@@ -1,9 +1,8 @@
 //! The inline boxes under the pointer, in front of the hit chain.
 //!
 //! GPUI's hit test ends at the host element that holds a paragraph. When that
-//! element is the target, the pointer may still be on a glyph of a `<span>` (or
-//! a nested `<text>`) inside it, and that box is the DOM target. Its retained
-//! ancestors are the path from there on (`events/path.rs`), so the chain only has
+//! element is the target, the pointer may still be on a glyph of a `<span>` inside it, and that box is the DOM target. Its
+//! retained ancestors are the path from there on (`events/path.rs`), so the chain only has
 //! to name the boxes and where the first line fragment of each starts, which is
 //! what `offsetX` is measured from.
 
