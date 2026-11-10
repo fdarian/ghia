@@ -73,6 +73,8 @@ export function createMutationQueue(
   const styleImages = createStyleImageLoader(renderer)
 
   let elementSource: ElementSource | undefined
+  // The gate's answer, kept here because `setAttribute` runs for every attribute of every element.
+  let forwardsAttributes = attributesForwarded(renderer)
 
   const mutations: MutationQueue = {
     get pending() {
@@ -137,7 +139,7 @@ export function createMutationQueue(
       requestFlush()
     },
     setAttribute(id, name, value) {
-      if (!attributesForwarded(renderer)) return
+      if (!forwardsAttributes) return
       writer.setAttribute(id, name, value)
       requestFlush()
     },
@@ -155,6 +157,7 @@ export function createMutationQueue(
       elementSource = source
     },
     backfillAttributes() {
+      forwardsAttributes = true
       elementSource?.forEachElement((id, type, props) => {
         for (const [prop, value] of props) {
           const name = attributeNameOfProp(type, prop)
