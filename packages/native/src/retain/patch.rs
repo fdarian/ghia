@@ -180,10 +180,13 @@ impl GpuixView {
             // which is not where the frame shows a row that a scroll moved.
             for (id, tape) in captured.iter().filter(|(id, _)| !anchors.contains(id) && !rows.contains(id)) {
                 let moved = view.read(app).moved_since_built(*id);
+                let old = tapes.roots_of(*id);
                 let tape = tape.borrow();
                 tape.each(crate::tape::Kind::Bounds, &mut |data, offset| crate::automation::publish_captured_bounds(data, offset + moved));
-                tape.each(crate::tape::Kind::Text, &mut |data, offset| crate::text::publish_captured_text(data, offset + moved));
-                tape.each(crate::tape::Kind::StartRegion, &mut |data, offset| crate::text::publish_captured_start_region(data, offset + moved));
+                tape.each(crate::tape::Kind::Text, &mut |data, offset| crate::text::publish_captured_text(old.as_ref(), data, offset + moved));
+                tape.each(crate::tape::Kind::StartRegion, &mut |data, offset| {
+                    crate::text::publish_captured_start_region(old.as_ref(), data, offset + moved)
+                });
             }
             let (tree, callback) = {
                 let view = view.read(app);

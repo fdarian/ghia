@@ -936,6 +936,51 @@ pub(crate) struct Unit {
     pub env: crate::renderer::FrameEnv,
 }
 
+/// The units of a list in the order they were built, found by element id without a walk of the list: a page of ten thousand
+/// rows has that many roots, and a patch asks for the few it touches.
+#[derive(Default)]
+struct UnitList {
+    items: Vec<Unit>,
+    at: FxHashMap<u64, usize>,
+}
+
+impl UnitList {
+    fn push(&mut self, unit: Unit) {
+        self.at.insert(unit.id, self.items.len());
+        self.items.push(unit);
+    }
+
+    fn position(&self, id: u64) -> Option<usize> {
+        self.at.get(&id).copied()
+    }
+
+    fn get(&self, id: u64) -> Option<&Unit> {
+        self.position(id).map(|at| &self.items[at])
+    }
+
+    fn retain(&mut self, keep: impl Fn(&Unit) -> bool) {
+        self.items.retain(keep);
+        self.at = self.items.iter().enumerate().map(|(at, unit)| (unit.id, at)).collect();
+    }
+}
+
+impl std::ops::Deref for UnitList {
+    type Target = [Unit];
+
+    fn deref(&self) -> &[Unit] {
+        &self.items
+    }
+}
+
+impl<'a> IntoIterator for &'a UnitList {
+    type Item = &'a Unit;
+    type IntoIter = std::slice::Iter<'a, Unit>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.iter()
+    }
+}
+
 /// What the last frame built whole left for a tick to be patched against.
 #[derive(Default)]
 struct Plan {
@@ -951,21 +996,21 @@ struct Plan {
     unsteady: bool,
     /// The revision of the root of the tree it was built from.
     revision: u64,
-    units: Vec<Unit>,
+    units: UnitList,
     ids: FxHashSet<u64>,
     /// The roots of the frame that a hover or a commit patch repaints (`Record::patch_root`), recorded or skipped:
     /// built or replayed by the frame as roots of the recording gpui keeps, and not units in the
     /// sense of `units`, since nothing runs on them.
-    patch_roots: Vec<Unit>,
+    patch_roots: UnitList,
     patch_root_ids: FxHashSet<u64>,
     /// The scrollers of the frame that a patch lays out again (`Retain::end_anchor`): each is wrapped
     /// as a retained root that gpui records as a source for a patch and never replays.
-    anchors: Vec<Unit>,
+    anchors: UnitList,
     anchor_ids: FxHashSet<u64>,
     /// The box roots of the frame that are neither a patch root nor a unit (those are kept in their lists): plain boxes
     /// of a size that what is in them cannot change, which a patch lays out again and repaints where the edit is
     /// (`Retain::begin_box_root`). Wrapped as `retained(..).patchable_relayout()` and recorded or skipped like any root.
-    box_roots: Vec<Unit>,
+    box_roots: UnitList,
     /// Every box root of the frame, those kept in the other lists too. Those in an anchor stay: the innermost root that
     /// holds an edit is the one that is laid out again (`Retain::relayout_holding`), the anchor only holds what no box
     /// root does.
@@ -2217,11 +2262,10 @@ impl Retain {
     pub(crate) fn unit(&self, id: u64) -> Option<&Unit> {
         self.plan
             .units
-            .iter()
-            .chain(&self.plan.patch_roots)
-            .chain(&self.plan.anchors)
-            .chain(&self.plan.box_roots)
-            .find(|unit| unit.id == id)
+            .get(id)
+            .or_else(|| self.plan.patch_roots.get(id))
+            .or_else(|| self.plan.anchors.get(id))
+            .or_else(|| self.plan.box_roots.get(id))
     }
 
     /// Whether the element `id` is made a patch root if the build leaves it recorded: a patch can repaint it
@@ -2733,24 +2777,25 @@ impl Retain {
                 None => return Err(Unpatchable::Commit(id)),
             }
         }
-        let units: Vec<u64> = self
-            .plan
-            .units
-            .iter()
-            .chain(&self.plan.patch_roots)
-            .map(|unit| unit.id)
-            .filter(|id| touched.contains(id) && !covered(*id))
+        // Each list is in the order the frame built it, and a patch asks for few of its roots: look each one up and put them in
+        // that order, rather than walk a list that has a root for every row.
+        let in_plan_order = |ids: &FxHashSet<u64>, lists: &[&UnitList]| -> Vec<u64> {
+            let mut found: Vec<(usize, usize, u64)> = Vec::new();
+            for &id in ids {
+                for (list, units) in lists.iter().enumerate() {
+                    if let Some(at) = units.position(id) {
+                        found.push((list, at, id));
+                    }
+                }
+            }
+            found.sort_unstable();
+            found.into_iter().map(|(.., id)| id).collect()
+        };
+        let units: Vec<u64> = in_plan_order(&touched, &[&self.plan.units, &self.plan.patch_roots])
+            .into_iter()
+            .filter(|id| !covered(*id))
             .collect();
-        let anchors: Vec<u64> = self
-            .plan
-            .anchors
-            .iter()
-            .chain(&self.plan.box_roots)
-            .chain(&self.plan.units)
-            .chain(&self.plan.patch_roots)
-            .map(|unit| unit.id)
-            .filter(|id| relaid.contains(id))
-            .collect();
+        let anchors = in_plan_order(&relaid, &[&self.plan.anchors, &self.plan.box_roots, &self.plan.units, &self.plan.patch_roots]);
         if let Some(&id) = anchors.iter().find(|id| self.plan.enclosing_forgotten.contains(id)) {
             return Err(Unpatchable::AnchorStale(id));
         }

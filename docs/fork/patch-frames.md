@@ -462,6 +462,17 @@ over the page, each in something that did not move.
   and a frame samples them all (`sync_values`). `BindingIndex` holds the bindings parsed once per revision of the tree, by element
   and by value: `value_demand` asks only the elements bound to a value that moves, and `preview` and a frame ask `element_due` of
   it. `getBuildCounters().motionValuesSampled` counts the values sampled for the elements that bind them.
+- **A patch asks for the roots it touches, not for every root or every registry entry.** On a page of 10000 live rows a header
+  edit, a hover and a row edit cost 9.1M, 3.4M and 6.3M instructions against 2.2M, 1.5M and 2.2M at 1000, and the growth was
+  walks over what did not change: the text registries (`Layered`, `tape.rs`) drained and rotated the tail of a window-long vector
+  and asked every entry whose list it was (`replace`), `publish_captured_text` compared the key of every entry, and `preview` and
+  `Retain::unit` walked every root of the frame. A registry keeps where each list wrote (`placed`, and `placed_pending` for the
+  replays it holds unexpanded), made when a patch first asks and kept while patches write as many entries as they take out
+  (`replace_runs` then overwrites in place); a push, an expansion, a `order_by_rows` or a patch that writes another number makes it
+  again. `CHILDREN` is `PARENTS` the other way round, so the lists a root holds are found from the root. `Plan` keeps each list of
+  units with their position (`UnitList`), and `preview` looks up the few ids it touches. 10000 rows, a1 / a2 / d: 1.44M / 1.68M /
+  1.33M (1000 rows: 1.44M / 1.67M / 1.34M). Still made again by the frame that moves rows (`order_by_rows`): the first patch
+  after a wheel tick pays one pass over the registries (a4 at 10000 rows is 6.2M against 2.2M at 1000).
 
 Patched ticks alone: the showcase page went from mean 4.11 to 1.82 ms (median 4.27 to 1.18) against 1.92 (median 1.55) for the tile
 alone, so nothing of the page is left in it. At window scale 2, which is what the machine gave for the sweep, the patched tick is 3.05 ms against 3.06 for the tile alone. Over a full sweep at window scale 2 the showcase went from 4.0 to 4.2 ms a draw and 28%
