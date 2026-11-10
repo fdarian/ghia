@@ -44,6 +44,8 @@
 //                        line layout cache and swaps its two generations: after 2 of them the mount's lines are only in the shape store
 //   MODE=remount         the mounted subtree is replaced by an identical one in ONE step (settings: a keyed <Show> on a counter; detail: a copy of the
 //                        first message), so every string was drawn in the frame before
+//   MODE=scroll          settings: a round is mount, scroll1, scroll2, unmount; each scroll is one wheel step over the dialog body followed by one frame, the
+//                        first right after the mount frame (SCROLL=150 px for the first, SCROLL2=150 px for the second). The scroll steps have no batch
 //   MODE=steady          mounts once, then K frames of each kind: "idle" (no flush: an empty tick), "replay" (flush, retention on), "record" (retention
 //                        turned off and on, then flush: builds everything and records it), "rebuild" (retention off, flush: builds everything, records
 //                        nothing); KINDS=replay,rebuild picks some. Per kind: instructions per frame and, with COUNTERS=1, the counters
@@ -60,8 +62,9 @@ import { SettingsDialog, textSalt } from "./Settings"
 const FIXTURE = process.env.FIXTURE ?? "detail"
 if (FIXTURE !== "detail" && FIXTURE !== "settings") throw new Error(`FIXTURE must be detail or settings, got ${FIXTURE}`)
 const MODE = process.env.MODE ?? (FIXTURE === "detail" ? "swap" : "toggle")
-if (MODE !== "swap" && MODE !== "toggle" && MODE !== "remount" && MODE !== "steady") throw new Error(`MODE must be swap, toggle, remount or steady, got ${MODE}`)
+if (MODE !== "swap" && MODE !== "toggle" && MODE !== "remount" && MODE !== "steady" && MODE !== "scroll") throw new Error(`MODE must be swap, toggle, remount, steady or scroll, got ${MODE}`)
 if (FIXTURE === "settings" && MODE === "swap") throw new Error("the settings fixture has no swap mode")
+if (FIXTURE === "detail" && MODE === "scroll") throw new Error("the detail fixture has no scroll mode")
 const K = Number(process.env.K ?? "300")
 const WARMUP = Number(process.env.WARMUP ?? "100")
 const INSTRUMENT = process.env.INSTRUMENT !== "0"
@@ -292,7 +295,7 @@ async function step(kind: string, write: () => void): Promise<Sample> {
 }
 
 function sampleOf(kind: string, s0: number, s1: number, s2: number, s3: number): Sample {
-  if (!INSTRUMENT || COUNT) return { kind, total: s3 - s0 - readOverhead, js: 0, ops: 0, prep: 0, apply: 0, post: 0, frame: 0 }
+  if (!INSTRUMENT || COUNT || MODE === "scroll") return { kind, total: s3 - s0 - readOverhead, js: 0, ops: 0, prep: 0, apply: 0, post: 0, frame: 0 }
   if (stampApplyStart === 0) throw new Error(`step ${kind} applied no batch`)
   const mounted = sawFirstOp
   return {
@@ -316,6 +319,15 @@ function writes(): [string, () => void][] {
     const first = messages[0]
     if (!first) throw new Error("no messages")
     return [["remount", () => setMessage({ ...first })]]
+  }
+  if (MODE === "scroll") {
+    const wheel = (deltaY: number) => () => renderer.dispatchScrollWheel(640, 400, 0, deltaY)
+    return [
+      ["mount", () => setOpen(true)],
+      ["scroll1", wheel(Number(process.env.SCROLL ?? "150"))],
+      ["scroll2", wheel(Number(process.env.SCROLL2 ?? "150"))],
+      ["unmount", () => setOpen(false)],
+    ]
   }
   if (FIXTURE === "settings") {
     let salt = 0
