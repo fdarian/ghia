@@ -83,6 +83,7 @@ The tree's hooks (`tree.rs`) collect `(element, Reach)` marks:
 | own style change | the reach of `[style]`, which is empty unless a selector reads it |
 | element inserted or moved | the element and its subtree, plus `structure` |
 | element about to be removed | the next matchable sibling, with `structure`, since what follows matches without it |
+| a `text` element given a string (it stops being matchable) | the next matchable sibling, with `structure`, as for a removal |
 | text of a `<style>` element, `<style>` inserted, removed or moved, root changed, constructed sheet changed or the adopted list changed | the sources are dirty: every element matches again |
 
 ### The flush

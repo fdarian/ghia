@@ -122,13 +122,23 @@ impl RetainedTree {
         }
     }
 
-    pub(crate) fn sheets_text_changed(&mut self, id: u64) {
+    /// `was_matchable` is whether the element was a matchable one before its string changed: a
+    /// `text` element given a string turns into a text node, which leaves its siblings' selectors
+    /// the way a removal does.
+    pub(crate) fn sheets_text_changed(&mut self, id: u64, was_matchable: bool) {
         let parent = self.elements.get(&id).and_then(|element| element.parent);
         if parent.is_some_and(|parent| self.sheets.style_elements.contains(&parent)) {
             self.sheets.sources_dirty = true;
         }
         if self.sheets.atoms_fresh {
             self.sheets.mark(id, Reach::SELF);
+            let structure = self.sheets.index.invalidation.structure;
+            let is_matchable = self.elements.get(&id).is_some_and(RetainedElement::is_matchable);
+            if was_matchable != is_matchable && !structure.is_empty() {
+                if let Some(next) = self.next_element_sibling(id) {
+                    self.sheets.mark(next, structure.from_next_sibling());
+                }
+            }
         }
     }
 

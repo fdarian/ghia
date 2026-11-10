@@ -1642,15 +1642,17 @@ impl RetainedTree {
 
     pub fn set_text(&mut self, id: u64, content: String) {
         let mut changed = false;
+        let mut was_matchable = true;
         if let Some(element) = self.elements.get_mut(&id) {
             if element.content.as_ref() != Some(&content) {
+                was_matchable = element.is_matchable();
                 element.content = Some(content);
                 changed = true;
             }
         }
         if changed {
             if self.sheets.enabled {
-                self.sheets_text_changed(id);
+                self.sheets_text_changed(id, was_matchable);
             }
             if self.universal.is_some() {
                 // The string makes this a text node, which no style layer reaches.

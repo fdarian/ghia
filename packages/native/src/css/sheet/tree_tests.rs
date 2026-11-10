@@ -521,6 +521,21 @@ fn inserting_a_sibling_matches_the_ones_after_it_again() {
 }
 
 #[test]
+fn a_text_element_given_a_string_matches_its_following_siblings_again() {
+    let mut doc = Doc::new();
+    doc.classed("span", ROOT, "a");
+    let text = doc.element("text", ROOT);
+    let last = doc.classed("span", ROOT, "b");
+    doc.style_element(ROOT, ".a + .b { color: red }");
+    doc.flush();
+    assert_eq!(doc.color(last), None, "the empty text element sits between them");
+
+    doc.tree.set_text(text, "hello".into());
+    doc.flush();
+    assert_eq!(doc.color(last), Some("red"), "a text node is skipped by sibling combinators");
+}
+
+#[test]
 fn removing_a_sheet_restores_the_inline_style() {
     let mut doc = Doc::new();
     let div = doc.classed("div", ROOT, "a");
