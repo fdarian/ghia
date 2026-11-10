@@ -4563,12 +4563,15 @@ gets a hidden `group` node to carry it.
 A paragraph is not an element, so the element that holds it reads it. A host
 element whose content is one paragraph (strings and `<span>`s, nothing else) has
 that text, and is a `Label` when it has no role of its own: the text is its value
-(`aria-valuetext` overrides it). With any other role the text is its name, as the
-DOM names a button, link or heading from its content, unless the author named it
-with `aria-label`, `aria-labelledby` or a `<label>`. `<div>Saved</div>` is read as
-"Saved"; a `role="button"` div with the same content is a button named "Saved";
-`<div aria-label="silent">Hello</div>` is a `Label` named "silent" whose value is
-"Hello".
+(`aria-valuetext` overrides it), and so it is for any role ARIA does not name from
+content (`list`, `region`, `group`, `form`). With a role it does name from content
+(button, link, heading, checkbox, radio, switch, menu item, tab, option, tree item,
+cell, row, tooltip) the text is its name, as the DOM names a button, link or heading
+from its content, unless the author named it with `aria-label`, `aria-labelledby` or
+a `<label>`. `<div>Saved</div>` is read as "Saved"; a `role="button"` div with the
+same content is a button named "Saved"; `<div role="list">Items</div>` is a list
+whose value is "Items"; `<div aria-label="silent">Hello</div>` is a `Label` named
+"silent" whose value is "Hello".
 
 ```tsx
 <div>Saved <span style={{ fontWeight: 700 }}>3 files</span></div> // Label "Saved 3 files"

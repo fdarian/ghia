@@ -152,20 +152,15 @@ pub(crate) fn carries_text(element: &crate::retained_tree::RetainedElement) -> b
     crate::text::inline::is_host_container(element) && element.element_type != crate::text::inline::TEXT_NODE
 }
 
-/// What a host container reads out when its content is one paragraph: that paragraph's text. A
-/// childless one reads its own `content`.
+/// What a host container reads out when its content is one paragraph: that paragraph's text.
 pub(crate) fn read_text(
-    tree: &crate::retained_tree::RetainedTree,
     element: &crate::retained_tree::RetainedElement,
     planned: Option<&crate::text::plan_cache::Planned>,
 ) -> Option<String> {
     if !carries_text(element) {
         return None;
     }
-    match planned {
-        Some(planned) => planned.accessible_text.clone(),
-        None => crate::text::inline::own_text(tree, element).filter(|text| !text.is_empty()),
-    }
+    planned?.accessible_text.clone()
 }
 
 /// [`read_text`] for an element nobody planned: one below a skipped subtree, or one a reference names.
@@ -174,7 +169,7 @@ pub(crate) fn read_text_unplanned(
     element: &crate::retained_tree::RetainedElement,
 ) -> Option<String> {
     if !carries_text(element) || element.children.is_empty() {
-        return read_text(tree, element, None);
+        return None;
     }
     let plan = crate::text::inline::plan_children_at(tree, element);
     crate::text::inline::sole_paragraph_text(plan.iter().map(|(child, _)| child))
@@ -191,10 +186,10 @@ pub(crate) fn role_without_props(element: &crate::retained_tree::RetainedElement
 }
 
 /// What a host container's `text` is to its node, which got `default_role` from
-/// [`role_without_props`]: the value of a `Label` (unless the author gave `aria-valuetext`), and the
-/// name of any other role, which a screen reader takes from `label` alone. An author's name
-/// (`aria-label`, `aria-labelledby`, a `<label>`) is kept, and so is the one the `Group` of a
-/// referenced container got from the same text.
+/// [`role_without_props`]: the name of a role ARIA names from content ([`names_from_content`]),
+/// the value of any other (a `Label`, a `list`, a `region`), unless the author gave
+/// `aria-valuetext`. An author's name (`aria-label`, `aria-labelledby`, a `<label>`) is kept, and so
+/// is the one the `Group` of a referenced container got from the same text.
 pub(crate) fn describe_text<E>(
     el: E,
     element: &crate::retained_tree::RetainedElement,
@@ -209,15 +204,42 @@ where
     };
     let props = element.custom_props();
     let role = resolve_role(props, default_role);
-    if role == Some(Role::Label) {
+    let links = links::current();
+    if role.is_none() && links.referenced_text(element.id).is_some() {
+        return el;
+    }
+    if !role.is_some_and(names_from_content) {
         return if props.contains_key("aria-valuetext") { el } else { el.aria_value(text) };
     }
-    let links = links::current();
-    let referenced_group = role.is_none() && links.referenced_text(element.id).is_some();
-    if referenced_group || named_by_aria(props) || links.labels_of(element.id).is_some() {
+    if named_by_aria(props) || links.labels_of(element.id).is_some() {
         return el;
     }
     el.aria_label(text)
+}
+
+/// Whether ARIA names a `role` from its content: a button is named by its text, a list is not.
+fn names_from_content(role: Role) -> bool {
+    matches!(
+        role,
+        Role::Button
+            | Role::Link
+            | Role::Heading
+            | Role::CheckBox
+            | Role::RadioButton
+            | Role::Switch
+            | Role::MenuItem
+            | Role::MenuItemCheckBox
+            | Role::MenuItemRadio
+            | Role::Tab
+            | Role::ListBoxOption
+            | Role::TreeItem
+            | Role::Cell
+            | Role::GridCell
+            | Role::ColumnHeader
+            | Role::RowHeader
+            | Role::Row
+            | Role::Tooltip
+    )
 }
 
 /// Whether each paragraph of `element` gets a node of its own: with a screen reader on, when blocks

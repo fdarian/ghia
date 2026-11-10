@@ -76,7 +76,7 @@ describeNative("accessibility", () => {
     expect(buttons[0]?.on_action).toEqual(expect.arrayContaining(["Click"]))
   })
 
-  it("reports a <text> node as Label with its content", () => {
+  it("reports an element holding text as Label with its content", () => {
     testRoot.render(<div style={{ width: 200, height: 24 }}>Hello</div>)
 
     const labels = withRole(testRoot.renderer.getA11yTree(), "Label")
@@ -219,7 +219,7 @@ describeNative("accessibility", () => {
     )
   })
 
-  it("joins interpolated <text> children into one Label", () => {
+  it("joins interpolated strings into one Label", () => {
     const name = "Ada"
     testRoot.render(<div style={{ width: 200, height: 24 }}>Hello {name}!</div>)
 
@@ -285,6 +285,18 @@ describeNative("accessibility", () => {
     const button = withRole(testRoot.renderer.getA11yTree(), "Button")[0]
     expect(button).toEqual(expect.objectContaining({ role: "Button", label: "Save" }))
     expect(button?.value).toBeUndefined()
+  })
+
+  it("reads the text of a role ARIA does not name from content as its value", () => {
+    testRoot.render(
+      <div role="list" style={{ width: 80, height: 24 }}>
+        Items
+      </div>,
+    )
+
+    const list = withRole(testRoot.renderer.getA11yTree(), "List")[0]
+    expect(list).toEqual(expect.objectContaining({ role: "List", value: "Items" }))
+    expect(list?.label).toBeUndefined()
   })
 
   it("keeps the author's name on a node with text, and reads the text as its value", () => {
