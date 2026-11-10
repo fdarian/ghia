@@ -916,7 +916,7 @@ the patcher turns it on with `Window::set_contained_patches`.
   that holds a focused input, a2 a text edit in a row of the scroller): a1 at 1000, 3000 and 10000 rows 26.2M, 73.3M and 241.0M
   before, 2.23M, 3.68M and 9.13M after (a patch of the header, `relayoutPatches` 1, nothing declined); a2 35.4M, 99.8M and 328M
   before the rows' recordings were rewritten, 9.84M, 26.3M and 83.9M after (a patch every op, `relayoutPatches` 1, `unpatchable` and `declines`
-  empty; what is left at 10000 is taffy's flexbox pass over the scroller's children); a hover (d) 1.53M, 1.94M and 3.37M (as before).
+  empty; what was left at 10000 was taffy's flexbox pass over the scroller's children, which a row that answers its parent as it did no longer starts: 2.23M, 3.01M and 6.27M, [layout](layout.md#relayout-boundaries)); a hover (d) 1.53M, 1.94M and 3.37M (as before).
 
 - **Which commits.** The tree notes the elements a commit changed (`RetainedTree::pending_structure`: props, style, text and children
   other than a strict restyle by paint; a created element is covered by the element it is put under, a destroyed one by the
