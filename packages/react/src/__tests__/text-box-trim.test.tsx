@@ -62,7 +62,7 @@ function setup() {
   return { ...root, ref, rect }
 }
 
-/** The height of `<text style={{ ...TEXT, ...style }}>Hello</text>`. */
+/** The height of `<div style={{ ...TEXT, ...style }}>Hello</div>`. */
 function heightOf(style: object, children: React.ReactNode = "Hello") {
   const { render, ref, rect, unmount } = setup()
   try {

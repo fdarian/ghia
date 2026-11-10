@@ -238,7 +238,7 @@ describe("highlight", () => {
 
   // Ordinals follow PAINT order, so `activeIndex` means "the nth match in the
   // document" no matter which kind of element painted it. Numbering retained
-  // matches first made activeIndex: 0 mark the <text> even when <code> came
+  // matches first made activeIndex: 0 mark the text even when <code> came
   // first in the document.
   it("numbers matches in document order across both kinds", () => {
     const { render, renderer } = createTestRoot()

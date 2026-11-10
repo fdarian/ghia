@@ -1,7 +1,7 @@
 /**
  * Behaviour tests for the video-editor timeline example.
  *
- * The app paints its own state into three `<text testId>` readouts, so every
+ * The app paints its own state into three `<div testId>` readouts, so every
  * assertion here is an exact number rather than a screenshot comparison.
  * Screenshots are still written into `examples/screenshots/` for inspection.
  *

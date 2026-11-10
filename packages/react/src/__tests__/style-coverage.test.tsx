@@ -36,8 +36,8 @@ function comparePixels(name: string, a: React.ReactElement, b: React.ReactElemen
 }
 
 describe("style props reach the renderer", () => {
-  it("applies padding to a <text> node", () => {
-    // `<text>` used to apply a text-only subset of the style set, so every
+  it("applies padding to an element holding text", () => {
+    // The text element used to apply a text-only subset of the style set, so every
     // layout prop on it was dropped.
     comparePixels(
       "text-padding",
@@ -52,7 +52,7 @@ describe("style props reach the renderer", () => {
     )
   })
 
-  it("applies width and background to a <text> node", () => {
+  it("applies width and background to an element holding text", () => {
     comparePixels(
       "text-box",
       <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
@@ -92,8 +92,8 @@ describe("style props reach the renderer", () => {
     )
   })
 
-  it("applies fontSize set on a div, not only on a text node", () => {
-    // `fontSize` lived only in build_text, so a div that set it alongside
+  it("applies fontSize set on a div, not only on the element holding the text", () => {
+    // `fontSize` lived only in the text builder, so a div that set it alongside
     // layout props had no effect on its children.
     comparePixels(
       "div-font-size",
