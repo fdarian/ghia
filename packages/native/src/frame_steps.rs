@@ -13,14 +13,23 @@
 //! (`Window::on_next_frame`), so a window that nothing else draws still runs them. What a callback
 //! requests waits for the frame after, because the request is cleared before JS is called.
 //!
+//! The steps run once per frame, and only for a frame. A frame is a draw that answers the display
+//! link (`Window::drawing_for_frame_request`) or, in the test renderer, one of its explicit frames
+//! (`as_frame`); a draw a read, an automation call or an update makes in between runs none, and
+//! asks for the next frame if its paint shows an offset nobody reported. When the steps ran in
+//! `on_next_frame` and left the window dirty, the draw that follows in the same frame skips them
+//! (`AnimationFrame::mark_stepped`), so a smooth scroll does not advance and report twice.
+//!
 //! The paint only registers a scroller and checks that it painted the offset it reported. An offset
 //! that layout moved (a clamp, anchoring) asks for the next frame, whose steps report it.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use gpui::{App, ScrollHandle, Window};
 
+use crate::automation::AutomationClock;
 use crate::events::sync_dispatch;
 use crate::renderer::{EventCallback, SharedPaintReports};
 
@@ -104,7 +113,12 @@ impl ScrollReports {
         };
         let left = offset_of(&watched.handle);
         if !same(watched.pass_start, left) {
-            let began = watched.laid_out.map_or(watched.pass_start, |(began, _)| began);
+            // A write between the two passes moved the handle off where the earlier one left it, and
+            // what that pass moved is no longer what is reported.
+            let began = match watched.laid_out {
+                Some((began, earlier_left)) if same(earlier_left, watched.pass_start) => began,
+                _ => watched.pass_start,
+            };
             watched.laid_out = Some((began, left));
         }
     }
@@ -142,10 +156,12 @@ impl ScrollReports {
     }
 }
 
-/// Whether JS has `requestAnimationFrame` callbacks waiting for this window's next frame.
+/// Whether JS has `requestAnimationFrame` callbacks waiting for this window's next frame, and
+/// whether this frame's steps have already run.
 #[derive(Default)]
 pub(crate) struct AnimationFrame {
     requested: bool,
+    stepped: bool,
 }
 
 impl AnimationFrame {
@@ -157,70 +173,128 @@ impl AnimationFrame {
     fn take(&mut self) -> bool {
         std::mem::replace(&mut self.requested, false)
     }
+
+    /// The steps ran ahead of a draw that is to follow in this frame, which must not run them again.
+    fn mark_stepped(&mut self) {
+        self.stepped = true;
+    }
+
+    /// True once after `mark_stepped`: the draw it was for.
+    fn take_stepped(&mut self) -> bool {
+        std::mem::take(&mut self.stepped)
+    }
+}
+
+thread_local! {
+    static EXPLICIT_FRAME: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Runs `run`, in which the draws of the test renderer count as a frame: its `flush`, `drawFrame`
+/// and the draw an input ends with stand for the display link, and no other draw it makes does.
+pub(crate) fn as_frame<R>(run: impl FnOnce() -> R) -> R {
+    struct Leave;
+    impl Drop for Leave {
+        fn drop(&mut self) {
+            EXPLICIT_FRAME.with(|depth| depth.set(depth.get() - 1));
+        }
+    }
+    EXPLICIT_FRAME.with(|depth| depth.set(depth.get() + 1));
+    let _leave = Leave;
+    run()
+}
+
+fn in_explicit_frame() -> bool {
+    EXPLICIT_FRAME.with(|depth| depth.get() > 0)
 }
 
 /// The event type JS runs the callbacks for. It goes the way of any sync event, so it is a call
 /// from native into JS made with the window stashed, which a callback that writes needs.
 const ANIMATION_FRAME_EVENT: &str = "animationframe";
 
-/// The steps a window runs before each draw. `now` is the clock the view's frames sample.
-pub(crate) fn steps(
+/// The steps of one window.
+#[derive(Clone)]
+pub(crate) struct FrameSteps {
     reports: SharedPaintReports,
     callback: Option<EventCallback>,
-    now: impl Fn() -> web_time::Instant + 'static,
-) -> Rc<dyn Fn(&mut Window, &mut App)> {
-    Rc::new(move |window: &mut Window, cx: &mut App| {
-        // A draw a handler's own call makes (a read that paints) leaves the steps to the next one,
-        // since a handler cannot be called while another is on the stack.
+    clock: AutomationClock,
+}
+
+impl FrameSteps {
+    pub(crate) fn new(reports: SharedPaintReports, callback: Option<EventCallback>, clock: AutomationClock) -> Self {
+        Self { reports, callback, clock }
+    }
+
+    /// What `Window::set_frame_steps` runs before every draw.
+    pub(crate) fn before_draw(self) -> Rc<dyn Fn(&mut Window, &mut App)> {
+        Rc::new(move |window: &mut Window, cx: &mut App| {
+            // A draw a handler's own call makes (a read that paints) leaves the steps to the next
+            // one, since a handler cannot be called while another is on the stack.
+            if sync_dispatch::in_sync_call() {
+                return;
+            }
+            if !(window.drawing_for_frame_request() || in_explicit_frame()) {
+                return;
+            }
+            if self.reports.borrow_mut().animation_frame.take_stepped() {
+                return;
+            }
+            self.run(window, cx);
+        })
+    }
+
+    /// The steps of the frame `Window::on_next_frame` delivers, ahead of its draw.
+    fn next_frame(&self, window: &mut Window, cx: &mut App) {
         if sync_dispatch::in_sync_call() {
+            // Inside a handler's own call the frame cannot be stepped, and it would be lost: the
+            // request stays set, so nothing else would ask for another one.
+            let steps = self.clone();
+            window.on_next_frame(move |window, cx| steps.next_frame(window, cx));
             return;
         }
-        crate::renderer::settle_scroll_writes();
-        crate::scroll::advance_animations(now());
-        report_scrolls(&reports, &callback, window, cx);
-        run_animation_frame(&reports, &callback, window, cx);
-    })
-}
+        self.run(window, cx);
+        if window.has_pending_draw() {
+            self.reports.borrow_mut().animation_frame.mark_stepped();
+        }
+    }
 
-fn report_scrolls(
-    reports: &SharedPaintReports,
-    callback: &Option<EventCallback>,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    let changed = reports.borrow().scrolls.changed();
-    for id in changed {
-        let Some(offset) = reports.borrow_mut().scrolls.take_change(id) else {
-            continue;
-        };
-        sync_dispatch::emit_full(window, cx, callback, id, "scroll", |payload| {
-            payload.scroll_x = Some(f64::from(offset.0));
-            payload.scroll_y = Some(f64::from(offset.1));
+    fn run(&self, window: &mut Window, cx: &mut App) {
+        let now = self.clock.now();
+        crate::renderer::settle_scroll_writes();
+        crate::scroll::advance_animations(now);
+        self.report_scrolls(window, cx);
+        self.run_animation_frame(now, window, cx);
+    }
+
+    fn report_scrolls(&self, window: &mut Window, cx: &mut App) {
+        let changed = self.reports.borrow().scrolls.changed();
+        for id in changed {
+            let Some(offset) = self.reports.borrow_mut().scrolls.take_change(id) else {
+                continue;
+            };
+            sync_dispatch::emit_full(window, cx, &self.callback, id, "scroll", |payload| {
+                payload.scroll_x = Some(f64::from(offset.0));
+                payload.scroll_y = Some(f64::from(offset.1));
+            });
+        }
+    }
+
+    fn run_animation_frame(&self, now: web_time::Instant, window: &mut Window, cx: &mut App) {
+        if !self.reports.borrow_mut().animation_frame.take() {
+            return;
+        }
+        let timeline_time = self.clock.ms_of(now);
+        sync_dispatch::emit_full(window, cx, &self.callback, 0, ANIMATION_FRAME_EVENT, |payload| {
+            payload.timeline_time = Some(timeline_time);
         });
     }
-}
 
-fn run_animation_frame(
-    reports: &SharedPaintReports,
-    callback: &Option<EventCallback>,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    if !reports.borrow_mut().animation_frame.take() {
-        return;
-    }
-    sync_dispatch::emit_full(window, cx, callback, 0, ANIMATION_FRAME_EVENT, |_| {});
-}
-
-/// Asks for the steps of the next frame to run the animation frame callbacks: the next frame
-/// is one even when nothing else asks for a draw.
-pub(crate) fn request_animation_frame(
-    reports: &SharedPaintReports,
-    steps: Rc<dyn Fn(&mut Window, &mut App)>,
-    window: &mut Window,
-) {
-    if reports.borrow_mut().animation_frame.request() {
-        window.on_next_frame(move |window, cx| steps(window, cx));
+    /// Asks for the steps of the next frame to run the animation frame callbacks: the next frame
+    /// is one even when nothing else asks for a draw.
+    pub(crate) fn request_animation_frame(&self, window: &mut Window) {
+        if self.reports.borrow_mut().animation_frame.request() {
+            let steps = self.clone();
+            window.on_next_frame(move |window, cx| steps.next_frame(window, cx));
+        }
     }
 }
 
@@ -304,6 +378,74 @@ mod tests {
         handle.set_offset(point(px(0.0), px(-150.0)));
         reports.note_laid_out(1);
         handle.set_offset(point(px(0.0), px(-300.0)));
+        assert_eq!(reports.take_change(1), Some((0.0, -300.0)));
+    }
+
+    #[test]
+    fn steps_that_ran_ahead_of_a_draw_are_skipped_by_that_draw_once() {
+        let mut frame = AnimationFrame::default();
+        assert!(!frame.take_stepped(), "nothing ran ahead of a frame by default");
+        frame.mark_stepped();
+        assert!(frame.take_stepped(), "the draw of the same frame skips its steps");
+        assert!(!frame.take_stepped(), "the draw of the next frame runs them");
+    }
+
+    #[test]
+    fn a_draw_is_a_frame_for_the_steps_only_inside_as_frame() {
+        assert!(!in_explicit_frame());
+        as_frame(|| {
+            assert!(in_explicit_frame());
+            as_frame(|| assert!(in_explicit_frame()));
+            assert!(in_explicit_frame(), "leaving a nested frame does not end the outer one");
+        });
+        assert!(!in_explicit_frame());
+    }
+
+    #[test]
+    fn a_frame_that_unwinds_is_not_left_open() {
+        let unwound = std::panic::catch_unwind(|| as_frame(|| panic!("a draw failed")));
+        assert!(unwound.is_err());
+        assert!(!in_explicit_frame());
+    }
+
+    #[test]
+    fn two_layout_only_passes_with_no_write_between_report_what_the_first_began_with() {
+        let mut reports = ScrollReports::default();
+        let handle = handle_at(-100.0);
+        reports.note_painted(1, &handle);
+
+        reports.begin_pass();
+        handle.set_offset(point(px(0.0), px(-150.0)));
+        reports.note_laid_out(1);
+        reports.begin_pass();
+        handle.set_offset(point(px(0.0), px(-200.0)));
+        reports.note_laid_out(1);
+
+        assert!(reports.changed().is_empty(), "the offset before either pass is still the reported one");
+        assert!(reports.note_painted(1, &handle));
+        assert_eq!(reports.take_change(1), Some((0.0, -200.0)));
+    }
+
+    #[test]
+    fn a_write_between_two_layout_only_passes_is_not_hidden_by_the_second() {
+        let mut reports = ScrollReports::default();
+        let handle = handle_at(-100.0);
+        reports.note_painted(1, &handle);
+
+        reports.begin_pass();
+        handle.set_offset(point(px(0.0), px(-150.0)));
+        reports.note_laid_out(1);
+        // A write moves the handle on, and the second pass moves it again.
+        handle.set_offset(point(px(0.0), px(-300.0)));
+        reports.begin_pass();
+        handle.set_offset(point(px(0.0), px(-350.0)));
+        reports.note_laid_out(1);
+
+        assert_eq!(
+            reports.changed(),
+            vec![1],
+            "the write is a change: the handle began the second pass at -300, not at the reported -100"
+        );
         assert_eq!(reports.take_change(1), Some((0.0, -300.0)));
     }
 }

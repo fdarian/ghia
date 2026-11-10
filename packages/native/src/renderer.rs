@@ -9880,19 +9880,18 @@ impl GpuixView {
         });
     }
 
-    /// The steps of "update the rendering" this window runs before a draw, see `frame_steps`.
-    fn frame_steps(&self) -> Rc<dyn Fn(&mut gpui::Window, &mut gpui::App)> {
-        let clock = self.clock.clone();
-        crate::frame_steps::steps(
+    /// The steps of "update the rendering" this window runs, see `frame_steps`.
+    fn frame_steps(&self) -> crate::frame_steps::FrameSteps {
+        crate::frame_steps::FrameSteps::new(
             self.paint_reports.clone(),
             self.event_callback.clone(),
-            move || clock.now(),
+            self.clock.clone(),
         )
     }
 
     /// `requestAnimationFrame`: the next frame's steps run the callbacks JS holds.
     pub(crate) fn request_animation_frame(&mut self, window: &mut gpui::Window) {
-        crate::frame_steps::request_animation_frame(&self.paint_reports, self.frame_steps(), window);
+        self.frame_steps().request_animation_frame(window);
     }
 
     /// Whether nothing is drawn of the motion at `id`: its element is culled and dormant, or it
@@ -9987,7 +9986,7 @@ impl gpui::Render for GpuixView {
             // there is no commit to survey that the update has not just made.
             move |_: &gpui::Window| tree.try_lock().is_ok_and(|tree| flips.wants_survey(tree.revision()))
         })));
-        window.set_frame_steps(Some(self.frame_steps()));
+        window.set_frame_steps(Some(self.frame_steps().before_draw()));
         window.set_scroll_patch_registries(verifies.then(|| {
             let window_id = window.window_handle().window_id();
             let tapes = self.tapes.clone();
