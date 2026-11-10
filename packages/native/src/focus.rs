@@ -101,6 +101,30 @@ impl FocusStyles {
         folded
     }
 
+    /// The custom properties element `id` computes to below `parent`: the ones `style` declares
+    /// with those of the focus variants that apply laid over them, the later variant winning. A
+    /// custom property a variant sets is the element's, as in CSS, so its base, its other
+    /// variants and its descendants read it.
+    pub fn custom_of(
+        &self,
+        id: u64,
+        style: &StyleDesc,
+        focusable: bool,
+        parent: &crate::css::custom_properties::CustomProperties,
+    ) -> crate::css::custom_properties::CustomProperties {
+        let mut declared = style.custom_properties.clone();
+        for variant in self.applying(id, style, focusable) {
+            declared = crate::css::custom_properties::CustomProperties::layered(
+                declared.as_ref(),
+                variant.custom_properties.as_ref(),
+            );
+        }
+        match declared.as_ref() {
+            Some(declared) => parent.descend(declared),
+            None => parent.clone(),
+        }
+    }
+
     /// The focus variants of `style` that apply to element `id`, weakest first.
     fn applying<'a>(&self, id: u64, style: &'a StyleDesc, focusable: bool) -> impl Iterator<Item = &'a StyleDesc> {
         [
@@ -803,6 +827,37 @@ mod tests {
         applied.sort_unstable();
         listed.sort_unstable();
         assert_eq!(applied, listed, "left: laid over an element by `applying`; right: in `focus_variant_fields!`");
+    }
+
+    fn custom(json: &str) -> crate::css::custom_properties::CustomProperties {
+        let style = crate::css::var_substitution::parse(json.as_bytes()).expect("a style");
+        style.custom_properties.expect("custom properties")
+    }
+
+    #[test]
+    fn a_focus_variant_that_applies_sets_the_custom_properties_of_its_element() {
+        let style = crate::css::var_substitution::parse(
+            br#"{"--a":"base","--b":"base","focusWithin":{"--a":"within","--c":"within"},"focusVisible":{"--a":"visible"}}"#,
+        )
+        .expect("a style");
+        let parent = custom(r#"{"--p":"parent"}"#);
+        let get = |custom: &crate::css::custom_properties::CustomProperties, name: &str| {
+            custom.get(name).map(str::to_owned)
+        };
+
+        let none = FocusStyles::default().custom_of(1, &style, true, &parent);
+        assert_eq!(get(&none, "--a").as_deref(), Some("base"));
+        assert_eq!(get(&none, "--c"), None);
+
+        let both = FocusStyles { visible: Some(1), within: Arc::from([1_u64]), ..Default::default() }
+            .custom_of(1, &style, true, &parent);
+        assert_eq!(get(&both, "--a").as_deref(), Some("visible"));
+        assert_eq!(get(&both, "--b").as_deref(), Some("base"));
+        assert_eq!(get(&both, "--c").as_deref(), Some("within"));
+        assert_eq!(get(&both, "--p").as_deref(), Some("parent"));
+
+        let within = FocusStyles { within: Arc::from([1_u64]), ..Default::default() }.custom_of(1, &style, true, &parent);
+        assert_eq!(get(&within, "--a").as_deref(), Some("within"));
     }
 
     fn tree_with(elements: &[(u64, &str)]) -> RetainedTree {

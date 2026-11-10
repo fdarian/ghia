@@ -11324,10 +11324,13 @@ fn build_element_unpumped(
             .then(|| crate::events::state_styles::resolve_pointer_states(style, pointer_states))
     });
     let base_style = state_style.as_ref().or(declared);
-    // A `var()` reads the custom properties the element computes to, its own included. It is
-    // substituted before anything reads the style, so inheritance, transitions, animations and
+    // A `var()` reads the custom properties the element computes to, its own included, and those
+    // of the focus variants that apply to it. It is substituted before anything reads the style, so inheritance, transitions, animations and
     // motion see what the element declares.
-    let own_custom = ctx.inherited.custom_of(base_style);
+    let own_custom = match base_style {
+        Some(style) => ctx.focus_styles.custom_of(id, style, ctx.focus_handles.contains_key(&id), &ctx.inherited.custom),
+        None => ctx.inherited.custom.clone(),
+    };
     let var_style = base_style.and_then(|style| crate::css::var_substitution::resolve(style, &own_custom));
     if var_style.is_some() {
         crate::css::custom_properties::reads::note();

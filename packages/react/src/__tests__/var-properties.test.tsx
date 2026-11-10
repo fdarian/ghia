@@ -421,6 +421,124 @@ describeNative("a custom property declared in a focus state", () => {
   }, SLOW)
 })
 
+describeNative("a custom property set in a focus variant that applies", () => {
+  const tabTo = (renderer: Renderer, testId: string) => {
+    renderer.simulateKeystrokes("Tab")
+    renderer.dispatchNativeEvents()
+    renderer.flush()
+    renderer.drawFrame()
+    expect(renderer.matchesFocus(renderer.findByTestId(testId)!.id, ":focus-visible")).toBe(true)
+  }
+
+  /** What `read` sees before the element `testId` is focused, while it is, and after it is blurred. */
+  const throughFocus = (tree: React.ReactElement, testId: string, read: (renderer: Renderer) => unknown) => {
+    let seen: unknown[] = []
+    mounted(tree, (renderer) => {
+      renderer.drawFrame()
+      const before = read(renderer)
+      tabTo(renderer, testId)
+      const during = read(renderer)
+      renderer.blurElement(renderer.findByTestId(testId)!.id)
+      renderer.flush()
+      renderer.drawFrame()
+      seen = [before, during, read(renderer)]
+    })
+    return seen
+  }
+
+  const page = (children: React.ReactNode) => (
+    <div style={{ position: "absolute", left: 0, top: 0, width: 600, "--w": "40px" }}>{children}</div>
+  )
+
+  it("reaches the base style of the element, as a literal in the variant does", () => {
+    const width = (renderer: Renderer) => box(renderer, "focusable")[2]
+    const viaVar = throughFocus(
+      page(<div testId="focusable" tabIndex={0} style={{ width: "var(--w)", height: 10, focusVisible: { "--w": "80px" } }} />),
+      "focusable",
+      width,
+    )
+    const literal = throughFocus(
+      page(<div testId="focusable" tabIndex={0} style={{ width: 40, height: 10, focusVisible: { width: 80 } }} />),
+      "focusable",
+      width,
+    )
+    expect(literal).toEqual([40, 80, 40])
+    expect(viaVar).toEqual(literal)
+  }, SLOW)
+
+  it("reaches a descendant of the element, and is gone from it once the element is blurred", () => {
+    const width = (renderer: Renderer) => box(renderer, "child")[2]
+    const seen = throughFocus(
+      page(
+        <div testId="focusable" tabIndex={0} style={{ width: 200, height: 20, focusVisible: { "--w": "80px" } }}>
+          <div testId="child" style={{ width: "var(--w)", height: 10 }} />
+        </div>,
+      ),
+      "focusable",
+      width,
+    )
+    expect(seen).toEqual([40, 80, 40])
+  }, SLOW)
+
+  it("is read by the variants that apply together, whichever declares it", () => {
+    const sizes = (renderer: Renderer) => box(renderer, "focusable").slice(2)
+    const seen = throughFocus(
+      page(
+        <div
+          testId="focusable"
+          tabIndex={0}
+          style={{
+            width: "calc(var(--a, 1px) + var(--b, 2px))",
+            height: 10,
+            focusWithin: { "--a": "10px", height: "var(--b, 5px)" },
+            focusVisible: { "--b": "20px" },
+          }}
+        />,
+      ),
+      "focusable",
+      sizes,
+    )
+    expect(seen).toEqual([[3, 10], [30, 20], [3, 10]])
+  }, SLOW)
+
+  it("lets the variant that is laid over the other win", () => {
+    const width = (renderer: Renderer) => box(renderer, "focusable")[2]
+    const seen = throughFocus(
+      page(
+        <div
+          testId="focusable"
+          tabIndex={0}
+          style={{ width: "var(--w)", height: 10, focusWithin: { "--w": "60px" }, focusVisible: { "--w": "80px" } }}
+        />,
+      ),
+      "focusable",
+      width,
+    )
+    expect(seen).toEqual([40, 80, 40])
+  }, SLOW)
+
+  it("paints a box-shadow of the base style the way a literal in the variant does", () => {
+    const ring = (shadow: string, focusVisible: Record<string, unknown>) =>
+      paint(
+        `focus-ring-${shadow.replace(/\W/g, "")}`,
+        <div style={{ position: "absolute", left: 0, top: 0, width: 600, height: 300 }}>
+          <div
+            tabIndex={0}
+            testId="focusable"
+            style={{ position: "absolute", left: 20, top: 20, width: 40, height: 40, boxShadow: shadow, focusVisible }}
+          />
+        </div>,
+        (renderer) => tabTo(renderer, "focusable"),
+      )
+    const viaVar = ring("var(--ring)", { "--ring": "0 0 0 4px #ff0000" })
+    const literal = ring("none", { boxShadow: "0 0 0 4px #ff0000" })
+    for (const [x, y] of [[18, 40], [62, 40], [40, 18], [40, 62], [40, 40], [5, 5]] as const) {
+      expectNear(viaVar.at(x, y), literal.at(x, y))
+    }
+    expectNear(viaVar.at(18, 40), RED)
+  }, SLOW)
+})
+
 describeNative("a var() declaration against the plain ones written around it", () => {
   const custom = { "--w": "4px", "--n": "none", "--p": "6px", "--line": "blue", "--b": "2px solid red", "--num": "8" }
 

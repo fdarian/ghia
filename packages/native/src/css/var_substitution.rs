@@ -309,7 +309,8 @@ pub(crate) fn holds_family(style: &StyleDesc, family: &str) -> bool {
 ///
 /// A transform text that cannot be resolved is the initial value of its property: `none`, and
 /// `50% 50%` for an origin. The focus styles are laid over the element when it is built, so they
-/// are substituted too. The pointer states are folded into the style before this runs.
+/// are substituted too, against the same `custom`: the caller puts the custom properties of the
+/// variants that apply in it. The pointer states are folded into the style before this runs.
 pub(crate) fn resolve(style: &StyleDesc, custom: &CustomProperties) -> Option<StyleDesc> {
     if !reads_vars(style) {
         return None;
@@ -344,13 +345,12 @@ fn resolve_in(style: &mut StyleDesc, custom: &CustomProperties) {
     if let Some(held) = style.var_declarations.take() {
         lay_declarations(style, &held, custom);
     }
-    // A focus variant is laid over the element when it is built, so what it declares of a custom
-    // property is what its own `var()` reads, as for an element a transition resolves.
+    // The custom properties of a focus variant that applies are already in `custom`
+    // (`FocusStyles::custom_of`), as CSS has them for the whole element.
     macro_rules! resolve_variants {
         ($($field:ident),+) => {$(
             if let Some(variant) = style.$field.as_mut() {
-                let own = variant.custom_properties.as_ref().map(|declared| custom.descend(declared));
-                resolve_in(variant, own.as_ref().unwrap_or(custom));
+                resolve_in(variant, custom);
             }
         )+};
     }
@@ -773,15 +773,14 @@ mod tests {
     }
 
     #[test]
-    fn a_focus_variant_reads_the_custom_properties_it_declares_over_the_elements() {
+    fn a_focus_variant_reads_the_custom_properties_it_is_given() {
         let focused = resolved(
-            r#"{"focusVisible":{"--v":"80px","--w":"70px","width":"var(--v)","height":"var(--w)","opacity":"var(--o)"}}"#,
-            &[("--w", "5px"), ("--o", "0.5")],
+            r#"{"focusVisible":{"width":"var(--w)","height":"var(--h)"}}"#,
+            &[("--w", "70px"), ("--h", "5px")],
         );
         let variant = focused.focus_visible.as_ref().unwrap();
-        assert_eq!(variant.width, style(r#"{"width":"80px"}"#).width);
-        assert_eq!(variant.height, style(r#"{"height":"70px"}"#).height);
-        assert_eq!(variant.opacity, Some(0.5));
+        assert_eq!(variant.width, style(r#"{"width":"70px"}"#).width);
+        assert_eq!(variant.height, style(r#"{"height":"5px"}"#).height);
     }
 
     #[test]

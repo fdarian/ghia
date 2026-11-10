@@ -8657,6 +8657,11 @@ A key that starts with `--` is a CSS custom property, in a style, a state style 
   base `borderWidth: 'var(--w)'` on its side only. Only a string is substituted: a number is not a `var()`. What it
   substitutes to is a number only for a property whose value is a `<number>` (`opacity`, `zIndex`, `flexGrow`, `order`);
   `padding: 'var(--n)'` with `--n: 8` is dropped, as `padding: '8'` is.
+  A custom property set in a focus style that applies (`focusVisible`, `focusWithin`, `hasFocusVisible`) is the
+  element's, as for `:focus-visible { --ring: ... }` in CSS: the element's own `var(--ring)`, in its base style and
+  in the other focus styles that apply with it, and its descendants read it while it applies, and the value it
+  covers is back after a blur. Where two focus styles that apply set one, the later of `focusWithin`,
+  `hasFocusVisible`, `focusVisible` wins.
 - **A normal property in `style()`** (`style(color: red)`, `style(display: block)`) is
   unknown, as in Chrome, which supports custom properties only.
 
