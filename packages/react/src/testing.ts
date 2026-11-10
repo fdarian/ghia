@@ -1,16 +1,12 @@
 import type { ReactNode } from "react"
-import type { EventPayload } from "@ghia/native"
 import {
   TestRenderer,
   hasNativeTestRenderer,
   type TestWindowOptions,
 } from "@ghia/native/testing"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
-import {
-  createRendererState,
-  type RootEventHandlers,
-  type SyncDispatchResult,
-} from "@ghia/native/host"
+import type { EventPayload } from "@ghia/native"
+import type { RootEventHandlers } from "@ghia/native/host"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
 
 export * from "@ghia/native/testing"
@@ -26,21 +22,11 @@ export function createTestRoot(
   options: TestWindowOptions & Pick<RootEventHandlers, "onUncaughtError"> = {}
 ): TestRoot {
   let renderer!: TestRenderer
+  // Only the queued events are wrapped here: synchronous ones take the handler a live window installs.
   renderer = new TestRenderer({
     ...options,
     dispatchEvent: (event: EventPayload) => {
       flushSync(() => handleGpuixEvent(event, renderer))
-    },
-    dispatchSyncEvent: (event: EventPayload) => {
-      // `attach` runs inside the frame, where no renderer call can be made (see `<nativeview>`): a state write
-      // in `onAttach` is a later render, as with the live renderer, and not flushed at the end of the event.
-      if (event.eventType === "attach") return createRendererState(renderer).dispatchSync(event)
-      let result: SyncDispatchResult | undefined
-      flushSync(() => {
-        result = createRendererState(renderer).dispatchSync(event)
-      })
-      if (!result) throw new Error("flushSync did not run the dispatch")
-      return result
     },
   })
   const root = createRoot(renderer, {
