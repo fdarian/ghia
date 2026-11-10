@@ -134,6 +134,10 @@ struct Covers {
     /// border side shorthand the all-sides border values as well, which it splits down to the other
     /// sides.
     clobbered: Vec<Vec<KeyId>>,
+    /// The keys whose declaration is in the way of the key's either way round: what laying it
+    /// overwrites, and what overwrites it when it is laid first (a border side shorthand writes
+    /// over an all-sides border value from the sides it covers).
+    overlapping: Vec<Vec<KeyId>>,
     border_width: KeyId,
     border_color: KeyId,
     border_style: KeyId,
@@ -203,6 +207,7 @@ impl Covers {
             keys,
             ids,
             clobbered: covered.clone(),
+            overlapping: Vec::new(),
             covered,
         };
         for key in 0..built.keys.len() {
@@ -211,6 +216,17 @@ impl Covers {
                 built.clobbered[key].extend(all_sides.into_iter().filter(|side| !built.covered[key].contains(side)));
             }
         }
+        built.overlapping = (0..built.keys.len())
+            .map(|key| {
+                let mut overlapping = built.clobbered[key].clone();
+                for (other, clobbered) in built.clobbered.iter().enumerate() {
+                    if clobbered.contains(&key) && !overlapping.contains(&other) {
+                        overlapping.push(other);
+                    }
+                }
+                overlapping
+            })
+            .collect();
         built
     }
 
@@ -308,10 +324,15 @@ pub(crate) fn covered_by(key: KeyId) -> &'static [KeyId] {
     &COVERS.covered[key]
 }
 
-/// What a declaration of `key` laid over a style can overwrite, which a declaration written after
-/// it keeps: see [`restore`].
-pub(crate) fn clobbered_by(key: KeyId) -> &'static [KeyId] {
-    &COVERS.clobbered[key]
+/// Whether the order two declarations are written in decides what they leave: one covers the other,
+/// or one is a border side shorthand and the other an all-sides border value, which it splits.
+pub(crate) fn overlaps(key: KeyId, other: KeyId) -> bool {
+    key == other || COVERS.overlapping[key].contains(&other)
+}
+
+/// The keys `overlaps` holds for with `key`.
+pub(crate) fn overlapping(key: KeyId) -> &'static [KeyId] {
+    &COVERS.overlapping[key]
 }
 
 pub(crate) fn is_set(style: &StyleDesc, key: KeyId) -> bool {

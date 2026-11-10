@@ -420,3 +420,63 @@ describeNative("a custom property declared in a focus state", () => {
     expect(focusedWidth({ width: "var(--w)" })).toBe(40)
   }, SLOW)
 })
+
+describeNative("a var() declaration against the plain ones written around it", () => {
+  const custom = { "--w": "4px", "--n": "none", "--p": "6px", "--line": "blue", "--b": "2px solid red" }
+
+  const substituted = (value: unknown): unknown => {
+    if (typeof value === "string") return value.replace(/var\((--[\w-]+)\)/g, (_, name) => custom[name])
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, substituted(inner)]))
+    }
+    return value
+  }
+
+  /// The box of the element and of the child inside it, which says what the borders and padding add up to on each side.
+  function measure(style: Record<string, unknown>, hovered: boolean) {
+    let boxes: number[] = []
+    mounted(
+      <div style={{ position: "absolute", left: 0, top: 0, width: 400, height: 400, ...custom }}>
+        <div testId="element" style={{ position: "absolute", left: 0, top: 0, ...style }}>
+          <div testId="inner" style={{ width: 5, height: 5 }} />
+        </div>
+      </div>,
+      (renderer) => {
+        if (hovered) {
+          renderer.nativeSimulateMouseMove(2, 2)
+          renderer.flush()
+          renderer.drawFrame()
+        }
+        boxes = [...box(renderer, "element"), ...box(renderer, "inner").slice(0, 2)]
+      },
+    )
+    return boxes
+  }
+
+  const cases: [string, Record<string, unknown>][] = [
+    ["a side shorthand after an all-sides width", { borderWidth: "var(--w)", borderStyle: "solid", borderTop: "1px solid" }],
+    ["a side shorthand after an all-sides style", { borderStyle: "var(--n)", borderWidth: "2px", borderTop: "1px solid" }],
+    ["borderBlock after an all-sides width", { borderWidth: "var(--w)", borderStyle: "solid", borderBlock: "1px solid" }],
+    ["borderInline after an all-sides width", { borderWidth: "var(--w)", borderStyle: "solid", borderInline: "1px solid" }],
+    ["a side shorthand after an all-sides color", { borderStyle: "solid", borderColor: "var(--line)", borderBottom: "10px solid #00ff00" }],
+    ["a held side shorthand before an all-sides width", { borderTop: "var(--b)", borderWidth: 3 }],
+    ["a held longhand before a valid shorthand", { paddingTop: "var(--p)", padding: 2 }],
+    ["a held shorthand before a longhand", { padding: "var(--p)", paddingLeft: 3 }],
+    ["a state side shorthand over an all-sides width", { borderWidth: "var(--w)", borderStyle: "solid", hover: { borderTop: "1px solid" } }],
+    ["a state borderInline over an all-sides width", { borderWidth: "var(--w)", borderStyle: "solid", hover: { borderInline: "1px solid" } }],
+    ["a state all-sides color over a held side", { borderTop: "var(--b)", hover: { borderColor: "green" } }],
+    ["a state longhand over a held shorthand", { padding: "var(--p)", hover: { paddingTop: 3 } }],
+  ]
+
+  for (const [name, style] of cases) {
+    it(`gives the box of the literal values for ${name}`, () => {
+      for (const hovered of "hover" in style ? [false, true] : [false]) {
+        expect(measure(style, hovered), `${name}${hovered ? " (hover)" : ""}`).toEqual(measure(substituted(style), hovered))
+      }
+    }, SLOW)
+  }
+
+  it("keeps the longhand that the literal keeps", () => {
+    expect(measure({ borderWidth: "var(--w)", borderStyle: "solid", borderTop: "1px solid" }, false).slice(2, 4)).toEqual([5 + 8, 5 + 1 + 4])
+  }, SLOW)
+})

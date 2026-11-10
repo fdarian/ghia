@@ -13,11 +13,13 @@
 //! [`resolve`] substitutes those in place.
 //!
 //! Written order decides between a held declaration and the others, as it does in CSS
-//! (`css::covers`): one laid over the style covers what it covers, except what was written after
-//! it ([`VarDeclaration::kept`]), and one that a later shorthand covers is dropped when it is held.
-//! The same holds between layers (a state style, an `@container` block, the universal style over
-//! or under an element's own): [`merge`] adds what the layer above sets to what a held declaration
-//! of the layer below keeps.
+//! (`css::covers`). A plain declaration written after a held one that overlaps it is held too, as
+//! text, and [`resolve`] lays the held declarations one after the other with the layering a state
+//! style gets, so a shorthand resets what it covers and an all-sides border value is split as for
+//! literals. One that a later held declaration covers is dropped. The same holds between layers (a
+//! state style, an `@container` block, the universal style over or under an element's own):
+//! [`merge`] adds what the layer above sets that overlaps a held declaration of the layer below to
+//! its [`VarDeclaration::kept`], and it is laid under those.
 //!
 //! The renderer resolves a style right after the pointer states are folded into it and before
 //! anything reads it (`renderer::build_element`): inheritance, transitions, animations and motion
@@ -25,6 +27,7 @@
 //! the parents' pass over their children) does not see a held declaration, see
 //! `docs/fork/deviations.md`.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -32,9 +35,9 @@ use rustc_hash::FxHashMap;
 
 use crate::css::covers::{self, KeyId};
 use crate::css::custom_properties::{self, CustomProperties};
-use crate::css::lenient::{json_string, object_text, recover, Declaration, Declarations};
+use crate::css::lenient::{json_string, number_text, object_text, recover, Declaration, Declarations};
 use crate::css::transform::{DEFAULT_ORIGIN_TEXT, DEFAULT_PERSPECTIVE_ORIGIN_TEXT};
-use crate::events::state_styles::{is_no_layer, laid_over, sets_property};
+use crate::events::state_styles::{is_no_layer, laid_over, sets_property, without_invalid_values};
 use crate::retained_tree::parse_style;
 use crate::style::StyleDesc;
 
@@ -51,8 +54,9 @@ pub(crate) struct VarDeclaration {
     /// The property, as written in a style object (camel case).
     key: String,
     text: String,
-    /// What laying this declaration would overwrite (`covers::clobbered_by`) that is set by a plain
-    /// declaration written after it, in its own object or in a layer above: those win.
+    /// What a plain declaration of a layer above sets that this one is in the way of
+    /// (`covers::overlapping`): those win. Empty from `parse`: within one object the declarations
+    /// that overlap a held one are held too, and laid in written order.
     kept: Box<[KeyId]>,
 }
 
@@ -76,25 +80,28 @@ fn strict_or_recover(text: &str) -> Result<StyleDesc, String> {
     parse_style(text.as_bytes()).or_else(|error| recover(text.as_bytes(), error))
 }
 
-struct Written {
+/// A declaration of the object being parsed, with what is known of it in written order.
+struct Entry {
+    declaration: Declaration,
     key_id: Option<KeyId>,
-    held: bool,
+    /// The text to substitute and parse when the element is built, when the declaration is held.
+    held: Option<String>,
+    /// Held although its text has no `var()`: a declaration written after a held one that overlaps
+    /// it, which has to be laid in written order with it.
+    promoted: bool,
 }
 
 fn parse_object(text: &str) -> Result<StyleDesc, String> {
     let Ok(declarations) = serde_json::from_str::<Declarations>(text) else {
         return strict_or_recover(text);
     };
-    let mut plain: Vec<Declaration> = Vec::new();
-    let mut written: Vec<Written> = Vec::new();
-    let mut held: Vec<(usize, String, String)> = Vec::new();
+    let mut entries: Vec<Entry> = Vec::new();
     let mut states: Vec<(String, StyleDesc)> = Vec::new();
     let mut blocks = None;
     for declaration in declarations.0 {
         let key_id = covers::key_id(&declaration.key);
-        if let Some(text) = held_text(&declaration) {
-            held.push((written.len(), declaration.key, text));
-            written.push(Written { key_id, held: true });
+        if let Some(held) = held_text(&declaration) {
+            entries.push(Entry { declaration, key_id, held: Some(held), promoted: false });
             continue;
         }
         if declaration.value.starts_with('{') && mentions_var(declaration.value.as_bytes()) {
@@ -107,8 +114,21 @@ fn parse_object(text: &str) -> Result<StyleDesc, String> {
                 continue;
             }
         }
-        written.push(Written { key_id, held: false });
-        plain.push(declaration);
+        // One that is invalid stays plain, to be dropped with the rest of the plain ones, and so
+        // covers nothing.
+        let held = key_id
+            .filter(|&id| entries.iter().any(|earlier| earlier.is_held_overlapping(id)))
+            .and_then(|_| valid_text(&declaration));
+        entries.push(Entry { declaration, key_id, promoted: held.is_some(), held });
+    }
+    settle_held(&mut entries);
+    let mut plain: Vec<Declaration> = Vec::new();
+    let mut held: Vec<VarDeclaration> = Vec::new();
+    for entry in entries {
+        match entry.held {
+            Some(text) => held.push(VarDeclaration { key: entry.declaration.key, text, kept: Box::default() }),
+            None => plain.push(entry.declaration),
+        }
     }
     let mut style = strict_or_recover(&object_text(&plain))?;
     for (key, state) in states {
@@ -117,31 +137,55 @@ fn parse_object(text: &str) -> Result<StyleDesc, String> {
     if let Some(blocks) = blocks {
         style.container_rules = Some(blocks);
     }
-    let held: Vec<VarDeclaration> = held
-        .into_iter()
-        .filter_map(|(position, key, text)| {
-            let key_id = written[position].key_id;
-            let later = &written[position + 1..];
-            // A shorthand written after it covers it, held or not.
-            let covered_later = key_id.is_some_and(|id| {
-                later.iter().filter_map(|other| other.key_id).any(|other| other != id && covers::covered_by(other).contains(&id))
-            });
-            if covered_later {
-                return None;
-            }
-            let kept = key_id.map_or_else(Vec::new, |id| {
-                later
-                    .iter()
-                    .filter(|other| !other.held)
-                    .filter_map(|other| other.key_id)
-                    .filter(|other| covers::clobbered_by(id).contains(other))
-                    .collect()
-            });
-            Some(VarDeclaration { key, text, kept: kept.into() })
-        })
-        .collect();
     style.var_declarations = (!held.is_empty()).then(|| held.into());
     Ok(style)
+}
+
+impl Entry {
+    fn is_held_overlapping(&self, key: KeyId) -> bool {
+        self.held.is_some() && self.key_id.is_some_and(|held| covers::overlaps(held, key))
+    }
+}
+
+/// Drops a held declaration that a held one written after it covers (laying it first would change
+/// nothing), and lets a promoted one go back to the plain declarations when what it overlapped went.
+fn settle_held(entries: &mut Vec<Entry>) {
+    let covered: Vec<bool> = (0..entries.len())
+        .map(|index| {
+            let entry = &entries[index];
+            entry.held.is_some()
+                && entry.key_id.is_some_and(|id| {
+                    entries[index + 1..].iter().any(|later| {
+                        later.held.is_some()
+                            && later.key_id.is_some_and(|other| other != id && covers::covered_by(other).contains(&id))
+                    })
+                })
+        })
+        .collect();
+    let mut covered = covered.into_iter();
+    entries.retain(|_| !covered.next().expect("one flag for each entry"));
+    let mut laid: Vec<KeyId> = Vec::new();
+    for entry in entries.iter_mut().filter(|entry| entry.held.is_some()) {
+        let id = entry.key_id;
+        if entry.promoted && !id.is_some_and(|id| laid.iter().any(|&held| covers::overlaps(held, id))) {
+            entry.held = None;
+            entry.promoted = false;
+        } else if let Some(id) = id {
+            laid.push(id);
+        }
+    }
+}
+
+/// The text of a plain declaration that is valid, for a property written as `declaration.key`: a
+/// string as it is, a number as React DOM writes it.
+fn valid_text(declaration: &Declaration) -> Option<String> {
+    let text = if declaration.value.starts_with('"') {
+        serde_json::from_str(&declaration.value).ok()?
+    } else {
+        number_text(&declaration.key, &declaration.value)?
+    };
+    let parsed = parse_declaration(&declaration.key, &text)?;
+    matches!(without_invalid_values(&parsed), Cow::Borrowed(_)).then_some(text)
 }
 
 /// The text of a declaration that is held: a string with a `var()` in a property that is not a
@@ -220,7 +264,7 @@ pub(crate) fn merge(base: &StyleDesc, over: &StyleDesc) -> Option<Arc<[VarDeclar
             changed = true;
             continue;
         }
-        let newly_kept: Vec<KeyId> = covers::clobbered_by(id)
+        let newly_kept: Vec<KeyId> = covers::overlapping(id)
             .iter()
             .copied()
             .filter(|other| covers::is_set(over, *other) && !declaration.kept.contains(other))
@@ -325,14 +369,14 @@ fn lay_declarations(style: &mut StyleDesc, held: &[VarDeclaration], custom: &Cus
             Some(parsed) => {
                 *style = match &plain {
                     Some(plain) if !declaration.kept.is_empty() => {
-                        // Laid on a style without them, so that nothing that is done for what
-                        // came before (the all-sides border values pushed down to the sides a side
-                        // shorthand leaves, the longhands it covers cleared) touches them.
+                        // Laid under what the layer above set, as the layers fold for plain values:
+                        // that is what pushes a held all-sides border value down to the sides a
+                        // side shorthand of the layer leaves.
                         let mut beneath = style.clone();
                         covers::clear(&mut beneath, &declaration.kept);
-                        let mut laid = laid_over(&beneath, &parsed);
-                        covers::restore(&mut laid, plain, &declaration.kept);
-                        laid
+                        let mut above = StyleDesc::default();
+                        covers::restore(&mut above, plain, &declaration.kept);
+                        laid_over(&laid_over(&beneath, &parsed), &above)
                     }
                     _ => laid_over(style, &parsed),
                 };
@@ -743,6 +787,95 @@ mod tests {
         let merged = merge(&base, &style(r#"{"opacity":0.5}"#)).unwrap();
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].key, "width");
+    }
+
+    /// `with_var` resolved, against the same style with the values written in.
+    fn same_as_literal(with_var: &str, literal: &str, entries: &[(&str, &str)]) {
+        let held = resolved(with_var, entries);
+        let twin = style(literal);
+        macro_rules! same {
+            ($($field:ident),+) => {$(assert_eq!(held.$field, twin.$field, "{with_var}: {}", stringify!($field));)+};
+        }
+        same!(
+            border, border_block, border_inline, border_top, border_right, border_bottom, border_left, border_width,
+            border_color, border_style, border_top_width, border_right_width, border_bottom_width, border_left_width,
+            border_top_color, border_right_color, border_bottom_color, border_left_color, border_top_style,
+            border_right_style, border_bottom_style, border_left_style, padding, padding_top, padding_right,
+            padding_bottom, padding_left
+        );
+    }
+
+    #[test]
+    fn a_side_shorthand_written_after_a_held_all_sides_border_value_splits_it() {
+        let entries = [("--w", "4px"), ("--n", "none"), ("--line", "red")];
+        same_as_literal(
+            r#"{"borderWidth":"var(--w)","borderStyle":"solid","borderTop":"1px solid"}"#,
+            r#"{"borderWidth":"4px","borderStyle":"solid","borderTop":"1px solid"}"#,
+            &entries,
+        );
+        same_as_literal(
+            r#"{"borderStyle":"var(--n)","borderWidth":"2px","borderTop":"1px solid"}"#,
+            r#"{"borderStyle":"none","borderWidth":"2px","borderTop":"1px solid"}"#,
+            &entries,
+        );
+        same_as_literal(
+            r#"{"borderWidth":"var(--w)","borderStyle":"solid","borderBlock":"1px solid"}"#,
+            r#"{"borderWidth":"4px","borderStyle":"solid","borderBlock":"1px solid"}"#,
+            &entries,
+        );
+        same_as_literal(
+            r#"{"borderWidth":"var(--w)","borderStyle":"solid","borderInline":"1px solid"}"#,
+            r#"{"borderWidth":"4px","borderStyle":"solid","borderInline":"1px solid"}"#,
+            &entries,
+        );
+        same_as_literal(
+            r##"{"borderStyle":"solid","borderColor":"var(--line)","borderBottom":"10px solid #00ff00"}"##,
+            r##"{"borderStyle":"solid","borderColor":"red","borderBottom":"10px solid #00ff00"}"##,
+            &entries,
+        );
+    }
+
+    #[test]
+    fn a_plain_declaration_overlapping_a_held_one_is_held_after_it() {
+        let held = style(r#"{"borderWidth":"var(--w)","borderStyle":"solid","borderTop":"1px solid","opacity":0.5}"#);
+        let keys: Vec<&str> = held.var_declarations.as_ref().unwrap().iter().map(|held| held.key.as_str()).collect();
+        assert_eq!(keys, ["borderWidth", "borderTop"]);
+        assert!(held.border_style.is_some());
+        assert_eq!(held.border_top, None);
+        assert_eq!(held.opacity, Some(0.5));
+        assert!(held.var_declarations.as_ref().unwrap().iter().all(|held| held.kept.is_empty()));
+    }
+
+    #[test]
+    fn a_plain_declaration_that_overlaps_nothing_held_stays_plain() {
+        let held = style(r#"{"paddingTop":"var(--p)","borderTop":"1px solid","paddingBottom":3}"#);
+        assert_eq!(held.var_declarations.as_deref().map(<[_]>::len), Some(1));
+        assert!(held.border_top.is_some() && held.padding_bottom.is_some());
+    }
+
+    #[test]
+    fn a_plain_declaration_held_for_a_held_one_that_went_is_plain_again() {
+        let held = style(r#"{"paddingTop":"var(--p)","paddingLeft":3,"padding":8}"#);
+        assert_eq!(held.var_declarations, None);
+        assert!(held.padding.is_some());
+        assert_eq!(held.padding_left, None);
+    }
+
+    #[test]
+    fn a_side_shorthand_of_the_layer_above_splits_a_held_all_sides_border_value_below() {
+        for over in [r#"{"borderTop":"1px solid"}"#, r#"{"borderInline":"1px solid"}"#] {
+            let held = hovered(&format!(r#"{{"borderWidth":"var(--w)","borderStyle":"solid","hover":{over}}}"#), &[("--w", "4px")]);
+            let literal = hovered(&format!(r#"{{"borderWidth":"4px","borderStyle":"solid","hover":{over}}}"#), &[]);
+            macro_rules! same {
+                ($($field:ident),+) => {$(assert_eq!(held.$field, literal.$field, "{over}: {}", stringify!($field));)+};
+            }
+            same!(
+                border_width, border_style, border_top, border_inline, border_top_width, border_right_width,
+                border_bottom_width, border_left_width, border_top_style, border_right_style, border_bottom_style,
+                border_left_style
+            );
+            assert!(held.border_bottom_width.is_some(), "{over}");
+        }
     }
 
     #[test]

@@ -181,18 +181,26 @@ fn object_declarations(value: &str) -> Option<Vec<Declaration>> {
     serde_json::from_str::<Declarations>(value).ok().map(|declarations| declarations.0)
 }
 
-/// The JSON string React DOM would write for a number `value` of `key`, or `None` when `value` is
-/// not a number.
-fn number_as_text(key: &str, value: &str) -> Option<String> {
+/// Whether the value of `key` is a `<number>`, which React DOM writes without a unit.
+pub(crate) fn is_unitless(key: &str) -> bool {
+    UNITLESS.contains(&key)
+}
+
+/// The text React DOM would write for a number `value` of `key`, or `None` when `value` is not a
+/// number.
+pub(crate) fn number_text(key: &str, value: &str) -> Option<String> {
     let number: serde_json::Number = serde_json::from_str(value).ok()?;
-    let text = if number.as_f64() == Some(0.0) {
+    Some(if number.as_f64() == Some(0.0) {
         "0".to_owned()
-    } else if UNITLESS.contains(&key) {
+    } else if is_unitless(key) {
         number.to_string()
     } else {
         format!("{number}px")
-    };
-    Some(json_string(&text))
+    })
+}
+
+fn number_as_text(key: &str, value: &str) -> Option<String> {
+    number_text(key, value).map(|text| json_string(&text))
 }
 
 /// Whether this is the first time `name: value` is dropped, so a re-render does not log it again.
