@@ -28,7 +28,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid unmount", () => {
     expect(app.renderer.getRetainedElementCount()).toBe(0)
   })
 
-  it("destroys sibling top-level nodes, and the html and body above them", () => {
+  it("destroys sibling top-level nodes, and the html, head and body above them", () => {
     const app = createTestRoot()
     app.render(() => (
       <>
@@ -36,8 +36,8 @@ describe.skipIf(!hasNativeTestRenderer)("Solid unmount", () => {
         <div style={{ width: 10, height: 10 }} />
       </>
     ))
-    // html, body and the two divs
-    expect(app.renderer.getRetainedElementCount()).toBe(4)
+    // html, head, body and the two divs
+    expect(app.renderer.getRetainedElementCount()).toBe(5)
     app.unmount()
     expect(app.renderer.getRetainedElementCount()).toBe(0)
   })
