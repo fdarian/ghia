@@ -13,15 +13,8 @@ import type { ElementType } from "../host.js"
 /** Where `[DOM_BINDING]()` is read, so two copies of this package find each other's nodes. */
 export const DOM_BINDING: unique symbol = Symbol.for("@ghia/native/dom-binding")
 
-/**
- * The element types of what every window root is made of, `html` and `body` in it, which each
- * adapter builds through its own host machinery. `ElementType` lists what an app writes, so
- * these are typed as what the adapters' constructors take.
- */
-export const ROOT_ELEMENT_TYPES = { html: "html", body: "body" } as unknown as {
-  html: ElementType
-  body: ElementType
-}
+/** The element types of what every window root is made of, `html` and `body` in it. */
+export const ROOT_ELEMENT_TYPES = { html: "html", body: "body" } as const satisfies Record<string, ElementType>
 
 /** Both fill the window: the box above the root is the window, and the app's top element sizes against it. */
 export const ROOT_ELEMENT_STYLE = { display: "block", width: "100%", height: "100%" } as const

@@ -1559,6 +1559,8 @@ export type GroupStateStyleDesc = StateStyleDesc & { group?: string | true }
 // "Inline text".
 export type ElementType =
   | "div"
+  | "html"
+  | "body"
   | "text"
   | "span"
   | "img"
