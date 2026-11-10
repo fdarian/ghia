@@ -1,6 +1,12 @@
 import { DOM_DISPATCHED_HANDLER_PROPS, KEYBOARD_FOCUS_EVENT_PROPS } from "./events/event-props.js"
 import { registerMutationQueue } from "./bounds.js"
-import { registerSheetSink } from "./css/index.js"
+import {
+  attributesForwarded,
+  openAttributeGate,
+  registerAttributeGateMember,
+  registerSheetSink,
+  type AttributeGateMember,
+} from "./css/index.js"
 import { createBlobImageLoader, type BlobImageHost } from "./blob-images.js"
 import type { MutationHost, MutationRenderer } from "./host.js"
 import { createStyleImageLoader, type StyleImageHost } from "./style-images.js"
@@ -22,8 +28,19 @@ export function appliedBatchCount(): number {
 }
 
 /** Atomic mutation queue shared by all framework adapters. */
-export interface MutationQueue extends MutationRenderer {
+export interface MutationQueue extends MutationRenderer, AttributeGateMember {
   readonly pending: number
+  /**
+   * The mounted elements of this queue's adapter, which the queue reads when the attributes start
+   * to be forwarded (see `css/attribute-gate.ts`). Set it once, before the first element mounts.
+   */
+  setElementSource(source: ElementSource): void
+}
+
+/** An adapter's registry of the elements it has mounted, by native id. */
+export interface ElementSource {
+  /** `props` are the element's current props, in the order it was given them. */
+  forEachElement(visit: (id: number, type: string, props: Iterable<readonly [string, unknown]>) => void): void
 }
 
 export function createMutationQueue(
@@ -55,6 +72,8 @@ export function createMutationQueue(
 
   const styleImages = createStyleImageLoader(renderer)
 
+  let elementSource: ElementSource | undefined
+
   const mutations: MutationQueue = {
     get pending() {
       return writer.opCount
@@ -62,6 +81,8 @@ export function createMutationQueue(
     createElement(id, elementType) {
       blobImages.created(id, elementType)
       writer.createElement(id, elementType)
+      // After the op, not before: Solid lists a node as mounted before it queues its element.
+      if (elementType === "style") openAttributeGate(renderer)
       requestFlush()
     },
     destroyElement(id) {
@@ -116,16 +137,32 @@ export function createMutationQueue(
       requestFlush()
     },
     setAttribute(id, name, value) {
+      if (!attributesForwarded(renderer)) return
       writer.setAttribute(id, name, value)
       requestFlush()
     },
     setStyleSheet(sheetId, text) {
+      if (text !== null) openAttributeGate(renderer)
       writer.setStyleSheet(sheetId, text)
       requestFlush()
     },
     setAdoptedStyleSheets(sheetIds) {
+      if (sheetIds.length > 0) openAttributeGate(renderer)
       writer.setAdoptedStyleSheets(sheetIds)
       requestFlush()
+    },
+    setElementSource(source) {
+      elementSource = source
+    },
+    backfillAttributes() {
+      elementSource?.forEachElement((id, type, props) => {
+        for (const [prop, value] of props) {
+          const name = attributeNameOfProp(type, prop)
+          if (name === undefined) continue
+          const text = attributeValue(name, value)
+          if (text !== null) mutations.setAttribute(id, name, text)
+        }
+      })
     },
     requestFlush,
     flushMutations() {
@@ -175,6 +212,7 @@ export function createMutationQueue(
     },
   }
   registerMutationQueue(renderer, mutations)
+  registerAttributeGateMember(renderer, mutations)
   registerSheetSink(renderer, mutations)
   return mutations
 }

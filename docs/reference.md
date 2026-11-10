@@ -4901,7 +4901,9 @@ value as it is, a number its text, `true` the empty string; `false`, `null` and 
 compared ASCII case-insensitively. Native reads an attribute from what was sent, else from the prop of the same name
 (`true` is `""`, `false` and `null` are absent; on `aria-*` the booleans are `"true"` and `"false"`), and a prop whose DOM
 attribute is named otherwise under that name: `tabIndex` is `tabindex`, `htmlFor` is `for`, `colSpan` is `colspan`, `rowSpan`
-is `rowspan` and `autoFocus` is `autofocus`. Setting an attribute changes nothing drawn by itself. `className` is no longer
+is `rowspan` and `autoFocus` is `autofocus`. A renderer sends none of them until a sheet can apply to it (a `<style>` element is created or a
+constructed sheet is adopted), and then sends those of the elements already mounted, so an app with no sheet pays nothing for them
+([the attribute gate](fork/stylesheets.md#the-attribute-gate)). Setting an attribute changes nothing drawn by itself. `className` is no longer
 a prop of the native element on any element type: `class` is its attribute.
 
 A `<style>` element and `CSSStyleSheet` add CSS rules that read these attributes: see [Stylesheets](#stylesheets).

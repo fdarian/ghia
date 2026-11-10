@@ -1,4 +1,7 @@
-/** DOM attributes reach the native tree through `setAttribute`, so a selector matcher reads them without JS. */
+/**
+ * DOM attributes reach the native tree through `setAttribute`, so a selector matcher reads them without JS. Native reads
+ * them for nothing but sheets, so they are sent once a `<style>` exists (or a sheet is adopted): the tests below mount one.
+ */
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { createSignal } from "solid-js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
@@ -20,7 +23,10 @@ describe.skipIf(!hasNativeTestRenderer)("attributes on native in Solid", () => {
     const [data, setData] = createSignal<string | number | boolean | undefined>("1")
     const [title, setTitle] = createSignal<string | undefined>("t")
     app.render(() => (
-      <div ref={(element: unknown) => (box = element)} class={klass()} data-x={data()} title={title()} />
+      <>
+        <style />
+        <div ref={(element: unknown) => (box = element)} class={klass()} data-x={data()} title={title()} />
+      </>
     ))
     const read = (name: string) => app.renderer.getAttribute(box.nativeId, name)
     expect([read("class"), read("data-x"), read("title")]).toEqual(["a b", "1", "t"])
@@ -48,12 +54,15 @@ describe.skipIf(!hasNativeTestRenderer)("attributes on native in Solid", () => {
   it("sends nothing for a handler, a style or an object", () => {
     let box: any
     app.render(() => (
-      <div
-        ref={(element: unknown) => (box = element)}
-        style={{ width: 4 }}
-        onClick={() => {}}
-        {...({ extra: { a: 1 } } as object)}
-      />
+      <>
+        <style />
+        <div
+          ref={(element: unknown) => (box = element)}
+          style={{ width: 4 }}
+          onClick={() => {}}
+          {...({ extra: { a: 1 } } as object)}
+        />
+      </>
     ))
     for (const name of ["style", "onclick", "onClick", "extra"]) {
       expect(app.renderer.getAttribute(box.nativeId, name)).toBeNull()

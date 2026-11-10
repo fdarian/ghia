@@ -2895,7 +2895,8 @@ export interface MutationRenderer {
   setCustomProp(id: number, key: string, value: object | string | number | boolean | null): void
   /**
    * A DOM attribute (`class`, `data-*`, a primitive-valued prop), kept on the native element for
-   * selector matching. `null` removes it.
+   * selector matching. `null` removes it. A queue drops it until a sheet can apply to its renderer, and then sends the
+   * attributes of the elements it holds (`css/attribute-gate.ts`).
    */
   setAttribute(id: number, name: string, value: string | null): void
   /**

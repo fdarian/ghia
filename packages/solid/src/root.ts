@@ -81,6 +81,11 @@ export function createRoot(
     eventHandlers,
     allocateId: () => ++state.ids.nextElementId,
   })
+  mutations.setElementSource({
+    forEachElement(visit) {
+      for (const node of container.elements.values()) visit(node.nativeId, node.type, node.props)
+    },
+  })
   let binding: RendererRootBinding | undefined
   let stopWindowEventListeners: (() => void) | undefined
   let stopElementSource: (() => void) | undefined

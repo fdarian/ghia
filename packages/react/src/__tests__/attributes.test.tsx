@@ -1,4 +1,7 @@
-/** DOM attributes reach the native tree through `setAttribute`, so a selector matcher reads them without JS. */
+/**
+ * DOM attributes reach the native tree through `setAttribute`, so a selector matcher reads them without JS. Native reads
+ * them for nothing but sheets, so they are sent once a `<style>` exists (or a sheet is adopted): the tests below mount one.
+ */
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
@@ -18,7 +21,12 @@ describe.skipIf(!hasNativeTestRenderer)("attributes on native in React", () => {
   const read = (name: string) => app.renderer.getAttribute(box.nativeId, name)
 
   it("sends className as class, data-* and primitive props, and removes them as they go", () => {
-    const view = (props: Record<string, unknown>) => <div ref={(element: unknown) => { box = element }} {...props} />
+    const view = (props: Record<string, unknown>) => (
+      <>
+        <style />
+        <div ref={(element: unknown) => { box = element }} {...props} />
+      </>
+    )
     app.render(view({ className: "a b", "data-x": "1", title: "t" }))
     expect([read("class"), read("data-x"), read("title")]).toEqual(["a b", "1", "t"])
 
@@ -41,7 +49,12 @@ describe.skipIf(!hasNativeTestRenderer)("attributes on native in React", () => {
   })
 
   it("keeps the class when a prop moves between className and class", () => {
-    const view = (props: Record<string, unknown>) => <div ref={(element: unknown) => { box = element }} {...props} />
+    const view = (props: Record<string, unknown>) => (
+      <>
+        <style />
+        <div ref={(element: unknown) => { box = element }} {...props} />
+      </>
+    )
     app.render(view({ className: "a b" }))
     expect(read("class")).toBe("a b")
 
@@ -60,12 +73,15 @@ describe.skipIf(!hasNativeTestRenderer)("attributes on native in React", () => {
 
   it("sends nothing for a handler, a style or an object", () => {
     app.render(
-      <div
-        ref={(element: unknown) => { box = element }}
-        style={{ width: 4 }}
-        onClick={() => {}}
-        {...({ extra: { a: 1 } } as object)}
-      />
+      <>
+        <style />
+        <div
+          ref={(element: unknown) => { box = element }}
+          style={{ width: 4 }}
+          onClick={() => {}}
+          {...({ extra: { a: 1 } } as object)}
+        />
+      </>
     )
     for (const name of ["style", "onclick", "onClick", "extra"]) expect(read(name)).toBeNull()
   })
