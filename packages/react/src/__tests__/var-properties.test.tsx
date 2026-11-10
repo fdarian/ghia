@@ -218,7 +218,7 @@ describeNative("a var() that the element inherits, animates or is animated over"
           <div testId="swatch" style={{ width: 100, height: 100, backgroundColor: "currentColor" }} />
         </div>
         <div style={{ position: "absolute", left: 300, top: 0, width: 300, fontSize, color }}>
-          <text testId="text">measured text</text>
+          <div testId="text">measured text</div>
         </div>
       </div>
     )
@@ -328,13 +328,13 @@ describeNative("a var() that the element inherits, animates or is animated over"
 describeNative("a var() in the style of an inline box", () => {
   const tree = (style: Record<string, unknown>, custom: Record<string, string>) => (
     <div style={{ position: "absolute", left: 0, top: 0, width: 600, ...custom }}>
-      <text testId="text">
+      <div testId="text">
         ab
         <span testId="span" style={style}>
           WWWW
         </span>
         cd
-      </text>
+      </div>
     </div>
   )
   const boxes = (renderer: Renderer) => [box(renderer, "text"), box(renderer, "span")]
@@ -369,9 +369,9 @@ describeNative("a var() in the style of an inline box", () => {
       paint(
         `span-color-${color.replace(/\W/g, "")}`,
         <div style={{ position: "absolute", left: 0, top: 0, width: 600, fontSize: 80, ...custom }}>
-          <text>
+          <div>
             <span style={{ color }}>WWWW</span>
-          </text>
+          </div>
         </div>,
       )
     const viaVar = painted("var(--c)", { "--c": "#ff0000" })
@@ -393,9 +393,9 @@ describeNative("a var() as the cursor of an inline box", () => {
     let seen: string[] = []
     mounted(
       <div style={{ position: "absolute", left: 0, top: 0, width: 600, ...custom }}>
-        <text testId="text" style={{ fontSize: 16, lineHeight: "20px" }}>
+        <div testId="text" style={{ fontSize: 16, lineHeight: "20px" }}>
           <span style={{ cursor }}>WWWWWWWW</span>
-        </text>
+        </div>
       </div>,
       (renderer) => {
         const [x, y] = box(renderer, "text")
@@ -751,9 +751,9 @@ describeNative("a var() that resolves to no motion", () => {
           {Array.from({ length: 20 }, (_, i) => (
             <div key={i} style={{ padding: 2 }}>
               {span ? (
-                <text>
+                <div>
                   row <span style={span}>span</span> tail
-                </text>
+                </div>
               ) : (
                 <div style={{ padding: 1 }}>
                   <div style={{ height: 5, width: 10, ...cell }} />
@@ -822,11 +822,11 @@ describeNative("a var() as the pointerEvents of an inline box", () => {
     let count = 0
     mounted(
       <div style={{ position: "absolute", left: 0, top: 0, width: 600, ...custom }}>
-        <text testId="text" style={{ fontSize: 16, lineHeight: "20px" }}>
+        <div testId="text" style={{ fontSize: 16, lineHeight: "20px" }}>
           <span style={{ pointerEvents }} onPointerDown={() => count++}>
             WWWWWWWW
           </span>
-        </text>
+        </div>
       </div>,
       (renderer) => {
         renderer.drawFrame()
