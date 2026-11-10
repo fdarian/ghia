@@ -864,3 +864,13 @@ fn degenerate_sheets_do_not_panic() {
         doc.parse(text);
     }
 }
+
+#[test]
+fn every_initial_value_is_a_declaration_the_validator_accepts() {
+    let mut validator = super::validate::Validator::default();
+    let rejected: Vec<String> = super::initial::all()
+        .filter(|initial| validator.filter_own(vec![(*initial).clone()]).is_empty())
+        .map(|initial| format!("{}: {}", initial.key, initial.value))
+        .collect();
+    assert!(rejected.is_empty(), "{rejected:?}");
+}

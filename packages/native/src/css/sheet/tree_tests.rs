@@ -316,6 +316,53 @@ fn a_css_wide_keyword_takes_back_what_a_shorthand_covered() {
 }
 
 #[test]
+fn a_css_wide_keyword_on_a_longhand_takes_back_what_an_earlier_shorthand_gave_it() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.inline(div, r#"{"position":"absolute","inset":0}"#);
+    doc.style_element(ROOT, ".a { right: unset !important }");
+    doc.flush();
+    let style = doc.style(div).expect("the element has a style");
+    assert_eq!(style.right, Some(crate::style::DimensionValue::Auto), "the shorthand no longer gives right 0");
+    assert!(style.inset.is_some(), "the shorthand still gives the other sides");
+}
+
+#[test]
+fn initial_on_a_padding_longhand_resets_it_below_the_shorthand() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.inline(div, r#"{"padding":"8px"}"#);
+    doc.style_element(ROOT, ".a { padding-left: initial !important }");
+    doc.flush();
+    let style = doc.style(div).expect("the element has a style");
+    assert_eq!(style.padding_left, Some(crate::css::length::LinearLength::px(0.0)));
+    assert!(style.padding.is_some(), "the shorthand still gives the other sides");
+}
+
+#[test]
+fn a_keyword_on_a_longhand_no_shorthand_covers_only_removes_it() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.inline(div, r#"{"paddingLeft":4}"#);
+    doc.style_element(ROOT, ".a { padding-left: unset !important }");
+    doc.flush();
+    assert!(doc.style(div).is_none_or(|style| style.padding_left.is_none()));
+}
+
+#[test]
+fn a_keyword_on_a_shorthand_resets_the_longhands_an_outer_shorthand_gave() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.inline(div, r#"{"padding":"8px"}"#);
+    doc.style_element(ROOT, ".a { padding-block: unset !important }");
+    doc.flush();
+    let style = doc.style(div).expect("the element has a style");
+    assert_eq!(style.padding_top, Some(crate::css::length::LinearLength::px(0.0)));
+    assert_eq!(style.padding_bottom, Some(crate::css::length::LinearLength::px(0.0)));
+    assert!(style.padding.is_some());
+}
+
+#[test]
 fn nested_rules_apply() {
     let mut doc = Doc::new();
     let parent = doc.classed("div", ROOT, "p");

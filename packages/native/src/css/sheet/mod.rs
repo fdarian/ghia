@@ -18,6 +18,7 @@ mod cascade;
 mod declarations;
 mod document;
 mod index;
+mod initial;
 mod invalidation;
 mod layers;
 mod matching;

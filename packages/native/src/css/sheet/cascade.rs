@@ -10,12 +10,13 @@ use std::sync::{Arc, Weak};
 
 use rustc_hash::FxHashMap;
 
-use crate::css::covers;
+use crate::css::covers::{self, KeyId};
 use crate::css::lenient::Declaration;
 use crate::style::StyleDesc;
 
 use super::declarations::render_declarations;
 use super::index::RuleIndex;
+use super::initial;
 use super::selector::Specificity;
 
 /// The rules an element matched. Equal lists share one allocation, so two elements that match
@@ -74,12 +75,28 @@ fn apply(list: &mut Vec<Declaration>, declaration: &Declaration) {
         list.push(declaration.clone());
         return;
     }
-    if let Some(key) = covers::key_id(&declaration.key) {
-        let covered = covers::covered_by(key);
-        if !covered.is_empty() {
-            list.retain(|earlier| covers::key_id(&earlier.key).is_none_or(|earlier| !covered.contains(&earlier)));
+    let Some(key) = covers::key_id(&declaration.key) else {
+        return;
+    };
+    let covered = covers::covered_by(key);
+    let longhands: Vec<KeyId> = if covered.is_empty() {
+        vec![key]
+    } else {
+        list.retain(|earlier| covers::key_id(&earlier.key).is_none_or(|earlier| !covered.contains(&earlier)));
+        covered.iter().copied().filter(|target| covers::covered_by(*target).is_empty()).collect()
+    };
+    // A shorthand written earlier still gives the longhand a value, and the keyword has to take
+    // that back: the initial value written after it wins over it.
+    for longhand in longhands {
+        if let Some(initial) = initial::of(longhand).filter(|_| is_shadowed(list, longhand)) {
+            list.push(initial.clone());
         }
     }
+}
+
+fn is_shadowed(list: &[Declaration], longhand: KeyId) -> bool {
+    list.iter()
+        .any(|earlier| covers::key_id(&earlier.key).is_some_and(|shorthand| covers::covered_by(shorthand).contains(&longhand)))
 }
 
 /// The merged declarations of the matched rules and the element's own, as the style prop's JSON.
