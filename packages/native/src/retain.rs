@@ -694,9 +694,6 @@ struct Node {
     patch_root: bool,
     /// The element was entered as a candidate patch anchor (`Retain::begin_anchor`).
     anchor: bool,
-    /// The anchor's candidate: how many box roots the frame had made when it was entered, which an anchor that holds
-    /// them takes out of the plan (`Retain::end_anchor`).
-    box_log_from: usize,
     /// The element is a candidate box root, see [`Entry::box_root`], and nothing above it is one.
     box_root: bool,
     /// Only with `verify`: a hash of what the build made of the element itself.
@@ -967,10 +964,10 @@ struct Plan {
     /// of a size that what is in them cannot change, which a patch lays out again and repaints where the edit is
     /// (`Retain::begin_box_root`). Wrapped as `retained(..).patchable_relayout()` and recorded or skipped like any root.
     box_roots: Vec<Unit>,
-    /// Every box root of the frame, those kept in the other lists too, and the order they were made in: an anchor that
-    /// holds some takes them out (`Retain::end_anchor`), a patch of the anchor lays the whole of it out.
+    /// Every box root of the frame, those kept in the other lists too. Those in an anchor stay: the innermost root that
+    /// holds an edit is the one that is laid out again (`Retain::relayout_holding`), the anchor only holds what no box
+    /// root does.
     box_ids: FxHashSet<u64>,
-    box_log: Vec<u64>,
     /// The anchors patches laid out again since the frame: what gpui recorded of the roots in them is
     /// of the layout before, so none of those is patched until a frame is built whole.
     repainted: FxHashSet<u64>,
@@ -2070,7 +2067,6 @@ impl Retain {
         self.plan.anchor_ids.retain(|id| !gone.contains(id));
         self.plan.box_roots.retain(|unit| !gone.contains(&unit.id));
         self.plan.box_ids.retain(|id| !gone.contains(id));
-        self.plan.box_log.retain(|id| !gone.contains(id));
         self.plan.repainted.retain(|id| !gone.contains(id));
         self.plan.unrecorded.retain(|id| !gone.contains(id));
     }
@@ -2339,7 +2335,6 @@ impl Retain {
             return None;
         }
         node.anchor = true;
-        node.box_log_from = self.plan.box_log.len();
         Some(EnterKey(node.enter))
     }
 
@@ -2370,15 +2365,7 @@ impl Retain {
         if refused {
             return None;
         }
-        let (subtree, from) = (node.subtree, node.box_log_from);
-        // A patch of the anchor lays all of it out, so the box roots that its content made are no root to patch at:
-        // gpui would lose the recording of the anchor around the one it rewrites.
-        let nested: FxHashSet<u64> = self.plan.box_log.drain(from..).collect();
-        if !nested.is_empty() {
-            self.plan.box_ids.retain(|id| !nested.contains(id));
-            self.plan.box_roots.retain(|unit| !nested.contains(&unit.id));
-        }
-        Some(subtree)
+        Some(node.subtree)
     }
 
     /// Keeps the anchor built since `begin_anchor` for the patches that follow the frame.
@@ -2464,7 +2451,6 @@ impl Retain {
             return;
         }
         self.plan.box_ids.insert(unit.id);
-        self.plan.box_log.push(unit.id);
         self.plan.box_roots.push(unit);
     }
 
@@ -2474,7 +2460,6 @@ impl Retain {
             return;
         }
         self.plan.box_ids.insert(id);
-        self.plan.box_log.push(id);
     }
 
     /// Whether plain boxes are made box roots, for a build to ask whether an element is a candidate.
@@ -2530,6 +2515,21 @@ impl Retain {
             at = tree.elements.get(&up).and_then(|element| element.parent);
         }
         None
+    }
+
+    /// Whether `id`, which the root `holder` holds (`holder` is `id` for a root that is patched itself), is in what a patch
+    /// of a root laid out again since the frame built whole: gpui forgot the recordings nested in such a root, so one
+    /// of them is patched again only after a frame built whole. The repainted root itself is patched again when gpui
+    /// rewrote its recording. Walks above `holder` too: a box root in an anchor that was patched is nested in it.
+    fn nested_in_repainted(&self, tree: &crate::retained_tree::RetainedTree, holder: u64, id: u64) -> bool {
+        let mut at = Some(holder);
+        while let Some(up) = at {
+            if self.plan.repainted.contains(&up) && (up != id || self.plan.unrecorded.contains(&up)) {
+                return true;
+            }
+            at = tree.elements.get(&up).and_then(|element| element.parent);
+        }
+        false
     }
 
     /// Whether the patch that `preview` plans lays the root `id` out again: it holds an element a commit changed
@@ -2713,11 +2713,8 @@ impl Retain {
             // What is nested in a root that a patch spliced was forgotten by gpui, and is neither replayed nor
             // patched until a frame built whole records it. The root itself is patched again when gpui rewrote its
             // recording.
-            let stale = |id: u64| {
-                self.relayout_holding(sources.tree, id)
-                    .is_some_and(|holder| self.plan.repainted.contains(&holder) && (holder != id || self.plan.unrecorded.contains(&holder)))
-            };
-            if let Some(&id) = units.iter().find(|id| stale(**id)).or_else(|| anchors.iter().find(|id| self.plan.unrecorded.contains(id))) {
+            let stale = |id: u64| self.relayout_holding(sources.tree, id).is_some_and(|holder| self.nested_in_repainted(sources.tree, holder, id));
+            if let Some(&id) = units.iter().chain(&anchors).find(|id| stale(**id)) {
                 return Err(Unpatchable::AnchorStale(id));
             }
         }
@@ -2835,7 +2832,6 @@ impl Retain {
             costly: false,
             patch_root: entry.patch_root,
             anchor: false,
-            box_log_from: 0,
             box_root: false,
             digest: 0,
             absent: false,
@@ -5852,6 +5848,24 @@ mod tests {
             unit.map(|(_, built)| built)
         }
 
+        /// Builds the scroller `id` the way `build_element_in` does for an anchor, with `inside` building what is in it.
+        /// Says whether it is one. Nothing if the frame skipped it.
+        fn anchor(&mut self, id: u64, inside: impl FnOnce(&mut Self)) -> Option<bool> {
+            if self.enter(id) {
+                return None;
+            }
+            let enter = self.retain.begin_anchor(true);
+            inside(self);
+            self.retain.exclude(Exclusion::Scroller);
+            let anchored = enter.filter(|_| self.retain.end_anchor().is_some());
+            if let Some(enter) = anchored {
+                let env = crate::renderer::FrameEnv::for_test(self.inherited.clone(), enter, web_time::Instant::now());
+                self.retain.add_anchor(Unit { id, env });
+            }
+            self.retain.exit();
+            Some(anchored.is_some())
+        }
+
         fn leaf(&mut self, id: u64) {
             self.element(id, None, |_| {});
         }
@@ -7104,6 +7118,94 @@ mod tests {
         assert_eq!(page.preview(&[], false), Ok(vec![2]), "gpui rewrote its recording");
         page.retain.anchor_repainted(&page.tree, 2, false);
         assert_eq!(page.preview(&[], false), Err(Unpatchable::AnchorStale(2)), "it lost it");
+    }
+
+    /// A page of `1 > (2 > (3, 4), 5)` whose frame `build`s the scroller 1 as an anchor holding the box root 2.
+    fn anchor_frame(page: &mut Units) {
+        page.frame(&[], false, |page| {
+            let anchored = page.anchor(1, |page| {
+                page.box_root(2, |page| two_leaves(page));
+                page.leaf(5);
+            });
+            assert!(anchored.is_none_or(|anchored| anchored), "the scroller is an anchor");
+        });
+    }
+
+    /// The anchor 1 holding the box root 2, once a frame has a record of the box to judge it by.
+    fn anchored_page() -> Units {
+        let mut page = Units::new();
+        page.box_roots = [2].into_iter().collect();
+        page.tree.set_commit_patching(true);
+        anchor_frame(&mut page);
+        page.edit(1);
+        page.edit(2);
+        anchor_frame(&mut page);
+        assert!(page.retain.is_anchor(1) && page.retain.is_box_root(2));
+        page
+    }
+
+    #[test]
+    fn an_edit_in_a_box_root_in_an_anchor_previews_to_the_box_root_and_one_no_box_root_holds_to_the_anchor() {
+        let mut page = anchored_page();
+        page.tree.set_text(3, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![2]), "the innermost root holds the edit");
+        assert!(page.retain.is_relaid(&page.tree, 2) && !page.retain.is_relaid(&page.tree, 1));
+        page.tree.take_structure();
+
+        page.tree.set_text(5, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "a child of the scroller that is no box root");
+        page.tree.take_structure();
+
+        page.tree.create_element(6, "div".to_owned());
+        page.tree.append_child(1, 6);
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "a child appended to the scroller");
+        page.tree.take_structure();
+
+        page.tree.set_text(3, "again".to_owned());
+        page.tree.set_text(5, "again".to_owned());
+        let mut both = page.preview(&[], false).expect("each is held by a root");
+        both.sort();
+        assert_eq!(both, vec![1, 2], "both, each in its own root");
+    }
+
+    #[test]
+    fn a_box_root_patch_in_an_anchor_leaves_both_patchable_and_an_anchor_patch_makes_the_box_root_wait_for_a_frame_built_whole() {
+        let mut page = anchored_page();
+        // A box root patch: gpui rewrote its recording.
+        page.tree.set_text(3, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![2]));
+        page.retain.anchor_repainted(&page.tree, 2, true);
+        page.tree.take_structure();
+        page.tree.set_text(4, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![2]), "the box root is patched again");
+        page.tree.take_structure();
+        page.tree.set_text(5, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "and the anchor around it is patched, or declined by gpui");
+        page.tree.take_structure();
+
+        // An anchor patch: what is nested in it is of the layout before.
+        page.retain.anchor_repainted(&page.tree, 1, true);
+        page.tree.set_text(3, "again".to_owned());
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::AnchorStale(2)), "a box root nested in a patched anchor");
+        page.tree.take_structure();
+        page.tree.set_text(5, "again".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "the anchor whose recording gpui rewrote");
+        page.retain.anchor_repainted(&page.tree, 1, false);
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::AnchorStale(1)), "the one it dropped");
+        page.tree.take_structure();
+
+        // The frame built whole takes the box root back only once it has records to judge it by.
+        anchor_frame(&mut page);
+        assert!(page.retain.is_anchor(1) && !page.retain.is_box_root(2), "no record of the box after the anchor patch");
+        page.tree.set_text(3, "last".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![1]));
+        page.tree.take_structure();
+        page.edit(1);
+        page.edit(2);
+        anchor_frame(&mut page);
+        assert!(page.retain.is_box_root(2));
+        page.tree.set_text(3, "the end".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![2]));
     }
 
     #[test]
