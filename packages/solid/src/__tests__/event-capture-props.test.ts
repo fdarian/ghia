@@ -60,7 +60,7 @@ describe("Solid host event listeners", () => {
     setHostProperty(element, "onDrop", undefined, handler)
     expect(listeners).toHaveLength(1)
     setHostProperty(element, "onDropCapture", undefined, handler)
-    expect(listeners).toEqual([[element.nativeId, "drop", true], [element.id, "drop", false]])
+    expect(listeners).toEqual([[element.nativeId, "drop", true], [element.nativeId, "drop", false]])
   })
 
   it("swaps a handler without telling native", () => {
