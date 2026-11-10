@@ -8,8 +8,8 @@ use super::selector::{AttrOp, AttrSelector, Combinator, ComplexSelector, Compoun
 
 /// One element of a tree, cheap to copy (a handle).
 pub trait ElementView: Sized {
-    /// The lower-cased tag name.
-    fn tag(&self) -> Atom;
+    /// The lower-cased tag name; `None` when no sheet names it.
+    fn tag(&self) -> Option<Atom>;
     /// `None` when the element has no id, or one no sheet names.
     fn id(&self) -> Option<Atom>;
     fn has_class(&self, class: Atom) -> bool;
@@ -67,7 +67,7 @@ fn compound_matches(compound: &Compound, element: &impl ElementView) -> bool {
 
 fn simple_matches<E: ElementView>(simple: &Simple, element: &E) -> bool {
     match simple {
-        Simple::Tag(tag) => element.tag() == *tag,
+        Simple::Tag(tag) => element.tag() == Some(*tag),
         Simple::Class(class) => element.has_class(*class),
         Simple::Id(id) => element.id() == Some(*id),
         Simple::Attr(attr) => attr_matches(attr, element),

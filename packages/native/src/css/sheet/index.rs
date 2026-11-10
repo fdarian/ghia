@@ -127,8 +127,10 @@ impl RuleIndex {
                 visit(bucket);
             }
         }
-        if let Some(bucket) = self.by_tag.get(&element.tag()) {
-            visit(bucket);
+        if !self.by_tag.is_empty() {
+            if let Some(bucket) = element.tag().and_then(|tag| self.by_tag.get(&tag)) {
+                visit(bucket);
+            }
         }
         visit(&self.universal);
         found.sort_by_key(|(rule, specificity)| (self.rules[*rule as usize].layer_rank, *specificity, *rule));

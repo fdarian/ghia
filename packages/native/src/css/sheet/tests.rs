@@ -90,8 +90,8 @@ struct View<'a> {
 }
 
 impl ElementView for View<'_> {
-    fn tag(&self) -> Atom {
-        self.tree.nodes[self.index].tag
+    fn tag(&self) -> Option<Atom> {
+        Some(self.tree.nodes[self.index].tag)
     }
     fn id(&self) -> Option<Atom> {
         self.tree.nodes[self.index].id

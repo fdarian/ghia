@@ -385,6 +385,18 @@ impl RetainedElement {
         &mut self.extras_mut().css
     }
 
+    /// Stores the id and class atoms for the matcher. An element that has none and kept nothing
+    /// before costs no allocation.
+    pub(crate) fn set_css_atoms(&mut self, id: Option<crate::css::sheet::Atom>, classes: Vec<crate::css::sheet::Atom>) {
+        if id.is_none() && classes.is_empty() && self.css().is_none() {
+            return;
+        }
+        let css = self.css_mut();
+        css.id = id;
+        css.classes = classes;
+        self.release_empty_extras();
+    }
+
     pub(crate) fn clear_css(&mut self) {
         if let Some(extras) = self.extras.as_mut() {
             extras.css = Default::default();
@@ -1037,8 +1049,8 @@ impl RetainedTree {
         let revision = self.take_revision_covered();
         self.elements
             .insert(id, RetainedElement::new(id, element_type, revision));
-        if self.sheets.enabled || is_style {
-            self.sheets_created(id, is_style);
+        if is_style {
+            self.sheets_style_created(id);
         }
         if self.universal.is_some() {
             self.refresh_effective_style(id, false);

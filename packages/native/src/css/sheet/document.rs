@@ -25,7 +25,6 @@ use super::validate::Validator;
 /// What an element has for the matcher, kept on the element while sheets exist.
 #[derive(Default)]
 pub struct ElementCss {
-    pub tag: Option<Atom>,
     pub id: Option<Atom>,
     pub classes: Vec<Atom>,
     /// `None` for an element no rule matches, and for one that is not in the document.
@@ -34,7 +33,7 @@ pub struct ElementCss {
 
 impl ElementCss {
     pub fn is_empty(&self) -> bool {
-        self.tag.is_none() && self.id.is_none() && self.classes.is_empty() && self.matched.is_none()
+        self.id.is_none() && self.classes.is_empty() && self.matched.is_none()
     }
 }
 

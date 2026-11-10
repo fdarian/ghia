@@ -77,17 +77,12 @@ impl RetainedTree {
         }
     }
 
-    // Hooks. Each runs only while `sheets.enabled`, except the one for a created element.
+    // Hooks. Each runs only while `sheets.enabled`, except the one for a created `<style>`.
 
-    pub(crate) fn sheets_created(&mut self, id: u64, is_style: bool) {
-        if is_style {
-            self.enable_sheets();
-            self.sheets.style_elements.insert(id);
-            self.sheets.sources_dirty = true;
-        }
-        if self.sheets.atoms_fresh {
-            self.init_css(id);
-        }
+    pub(crate) fn sheets_style_created(&mut self, id: u64) {
+        self.enable_sheets();
+        self.sheets.style_elements.insert(id);
+        self.sheets.sources_dirty = true;
     }
 
     pub(crate) fn sheets_destroyed(&mut self, id: u64) {
@@ -188,20 +183,6 @@ impl RetainedTree {
 
     // Atoms.
 
-    fn init_css(&mut self, id: u64) {
-        let atoms = &mut self.sheets.atoms;
-        let Some(element) = self.elements.get_mut(&id) else {
-            return;
-        };
-        let tag = atoms.intern(&element.element_type.to_ascii_lowercase());
-        let element_id = id_atom(atoms, element.attribute("id"));
-        let classes = class_atoms(atoms, element.attribute("class"));
-        let css = element.css_mut();
-        css.tag = Some(tag);
-        css.id = element_id;
-        css.classes = classes;
-    }
-
     /// Reads the class atoms again, and returns the ones the element had.
     fn refresh_class_atoms(&mut self, id: u64) -> Vec<Atom> {
         let atoms = &mut self.sheets.atoms;
@@ -292,13 +273,9 @@ impl RetainedTree {
     fn init_all_css(&mut self) {
         let atoms = &mut self.sheets.atoms;
         for element in self.elements.values_mut() {
-            let tag = atoms.intern(&element.element_type.to_ascii_lowercase());
             let element_id = id_atom(atoms, element.attribute("id"));
             let classes = class_atoms(atoms, element.attribute("class"));
-            let css = element.css_mut();
-            css.tag = Some(tag);
-            css.id = element_id;
-            css.classes = classes;
+            element.set_css_atoms(element_id, classes);
         }
     }
 
@@ -380,8 +357,8 @@ impl RetainedTree {
             };
             let css = element.css();
             let matched = if connected && element.is_matchable() {
-                let css = css.expect("atoms are current while sheets match");
-                self.sheets.index.matching(&TreeView::new(self, id), css.id, &css.classes)
+                let (element_id, classes) = css.map_or((None, &[][..]), |css| (css.id, &css.classes[..]));
+                self.sheets.index.matching(&TreeView::new(self, id), element_id, classes)
             } else {
                 Vec::new()
             };

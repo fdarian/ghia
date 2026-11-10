@@ -24,8 +24,8 @@ impl<'a> TreeView<'a> {
 }
 
 impl ElementView for TreeView<'_> {
-    fn tag(&self) -> Atom {
-        self.element().css().and_then(|css| css.tag).expect("atoms are current while sheets match")
+    fn tag(&self) -> Option<Atom> {
+        self.tree.sheets.atoms.tag(&self.element().element_type)
     }
 
     fn id(&self) -> Option<Atom> {
