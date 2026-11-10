@@ -54,5 +54,9 @@ fn op_json(op: &BatchOp<'_>) -> String {
         BatchOp::SetCustomProp { id, key, value } => {
             format!(r#"["setCustomProp",{id},{},{value}]"#, text(key))
         }
+        BatchOp::SetAttribute { id, name, value } => match value {
+            Some(value) => format!(r#"["setAttribute",{id},{},{}]"#, text(name), text(value)),
+            None => format!(r#"["setAttribute",{id},{},null]"#, text(name)),
+        },
     }
 }

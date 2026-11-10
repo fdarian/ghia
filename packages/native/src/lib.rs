@@ -14,6 +14,7 @@ use napi_derive::napi;
 mod accessibility;
 #[cfg(target_os = "macos")]
 mod app_menu;
+mod attributes;
 mod automation;
 mod background_images;
 pub mod batch;

@@ -14018,6 +14018,9 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
             BatchOp::SetCustomProp { id, key, value } => {
                 tree.set_custom_prop(id, key, value);
             }
+            BatchOp::SetAttribute { id, name, value } => {
+                tree.set_attribute(id, name, value.map(str::to_owned));
+            }
         }
     }
 

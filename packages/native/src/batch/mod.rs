@@ -73,4 +73,10 @@ pub enum BatchOp<'a> {
         key: String,
         value: serde_json::Value,
     },
+    /// `None` removes the attribute.
+    SetAttribute {
+        id: u64,
+        name: &'a str,
+        value: Option<&'a str>,
+    },
 }

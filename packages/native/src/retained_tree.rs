@@ -137,6 +137,7 @@ pub struct RetainedElement {
 struct ElementExtras {
     events: HashSet<String>,
     custom_props: HashMap<String, serde_json::Value>,
+    attributes: crate::attributes::AttributeStore,
     /// The style before the `setStyle` that made the element declare a CSS
     /// transition. Native only tracks elements that declare one, and the
     /// transitions of a change are the ones of the style after it, so without
@@ -353,6 +354,20 @@ impl RetainedElement {
         self.extras.as_deref()?.before_transition.as_deref()
     }
 
+    pub(crate) fn attribute_store(&self) -> Option<&crate::attributes::AttributeStore> {
+        self.extras.as_deref().map(|extras| &extras.attributes)
+    }
+
+    /// Returns whether the attribute changed.
+    pub(crate) fn set_attribute(&mut self, name: &str, value: Option<String>) -> bool {
+        if value.is_none() && self.attribute_store().is_none_or(|store| store.get(name).is_none()) {
+            return false;
+        }
+        let changed = self.extras_mut().attributes.set(name, value);
+        self.release_empty_extras();
+        changed
+    }
+
     fn extras_mut(&mut self) -> &mut ElementExtras {
         self.extras.get_or_insert_with(Default::default)
     }
@@ -364,6 +379,7 @@ impl RetainedElement {
             .is_some_and(|extras| {
                 extras.events.is_empty()
                     && extras.custom_props.is_empty()
+                    && extras.attributes.is_empty()
                     && extras.before_transition.is_none()
                     && extras.props_before.lock().expect("props_before is never held across a panic").is_empty()
             })
