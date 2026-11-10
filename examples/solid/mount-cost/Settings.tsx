@@ -52,8 +52,8 @@ function Row(props: { label: string; hint: string; children: JSX.Element }) {
       }}
     >
       <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flexGrow: 1 }}>
-        <text style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{salted(props.label)}</text>
-        <text style={{ fontSize: 12, color: "#71717A" }}>{salted(props.hint)}</text>
+        <div style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{salted(props.label)}</div>
+        <div style={{ fontSize: 12, color: "#71717A" }}>{salted(props.hint)}</div>
       </div>
       <div style={{ display: "flex", flexDirection: "row", alignItems: "center", flexShrink: 0 }}>{props.children}</div>
     </div>
@@ -61,7 +61,7 @@ function Row(props: { label: string; hint: string; children: JSX.Element }) {
 }
 
 function Value(props: { text: string }) {
-  return <text style={{ fontSize: 13, color: "#3F3F46" }}>{salted(props.text)}</text>
+  return <div style={{ fontSize: 13, color: "#3F3F46" }}>{salted(props.text)}</div>
 }
 
 function ActionButton(props: { label: string; onClick: () => void }) {
@@ -80,7 +80,7 @@ function ActionButton(props: { label: string; onClick: () => void }) {
         border: "1px solid #E4E4E7",
       }}
     >
-      <text style={{ fontSize: 13, color: "#18181B" }}>{salted(props.label)}</text>
+      <div style={{ fontSize: 13, color: "#18181B" }}>{salted(props.label)}</div>
     </div>
   )
 }
@@ -88,8 +88,8 @@ function ActionButton(props: { label: string; onClick: () => void }) {
 function Section(props: { title: string; description: string; children: JSX.Element }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", marginBottom: 28 }}>
-      <text style={{ fontSize: 16, fontWeight: 600, color: "#18181B" }}>{salted(props.title)}</text>
-      <text style={{ fontSize: 12, color: "#71717A", marginBottom: 8 }}>{salted(props.description)}</text>
+      <div style={{ fontSize: 16, fontWeight: 600, color: "#18181B" }}>{salted(props.title)}</div>
+      <div style={{ fontSize: 12, color: "#71717A", marginBottom: 8 }}>{salted(props.description)}</div>
       {props.children}
     </div>
   )
@@ -134,7 +134,7 @@ export function SettingsDialog(props: { values: SettingsValues; onClose: () => v
             borderBottom: "1px solid #E4E4E7",
           }}
         >
-          <text style={{ fontSize: 18, fontWeight: 600, color: "#18181B" }}>{salted("Settings")}</text>
+          <div style={{ fontSize: 18, fontWeight: 600, color: "#18181B" }}>{salted("Settings")}</div>
           <ActionButton label="Close" onClick={props.onClose} />
         </div>
         <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, minHeight: 0, padding: 24, overflowY: "auto" }}>

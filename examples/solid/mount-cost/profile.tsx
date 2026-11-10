@@ -138,7 +138,7 @@ function Fixture() {
   }
   return (
     <div style={{ display: "flex", flexDirection: "row", width: "100%", height: "100%", backgroundColor: "#FFFFFF" }}>
-      {CHURN > 0 ? <text style={{ fontSize: 12, color: "#71717A" }}>{`churn ${churn()}`}</text> : null}
+      {CHURN > 0 ? <div style={{ fontSize: 12, color: "#71717A" }}>{`churn ${churn()}`}</div> : null}
       <Show when={open() ? generation() : 0} keyed>
         {/* keyed Show re-runs its children only for a function that takes the value */}
         {(_generation) => (

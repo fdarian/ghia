@@ -18,8 +18,8 @@ const ROWS = 4
 const Row = ({ label }: { label: string }) => (
   <div style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 48, padding: 8 }}>
     <div style={{ display: "flex", flexDirection: "column", flexGrow: 1 }}>
-      <text style={{ fontSize: 14, color: "#18181B" }}>{label}</text>
-      <text style={{ fontSize: 12, color: "#71717A" }}>{`${label} hint`}</text>
+      <div style={{ fontSize: 14, color: "#18181B" }}>{label}</div>
+      <div style={{ fontSize: 12, color: "#71717A" }}>{`${label} hint`}</div>
     </div>
     <div style={{ width: 36, height: 20, borderRadius: 10, backgroundColor: "#2563EB" }}>
       <div style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: "#FFFFFF" }} />
@@ -30,12 +30,12 @@ const Row = ({ label }: { label: string }) => (
 const Dialog = ({ sections }: { sections: number }) => (
   <div style={{ width: 640, height: 400, display: "flex", flexDirection: "column", backgroundColor: "#FFFFFF" }}>
     <div style={{ height: 40, flexShrink: 0 }}>
-      <text>Settings</text>
+      <div>Settings</div>
     </div>
     <div testId="body" style={{ overflowY: "auto", flexGrow: 1, minHeight: 0 }}>
       {Array.from({ length: sections }, (_, section) => (
         <div key={section} style={{ display: "flex", flexDirection: "column" }}>
-          <text style={{ fontSize: 16 }}>{`Section ${section}`}</text>
+          <div style={{ fontSize: 16 }}>{`Section ${section}`}</div>
           {Array.from({ length: ROWS }, (_, row) => (
             <Row key={row} label={`row ${section}.${row}`} />
           ))}
