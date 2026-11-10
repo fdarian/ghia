@@ -126,7 +126,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid event targets are elements", () =
     expect(seen[0]![1]).toBe(button)
     expect(seen[0]![2]).toBe(document)
     expect(seen[1]![1]).toBe(button)
-    expect(seen[1]![2]).toBe(window)
+    expect(seen[1]![2]).toBe(globalThis)
     app.unmount()
   })
 
@@ -155,7 +155,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid event targets are elements", () =
 
     expect(seen).toHaveLength(1)
     expect(seen[0]![0]).toBeNull()
-    expect(seen[0]![1]).toBe(window)
+    expect(seen[0]![1]).toBe(globalThis)
     app.unmount()
   })
 })
