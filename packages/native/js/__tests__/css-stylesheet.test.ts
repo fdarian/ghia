@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { createMutationQueue, type MutationHost } from "../host.js"
 import { document } from "../events/window-target.js"
 import { CSSRule, CSSRuleList, CSSStyleRule, CSSStyleSheet } from "../css/index.js"
 import { splitRules } from "../css/rules.js"
+import { registerSheetSink, type SheetSink } from "../css/sheet-sync.js"
 import { decodeWireBatchForTest } from "../wire-testing.js"
 import "../dom-globals.js"
 
@@ -323,6 +324,46 @@ describe("document.adoptedStyleSheets", () => {
       ["setStyleSheet", sheet.id, ".a { top: 0 }"],
       ["setAdoptedStyleSheets", [sheet.id]],
     ])
+  })
+
+  it("resends everything to a queue registered after the renderer's earlier one was collected", () => {
+    const collected = new Set<object>()
+    class SwitchableWeakRef<T extends object> {
+      constructor(private readonly target: T) {}
+      deref(): T | undefined {
+        return collected.has(this.target) ? undefined : this.target
+      }
+    }
+    vi.stubGlobal("WeakRef", SwitchableWeakRef)
+    try {
+      const received: unknown[][] = []
+      const sinkFor = (): SheetSink => ({
+        setStyleSheet: (id, text) => received.push(["setStyleSheet", id, text]),
+        setAdoptedStyleSheets: (ids) => received.push(["setAdoptedStyleSheets", [...ids]]),
+      })
+      const renderer = {}
+      const first = sinkFor()
+      const sheet = new CSSStyleSheet()
+      sheet.replaceSync(".a { top: 0 }")
+      registerSheetSink(renderer, first)
+      document.adoptedStyleSheets = [sheet]
+      expect(received).toEqual([
+        ["setStyleSheet", sheet.id, ".a { top: 0 }"],
+        ["setAdoptedStyleSheets", [sheet.id]],
+      ])
+      received.length = 0
+      collected.add(first)
+      sheet.replaceSync(".a { top: 7px }")
+      expect(received).toEqual([])
+      registerSheetSink(renderer, sinkFor())
+      expect(received).toEqual([
+        ["setStyleSheet", sheet.id, ".a { top: 7px }"],
+        ["setAdoptedStyleSheets", [sheet.id]],
+      ])
+    } finally {
+      document.adoptedStyleSheets = []
+      vi.unstubAllGlobals()
+    }
   })
 
   it("sends to each renderer once, though it has two queues", () => {

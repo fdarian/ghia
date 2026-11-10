@@ -26,6 +26,8 @@ interface RendererSheets {
   readonly known: Set<number>
   /** The adopted list native holds. */
   adopted: readonly number[]
+  /** A change happened while no queue could carry it, so native may be behind: the next sync resends everything. */
+  stale: boolean
 }
 
 const renderers = new Set<WeakRef<object>>()
@@ -64,17 +66,20 @@ function sameIds(left: readonly number[], right: readonly number[]): boolean {
 
 function syncRenderer(state: RendererSheets): void {
   const sink = liveSink(state)
-  if (!sink) return
+  if (!sink) {
+    state.stale = true
+    return
+  }
   const sheets = effectiveSheets()
   const wanted = new Set<number>()
   for (const sheet of sheets) {
     wanted.add(sheet.id)
-    if (state.known.has(sheet.id)) continue
+    if (!state.stale && state.known.has(sheet.id)) continue
     sink.setStyleSheet(sheet.id, sheet.sheetText())
     state.known.add(sheet.id)
   }
   const ids = sheets.map((sheet) => sheet.id)
-  if (!sameIds(state.adopted, ids)) {
+  if (state.stale || !sameIds(state.adopted, ids)) {
     sink.setAdoptedStyleSheets(ids)
     state.adopted = ids
   }
@@ -83,6 +88,7 @@ function syncRenderer(state: RendererSheets): void {
     sink.setStyleSheet(id, null)
     state.known.delete(id)
   }
+  state.stale = false
 }
 
 function eachRenderer(visit: (state: RendererSheets) => void): void {
@@ -101,7 +107,7 @@ function eachRenderer(visit: (state: RendererSheets) => void): void {
 export function registerSheetSink(renderer: object, sink: SheetSink): void {
   let state = states.get(renderer)
   if (!state) {
-    state = { sinks: new Set(), known: new Set(), adopted: [] }
+    state = { sinks: new Set(), known: new Set(), adopted: [], stale: false }
     states.set(renderer, state)
     renderers.add(new WeakRef(renderer))
   }
@@ -120,8 +126,7 @@ export function sheetChanged(sheet: SyncedSheet): void {
   if (!adopted.includes(sheet)) return
   eachRenderer((state) => {
     const sink = liveSink(state)
-    if (!sink) return
-    if (state.known.has(sheet.id) && !sheet.disabled) sink.setStyleSheet(sheet.id, sheet.sheetText())
+    if (sink && !state.stale && state.known.has(sheet.id) && !sheet.disabled) sink.setStyleSheet(sheet.id, sheet.sheetText())
     else syncRenderer(state)
   })
 }
