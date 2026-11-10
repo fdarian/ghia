@@ -3,6 +3,8 @@ import {
   type ElementEventListener,
   type ElementListenerOptions,
 } from "./events/element-listeners.js"
+import { readLayoutSize } from "./bounds.js"
+import type { NativeRenderer } from "./host.js"
 import { document, type GpuixDocument } from "./events/window-target.js"
 
 /** The DOM members every host element has beside the scroll ones. */
@@ -13,6 +15,10 @@ export interface DomElement {
   readonly isConnected: boolean
   /** The prop of that name as a string, or `null` when the element was not given it. */
   getAttribute(name: string): string | null
+  /** The border box's width, rounded, before any transform. 0 for an element with no box. */
+  readonly offsetWidth: number
+  /** The border box's height, rounded, before any transform. 0 for an element with no box. */
+  readonly offsetHeight: number
   addEventListener(
     type: string,
     listener: ElementEventListener | null,
@@ -28,6 +34,8 @@ export interface DomElement {
 export interface DomElementBinding {
   readonly listeners: ElementListeners
   readonly connected: boolean
+  /** The renderer and id of the element while it is mounted. */
+  readonly layout: { renderer: NativeRenderer; id: number } | undefined
   /** What the element was given: the props of a Solid element, of a React instance. */
   prop(name: string): unknown
 }
@@ -70,6 +78,20 @@ export function defineDomMembers<This extends object>(
         const bound = bind(this)
         const value = bound.prop(name)
         return attributeOf(name === "class" && value === undefined ? bound.prop("className") : value)
+      },
+    },
+    offsetWidth: {
+      configurable: true,
+      get(this: This) {
+        const layout = bind(this).layout
+        return layout ? Math.round(readLayoutSize(layout.renderer, layout.id).width) : 0
+      },
+    },
+    offsetHeight: {
+      configurable: true,
+      get(this: This) {
+        const layout = bind(this).layout
+        return layout ? Math.round(readLayoutSize(layout.renderer, layout.id).height) : 0
       },
     },
     addEventListener: {

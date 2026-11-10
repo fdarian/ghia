@@ -118,6 +118,34 @@ describe.skipIf(!hasNativeTestRenderer)("DOM members of a Solid element", () => 
     app.unmount()
   })
 
+  it("answers offsetWidth and offsetHeight with the layout size, whatever transform the element has", () => {
+    let plain!: HostElement
+    let moved!: HostElement
+    let scaled!: HostElement
+    let unmounted!: HostElement
+    const [shown, setShown] = createSignal(true)
+    const app = setup(() => (
+      <div style={{ width: 400, height: 400 }}>
+        <div ref={plain} style={{ width: 33.4, height: 20.6 }} />
+        <div ref={moved} style={{ width: 50, height: 30, transform: "translate(40px, 12px)" }} />
+        <div ref={scaled} testId="scaled" style={{ width: 50, height: 30, transform: "scale(2)" }} />
+        <Show when={shown()}>
+          <div ref={unmounted} style={{ width: 10, height: 10 }} />
+        </Show>
+      </div>
+    ))
+    expect([plain.offsetWidth, plain.offsetHeight]).toEqual([33, 21])
+    expect([moved.offsetWidth, moved.offsetHeight]).toEqual([50, 30])
+    expect([scaled.offsetWidth, scaled.offsetHeight]).toEqual([50, 30])
+    const scaledBounds = app.renderer.getElementBounds(app.renderer.findByTestId("scaled")!.id)!
+    expect(scaledBounds.width).toBe(100)
+    expect(unmounted.offsetHeight).toBe(10)
+    setShown(false)
+    app.renderer.flush()
+    expect([unmounted.offsetWidth, unmounted.offsetHeight]).toEqual([0, 0])
+    app.unmount()
+  })
+
   describe("requestAnimationFrame", () => {
     it("runs before the draw that paints what its callback changed", () => {
       const [label, setLabel] = createSignal("before")
