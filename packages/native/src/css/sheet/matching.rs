@@ -2,9 +2,29 @@
 //! [`ElementView`].
 
 use std::borrow::Cow;
+use std::ops::Deref;
+use std::sync::Arc;
 
 use super::atoms::Atom;
 use super::selector::{AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, Simple};
+
+/// An attribute's text: borrowed from the element, or shared with a cache that made it (the
+/// `style` attribute, which is not stored anywhere as text).
+pub enum AttrValue<'a> {
+    Text(Cow<'a, str>),
+    Shared(Arc<str>),
+}
+
+impl Deref for AttrValue<'_> {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        match self {
+            AttrValue::Text(text) => text,
+            AttrValue::Shared(text) => text,
+        }
+    }
+}
 
 /// One element of a tree, cheap to copy (a handle).
 pub trait ElementView: Sized {
@@ -15,7 +35,7 @@ pub trait ElementView: Sized {
     fn has_class(&self, class: Atom) -> bool;
     /// The value of the attribute, which includes `id` and `class` when a selector asks for them
     /// by attribute.
-    fn attr(&self, name: Atom) -> Option<Cow<'_, str>>;
+    fn attr(&self, name: Atom) -> Option<AttrValue<'_>>;
     fn parent(&self) -> Option<Self>;
     /// The closest preceding sibling that is an element.
     fn prev_sibling(&self) -> Option<Self>;
@@ -85,23 +105,50 @@ fn attr_matches(selector: &AttrSelector, element: &impl ElementView) -> bool {
     let Some(matcher) = &selector.matcher else {
         return true;
     };
-    let (actual, expected) = if matcher.case_insensitive {
-        (actual.to_lowercase(), matcher.value.to_lowercase())
-    } else {
-        (actual.into_owned(), matcher.value.clone())
-    };
+    let actual: &str = &actual;
+    let expected: &str = &matcher.value;
+    let same = |a: &str, b: &str| text_equals(a, b, matcher.case_insensitive);
     match matcher.op {
-        AttrOp::Equals => actual == expected,
+        AttrOp::Equals => same(actual, expected),
         AttrOp::Includes => {
             !expected.is_empty()
                 && !expected.contains(char::is_whitespace)
-                && actual.split_whitespace().any(|word| word == expected)
+                && actual.split_whitespace().any(|word| same(word, expected))
         }
         AttrOp::DashMatch => {
-            actual == expected || (actual.starts_with(&expected) && actual[expected.len()..].starts_with('-'))
+            same(actual, expected)
+                || (actual.len() > expected.len()
+                    && actual.as_bytes()[expected.len()] == b'-'
+                    && text_equals(&actual[..expected.len()], expected, matcher.case_insensitive))
         }
-        AttrOp::Prefix => !expected.is_empty() && actual.starts_with(&expected),
-        AttrOp::Suffix => !expected.is_empty() && actual.ends_with(&expected),
-        AttrOp::Substring => !expected.is_empty() && actual.contains(&expected),
+        AttrOp::Prefix => {
+            !expected.is_empty()
+                && actual.len() >= expected.len()
+                && bytes_equal(&actual.as_bytes()[..expected.len()], expected.as_bytes(), matcher.case_insensitive)
+        }
+        AttrOp::Suffix => {
+            !expected.is_empty()
+                && actual.len() >= expected.len()
+                && bytes_equal(&actual.as_bytes()[actual.len() - expected.len()..], expected.as_bytes(), matcher.case_insensitive)
+        }
+        AttrOp::Substring => {
+            !expected.is_empty()
+                && actual
+                    .as_bytes()
+                    .windows(expected.len())
+                    .any(|window| bytes_equal(window, expected.as_bytes(), matcher.case_insensitive))
+        }
     }
+}
+
+fn bytes_equal(a: &[u8], b: &[u8], case_insensitive: bool) -> bool {
+    if case_insensitive {
+        a.eq_ignore_ascii_case(b)
+    } else {
+        a == b
+    }
+}
+
+fn text_equals(a: &str, b: &str, case_insensitive: bool) -> bool {
+    bytes_equal(a.as_bytes(), b.as_bytes(), case_insensitive)
 }

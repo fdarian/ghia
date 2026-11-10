@@ -99,9 +99,9 @@ impl ElementView for View<'_> {
     fn has_class(&self, class: Atom) -> bool {
         self.tree.nodes[self.index].classes.contains(&class)
     }
-    fn attr(&self, name: Atom) -> Option<std::borrow::Cow<'_, str>> {
+    fn attr(&self, name: Atom) -> Option<super::matching::AttrValue<'_>> {
         let node = &self.tree.nodes[self.index];
-        node.attrs.iter().find(|(key, _)| *key == name).map(|(_, value)| value.as_str().into())
+        node.attrs.iter().find(|(key, _)| *key == name).map(|(_, value)| super::matching::AttrValue::Text(value.as_str().into()))
     }
     fn parent(&self) -> Option<Self> {
         self.tree.nodes[self.index].parent.map(|index| View { tree: self.tree, index })
@@ -493,6 +493,14 @@ fn attribute_value_case_flags() {
     assert_eq!(selected("[lang=EN-us I]"), [SECOND]);
     assert_eq!(selected("[lang='EN-us'i]"), [SECOND]);
     assert_eq!(selected("[lang=en-US s]"), [SECOND]);
+    assert_eq!(selected("[lang|=EN i]"), [SECOND]);
+    assert_eq!(selected("[lang|=EN]"), Vec::<usize>::new());
+    assert_eq!(selected("[lang^=EN i]"), [SECOND]);
+    assert_eq!(selected("[lang$=us i]"), [SECOND]);
+    assert_eq!(selected("[lang*='-u' i]"), [SECOND]);
+    assert_eq!(selected("[lang*='-u']"), Vec::<usize>::new());
+    assert_eq!(selected("[data-x~=B i]"), [MAIN]);
+    assert_eq!(selected("[lang$=en-us-longer i]"), Vec::<usize>::new());
     assert_eq!(selected("[ lang = 'en-US' ]"), [SECOND]);
     assert!(!is_valid("[lang=en x]"));
     assert!(!is_valid("[lang=1]"));

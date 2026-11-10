@@ -737,7 +737,7 @@ fn names_no_sheet_mentions_are_not_interned_and_elements_keep_nothing_of_them() 
     }
     doc.flush();
     assert_eq!(doc.tree.sheets.atoms.len(), names);
-    assert!(doc.tree.elements[&last].css().is_none());
+    assert!(doc.tree.elements[&last].css().is_none_or(|css| css.is_empty()));
     assert!(doc.tree.elements[&last].attribute_store().is_some());
 }
 
@@ -779,11 +779,80 @@ fn winding_down_frees_the_names_and_the_style_texts() {
     assert!(!doc.tree.sheets.enabled);
     assert_eq!(doc.tree.sheets.atoms.len(), 1);
     assert_eq!(doc.tree.sheets.style_text_count(), 0);
-    assert!(doc.tree.elements[&item].css().is_none());
+    assert!(doc.tree.elements[&item].css().is_none_or(|css| css.is_empty()));
 
     doc.style_element(ROOT, ".a { color: blue }");
     doc.flush();
     assert_eq!(doc.color(item), Some("blue"));
+}
+
+#[test]
+fn sibling_combinators_over_thousands_of_siblings_cost_work_in_proportion_to_them() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a + .b { color: red } .a ~ .c { background-color: blue }");
+    doc.flush();
+    let n = 2000;
+    let list = doc.element("div", ROOT);
+    let items: Vec<u64> = (0..n).map(|i| doc.classed("div", list, ["a", "b", "c"][i % 3])).collect();
+    reset_sibling_work();
+    doc.flush();
+    assert!(sibling_work() < 40 * n, "mount: {}", sibling_work());
+    assert_eq!(doc.color(items[1]), Some("red"));
+    assert_eq!(doc.color(items[2]), None);
+    assert_eq!(doc.background(items[2]), Some("blue"));
+    assert_eq!(doc.background(items[0]), None);
+    assert_eq!(doc.background(items[n - 1]), doc.background(items[n - 1 - 3]));
+
+    reset_sibling_work();
+    doc.tree.set_attribute(items[999], "class", Some("z".into()));
+    doc.flush();
+    assert!(sibling_work() < 40 * n, "toggle: {}", sibling_work());
+    assert_eq!(doc.color(items[1000]), None);
+    assert_eq!(doc.background(items[1001]), Some("blue"));
+
+    reset_sibling_work();
+    doc.tree.set_attribute(items[0], "class", Some("z".into()));
+    doc.flush();
+    assert!(sibling_work() < 40 * n, "first toggle: {}", sibling_work());
+    assert_eq!(doc.color(items[1]), None);
+}
+
+#[test]
+fn sibling_marks_under_one_parent_expand_the_following_siblings_once() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a ~ .b { color: red }");
+    doc.flush();
+    let n = 2000;
+    let items: Vec<u64> = (0..n).map(|_| doc.classed("div", ROOT, "b")).collect();
+    doc.flush();
+    reset_sibling_work();
+    for item in items.iter().step_by(2) {
+        doc.tree.set_attribute(*item, "class", Some("a".into()));
+    }
+    doc.flush();
+    assert!(sibling_work() < 40 * n, "marks: {}", sibling_work());
+    assert_eq!(doc.color(items[0]), None);
+    assert_eq!(doc.color(items[1]), Some("red"));
+    assert_eq!(doc.color(items[2]), None);
+    assert_eq!(doc.color(items[3]), Some("red"));
+}
+
+#[test]
+fn a_style_element_deep_in_a_large_subtree_is_found_when_the_subtree_is_removed() {
+    let mut doc = Doc::new();
+    let item = doc.classed("div", ROOT, "a");
+    let container = doc.element("div", ROOT);
+    for _ in 0..100 {
+        doc.element("div", container);
+    }
+    let nested = doc.element("div", container);
+    doc.style_element(nested, ".a { color: red }");
+    doc.flush();
+    assert_eq!(doc.color(item), Some("red"));
+
+    doc.tree.detach_child(container);
+    doc.flush();
+    assert_eq!(doc.color(item), None);
 }
 
 #[test]

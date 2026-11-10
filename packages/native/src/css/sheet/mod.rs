@@ -41,7 +41,7 @@ pub use document::{ElementCss, StyleSheets};
 pub use declarations::render_declarations;
 pub use invalidation::{Invalidation, Reach};
 pub use layers::{LayerId, LayerOrder, Layers};
-pub use matching::{matches, ElementView};
+pub use matching::{matches, AttrValue, ElementView};
 pub use parser::parse_sheet;
 pub use selector::{
     AttrMatcher, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, Simple, Specificity,

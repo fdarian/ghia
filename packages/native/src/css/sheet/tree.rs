@@ -9,7 +9,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
@@ -17,7 +17,11 @@ use super::atoms::{Atom, Atoms};
 use super::cascade::MatchedRules;
 use super::invalidation::Reach;
 use super::selector::Specificity;
-use super::view::TreeView;
+use super::view::{count_sibling_work, SiblingPositions, TreeView};
+
+/// Elements of a subtree `contains_style_element` walks for each `<style>` element there is, which
+/// is about what walking up from that one costs.
+const SUBTREE_WALK_PER_STYLE: usize = 8;
 
 fn lowercase(name: &str) -> Cow<'_, str> {
     if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
@@ -180,11 +184,46 @@ impl RetainedTree {
         self.sheets.mark(id, reach);
     }
 
+    /// Whether `ancestor` is a `<style>` element or has one below it. Asked on every insert and
+    /// removal of an element with children, so it has to cost little with a thousand `<style>`
+    /// elements: a small subtree is walked, and only a large one is answered from the style
+    /// elements' side, by walking up from each to the root.
     fn contains_style_element(&self, ancestor: u64) -> bool {
-        let is_leaf = self.elements.get(&ancestor).is_some_and(|element| element.children.is_empty());
-        if is_leaf && !self.sheets.style_elements.contains(&ancestor) {
+        let styles = &self.sheets.style_elements;
+        if styles.is_empty() {
             return false;
         }
+        if styles.contains(&ancestor) {
+            return true;
+        }
+        let Some(element) = self.elements.get(&ancestor) else {
+            return false;
+        };
+        if element.children.is_empty() {
+            return false;
+        }
+        let mut budget = styles.len().saturating_mul(SUBTREE_WALK_PER_STYLE);
+        let mut walk = vec![element.children.iter()];
+        while let Some(children) = walk.last_mut() {
+            let Some(id) = children.next() else {
+                walk.pop();
+                continue;
+            };
+            if styles.contains(id) {
+                return true;
+            }
+            if budget == 0 {
+                return self.style_elements_reach(ancestor);
+            }
+            budget -= 1;
+            if let Some(element) = self.elements.get(id) {
+                walk.push(element.children.iter());
+            }
+        }
+        false
+    }
+
+    fn style_elements_reach(&self, ancestor: u64) -> bool {
         self.sheets.style_elements.iter().any(|style| {
             let mut at = Some(*style);
             while let Some(id) = at {
@@ -338,6 +377,9 @@ impl RetainedTree {
         };
         // Marks of siblings come in a run, so the last parent's answer is most often the one needed.
         let mut last_parent: Option<(u64, bool)> = None;
+        // The marks that reach siblings, by parent in the order the parents were first marked.
+        let mut by_parent: Vec<(u64, Vec<(u64, Reach)>)> = Vec::new();
+        let mut slot_of: FxHashMap<u64, usize> = FxHashMap::default();
         for (id, reach) in marks {
             let Some(element) = self.elements.get(id) else {
                 continue;
@@ -357,24 +399,64 @@ impl RetainedTree {
             if !reach.reaches_siblings() {
                 continue;
             }
-            let Some(parent) = element.parent.and_then(|parent| self.elements.get(&parent)) else {
+            let Some(parent) = element.parent.filter(|parent| self.elements.contains_key(parent)) else {
                 continue;
             };
-            let Some(position) = parent.children.iter().position(|child| child == id) else {
-                continue;
-            };
-            let after = &parent.children[position + 1..];
-            let next = after.iter().copied().find(|sibling| self.elements.get(sibling).is_some_and(RetainedElement::is_matchable));
-            if let Some(next) = next.filter(|_| reach.next_sibling() != 0) {
-                expansion.add(next, reach.next_sibling(), connected);
-            }
-            if reach.following_siblings() != 0 {
-                for sibling in after {
-                    expansion.add(*sibling, reach.following_siblings(), connected);
-                }
-            }
+            let slot = *slot_of.entry(parent).or_insert_with(|| {
+                by_parent.push((parent, Vec::new()));
+                by_parent.len() - 1
+            });
+            by_parent[slot].1.push((*id, *reach));
+        }
+        for (parent, siblings) in &by_parent {
+            self.expand_siblings(&mut expansion, *parent, siblings);
         }
         expansion.out
+    }
+
+    /// The siblings `marks` (all children of `parent_id`) reach: for each, the next matchable
+    /// sibling, and the following ones. The following siblings are walked once, from the first
+    /// mark, with the places of every mark before each of them folded together, so n marks among
+    /// n siblings cost n and not n squared.
+    fn expand_siblings(&self, expansion: &mut Expansion<'_>, parent_id: u64, marks: &[(u64, Reach)]) {
+        let parent = &self.elements[&parent_id];
+        let connected = self.is_connected(parent_id);
+        count_sibling_work(parent.children.len());
+        let mut placed: Vec<(usize, Reach)> = if let [(id, reach)] = marks {
+            parent.children.iter().position(|child| child == id).map(|position| (position, *reach)).into_iter().collect()
+        } else {
+            let positions: FxHashMap<u64, usize> =
+                parent.children.iter().enumerate().map(|(position, child)| (*child, position)).collect();
+            marks.iter().filter_map(|(id, reach)| positions.get(id).map(|position| (*position, *reach))).collect()
+        };
+        for (position, reach) in &placed {
+            if reach.next_sibling() == 0 {
+                continue;
+            }
+            let mut steps = 0;
+            let next = parent.children[position + 1..].iter().copied().find(|sibling| {
+                steps += 1;
+                self.elements.get(sibling).is_some_and(RetainedElement::is_matchable)
+            });
+            count_sibling_work(steps);
+            if let Some(next) = next {
+                expansion.add(next, reach.next_sibling(), connected);
+            }
+        }
+        placed.retain(|(_, reach)| reach.following_siblings() != 0);
+        placed.sort_by_key(|(position, _)| *position);
+        let Some((first, _)) = placed.first() else {
+            return;
+        };
+        let mut folded = 0u8;
+        let mut pending = placed.iter().peekable();
+        for (position, sibling) in parent.children.iter().enumerate().skip(first + 1) {
+            while let Some((_, reach)) = pending.next_if(|(mark, _)| *mark < position) {
+                folded |= reach.following_siblings();
+            }
+            count_sibling_work(1);
+            expansion.add(*sibling, folded, connected);
+        }
     }
 
     /// Matches what the batch marked, and restyles the elements whose rules changed.
@@ -396,6 +478,7 @@ impl RetainedTree {
         let restyle = self.restyle_set(&marks, all);
 
         let mut found: Vec<(u64, Vec<(u32, Specificity)>)> = Vec::new();
+        let positions = SiblingPositions::default();
         for (id, connected) in restyle {
             crate::perf_counters::element_rematched();
             let Some(element) = self.elements.get(&id) else {
@@ -404,7 +487,7 @@ impl RetainedTree {
             let css = element.css();
             let (element_id, classes) = css.map_or((None, &[][..]), |css| (css.id, &css.classes[..]));
             let matched = if connected && element.is_matchable() && self.sheets.index.may_match(element_id, classes) {
-                self.sheets.index.matching(&TreeView::new(self, id), element_id, classes)
+                self.sheets.index.matching(&TreeView::new(self, id, &positions), element_id, classes)
             } else {
                 Vec::new()
             };
