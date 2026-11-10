@@ -203,6 +203,14 @@ function currentDocumentElements(): DocumentElements | null {
   return elementSources.get(renderer)?.source.documentElements() ?? null
 }
 
+function finiteCoordinate(value: number, name: string): number {
+  const coordinate = Number(value)
+  if (!Number.isFinite(coordinate)) {
+    throw new TypeError(`Failed to execute 'elementsFromPoint' on 'Document': The provided double value for '${name}' is non-finite.`)
+  }
+  return coordinate
+}
+
 /**
  * The `document` of a GPUIX app: a DOM `Document` node that is also the `window` target,
  * plus `activeElement` and `pointerLockElement`.
@@ -278,6 +286,35 @@ export class GpuixDocument<Element = unknown> extends Document {
   /** The element that scrolls the document, which is `documentElement` as in standards mode. */
   get scrollingElement(): Element | null {
     return this.documentElement
+  }
+
+  /**
+   * The elements under the point `(x, y)` of the window that mounted last, in CSS pixels from its
+   * top left corner, topmost first and ending with `body` then `html`: what `elementFromPoint`
+   * answers with its first. Empty for a point outside the window. The window is laid out first,
+   * so an element mounted in this turn is found, and `pointer-events: none`, `visibility: hidden`
+   * and `display: none` elements are left out.
+   */
+  elementsFromPoint(x: number, y: number): Element[] {
+    const renderer = mountedRenderer()
+    if (renderer === undefined) {
+      throw new Error("document.elementsFromPoint needs a mounted GPUIX root. Call it after render().")
+    }
+    if (renderer.getElementsAt === undefined) {
+      throw new Error("This renderer cannot hit test, so document.elementsFromPoint is unavailable")
+    }
+    return renderer.getElementsAt(finiteCoordinate(x, "x"), finiteCoordinate(y, "y")).map((id) => {
+      const element = elementOf(renderer, id)
+      if (element === undefined) {
+        throw new Error(`Element ${id} is under the point but its root has no element for it`)
+      }
+      return element as Element
+    })
+  }
+
+  /** The topmost of `elementsFromPoint`, or `null` for a point outside the window. */
+  elementFromPoint(x: number, y: number): Element | null {
+    return this.elementsFromPoint(x, y)[0] ?? null
   }
 
   /**
