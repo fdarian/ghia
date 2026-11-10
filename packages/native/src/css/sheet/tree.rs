@@ -27,14 +27,16 @@ fn lowercase(name: &str) -> Cow<'_, str> {
     }
 }
 
-fn class_atoms(atoms: &mut Atoms, value: Option<Cow<'_, str>>) -> Vec<Atom> {
+/// A class or id no sheet names cannot match a selector, so it has no atom and an element keeps
+/// nothing of it: the interner holds the names of the sheets, not of every element ever seen.
+fn class_atoms(atoms: &Atoms, value: Option<Cow<'_, str>>) -> Vec<Atom> {
     value
-        .map(|value| value.split_ascii_whitespace().map(|class| atoms.intern(class)).collect())
+        .map(|value| value.split_ascii_whitespace().filter_map(|class| atoms.get(class)).collect())
         .unwrap_or_default()
 }
 
-fn id_atom(atoms: &mut Atoms, value: Option<Cow<'_, str>>) -> Option<Atom> {
-    value.filter(|value| !value.is_empty()).map(|value| atoms.intern(&value))
+fn id_atom(atoms: &Atoms, value: Option<Cow<'_, str>>) -> Option<Atom> {
+    value.and_then(|value| atoms.get(&value))
 }
 
 impl RetainedTree {
@@ -199,20 +201,20 @@ impl RetainedTree {
 
     /// Reads the class atoms again, and returns the ones the element had.
     fn refresh_class_atoms(&mut self, id: u64) -> Vec<Atom> {
-        let atoms = &mut self.sheets.atoms;
+        let atoms = &self.sheets.atoms;
         let Some(element) = self.elements.get_mut(&id) else {
             return Vec::new();
         };
         let classes = class_atoms(atoms, element.attribute("class"));
-        std::mem::replace(&mut element.css_mut().classes, classes)
+        element.replace_css_classes(classes)
     }
 
     /// Reads the id atom again, and returns the one the element had.
     fn refresh_id_atom(&mut self, id: u64) -> Option<Atom> {
-        let atoms = &mut self.sheets.atoms;
+        let atoms = &self.sheets.atoms;
         let element = self.elements.get_mut(&id)?;
         let element_id = id_atom(atoms, element.attribute("id"));
-        std::mem::replace(&mut element.css_mut().id, element_id)
+        element.replace_css_id(element_id)
     }
 
     /// An element's `id` arrives as a prop, not through `setAttribute`, and so do `role` and
@@ -285,13 +287,19 @@ impl RetainedTree {
         if texts == self.sheets.loaded {
             return;
         }
+        let names = self.sheets.atoms.len();
         self.sheets.load(texts);
+        // Elements keep atoms only for the names a sheet had when they were read, so a name the
+        // new sheets bring has to be looked for in every element's class and id again.
+        if self.sheets.atoms.len() != names {
+            self.sheets.atoms_fresh = false;
+        }
         self.styles.cascaded.clear();
         self.sheets.mark_all = true;
     }
 
     fn init_all_css(&mut self) {
-        let atoms = &mut self.sheets.atoms;
+        let atoms = &self.sheets.atoms;
         for element in self.elements.values_mut() {
             let element_id = id_atom(atoms, element.attribute("id"));
             let classes = class_atoms(atoms, element.attribute("class"));
@@ -421,9 +429,7 @@ impl RetainedTree {
         }
         self.apply_matched(changes);
 
-        if self.sheets.reads_style() {
-            self.sheets.release_unused();
-        }
+        self.sheets.release_unused();
         if self.sheets.style_elements.is_empty() && self.sheets.constructed.is_empty() {
             self.wind_down_sheets();
         }
@@ -431,11 +437,7 @@ impl RetainedTree {
 
     /// No sheet is left and every element has been matched against none: free what only sheets use.
     fn wind_down_sheets(&mut self) {
-        self.sheets.enabled = false;
-        self.sheets.atoms_fresh = false;
-        self.sheets.loaded.clear();
-        self.sheets.index = Default::default();
-        self.sheets.interner = Default::default();
+        self.sheets.wind_down();
         self.styles.cascaded.clear();
         for element in self.elements.values_mut() {
             element.clear_css();

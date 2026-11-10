@@ -725,6 +725,68 @@ fn entries_that_share_one_cascaded_style_are_released_once_no_element_uses_it() 
 }
 
 #[test]
+fn names_no_sheet_mentions_are_not_interned_and_elements_keep_nothing_of_them() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a { color: red } #b { color: blue }");
+    doc.flush();
+    let names = doc.tree.sheets.atoms.len();
+    let mut last = 0;
+    for n in 0..10_000 {
+        last = doc.classed("div", ROOT, &format!("c{n} d{n}"));
+        doc.tree.set_attribute(last, "id", Some(format!("i{n}")));
+    }
+    doc.flush();
+    assert_eq!(doc.tree.sheets.atoms.len(), names);
+    assert!(doc.tree.elements[&last].css().is_none());
+    assert!(doc.tree.elements[&last].attribute_store().is_some());
+}
+
+#[test]
+fn a_sheet_that_names_a_class_elements_already_have_matches_them() {
+    let mut doc = Doc::new();
+    let late = doc.classed("div", ROOT, "late other");
+    let named = doc.classed("div", ROOT, "a");
+    let identified = doc.element("div", ROOT);
+    doc.tree.set_attribute(identified, "id", Some("i".into()));
+    doc.style_element(ROOT, ".a { color: red }");
+    doc.flush();
+    assert_eq!(doc.color(late), None);
+    assert_eq!(doc.color(named), Some("red"));
+
+    doc.style_element(ROOT, ".late { color: blue } #i { color: green }");
+    doc.flush();
+    assert_eq!(doc.color(late), Some("blue"));
+    assert_eq!(doc.color(identified), Some("green"));
+    assert_eq!(doc.color(named), Some("red"));
+
+    doc.tree.set_attribute(late, "class", Some("other".into()));
+    doc.flush();
+    assert_eq!(doc.color(late), None);
+}
+
+#[test]
+fn winding_down_frees_the_names_and_the_style_texts() {
+    let mut doc = Doc::new();
+    let item = doc.classed("div", ROOT, "a");
+    doc.inline(item, r#"{"left":1}"#);
+    let (style, _) = doc.style_element(ROOT, r#".a { color: red } [style*="left"] { top: 1px }"#);
+    doc.flush();
+    assert!(doc.tree.sheets.atoms.len() > 1);
+    assert_eq!(doc.tree.sheets.style_text_count(), 1);
+
+    doc.tree.destroy_element(style);
+    doc.flush();
+    assert!(!doc.tree.sheets.enabled);
+    assert_eq!(doc.tree.sheets.atoms.len(), 1);
+    assert_eq!(doc.tree.sheets.style_text_count(), 0);
+    assert!(doc.tree.elements[&item].css().is_none());
+
+    doc.style_element(ROOT, ".a { color: blue }");
+    doc.flush();
+    assert_eq!(doc.color(item), Some("blue"));
+}
+
+#[test]
 fn the_universal_layer_goes_under_the_cascade() {
     let mut doc = Doc::new();
     let div = doc.classed("div", ROOT, "a");

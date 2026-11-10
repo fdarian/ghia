@@ -397,6 +397,26 @@ impl RetainedElement {
         self.release_empty_extras();
     }
 
+    /// Replaces the class atoms and returns the ones the element had.
+    pub(crate) fn replace_css_classes(&mut self, classes: Vec<crate::css::sheet::Atom>) -> Vec<crate::css::sheet::Atom> {
+        if classes.is_empty() && self.css().is_none_or(|css| css.classes.is_empty()) {
+            return Vec::new();
+        }
+        let before = std::mem::replace(&mut self.css_mut().classes, classes);
+        self.release_empty_extras();
+        before
+    }
+
+    /// Replaces the id atom and returns the one the element had.
+    pub(crate) fn replace_css_id(&mut self, id: Option<crate::css::sheet::Atom>) -> Option<crate::css::sheet::Atom> {
+        if id.is_none() && self.css().is_none_or(|css| css.id.is_none()) {
+            return None;
+        }
+        let before = std::mem::replace(&mut self.css_mut().id, id);
+        self.release_empty_extras();
+        before
+    }
+
     pub(crate) fn clear_css(&mut self) {
         if let Some(extras) = self.extras.as_mut() {
             extras.css = Default::default();

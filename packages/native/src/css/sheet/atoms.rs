@@ -29,6 +29,10 @@ impl Atoms {
         self.by_name.get(name).copied()
     }
 
+    pub fn len(&self) -> usize {
+        self.names.len()
+    }
+
     /// The atom of an element's tag: selectors compare it lower-cased, elements keep it as given.
     pub fn tag(&self, name: &str) -> Option<Atom> {
         if name.bytes().any(|byte| byte.is_ascii_uppercase()) {

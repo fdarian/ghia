@@ -215,6 +215,25 @@ impl StyleSheets {
         text
     }
 
+    /// Frees what only sheets use: the indexed rules, the interned names and matched sets, and
+    /// the `[style]` texts. The sources (`style_elements`, `constructed`) stay: they are the
+    /// document's, and the caller decides when none is left.
+    pub(crate) fn wind_down(&mut self) {
+        self.enabled = false;
+        self.atoms_fresh = false;
+        self.loaded.clear();
+        self.index = Default::default();
+        self.interner = Default::default();
+        self.atoms = Atoms::default();
+        self.style = self.atoms.intern("style");
+        self.style_texts.get_mut().clear();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn style_text_count(&self) -> usize {
+        self.style_texts.borrow().len()
+    }
+
     /// Forget the `[style]` texts of own styles no element holds any more.
     pub(crate) fn release_unused(&mut self) {
         self.style_texts.get_mut().retain(|_, (own, _)| Arc::strong_count(own) > 2);
