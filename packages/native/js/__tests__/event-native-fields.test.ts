@@ -13,12 +13,12 @@ describe("event fields for a library that wraps events", () => {
     expect(event.nativeEvent).toBe(event)
   })
 
-  it("has isPrimary on pointer events only", () => {
-    for (const type of ["pointerdown", "pointermove", "pointerup", "pointercancel", "pointerenter", "gotpointercapture"]) {
+  it("has isPrimary on pointer events and the clicks Chrome makes PointerEvents", () => {
+    for (const type of ["pointerdown", "pointermove", "pointerup", "pointercancel", "pointerenter", "gotpointercapture", "click", "auxclick", "contextmenu"]) {
       expect(eventOf(type).isPrimary).toBe(true)
     }
     for (const type of ["pointerDown", "pointerMove"]) expect(eventOf(type).isPrimary).toBe(true)
-    for (const type of ["click", "keydown", "mousedown", "pointerlockchange", "focus"]) {
+    for (const type of ["dblclick", "keydown", "mousedown", "pointerlockchange", "focus"]) {
       expect(eventOf(type)).not.toHaveProperty("isPrimary")
     }
   })

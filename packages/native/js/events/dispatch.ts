@@ -105,6 +105,10 @@ const POINTER_EVENT_TYPES: ReadonlySet<string> = new Set([
   "pointerleave",
   "gotpointercapture",
   "lostpointercapture",
+  // Chrome makes these PointerEvents too.
+  "click",
+  "auxclick",
+  "contextmenu",
 ])
 
 export function eventBubbles(eventType: string): boolean {

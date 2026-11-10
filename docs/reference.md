@@ -7018,8 +7018,8 @@ ancestors' `onClick`. A host ref has the same `click()`, and
 Every mouse and pointer event type has `pointerId` and `pointerType` as required
 fields: `1` and `"mouse"` for the mouse. A pointer event (`pointerdown`, `pointermove`,
 `pointerup`, `pointercancel`, `pointerover`, `pointerout`, `pointerenter`, `pointerleave`,
-`gotpointercapture`, `lostpointercapture`) also has `isPrimary`, always `true`: Ghia has one
-pointer. Every event has `nativeEvent`, the event itself, which is what a library that wraps
+`gotpointercapture`, `lostpointercapture`, and `click`, `auxclick` and `contextmenu`, which are
+PointerEvents in Chrome) also has `isPrimary`, always `true`: Ghia has one pointer. Every event has `nativeEvent`, the event itself, which is what a library that wraps
 events reads the DOM event from (a React synthetic event has the same member).
 
 ### Pointer capture
