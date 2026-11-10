@@ -339,26 +339,28 @@ describeNative("a var() in the style of an inline box", () => {
   )
   const boxes = (renderer: Renderer) => [box(renderer, "text"), box(renderer, "span")]
 
-  it.each([
-    ["fontSize", { fontSize: "var(--s)" }, { fontSize: "40px" }, { "--s": "40px" }, { "--s": "20px" }, { fontSize: "20px" }],
-    ["paddingLeft", { paddingLeft: "var(--s)" }, { paddingLeft: "40px" }, { "--s": "40px" }, { "--s": "20px" }, { paddingLeft: "20px" }],
-  ])("sizes a span by %s, and again when the custom property above it changes", (_, viaVar, literal, custom, changed, changedLiteral) => {
-    let unset: unknown
-    mounted(tree({}, custom), (renderer) => {
-      unset = boxes(renderer)
+  const measured = (spanTree: React.ReactElement) => {
+    let found: unknown
+    mounted(spanTree, (renderer) => {
+      found = boxes(renderer)
     })
-    mounted(tree(viaVar, custom), (renderer, root) => {
-      expect(boxes(renderer)).not.toEqual(unset)
-      let expected: unknown
-      mounted(tree(literal, {}), (literalRenderer) => {
-        expected = boxes(literalRenderer)
-      })
+    return found
+  }
+
+  it.each([
+    ["fontSize", "40px", "20px"],
+    ["paddingLeft", "40px", "20px"],
+  ])("sizes a span by %s, and again when the custom property above it changes", (property, value, changed) => {
+    const viaVar = { [property]: "var(--s)" }
+    const literal = (to: string) => ({ [property]: to })
+    const unset = measured(tree({}, { "--s": value }))
+    const expected = measured(tree(literal(value), {}))
+    const expectedChanged = measured(tree(literal(changed), {}))
+    expect(expected).not.toEqual(unset)
+    mounted(tree(viaVar, { "--s": value }), (renderer, root) => {
       expect(boxes(renderer)).toEqual(expected)
-      update(root, tree(viaVar, changed))
-      mounted(tree(changedLiteral, {}), (literalRenderer) => {
-        expected = boxes(literalRenderer)
-      })
-      expect(boxes(renderer)).toEqual(expected)
+      update(root, tree(viaVar, { "--s": changed }))
+      expect(boxes(renderer)).toEqual(expectedChanged)
     })
   }, SLOW)
 

@@ -407,6 +407,23 @@ mod tests {
     }
 
     #[test]
+    fn a_box_with_no_motion_reads_the_custom_properties_of_the_boxes_around_it() {
+        let mut page = Page::new();
+        let held = |json: &str| Arc::new(crate::css::var_substitution::parse(json.as_bytes()).expect("a style"));
+        page.tree.set_style(3, held(r#"{ "--outer": "red", "--len": "7px", "paddingLeft": "var(--len)" }"#));
+        page.tree.set_style(5, held(r#"{ "--own": "lime", "backgroundColor": "var(--outer)", "color": "var(--own)" }"#));
+        let before = crate::css::custom_properties::reads::count();
+        let styles = page.frame(0);
+        assert!(crate::css::custom_properties::reads::count() > before, "a read of the custom properties is noted");
+        assert!(styles.sampled.is_empty(), "nothing was stepped");
+        assert_eq!(page.shown(&styles, 3).padding_left, LinearLength::px(7.0).into());
+        let inner = page.shown(&styles, 5);
+        is(&inner.background_color, "red");
+        is(&inner.color, "lime");
+        assert_eq!(inner.var_declarations, None);
+    }
+
+    #[test]
     fn a_background_between_two_colours_shows_neither_while_it_transitions() {
         let mut page = Page::new();
         let style = |color: &str| {
@@ -490,7 +507,7 @@ mod tests {
         page.style(3, r#"{ "backgroundColor": "blue" }"#);
         let styles = page.frame(0);
         is(&page.shown(&styles, 3).background_color, "blue");
-        assert!(styles.0.is_empty(), "nothing was stepped");
+        assert!(styles.sampled.is_empty(), "nothing was stepped");
         assert!(!page.transitions.take_active());
     }
 
