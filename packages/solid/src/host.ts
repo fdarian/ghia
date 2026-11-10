@@ -18,6 +18,8 @@ import {
   eventTypesWithOverrides,
   focusHostElement,
   hostElementMatches,
+  attributeNameOfProp,
+  attributeValue,
   forwardsCustomProp,
   isNativeviewHandlerProp,
   HOST_BINDING,
@@ -692,9 +694,18 @@ export function setHostProperty(
   }
   if (value === undefined) node.props.delete(name)
   else node.props.set(name, value)
-  if (!node.root || !node.mounted || !customPropAllowed(node, name)) return
+  if (!node.root || !node.mounted) return
+  syncAttribute(node.root, node, name, value)
+  if (!customPropAllowed(node, name)) return
   const serialized = serializeCustomProp(value)
   if (node.sent.writesProp(name, serialized)) node.root.mutations.setCustomProp(node.nativeId, name, serialized)
+}
+
+function syncAttribute(root: HostRoot, node: HostElement, prop: string, value: HostPropertyValue): void {
+  const attribute = attributeNameOfProp(node.type, prop)
+  if (attribute === undefined) return
+  const text = attributeValue(attribute, value)
+  if (node.sent.writesAttribute(attribute, text)) root.mutations.setAttribute(node.nativeId, attribute, text)
 }
 
 function syncNativeviewProps(root: HostRoot, node: HostElement): void {
@@ -725,6 +736,7 @@ function mount(root: HostRoot, node: HostNode): void {
     if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.type)
     node.listeners.attach({ eventHandlers: root.eventHandlers, renderer: root.mutations, elementId: node.nativeId })
     for (const [name, value] of node.props) {
+      syncAttribute(root, node, name, value)
       if (!EVENT_PROP_NAMES.has(name) && customPropAllowed(node, name)) {
         const serialized = serializeCustomProp(value)
         if (node.sent.writesProp(name, serialized)) root.mutations.setCustomProp(node.nativeId, name, serialized)

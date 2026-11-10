@@ -223,6 +223,7 @@ function writeWire(ops: Op[], writer: WireWriter): void {
       case 'setKeyboardFocusDim': writer.setKeyboardFocusDim(op[1] as boolean); break
       case 'setUniversalStyle': writer.setUniversalStyle(op[1] === null ? null : JSON.stringify(op[1])); break
       case 'setCustomProp': writer.setCustomProp(op[1] as number, op[2] as string, op[3] as never); break
+      case 'setAttribute': writer.setAttribute(op[1] as number, op[2] as string, op[3] as string | null); break
       default: throw new Error(`no wire opcode for ${String(op[0])}`)
     }
   }

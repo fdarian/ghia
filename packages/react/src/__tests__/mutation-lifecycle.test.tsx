@@ -31,6 +31,7 @@ function recordingRenderer(): MutationRenderer & { styles: object[] } {
     setKeyboardFocusDim() {},
     setUniversalStyle() {},
     setCustomProp() {},
+    setAttribute() {},
     requestFlush() {},
     flushMutations() {},
   }

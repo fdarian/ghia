@@ -416,6 +416,7 @@ interface NativeTestRendererApi
   takeSimulatedWindowActions(): string[]
   getScrollMetrics(elementId: number): number[] | null
   getComputedStyle(elementId: number, pseudoElement: boolean): string[] | null
+  getAttribute(elementId: number, name: string): string | null
   scrollByKey(key: string, shift: boolean): void
   setImage(elementId: number, bytes: Buffer | Uint8Array): void
   /** Encoded bytes for the `blob:` URL a `url()` background names. */
@@ -1843,6 +1844,12 @@ export class TestRenderer implements NativeRenderer {
    *  null for an element that has not been painted. */
   getScrollMetrics(elementId: number): number[] | null {
     return this.native.getScrollMetrics(elementId)
+  }
+
+  /** The attribute `name` the native tree holds for an element, or null. Flush first: a queued
+   *  mutation is not in the tree yet. */
+  getAttribute(elementId: number, name: string): string | null {
+    return this.native.getAttribute(elementId, name)
   }
 
   /** `[name, value, name, value, ...]` of the computed style of an element, or null while it is not in

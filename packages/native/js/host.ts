@@ -2892,6 +2892,11 @@ export interface MutationRenderer {
   setUniversalStyle(style: StyleDesc | null): void
   setCustomProp(id: number, key: string, value: object | string | number | boolean | null): void
   /**
+   * A DOM attribute (`class`, `data-*`, a primitive-valued prop), kept on the native element for
+   * selector matching. `null` removes it.
+   */
+  setAttribute(id: number, name: string, value: string | null): void
+  /**
    * Schedule the flush a queued mutation would have scheduled. An adapter that
    * defers work to the flush (Solid destroys a removed node there) calls it when
    * it has something to finish but nothing to enqueue yet. A queue with no

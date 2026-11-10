@@ -499,6 +499,7 @@ is atomic: native decodes it whole and resolves every style before it touches an
 | 10 | `setKeyboardFocusDim` | bool |
 | 11 | `setUniversalStyle` | string style; the empty string clears the layer |
 | 12 | `setCustomProp` | id, string key, value |
+| 13 | `setAttribute` | id, string name, bool present, then (when present) string value |
 
 **A style is its JSON text**, the exact string `JSON.stringify(style)` gives, with the keys in the order written.
 Native interns styles by those bytes and reads `@container` rules from the text, so two styles are one style exactly

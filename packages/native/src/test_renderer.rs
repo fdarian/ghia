@@ -955,6 +955,14 @@ impl TestGpuixRenderer {
         self.tree.lock().unwrap().elements.len() as u32
     }
 
+    /// The attribute `name` the native tree holds for an element (see `RetainedTree::attribute`),
+    /// or null. Reads the tree as it is: a mutation JS has queued and not flushed is not in it.
+    #[napi]
+    pub fn get_attribute(&self, element_id: f64, name: String) -> Result<Option<String>> {
+        let id = to_element_id(element_id)?;
+        Ok(self.tree.lock().unwrap().attribute(id, &name).map(|value| value.into_owned()))
+    }
+
     /// What the element build has done since the last `resetBuildCounters`. A draw builds every
     /// element, so divide by the frames drawn to get the per-frame figure.
     #[napi]

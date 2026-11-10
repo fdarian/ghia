@@ -114,6 +114,10 @@ export function createMutationQueue(
       writer.setCustomProp(id, key, value)
       requestFlush()
     },
+    setAttribute(id, name, value) {
+      writer.setAttribute(id, name, value)
+      requestFlush()
+    },
     requestFlush,
     flushMutations() {
       flushScheduled = false
@@ -277,11 +281,47 @@ export function isUniversalProp(name: string): boolean {
  * element with SVG attributes, so it forwards those too.
  */
 export function forwardsCustomProp(type: string, name: string): boolean {
+  // `class` reaches native through `setAttribute` alone: nothing in native reads it as a prop.
+  if (name === "class" || name === "className") return false
   return (
     !BUILT_IN_TYPES.has(type) ||
     isUniversalProp(name) ||
     (type === "text" && SVG_TEXT_PROPS.has(name))
   )
+}
+
+/**
+ * The attribute a prop of an element of this type sets, or `undefined` when it is not one: `class`
+ * (also from `className`), every `data-*`, and any prop that is not reserved, not an event and not
+ * already forwarded as a custom prop. Whether the value is one is `attributeValue`'s answer.
+ */
+export function attributeNameOfProp(type: string, name: string): string | undefined {
+  if (name === "class" || name === "className") return "class"
+  if (name.startsWith("data-")) return name
+  if (isReservedProp(name) || forwardsCustomProp(type, name)) return undefined
+  return name
+}
+
+/**
+ * What the attribute `name` holds for a prop value, `null` for none. A string is itself, a number
+ * its text and `true` the empty string, as the DOM prints a boolean attribute; `false`, `null` and
+ * `undefined` remove it, and so does an object or a function, which no attribute holds. `class`
+ * converts whatever else it is with `String`.
+ */
+export function attributeValue(name: string, value: unknown): string | null {
+  switch (typeof value) {
+    case "string":
+      return value
+    case "number":
+      return String(value)
+    case "boolean":
+      return value ? "" : null
+    case "undefined":
+      return null
+    default:
+      if (value === null) return null
+      return name === "class" ? String(value) : null
+  }
 }
 
 export function isReservedProp(name: string): boolean {

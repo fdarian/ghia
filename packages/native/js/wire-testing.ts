@@ -121,6 +121,12 @@ export function decodeWireBatchForTest(bytes: Uint8Array): DecodedOp[] {
         ops.push([name, id, key, value()])
         break
       }
+      case WIRE_OPCODE.setAttribute: {
+        const id = varint()
+        const attribute = string()
+        ops.push([name, id, attribute, bool() ? string() : null])
+        break
+      }
       default:
         throw new Error(`Unknown opcode ${code} at byte ${position - 1}`)
     }
@@ -172,6 +178,9 @@ export function encodeWireBatchForTest(ops: readonly DecodedOp[]): Uint8Array {
         break
       case "setCustomProp":
         writer.setCustomProp(op[1] as number, op[2] as string, op[3] as WireValue)
+        break
+      case "setAttribute":
+        writer.setAttribute(op[1] as number, op[2] as string, op[3] as string | null)
         break
       default:
         throw new Error(`No wire opcode for ${String(op[0])}`)

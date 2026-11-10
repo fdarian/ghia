@@ -15,6 +15,7 @@ type Tuple =
   | ["setKeyboardFocusDim", boolean]
   | ["setUniversalStyle", object | null]
   | ["setCustomProp", number, string, WireValue]
+  | ["setAttribute", number, string, string | null]
 
 function write(writer: WireWriter, tuple: Tuple): void {
   switch (tuple[0]) {
@@ -42,6 +43,8 @@ function write(writer: WireWriter, tuple: Tuple): void {
       return writer.setUniversalStyle(tuple[1] === null ? null : JSON.stringify(tuple[1]))
     case "setCustomProp":
       return writer.setCustomProp(tuple[1], tuple[2], tuple[3])
+    case "setAttribute":
+      return writer.setAttribute(tuple[1], tuple[2], tuple[3])
   }
 }
 
@@ -155,6 +158,9 @@ describe("WireWriter round trip", () => {
       ["setUniversalStyle", { color: "red" }],
       ["setUniversalStyle", null],
       ["setCustomProp", 1, "testId", "x"],
+      ["setAttribute", 1, "class", "a b"],
+      ["setAttribute", 1, "hidden", ""],
+      ["setAttribute", 1, "data-x", null],
     ])
   })
 
@@ -207,6 +213,7 @@ describe("WireWriter round trip", () => {
       ["setText", index, text],
       ["setEventListener", index, text, index % 2 === 0],
       ["setCustomProp", index, text, text],
+      ["setAttribute", index, text, text],
     ])
     expectRoundTrip(tuples)
   })

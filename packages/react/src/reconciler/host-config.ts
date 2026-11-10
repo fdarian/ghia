@@ -16,6 +16,8 @@ import {
   ROOT_ELEMENT_TYPES,
   sameMutationValue,
   serializeCustomProp,
+  attributeNameOfProp,
+  attributeValue,
   forwardsCustomProp,
   readTextControlSelection,
   requestFormSubmit,
@@ -271,6 +273,39 @@ function syncCustomProps(
   }
 }
 
+function syncAttributes(renderer: MutationRenderer, id: number, type: string, props: Props): void {
+  for (const [key, value] of Object.entries(props)) {
+    const name = attributeNameOfProp(type, key)
+    if (name === undefined) continue
+    const text = attributeValue(name, value)
+    if (text !== null) renderer.setAttribute(id, name, text)
+  }
+}
+
+function diffAttributes(
+  renderer: MutationRenderer,
+  id: number,
+  type: string,
+  oldProps: Props,
+  newProps: Props
+): void {
+  const previous = oldProps as Record<string, unknown>
+  const next = newProps as Record<string, unknown>
+  for (const key in next) {
+    const name = attributeNameOfProp(type, key)
+    if (name === undefined) continue
+    const text = attributeValue(name, next[key])
+    const before = key in previous ? attributeValue(name, previous[key]) : null
+    if (text !== before) renderer.setAttribute(id, name, text)
+  }
+  for (const key in previous) {
+    if (key in next) continue
+    const name = attributeNameOfProp(type, key)
+    if (name === undefined) continue
+    if (attributeValue(name, previous[key]) !== null) renderer.setAttribute(id, name, null)
+  }
+}
+
 /**
  * Diff and send changed custom props to Rust.
  *
@@ -332,6 +367,7 @@ function materialize(node: HostNode): ReturnType<typeof stateFor> {
     syncMotionBindings(state.container, node.nativeId, node.props.style, node.type)
     syncEventListeners(state.container, node)
     syncCustomProps(renderer, node.nativeId, node.type, node.props)
+    syncAttributes(renderer, node.nativeId, node.type, node.props)
   } else {
     renderer.createElement(node.nativeId, "text")
     renderer.setText(node.nativeId, node.text)
@@ -584,6 +620,7 @@ export const hostConfig = {
     }
     // Custom prop diff (for non-div/text elements)
     diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
+    diffAttributes(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
     instance.props = newProps
   },
 
