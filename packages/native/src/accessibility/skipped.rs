@@ -285,7 +285,7 @@ mod tests {
     }
 
     #[test]
-    fn paragraphs_beside_blocks_are_nodes_in_document_order_and_a_group_is_named_by_its_text() {
+    fn paragraphs_beside_blocks_are_nodes_in_document_order_and_a_group_reads_its_text_as_its_value() {
         let mut tree = tree();
         add(&mut tree, 1, 2, &[], serde_json::json!({}));
         tree.create_element(3, "#text".to_string());
@@ -309,7 +309,7 @@ mod tests {
         );
         let nodes = exposed(&tree, &tree.elements[&1]);
         assert_eq!((nodes[0].node.value(), nodes[2].node.value()), (Some("Before"), Some("After")));
-        assert_eq!((nodes[3].node.label(), nodes[3].node.value()), (Some("Group text"), None));
+        assert_eq!((nodes[3].node.label(), nodes[3].node.value()), (None, Some("Group text")));
     }
 
     #[test]
