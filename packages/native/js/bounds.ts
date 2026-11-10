@@ -92,6 +92,20 @@ export function readBoundingClientRect(renderer: NativeRenderer, id: number): Bo
 }
 
 /**
+ * The border box's size before any transform, which `offsetWidth` and `offsetHeight` round. Read
+ * the way `readBoundingClientRect` reads. An element with no box is 0 by 0.
+ */
+export function readLayoutSize(renderer: NativeRenderer, id: number): { width: number; height: number } {
+  if (!renderer.getElementBounds) {
+    throw new Error("This renderer cannot measure elements: it has no getElementBounds")
+  }
+  flushPendingMutations(renderer)
+  const bounds = renderer.getElementBounds(id)
+  if (!bounds) return { width: 0, height: 0 }
+  return { width: bounds.layoutWidth, height: bounds.layoutHeight }
+}
+
+/**
  * Key of the method a framework adapter puts on its host element instances to
  * let shared code (observers) reach the element's renderer and mutation queue.
  */

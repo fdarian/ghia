@@ -99,6 +99,7 @@ function attachHostMethods(instance: Instance): PublicInstance {
   defineDomMembers(instance, () => ({
     listeners: listenersOf(instance),
     connected: container.instances.get(instance.id) === instance,
+    layout: state.mounted ? { renderer: container.nativeRenderer, id: instance.id } : undefined,
     prop: (name) => (instance.props as Record<string, unknown>)[name],
   }))
   Object.assign(instance, createElementMethods(container.nativeRenderer, instance.id))

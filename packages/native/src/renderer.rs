@@ -14093,6 +14093,10 @@ pub struct ElementBounds {
     /// pixels as the DOM does.
     pub client_left: f64,
     pub client_top: f64,
+    /// The border box's size before any transform, which `offsetWidth` and `offsetHeight` round:
+    /// `width` and `height` are the box after the transforms.
+    pub layout_width: f64,
+    pub layout_height: f64,
 }
 
 /// A [`WebAnimationInfo`] with the element the run is of, for a read that spans elements.
@@ -14338,6 +14342,8 @@ impl ElementBounds {
             height,
             client_left: bounds.client_left.round(),
             client_top: bounds.client_top.round(),
+            layout_width: bounds.width,
+            layout_height: bounds.height,
         }
     }
 }
@@ -14355,6 +14361,8 @@ fn element_bounds_js(
         ("height", height),
         ("clientLeft", bounds.client_left.round()),
         ("clientTop", bounds.client_top.round()),
+        ("layoutWidth", bounds.width),
+        ("layoutHeight", bounds.height),
     ] {
         js_sys::Reflect::set(
             &object,
