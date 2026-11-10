@@ -15,7 +15,7 @@ export interface DomElement {
   readonly isConnected: boolean
   /**
    * The prop of that name (case-insensitive) as a string, or `null` when the element was not given
-   * it. `false` is `null` and `true` is `""`, except for `data-*` and `aria-*`, which hold "true" and "false".
+   * it, or when it is a function or an object (`onClick`, `style`). `false` is `null` and `true` is `""`, except for `data-*` and `aria-*`, which hold "true" and "false".
    */
   getAttribute(name: string): string | null
   /** The border box's width, rounded, before any transform. 0 for an element with no box. */
@@ -62,6 +62,8 @@ function propForAttribute(bound: DomElementBinding, name: string): unknown {
  */
 function attributeOf(name: string, value: unknown): string | null {
   if (value === undefined || value === null) return null
+  // A handler or a style object is not an attribute: there is no text to give for it.
+  if (typeof value === "function" || typeof value === "object") return null
   const lower = name.toLowerCase()
   if (lower.startsWith("data-") || lower.startsWith("aria-")) return String(value)
   if (value === false) return null

@@ -224,9 +224,12 @@ describe.skipIf(!hasNativeTestRenderer)("DOM members of a Solid element", () => 
         aria-expanded={false}
         hidden={true}
         title="t"
+        onClick={() => {}}
         style={{ width: 10, height: 10 }}
       />
     ))
+    expect(row.getAttribute("onclick")).toBeNull()
+    expect(row.getAttribute("style")).toBeNull()
     expect(row.getAttribute("DATA-flag")).toBe("false")
     expect(row.getAttribute("data-on")).toBe("true")
     expect(row.getAttribute("Aria-Expanded")).toBe("false")
