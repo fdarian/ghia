@@ -291,17 +291,23 @@ impl RetainedTree {
 
     /// The elements to match again, each with whether it is in the document, once.
     fn restyle_set(&self, marks: &[(u64, Reach)], all: bool) -> Vec<(u64, bool)> {
-        let mut out: Vec<(u64, bool)> = Vec::new();
         if all {
-            let mut seen: FxHashSet<u64> = FxHashSet::default();
-            for id in self.document_order(None) {
-                seen.insert(id);
-                out.push((id, true));
+            let walked = self.document_order(None);
+            let mut out: Vec<(u64, bool)> = Vec::with_capacity(self.elements.len());
+            out.extend(walked.iter().map(|id| (*id, true)));
+            if walked.len() < self.elements.len() {
+                let in_document: FxHashSet<u64> = walked.into_iter().collect();
+                out.extend(self.elements.keys().filter(|id| !in_document.contains(id)).map(|id| (*id, false)));
             }
-            out.extend(self.elements.keys().filter(|id| !seen.contains(id)).map(|id| (*id, false)));
             return out;
         }
-        let mut expansion = Expansion { tree: self, visited: FxHashSet::default(), covered: FxHashSet::default(), out };
+        let out: Vec<(u64, bool)> = Vec::with_capacity(marks.len());
+        let mut expansion = Expansion {
+            tree: self,
+            visited: FxHashSet::with_capacity_and_hasher(marks.len(), Default::default()),
+            covered: FxHashSet::default(),
+            out,
+        };
         for (id, reach) in marks {
             let Some(element) = self.elements.get(id) else {
                 continue;
