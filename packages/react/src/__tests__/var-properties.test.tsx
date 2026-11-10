@@ -385,3 +385,36 @@ describeNative("a var() in the style of an inline box", () => {
     expect(red).toBeGreaterThan(20)
   }, SLOW)
 })
+
+describeNative("a custom property declared in a focus state", () => {
+  const tree = (focusVisible: Record<string, unknown>) => (
+    <div style={{ position: "absolute", left: 0, top: 0, width: 600, "--w": "40px" }}>
+      <div testId="focusable" tabIndex={0} style={{ width: 20, height: 10, focusVisible }} />
+    </div>
+  )
+  const focusedWidth = (focusVisible: Record<string, unknown>) => {
+    let width = 0
+    mounted(tree(focusVisible), (renderer) => {
+      renderer.simulateKeystrokes("Tab")
+      renderer.dispatchNativeEvents()
+      renderer.flush()
+      renderer.drawFrame()
+      expect(renderer.matchesFocus(renderer.findByTestId("focusable")!.id, ":focus-visible")).toBe(true)
+      width = box(renderer, "focusable")[2]
+    })
+    return width
+  }
+
+  it("is the one a var() in that state reads", () => {
+    expect(focusedWidth({ width: 80 })).toBe(80)
+    expect(focusedWidth({ "--v": "80px", width: "var(--v)" })).toBe(80)
+  }, SLOW)
+
+  it("wins over the one the ancestor declares", () => {
+    expect(focusedWidth({ "--w": "80px", width: "var(--w)" })).toBe(80)
+  }, SLOW)
+
+  it("falls back to the ancestor's when the state does not declare it", () => {
+    expect(focusedWidth({ width: "var(--w)" })).toBe(40)
+  }, SLOW)
+})

@@ -300,10 +300,13 @@ fn resolve_in(style: &mut StyleDesc, custom: &CustomProperties) {
     if let Some(held) = style.var_declarations.take() {
         lay_declarations(style, &held, custom);
     }
+    // A focus variant is laid over the element when it is built, so what it declares of a custom
+    // property is what its own `var()` reads, as for an element a transition resolves.
     macro_rules! resolve_variants {
         ($($field:ident),+) => {$(
             if let Some(variant) = style.$field.as_mut() {
-                resolve_in(variant, custom);
+                let own = variant.custom_properties.as_ref().map(|declared| custom.descend(declared));
+                resolve_in(variant, own.as_ref().unwrap_or(custom));
             }
         )+};
     }
@@ -709,6 +712,18 @@ mod tests {
         assert_eq!(focused.focus_within.as_ref().unwrap().height, style(r#"{"height":"5px"}"#).height);
         assert_eq!(focused.has_focus_visible.as_ref().unwrap().opacity, Some(0.5));
         assert!(!focused.holds_var_declarations());
+    }
+
+    #[test]
+    fn a_focus_variant_reads_the_custom_properties_it_declares_over_the_elements() {
+        let focused = resolved(
+            r#"{"focusVisible":{"--v":"80px","--w":"70px","width":"var(--v)","height":"var(--w)","opacity":"var(--o)"}}"#,
+            &[("--w", "5px"), ("--o", "0.5")],
+        );
+        let variant = focused.focus_visible.as_ref().unwrap();
+        assert_eq!(variant.width, style(r#"{"width":"80px"}"#).width);
+        assert_eq!(variant.height, style(r#"{"height":"70px"}"#).height);
+        assert_eq!(variant.opacity, Some(0.5));
     }
 
     #[test]
