@@ -46,6 +46,7 @@ export {
   GpuixEventTarget,
   installElementSource,
   syncWindowEventListeners,
+  syncWindowSelectionChange,
   window,
   type AddEventListenerOptions,
   type WindowEventListener,

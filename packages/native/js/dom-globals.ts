@@ -13,6 +13,7 @@ import {
   SVGElement,
   Text,
 } from "./dom/nodes.js"
+import { Selection } from "./dom/selection.js"
 import { document, window } from "./events/window-target.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
 import { isWebBuild } from "./web-build.js"
@@ -39,9 +40,12 @@ const DOM_CLASSES = {
   Document,
   DocumentFragment,
   ShadowRoot,
+  Selection,
 }
 
-const DOM_FUNCTIONS = { ResizeObserver, IntersectionObserver, getComputedStyle, matchMedia }
+const getSelection = () => document.getSelection()
+
+const DOM_FUNCTIONS = { ResizeObserver, IntersectionObserver, getComputedStyle, matchMedia, getSelection }
 
 /**
  * Marks the install as done on `globalThis`, so a second evaluation of this module

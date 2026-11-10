@@ -7,6 +7,7 @@ import {
   createMutationQueue,
   installElementSource,
   syncWindowEventListeners,
+  syncWindowSelectionChange,
 } from "@ghia/native/host"
 import { GpuixContext, type GpuixContextValue } from "../hooks/use-gpuix.js"
 import type {
@@ -113,6 +114,7 @@ export function createRoot(
   const windowSelectionEventId = gpuixContainer.windowSelectionEventId
   const windowAppearanceEventId = gpuixContainer.windowAppearanceEventId
   let stopWindowEventListeners: (() => void) | undefined
+  let stopSelectionChange: (() => void) | undefined
   let stopElementSource: (() => void) | undefined
   try {
     renderer.setWindowKeyEvents?.(
@@ -122,10 +124,11 @@ export function createRoot(
       true,
       windowKeyEventId
     )
-    renderer.setWindowSelectionChange?.(
-      Boolean(rootEventHandlers.onSelectionChange),
-      windowSelectionEventId
-    )
+    stopSelectionChange = syncWindowSelectionChange(
+      renderer,
+      windowSelectionEventId,
+      () => Boolean(rootEventHandlers.onSelectionChange)
+    ).stop
     renderer.setWindowAppearanceChange?.(
       Boolean(rootEventHandlers.onAppearanceChange),
       windowAppearanceEventId
@@ -154,7 +157,7 @@ export function createRoot(
       renderer.setWindowKeyEvents?.(false, false, windowKeyEventId)
       stopWindowEventListeners?.()
       stopElementSource?.()
-      renderer.setWindowSelectionChange?.(false, windowSelectionEventId)
+      stopSelectionChange?.()
       renderer.setWindowAppearanceChange?.(false, windowAppearanceEventId)
     }
   }

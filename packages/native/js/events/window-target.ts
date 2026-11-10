@@ -1,6 +1,7 @@
 import type { EventPayload } from "../../index.js"
 import type { Animation } from "../web-animations.js"
 import { Document, DOM_BINDING, registerDocument, type Node, type NodeBinding } from "../dom/nodes.js"
+import { getSelection, type Selection } from "../dom/selection.js"
 import { mountedRenderer } from "../mounted-renderer.js"
 import {
   createDomEvent,
@@ -317,6 +318,11 @@ export class GpuixDocument<Element = unknown> extends Document {
     return this.elementsFromPoint(x, y)[0] ?? null
   }
 
+  /** The text selection of the window that mounted last. */
+  getSelection(): Selection {
+    return getSelection()
+  }
+
   /**
    * The global object, which `dom-globals` installs as `window`: where a library that takes
    * `element.ownerDocument.defaultView` as its window finds `setTimeout`, `requestAnimationFrame`
@@ -490,6 +496,58 @@ export function syncWindowEventListeners(renderer: {
     typeSubscribers.delete(send)
     renderer.setWindowEventListeners?.([])
   }
+}
+
+/** Whether anything listens for `selectionchange`, which native only produces while it is asked to. */
+export function listensForSelectionChange(): boolean {
+  return document.hasListeners("selectionchange") || window.hasListeners("selectionchange")
+}
+
+/**
+ * Keeps the renderer's `selectionChange` event on while `rootListens()` says the root wants it or a
+ * `selectionchange` listener exists on `window` or `document`. `resync` after `rootListens` may
+ * have changed; `stop` turns it off. Native names the window's event with `eventId`.
+ */
+export function syncWindowSelectionChange(
+  renderer: { setWindowSelectionChange?: (enabled: boolean, eventId: number) => void },
+  eventId: number,
+  rootListens: () => boolean
+): { resync: () => void; stop: () => void } {
+  const resync = () => {
+    renderer.setWindowSelectionChange?.(rootListens() || listensForSelectionChange(), eventId)
+  }
+  resync()
+  typeSubscribers.add(resync)
+  return {
+    resync,
+    stop() {
+      typeSubscribers.delete(resync)
+      renderer.setWindowSelectionChange?.(false, eventId)
+    },
+  }
+}
+
+/**
+ * Sends `selectionchange` to `document`, as the DOM does: it does not bubble, so `window` hears
+ * it in the capture phase only. `payload.value` is the selected text, absent after a clear.
+ */
+export function dispatchSelectionChange(root: DomEventRoot, payload: EventPayload): void {
+  const { event, state } = createDomEvent(
+    root,
+    { ...payload, eventType: "selectionchange", elementId: 0 },
+    [],
+    document
+  )
+  const errors: unknown[] = []
+  const fail = (error: unknown) => errors.push(error)
+  window.run(event, state, true, EVENT_PHASE_CAPTURING, fail)
+  if (!state.propagationStopped) {
+    document.run(event, state, true, EVENT_PHASE_AT_TARGET, fail)
+    document.run(event, state, false, EVENT_PHASE_AT_TARGET, fail)
+  }
+  event.currentTarget = null
+  event.eventPhase = EVENT_PHASE_NONE
+  reportHandlerErrors(root, errors)
 }
 
 const DOCUMENT_EVENT_TYPES: ReadonlySet<string> = new Set(["pointerlockchange", "pointerlockerror"])
