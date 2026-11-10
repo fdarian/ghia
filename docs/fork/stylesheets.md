@@ -108,7 +108,7 @@ An element that is not in the document, or is not matchable, matches nothing: re
 
 ## Attributes and wire ops 13 to 15
 
-Op 13 `setAttribute(id, name, value | null)` stores into the element's attribute store; the JS adapters forward `class`, every `data-*` and any other primitive attribute (see [reference](../reference.md#listeners-and-dom-members-on-an-element))). `class` and `data-*` go as op 13 alone, never also as a custom prop, so an element of any type pays one op for each. Ops 14 and 15 carry the constructed sheets. All three are in the binary batch (`js/wire.ts`, `WIRE_OPCODE`) and decoded by `wire-testing.ts` for the tests. Layout of each is in [reference](../reference.md#wire-format).
+Op 13 `setAttribute(id, name, value | null)` stores into the element's attribute store; the JS adapters forward `class`, every `data-*` and any other primitive attribute (see [reference](../reference.md#listeners-and-dom-members-on-an-element)). `class` and `data-*` go as op 13 alone, never also as a custom prop, so an element of any type pays one op for each. Ops 14 and 15 carry the constructed sheets. All three are in the binary batch (`js/wire.ts`, `WIRE_OPCODE`) and decoded by `wire-testing.ts` for the tests. Layout of each is in [reference](../reference.md#wire-format).
 
 ## The JS side
 
