@@ -122,13 +122,13 @@ describe("the nodes React builds", () => {
       const t = build()
       expect(t.root.isConnected).toBe(false)
       expect(t.a.isConnected).toBe(false)
-      container.instances.set(t.root.id, t.root)
-      container.instances.set(t.second.id, t.second)
+      container.instances.set(t.root.nativeId, t.root)
+      container.instances.set(t.second.nativeId, t.second)
       expect(t.root.isConnected).toBe(true)
       expect(t.a.isConnected).toBe(true)
       expect(t.deep.isConnected).toBe(false)
-      container.instances.delete(t.root.id)
-      container.instances.delete(t.second.id)
+      container.instances.delete(t.root.nativeId)
+      container.instances.delete(t.second.nativeId)
     })
 
     it("exposes the binding the members read", () => {

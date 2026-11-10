@@ -58,7 +58,7 @@ const hostNodeStates = new WeakMap<HostNode, HostNodeState>()
 export function stateFor(node: HostNode): HostNodeState {
   const state = hostNodeStates.get(node)
   if (!state) {
-    throw new Error(`GPUIX host node ${node.id} does not belong to a root`)
+    throw new Error(`GPUIX host node ${node.nativeId} does not belong to a root`)
   }
   return state
 }
@@ -79,14 +79,14 @@ function createState(container: Container): HostNodeState {
 }
 
 function methodsOf(instance: HostNode): ElementMethods {
-  return createElementMethods(containerFor(instance).nativeRenderer, instance.id)
+  return createElementMethods(containerFor(instance).nativeRenderer, instance.nativeId)
 }
 
 class ReactHostElement extends HTMLElement implements Instance {
   declare parentId?: number
 
   constructor(
-    readonly id: number,
+    readonly nativeId: number,
     readonly type: ElementType,
     public props: Props
   ) {
@@ -125,19 +125,19 @@ class ReactHostElement extends HTMLElement implements Instance {
   }
 
   focus(options?: FocusOptions): void {
-    focusHostElement(containerFor(this).nativeRenderer, this.id, options)
+    focusHostElement(containerFor(this).nativeRenderer, this.nativeId, options)
   }
 
   blur(): void {
-    blurHostElement(containerFor(this).nativeRenderer, this.id)
+    blurHostElement(containerFor(this).nativeRenderer, this.nativeId)
   }
 
   matches(selector: string): boolean {
-    return hostElementMatches(containerFor(this).nativeRenderer, this.id, selector)
+    return hostElementMatches(containerFor(this).nativeRenderer, this.nativeId, selector)
   }
 
   getBoundingClientRect(): BoundingClientRect {
-    return readBoundingClientRect(containerFor(this).nativeRenderer, this.id)
+    return readBoundingClientRect(containerFor(this).nativeRenderer, this.nativeId)
   }
 
   [HOST_BINDING](): HostBinding | undefined {
@@ -150,20 +150,20 @@ class ReactHostElement extends HTMLElement implements Instance {
 
 defineScrollMembers(ReactHostElement.prototype, (instance: ReactHostElement) => ({
   renderer: containerFor(instance).nativeRenderer,
-  id: instance.id,
+  id: instance.nativeId,
 }))
 defineDomMembers(ReactHostElement.prototype, (instance: ReactHostElement) => ({
   listeners: listenersOf(instance),
   connected: isConnected(instance),
   layout: stateFor(instance).mounted
-    ? { renderer: containerFor(instance).nativeRenderer, id: instance.id }
+    ? { renderer: containerFor(instance).nativeRenderer, id: instance.nativeId }
     : undefined,
   prop: (name) => (instance.props as Record<string, unknown>)[name],
 }))
 
 /** Mounted, which a destroyed element is not any more. */
 function isConnected(instance: Instance): boolean {
-  return containerFor(instance).instances.get(instance.id) === instance
+  return containerFor(instance).instances.get(instance.nativeId) === instance
 }
 
 /**
@@ -181,7 +181,7 @@ for (const key of Reflect.ownKeys(ReactHostElement.prototype)) {
 
 class ReactHostText extends Text implements TextInstance {
   constructor(
-    readonly id: number,
+    readonly nativeId: number,
     public text: string,
     public parentId: number | null
   ) {
@@ -291,7 +291,7 @@ export function linkChild(parent: HostNode, child: HostNode, before?: HostNode):
   unlinkChild(child)
   const siblings = stateFor(parent).children
   const index = before === undefined ? siblings.length : siblings.indexOf(before)
-  if (index < 0) throw new Error(`GPUIX host node ${before?.id} is not a child of node ${parent.id}`)
+  if (index < 0) throw new Error(`GPUIX host node ${before?.nativeId} is not a child of node ${parent.nativeId}`)
   siblings.splice(index, 0, child)
   stateFor(child).parent = parent
 }

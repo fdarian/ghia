@@ -52,7 +52,7 @@ describeNative("virtual-list row: display contents", () => {
   describe("listeners", () => {
     it("hears a click on a child, capture before bubble, with currentTarget the row and target the child", () => {
       const seen: Array<[string, number, number]> = []
-      const record = (name: string) => (event: any) => seen.push([name, event.currentTarget.id, event.target.id])
+      const record = (name: string) => (event: any) => seen.push([name, event.currentTarget.nativeId, event.target.nativeId])
       testRoot.render(stacked(3, (row) => (row === 1 ? { onClick: record("bubble"), onClickCapture: record("capture") } : {})))
 
       testRoot.renderer.nativeSimulateClick(10, 50)
@@ -118,7 +118,7 @@ describeNative("virtual-list row: display contents", () => {
             }}
             testId="row"
             style={contents}
-            onClick={(event) => seen.push([event.currentTarget.id, event.target.id])}
+            onClick={(event) => seen.push([event.currentTarget.nativeId, event.target.nativeId])}
           >
             <div style={{ height: 20 }} />
           </div>

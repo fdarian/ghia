@@ -177,10 +177,10 @@ function listen(kind: ObserveEvent, element: ObservableElement, subscriber: Subs
     if (!binding) return
     if (release) {
       // Created again: the native element is new and has no listener.
-      setNativeListener(binding, element.id, kind, true, false)
+      setNativeListener(binding, element.nativeId, kind, true, false)
       return
     }
-    release = attach(binding, element.id, kind, subscriber)
+    release = attach(binding, element.nativeId, kind, subscriber)
   }
   bind()
   const stopMountWatch = element[HOST_MOUNT]?.(bind)
@@ -746,7 +746,7 @@ export class IntersectionObserver {
       // Ancestors above the root, and the window edge, do not clip.
       let clipped = border
       for (const clip of sample.clips) {
-        if (this.root && clip.id === this.root.id) break
+        if (this.root && clip.id === this.root.nativeId) break
         clipped = overlap(clipped, clip.rect)
       }
       intersection = overlap(clipped, rootBounds)

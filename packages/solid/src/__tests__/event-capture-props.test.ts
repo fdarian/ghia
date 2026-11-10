@@ -45,7 +45,7 @@ describe("Solid host event listeners", () => {
       [element.id, "pointerdown", true],
       [element.id, "click", true],
     ])
-    expect([...(root.eventHandlers.get(element.id)?.keys() ?? [])]).toEqual([
+    expect([...(root.eventHandlers.get(element.nativeId)?.keys() ?? [])]).toEqual([
       "pointerdown",
       "clickCapture",
     ])
@@ -70,7 +70,7 @@ describe("Solid host event listeners", () => {
     setHostProperty(element, "onContextMenu", handler)
     setHostProperty(element, "onContextMenu", next, handler)
     expect(listeners).toHaveLength(1)
-    expect(root.eventHandlers.get(element.id)?.get("contextmenu")).toBe(next)
+    expect(root.eventHandlers.get(element.nativeId)?.get("contextmenu")).toBe(next)
   })
 
   it("keeps onMouseDownOutside as the gpuix type", () => {

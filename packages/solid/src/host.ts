@@ -140,7 +140,7 @@ export class HostRoot implements MotionBindingHost {
     if (!this.html.mounted) return
     markUnmounted(this.html)
     this.html.parent = null
-    this.mutations.destroyElement(this.html.id)
+    this.mutations.destroyElement(this.html.nativeId)
   }
 
   /** Destroys the removed nodes that stayed out of the tree. Call before each flush. */
@@ -150,7 +150,7 @@ export class HostRoot implements MotionBindingHost {
     for (const node of removed) {
       if (node.parent !== null || !node.mounted) continue
       markUnmounted(node)
-      this.mutations.destroyElement(node.id)
+      this.mutations.destroyElement(node.nativeId)
     }
   }
 
@@ -164,7 +164,7 @@ export class HostRoot implements MotionBindingHost {
     html.childList.push(body)
     body.parent = html
     mount(this, html)
-    this.mutations.setRoot(html.id)
+    this.mutations.setRoot(html.nativeId)
     return { html, body }
   }
 }
@@ -179,7 +179,7 @@ export class HostElement extends HTMLElement {
   readonly props = new Map<string, HostPropertyValue>()
   parent: HostParent | null = null
   root: HostRoot | null = null
-  id = 0
+  nativeId = 0
   mounted = false
   style: StyleDesc = {}
   /** Laid over `style` while it is set, however `style` changes: the box a leaving `popLayout` child keeps. */
@@ -220,7 +220,7 @@ export class HostElement extends HTMLElement {
   writeStyle(): void {
     if (!this.root || !this.mounted) return
     const style = this.appliedStyle()
-    if (this.sent.writesStyle(style)) this.root.mutations.setStyle(this.id, style, this.sent.styleJson)
+    if (this.sent.writesStyle(style)) this.root.mutations.setStyle(this.nativeId, style, this.sent.styleJson)
   }
 
   setPointerCapture(pointerId: number): void {
@@ -244,20 +244,20 @@ export class HostElement extends HTMLElement {
   }
 
   focus(options?: FocusOptions): void {
-    focusHostElement(this.mountedRenderer("focus"), this.id, options)
+    focusHostElement(this.mountedRenderer("focus"), this.nativeId, options)
   }
 
   blur(): void {
-    blurHostElement(this.mountedRenderer("blur"), this.id)
+    blurHostElement(this.mountedRenderer("blur"), this.nativeId)
   }
 
   matches(selector: string): boolean {
-    return hostElementMatches(this.mountedRenderer("matches"), this.id, selector)
+    return hostElementMatches(this.mountedRenderer("matches"), this.nativeId, selector)
   }
 
   private methods(): ElementMethods {
     if (!this.root) throw new Error("The element is not in a root")
-    return createElementMethods(this.root.nativeRenderer, this.id)
+    return createElementMethods(this.root.nativeRenderer, this.nativeId)
   }
 
   private mountedRenderer(method: string): NativeRenderer {
@@ -349,7 +349,7 @@ export class HostElement extends HTMLElement {
       throw new Error(`${member} is only valid on <webview>, got <${this.type}>`)
     }
     return createWebviewMethods({
-      id: this.id,
+      id: this.nativeId,
       nativeRenderer: root.nativeRenderer,
       flushMutations: () => root.mutations.flushMutations(),
     })
@@ -363,7 +363,7 @@ export class HostElement extends HTMLElement {
       throw new Error(`requestSubmit() is only valid on <form>, got <${this.type}>`)
     }
     requestFormSubmit({
-      id: this.id,
+      id: this.nativeId,
       nativeRenderer: root.nativeRenderer,
       flushMutations: () => root.mutations.flushMutations(),
     })
@@ -376,7 +376,7 @@ export class HostElement extends HTMLElement {
       throw new Error(`${member} is only valid on <input> and <textarea>, got <${this.type}>`)
     }
     return {
-      id: this.id,
+      id: this.nativeId,
       nativeRenderer: root.nativeRenderer,
       flushMutations: () => root.mutations.flushMutations(),
     }
@@ -389,7 +389,7 @@ export class HostElement extends HTMLElement {
    */
   getBoundingClientRect(): BoundingClientRect {
     if (!this.root || !this.mounted) return toBoundingClientRect(null)
-    return readBoundingClientRect(this.root.nativeRenderer, this.id)
+    return readBoundingClientRect(this.root.nativeRenderer, this.nativeId)
   }
 
   /**
@@ -414,7 +414,7 @@ export class HostElement extends HTMLElement {
   }
 
   setImage(bytes: Buffer | Uint8Array): void {
-    this.root?.nativeRenderer.setImage?.(this.id, bytes as Buffer)
+    this.root?.nativeRenderer.setImage?.(this.nativeId, bytes as Buffer)
   }
 
   setImagePixels(
@@ -424,7 +424,7 @@ export class HostElement extends HTMLElement {
     options?: ImagePixelsOptions
   ): void {
     this.root?.nativeRenderer.setImagePixels?.(
-      this.id,
+      this.nativeId,
       width,
       height,
       pixels as Buffer,
@@ -441,12 +441,12 @@ export interface HostElement extends ScrollableElement, Omit<DomElement, "ownerD
 defineDomMembers(HostElement.prototype, (element: HostElement) => ({
   listeners: element.listeners,
   connected: isConnected(element),
-  layout: element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.id } : undefined,
+  layout: element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.nativeId } : undefined,
   prop: (name) => element.props.get(name),
 }))
 defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
   renderer: element.root?.nativeRenderer,
-  id: element.id,
+  id: element.nativeId,
 }))
 
 /**
@@ -477,7 +477,7 @@ export class HostText extends Text {
   readonly childList: HostNode[] = []
   parent: HostParent | null = null
   root: HostRoot | null = null
-  id = 0
+  nativeId = 0
   mounted = false
   private domBinding: TextBinding | undefined
 
@@ -644,7 +644,7 @@ export function replaceHostText(node: HostText, value: string): void {
   const next = String(value)
   if (node.text === next) return
   node.text = next
-  if (node.root && node.mounted) node.root.mutations.setText(node.id, next)
+  if (node.root && node.mounted) node.root.mutations.setText(node.nativeId, next)
 }
 
 // A `<nativeview>`'s handlers take the pointer and nothing, not an event: see `syncNativeviewListeners`.
@@ -673,7 +673,7 @@ export function setHostProperty(
     node.motionValues = split.motionValues
     if (node.root && node.mounted) {
       node.writeStyle()
-      syncMotionBindings(node.root, node.root.mutations, node.id, node.motionValues, node.kind === "element" ? node.type : undefined)
+      syncMotionBindings(node.root, node.root.mutations, node.nativeId, node.motionValues, node.kind === "element" ? node.type : undefined)
     }
     return
   }
@@ -694,14 +694,14 @@ export function setHostProperty(
   else node.props.set(name, value)
   if (!node.root || !node.mounted || !customPropAllowed(node, name)) return
   const serialized = serializeCustomProp(value)
-  if (node.sent.writesProp(name, serialized)) node.root.mutations.setCustomProp(node.id, name, serialized)
+  if (node.sent.writesProp(name, serialized)) node.root.mutations.setCustomProp(node.nativeId, name, serialized)
 }
 
 function syncNativeviewProps(root: HostRoot, node: HostElement): void {
   syncNativeviewListeners(
     root.eventHandlers,
     root.mutations,
-    node.id,
+    node.nativeId,
     node.props.get("onAttach"),
     node.props.get("onDetach")
   )
@@ -712,22 +712,22 @@ function mount(root: HostRoot, node: HostNode): void {
     throw new Error("Cannot move a GPUIX host node between roots")
   }
   node.root = root
-  if (!node.id) node.id = root.allocateId()
+  if (!node.nativeId) node.nativeId = root.allocateId()
   if (node.mounted) return
   node.mounted = true
-  if (node.kind === "element") root.elements.set(node.id, node)
-  root.mutations.createElement(node.id, node.kind === "text" ? "text" : node.type)
+  if (node.kind === "element") root.elements.set(node.nativeId, node)
+  root.mutations.createElement(node.nativeId, node.kind === "text" ? "text" : node.type)
   if (node.kind === "text") {
-    root.mutations.setText(node.id, node.text)
+    root.mutations.setText(node.nativeId, node.text)
   } else {
     node.sent.reset()
     node.writeStyle()
-    if (node.motionValues) syncMotionBindings(root, root.mutations, node.id, node.motionValues, node.type)
-    node.listeners.attach({ eventHandlers: root.eventHandlers, renderer: root.mutations, elementId: node.id })
+    if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.type)
+    node.listeners.attach({ eventHandlers: root.eventHandlers, renderer: root.mutations, elementId: node.nativeId })
     for (const [name, value] of node.props) {
       if (!EVENT_PROP_NAMES.has(name) && customPropAllowed(node, name)) {
         const serialized = serializeCustomProp(value)
-        if (node.sent.writesProp(name, serialized)) root.mutations.setCustomProp(node.id, name, serialized)
+        if (node.sent.writesProp(name, serialized)) root.mutations.setCustomProp(node.nativeId, name, serialized)
       }
     }
     if (node.type === "nativeview") syncNativeviewProps(root, node)
@@ -737,7 +737,7 @@ function mount(root: HostRoot, node: HostNode): void {
   }
   for (const child of node.childList) {
     mount(root, child)
-    root.mutations.appendChild(node.id, child.id)
+    root.mutations.appendChild(node.nativeId, child.nativeId)
   }
 }
 
@@ -771,8 +771,8 @@ export function insertHostNode(
   if (!root) return
   root.removals.delete(node)
   mount(root, node)
-  if (anchor) root.mutations.insertBefore(parent.id, node.id, anchor.id)
-  else root.mutations.appendChild(parent.id, node.id)
+  if (anchor) root.mutations.insertBefore(parent.nativeId, node.nativeId, anchor.nativeId)
+  else root.mutations.appendChild(parent.nativeId, node.nativeId)
 }
 
 function markUnmounted(node: HostNode): void {
@@ -781,13 +781,13 @@ function markUnmounted(node: HostNode): void {
     // A `<nativeview>` hears `detach` while the batch that destroys it is applied, which is
     // after this: it stays known until `createRoot` releases the destroyed ids.
     if (!(node.kind === "element" && node.type === "nativeview")) {
-      node.root.elements.delete(node.id)
+      node.root.elements.delete(node.nativeId)
       if (node.kind === "element") node.listeners.detach()
-      unregisterEventHandlers(node.root.eventHandlers, node.id)
+      unregisterEventHandlers(node.root.eventHandlers, node.nativeId)
     }
     // Retired now, released after the batch: an element mounted again before
     // the flush binds its values afresh, and a shared value is never freed between.
-    if (node.root.motionBindings.size > 0) retireMotionBindings(node.root, [node.id])
+    if (node.root.motionBindings.size > 0) retireMotionBindings(node.root, [node.nativeId])
   }
   for (const child of node.childList) markUnmounted(child)
 }
@@ -807,7 +807,7 @@ export function removeHostNode(requestedParent: HostParent, node: HostNode): voi
   root.removals.add(node)
   // Native is told now, not at the flush: a layout read in this turn flushes the queue and
   // must not lay out a subtree the DOM would already have taken out of the document.
-  root.mutations.detachChild(node.id)
+  root.mutations.detachChild(node.nativeId)
   root.mutations.requestFlush()
 }
 

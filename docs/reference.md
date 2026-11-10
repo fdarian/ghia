@@ -3173,11 +3173,11 @@ Use a ref to call the same renderer scroll methods as a plain scroll container:
 ```tsx
 function Results({ rows }: { rows: Result[] }) {
   const renderer = useGpuixRequired()
-  const listRef = useRef<{ id: number } | null>(null)
+  const listRef = useRef<{ nativeId: number } | null>(null)
 
   const reveal = (index: number) => {
     if (listRef.current) {
-      renderer.scrollToItem?.(listRef.current.id, index)
+      renderer.scrollToItem?.(listRef.current.nativeId, index)
     }
   }
 
@@ -4895,7 +4895,7 @@ Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `
 
 Every window root is a real `<html>` with a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; all three are `null` while no root is mounted, and with several windows they are those of the window that mounted last (the rule `matchMedia` follows). `html.parentNode` is `document`, `body.parentNode` is `html`, a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin; they add no accessibility node. `document.head` does not exist.
 
-Nothing here changes the tree: `setAttribute`, `appendChild` and the other writing members are not there. A host element's `id` stays the number native knows it by (`renderer.scrollToItem(ref.id, i)`), so `el.id` is not the DOM's `id` attribute; read the prop with `getAttribute("id")`.
+Nothing here changes the tree: `setAttribute`, `appendChild` and the other writing members are not there. `el.id` is the `id` prop as a string, `""` without one, as in the DOM (read only for now). The number native knows an element by, which the renderer methods take, is `el.nativeId` (`renderer.scrollToItem(ref.nativeId, i)`).
 
 The `on*` prop and the listeners of one type and phase are one list, called in the order the DOM gives: a listener in the order it was added, the prop where it was first set (so before the listeners added after it), and a prop that is set again after it was unset last. A change of the prop replaces its handler in place. At the target the capture listeners run first, then the bubble ones, as in current browsers.
 
@@ -5776,8 +5776,8 @@ then wrap inside it with `focusNextWithin` / `focusPreviousWithin`.
 function onKeyDown(event: KeyEvent) {
   if (event.key !== 'Tab' || !panel) return
   event.preventDefault()
-  if (event.modifiers?.shift) renderer.focusPreviousWithin?.(panel.id)
-  else renderer.focusNextWithin?.(panel.id)
+  if (event.modifiers?.shift) renderer.focusPreviousWithin?.(panel.nativeId)
+  else renderer.focusNextWithin?.(panel.nativeId)
 }
 
 <div ref={setPanel} onKeyDown={onKeyDown}>

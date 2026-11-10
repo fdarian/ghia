@@ -85,7 +85,7 @@ function attachTypeMembers(instance: Instance, container: Container): void {
     const form = instance as FormInstance
     form.requestSubmit = () =>
       requestFormSubmit({
-        id: form.id,
+        id: form.nativeId,
         nativeRenderer: container.nativeRenderer,
         flushMutations: () => container.renderer.flushMutations(),
       })
@@ -93,7 +93,7 @@ function attachTypeMembers(instance: Instance, container: Container): void {
     Object.assign(
       instance as WebviewInstance,
       createWebviewMethods({
-        id: instance.id,
+        id: instance.nativeId,
         nativeRenderer: container.nativeRenderer,
         flushMutations: () => container.renderer.flushMutations(),
       }),
@@ -101,11 +101,11 @@ function attachTypeMembers(instance: Instance, container: Container): void {
   } else if (instance.type === "img") {
     const img = instance as ImgInstance
     img.setImage = (bytes) => {
-      container.nativeRenderer.setImage?.(img.id, bytes as Buffer)
+      container.nativeRenderer.setImage?.(img.nativeId, bytes as Buffer)
     }
     img.setImagePixels = (width, height, pixels, options) => {
       container.nativeRenderer.setImagePixels?.(
-        img.id,
+        img.nativeId,
         width,
         height,
         pixels as Buffer,
@@ -117,7 +117,7 @@ function attachTypeMembers(instance: Instance, container: Container): void {
 
 function attachTextControlMethods(control: TextControlInstance, container: Container): void {
   const host = {
-    id: control.id,
+    id: control.nativeId,
     nativeRenderer: container.nativeRenderer,
     flushMutations: () => container.renderer.flushMutations(),
   }
@@ -133,7 +133,7 @@ function attachTextControlMethods(control: TextControlInstance, container: Conta
 
 function adopt(parent: Instance | undefined, child: Instance | TextInstance): void {
   if (!("type" in child)) return
-  if (parent) child.parentId = parent.id
+  if (parent) child.parentId = parent.nativeId
   else delete child.parentId
 }
 
@@ -157,9 +157,9 @@ function syncEventListeners(container: Container, instance: Instance): void {
   listeners.attach({
     eventHandlers: container.eventHandlers,
     renderer: container.renderer,
-    elementId: instance.id,
+    elementId: instance.nativeId,
   })
-  if (instance.type === "nativeview") syncNativeviewProps(container, instance.id, instance.props as Record<string, unknown>)
+  if (instance.type === "nativeview") syncNativeviewProps(container, instance.nativeId, instance.props as Record<string, unknown>)
   const record = instance.props as Record<string, unknown>
   for (const propName in record) {
     const eventType = EVENT_TYPE_BY_PROP.get(propName)
@@ -325,23 +325,23 @@ function materialize(node: HostNode): ReturnType<typeof stateFor> {
 
   const renderer = state.container.renderer
   if ("type" in node) {
-    renderer.createElement(node.id, node.type)
-    state.container.instances.set(node.id, node)
-    if (state.hidden) renderer.setStyle(node.id, hiddenStyle(node.props.style))
-    else sendStyle(renderer, node.id, node.props)
-    syncMotionBindings(state.container, node.id, node.props.style, node.type)
+    renderer.createElement(node.nativeId, node.type)
+    state.container.instances.set(node.nativeId, node)
+    if (state.hidden) renderer.setStyle(node.nativeId, hiddenStyle(node.props.style))
+    else sendStyle(renderer, node.nativeId, node.props)
+    syncMotionBindings(state.container, node.nativeId, node.props.style, node.type)
     syncEventListeners(state.container, node)
-    syncCustomProps(renderer, node.id, node.type, node.props)
+    syncCustomProps(renderer, node.nativeId, node.type, node.props)
   } else {
-    renderer.createElement(node.id, "text")
-    renderer.setText(node.id, node.text)
+    renderer.createElement(node.nativeId, "text")
+    renderer.setText(node.nativeId, node.text)
   }
   state.mounted = true
 
   if (state.initialChildren) {
     for (const child of state.initialChildren) {
       materialize(child)
-      renderer.appendChild(node.id, child.id)
+      renderer.appendChild(node.nativeId, child.nativeId)
     }
     state.initialChildren = undefined
   }
@@ -380,15 +380,15 @@ export function installDocumentElements(base: Omit<Container, "html" | "body">):
   linkChild(html, body)
   materialize(html)
   materialize(body)
-  container.renderer.appendChild(html.id, body.id)
-  container.renderer.setRoot(html.id)
+  container.renderer.appendChild(html.nativeId, body.nativeId)
+  container.renderer.setRoot(html.nativeId)
   return container
 }
 
 /** Destroys `<html>` and, with it, `<body>`, once the app's nodes are out of them. */
 export function destroyDocumentElements(container: Container): void {
-  if (container.instances.get(container.html.id) !== container.html) return
-  container.renderer.destroyElement(container.html.id)
+  if (container.instances.get(container.html.nativeId) !== container.html) return
+  container.renderer.destroyElement(container.html.nativeId)
   container.renderer.flushMutations()
 }
 
@@ -437,7 +437,7 @@ export const hostConfig = {
     materialize(child)
     adopt(parent, child)
     linkChild(parent, child)
-    parentState.container.renderer.appendChild(parent.id, child.id)
+    parentState.container.renderer.appendChild(parent.nativeId, child.nativeId)
   },
 
   // React only calls this from the deletion path, never to move a node, so the
@@ -447,7 +447,7 @@ export const hostConfig = {
   removeChild(parent: Instance, child: Instance | TextInstance): void {
     const container = containerFor(parent)
     unlinkChild(child)
-    const destroyed = container.renderer.destroyElement(child.id)
+    const destroyed = container.renderer.destroyElement(child.nativeId)
     for (const id of destroyed) {
       unregisterEventHandlers(container.eventHandlers, id)
     }
@@ -463,7 +463,7 @@ export const hostConfig = {
     materialize(child)
     adopt(parent, child)
     linkChild(parent, child, beforeChild)
-    parentState.container.renderer.insertBefore(parent.id, child.id, beforeChild.id)
+    parentState.container.renderer.insertBefore(parent.nativeId, child.nativeId, beforeChild.nativeId)
   },
 
   // The children of a window's root and of a portal share their target, `body` or the
@@ -479,12 +479,12 @@ export const hostConfig = {
     materialize(child)
     adopt(target, child)
     linkChild(target, child, beforeChild)
-    container.renderer.insertBefore(target.id, child.id, beforeChild.id)
+    container.renderer.insertBefore(target.nativeId, child.nativeId, beforeChild.nativeId)
   },
 
   removeChildFromContainer(parent: Container, child: Instance): void {
     unlinkChild(child)
-    const destroyed = parent.renderer.destroyElement(child.id)
+    const destroyed = parent.renderer.destroyElement(child.nativeId)
     for (const id of destroyed) {
       unregisterEventHandlers(parent.eventHandlers, id)
     }
@@ -573,17 +573,17 @@ export const hostConfig = {
     // their style, so send it only when it did.
     if (!sameStyle(oldProps.style, newProps.style)) {
       container.renderer.setStyle(
-        instance.id,
+        instance.nativeId,
         state.hidden ? hiddenStyle(newProps.style) : (splitMotionStyle(newProps.style).style ?? {})
       )
-      syncMotionBindings(container, instance.id, newProps.style, instance.type)
+      syncMotionBindings(container, instance.nativeId, newProps.style, instance.type)
     }
     diffEventListeners(instance, oldProps, newProps)
     if (instance.type === "nativeview") {
-      diffNativeviewProps(container, instance.id, oldProps, newProps)
+      diffNativeviewProps(container, instance.nativeId, oldProps, newProps)
     }
     // Custom prop diff (for non-div/text elements)
-    diffCustomProps(container.renderer, instance.id, instance.type, oldProps, newProps)
+    diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
     instance.props = newProps
   },
 
@@ -592,7 +592,7 @@ export const hostConfig = {
     _oldText: string,
     newText: string
   ): void {
-    rendererFor(textInstance).setText(textInstance.id, newText)
+    rendererFor(textInstance).setText(textInstance.nativeId, newText)
     textInstance.text = newText
   },
 
@@ -603,7 +603,7 @@ export const hostConfig = {
     adopt(target, child)
     materialize(target)
     linkChild(target, child)
-    container.renderer.appendChild(target.id, child.id)
+    container.renderer.appendChild(target.nativeId, child.nativeId)
   },
 
   appendInitialChild(parent: Instance, child: Instance | TextInstance): void {
@@ -620,12 +620,12 @@ export const hostConfig = {
     // keeps the layout box, so replacing the whole style here would collapse
     // the box and lose every other style on the element.
     stateFor(instance).hidden = true
-    rendererFor(instance).setStyle(instance.id, hiddenStyle(instance.props.style))
+    rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(instance.props.style))
   },
 
   unhideInstance(instance: Instance, props: Props): void {
     stateFor(instance).hidden = false
-    rendererFor(instance).setStyle(instance.id, splitMotionStyle(props.style).style ?? {})
+    rendererFor(instance).setStyle(instance.nativeId, splitMotionStyle(props.style).style ?? {})
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},
@@ -677,7 +677,7 @@ export const hostConfig = {
 
   detachDeletedInstance(instance: Instance): void {
     const container = containerFor(instance)
-    const destroyed = container.renderer.destroyElement(instance.id)
+    const destroyed = container.renderer.destroyElement(instance.nativeId)
     for (const id of destroyed) {
       unregisterEventHandlers(container.eventHandlers, id)
     }

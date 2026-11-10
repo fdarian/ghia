@@ -197,8 +197,8 @@ export function AnimatePresence(props: AnimatePresenceProps): JSX.Element {
     const parent = item.parent
     const box = measurePopLayout(
       item.root.nativeRenderer,
-      item.id,
-      parent?.kind === "element" ? parent.id : undefined
+      item.nativeId,
+      parent?.kind === "element" ? parent.nativeId : undefined
     )
     if (box === undefined) return
     item.setPin(box)

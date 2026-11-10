@@ -267,7 +267,8 @@ export interface Container {
  * React hands out a ref.
  */
 export interface Instance extends Partial<FocusableElement>, HTMLElement {
-  id: number
+  /** The handle the native renderer knows the element by; `id` is the DOM's. */
+  nativeId: number
   type: ElementType
   props: Props
   /** The element this one is placed in; absent at the root of a window. */
@@ -319,7 +320,7 @@ export interface FormInstance extends PublicInstance, FormMethods {
 }
 
 export interface TextInstance extends Text {
-  id: number
+  nativeId: number
   text: string
   parentId: number | null
 }

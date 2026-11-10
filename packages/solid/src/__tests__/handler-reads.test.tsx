@@ -51,8 +51,8 @@ describe.skipIf(!hasNativeTestRenderer)("reads inside a press or release handler
             <div ref={box} testId="box" style={{ width: 50, height: height() }} />
           </div>
         ))
-        app.renderer.focusElement(other.id)
-        const bounds = app.renderer.getElementBounds(field.id)!
+        app.renderer.focusElement(other.nativeId)
+        const bounds = app.renderer.getElementBounds(field.nativeId)!
 
         app.renderer.nativeSimulateClick(bounds.x + 10, bounds.y + 5)
 

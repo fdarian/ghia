@@ -182,7 +182,7 @@ class ComputedStyleDeclaration {
     if (this.#pseudo === "unsupported") return undefined
     const binding = this.#element[HOST_BINDING]()
     if (!binding) return undefined
-    return readComputedStyle(binding.renderer, this.#element.id, this.#pseudo === "absent")
+    return readComputedStyle(binding.renderer, this.#element.nativeId, this.#pseudo === "absent")
   }
 
   get length(): number {

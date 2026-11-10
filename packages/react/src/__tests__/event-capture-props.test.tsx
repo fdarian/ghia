@@ -59,7 +59,7 @@ describe("React host event listeners", () => {
       [instance.id, "pointerdown", true],
       [instance.id, "click", true],
     ])
-    const handlers = container.eventHandlers.get(instance.id)
+    const handlers = container.eventHandlers.get(instance.nativeId)
     expect([...(handlers?.keys() ?? [])]).toEqual(["pointerdown", "clickCapture"])
   })
 
@@ -95,7 +95,7 @@ describe("React host event listeners", () => {
     const next = () => {}
     update(instance, before, { onContextMenu: next })
     expect(listeners).toHaveLength(1)
-    expect(container.eventHandlers.get(instance.id)?.get("contextmenu")).toBe(next)
+    expect(container.eventHandlers.get(instance.nativeId)?.get("contextmenu")).toBe(next)
   })
 
   it("keeps onMouseDownOutside as the gpuix type", () => {

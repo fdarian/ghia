@@ -327,6 +327,12 @@ abstract class ElementClass extends NodeClass {
     return this[DOM_BINDING]().type
   }
 
+  /** The `id` prop, "" when the element has none. The native handle is `nativeId`. */
+  get id(): string {
+    const value = this.getAttribute("id")
+    return value === null ? "" : value
+  }
+
   get className(): string {
     const binding = this[DOM_BINDING]()
     const value = binding.prop("className") ?? binding.prop("class")

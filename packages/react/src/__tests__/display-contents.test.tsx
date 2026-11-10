@@ -114,7 +114,7 @@ describeNative("display: contents", () => {
         <div
           testId="root"
           style={{ display: "contents" }}
-          onClick={(event) => seen.push(`click ${event.currentTarget.id === id("root")}`)}
+          onClick={(event) => seen.push(`click ${event.currentTarget.nativeId === id("root")}`)}
         >
           <div testId="a" style={{ width: 50, height: 50 }} />
         </div>
@@ -162,7 +162,7 @@ describeNative("display: contents", () => {
 
     it("fires bubble and capture click listeners with the element as currentTarget and the hit descendant as target", () => {
       const seen: Array<[string, number, number]> = []
-      const record = (name: string) => (event: any) => seen.push([name, event.currentTarget.id, event.target.id])
+      const record = (name: string) => (event: any) => seen.push([name, event.currentTarget.nativeId, event.target.nativeId])
       render({ onClick: record("bubble"), onClickCapture: record("capture") })
 
       testRoot.renderer.nativeSimulateClick(10, 10)
@@ -184,7 +184,7 @@ describeNative("display: contents", () => {
             }}
             testId="contents"
             style={{ display: "contents" }}
-            onClick={(event) => seen.push([event.currentTarget.id, event.target.id])}
+            onClick={(event) => seen.push([event.currentTarget.nativeId, event.target.nativeId])}
           >
             <div style={{ width: 50, height: 50 }} />
           </div>

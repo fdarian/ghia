@@ -89,7 +89,7 @@ export function Select(props: SelectProps): JSX.Element {
     const previous = open()
     if (props.open === undefined) setInternalOpen(next)
     if (previous !== next) props.onOpenChange?.(next)
-    if (!next && restoreFocus && trigger.current) renderer.focusElement?.(trigger.current.id)
+    if (!next && restoreFocus && trigger.current) renderer.focusElement?.(trigger.current.nativeId)
     if (next) setActive(items.find((item) => item.value === value() && !item.disabled)?.value ?? null)
   }
   const move = (delta: number) => {

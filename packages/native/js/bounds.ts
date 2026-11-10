@@ -126,7 +126,7 @@ export interface HostBinding {
 
 /** A mounted host element, as `ResizeObserver` and `IntersectionObserver` take it. */
 export interface ObservableElement {
-  readonly id: number
+  readonly nativeId: number
   /** The binding while the element is mounted, `undefined` before and after. */
   [HOST_BINDING](): HostBinding | undefined
   /** Calls `listener` each time the element is created natively. Returns the stop function. */
