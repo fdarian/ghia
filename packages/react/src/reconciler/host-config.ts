@@ -293,7 +293,7 @@ function diffAttributes(
   const next = newProps as Record<string, unknown>
   for (const key in next) {
     const name = attributeNameOfProp(type, key)
-    if (name === undefined) continue
+    if (name === undefined || name === "class") continue
     const text = attributeValue(name, next[key])
     const before = key in previous ? attributeValue(name, previous[key]) : null
     if (text !== before) renderer.setAttribute(id, name, text)
@@ -301,9 +301,16 @@ function diffAttributes(
   for (const key in previous) {
     if (key in next) continue
     const name = attributeNameOfProp(type, key)
-    if (name === undefined) continue
+    if (name === undefined || name === "class") continue
     if (attributeValue(name, previous[key]) !== null) renderer.setAttribute(id, name, null)
   }
+  // `class` and `className` are one attribute: a prop that moves from one to the other keeps its value.
+  const classText = classAttribute(next)
+  if (classText !== classAttribute(previous)) renderer.setAttribute(id, "class", classText)
+}
+
+function classAttribute(props: Record<string, unknown>): string | null {
+  return attributeValue("class", props.class ?? props.className)
 }
 
 /**

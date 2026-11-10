@@ -40,6 +40,24 @@ describe.skipIf(!hasNativeTestRenderer)("attributes on native in React", () => {
     expect([read("class"), read("data-x")]).toEqual([null, null])
   })
 
+  it("keeps the class when a prop moves between className and class", () => {
+    const view = (props: Record<string, unknown>) => <div ref={(element: unknown) => { box = element }} {...props} />
+    app.render(view({ className: "a b" }))
+    expect(read("class")).toBe("a b")
+
+    app.render(view({ class: "a b" }))
+    expect(read("class")).toBe("a b")
+
+    app.render(view({ className: "a b" }))
+    expect(read("class")).toBe("a b")
+
+    app.render(view({ class: "c" }))
+    expect(read("class")).toBe("c")
+
+    app.render(view({}))
+    expect(read("class")).toBeNull()
+  })
+
   it("sends nothing for a handler, a style or an object", () => {
     app.render(
       <div
