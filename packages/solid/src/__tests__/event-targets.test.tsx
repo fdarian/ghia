@@ -141,7 +141,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid event targets are elements", () =
     app.renderer.nativeSimulateClick(50, 50)
 
     expect(seen?.target).toBe(element)
-    expect(seen?.elementId).toBe(element.id)
+    expect(seen?.elementId).toBe(element.nativeId)
     app.unmount()
   })
 

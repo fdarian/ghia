@@ -469,7 +469,7 @@ export function InfiniteChatApp({
       // the void pixel-fixed and replace the screen around it. Only the app
       // knows the void stands for the content that just arrived, so it reads
       // the anchor here and re-anchors after the commit.
-      const listId = listRef.current?.id
+      const listId = listRef.current?.nativeId
       const top = listId != null ? renderer?.getListScrollTop?.(listId) : null
 
       // TWO commits, never one. `VirtualListEntry::sync` turns the child ids
@@ -542,7 +542,7 @@ export function InfiniteChatApp({
       })
       pending.current = false
       const index = page.items.findIndex((message) => message.id === target)
-      const id = listRef.current?.id
+      const id = listRef.current?.nativeId
       // +1 for the leading edge row, which exists whenever there is history above.
       if (id != null && index >= 0) renderer?.scrollToItem?.(id, index + (page.before ? 1 : 0))
     },

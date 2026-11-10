@@ -30,7 +30,7 @@ describeNative("form", () => {
   const focusedTestId = () =>
     testRoot.renderer.getElement(testRoot.renderer.getFocusedElementId())?.testId ?? null
   const idOf = (testId: string) => testRoot.renderer.findByTestId(testId).id
-  const testIdOf = (element: { id: number }) => testRoot.renderer.getElement(element.id).testId
+  const testIdOf = (element: { nativeId: number }) => testRoot.renderer.getElement(element.nativeId).testId
   const type = (testId: string, keys: string) =>
     testRoot.renderer.nativeSimulateKeystrokes(idOf(testId), keys)
 

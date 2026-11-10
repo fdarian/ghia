@@ -163,8 +163,8 @@ function play(name: string) {
     const read = (): Seen => {
       const boxes: Seen["boxes"] = {}
       for (const [key, node] of refs) {
-        const bounds = renderer.getElementBounds(node.id)!
-        const metrics = renderer.getScrollMetrics(node.id)
+        const bounds = renderer.getElementBounds(node.nativeId)!
+        const metrics = renderer.getScrollMetrics(node.nativeId)
         boxes[key] = {
           rect: [bounds.x, bounds.y, bounds.width, bounds.height],
           client: metrics ? [metrics[4]!, metrics[5]!] : [],

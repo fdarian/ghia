@@ -163,7 +163,7 @@ const A = {
   },
   read: (): Action => (run) => {
     run.show()
-    const bounds = run.renderer.getElementBounds(run.refs.get("t")!.id)!
+    const bounds = run.renderer.getElementBounds(run.refs.get("t")!.nativeId)!
     run.did(`read t ${bounds.width}x${bounds.height}`)
   },
   ro: (name: string): Action => (run) => {
@@ -203,7 +203,7 @@ const A = {
     run.did(`rt.height=${height}`)
   },
   rscroll: (y: number): Action => (run) => {
-    run.renderer.scrollTo(run.refs.get("r")!.id, 0, y)
+    run.renderer.scrollTo(run.refs.get("r")!.nativeId, 0, y)
     run.did(`r.scrollTop=${y}`)
   },
   /** The page gives `#r` a 15px scrollbar; the test window's setting is what makes a bar take room. */
@@ -212,7 +212,7 @@ const A = {
     run.did("r.scrollbar=15")
   },
   scroll: (y: number): Action => (run) => {
-    run.renderer.scrollTo(run.refs.get("scroller")!.id, 0, y)
+    run.renderer.scrollTo(run.refs.get("scroller")!.nativeId, 0, y)
     run.did(`scrollY=${y}`)
   },
 }
@@ -518,9 +518,9 @@ describeNative("observers of a target inside content-visibility skipped content"
           renderer.drawFrame()
           renderer.dispatchNativeEvents()
         }
-        if (forcedRead) renderer.getElementBounds(run.refs.get("t")!.id)
+        if (forcedRead) renderer.getElementBounds(run.refs.get("t")!.nativeId)
         found = { passes: renderer.getLayoutPassCount() - passes, built: renderer.getBuildCounters().elementsBuilt - built }
-        if (!forcedRead) expect(renderer.getBuiltElementBounds(run.refs.get("t")!.id), "the content is not built").toBeNull()
+        if (!forcedRead) expect(renderer.getBuiltElementBounds(run.refs.get("t")!.nativeId), "the content is not built").toBeNull()
       })
       return found
     }
@@ -538,7 +538,7 @@ describeNative("observers of a target inside content-visibility skipped content"
       observer.observe(run.refs.get("t")!)
       run.renderer.dispatchNativeEvents()
       expect(told.map((entry) => [entry.isIntersecting, entry.boundingClientRect.width, entry.boundingClientRect.height])).toEqual([[false, 0, 0]])
-      expect(run.renderer.getBuiltElementBounds(run.refs.get("t")!.id), "and the content is not built").toBeNull()
+      expect(run.renderer.getBuiltElementBounds(run.refs.get("t")!.nativeId), "and the content is not built").toBeNull()
     })
   })
 

@@ -118,7 +118,7 @@ describeNative("event targets are elements", () => {
     testRoot.renderer.nativeSimulateClick(50, 50)
 
     expect(seen?.target).toBe(element)
-    expect(seen?.elementId).toBe(element?.id)
+    expect(seen?.elementId).toBe(element?.nativeId)
     expect(typeof seen?.elementId).toBe("number")
   })
 

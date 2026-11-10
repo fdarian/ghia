@@ -80,7 +80,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid text controls", () => {
 
     app.flushSync(() => setDisabled(false))
     app.renderer.focusElement(field.nativeId)
-    expect(app.renderer.getFocusedElementId()).toBe(field.id)
+    expect(app.renderer.getFocusedElementId()).toBe(field.nativeId)
     app.renderer.simulateKeystrokes("x")
     expect(text()).toBe("lockedx")
   })

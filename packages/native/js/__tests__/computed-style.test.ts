@@ -13,7 +13,7 @@ function fakeElement(id: number, pairs: string[] | null, mounted = true) {
     },
   } as unknown as NativeRenderer
   const element = {
-    id,
+    nativeId: id,
     [HOST_BINDING]: () => (mounted ? { renderer, mutations: {} as MutationRenderer } : undefined),
   }
   return { element, reads }

@@ -207,7 +207,7 @@ describeNative("fractional bounds", () => {
     const { element, renderer, unmount } = setup()
     try {
       const scroller = element("scroller")
-      renderer.scrollTo(scroller.id, 12.5, 7.25, "instant")
+      renderer.scrollTo(scroller.nativeId, 12.5, 7.25, "instant")
       renderer.flush()
       // Chrome: scrollTo(12.5, 7.25) reads back 13, 7 at scale 1 (fixtures/scroll-fraction-oracle.json).
       expect([scroller.scrollLeft, scroller.scrollTop]).toEqual([13, 7])

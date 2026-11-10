@@ -222,7 +222,7 @@ describeNative("a read on a dirty window", () => {
       )
       const painted = renderer.getPaintedFrameCount()
       new ResizeObserver((entries) => sizes.push(entries[0]!.borderBoxSize[0]!.inlineSize)).observe(element)
-      renderer.getElementBounds(element.id)
+      renderer.getElementBounds(element.nativeId)
       renderer.dispatchNativeEvents()
 
       expect(sizes, "the read laid out and reported nothing").toEqual([])

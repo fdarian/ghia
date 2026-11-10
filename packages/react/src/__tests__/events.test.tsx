@@ -3220,11 +3220,11 @@ describeNative("events", () => {
       // ref.current should be the Instance with a numeric id
       expect(capturedRef).not.toBeNull()
       expect(capturedRef.current).not.toBeNull()
-      expect(typeof capturedRef.current.id).toBe("number")
-      expect(capturedRef.current.id).toBeGreaterThan(0)
+      expect(typeof capturedRef.current.nativeId).toBe("number")
+      expect(capturedRef.current.nativeId).toBeGreaterThan(0)
 
       // Use the ref's id with the scroll API
-      const elementId = capturedRef.current.id
+      const elementId = capturedRef.current.nativeId
 
       // Initially at 0,0
       expect(testRoot.renderer.getScrollOffset(elementId)).toEqual([0, 0])

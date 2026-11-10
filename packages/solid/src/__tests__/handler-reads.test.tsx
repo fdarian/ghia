@@ -62,13 +62,13 @@ describe.skipIf(!hasNativeTestRenderer)("reads inside a press or release handler
         expect(first.fieldHover).toBe(true)
         if (on === "mousedown") {
           // The press moves focus after its handlers have run.
-          expect(first.focusedId).toBe(other.id)
+          expect(first.focusedId).toBe(other.nativeId)
           expect(first.otherFocus).toBe(true)
           expect(first.otherWithin).toBe(true)
           expect(first.fieldFocus).toBe(false)
           expect(first.active).toBe(other)
         } else {
-          expect(first.focusedId).toBe(field.id)
+          expect(first.focusedId).toBe(field.nativeId)
           expect(first.otherFocus).toBe(false)
           expect(first.fieldFocus).toBe(true)
           expect(first.active).toBe(field)
