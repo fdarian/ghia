@@ -23,9 +23,13 @@ const shots = fs.mkdtempSync(path.join(os.tmpdir(), "box-root-patch-"))
 /** Rows of five elements each: more than an anchor holds (1024), so the scroller is no anchor and the rows are the roots. */
 const ROWS = Number(process.env.ROWS ?? "230")
 
+/** The row whose preview shows `Page.row` in the scrolled cases, far enough down that the scroller has to be moved to show it. */
+const WATCHED_FAR = 30
+const WHEEL_TICK = 30
+
 type Page = { title: string; headerHeight: number; row: string; footer: string }
 
-function open(initial: Page) {
+function open(initial: Page, watched: number) {
   const [page, setPage] = createSignal(initial)
   const app = createTestRoot({ width: 600, height: 400 })
   app.render(() => (
@@ -43,7 +47,7 @@ function open(initial: Page) {
             >
               <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, minWidth: 0 }}>
                 <text style={{ fontSize: 14, color: "#18181b", whiteSpace: "nowrap" }}>{`Message ${index}`}</text>
-                <text style={{ fontSize: 12, color: "#71717a", whiteSpace: "nowrap" }}>{index === 5 ? page().row : "preview"}</text>
+                <text style={{ fontSize: 12, color: "#71717a", whiteSpace: "nowrap" }}>{index === watched ? page().row : "preview"}</text>
               </div>
               <text style={{ width: 72, fontSize: 12, color: "#2563eb", textAlign: "right" }}>{`r${index}`}</text>
             </div>
@@ -76,18 +80,41 @@ const reason = (reasons: string, key: string) => (JSON.parse(reasons) as Record<
 
 const BASE: Page = { title: "230 items", headerHeight: 56, row: "a preview of the body", footer: "ready" }
 
-function run(name: string, patch: boolean, changes: Partial<Page>[]) {
-  const { app, renderer, set } = open(BASE)
+type Scrolled = { top: number; tickBetweenEdits: boolean }
+
+function run(name: string, patch: boolean, changes: Partial<Page>[], scrolled?: Scrolled) {
+  const watched = scrolled ? WATCHED_FAR : 5
+  const { app, renderer, set } = open(BASE, watched)
   try {
     renderer.setPatchEnabled(patch)
+    renderer.clockPause()
+    const scroller = renderer.findByTestId("scroller")
+    if (!scroller) throw new Error("no scroller")
+    let direction = 1
+    const tick = () => {
+      renderer.dispatchScrollWheel(300, 200, 0, direction * WHEEL_TICK, undefined, "moved")
+      direction = -direction
+      for (let frame = 0; frame < 3; frame++) {
+        renderer.clockAdvance(1000 / 120)
+        renderer.drawFrame()
+      }
+    }
     // The first frames record the page, and the first edit of a root that was recorded before it qualified is a frame built whole, which makes it.
     renderer.drawFrame()
     renderer.drawFrame()
+    if (scrolled) {
+      renderer.scrollTo(scroller.id, undefined, scrolled.top)
+      renderer.drawFrame()
+      renderer.drawFrame()
+      // A wheel tick puts every row where it was not recorded: the rows are replays with a delta from here on.
+      tick()
+    }
     set({ title: "warm", row: "warm" })
     renderer.drawFrame()
     renderer.drawFrame()
     const steps = []
     for (const [step, change] of changes.entries()) {
+      if (scrolled?.tickBetweenEdits) tick()
       const before = renderer.getPatchCounters()
       const frames = renderer.getPaintedFrameCount()
       set(change)
@@ -99,7 +126,7 @@ function run(name: string, patch: boolean, changes: Partial<Page>[]) {
         whole: renderer.getPaintedFrameCount() - frames,
         picture: picture(renderer, `${name}-${patch}-${step}`),
         header: boundsOf(renderer, "header"),
-        row: boundsOf(renderer, "row-5"),
+        row: boundsOf(renderer, `row-${watched}`),
       })
     }
     return { steps, mismatches: renderer.getRetainedCounters().mismatches, counters: renderer.getPatchCounters() }
@@ -135,6 +162,40 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a box of a fixed
     expect(on.steps.map((step) => step.whole)).toEqual([0, 0, 0])
     expect(reason(on.counters.unpatchable, "Structure")).toBe(0)
     expect(reason(on.counters.unpatchable, "Box:StaleRecording")).toBe(0)
+  }, TIMEOUT)
+
+  it("a text edit in a row of a scroller that was scrolled and then moved by a wheel tick is a relayout patch of the row", () => {
+    const changes: Partial<Page>[] = [{ row: "edit 1" }, { row: "edit 2, a much longer preview of the body" }, { row: "" }, { row: "edit 4" }]
+    const scrolled: Scrolled = { top: 1400, tickBetweenEdits: false }
+    const on = run("scrolled", true, changes, scrolled)
+    const off = run("scrolled", false, changes, scrolled)
+    expect(on.mismatches).toBe(0)
+    expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+    expect(on.steps.map((step) => step.row)).toEqual(off.steps.map((step) => step.row))
+    if (!counted) return
+    expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 1, 1, 1])
+    expect(on.steps.map((step) => step.whole)).toEqual([0, 0, 0, 0])
+    // The one Structure is the edit that warms the page up: the first edit of a row a wheel put elsewhere is a frame built whole.
+    expect(reason(on.counters.unpatchable, "Structure")).toBe(1)
+    expect(reason(on.counters.unpatchable, "Box:Relocated")).toBe(0)
+  }, TIMEOUT)
+
+  it("a row that a patch rewrote and a wheel tick then moved is edited by a patch again where gpui keeps its recording, and no frame shows anything but what patching off shows", () => {
+    const changes: Partial<Page>[] = [{ row: "edit 1" }, { row: "edit 2, a much longer preview of the body" }, { row: "" }, { row: "edit 4" }, { row: "edit 5" }]
+    const scrolled: Scrolled = { top: 1400, tickBetweenEdits: true }
+    const on = run("scrolled-ticks", true, changes, scrolled)
+    const off = run("scrolled-ticks", false, changes, scrolled)
+    expect(on.mismatches).toBe(0)
+    expect(on.steps.map((step) => step.picture)).toEqual(off.steps.map((step) => step.picture))
+    expect(on.steps.map((step) => step.row)).toEqual(off.steps.map((step) => step.row))
+    if (!counted) return
+    // The edits that follow a tick that moved the row away from where gpui rewrote its recording are patches (gpui puts the patch
+    // where the recording is and the result where the frame has the row). The others meet a page that the retention left unrecorded
+    // after the wheel (`Backoff`, `learn_relocation`), which a frame built whole answers, and so a root that is no box root yet.
+    expect(on.steps.filter((step) => step.relaid === 1).length, JSON.stringify(on.counters)).toBeGreaterThanOrEqual(3)
+    for (const step of on.steps) expect(step.patched + step.whole).toBe(1)
+    expect(reason(on.counters.declines, "Relocated")).toBe(0)
+    expect(reason(on.counters.unpatchable, "Box:Relocated")).toBe(0)
   }, TIMEOUT)
 
   it("an edit that changes the box (the header's height) is declined NotContained and the frame is built whole", () => {

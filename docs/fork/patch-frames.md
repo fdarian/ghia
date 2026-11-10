@@ -97,7 +97,9 @@ paint repaints those roots in the frame that is shown and leaves the rest as it 
   of its own (`PaintRecord::is_plain_or_relocated`: nothing handed to a stacking context). The unit is registered in the frame that
   records the root and in a frame that replays it with the key it was recorded with (`delta` zero and the key equal, not merely a
   place the recording fits); a frame that replays it elsewhere (a list scrolled since) notes it as *relocated* instead
-  (`Frame::relocated`), and a patch of it declines as `PatchDecline::Relocated`, where a root that was never patchable is
+  (`Frame::relocated`), and a patch of it declines as `PatchDecline::Relocated`, unless it is `patchable_relayout()` and the mask
+  around it is the one it recorded under: that one is registered at any `delta` and a patch that lays it out again paints it in its
+  region and puts the result `delta` away ([Box roots](#patch-roots)). A root that was never patchable is
   `UnknownUnit`. `Window::patch_blocker` answers the same question without painting, for an embedder that would build the root for
   nothing. The scratch frame paints the root under the content mask captured when it was recorded, which is what a recording at its
   own place was cut by, so what it writes over the frame is what a replay would have put there. A patch of such a root makes the
@@ -905,8 +907,9 @@ the patcher turns it on with `Window::set_contained_patches`.
   replayed: it is wrapped keyed by the frame, as a unit is (`Retain::unrecorded_box_root`, `box_root_unrecorded`), and a patch builds
   the caret's unit flat with the rest. A box that is a row of a scroller is recorded to be put elsewhere (`relocatable`), and a patch that
   lays it out again paints it in its region as a frame built whole records it (only where the frame has it where it was recorded: one that
-  a scroll moved is `Relocated`) and rewrites its recording from the patch, relocation included (zed `PatchSource::relocated_rewritable`,
-  `Window::relocated_rewrite`), so every edit of a row is a patch, not one in three.
+  a scroll moved is `Relocated` unless it lays out again: it is painted in its region and the splice puts it `delta` away) and rewrites its
+  recording from the patch, relocation included (zed `PatchSource::relocated_rewritable`, `Window::relocated_rewrite`), so every edit of a
+  row is a patch, not one in three, in a scroller that was scrolled too.
   A box root whose recording gpui rewrote keeps its own record when the patch is over (`Retain::anchor_repainted`), as the record is
   what qualifies a box: the frame built whole after the patch makes it a box root again. When gpui did not rewrite it (the reasons
   the recording cannot be put elsewhere changed) the record goes with the recording, and the box is a root again
@@ -916,7 +919,13 @@ the patcher turns it on with `Window::set_contained_patches`.
   that holds a focused input, a2 a text edit in a row of the scroller): a1 at 1000, 3000 and 10000 rows 26.2M, 73.3M and 241.0M
   before, 2.23M, 3.68M and 9.13M after (a patch of the header, `relayoutPatches` 1, nothing declined); a2 35.4M, 99.8M and 328M
   before the rows' recordings were rewritten, 9.84M, 26.3M and 83.9M after (a patch every op, `relayoutPatches` 1, `unpatchable` and `declines`
-  empty; what was left at 10000 was taffy's flexbox pass over the scroller's children, which a row that answers its parent as it did no longer starts: 2.23M, 3.01M and 6.27M, [layout](layout.md#relayout-boundaries)); a hover (d) 1.53M, 1.94M and 3.37M (as before).
+  empty; what was left at 10000 was taffy's flexbox pass over the scroller's children, which a row that answers its parent as it did no longer starts: 2.23M, 3.01M and 6.27M, [layout](layout.md#relayout-boundaries)); a hover (d) 1.53M, 1.94M and 3.37M (as before). The scroller scrolled to its middle and
+  moved one wheel tick, a row edited (a3): 3.28M, 3.24M and 6.54M; a row edited after a wheel tick that moved a recording a patch had rewritten (a4,
+  alternating up and down): 2.37M, 4.26M and 9.13M, a patch every op at each count (before: a frame built whole, 28M, 100M and 245M, `Box:Relocated`).
+  At 230 rows (a scroller of 1151 elements, the size of `box-root-patch.test.tsx`) a4 is a patch on every second op: the edit after a wheel
+  tick that moves the row away from where gpui rewrote it is a patch, the one after the tick that brings it back is `Structure` (the frame
+  built whole after the wheel left the rows no box roots, which the retention's `Backoff` or `learn_relocation` decides; not a gpui decline,
+  `declines` is empty).
 
 - **Which commits.** The tree notes the elements a commit changed (`RetainedTree::pending_structure`: props, style, text and children
   other than a strict restyle by paint; a created element is covered by the element it is put under, a destroyed one by the
