@@ -4893,7 +4893,7 @@ Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `
 | `textContent` | The text of the node and its descendants. Read only: there is no setter yet. |
 | `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `className` or `class` prop (`""` without one), an attribute exists where `getAttribute` is not `null`, and `className` is the attribute `class`. `dataset` is a frozen read-only snapshot of the `data-*` props with the names in camel case (`data-row-id` is `rowId`). |
 
-Every window root is a real `<html>` with a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; all three are `null` while no root is mounted, and with several windows they are those of the window that mounted last (the rule `matchMedia` follows). `html.parentNode` is `document`, `body.parentNode` is `html`, a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin; they add no accessibility node. `document.head` does not exist.
+Every window root is a real `<html>` with a `<head>` and a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.head` the `<head>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; all four are `null` while no root is mounted, and with several windows they are those of the window that mounted last (the rule `matchMedia` follows). `html.parentNode` is `document`, `head.parentNode` and `body.parentNode` are `html` (`documentElement.children` is `[head, body]`), a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin; they add no accessibility node. `head` is `display: none`: it has no box, and an element appended to it is never drawn, laid out or hit, though it is a real element in the tree (a library that prepends a node to `document.head` finds one).
 
 Nothing here changes the tree: `setAttribute`, `appendChild` and the other writing members are not there. `el.id` is the `id` prop as a string, `""` without one, as in the DOM (read only for now). The number native knows an element by, which the renderer methods take, is `el.nativeId` (`renderer.scrollToItem(ref.nativeId, i)`).
 
@@ -4941,7 +4941,17 @@ own target, so `error`, `unhandledrejection` and `message` listeners keep
 working. `scrollTo`, `scroll` and `scrollBy` exist and do nothing: an app window
 has no document to scroll, as with a page that does not overflow. Libraries that
 check `typeof window` for a browser, such as TanStack Query, see a client.
-Nothing else is installed: `location`, `localStorage`, `innerWidth` and the rest
+`getComputedStyle`, `matchMedia` and `IntersectionObserver` are globals too, and
+so is a handful of members of `window`: `innerWidth` and `innerHeight` (the window's
+content size in CSS pixels, read live from the window that mounted last, and an
+error before any root is mounted, as for `matchMedia`), `visualViewport`,
+`frameElement` (`null`) and `parent`, `top` and `self` (the global object, unless the
+runtime defines them). `visualViewport` has `width` and `height` equal to the inner size,
+`offsetLeft`, `offsetTop`, `pageLeft` and `pageTop` of 0 (the document cannot scroll),
+`scale` of 1, and `addEventListener` and `removeEventListener` for `resize`, which is sent
+when the window's size changes (not for a change of OS preference), to a listener on the
+window that mounted last when it was added. There is no `resize` event on `window` yet.
+Nothing else is installed: `location`, `localStorage` and the rest
 are missing, so reading them throws a `ReferenceError` or gives `undefined`. The browser (wasm) build runs in a real page and installs nothing.
 Installing twice is harmless. `isWebBuild`, exported by the adapters and
 `@ghia/native/host`, is `true` on the browser build and `false` on the native
@@ -4976,6 +4986,18 @@ path, so adding the first listener of a type is what turns it on.
 It is current inside a `mousedown` handler, where it is still the element the
 press is about to take focus from. With several windows (one root each), it is
 the focused element of the window that heard a focus event last.
+
+### `getComputedStyle(element, pseudoElt?)`
+
+A read-only `CSSStyleDeclaration` of Chrome's resolved values, with camelCase members and
+`getPropertyValue`, `length`, `item` and iteration, and `--custom` properties; a write throws a
+`NoModificationAllowedError`. It is a forced read (the pending mutations are flushed and the
+window is laid out first, see [deviations](fork/deviations.md#forced-reads)) and reads the
+transitions and animations at the instant of the read. The properties are those a library reads
+(`COMPUTED_STYLE_PROPERTIES`, 82 of them); any other reads `""`. Lengths are px (the used value
+for `width`, `height`, `padding`, `margin` and the border widths), `transform` is `none` or a
+`matrix()`, colours are `rgb()` or `rgba()`, durations are in seconds. An element that is not in
+the document reads `""`. `::before` and `::after` read as a pseudo-element the element does not have.
 
 ### Tab and Escape are defaults
 
