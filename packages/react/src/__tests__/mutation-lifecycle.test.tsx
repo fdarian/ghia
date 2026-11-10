@@ -32,6 +32,8 @@ function recordingRenderer(): MutationRenderer & { styles: object[] } {
     setUniversalStyle() {},
     setCustomProp() {},
     setAttribute() {},
+    setStyleSheet() {},
+    setAdoptedStyleSheets() {},
     requestFlush() {},
     flushMutations() {},
   }

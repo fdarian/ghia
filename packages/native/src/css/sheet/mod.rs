@@ -10,22 +10,31 @@
 //! The atoms and layers belong to the document, so every sheet of one document is parsed with the
 //! same [`Atoms`] and [`Layers`].
 
-// Nothing outside the tests reads the sheet until the matcher and cascade land.
-#![allow(dead_code, unused_imports)]
+// The tests read the parts of a sheet through the re-exports below, which nothing else needs.
+#![cfg_attr(not(test), allow(unused_imports))]
 
 mod atoms;
+mod cascade;
 mod declarations;
+mod document;
+mod index;
 mod layers;
 mod matching;
 mod parser;
 mod selector;
 mod selector_parse;
 mod tokenizer;
+mod tree;
+mod view;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tree_tests;
 
 pub use atoms::{Atom, Atoms};
+pub use cascade::{CascadeCache, MatchedRules};
+pub use document::{ElementCss, StyleSheets};
 pub use declarations::render_declarations;
 pub use layers::{LayerId, LayerOrder, Layers};
 pub use matching::{matches, ElementView};

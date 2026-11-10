@@ -500,6 +500,8 @@ is atomic: native decodes it whole and resolves every style before it touches an
 | 11 | `setUniversalStyle` | string style; the empty string clears the layer |
 | 12 | `setCustomProp` | id, string key, value |
 | 13 | `setAttribute` | id, string name, bool present, then (when present) string value |
+| 14 | `setStyleSheet` | sheet id, bool present, then (when present) string text |
+| 15 | `setAdoptedStyleSheets` | varint count, then that many sheet ids |
 
 **A style is its JSON text**, the exact string `JSON.stringify(style)` gives, with the keys in the order written.
 Native interns styles by those bytes and reads `@container` rules from the text, so two styles are one style exactly
@@ -507,6 +509,10 @@ when their text is equal. Native does not parse the JSON until it meets a text i
 
 **A `setAttribute` carries a name and, when the bool is 1, a value**; 0 removes the attribute and nothing follows it. An
 empty value is a present attribute, not a removal.
+
+**A `setStyleSheet` sets the text of a constructed stylesheet**; 0 deletes it. Sheet ids are their own namespace, not element
+ids. A sheet applies only while `setAdoptedStyleSheets` lists it (the list replaces the previous one; the order is the order of
+the cascade, after the sheets of the document's `<style>` elements).
 
 **A `setCustomProp` value** is a tag byte and its payload:
 
@@ -4893,6 +4899,21 @@ value as it is, a number its text, `true` the empty string; `false`, `null` and 
 compared ASCII case-insensitively. Native reads an attribute from what was sent, else from the prop of the same name
 (`true` is `""`, `false` and `null` are absent). Setting an attribute changes nothing drawn by itself. `className` is no longer
 a prop of the native element on any element type: `class` is its attribute.
+
+**Stylesheets.** A `<style>` element in the tree (`<style>{css}</style>` in Solid and React) is a stylesheet: its text children
+are the CSS, it takes part while it is connected to the root, in tree order, and it is `display: none` and never drawn. The
+constructed sheets of wire ops 14 and 15 come after them, in the order of the adopted list. Native matches the rules against
+the tree (type, universal, class, id and attribute selectors, `:is()`, `:where()`, `:not()`, `:root`, the four combinators,
+nesting, `@layer`) and the declarations of the rules that match take part in the cascade with the element's `style` prop:
+normal declarations of the rules in order of layer, specificity and source, then the `style` prop, then `!important`
+declarations (the first layer wins there, unlayered styles lose). A declaration whose value is a CSS-wide keyword
+(`unset`, `initial`, `inherit`, `revert`, `revert-layer`) takes back what an earlier declaration of its property (and of the
+longhands it covers) set and sets nothing. The result goes through the same parser as the `style` prop, so a declaration that
+does not parse is dropped alone. A `[style*="..."]` selector reads the element's `style` prop as `kebab-case: value;` text.
+Changes to a class, an `id`, an attribute a selector names, the tree's structure and the text of a `<style>` element match
+again at the end of the batch that made them (`getBuildCounters().elementsRematched`, `cascadesComputed`). What is not
+implemented (other pseudo-classes and pseudo-elements, `@media`, `@keyframes`, `@supports`, `@container` and `@import` in a
+sheet) is skipped with its rule. The JS `CSSStyleSheet` and `document.adoptedStyleSheets` are not there yet.
 
 ### DOM classes and the tree
 

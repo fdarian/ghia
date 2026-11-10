@@ -138,6 +138,7 @@ struct ElementExtras {
     events: HashSet<String>,
     custom_props: HashMap<String, serde_json::Value>,
     attributes: crate::attributes::AttributeStore,
+    css: crate::css::sheet::ElementCss,
     /// The style before the `setStyle` that made the element declare a CSS
     /// transition. Native only tracks elements that declare one, and the
     /// transitions of a change are the ones of the style after it, so without
@@ -165,9 +166,11 @@ impl RetainedElement {
         if let Some(folded) = &*self.container_display.borrow() {
             return folded.clone().map(std::borrow::Cow::Owned);
         }
+        // A `<style>` element is `display: none` in every user agent, and its text is the sheet.
         self.style
             .as_deref()
             .and_then(|style| style.display.as_deref())
+            .or((self.element_type == "style").then_some("none"))
             .map(std::borrow::Cow::Borrowed)
     }
 
@@ -261,6 +264,12 @@ impl RetainedElement {
     /// matches elements, not text nodes: a `text` element that holds a string is
     /// one, a `<text>` that holds children is an element.
     fn takes_universal_style(&self) -> bool {
+        self.is_matchable()
+    }
+
+    /// Whether selectors can match the element: a `text` element that holds a string is a text
+    /// node, which they never do.
+    pub(crate) fn is_matchable(&self) -> bool {
         !(self.element_type == "text" && self.content.is_some())
     }
 
@@ -368,6 +377,26 @@ impl RetainedElement {
         changed
     }
 
+    pub(crate) fn css(&self) -> Option<&crate::css::sheet::ElementCss> {
+        self.extras.as_deref().map(|extras| &extras.css)
+    }
+
+    pub(crate) fn css_mut(&mut self) -> &mut crate::css::sheet::ElementCss {
+        &mut self.extras_mut().css
+    }
+
+    pub(crate) fn clear_css(&mut self) {
+        if let Some(extras) = self.extras.as_mut() {
+            extras.css = Default::default();
+            self.release_empty_extras();
+        }
+    }
+
+    /// What the element declared with `setStyle`, under any rule a sheet matched it with.
+    pub(crate) fn own_style(&self) -> Option<&Arc<StyleDesc>> {
+        self.own_style.as_ref()
+    }
+
     fn extras_mut(&mut self) -> &mut ElementExtras {
         self.extras.get_or_insert_with(Default::default)
     }
@@ -380,6 +409,7 @@ impl RetainedElement {
                 extras.events.is_empty()
                     && extras.custom_props.is_empty()
                     && extras.attributes.is_empty()
+                    && extras.css.is_empty()
                     && extras.before_transition.is_none()
                     && extras.props_before.lock().expect("props_before is never held across a panic").is_empty()
             })
@@ -403,7 +433,7 @@ pub type ElementMap = rustc_hash::FxHashMap<u64, RetainedElement>;
 /// A 64-bit hash collides eventually, and a collision here would paint one
 /// element with another element's style, which is a bug nobody would find.
 struct InternedStyle {
-    raw: Box<[u8]>,
+    raw: Arc<[u8]>,
     style: Arc<StyleDesc>,
 }
 
@@ -434,6 +464,11 @@ pub struct StyleTable {
     /// The universal layer's result per own style. It lives here because it holds
     /// styles of the table, which `sweep` could not reclaim while it did.
     layered: crate::universal_style::LayerCache,
+    /// The raw payload of each interned style by the address of its value, which the cascade
+    /// reads an element's own declarations from.
+    raws: rustc_hash::FxHashMap<usize, Arc<[u8]>>,
+    /// The style of an element that sheets matched, per matched rules and own style.
+    pub(crate) cascaded: crate::css::sheet::CascadeCache,
     /// What the styles of a restyle say of whether it only paints: the same few styles take turns on
     /// the rows of a page.
     restyles: crate::style_memo::StyleMemo<crate::events::hover_paint::Paints>,
@@ -483,8 +518,10 @@ impl StyleTable {
             }
         };
         let shared = Arc::new(style);
+        let raw: Arc<[u8]> = raw.into();
+        self.raws.insert(Arc::as_ptr(&shared) as usize, raw.clone());
         self.entries.entry(key).or_default().push(InternedStyle {
-            raw: raw.into(),
+            raw,
             style: shared.clone(),
         });
         self.count += 1;
@@ -499,9 +536,17 @@ impl StyleTable {
     /// nothing can be reading it.
     pub fn sweep(&mut self) {
         self.layered.release_unused();
+        self.cascaded.release_unused();
         let mut live = 0;
+        let raws = &mut self.raws;
         self.entries.retain(|_, bucket| {
-            bucket.retain(|entry| Arc::strong_count(&entry.style) > 1);
+            bucket.retain(|entry| {
+                let held = Arc::strong_count(&entry.style) > 1;
+                if !held {
+                    raws.remove(&(Arc::as_ptr(&entry.style) as usize));
+                }
+                held
+            });
             live += bucket.len();
             !bucket.is_empty()
         });
@@ -534,6 +579,11 @@ impl StyleTable {
 
     pub fn len(&self) -> usize {
         self.count
+    }
+
+    /// The payload `style` was interned from, or `None` for a style that did not come from `intern`.
+    pub(crate) fn raw_of(&self, style: &Arc<StyleDesc>) -> Option<Arc<[u8]>> {
+        self.raws.get(&(Arc::as_ptr(style) as usize)).cloned()
     }
 }
 
@@ -714,6 +764,8 @@ pub struct RetainedTree {
     /// The elements the accessibility links start from, see [`RelationRegistry`].
     relations: RelationRegistry,
     pub styles: StyleTable,
+    /// The document's stylesheets and what has to be matched against them again.
+    pub(crate) sheets: crate::css::sheet::StyleSheets,
     /// What each built element was painted with, for the walks that read the tree.
     pub(crate) resolved: std::cell::RefCell<crate::resolved_style::ResolvedStyles>,
     /// Whether the elements with `content-visibility: auto` skip their content, and the sizes
@@ -790,6 +842,7 @@ impl RetainedTree {
             var_style_count: 0,
             relations: RelationRegistry::default(),
             styles: StyleTable::default(),
+            sheets: Default::default(),
             resolved: Default::default(),
             relevance: Default::default(),
             universal: None,
@@ -960,6 +1013,9 @@ impl RetainedTree {
     pub fn set_root(&mut self, id: u64) {
         if self.root_id != Some(id) {
             self.root_id = Some(id);
+            if self.sheets.enabled {
+                self.sheets_root_changed();
+            }
             self.mark_dirty(Dirty::Layout);
         }
     }
@@ -969,6 +1025,7 @@ impl RetainedTree {
     }
 
     pub fn create_element(&mut self, id: u64, element_type: String) {
+        let is_style = element_type == "style";
         self.relations.created(id, &element_type);
         self.anchored_count += usize::from(element_type == "anchored");
         if element_type == "img" {
@@ -980,6 +1037,9 @@ impl RetainedTree {
         let revision = self.take_revision_covered();
         self.elements
             .insert(id, RetainedElement::new(id, element_type, revision));
+        if self.sheets.enabled || is_style {
+            self.sheets_created(id, is_style);
+        }
         if self.universal.is_some() {
             self.refresh_effective_style(id, false);
         }
@@ -1180,6 +1240,9 @@ impl RetainedTree {
     /// Unlinks from the parent before removing, then marks the parent chain
     /// changed so caches cannot serve text that is no longer in the tree.
     pub fn destroy_element(&mut self, id: u64) -> Vec<u64> {
+        if self.sheets.enabled {
+            self.sheets_unlinking(id);
+        }
         let parent_id = self.elements.get(&id).and_then(|element| element.parent);
         // An element taken out of its parent by `detach_child` was noted then, and one that was never
         // in the tree is in no frame.
@@ -1240,6 +1303,9 @@ impl RetainedTree {
             self.container_rule_count -= usize::from(has_container_rules(&element));
             self.var_style_count -= usize::from(holds_var_declarations(&element));
             self.relations.destroyed(&element);
+            if self.sheets.enabled {
+                self.sheets_destroyed(id);
+            }
             self.resolved.get_mut().forget(id);
             destroyed.push(id);
             for child_id in element.children {
@@ -1256,6 +1322,9 @@ impl RetainedTree {
         let Some(parent_id) = self.elements.get(&id).and_then(|element| element.parent) else {
             return;
         };
+        if self.sheets.enabled {
+            self.sheets_unlinking(id);
+        }
         if let Some(parent) = self.elements.get_mut(&parent_id) {
             parent.children.retain(|child| *child != id);
         }
@@ -1263,6 +1332,9 @@ impl RetainedTree {
             element.parent = None;
         }
         self.detached_from.insert(id, parent_id);
+        if self.sheets.enabled {
+            self.sheets_linked(id);
+        }
         self.mark_changed(parent_id);
         self.relations.restructured();
     }
@@ -1275,6 +1347,9 @@ impl RetainedTree {
     }
 
     pub fn append_child(&mut self, parent_id: u64, child_id: u64) {
+        if self.sheets.enabled {
+            self.sheets_unlinking(child_id);
+        }
         // Remove from old parent if any
         let old_parent_id = self.elements.get(&child_id).and_then(|e| e.parent);
         if let Some(old_parent_id) = old_parent_id {
@@ -1291,6 +1366,9 @@ impl RetainedTree {
         if let Some(parent) = self.elements.get_mut(&parent_id) {
             parent.children.push(child_id);
         }
+        if self.sheets.enabled {
+            self.sheets_linked(child_id);
+        }
         if self.inert_count > 0 || self.visibility_count > 0 {
             self.track_focusable_subtree(child_id);
         }
@@ -1302,6 +1380,9 @@ impl RetainedTree {
     }
 
     pub fn insert_before(&mut self, parent_id: u64, child_id: u64, before_id: u64) {
+        if self.sheets.enabled {
+            self.sheets_unlinking(child_id);
+        }
         // Remove from old parent if any
         let old_parent_id = self.elements.get(&child_id).and_then(|e| e.parent);
         if let Some(old_parent_id) = old_parent_id {
@@ -1322,6 +1403,9 @@ impl RetainedTree {
                 .position(|c| *c == before_id)
                 .unwrap_or(parent.children.len());
             parent.children.insert(pos, child_id);
+        }
+        if self.sheets.enabled {
+            self.sheets_linked(child_id);
         }
         if self.inert_count > 0 || self.visibility_count > 0 {
             self.track_focusable_subtree(child_id);
@@ -1365,6 +1449,23 @@ impl RetainedTree {
         let classify = self.commit_patching;
         let change = self.refresh_effective_style(id, classify);
         self.settle_style_change(id, change);
+        if self.sheets.enabled {
+            self.sheets_style_changed(id);
+        }
+    }
+
+    /// Sets the rules the sheets matched the elements with and restyles each, as `set_style` does
+    /// for a new own style (`css::sheet::tree`'s flush finds which changed).
+    pub(crate) fn apply_matched(&mut self, changes: Vec<(u64, Option<Arc<crate::css::sheet::MatchedRules>>)>) {
+        for (id, matched) in changes {
+            let Some(element) = self.elements.get_mut(&id) else {
+                continue;
+            };
+            element.css_mut().matched = matched;
+            let classify = self.commit_patching;
+            let change = self.refresh_effective_style(id, classify);
+            self.settle_style_change(id, change);
+        }
     }
 
     /// The style layer under every element's own style, as a CSS `* { ... }` rule
@@ -1411,6 +1512,17 @@ impl RetainedTree {
         let Some(element) = self.elements.get(&id) else {
             return StyleChange::default();
         };
+        if let Some(matched) = element.css().and_then(|css| css.matched.as_ref()) {
+            let declared = self.sheets.cascaded(&mut self.styles, matched, element.own_style.as_ref());
+            let effective = match (&self.universal, declared) {
+                (Some(universal), declared) if element.takes_universal_style() => Some(match declared {
+                    Some(declared) => self.styles.layered.effective(universal, &declared),
+                    None => universal.clone(),
+                }),
+                (_, declared) => declared,
+            };
+            return self.assign_style(id, effective, classify);
+        }
         let effective = match (&self.universal, &element.own_style) {
             (Some(universal), own) if element.takes_universal_style() => Some(match own {
                 Some(own) => self.styles.layered.effective(universal, own),
@@ -1532,6 +1644,9 @@ impl RetainedTree {
             }
         }
         if changed {
+            if self.sheets.enabled {
+                self.sheets_text_changed(id);
+            }
             if self.universal.is_some() {
                 // The string makes this a text node, which no style layer reaches.
                 let change = self.refresh_effective_style(id, false);
@@ -1596,6 +1711,7 @@ impl RetainedTree {
         let affects_focusability = key == "tabIndex" || key == "disabled";
         let is_inert = key == "inert";
         let relation_key = RelationRegistry::reads(&key).then(|| key.clone());
+        let sheet_key = self.sheets.enabled.then(|| key.clone());
         let mut previous_relation = None;
         let is_form_control = key == FORM_CONTROL_PROP;
         let was_inert = self
@@ -1653,6 +1769,9 @@ impl RetainedTree {
         }
         if !changed {
             return;
+        }
+        if let Some(sheet_key) = sheet_key {
+            self.sheets_prop_changed(id, &sheet_key);
         }
         if let Some(relation_key) = &relation_key {
             if let Some(element) = self.elements.get(&id) {

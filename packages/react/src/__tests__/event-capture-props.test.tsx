@@ -20,6 +20,8 @@ function setup() {
     setUniversalStyle() {},
     setCustomProp() {},
     setAttribute() {},
+    setStyleSheet() {},
+    setAdoptedStyleSheets() {},
     requestFlush() {},
     flushMutations() {},
   }

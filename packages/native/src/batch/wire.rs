@@ -30,6 +30,8 @@ pub mod opcode {
     pub const SET_UNIVERSAL_STYLE: u8 = 11;
     pub const SET_CUSTOM_PROP: u8 = 12;
     pub const SET_ATTRIBUTE: u8 = 13;
+    pub const SET_STYLE_SHEET: u8 = 14;
+    pub const SET_ADOPTED_STYLE_SHEETS: u8 = 15;
 }
 
 /// The tag in front of a `setCustomProp` value.
@@ -274,6 +276,19 @@ impl<'a> Reader<'a> {
                 name: self.str()?,
                 value: if self.bool()? { Some(self.str()?) } else { None },
             },
+            opcode::SET_STYLE_SHEET => BatchOp::SetStyleSheet {
+                sheet_id: self.id()?,
+                text: if self.bool()? { Some(self.str()?) } else { None },
+            },
+            opcode::SET_ADOPTED_STYLE_SHEETS => {
+                let count = self.varint()?;
+                // The count is untrusted: every id takes at least one byte.
+                let mut sheet_ids = Vec::with_capacity(count.min(self.remaining() as u64) as usize);
+                for _ in 0..count {
+                    sheet_ids.push(self.id()?);
+                }
+                BatchOp::SetAdoptedStyleSheets { sheet_ids }
+            }
             other => return Err(WireErrorKind::UnknownOpcode(other)),
         })
     }
@@ -388,14 +403,22 @@ mod tests {
         string(&mut ops, "data-x");
         ops.push(1);
         string(&mut ops, "v");
-        batch(13, &ops)
+        ops.push(opcode::SET_STYLE_SHEET);
+        varint(&mut ops, 7);
+        ops.push(1);
+        string(&mut ops, ".a { color: red }");
+        ops.push(opcode::SET_ADOPTED_STYLE_SHEETS);
+        varint(&mut ops, 2);
+        varint(&mut ops, 7);
+        varint(&mut ops, 300);
+        batch(15, &ops)
     }
 
     #[test]
     fn decodes_every_op_kind() {
         let bytes = every_op();
         let ops = decode(&bytes).unwrap();
-        assert_eq!(ops.len(), 13);
+        assert_eq!(ops.len(), 15);
         assert!(
             matches!(&ops[0], BatchOp::CreateElement { id: 1, element_type } if element_type == "div")
         );
@@ -445,6 +468,11 @@ mod tests {
                 value: Some("v")
             }
         ));
+        assert!(matches!(
+            &ops[13],
+            BatchOp::SetStyleSheet { sheet_id: 7, text: Some(".a { color: red }") }
+        ));
+        assert!(matches!(&ops[14], BatchOp::SetAdoptedStyleSheets { sheet_ids } if sheet_ids == &[7, 300]));
     }
 
     #[test]
@@ -546,14 +574,14 @@ mod tests {
     fn truncation_names_the_op() {
         let bytes = every_op();
         let error = decode(&bytes[..bytes.len() - 1]).unwrap_err();
-        assert_eq!(error.op, Some(12));
+        assert_eq!(error.op, Some(14));
         assert_eq!(error.kind, WireErrorKind::Truncated);
-        assert!(error.to_string().starts_with("Batch op 12:"), "{error}");
+        assert!(error.to_string().starts_with("Batch op 14:"), "{error}");
     }
 
     #[test]
     fn unknown_opcode_is_an_error_not_a_skip() {
-        for code in [0u8, 14, 255] {
+        for code in [0u8, 16, 255] {
             assert_eq!(kind(&batch(1, &[code])), WireErrorKind::UnknownOpcode(code));
         }
     }
@@ -624,6 +652,11 @@ mod tests {
                 attribute.push(1);
                 string(&mut attribute, "value");
                 attribute
+            }),
+            (opcode::SET_STYLE_SHEET, 1, {
+                let mut sheet = vec![1];
+                string(&mut sheet, "a {}");
+                sheet
             }),
         ]
     }
@@ -791,6 +824,54 @@ mod tests {
         ));
         assert_eq!(kind(&attribute(&[2])), WireErrorKind::InvalidBool(2));
         assert_eq!(kind(&attribute(&[])), WireErrorKind::Truncated);
+    }
+
+    #[test]
+    fn set_style_sheet_carries_text_or_deletes() {
+        let sheet = |rest: &[u8]| {
+            let mut ops = vec![opcode::SET_STYLE_SHEET];
+            varint(&mut ops, 3);
+            ops.extend_from_slice(rest);
+            batch(1, &ops)
+        };
+        let mut present = vec![1];
+        string(&mut present, "");
+        assert!(matches!(
+            decode(&sheet(&present)).unwrap()[0],
+            BatchOp::SetStyleSheet { sheet_id: 3, text: Some("") }
+        ));
+        assert!(matches!(
+            decode(&sheet(&[0])).unwrap()[0],
+            BatchOp::SetStyleSheet { sheet_id: 3, text: None }
+        ));
+        assert_eq!(kind(&sheet(&[2])), WireErrorKind::InvalidBool(2));
+        assert_eq!(kind(&sheet(&[])), WireErrorKind::Truncated);
+    }
+
+    #[test]
+    fn set_adopted_style_sheets_carries_a_count_and_ids() {
+        let adopted = |count: u64, ids: &[u64]| {
+            let mut ops = vec![opcode::SET_ADOPTED_STYLE_SHEETS];
+            varint(&mut ops, count);
+            for id in ids {
+                varint(&mut ops, *id);
+            }
+            batch(1, &ops)
+        };
+        assert!(matches!(
+            &decode(&adopted(0, &[])).unwrap()[0],
+            BatchOp::SetAdoptedStyleSheets { sheet_ids } if sheet_ids.is_empty()
+        ));
+        assert!(matches!(
+            &decode(&adopted(3, &[1, 2, 1])).unwrap()[0],
+            BatchOp::SetAdoptedStyleSheets { sheet_ids } if sheet_ids == &[1, 2, 1]
+        ));
+        assert_eq!(kind(&adopted(3, &[1, 2])), WireErrorKind::Truncated);
+        assert_eq!(kind(&adopted(1 << 40, &[1])), WireErrorKind::Truncated);
+        assert_eq!(
+            kind(&adopted(1, &[MAX_ELEMENT_ID + 1])),
+            WireErrorKind::InvalidId(MAX_ELEMENT_ID + 1)
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@
 
 use std::borrow::Cow;
 
-use crate::retained_tree::RetainedTree;
+use crate::retained_tree::{RetainedElement, RetainedTree};
 
 /// The attributes of one element. Most elements have none to three, so a list of pairs is
 /// smaller and as fast as a map.
@@ -76,24 +76,35 @@ fn attribute_text(value: &serde_json::Value) -> Option<Cow<'_, str>> {
     }
 }
 
+impl RetainedElement {
+    /// The attribute `name`: what `set_attribute` stored, else the custom prop of the same name
+    /// read as DOM would print it.
+    pub fn attribute(&self, name: &str) -> Option<Cow<'_, str>> {
+        if let Some(value) = self.attribute_store().and_then(|store| store.get(name)) {
+            return Some(Cow::Borrowed(value));
+        }
+        attribute_text(self.custom_props().get(name)?)
+    }
+}
+
 impl RetainedTree {
     /// Sets (`Some`) or removes (`None`) an attribute; `name` is lower-cased. Returns whether
     /// it changed. An element that does not exist changes nothing.
     pub fn set_attribute(&mut self, id: u64, name: &str, value: Option<String>) -> bool {
-        match self.elements.get_mut(&id) {
+        let changed = match self.elements.get_mut(&id) {
             Some(element) => element.set_attribute(name, value),
             None => false,
+        };
+        if changed && self.sheets.enabled {
+            self.sheets_attribute_changed(id, name);
         }
+        changed
     }
 
     /// The attribute `name` of the element: what `set_attribute` stored, else the custom prop
     /// of the same name read as DOM would print it.
     pub fn attribute(&self, id: u64, name: &str) -> Option<Cow<'_, str>> {
-        let element = self.elements.get(&id)?;
-        if let Some(value) = element.attribute_store().and_then(|store| store.get(name)) {
-            return Some(Cow::Borrowed(value));
-        }
-        attribute_text(element.custom_props().get(name)?)
+        self.elements.get(&id)?.attribute(name)
     }
 
     /// The names the element has an attribute under: the stored ones, then the custom props

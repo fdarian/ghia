@@ -93,6 +93,8 @@ export interface BuildCounters {
   motionValuesSampled: number
   listStatesCreated: number
   listItemsSpliced: number
+  elementsRematched: number
+  cascadesComputed: number
   retainReasons: string
 }
 

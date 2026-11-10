@@ -118,6 +118,14 @@ export function createMutationQueue(
       writer.setAttribute(id, name, value)
       requestFlush()
     },
+    setStyleSheet(sheetId, text) {
+      writer.setStyleSheet(sheetId, text)
+      requestFlush()
+    },
+    setAdoptedStyleSheets(sheetIds) {
+      writer.setAdoptedStyleSheets(sheetIds)
+      requestFlush()
+    },
     requestFlush,
     flushMutations() {
       flushScheduled = false

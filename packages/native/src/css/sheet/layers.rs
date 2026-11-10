@@ -77,6 +77,12 @@ pub struct LayerOrder {
 }
 
 impl LayerOrder {
+    /// The rank of styles written outside every layer: above every layer for normal declarations,
+    /// below them for important ones.
+    pub fn unlayered(&self) -> u32 {
+        self.unlayered
+    }
+
     pub fn rank(&self, layer: Option<LayerId>) -> u32 {
         match layer {
             Some(layer) => self.ranks[layer.0 as usize],

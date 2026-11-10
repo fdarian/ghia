@@ -1,0 +1,634 @@
+//! Sheets applied to a retained tree: matching, the cascade against inline styles, and what each
+//! kind of mutation does to the style of an element.
+
+use std::sync::Arc;
+
+use crate::retained_tree::RetainedTree;
+use crate::style::StyleDesc;
+
+struct Doc {
+    tree: RetainedTree,
+    next: u64,
+}
+
+const ROOT: u64 = 1;
+
+impl Doc {
+    fn new() -> Doc {
+        let mut tree = RetainedTree::new();
+        tree.create_element(ROOT, "div".into());
+        tree.set_root(ROOT);
+        Doc { tree, next: 2 }
+    }
+
+    fn element(&mut self, tag: &str, parent: u64) -> u64 {
+        let id = self.make(tag);
+        self.tree.append_child(parent, id);
+        id
+    }
+
+    /// Created and not yet in the tree.
+    fn make(&mut self, tag: &str) -> u64 {
+        let id = self.next;
+        self.next += 1;
+        self.tree.create_element(id, tag.into());
+        id
+    }
+
+    fn classed(&mut self, tag: &str, parent: u64, class: &str) -> u64 {
+        let id = self.make(tag);
+        self.tree.set_attribute(id, "class", Some(class.into()));
+        self.tree.append_child(parent, id);
+        id
+    }
+
+    /// A `<style>` element under `parent` holding `css`, and the id of its text node.
+    fn style_element(&mut self, parent: u64, css: &str) -> (u64, u64) {
+        let style = self.make("style");
+        let text = self.make("text");
+        self.tree.set_text(text, css.into());
+        self.tree.append_child(style, text);
+        self.tree.append_child(parent, style);
+        (style, text)
+    }
+
+    fn inline(&mut self, id: u64, json: &str) {
+        let style = self.tree.styles.intern(json.as_bytes()).unwrap();
+        self.tree.set_style(id, style);
+    }
+
+    fn flush(&mut self) {
+        self.tree.flush_styles();
+    }
+
+    fn style(&self, id: u64) -> Option<&StyleDesc> {
+        self.tree.elements[&id].style.as_deref()
+    }
+
+    fn color(&self, id: u64) -> Option<&str> {
+        self.style(id).and_then(|style| style.color.as_deref())
+    }
+
+    fn background(&self, id: u64) -> Option<&str> {
+        self.style(id).and_then(|style| style.background_color.as_deref())
+    }
+
+    fn style_arc(&self, id: u64) -> Option<Arc<StyleDesc>> {
+        self.tree.elements[&id].style.clone()
+    }
+}
+
+fn counts() -> crate::perf_counters::Counts {
+    crate::perf_counters::snapshot()
+}
+
+#[test]
+fn a_document_without_sheets_keeps_no_state() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.inline(div, r#"{"color":"red"}"#);
+    doc.flush();
+    assert!(!doc.tree.sheets.enabled);
+    assert!(doc.tree.elements[&div].css().is_none_or(|css| css.is_empty()));
+    assert_eq!(counts().elements_rematched, 0);
+    assert_eq!(doc.color(div), Some("red"));
+}
+
+#[test]
+fn tag_class_id_and_attribute_selectors_apply() {
+    let mut doc = Doc::new();
+    let plain = doc.element("span", ROOT);
+    let classed = doc.classed("div", ROOT, "a b");
+    let identified = doc.element("div", ROOT);
+    doc.tree.set_attribute(identified, "id", Some("x".into()));
+    let attributed = doc.element("div", ROOT);
+    doc.tree.set_attribute(attributed, "data-k", Some("v w".into()));
+    doc.style_element(
+        ROOT,
+        "span { color: red } .b { background-color: blue } #x { opacity: 0.5 } [data-k~=w] { padding-top: 4px }",
+    );
+    doc.flush();
+
+    assert_eq!(doc.color(plain), Some("red"));
+    assert_eq!(doc.color(classed), None);
+    assert_eq!(doc.background(classed), Some("blue"));
+    assert_eq!(doc.style(identified).and_then(|style| style.opacity), Some(0.5));
+    assert!(doc.style(attributed).is_some_and(|style| style.padding_top.is_some()));
+    assert!(doc.style(classed).is_some_and(|style| style.padding_top.is_none()));
+}
+
+#[test]
+fn an_id_that_arrives_as_a_prop_matches() {
+    let mut doc = Doc::new();
+    let div = doc.element("div", ROOT);
+    doc.tree.set_custom_prop(div, "id".into(), serde_json::json!("x"));
+    doc.style_element(ROOT, "#x { color: red }");
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+
+    doc.tree.set_custom_prop(div, "id".into(), serde_json::json!("y"));
+    doc.flush();
+    assert_eq!(doc.color(div), None);
+}
+
+#[test]
+fn combinators_follow_the_tree() {
+    let mut doc = Doc::new();
+    let parent = doc.classed("div", ROOT, "p");
+    let child = doc.classed("div", parent, "c");
+    let grandchild = doc.classed("div", child, "c");
+    let first = doc.classed("span", ROOT, "a");
+    let next = doc.classed("span", ROOT, "b");
+    let later = doc.classed("span", ROOT, "b");
+    doc.style_element(
+        ROOT,
+        ".p > .c { color: red } .p .c { background-color: blue } .a + .b { opacity: 0.1 } .a ~ .b { padding-top: 1px }",
+    );
+    doc.flush();
+
+    assert_eq!(doc.color(child), Some("red"));
+    assert_eq!(doc.color(grandchild), None, "a child is not a grandchild");
+    assert_eq!(doc.background(grandchild), Some("blue"));
+    assert_eq!(doc.style(next).and_then(|style| style.opacity), Some(0.1));
+    assert_eq!(doc.style(later).and_then(|style| style.opacity), None);
+    assert!(doc.style(later).is_some_and(|style| style.padding_top.is_some()));
+    assert!(doc.style(first).is_none());
+}
+
+#[test]
+fn not_and_is_match() {
+    let mut doc = Doc::new();
+    let a = doc.classed("div", ROOT, "a");
+    let b = doc.classed("div", ROOT, "b");
+    let c = doc.classed("div", ROOT, "c x");
+    doc.style_element(ROOT, "div:not(.a, .x) { color: red } :is(.a, .c) { background-color: blue }");
+    doc.flush();
+    assert_eq!(doc.color(a), None);
+    assert_eq!(doc.color(b), Some("red"));
+    assert_eq!(doc.color(c), None);
+    assert_eq!(doc.background(a), Some("blue"));
+    assert_eq!(doc.background(b), None);
+    assert_eq!(doc.background(c), Some("blue"));
+}
+
+#[test]
+fn specificity_decides_then_source_order() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.style_element(ROOT, "div.a { color: red } .a { color: blue } .a { background-color: red } .a { background-color: blue }");
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"), "(0,1,1) beats (0,1,0) whatever the order");
+    assert_eq!(doc.background(div), Some("blue"), "the later of two equals");
+}
+
+#[test]
+fn a_later_sheet_wins_over_an_earlier_one() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.style_element(ROOT, ".a { color: red; background-color: red }");
+    doc.style_element(ROOT, ".a { color: blue }");
+    doc.set_adopted("p { color: green } .a { background-color: green }");
+    doc.flush();
+    assert_eq!(doc.color(div), Some("blue"));
+    assert_eq!(doc.background(div), Some("green"), "adopted sheets come after style elements");
+}
+
+impl Doc {
+    fn set_adopted(&mut self, css: &str) {
+        self.tree.set_style_sheet(900, Some(css));
+        self.tree.set_adopted_style_sheets(vec![900]);
+    }
+}
+
+#[test]
+fn style_elements_apply_in_tree_order_not_creation_order() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    let (late, _) = doc.style_element(ROOT, ".a { color: blue }");
+    let (early, _) = doc.style_element(ROOT, ".a { color: red }");
+    doc.tree.insert_before(ROOT, early, late);
+    doc.flush();
+    assert_eq!(doc.color(div), Some("blue"), "the one later in the tree wins");
+}
+
+#[test]
+fn layers_rank_below_unlayered_styles_and_important_reverses() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.style_element(
+        ROOT,
+        "@layer base { .a { color: red; opacity: 0.1 !important } } @layer theme { .a { opacity: 0.2 !important } } \
+         div { color: blue; opacity: 0.3 !important }",
+    );
+    doc.flush();
+    assert_eq!(doc.color(div), Some("blue"), "unlayered beats a layer despite less specificity");
+    assert_eq!(
+        doc.style(div).and_then(|style| style.opacity),
+        Some(0.1),
+        "important: the first layer wins and unlayered loses"
+    );
+}
+
+#[test]
+fn important_beats_inline_and_inline_beats_normal() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.inline(div, r#"{"color":"green","backgroundColor":"green","opacity":0.9}"#);
+    doc.style_element(ROOT, ".a { color: red; background-color: blue !important; opacity: 0.2 }");
+    doc.flush();
+    assert_eq!(doc.color(div), Some("green"), "inline beats a normal declaration");
+    assert_eq!(doc.background(div), Some("blue"), "important beats inline");
+    assert_eq!(doc.style(div).and_then(|style| style.opacity), Some(0.9));
+}
+
+#[test]
+fn unset_important_removes_the_inline_value() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.inline(div, r#"{"color":"green","backgroundColor":"green"}"#);
+    doc.style_element(ROOT, ".a { color: UNSET !important }");
+    doc.flush();
+    assert_eq!(doc.color(div), None);
+    assert_eq!(doc.background(div), Some("green"));
+}
+
+#[test]
+fn a_css_wide_keyword_takes_back_what_a_shorthand_covered() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.inline(div, r#"{"paddingTop":4,"opacity":0.5}"#);
+    doc.style_element(ROOT, ".a { padding: initial !important }");
+    doc.flush();
+    let style = doc.style(div).expect("the element has a style");
+    assert!(style.padding_top.is_none(), "unsetting the shorthand clears the longhands it covers");
+    assert_eq!(style.opacity, Some(0.5));
+}
+
+#[test]
+fn nested_rules_apply() {
+    let mut doc = Doc::new();
+    let parent = doc.classed("div", ROOT, "p");
+    let child = doc.classed("div", parent, "c");
+    let outside = doc.classed("div", ROOT, "c");
+    doc.style_element(ROOT, ".p { color: red; .c { background-color: blue } }");
+    doc.flush();
+    assert_eq!(doc.color(parent), Some("red"));
+    assert_eq!(doc.background(child), Some("blue"));
+    assert_eq!(doc.background(outside), None);
+}
+
+#[test]
+fn a_class_change_matches_the_element_again() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    let other = doc.classed("div", ROOT, "a");
+    doc.style_element(ROOT, ".on { color: red } .a { background-color: blue }");
+    doc.flush();
+    assert_eq!(doc.color(div), None);
+
+    doc.tree.set_attribute(div, "class", Some("a on".into()));
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+    assert_eq!(doc.color(other), None);
+
+    doc.tree.set_attribute(div, "class", Some("a".into()));
+    doc.flush();
+    assert_eq!(doc.color(div), None);
+    assert_eq!(doc.background(div), Some("blue"));
+}
+
+#[test]
+fn an_attribute_change_matches_the_subtree_again() {
+    let mut doc = Doc::new();
+    let parent = doc.element("div", ROOT);
+    let child = doc.element("div", parent);
+    doc.style_element(ROOT, "[data-theme=dark] div { color: white } [data-open] { background-color: red }");
+    doc.flush();
+    assert_eq!(doc.color(child), None);
+
+    doc.tree.set_attribute(parent, "data-theme", Some("dark".into()));
+    doc.flush();
+    assert_eq!(doc.color(child), Some("white"));
+    assert_eq!(doc.background(parent), None);
+
+    doc.tree.set_attribute(parent, "data-open", Some(String::new()));
+    doc.flush();
+    assert_eq!(doc.background(parent), Some("red"));
+
+    doc.tree.set_attribute(parent, "data-theme", None);
+    doc.flush();
+    assert_eq!(doc.color(child), None);
+}
+
+#[test]
+fn a_change_no_selector_reads_matches_nothing_again() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.style_element(ROOT, ".a { color: red }");
+    doc.flush();
+    crate::perf_counters::reset();
+
+    doc.tree.set_attribute(div, "data-unrelated", Some("1".into()));
+    doc.tree.set_attribute(div, "title", Some("t".into()));
+    doc.flush();
+    assert_eq!(counts().elements_rematched, 0);
+
+    doc.tree.set_attribute(div, "class", Some("a b".into()));
+    doc.flush();
+    assert_eq!(counts().elements_rematched, 1);
+}
+
+#[test]
+fn the_style_attribute_reads_the_own_declarations() {
+    let mut doc = Doc::new();
+    let div = doc.element("div", ROOT);
+    doc.inline(div, r#"{"--dnd-scale":"1.5","backgroundColor":"red"}"#);
+    doc.style_element(ROOT, "[style*='--dnd-scale'] { color: blue } [style*='background-color: red'] { opacity: 0.5 }");
+    doc.flush();
+    assert_eq!(doc.color(div), Some("blue"));
+    assert_eq!(doc.style(div).and_then(|style| style.opacity), Some(0.5));
+
+    doc.inline(div, r#"{"backgroundColor":"red"}"#);
+    doc.flush();
+    assert_eq!(doc.color(div), None, "a new own style is read again");
+}
+
+#[test]
+fn elements_created_before_the_sheet_are_matched_and_after_it_too() {
+    let mut doc = Doc::new();
+    let early = doc.classed("div", ROOT, "a");
+    doc.style_element(ROOT, ".a { color: red }");
+    let late = doc.classed("div", ROOT, "a");
+    doc.flush();
+    assert_eq!(doc.color(early), Some("red"));
+    assert_eq!(doc.color(late), Some("red"));
+}
+
+#[test]
+fn an_element_built_away_from_the_document_is_matched_when_it_is_put_in() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".p > .c { color: red }");
+    let parent = doc.make("div");
+    doc.tree.set_attribute(parent, "class", Some("p".into()));
+    let child = doc.make("div");
+    doc.tree.set_attribute(child, "class", Some("c".into()));
+    doc.tree.append_child(parent, child);
+    doc.flush();
+    assert_eq!(doc.color(child), None, "not in the document");
+
+    doc.tree.append_child(ROOT, parent);
+    doc.flush();
+    assert_eq!(doc.color(child), Some("red"));
+
+    doc.tree.detach_child(parent);
+    doc.flush();
+    assert_eq!(doc.color(child), None, "out of the document again");
+}
+
+#[test]
+fn removing_a_sibling_matches_the_ones_after_it_again() {
+    let mut doc = Doc::new();
+    let first = doc.classed("span", ROOT, "a");
+    let middle = doc.classed("span", ROOT, "a");
+    let last = doc.classed("span", ROOT, "b");
+    doc.style_element(ROOT, ".a + .b { color: red }");
+    doc.flush();
+    assert_eq!(doc.color(last), Some("red"), "the middle one is its previous sibling");
+
+    doc.tree.destroy_element(middle);
+    doc.flush();
+    assert_eq!(doc.color(last), Some("red"), "the first one is now");
+    doc.tree.destroy_element(first);
+    doc.flush();
+    assert_eq!(doc.color(last), None);
+}
+
+#[test]
+fn inserting_a_sibling_matches_the_ones_after_it_again() {
+    let mut doc = Doc::new();
+    let last = doc.classed("span", ROOT, "b");
+    doc.style_element(ROOT, ".a + .b { color: red }");
+    doc.flush();
+    assert_eq!(doc.color(last), None);
+
+    let first = doc.make("span");
+    doc.tree.set_attribute(first, "class", Some("a".into()));
+    doc.tree.insert_before(ROOT, first, last);
+    doc.flush();
+    assert_eq!(doc.color(last), Some("red"));
+}
+
+#[test]
+fn removing_a_sheet_restores_the_inline_style() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.inline(div, r#"{"color":"green"}"#);
+    let own = doc.style_arc(div);
+    doc.tree.set_style_sheet(5, Some(".a { color: red !important; opacity: 0.5 }"));
+    doc.tree.set_adopted_style_sheets(vec![5]);
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+
+    doc.tree.set_adopted_style_sheets(vec![]);
+    doc.flush();
+    assert_eq!(doc.color(div), Some("green"));
+    assert!(Arc::ptr_eq(&doc.style_arc(div).unwrap(), &own.unwrap()), "exactly the own style again");
+}
+
+#[test]
+fn deleting_the_last_sheet_frees_the_state() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.tree.set_style_sheet(5, Some(".a { color: red }"));
+    doc.tree.set_adopted_style_sheets(vec![5]);
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+    assert!(doc.tree.sheets.enabled);
+
+    doc.tree.set_style_sheet(5, None);
+    doc.flush();
+    assert_eq!(doc.color(div), None);
+    assert!(!doc.tree.sheets.enabled);
+    assert!(doc.tree.elements[&div].css().is_none_or(|css| css.is_empty()));
+    assert_eq!(doc.tree.styles.cascaded.len(), 0);
+
+    doc.tree.set_style_sheet(5, Some(".a { color: blue }"));
+    doc.tree.set_adopted_style_sheets(vec![5]);
+    doc.flush();
+    assert_eq!(doc.color(div), Some("blue"), "the adopted list outlived the sheet");
+}
+
+#[test]
+fn a_style_elements_text_is_the_sheet_and_a_change_to_it_applies() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    let (style, text) = doc.style_element(ROOT, ".a { color: red }");
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+
+    doc.tree.set_text(text, ".a { color: blue }".into());
+    doc.flush();
+    assert_eq!(doc.color(div), Some("blue"));
+
+    // The sheet is every text child of the element.
+    let more = doc.make("text");
+    doc.tree.set_text(more, " .a { background-color: red }".into());
+    doc.tree.append_child(style, more);
+    doc.flush();
+    assert_eq!(doc.color(div), Some("blue"));
+    assert_eq!(doc.background(div), Some("red"));
+
+    doc.tree.destroy_element(more);
+    doc.flush();
+    assert_eq!(doc.background(div), None);
+}
+
+#[test]
+fn a_style_element_is_not_rendered() {
+    let mut doc = Doc::new();
+    let (style, text) = doc.style_element(ROOT, ".a { color: red }");
+    doc.flush();
+    assert_eq!(doc.tree.elements[&style].display().as_deref(), Some("none"));
+    assert!(crate::layout::box_generation::is_display_none(&doc.tree.elements[&style]));
+    assert!(doc.tree.elements[&text].parent == Some(style));
+}
+
+#[test]
+fn a_detached_style_element_stops_applying_and_applies_when_put_back() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    let (style, _) = doc.style_element(ROOT, ".a { color: red }");
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+
+    doc.tree.detach_child(style);
+    doc.flush();
+    assert_eq!(doc.color(div), None);
+
+    doc.tree.append_child(ROOT, style);
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+
+    doc.tree.destroy_element(style);
+    doc.flush();
+    assert_eq!(doc.color(div), None);
+    assert!(!doc.tree.sheets.enabled);
+}
+
+#[test]
+fn a_style_element_under_a_detached_parent_does_not_apply() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    let holder = doc.make("div");
+    let (_, _) = doc.style_element(holder, ".a { color: red }");
+    doc.flush();
+    assert_eq!(doc.color(div), None);
+
+    doc.tree.append_child(ROOT, holder);
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+}
+
+#[test]
+fn elements_that_match_the_same_rules_share_one_cascade() {
+    let mut doc = Doc::new();
+    doc.inline(ROOT, "{}");
+    let rows: Vec<u64> = (0..40).map(|_| doc.classed("div", ROOT, "row")).collect();
+    for row in &rows {
+        doc.inline(*row, r#"{"opacity":0.5}"#);
+    }
+    doc.style_element(ROOT, ".row { color: red }");
+    crate::perf_counters::reset();
+    doc.flush();
+    assert_eq!(counts().cascades_computed, 1, "forty rows, one merge");
+    for row in &rows {
+        assert!(Arc::ptr_eq(&doc.style_arc(*row).unwrap(), &doc.style_arc(rows[0]).unwrap()));
+        assert_eq!(doc.color(*row), Some("red"));
+    }
+
+    // A row with another own style is another pair, and a new row with the first pair is a hit.
+    let other = doc.classed("div", ROOT, "row");
+    doc.inline(other, r#"{"opacity":0.7}"#);
+    let same = doc.classed("div", ROOT, "row");
+    doc.inline(same, r#"{"opacity":0.5}"#);
+    doc.flush();
+    assert_eq!(counts().cascades_computed, 2);
+}
+
+#[test]
+fn a_sheet_change_clears_the_cascade_cache() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    let (_, text) = doc.style_element(ROOT, ".a { color: red }");
+    doc.flush();
+    assert_eq!(doc.tree.styles.cascaded.len(), 1);
+    crate::perf_counters::reset();
+
+    doc.tree.set_text(text, ".a { color: blue }".into());
+    doc.flush();
+    assert_eq!(counts().cascades_computed, 1);
+    assert_eq!(doc.color(div), Some("blue"));
+    assert_eq!(doc.tree.styles.cascaded.len(), 1);
+}
+
+#[test]
+fn the_universal_layer_goes_under_the_cascade() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    let layer = doc.tree.styles.intern(br#"{"color":"gray","backgroundColor":"gray"}"#).unwrap();
+    doc.tree.set_universal_style(Some(layer));
+    doc.style_element(ROOT, ".a { color: red }");
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+    assert_eq!(doc.background(div), Some("gray"));
+}
+
+#[test]
+fn a_text_node_is_never_matched() {
+    let mut doc = Doc::new();
+    let text = doc.make("text");
+    doc.tree.set_attribute(text, "class", Some("a".into()));
+    doc.tree.append_child(ROOT, text);
+    doc.style_element(ROOT, ".a { color: red } text { color: red }");
+    doc.flush();
+    assert_eq!(doc.color(text), Some("red"), "a text element that holds no string is an element");
+
+    doc.tree.set_text(text, "hello".into());
+    doc.flush();
+    assert_eq!(doc.color(text), None);
+}
+
+#[test]
+fn root_matches_the_container_element() {
+    let mut doc = Doc::new();
+    let child = doc.element("div", ROOT);
+    doc.style_element(ROOT, ":root { color: red } :root > div { background-color: blue }");
+    doc.flush();
+    assert_eq!(doc.color(ROOT), Some("red"));
+    assert_eq!(doc.color(child), None);
+    assert_eq!(doc.background(child), Some("blue"));
+}
+
+#[test]
+fn an_invalid_value_in_a_sheet_does_not_take_the_element_down() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.style_element(ROOT, ".a { color: red; transition-duration: bogus }");
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+}
+
+#[test]
+fn a_restyle_marks_the_tree_like_set_style() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.style_element(ROOT, ".a { color: red }");
+    doc.flush();
+    doc.tree.take_dirty();
+    let revision = doc.tree.elements[&div].subtree_revision;
+
+    doc.tree.set_attribute(div, "class", Some("b".into()));
+    doc.flush();
+    assert_ne!(doc.tree.elements[&div].subtree_revision, revision, "the style changed, so the element is dirty");
+    assert_ne!(doc.tree.take_dirty(), crate::retained_tree::Dirty::Clean);
+}

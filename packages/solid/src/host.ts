@@ -585,6 +585,7 @@ function isElementType(type: string): type is ElementType {
     case "webview":
     case "nativeview":
     case "virtual-list":
+    case "style":
     case "path":
     case "circle":
     case "ellipse":

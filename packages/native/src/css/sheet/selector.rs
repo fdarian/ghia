@@ -77,7 +77,7 @@ pub enum AttrOp {
 }
 
 /// Compares ids first, then classes, then types.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct Specificity {
     pub ids: u32,
     pub classes: u32,

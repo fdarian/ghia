@@ -1,6 +1,8 @@
 //! Right-to-left matching of a [`ComplexSelector`] against anything that can answer
 //! [`ElementView`].
 
+use std::borrow::Cow;
+
 use super::atoms::Atom;
 use super::selector::{AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, Simple};
 
@@ -13,7 +15,7 @@ pub trait ElementView: Sized {
     fn has_class(&self, class: Atom) -> bool;
     /// The value of the attribute, which includes `id` and `class` when a selector asks for them
     /// by attribute.
-    fn attr(&self, name: Atom) -> Option<&str>;
+    fn attr(&self, name: Atom) -> Option<Cow<'_, str>>;
     fn parent(&self) -> Option<Self>;
     /// The closest preceding sibling that is an element.
     fn prev_sibling(&self) -> Option<Self>;
@@ -86,7 +88,7 @@ fn attr_matches(selector: &AttrSelector, element: &impl ElementView) -> bool {
     let (actual, expected) = if matcher.case_insensitive {
         (actual.to_lowercase(), matcher.value.to_lowercase())
     } else {
-        (actual.to_owned(), matcher.value.clone())
+        (actual.into_owned(), matcher.value.clone())
     };
     match matcher.op {
         AttrOp::Equals => actual == expected,

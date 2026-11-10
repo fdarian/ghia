@@ -25,6 +25,8 @@ thread_local! {
     static MOTION_VALUES_SAMPLED: Cell<u64> = const { Cell::new(0) };
     static LIST_STATES_CREATED: Cell<u64> = const { Cell::new(0) };
     static LIST_ITEMS_SPLICED: Cell<u64> = const { Cell::new(0) };
+    static ELEMENTS_REMATCHED: Cell<u64> = const { Cell::new(0) };
+    static CASCADES_COMPUTED: Cell<u64> = const { Cell::new(0) };
     /// Not cleared by `reset`: it is read with the window's frame work counters, which run from
     /// the window's creation and are subtracted by the reader.
     static DORMANT_TICKS: Cell<u64> = const { Cell::new(0) };
@@ -65,6 +67,11 @@ pub(crate) struct Counts {
     pub list_states_created: u64,
     /// Items a change of a list's item count spliced out of or into its state.
     pub list_items_spliced: u64,
+    /// Elements a stylesheet flush matched against the rules again.
+    pub elements_rematched: u64,
+    /// Cascades merged and parsed, the misses of the cascade cache: elements that match the same
+    /// rules and share an own style share one.
+    pub cascades_computed: u64,
 }
 
 /// A frame left `elements` unbuilt because it found them unchanged.
@@ -117,6 +124,14 @@ pub(crate) fn list_state_created() {
 
 pub(crate) fn list_items_spliced(items: u64) {
     LIST_ITEMS_SPLICED.with(|count| count.set(count.get() + items));
+}
+
+pub(crate) fn element_rematched() {
+    ELEMENTS_REMATCHED.with(|count| count.set(count.get() + 1));
+}
+
+pub(crate) fn cascade_computed() {
+    CASCADES_COMPUTED.with(|count| count.set(count.get() + 1));
 }
 
 pub(crate) fn dormant_tick() {
@@ -175,6 +190,8 @@ pub(crate) fn snapshot() -> Counts {
         motion_values_sampled: MOTION_VALUES_SAMPLED.with(Cell::get),
         list_states_created: LIST_STATES_CREATED.with(Cell::get),
         list_items_spliced: LIST_ITEMS_SPLICED.with(Cell::get),
+        elements_rematched: ELEMENTS_REMATCHED.with(Cell::get),
+        cascades_computed: CASCADES_COMPUTED.with(Cell::get),
     }
 }
 
@@ -196,6 +213,8 @@ pub(crate) fn reset() {
     MOTION_VALUES_SAMPLED.with(|count| count.set(0));
     LIST_STATES_CREATED.with(|count| count.set(0));
     LIST_ITEMS_SPLICED.with(|count| count.set(0));
+    ELEMENTS_REMATCHED.with(|count| count.set(0));
+    CASCADES_COMPUTED.with(|count| count.set(0));
     RETAIN_SLOTS.with(|slots| *slots.borrow_mut() = [0; crate::retain::SLOTS]);
 }
 

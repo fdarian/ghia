@@ -1575,6 +1575,7 @@ export type ElementType =
   | "webview"
   | "nativeview"
   | "virtual-list"
+  | "style"
   | SvgChildType
 
 // ── Theme ────────────────────────────────────────────────────────────
@@ -2896,6 +2897,13 @@ export interface MutationRenderer {
    * selector matching. `null` removes it.
    */
   setAttribute(id: number, name: string, value: string | null): void
+  /**
+   * A constructed stylesheet: its text, or `null` to delete it. Sheet ids are their own namespace,
+   * not element ids. It applies once `setAdoptedStyleSheets` lists it.
+   */
+  setStyleSheet(sheetId: number, text: string | null): void
+  /** The constructed sheets that apply, in order, after the document's `<style>` elements. */
+  setAdoptedStyleSheets(sheetIds: readonly number[]): void
   /**
    * Schedule the flush a queued mutation would have scheduled. An adapter that
    * defers work to the flush (Solid destroys a removed node there) calls it when

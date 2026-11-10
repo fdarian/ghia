@@ -23,6 +23,8 @@ export const WIRE_OPCODE = {
   setUniversalStyle: 11,
   setCustomProp: 12,
   setAttribute: 13,
+  setStyleSheet: 14,
+  setAdoptedStyleSheets: 15,
 } as const
 
 export const WIRE_VALUE_TAG = {
@@ -259,6 +261,25 @@ export class WireWriter {
     }
     this.bytes[this.position++] = 1
     this.string(value)
+  }
+
+  /** A constructed stylesheet; `null` deletes it. Sheet ids are their own namespace. */
+  setStyleSheet(sheetId: number, text: string | null): void {
+    this.begin(WIRE_OPCODE.setStyleSheet, MAX_ID_BYTES + 1 + (text === null ? 0 : stringBound(text)))
+    this.id(sheetId)
+    if (text === null) {
+      this.bytes[this.position++] = 0
+      return
+    }
+    this.bytes[this.position++] = 1
+    this.string(text)
+  }
+
+  /** The constructed sheets that apply, in order, after the `<style>` elements of the document. */
+  setAdoptedStyleSheets(sheetIds: readonly number[]): void {
+    this.begin(WIRE_OPCODE.setAdoptedStyleSheets, (1 + sheetIds.length) * MAX_ID_BYTES)
+    this.id(sheetIds.length)
+    for (const sheetId of sheetIds) this.id(sheetId)
   }
 
   /** The batch written so far, and the writer ready for the next one. */

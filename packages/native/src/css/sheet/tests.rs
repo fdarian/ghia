@@ -99,9 +99,9 @@ impl ElementView for View<'_> {
     fn has_class(&self, class: Atom) -> bool {
         self.tree.nodes[self.index].classes.contains(&class)
     }
-    fn attr(&self, name: Atom) -> Option<&str> {
+    fn attr(&self, name: Atom) -> Option<std::borrow::Cow<'_, str>> {
         let node = &self.tree.nodes[self.index];
-        node.attrs.iter().find(|(key, _)| *key == name).map(|(_, value)| value.as_str())
+        node.attrs.iter().find(|(key, _)| *key == name).map(|(_, value)| value.as_str().into())
     }
     fn parent(&self) -> Option<Self> {
         self.tree.nodes[self.index].parent.map(|index| View { tree: self.tree, index })
