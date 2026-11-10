@@ -298,7 +298,13 @@ In order, the steps:
    synchronously through the sync-dispatch path that input uses, so the handler's mutations (a Solid write, an `applyBatch`,
    a React commit) are in the tree the draw builds.
 
+4. run the `requestAnimationFrame` callbacks, if JS asked (below).
+
 Nothing to do is no JS call. Smooth scrolls sample the clock at the steps, a little before the render's own instant.
+
+#### `requestAnimationFrame`
+
+The callback list is global JS state in `@ghia/native` (`animation-frame.ts`), like the DOM's one per window. `requestAnimationFrame(cb)` adds to it and asks each mounted renderer, once until its frame runs, for the next frame's steps (`renderer.requestAnimationFrame()`). Native (`frame_steps::AnimationFrame`) sets a flag for the window and registers `Window::on_next_frame` with the same steps, so a window nothing else draws still gets a frame; JS also asks a renderer again after `init()`, and a renderer that mounts after the request, so a callback requested before the window exists waits for it. Step 4 clears the flag and sends the `animationframe` event through the sync-dispatch path (not an element event: `renderer-state.ts` takes it before any handler map, runs it through the root's `schedule` like a handler, so a React commit or a Solid flush lands before the draw builds). JS takes the list before it runs the callbacks, in order, with one `performance.now()` for all, so what a callback requests waits for the next frame, and `cancelAnimationFrame` reaches a callback of the running frame that has not run yet. The callbacks run after the scroll events of the same steps, as in HTML. With several windows there is still one list: the first window whose steps run takes it (a deviation, [deviations.md](deviations.md#events-and-input)). A frame that comes by `on_next_frame` runs the steps before the draw and the draw's own steps then find nothing left; where JS cannot be called synchronously the event goes through the event queue and the callbacks run a turn later. The test renderer runs them in the next `flush`, `drawFrame` or any draw that comes first.
 
 ### Windows that are not key (#78)
 
