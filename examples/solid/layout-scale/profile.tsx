@@ -8,6 +8,9 @@
 //
 // Ops, each WARM unmeasured then REPS measured; one op is a state change, its flush, and one `drawFrame()`:
 //   a1 the header count label's text changes       a2 the counter label of one row in view changes
+//   a3 the scroller is scrolled to the middle and one wheel tick (settled, unmeasured), then the counter label of one of eight rows in view changes
+//   a4 as a3, and before each edit the scroller is moved one wheel tick (unmeasured, alternating up and down): the row edited was
+//      rewritten by a patch and then moved by a scroll
 //   b  one keystroke into the focused header input (the test window draws that frame inside the key call, so it is all in "js")
 //   c  the same string written again to a row label through Solid (`equals: false`; the host skips an equal text, so no batch is sent)
 //   c2 the same string written again through the mutation queue (a batch is sent)
@@ -18,7 +21,7 @@
 //
 // Env:
 //   COUNTS=1000,3000,10000   live rows of each run
-//   OPS=a1,a2,b,c,c2,d,e     which ops run
+//   OPS=a1,a2,a3,a4,b,c,c2,d,e  which ops run
 //   REPS=60 WARM=10          measured and warm-up ops
 //   JSON=1                   prints the results as JSON on the last line
 //   LOOP=a1 LOOPS=n          one count (the first of COUNTS), one op run n times with no reads, to `sample <pid> 5` (HOLD_MS=ms waits first)
@@ -29,7 +32,7 @@ import { useGpuix } from "@ghia/solid"
 import { createTestRoot } from "@ghia/solid/testing"
 
 const COUNTS = (process.env.COUNTS ?? "1000,3000,10000").split(",").map(Number)
-const OPS = (process.env.OPS ?? "a1,a2,b,c,c2,d,e").split(",")
+const OPS = (process.env.OPS ?? "a1,a2,a3,a4,b,c,c2,d,e").split(",")
 const REPS = Number(process.env.REPS ?? "60")
 const WARM = Number(process.env.WARM ?? "10")
 const LOOP = process.env.LOOP
@@ -42,6 +45,9 @@ const ROW_HEIGHT = 48
 const IN_VIEW_ROW = 5
 const TICK_MS = 1000 / 120
 const HOVER_ROWS = [10, 11]
+const WHEEL_DELTA = 30
+const SCROLLED_ROWS = 8
+const WHEEL_AT = { x: WIDTH / 2, y: HEADER_HEIGHT + 200 }
 
 const libSystem = dlopen("/usr/lib/libSystem.B.dylib", { proc_pid_rusage: { args: ["i32", "i32", "ptr"], returns: "i32" } })
 const rusageBuffer = new BigUint64Array(296 / 8)
@@ -148,7 +154,7 @@ function App(props: { count: number; onReady: (page: Page) => void }) {
         />
         <text style={{ marginLeft: 16, fontSize: 12, color: "#71717A", whiteSpace: "nowrap" }}>{header()}</text>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "auto", height: HEIGHT - HEADER_HEIGHT }}>
+      <div testId="scroller" style={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "auto", height: HEIGHT - HEADER_HEIGHT }}>
         <For each={indexes}>{(index) => <Row index={index} counter={counters[index]![0]} />}</For>
       </div>
     </div>
@@ -234,11 +240,42 @@ async function run(count: number): Promise<OpResult[]> {
   const hoverY = (row: number) => HEADER_HEIGHT + row * ROW_HEIGHT + ROW_HEIGHT / 2
   console.error(`N=${count}: mounted in ${mountMs.toFixed(0)} ms, pid ${process.pid}`)
 
+  const scroller = renderer.findByTestId("scroller")
+  if (!scroller) throw new Error("no scroller")
+  const scrollTop = () => {
+    const metrics = renderer.getScrollMetrics(scroller.id)
+    if (!metrics) throw new Error("the scroller has no scroll metrics")
+    return metrics[1]!
+  }
+  const settle = () => {
+    for (let i = 0; i < 3; i++) {
+      renderer.clockAdvance(TICK_MS)
+      renderer.drawFrame()
+    }
+  }
+  const scrollToTop = (top: number) => {
+    renderer.scrollTo(scroller.id, undefined, top)
+    settle()
+    if (Math.abs(scrollTop() - top) > 0.5) throw new Error(`scrollTop is ${scrollTop()}, expected ${top}`)
+  }
+  const middleRow = Math.floor(count / 2)
+  const middleTop = middleRow * ROW_HEIGHT
+  const scrolledRow = middleRow + IN_VIEW_ROW
+  let wheelDirection = 1
+  let scrolledEdits = 0
+  const wheelTick = () => {
+    renderer.dispatchScrollWheel(WHEEL_AT.x, WHEEL_AT.y, 0, wheelDirection * WHEEL_DELTA, undefined, "moved")
+    wheelDirection = -wheelDirection
+    settle()
+  }
+
   let typed = false
   let hovered = 0
   const ops: Record<string, () => void> = {
     a1: () => testRoot.root.flushSync(() => ready.setHeader()),
     a2: () => testRoot.root.flushSync(() => ready.setCounter(IN_VIEW_ROW)),
+    a3: () => testRoot.root.flushSync(() => ready.setCounter(scrolledRow + (scrolledEdits++ % SCROLLED_ROWS))),
+    a4: () => testRoot.root.flushSync(() => ready.setCounter(scrolledRow)),
     b: () => {
       // The helper `simulateKeystrokes` draws the frame itself in its closing `flushIfDirty`; this is the key as the platform delivers it.
       native.simulateKeystrokes(typed ? "Backspace" : "a")
@@ -258,7 +295,22 @@ async function run(count: number): Promise<OpResult[]> {
   renderer.dispatchMouseMove(WIDTH / 2, hoverY(HOVER_ROWS[0]!))
   for (let i = 0; i < 5; i++) renderer.drawFrame()
 
-  const step = (op: () => void) => {
+  /** Runs before every op, unmeasured and not counted: where the scroller stands and what moved it. */
+  const prepare: Record<string, () => void> = {
+    a4: wheelTick,
+  }
+  /** Where the scroller stands when an op starts: a3 and a4 at the middle after one wheel tick, so that the rows are replays with a delta. */
+  const setup: Record<string, () => void> = {
+    a3: () => {
+      scrollToTop(middleTop)
+      wheelTick()
+    },
+    a4: () => scrollToTop(middleTop),
+  }
+
+  const step = (op: () => void, name: string) => {
+    prepare[name]?.()
+    const counted = snapshot(renderer)
     const a = readInstructions()
     op()
     // A display-link frame: time has moved since the last one, so a paint-only change can be a patched tick.
@@ -268,16 +320,18 @@ async function run(count: number): Promise<OpResult[]> {
     renderer.drawFrame()
     const t1 = performance.now()
     const c = readInstructions()
-    return { js: b - a - readOverhead, frame: c - b - readOverhead, wall: t1 - t0 }
+    return { js: b - a - readOverhead, frame: c - b - readOverhead, wall: t1 - t0, before: counted, after: snapshot(renderer) }
   }
 
   if (LOOP) {
     const op = ops[LOOP]
     if (!op) throw new Error(`unknown LOOP ${LOOP}`)
-    for (let i = 0; i < WARM; i++) step(op)
+    ;(setup[LOOP] ?? (() => scrollToTop(0)))()
+    for (let i = 0; i < WARM; i++) step(op, LOOP)
     console.error(`looping ${LOOP} ${LOOPS} times, pid ${process.pid}, after ${HOLD_MS} ms`)
     if (HOLD_MS > 0) await new Promise((resolve) => setTimeout(resolve, HOLD_MS))
     for (let i = 0; i < LOOPS; i++) {
+      prepare[LOOP]?.()
       op()
       renderer.clockAdvance(TICK_MS)
       renderer.drawFrame()
@@ -289,23 +343,28 @@ async function run(count: number): Promise<OpResult[]> {
   for (const name of OPS) {
     const op = ops[name]
     if (!op) throw new Error(`unknown op ${name}`)
-    for (let i = 0; i < WARM; i++) step(op)
-    const before = snapshot(renderer)
+    ;(setup[name] ?? (() => scrollToTop(0)))()
+    for (let i = 0; i < WARM; i++) step(op, name)
     const batchesBefore = batchStats.calls
-    const samples = Array.from({ length: REPS }, () => step(op))
-    const after = snapshot(renderer)
+    const samples = Array.from({ length: REPS }, () => step(op, name))
     const counters: Snapshot = {}
-    for (const key of Object.keys(after.numbers)) counters[key] = (after.numbers[key]! - before.numbers[key]!) / REPS
-    const reasonDelta = (afterReasons: Reasons, beforeReasons: Reasons): Reasons => {
+    for (const key of Object.keys(samples[0]!.after.numbers)) {
+      counters[key] = samples.reduce((total, sample) => total + sample.after.numbers[key]! - sample.before.numbers[key]!, 0) / REPS
+    }
+    const reasonDelta = (pick: (snap: ReturnType<typeof snapshot>) => Reasons): Reasons => {
       const delta: Reasons = {}
-      for (const key of Object.keys(afterReasons)) {
-        const change = afterReasons[key]! - (beforeReasons[key] ?? 0)
-        if (change !== 0) delta[key] = change / REPS
+      for (const sample of samples) {
+        const afterReasons = pick(sample.after)
+        const beforeReasons = pick(sample.before)
+        for (const key of Object.keys(afterReasons)) {
+          const change = afterReasons[key]! - (beforeReasons[key] ?? 0)
+          if (change !== 0) delta[key] = (delta[key] ?? 0) + change / REPS
+        }
       }
       return delta
     }
-    const unpatchable = reasonDelta(after.unpatchable, before.unpatchable)
-    const declines = reasonDelta(after.declines, before.declines)
+    const unpatchable = reasonDelta((snap) => snap.unpatchable)
+    const declines = reasonDelta((snap) => snap.declines)
     results.push({
       op: name,
       count,
