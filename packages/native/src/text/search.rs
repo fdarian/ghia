@@ -1210,12 +1210,12 @@ mod tests {
 
     // ── Grouping ─────────────────────────────────────────────────────
 
-    /// `<div><text>Hello {name}!</text></div>` — React splits one line into
+    /// `<div><div>Hello {name}!</div></div>` — React splits one line into
     /// three host nodes that must search as one string.
     fn interpolated_tree() -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
-        tree.create_element(2, "text".to_string());
+        tree.create_element(2, "div".to_string());
         tree.append_child(1, 2);
         for (id, text) in [(3, "Hello "), (4, "Tommy"), (5, "!")] {
             tree.create_element(id, "#text".to_string());
@@ -1251,7 +1251,7 @@ mod tests {
     #[test]
     fn a_match_crosses_the_inline_boxes_of_a_paragraph() {
         let mut tree = RetainedTree::new();
-        tree.create_element(1, "text".to_string());
+        tree.create_element(1, "div".to_string());
         tree.create_element(2, "#text".to_string());
         tree.append_child(1, 2);
         tree.set_text(2, "Hello ".to_string());
@@ -1276,7 +1276,7 @@ mod tests {
     #[test]
     fn an_atomic_inline_splits_its_paragraph_in_document_order() {
         let mut tree = RetainedTree::new();
-        tree.create_element(1, "text".to_string());
+        tree.create_element(1, "div".to_string());
         tree.create_element(2, "#text".to_string());
         tree.append_child(1, 2);
         tree.set_text(2, "a ".to_string());
@@ -1413,7 +1413,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
         for (wrapper, leaf, text) in [(2, 3, "quick "), (4, 5, "brown")] {
-            tree.create_element(wrapper, "text".to_string());
+            tree.create_element(wrapper, "div".to_string());
             tree.append_child(1, wrapper);
             tree.create_element(leaf, "#text".to_string());
             tree.append_child(wrapper, leaf);
@@ -1472,7 +1472,7 @@ mod tests {
     #[test]
     fn a_non_text_sibling_ends_the_group_for_both() {
         let mut tree = RetainedTree::new();
-        tree.create_element(1, "text".to_string());
+        tree.create_element(1, "div".to_string());
         for (id, kind) in [(2, "#text"), (3, "div"), (4, "#text")] {
             tree.create_element(id, kind.to_string());
             tree.append_child(1, id);
@@ -1872,7 +1872,7 @@ mod tests {
             (3, "alpha b", r#"{"contentVisibility":"hidden"}"#),
             (4, "alpha c", "{}"),
         ] {
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "div".to_string());
             tree.append_child(1, id);
             tree.set_style(id, Arc::new(serde_json::from_str(style).expect("a style")));
             tree.create_element(id + 10, "#text".to_string());

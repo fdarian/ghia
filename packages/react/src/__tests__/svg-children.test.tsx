@@ -166,10 +166,14 @@ describeNative("svg children", () => {
     // React reports a commit error to its root's uncaught-error handler.
     const errors = vi.spyOn(console, "error").mockImplementation(() => {})
     try {
-      for (const element of [<div><path d="M0 0" /></div>, <g />]) {
+      for (const [element, tag] of [
+        [<div><path d="M0 0" /></div>, "path"],
+        [<g />, "g"],
+        [<div><text>Hi</text></div>, "text"],
+      ] as const) {
         errors.mockClear()
         createTestRoot().render(element)
-        expect(String(errors.mock.calls[0]?.[0])).toMatch(/only valid inside <svg>/)
+        expect(String(errors.mock.calls[0]?.[0])).toMatch(new RegExp(`<${tag}> is only valid inside <svg>`))
       }
     } finally {
       errors.mockRestore()

@@ -727,10 +727,17 @@ struct Node {
     reads_custom: bool,
 }
 
-/// Whether building the element alone costs more than replaying it: it carries text or is not a plain
-/// host box (an image, an `<svg>`), see [`Entry::costly`].
-pub(crate) fn costly(element: &crate::retained_tree::RetainedElement) -> bool {
-    element.content.is_some() || !crate::text::inline::is_host_type(&element.element_type) || element.element_type == "text"
+/// Whether building the element alone costs more than replaying it: it carries text (its own, or a
+/// `#text` child it lays out as a paragraph) or is not a plain host box (an image, an `<svg>`), see
+/// [`Entry::costly`].
+pub(crate) fn costly(tree: &crate::retained_tree::RetainedTree, element: &crate::retained_tree::RetainedElement) -> bool {
+    element.content.is_some()
+        || !crate::text::inline::is_host_type(&element.element_type)
+        || element
+            .children
+            .iter()
+            .filter_map(|id| tree.elements.get(id))
+            .any(crate::text::inline::is_raw_text)
 }
 
 /// What `Retain::scan_patch_root` finds in a subtree.
@@ -2195,7 +2202,7 @@ impl Retain {
         if scan.lifts {
             return false;
         }
-        scan.hovers || (self.quiet && !scan.root_below && self.worth(scan.size, costly(element)))
+        scan.hovers || (self.quiet && !scan.root_below && self.worth(scan.size, costly(tree, element)))
     }
 
     /// What a subtree holds that a patch root is judged by: whether `id` or something below it declares a hover that
@@ -2235,7 +2242,7 @@ impl Retain {
         let scanned = if size > PATCH_ROOT_MAX_ELEMENTS {
             PatchRootScan { hovers: false, size: PATCH_ROOT_MAX_ELEMENTS + 1, lifts, root_below: true, rooted: true, unfit }
         } else {
-            let rooted = root_below || self.worth(size, costly(element));
+            let rooted = root_below || self.worth(size, costly(tree, element));
             PatchRootScan { hovers, size, lifts, root_below, rooted, unfit }
         };
         self.patch_root_scans.insert(id, (element.subtree_revision, scanned));
@@ -4348,10 +4355,15 @@ mod tests {
         El { id, parent, element_type: "div", style, text: None, props: Vec::new() }
     }
 
-    /// A styled `<text>` holding a string: a host element of its own, which the counts of built
-    /// elements below include (a `#text` node is not one).
+    /// A `div` holding a string: a host element of its own, which the counts of built elements
+    /// below include (its `#text` child, [`string_id`], is not one).
     fn text(id: u64, parent: u64, content: &'static str) -> El {
-        El { id, parent: Some(parent), element_type: "text", style: "{}", text: Some(content), props: Vec::new() }
+        El { id, parent: Some(parent), element_type: "div", style: "{}", text: Some(content), props: Vec::new() }
+    }
+
+    /// The id of the `#text` node of a [`text`] element.
+    fn string_id(id: u64) -> u64 {
+        id + 1_000_000
     }
 
     fn typed(id: u64, parent: u64, element_type: &'static str, style: &'static str) -> El {
@@ -4396,7 +4408,8 @@ mod tests {
                     let style = tree.styles.intern(element.style.as_bytes()).unwrap();
                     tree.set_style(element.id, style);
                     if let Some(content) = element.text {
-                        tree.set_text(element.id, content.to_owned());
+                        tree.create_element(string_id(element.id), crate::text::inline::TEXT_NODE.to_owned());
+                        tree.set_text(string_id(element.id), content.to_owned());
                     }
                     for (key, value) in &element.props {
                         tree.set_custom_prop(element.id, (*key).to_owned(), value.clone());
@@ -4405,6 +4418,9 @@ mod tests {
                 for element in &elements {
                     if let Some(parent) = element.parent {
                         tree.append_child(parent, element.id);
+                    }
+                    if element.text.is_some() {
+                        tree.append_child(element.id, string_id(element.id));
                     }
                 }
                 tree.set_root(elements[0].id);
@@ -4971,7 +4987,7 @@ mod tests {
             for line in 1..=2 {
                 elements.push(div(card + line, Some(card), r##"{"height": 20}"##));
                 let host = card * 10 + line;
-                elements.push(typed(host, card + line, "text", r##"{"color": "#ffffff"}"##));
+                elements.push(typed(host, card + line, "span", r##"{"color": "#ffffff"}"##));
                 elements.push(text(host * 10, host, "some words"));
             }
         }
@@ -5129,7 +5145,7 @@ mod tests {
     fn a_change_of_text_changes_the_line_that_holds_it_and_what_is_above(cx: &mut gpui::TestAppContext) {
         let scene = Scene::new(cx, page([CARD; 3]));
         scene.settle(cx);
-        scene.tree.lock().unwrap().set_text(101, "other words".to_owned());
+        scene.tree.lock().unwrap().set_text(string_id(101), "other words".to_owned());
         scene.draw(cx);
         assert_eq!(scene.roots(cx), vec![12, 13, 20, 30]);
         scene.settle(cx);

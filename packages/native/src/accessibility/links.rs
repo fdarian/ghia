@@ -242,8 +242,7 @@ fn compute(tree: &RetainedTree) -> A11yLinks {
         let Some(element) = first_with_id(tree, id) else {
             continue;
         };
-        let is_text_host = element.element_type == "text";
-        if !has_role(element) && !is_text_host && element.element_type != "label" {
+        if !has_role(element) && element.element_type != "label" {
             links
                 .referenced_text
                 .insert(element.id, text_of(tree, element));

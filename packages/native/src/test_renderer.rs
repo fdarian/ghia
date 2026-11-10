@@ -1969,7 +1969,7 @@ impl TestGpuixRenderer {
 
     /// Every string painted in the last frame, in paint order.
     ///
-    /// `getAllText()` only sees `<text>` nodes in the retained tree. Native
+    /// `getAllText()` only sees string nodes in the retained tree. Native
     /// elements such as `<code>` and `<diff>` draw their text inside gpui, so
     /// this is the only way to assert on what they actually rendered.
     #[napi]
@@ -2746,7 +2746,7 @@ impl TestGpuixRenderer {
         texts
     }
 
-    /// Find element IDs matching the given type (e.g. "div", "text").
+    /// Find element IDs matching the given type (e.g. "div", "span").
     #[napi]
     pub fn find_by_type(&self, element_type: String) -> Vec<f64> {
         let tree = self.tree.lock().unwrap();
