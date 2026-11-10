@@ -505,6 +505,9 @@ is atomic: native decodes it whole and resolves every style before it touches an
 Native interns styles by those bytes and reads `@container` rules from the text, so two styles are one style exactly
 when their text is equal. Native does not parse the JSON until it meets a text it has not interned.
 
+**A `setAttribute` carries a name and, when the bool is 1, a value**; 0 removes the attribute and nothing follows it. An
+empty value is a present attribute, not a removal.
+
 **A `setCustomProp` value** is a tag byte and its payload:
 
 | tag | value | payload |
@@ -4880,6 +4883,16 @@ A host element (a React ref, a Solid `HostElement`) has the members a library wr
 | `isConnected` | True while the element is in the tree of a mounted root. |
 | `getAttribute(name)` | The prop of that name as a string, or `null` when the element was not given it (or its value is not a string, number or `true`). `data-index={5}` reads `"5"`. |
 | `offsetWidth`, `offsetHeight` | The border box's layout size, rounded half up, before any `transform` (a `scale(2)` element has the offset size it had without it; `getBoundingClientRect()` is the transformed box). The read lays out first, as `getBoundingClientRect` does. `0` for an element that is not mounted or has no box. `renderer.getElementBounds(id)` carries the unrounded size as `layoutWidth` and `layoutHeight`. |
+
+**Attributes on native.** The adapters also send the DOM attributes an element has to native (`MutationRenderer.setAttribute`,
+wire op 13), so the Rust side reads them without a call into JS. They are `class` (from `class` or `className`; a value that
+is not a string goes through `String()`), every `data-*`, and any other prop that holds a string, a number or a boolean
+and that is not `style`, `children`, `key`, `ref`, an event handler or already sent as a prop of the element (`id`, `role`,
+`aria-*`, `tabIndex` and the other props of a `div`, `text`, `label`, `form` or `span` that native reads). A string is the
+value as it is, a number its text, `true` the empty string; `false`, `null` and `undefined` remove the attribute. Names are
+compared ASCII case-insensitively. Native reads an attribute from what was sent, else from the prop of the same name
+(`true` is `""`, `false` and `null` are absent). Setting an attribute changes nothing drawn by itself. `className` is no longer
+a prop of the native element on any element type: `class` is its attribute.
 
 ### DOM classes and the tree
 
