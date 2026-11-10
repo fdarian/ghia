@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::attributes::attribute_name_of_prop;
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
 use super::atoms::{Atom, Atoms};
@@ -257,10 +258,10 @@ impl RetainedTree {
     }
 
     /// An element's `id` arrives as a prop, not through `setAttribute`, and so do `role` and
-    /// `aria-*`: they read as attributes of the same name.
+    /// `aria-*`: they read as attributes of the same name, and `tabIndex` as `tabindex`.
     pub(crate) fn sheets_prop_changed(&mut self, id: u64, key: &str) {
         if self.sheets.atoms_fresh {
-            self.attribute_changed(id, key);
+            self.attribute_changed(id, attribute_name_of_prop(key));
         }
     }
 

@@ -64,6 +64,32 @@ impl AttributeStore {
     }
 }
 
+/// The props whose DOM attribute has another name: React and Solid write `tabIndex`, DOM reads
+/// `tabindex`. Props arrive as custom props under the first name; a selector reads the second.
+const PROP_ATTRIBUTES: [(&str, &str); 5] = [
+    ("tabIndex", "tabindex"),
+    ("htmlFor", "for"),
+    ("colSpan", "colspan"),
+    ("rowSpan", "rowspan"),
+    ("autoFocus", "autofocus"),
+];
+
+/// The attribute a custom prop reads as: the DOM name for a prop in the table, else the name.
+pub(crate) fn attribute_name_of_prop(prop: &str) -> &str {
+    PROP_ATTRIBUTES
+        .iter()
+        .find(|(known, _)| *known == prop)
+        .map_or(prop, |(_, attribute)| attribute)
+}
+
+/// The custom prop that backs the attribute `name`, when its prop is named otherwise.
+fn prop_name_of_attribute(name: &str) -> Option<&'static str> {
+    PROP_ATTRIBUTES
+        .iter()
+        .find(|(_, attribute)| attribute.eq_ignore_ascii_case(name))
+        .map(|(prop, _)| *prop)
+}
+
 /// Whether the DOM prints a boolean for this attribute as its text: React and Solid stringify
 /// `data-*` and `aria-*`, where every other attribute is present (empty) or absent.
 fn stringifies_booleans(name: &str) -> bool {
@@ -92,7 +118,12 @@ impl RetainedElement {
         if let Some(value) = self.attribute_store().and_then(|store| store.get(name)) {
             return Some(Cow::Borrowed(value));
         }
-        attribute_text(name, self.custom_props().get(name)?)
+        let props = self.custom_props();
+        let value = match prop_name_of_attribute(name) {
+            Some(prop) => props.get(prop)?,
+            None => props.get(name)?,
+        };
+        attribute_text(name, value)
     }
 }
 
@@ -126,9 +157,10 @@ impl RetainedTree {
             .attribute_store()
             .map(|store| store.names().map(str::to_owned).collect())
             .unwrap_or_default();
-        for (name, value) in element.custom_props() {
+        for (prop, value) in element.custom_props() {
+            let name = attribute_name_of_prop(prop);
             if attribute_text(name, value).is_some() && !names.iter().any(|stored| stored == name) {
-                names.push(name.clone());
+                names.push(name.to_owned());
             }
         }
         names
@@ -211,7 +243,7 @@ mod tests {
     fn custom_props_answer_where_the_store_has_nothing() {
         let mut tree = tree();
         tree.set_custom_prop(1, "id".into(), serde_json::json!("root"));
-        tree.set_custom_prop(1, "tabindex".into(), serde_json::json!(3));
+        tree.set_custom_prop(1, "tabIndex".into(), serde_json::json!(3));
         tree.set_custom_prop(1, "aria-hidden".into(), serde_json::json!(true));
         tree.set_custom_prop(1, "aria-busy".into(), serde_json::json!(false));
         tree.set_custom_prop(1, "data-obj".into(), serde_json::json!({ "a": 1 }));

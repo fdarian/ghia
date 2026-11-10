@@ -148,6 +148,26 @@ fn data_and_aria_booleans_match_as_true_and_false() {
 }
 
 #[test]
+fn a_camel_case_prop_matches_and_restyles_under_its_dom_attribute_name() {
+    let mut doc = Doc::new();
+    let div = doc.element("div", ROOT);
+    let label = doc.element("label", ROOT);
+    doc.tree.set_custom_prop(div, "tabIndex".into(), serde_json::json!(0));
+    doc.tree.set_custom_prop(label, "htmlFor".into(), serde_json::json!("x"));
+    doc.style_element(ROOT, "[tabindex=\"0\"] { color: red } [for=x] { background-color: blue }");
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+    assert_eq!(doc.background(label), Some("blue"));
+
+    doc.tree.set_custom_prop(div, "tabIndex".into(), serde_json::json!(-1));
+    doc.flush();
+    assert_eq!(doc.color(div), None);
+    doc.tree.set_custom_prop(div, "tabIndex".into(), serde_json::json!(0));
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"));
+}
+
+#[test]
 fn combinators_follow_the_tree() {
     let mut doc = Doc::new();
     let parent = doc.classed("div", ROOT, "p");
