@@ -491,6 +491,13 @@ export declare class GpuixRenderer {
    */
   clickElement(elementId: number): void
   /**
+   * Run the activation behaviour of the element `element_id` (a label focuses its control, a
+   * submit button submits its form) for a `click` an app dispatched at it with `dispatchEvent`,
+   * which JS has delivered already and no listener cancelled. Delivers no click of its own.
+   * A disabled form control has none.
+   */
+  activateElement(elementId: number): void
+  /**
    * Paint packed pixels onto an `<img>` host node. `format` is `"rgba"`
    * (default) or `"bgra"`; BGRA skips the per-pixel swizzle.
    */
@@ -1164,6 +1171,12 @@ export declare class TestGpuixRenderer {
    * `drainEvents` like every other event.
    */
   clickElement(elementId: number): void
+  /**
+   * The activation behaviour of the element `element_id` for a `click` an app dispatched at it
+   * with `dispatchEvent`, which JS has delivered already: a label focuses its control, a submit
+   * button submits its form. Delivers no click of its own.
+   */
+  activateElement(elementId: number): void
   /** Packed `"rgba"` (default) or `"bgra"` pixels onto an `<img>` host node. */
   setImagePixels(elementId: number, width: number, height: number, pixels: Buffer, format?: string | undefined | null): void
   /** Encoded image bytes onto an `<img>` host node. */

@@ -387,6 +387,7 @@ interface NativeTestRendererApi
   releasePointerCapture(elementId: number, pointerId: number): void
   hasPointerCapture(elementId: number, pointerId: number): boolean
   clickElement(elementId: number): void
+  activateElement(elementId: number): void
   getAnimations(elementId: number): WebAnimationInfo[]
   getSubtreeAnimations(elementId: number): ElementWebAnimationInfo[]
   getDocumentAnimations(): ElementWebAnimationInfo[]
@@ -1703,6 +1704,10 @@ export class TestRenderer implements NativeRenderer {
 
   clickElement(elementId: number): void {
     this.native.clickElement(elementId)
+  }
+
+  activateElement(elementId: number): void {
+    this.native.activateElement(elementId)
   }
 
   getAnimations(elementId: number): WebAnimationInfo[] {

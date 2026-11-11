@@ -87,6 +87,20 @@ impl Activation {
         }
     }
 
+    /// The activation behaviour of a click an app dispatched at the element `id` with
+    /// `dispatchEvent`, which JS has already delivered and no listener cancelled: that of the
+    /// activation target on the element's path. Does nothing for a disabled form control.
+    pub(crate) fn activate_element(&self, id: u64, window: &mut Window, cx: &mut App) -> Result<(), String> {
+        let click = {
+            let tree = self.tree.lock().unwrap();
+            synthetic_click::click_element(&tree, id)?
+        };
+        if let Some(click) = click {
+            self.activate(&click, window, cx);
+        }
+        Ok(())
+    }
+
     /// `click` for the element `id` as the tree has it now, with `modifiers` held. Does nothing for
     /// a disabled form control.
     pub(crate) fn click_element(
@@ -110,6 +124,25 @@ impl Activation {
 /// `Activation::click_element` for the window's root view, with no modifiers held.
 pub(crate) fn click_element(id: u64, window: &mut Window, cx: &mut App) -> Result<(), String> {
     click_element_with(id, None, window, cx)
+}
+
+/// `Activation::activate_element` for the window's root view. Like `click_element_with`, it reads the
+/// view for its shared state, and runs once the view is free when something else holds it.
+pub(crate) fn activate_element(id: u64, window: &mut Window, cx: &mut App) -> Result<(), String> {
+    let view = window
+        .root::<GpuixView>()
+        .flatten()
+        .ok_or_else(|| "The window has no GpuixView".to_string())?;
+    if view.is_updating(cx) {
+        window.defer(cx, move |window, cx| {
+            if let Err(error) = activate_element(id, window, cx) {
+                sync_dispatch::report_deferred_error(error);
+            }
+        });
+        return Ok(());
+    }
+    let activation = view.read(cx).activation();
+    activation.activate_element(id, window, cx)
 }
 
 /// `click_element` for a click that carries the modifiers held (Enter on a link). The view is read

@@ -4,6 +4,7 @@ import {
   type ElementEventListener,
   type ElementListenerOptions,
 } from "./events/element-listeners.js"
+import { activateAfterClick } from "./events/activation.js"
 import { reportUncaught } from "./events/dispatch.js"
 import { createRendererState } from "./renderer-state.js"
 import { readLayoutSize } from "./bounds.js"
@@ -218,6 +219,7 @@ export function defineDomMembers<This extends object>(
         const path = pathFrom(this as unknown as Element)
         const report = bound.layout ? createRendererState(bound.layout.renderer).reportError : reportUncaught
         dispatchEventAlongPath(event, path, (index) => listenersOf(path[index]), bound.connected, report)
+        activateAfterClick(bound.layout, event)
         return !event.defaultPrevented
       },
     },

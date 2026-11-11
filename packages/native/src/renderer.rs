@@ -4220,6 +4220,26 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Run the activation behaviour of the element `element_id` (a label focuses its control, a
+    /// submit button submits its form) for a `click` an app dispatched at it with `dispatchEvent`,
+    /// which JS has delivered already and no listener cancelled. Delivers no click of its own.
+    /// A disabled form control has none.
+    #[napi]
+    pub fn activate_element(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |window, cx| {
+            crate::events::activation::activate_element(id, window, cx)
+        })?
+        .map_err(Error::from_reason);
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = id;
+            Err(Error::from_reason("activateElement is only implemented on macOS"))
+        }
+    }
+
     /// Paint packed pixels onto an `<img>` host node. `format` is `"rgba"`
     /// (default) or `"bgra"`; BGRA skips the per-pixel swizzle.
     #[napi]

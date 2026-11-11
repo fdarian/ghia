@@ -2220,6 +2220,16 @@ impl TestGpuixRenderer {
             .map_err(Error::from_reason)
     }
 
+    /// The activation behaviour of the element `element_id` for a `click` an app dispatched at it
+    /// with `dispatchEvent`, which JS has delivered already: a label focuses its control, a submit
+    /// button submits its form. Delivers no click of its own.
+    #[napi]
+    pub fn activate_element(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        window_call(move |window, cx| crate::events::activation::activate_element(id, window, cx))?
+            .map_err(Error::from_reason)
+    }
+
     /// Packed `"rgba"` (default) or `"bgra"` pixels onto an `<img>` host node.
     #[napi]
     pub fn set_image_pixels(
