@@ -333,6 +333,36 @@ describe("document.adoptedStyleSheets", () => {
     expect(recording.sent()).toEqual([])
   })
 
+  it("sends one setStyleSheet per flush however many times the sheet changed, with all the rules", () => {
+    const recording = recordingRenderer()
+    const sheet = new CSSStyleSheet()
+    document.adoptedStyleSheets = [sheet]
+    recording.sent()
+    for (let index = 0; index < 1000; index++) sheet.insertRule(`.r${index} { top: ${index}px }`, index)
+    sheet.deleteRule(0)
+    const sent = recording.sent()
+    expect(sent).toHaveLength(1)
+    expect(sent[0]![0]).toBe("setStyleSheet")
+    expect(sent[0]![1]).toBe(sheet.id)
+    expect(sent[0]![2]).toBe(sheet.sheetText())
+    expect(sheet.cssRules.length).toBe(999)
+    expect(sent[0]![2]).toContain(".r999 { top: 999px }")
+    expect(sent[0]![2]).not.toContain(".r0 {")
+  })
+
+  it("drops a pending text for a sheet that left the adopted list before the flush", () => {
+    const recording = recordingRenderer()
+    const sheet = new CSSStyleSheet()
+    document.adoptedStyleSheets = [sheet]
+    recording.sent()
+    sheet.insertRule(".a { top: 0 }")
+    document.adoptedStyleSheets = []
+    expect(recording.sent()).toEqual([
+      ["setAdoptedStyleSheets", []],
+      ["setStyleSheet", sheet.id, null],
+    ])
+  })
+
   it("deletes a sheet natively once it is not adopted, and sends its text again when it comes back", () => {
     const recording = recordingRenderer()
     const sheet = new CSSStyleSheet()
@@ -378,6 +408,7 @@ describe("document.adoptedStyleSheets", () => {
       const sinkFor = (): SheetSink => ({
         setStyleSheet: (id, text) => received.push(["setStyleSheet", id, text]),
         setAdoptedStyleSheets: (ids) => received.push(["setAdoptedStyleSheets", [...ids]]),
+        sheetsDirty: () => {},
       })
       const renderer = {}
       const first = sinkFor()

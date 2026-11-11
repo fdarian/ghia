@@ -4,6 +4,7 @@ import {
   attributesForwarded,
   openAttributeGate,
   registerAttributeGateMember,
+  flushDirtySheets,
   registerSheetSink,
   type AttributeGateMember,
 } from "./css/index.js"
@@ -75,6 +76,7 @@ export function createMutationQueue(
   const styleImages = createStyleImageLoader(renderer)
 
   let elementSource: ElementSource | undefined
+  let sheetsPending = false
   // The gate's answer, kept here because `setAttribute` runs for every attribute of every element.
   let forwardsAttributes = attributesForwarded(renderer)
 
@@ -153,6 +155,10 @@ export function createMutationQueue(
       writer.setStyleSheet(sheetId, text)
       requestFlush()
     },
+    sheetsDirty() {
+      sheetsPending = true
+      requestFlush()
+    },
     setAdoptedStyleSheets(sheetIds) {
       if (sheetIds.length > 0) openAttributeGate(renderer)
       writer.setAdoptedStyleSheets(sheetIds)
@@ -170,6 +176,10 @@ export function createMutationQueue(
     requestFlush,
     flushMutations() {
       flushScheduled = false
+      if (sheetsPending) {
+        sheetsPending = false
+        flushDirtySheets(renderer, mutations)
+      }
       if (writer.opCount === 0) return
       appliedBatches++
       // Taken before the call: applying a batch can run JS (the focus events of

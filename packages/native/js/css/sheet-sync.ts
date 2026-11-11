@@ -9,6 +9,11 @@
 export interface SheetSink {
   setStyleSheet(sheetId: number, text: string | null): void
   setAdoptedStyleSheets(sheetIds: readonly number[]): void
+  /**
+   * A sheet native already holds changed. The queue calls `flushDirtySheets` with itself when it next
+   * flushes, so a sheet changed n times in a tick is sent once, not n times.
+   */
+  sheetsDirty(): void
 }
 
 /** A sheet as the sync sees it. */
@@ -26,6 +31,8 @@ interface RendererSheets {
   readonly known: Set<number>
   /** The adopted list native holds. */
   adopted: readonly number[]
+  /** Sheets native holds whose text changed since the last flush of the queue that was told. */
+  readonly dirty: Set<SyncedSheet>
   /** A change happened while no queue could carry it, so native may be behind: the next sync resends everything. */
   stale: boolean
 }
@@ -76,6 +83,7 @@ function syncRenderer(state: RendererSheets): void {
     wanted.add(sheet.id)
     if (!state.stale && state.known.has(sheet.id)) continue
     sink.setStyleSheet(sheet.id, sheet.sheetText())
+    state.dirty.delete(sheet)
     state.known.add(sheet.id)
   }
   const ids = sheets.map((sheet) => sheet.id)
@@ -107,7 +115,7 @@ function eachRenderer(visit: (state: RendererSheets) => void): void {
 export function registerSheetSink(renderer: object, sink: SheetSink): void {
   let state = states.get(renderer)
   if (!state) {
-    state = { sinks: new Set(), known: new Set(), adopted: [], stale: false }
+    state = { sinks: new Set(), known: new Set(), dirty: new Set(), adopted: [], stale: false }
     states.set(renderer, state)
     renderers.add(new WeakRef(renderer))
   }
@@ -121,12 +129,29 @@ export function setAdoptedSheets(sheets: readonly SyncedSheet[]): void {
   eachRenderer(syncRenderer)
 }
 
-/** The text or `disabled` state of `sheet` changed: every renderer that holds it gets the new text. */
+/**
+ * The text or `disabled` state of `sheet` changed. Every renderer that holds it gets the new text
+ * when its queue next flushes, once however many changes came before.
+ */
 export function sheetChanged(sheet: SyncedSheet): void {
   if (!adopted.includes(sheet)) return
   eachRenderer((state) => {
     const sink = liveSink(state)
-    if (sink && !state.stale && state.known.has(sheet.id) && !sheet.disabled) sink.setStyleSheet(sheet.id, sheet.sheetText())
-    else syncRenderer(state)
+    if (sink && !state.stale && state.known.has(sheet.id) && !sheet.disabled) {
+      state.dirty.add(sheet)
+      sink.sheetsDirty()
+    } else {
+      syncRenderer(state)
+    }
   })
+}
+
+/** Called by a queue as it starts to flush, after it was told `sheetsDirty`: writes each changed sheet through `sink`. */
+export function flushDirtySheets(renderer: object, sink: SheetSink): void {
+  const state = states.get(renderer)
+  if (!state) return
+  for (const sheet of state.dirty) {
+    if (state.known.has(sheet.id) && !sheet.disabled) sink.setStyleSheet(sheet.id, sheet.sheetText())
+  }
+  state.dirty.clear()
 }
