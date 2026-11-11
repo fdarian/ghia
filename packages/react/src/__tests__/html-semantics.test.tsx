@@ -212,6 +212,39 @@ describeNative("HTML tag roles", () => {
     expect(paragraph.value).toBe("supercalifragilistic")
   })
 
+  it("copies a paragraph with wbr without the break opportunity, as Chrome does", () => {
+    testRoot.render(
+      <p testId="p" style={{ width: 400, margin: 0, fontSize: 16, lineHeight: "20px", fontFamily: "Menlo" }}>
+        foo<wbr />bar baz
+      </p>,
+    )
+    const box = testRoot.renderer.getElementBounds(testRoot.renderer.findByTestId("p").id)
+    const y = box.y + 10
+    expect(testRoot.renderer.dragSelect(box.x + 1, y, box.x + box.width - 1, y)).toBe("foobar baz")
+  })
+
+  it("finds a query across the wbr in a paragraph, and highlights what Chrome's find does", () => {
+    for (const caseSensitive of [false, true]) {
+      const { render, renderer, unmount } = createTestRoot({ width: 600, height: 800 })
+      try {
+        const counts: number[] = []
+        render(
+          <div highlight={{ query: "foobar", caseSensitive }} onHighlight={(event) => counts.push(event.matchCount ?? -1)}>
+            <p style={{ margin: 0 }}>
+              say foo<wbr />bar<wbr /> and foo<wbr />baz
+            </p>
+          </div>,
+        )
+        renderer.dispatchNativeEvents()
+        expect(counts, `case sensitive: ${caseSensitive}`).toEqual([1])
+        const painted = renderer.getPaintedHighlights().map((hit) => hit.text.slice(hit.start, hit.end))
+        expect(painted, `case sensitive: ${caseSensitive}`).toEqual(["foo\u200Bbar"])
+      } finally {
+        unmount()
+      }
+    }
+  })
+
   it("exposes a press on a button and not on a plain paragraph", () => {
     testRoot.render(
       <div>
