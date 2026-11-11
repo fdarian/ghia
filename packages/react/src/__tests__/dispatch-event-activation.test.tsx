@@ -106,4 +106,32 @@ describeNative("dispatchEvent of a click, in React", () => {
     expect(submits).toHaveLength(1)
     expect(document.defaultView).toBe(globalThis)
   })
+
+  it("rejects a click dispatched again while it is being dispatched, without toggling the checkbox a second time", () => {
+    testRoot = createTestRoot()
+    const nodes: Record<string, PublicInstance> = {}
+    testRoot.render(
+      <input
+        ref={(instance: unknown) => {
+          if (instance) nodes.box = instance as PublicInstance
+        }}
+        type="checkbox"
+        style={{ width: 20, height: 20 }}
+      />
+    )
+    const seen: Array<{ checked: boolean; error: string | null }> = []
+    const event = click()
+    nodes.box.addEventListener("click", (() => {
+      let error: string | null = null
+      try {
+        nodes.box.dispatchEvent(event)
+      } catch (thrown) {
+        error = (thrown as DOMException).name
+      }
+      seen.push({ checked: (nodes.box as unknown as HTMLInputElement).checked, error })
+    }) as never)
+    nodes.box.dispatchEvent(event)
+    expect(seen).toEqual([{ checked: true, error: "InvalidStateError" }])
+    expect((nodes.box as unknown as HTMLInputElement).checked).toBe(true)
+  })
 })

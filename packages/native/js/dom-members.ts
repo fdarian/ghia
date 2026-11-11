@@ -9,7 +9,7 @@ import { reportUncaught } from "./events/dispatch.js"
 import { createRendererState } from "./renderer-state.js"
 import { readLayoutSize } from "./bounds.js"
 import type { NativeRenderer } from "./host.js"
-import { dispatchEventAlongPath, document, type GpuixDocument } from "./events/window-target.js"
+import { assertDispatchable, dispatchEventAlongPath, document, type GpuixDocument } from "./events/window-target.js"
 import {
   attributeLookupName,
   attributeNameOf,
@@ -251,6 +251,7 @@ export function defineDomMembers<This extends object>(
       configurable: true,
       writable: true,
       value(this: This, event: Event) {
+        assertDispatchable(event)
         const bound = bind(this)
         const path = pathFrom(this as unknown as Element)
         const report = bound.layout ? createRendererState(bound.layout.renderer).reportError : reportUncaught

@@ -695,8 +695,12 @@ function endDispatch(state: DispatchState): void {
   state.path = []
 }
 
-/** The state of a dispatch of an app's `event` at `target`, which it must not already be in. */
-function beginDispatch(event: Event, target: object): DispatchState {
+/**
+ * What `dispatchEvent` checks before it does anything: `event` is an `Event` and is not being
+ * dispatched. A caller that acts before the dispatch (a click's pre-activation) runs this first, so
+ * a rejected event leaves nothing to undo.
+ */
+export function assertDispatchable(event: Event): DispatchState {
   if (!(event instanceof Event)) {
     throw new TypeError("Failed to execute 'dispatchEvent' on 'EventTarget': parameter 1 is not of type 'Event'.")
   }
@@ -707,6 +711,12 @@ function beginDispatch(event: Event, target: object): DispatchState {
       "InvalidStateError"
     )
   }
+  return state
+}
+
+/** The state of a dispatch of an app's `event` at `target`, which it must not already be in. */
+function beginDispatch(event: Event, target: object): DispatchState {
+  const state = assertDispatchable(event)
   ;(event as unknown as DomEvent & { target: object }).target = target
   return state
 }
