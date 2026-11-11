@@ -190,6 +190,46 @@ describeNative("DOM building from code in React", () => {
     expect(listener).toHaveBeenCalledTimes(1)
   })
 
+  it("does not call a handler React removed while code had the element out of the document", async () => {
+    let box: PublicInstance | null = null
+    const fire = vi.fn()
+    const tree = (armed: boolean) => (
+      <div ref={(instance) => (box = instance)} onClick={armed ? fire : undefined} style={{ width: 30, height: 10 }} />
+    )
+    testRoot.render(tree(true))
+    const element = box as unknown as HTMLElement
+    element.remove()
+    await settle()
+    testRoot.render(tree(false))
+    document.body!.appendChild(element)
+    await settle()
+    element.click()
+    expect(fire).not.toHaveBeenCalled()
+  })
+
+  it("only links what React places in an element code removed and native released", async () => {
+    let box: PublicInstance | null = null
+    const tree = (withChild: boolean) => (
+      <div ref={(instance) => (box = instance)} style={{ width: 30, height: 10 }}>
+        {withChild ? <span>late</span> : null}
+      </div>
+    )
+    testRoot.render(tree(false))
+    const element = box as unknown as HTMLElement
+    element.remove()
+    await settle()
+    expect(testRoot.renderer.getElement((element as unknown as Handle).nativeId)).toBeUndefined()
+    testRoot.render(tree(true))
+    await settle()
+    const child = element.firstElementChild!
+    expect(child.textContent).toBe("late")
+    expect(testRoot.renderer.getElement((element as unknown as Handle).nativeId), "no native orphan").toBeUndefined()
+    expect(testRoot.renderer.getElement((child as unknown as Handle).nativeId)).toBeUndefined()
+    document.body!.appendChild(element)
+    await settle()
+    expect(testRoot.renderer.findByText("late")).toBeDefined()
+  })
+
   it("does not send a framework update to an element native let go", async () => {
     let box: PublicInstance | null = null
     const tree = (kind: string) => (

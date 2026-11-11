@@ -61,11 +61,13 @@ import type {
   WebviewInstance,
 } from "../types/host.js"
 import { syncMotionBindings } from "./motion-bindings.js"
-import { listenersOf, unregisterEventHandlers } from "./event-registry.js"
+import { detachListeners, listenersOf, unregisterEventHandlers } from "./event-registry.js"
+import { insertDomNode } from "./dom-mutation.js"
 import {
   containerFor,
   createHostElement,
   createHostText,
+  isInTree,
   linkChild,
   livePropEntries,
   liveStyleOf,
@@ -147,6 +149,14 @@ export function adopt(parent: Instance | undefined, child: Instance | TextInstan
   if (!("type" in child)) return
   if (parent) child.parentId = parent.nativeId
   else delete child.parentId
+}
+
+/**
+ * A parent code took out of the document and a flush released has no native element. What React
+ * places in it is only linked, as code's own placement does, so no native orphan is made.
+ */
+function isReleased(parent: Instance): boolean {
+  return !stateFor(parent).mounted && !isInTree(parent)
 }
 
 function rendererFor(node: HostNode): MutationRenderer {
@@ -552,6 +562,7 @@ export const hostConfig = {
   },
 
   appendChild(parent: Instance, child: Instance | TextInstance): void {
+    if (isReleased(parent)) return insertDomNode(parent, child, null)
     assertPlacement(parent, child)
     const parentState = materialize(parent)
     materialize(child)
@@ -574,6 +585,7 @@ export const hostConfig = {
     child: Instance | TextInstance,
     beforeChild: Instance | TextInstance
   ): void {
+    if (isReleased(parent)) return insertDomNode(parent, child, beforeChild)
     assertPlacement(parent, child)
     const parentState = materialize(parent)
     materialize(child)
@@ -692,8 +704,13 @@ export const hostConfig = {
       adoptProps(instance, state, oldProps, newProps, styleChanged)
     }
     // Code took it out of the document and native let it go: it is made again, from these
-    // props, when it is inserted.
-    if (!state.mounted) return
+    // props, when it is inserted. Its handler slots are kept up to date meanwhile, because that
+    // re-registers them; they do not reach native, which has no element for them.
+    if (!state.mounted) {
+      detachListeners(instance)
+      diffEventListeners(instance, oldProps, newProps)
+      return
+    }
     if (styleChanged) {
       sendLiveStyle(instance, state)
       syncMotionBindings(container, instance.nativeId, newProps.style, instance.type)
