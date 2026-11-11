@@ -188,7 +188,7 @@ impl RetainedElement {
         self.style
             .as_deref()
             .and_then(|style| style.display.as_deref())
-            .or((self.element_type == "style").then_some("none"))
+            .or_else(|| (self.element_type == "style").then_some("none"))
             .map(std::borrow::Cow::Borrowed)
     }
 
