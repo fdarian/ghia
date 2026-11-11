@@ -159,7 +159,7 @@ impl ElementView for TreeView<'_> {
         let name = if element.is_svg() { name.written } else { name.lower };
         if name == sheets.style {
             let own = element.own_style()?;
-            let raw = self.tree.styles.raw_of(own).expect("an own style comes from StyleTable::intern");
+            let raw = self.tree.styles.raw_of(own);
             return Some(AttrValue::Shared(sheets.style_text(own, &raw)));
         }
         element.attribute(sheets.atoms.name(name)).map(AttrValue::Text)

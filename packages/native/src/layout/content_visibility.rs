@@ -1100,7 +1100,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         for (id, json) in [(1, r#"{"contentVisibility":"auto"}"#), (2, r#"{"position":"absolute"}"#), (3, "{}")] {
             tree.create_element(id, "div".to_owned());
-            tree.set_style(id, std::sync::Arc::new(style(json)));
+            tree.set_style_desc(id, style(json));
         }
         tree.set_root(1);
         tree.append_child(1, 2);
@@ -1301,7 +1301,7 @@ mod tests {
             (5, "{}"),
         ] {
             tree.create_element(id, "div".to_owned());
-            tree.set_style(id, std::sync::Arc::new(style(json)));
+            tree.set_style_desc(id, style(json));
         }
         tree.set_root(1);
         for (parent, child) in [(1, 2), (2, 3), (3, 5), (1, 4)] {

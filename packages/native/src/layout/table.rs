@@ -471,7 +471,7 @@ mod tests {
     fn element(json: serde_json::Value, props: &[(&str, serde_json::Value)]) -> RetainedElement {
         let mut tree = crate::retained_tree::RetainedTree::new();
         tree.create_element(1, "div".to_string());
-        tree.set_style(1, std::sync::Arc::new(serde_json::from_value(json).unwrap()));
+        tree.set_style_desc(1, serde_json::from_value(json).unwrap());
         for (key, value) in props {
             tree.set_custom_prop(1, key.to_string(), value.clone());
         }
@@ -559,7 +559,7 @@ mod tests {
                 tree.set_text(id, text.to_string());
             }
             if let Some(style) = style {
-                tree.set_style(id, std::sync::Arc::new(serde_json::from_value(style).unwrap()));
+                tree.set_style_desc(id, serde_json::from_value(style).unwrap());
             }
             tree.append_child(1, id);
         }
@@ -602,7 +602,7 @@ mod tests {
         }
 
         fn styled(&mut self, id: u64, json: serde_json::Value) -> &mut Self {
-            self.tree.set_style(id, std::sync::Arc::new(serde_json::from_value(json).unwrap()));
+            self.tree.set_style_desc(id, serde_json::from_value(json).unwrap());
             self
         }
 

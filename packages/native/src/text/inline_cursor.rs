@@ -159,7 +159,7 @@ mod tests {
             } else {
                 serde_json::from_value(style.clone()).expect("a style")
             };
-            tree.set_style(*id, Arc::new(style));
+            tree.set_style_desc(*id, style);
         }
         tree
     }

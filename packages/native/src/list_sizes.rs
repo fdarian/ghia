@@ -207,7 +207,7 @@ mod tests {
     fn row(element_type: &str, style: &str) -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, element_type.to_string());
-        tree.set_style(1, Arc::new(serde_json::from_str(style).expect("a style")));
+        tree.set_style_desc(1, serde_json::from_str(style).expect("a style"));
         tree
     }
 
@@ -336,7 +336,7 @@ mod tests {
         ] {
             let mut tree = RetainedTree::new();
             tree.create_element(1, "div".to_string());
-            tree.set_style(1, Arc::new(crate::css::var_substitution::parse(style.as_bytes()).expect("a style")));
+            tree.set_style_desc(1, crate::css::var_substitution::parse(style.as_bytes()).expect("a style"));
             assert!(RowBox::of(&tree.elements[&1], false).is_none(), "{style}");
         }
     }

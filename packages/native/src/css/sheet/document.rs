@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::retained_tree::StyleTable;
+use crate::retained_tree::{InternedStyle, StyleTable};
 use crate::style::StyleDesc;
 
 use super::atoms::{Atom, Atoms};
@@ -198,15 +198,16 @@ impl StyleSheets {
         &mut self,
         styles: &mut StyleTable,
         matched: &Arc<MatchedRules>,
-        own: Option<&Arc<StyleDesc>>,
+        own: Option<&InternedStyle>,
     ) -> Option<Arc<StyleDesc>> {
-        if let Some(hit) = styles.cascaded.get(matched, own) {
+        let own_arc = own.map(InternedStyle::arc);
+        if let Some(hit) = styles.cascaded.get(matched, own_arc) {
             return hit;
         }
         crate::perf_counters::cascade_computed();
         let declarations = match own {
             Some(own) => {
-                let raw = styles.raw_of(own).expect("an own style comes from StyleTable::intern");
+                let raw = styles.raw_of(own);
                 let own = serde_json::from_slice::<crate::css::lenient::Declarations>(&raw)
                     .expect("an interned style is a JSON object")
                     .0;
@@ -216,23 +217,23 @@ impl StyleSheets {
         };
         let text = merge(&self.index, matched, &declarations);
         let style = match styles.intern(text.as_bytes()) {
-            Ok(style) => Some(style),
+            Ok(style) => Some(style.into_arc()),
             Err(error) => {
                 log::warn!("Stylesheet declarations dropped, the merged style does not parse: {error}");
-                own.cloned()
+                own.cloned().map(InternedStyle::into_arc)
             }
         };
-        styles.cascaded.insert(matched, own, style.clone());
+        styles.cascaded.insert(matched, own_arc, style.clone());
         style
     }
 
-    pub(crate) fn style_text(&self, own: &Arc<StyleDesc>, raw: &[u8]) -> Arc<str> {
-        let key = Arc::as_ptr(own) as usize;
+    pub(crate) fn style_text(&self, own: &InternedStyle, raw: &[u8]) -> Arc<str> {
+        let key = Arc::as_ptr(own.arc()) as usize;
         if let Some((_, text)) = self.style_texts.borrow().get(&key) {
             return text.clone();
         }
         let text: Arc<str> = style_attribute_text(raw).into();
-        self.style_texts.borrow_mut().insert(key, (own.clone(), text.clone()));
+        self.style_texts.borrow_mut().insert(key, (own.arc().clone(), text.clone()));
         text
     }
 

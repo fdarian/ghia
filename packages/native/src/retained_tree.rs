@@ -94,7 +94,7 @@ pub struct RetainedElement {
     /// What the element declared with `setStyle`, which the effective `style`
     /// is recomputed from when the universal layer changes. The same pointer as
     /// `style` while there is no layer.
-    own_style: Option<Arc<StyleDesc>>,
+    own_style: Option<InternedStyle>,
     pub content: Option<String>,
     pub children: Vec<u64>,
     pub parent: Option<u64>,
@@ -443,7 +443,7 @@ impl RetainedElement {
     }
 
     /// What the element declared with `setStyle`, under any rule a sheet matched it with.
-    pub(crate) fn own_style(&self) -> Option<&Arc<StyleDesc>> {
+    pub(crate) fn own_style(&self) -> Option<&InternedStyle> {
         self.own_style.as_ref()
     }
 
@@ -482,9 +482,33 @@ pub type ElementMap = rustc_hash::FxHashMap<u64, RetainedElement>;
 /// The raw bytes are kept so a hash hit can be confirmed by comparing content.
 /// A 64-bit hash collides eventually, and a collision here would paint one
 /// element with another element's style, which is a bug nobody would find.
-struct InternedStyle {
+struct TableEntry {
     raw: Arc<[u8]>,
     style: Arc<StyleDesc>,
+}
+
+/// A style that came out of [`StyleTable::intern`], which is what the table keeps the raw payload
+/// of: the cascade reads an element's own declarations from it. Only `intern` makes one, so a
+/// holder cannot have a style the table does not know.
+#[derive(Clone)]
+pub struct InternedStyle(Arc<StyleDesc>);
+
+impl InternedStyle {
+    pub fn arc(&self) -> &Arc<StyleDesc> {
+        &self.0
+    }
+
+    pub fn into_arc(self) -> Arc<StyleDesc> {
+        self.0
+    }
+}
+
+impl std::ops::Deref for InternedStyle {
+    type Target = StyleDesc;
+
+    fn deref(&self) -> &StyleDesc {
+        &self.0
+    }
 }
 
 /// Below this many entries a sweep is not worth thinking about, so the table
@@ -505,7 +529,7 @@ pub(crate) const STYLE_SWEEP_FLOOR: usize = 64;
 /// borrow checker proves it cannot have touched an element.
 #[derive(Default)]
 pub struct StyleTable {
-    entries: rustc_hash::FxHashMap<u64, Vec<InternedStyle>>,
+    entries: rustc_hash::FxHashMap<u64, Vec<TableEntry>>,
     /// Entries currently held. Tracked rather than summed, so `maybe_sweep` is
     /// O(1) on the commits that do not sweep.
     count: usize,
@@ -550,13 +574,13 @@ impl StyleTable {
     /// Parse a style payload, reusing the shared value when the same bytes
     /// arrived before. Hashing ~110 bytes is far cheaper than building the
     /// ~80 `Option` fields of a `StyleDesc`.
-    pub fn intern(&mut self, raw: &[u8]) -> Result<Arc<StyleDesc>, String> {
+    pub fn intern(&mut self, raw: &[u8]) -> Result<InternedStyle, String> {
         let mut hasher = rustc_hash::FxHasher::default();
         raw.hash(&mut hasher);
         let key = hasher.finish();
         if let Some(bucket) = self.entries.get(&key) {
             if let Some(hit) = bucket.iter().find(|entry| &*entry.raw == raw) {
-                return Ok(hit.style.clone());
+                return Ok(InternedStyle(hit.style.clone()));
             }
         }
         let style = if crate::css::var_substitution::mentions_var(raw) {
@@ -570,12 +594,12 @@ impl StyleTable {
         let shared = Arc::new(style);
         let raw: Arc<[u8]> = raw.into();
         self.raws.insert(Arc::as_ptr(&shared) as usize, raw.clone());
-        self.entries.entry(key).or_default().push(InternedStyle {
+        self.entries.entry(key).or_default().push(TableEntry {
             raw,
             style: shared.clone(),
         });
         self.count += 1;
-        Ok(shared)
+        Ok(InternedStyle(shared))
     }
 
     /// Drop interned styles no element references any more.
@@ -631,9 +655,25 @@ impl StyleTable {
         self.count
     }
 
-    /// The payload `style` was interned from, or `None` for a style that did not come from `intern`.
-    pub(crate) fn raw_of(&self, style: &Arc<StyleDesc>) -> Option<Arc<[u8]>> {
-        self.raws.get(&(Arc::as_ptr(style) as usize)).cloned()
+    /// A style built in a test instead of parsed from a payload: the payload it reads back is the
+    /// style serialized.
+    #[cfg(test)]
+    pub(crate) fn intern_arc(&mut self, shared: Arc<StyleDesc>) -> InternedStyle {
+        let raw: Arc<[u8]> = serde_json::to_vec(&*shared).expect("a style serializes").into();
+        let mut hasher = rustc_hash::FxHasher::default();
+        raw.hash(&mut hasher);
+        self.raws.insert(Arc::as_ptr(&shared) as usize, raw.clone());
+        self.entries.entry(hasher.finish()).or_default().push(TableEntry { raw, style: shared.clone() });
+        self.count += 1;
+        InternedStyle(shared)
+    }
+
+    /// The payload `style` was interned from.
+    pub(crate) fn raw_of(&self, style: &InternedStyle) -> Arc<[u8]> {
+        self.raws
+            .get(&(Arc::as_ptr(style.arc()) as usize))
+            .expect("the table keeps the payload of a style that is held")
+            .clone()
     }
 }
 
@@ -1484,14 +1524,14 @@ impl RetainedTree {
             .is_some_and(|root| !root.children.is_empty())
     }
 
-    pub fn set_style(&mut self, id: u64, style: Arc<StyleDesc>) {
+    pub fn set_style(&mut self, id: u64, style: InternedStyle) {
         let Some(element) = self.elements.get_mut(&id) else {
             return;
         };
         let same = element
             .own_style
             .as_ref()
-            .is_some_and(|current| Arc::ptr_eq(current, &style) || **current == *style);
+            .is_some_and(|current| Arc::ptr_eq(current.arc(), style.arc()) || **current.arc() == **style.arc());
         if same {
             return;
         }
@@ -1502,6 +1542,17 @@ impl RetainedTree {
         if self.sheets.enabled {
             self.sheets_style_changed(id);
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_style_desc(&mut self, id: u64, style: StyleDesc) {
+        self.set_style_arc(id, Arc::new(style));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_style_arc(&mut self, id: u64, style: Arc<StyleDesc>) {
+        let interned = self.styles.intern_arc(style);
+        self.set_style(id, interned);
     }
 
     /// Sets the rules the sheets matched the elements with and restyles each, as `set_style` does
@@ -1564,7 +1615,7 @@ impl RetainedTree {
         };
         let declared = match element.css().and_then(|css| css.matched.as_ref()) {
             Some(matched) => self.sheets.cascaded(&mut self.styles, matched, element.own_style.as_ref()),
-            None => element.own_style.clone(),
+            None => element.own_style.clone().map(InternedStyle::into_arc),
         };
         let effective = match (&self.universal, declared) {
             (Some(universal), declared) if element.takes_universal_style() => Some(match declared {
@@ -2339,11 +2390,11 @@ mod tests {
         let mut tree = tree_with_child();
         let first = tree.styles.intern(br#"{"color":"red"}"#).unwrap();
         let second = tree.styles.intern(br#"{"color":"red"}"#).unwrap();
-        assert!(Arc::ptr_eq(&first, &second));
+        assert!(Arc::ptr_eq(first.arc(), second.arc()));
         assert_eq!(tree.styles.len(), 1);
 
         let other = tree.styles.intern(br#"{"color":"blue"}"#).unwrap();
-        assert!(!Arc::ptr_eq(&first, &other));
+        assert!(!Arc::ptr_eq(first.arc(), other.arc()));
         assert_eq!(tree.styles.len(), 2);
     }
 
@@ -2584,13 +2635,13 @@ mod tests {
             let style = serde_json::json!({ "display": value });
             Arc::new(serde_json::from_value::<StyleDesc>(style).expect("a style"))
         };
-        tree.set_style(2, display("contents"));
-        tree.set_style(3, display("contents"));
+        tree.set_style_arc(2, display("contents"));
+        tree.set_style_arc(3, display("contents"));
         assert!(focusable(&tree).is_empty(), "no box, nothing to focus");
 
-        tree.set_style(2, display("block"));
+        tree.set_style_arc(2, display("block"));
         assert_eq!(focusable(&tree), vec![2], "a box again");
-        tree.set_style(3, display("block"));
+        tree.set_style_arc(3, display("block"));
         assert_eq!(focusable(&tree), vec![2, 3]);
     }
 
@@ -2684,10 +2735,10 @@ mod tests {
         };
         assert_eq!(focusable(&tree), vec![2, 3, 4]);
 
-        tree.set_style(2, visibility("hidden"));
+        tree.set_style_arc(2, visibility("hidden"));
         assert_eq!(focusable(&tree), vec![4], "the element and its descendants");
 
-        tree.set_style(3, visibility("visible"));
+        tree.set_style_arc(3, visibility("visible"));
         assert_eq!(focusable(&tree), vec![3, 4]);
 
         // Moving a subtree under a hidden element, or out of one, follows the new ancestors.
@@ -2696,7 +2747,7 @@ mod tests {
         tree.append_child(1, 4);
         assert_eq!(focusable(&tree), vec![3, 4]);
 
-        tree.set_style(2, Arc::new(StyleDesc::default()));
+        tree.set_style_desc(2, StyleDesc::default());
         assert_eq!(focusable(&tree), vec![2, 3, 4]);
         assert!(!tree.is_visibility_hidden(3));
     }
@@ -2776,9 +2827,9 @@ mod tests {
                 ..Default::default()
             })
         };
-        tree.set_style(2, styled(Some("hidden"), None));
-        tree.set_style(5, styled(None, Some("none")));
-        tree.set_style(6, styled(None, Some("auto")));
+        tree.set_style_arc(2, styled(Some("hidden"), None));
+        tree.set_style_arc(5, styled(None, Some("none")));
+        tree.set_style_arc(6, styled(None, Some("auto")));
         let boxes = [
             (1, (0.0, 0.0, 100.0, 100.0)),
             (2, (0.0, 0.0, 50.0, 50.0)),
@@ -2827,9 +2878,9 @@ mod tests {
                 ..Default::default()
             })
         };
-        tree.set_style(1, styled(Some("relative"), None));
-        tree.set_style(2, styled(clip_position, Some("hidden")));
-        tree.set_style(3, styled(Some(box_position), None));
+        tree.set_style_arc(1, styled(Some("relative"), None));
+        tree.set_style_arc(2, styled(clip_position, Some("hidden")));
+        tree.set_style_arc(3, styled(Some(box_position), None));
         let boxes = [
             (1, (0.0, 0.0, 200.0, 200.0)),
             (2, (100.0, 100.0, 50.0, 50.0)),
@@ -2869,7 +2920,7 @@ mod tests {
             position: Some("static".to_string()),
             ..Default::default()
         });
-        tree.set_style(3, in_flow);
+        tree.set_style_arc(3, in_flow);
         assert_eq!(tree.elements_at(20.0, 20.0, &painted), vec![1]);
     }
 
@@ -2922,7 +2973,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         for id in 1..=3 {
             tree.create_element(id, "div".to_string());
-            tree.set_style(id, Arc::new(StyleDesc::default()));
+            tree.set_style_desc(id, StyleDesc::default());
         }
         tree.set_root(1);
         tree.append_child(1, 2);
@@ -2948,7 +2999,7 @@ mod tests {
     fn the_count_of_escaping_elements_follows_styles_and_destruction() {
         let (mut tree, _) = escaping_tree(None, "fixed");
         assert_eq!(tree.escaping_count, 1);
-        tree.set_style(2, Arc::new(StyleDesc { position: Some("absolute".into()), ..Default::default() }));
+        tree.set_style_desc(2, StyleDesc { position: Some("absolute".into()), ..Default::default() });
         assert_eq!(tree.escaping_count, 2);
         tree.destroy_element(2);
         assert_eq!(tree.escaping_count, 0);
@@ -2987,13 +3038,13 @@ mod tests {
             })
         };
         // The sibling and the scroller are hidden, so the pointer reaches the root under them.
-        tree.set_style(4, visibility("hidden"));
+        tree.set_style_arc(4, visibility("hidden"));
         assert_eq!(tree.elements_at(45.0, 10.0, &painted), vec![2, 1]);
-        tree.set_style(2, visibility("hidden"));
+        tree.set_style_arc(2, visibility("hidden"));
         assert_eq!(tree.elements_at(45.0, 10.0, &painted), vec![1]);
         // The row inherits it, and `visible` undoes it for the row alone.
         assert_eq!(tree.elements_at(10.0, 45.0, &painted), vec![1]);
-        tree.set_style(3, visibility("visible"));
+        tree.set_style_arc(3, visibility("visible"));
         assert_eq!(tree.elements_at(10.0, 45.0, &painted), vec![3, 1]);
     }
 
@@ -3026,7 +3077,7 @@ mod tests {
         for (parent, child) in [(1, 2), (2, 3), (3, 4), (1, 5)] {
             tree.append_child(parent, child);
         }
-        tree.set_style(
+        tree.set_style_arc(
             2,
             Arc::new(StyleDesc {
                 overflow: Some("hidden".to_string()),
@@ -3085,7 +3136,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         for (id, _, kind, style) in &nodes {
             tree.create_element(*id, kind.to_string());
-            tree.set_style(*id, Arc::new(style.clone()));
+            tree.set_style_desc(*id, style.clone());
         }
         tree.set_root(nodes[0].0);
         for (id, parent, _, _) in &nodes {

@@ -1002,7 +1002,7 @@ fn the_universal_layer_goes_under_the_cascade() {
     let mut doc = Doc::new();
     let div = doc.classed("div", ROOT, "a");
     let layer = doc.tree.styles.intern(br#"{"color":"gray","backgroundColor":"gray"}"#).unwrap();
-    doc.tree.set_universal_style(Some(layer));
+    doc.tree.set_universal_style(Some(layer.into_arc()));
     doc.style_element(ROOT, ".a { color: red }");
     doc.flush();
     assert_eq!(doc.color(div), Some("red"));

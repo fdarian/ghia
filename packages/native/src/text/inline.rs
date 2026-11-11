@@ -723,7 +723,7 @@ mod tests {
         }
 
         fn styled(&mut self, id: u64, json: serde_json::Value) -> &mut Self {
-            self.tree.set_style(id, style(json));
+            self.tree.set_style_arc(id, style(json));
             self
         }
 

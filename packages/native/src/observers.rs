@@ -824,7 +824,7 @@ mod tests {
         tree.create_element(1, "div".to_string());
         tree.create_element(2, "div".to_string());
         tree.append_child(1, 2);
-        tree.set_style(
+        tree.set_style_arc(
             1,
             Arc::new(StyleDesc {
                 border_width: Some(crate::css::shorthand::Sides::all(crate::css::length::LinearLength::px(2.0))),

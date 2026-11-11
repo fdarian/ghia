@@ -421,7 +421,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
         tree.set_root(1);
-        tree.set_style(1, std::sync::Arc::new(style));
+        tree.set_style_desc(1, style);
         (tree, 1)
     }
 
@@ -515,8 +515,8 @@ mod tests {
         tree.create_element(2, "div".to_string());
         tree.set_root(1);
         tree.append_child(1, 2);
-        tree.set_style(1, std::sync::Arc::new(style));
-        tree.set_style(2, std::sync::Arc::new(child));
+        tree.set_style_desc(1, style);
+        tree.set_style_desc(2, child);
         (tree, 1)
     }
 
