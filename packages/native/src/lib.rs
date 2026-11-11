@@ -29,6 +29,7 @@ mod focus;
 mod frame_steps;
 mod focus_emulation;
 mod forms;
+mod html;
 mod layout;
 mod list_resize;
 mod list_sizes;

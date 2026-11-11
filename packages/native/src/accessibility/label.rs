@@ -4,7 +4,7 @@ use gpui::prelude::*;
 
 use crate::element_tree::EventPayload;
 use crate::events::path::event_path;
-use crate::retained_tree::RetainedTree;
+use crate::retained_tree::{RetainedElement, RetainedTree};
 
 /// Give the label node its text, which is what names the control it points at.
 pub(crate) fn describe<E>(mut el: E, label_id: u64) -> E
@@ -18,24 +18,24 @@ where
     el
 }
 
-/// Interactive content that exists as a gpuix element type. A click on one
-/// inside a label belongs to it, not to the label.
-fn is_interactive_content(element_type: &str) -> bool {
-    matches!(element_type, "input" | "textarea" | "select" | "button")
+/// Interactive content that exists as a gpuix element: a click on one inside a label belongs to
+/// it, not to the label. An `<a>` is only interactive with an `href`, as in Blink's
+/// `IsInInteractiveContent`.
+fn is_interactive_content(element: &RetainedElement) -> bool {
+    matches!(element.element_type.as_str(), "input" | "textarea" | "select") || crate::html::is_activatable(element)
 }
 
-/// The control a `click` activates, if it does. The nearest `<label>` on the
-/// click's path is the activation target, as in the DOM, and it does nothing
-/// when the click landed on interactive content inside it, on its control, or
-/// inside its control, or when the control is disabled or inert. `path` starts
-/// at the click's target.
+/// The control a `click` activates, if it does. The label is the activation target when it is the
+/// first element on the click's path with an activation behaviour (a link or a button inside it
+/// takes the click for itself), and it does nothing when the click landed on interactive content
+/// inside it, on its control, or inside its control, or when the control is disabled or inert.
+/// `path` starts at the click's target.
 pub(crate) fn activated_control(tree: &RetainedTree, path: &[u64]) -> Option<u64> {
-    let label_index = path.iter().position(|id| {
-        tree.elements
-            .get(id)
-            .is_some_and(|element| element.element_type == "label")
-    })?;
-    let label = path[label_index];
+    let label = crate::html::activation_target(tree, path)?;
+    if tree.elements.get(&label)?.element_type != "label" {
+        return None;
+    }
+    let label_index = path.iter().position(|id| *id == label)?;
     if tree.is_inert(label) {
         return None;
     }
@@ -43,7 +43,7 @@ pub(crate) fn activated_control(tree: &RetainedTree, path: &[u64]) -> Option<u64
     if inside_label.iter().any(|id| {
         tree.elements
             .get(id)
-            .is_some_and(|element| is_interactive_content(&element.element_type))
+            .is_some_and(is_interactive_content)
     }) {
         return None;
     }
@@ -138,6 +138,34 @@ mod tests {
         crate::batch::test_json::apply(&mut tree, r#"[["setCustomProp",3,"inert",true]]"#)
             .unwrap();
         assert_eq!(activated_control(&tree, &[2, 1]), None);
+    }
+
+    #[test]
+    fn a_label_activates_its_button_unless_it_is_disabled() {
+        let batch = r#"[["createElement",1,"div"],["setRoot",1],
+            ["createElement",2,"label"],["appendChild",1,2],["setCustomProp",2,"htmlFor","go"],
+            ["createElement",3,"button"],["appendChild",1,3],["setCustomProp",3,"id","go"],
+            ["createElement",4,"label"],["appendChild",1,4],
+            ["createElement",5,"button"],["appendChild",4,5]]"#;
+        let mut tree = tree_with(batch);
+        assert_eq!(activated_control(&tree, &[2, 1]), Some(3));
+        assert_eq!(activated_control(&tree, &[4, 1]), Some(5));
+        assert_eq!(activated_control(&tree, &[5, 4, 1]), None, "a click on the button is its own");
+        crate::batch::test_json::apply(&mut tree, r#"[["setCustomProp",3,"disabled",true],["setCustomProp",5,"disabled",true]]"#).unwrap();
+        assert_eq!(activated_control(&tree, &[2, 1]), None);
+        assert_eq!(activated_control(&tree, &[4, 1]), None);
+    }
+
+    #[test]
+    fn a_click_on_a_link_with_an_href_inside_the_label_does_not_activate_the_control() {
+        let tree = tree_with(
+            r#"[["createElement",1,"label"],["setRoot",1],
+                ["createElement",2,"input"],["appendChild",1,2],
+                ["createElement",3,"a"],["appendChild",1,3],["setCustomProp",3,"href","/help"],
+                ["createElement",4,"a"],["appendChild",1,4]]"#,
+        );
+        assert_eq!(activated_control(&tree, &[3, 1]), None);
+        assert_eq!(activated_control(&tree, &[4, 1]), Some(2), "an a without an href is not interactive");
     }
 
     #[test]

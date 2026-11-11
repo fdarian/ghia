@@ -171,12 +171,12 @@ export function withoutIgnoredSpanStyle<Style>(style: Style): Style {
   return kept as Style
 }
 
-/** Throws for a motion value bound to a property a span cannot show, naming it. */
-export function assertSpanMotionValues(values: Record<string, MotionValue> | undefined): void {
+/** Throws for a motion value bound to a property a span, or an inline tag (`type`), cannot show, naming it. */
+export function assertSpanMotionValues(values: Record<string, MotionValue> | undefined, type = "span"): void {
   for (const key of Object.keys(values ?? {})) {
     if (!(MOTION_SPAN_KEYS as readonly string[]).includes(key)) {
       throw new Error(
-        `A span cannot take a motion value in style.${key}: an inline box can only show ${MOTION_SPAN_KEYS.join(", ")}`
+        `A ${type} cannot take a motion value in style.${key}: an inline box can only show ${MOTION_SPAN_KEYS.join(", ")}`
       )
     }
   }

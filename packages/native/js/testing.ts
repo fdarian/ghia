@@ -427,7 +427,7 @@ interface NativeTestRendererApi
   selectText(elementId: number): void
   setSelectionRange(elementId: number, start: number, end: number, direction?: string): void
   getTextSelection(elementId: number): { start: number; end: number; direction: string }
-  requestSubmit(elementId: number): void
+  requestSubmit(elementId: number, submitterId?: number): void
   webviewCommand(elementId: number, command: string, argument?: string): void
   webviewState(elementId: number): {
     url: string
@@ -1900,9 +1900,9 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getTextSelection(elementId)
   }
 
-  requestSubmit(elementId: number): void {
+  requestSubmit(elementId: number, submitterId?: number): void {
     this.native.flushIfDirty()
-    this.native.requestSubmit(elementId)
+    this.native.requestSubmit(elementId, submitterId)
     this.dispatchNativeEvents()
     this.native.flushIfDirty()
   }

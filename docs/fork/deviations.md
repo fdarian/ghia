@@ -19,7 +19,7 @@ A new deviation goes in the section of its topic, as a bullet with a bold lead p
 - **`beforeinput`, `onInput`, `keypress` and `charCode` do not exist.** Text editing reports through `onChange` only, after the edit, so a handler cannot cancel one edit by type; `keydown`'s `preventDefault` cancels the key's action and its text.
 - **`readOnly` controls** are submitted but not validated, and `select()` does not move focus. Password inputs get the password role and expose no value; number inputs get the spin-button role.
 - **`:has()` is the six relational states, not a selector.** The states are `hasHover`, `hasActive`, `hasFocus`, `hasFocusVisible`, `hasDisabled` and `hasEnabled`. There is no `:has(.error)` and no `:has(> x)`, because the relational states are not a selector engine (a [stylesheet](stylesheets.md) has selectors, but not `:has()`). There is no `hasChecked` (nor `checked`): no element can be checked, since every `<input type>` is text-like and there is no checkbox, radio or `<option>`, so the state has no source until a checkbox control exists.
-- **`:disabled` / `:enabled` cover form controls only.** There is no `<fieldset disabled>` or disabled `<form>` (neither exists), `:enabled`/`:disabled` for an `<option>` or `<optgroup>` do not exist, and `:checked`/`hasChecked`/`:indeterminate` are not available (no checkable element; they need a native checkbox control).
+- **`:disabled` / `:enabled` cover form controls only.** A `<fieldset disabled>` does not disable its controls ([HTML tags](#html-tags)), `:enabled`/`:disabled` for an `<option>` or `<optgroup>` do not exist, and `:checked`/`hasChecked`/`:indeterminate` are not available (no checkable element; they need a native checkbox control).
 
 ## Layout
 
@@ -41,6 +41,40 @@ A new deviation goes in the section of its topic, as a bullet with a bold lead p
 - **Relayout boundaries and floats.** Floats are left out of the boundary fuzz: a block laid out from its cache does not hand the floats that escape it to the block formatting context around it, boundary or not.
 - **Scroll container baselines.** A scroll block in a block that is itself in a flex, grid or table container inside an `inline-block` is also taken as the last baseline (Blink forces it only through blocks all the way up), and a flex or grid container that scrolls inside an `inline-block` does not keep the baseline of its text in its box (the text is read off directly).
 - **Fractional bounds (#45).** Bounds are fractional like Chrome's, with a few differences: the fraction of a scroll offset is dropped and a box that does not scroll reports its padding box for both `clientWidth` and `scrollWidth` (the two entries above), and the cases of a percentage, a flex share or a text that are still a 64th off are the 1/64 entries of this section.
+
+## HTML tags
+
+An HTML tag ([docs/reference.md](../reference.md#html-tags)) is the user agent style of Chrome's `html.css` for that one tag, plus an implicit role, tab stop and activation (`packages/native/src/html/`; [layout.md](layout.md#html-tags)). Anything Chrome's stylesheet says with a selector, and anything that needs an element's attributes or place, is not there, until a user agent stylesheet replaces the table.
+
+**Styles Chrome has by selector**
+
+- **`a` has no link styling.** No blue, no underline: Chrome's rule is `a:any-link`, which needs the `href` attribute, and a tag's style cannot read one. Style the link yourself.
+- **Nested lists.** `ul ul`, `ol ul` and the like keep the margins of the outer list: Chrome zeroes the block margins of a nested list with a descendant selector. Set `margin` on the nested list.
+- **A nested `h1` is not smaller** inside `article`, `aside`, `nav` or `section`, which Chrome does with a descendant selector.
+- **`dialog` is `display: none` without `open`**, always: `open` is not forwarded, so a tag style cannot say `dialog[open]`. Set `display` yourself to show one.
+- **`details` has no open state** and `summary` no marker, and `abbr[title]` has no dotted underline (an attribute selector).
+- **`td` and `th` are vertically centred** even outside a `tbody`, `thead` or `tfoot`: Chrome inherits the alignment from the row group, and the tag style has no parent to ask. A `th` is bold and centred.
+- **`pre`, `kbd` and `samp` use `Menlo` at the inherited size,** not the generic `monospace` at 13px.
+
+**What is not drawn**
+
+- **No `li` markers** (bullets, numbers), no `q` quotes, and a `legend` does not sit on the `fieldset` border.
+- **`<button>` paints Chrome's non-native look:** a `2px` outset border, `#efefef` background. Chrome on macOS themes a button with the system's look; the tag draws no themed control.
+- **A `<button>` with a set height does not centre its content vertically,** where Chrome does. And `<button style={{ display: 'block' }}>` stretches to the container's width, where Chrome keeps a block button fit-content.
+
+**What is not there**
+
+- **`<a href>` does not navigate.** Enter and a click fire `click` and stop.
+- **An inline `<a>` has no accessibility node,** and no other inline box has one: only an `a` with `display: block` or `inline-block` is a `link`.
+- **The tab stop of an inline `<a>` follows paint order.** It comes after the `inline-block` elements (a `button`) beside it in the paragraph, not in the order of the tree.
+- **`th scope` is not forwarded,** so a `th` is always a `columnheader`, never a row header.
+- **`<fieldset disabled>` does not disable its controls,** and a `<fieldset>` is not a form control for `:disabled`.
+- **A button does not reset, and only `<button>` submits.** `<button type="reset">` does nothing, because Ghia does not reset controls. `<input type="submit">` does not exist (every `<input type>` is text-like), so only a `<button>` is a submitter. A `<button>` is not submitted as a `name` and `value` in `formData`.
+- **`type` is the host type, not the DOM `type` property.** `event.submitter.type`, and the `type` field of any element, is the element's host type: `"button"` for a submit button, where Chrome says `"submit"`.
+- **`aside` is always `complementary`.** Per HTML-AAM an `<aside>` scoped to `body` or `main` is `complementary`, and one inside `article`, `aside`, `nav` or `section` is `complementary` only with an accessible name, and otherwise `generic`. Ghia gives it `complementary` everywhere, so an unnamed `<aside>` in sectioning content is a landmark where Chrome has none. Unlike `header` and `footer`, it does not change with its place.
+- **A typed U+200B (zero width space) is dropped from copied text and ignored by find-in-page.** The break opportunity `<wbr>` inserts is the same character, so the two cannot be told apart; Chrome keeps a typed one.
+- **A `<button>`'s `display: inline` becomes `inline-block` only from the element's own style.** Chrome computes a button's `inline` to `inline-block` however it was set; here a `display: inline` that arrives from an `@container` rule or a state style (`hover` and the like) stays `inline`.
+- **`code` is Ghia's syntax element, not HTML `<code>`,** and `select` is Ghia's own, not an HTML select with `<option>`s: neither is in the tag table (see the [native text components](../reference.md#native-text-components) and [Headless controls](../reference.md#headless-controls)).
 
 ## Text
 

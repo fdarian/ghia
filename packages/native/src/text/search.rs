@@ -228,11 +228,15 @@ impl std::fmt::Debug for Needle {
 ///
 /// Lowercasing alone is not enough: Unicode case conversion changes byte length
 /// (`İ` is 2 bytes and folds to 3), so a match offset in folded space does not
-/// index the original. The map converts it back exactly.
+/// index the original. The map converts it back exactly. The break opportunities of
+/// `<wbr>` are left out, see [`without_break_opportunities`].
 fn fold(text: &str) -> (String, Vec<u32>) {
     let mut folded = String::with_capacity(text.len());
     let mut map: Vec<u32> = Vec::with_capacity(text.len() + 1);
     for (ix, ch) in text.char_indices() {
+        if ch == crate::html::BREAK_OPPORTUNITY {
+            continue;
+        }
         for lower in ch.to_lowercase() {
             let len = lower.len_utf8();
             folded.push(lower);
@@ -243,6 +247,35 @@ fn fold(text: &str) -> (String, Vec<u32>) {
     }
     map.push(text.len() as u32);
     (folded, map)
+}
+
+/// `text` without the zero width spaces `<wbr>` puts in a paragraph, and the byte of `text` each byte of the
+/// result came from: find-in-page does not see a break opportunity, so a query matches across one. `None`
+/// when `text` has none, which is the case of nearly every group.
+fn without_break_opportunities(text: &str) -> Option<(String, Vec<u32>)> {
+    if !text.contains(crate::html::BREAK_OPPORTUNITY) {
+        return None;
+    }
+    let mut kept = String::with_capacity(text.len());
+    let mut map: Vec<u32> = Vec::with_capacity(text.len() + 1);
+    for (ix, ch) in text.char_indices() {
+        if ch == crate::html::BREAK_OPPORTUNITY {
+            continue;
+        }
+        kept.push(ch);
+        map.extend(std::iter::repeat_n(ix as u32, ch.len_utf8()));
+    }
+    map.push(text.len() as u32);
+    Some((kept, map))
+}
+
+/// The range of `text` that the match `hit` of a text read through `map` stands for. A break opportunity
+/// just after the match is not part of it, though the map of its end points past it.
+fn original_range(text: &str, map: &[u32], hit: Range<usize>) -> Option<Range<usize>> {
+    let (&start, &end) = (map.get(hit.start)?, map.get(hit.end)?);
+    let end = text[..end as usize].trim_end_matches(crate::html::BREAK_OPPORTUNITY).len();
+    let range = start as usize..end;
+    (!range.is_empty()).then_some(range)
 }
 
 // ── Offsets ──────────────────────────────────────────────────────────
@@ -285,8 +318,9 @@ fn is_word_char(ch: char) -> bool {
 }
 
 fn is_whole_word(text: &str, range: &Range<usize>) -> bool {
-    let before = text[..range.start].chars().next_back();
-    let after = text[range.end..].chars().next();
+    let is_text = |c: &char| *c != crate::html::BREAK_OPPORTUNITY;
+    let before = text[..range.start].chars().rev().find(is_text);
+    let after = text[range.end..].chars().find(is_text);
     !before.is_some_and(is_word_char) && !after.is_some_and(is_word_char)
 }
 
@@ -624,21 +658,23 @@ fn matches_in(
     }
     let mut out = Vec::new();
     if spec.case_sensitive {
-        for range in spec.needle.find(text) {
-            if !spec.whole_word || is_whole_word(text, &range) {
+        let stripped = without_break_opportunities(text);
+        let haystack = stripped.as_ref().map_or(text, |(kept, _)| kept.as_str());
+        for hit in spec.needle.find(haystack) {
+            let range = match &stripped {
+                Some((_, map)) => original_range(text, map, hit),
+                None => Some(hit),
+            };
+            if let Some(range) = range.filter(|range| !spec.whole_word || is_whole_word(text, range)) {
                 out.push(range);
             }
         }
         return out;
     }
     for hit in spec.needle.find(folded) {
-        let (Some(&start), Some(&end)) = (fold_map.get(hit.start), fold_map.get(hit.end)) else {
+        let Some(range) = original_range(text, fold_map, hit) else {
             continue;
         };
-        let range = start as usize..end as usize;
-        if range.start >= range.end {
-            continue;
-        }
         if !spec.whole_word || is_whole_word(text, &range) {
             out.push(range);
         }
@@ -1088,6 +1124,33 @@ mod tests {
     fn find(text: &str, spec: &HighlightSpec) -> Vec<Range<usize>> {
         let (folded, map) = fold(text);
         matches_in(text, &folded, &map, spec)
+    }
+
+    #[test]
+    fn a_match_crosses_the_break_opportunity_of_a_wbr() {
+        let text = "a foo\u{200B}bar b";
+        for case_sensitive in [false, true] {
+            let mut spec = spec("foobar");
+            spec.case_sensitive = case_sensitive;
+            spec.needle = Needle::new("foobar", case_sensitive);
+            assert_eq!(find(text, &spec), vec![2..11], "case sensitive: {case_sensitive}");
+            assert_eq!(&text[2..11], "foo\u{200B}bar");
+            // The break opportunity is no part of what a match ends or starts at.
+            spec.query = "foo".to_string();
+            spec.needle = Needle::new("foo", case_sensitive);
+            assert_eq!(find(text, &spec), vec![2..5], "case sensitive: {case_sensitive}");
+            spec.query = "bar".to_string();
+            spec.needle = Needle::new("bar", case_sensitive);
+            assert_eq!(find(text, &spec), vec![8..11], "case sensitive: {case_sensitive}");
+            // And it is no letter or space either: `foo` is not a whole word of `foo<wbr>bar`.
+            spec.whole_word = true;
+            spec.query = "foo".to_string();
+            spec.needle = Needle::new("foo", case_sensitive);
+            assert!(find(text, &spec).is_empty(), "case sensitive: {case_sensitive}");
+            spec.query = "foobar".to_string();
+            spec.needle = Needle::new("foobar", case_sensitive);
+            assert_eq!(find(text, &spec), vec![2..11]);
+        }
     }
 
     fn context(groups: &GroupList, set: HighlightSet) -> HighlightContext {

@@ -89,12 +89,15 @@ function attachTypeMembers(instance: Instance, container: Container): void {
     attachTextControlMethods(instance as TextControlInstance, container)
   } else if (instance.type === "form") {
     const form = instance as FormInstance
-    form.requestSubmit = () =>
-      requestFormSubmit({
-        id: form.nativeId,
-        nativeRenderer: container.nativeRenderer,
-        flushMutations: () => container.renderer.flushMutations(),
-      })
+    form.requestSubmit = (submitter) =>
+      requestFormSubmit(
+        {
+          id: form.nativeId,
+          nativeRenderer: container.nativeRenderer,
+          flushMutations: () => container.renderer.flushMutations(),
+        },
+        submitter,
+      )
   } else if (instance.type === "webview") {
     Object.assign(
       instance as WebviewInstance,
@@ -151,7 +154,7 @@ function nextId(container: Container): number {
   return ++container.ids.nextElementId
 }
 
-/** SVG shapes exist only inside an `<svg>`; text and other elements go anywhere. */
+/** SVG shapes, `<text>` among them, exist only inside an `<svg>`; every other element goes anywhere. */
 function assertPlacement(parent: Instance | undefined, child: Instance | TextInstance): void {
   if ("type" in child) assertSvgPlacement(parent?.type, child.type)
 }

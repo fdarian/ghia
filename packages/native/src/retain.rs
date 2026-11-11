@@ -744,7 +744,7 @@ pub(crate) fn costly(tree: &crate::retained_tree::RetainedTree, element: &crate:
         || !crate::text::inline::is_host_type(&element.element_type)
         || element.children.iter().filter_map(|id| tree.elements.get(id)).any(|child| {
             // Solid keeps an empty `#text` where an expression has no value yet: it lays out nothing.
-            child.element_type == "span"
+            crate::text::inline::is_inline_wrapper(child)
                 || (crate::text::inline::is_raw_text(child) && child.content.as_deref().is_some_and(|text| !text.trim().is_empty()))
         })
 }
