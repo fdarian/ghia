@@ -9,7 +9,25 @@ export function attributeNameOf(prop: string, svg: boolean): string {
   if (prop === "className") return "class"
   if (svg) return prop
   if (prop === "htmlFor") return "for"
+  // The `checked` and `value` attributes of an `<input>` are its defaults: the properties are `checked` and `value`.
+  if (prop === "defaultChecked") return "checked"
+  if (prop === "defaultValue") return "value"
   return lowerCased(prop)
+}
+
+/** The input types whose `value` attribute is the value itself (the HTML spec's "default" and "default/on" value modes). */
+const VALUE_IS_ATTRIBUTE = new Set(["checkbox", "radio", "hidden", "submit", "button", "reset", "image"])
+
+/**
+ * The prop that holds an `<input>`'s `checked` or `value` attribute, where it is not the prop of that
+ * name: the attribute is `defaultChecked`, and for the types with the "value" value mode (text,
+ * range, number, ...) `defaultValue`, which is the value only while the control is clean. The `value`
+ * of a checkbox, radio or hidden input is its attribute, so it has none.
+ */
+export function inputDefaultProp(attribute: string, inputType: unknown): "defaultChecked" | "defaultValue" | undefined {
+  if (attribute === "checked") return "defaultChecked"
+  if (attribute !== "value") return undefined
+  return VALUE_IS_ATTRIBUTE.has(String(inputType).toLowerCase()) ? undefined : "defaultValue"
 }
 
 /** `toLowerCase` that allocates only for a name with a capital: an adapter asks for every prop of every element. */

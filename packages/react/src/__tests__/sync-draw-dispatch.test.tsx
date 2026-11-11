@@ -164,7 +164,9 @@ describeNative("layout reads inside an input handler", () => {
       expect(rects[0]).toMatchObject({ height: 30 })
       expect(renderer.getFocusedElementId()).toBe(field.id)
       renderer.simulateKeystrokes("a")
-      expect(renderer.getTextSelection(field.id)).toMatchObject({ start: 1, end: 1 })
+      // `defaultValue` is the text, and the click at the right end puts the caret after it.
+      expect(renderer.getTextValue(field.id)).toBe("helloa")
+      expect(renderer.getTextSelection(field.id)).toMatchObject({ start: 6, end: 6 })
     } finally {
       unmount()
     }

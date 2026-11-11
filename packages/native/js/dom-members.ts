@@ -14,6 +14,7 @@ import {
   attributeLookupName,
   attributeNameOf,
   attributeText,
+  inputDefaultProp,
   isStoredAttribute,
   propWrittenBy,
   storeAttribute,
@@ -150,6 +151,11 @@ function propKeyForAttribute(bound: DomElementBinding, attribute: string, svg: b
 /** The DOM rejects an empty name and one with a space, a slash, `>`, `=` or NUL. */
 const INVALID_NAME = /[\s\0/>=]|^$/
 
+/** The prop of `<input>` that stands for the `checked` or `value` attribute, when it is not the prop of that name. */
+function defaultPropOf(element: Element, bound: DomElementBinding, attribute: string): "defaultChecked" | "defaultValue" | undefined {
+  return element.localName === "input" ? inputDefaultProp(attribute, bound.prop("type")) : undefined
+}
+
 function writeAttribute(element: Element, bound: DomElementBinding, name: string, text: string | null): void {
   const svg = element instanceof SVGElement
   const requested = String(name)
@@ -161,7 +167,13 @@ function writeAttribute(element: Element, bound: DomElementBinding, name: string
     writeStyleAttribute(styleDeclarationOf(element, () => bound), text)
     return
   }
-  if (isStoredAttribute(attribute)) {
+  const defaultProp = defaultPropOf(element, bound, attribute)
+  if (defaultProp !== undefined) {
+    const value = text === null ? undefined : defaultProp === "defaultChecked" ? true : text
+    bound.writeProp(defaultProp, value)
+    return
+  }
+  if (isStoredAttribute(attribute) || (attribute === "value" && element.localName === "textarea")) {
     const before = element.getAttribute(attribute)
     storeAttribute(element, attribute, text)
     if (hasMutationObservers() && element.getAttribute(attribute) !== before) {
@@ -201,7 +213,10 @@ export function defineDomMembers<This extends object>(
         }
         const stored = storedAttribute(this, attributeLookupName(name, svg))
         if (stored !== undefined) return stored
-        return attributeText(name, propForAttribute(bind(this), name, svg))
+        const bound = bind(this)
+        const defaultProp = defaultPropOf(this as unknown as Element, bound, attributeLookupName(name, svg))
+        const written = defaultProp === undefined ? undefined : bound.prop(defaultProp)
+        return attributeText(name, written ?? propForAttribute(bound, name, svg))
       },
     },
     setAttribute: {

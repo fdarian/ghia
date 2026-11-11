@@ -2000,7 +2000,10 @@ export interface InputProps extends TextControlProps {
   checked?: boolean
   /** `type="checkbox"` and `"radio"`: the checkedness until a user or a `checked` write sets it. */
   defaultChecked?: boolean
-  /** `type="range"`: the value a range has until `value` is written (and again if `value` is removed). */
+  /**
+   * The `value` attribute: the text of a text control until `value` is given or the user edits it, and a range's value
+   * until `value` is written (and again if `value` is removed).
+   */
   defaultValue?: string | number
   /** `type="number"` and `"range"`. A number or numeric string. Defaults to 0 for a range. */
   min?: number | string

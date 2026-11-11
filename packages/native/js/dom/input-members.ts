@@ -176,7 +176,7 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
         if (!hasValue(this)) return undefined
         const binding = bind(this)
         const layout = binding.layout
-        if (layout === undefined) return propText(binding.prop("value"))
+        if (layout === undefined) return propText(binding.prop("value") ?? binding.prop("defaultValue"))
         if (Reflect.get(this, "localName") === "input") {
           const state = readInputChoice(layout)
           if (state.kind !== "text") return state.value

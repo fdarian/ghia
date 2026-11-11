@@ -209,7 +209,9 @@ impl RetainedTree {
     /// prop's value changed: it is the property assignment React DOM makes, and the one `input.checked =`
     /// makes. Called before the prop is stored.
     pub(crate) fn input_prop_written(&mut self, id: u64, key: &str, value: &Value) {
-        let Some(flag) = value.as_bool() else {
+        // Removing `defaultChecked` is removing the `checked` attribute: a clean control is unchecked.
+        let removed_default = key == "defaultChecked" && value.is_null();
+        let Some(flag) = value.as_bool().or(removed_default.then_some(false)) else {
             return;
         };
         match key {
@@ -599,6 +601,7 @@ impl CustomElement for InputElement {
         &[
             "type",
             "value",
+            "defaultValue",
             "placeholder",
             "readOnly",
             "disabled",
@@ -736,6 +739,19 @@ mod tests {
         assert!(!tree.is_checked(5));
         tree.input_prop_written(5, "checked", &Value::Bool(true));
         tree.input_prop_written(5, "defaultChecked", &Value::Bool(false));
+        assert!(tree.is_checked(5), "a write to checked made it dirty");
+    }
+
+    #[test]
+    fn removing_the_default_unchecks_a_clean_control_and_not_a_dirty_one() {
+        let mut tree = tree(GROUPS);
+        tree.input_prop_written(5, "defaultChecked", &Value::Bool(true));
+        assert!(tree.is_checked(5));
+        tree.input_prop_written(5, "defaultChecked", &Value::Null);
+        assert!(!tree.is_checked(5));
+        tree.input_prop_written(5, "defaultChecked", &Value::Bool(true));
+        tree.input_prop_written(5, "checked", &Value::Bool(true));
+        tree.input_prop_written(5, "defaultChecked", &Value::Null);
         assert!(tree.is_checked(5), "a write to checked made it dirty");
     }
 

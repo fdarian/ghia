@@ -320,7 +320,14 @@ impl CustomElementFactory for TextareaFactory {
 
 pub(super) struct TextEditorElement {
     multiline: bool,
+    /// The text the props ask for: the `value` prop, else `default_value` while the control is clean.
     value: String,
+    /// The `defaultValue` prop, which the `value` attribute is: the text until a `value` is given
+    /// or the user edits the control (the DOM's dirty value flag).
+    default_value: String,
+    value_given: bool,
+    /// Set by the editor at the first edit a user makes, and so shared with it.
+    edited: Rc<Cell<bool>>,
     placeholder: String,
     read_only: bool,
     disabled: bool,
@@ -350,6 +357,9 @@ impl TextEditorElement {
         Self {
             multiline,
             value: String::new(),
+            default_value: String::new(),
+            value_given: false,
+            edited: Rc::new(Cell::new(false)),
             placeholder: String::new(),
             read_only: false,
             disabled: false,
@@ -389,6 +399,13 @@ impl TextEditorElement {
 
     /// Push a changed `value` prop into the editor now, rather than at the next
     /// frame, so an imperative call right after a controlled update sees it.
+    /// What the DOM's value is for a control whose `value` was never set or edited: its default.
+    fn settle_default_value(&mut self) {
+        if !self.value_given && !self.edited.get() {
+            self.value = self.default_value.clone();
+        }
+    }
+
     fn apply_value(&mut self, cx: &mut App) {
         let Some(state) = self.state.clone() else {
             return;
@@ -475,6 +492,7 @@ impl CustomElement for TextEditorElement {
                 let state_focus_handle = focus_handle.clone();
                 let paint_epoch = self.paint_epoch.clone();
                 let caret_due = self.caret_due.clone();
+                let edited = self.edited.clone();
                 cx.new(move |cx| TextEditorState {
                     entity_id: cx.entity_id(),
                     element_id: id,
@@ -516,6 +534,7 @@ impl CustomElement for TextEditorElement {
                     caret_color,
                     paint_epoch,
                     caret_due,
+                    edited,
                     blink_anchor: cx.background_executor().now(),
                     caret_was_shown: false,
                     blink_armed: false,
@@ -645,7 +664,15 @@ impl CustomElement for TextEditorElement {
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
         match key {
-            "value" => self.value = value.as_str().unwrap_or_default().to_string(),
+            "value" => {
+                self.value_given = !value.is_null();
+                self.value = value.as_str().unwrap_or_default().to_string();
+                self.settle_default_value();
+            }
+            "defaultValue" => {
+                self.default_value = value.as_str().unwrap_or_default().to_string();
+                self.settle_default_value();
+            }
             "placeholder" => self.placeholder = value.as_str().unwrap_or_default().to_string(),
             "readOnly" => self.read_only = value.as_bool().unwrap_or(false),
             "disabled" => self.disabled = value.as_bool().unwrap_or(false),
@@ -671,6 +698,7 @@ impl CustomElement for TextEditorElement {
     fn supported_props(&self) -> &'static [&'static str] {
         &[
             "value",
+            "defaultValue",
             "placeholder",
             "readOnly",
             "disabled",
@@ -958,6 +986,8 @@ struct TextEditorState {
     paint_epoch: Rc<Cell<u64>>,
     /// The caret changed phase after it was painted last: only a paint of the editor clears it.
     caret_due: Rc<Cell<bool>>,
+    /// A user edited the text: see `TextEditorElement::edited`.
+    edited: Rc<Cell<bool>>,
     blink_anchor: Instant,
     /// Whether the last render found the caret shown, to start its phase over when focus comes.
     caret_was_shown: bool,
@@ -1184,6 +1214,7 @@ impl TextEditorState {
 
     /// The DOM `input` event of one edit, which bubbles and cannot be canceled.
     fn emit_input(&mut self, kind: InputKind, inserted: &str, is_composing: bool) {
+        self.edited.set(true);
         self.routing.text_commits().edited(self.element_id, &self.content);
         let tree = self.tree.lock().unwrap();
         if !crate::events::path::path_listens(&tree, self.element_id, "input") {
@@ -2573,6 +2604,26 @@ impl gpui::IntoElement for EditorTextElement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_default_value_is_the_text_until_a_value_is_given_or_the_user_edits() {
+        let mut clean = TextEditorElement::new(false);
+        clean.set_prop("defaultValue", serde_json::json!("a"));
+        assert_eq!(clean.value, "a");
+        clean.set_prop("defaultValue", serde_json::json!("b"));
+        assert_eq!(clean.value, "b");
+        clean.set_prop("value", serde_json::json!("v"));
+        clean.set_prop("defaultValue", serde_json::json!("c"));
+        assert_eq!(clean.value, "v", "a value is given, so the default no longer decides");
+        clean.set_prop("value", serde_json::Value::Null);
+        assert_eq!(clean.value, "c", "without a value the default is the text again");
+
+        let mut dirty = TextEditorElement::new(false);
+        dirty.set_prop("defaultValue", serde_json::json!("a"));
+        dirty.edited.set(true);
+        dirty.set_prop("defaultValue", serde_json::json!("b"));
+        assert_eq!(dirty.value, "a", "an edited control keeps its text");
+    }
 
     fn has_binding(bindings: &[KeyBinding], keystroke: &str, action: &dyn gpui::Action) -> bool {
         let keystroke = gpui::Keystroke::parse(keystroke).unwrap();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isStoredAttribute, propWrittenBy } from "../dom/attribute-names.js"
+import { attributeNameOf, inputDefaultProp, isStoredAttribute, propWrittenBy } from "../dom/attribute-names.js"
 
 describe("propWrittenBy", () => {
   it("names the prop and converts the text as the browser's reflection does", () => {
@@ -23,5 +23,24 @@ describe("propWrittenBy", () => {
   it("stores on* and the non-attribute props without a prop", () => {
     for (const name of ["onclick", "children", "key", "ref"]) expect(isStoredAttribute(name)).toBe(true)
     expect(isStoredAttribute("tabindex")).toBe(false)
+  })
+})
+
+describe("the checked and value attributes of an input", () => {
+  it("are defaults, except where the attribute is the value itself", () => {
+    expect(inputDefaultProp("checked", "checkbox")).toBe("defaultChecked")
+    expect(inputDefaultProp("value", undefined)).toBe("defaultValue")
+    expect(inputDefaultProp("value", "text")).toBe("defaultValue")
+    expect(inputDefaultProp("value", "range")).toBe("defaultValue")
+    for (const type of ["checkbox", "RADIO", "hidden", "submit", "button", "reset", "image"]) {
+      expect(inputDefaultProp("value", type)).toBeUndefined()
+    }
+    expect(inputDefaultProp("name", "text")).toBeUndefined()
+  })
+
+  it("are named by the default props", () => {
+    expect(attributeNameOf("defaultChecked", false)).toBe("checked")
+    expect(attributeNameOf("defaultValue", false)).toBe("value")
+    expect(attributeNameOf("defaultValue", true)).toBe("defaultValue")
   })
 })

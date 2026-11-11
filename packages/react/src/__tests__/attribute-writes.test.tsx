@@ -322,4 +322,81 @@ describeNative("attribute writes on a React host instance", () => {
       expect(getComputedStyle(target).opacity).toBe("0.25")
     })
   })
+
+  it("makes the `checked` attribute of an input its default: a clean control follows it, a dirty one does not", () => {
+    const nodes: Record<string, any> = {}
+    const ref = (name: string) => (instance: unknown) => {
+      if (instance) nodes[name] = instance
+    }
+    setup(
+      <div>
+        <input ref={ref("clean")} type="checkbox" style={box} />
+        <input ref={ref("written")} type="checkbox" style={box} />
+        <input ref={ref("clicked")} type="checkbox" style={box} />
+      </div>
+    )
+    const { clean, written, clicked } = nodes
+    clean.setAttribute("checked", "")
+    expect([clean.checked, clean.defaultChecked, clean.getAttribute("checked")]).toEqual([true, true, ""])
+    expect(clean.getAttributeNames()).toContain("checked")
+    clean.removeAttribute("checked")
+    expect([clean.checked, clean.defaultChecked, clean.getAttribute("checked")]).toEqual([false, false, null])
+
+    written.checked = false
+    written.setAttribute("checked", "")
+    expect([written.checked, written.defaultChecked, written.getAttribute("checked")]).toEqual([false, true, ""])
+
+    clicked.click()
+    expect(clicked.checked).toBe(true)
+    clicked.removeAttribute("checked")
+    expect([clicked.checked, clicked.getAttribute("checked")]).toEqual([true, null])
+    clicked.setAttribute("checked", "")
+    clicked.click()
+    expect(clicked.checked).toBe(false)
+  })
+
+  it("makes the `value` attribute of a text input and a range its default value, and a checkbox's its value", () => {
+    const nodes: Record<string, any> = {}
+    const ref = (name: string) => (instance: unknown) => {
+      if (instance) nodes[name] = instance
+    }
+    const { renderer, idOf } = setup(
+      <div>
+        <input ref={ref("text")} testId="text" type="text" style={{ width: 100, height: 20 }} />
+        <input ref={ref("written")} type="text" style={{ width: 100, height: 20 }} />
+        <input ref={ref("range")} type="range" style={{ width: 100, height: 20 }} />
+        <input ref={ref("checkbox")} type="checkbox" style={box} />
+        <textarea ref={ref("area")} style={{ width: 100, height: 40 }} />
+      </div>
+    )
+    const { text, written, range, checkbox, area } = nodes
+    text.setAttribute("value", "a")
+    expect([text.value, text.getAttribute("value")]).toEqual(["a", "a"])
+    text.setAttribute("value", "b")
+    expect(text.value).toBe("b")
+    renderer.focusElement(idOf("text"))
+    renderer.simulateKeystrokes("x")
+    expect(text.value).toBe("bx")
+    text.setAttribute("value", "c")
+    expect([text.value, text.getAttribute("value")]).toEqual(["bx", "c"])
+
+    written.value = "z"
+    written.setAttribute("value", "c")
+    expect([written.value, written.getAttribute("value")]).toEqual(["z", "c"])
+
+    range.setAttribute("value", "20")
+    expect([range.value, range.getAttribute("value")]).toEqual(["20", "20"])
+    range.value = "30"
+    range.setAttribute("value", "70")
+    expect([range.value, range.getAttribute("value")]).toEqual(["30", "70"])
+
+    // The value of a checkbox is its attribute, whether or not the control is dirty.
+    expect(checkbox.value).toBe("on")
+    checkbox.click()
+    checkbox.setAttribute("value", "yes")
+    expect([checkbox.value, checkbox.getAttribute("value")]).toEqual(["yes", "yes"])
+
+    area.setAttribute("value", "t")
+    expect([area.value, area.getAttribute("value")]).toEqual(["", "t"])
+  })
 })
