@@ -2626,7 +2626,7 @@ impl TestGpuixRenderer {
         if unflushed != Dirty::Clean {
             self.flush_for(unflushed)?;
         }
-        window_call(|window, cx| crate::renderer::read_computed_style(&self.tree, id, pseudo_element, window, cx))?
+        window_call(|window, cx| crate::css::computed_style::read_in_window(&self.tree, id, pseudo_element, window, cx))?
     }
 
     /// The DOM scroll position of a scrollable element, `[scrollLeft, scrollTop]` (zero or

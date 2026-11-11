@@ -3,7 +3,7 @@
 //!
 //! Nothing here is stored per element. The element's style is resolved the way a build of the
 //! frame resolves it (state styles, CSS transitions, `motion`, motion values and CSS animations at
-//! the instant of the read, `renderer::style_at_read`), on top of the inherited values that the
+//! the instant of the read, `style_at_read`), on top of the inherited values that the
 //! build walks down from the root (`Inherited::descend`). Lengths that depend on layout are the
 //! used px of the laid-out box, as Chrome's resolved values are, and an element with no box
 //! reports its computed values.
@@ -16,7 +16,11 @@ use crate::automation::ElementBounds;
 use crate::css::length::{LengthContext, LinearLength};
 use crate::css::syntax::{split_commas, split_whitespace};
 use crate::motion::text::{length as length_text, pixels, six_digits};
-use crate::renderer::{BuildCtx, Inherited};
+use crate::css::custom_properties::CustomProperties;
+use crate::renderer::{BuildCtx, GpuixView, Inherited, SkippedContent, StyleInputs};
+use crate::retained_tree::RetainedTree;
+use napi::{Error, Result};
+use std::sync::Mutex;
 use crate::retained_tree::RetainedElement;
 use crate::style::{DimensionValue, StyleDesc};
 
@@ -56,6 +60,38 @@ pub(crate) fn is_connected(tree: &crate::retained_tree::RetainedTree, id: u64) -
     false
 }
 
+/// `GpuixRenderer::get_computed_style`: lays the window out as a bounds read does, then asks the view
+/// for the values at the instant of the read. Null for an element that is not in the document.
+pub(crate) fn read_in_window(
+    tree: &Mutex<RetainedTree>,
+    id: u64,
+    pseudo_element: bool,
+    window: &mut gpui::Window,
+    cx: &mut gpui::App,
+) -> Result<Option<Vec<String>>> {
+    let parent = {
+        let tree = tree.lock().unwrap();
+        if !is_connected(&tree, id) {
+            return Ok(None);
+        }
+        tree.elements.get(&id).and_then(|element| element.parent)
+    };
+    let boxes = crate::renderer::read_after_layout(
+        tree,
+        id,
+        window,
+        cx,
+        SkippedContent::Force,
+        gpui::Window::draw_if_dirty,
+        |window_id| Boxes::read(window_id, id, parent),
+    )?;
+    let view = window
+        .root::<GpuixView>()
+        .flatten()
+        .ok_or_else(|| Error::from_reason("the window has no view to read a style from"))?;
+    Ok(view.update(cx, |view, _cx| view.computed_style(id, pseudo_element, &boxes, window)))
+}
+
 /// The values of every property of the set for element `id`, or `None` when it is not in the
 /// document. `pseudo` asks for a `::before` or `::after` the element does not have, which Chrome
 /// reports with the values it inherits and the initial value of every other property.
@@ -73,13 +109,12 @@ pub(crate) fn read(
     let element = tree.elements.get(&id)?;
     let chain = crate::layout::content_visibility::ancestors_of(tree, id);
     let parent = enter_ancestors(ctx, &chain);
-    let style = if pseudo { StyleDesc::default() } else { crate::renderer::style_at_read(ctx, window, element) };
-    let own = ctx.inherited.clone().descend(Some(&style), element.has_inert_prop());
-    let vars = crate::css::var_substitution::resolve(&style, &own.custom);
-    let style = vars.as_ref().unwrap_or(&style);
+    let (style, custom) =
+        if pseudo { (StyleDesc::default(), ctx.inherited.custom.clone()) } else { style_at_read(ctx, window, element) };
+    let own = ctx.inherited.clone().descend_with_custom(Some(&style), element.has_inert_prop(), custom);
     let rtl = own.direction.direction.is_rtl();
     let mirrored = rtl.then(|| style.mirrored_inline_pairs()).flatten();
-    let style = mirrored.as_ref().unwrap_or(style);
+    let style = mirrored.as_ref().unwrap_or(&style);
     let view = View {
         element,
         style,
@@ -108,12 +143,68 @@ fn enter_ancestors(ctx: &mut BuildCtx, chain: &[u64]) -> ParentFacts {
             .filter(|_| pointer_states.any())
             .map(|style| crate::events::state_styles::resolve_pointer_states(style, pointer_states));
         let base = stated.as_ref().or(declared);
+        let (substituted, custom) = ctx.substitute_vars(*id, base);
+        let base = substituted.as_ref().or(base);
         let focused = base.map(|style| ctx.focus_styles.folded(*id, style, ctx.focus_handles.contains_key(id)));
         let style = focused.as_deref();
         parent.lays_out_items = crate::layout::display::lays_out_items(style.and_then(|style| style.display.as_deref()));
-        ctx.inherited = ctx.inherited.clone().descend(style, inert);
+        ctx.inherited = ctx.inherited.clone().descend_with_custom(style, inert, custom);
     }
     parent
+}
+
+/// The style `element` is painted with at `ctx.now`, as a build of the frame would resolve it: state
+/// styles, `var()`, CSS transitions, `motion`, motion values and CSS animations, then the focus
+/// variants; with the custom properties it computes to. What the transitions and animations run is
+/// put back as a pass that reads forced content has it (see `animate_style`), so a read advances
+/// nothing. `ctx.inherited` is the element's parent's.
+fn style_at_read(
+    ctx: &mut BuildCtx,
+    window: &gpui::Window,
+    element: &crate::retained_tree::RetainedElement,
+) -> (StyleDesc, CustomProperties) {
+    let id = element.id;
+    let declared = element.style.as_deref();
+    let focused = |ctx: &BuildCtx, style: &StyleDesc| -> StyleDesc {
+        (*ctx.focus_styles.folded(id, style, ctx.focus_handles.contains_key(&id))).clone()
+    };
+    if crate::layout::box_generation::is_display_none(element) {
+        let (substituted, custom) = ctx.substitute_vars(id, declared);
+        let style = substituted.as_ref().or(declared).map(|style| focused(ctx, style)).unwrap_or_default();
+        return (style, custom);
+    }
+    let pointer_states = declared
+        .map(|style| ctx.pointer_states(id, style, element.has_inert_prop()))
+        .unwrap_or_default();
+    let state_style = declared.and_then(|style| {
+        pointer_states
+            .any()
+            .then(|| crate::events::state_styles::resolve_pointer_states(style, pointer_states))
+    });
+    let base_style = state_style.as_ref().or(declared);
+    let (var_style, custom) = ctx.substitute_vars(id, base_style);
+    let base_style = var_style.as_ref().or(base_style);
+    let animations = ctx.css_animations.rewind_point(id);
+    let transitions = ctx.css_transitions.rewind_point(id);
+    let animated = crate::renderer::animate_style_at(
+        ctx,
+        window,
+        element,
+        StyleInputs {
+            declared,
+            shared: element.style.as_ref(),
+            base: base_style,
+            before_transition: element.style_before_transition(),
+            pointer_states,
+            provisional: false,
+            may_hide: false,
+        },
+        false,
+    );
+    ctx.css_animations.rewind(animations, ctx.now);
+    ctx.css_transitions.rewind(transitions);
+    let style = animated.current(base_style).map(|style| focused(ctx, style)).unwrap_or_default();
+    (style, custom)
 }
 
 struct View<'a> {

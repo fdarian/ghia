@@ -714,32 +714,6 @@ pub(crate) fn read_bounds(
     crate::automation::get_bounds(window, id)
 }
 
-/// `GpuixRenderer::get_computed_style`: lays the window out as a bounds read does, then asks the view
-/// for the values at the instant of the read. Null for an element that is not in the document.
-pub(crate) fn read_computed_style(
-    tree: &Mutex<RetainedTree>,
-    id: u64,
-    pseudo_element: bool,
-    window: &mut gpui::Window,
-    cx: &mut gpui::App,
-) -> Result<Option<Vec<String>>> {
-    let parent = {
-        let tree = tree.lock().unwrap();
-        if !crate::css::computed_style::is_connected(&tree, id) {
-            return Ok(None);
-        }
-        tree.elements.get(&id).and_then(|element| element.parent)
-    };
-    let boxes = read_after_layout(tree, id, window, cx, SkippedContent::Force, gpui::Window::draw_if_dirty, |window_id| {
-        crate::css::computed_style::Boxes::read(window_id, id, parent)
-    })?;
-    let view = window
-        .root::<GpuixView>()
-        .flatten()
-        .ok_or_else(|| Error::from_reason("the window has no view to read a style from"))?;
-    Ok(view.update(cx, |view, _cx| view.computed_style(id, pseudo_element, &boxes, window)))
-}
-
 /// Lays out the window as `lay_out` does and reads what it published with `read`, laying out the
 /// content of the skipped ancestors of `id` too when it has any (`skipped` is `Force`): Chrome's forced layout of a
 /// locked subtree (`DisplayLockUtilities::ScopedForcedUpdate`) for a read of geometry. The
@@ -1060,12 +1034,6 @@ enum UiCommand {
         id: u64,
         response: SyncSender<Option<[f64; 6]>>,
     },
-    GetComputedStyle {
-        tree: Arc<Mutex<RetainedTree>>,
-        id: u64,
-        pseudo_element: bool,
-        response: SyncSender<Option<Vec<String>>>,
-    },
     ScrollByKey {
         key: String,
         shift: bool,
@@ -1283,29 +1251,6 @@ async fn run_ui_commands(
                     { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) };
                     response.send(scroll_metrics(window.window_handle().window_id(), id)).ok();
                 })
-            }
-            UiCommand::GetComputedStyle { tree, id, pseudo_element, response } => {
-                let handle = gpui::AnyWindowHandle::from(window);
-                let connected = tree.lock().unwrap();
-                let parent = crate::css::computed_style::is_connected(&connected, id)
-                    .then(|| connected.elements.get(&id).and_then(|element| element.parent));
-                drop(connected);
-                match parent {
-                    None => {
-                        response.send(None).ok();
-                        Ok(())
-                    }
-                    Some(parent) => {
-                        let boxes = handle.update(cx, move |_view, window, cx| {
-                            crate::renderer::settle_pending_layout(window, cx);
-                            window.draw_if_dirty(cx);
-                            crate::css::computed_style::Boxes::read(window.window_handle().window_id(), id, parent)
-                        })?;
-                        window.update(cx, move |view, window, _cx| {
-                            response.send(view.computed_style(id, pseudo_element, &boxes, window)).ok();
-                        })
-                    }
-                }
             }
             UiCommand::ScrollByKey { key, shift, response } => {
                 window.update(cx, move |view, window, cx| {
@@ -4144,23 +4089,11 @@ impl GpuixRenderer {
                 return Ok(None);
             }
             return update_window_without_view(|window, cx| {
-                read_computed_style(&self.tree, id, pseudo_element, window, cx)
+                crate::css::computed_style::read_in_window(&self.tree, id, pseudo_element, window, cx)
             })?;
         }
 
-        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        {
-            let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetComputedStyle { tree: self.tree.clone(), id, pseudo_element, response })?;
-            return recv_ui_response(receiver, "the computed style query");
-        }
-
-        #[cfg(not(any(
-            target_os = "macos",
-            target_os = "windows",
-            target_os = "linux",
-            target_os = "freebsd"
-        )))]
+        #[cfg(not(target_os = "macos"))]
         Err(Error::from_reason("Unsupported operating system"))
     }
 
@@ -7862,8 +7795,8 @@ pub(crate) struct BuildCtx<'a> {
     virtual_lists: &'a mut HashMap<u64, VirtualListEntry>,
     pub motion_states: &'a mut HashMap<u64, crate::motion::MotionState>,
     motion_values: &'a crate::motion::MotionValueStore,
-    css_transitions: &'a mut crate::motion::CssTransitions,
-    css_animations: &'a mut crate::motion::CssAnimations,
+    pub(crate) css_transitions: &'a mut crate::motion::CssTransitions,
+    pub(crate) css_animations: &'a mut crate::motion::CssAnimations,
     contents_styles: &'a mut HashMap<u64, Arc<ContentsFrame>>,
     keyframes: &'a crate::motion::KeyframesRegistry,
     measurements: &'a crate::motion::measure::Measurements,
@@ -7950,6 +7883,24 @@ impl BuildCtx<'_> {
     /// Where the element being built sits in the document, which orders its text in selection and find.
     pub fn doc_path(&self) -> crate::text::selection::DocPath {
         crate::text::selection::DocPath::new(self.doc_hosts.clone(), self.doc_path.as_slice().into())
+    }
+
+    /// What element `id` computes to for its `var()`: the custom properties it computes to (the
+    /// focus variants that apply to it included) and `style` with them substituted, `None` when it
+    /// holds no `var()`. `self.inherited` is the element's parent's.
+    pub(crate) fn substitute_vars(
+        &self,
+        id: u64,
+        style: Option<&StyleDesc>,
+    ) -> (Option<StyleDesc>, crate::css::custom_properties::CustomProperties) {
+        let custom = match style {
+            Some(style) => {
+                self.focus_styles.custom_of(id, style, self.focus_handles.contains_key(&id), &self.inherited.custom)
+            }
+            None => self.inherited.custom.clone(),
+        };
+        let substituted = style.and_then(|style| crate::css::var_substitution::resolve(style, &custom));
+        (substituted, custom)
     }
 
     /// The states of `id` that `style` has a refinement for. Nothing applies in
@@ -8294,7 +8245,7 @@ impl Inherited {
     }
 
     /// The custom properties an element styled by `style` computes to, below this context.
-    fn custom_of(&self, style: Option<&StyleDesc>) -> crate::css::custom_properties::CustomProperties {
+    pub(crate) fn custom_of(&self, style: Option<&StyleDesc>) -> crate::css::custom_properties::CustomProperties {
         match style.and_then(|style| style.custom_properties.as_ref()) {
             Some(declared) => self.custom.descend(declared),
             None => self.custom.clone(),
@@ -8309,7 +8260,7 @@ impl Inherited {
 
     /// [`descend`](Self::descend) for an element whose `custom`, what `custom_of` says of its
     /// style, is known already: its `var()` was substituted from it.
-    fn descend_with_custom(
+    pub(crate) fn descend_with_custom(
         mut self,
         style: Option<&StyleDesc>,
         inert: bool,
@@ -10939,28 +10890,28 @@ fn enter_contents(ctx: &mut BuildCtx) -> Option<Inherited> {
 }
 
 /// What `animate_style` starts from.
-struct StyleInputs<'a> {
+pub(crate) struct StyleInputs<'a> {
     /// The style with the `@container` blocks folded in: what the stages ask whether they apply to.
-    declared: Option<&'a StyleDesc>,
+    pub(crate) declared: Option<&'a StyleDesc>,
     /// `declared` as the style table's own `Arc`, when no `@container` block changed it.
-    shared: Option<&'a Arc<StyleDesc>>,
+    pub(crate) shared: Option<&'a Arc<StyleDesc>>,
     /// `declared` with the state styles (`hover`, `focus`, ...) folded in.
-    base: Option<&'a StyleDesc>,
-    before_transition: Option<&'a StyleDesc>,
-    pointer_states: crate::events::state_styles::PointerStates,
+    pub(crate) base: Option<&'a StyleDesc>,
+    pub(crate) before_transition: Option<&'a StyleDesc>,
+    pub(crate) pointer_states: crate::events::state_styles::PointerStates,
     /// Until every container above has been laid out once, the style is a guess that the next
     /// pass replaces. It must not seed a transition or an animation: the correct style would
     /// then animate in from the guess.
-    provisional: bool,
+    pub(crate) provisional: bool,
     /// Whether a `display: none` that a transition produces ends the build: only an element with
     /// a box has one to end.
-    may_hide: bool,
+    pub(crate) may_hide: bool,
 }
 
 /// An element's style in this frame, after the stages that move with time. Owned, so that the
 /// build of an element and the overlay of a `display: contents` element that is never built read
 /// the one result.
-struct Animated {
+pub(crate) struct Animated {
     /// A `display` transition has hidden the element: no stage after it ran.
     hidden: bool,
     // Boxed: `StyleDesc` is ~13 KB and an `Option` of it is moved whole into this struct even when
@@ -10984,7 +10935,7 @@ impl Animated {
         self.transitioned.as_ref().map(|declared| &*declared.style).or(base)
     }
 
-    fn current<'s>(&'s self, base: Option<&'s StyleDesc>) -> Option<&'s StyleDesc> {
+    pub(crate) fn current<'s>(&'s self, base: Option<&'s StyleDesc>) -> Option<&'s StyleDesc> {
         self.animated
             .as_deref()
             .or(self.bound.as_deref())
@@ -11051,7 +11002,7 @@ fn animate_style(
 /// `steps`: the element is built for a frame, so what it runs counts (it marks the build dynamic, it
 /// is an effect group or has a transform for as long as it runs, and its measurement is kept). An
 /// element built for a read of skipped content or provisionally only has its values.
-fn animate_style_at(
+pub(crate) fn animate_style_at(
     ctx: &mut BuildCtx,
     window: &gpui::Window,
     element: &crate::retained_tree::RetainedElement,
@@ -11243,55 +11194,6 @@ fn animate_style_at(
         measurement,
         dynamic,
     }
-}
-
-/// The style `element` is painted with at `ctx.now`, as a build of the frame would resolve it: state
-/// styles, CSS transitions, `motion`, motion values and CSS animations, then the focus variants. For
-/// `getComputedStyle`, which asks between frames: what the transitions and animations run is put back
-/// as a pass that reads forced content has it (see `animate_style`), so a read advances nothing.
-/// `ctx.inherited` is the element's parent's.
-pub(crate) fn style_at_read(
-    ctx: &mut BuildCtx,
-    window: &gpui::Window,
-    element: &crate::retained_tree::RetainedElement,
-) -> StyleDesc {
-    let id = element.id;
-    let declared = element.style.as_deref();
-    let focused = |ctx: &BuildCtx, style: &StyleDesc| -> StyleDesc {
-        (*ctx.focus_styles.folded(id, style, ctx.focus_handles.contains_key(&id))).clone()
-    };
-    if crate::layout::box_generation::is_display_none(element) {
-        return declared.map(|style| focused(ctx, style)).unwrap_or_default();
-    }
-    let pointer_states = declared
-        .map(|style| ctx.pointer_states(id, style, element.has_inert_prop()))
-        .unwrap_or_default();
-    let state_style = declared.and_then(|style| {
-        pointer_states
-            .any()
-            .then(|| crate::events::state_styles::resolve_pointer_states(style, pointer_states))
-    });
-    let base_style = state_style.as_ref().or(declared);
-    let animations = ctx.css_animations.rewind_point(id);
-    let transitions = ctx.css_transitions.rewind_point(id);
-    let animated = animate_style_at(
-        ctx,
-        window,
-        element,
-        StyleInputs {
-            declared,
-            shared: element.style.as_ref(),
-            base: base_style,
-            before_transition: element.style_before_transition(),
-            pointer_states,
-            provisional: false,
-            may_hide: false,
-        },
-        false,
-    );
-    ctx.css_animations.rewind(animations, ctx.now);
-    ctx.css_transitions.rewind(transitions);
-    animated.current(base_style).map(|style| focused(ctx, style)).unwrap_or_default()
 }
 
 /// Whether an animation or a transition of the `opacity` of `element` is current: a CSS animation or
@@ -11532,11 +11434,7 @@ fn build_element_unpumped(
     // A `var()` reads the custom properties the element computes to, its own included, and those
     // of the focus variants that apply to it. It is substituted before anything reads the style, so inheritance, transitions, animations and
     // motion see what the element declares.
-    let own_custom = match base_style {
-        Some(style) => ctx.focus_styles.custom_of(id, style, ctx.focus_handles.contains_key(&id), &ctx.inherited.custom),
-        None => ctx.inherited.custom.clone(),
-    };
-    let var_style = base_style.and_then(|style| crate::css::var_substitution::resolve(style, &own_custom));
+    let (var_style, own_custom) = ctx.substitute_vars(id, base_style);
     if var_style.is_some() {
         crate::css::custom_properties::reads::note();
     }
