@@ -176,8 +176,7 @@ export class CSSStyleSheet implements SyncedSheet {
         "IndexSizeError"
       )
     }
-    const [removed] = this.rules.splice(position, 1)
-    removed![SHEET_OF] = null
+    for (const removed of this.rules.splice(position, 1)) removed[SHEET_OF] = null
     showRules(this.cssRules, this.rules)
     sheetChanged(this)
   }
