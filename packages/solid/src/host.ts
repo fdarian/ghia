@@ -505,7 +505,9 @@ export interface HostElement extends ScrollableElement, Omit<DomElement, "ownerD
 }
 defineDomMembers(HostElement.prototype, (element: HostElement) => ({
   listeners: element.listeners,
-  connected: isConnected(element),
+  get connected() {
+    return isConnected(element)
+  },
   layout: element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.nativeId } : undefined,
   prop: (name) => element.props.get(name),
   propNames: () => element.props.keys(),
@@ -528,12 +530,7 @@ copyPrototypeMembers(HostElement.prototype, SvgHostElement.prototype)
 
 /** In the tree of a root: every ancestor up to the root still holds it, as `removeChild` takes a node out of the DOM. */
 function isConnected(node: HostNode): boolean {
-  let current: HostNode | HostRoot = node
-  while (current.kind !== "root") {
-    if (current.parent === null) return false
-    current = current.parent
-  }
-  return true
+  return treeRoot(node) !== null
 }
 
 export class HostText extends Text {
@@ -609,7 +606,7 @@ class ElementDomBinding implements ElementBinding {
   insertBefore(child: Node, before: Node | null): void {
     const node = child as unknown as HostNode
     const target = treeRoot(this.element)
-    if (target !== null && node.root !== null && node.root !== target) throw crossRootError()
+    if (target !== null && belongsToOtherRoot(node, target)) throw crossRootError()
     insertHostNode(this.element, node, before as unknown as HostNode | null)
   }
 
@@ -950,6 +947,16 @@ function retireNode(node: HostNode): void {
   // must not lay out a subtree the DOM would already have taken out of the document.
   root.mutations.detachChild(node.nativeId)
   root.mutations.requestFlush()
+}
+
+/**
+ * Whether `node`, or a node under it, was mounted by a root other than `target`: mounting it there
+ * would throw after the tree was changed. A mounted node's subtree is in its own root already.
+ */
+function belongsToOtherRoot(node: HostNode, target: HostRoot): boolean {
+  if (node.root !== null && node.root !== target) return true
+  if (node.mounted || node.kind !== "element") return false
+  return node.childList.some((child) => belongsToOtherRoot(child, target))
 }
 
 /** The root whose tree `node` is in, or `null` for a node that is in none. */
