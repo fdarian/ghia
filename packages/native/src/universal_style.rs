@@ -316,6 +316,11 @@ mod tests {
             self.window = crate::color::ColorContext::root(crate::color::Scheme::Dark);
         }
 
+        /// The end of a frame, as `GpuixView::render` ends one once it has built the root.
+        fn built(&self, tree: &crate::retained_tree::RetainedTree) {
+            tree.note_frame_built();
+        }
+
         fn background(&mut self, tree: &crate::retained_tree::RetainedTree, id: u64, millis: u64) -> String {
             let element = &tree.elements[&id];
             let style = element.style.as_deref().expect("a styled element");
@@ -426,12 +431,13 @@ mod tests {
         let mut tree = crate::retained_tree::RetainedTree::new();
         apply(
             &mut tree,
-            r##"[["createElement",1,"div"],["createElement",2,"div"],["setStyle",2,{"width":10}],
-                ["setUniversalStyle",{"backgroundColor":"#ff0000"}]]"##,
+            r##"[["createElement",1,"div"],["createElement",2,"div"],["appendChild",1,2],["setRoot",1],
+                ["setStyle",2,{"width":10}],["setUniversalStyle",{"backgroundColor":"#ff0000"}]]"##,
         );
         let mut frames = Frames::new();
         assert_eq!(frames.background(&tree, 1, 0), "#ff0000");
         assert_eq!(frames.background(&tree, 2, 0), "#ff0000");
+        frames.built(&tree);
 
         apply(
             &mut tree,
