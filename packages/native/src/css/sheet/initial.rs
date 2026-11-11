@@ -115,6 +115,27 @@ pub(super) fn of(key: KeyId) -> Option<&'static Declaration> {
     INITIAL.get(&key)
 }
 
+/// Longhands that no shorthand covers, so they are not in the table, and whose initial value the
+/// style parser cannot represent.
+const UNREPRESENTABLE: [(&str, &str); 1] = [("zIndex", "auto")];
+
+/// Whether `declaration` is its property's initial value written as a keyword, which the cascade
+/// then reads as `initial`. A value the style parser has no form for (`z-index: auto`) could not
+/// otherwise take back an earlier rule's value.
+pub(super) fn is_initial_keyword(declaration: &Declaration) -> bool {
+    let Ok(written) = serde_json::from_str::<String>(&declaration.value) else {
+        return false;
+    };
+    let written = written.trim();
+    if UNREPRESENTABLE.iter().any(|(key, keyword)| *key == declaration.key && written.eq_ignore_ascii_case(keyword)) {
+        return true;
+    }
+    covers::key_id(&declaration.key)
+        .and_then(of)
+        .and_then(|initial| serde_json::from_str::<String>(&initial.value).ok())
+        .is_some_and(|keyword| written.eq_ignore_ascii_case(&keyword))
+}
+
 #[cfg(test)]
 pub(super) fn all() -> impl Iterator<Item = &'static Declaration> {
     INITIAL.values()

@@ -780,6 +780,67 @@ fn own_styles_that_all_merge_to_one_style_are_not_pinned_by_it() {
 }
 
 #[test]
+fn z_index_auto_takes_back_an_earlier_rules_value_and_so_does_an_inline_one() {
+    let mut doc = Doc::new();
+    let both = doc.classed("div", ROOT, "a b");
+    let inline = doc.classed("div", ROOT, "a");
+    doc.style_element(ROOT, ".a { z-index: 5 } .a.b { z-index: auto }");
+    doc.inline(inline, r#"{"zIndex":"auto"}"#);
+    doc.flush();
+    assert_eq!(doc.style(both).and_then(|style| style.z_index), None);
+    assert_eq!(doc.style(inline).and_then(|style| style.z_index), None);
+}
+
+#[test]
+fn an_initial_keyword_the_style_parser_reads_still_applies_as_written() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a b");
+    doc.style_element(ROOT, ".a { top: 5px } .a.b { top: auto }");
+    doc.flush();
+    assert!(doc.style(div).is_some_and(|style| style.top.is_some()));
+}
+
+#[test]
+fn an_opacity_percentage_from_a_sheet_overrides_an_earlier_rule() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a b");
+    doc.style_element(ROOT, ".a { opacity: 1 } .a.b { opacity: 50% }");
+    doc.flush();
+    assert_eq!(doc.style(div).and_then(|style| style.opacity), Some(0.5));
+}
+
+#[test]
+fn an_inline_important_beats_an_important_rule_and_an_inline_normal_value_does_not() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.style_element(ROOT, ".a { color: red !important; opacity: 0.2 !important; display: flex }");
+    doc.inline(div, r#"{"color":"blue !important","opacity":0.9,"display":"none"}"#);
+    doc.flush();
+    assert_eq!(doc.color(div), Some("blue"));
+    assert_eq!(doc.style(div).and_then(|style| style.opacity), Some(0.2));
+    assert_eq!(doc.style(div).and_then(|style| style.display.as_deref()), Some("none"));
+}
+
+#[test]
+fn an_inline_important_with_no_rule_matching_is_the_plain_value() {
+    let mut doc = Doc::new();
+    let div = doc.element("div", ROOT);
+    doc.style_element(ROOT, ".never { color: red }");
+    doc.inline(div, r#"{"display":"none !important","color":"blue"}"#);
+    doc.flush();
+    assert_eq!(doc.style(div).and_then(|style| style.display.as_deref()), Some("none"));
+    assert_eq!(doc.color(div), Some("blue"));
+}
+
+#[test]
+fn an_inline_important_is_the_plain_value_when_there_is_no_sheet() {
+    let mut doc = Doc::new();
+    let div = doc.element("div", ROOT);
+    doc.inline(div, r#"{"display":"none !important"}"#);
+    assert_eq!(doc.style(div).and_then(|style| style.display.as_deref()), Some("none"));
+}
+
+#[test]
 fn entries_that_share_one_cascaded_style_are_released_once_no_element_uses_it() {
     let mut doc = Doc::new();
     let first = doc.classed("div", ROOT, "a");

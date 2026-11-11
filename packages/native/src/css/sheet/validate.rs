@@ -16,6 +16,7 @@ use crate::retained_tree::parse_style;
 use crate::style::StyleDesc;
 
 use super::cascade::is_css_wide;
+use super::initial;
 use super::Rule;
 
 /// How many verdicts are remembered before the memory starts over.
@@ -33,8 +34,8 @@ impl Validator {
     /// with none.
     pub fn filter(&mut self, rules: &mut Vec<Rule>) {
         for rule in rules.iter_mut() {
-            rule.normal.retain(|declaration| self.accepts(declaration));
-            rule.important.retain(|declaration| self.accepts(declaration));
+            rule.normal = self.judge_all(std::mem::take(&mut rule.normal));
+            rule.important = self.judge_all(std::mem::take(&mut rule.important));
         }
         rules.retain(|rule| !rule.normal.is_empty() || !rule.important.is_empty());
     }
@@ -45,12 +46,25 @@ impl Validator {
     /// style) is not a declaration of a property and passes.
     pub fn filter_own(&mut self, own: Vec<Declaration>) -> Vec<Declaration> {
         own.into_iter()
-            .filter(|declaration| match declaration.value.as_str() {
-                "null" | "\"\"" => false,
-                value if value.starts_with('{') || value.starts_with('[') => true,
-                _ => self.accepts(declaration),
+            .filter_map(|declaration| match declaration.value.as_str() {
+                "null" | "\"\"" => None,
+                value if value.starts_with('{') || value.starts_with('[') => Some(declaration),
+                _ => self.judge(declaration),
             })
             .collect()
+    }
+
+    fn judge_all(&mut self, declarations: Vec<Declaration>) -> Vec<Declaration> {
+        declarations.into_iter().filter_map(|declaration| self.judge(declaration)).collect()
+    }
+
+    /// The declaration as the cascade takes it, or `None` when CSS would ignore it. A keyword that
+    /// is the property's initial value and that the style parser has no form for becomes `initial`.
+    fn judge(&mut self, declaration: Declaration) -> Option<Declaration> {
+        if self.accepts(&declaration) {
+            return Some(declaration);
+        }
+        initial::is_initial_keyword(&declaration).then(|| Declaration { key: declaration.key, value: "\"initial\"".to_owned() })
     }
 
     fn accepts(&mut self, declaration: &Declaration) -> bool {
@@ -65,7 +79,7 @@ impl Validator {
         }
         // A key the style does not know parses and sets nothing, which CSS also ignores.
         let accepted = parse_style(alone.as_bytes()).is_ok_and(|style| style != StyleDesc::default() && is_valid(&style));
-        if !accepted {
+        if !accepted && !initial::is_initial_keyword(declaration) {
             log::warn!("Stylesheet: declaration ignored, not a valid {}: {}", declaration.key, declaration.value);
         }
         if self.verdicts.len() >= VERDICT_LIMIT {
