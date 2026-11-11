@@ -94,7 +94,7 @@ macro_rules! overlaid_fields {
         animation, animation_name, animation_duration, animation_timing_function,
         animation_delay, animation_iteration_count, animation_direction, animation_fill_mode,
         animation_play_state,
-        focus_visible, focus_within, has_focus_visible, keyboard_focus_dim, group,
+        focus, focus_visible, focus_within, has_focus_visible, keyboard_focus_dim, group,
         container_type, container_name, container, content_visibility, contain_intrinsic_size,
         contain_intrinsic_width, contain_intrinsic_height, contain_intrinsic_inline_size,
         contain_intrinsic_block_size,
@@ -145,7 +145,7 @@ pub(crate) fn is_no_layer(layer: &StyleDesc) -> bool {
 /// `has_disabled` and `has_enabled` that a strict descendant is: `:disabled`, `:enabled`,
 /// `:has(:disabled)`, `:has(:enabled)`.
 ///
-/// `focus_within`, `has_focus_visible` and `focus_visible` are set only for an
+/// `focused`, `focus_within`, `has_focus_visible` and `focus_visible` are set only for an
 /// inline box. Any other element applies those focus styles where it tracks focus
 /// ([`crate::focus::apply_focus_styles`]), which an inline box has no element for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -162,6 +162,7 @@ pub struct PointerStates {
     pub enabled: bool,
     pub has_disabled: bool,
     pub has_enabled: bool,
+    pub focused: bool,
     pub focus_within: bool,
     pub has_focus_visible: bool,
     pub focus_visible: bool,
@@ -181,6 +182,7 @@ impl PointerStates {
             || self.enabled
             || self.has_disabled
             || self.has_enabled
+            || self.focused
             || self.focus_within
             || self.has_focus_visible
             || self.focus_visible
@@ -237,7 +239,7 @@ pub(crate) fn is_overlay_fixed_point(style: &StyleDesc) -> bool {
 /// `style` with the refinements of `states` folded in and every state style
 /// cleared. Later wins: `groupHover`, `hasHover`, `hover`, `groupActive`,
 /// `hasActive`, `active`, `hasEnabled`, `hasDisabled`, `enabled`, `disabled`,
-/// `groupFocusWithin`, `hasFocus`, `focusWithin`, `hasFocusVisible`, `focusVisible`. A group
+/// `groupFocusWithin`, `hasFocus`, `focus`, `focusWithin`, `hasFocusVisible`, `focusVisible`. A group
 /// refinement is one more variant of the element, so the element's own `hover` beats a `groupHover` that sets the
 /// same field (as in Tailwind). A relational refinement sits between the two: an
 /// element's own state beats what its descendants cause, and that beats a group.
@@ -246,8 +248,8 @@ pub(crate) fn is_overlay_fixed_point(style: &StyleDesc) -> bool {
 /// its disabled look while hovered or pressed.
 ///
 /// Focus styles sit above the pointer ones, so `groupFocusWithin` comes after
-/// them, and `focusWithin`, `hasFocusVisible` and `focusVisible` after that. The
-/// last three are in the fold only for an inline box; an element with a focus
+/// them, and `focus`, `focusWithin`, `hasFocusVisible` and `focusVisible` after that. The
+/// last four are in the fold only for an inline box; an element with a focus
 /// handle applies them after it, so they beat every layer here either way.
 pub fn resolve_pointer_states(style: &StyleDesc, states: PointerStates) -> StyleDesc {
     let mut resolved = overlay(style, &NO_LAYER);
@@ -269,6 +271,7 @@ pub fn resolve_pointer_states(style: &StyleDesc, states: PointerStates) -> Style
             true,
         ),
         (states.has_focused, style.has_focus.as_deref(), false),
+        (states.focused, style.focus.as_deref(), false),
         (states.focus_within, style.focus_within.as_deref(), false),
         (states.has_focus_visible, style.has_focus_visible.as_deref(), false),
         (states.focus_visible, style.focus_visible.as_deref(), false),

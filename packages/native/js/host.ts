@@ -1391,6 +1391,9 @@ export interface StyleDesc {
   /** While a strict descendant is an enabled form control, like CSS `:has(:enabled)`. Above
    *  `active`, below `hasDisabled`. */
   hasEnabled?: StateStyleDesc
+  /** While the element is the focused one, like CSS `:focus`: by the keyboard, a
+   *  mouse press or script. Below `focusWithin`. Needs a focusable element. */
+  focus?: StateStyleDesc
   /** While the element matches `:focus-visible`: focused by the keyboard (Tab),
    *  or a text control, or focus moved there by script from an element that
    *  matched. A mouse press on a button never shows it. Needs a focusable
@@ -1543,6 +1546,7 @@ export type StateStyleDesc = Omit<
   | "@container"
   | "hover"
   | "active"
+  | "focus"
   | "focusVisible"
   | "focusWithin"
   | "keyboardFocusDim"

@@ -77,7 +77,7 @@ fn declares_decoration(style: &StyleDesc) -> bool {
     style.text_decoration.is_some() || style.text_decoration_line.is_some()
 }
 
-/// `state` (a `focusWithin` or `focusVisible` refinement) as it paints over `below`, the
+/// `state` (a `focus`, `focusWithin` or `focusVisible` refinement) as it paints over `below`, the
 /// style it refines, whose offset is `below_offset`. A state is applied as a refinement
 /// of the element's text style, so it has to carry the whole line: one that declares a
 /// decoration takes the offset the element has when it declares none, and one that only
@@ -102,19 +102,24 @@ fn filled_state(state: &StyleDesc, below: &StyleDesc, below_offset: TextUnderlin
 
 /// `style` with the offset it inherits filled in, when it declares a text
 /// decoration without an offset of its own: the line takes the offset of the box
-/// that declares it, and that box inherits one. The `focusWithin` and `focusVisible`
+/// that declares it, and that box inherits one. The `focus`, `focusWithin` and `focusVisible`
 /// refinements get the same, each over the style under it. `None` when `style` needs
 /// nothing.
 pub(crate) fn with_inherited(style: &StyleDesc, inherited: TextUnderlineOffset) -> Option<StyleDesc> {
     let base = (declares_decoration(style) && style.text_underline_offset.is_none() && inherited != TextUnderlineOffset::Auto)
         .then(|| StyleDesc { text_underline_offset: Some(inherited.clone()), ..style.clone() });
-    if style.focus_within.is_none() && style.focus_visible.is_none() {
+    if style.focus.is_none() && style.focus_within.is_none() && style.focus_visible.is_none() {
         return base;
     }
     let mut filled = base.unwrap_or_else(|| style.clone());
     let offset_of = |style: &StyleDesc| style.text_underline_offset.clone().unwrap_or_else(|| inherited.clone());
-    // `focusVisible` sits on `focusWithin`, which sits on the element's own style.
+    // `focusVisible` sits on `focusWithin`, which sits on `focus`, which sits on the element's own style.
     let mut below = filled.clone();
+    if let Some(focused) = filled.focus.as_deref() {
+        let focused = filled_state(focused, &below, offset_of(&below)).unwrap_or_else(|| focused.clone());
+        below = crate::events::state_styles::overlay(&below, &focused);
+        filled.focus = Some(Box::new(focused));
+    }
     if let Some(within) = filled.focus_within.as_deref() {
         let within = filled_state(within, &below, offset_of(&below)).unwrap_or_else(|| within.clone());
         below = crate::events::state_styles::overlay(&below, &within);

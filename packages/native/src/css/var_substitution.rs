@@ -220,6 +220,7 @@ fn state_slot<'a>(style: &'a mut StyleDesc, key: &str) -> Option<&'a mut Option<
     Some(match key {
         "hover" => &mut style.hover,
         "active" => &mut style.active,
+        "focus" => &mut style.focus,
         "focusVisible" => &mut style.focus_visible,
         "focusWithin" => &mut style.focus_within,
         "groupHover" => &mut style.group_hover,

@@ -285,7 +285,7 @@ impl StyleDesc {
     /// is the only property of a style that an item of a flex or grid container reads differently.
     pub(crate) fn declares_z_index(&self) -> bool {
         self.z_index.is_some()
-            || [&self.focus_within, &self.has_focus_visible, &self.focus_visible]
+            || [&self.focus, &self.focus_within, &self.has_focus_visible, &self.focus_visible]
                 .into_iter()
                 .any(|variant| variant.as_deref().is_some_and(|variant| variant.z_index.is_some()))
     }
@@ -1223,6 +1223,8 @@ pub struct StyleDesc {
     // Uses Box to avoid infinite-size struct (StyleDesc contains StyleDesc).
     pub hover: Option<Box<StyleDesc>>,
     pub active: Option<Box<StyleDesc>>,
+    /// While this element is the focused one, like CSS `:focus`. Weaker than `focusWithin`.
+    pub focus: Option<Box<StyleDesc>>,
     /// While focused after keyboard input, like CSS `:focus-visible`.
     pub focus_visible: Option<Box<StyleDesc>>,
     /// While this element or a descendant is focused, like CSS `:focus-within`.
@@ -1365,7 +1367,7 @@ impl StyleDesc {
             };
         }
         paint_states!(
-            hover, active, focus_visible, focus_within, group_hover, group_active, group_focus_within,
+            hover, active, focus, focus_visible, focus_within, group_hover, group_active, group_focus_within,
             has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
         );
         painted.opacity = other.opacity;
@@ -1453,7 +1455,7 @@ impl StyleDesc {
             };
         }
         touches!(
-            hover, active, focus_visible, focus_within, group_hover, group_active, group_focus_within,
+            hover, active, focus, focus_visible, focus_within, group_hover, group_active, group_focus_within,
             has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
         )
     }
@@ -1482,7 +1484,7 @@ impl StyleDesc {
         }
         self.var_declarations.is_some()
             || any_state!(
-                hover, active, focus_visible, focus_within, group_hover, group_active, group_focus_within,
+                hover, active, focus, focus_visible, focus_within, group_hover, group_active, group_focus_within,
                 has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
             )
             || self.container_rules.as_ref().is_some_and(|rules| rules.any_style(Self::holds_var_declarations))

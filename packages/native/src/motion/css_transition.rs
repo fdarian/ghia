@@ -555,6 +555,7 @@ pub(crate) fn leaves_box_size(style: &StyleDesc) -> bool {
             })
     };
     leaves(style)
+        && style.focus.as_deref().is_none_or(leaves)
         && style.focus_within.as_deref().is_none_or(leaves)
         && super::state_styles(style).into_iter().all(|(_, state)| state.is_none_or(leaves))
 }

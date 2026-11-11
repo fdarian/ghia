@@ -23,6 +23,7 @@ pub fn layer_under(universal: &StyleDesc, own: &StyleDesc) -> StyleDesc {
     let mut layered = overlay(universal, own);
     layered.hover = refine(universal.hover.as_deref(), own.hover.as_deref());
     layered.active = refine(universal.active.as_deref(), own.active.as_deref());
+    layered.focus = refine(universal.focus.as_deref(), own.focus.as_deref());
     layered.focus_visible = refine(universal.focus_visible.as_deref(), own.focus_visible.as_deref());
     layered.focus_within = refine(universal.focus_within.as_deref(), own.focus_within.as_deref());
     layered.group_hover = refine(universal.group_hover.as_deref(), own.group_hover.as_deref());

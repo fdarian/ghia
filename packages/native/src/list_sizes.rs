@@ -144,6 +144,7 @@ fn paints_in_every_state(style: &StyleDesc) -> bool {
     [
         &style.hover,
         &style.active,
+        &style.focus,
         &style.focus_visible,
         &style.focus_within,
         &style.group_hover,
