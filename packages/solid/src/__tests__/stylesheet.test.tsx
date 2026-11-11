@@ -167,7 +167,7 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in Solid", () => {
     ))
     expect(getComputedStyle(heading).marginTop).toBe("3px")
     expect(getComputedStyle(heading).marginBottom).toBe("7px")
-    expect(getComputedStyle(heading).fontWeight).toBe("700")
+    expect(getComputedStyle(heading).display).toBe("block")
     expect(getComputedStyle(paragraph).marginTop).toBe("16px")
     expect(getComputedStyle(paragraph).marginBottom).toBe("7px")
     expect(getComputedStyle(button).display).toBe("flex")
