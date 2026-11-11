@@ -22,6 +22,7 @@ import {
   isNativeviewHandlerProp,
   HOST_BINDING,
   HOST_MOUNT,
+  copyPrototypeMembers,
   hasMutationObservers,
   queueCharacterDataMutation,
   queueChildListMutation,
@@ -469,12 +470,7 @@ defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
  * fields come from one constructor and the prototype chain from this one.
  */
 abstract class SvgHostElement extends SVGElement {}
-for (const key of Reflect.ownKeys(HostElement.prototype)) {
-  if (key === "constructor") continue
-  const descriptor = Object.getOwnPropertyDescriptor(HostElement.prototype, key)
-  if (descriptor === undefined) throw new Error(`HostElement.prototype has no own ${String(key)}`)
-  Object.defineProperty(SvgHostElement.prototype, key, descriptor)
-}
+copyPrototypeMembers(HostElement.prototype, SvgHostElement.prototype)
 
 /** In the tree of a root: every ancestor up to the root still holds it, as `removeChild` takes a node out of the DOM. */
 function isConnected(node: HostNode): boolean {
@@ -769,7 +765,7 @@ function removeFromParent(node: HostNode): void {
   const index = parent.childList.indexOf(node)
   if (index >= 0) parent.childList.splice(index, 1)
   node.parent = null
-  if (index >= 0 && parent.kind === "element") {
+  if (index >= 0 && parent.kind === "element" && hasMutationObservers()) {
     queueChildListMutation(parent, [], [node], parent.childList[index - 1] ?? null, parent.childList[index] ?? null)
   }
 }
@@ -792,7 +788,9 @@ export function insertHostNode(
   const index = anchor ? parent.childList.indexOf(anchor) : parent.childList.length
   parent.childList.splice(index, 0, node)
   node.parent = parent
-  queueChildListMutation(parent, [node], [], parent.childList[index - 1] ?? null, parent.childList[index + 1] ?? null)
+  if (hasMutationObservers()) {
+    queueChildListMutation(parent, [node], [], parent.childList[index - 1] ?? null, parent.childList[index + 1] ?? null)
+  }
   const root = parent.root
   if (!root) return
   root.removals.delete(node)
