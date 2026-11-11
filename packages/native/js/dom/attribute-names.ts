@@ -17,8 +17,8 @@ export function attributeLookupName(name: string, svg: boolean): string {
   return svg ? name : name.toLowerCase()
 }
 
-/** Props that are not attributes: `getAttributeNames` skips them. */
-export const NOT_ATTRIBUTES: ReadonlySet<string> = new Set(["children", "key", "ref", "style"])
+/** Props that are not attributes: `getAttributeNames` skips them. `style` is an attribute: its text is `element.style.cssText`. */
+export const NOT_ATTRIBUTES: ReadonlySet<string> = new Set(["children", "key", "ref"])
 
 /**
  * How `setAttribute` turns the text of an attribute into the prop it stands for, as the browser's
@@ -51,7 +51,7 @@ const WRITTEN_AS_PROP: Readonly<Record<string, { prop: string; kind?: AttributeK
 const INTEGER = /^\s*[+-]?\d+\s*$/
 
 /**
- * Attributes with no prop behind them: the ones `getAttributeNames` skips, and `on*`. A write is
+ * Attributes with no prop behind them: the ones `getAttributeNames` skips, and `on*`. (`style` is the declaration's.) A write is
  * kept for `getAttribute` and reaches nothing else.
  */
 export function isStoredAttribute(attribute: string): boolean {

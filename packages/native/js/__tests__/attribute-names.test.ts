@@ -20,8 +20,8 @@ describe("propWrittenBy", () => {
     expect(propWrittenBy("tabindex", null, "tabIndex")).toEqual({ prop: "tabIndex", value: undefined })
   })
 
-  it("stores style, on* and the non-attribute props without a prop", () => {
-    for (const name of ["style", "onclick", "children", "key", "ref"]) expect(isStoredAttribute(name)).toBe(true)
+  it("stores on* and the non-attribute props without a prop", () => {
+    for (const name of ["onclick", "children", "key", "ref"]) expect(isStoredAttribute(name)).toBe(true)
     expect(isStoredAttribute("tabindex")).toBe(false)
   })
 })

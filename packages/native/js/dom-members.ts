@@ -19,6 +19,12 @@ import {
   storedAttribute,
 } from "./dom/attribute-names.js"
 import { hasMutationObservers, queueAttributeMutation } from "./dom/mutation-observer.js"
+import {
+  styleAttributeOf,
+  styleDeclarationOf,
+  writeStyleAttribute,
+  type StyleBinding,
+} from "./dom/style-declaration.js"
 import { Element, SVGElement, type Node } from "./dom/nodes.js"
 
 /** The DOM members every host element has beside the scroll ones. */
@@ -35,11 +41,18 @@ export interface DomElement {
   /**
    * Writes the prop the attribute stands for, through the same path as a rendered prop, so native
    * has it at once and `getAttribute(name)` gives it back as text. A framework's next commit of
-   * that prop overwrites it; an attribute it never set stays. `style` and `on*` are kept for
-   * `getAttribute` only. See docs/fork/deviations.md.
+   * that prop overwrites it; an attribute it never set stays. `style` is `style.cssText`; `on*`
+   * is kept for `getAttribute` only. See docs/fork/deviations.md.
    */
   setAttribute(name: string, value: string): void
   removeAttribute(name: string): void
+  /**
+   * The inline style: the framework's `style` prop with what this declaration wrote over it. A
+   * write reaches native before the next frame and before any read of layout. A framework
+   * commit that changes a property replaces the written value. Assigning a string sets `cssText`.
+   * See docs/fork/deviations.md for what is stored and not applied.
+   */
+  style: CSSStyleDeclaration
   /** The border box's width, rounded, before any transform. 0 for an element with no box. */
   readonly offsetWidth: number
   /** The border box's height, rounded, before any transform. 0 for an element with no box. */
@@ -65,7 +78,7 @@ export interface DomElement {
   dispatchEvent(event: Event): boolean
 }
 
-export interface DomElementBinding {
+export interface DomElementBinding extends StyleBinding {
   readonly listeners: ElementListeners
   readonly connected: boolean
   /** The renderer and id of the element while it is mounted. */
@@ -123,6 +136,10 @@ function writeAttribute(element: Element, bound: DomElementBinding, name: string
     throw new DOMException(`'${requested}' is not a valid attribute name.`, "InvalidCharacterError")
   }
   const attribute = attributeLookupName(requested, svg)
+  if (attribute === "style") {
+    writeStyleAttribute(styleDeclarationOf(element, () => bound), text)
+    return
+  }
   if (isStoredAttribute(attribute)) {
     const before = element.getAttribute(attribute)
     storeAttribute(element, attribute, text)
@@ -172,6 +189,9 @@ export function defineDomMembers<This extends object>(
       writable: true,
       value(this: This, name: string) {
         const svg = this instanceof SVGElement
+        if (attributeLookupName(name, svg) === "style") {
+          return styleAttributeOf(styleDeclarationOf(this as unknown as Element, () => bind(this)))
+        }
         const stored = storedAttribute(this, attributeLookupName(name, svg))
         if (stored !== undefined) return stored
         return attributeOf(name, propForAttribute(bind(this), name, svg))
@@ -189,6 +209,15 @@ export function defineDomMembers<This extends object>(
       writable: true,
       value(this: This, name: string) {
         writeAttribute(this as unknown as Element, bind(this), name, null)
+      },
+    },
+    style: {
+      configurable: true,
+      get(this: This) {
+        return styleDeclarationOf(this as unknown as Element, () => bind(this))
+      },
+      set(this: This, text: string) {
+        styleDeclarationOf(this as unknown as Element, () => bind(this)).cssText = text
       },
     },
     offsetWidth: {

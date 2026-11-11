@@ -38,6 +38,7 @@ export * from "./dom-members.js"
 export * from "./dom/nodes.js"
 export * from "./dom/mutation-observer.js"
 export * from "./dom/attribute-names.js"
+export { keepWrittenEntries, type StyleBinding } from "./dom/style-declaration.js"
 export * from "./dom/prototype-members.js"
 export * from "./animation-frame.js"
 export * from "./events/types.js"
@@ -2909,6 +2910,13 @@ export interface MutationRenderer {
    * scheduler leaves the flush to the caller.
    */
   requestFlush(): void
+  /**
+   * Runs `write`, which queues ops, at the start of the next flush instead of now; a second call
+   * with the same `key` before then replaces the first. A write that comes many times before a
+   * frame (`element.style.setProperty` on every pointer move) costs one op for the frame. Every
+   * read that flushes, and the flush the queue schedules, runs it.
+   */
+  deferWrite(key: object, write: () => void): void
   flushMutations(): void
 }
 

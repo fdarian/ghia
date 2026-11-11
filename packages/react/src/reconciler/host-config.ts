@@ -45,6 +45,7 @@ const EVENT_TYPE_BY_PROP = eventTypesWithOverrides({
   onDetach: null,
 })
 import { diffCustomProps, keepAttributeWrites } from "./custom-props.js"
+import { hiddenStyle, nativeStyleOf } from "./native-style.js"
 import type {
   Container,
   ElementType,
@@ -251,15 +252,6 @@ function sendStyle(renderer: MutationRenderer, id: number, props: Props): void {
  */
 function sameStyle(left: Props["style"], right: Props["style"]): boolean {
   return left === right || sameMutationValue(left ?? NO_STYLE, right ?? NO_STYLE)
-}
-
-/** The style a hidden element keeps: its own, minus the states, plus `visibility: hidden`. */
-function hiddenStyle(style: Props["style"]) {
-  // Hover and active go, because a hidden element must stay hidden. A hover
-  // style that sets `visibility` would otherwise paint an element React
-  // asked to hide.
-  const { hover: _hover, active: _active, ...base } = splitMotionStyle(style).style ?? {}
-  return { ...base, visibility: "hidden" }
 }
 
 // ── Custom prop forwarding ───────────────────────────────────────────
@@ -543,25 +535,22 @@ export const hostConfig = {
   ): void {
     const state = stateFor(instance)
     const { container } = state
+    // `element.style` may have written to the props since the last commit: keep what the framework
+    // did not commit over, and send native from what the element has.
+    const current = instance.props
+    const next = current === oldProps ? newProps : keepAttributeWrites(current, oldProps, newProps)
     // `commitUpdate` runs for every host element whose props object is new,
     // which is every element a parent re-rendered. Most of those did not change
     // their style, so send it only when it did.
     if (!sameStyle(oldProps.style, newProps.style)) {
-      container.renderer.setStyle(
-        instance.nativeId,
-        state.hidden ? hiddenStyle(newProps.style) : (splitMotionStyle(newProps.style).style ?? {})
-      )
-      syncMotionBindings(container, instance.nativeId, newProps.style, instance.type)
+      container.renderer.setStyle(instance.nativeId, nativeStyleOf(next.style, state.hidden))
+      syncMotionBindings(container, instance.nativeId, next.style, instance.type)
     }
     diffEventListeners(instance, oldProps, newProps)
     if (instance.type === "nativeview") {
       diffNativeviewProps(container, instance.nativeId, oldProps, newProps)
     }
-    // Custom prop diff (for non-div/text elements)
-    // `setAttribute` may have changed props since the last commit: keep what the framework did not
-    // commit over, and diff native from what it has.
-    const current = instance.props
-    const next = current === oldProps ? newProps : keepAttributeWrites(current, oldProps, newProps)
+    // Custom prop diff (for non-div/text elements). `setAttribute` may have changed props too.
     diffCustomProps(container.renderer, instance.nativeId, instance.type, current, next)
     if (hasMutationObservers()) {
       recordAttributeChanges(instance, new Set([...Object.keys(current), ...Object.keys(next)]), () => {
@@ -610,9 +599,9 @@ export const hostConfig = {
     rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(instance.props.style))
   },
 
-  unhideInstance(instance: Instance, props: Props): void {
+  unhideInstance(instance: Instance, _props: Props): void {
     stateFor(instance).hidden = false
-    rendererFor(instance).setStyle(instance.nativeId, splitMotionStyle(props.style).style ?? {})
+    rendererFor(instance).setStyle(instance.nativeId, nativeStyleOf(instance.props.style, false))
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},
@@ -664,6 +653,7 @@ export const hostConfig = {
 
   detachDeletedInstance(instance: Instance): void {
     const container = containerFor(instance)
+    stateFor(instance).destroyed = true
     const destroyed = container.renderer.destroyElement(instance.nativeId)
     for (const id of destroyed) {
       unregisterEventHandlers(container.eventHandlers, id)

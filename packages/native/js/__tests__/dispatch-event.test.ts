@@ -37,6 +37,8 @@ defineDomMembers(Box.prototype, (box: Box) => ({
   prop: () => undefined,
   propNames: () => [],
   writeProp: () => {},
+  readStyle: () => undefined,
+  writeStyle: () => {},
 }))
 
 /** `outer` contains `middle` contains `inner`. */

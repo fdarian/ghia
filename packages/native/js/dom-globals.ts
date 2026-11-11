@@ -14,6 +14,7 @@ import {
   Text,
 } from "./dom/nodes.js"
 import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
+import { CSSStyleDeclaration } from "./dom/style-declaration.js"
 import { Selection } from "./dom/selection.js"
 import { EVENT_CLASSES } from "./events/classes.js"
 import { document, window } from "./events/window-target.js"
@@ -45,6 +46,7 @@ const DOM_CLASSES = {
   Selection,
   MutationObserver,
   MutationRecord,
+  CSSStyleDeclaration,
   ...EVENT_CLASSES,
 }
 

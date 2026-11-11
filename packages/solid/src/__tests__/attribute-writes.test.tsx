@@ -44,7 +44,7 @@ describe.skipIf(!hasNativeTestRenderer)("attribute writes on a Solid element", (
     target.setAttribute("DATA-Other", "y")
     expect(target.getAttribute("data-extra")).toBe("x")
     expect(target.hasAttribute("data-extra")).toBe(true)
-    expect(target.getAttributeNames().sort()).toEqual(["data-extra", "data-kept", "data-other", "testid"].sort())
+    expect(target.getAttributeNames().sort()).toEqual(["data-extra", "data-kept", "data-other", "style", "testid"].sort())
     expect(target.dataset).toEqual({ kept: "1", extra: "x", other: "y" })
     target.setAttribute("data-extra", 5 as unknown as string)
     expect(target.getAttribute("data-extra")).toBe("5")
@@ -97,21 +97,17 @@ describe.skipIf(!hasNativeTestRenderer)("attribute writes on a Solid element", (
     expect(() => target.setAttribute("", "1")).toThrow(expect.objectContaining({ name: "InvalidCharacterError" }))
   })
 
-  it("keeps style and on* as text for getAttribute and sends nothing to native", () => {
+  it("keeps on* as text for getAttribute and sends nothing to native", () => {
     const clicks: string[] = []
     let target!: HostElement
     const { renderer, center } = setup(() => (
       <div ref={target} testId="box" style={box} onClick={() => clicks.push("prop")} />
     ))
-    target.setAttribute("style", "color: red")
     target.setAttribute("onclick", "alert(1)")
-    expect(target.getAttribute("style")).toBe("color: red")
     expect(target.getAttribute("onclick")).toBe("alert(1)")
-    expect(target.getAttributeNames()).toEqual(expect.arrayContaining(["style", "onclick"]))
+    expect(target.getAttributeNames()).toEqual(expect.arrayContaining(["onclick"]))
     renderer.nativeSimulateClick(...center("box"))
     expect(clicks).toEqual(["prop"])
-    target.removeAttribute("style")
-    expect(target.getAttribute("style")).toBeNull()
   })
 
   it("makes an element focusable with tabindex -1 and a tab stop with 0", () => {
@@ -251,7 +247,7 @@ describe.skipIf(!hasNativeTestRenderer)("attribute writes on a Solid element", (
       ["attributes", "data-a", "1"],
       ["attributes", "data-b", null],
       ["attributes", "tabindex", null],
-      ["attributes", "style", null],
+      ["attributes", "style", "width: 40px; height: 20px;"],
       ["attributes", "data-b", "x"],
       ["attributes", "inert", null],
     ])

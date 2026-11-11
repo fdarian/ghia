@@ -74,6 +74,8 @@ class FakeSvg extends SVGElement {
 for (const prototype of [FakeElement.prototype, FakeSvg.prototype]) {
   defineDomMembers(prototype, (element: FakeElement | FakeSvg) => ({
     listeners: undefined as never,
+    readStyle: () => undefined,
+    writeStyle: () => {},
     connected: true,
     prop: (name) => element.props[name],
     propNames: () => Object.keys(element.props),

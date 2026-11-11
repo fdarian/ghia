@@ -282,7 +282,7 @@ describeNative("DOM members of a React host instance", () => {
         />
       )
       expect(box!.className).toBe("card")
-      expect(box!.getAttributeNames().sort()).toEqual(["class", "data-index", "data-row-id"])
+      expect(box!.getAttributeNames().sort()).toEqual(["class", "data-index", "data-row-id", "style"])
       expect(box!.hasAttribute("data-index")).toBe(true)
       expect(box!.hasAttribute("data-missing")).toBe(false)
       expect(box!.dataset).toEqual({ rowId: "r1", index: "3" })
@@ -394,7 +394,7 @@ describeNative("DOM members of a React host instance", () => {
       />
     )
     expect(row!.getAttribute("onclick")).toBeNull()
-    expect(row!.getAttribute("style")).toBeNull()
+    expect(row!.getAttribute("style")).toBe("width: 10px; height: 10px;")
     expect(row!.getAttribute("DATA-flag")).toBe("false")
     expect(row!.getAttribute("data-on")).toBe("true")
     expect(row!.getAttribute("Aria-Expanded")).toBe("false")

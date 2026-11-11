@@ -76,17 +76,26 @@ describe.skipIf(!hasNativeTestRenderer)("MutationObserver in Solid", () => {
     expect(filtered.takeRecords().map((record) => [record.attributeName, record.oldValue])).toEqual([["data-b", null]])
   })
 
-  it("makes no record for a style, a handler or an unchanged value", () => {
-    const [color, setColor] = createSignal("red")
+  it("makes no record for a handler or an unchanged value", () => {
     const [handler, setHandler] = createSignal(() => {})
     let box: HTMLElement | undefined
     app.render(() => (
-      <div ref={(element) => (box = element as unknown as HTMLElement)} data-a="1" style={{ background: color() }} onClick={handler()} />
+      <div ref={(element) => (box = element as unknown as HTMLElement)} data-a="1" style={{ background: "red" }} onClick={handler()} />
     ))
     const observer = observe(box!, { attributes: true })
-    setColor("blue")
     setHandler(() => () => {})
     expect(observer.takeRecords()).toHaveLength(0)
+  })
+
+  it("records a style change as a style attribute with the old cssText", () => {
+    const [color, setColor] = createSignal("red")
+    let box: HTMLElement | undefined
+    app.render(() => <div ref={(element) => (box = element as unknown as HTMLElement)} style={{ background: color() }} />)
+    const observer = observe(box!, { attributes: true, attributeOldValue: true })
+    setColor("blue")
+    expect(observer.takeRecords().map((record) => [record.attributeName, record.oldValue])).toEqual([
+      ["style", "background: red;"],
+    ])
   })
 
   it("reports a text change as characterData with the old text", () => {

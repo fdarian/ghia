@@ -44,7 +44,7 @@ describeNative("attribute writes on a React host instance", () => {
     target.setAttribute("DATA-Other", "y")
     expect(target.getAttribute("data-extra")).toBe("x")
     expect(target.hasAttribute("data-extra")).toBe(true)
-    expect(target.getAttributeNames().sort()).toEqual(["data-extra", "data-kept", "data-other", "testid"].sort())
+    expect(target.getAttributeNames().sort()).toEqual(["data-extra", "data-kept", "data-other", "style", "testid"].sort())
     expect(target.dataset).toEqual({ kept: "1", extra: "x", other: "y" })
     target.setAttribute("data-extra", 5 as unknown as string)
     expect(target.getAttribute("data-extra")).toBe("5")
@@ -87,22 +87,18 @@ describeNative("attribute writes on a React host instance", () => {
     expect(() => element!.setAttribute("", "1")).toThrow(expect.objectContaining({ name: "InvalidCharacterError" }))
   })
 
-  it("keeps style and on* as text for getAttribute and sends nothing to native", () => {
+  it("keeps on* as text for getAttribute and sends nothing to native", () => {
     const clicks: string[] = []
     let element: PublicInstance | null = null
     const { renderer, center } = setup(
       <div ref={(instance) => (element = instance)} testId="box" style={box} onClick={() => clicks.push("prop")} />
     )
-    element!.setAttribute("style", "color: red")
     element!.setAttribute("onclick", "alert(1)")
-    expect(element!.getAttribute("style")).toBe("color: red")
     expect(element!.getAttribute("onclick")).toBe("alert(1)")
-    expect(element!.getAttributeNames()).toEqual(expect.arrayContaining(["style", "onclick"]))
+    expect(element!.getAttributeNames()).toEqual(expect.arrayContaining(["onclick"]))
     renderer.nativeSimulateClick(...center("box"))
     expect(clicks).toEqual(["prop"])
     expect(element!.getAttribute("class")).toBeNull()
-    element!.removeAttribute("style")
-    expect(element!.getAttribute("style")).toBeNull()
   })
 
   it("makes an element focusable with tabindex -1 and a tab stop with 0", () => {
@@ -251,7 +247,7 @@ describeNative("attribute writes on a React host instance", () => {
       ["attributes", "data-a", "1"],
       ["attributes", "data-b", null],
       ["attributes", "tabindex", null],
-      ["attributes", "style", null],
+      ["attributes", "style", "width: 40px; height: 20px;"],
       ["attributes", "data-b", "x"],
       ["attributes", "inert", null],
     ])

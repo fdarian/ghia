@@ -28,10 +28,24 @@ export interface MutationQueue extends MutationRenderer {
 export function createMutationQueue(
   renderer: MutationHost & BlobImageHost & StyleImageHost,
   onDestroyed: (ids: readonly number[]) => void = () => {},
-  scheduleFlush?: (flush: () => void) => void
+  scheduleFlush?: (flush: () => void) => void,
+  scheduleWrites?: (flush: () => void) => void
 ): MutationQueue {
   const writer = new WireWriter()
   let flushScheduled = false
+  const deferred = new Map<object, () => void>()
+
+  /** `scheduleFlush` when the adapter has one for every op, else the scheduler for deferred writes alone. */
+  const requestDeferredFlush = () => {
+    const schedule = scheduleFlush ?? scheduleWrites
+    if (!schedule || flushScheduled) return
+    flushScheduled = true
+    schedule(() => {
+      if (!flushScheduled) return
+      flushScheduled = false
+      mutations.flushMutations()
+    })
+  }
 
   const requestFlush = () => {
     if (!scheduleFlush || flushScheduled) return
@@ -115,8 +129,19 @@ export function createMutationQueue(
       requestFlush()
     },
     requestFlush,
+    deferWrite(key, write) {
+      deferred.set(key, write)
+      requestDeferredFlush()
+    },
     flushMutations() {
       flushScheduled = false
+      if (deferred.size > 0) {
+        // A write may queue ops, but not defer another one: a task that did would run in the next flush.
+        const writes = [...deferred.values()]
+        deferred.clear()
+        for (const write of writes) write()
+        flushScheduled = false
+      }
       if (writer.opCount === 0) return
       appliedBatches++
       // Taken before the call: applying a batch can run JS (the focus events of

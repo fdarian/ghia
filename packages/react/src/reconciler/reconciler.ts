@@ -91,6 +91,15 @@ export function createRoot(
       gpuixContainer.instances.delete(id)
     }
     releaseMotionBindings(gpuixContainer, destroyedIds)
+  }, undefined, (flush) => {
+    // A write through `element.style` outside a commit: a commit sends at its end, and nothing else would.
+    queueMicrotask(() => {
+      try {
+        flush()
+      } catch (error) {
+        onUncaughtError(error instanceof Error ? error : new Error(String(error)), {})
+      }
+    })
   })
   gpuixContainer = installDocumentElements({
     nativeRenderer: renderer,

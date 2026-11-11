@@ -406,6 +406,7 @@ abstract class ElementClass extends NodeClass {
       const name = attributeNameOf(prop, svg)
       if (this.getAttribute(name) !== null && !names.includes(name)) names.push(name)
     }
+    if (this.getAttribute("style") !== null && !names.includes("style")) names.push("style")
     for (const name of storedAttributeNames(this)) if (!names.includes(name)) names.push(name)
     return names
   }

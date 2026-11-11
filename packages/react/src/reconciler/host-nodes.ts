@@ -35,6 +35,7 @@ import type {
 import type { Container, ElementType, Instance, Props, TextInstance } from "../types/host.js"
 import { diffCustomProps } from "./custom-props.js"
 import { listenersOf } from "./event-registry.js"
+import { nativeStyleOf } from "./native-style.js"
 
 export type HostNode = Instance | TextInstance
 
@@ -54,6 +55,8 @@ export interface HostNodeState {
   children: HostNode[]
   /** The members of its type (`<input>`, `<form>`, ...) were attached when its ref was handed out. */
   typeMembersAttached: boolean
+  /** React deleted it: native destroys the element in the next batch, so nothing more is sent for it. */
+  destroyed: boolean
   binding?: NodeBinding
 }
 
@@ -79,6 +82,7 @@ function createState(container: Container): HostNodeState {
     parent: null,
     children: [],
     typeMembersAttached: false,
+    destroyed: false,
   }
 }
 
@@ -161,6 +165,8 @@ defineDomMembers(ReactHostElement.prototype, (instance: ReactHostElement) => ({
   prop: (name) => (instance.props as Record<string, unknown>)[name],
   propNames: () => Object.keys(instance.props),
   writeProp: (name, value) => writeInstanceProp(instance, name, value),
+  readStyle: () => instance.props.style as Record<string, unknown> | undefined,
+  writeStyle: (next) => writeInstanceStyle(instance, next),
 }))
 
 /**
@@ -180,6 +186,22 @@ function writeInstanceProp(instance: ReactHostElement, name: string, value: stri
   if (hasMutationObservers()) recordAttributeChanges(instance, [name], apply)
   else apply()
   if (state.mounted) state.container.renderer.flushMutations()
+}
+
+/**
+ * What a write through `element.style` does: the element's style is `next` and native is sent it
+ * once at the next flush, however many writes come before that.
+ */
+function writeInstanceStyle(instance: ReactHostElement, next: Record<string, unknown>): void {
+  instance.props = { ...instance.props, style: next } as Props
+  const state = stateFor(instance)
+  if (state.mounted) state.container.renderer.deferWrite(instance, () => sendInstanceStyle(instance))
+}
+
+function sendInstanceStyle(instance: ReactHostElement): void {
+  const state = stateFor(instance)
+  if (state.destroyed) return
+  state.container.renderer.setStyle(instance.nativeId, nativeStyleOf(instance.props.style, state.hidden))
 }
 
 /** Mounted, which a destroyed element is not any more. */

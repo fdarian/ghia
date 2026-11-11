@@ -96,6 +96,8 @@ export function createNativeRenderer(
     }
   }
   renderer.tick = () => {
+    // Writes an element made since the last flush (`element.style`) reach native before the frame this tick draws.
+    flushPendingMutations(renderer)
     const running = tick()
     if (!running) {
       unregisterKeyframesHost(renderer)

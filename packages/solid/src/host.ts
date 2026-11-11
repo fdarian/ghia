@@ -24,6 +24,7 @@ import {
   HOST_MOUNT,
   copyPrototypeMembers,
   hasMutationObservers,
+  keepWrittenEntries,
   queueCharacterDataMutation,
   queueChildListMutation,
   recordAttributeChanges,
@@ -169,9 +170,9 @@ export class HostRoot implements MotionBindingHost {
     const html = createHostElement(ROOT_ELEMENT_TYPES.html)
     const head = createHostElement(ROOT_ELEMENT_TYPES.head)
     const body = createHostElement(ROOT_ELEMENT_TYPES.body)
-    html.style = { ...ROOT_ELEMENT_STYLE }
-    head.style = { ...ROOT_HEAD_STYLE }
-    body.style = { ...ROOT_ELEMENT_STYLE }
+    html.setCommittedStyle({ ...ROOT_ELEMENT_STYLE })
+    head.setCommittedStyle({ ...ROOT_HEAD_STYLE })
+    body.setCommittedStyle({ ...ROOT_ELEMENT_STYLE })
     html.parent = this
     for (const child of [head, body]) {
       html.childList.push(child)
@@ -195,8 +196,11 @@ export class HostElement extends HTMLElement {
   root: HostRoot | null = null
   nativeId = 0
   mounted = false
-  style: StyleDesc = {}
-  /** Laid over `style` while it is set, however `style` changes: the box a leaving `popLayout` child keeps. */
+  /** The style the element has: what the framework committed, with what `element.style` wrote over it. */
+  inlineStyle: StyleDesc = {}
+  /** The style the framework committed last, without motion values. */
+  committedStyle: StyleDesc = {}
+  /** Laid over `inlineStyle` while it is set, however that changes: the box a leaving `popLayout` child keeps. */
   pin: StyleDesc | undefined
   /**
    * Held on the instance, not in a module map: the JSX runtime can load a second
@@ -220,9 +224,15 @@ export class HostElement extends HTMLElement {
     return this.domBinding
   }
 
-  /** What the renderer is given: `style` under `pin`. */
+  /** What the renderer is given: `inlineStyle` under `pin`. */
   appliedStyle(): StyleDesc {
-    return this.pin === undefined ? this.style : { ...this.style, ...this.pin }
+    return this.pin === undefined ? this.inlineStyle : { ...this.inlineStyle, ...this.pin }
+  }
+
+  /** The framework committed `style`: it replaces what `element.style` wrote, for the properties it changed. */
+  setCommittedStyle(style: StyleDesc): void {
+    this.inlineStyle = keepWrittenEntries(this.inlineStyle, this.committedStyle, style) ?? style
+    this.committedStyle = style
   }
 
   setPin(pin: StyleDesc | undefined): void {
@@ -461,6 +471,12 @@ defineDomMembers(HostElement.prototype, (element: HostElement) => ({
     setHostProperty(element, name, value)
     if (element.root && element.mounted) element.root.mutations.flushMutations()
   },
+  readStyle: () => element.inlineStyle as Record<string, unknown>,
+  writeStyle: (next) => {
+    element.inlineStyle = next as StyleDesc
+    // Sent once at the next flush, however many writes come before it.
+    if (element.root && element.mounted) element.root.mutations.deferWrite(element, () => element.writeStyle())
+  },
 }))
 defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
   renderer: element.root?.nativeRenderer,
@@ -690,11 +706,15 @@ export function setHostProperty(
   }
   if (name === "style") {
     const split = splitMotionStyle(isStyle(value) ? value : undefined)
-    node.style = split.style ?? {}
-    node.motionValues = split.motionValues
+    const write = () => {
+      node.setCommittedStyle(split.style ?? {})
+      node.motionValues = split.motionValues
+    }
+    if (hasMutationObservers()) recordAttributeChanges(node, ["style"], write)
+    else write()
     if (node.root && node.mounted) {
       node.writeStyle()
-      syncMotionBindings(node.root, node.root.mutations, node.nativeId, node.motionValues, node.kind === "element" ? node.type : undefined, node.style)
+      syncMotionBindings(node.root, node.root.mutations, node.nativeId, node.motionValues, node.kind === "element" ? node.type : undefined, node.inlineStyle)
     }
     return
   }
@@ -748,7 +768,7 @@ function mount(root: HostRoot, node: HostNode): void {
   } else {
     node.sent.reset()
     node.writeStyle()
-    if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.type, node.style)
+    if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.type, node.inlineStyle)
     node.listeners.attach({ eventHandlers: root.eventHandlers, renderer: root.mutations, elementId: node.nativeId })
     for (const [name, value] of node.props) {
       if (!EVENT_PROP_NAMES.has(name) && customPropAllowed(node, name)) {
