@@ -4,7 +4,7 @@
 
 use super::atoms::Atoms;
 use super::selector::{
-    AttrMatcher, AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, SelectorList, Simple, Specificity,
+    AttrMatcher, AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, SelectorList, Simple, Specificity, TypeName,
 };
 use super::tokenizer::{find_close, trim, Kind, Token};
 
@@ -184,7 +184,10 @@ impl Parser<'_, '_> {
                 Kind::Ident(name) if !has_type && simples.is_empty() => {
                     has_type = true;
                     *index += 1;
-                    simples.push(Simple::Tag(self.atoms.intern(&name.to_ascii_lowercase())));
+                    simples.push(Simple::Tag(TypeName {
+                        lower: self.atoms.intern(&name.to_ascii_lowercase()),
+                        written: self.atoms.intern(name),
+                    }));
                     self.reject_namespace(tokens, *index)?;
                 }
                 Kind::Delim('*') if !has_type && simples.is_empty() => {

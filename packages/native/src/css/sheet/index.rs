@@ -87,7 +87,11 @@ impl RuleIndex {
         } else if let Some(tag) =
             subject.iter().find_map(|simple| if let Simple::Tag(tag) = simple { Some(*tag) } else { None })
         {
-            self.by_tag.entry(tag).or_default().push(entry);
+            // An HTML element looks its tag up lower-cased and an SVG one as given.
+            self.by_tag.entry(tag.lower).or_default().push(entry);
+            if tag.written != tag.lower {
+                self.by_tag.entry(tag.written).or_default().push(entry);
+            }
         } else {
             self.universal.push(entry);
         }

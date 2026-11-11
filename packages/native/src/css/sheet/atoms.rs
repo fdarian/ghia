@@ -6,7 +6,8 @@ use rustc_hash::FxHashMap;
 pub struct Atom(u32);
 
 /// One interner per document, shared by every sheet of it. Case is the caller's business: the
-/// parser lower-cases tags and attribute names, and keeps classes and ids as written.
+/// parser interns a type and an attribute name both lower-cased and as written, and keeps classes
+/// and ids as written.
 #[derive(Default)]
 pub struct Atoms {
     by_name: FxHashMap<Box<str>, Atom>,
@@ -33,7 +34,7 @@ impl Atoms {
         self.names.len()
     }
 
-    /// The atom of an element's tag: selectors compare it lower-cased, elements keep it as given.
+    /// The atom of an HTML element's tag: a selector compares it lower-cased, elements keep it as given.
     pub fn tag(&self, name: &str) -> Option<Atom> {
         if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
             self.get(&name.to_ascii_lowercase())

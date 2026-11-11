@@ -93,6 +93,9 @@ impl ElementView for View<'_> {
     fn tag(&self) -> Option<Atom> {
         Some(self.tree.nodes[self.index].tag)
     }
+    fn is_svg(&self) -> bool {
+        false
+    }
     fn id(&self) -> Option<Atom> {
         self.tree.nodes[self.index].id
     }
@@ -688,7 +691,7 @@ fn a_selector_is_stored_subject_first() {
     assert_eq!(selector.compounds.len(), 3);
     assert_eq!(selector.links, [Combinator::Descendant, Combinator::Child]);
     let span = doc.atoms.get("span").expect("interned");
-    assert_eq!(selector.compounds[0].simples[0], Simple::Tag(span));
+    assert_eq!(selector.compounds[0].simples[0], Simple::Tag(TypeName { lower: span, written: span }));
 }
 
 #[test]
@@ -699,7 +702,9 @@ fn atoms_are_shared_and_lower_cased_where_css_is_case_insensitive() {
     assert!(doc.atoms.get("data-x").is_some());
     assert!(doc.atoms.get("Foo").is_some());
     assert!(doc.atoms.get("Bar").is_some());
-    assert!(doc.atoms.get("DIV").is_none());
+    // A type is kept as written too, which is what an SVG element compares.
+    assert!(doc.atoms.get("DIV").is_some());
+    assert!(doc.atoms.get("Data-X").is_some());
     assert!(doc.atoms.get("foo").is_none());
     let again = doc.atoms.intern("div");
     assert_eq!(doc.atoms.name(again), "div");

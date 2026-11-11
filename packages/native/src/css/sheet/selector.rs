@@ -33,7 +33,7 @@ pub struct Compound {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Simple {
-    Tag(Atom),
+    Tag(TypeName),
     Class(Atom),
     Id(Atom),
     Attr(AttrSelector),
@@ -70,6 +70,25 @@ impl Deref for SelectorList {
 
     fn deref(&self) -> &[ComplexSelector] {
         &self.selectors
+    }
+}
+
+/// The name a selector writes as a type. An HTML element's type is case-insensitive and compares
+/// `lower`; an SVG element's is case-sensitive (`linearGradient`) and compares `written`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct TypeName {
+    pub lower: Atom,
+    pub written: Atom,
+}
+
+impl TypeName {
+    /// The atom an element of this kind compares the type against.
+    pub fn for_element(self, is_svg: bool) -> Atom {
+        if is_svg {
+            self.written
+        } else {
+            self.lower
+        }
     }
 }
 

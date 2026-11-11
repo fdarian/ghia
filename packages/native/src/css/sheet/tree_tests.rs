@@ -898,6 +898,21 @@ fn a_subsequent_sibling_combinator_that_cannot_match_costs_work_in_proportion_to
 }
 
 #[test]
+fn a_type_selector_ignores_case_on_an_html_element_and_not_on_an_svg_one() {
+    let mut doc = Doc::new();
+    let svg = doc.element("linearGradient", ROOT);
+    let html = doc.element("lineargradient", ROOT);
+    let shouting = doc.element("DIV", ROOT);
+    doc.style_element(ROOT, "lineargradient { color: red } linearGradient { background-color: blue } Div { opacity: 0.5 }");
+    doc.flush();
+    assert_eq!(doc.color(svg), None);
+    assert_eq!(doc.background(svg), Some("blue"));
+    assert_eq!(doc.color(html), Some("red"));
+    assert_eq!(doc.background(html), Some("blue"));
+    assert_eq!(doc.style(shouting).and_then(|style| style.opacity), Some(0.5));
+}
+
+#[test]
 fn sibling_marks_under_one_parent_expand_the_following_siblings_once() {
     let mut doc = Doc::new();
     doc.style_element(ROOT, ".a ~ .b { color: red }");

@@ -133,7 +133,16 @@ impl<'a> TreeView<'a> {
 
 impl ElementView for TreeView<'_> {
     fn tag(&self) -> Option<Atom> {
-        self.tree.sheets.atoms.tag(&self.element().element_type)
+        let element = self.element();
+        if element.is_svg() {
+            self.tree.sheets.atoms.get(&element.element_type)
+        } else {
+            self.tree.sheets.atoms.tag(&element.element_type)
+        }
+    }
+
+    fn is_svg(&self) -> bool {
+        self.element().is_svg()
     }
 
     fn id(&self) -> Option<Atom> {
