@@ -8,7 +8,6 @@ import {
   document,
   DOM_BINDING,
   HTMLElement,
-  SVG_CHILD_TYPES,
   SVGElement,
   Text,
   defineScrollMembers,
@@ -17,6 +16,10 @@ import {
   blurHostElement,
   eventTypesWithOverrides,
   focusHostElement,
+  attributeNameOf,
+  attributeText,
+  isSvgType,
+  isNotNativeAttribute,
   forwardsCustomProp,
   isHtmlTag,
   isNativeviewHandlerProp,
@@ -28,8 +31,6 @@ import {
   queueCharacterDataMutation,
   queueChildListMutation,
   recordAttributeChanges,
-  ROOT_ELEMENT_STYLE,
-  ROOT_HEAD_STYLE,
   ROOT_ELEMENT_TYPES,
   readBoundingClientRect,
   toBoundingClientRect,
@@ -93,6 +94,16 @@ export function isHostPropertyValue<Value>(
   const type = typeof value
   return value == null || type === "object" || type === "string" ||
     type === "number" || type === "boolean" || type === "function"
+}
+
+interface ClassSources {
+  class: HostPropertyValue
+  className: HostPropertyValue
+  classList: object | undefined
+  /** The `class:name={on}` props: the universal Solid compiler passes each as a prop of that name. */
+  readonly toggles: Map<string, boolean>
+  /** The `classList` keys that were ever truthy: Solid's DOM `classList` takes a token away only from a key it turned on. */
+  readonly turnedOn: Set<string>
 }
 
 export class HostRoot implements MotionBindingHost {
@@ -171,9 +182,6 @@ export class HostRoot implements MotionBindingHost {
     const html = createHostElement(ROOT_ELEMENT_TYPES.html)
     const head = createHostElement(ROOT_ELEMENT_TYPES.head)
     const body = createHostElement(ROOT_ELEMENT_TYPES.body)
-    html.setCommittedStyle({ ...ROOT_ELEMENT_STYLE })
-    head.setCommittedStyle({ ...ROOT_HEAD_STYLE })
-    body.setCommittedStyle({ ...ROOT_ELEMENT_STYLE })
     html.parent = this
     for (const child of [head, body]) {
       html.childList.push(child)
@@ -193,6 +201,8 @@ export class HostElement extends HTMLElement {
    */
   readonly childList: HostNode[] = []
   readonly props = new Map<string, HostPropertyValue>()
+  /** What `class`, `className` and `classList` were each given, once more than one of them is in play: see `mergeClassProp`. */
+  classSources: ClassSources | undefined
   parent: HostParent | null = null
   root: HostRoot | null = null
   nativeId = 0
@@ -591,7 +601,7 @@ class TextDomBinding implements TextBinding {
 
 export function createHostElement(type: string): HostElement {
   if (!isElementType(type)) throw new Error(`Unsupported GPUIX element <${type}>`)
-  if (type === "svg" || SVG_CHILD_TYPES.has(type)) {
+  if (isSvgType(type)) {
     return Reflect.construct(HostElement, [type], SvgHostElement) as HostElement
   }
   return new HostElement(type)
@@ -619,6 +629,7 @@ function isElementType(type: string): type is ElementType {
     case "webview":
     case "nativeview":
     case "virtual-list":
+    case "style":
     case "path":
     case "circle":
     case "ellipse":
@@ -732,11 +743,93 @@ export function setHostProperty(
     node.listeners.setProp(eventType, isEventHandler(value) ? value : undefined)
     return
   }
+  if (mergesClass(node, name)) {
+    setMergedClass(node, name, value)
+    return
+  }
   if (hasMutationObservers()) recordAttributeChanges(node, [name], () => storeHostProp(node, name, value))
   else storeHostProp(node, name, value)
-  if (!node.root || !node.mounted || !customPropAllowed(node, name)) return
+  syncStoredProp(node, name, value)
+}
+
+function syncStoredProp(node: HostElement, name: string, value: HostPropertyValue): void {
+  if (!node.root || !node.mounted) return
+  syncAttribute(node.root, node, name, value)
+  if (!customPropAllowed(node, name)) return
   const serialized = serializeCustomProp(value)
   if (node.sent.writesProp(name, serialized)) node.root.mutations.setCustomProp(node.nativeId, name, serialized)
+}
+
+/** Whether `name` is a prop whose value joins the element's one `class` attribute with another's. */
+function mergesClass(node: HostElement, name: string): boolean {
+  if (name === "classList" || name.startsWith("class:")) return true
+  if (node.classSources !== undefined) return name === "class" || name === "className"
+  return (name === "class" && node.props.has("className")) || (name === "className" && node.props.has("class"))
+}
+
+/**
+ * `class`, `className` and `classList` all end in the one `class` attribute, which is what `props` then
+ * holds under `class`, so `getAttribute`, `className` and the sent attribute agree. `class` wins over
+ * `className` as in `attributesOfProps`. `classList` and `class:name` are what Solid's DOM
+ * `classList` does to the tokens: a truthy key adds its token, and a key that was truthy and is not any more takes it away.
+ */
+function setMergedClass(node: HostElement, name: string, value: HostPropertyValue): void {
+  const sources = (node.classSources ??= {
+    class: node.props.get("class"),
+    className: node.props.get("className"),
+    classList: undefined,
+    toggles: new Map(),
+    turnedOn: new Set(),
+  })
+  if (name === "classList") sources.classList = typeof value === "object" && value !== null ? value : undefined
+  else if (name.startsWith("class:")) sources.toggles.set(name.slice("class:".length), Boolean(value))
+  else if (name === "class") sources.class = value
+  else sources.className = value
+  const merged = classValueOf(sources)
+  const store = () => {
+    node.props.delete("className")
+    storeHostProp(node, "class", merged)
+  }
+  if (hasMutationObservers()) recordAttributeChanges(node, ["class"], store)
+  else store()
+  syncStoredProp(node, "class", merged)
+}
+
+function classValueOf(sources: ClassSources): string | undefined {
+  const written = sources.class !== undefined ? sources.class : sources.className
+  const base = attributeText("class", written)
+  if (sources.classList === undefined && sources.toggles.size === 0) return base ?? undefined
+  let tokens = base === null ? [] : tokensOf(base)
+  let changed = false
+  const listed: Array<[string, unknown]> = sources.classList === undefined ? [] : Object.entries(sources.classList)
+  const toggles = [...listed, ...sources.toggles]
+  for (const [key, on] of toggles) {
+    for (const token of tokensOf(key)) {
+      if (on) {
+        sources.turnedOn.add(token)
+        if (!tokens.includes(token)) {
+          tokens.push(token)
+          changed = true
+        }
+      } else if (sources.turnedOn.has(token) && tokens.includes(token)) {
+        tokens = tokens.filter((existing) => existing !== token)
+        changed = true
+      }
+    }
+  }
+  return changed ? tokens.join(" ") : (base ?? undefined)
+}
+
+function tokensOf(text: string): string[] {
+  return text.split(/\s+/).filter((token) => token !== "")
+}
+
+function syncAttribute(root: HostRoot, node: HostElement, prop: string, value: HostPropertyValue): void {
+  // The record of what was sent is filled when the gate opens (`ElementSource.rememberAttributes`).
+  if (!root.mutations.forwardsAttributes || isNotNativeAttribute(prop)) return
+  const attribute = attributeNameOf(prop, node instanceof SVGElement)
+  const text = attributeText(attribute, value)
+  if (node.sent.writesAttribute(attribute, text)) root.mutations.setAttribute(node.nativeId, attribute, text)
 }
 
 function storeHostProp(node: HostElement, name: string, value: HostPropertyValue): void {
@@ -772,6 +865,7 @@ function mount(root: HostRoot, node: HostNode): void {
     if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.type, node.inlineStyle)
     node.listeners.attach({ eventHandlers: root.eventHandlers, renderer: root.mutations, elementId: node.nativeId })
     for (const [name, value] of node.props) {
+      syncAttribute(root, node, name, value)
       if (!EVENT_PROP_NAMES.has(name) && customPropAllowed(node, name)) {
         const serialized = serializeCustomProp(value)
         if (node.sent.writesProp(name, serialized)) root.mutations.setCustomProp(node.nativeId, name, serialized)

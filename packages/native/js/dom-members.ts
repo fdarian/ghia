@@ -13,6 +13,7 @@ import { dispatchEventAlongPath, document, type GpuixDocument } from "./events/w
 import {
   attributeLookupName,
   attributeNameOf,
+  attributeText,
   isStoredAttribute,
   propWrittenBy,
   storeAttribute,
@@ -173,22 +174,6 @@ function writeAttribute(element: Element, bound: DomElementBinding, name: string
 }
 
 /**
- * A prop as the string a DOM attribute holds, or null where the DOM would have no attribute. A
- * `data-*` or `aria-*` attribute holds "false" for false; any other boolean attribute is present
- * (empty) for true and absent for false.
- */
-function attributeOf(name: string, value: unknown): string | null {
-  if (value === undefined || value === null) return null
-  // A handler or a style object is not an attribute: there is no text to give for it.
-  if (typeof value === "function" || typeof value === "object") return null
-  const lower = name.toLowerCase()
-  if (lower.startsWith("data-") || lower.startsWith("aria-")) return String(value)
-  if (value === false) return null
-  if (value === true) return ""
-  return String(value)
-}
-
-/**
  * Defines the DOM members on `target`, which is a prototype or one instance. `bind` finds what is
  * behind `this`.
  */
@@ -216,7 +201,7 @@ export function defineDomMembers<This extends object>(
         }
         const stored = storedAttribute(this, attributeLookupName(name, svg))
         if (stored !== undefined) return stored
-        return attributeOf(name, propForAttribute(bind(this), name, svg))
+        return attributeText(name, propForAttribute(bind(this), name, svg))
       },
     },
     setAttribute: {

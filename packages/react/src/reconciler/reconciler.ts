@@ -116,6 +116,13 @@ export function createRoot(
     onEvent: rootEventHandlers.onEvent,
     onUncaughtError,
   })
+  batchedRenderer.setElementSource({
+    forEachElement(visit) {
+      for (const instance of gpuixContainer.instances.values()) {
+        visit(instance.nativeId, instance.type, Object.entries(instance.props))
+      }
+    },
+  })
   // The flush stands in for the microtask checkpoint a browser runs before it renders.
   attachRoot(renderer, gpuixContainer, (run) => flushSync(run))
   // Sent on every root, so a remount without the option restores the default.

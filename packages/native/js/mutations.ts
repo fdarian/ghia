@@ -1,5 +1,16 @@
 import { DOM_DISPATCHED_HANDLER_PROPS, KEYBOARD_FOCUS_EVENT_PROPS } from "./events/event-props.js"
 import { registerMutationQueue } from "./bounds.js"
+import {
+  attributesForwarded,
+  openAttributeGate,
+  registerAttributeGateMember,
+  flushDirtySheets,
+  registerSheetSink,
+  type AttributeGateMember,
+  type SheetSink,
+} from "./css/index.js"
+import { attributesOfProps } from "./dom/attribute-names.js"
+import { isSvgType } from "./svg.js"
 import { createBlobImageLoader, type BlobImageHost } from "./blob-images.js"
 import type { MutationHost, MutationRenderer } from "./host.js"
 import { createStyleImageLoader, type StyleImageHost } from "./style-images.js"
@@ -21,8 +32,24 @@ export function appliedBatchCount(): number {
 }
 
 /** Atomic mutation queue shared by all framework adapters. */
-export interface MutationQueue extends MutationRenderer {
+export interface MutationQueue extends MutationRenderer, AttributeGateMember, Pick<SheetSink, "sheetsDirty"> {
   readonly pending: number
+  /**
+   * The mounted elements of this queue's adapter, which the queue reads when the attributes start
+   * to be forwarded (see `css/attribute-gate.ts`). Set it once, before the first element mounts.
+   */
+  setElementSource(source: ElementSource): void
+}
+
+/** An adapter's registry of the elements it has mounted, by native id. */
+export interface ElementSource {
+  /** `props` are the element's current props, in the order it was given them. */
+  forEachElement(visit: (id: number, type: string, props: Iterable<readonly [string, unknown]>) => void): void
+  /**
+   * An adapter that keeps a record of the attributes it sent skips them while the gate is closed, so it is given
+   * what the backfill sent for `id`: the record then says what native holds. It owns `attributes` from here on.
+   */
+  rememberAttributes?(id: number, attributes: Map<string, string>): void
 }
 
 export function createMutationQueue(
@@ -68,6 +95,11 @@ export function createMutationQueue(
 
   const styleImages = createStyleImageLoader(renderer)
 
+  let elementSource: ElementSource | undefined
+  let sheetsPending = false
+  // The gate's answer, kept here because `setAttribute` runs for every attribute of every element.
+  let forwardsAttributes = attributesForwarded(renderer)
+
   const mutations: MutationQueue = {
     get pending() {
       return writer.opCount
@@ -75,6 +107,8 @@ export function createMutationQueue(
     createElement(id, elementType) {
       blobImages.created(id, elementType)
       writer.createElement(id, elementType)
+      // After the op, not before: Solid lists a node as mounted before it queues its element.
+      if (elementType === "style") openAttributeGate(renderer)
       requestFlush()
     },
     destroyElement(id) {
@@ -128,6 +162,39 @@ export function createMutationQueue(
       writer.setCustomProp(id, key, value)
       requestFlush()
     },
+    get forwardsAttributes() {
+      return forwardsAttributes
+    },
+    setAttribute(id, name, value) {
+      if (!forwardsAttributes) return
+      writer.setAttribute(id, name, value)
+      requestFlush()
+    },
+    setStyleSheet(sheetId, text) {
+      if (text !== null) openAttributeGate(renderer)
+      writer.setStyleSheet(sheetId, text)
+      requestFlush()
+    },
+    sheetsDirty() {
+      sheetsPending = true
+      requestFlush()
+    },
+    setAdoptedStyleSheets(sheetIds) {
+      if (sheetIds.length > 0) openAttributeGate(renderer)
+      writer.setAdoptedStyleSheets(sheetIds)
+      requestFlush()
+    },
+    setElementSource(source) {
+      elementSource = source
+    },
+    backfillAttributes() {
+      forwardsAttributes = true
+      elementSource?.forEachElement((id, type, props) => {
+        const attributes = attributesOfProps(props, isSvgType(type))
+        for (const [name, text] of attributes) mutations.setAttribute(id, name, text)
+        elementSource?.rememberAttributes?.(id, attributes)
+      })
+    },
     requestFlush,
     deferWrite(key, write) {
       deferred.set(key, write)
@@ -141,6 +208,10 @@ export function createMutationQueue(
         deferred.clear()
         for (const write of writes) write()
         flushScheduled = false
+      }
+      if (sheetsPending) {
+        sheetsPending = false
+        flushDirtySheets(renderer, mutations)
       }
       if (writer.opCount === 0) return
       appliedBatches++
@@ -187,6 +258,8 @@ export function createMutationQueue(
     },
   }
   registerMutationQueue(renderer, mutations)
+  registerAttributeGateMember(renderer, mutations)
+  registerSheetSink(renderer, mutations)
   return mutations
 }
 
@@ -300,6 +373,9 @@ export function isUniversalProp(name: string): boolean {
 
 /** Whether a prop of an element of this type reaches native. A host element forwards only its universal props. */
 export function forwardsCustomProp(type: string, name: string): boolean {
+  // `class` and `data-*` reach native through `setAttribute` alone: nothing in native reads them as props, and a copy of
+  // each as a custom prop would cost a second op per element for a value the attribute store already holds.
+  if (name === "class" || name === "className" || name.startsWith("data-")) return false
   if (!BUILT_IN_TYPES.has(type)) return true
   const ofTag = isHtmlTag(type) ? HTML_TAG_PROPS[type] : undefined
   return isUniversalProp(name) || ofTag?.includes(name) === true

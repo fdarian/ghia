@@ -4390,7 +4390,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         for (id, _, kind, display) in nodes {
             tree.create_element(*id, kind.to_string());
-            tree.set_style(*id, Arc::new(crate::style::StyleDesc {
+            tree.set_style_arc(*id, Arc::new(crate::style::StyleDesc {
                 display: display.map(str::to_owned),
                 ..Default::default()
             }));
@@ -6950,7 +6950,7 @@ mod tests {
         ]);
         page.tree.set_commit_patching(true);
         for id in [6, 7] {
-            page.tree.set_style(id, restyled(r##"{"backgroundColor":"#111111"}"##));
+            page.tree.set_style_arc(id, restyled(r##"{"backgroundColor":"#111111"}"##));
         }
         let shape = page.list_frame(false);
         // The list builds the row 3 and not the row 4.
@@ -6958,11 +6958,11 @@ mod tests {
         page.tree.take_dirty();
         page.tree.take_restyles();
 
-        page.tree.set_style(7, restyled(r##"{"backgroundColor":"#222222"}"##));
+        page.tree.set_style_arc(7, restyled(r##"{"backgroundColor":"#222222"}"##));
         assert_eq!(page.tree.pending_restyles(), [7]);
         assert_eq!(page.preview(&[], false), Ok(vec![]), "a row that is not built has nothing to repaint, and is built with the new style when it comes in");
 
-        page.tree.set_style(6, restyled(r##"{"backgroundColor":"#222222"}"##));
+        page.tree.set_style_arc(6, restyled(r##"{"backgroundColor":"#222222"}"##));
         assert_eq!(page.preview(&[], false), Err(Unpatchable::Commit(6)), "a row that is built and no root holds is a frame built whole");
 
         let env = crate::renderer::FrameEnv::for_test(page.inherited.clone(), EnterKey(Key::default()), web_time::Instant::now());
@@ -6982,33 +6982,33 @@ mod tests {
         let mut page = Units::new();
         page.patch_roots = [2, 3].into_iter().collect();
         page.tree.set_commit_patching(true);
-        page.tree.set_style(3, restyled(r##"{"backgroundColor":"#111111"}"##));
-        page.tree.set_style(5, restyled(r##"{"backgroundColor":"#111111"}"##));
+        page.tree.set_style_arc(3, restyled(r##"{"backgroundColor":"#111111"}"##));
+        page.tree.set_style_arc(5, restyled(r##"{"backgroundColor":"#111111"}"##));
         assert_eq!(hover_page(&mut page, &[]), [Some(false), Some(true), Some(false)]);
         page.tree.take_dirty();
         assert_eq!(page.preview(&[], false), Ok(vec![]), "nothing changed");
 
         // A colour that stays visible: the revision moved, the barrier did not.
         let frame_revision = page.retain.plan.revision;
-        page.tree.set_style(3, restyled(r##"{"backgroundColor":"#222222"}"##));
+        page.tree.set_style_arc(3, restyled(r##"{"backgroundColor":"#222222"}"##));
         assert_eq!(page.tree.take_dirty(), Dirty::PaintPatchable);
         assert!(page.tree.revision() > frame_revision);
         assert!(page.tree.patch_barrier() <= frame_revision);
         assert_eq!(page.preview(&[], false), Ok(vec![2]), "the root that holds 3 is repainted");
 
         // An element no root holds is a frame built whole, which visits the roots.
-        page.tree.set_style(5, restyled(r##"{"backgroundColor":"#333333"}"##));
+        page.tree.set_style_arc(5, restyled(r##"{"backgroundColor":"#333333"}"##));
         assert_eq!(page.preview(&[], false), Err(Unpatchable::Commit(5)));
         page.tree.take_restyles();
         assert_eq!(page.preview(&[], false), Ok(vec![]), "once a frame took what was restyled");
 
         // An opacity that crosses 1 changes what is painted in kind: no restyle a root repaints, though it only paints. It is
         // a change of the element that no anchor holds (this page has none), which a frame built whole draws.
-        page.tree.set_style(3, restyled(r##"{"backgroundColor":"#222222","opacity":0.5}"##));
+        page.tree.set_style_arc(3, restyled(r##"{"backgroundColor":"#222222","opacity":0.5}"##));
         assert_eq!(page.tree.take_dirty(), Dirty::Paint);
         assert_eq!(page.preview(&[], false), Err(Unpatchable::Structure(3)));
         // And it stays one for the restyles after it, until a frame is built whole.
-        page.tree.set_style(3, restyled(r##"{"backgroundColor":"#444444","opacity":0.5}"##));
+        page.tree.set_style_arc(3, restyled(r##"{"backgroundColor":"#444444","opacity":0.5}"##));
         assert_eq!(page.preview(&[], false), Err(Unpatchable::Structure(3)));
         hover_page(&mut page, &[]);
         assert_eq!(page.preview(&[], false), Ok(vec![]), "the frame built whole took what changed");
@@ -7403,9 +7403,9 @@ mod tests {
     #[test]
     fn a_restyle_is_not_classified_while_patching_is_off() {
         let mut page = Units::new();
-        page.tree.set_style(3, restyled(r##"{"backgroundColor":"#111111"}"##));
+        page.tree.set_style_arc(3, restyled(r##"{"backgroundColor":"#111111"}"##));
         page.tree.take_dirty();
-        page.tree.set_style(3, restyled(r##"{"backgroundColor":"#222222"}"##));
+        page.tree.set_style_arc(3, restyled(r##"{"backgroundColor":"#222222"}"##));
         assert_eq!(page.tree.take_dirty(), Dirty::Paint);
         assert!(page.tree.pending_restyles().is_empty());
         assert_eq!(page.tree.patch_barrier(), page.tree.revision() - 1);
@@ -7790,7 +7790,7 @@ mod tests {
         };
         assert_eq!(motion_on_5(&page), Err(Unpatchable::Outside(5)), "a box that is drawn and runs something outside the unit");
         let none = serde_json::json!({"display": "none"});
-        page.tree.set_style(5, std::sync::Arc::new(serde_json::from_value(none).expect("a style")));
+        page.tree.set_style_desc(5, serde_json::from_value(none).expect("a style"));
         page.page(&[], Some(true), None);
         page.page(&[], Some(true), None);
         assert_eq!(motion_on_5(&page), Ok(vec![2]), "no frame builds or paints it");

@@ -290,7 +290,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         for (id, kind, style) in nodes {
             tree.create_element(*id, kind.to_string());
-            tree.set_style(*id, Arc::new(style.clone()));
+            tree.set_style_desc(*id, style.clone());
         }
         tree.set_root(nodes[0].0);
         for pair in nodes.windows(2) {

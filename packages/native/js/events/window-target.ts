@@ -1,6 +1,7 @@
 import type { EventPayload } from "../../index.js"
 import type { Animation } from "../web-animations.js"
 import { Document, DOM_BINDING, registerDocument, type Node, type NodeBinding } from "../dom/nodes.js"
+import { getAdoptedStyleSheets, replaceAdoptedStyleSheets, type CSSStyleSheet } from "../css/index.js"
 import { getSelection, type Selection } from "../dom/selection.js"
 import { mountedRenderer } from "../mounted-renderer.js"
 import {
@@ -235,6 +236,15 @@ export class GpuixDocument<Element = unknown> extends Document {
 
   [DOM_BINDING](): NodeBinding {
     return DOCUMENT_BINDING
+  }
+
+  /** The constructed sheets that apply to every window of the app, in order; later ones win. */
+  get adoptedStyleSheets(): CSSStyleSheet[] {
+    return getAdoptedStyleSheets()
+  }
+
+  set adoptedStyleSheets(sheets: Iterable<CSSStyleSheet>) {
+    replaceAdoptedStyleSheets(sheets)
   }
 
   addEventListener(

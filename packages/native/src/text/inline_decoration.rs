@@ -346,7 +346,7 @@ mod tests {
             tree.set_text(id, text.to_string());
         }
         for (id, style) in styles {
-            tree.set_style(*id, Arc::new(serde_json::from_value(style.clone()).expect("a style")));
+            tree.set_style_desc(*id, serde_json::from_value(style.clone()).expect("a style"));
         }
         tree
     }

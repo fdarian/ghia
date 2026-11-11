@@ -69,6 +69,10 @@ export default defineConfig({
 })
 ```
 
+`ghia()` returns two plugins (the main one and `ghia:workers`), so put its
+result in the `plugins` array as it is; do not index into it or wrap it in a
+single `Plugin`.
+
 Use `vite.config.mts` when your `package.json` has no `"type": "module"`.
 
 `react()` also makes the bare `react-dom` import resolve to `@ghia/react/react-dom`,
@@ -145,8 +149,13 @@ ghia build
 
 `ghia build` writes `dist/main.js` and compiles it into `dist/app`, one
 executable that carries Bun and the renderer (about 128 MB), so it runs with no
-Bun and no Node install. `ghia build --no-compile` writes only `dist/main.js`,
-which runs with plain `bun`.
+Bun and no Node install. `ghia build --no-compile` writes `dist/main.js` plus
+the Worker files and chunks, all flat in `dist/`, which run with plain `bun`.
+
+A Worker the app starts with `new Worker(new URL('./raster.ts', import.meta.url))`
+(a relative string literal, in the UI or the server code) is bundled into
+`dist/raster-<hash>.worker.js` and carried by the binary; see
+[App Workers](solid.md#app-workers).
 
 For a smaller ship set, run the same React app on
 [hermes-node](../hermes/README.md) instead of Bun. That path is
@@ -511,12 +520,23 @@ is atomic: native decodes it whole and resolves every style before it touches an
 | 10 | `setKeyboardFocusDim` | bool |
 | 11 | `setUniversalStyle` | string style; the empty string clears the layer |
 | 12 | `setCustomProp` | id, string key, value |
+| 13 | `setAttribute` | id, string name, bool present, then (when present) string value |
+| 14 | `setStyleSheet` | sheet id, bool present, then (when present) string text |
+| 15 | `setAdoptedStyleSheets` | varint count, then that many sheet ids |
 
 A string child is an element of type `"#text"` (a DOM text node): the adapters send `createElement id "#text"` and then `setText`. It takes no style, listener, prop or child, and `setText` is for it only.
 
 **A style is its JSON text**, the exact string `JSON.stringify(style)` gives, with the keys in the order written.
 Native interns styles by those bytes and reads `@container` rules from the text, so two styles are one style exactly
 when their text is equal. Native does not parse the JSON until it meets a text it has not interned.
+
+**A `setAttribute` carries a name and, when the bool is 1, a value**; 0 removes the attribute and nothing follows it. An
+empty value is a present attribute, not a removal.
+
+**A `setStyleSheet` sets the text of a constructed stylesheet**; 0 deletes it. Sheet ids are their own namespace, not element
+ids. A sheet applies only while `setAdoptedStyleSheets` lists it (the list replaces the previous one; the order is the order of
+the cascade, after the sheets of the document's `<style>` elements). `CSSStyleSheet` and `document.adoptedStyleSheets` send both
+([Stylesheets](#stylesheets)).
 
 **A `setCustomProp` value** is a tag byte and its payload:
 
@@ -668,7 +688,7 @@ Run it with `ghia dev`. A save applies a component edit as a hot update
 (local signal state resets) and re-runs the entry when no component accepts
 the edit. `ghia build` writes `dist/main.js` and compiles it into `dist/app`,
 one executable that embeds Bun and the native addon (about 128 MB). `ghia build
---no-compile` writes only `dist/main.js`, which runs with plain `bun`, and
+--no-compile` writes `dist/main.js` plus the Worker files and chunks, which run with plain `bun`, and
 `ghia({ entry, compile: { outfile } })` moves the binary.
 
 ```bash
@@ -5080,6 +5100,22 @@ const PointerEvent = input.ownerDocument.defaultView.PointerEvent
 input.dispatchEvent(new PointerEvent('click', { bubbles: true, cancelable: true, shiftKey: event.shiftKey }))
 ```
 
+**Attributes on native.** The adapters also send the DOM attributes an element has to native (`MutationRenderer.setAttribute`,
+wire op 13), so the Rust side reads them without a call into JS. They are exactly what `getAttributeNames()` lists: every prop
+that is not `style`, `children`, `key` or `ref`, whose value is not a function or an object, named by `attributeNameOf(prop, svg)`
+and valued as `getAttribute` reads it (a string as it is, a number its text, `true` the empty string; `false`, `null` and
+`undefined` remove the attribute; on `data-*` and `aria-*` a boolean is its text, `"true"` or `"false"`). A prop native also
+reads (`id`, `tabIndex`, `role`, `aria-*`) is sent both ways. An HTML element's names are lower case (`tabIndex` is `tabindex`,
+`data-rowId` is `data-rowid`, `className` is `class`, `htmlFor` is `for`), and a selector's attribute name is compared lower-cased, so
+`[tabindex="0"]` and `[tabIndex="0"]` both match `tabIndex={0}`. An SVG element keeps the case of its names and a selector is
+compared exactly: `svg[viewBox]` matches and `svg[viewbox]` does not, as in Chrome. Native reads an attribute from what was sent
+and from nothing else. A renderer sends none of them until a sheet can apply to it (a `<style>` element is created or a
+constructed sheet is adopted), and then sends those of the elements already mounted, so an app with no sheet sends none of them
+([the attribute gate](fork/stylesheets.md#the-attribute-gate)). What it still pays is the props themselves: 5000 items with a class and two `data-*` attributes each mount in 146 Minstr of JS and batch work against 125 for the same items without them (batch noise is about 12), with no op sent and native unchanged at 14.7 Minstr, and a class or `data-*` toggle costs 1.4 Minstr either way (`profile-stylesheet-cost`, `attrs` against `inline`). Setting an attribute changes nothing drawn by itself. `className` is no longer
+a prop of the native element on any element type: `class` is its attribute. In Solid, `class`, `className`, `classList` and `class:name` all end in the one `class` attribute: `class` wins over `className` (as an attribute written as such does everywhere), and `classList` and `class:name` add the token of a truthy key and, as Solid's DOM `classList` does, take it away from a key that was truthy and no longer is, so `getAttribute("class")`, `className` and `.name` rules all see the result.
+
+A `<style>` element and `CSSStyleSheet` add CSS rules that read these attributes: see [Stylesheets](#stylesheets).
+
 ### DOM classes and the tree
 
 Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `Element` and `Node` hold for every host element, `SVGElement` replaces `HTMLElement` for an `<svg>` and the shapes in it, and a text child is a `Text` (a `CharacterData`). `Node`, `Element`, `HTMLElement`, `SVGElement`, `Text`, `CharacterData`, `Document`, `DocumentFragment` and `ShadowRoot` are exported by `@ghia/native/host` and installed as globals where the runtime has none (not on the browser build). Two copies of `@ghia/native` share one set of classes. `new HTMLElement()` and the other public classes throw `TypeError: Illegal constructor`. `document` is a `Document`. `DocumentFragment` and `ShadowRoot` are never instantiated, so an `instanceof` check against them is `false`. `HTMLInputElement` and `HTMLTextAreaElement` are globals too (and exported), where a library reads `win.HTMLInputElement` to tell a text control: an element is one by its tag (`el instanceof HTMLInputElement` holds for an `<input>` and no other), and they cannot be constructed. `DOMRect` and `DOMRectReadOnly` are globals as well, with `fromRect`, the edges `left`, `right`, `top` and `bottom` (the lesser and the greater of the two edges for a negative size) and `toJSON()`; `DOMRect`'s `x`, `y`, `width` and `height` can be set. The other `HTML*Element` classes are not there.
@@ -5094,12 +5130,12 @@ Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `
 | `textContent` | The text of the node and its descendants. Read only: there is no setter yet. |
 | `matches(selector)`, `closest(selector)` | A real selector, as in the DOM: type, class, id, attribute (`=`, `~=`, `\|=`, `^=`, `$=`, `*=`, with `i` and `s`), the combinators (space, `>`, `+`, `~`), selector lists, and `:not()`, `:is()`, `:where()`, `:has()`, `:root`, `:empty`, `:scope`, `:first-child`, `:last-child`, `:only-child`, `:nth-child()`, `:nth-last-child()` and the `-of-type` forms, `:lang()`, `:disabled`, `:enabled` (read from the attributes), and `:checked` and `:indeterminate` (the live state of a checkbox or radio). `closest` starts at the element itself and walks up through the parents. `:scope` is the element the method is called on. `:focus`, `:focus-visible`, `:focus-within`, `:hover` and `:active` ask the window, so they answer for the focus and pointer as they are at that moment (and are `false` for an element that is not mounted). A selector the engine cannot parse, or a pseudo-class or pseudo-element it does not have, throws a `SyntaxError` `DOMException`; see [the deviations](fork/deviations.md#dom-selectors). Tag names are compared without case (`P` matches a `<p>`), as an HTML document does. |
 | `querySelector(selector)`, `querySelectorAll(selector)` | On an element, on `document` and on a `DocumentFragment`. The elements below the node that match, in document order: the node itself is not one, but the whole selector is matched against the tree, so `el.querySelectorAll('main p')` finds a `p` in `el` whose `main` is above it. `querySelectorAll` returns a static list (an `Array` with `item(index)`, `length` and `forEach`) that does not follow later changes to the tree, and `querySelector` the first or `null`. `document.querySelector(…)` searches the `<html>` of every window, so an app's elements and a portal into `document.body` are both found; with nothing mounted it finds nothing. `:scope` in a query on `document` is `<html>`. A selector is compiled once and kept by its text, so asking the same question on every focus change (a focus trap's tabbable list, `a[href], button:not([disabled]), [tabindex]`) walks the tree and parses nothing. |
-| `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `className` or `class` prop (`""` without one), an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a live `DOMStringMap` of the `data-*` attributes with the names in camel case (`data-row-id` is `rowId`): a read goes through `getAttribute`, and an assignment or a `delete` through `setAttribute` and `removeAttribute`, so Base UI's `element.dataset.tabindex = ...` works. |
+| `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `class` attribute (`""` without one; `class` wins over `className`, as `getAttribute("class")` does), an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a live `DOMStringMap` of the `data-*` attributes with the names in camel case (`data-row-id` is `rowId`): a read goes through `getAttribute`, and an assignment or a `delete` through `setAttribute` and `removeAttribute`, so Base UI's `element.dataset.tabindex = ...` works. |
 | `hidden`, `tabIndex`, `isContentEditable`, `shadowRoot`, `assignedSlot` | `hidden` is the `hidden` attribute: `false` without it, `true` with it, and `"until-found"` when the attribute says that; assigning `true` or a non-empty string sets it, `false` removes it. An element that has it is `display: none` by its user agent style, as in Chrome (`[hidden]:not([hidden=until-found i])`), whatever its tag, so the author's own `display` is over it, and `until-found` keeps its box. `tabIndex` is the `tabindex` attribute as an integer (text that does not start with one reads the default), and without it the default of the tag, as in the HTML standard: 0 for `a`, `area`, `button`, `frame`, `iframe`, `input`, `object`, `select`, `textarea` and the first `summary` of a `details`, -1 for the rest; assigning writes the attribute. `isContentEditable` is `false`: Ghia has no `contenteditable`, so nothing in it is an editing host (an element given the attribute is not editable, and Base UI's tabbable walk reads it as not focusable by it). `shadowRoot` and `assignedSlot` are `null`: there is no shadow DOM. |
-| `setAttribute(name, value)`, `removeAttribute(name)`, `toggleAttribute(name, force?)` | Write the prop the attribute stands for through the framework's own prop path, so native applies it as if the app had rendered that prop, at once (the mutations are flushed before the call returns), and `getAttribute` gives it back. This is what `@floating-ui`'s `markOthers` and Base UI's focus manager do: `setAttribute('aria-hidden', 'true')` leaves the element out of the accessibility tree, `setAttribute('inert', '')` makes the subtree inert, `setAttribute('tabindex', '-1')` makes the element focusable and `'0'` a tab stop. Names are lowercased on HTML elements, as in the DOM, and an empty name or one with a space, `/`, `>`, `=` or NUL throws `InvalidCharacterError`. The value is text: `tabindex`, `colspan`, `rowspan`, `span` and `maxlength` hold the integer the text is (text that is no integer is kept as it is, and native ignores it); `inert`, `disabled`, `hidden` (except `until-found`, which is kept as that text), `required`, `readonly`, `autofocus`, `checked`, `multiple`, `selected` and `open` are on whatever the text is (`""` too), and `draggable` is on for `"true"`. `class` is `className` (or `class`, where the element was given that), `for` is `htmlFor`, and any other name is the prop of that name (`aria-*`, `data-*`). An element keeps the key its framework used for an attribute. Like the DOM, a later commit of the same prop by React or Solid overwrites the attribute, a commit that leaves the prop as it was does not, and an attribute the framework never set stays. `setAttribute('style', text)` sets `style.cssText` (below), and `on*` is kept as text for `getAttribute` and does nothing else: see [deviations](./fork/deviations.md#dom-attributes). `toggleAttribute` follows the DOM and returns whether the attribute is there afterwards. A `MutationObserver` with `attributes` gets a record, with `oldValue` where it asked, for each write that changes what `getAttribute` reads. |
+| `setAttribute(name, value)`, `removeAttribute(name)`, `toggleAttribute(name, force?)` | Write the prop the attribute stands for through the framework's own prop path, so native applies it as if the app had rendered that prop, at once (the mutations are flushed before the call returns), and `getAttribute` gives it back. This is what `@floating-ui`'s `markOthers` and Base UI's focus manager do: `setAttribute('aria-hidden', 'true')` leaves the element out of the accessibility tree, `setAttribute('inert', '')` makes the subtree inert, `setAttribute('tabindex', '-1')` makes the element focusable and `'0'` a tab stop. Names are lowercased on HTML elements, as in the DOM, and an empty name or one with a space, `/`, `>`, `=` or NUL throws `InvalidCharacterError`. The value is text: `tabindex`, `colspan`, `rowspan`, `span` and `maxlength` hold the integer the text is (text that is no integer is kept as it is, and native ignores it); `inert`, `disabled`, `hidden` (except `until-found`, which is kept as that text), `required`, `readonly`, `autofocus`, `checked`, `multiple`, `selected` and `open` are on whatever the text is (`""` too), and `draggable` is on for `"true"`. `class` is `className` (or `class`, where the element was given that), `for` is `htmlFor`, and any other name is the prop of that name (`aria-*`, `data-*`). An element keeps the key its framework used for an attribute. The write goes the way a rendered prop's does to the attribute store native's [stylesheet](#stylesheets) selectors read, so `[data-state="open"]`, `[hidden]` and `.foo` match what `setAttribute`, `toggleAttribute` and `dataset` write, and stop matching when it is removed. Like the DOM, a later commit of the same prop by React or Solid overwrites the attribute, a commit that leaves the prop as it was does not, and an attribute the framework never set stays. `setAttribute('style', text)` sets `style.cssText` (below), and `on*` is kept as text for `getAttribute` and does nothing else: see [deviations](./fork/deviations.md#dom-attributes). `toggleAttribute` follows the DOM and returns whether the attribute is there afterwards. A `MutationObserver` with `attributes` gets a record, with `oldValue` where it asked, for each write that changes what `getAttribute` reads. |
 | `style` | The element's inline style as a `CSSStyleDeclaration` (`el.style instanceof CSSStyleDeclaration`; one object per element, assigning a string sets `cssText`). It reads the style the element has now, as CSS text: the framework's `style` prop with what was written through the declaration laid over it, a number as React DOM writes it (`height: 20` is `"20px"`, `opacity: 0.5` is `"0.5"`, `0` is `"0"`) and `""` for what is not set. Members: an accessor for every CSS property in camel case (`style.height`, `style.pointerEvents`, `style.cssFloat`, and `style.webkitFontSmoothing`; Chrome's list plus Ghia's own style keys), `getPropertyValue(name)`, `setProperty(name, value, priority?)`, `removeProperty(name)` (gives the old value), `getPropertyPriority(name)` (kebab-case and `--custom` names), `cssText` (a getter and a setter that parses declarations, comments, quoted `;` and `!important`), `length`, `item(index)`, iteration and `parentRule` (`null`). Setting `""` or `null`, or calling `removeProperty`, removes the property, and as in the DOM that also removes a value the framework set, until the framework commits that property again. What is written is applied as a style: a written `height`, `transform` or `opacity` reaches layout, paint and `getComputedStyle`, and a custom property feeds a `var()` in the framework's `style`. A commit by React or Solid replaces only the properties it changed (as React DOM sets only the changed keys): a property the commit leaves as it was keeps the written value, and a property the framework never set stays. A write is queued, not sent: a burst of `setProperty` calls before a frame (a drawer's pointer move) is one `setStyle` for native, sent before the next frame and before any read that lays out (`getBoundingClientRect`, `offset*`, `getComputedStyle`, `scrollTop`) and a write that changes nothing queues nothing. `setAttribute('style', text)` and `getAttribute('style')` are `cssText`, and `removeAttribute('style')` clears it. A `MutationObserver` gets one `style` attribute record per write that changes the text, with `oldValue` the `cssText` before, and one for a `style` prop the framework commits. Not applied or not the DOM's: see [deviations](./fork/deviations.md#dom-attributes). |
 
-Every window root is a real `<html>` with a `<head>` and a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.head` the `<head>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; all four are `null` while no root is mounted, and with several windows they are those of the window that mounted last (the rule `matchMedia` follows). `html.parentNode` is `document`, `head.parentNode` and `body.parentNode` are `html` (`documentElement.children` is `[head, body]`), a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin; they add no accessibility node. `head` is `display: none`: it has no box, and an element appended to it is never drawn, laid out or hit, though it is a real element in the tree (a library that prepends a node to `document.head` finds one).
+Every window root is a real `<html>` with a `<head>` and a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.head` the `<head>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; all four are `null` while no root is mounted, and with several windows they are those of the window that mounted last (the rule `matchMedia` follows). `html.parentNode` is `document`, `head.parentNode` and `body.parentNode` are `html` (`documentElement.children` is `[head, body]`), a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin (the [user agent style](#html-tags) of those tags, which a stylesheet rule such as `body { display: flex }` overrides, and neither has a `style` attribute); they add no accessibility node. `head` is `display: none`: it has no box, and an element appended to it is never drawn, laid out or hit, though it is a real element in the tree (a library that prepends a node to `document.head` finds one).
 
 `document.getElementById(id)` finds the first element, in document order across every window, whose `id` is `id` (`null` for none and for `""`). `document.createElement(name)` makes an HTML element of that tag (the name is lowercased; an invalid one throws an `InvalidCharacterError`) that is in no tree: a library makes one to measure with or to test a feature (`createElement('div').focus({ get preventScroll() {...} })`). It has the members of an element that is not connected: attributes (`setAttribute`, `getAttribute`, `hidden`, `tabIndex`), `style`, `addEventListener` and `dispatchEvent`, `isConnected` `false`, `parentNode` `null`, no children, and a zero box (`offsetWidth` and `getBoundingClientRect()` read 0, `getClientRects()` is empty, `offsetParent` is `null`, `getComputedStyle` reads `""`, the scroll sizes and offsets are 0). `focus()` reads `preventScroll` from its options and takes no focus. Nothing mounts it and there is no `appendChild` to insert it, so it is not drawn: see [deviations](./fork/deviations.md#documentcreateelement).
 
@@ -6462,6 +6498,7 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `anchored`      | Positioned overlay                               |
 | `webview`       | A web page in a native view of the window (macOS) |
 | `nativeview`    | A `div` with an AppKit view from another library in it (macOS) |
+| `style`         | A stylesheet: its text is the CSS, never drawn (see [Stylesheets](#stylesheets)) |
 | `canvas`        | Custom drawing (planned)                         |
 
 HTML tags (`p`, `h1`, `ul`, `a`, `button`, `table` and the rest) are elements too: see [HTML tags](#html-tags).
@@ -8764,7 +8801,7 @@ way, overflow included.
 
 ### Group state styles
 
-There is no stylesheet, so an element cannot react to a hovered ancestor with a
+A stylesheet has no `:hover` yet ([Stylesheets](#stylesheets)), so an element cannot react to a hovered ancestor with a
 selector. Mark the ancestor with `group` and style the descendants with
 `groupHover`, `groupActive` and `groupFocusWithin`, like Tailwind's
 `group-hover:`, `group-active:` and `group-focus-within:`:
@@ -8848,7 +8885,7 @@ can hold works: layout, `position`, `color` (which reaches the descendants'
 that `hover` does, including an inline `<span>`: a span restyles while a span
 inside it is hovered.
 
-There is no stylesheet, so this is not the whole of `:has()`. It cannot express:
+A stylesheet has no `:has()` either, so this is not the whole of it. It cannot express:
 
 - An arbitrary selector. `:has(.error)`, `:has(img)` and `:has(+ x)` need a
   selector engine; the six keys cover the pseudo-classes Ghia tracks
@@ -9362,7 +9399,10 @@ render per frame.
   transition when its duration plus delay is above zero, using the `transition*`
   of the style after the change, so a change that also adds the transition (or a
   duration) runs. The first style an
-  element mounts with never transitions. A property that is unset starts from its
+  element is drawn with never transitions: not one given in a later batch before
+  the first frame, and not one an element has when it is inserted, whether it was
+  created detached or removed and put back (a browser gives an element outside the
+  document no computed style). A property that is unset starts from its
   CSS computed value: the initial one (`opacity` 1, padding `0`, `boxShadow`
   none, `backgroundColor` transparent) or the inherited one (`color` is the
   parent's colour, so `color` unset to `color: 'blue'` runs from it, and a
@@ -9445,8 +9485,8 @@ render per frame.
 
 ### CSS animations
 
-`animation` and its longhands take CSS syntax, as in a DOM inline style. There is
-no stylesheet to hold `@keyframes`, so `defineKeyframes` is its analogue. The
+`animation` and its longhands take CSS syntax, as in a DOM inline style. A
+stylesheet skips `@keyframes` rules, so `defineKeyframes` is the way to declare them. The
 animation then runs natively, with no React render per frame.
 
 ```tsx
@@ -9699,10 +9739,71 @@ Costs and limits ([deviations](./fork/deviations.md#paint-and-transforms)):
 - A layer with a `transition` makes every element track transitions, which costs
   a little per element per frame. Name the properties as above instead of `all`
 - It is one layer. There are no selectors, no specificity and no cascade between
-  rules, so it cannot say "every `<span>`" or "every child of a card"
+  rules (a [stylesheet](#stylesheets) has them), so it cannot say "every `<span>`" or "every child of a card"
 - An element that had no style when the layer first gave it a `transition` has
   no earlier style to fade from, so a colour the same change gives it appears at
   once. Later changes fade
+
+## Stylesheets
+
+Ghia matches CSS rules against the tree natively, so a library that injects a stylesheet works unchanged: `@dnd-kit/dom` styles a dragged item with `[data-dnd-dragging]` rules it adds as a constructed sheet. A rule's declarations take part in the cascade with the element's `style` prop and go through the same parser, so everything under [Supported Styles](#supported-styles) is available in a sheet, `var()` included.
+
+There are two ways to add a sheet, and any number of each:
+
+- **A `<style>` element** (`<style>{css}</style>` in Solid and React): its text children are the CSS. It takes part while it is connected to the root, in tree order, follows changes to its text and stops applying when it is removed. It is `display: none` and never drawn. Its `media`, `type`, `disabled` and `nonce` attributes are not read.
+- **A constructed sheet**: `new CSSStyleSheet()`, then put it in `document.adoptedStyleSheets`. Constructed sheets come after every `<style>` element in the cascade, in the order of the adopted list.
+
+```ts
+const sheet = new CSSStyleSheet()
+sheet.replaceSync(`
+  .card { padding: 8px; border-radius: 6px }
+  .card[data-selected] { outline: 2px solid var(--accent) }
+`)
+document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
+```
+
+### `CSSStyleSheet`
+
+`CSSStyleSheet`, `CSSRule`, `CSSStyleRule` and `CSSRuleList` are exported by `@ghia/native/host` and installed as globals where the runtime has none (not on the browser build, which has the browser's).
+
+| Member | |
+|---|---|
+| `new CSSStyleSheet(options?)` | `options.disabled` starts the sheet disabled; `baseURL` and `media` are accepted and ignored. |
+| `replaceSync(text)` | Replaces every rule. `@import` rules are left out, as the spec says of a constructed sheet. |
+| `replace(text)` | The same one microtask later; resolves with the sheet. |
+| `insertRule(rule, index = 0)` | Puts one rule at `index` and returns the index. Throws a `DOMException` named `SyntaxError` unless the text is exactly one rule (or is an `@import`), and `IndexSizeError` when `index` is past the end. |
+| `deleteRule(index)` | Throws `IndexSizeError` for an index that is not a rule. |
+| `cssRules` | A live, read-only, array-like list: `length`, `item(i)`, index access and iteration. Each entry is a `CSSRule` with `cssText`, `type` (`1` for a style rule, `4` `@media`, `5` `@font-face`, `7` `@keyframes`, `12` `@supports`, `3` `@import`, `0` for the others, `@layer` and `@container` included), `parentRule` (`null`) and `parentStyleSheet`; a style rule is a `CSSStyleRule` and has `selectorText`. |
+| `disabled` | A disabled sheet does not apply, adopted or not. |
+| `ownerNode`, `ownerRule`, `parentStyleSheet`, `href`, `title` | `null`. `type` is `"text/css"`. |
+
+Native parses the sheet, so JS keeps only the text of each rule to answer `cssRules`. `cssText` is the rule as it was written, comments inside it included, not a re-serialization, and a rule with a selector native rejects is still listed. Every change sends the whole sheet to native, once per flush of the queue however many changes came before (1000 `insertRule` calls in one tick are one op). There is no `CSSStyleRule.style`, `CSSGroupingRule` or `CSSMediaRule`; see [deviations](./fork/deviations.md#stylesheets).
+
+### `document.adoptedStyleSheets`
+
+An observable array of `CSSStyleSheet`: assigning the property, assigning an index or `length`, and `push`, `pop`, `shift`, `unshift`, `splice`, `sort`, `reverse`, `fill` and `copyWithin` all take effect, and a value that is not a `CSSStyleSheet` throws a `TypeError` before anything changes. Only the last index can be deleted, so the array has no holes. A sheet listed twice counts once, at its last place. It is one array for the document, which spans every window: each window gets the same list, and a window opened later gets it too. A sheet that leaves the list is gone from native, and comes back with its current text when it is adopted again.
+
+### What matches
+
+| | Supported |
+|---|---|
+| Simple selectors | type (`div`), universal (`*`), `.class`, `#id`, `[attr]`, `[attr=v]`, `[attr~=v]`, `[attr\|=v]`, `[attr^=v]`, `[attr$=v]`, `[attr*=v]`, with the `i` and `s` flags |
+| Combinators | descendant, `>`, `+`, `~` |
+| Pseudo-classes | `:is()` and `:where()` (forgiving lists, `:where` has no specificity), `:not()` (a selector list), `:root` (the `<html>` of the window), `:host` (never matches: there are no shadow roots) |
+| Pseudo-elements | parse and never match |
+| Nesting | nested rules with `&` and the implicit `&` of a relative selector (`.a { .b { } }`, `.a { &:is(.c) { } }`), with the specificity of the parent's `:is()` |
+| At-rules | `@layer name { }`, `@layer a, b;`, anonymous `@layer { }`, nested layers (`a.b`) |
+| Declarations | `!important`; `var()`; every property of the style prop, with the kebab-case names CSS writes (`background-color`, `-webkit-user-select`) |
+
+Anything else makes the selector invalid and drops its rule (a list is all or nothing, except inside `:is()` and `:where()`): `:hover`, `:focus`, `:first-child`, `:nth-child()`, `:has()`, `:checked` and the other pseudo-classes. At-rules that are skipped with their block: `@media`, `@keyframes`, `@container`, `@supports`, `@font-face`, `@import`, `@namespace`, `@property`, and any at-rule inside a style rule. A declaration the style parser rejects (a value Ghia cannot represent, or one CSS would also ignore) is dropped alone and cannot take back an earlier rule's value; the exception is a property's initial value written as a keyword, which acts as `initial` (`z-index: auto`). Each skipped rule is logged once, and the values that are dropped where CSS would keep them are listed in [deviations](./fork/deviations.md#stylesheets). The full list of differences is in [deviations](./fork/deviations.md#stylesheets).
+
+**Attributes.** A selector reads the attributes `element.attributes` lists, as the DOM names them (`setAttribute`, wire op 13): `class` (from `class` or `className`), `tabindex` (from `tabIndex`), `for` (from `htmlFor`), `data-*`, `id`, `role`, `aria-*` and every other prop that holds a string, a number or a boolean. A `data-*` or `aria-*` boolean matches as `"true"` or `"false"`, so `[aria-expanded="false"]` matches `aria-expanded={false}`. On an HTML element a selector's attribute name compares without regard to case (`[tabindex]`, `[tabIndex]` and `[data-rowid]` match `tabIndex={0}` and `data-rowId="7"`); on an SVG element it compares exactly (`svg[viewBox]` matches, `svg[viewbox]` does not). Values compare case-sensitively unless the selector says `i`. `[style*="--x"]` reads the element's `style` prop as `kebab-case: value;` text. See [Listeners and DOM members](#listeners-and-dom-members-on-an-element) for what is sent.
+
+**The cascade.** The normal declarations of the matching rules apply first, ordered by layer (layers in the order first declared, unlayered rules last and so strongest), then specificity, then source order across the sheets. Then the element's `style` prop, so an inline value beats a normal rule of any specificity. Then the `!important` declarations of the rules, with the layers the other way round (the first layer wins, unlayered rules lose). Last, the inline values written with an `!important` suffix (`style={{ display: 'none !important' }}`), which beat an `!important` rule as inline `!important` does in CSS; with no rule matching, the suffix is dropped and the value is plain. The suffix is a Ghia extension: in a browser a suffix in a style object is invalid, and React DOM sets priority with `style.setProperty(name, value, 'important')`, which a style object cannot express ([deviations](./fork/deviations.md#stylesheets)). A later declaration of a property replaces an earlier one, and a shorthand replaces the longhands before it, as written order does in the `style` prop. A CSS-wide keyword (`unset`, `initial`, `inherit`, `revert`, `revert-layer`) takes back what an earlier declaration of its property, and of the longhands it covers, set, and sets nothing. In the dnd-kit sheet that is `right: unset !important` removing an inline `right`; with the item dropped, the inline value is back.
+
+**Restyling.** An element is matched again when a class, its `id`, an attribute a selector names, its place among its siblings or the text of a `<style>` element changes, and only the elements a selector can reach from the change (a descendant rule reaches the subtree, a sibling rule the following siblings). The work happens once at the end of the batch that made the changes, so toggling a class on one of fifty items matches that one. Elements that match the same rules and have the same `style` share one cascade. A document with no sheet matches nothing: native returns at one flag in every hook (5000 items cost 14.7 Minstr of native work in the batch with a class and two `data-*` attributes each and no sheet, against 14.6 without them), and what the app pays is the JS side's props (see [attributes on native](#listeners-and-dom-members-on-an-element)). `renderer.getBuildCounters()` has `elementsRematched` and `cascadesComputed` for tests.
+
+Reading the result: `getComputedStyle` answers its fixed list of properties. The test renderer's `getElement(id).style` is the style the cascade produced, `cursor` and `pointerEvents` included.
 
 ## Automation
 

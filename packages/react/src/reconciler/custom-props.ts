@@ -1,5 +1,8 @@
 import {
+  attributesOfProps,
   forwardsCustomProp,
+  isNotNativeAttribute,
+  isSvgType,
   keepWrittenEntries,
   isReservedProp,
   sameMutationValue,
@@ -69,5 +72,46 @@ export function diffCustomProps(
     if (isReservedProp(key)) continue
     if (!forwardsCustomProp(type, key)) continue
     if (!(key in next)) renderer.setCustomProp(id, key, null)
+  }
+}
+
+/** A handler or an object is no attribute, so one is as good as another: an inline handler is new on every render. */
+function isNoAttributeValue(value: unknown): boolean {
+  return typeof value === "function" || (typeof value === "object" && value !== null)
+}
+
+function sameAttributeProp(previous: unknown, next: unknown): boolean {
+  return previous === next || (isNoAttributeValue(previous) && isNoAttributeValue(next))
+}
+
+/** Whether a prop that can be an attribute differs, compared in place: most commits change none, and this allocates nothing. */
+function attributePropsDiffer(oldProps: Props, newProps: Props): boolean {
+  const previous = oldProps as unknown as Record<string, unknown>
+  const next = newProps as unknown as Record<string, unknown>
+  for (const key in next) {
+    if (!isNotNativeAttribute(key) && !sameAttributeProp(previous[key], next[key])) return true
+  }
+  for (const key in previous) {
+    if (!(key in next) && !isNotNativeAttribute(key) && !sameAttributeProp(previous[key], undefined)) return true
+  }
+  return false
+}
+
+export function diffAttributes(
+  renderer: MutationRenderer,
+  id: number,
+  type: string,
+  oldProps: Props,
+  newProps: Props
+): void {
+  if (!renderer.forwardsAttributes || !attributePropsDiffer(oldProps, newProps)) return
+  const svg = isSvgType(type)
+  const previous = attributesOfProps(Object.entries(oldProps), svg)
+  const next = attributesOfProps(Object.entries(newProps), svg)
+  for (const [name, text] of next) {
+    if (previous.get(name) !== text) renderer.setAttribute(id, name, text)
+  }
+  for (const name of previous.keys()) {
+    if (!next.has(name)) renderer.setAttribute(id, name, null)
   }
 }

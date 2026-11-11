@@ -12,11 +12,11 @@ import {
   createWebviewMethods,
   eventTypesWithOverrides,
   isReservedProp,
-  ROOT_ELEMENT_STYLE,
-  ROOT_HEAD_STYLE,
   ROOT_ELEMENT_TYPES,
   sameMutationValue,
   serializeCustomProp,
+  attributesOfProps,
+  isSvgType,
   forwardsCustomProp,
   hasMutationObservers,
   queueCharacterDataMutation,
@@ -47,7 +47,7 @@ const EVENT_TYPE_BY_PROP = eventTypesWithOverrides({
   onAttach: null,
   onDetach: null,
 })
-import { diffCustomProps, keepAttributeWrites } from "./custom-props.js"
+import { diffAttributes, diffCustomProps, keepAttributeWrites } from "./custom-props.js"
 import { fieldHandlers } from "./field-events.js"
 import { hiddenStyle, nativeStyleOf } from "./native-style.js"
 import type {
@@ -283,6 +283,13 @@ function syncCustomProps(
   }
 }
 
+function syncAttributes(renderer: MutationRenderer, id: number, type: string, props: Props): void {
+  if (!renderer.forwardsAttributes) return
+  for (const [name, text] of attributesOfProps(Object.entries(props), isSvgType(type))) {
+    renderer.setAttribute(id, name, text)
+  }
+}
+
 /**
  * Materialize a render-phase host node only after React places its subtree in
  * the commit phase. Abandoned concurrent renders stay as collectable JS
@@ -301,6 +308,7 @@ function materialize(node: HostNode): ReturnType<typeof stateFor> {
     syncMotionBindings(state.container, node.nativeId, node.props.style, node.type)
     syncEventListeners(state.container, node)
     syncCustomProps(renderer, node.nativeId, node.type, node.props)
+    syncAttributes(renderer, node.nativeId, node.type, node.props)
   } else {
     renderer.createElement(node.nativeId, "#text")
     renderer.setText(node.nativeId, node.text)
@@ -331,24 +339,9 @@ export function publicInstanceById(container: Container, id: number): PublicInst
 export function installDocumentElements(base: Omit<Container, "html" | "head" | "body">): Container {
   // `html`, `head` and `body` are assigned below, before anything reads them.
   const container = base as Container
-  const html = createHostElement(
-    nextId(container),
-    ROOT_ELEMENT_TYPES.html,
-    { style: { ...ROOT_ELEMENT_STYLE } },
-    container
-  )
-  const head = createHostElement(
-    nextId(container),
-    ROOT_ELEMENT_TYPES.head,
-    { style: { ...ROOT_HEAD_STYLE } },
-    container
-  )
-  const body = createHostElement(
-    nextId(container),
-    ROOT_ELEMENT_TYPES.body,
-    { style: { ...ROOT_ELEMENT_STYLE } },
-    container
-  )
+  const html = createHostElement(nextId(container), ROOT_ELEMENT_TYPES.html, {}, container)
+  const head = createHostElement(nextId(container), ROOT_ELEMENT_TYPES.head, {}, container)
+  const body = createHostElement(nextId(container), ROOT_ELEMENT_TYPES.body, {}, container)
   container.html = html
   container.head = head
   container.body = body
@@ -562,8 +555,9 @@ export const hostConfig = {
     if (instance.type === "nativeview") {
       diffNativeviewProps(container, instance.nativeId, oldProps, newProps)
     }
-    // Custom prop diff (for non-div/text elements). `setAttribute` may have changed props too.
+    // Custom prop and attribute diff. `setAttribute` may have changed props too.
     diffCustomProps(container.renderer, instance.nativeId, instance.type, current, next)
+    diffAttributes(container.renderer, instance.nativeId, instance.type, current, next)
     if (hasMutationObservers()) {
       recordAttributeChanges(instance, new Set([...Object.keys(current), ...Object.keys(next)]), () => {
         instance.props = next
@@ -604,9 +598,8 @@ export const hostConfig = {
   },
 
   hideInstance(instance: Instance): void {
-    // Keep the element's own style. `visibility: hidden` skips the paint and
-    // keeps the layout box, so replacing the whole style here would collapse
-    // the box and lose every other style on the element.
+    // Keep the element's own style: only `display` is replaced, and it comes back with
+    // `unhideInstance`.
     stateFor(instance).hidden = true
     rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(instance.props.style))
   },

@@ -1,6 +1,7 @@
 /** `setAttribute`, `removeAttribute` and `toggleAttribute` on a React host instance: the write has the effect of the prop. */
 import { useState } from "react"
 import { afterEach, describe, expect, it } from "vitest"
+import { getComputedStyle } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer, type A11yTreeDump } from "../testing.js"
 import type { PublicInstance } from "../types/host.js"
 
@@ -252,5 +253,73 @@ describeNative("attribute writes on a React host instance", () => {
       ["attributes", "inert", null],
     ])
     expect(records.every((record) => record.target === element)).toBe(true)
+  })
+
+  describe("with a stylesheet", () => {
+    const sheet = `
+      [data-state="open"] { opacity: 0.25 }
+      .marked { padding-top: 7px }
+      [hidden] { padding-left: 5px }
+    `
+
+    it("applies and un-applies a rule keyed on an attribute written by setAttribute", () => {
+      let element: PublicInstance | null = null
+      setup(
+        <div>
+          <style>{sheet}</style>
+          <div ref={(instance) => (element = instance)} style={box} />
+        </div>
+      )
+      const target = element!
+      expect(getComputedStyle(target).opacity).toBe("1")
+      target.setAttribute("data-state", "open")
+      expect(getComputedStyle(target).opacity).toBe("0.25")
+      target.setAttribute("data-state", "closed")
+      expect(getComputedStyle(target).opacity).toBe("1")
+      target.setAttribute("data-state", "open")
+      target.removeAttribute("data-state")
+      expect(getComputedStyle(target).opacity).toBe("1")
+
+      target.setAttribute("class", "marked")
+      expect(getComputedStyle(target).paddingTop).toBe("7px")
+      target.removeAttribute("class")
+      expect(getComputedStyle(target).paddingTop).toBe("0px")
+
+      expect(target.toggleAttribute("hidden")).toBe(true)
+      expect(getComputedStyle(target).paddingLeft).toBe("5px")
+      expect(target.toggleAttribute("hidden")).toBe(false)
+      expect(getComputedStyle(target).paddingLeft).toBe("0px")
+    })
+
+    it("applies and un-applies a rule keyed on a data attribute written through dataset", () => {
+      let element: PublicInstance | null = null
+      setup(
+        <div>
+          <style>{sheet}</style>
+          <div ref={(instance) => (element = instance)} style={box} />
+        </div>
+      )
+      const target = element!
+      target.dataset.state = "open"
+      expect(getComputedStyle(target).opacity).toBe("0.25")
+      delete target.dataset.state
+      expect(getComputedStyle(target).opacity).toBe("1")
+    })
+
+    it("sends an attribute written before the first sheet exists once one does", () => {
+      let element: PublicInstance | null = null
+      const view = (withSheet: boolean) => (
+        <div>
+          <div ref={(instance) => (element = instance)} style={box} />
+          {withSheet && <style>{sheet}</style>}
+        </div>
+      )
+      const { root } = setup(view(false))
+      const target = element!
+      target.setAttribute("data-state", "open")
+      root.render(view(true))
+      expect(element).toBe(target)
+      expect(getComputedStyle(target).opacity).toBe("0.25")
+    })
   })
 })

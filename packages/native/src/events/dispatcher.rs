@@ -1992,7 +1992,7 @@ mod tests {
     fn the_primary_press_is_active_until_release() {
         let mut tree = tree(&[]);
         let style: StyleDesc = serde_json::from_str(r#"{"active":{"opacity":0.5}}"#).unwrap();
-        tree.set_style(2, Arc::new(style));
+        tree.set_style_desc(2, style);
         let mut state = PointerState::default();
         let pressed = dispatch(&mut state, &tree, &down(0, 1, chain_of(&[3, 2, 1])));
         assert!(pressed.restyle);
@@ -2006,7 +2006,7 @@ mod tests {
     fn only_a_hover_style_asks_for_a_restyle() {
         let mut tree = tree(&[]);
         let style: StyleDesc = serde_json::from_str(r#"{"hover":{"opacity":0.5}}"#).unwrap();
-        tree.set_style(2, Arc::new(style));
+        tree.set_style_desc(2, style);
         let mut state = PointerState::default();
         assert!(dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1]))).restyle);
         assert!(!dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1]))).restyle);
@@ -2038,7 +2038,7 @@ mod tests {
         let has_hover: StyleDesc = serde_json::from_str(r#"{"hasHover":{"opacity":0.5}}"#).unwrap();
         let styled = |id: u64, style: &StyleDesc| {
             let mut styled = tree(&[]);
-            styled.set_style(id, Arc::new(style.clone()));
+            styled.set_style_desc(id, style.clone());
             styled
         };
 
@@ -2091,7 +2091,7 @@ mod tests {
     fn styled_with(tree: &mut RetainedTree, styles: &[(u64, &str)]) {
         for (id, json) in styles {
             let style: StyleDesc = serde_json::from_str(json).unwrap();
-            tree.set_style(*id, Arc::new(style));
+            tree.set_style_desc(*id, style);
         }
     }
 
@@ -2232,7 +2232,7 @@ mod tests {
     fn a_pinned_target_keeps_the_hover_whatever_is_under_the_pointer() {
         let hover: StyleDesc = serde_json::from_str(r#"{"hover":{"opacity":0.5}}"#).unwrap();
         let mut tree = tree(&[]);
-        tree.set_style(3, Arc::new(hover));
+        tree.set_style_desc(3, hover);
         let mut state = PointerState::default();
         assert!(hover_would_matter(&state, &tree, Some(4), Some(3)));
         state.explicit = Some(4);
@@ -2243,7 +2243,7 @@ mod tests {
     fn a_has_hover_style_restyles_only_when_a_descendant_gains_or_loses_the_pointer() {
         let mut tree = tree(&[]);
         let style: StyleDesc = serde_json::from_str(r#"{"hasHover":{"opacity":0.5}}"#).unwrap();
-        tree.set_style(2, Arc::new(style));
+        tree.set_style_desc(2, style);
         let mut state = PointerState::default();
         assert!(dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1]))).restyle, "a child is entered");
         assert!(state.has_hovered(2) && !state.has_hovered(3) && state.has_hovered(1));
@@ -2277,7 +2277,7 @@ mod tests {
     fn a_has_active_style_restyles_when_a_descendant_is_pressed_and_released() {
         let mut tree = tree(&[]);
         let style: StyleDesc = serde_json::from_str(r#"{"hasActive":{"opacity":0.5}}"#).unwrap();
-        tree.set_style(2, Arc::new(style));
+        tree.set_style_desc(2, style);
         let mut state = PointerState::default();
         let pressed = dispatch(&mut state, &tree, &down(0, 1, chain_of(&[2, 1])));
         assert!(!pressed.restyle, "pressing the element itself is its own :active");

@@ -309,7 +309,7 @@ mod tests {
         tree.append_child(anchored - 1, anchored);
         if let Some(style) = parent_style {
             let style = serde_json::from_str(style).expect("a style");
-            tree.set_style(anchored - 1, Arc::new(style));
+            tree.set_style_desc(anchored - 1, style);
         }
         tree
     }

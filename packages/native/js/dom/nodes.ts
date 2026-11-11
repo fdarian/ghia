@@ -9,7 +9,7 @@
  */
 
 import type { ElementType, NativeRenderer } from "../host.js"
-import { NOT_ATTRIBUTES, attributeNameOf, storedAttributeNames } from "./attribute-names.js"
+import { attributeNameOf, isNotAttribute, storedAttributeNames } from "./attribute-names.js"
 import { datasetOf } from "./dataset.js"
 import type { DOMRectList } from "./dom-rect.js"
 import { defineReflectedMembers, type ReflectedMembers } from "./reflected-members.js"
@@ -24,12 +24,6 @@ export const ROOT_ELEMENT_TYPES = {
   head: "head",
   body: "body",
 } as const satisfies Record<string, ElementType>
-
-/** Both fill the window: the box above the root is the window, and the app's top element sizes against it. */
-export const ROOT_ELEMENT_STYLE = { display: "block", width: "100%", height: "100%" } as const
-
-/** `head` has no box and its children are never drawn: it holds what the page loads, not what it shows. */
-export const ROOT_HEAD_STYLE = { display: "none" } as const
 
 /** What an adapter tells the DOM members about one of its nodes. */
 export type NodeBinding = {
@@ -364,10 +358,10 @@ abstract class ElementClass extends NodeClass {
     return value === null ? "" : value
   }
 
+  /** The `class` attribute, which is what `getAttribute` and the attributes sent to native read: `class` wins over `className`. */
   get className(): string {
-    const binding = this[DOM_BINDING]()
-    const value = binding.prop("className") ?? binding.prop("class")
-    return typeof value === "string" ? value : ""
+    const value = this.getAttribute("class")
+    return value === null ? "" : value
   }
 
   get children(): readonly Element[] {
@@ -420,7 +414,7 @@ abstract class ElementClass extends NodeClass {
     const names: string[] = []
     const svg = this instanceof shared.SVGElement
     for (const prop of this[DOM_BINDING]().propNames()) {
-      if (NOT_ATTRIBUTES.has(prop)) continue
+      if (isNotAttribute(prop)) continue
       const name = attributeNameOf(prop, svg)
       if (this.getAttribute(name) !== null && !names.includes(name)) names.push(name)
     }

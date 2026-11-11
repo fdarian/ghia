@@ -15,7 +15,7 @@
  */
 
 import { reportUncaught } from "../events/dispatch.js"
-import { NOT_ATTRIBUTES, attributeNameOf } from "./attribute-names.js"
+import { attributeNameOf, isNotAttribute } from "./attribute-names.js"
 import { Node, SVGElement, type Element } from "./nodes.js"
 
 export type MutationObserverInit = {
@@ -463,7 +463,7 @@ export function recordAttributeChanges(element: Element, propNames: Iterable<str
   const names: string[] = []
   const svg = element instanceof SVGElement
   for (const prop of propNames) {
-    if (NOT_ATTRIBUTES.has(prop)) continue
+    if (isNotAttribute(prop)) continue
     const name = attributeNameOf(prop, svg)
     if (!names.includes(name)) names.push(name)
   }

@@ -303,6 +303,14 @@ describe("element members", () => {
     expect(new FakeHtml("div").className).toBe("")
   })
 
+  it("reads class before className, as getAttribute does", () => {
+    const both = new FakeHtml("div", { className: "from-name", class: "from-attribute" })
+    expect(both.className).toBe("from-attribute")
+    expect(both.className).toBe(both.getAttribute("class"))
+    expect(new FakeHtml("div", { class: "from-attribute", className: "from-name" }).className).toBe("from-attribute")
+    expect(new FakeHtml("div", { className: "from-name", class: undefined }).className).toBe("from-name")
+  })
+
   it("lists attributes that hold a value, hasAttribute and dataset", () => {
     const el = new FakeHtml("div", {
       className: "x",

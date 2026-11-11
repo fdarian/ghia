@@ -112,7 +112,7 @@ mod tests {
         tree.append_child(3, 4);
         for id in [2, 3] {
             let contents = serde_json::json!({"display": "contents"});
-            tree.set_style(id, std::sync::Arc::new(serde_json::from_value(contents).expect("a style")));
+            tree.set_style_desc(id, serde_json::from_value(contents).expect("a style"));
         }
 
         let path = event_path(&tree, 4);

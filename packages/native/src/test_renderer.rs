@@ -69,6 +69,10 @@ pub struct BuildCounters {
     pub list_states_created: f64,
     /// Items a change of a list's item count spliced out of or into its state.
     pub list_items_spliced: f64,
+    /// Elements a stylesheet flush matched against the rules again.
+    pub elements_rematched: f64,
+    /// Cascades merged and parsed: the misses of the cascade cache.
+    pub cascades_computed: f64,
     /// A JSON object: elements by the reason they are, or are not, in a retainable subtree, for
     /// the builds since the reset. `retained` is the share that is; every built element is counted
     /// once.
@@ -967,6 +971,14 @@ impl TestGpuixRenderer {
         self.tree.lock().unwrap().elements.len() as u32
     }
 
+    /// The attribute `name` the native tree holds for an element (see `RetainedTree::attribute`),
+    /// or null. Reads the tree as it is: a mutation JS has queued and not flushed is not in it.
+    #[napi]
+    pub fn get_attribute(&self, element_id: f64, name: String) -> Result<Option<String>> {
+        let id = to_element_id(element_id)?;
+        Ok(self.tree.lock().unwrap().attribute(id, &name).map(|value| value.into_owned()))
+    }
+
     /// What the element build has done since the last `resetBuildCounters`. A draw builds every
     /// element, so divide by the frames drawn to get the per-frame figure.
     #[napi]
@@ -991,6 +1003,8 @@ impl TestGpuixRenderer {
             motion_values_sampled: counts.motion_values_sampled as f64,
             list_states_created: counts.list_states_created as f64,
             list_items_spliced: counts.list_items_spliced as f64,
+            elements_rematched: counts.elements_rematched as f64,
+            cascades_computed: counts.cascades_computed as f64,
             retain_reasons: serde_json::Value::Object(
                 crate::perf_counters::retain_reasons()
                     .into_iter()

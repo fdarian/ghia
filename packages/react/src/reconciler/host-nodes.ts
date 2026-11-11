@@ -18,7 +18,7 @@ import {
   queueChildListMutation,
   recordAttributeChanges,
   readBoundingClientRect,
-  SVG_CHILD_TYPES,
+  isSvgType,
   SVGElement,
   Text,
 } from "@ghia/native/host"
@@ -33,7 +33,7 @@ import type {
   TextBinding,
 } from "@ghia/native/host"
 import type { Container, ElementType, Instance, Props, TextInstance } from "../types/host.js"
-import { diffCustomProps } from "./custom-props.js"
+import { diffAttributes, diffCustomProps } from "./custom-props.js"
 import { listenersOf } from "./event-registry.js"
 import { nativeStyleOf } from "./native-style.js"
 
@@ -45,7 +45,7 @@ export interface HostNodeState {
   mounted: boolean
   /**
    * React hid this element (Suspense, Activity). Its native style carries
-   * `visibility: hidden`, so a style update must keep that rather than
+   * `display: none !important`, so a style update must keep that rather than
    * overwrite it with the visible one.
    */
   hidden: boolean
@@ -182,7 +182,10 @@ function writeInstanceProp(instance: ReactHostElement, name: string, value: stri
   const apply = () => {
     instance.props = next as Props
   }
-  if (state.mounted) diffCustomProps(state.container.renderer, instance.nativeId, instance.type, instance.props, next as Props)
+  if (state.mounted) {
+    diffCustomProps(state.container.renderer, instance.nativeId, instance.type, instance.props, next as Props)
+    diffAttributes(state.container.renderer, instance.nativeId, instance.type, instance.props, next as Props)
+  }
   if (hasMutationObservers()) recordAttributeChanges(instance, [name], apply)
   else apply()
   if (state.mounted) state.container.renderer.flushMutations()
@@ -313,7 +316,7 @@ export function createHostElement(
   container: Container
 ): Instance {
   const instance =
-    type === "svg" || SVG_CHILD_TYPES.has(type)
+    isSvgType(type)
       ? (Reflect.construct(ReactHostElement, [id, type, props], ReactSvgElement) as ReactHostElement)
       : new ReactHostElement(id, type, props)
   hostNodeStates.set(instance, createState(container))

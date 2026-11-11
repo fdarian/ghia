@@ -132,7 +132,7 @@ mod tests {
         assert_eq!(element.order(), Some(3.0));
         element.style = Some(std::sync::Arc::new(StyleDesc { order: Some(1.0), ..Default::default() }));
         tree.elements.insert(1, element);
-        tree.set_style(1, std::sync::Arc::new(StyleDesc { order: Some(2.0), ..Default::default() }));
+        tree.set_style_desc(1, StyleDesc { order: Some(2.0), ..Default::default() });
         assert_eq!(tree.elements[&1].order(), Some(2.0));
     }
 

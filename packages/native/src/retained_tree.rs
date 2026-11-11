@@ -71,6 +71,10 @@ impl Context {
 pub struct RetainedElement {
     pub id: u64,
     pub element_type: String,
+    /// `element_type` is an SVG element wherever it is put, which decides the case of its attribute
+    /// names (`attributes.rs`). Worked out at the first attribute read or write, which an app with no
+    /// sheet never makes, and kept because every one after asks.
+    is_svg: std::cell::OnceCell<bool>,
     /// Shared, not owned. `StyleDesc` is ~1.4 KB, and holding it inline made an
     /// unstyled element pay for a style it does not have: `RetainedElement` was
     /// 1624 bytes, and the `HashMap` stores values inline, so the whole table
@@ -91,12 +95,16 @@ pub struct RetainedElement {
     /// What the element declared with `setStyle`, which the effective `style`
     /// is recomputed from when the universal layer changes. The same pointer as
     /// `style` while no layer is under it.
-    own_style: Option<Arc<StyleDesc>>,
+    own_style: Option<InternedStyle>,
     pub content: Option<String>,
     pub children: Vec<u64>,
     pub parent: Option<u64>,
     /// Most host nodes have neither listeners nor custom props.
     extras: Option<Box<ElementExtras>>,
+    /// Only an element that was given an attribute or matched by a sheet has these, which an app
+    /// with no sheet never makes: boxed, they cost an element one pointer. Not in `extras`, so an
+    /// element with a class and no listener is one allocation and not two.
+    markup: Option<Box<Markup>>,
     /// Take keyboard focus the first time this element gets a focus handle.
     /// Without it an `<input>` is dead until the user clicks it.
     pub auto_focus: bool,
@@ -150,6 +158,18 @@ struct ElementExtras {
     props_before: std::sync::Mutex<HashMap<String, Option<serde_json::Value>>>,
 }
 
+#[derive(Default)]
+struct Markup {
+    attributes: crate::attributes::AttributeStore,
+    css: crate::css::sheet::ElementCss,
+}
+
+impl Markup {
+    fn is_empty(&self) -> bool {
+        self.attributes.is_empty() && self.css.is_empty()
+    }
+}
+
 impl ElementExtras {
     fn props_before_mut(&mut self) -> &mut HashMap<String, Option<serde_json::Value>> {
         self.props_before.get_mut().expect("props_before is never held across a panic")
@@ -165,9 +185,11 @@ impl RetainedElement {
         if let Some(folded) = &*self.container_display.borrow() {
             return folded.clone().map(std::borrow::Cow::Owned);
         }
+        // A `<style>` element is `display: none` in every user agent, and its text is the sheet.
         self.style
             .as_deref()
             .and_then(|style| style.display.as_deref())
+            .or_else(|| (self.element_type == "style").then_some("none"))
             .map(std::borrow::Cow::Borrowed)
     }
 
@@ -264,6 +286,11 @@ impl RetainedElement {
     /// Whether the universal style layer applies to this element. CSS `*`
     /// matches elements, not text nodes.
     fn takes_universal_style(&self) -> bool {
+        self.is_matchable()
+    }
+
+    /// Whether selectors can match the element: a `#text` node is never matched.
+    pub(crate) fn is_matchable(&self) -> bool {
         self.element_type != crate::text::inline::TEXT_NODE
     }
 
@@ -296,6 +323,7 @@ impl RetainedElement {
     pub fn new(id: u64, element_type: String, revision: u64) -> Self {
         Self {
             id,
+            is_svg: std::cell::OnceCell::new(),
             element_type,
             style: None,
             own_style: None,
@@ -303,6 +331,7 @@ impl RetainedElement {
             children: Vec::new(),
             parent: None,
             extras: None,
+            markup: None,
             auto_focus: false,
             svg_written: std::cell::Cell::new(false),
             container_display: Default::default(),
@@ -357,8 +386,99 @@ impl RetainedElement {
         self.extras.as_deref()?.before_transition.as_deref()
     }
 
+    pub(crate) fn is_svg(&self) -> bool {
+        *self.is_svg.get_or_init(|| crate::custom_elements::svg_tree::is_svg_tag(&self.element_type))
+    }
+
+    pub(crate) fn attribute_store(&self) -> Option<&crate::attributes::AttributeStore> {
+        self.markup.as_deref().map(|markup| &markup.attributes)
+    }
+
+    /// Returns whether the attribute changed.
+    pub(crate) fn set_attribute(&mut self, names: &mut crate::attributes::AttributeNames, name: &str, value: Option<String>) -> bool {
+        let name = &*crate::attributes::stored_name(self.is_svg(), name);
+        if value.is_none() && self.attribute_store().is_none_or(|store| store.get(name).is_none()) {
+            return false;
+        }
+        let changed = self.markup_mut().attributes.set(names, name, value);
+        self.release_empty_markup();
+        changed
+    }
+
+    pub(crate) fn css(&self) -> Option<&crate::css::sheet::ElementCss> {
+        self.markup.as_deref().map(|markup| &markup.css)
+    }
+
+    pub(crate) fn css_mut(&mut self) -> &mut crate::css::sheet::ElementCss {
+        &mut self.markup_mut().css
+    }
+
+    /// Stores the id and class atoms for the matcher. An element that has none and kept nothing
+    /// before costs no allocation.
+    pub(crate) fn set_css_atoms(&mut self, id: Option<crate::css::sheet::Atom>, classes: crate::css::sheet::ClassAtoms) {
+        if id.is_none() && classes.is_empty() && self.css().is_none() {
+            return;
+        }
+        let css = self.css_mut();
+        css.id = id;
+        css.classes = classes;
+        self.release_empty_markup();
+    }
+
+    /// Sets the rules the sheets matched the element with, and lets go of the markup when that
+    /// leaves it empty.
+    pub(crate) fn set_matched(&mut self, matched: Option<Arc<crate::css::sheet::MatchedRules>>) {
+        if matched.is_none() && self.css().is_none() {
+            return;
+        }
+        self.css_mut().matched = matched;
+        self.release_empty_markup();
+    }
+
+    /// Replaces the class atoms and returns the ones the element had.
+    pub(crate) fn replace_css_classes(&mut self, classes: crate::css::sheet::ClassAtoms) -> crate::css::sheet::ClassAtoms {
+        if classes.is_empty() && self.css().is_none_or(|css| css.classes.is_empty()) {
+            return Default::default();
+        }
+        let before = std::mem::replace(&mut self.css_mut().classes, classes);
+        self.release_empty_markup();
+        before
+    }
+
+    /// Replaces the id atom and returns the one the element had.
+    pub(crate) fn replace_css_id(&mut self, id: Option<crate::css::sheet::Atom>) -> Option<crate::css::sheet::Atom> {
+        if id.is_none() && self.css().is_none_or(|css| css.id.is_none()) {
+            return None;
+        }
+        let before = std::mem::replace(&mut self.css_mut().id, id);
+        self.release_empty_markup();
+        before
+    }
+
+    pub(crate) fn clear_css(&mut self) {
+        if let Some(markup) = self.markup.as_mut() {
+            markup.css = Default::default();
+            self.release_empty_markup();
+        }
+    }
+
+    /// What the element declared with `setStyle`, under any rule a sheet matched it with.
+    pub(crate) fn own_style(&self) -> Option<&InternedStyle> {
+        self.own_style.as_ref()
+    }
+
     fn extras_mut(&mut self) -> &mut ElementExtras {
         self.extras.get_or_insert_with(Default::default)
+    }
+
+    fn markup_mut(&mut self) -> &mut Markup {
+        self.markup.get_or_insert_with(Default::default)
+    }
+
+    fn release_empty_markup(&mut self) {
+        if self.markup.as_ref().is_some_and(|markup| markup.is_empty()) {
+            self.markup = None;
+        }
     }
 
     fn release_empty_extras(&mut self) {
@@ -390,9 +510,33 @@ pub type ElementMap = rustc_hash::FxHashMap<u64, RetainedElement>;
 /// The raw bytes are kept so a hash hit can be confirmed by comparing content.
 /// A 64-bit hash collides eventually, and a collision here would paint one
 /// element with another element's style, which is a bug nobody would find.
-struct InternedStyle {
-    raw: Box<[u8]>,
+struct TableEntry {
+    raw: Arc<[u8]>,
     style: Arc<StyleDesc>,
+}
+
+/// A style that came out of [`StyleTable::intern`], which is what the table keeps the raw payload
+/// of: the cascade reads an element's own declarations from it. Only `intern` makes one, so a
+/// holder cannot have a style the table does not know.
+#[derive(Clone)]
+pub struct InternedStyle(Arc<StyleDesc>);
+
+impl InternedStyle {
+    pub fn arc(&self) -> &Arc<StyleDesc> {
+        &self.0
+    }
+
+    pub fn into_arc(self) -> Arc<StyleDesc> {
+        self.0
+    }
+}
+
+impl std::ops::Deref for InternedStyle {
+    type Target = StyleDesc;
+
+    fn deref(&self) -> &StyleDesc {
+        &self.0
+    }
 }
 
 /// Below this many entries a sweep is not worth thinking about, so the table
@@ -413,7 +557,7 @@ pub(crate) const STYLE_SWEEP_FLOOR: usize = 64;
 /// borrow checker proves it cannot have touched an element.
 #[derive(Default)]
 pub struct StyleTable {
-    entries: rustc_hash::FxHashMap<u64, Vec<InternedStyle>>,
+    entries: rustc_hash::FxHashMap<u64, Vec<TableEntry>>,
     /// Entries currently held. Tracked rather than summed, so `maybe_sweep` is
     /// O(1) on the commits that do not sweep.
     count: usize,
@@ -422,6 +566,11 @@ pub struct StyleTable {
     /// The universal layer's result per own style. It lives here because it holds
     /// styles of the table, which `sweep` could not reclaim while it did.
     layered: crate::universal_style::LayerCache,
+    /// The raw payload of each interned style by the address of its value, which the cascade
+    /// reads an element's own declarations from.
+    raws: rustc_hash::FxHashMap<usize, Arc<[u8]>>,
+    /// The style of an element that sheets matched, per matched rules and own style.
+    pub(crate) cascaded: crate::css::sheet::CascadeCache,
     /// What the styles of a restyle say of whether it only paints: the same few styles take turns on
     /// the rows of a page.
     restyles: crate::style_memo::StyleMemo<crate::events::hover_paint::Paints>,
@@ -453,30 +602,34 @@ impl StyleTable {
     /// Parse a style payload, reusing the shared value when the same bytes
     /// arrived before. Hashing ~110 bytes is far cheaper than building the
     /// ~80 `Option` fields of a `StyleDesc`.
-    pub fn intern(&mut self, raw: &[u8]) -> Result<Arc<StyleDesc>, String> {
+    pub fn intern(&mut self, raw: &[u8]) -> Result<InternedStyle, String> {
         let mut hasher = rustc_hash::FxHasher::default();
         raw.hash(&mut hasher);
         let key = hasher.finish();
         if let Some(bucket) = self.entries.get(&key) {
             if let Some(hit) = bucket.iter().find(|entry| &*entry.raw == raw) {
-                return Ok(hit.style.clone());
+                return Ok(InternedStyle(hit.style.clone()));
             }
         }
-        let style = if crate::css::var_substitution::mentions_var(raw) {
-            crate::css::var_substitution::parse(raw)?
+        // The payload is kept as it came: the cascade reads which values were `!important` from it.
+        let parsed = crate::css::inline_important::strip_payload(raw);
+        let style = if crate::css::var_substitution::mentions_var(&parsed) {
+            crate::css::var_substitution::parse(&parsed)?
         } else {
-            match parse_style(raw) {
+            match parse_style(&parsed) {
                 Ok(style) => style,
-                Err(error) => crate::css::lenient::recover(raw, error)?,
+                Err(error) => crate::css::lenient::recover(&parsed, error)?,
             }
         };
         let shared = Arc::new(style);
-        self.entries.entry(key).or_default().push(InternedStyle {
-            raw: raw.into(),
+        let raw: Arc<[u8]> = raw.into();
+        self.raws.insert(Arc::as_ptr(&shared) as usize, raw.clone());
+        self.entries.entry(key).or_default().push(TableEntry {
+            raw,
             style: shared.clone(),
         });
         self.count += 1;
-        Ok(shared)
+        Ok(InternedStyle(shared))
     }
 
     /// Drop interned styles no element references any more.
@@ -487,9 +640,17 @@ impl StyleTable {
     /// nothing can be reading it.
     pub fn sweep(&mut self) {
         self.layered.release_unused();
+        self.cascaded.release_unused();
         let mut live = 0;
+        let raws = &mut self.raws;
         self.entries.retain(|_, bucket| {
-            bucket.retain(|entry| Arc::strong_count(&entry.style) > 1);
+            bucket.retain(|entry| {
+                let held = Arc::strong_count(&entry.style) > 1;
+                if !held {
+                    raws.remove(&(Arc::as_ptr(&entry.style) as usize));
+                }
+                held
+            });
             live += bucket.len();
             !bucket.is_empty()
         });
@@ -522,6 +683,27 @@ impl StyleTable {
 
     pub fn len(&self) -> usize {
         self.count
+    }
+
+    /// A style built in a test instead of parsed from a payload: the payload it reads back is the
+    /// style serialized.
+    #[cfg(test)]
+    pub(crate) fn intern_arc(&mut self, shared: Arc<StyleDesc>) -> InternedStyle {
+        let raw: Arc<[u8]> = serde_json::to_vec(&*shared).expect("a style serializes").into();
+        let mut hasher = rustc_hash::FxHasher::default();
+        raw.hash(&mut hasher);
+        self.raws.insert(Arc::as_ptr(&shared) as usize, raw.clone());
+        self.entries.entry(hasher.finish()).or_default().push(TableEntry { raw, style: shared.clone() });
+        self.count += 1;
+        InternedStyle(shared)
+    }
+
+    /// The payload `style` was interned from.
+    pub(crate) fn raw_of(&self, style: &InternedStyle) -> Arc<[u8]> {
+        self.raws
+            .get(&(Arc::as_ptr(style.arc()) as usize))
+            .expect("the table keeps the payload of a style that is held")
+            .clone()
     }
 }
 
@@ -706,6 +888,15 @@ pub struct RetainedTree {
     /// The elements the accessibility links start from, see [`RelationRegistry`].
     relations: RelationRegistry,
     pub styles: StyleTable,
+    /// The elements whose style no frame has drawn: created, or taken out of the document since,
+    /// which a browser gives no computed style. `assign_style` starts no transition from one, and
+    /// `note_frame_built` forgets those a frame has built. A `RefCell` because a frame holds the
+    /// tree shared.
+    fresh: std::cell::RefCell<rustc_hash::FxHashSet<u64>>,
+    /// The document's stylesheets and what has to be matched against them again.
+    pub(crate) sheets: crate::css::sheet::StyleSheets,
+    /// The attribute names the elements hold, one allocation each however many elements use it.
+    pub(crate) attribute_names: crate::attributes::AttributeNames,
     /// What each built element was painted with, for the walks that read the tree.
     pub(crate) resolved: std::cell::RefCell<crate::resolved_style::ResolvedStyles>,
     /// Whether the elements with `content-visibility: auto` skip their content, and the sizes
@@ -784,7 +975,10 @@ impl RetainedTree {
             var_style_count: 0,
             relations: RelationRegistry::default(),
             styles: StyleTable::default(),
+            sheets: Default::default(),
+            attribute_names: Default::default(),
             resolved: Default::default(),
+            fresh: Default::default(),
             relevance: Default::default(),
             universal: None,
             root_id: None,
@@ -954,6 +1148,9 @@ impl RetainedTree {
     pub fn set_root(&mut self, id: u64) {
         if self.root_id != Some(id) {
             self.root_id = Some(id);
+            if self.sheets.enabled {
+                self.sheets_root_changed();
+            }
             self.mark_dirty(Dirty::Layout);
         }
     }
@@ -963,6 +1160,7 @@ impl RetainedTree {
     }
 
     pub fn create_element(&mut self, id: u64, element_type: String) {
+        let is_style = element_type == "style";
         self.relations.created(id, &element_type);
         self.anchored_count += usize::from(element_type == "anchored");
         if element_type == "img" {
@@ -975,8 +1173,12 @@ impl RetainedTree {
             self.choices.created(id);
         }
         let revision = self.take_revision_covered();
+        self.fresh.get_mut().insert(id);
         self.elements
             .insert(id, RetainedElement::new(id, element_type, revision));
+        if is_style {
+            self.sheets_style_created(id);
+        }
         if self.universal.is_some() || crate::html::is_tag(&self.elements[&id].element_type) {
             self.refresh_effective_style(id, false);
         }
@@ -1177,6 +1379,9 @@ impl RetainedTree {
     /// Unlinks from the parent before removing, then marks the parent chain
     /// changed so caches cannot serve text that is no longer in the tree.
     pub fn destroy_element(&mut self, id: u64) -> Vec<u64> {
+        if self.sheets.enabled {
+            self.sheets_unlinking(id);
+        }
         let parent_id = self.elements.get(&id).and_then(|element| element.parent);
         // An element taken out of its parent by `detach_child` was noted then, and one that was never
         // in the tree is in no frame.
@@ -1239,7 +1444,11 @@ impl RetainedTree {
             self.container_rule_count -= usize::from(has_container_rules(&element));
             self.var_style_count -= usize::from(holds_var_declarations(&element));
             self.relations.destroyed(&element);
+            if self.sheets.enabled {
+                self.sheets_destroyed(id);
+            }
             self.resolved.get_mut().forget(id);
+            self.fresh.get_mut().remove(&id);
             destroyed.push(id);
             for child_id in element.children {
                 self.destroy_element_recursive(child_id, destroyed);
@@ -1255,6 +1464,9 @@ impl RetainedTree {
         let Some(parent_id) = self.elements.get(&id).and_then(|element| element.parent) else {
             return;
         };
+        if self.sheets.enabled {
+            self.sheets_unlinking(id);
+        }
         if let Some(parent) = self.elements.get_mut(&parent_id) {
             parent.children.retain(|child| *child != id);
         }
@@ -1262,6 +1474,10 @@ impl RetainedTree {
             element.parent = None;
         }
         self.detached_from.insert(id, parent_id);
+        self.mark_fresh_subtree(id);
+        if self.sheets.enabled {
+            self.sheets_linked(id);
+        }
         self.mark_changed(parent_id);
         self.relations.restructured();
     }
@@ -1274,6 +1490,9 @@ impl RetainedTree {
     }
 
     pub fn append_child(&mut self, parent_id: u64, child_id: u64) {
+        if self.sheets.enabled {
+            self.sheets_unlinking(child_id);
+        }
         // Remove from old parent if any
         let old_parent_id = self.elements.get(&child_id).and_then(|e| e.parent);
         if let Some(old_parent_id) = old_parent_id {
@@ -1290,6 +1509,9 @@ impl RetainedTree {
         if let Some(parent) = self.elements.get_mut(&parent_id) {
             parent.children.push(child_id);
         }
+        if self.sheets.enabled {
+            self.sheets_linked(child_id);
+        }
         if self.inert_count > 0 || self.visibility_count > 0 {
             self.track_focusable_subtree(child_id);
         }
@@ -1301,6 +1523,9 @@ impl RetainedTree {
     }
 
     pub fn insert_before(&mut self, parent_id: u64, child_id: u64, before_id: u64) {
+        if self.sheets.enabled {
+            self.sheets_unlinking(child_id);
+        }
         // Remove from old parent if any
         let old_parent_id = self.elements.get(&child_id).and_then(|e| e.parent);
         if let Some(old_parent_id) = old_parent_id {
@@ -1322,6 +1547,9 @@ impl RetainedTree {
                 .unwrap_or(parent.children.len());
             parent.children.insert(pos, child_id);
         }
+        if self.sheets.enabled {
+            self.sheets_linked(child_id);
+        }
         if self.inert_count > 0 || self.visibility_count > 0 {
             self.track_focusable_subtree(child_id);
         }
@@ -1332,15 +1560,6 @@ impl RetainedTree {
         self.relations.restructured();
     }
 
-    /// Takes an interned style. Pointer identity is the fast path and covers
-    /// every resend, because `StyleTable::intern` returns the same `Arc` for
-    /// the same bytes. It is not sufficient on its own: interning keys on raw
-    /// bytes, so `{"color":"red","width":10}` and `{"width":10,"color":"red"}`
-    /// are two `Arc`s holding the same style. Only a pointer miss pays for the
-    /// ~80-field compare, which is what decides whether this repaints.
-    ///
-    /// The comparison is on the declared style, before the universal layer is
-    /// put under it, so a resend costs no merge.
     /// Whether the root has anything in it: the container a renderer mounts into is there, and is
     /// drawn, before the first element is.
     pub(crate) fn has_content(&self) -> bool {
@@ -1349,14 +1568,40 @@ impl RetainedTree {
             .is_some_and(|root| !root.children.is_empty())
     }
 
-    pub fn set_style(&mut self, id: u64, style: Arc<StyleDesc>) {
+    /// The end of a frame's build. What it built has been seen with its style, so a change to it
+    /// can start a transition (`assign_style`). An element outside the document was not built, and
+    /// stays one whose style has never been seen however many batches pass.
+    pub(crate) fn note_frame_built(&self) {
+        let mut fresh = self.fresh.borrow_mut();
+        if fresh.is_empty() {
+            return;
+        }
+        fresh.retain(|&id| !crate::css::computed_style::is_connected(self, id));
+        if fresh.is_empty() && fresh.capacity() > 1024 {
+            *fresh = Default::default();
+        }
+    }
+
+    /// Marks `id` and everything below it as never drawn.
+    fn mark_fresh_subtree(&mut self, id: u64) {
+        let mut pending = vec![id];
+        while let Some(current) = pending.pop() {
+            if let Some(element) = self.elements.get(&current) {
+                pending.extend(element.children.iter().copied());
+                self.fresh.get_mut().insert(current);
+            }
+        }
+    }
+
+    /// Takes an interned style. `StyleTable::intern` returns the same `Arc` for the same bytes, so
+    /// every resend is a pointer match and costs no merge. Two payloads that parse to the same
+    /// style are two `Arc`s and restyle, which `assign_style` then finds changes nothing: the
+    /// parsed style cannot stand in for the payload, because it has dropped `!important`.
+    pub fn set_style(&mut self, id: u64, style: InternedStyle) {
         let Some(element) = self.elements.get_mut(&id) else {
             return;
         };
-        let same = element
-            .own_style
-            .as_ref()
-            .is_some_and(|current| Arc::ptr_eq(current, &style) || **current == *style);
+        let same = element.own_style.as_ref().is_some_and(|current| Arc::ptr_eq(current.arc(), style.arc()));
         if same {
             return;
         }
@@ -1364,6 +1609,34 @@ impl RetainedTree {
         let classify = self.commit_patching;
         let change = self.refresh_effective_style(id, classify);
         self.settle_style_change(id, change);
+        if self.sheets.enabled {
+            self.sheets_style_changed(id);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_style_desc(&mut self, id: u64, style: StyleDesc) {
+        self.set_style_arc(id, Arc::new(style));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_style_arc(&mut self, id: u64, style: Arc<StyleDesc>) {
+        let interned = self.styles.intern_arc(style);
+        self.set_style(id, interned);
+    }
+
+    /// Sets the rules the sheets matched the elements with and restyles each, as `set_style` does
+    /// for a new own style (`css::sheet::tree`'s flush finds which changed).
+    pub(crate) fn apply_matched(&mut self, changes: Vec<(u64, Option<Arc<crate::css::sheet::MatchedRules>>)>) {
+        for (id, matched) in changes {
+            let Some(element) = self.elements.get_mut(&id) else {
+                continue;
+            };
+            element.set_matched(matched);
+            let classify = self.commit_patching;
+            let change = self.refresh_effective_style(id, classify);
+            self.settle_style_change(id, change);
+        }
     }
 
     /// The style layer under every element's own style, as a CSS `* { ... }` rule
@@ -1410,12 +1683,16 @@ impl RetainedTree {
         let Some(element) = self.elements.get(&id) else {
             return StyleChange::default();
         };
+        let declared = match element.css().and_then(|css| css.matched.as_ref()) {
+            Some(matched) => self.sheets.cascaded(&mut self.styles, matched, element.own_style.as_ref()),
+            None => element.own_style.clone().map(InternedStyle::into_arc),
+        };
         let universal = self.universal.as_ref().filter(|_| element.takes_universal_style());
         let user_agent = crate::html::ua_style_of(element);
-        let effective = match (self.styles.layered.base(universal, user_agent.as_ref()), &element.own_style) {
-            (Some(base), Some(own)) => Some(self.styles.layered.effective(&base, own)),
+        let effective = match (self.styles.layered.base(universal, user_agent.as_ref()), declared) {
+            (Some(base), Some(declared)) => Some(self.styles.layered.effective(&base, &declared)),
             (Some(base), None) => Some(base),
-            (None, own) => own.clone(),
+            (None, declared) => declared,
         };
         self.assign_style(id, crate::html::used_style(&element.element_type, effective), classify)
     }
@@ -1456,8 +1733,12 @@ impl RetainedTree {
         let escaped_before = containing_block::may_escape(element);
         let container_rules_before = has_container_rules(element);
         let var_declarations_before = holds_var_declarations(element);
+        // CSS never transitions the first style of an element, and a batch assigns an element
+        // several (its own, the user agent's, then the sheets' cascade) before any is drawn.
+        let never_drawn = self.fresh.get_mut().contains(&id);
         let before = element.style.take().filter(|old| {
-            !crate::motion::declares_transitions(old)
+            !never_drawn
+                && !crate::motion::declares_transitions(old)
                 && style.as_deref().is_some_and(crate::motion::declares_transitions)
         });
         if before.is_some() {
@@ -1531,6 +1812,9 @@ impl RetainedTree {
             }
         }
         if changed {
+            if self.sheets.enabled {
+                self.sheets_text_changed(id);
+            }
             if self.universal.is_some() {
                 // The string makes this a text node, which no style layer reaches.
                 let change = self.refresh_effective_style(id, false);
@@ -2122,6 +2406,30 @@ mod tests {
     }
 
     #[test]
+    fn the_attribute_store_and_sheet_data_cost_an_element_one_pointer_until_it_has_one() {
+        let mut tree = tree_with_child();
+        tree.set_event_listener(2, "click".into(), true);
+        assert!(tree.elements[&2].markup.is_none());
+
+        tree.set_attribute(2, "data-x", Some("1".into()));
+        assert!(tree.elements[&2].markup.is_some());
+        tree.set_attribute(2, "data-x", None);
+        assert!(tree.elements[&2].markup.is_none());
+
+        tree.set_event_listener(2, "click".into(), false);
+        assert!(tree.elements[&2].extras.is_none());
+        // 240 with the store and the sheet data inline.
+        assert!(std::mem::size_of::<ElementExtras>() <= 176);
+    }
+
+    #[test]
+    fn an_attribute_needs_no_listener_extras() {
+        let mut tree = tree_with_child();
+        tree.set_attribute(2, "class", Some("a".into()));
+        assert!(tree.elements[&2].extras.is_none());
+    }
+
+    #[test]
     fn destroy_unlinks_from_parent() {
         let mut tree = tree_with_child();
         let destroyed = tree.destroy_element(2);
@@ -2208,11 +2516,11 @@ mod tests {
         let mut tree = tree_with_child();
         let first = tree.styles.intern(br#"{"color":"red"}"#).unwrap();
         let second = tree.styles.intern(br#"{"color":"red"}"#).unwrap();
-        assert!(Arc::ptr_eq(&first, &second));
+        assert!(Arc::ptr_eq(first.arc(), second.arc()));
         assert_eq!(tree.styles.len(), 1);
 
         let other = tree.styles.intern(br#"{"color":"blue"}"#).unwrap();
-        assert!(!Arc::ptr_eq(&first, &other));
+        assert!(!Arc::ptr_eq(first.arc(), other.arc()));
         assert_eq!(tree.styles.len(), 2);
     }
 
@@ -2453,13 +2761,13 @@ mod tests {
             let style = serde_json::json!({ "display": value });
             Arc::new(serde_json::from_value::<StyleDesc>(style).expect("a style"))
         };
-        tree.set_style(2, display("contents"));
-        tree.set_style(3, display("contents"));
+        tree.set_style_arc(2, display("contents"));
+        tree.set_style_arc(3, display("contents"));
         assert!(focusable(&tree).is_empty(), "no box, nothing to focus");
 
-        tree.set_style(2, display("block"));
+        tree.set_style_arc(2, display("block"));
         assert_eq!(focusable(&tree), vec![2], "a box again");
-        tree.set_style(3, display("block"));
+        tree.set_style_arc(3, display("block"));
         assert_eq!(focusable(&tree), vec![2, 3]);
     }
 
@@ -2553,10 +2861,10 @@ mod tests {
         };
         assert_eq!(focusable(&tree), vec![2, 3, 4]);
 
-        tree.set_style(2, visibility("hidden"));
+        tree.set_style_arc(2, visibility("hidden"));
         assert_eq!(focusable(&tree), vec![4], "the element and its descendants");
 
-        tree.set_style(3, visibility("visible"));
+        tree.set_style_arc(3, visibility("visible"));
         assert_eq!(focusable(&tree), vec![3, 4]);
 
         // Moving a subtree under a hidden element, or out of one, follows the new ancestors.
@@ -2565,7 +2873,7 @@ mod tests {
         tree.append_child(1, 4);
         assert_eq!(focusable(&tree), vec![3, 4]);
 
-        tree.set_style(2, Arc::new(StyleDesc::default()));
+        tree.set_style_desc(2, StyleDesc::default());
         assert_eq!(focusable(&tree), vec![2, 3, 4]);
         assert!(!tree.is_visibility_hidden(3));
     }
@@ -2645,9 +2953,9 @@ mod tests {
                 ..Default::default()
             })
         };
-        tree.set_style(2, styled(Some("hidden"), None));
-        tree.set_style(5, styled(None, Some("none")));
-        tree.set_style(6, styled(None, Some("auto")));
+        tree.set_style_arc(2, styled(Some("hidden"), None));
+        tree.set_style_arc(5, styled(None, Some("none")));
+        tree.set_style_arc(6, styled(None, Some("auto")));
         let boxes = [
             (1, (0.0, 0.0, 100.0, 100.0)),
             (2, (0.0, 0.0, 50.0, 50.0)),
@@ -2696,9 +3004,9 @@ mod tests {
                 ..Default::default()
             })
         };
-        tree.set_style(1, styled(Some("relative"), None));
-        tree.set_style(2, styled(clip_position, Some("hidden")));
-        tree.set_style(3, styled(Some(box_position), None));
+        tree.set_style_arc(1, styled(Some("relative"), None));
+        tree.set_style_arc(2, styled(clip_position, Some("hidden")));
+        tree.set_style_arc(3, styled(Some(box_position), None));
         let boxes = [
             (1, (0.0, 0.0, 200.0, 200.0)),
             (2, (100.0, 100.0, 50.0, 50.0)),
@@ -2738,7 +3046,7 @@ mod tests {
             position: Some("static".to_string()),
             ..Default::default()
         });
-        tree.set_style(3, in_flow);
+        tree.set_style_arc(3, in_flow);
         assert_eq!(tree.elements_at(20.0, 20.0, &painted), vec![1]);
     }
 
@@ -2791,7 +3099,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         for id in 1..=3 {
             tree.create_element(id, "div".to_string());
-            tree.set_style(id, Arc::new(StyleDesc::default()));
+            tree.set_style_desc(id, StyleDesc::default());
         }
         tree.set_root(1);
         tree.append_child(1, 2);
@@ -2817,7 +3125,7 @@ mod tests {
     fn the_count_of_escaping_elements_follows_styles_and_destruction() {
         let (mut tree, _) = escaping_tree(None, "fixed");
         assert_eq!(tree.escaping_count, 1);
-        tree.set_style(2, Arc::new(StyleDesc { position: Some("absolute".into()), ..Default::default() }));
+        tree.set_style_desc(2, StyleDesc { position: Some("absolute".into()), ..Default::default() });
         assert_eq!(tree.escaping_count, 2);
         tree.destroy_element(2);
         assert_eq!(tree.escaping_count, 0);
@@ -2856,13 +3164,13 @@ mod tests {
             })
         };
         // The sibling and the scroller are hidden, so the pointer reaches the root under them.
-        tree.set_style(4, visibility("hidden"));
+        tree.set_style_arc(4, visibility("hidden"));
         assert_eq!(tree.elements_at(45.0, 10.0, &painted), vec![2, 1]);
-        tree.set_style(2, visibility("hidden"));
+        tree.set_style_arc(2, visibility("hidden"));
         assert_eq!(tree.elements_at(45.0, 10.0, &painted), vec![1]);
         // The row inherits it, and `visible` undoes it for the row alone.
         assert_eq!(tree.elements_at(10.0, 45.0, &painted), vec![1]);
-        tree.set_style(3, visibility("visible"));
+        tree.set_style_arc(3, visibility("visible"));
         assert_eq!(tree.elements_at(10.0, 45.0, &painted), vec![3, 1]);
     }
 
@@ -2895,7 +3203,7 @@ mod tests {
         for (parent, child) in [(1, 2), (2, 3), (3, 4), (1, 5)] {
             tree.append_child(parent, child);
         }
-        tree.set_style(
+        tree.set_style_arc(
             2,
             Arc::new(StyleDesc {
                 overflow: Some("hidden".to_string()),
@@ -2954,7 +3262,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         for (id, _, kind, style) in &nodes {
             tree.create_element(*id, kind.to_string());
-            tree.set_style(*id, Arc::new(style.clone()));
+            tree.set_style_desc(*id, style.clone());
         }
         tree.set_root(nodes[0].0);
         for (id, parent, _, _) in &nodes {
@@ -3274,10 +3582,12 @@ mod tests {
     #[test]
     fn the_style_before_a_transition_declaration_is_kept_until_the_next_style() {
         let mut tree = tree_with_child();
+        tree.set_root(1);
         let intern = |tree: &mut RetainedTree, json: &str| tree.styles.intern(json.as_bytes()).unwrap();
         let plain = intern(&mut tree, r#"{"opacity":0}"#);
         tree.set_style(1, plain);
         assert!(tree.elements[&1].style_before_transition().is_none(), "the first style has nothing before it");
+        tree.note_frame_built();
 
         let declared = intern(&mut tree, r#"{"opacity":1,"transition":"opacity 1s"}"#);
         tree.set_style(1, declared);
@@ -3596,8 +3906,10 @@ mod tests {
     #[test]
     fn a_layer_that_introduces_a_transition_keeps_the_style_before_it() {
         let mut tree = layered_tree();
+        tree.set_root(1);
         apply(&mut tree, r##"[["setUniversalStyle",{"backgroundColor":"#ff0000"}]]"##);
         assert!(tree.elements[&2].style_before_transition().is_none());
+        tree.note_frame_built();
         apply(
             &mut tree,
             r##"[["setUniversalStyle",{"backgroundColor":"#0000ff","transition":"background-color 1s"}]]"##,

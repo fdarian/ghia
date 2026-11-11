@@ -1,6 +1,7 @@
 /** `setAttribute`, `removeAttribute` and `toggleAttribute` on a Solid element: the write has the effect of the prop. */
 import { createSignal } from "solid-js"
 import { afterEach, describe, expect, it } from "vitest"
+import { getComputedStyle } from "@ghia/native/host"
 import type { HostElement } from "../host.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
@@ -252,5 +253,57 @@ describe.skipIf(!hasNativeTestRenderer)("attribute writes on a Solid element", (
       ["attributes", "inert", null],
     ])
     expect(records.every((record) => record.target === (target as unknown as Node))).toBe(true)
+  })
+
+  describe("with a stylesheet", () => {
+    const sheet = `
+      [data-state="open"] { opacity: 0.25 }
+      .marked { padding-top: 7px }
+      [hidden] { padding-left: 5px }
+    `
+
+    it("applies and un-applies a rule keyed on an attribute written by setAttribute or dataset", () => {
+      let target!: HostElement
+      setup(() => (
+        <div>
+          <style>{sheet}</style>
+          <div ref={target} style={box} />
+        </div>
+      ))
+      expect(getComputedStyle(target).opacity).toBe("1")
+      target.setAttribute("data-state", "open")
+      expect(getComputedStyle(target).opacity).toBe("0.25")
+      target.removeAttribute("data-state")
+      expect(getComputedStyle(target).opacity).toBe("1")
+
+      target.dataset.state = "open"
+      expect(getComputedStyle(target).opacity).toBe("0.25")
+      delete target.dataset.state
+      expect(getComputedStyle(target).opacity).toBe("1")
+
+      target.setAttribute("class", "marked")
+      expect(getComputedStyle(target).paddingTop).toBe("7px")
+      target.removeAttribute("class")
+      expect(getComputedStyle(target).paddingTop).toBe("0px")
+
+      expect(target.toggleAttribute("hidden")).toBe(true)
+      expect(getComputedStyle(target).paddingLeft).toBe("5px")
+      expect(target.toggleAttribute("hidden")).toBe(false)
+      expect(getComputedStyle(target).paddingLeft).toBe("0px")
+    })
+
+    it("sends an attribute written before the first sheet exists once one does", () => {
+      let target!: HostElement
+      const [withSheet, setWithSheet] = createSignal(false)
+      setup(() => (
+        <div>
+          <div ref={target} style={box} />
+          {withSheet() ? <style>{sheet}</style> : null}
+        </div>
+      ))
+      target.setAttribute("data-state", "open")
+      setWithSheet(true)
+      expect(getComputedStyle(target).opacity).toBe("0.25")
+    })
   })
 })
