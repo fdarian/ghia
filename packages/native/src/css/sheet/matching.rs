@@ -40,6 +40,30 @@ pub trait ElementView: Sized {
     /// The closest preceding sibling that is an element.
     fn prev_sibling(&self) -> Option<Self>;
     fn is_root(&self) -> bool;
+
+    /// Whether `satisfies` holds for some sibling before this one. `key` names `satisfies` (it is
+    /// the same for every element it is asked of, and its answer for a sibling does not depend on
+    /// this element), so an implementation can remember what it learnt about a parent's children
+    /// and answer the next sibling without walking them again: `.x ~ .item` over n siblings and
+    /// no `.x` is n steps, not n squared.
+    fn any_earlier_sibling(&self, _key: SiblingTest, satisfies: impl Fn(&Self) -> bool) -> bool {
+        let mut sibling = self.prev_sibling();
+        while let Some(candidate) = sibling {
+            if satisfies(&candidate) {
+                return true;
+            }
+            sibling = candidate.prev_sibling();
+        }
+        false
+    }
+}
+
+/// Which `satisfies` of [`ElementView::any_earlier_sibling`]: the address of the selector it is
+/// part of, which does not move while a pass of matching runs, and the compound it starts at.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct SiblingTest {
+    selector: usize,
+    compound: usize,
 }
 
 pub fn matches(selector: &ComplexSelector, element: &impl ElementView) -> bool {
@@ -69,14 +93,8 @@ fn matches_from<E: ElementView>(selector: &ComplexSelector, index: usize, elemen
             false
         }
         Combinator::SubsequentSibling => {
-            let mut sibling = element.prev_sibling();
-            while let Some(candidate) = sibling {
-                if matches_from(selector, index + 1, &candidate) {
-                    return true;
-                }
-                sibling = candidate.prev_sibling();
-            }
-            false
+            let test = SiblingTest { selector: std::ptr::from_ref(selector) as usize, compound: index + 1 };
+            element.any_earlier_sibling(test, |sibling| matches_from(selector, index + 1, sibling))
         }
     }
 }

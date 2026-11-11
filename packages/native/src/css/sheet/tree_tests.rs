@@ -877,6 +877,27 @@ fn sibling_combinators_over_thousands_of_siblings_cost_work_in_proportion_to_the
 }
 
 #[test]
+fn a_subsequent_sibling_combinator_that_cannot_match_costs_work_in_proportion_to_the_siblings() {
+    let n = 2000;
+    // The position of the one `.x` among n `.item`s, or none.
+    for x_at in [None, Some(n - 1), Some(1000)] {
+        let mut doc = Doc::new();
+        doc.style_element(ROOT, ".x ~ .item { color: red }");
+        doc.flush();
+        let list = doc.element("div", ROOT);
+        let items: Vec<u64> =
+            (0..n).map(|i| doc.classed("div", list, if x_at == Some(i) { "x" } else { "item" })).collect();
+        reset_sibling_work();
+        doc.flush();
+        assert!(sibling_work() < 40 * n, "{x_at:?}: {}", sibling_work());
+        for (i, item) in items.iter().enumerate() {
+            let expected = x_at.is_some_and(|x| x < i).then_some("red");
+            assert_eq!(doc.color(*item), expected, "{x_at:?} item {i}");
+        }
+    }
+}
+
+#[test]
 fn sibling_marks_under_one_parent_expand_the_following_siblings_once() {
     let mut doc = Doc::new();
     doc.style_element(ROOT, ".a ~ .b { color: red }");

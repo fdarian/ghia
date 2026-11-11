@@ -7,7 +7,7 @@ use rustc_hash::FxHashMap;
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
 use super::atoms::Atom;
-use super::matching::{AttrValue, ElementView};
+use super::matching::{AttrValue, ElementView, SiblingTest};
 use super::selector::AttrName;
 
 // Children scanned and siblings stepped over by the matcher, which the tests read to check that
@@ -30,12 +30,23 @@ enum Positions {
     Map(FxHashMap<u64, usize>),
 }
 
-/// Where each element stands among its siblings, for one pass of matching over a tree that does
-/// not change. A parent's map is built the second time it is asked, so one element among many
-/// siblings costs a scan and the thousand that a mount matches cost one map.
+/// How far the children of one parent have been tried against one [`SiblingTest`].
+#[derive(Clone, Copy, Default)]
+struct Scan {
+    /// The first position that satisfies the test, once one has been met.
+    first: Option<usize>,
+    /// Positions before this one have been tried.
+    tried: usize,
+}
+
+/// Where each element stands among its siblings, and what a sibling combinator has learnt about
+/// them, for one pass of matching over a tree that does not change. A parent's map is built the
+/// second time it is asked, so one element among many siblings costs a scan and the thousand that
+/// a mount matches cost one map.
 #[derive(Default)]
 pub struct SiblingPositions {
     parents: RefCell<FxHashMap<u64, Positions>>,
+    scans: RefCell<FxHashMap<(u64, SiblingTest), Scan>>,
 }
 
 impl SiblingPositions {
@@ -57,6 +68,45 @@ impl SiblingPositions {
         let position = parent.children.iter().position(|child| *child == id);
         count_sibling_work(position.map_or(parent.children.len(), |position| position + 1));
         position
+    }
+}
+
+impl SiblingPositions {
+    /// Whether `satisfies` holds for a child of `parent` before `position`. The children are
+    /// tried in order and once, up to the furthest position asked: the first to satisfy the test
+    /// answers every sibling after it, and a run of children that do not answers every sibling
+    /// inside it.
+    fn any_before(
+        &self,
+        parent_id: u64,
+        parent: &RetainedElement,
+        position: usize,
+        test: SiblingTest,
+        satisfies: impl Fn(u64) -> bool,
+    ) -> bool {
+        let key = (parent_id, test);
+        // `satisfies` matches the rest of the selector, which can ask this cache again, so no
+        // borrow is held while it runs.
+        let mut scan = self.scans.borrow().get(&key).copied().unwrap_or_default();
+        if let Some(first) = scan.first {
+            return first < position;
+        }
+        if scan.tried < position {
+            let found = parent.children[scan.tried..position].iter().position(|child| satisfies(*child));
+            match found {
+                Some(offset) => {
+                    count_sibling_work(offset + 1);
+                    scan.first = Some(scan.tried + offset);
+                    scan.tried += offset + 1;
+                }
+                None => {
+                    count_sibling_work(position - scan.tried);
+                    scan.tried = position;
+                }
+            }
+            self.scans.borrow_mut().insert(key, scan);
+        }
+        scan.first.is_some()
     }
 }
 
@@ -125,5 +175,21 @@ impl ElementView for TreeView<'_> {
 
     fn is_root(&self) -> bool {
         self.tree.root_id == Some(self.id)
+    }
+
+    fn any_earlier_sibling(&self, test: SiblingTest, satisfies: impl Fn(&Self) -> bool) -> bool {
+        let Some(parent_id) = self.element().parent else {
+            return false;
+        };
+        let Some(parent) = self.tree.elements.get(&parent_id) else {
+            return false;
+        };
+        let Some(position) = self.positions.position(parent_id, parent, self.id) else {
+            return false;
+        };
+        self.positions.any_before(parent_id, parent, position, test, |sibling| {
+            self.tree.elements.get(&sibling).is_some_and(RetainedElement::is_matchable)
+                && satisfies(&self.with_id(sibling))
+        })
     }
 }
