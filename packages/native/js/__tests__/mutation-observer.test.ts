@@ -1,6 +1,8 @@
+import v8 from "node:v8"
+import vm from "node:vm"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { defineDomMembers } from "../dom-members.js"
-import { DOM_BINDING, HTMLElement, Node, Text, type ElementBinding, type TextBinding } from "../dom/nodes.js"
+import { DOM_BINDING, HTMLElement, Node, SVGElement, Text, type ElementBinding, type TextBinding } from "../dom/nodes.js"
 import {
   hasMutationObservers,
   MutationObserver,
@@ -48,12 +50,35 @@ class FakeText extends Text {
   }
 }
 
-defineDomMembers(FakeElement.prototype, (element: FakeElement) => ({
-  listeners: undefined as never,
-  connected: true,
-  prop: (name) => element.props[name],
-  propNames: () => Object.keys(element.props),
-}))
+class FakeSvg extends SVGElement {
+  readonly kids: FakeElement[] = []
+  constructor(
+    readonly type: string,
+    readonly props: Props = {}
+  ) {
+    super()
+  }
+  [DOM_BINDING](): ElementBinding {
+    return {
+      parent: null,
+      children: this.kids,
+      connected: true,
+      root: null,
+      type: this.type,
+      prop: (name) => this.props[name],
+      propNames: () => Object.keys(this.props),
+    }
+  }
+}
+
+for (const prototype of [FakeElement.prototype, FakeSvg.prototype]) {
+  defineDomMembers(prototype, (element: FakeElement | FakeSvg) => ({
+    listeners: undefined as never,
+    connected: true,
+    prop: (name) => element.props[name],
+    propNames: () => Object.keys(element.props),
+  }))
+}
 
 type Child = FakeElement | FakeText
 
@@ -440,7 +465,101 @@ describe("MutationObserver", () => {
       expect(hasMutationObservers()).toBe(false)
     })
   })
+
+  describe("attribute names", () => {
+    it("are the lowercase names of the props on an HTML element, and keep their case on SVG", () => {
+      const html = new FakeElement("label", { tabIndex: 0, className: "a", htmlFor: "x", "data-rowId": "1" })
+      expect(html.getAttributeNames()).toEqual(["tabindex", "class", "for", "data-rowid"])
+      expect(html.hasAttribute("tabindex")).toBe(true)
+      expect(html.hasAttribute("tabIndex")).toBe(true)
+      expect(html.getAttribute("tabindex")).toBe("0")
+      expect(html.getAttribute("tabIndex")).toBe("0")
+      expect(html.getAttribute("FOR")).toBe("x")
+      expect(html.getAttribute("htmlFor")).toBeNull()
+      expect(html.getAttribute("className")).toBeNull()
+      const svg = new FakeSvg("svg", { viewBox: "0 0 1 1", className: "s" })
+      expect(svg.getAttributeNames()).toEqual(["viewBox", "class"])
+      expect(svg.getAttribute("viewBox")).toBe("0 0 1 1")
+      expect(svg.getAttribute("viewbox")).toBeNull()
+    })
+
+    it("name the attribute of a record, so an attributeFilter of the lowercase name matches", () => {
+      const element = new FakeElement("div")
+      const filtered = observer(() => {})
+      filtered.observe(element, { attributeFilter: ["tabindex", "class"] })
+      setProp(element, "tabIndex", 0)
+      setProp(element, "className", "a")
+      setProp(element, "htmlFor", "x")
+      expect(filtered.takeRecords().map((record) => record.attributeName)).toEqual(["tabindex", "class"])
+    })
+
+    it("keep the case on an SVG element", () => {
+      const svg = new FakeSvg("svg")
+      const mo = observer(() => {})
+      mo.observe(svg, { attributes: true })
+      recordAttributeChanges(svg, ["viewBox"], () => {
+        svg.props.viewBox = "0 0 1 1"
+      })
+      expect(mo.takeRecords().map((record) => record.attributeName)).toEqual(["viewBox"])
+    })
+  })
+
+  describe("what an observer holds", () => {
+    it("keeps observing a node that is still alive through a collection", async () => {
+      const mo = observer(() => {})
+      const tree = new FakeElement("div")
+      mo.observe(tree, { childList: true, subtree: true })
+      await collect()
+      expect(hasMutationObservers()).toBe(true)
+      remove(append0(tree))
+      expect(mo.takeRecords()).toHaveLength(2)
+    })
+
+    it("does not keep an observed node alive, and the live count follows its collection", async () => {
+      const mo = observer(() => {})
+      let holder: WeakRef<FakeElement>
+      ;(() => {
+        const node = new FakeElement("div")
+        holder = new WeakRef(node)
+        mo.observe(node, { childList: true, subtree: true })
+        append(node, new FakeElement("p"))
+        mo.takeRecords()
+      })()
+      await collect()
+      expect(holder!.deref()).toBeUndefined()
+      expect(hasMutationObservers()).toBe(false)
+      expect(() => mo.disconnect()).not.toThrow()
+      expect(hasMutationObservers()).toBe(false)
+    })
+
+    it("counts a registration once when its node is collected after a disconnect", async () => {
+      const mo = observer(() => {})
+      const kept = new FakeElement("div")
+      mo.observe(kept, { attributes: true })
+      ;(() => {
+        const node = new FakeElement("div")
+        mo.observe(node, { attributes: true })
+        mo.disconnect()
+        mo.observe(kept, { attributes: true })
+      })()
+      await collect()
+      expect(hasMutationObservers()).toBe(true)
+      mo.disconnect()
+      expect(hasMutationObservers()).toBe(false)
+    })
+  })
 })
+
+/** `gc` without `--expose-gc`: V8 takes the flag at runtime and a fresh context gets the function. */
+v8.setFlagsFromString("--expose-gc")
+const collectGarbage = vm.runInNewContext("gc") as () => void
+
+async function collect(): Promise<void> {
+  for (let round = 0; round < 5; round++) {
+    collectGarbage()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+}
 
 function append0(parent: FakeElement): FakeElement {
   const child = new FakeElement("i")

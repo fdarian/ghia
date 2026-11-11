@@ -4908,7 +4908,7 @@ A host element (a React ref, a Solid `HostElement`) has the members a library wr
 | `addEventListener(type, listener, options?)`, `removeEventListener(type, listener, options?)` | For any event type, with the DOM's arguments: `listener` is a function or an object with `handleEvent`, `options` is `{ capture, once, passive, signal }` or the `capture` boolean. The same function in the same phase is added once. `once` removes it before it runs, `passive` makes `event.preventDefault()` do nothing while it runs, and a `signal` removes it when it aborts (an aborted one adds nothing). A listener is called with the element as `this`. A type native never emits (`touchstart`, `touchend`, `touchcancel`) is accepted and never fires. |
 | `ownerDocument` | The `document` object the adapters export. Its `defaultView` is the global `window` (`globalThis`), which has `setTimeout`, `requestAnimationFrame` and `ResizeObserver`, so `element.ownerDocument.defaultView` works as the window of a library that asks for it. |
 | `isConnected` | True while the element is in the tree of a mounted root. |
-| `getAttribute(name)` | The prop of that name as a string (the name is matched without regard to case), or `null` when the element was not given it or its value is a function or an object (`onClick`, `style`). `data-index={5}` reads `"5"`; `false`, `null` and `undefined` read `null` and `true` reads `""`, except for `data-*` and `aria-*`, where `false` reads `"false"` and `true` `"true"`. |
+| `getAttribute(name)` | The prop whose attribute name is `name` as a string (a prop is an attribute under the name the DOM gives it: lowercase on an HTML element, so `tabIndex={0}` is `tabindex` and `getAttribute("tabIndex")` finds it, `className` is `class` and `htmlFor` is `for`; an SVG element keeps the case of its props, `viewBox`, and matches names exactly), or `null` when the element was not given it or its value is a function or an object (`onClick`, `style`). `data-index={5}` reads `"5"`; `false`, `null` and `undefined` read `null` and `true` reads `""`, except for `data-*` and `aria-*`, where `false` reads `"false"` and `true` `"true"`. |
 | `offsetWidth`, `offsetHeight` | The border box's layout size, rounded half up, before any `transform` (a `scale(2)` element has the offset size it had without it; `getBoundingClientRect()` is the transformed box). The read lays out first, as `getBoundingClientRect` does. `0` for an element that is not mounted or has no box. `renderer.getElementBounds(id)` carries the unrounded size as `layoutWidth` and `layoutHeight`. |
 
 ### DOM classes and the tree
@@ -4923,7 +4923,7 @@ Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `
 | `children`, `childElementCount`, `firstElementChild`, `lastElementChild`, `previousElementSibling`, `nextElementSibling` | The same, elements only. `children` is an array, not an `HTMLCollection`. |
 | `contains(node)`, `getRootNode()`, `compareDocumentPosition(node)` | `contains` includes the node itself. `getRootNode()` is `document` for a mounted node and the top of its tree otherwise. `compareDocumentPosition` gives the `DOCUMENT_POSITION_*` bits (`DISCONNECTED`, `PRECEDING`, `FOLLOWING`, `CONTAINS`, `CONTAINED_BY`); two trees that are not in one document are `DISCONNECTED` and `IMPLEMENTATION_SPECIFIC` with a stable order. `document.contains(node)` is `node.isConnected`. |
 | `textContent` | The text of the node and its descendants. Read only: there is no setter yet. |
-| `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `className` or `class` prop (`""` without one), an attribute exists where `getAttribute` is not `null`, and `className` is the attribute `class`. `dataset` is a frozen read-only snapshot of the `data-*` props with the names in camel case (`data-row-id` is `rowId`). |
+| `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `className` or `class` prop (`""` without one), an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a frozen read-only snapshot of the `data-*` props with the names in camel case (`data-row-id` is `rowId`). |
 
 Every window root is a real `<html>` with a `<head>` and a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.head` the `<head>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; all four are `null` while no root is mounted, and with several windows they are those of the window that mounted last (the rule `matchMedia` follows). `html.parentNode` is `document`, `head.parentNode` and `body.parentNode` are `html` (`documentElement.children` is `[head, body]`), a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin; they add no accessibility node. `head` is `display: none`: it has no box, and an element appended to it is never drawn, laid out or hit, though it is a real element in the tree (a library that prepends a node to `document.head` finds one).
 
@@ -4986,7 +4986,7 @@ a `resize` event too: both are sent when the size of the window that mounted las
 (not for a change of OS preference), `visualViewport` first, from one subscription that
 exists only while either has a listener, and a listener added before any root is mounted
 starts to hear the first one that is. The event's `target` and `currentTarget` are the
-global `window`, and `visualViewport` for its own.
+global `window`, and `visualViewport` for its own. It neither bubbles nor can be cancelled, as in Chrome.
 `MutationObserver` and `MutationRecord` are globals too, with the standard's semantics.
 `observe(node, { childList, attributes, characterData, subtree, attributeOldValue,
 characterDataOldValue, attributeFilter })` throws a `TypeError` for the option sets the standard
@@ -4994,11 +4994,14 @@ rejects (none of the three kinds, `attributeOldValue` or `attributeFilter` with 
 and observing the same node again replaces its options. Records go to the observer in one
 microtask per batch, in the order the observers were made, with `type`, `target`, `addedNodes`,
 `removedNodes`, `previousSibling`, `nextSibling`, `attributeName`, `attributeNamespace` (`null`)
-and `oldValue`; `takeRecords()` empties the queue and `disconnect()` drops it. The adapters report
+and `oldValue`; `takeRecords()` empties the queue and `disconnect()` drops it. An observer does not
+keep the nodes it observes alive, as in the standard: an unmounted node nothing else refers to is
+collected, and its registration goes with it. The adapters report
 the changes they make to their tree: a node placed or removed (a move is a removal, then an
 insertion), a text change (`characterData`) and a prop change. An attribute is what `getAttribute`
-reads, so a record is made only when that string changed, with the old string as `oldValue`:
-`className` is the `class` attribute, and a handler, an object, `style` and `children` are no
+reads, so a record is made only when that string changed, with the old string as `oldValue`, and
+`attributeName` is the attribute's name (`tabindex` for a `tabIndex` prop, so an `attributeFilter`
+of `["tabindex"]` matches): `className` is the `class` attribute, and a handler, an object, `style` and `children` are no
 attribute and make no record. `html`, `head` and `body` are in the tree, so
 `observe(document.body, { childList: true, subtree: true })` sees the app's nodes. A subtree
 observer keeps hearing of changes inside a node that was removed from the subtree until its next
@@ -7074,7 +7077,9 @@ Every mouse and pointer event type has `pointerId` and `pointerType` as required
 fields: `1` and `"mouse"` for the mouse. A pointer event (`pointerdown`, `pointermove`,
 `pointerup`, `pointercancel`, `pointerover`, `pointerout`, `pointerenter`, `pointerleave`,
 `gotpointercapture`, `lostpointercapture`, and `click`, `auxclick` and `contextmenu`, which are
-PointerEvents in Chrome) also has `isPrimary`, always `true`: Ghia has one pointer. Every event has `nativeEvent`, the event itself, which is what a library that wraps
+PointerEvents in Chrome) also has `isPrimary`: `true`, because Ghia has one pointer, except on a
+`click`, `auxclick` or `contextmenu` that no pointer made (`pointerId` `-1`: Enter or Space on a
+button, the VoiceOver Press, `el.click()`), where it is `false`. Every event has `nativeEvent`, the event itself, which is what a library that wraps
 events reads the DOM event from (a React synthetic event has the same member).
 
 ### Pointer capture

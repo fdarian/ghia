@@ -36,6 +36,8 @@ export * from "./events/element-listeners.js"
 export * from "./dom-members.js"
 export * from "./dom/nodes.js"
 export * from "./dom/mutation-observer.js"
+export * from "./dom/attribute-names.js"
+export * from "./dom/prototype-members.js"
 export * from "./animation-frame.js"
 export * from "./events/types.js"
 export type { AriaProps }
