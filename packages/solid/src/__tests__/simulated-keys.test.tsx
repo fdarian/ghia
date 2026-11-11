@@ -47,7 +47,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid simulated keystrokes", () => {
     const [text, setText] = createSignal("")
     const app = createTestRoot()
     app.render(() => (
-      <input testId="field" value={text()} style={{ width: 300, height: 40 }} onChange={(event) => setText(event.value ?? "")} />
+      <input testId="field" value={text()} style={{ width: 300, height: 40 }} onInput={(event) => setText(event.value ?? "")} />
     ))
     app.renderer.nativeSimulateKeystrokes(app.renderer.findByTestId("field")!.id, "a Shift+b")
     expect(text()).toBe("aB")

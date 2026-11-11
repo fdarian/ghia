@@ -40,6 +40,7 @@ struct RoutingState {
     modality: crate::focus::FocusModality,
     /// The button a Space key down armed, which the key up clicks if it is still focused.
     armed_space: Cell<Option<u64>>,
+    text_commits: super::text_commit::TextCommits,
 }
 
 /// What the input listeners read from `GpuixView`, shared so they never have to
@@ -70,6 +71,10 @@ impl InputRouting {
 
     pub fn modality(&self) -> &crate::focus::FocusModality {
         &self.0.modality
+    }
+
+    pub(crate) fn text_commits(&self) -> &super::text_commit::TextCommits {
+        &self.0.text_commits
     }
 
     pub(super) fn arm_space(&self, element: u64) {

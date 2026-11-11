@@ -130,7 +130,7 @@ describe("the events Ghia delivers", () => {
     ["focus", FocusEvent],
     ["focusin", FocusEvent],
     ["blur", FocusEvent],
-    ["change", InputEvent],
+    ["input", InputEvent],
     ["compositionupdate", CompositionEvent],
     ["transitionend", TransitionEvent],
     ["animationstart", AnimationEvent],
@@ -148,6 +148,16 @@ describe("the events Ghia delivers", () => {
     expect(event).toBeInstanceOf(Event)
     expect(event).not.toBeInstanceOf(UIEvent)
     expect(event.bubbles).toBe(false)
+  })
+
+  it("is a plain Event for change, as in the DOM, and an InputEvent for input", () => {
+    const change = deliver("change", { value: "x" })
+    expect(change).not.toBeInstanceOf(UIEvent)
+    expect([change.bubbles, change.cancelable]).toEqual([true, false])
+    const input = deliver("input", { value: "x", inputType: "insertText", data: "x" })
+    expect(input).toBeInstanceOf(InputEvent)
+    expect([input.bubbles, input.cancelable]).toEqual([true, false])
+    expect(deliver("input").data).toBeNull()
   })
 
   it("keeps every field of the payload and replaces the ids with elements", () => {

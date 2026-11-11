@@ -81,7 +81,7 @@ const SPECS: ReadonlyMap<string, TypeSpec> = new Map([
   ),
   ...typesOf({ cls: KeyboardEvent, modifiers: true, pointer: false }, ["keydown", "keyup"]),
   ...typesOf({ cls: FocusEvent, modifiers: false, pointer: false }, ["focus", "blur", "focusin", "focusout"]),
-  ...typesOf({ cls: InputEvent, modifiers: false, pointer: false }, ["change"]),
+  ...typesOf({ cls: InputEvent, modifiers: false, pointer: false }, ["input"]),
   ...typesOf(
     { cls: CompositionEvent, modifiers: false, pointer: false },
     ["compositionstart", "compositionupdate", "compositionend"]

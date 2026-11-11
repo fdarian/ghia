@@ -45,7 +45,7 @@ describeNative("input method composition", () => {
       { key: "a", action: "mark", text: "か" },
       { key: "Enter", action: "commit", text: "か" }
     )
-    expect(events.filter((event) => event.type === "change").map((event) => event.value)).toEqual([
+    expect(events.filter((event) => event.type === "input").map((event) => event.value)).toEqual([
       "k",
       "か",
       "か",
@@ -92,7 +92,7 @@ describeNative("input method composition", () => {
 
   it("the keydown comes before the edit it causes and the keyup after", () => {
     compose({ key: "a", action: "mark", text: "あ" })
-    expect(events.map((event) => event.type)).toEqual(["keydown", "change", "keyup"])
+    expect(events.map((event) => event.type)).toEqual(["keydown", "input", "keyup"])
   })
 
   it("preventDefault on a Process keydown does not stop the input method", () => {
@@ -102,7 +102,7 @@ describeNative("input method composition", () => {
       { key: "Enter", action: "commit", text: "あ" }
     )
     expect(keyDowns().map(([key]) => key)).toEqual(["Process", "Process"])
-    expect(events.filter((event) => event.type === "change").map((event) => event.value)).toEqual([
+    expect(events.filter((event) => event.type === "input").map((event) => event.value)).toEqual([
       "あ",
       "あ",
     ])
@@ -158,7 +158,7 @@ describeNative("composition events", () => {
     const detail =
       event.type === "keydown" || event.type === "keyup"
         ? `${event.key}${event.isComposing ? " composing" : ""}`
-        : event.type === "change"
+        : event.type === "input"
           ? JSON.stringify(event.value)
           : JSON.stringify(event.data)
     log.push(`${name}:${event.type} ${detail}`)
@@ -196,7 +196,7 @@ describeNative("composition events", () => {
     inputId = renderer.findByTestId("field").id
   }
 
-  it("fires start and update before the change of their edit and end after the change of the commit", () => {
+  it("fires start and update before the input of their edit and end after the input of the commit", () => {
     mount()
     renderer.simulateComposition(inputId, [
       { key: "k", action: "mark", text: "k" },
@@ -209,15 +209,15 @@ describeNative("composition events", () => {
       'parent:compositionstart ""',
       'parent-capture:compositionupdate "k"',
       'input:compositionupdate "k"',
-      'input:change "k"',
+      'input:input "k"',
       "input:keyup k composing",
       "input:keydown Process composing",
       'parent-capture:compositionupdate "か"',
       'input:compositionupdate "か"',
-      'input:change "か"',
+      'input:input "か"',
       "input:keyup a composing",
       "input:keydown Process composing",
-      'input:change "か"',
+      'input:input "か"',
       'input:compositionend "か"',
       'parent:compositionend "か"',
       "input:keyup Enter",
@@ -267,7 +267,7 @@ describeNative("composition events", () => {
       'input:compositionend ""',
       'parent:compositionend ""',
     ])
-    expect(events.filter((event) => event.type === "change").map((event) => event.value)).toEqual([
+    expect(events.filter((event) => event.type === "input").map((event) => event.value)).toEqual([
       "あ",
       "",
     ])
@@ -283,7 +283,7 @@ describeNative("composition events", () => {
     events.length = 0
     renderer.nativeSimulateKeystrokes(inputId, "x")
     expect(log.filter((entry) => entry.includes("composition"))).toEqual([])
-    expect(events.filter((event) => event.type === "change").map((event) => event.value)).toEqual([
+    expect(events.filter((event) => event.type === "input").map((event) => event.value)).toEqual([
       "あx",
     ])
   })

@@ -27,7 +27,8 @@ const CLASS_OF_TYPE: Record<string, string> = {
   focusin: "FocusEvent",
   blur: "FocusEvent",
   focusout: "FocusEvent",
-  change: "InputEvent",
+  input: "InputEvent",
+  change: "Event",
   dragenter: "DragEvent",
   dragover: "DragEvent",
 }
@@ -42,7 +43,7 @@ describeNative("DOM event classes on events Ghia delivers, in React", () => {
   })
 
   /** Heard through a prop on the element: native emits these only for the element that listens. */
-  const PROP_TYPES = new Set(["change", "dragenter", "dragover"])
+  const PROP_TYPES = new Set(["input", "change", "dragenter", "dragover"])
 
   function recordAll(seen: Map<string, DomEvent>): void {
     for (const type of Object.keys(CLASS_OF_TYPE).filter((name) => !PROP_TYPES.has(name))) {
@@ -78,11 +79,12 @@ describeNative("DOM event classes on events Ghia delivers, in React", () => {
           }}
           testId="field"
           style={{ width: 100, height: 30 }}
-          onChange={(event) => seen.set("change", event)}
+          onInput={(event) => seen.set("input", event)}
         />
       </div>
     )
     recordAll(seen)
+    field!.addEventListener("change", (event) => seen.set("change", event as DomEvent))
     const renderer = testRoot.renderer
     const bounds = renderer.getElementBounds(renderer.findByTestId("box")!.id)!
     const x = bounds.x + 10
@@ -96,6 +98,7 @@ describeNative("DOM event classes on events Ghia delivers, in React", () => {
     renderer.nativeSimulateKeystrokes(renderer.findByTestId("box")!.id, "a")
     field!.focus()
     renderer.nativeSimulateKeystrokes(renderer.findByTestId("field")!.id, "b")
+    field!.blur()
     renderer.nativeSimulateFileDragEnter(x, y, [import.meta.filename])
     renderer.nativeSimulateFileDragMove(x + 1, y)
     renderer.nativeSimulateFileDragExit()

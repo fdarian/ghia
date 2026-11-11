@@ -192,8 +192,8 @@ export function ComboboxInput(props: ComboboxInputProps): JSX.Element {
       props.onBlur?.(event)
       state.setOpen(false)
     },
-    onChange(event: HostInputEvent) {
-      props.onChange?.(event)
+    onInput(event: HostInputEvent) {
+      props.onInput?.(event)
       state.setInput(event.value)
       if (!disabled()) state.setOpen(true)
     },

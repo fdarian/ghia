@@ -33,18 +33,22 @@ const NoEventPriority = 0
 
 /**
  * React DOM listens to `focusin` and `focusout` for `onFocus` and `onBlur`, so
- * they bubble. React has no `onFocusIn` or `onFocusOut`.
+ * they bubble. React has no `onFocusIn` or `onFocusOut`. `onInput` and `onChange`
+ * depend on the element: see `fieldHandlers`.
  */
 const EVENT_TYPE_BY_PROP = eventTypesWithOverrides({
   onFocus: "focusin",
   onBlur: "focusout",
   onFocusIn: null,
   onFocusOut: null,
+  onInput: null,
+  onChange: null,
   // A `<nativeview>`'s handlers take the pointer and nothing, not an event: see `syncNativeviewListeners`.
   onAttach: null,
   onDetach: null,
 })
 import { diffCustomProps, keepAttributeWrites } from "./custom-props.js"
+import { fieldHandlers } from "./field-events.js"
 import { hiddenStyle, nativeStyleOf } from "./native-style.js"
 import type {
   Container,
@@ -175,6 +179,9 @@ function syncEventListeners(container: Container, instance: Instance): void {
     const handler = record[propName]
     if (eventType && handler) listeners.setProp(eventType, handler as HostEventHandler)
   }
+  const fields = fieldHandlers(instance.type, instance.props)
+  if (fields.input) listeners.setProp("input", fields.input)
+  if (fields.change) listeners.setProp("change", fields.change)
 }
 
 function syncNativeviewProps(
@@ -227,6 +234,11 @@ function diffEventListeners(instance: Instance, oldProps: Props, newProps: Props
     const eventType = EVENT_TYPE_BY_PROP.get(propName)
     if (eventType && previous[propName]) listeners.setProp(eventType, undefined)
   }
+  if (previous.onInput === next.onInput && previous.onChange === next.onChange && previous.type === next.type) return
+  const before = fieldHandlers(instance.type, oldProps)
+  const after = fieldHandlers(instance.type, newProps)
+  if (before.input !== after.input) listeners.setProp("input", after.input)
+  if (before.change !== after.change) listeners.setProp("change", after.change)
 }
 
 // ── Style helper ─────────────────────────────────────────────────────

@@ -265,8 +265,8 @@ export interface HostCompositionEvent extends HostDomEvent {
 }
 
 /**
- * The `onChange` event of an `<input>` or `<textarea>`: one edit of its text,
- * which is what the DOM calls `input`. `inputType` and `data` are those of an
+ * The `input` event of an `<input>` or `<textarea>` (`onInput`, and React's `onChange`): one edit of
+ * its text, which bubbles and cannot be canceled. `inputType` and `data` are those of an
  * `InputEvent` as Chrome fills them: `insertText`, `insertFromPaste` and
  * `insertCompositionText` carry the inserted text in `data`; `insertLineBreak`,
  * the `delete…` types (`deleteContentBackward`, `deleteContentForward`,
@@ -285,12 +285,21 @@ export interface HostInputEvent extends Omit<HostDomEvent, "data"> {
   readonly isComposing: boolean
 }
 
+/**
+ * The `change` event (`onChange` in Solid): the user committed a text control's value, on blur or on
+ * Enter in an `<input>`, and it is not the value the control had before. `value` is the committed text;
+ * a checkbox or radio's `change` has none. It bubbles and cannot be canceled.
+ */
+export interface HostChangeEvent extends HostDomEvent {
+  readonly value?: string
+}
+
 export interface CompositionEventHandlerProps {
   /** A composition began. Fires before its first `compositionupdate`. */
   onCompositionStart?: (event: HostCompositionEvent) => void
-  /** The composition's text changed. Fires before the `onChange` of that edit. */
+  /** The composition's text changed. Fires before the `input` of that edit. */
   onCompositionUpdate?: (event: HostCompositionEvent) => void
-  /** The composition ended, committed or cancelled. Fires after the `onChange` of its final edit. */
+  /** The composition ended, committed or cancelled. Fires after the `input` of its final edit. */
   onCompositionEnd?: (event: HostCompositionEvent) => void
 }
 

@@ -273,6 +273,10 @@ impl FocusState {
         self.outbox.pop_front()
     }
 
+    fn push_event(&mut self, payload: EventPayload) {
+        self.outbox.push_back(payload);
+    }
+
     #[cfg(not(target_family = "wasm"))]
     fn push_page_moves(&mut self, tree: &RetainedTree, change: &FocusChange) {
         let is_webview = |id: &u64| tree.elements.get(id).is_some_and(|element| element.element_type == "webview");
@@ -779,6 +783,13 @@ impl GpuixView {
         ) {
             if let Some(from) = change.from {
                 crate::events::key_activation::blurred(&self.routing, &self.pointer, tree, from);
+            }
+            // The value the user left in a text control is committed before `blur`, as in Chrome.
+            let committed = change.from.and_then(|from| Some((from, self.routing.text_commits().commit(from)?)));
+            if let Some((from, value)) = committed {
+                if let Some(payload) = crate::events::text_commit::change_payload(tree, from, value) {
+                    self.focus.push_event(payload);
+                }
             }
             self.focus.push_change(tree, &change);
             #[cfg(not(target_family = "wasm"))]

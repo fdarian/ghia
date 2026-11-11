@@ -20,6 +20,7 @@ pub mod state;
 pub mod state_styles;
 pub(crate) mod sync_dispatch;
 pub mod synthetic_click;
+pub(crate) mod text_commit;
 
 /// Every GPUIX window hit-tests like the DOM: the pointer hits the topmost
 /// element that is not `pointer-events: none` and the elements enclosing it,

@@ -4319,7 +4319,8 @@ grapheme-safe deletion and mouse positioning.
 in `onKeyDown` and call `preventDefault()`, as above. Enter in an `<input>`
 submits its [form](#forms), if it has one and no other `<input>` shares it. There is no `onSubmit` on `<input>`
 or `<textarea>`. The editor updates natively first, then
-reports the complete value to React.
+reports the complete value through `input` (React's `onChange`, Solid's `onInput`); `change` is the commit, on blur
+and on Enter in an `<input>` (see [The input and change events](#the-input-and-change-events)).
 `value` changes can replace the native content, but keeping the same prop value
 does not reject an edit like a browser-controlled input.
 
@@ -4397,13 +4398,13 @@ reported as disabled to assistive technology. The `disabled` and `enabled`
 (see [Checkbox, radio and hidden inputs](#checkbox-radio-and-hidden-inputs)); an
 unknown value is `'text'`. `type` on a `<textarea>` is ignored.
 
-- `'password'` paints one bullet per character. `onChange` and `value` carry
+- `'password'` paints one bullet per character. `input` and `value` carry
   the real text. Copy and cut do nothing, double click selects all, and the
   value is not exposed to assistive technology (the role is `PasswordInput`).
 - `'number'` makes `ArrowUp` and `ArrowDown` step the value by `step` (default
-  1), clamped to `min` and `max`, and report it through `onChange`. Text that
-  is not a number steps from 0. Typing is not restricted and `onChange`
-  reports the raw text, so `'1e'` stays `'1e'`. There is no spinner. `min`,
+  1), clamped to `min` and `max`, and report it through `input` and then `change`
+  (a step commits itself, as in Chrome). Text that is not a number steps from 0.
+  Typing is not restricted and `input` reports the raw text, so `'1e'` stays `'1e'`. There is no spinner. `min`,
   `max` and `step` are ignored for other types. It is exposed to assistive
   technology as a spin button with its numeric value, `min`, `max` and `step`.
 - `'search'` is exposed to assistive technology as a search field.
@@ -4447,7 +4448,8 @@ hidden `<input>` and click it, run unchanged. A change of `type` builds the othe
   with the same non-empty `name` in the same form, or in the same tree when they have no form.
   Arrow keys do not move between the radios of a group.
 - **Events.** `onInput` (or `addEventListener('input')`) and `onChange` (`'change'`) each fire once per toggle, `input`
-  first. On a text control `onChange` is the per-edit event and `onInput` never fires.
+  first. In React `onChange` of a checkbox or radio is its `change`, as in React DOM, where a text control's is its
+  `input`: see [The input and change events](#the-input-and-change-events).
 - **Controlled.** A control with a `checked` prop goes back to that prop after the change handlers have run
   (as React DOM restores a controlled input), so a handler that does not take the new value leaves the control
   as it was.
@@ -4942,7 +4944,7 @@ an `<input>` or `<textarea>`, and the events follow Chrome's:
   `""`), then `compositionupdate` (`data` is the composition's current text) for
   every change, then `compositionend` (`data` is the final text, `""` when the
   composition was cancelled) on commit. `compositionstart` and `compositionupdate`
-  come before the `change` of their edit, `compositionend` after the `change` of
+  come before the `input` of their edit, `compositionend` after the `input` of
   the final one, as in Chrome. They are aimed at the input, bubble, and cannot be
   cancelled. `onCompositionStart`, `onCompositionUpdate` and `onCompositionEnd`
   have `…Capture` twins.
@@ -4951,23 +4953,26 @@ an `<input>` or `<textarea>`, and the events follow Chrome's:
 
 Windows and Linux report `isComposing` false and fire no composition events.
 A value an app sets while a composition is open ends it without a
-`compositionend`. The `change` of a composition's edits has `inputType`
+`compositionend`. The `input` of a composition's edits has `inputType`
 `insertCompositionText` and `isComposing` true, see
-[The change event](#the-change-event).
+[The input and change events](#the-input-and-change-events).
 In the test renderer, [`simulateComposition`](#simulating-keys) runs the
 sequence.
 
-### The change event
+### The input and change events
 
-`onChange` fires once per edit of the text of an `<input>` or `<textarea>`, which is
-what the DOM calls `input` (`onInput` fires for a checkbox or radio only, and there is no `beforeinput`). Besides
-`value` it carries the fields of a DOM `InputEvent`, filled as Chrome fills them:
+Text controls fire the DOM's two events, at the DOM's times.
+
+`input` fires once per edit of the text of an `<input>` or `<textarea>`: a typed character, a paste, a cut, a deletion,
+an input method's commit, an undo or redo and a number input's arrow step. It is an `InputEvent`, bubbles and cannot be
+canceled, and is delivered after the edit (there is no `beforeinput`). Besides `value` it carries the fields of a DOM
+`InputEvent`, filled as Chrome fills them:
 
 | Edit | `inputType` | `data` |
 |---|---|---|
 | A typed character, or text from an input method that is not composing | `insertText` | the text |
 | Paste | `insertFromPaste` | the pasted text |
-| Enter in a `<textarea>` (an `<input>` fires nothing) | `insertLineBreak` | `null` |
+| Enter in a `<textarea>` (an `<input>` fires no `input`) | `insertLineBreak` | `null` |
 | Each change of a composition, and its commit | `insertCompositionText` | the composition's text |
 | A composition cancelled | `deleteCompositionText` | `null` |
 | Backspace, Delete | `deleteContentBackward`, `deleteContentForward` | `null` |
@@ -4980,8 +4985,29 @@ what the DOM calls `input` (`onInput` fires for a checkbox or radio only, and th
 Typing over a selection is `insertText` and deleting a selection is the delete type
 of its key. `data` is the text that fit under `maxLength`. `isComposing` is true for
 every edit of a composition, the commit included: it comes before `compositionend`.
-Setting `value` from code fires nothing. `data` is `null` rather than absent when
-the edit inserted no text. The handler's event is typed `HostInputEvent`.
+`data` is `null` rather than absent when the edit inserted no text. The handler's event is typed `HostInputEvent`.
+A checkbox or radio fires `input` too, once per toggle, before its `change`.
+
+`change` fires when the user commits a value the control did not have at the last commit: on blur (before `blur`
+and `focusout`, also when focus moves to another control or the window loses it) when the value differs from the value
+the control had at focus, and on Enter in a single-line `<input>` (before the form is submitted by the same Enter). Its
+event is a plain `Event` that bubbles and cannot be canceled, with `value` set to the committed text; the number
+stepper commits each step as `input` then `change`, as Chrome does. A `<textarea>` commits on blur only, since Enter
+there inserts a newline. Nothing fires `change` for an edit that was undone, a blur with no edit, or a write to
+`value` from code, which also drops an edit that was not yet committed.
+
+Setting `value` from code fires neither event.
+
+| | `input` per edit | `change` on commit |
+|---|---|---|
+| React | `onInput`, and `onChange` of a text control (React DOM's) | `addEventListener('change')`; `onChange` of a checkbox or radio |
+| Solid | `onInput` | `onChange` |
+
+React's `onChange` is React DOM's: on an `<input>` or `<textarea>` (not a checkbox or radio) it is the `input` event, so
+an app written for React DOM sees one call per edit, `onInput` runs before it when an element has both, and an
+`onChange` on a `<form>` or a `<div>` hears the edits of the text controls under it and the toggles of the checkboxes
+and radios under it, once each. Solid's `onChange` is the DOM's: it fires on commit only, and the text of `onInput` is
+`event.value`.
 
 ### Listeners and DOM members on an element
 
@@ -7070,7 +7096,8 @@ The details for a library author, with a minimal addon, are in
 | Scroll | `onScroll` | `scrollTop`, `scrollLeft` — scroll containers, not `<virtual-list>` |
 | Content visibility | `onContentVisibilityAutoStateChange` | `skipped` — an element with `contentVisibility: "auto"` began or stopped skipping its content. Bubbles, cancelable, has an `…Capture` twin. See [Skipping content with `contentVisibility`](#skipping-content-with-contentvisibility) |
 | Layout | `onLayout` | `width`, `height`, `x`, `y` — any element a `ResizeObserver` works on (`<div>`, `<span>`, `<input>`, `<img>`, `<svg>` and the other built-in elements). See also `ResizeObserver` and `IntersectionObserver` under [Measure an element](#measure-an-element) |
-| Change | `onChange` | `value`, `inputType`, `data`, `isComposing` — `<input>` and `<textarea>` only, once per edit like the DOM `input`. See [The change event](#the-change-event) |
+| Input | `onInput` (React: also `onChange` of a text control) | `value`, `inputType`, `data`, `isComposing` — once per edit of an `<input>` or `<textarea>`, and once per toggle of a checkbox or radio. Bubbles, not cancelable. See [The input and change events](#the-input-and-change-events) |
+| Change | `onChange` (React: of a checkbox or radio) | `value` — an `<input>` or `<textarea>` whose value the user committed on blur or Enter, or a checkbox or radio that was toggled. Bubbles, not cancelable. See [The input and change events](#the-input-and-change-events) |
 | Submit | `onSubmit` | `formData`, `submitter` — `<form>`, bubbling. See [Forms](#forms) |
 | Webview | `onDidStartLoading`, `onDidStopLoading`, `onDidNavigate`, `onPageTitleUpdated`, `onDidFailLoad` | `url`, `title`, `explicitSet`, `errorCode`, `errorDescription`, `validatedUrl` — `<webview>` only, at the element, not bubbling. See [`<webview>`](#webview) |
 | Native view | `onAttach`, `onDetach` | `nativeHandle` (decimal digits) — `<nativeview>` only, at the element, not bubbling; the handlers get the `bigint` and no event. See [`<nativeview>`](#nativeview) |
@@ -7280,7 +7307,7 @@ events reads the DOM event from (a React synthetic event has the same member).
 
 ### Event classes
 
-Every event Ghia delivers is an instance of the DOM class of its type, and of `Event`: a `click`, `auxclick`, `contextmenu` and every `pointer*` type is a `PointerEvent`; the other mouse types a `MouseEvent`; `wheel` a `WheelEvent`; the drag types a `DragEvent`; `keydown` and `keyup` a `KeyboardEvent`; `focus`, `blur`, `focusin` and `focusout` a `FocusEvent`; `onChange`'s event an `InputEvent`; the composition types a `CompositionEvent`; the transition types a `TransitionEvent` and the animation types an `AnimationEvent`. Any other type is a plain `Event`. The classes are exported by `@ghia/native/host` and installed as globals where the runtime has none (`UIEvent`, `MouseEvent`, `PointerEvent`, `WheelEvent`, `DragEvent`, `KeyboardEvent`, `FocusEvent`, `InputEvent`, `CompositionEvent`, `TransitionEvent`, `AnimationEvent`), so `event instanceof PointerEvent` and `new (element.ownerDocument.defaultView.PointerEvent)('click', { bubbles: true, shiftKey: true })` work as they do in a browser. Each takes the DOM's constructor arguments (the type and an init dictionary with the DOM's defaults: `new MouseEvent('click')` has `clientX` 0 and `relatedTarget` `null`), and is a subclass of the runtime's own `Event`, so `Event`, `CustomEvent` and `EventTarget` are untouched. Pass one to [`dispatchEvent`](#listeners-and-dom-members-on-an-element) to send it through the tree.
+Every event Ghia delivers is an instance of the DOM class of its type, and of `Event`: a `click`, `auxclick`, `contextmenu` and every `pointer*` type is a `PointerEvent`; the other mouse types a `MouseEvent`; `wheel` a `WheelEvent`; the drag types a `DragEvent`; `keydown` and `keyup` a `KeyboardEvent`; `focus`, `blur`, `focusin` and `focusout` a `FocusEvent`; `input` an `InputEvent`; the composition types a `CompositionEvent`; the transition types a `TransitionEvent` and the animation types an `AnimationEvent`. Any other type is a plain `Event`. The classes are exported by `@ghia/native/host` and installed as globals where the runtime has none (`UIEvent`, `MouseEvent`, `PointerEvent`, `WheelEvent`, `DragEvent`, `KeyboardEvent`, `FocusEvent`, `InputEvent`, `CompositionEvent`, `TransitionEvent`, `AnimationEvent`), so `event instanceof PointerEvent` and `new (element.ownerDocument.defaultView.PointerEvent)('click', { bubbles: true, shiftKey: true })` work as they do in a browser. Each takes the DOM's constructor arguments (the type and an init dictionary with the DOM's defaults: `new MouseEvent('click')` has `clientX` 0 and `relatedTarget` `null`), and is a subclass of the runtime's own `Event`, so `Event`, `CustomEvent` and `EventTarget` are untouched. Pass one to [`dispatchEvent`](#listeners-and-dom-members-on-an-element) to send it through the tree.
 
 `getModifierState(key)` is on `MouseEvent` (so on pointer, wheel and drag events) and `KeyboardEvent`: `"Shift"`, `"Control"`, `"Alt"` and `"Meta"` read the four modifier fields (`shiftKey`, `ctrlKey`, `altKey`, `metaKey`, which every mouse and key event has), and any other key (`"CapsLock"`, `"NumLock"`) is `false` on a delivered event, since no platform reports them to Ghia. A constructed event answers for the `modifier*` members of its init (`new KeyboardEvent('keydown', { modifierCapsLock: true })`).
 

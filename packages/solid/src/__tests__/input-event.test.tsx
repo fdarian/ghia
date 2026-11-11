@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 describe.skipIf(!hasNativeTestRenderer)("Solid input event", () => {
-  it("onChange carries inputType, data and isComposing", () => {
+  it("onInput carries inputType, data and isComposing", () => {
     const edits: unknown[] = []
     const app = createTestRoot()
     app.render(() => (
       <textarea
         testId="field"
         style={{ width: 200, height: 60 }}
-        onChange={(event) => edits.push([event.inputType, event.data, event.value, event.isComposing])}
+        onInput={(event) => edits.push([event.inputType, event.data, event.value, event.isComposing])}
       />
     ))
     const id = app.renderer.findByTestId("field")!.id

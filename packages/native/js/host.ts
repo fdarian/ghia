@@ -15,6 +15,7 @@ import type {
   AnimationEventProps,
   CompositionEventProps,
   ContentVisibilityEventProps,
+  HostChangeEvent,
   HostInputEvent,
   PointerEventProps,
 } from "./events/types.js"
@@ -1817,13 +1818,15 @@ export interface HostProps
   // `onCompositionStart`, `onCompositionUpdate` and `onCompositionEnd`, with
   // `on…Capture` twins: see CompositionEventProps. They bubble from the
   // `<input>` or `<textarea>` being composed in.
-  /** One edit of the text, the DOM `input`: see `HostInputEvent`. On a checkbox or radio, a click
-   *  that changed its checkedness, once, after `onInput`. */
-  onChange?: (event: HostInputEvent) => void
-  /** A checkbox or radio was toggled by a click, Space, `click()` or a dispatched click: the DOM
-   *  `input` event, bubbling and not cancelable, before `change`. On a text control, `onChange`
-   *  is the per-edit event and `onInput` never fires. */
-  onInput?: (event: DomEvent) => void
+  /** The DOM `change` event: the user committed the value of a text control, on blur or on Enter in an
+   *  `<input>`, and it differs from the value the control had at the last commit (see
+   *  `HostChangeEvent`). It is the toggle of a checkbox or radio that a click, Space, `click()` or a
+   *  dispatched click made, once, after `input`. A script's write to `value` fires none. React's
+   *  `onChange` on a text control is the per-edit `onInput` instead, as in React DOM. */
+  onChange?: (event: HostChangeEvent) => void
+  /** The DOM `input` event: one edit of a text control's text, or the toggle of a checkbox or radio
+   *  (before its `change`). It bubbles and cannot be canceled: see `HostInputEvent`. */
+  onInput?: (event: HostInputEvent) => void
   /** The DOM `submit` event of a descendant `<form>`, bubbling: see
    *  `FormProps.onSubmit`. Not available on `<input>` or `<textarea>`: handle
    *  Enter in `onKeyDown` and call `preventDefault()` to keep it from submitting
@@ -1933,7 +1936,7 @@ export interface HostProps
 
 // Props shared by the native text editor elements.
 export interface TextControlProps extends Omit<HostProps, "onSubmit"> {
-  /** External editor value. Native edits apply immediately and report through onChange. */
+  /** External editor value. Native edits apply immediately and report through `onInput` (`onChange` in React). */
   value?: string
   placeholder?: string
   readOnly?: boolean
@@ -1967,9 +1970,9 @@ export interface InputProps extends TextControlProps {
    *
    * - `"password"` paints one bullet per character and disables copy and cut.
    * - `"number"` makes ArrowUp and ArrowDown step the value by `step`, within
-   *   `min` and `max`, and report it through `onChange`. Typing is not
-   *   restricted: `onChange` reports exactly the text, even when it is not a
-   *   number. There is no spinner.
+   *   `min` and `max`, and report it through `onInput` and `onChange` (a step is
+   *   one committed edit). Typing is not restricted: `onInput` reports exactly
+   *   the text, even when it is not a number. There is no spinner.
    * - `"search"` is exposed to assistive technology as a search field.
    * - `"email"`, `"tel"` and `"url"` behave as `"text"`.
    * - `"checkbox"` and `"radio"` are a 13 by 13 box with nothing painted in it (style it, or hide it

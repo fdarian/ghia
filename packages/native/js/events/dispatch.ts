@@ -301,7 +301,7 @@ export function createDomEvent(
   event.relatedTarget = optionalElement(root, payload.relatedTarget)
   if (payload.formEntries) Object.assign(event, formSubmission(root, payload.formEntries, payload.submitterId))
   // An edit has no data unless it inserted text, and the DOM says so with null.
-  if (type === "change") event.data = payload.data ?? null
+  if (type === "input") event.data = payload.data ?? null
   if (delivered.pointer) event.isPrimary = isPrimaryPointer(payload)
   if (delivered.modifiers) {
     const held = payload.modifiers

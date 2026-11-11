@@ -164,7 +164,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid form", () => {
           testId="area"
           value={text()}
           style={{ width: 200, height: 80 }}
-          onChange={(event) => setText(event.value ?? "")}
+          onInput={(event) => setText(event.value ?? "")}
         />
       </form>
     ))

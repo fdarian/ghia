@@ -14,7 +14,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid text controls", () => {
         testId="field"
         value={text()}
         style={{ width: 300, height: 40 }}
-        onChange={(event) => setText(event.value ?? "")}
+        onInput={(event) => setText(event.value ?? "")}
       />
     ))
     expect([field.selectionStart, field.selectionEnd]).toEqual([5, 5])
@@ -70,7 +70,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid text controls", () => {
         disabled={disabled()}
         value={text()}
         style={{ width: 300, height: 40 }}
-        onChange={(event) => setText(event.value ?? "")}
+        onInput={(event) => setText(event.value ?? "")}
       />
     ))
     app.renderer.focusElement(field.nativeId)
@@ -96,7 +96,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid text controls", () => {
         max={2}
         value={text()}
         style={{ width: 300, height: 40 }}
-        onChange={(event) => setText(event.value ?? "")}
+        onInput={(event) => setText(event.value ?? "")}
       />
     ))
     app.renderer.nativeSimulateKeystrokes(field.nativeId, "ArrowUp ArrowUp")

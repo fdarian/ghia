@@ -35,7 +35,8 @@ use super::text_selection::{
     describe, resolve, utf16_len, SelectionRequest, TextSelection,
 };
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
-use crate::renderer::{emit_bubbling_event, emit_event_full, EventCallback, GpuixView};
+use crate::events::keyboard::InputRouting;
+use crate::renderer::{emit_bubbling_event, EventCallback, GpuixView};
 use crate::retained_tree::RetainedTree;
 use crate::theme::Theme;
 
@@ -434,9 +435,9 @@ impl CustomElement for TextEditorElement {
                 .cloned()
                 .unwrap_or_else(|| cx.focus_handle())
         };
-        let emits_change = ctx.events.contains("change");
         let callback = ctx.event_callback.clone();
         let tree = ctx.activation.tree.clone();
+        let routing = ctx.activation.routing.clone();
         let view = cx.weak_entity();
 
         let state = self
@@ -460,6 +461,7 @@ impl CustomElement for TextEditorElement {
                 let tree = tree.clone();
                 let view = view.clone();
                 let id = ctx.id;
+                routing.text_commits().written(id, &value);
                 let cursor = value.len();
                 let (selected_range, selection_reversed, directionless_range) =
                     match initial_selection {
@@ -479,7 +481,7 @@ impl CustomElement for TextEditorElement {
                     view,
                     callback,
                     tree,
-                    emits_change,
+                    routing,
                     focus_handle: state_focus_handle,
                     content: value,
                     placeholder: placeholder.into(),
@@ -542,7 +544,6 @@ impl CustomElement for TextEditorElement {
             state.number_rules = number_rules;
             state.muted_color = self.theme.text_muted;
             state.callback = callback;
-            state.emits_change = emits_change;
             state.placeholder = self.placeholder.clone().into();
             state.read_only = self.read_only;
             state.min_rows = self.min_rows.max(1);
@@ -686,7 +687,7 @@ impl CustomElement for TextEditorElement {
 
     fn supported_events(&self) -> &'static [&'static str] {
         &[
-            "change", "keydown", "keyup", "focus", "blur",
+            "input", "change", "keydown", "keyup", "focus", "blur",
         ]
     }
 
@@ -917,7 +918,8 @@ struct TextEditorState {
     /// For the propagation path of a composition event. Never locked from the
     /// code that builds the frame, which holds it: only input handlers emit.
     tree: Arc<Mutex<RetainedTree>>,
-    emits_change: bool,
+    /// What `change` commits, see `text_commit`.
+    routing: InputRouting,
     focus_handle: FocusHandle,
     content: String,
     placeholder: SharedString,
@@ -966,6 +968,12 @@ struct TextEditorState {
     undo_stack: VecDeque<EditSnapshot>,
     redo_stack: Vec<EditSnapshot>,
     last_edit: Option<LastEdit>,
+}
+
+impl Drop for TextEditorState {
+    fn drop(&mut self) {
+        self.routing.text_commits().forget(self.element_id);
+    }
 }
 
 impl TextEditorState {
@@ -1134,6 +1142,7 @@ impl TextEditorState {
             return;
         }
         self.content = value;
+        self.routing.text_commits().written(self.element_id, &self.content);
         let end = self.content.len();
         self.selected_range = end..end;
         self.selection_reversed = false;
@@ -1173,19 +1182,34 @@ impl TextEditorState {
         });
     }
 
-    fn emit_change(&mut self, kind: InputKind, inserted: &str, is_composing: bool) {
-        if self.emits_change {
-            self.pending_values.push_back(self.content.clone());
-            while self.pending_values.len() > 32 {
-                self.pending_values.pop_front();
-            }
-            emit_event_full(&self.callback, self.element_id, "change", |payload| {
-                payload.value = Some(self.content.clone());
-                payload.input_type = Some(kind.input_type().to_string());
-                payload.data = kind.carries_text().then(|| inserted.to_string());
-                payload.is_composing = Some(is_composing);
-            });
+    /// The DOM `input` event of one edit, which bubbles and cannot be canceled.
+    fn emit_input(&mut self, kind: InputKind, inserted: &str, is_composing: bool) {
+        self.routing.text_commits().edited(self.element_id, &self.content);
+        let tree = self.tree.lock().unwrap();
+        if !crate::events::path::path_listens(&tree, self.element_id, "input") {
+            return;
         }
+        self.pending_values.push_back(self.content.clone());
+        while self.pending_values.len() > 32 {
+            self.pending_values.pop_front();
+        }
+        emit_bubbling_event(&self.callback, &tree, self.element_id, "input", |payload| {
+            payload.value = Some(self.content.clone());
+            payload.input_type = Some(kind.input_type().to_string());
+            payload.data = kind.carries_text().then(|| inserted.to_string());
+            payload.is_composing = Some(is_composing);
+        });
+    }
+
+    /// The DOM `change` event for an edit that commits itself, as the number stepper's does.
+    fn emit_change(&self) {
+        let Some(value) = self.routing.text_commits().commit(self.element_id) else {
+            return;
+        };
+        let tree = self.tree.lock().unwrap();
+        emit_bubbling_event(&self.callback, &tree, self.element_id, "change", |payload| {
+            payload.value = Some(value);
+        });
     }
 
     fn restore(&mut self, snapshot: EditSnapshot, kind: InputKind, cx: &mut Context<Self>) {
@@ -1196,7 +1220,7 @@ impl TextEditorState {
         self.follow_cursor = true;
         self.last_edit = None;
         self.reset_blink(cx);
-        self.emit_change(kind, "", false);
+        self.emit_input(kind, "", false);
         self.changed(cx);
     }
 
@@ -1569,8 +1593,15 @@ impl TextEditorState {
         }
     }
 
+    /// Enter commits the value (Chrome fires `change` before the form is submitted), then submits.
+    /// Both wait until the key's dispatch is over, so a handler of `change` may read this editor.
     fn submit(&mut self, _: &Submit, window: &mut Window, cx: &mut Context<Self>) {
-        crate::forms::implicit_submission(self.view.clone(), self.element_id, window, cx);
+        let (view, id) = (self.view.clone(), self.element_id);
+        let (routing, tree, callback) = (self.routing.clone(), self.tree.clone(), self.callback.clone());
+        window.defer(cx, move |window, cx| {
+            crate::events::text_commit::deliver_commit(&routing, &tree, &callback, id, window, cx);
+            crate::forms::implicit_submission(view, id, window, cx);
+        });
     }
 
     /// Replace `range` and put the caret after the new text. `user_input`
@@ -1609,11 +1640,14 @@ impl TextEditorState {
         self.follow_cursor = true;
         self.reset_blink(cx);
         // The input event is still part of the composition, so it comes first, as in Chrome.
-        self.emit_change(
+        self.emit_input(
             kind.for_outcome(ends_composition, &replacement),
             &replacement,
             ends_composition,
         );
+        if kind == InputKind::Stepped {
+            self.emit_change();
+        }
         if ends_composition {
             self.emit_composition("compositionend", &replacement);
         }
@@ -2175,7 +2209,7 @@ impl EntityInputHandler for TextEditorState {
             (true, true) => self.emit_composition("compositionupdate", &replacement),
             _ => {}
         }
-        self.emit_change(
+        self.emit_input(
             InputKind::InsertCompositionText.for_outcome(was_composing, &replacement),
             &replacement,
             was_composing || is_composing,
