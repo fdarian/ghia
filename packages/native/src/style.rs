@@ -785,6 +785,8 @@ pub struct StyleDesc {
     // Position
     pub position: Option<String>,
     /// Paint order among positioned siblings. Only applies when `position` is set.
+    /// `auto` is no value.
+    #[serde(default, deserialize_with = "crate::css::keyword_number::deserialize_z_index")]
     pub z_index: Option<f64>,
     /// One to four lengths or `auto` for `top`, `right`, `bottom` and `left` in CSS order. The
     /// four longhands win over it.
@@ -1077,6 +1079,8 @@ pub struct StyleDesc {
     pub caption_side: Option<crate::css::table::CaptionSide>,
     /// CSS `empty-cells`, inherited.
     pub empty_cells: Option<crate::css::table::EmptyCells>,
+    /// `none` is no value.
+    #[serde(default, deserialize_with = "crate::css::keyword_number::deserialize_line_clamp")]
     pub line_clamp: Option<f64>,
     /// CSS `text-decoration` and its longhands. `css::text_decoration` says what
     /// is drawn.

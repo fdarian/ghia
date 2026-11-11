@@ -298,8 +298,9 @@ fn style_attribute_text(raw: &[u8]) -> String {
         .expect("an interned style is a JSON object");
     let mut text = String::new();
     for declaration in declarations.0 {
-        // Layout switches, not CSS properties: `STYLE_PROPERTIES` in JS leaves them out too.
-        if matches!(declaration.key.as_str(), "gridColumnMin" | "gridRowMin") {
+        // Keys of a style that are not CSS properties and can hold a string or a number: `STYLE_PROPERTIES`
+        // in JS leaves them out too. The other non-CSS keys (state blocks, switches) are objects or booleans.
+        if matches!(declaration.key.as_str(), "gridColumnMin" | "gridRowMin" | "group") {
             continue;
         }
         // As the DOM reads `style.cssText`: no value, no declaration, and a number has its unit.
@@ -351,9 +352,9 @@ mod tests {
     }
 
     #[test]
-    fn a_state_block_a_query_and_a_switch_are_not_declarations() {
+    fn a_state_block_a_query_a_switch_and_a_group_name_are_not_declarations() {
         let text = style_attribute_text(
-            br#"{"width":10,"hover":{"opacity":0.5},"@container":{"(min-width: 10px)":{"top":1}},"keyboardFocusDim":true,"gridColumnMin":"zero","color":"red"}"#,
+            br#"{"width":10,"hover":{"opacity":0.5},"@container":{"(min-width: 10px)":{"top":1}},"keyboardFocusDim":true,"gridColumnMin":"zero","gridRowMin":2,"group":"card","color":"red"}"#,
         );
         assert_eq!(text, "width: 10px; color: red;");
     }

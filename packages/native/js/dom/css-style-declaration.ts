@@ -7,6 +7,7 @@
  */
 
 import type { StyleDesc } from "../host.js"
+import { overlaps } from "../style-covers.js"
 import { STYLE_PROPERTIES, type StyleProperty } from "../style-properties.js"
 
 /** What an adapter gives the declaration of one of its elements. */
@@ -179,20 +180,38 @@ function sameValue(left: unknown, right: unknown): boolean {
 }
 
 /**
+ * `live` with the declaration of `key` set to `stored`, or `undefined` when that changes nothing. A
+ * declaration is replaced where it stands, as CSS does, unless a later one overlaps it (a shorthand
+ * and a longhand it covers), where the last wins: then it moves last.
+ */
+function withDeclaration(live: StyleRecord, key: string, stored: unknown): StyleRecord | undefined {
+  const keys = Object.keys(live)
+  const index = live[key] === undefined ? -1 : keys.indexOf(key)
+  const inPlace = index >= 0 && !keys.slice(index + 1).some((later) => live[later] !== undefined && overlaps(key, later))
+  if (inPlace && sameValue(live[key], stored)) return undefined
+  if (inPlace) return { ...live, [key]: stored }
+  const next = { ...live }
+  delete next[key]
+  next[key] = stored
+  return next
+}
+
+/**
  * `live` with a framework's change from `previous` to `next` applied: what `next` set or changed
  * is written over code's, what `previous` had and `next` does not is removed, and every other
- * property keeps what the live style holds, code's included. What `next` set or changed moves last,
- * because the last of a shorthand and a longhand wins.
+ * property keeps what the live style holds, code's included. What `next` set or changed is replaced
+ * where it stands, and moves last when a later property overlaps it, because the last of a shorthand
+ * and a longhand wins.
  */
 export function applyStyleChange(live: StyleDesc, previous: StyleDesc, next: StyleDesc): StyleDesc {
-  const result = { ...live } as StyleRecord
+  let result = { ...live } as StyleRecord
   const before = previous as StyleRecord
   const after = next as StyleRecord
   for (const key of Object.keys(after)) {
     const value = after[key]
     if (sameValue(before[key], value)) continue
-    delete result[key]
-    if (value !== undefined) result[key] = value
+    if (value === undefined) delete result[key]
+    else result = withDeclaration(result, key, value) ?? result
   }
   for (const key of Object.keys(before)) if (!(key in after)) delete result[key]
   return result as StyleDesc
@@ -249,9 +268,9 @@ class CSSStyleDeclarationClass {
   }
 
   /**
-   * Sets the property, or removes it for `""` and `null`. A property Ghia has no style for, a value
-   * CSS would not accept and a value with `!important` change nothing, as in a browser; `priority`
-   * is accepted and ignored.
+   * Sets the property, or removes it for `""` and `null`. A property Ghia has no style for and a
+   * value with `!important` change nothing, as in a browser; `priority` is accepted and ignored. A
+   * value that is not valid CSS is stored as text, and native drops it when it reads the style.
    */
   setProperty(name: string, value: string | null, priority?: string): void {
     const key = keyOf(name)
@@ -264,13 +283,8 @@ class CSSStyleDeclarationClass {
     if (IMPORTANT.test(text)) return
     if (priority !== undefined && priority !== "" && String(priority).toLowerCase() !== "important") return
     const stored = storedValue(key, text)
-    const live = this.#binding.style as StyleRecord
-    // Written last even when the value is the same: the last of a shorthand and a longhand wins.
-    if (live[key] === stored && Object.keys(live).at(-1) === key) return
-    const next = { ...live }
-    delete next[key]
-    next[key] = stored
-    this.#binding.setStyle(next as StyleDesc)
+    const next = withDeclaration(this.#binding.style as StyleRecord, key, stored)
+    if (next !== undefined) this.#binding.setStyle(next as StyleDesc)
   }
 
   /** The value the property had, `""` when it had none. */

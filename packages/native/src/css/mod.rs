@@ -33,6 +33,7 @@ pub(crate) mod mask;
 pub(crate) mod mask_border;
 #[cfg(test)]
 mod parse_cost;
+pub(crate) mod keyword_number;
 pub(crate) mod opacity;
 pub(crate) mod outline;
 pub(crate) mod overflow_anchor;
