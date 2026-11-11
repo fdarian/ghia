@@ -5015,7 +5015,7 @@ Code that is not the framework (a library such as `@dnd-kit/dom`) changes the tr
 
 | Member | |
 |---|---|
-| `document.createElement(tagName)`, `document.createElementNS(ns, name)`, `document.createTextNode(data)` | New nodes of the window that mounted last, in no tree: a node is drawn once it is inserted under a node that is in the document (`document.body`, `document.head` and `document.documentElement` work). `createElement` lowercases the name; `createElementNS` takes the HTML or the SVG namespace, and the SVG names keep their case (`linearGradient`). Before a root is mounted they throw. A name that is not one of the element types (`marquee`, `style`) throws `NotSupportedError`, where a browser makes an unknown element; a name that is not an XML name throws `InvalidCharacterError`. |
+| `document.createElement(tagName)`, `document.createElementNS(ns, name)`, `document.createTextNode(data)` | New nodes of the window that mounted last, in no tree: a node is drawn once it is inserted under a node that is in the document (`document.body`, `document.head` and `document.documentElement` work). `createElement` lowercases the name; `createElementNS` takes the HTML or the SVG namespace, and the SVG names keep their case (`linearGradient`). Before a root is mounted they throw. A `<style>` element is one of the element types, and a [stylesheet](#stylesheets) once it is in the document. A name that is not one of the element types (`marquee`) throws `NotSupportedError`, where a browser makes an unknown element; a name that is not an XML name throws `InvalidCharacterError`. |
 | `appendChild`, `insertBefore`, `removeChild`, `replaceChild` | With the DOM's return values (the node, the node, the child, the replaced child). A node that has a parent is moved: its old parent's `MutationObserver` hears a removal and the new parent's an insertion, and a node in the document moves natively, it is not made again. `HierarchyRequestError` for a node that contains the new parent, for a parent that is `Text` or `document`, and for a node that is neither element nor text; `NotFoundError` for a reference or child that is not a child of the parent; `TypeError` for an argument that is not a `Node`. A throw changes nothing. |
 | `remove()`, `before(...)`, `after(...)`, `replaceWith(...)` | On elements and text. Strings become `Text` nodes. A node among the arguments that is already beside the target moves, as in the DOM. |
 | `append(...)`, `prepend(...)`, `replaceChildren(...)` | On elements. |
@@ -5037,7 +5037,7 @@ el.style.removeProperty("--dnd-top")        // returns the old value, "" when th
 
 | Member | |
 |---|---|
-| `setProperty(name, value, priority?)`, `removeProperty(name)`, `getPropertyValue(name)`, `getPropertyPriority(name)` | `name` is the CSS name (`background-color`, `-webkit-font-smoothing`, `--x`) in any case, except that a custom property keeps its case. `""` or `null` removes the property. A property Ghia has no style for (`touch-action`, `will-change`), a value that is not a valid value of the property, and a value ending in `!important` change nothing, as an invalid declaration changes nothing in a browser. `priority` `"important"` is accepted and ignored ([deviations](fork/deviations.md#dom-building-from-code)). |
+| `setProperty(name, value, priority?)`, `removeProperty(name)`, `getPropertyValue(name)`, `getPropertyPriority(name)` | `name` is the CSS name (`background-color`, `-webkit-font-smoothing`, `--x`) in any case, except that a custom property keeps its case. `""` or `null` removes the property. A property Ghia has no style for (`touch-action`, `will-change`) and a value ending in `!important` change nothing. A value is not checked against the property: an invalid one is stored and native's lenient parser drops it ([deviations](fork/deviations.md#dom-building-from-code)). A number property takes numeric text as a number (`"10"` is `10`) and any other text (`"auto"`, `"50%"`, `"none"`, a CSS-wide keyword) as written. `priority` `"important"` is accepted and ignored ([deviations](fork/deviations.md#dom-building-from-code)). |
 | `cssText` | The declarations as `a: b; --c: d;`, and `""` for none. Setting it replaces every declaration (the state blocks and queries of the framework's style stay: they are no CSS text). |
 | `length`, `item(index)`, `[Symbol.iterator]`, `parentRule` | The declarations' names in written order; `parentRule` is `null`. |
 | `el.style.backgroundColor`, `el.style.translate`, ... | A camelCase member to read and to write for every property of `StyleDesc`, which is the list `STYLE_PROPERTIES` in `@ghia/native/host`. A number is read as CSS has it: `10px` for a length, a plain number for `opacity`, `zIndex`, `flex`, `scale` and the like, `45deg` for `rotate`. |
@@ -9552,7 +9552,7 @@ await animation.finished // resolves with the animation
 ##### `element.animate()`
 
 `element.animate(keyframes, options)` starts an animation of the element and returns
-its `Animation`, as in the Web Animations API. It is how `@dnd-kit/dom` moves a
+its `Animation`, as in the Web Animations API. An element that has no native element yet, one made by code and not inserted or one released after its removal, throws: [deviations](fork/deviations.md#dom-building-from-code). It is how `@dnd-kit/dom` moves a
 dropped item, and it runs unchanged:
 
 ```tsx

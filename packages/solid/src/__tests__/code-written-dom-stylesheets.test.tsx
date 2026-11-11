@@ -40,6 +40,21 @@ describe.skipIf(!hasNativeTestRenderer)("code-written DOM and stylesheets in Sol
     expect(getComputedStyle(box).opacity).toBe("0.25")
   })
 
+  it("applies a <style> element made by code once it is in document.head, and follows its text", () => {
+    const box = mount("", { class: "x" })
+    const sheet = document.createElement("style")
+    sheet.textContent = ".x { opacity: 0.5 }"
+    document.head!.appendChild(sheet)
+    app.flushSync(() => {})
+    expect(getComputedStyle(box).opacity).toBe("0.5")
+    sheet.textContent = ".x { opacity: 0.25 }"
+    app.flushSync(() => {})
+    expect(getComputedStyle(box).opacity).toBe("0.25")
+    sheet.remove()
+    app.flushSync(() => {})
+    expect(getComputedStyle(box).opacity).toBe("1")
+  })
+
   it("matches a [style] selector on a style written from code, and getAttribute reads the same text", () => {
     const box = mount('[style*="--drag"] { padding-top: 7px }', { style: { width: 10 } })
     expect(getComputedStyle(box).paddingTop).toBe("0px")
