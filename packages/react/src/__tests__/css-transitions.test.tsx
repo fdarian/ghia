@@ -278,10 +278,7 @@ describeNative("CSS transitions", () => {
     expect(widthOf(renderer, "box")).toBe(80)
   })
 
-  // Known gap, found when the app's top element moved under `<body>`: `hide` runs from the build of the element that is
-  // `display: none`, and a parent builds only the children that have a box, so an element below another one is never told. It
-  // passed while the top element was the native root. Fix in the engine, then turn this into `it`.
-  it.fails("cancels a running transition on display none and starts none when shown with a new value", () => {
+  it("cancels a running transition on display none and starts none when shown with a new value", () => {
     const { render, renderer } = createTestRoot()
     const seen: string[] = []
     const box = (width: number, display?: "none") => (
@@ -309,6 +306,42 @@ describeNative("CSS transitions", () => {
     renderer.clockFastForward(500)
     expect(widthOf(renderer, "box")).toBe(300)
     expect(seen).toEqual(["run", "cancel 0.5"])
+  })
+
+  it("cancels the transitions of every element below an ancestor that goes display none", () => {
+    const { render, renderer } = createTestRoot()
+    const seen: string[] = []
+    const tree = (width: number, display?: "none") => (
+      <div testId="outer">
+        <div testId="hidden" style={{ display }}>
+          <div>
+            <div
+              testId="deep"
+              onTransitionCancel={(event) => seen.push(`cancel ${event.elapsedTime}`)}
+              style={{ width, height: 20, transition: "width 1s linear" }}
+            />
+          </div>
+        </div>
+      </div>
+    )
+    renderer.clockPause()
+    render(tree(100))
+    render(tree(200))
+    renderer.clockFastForward(500)
+    expect(widthOf(renderer, "deep")).toBeCloseTo(150, 0)
+    render(tree(200, "none"))
+    renderer.clockFastForward(16)
+    renderer.dispatchNativeEvents()
+    expect(seen).toEqual(["cancel 0.5"])
+
+    // Shown again with a value changed meanwhile: no transition starts.
+    render(tree(300, "none"))
+    renderer.clockFastForward(16)
+    render(tree(300))
+    expect(widthOf(renderer, "deep")).toBe(300)
+    renderer.clockFastForward(500)
+    expect(widthOf(renderer, "deep")).toBe(300)
+    expect(seen).toEqual(["cancel 0.5"])
   })
 
   describe("allow-discrete", () => {

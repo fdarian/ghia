@@ -150,6 +150,14 @@ A motion, transition or keyframes animation of `color` or `fontSize` on a `displ
 
 `splice_overlay` steps the wrapper with `animate_style`, the function `build_element` also steps an element's style with (transitions, `motion`, motion values, keyframes), once a frame for each (`contents_styles`), and hands the children the inheritable part of what it shows. The overlay key is a hash of those values and of what runs, not the wrapper's `style_serial`, so a child is built again exactly when a value it inherits changes. A child under a running element notes the motion in its own record, which keeps it and the way up to the wrapper on the spine while the wrapper runs. A property that needs a box (`opacity`, a background, a size) still does nothing, because there is no box, as in the DOM.
 
+## Going `display: none`
+
+An element that is not rendered has no transitions and no animations: `CssTransitions::hide` and `CssAnimations::hide` (`motion/css_transition.rs`, `motion/css_animation.rs`) cancel those of the element and of everything below it, Web Animations of the API included, and drop their state, so the element starts from its current style when it shows again. A parent builds only the children that have a box, so an element that goes `display: none` is not built again and cannot say so itself; its own build only covers a window root and a `display` transition with `allow-discrete` that has just ended.
+
+The retained tree says it instead (`RetainedTree::pending_hides`). `assign_style` queues an element whose style turns to `display: none`, and `append_child` and `insert_before` queue an element that was already in a tree and is moved below one (`display_none_count` skips the ancestor walk while no element is `display: none`). The render drains the queue before motions are synced (`take_pending_hides`) and calls `hide` for each, which walks the subtree once and is a no-op afterwards. A queued element that is shown again before that frame, or that a `display` transition still keeps rendered, is dropped from the queue: a style recalculation sees only the net change. The work is done on the frame that goes `display: none` and no frame after it walks the tree, and it does not depend on whether a retained ancestor is replayed, since the queue is drained before any build.
+
+What is not covered: a `display: none` that only an `@container` block folds in (`RetainedElement::container_display`). The parent learns it while it builds, and an element that was shown a frame before keeps its transitions until a build of it finds the folded style.
+
 ## A style native rejects does not freeze React
 
 An invalid animation, transition or grid track used to make `applyBatch` fail inside `resetAfterCommit`. That left react-reconciler's `isFlushingWork` set, so no root in the process committed a sync update again. The batch is now resent without the offending `setStyle`, and the error goes to the root's `onUncaughtError`. Don't let a native style error propagate out of `resetAfterCommit`: every root stops committing.
@@ -197,5 +205,6 @@ A layout pass a read forced samples the instant of the last draw, which is long 
 - A target's own transition: the rows of `motion-default-oracle` with a `target`, `motion-default.test.tsx` and `motion-target-transition.test.tsx` (React and Solid).
 - Other oracles: `motion-values-oracle.html` (see [testing.md](testing.md#chrome-oracles)).
 - `display: contents`: `display-contents.test.tsx` (motion, transition, keyframes, `fontSize` laid out, `opacity` left alone) and `retained-frame-sources.test.tsx`, which follow the wrapper with retention on and off; Solid's `display-contents-motion`.
+- `display: none`: `css-transitions.test.tsx` and `css-animations.test.tsx` (an element two levels below the one that goes `display: none`), the `hide` tests of `css_transition.rs` and `css_animation.rs` and the queue test in `retained_tree.rs`.
 
 Deviations from Chrome, the DOM and Motion: [deviations.md](deviations.md#motion).

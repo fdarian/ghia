@@ -155,6 +155,12 @@ impl ElementExtras {
     }
 }
 
+/// Whether the style the element has says `display: none`, whatever its `@container` blocks fold
+/// it to (`RetainedElement::display`) and a `display` transition keeps shown.
+fn styles_display_none(element: &RetainedElement) -> bool {
+    element.style.as_deref().is_some_and(|style| style.display.as_deref() == Some("none"))
+}
+
 static EMPTY_EXTRAS: LazyLock<ElementExtras> = LazyLock::new(ElementExtras::default);
 
 impl RetainedElement {
@@ -663,6 +669,14 @@ pub struct RetainedTree {
     inert_count: usize,
     /// Elements whose style declares a `visibility`, so a tree without any skips the ancestor walk.
     visibility_count: usize,
+    /// Elements whose own style says `display: none`, so a tree without any skips the ancestor walk
+    /// a move into a hidden parent makes.
+    display_none_count: usize,
+    /// Elements that went `display: none`, or were moved below one, since the frame last drained
+    /// this (`take_pending_hides`). A parent builds only the children that have a box, so an element
+    /// that stops having one is never built again and cannot tell the transitions and animations
+    /// running on it, and below it, that they are cancelled.
+    pending_hides: std::cell::RefCell<Vec<u64>>,
     /// How many `anchored` elements exist. Without any (and without an absolute or fixed
     /// element), an `elements_at` walk can drop a clipped subtree whole.
     anchored_count: usize,
@@ -746,6 +760,8 @@ impl RetainedTree {
             geometry_ids: FxHashSet::default(),
             inert_count: 0,
             visibility_count: 0,
+            display_none_count: 0,
+            pending_hides: Default::default(),
             anchored_count: 0,
             escaping_count: 0,
             style_serials: 0,
@@ -775,6 +791,19 @@ impl RetainedTree {
 
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    /// The elements that went `display: none`, or were moved below one, since the last call and
+    /// are still without a box: what the transitions and animations in their subtrees are
+    /// cancelled for.
+    pub(crate) fn take_pending_hides(&self) -> Vec<u64> {
+        let mut pending = std::mem::take(&mut *self.pending_hides.borrow_mut());
+        pending.retain(|id| {
+            self.elements
+                .get(id)
+                .is_some_and(|element| crate::layout::box_generation::has_display_none_in_chain(self, element))
+        });
+        pending
     }
 
     pub fn removals(&self) -> u64 {
@@ -1197,6 +1226,7 @@ impl RetainedTree {
             self.geometry_ids.remove(&id);
             self.inert_count -= usize::from(element.has_inert_prop());
             self.visibility_count -= usize::from(element.declared_hidden().is_some());
+            self.display_none_count -= usize::from(styles_display_none(&element));
             self.anchored_count -= usize::from(element.element_type == "anchored");
             self.escaping_count -= usize::from(containing_block::may_escape(&element));
             self.container_rule_count -= usize::from(has_container_rules(&element));
@@ -1228,6 +1258,25 @@ impl RetainedTree {
         self.relations.restructured();
     }
 
+    /// An element that was already in a tree and is moved below a `display: none` element stops
+    /// being rendered with what it was running.
+    fn note_moved_below_display_none(&mut self, parent_id: u64, child_id: u64) {
+        if self.display_none_count == 0 {
+            return;
+        }
+        let mut current = Some(parent_id);
+        while let Some(id) = current {
+            let Some(element) = self.elements.get(&id) else {
+                return;
+            };
+            if crate::layout::box_generation::declares_display_none(element) {
+                self.pending_hides.get_mut().push(child_id);
+                return;
+            }
+            current = element.parent;
+        }
+    }
+
     fn count_reparent(&mut self, child_id: u64, old_parent_id: Option<u64>, parent_id: u64) {
         let left = old_parent_id.or_else(|| self.detached_from.remove(&child_id));
         if left.is_some_and(|left| left != parent_id) {
@@ -1247,6 +1296,7 @@ impl RetainedTree {
         if let Some(child) = self.elements.get_mut(&child_id) {
             child.parent = Some(parent_id);
         }
+        let placed_before = old_parent_id.is_some() || self.detached_from.contains_key(&child_id);
         self.count_reparent(child_id, old_parent_id, parent_id);
         // Add to new parent's children
         if let Some(parent) = self.elements.get_mut(&parent_id) {
@@ -1254,6 +1304,9 @@ impl RetainedTree {
         }
         if self.inert_count > 0 || self.visibility_count > 0 {
             self.track_focusable_subtree(child_id);
+        }
+        if placed_before {
+            self.note_moved_below_display_none(parent_id, child_id);
         }
         if let Some(old_parent_id) = old_parent_id {
             self.mark_changed(old_parent_id);
@@ -1274,6 +1327,7 @@ impl RetainedTree {
         if let Some(child) = self.elements.get_mut(&child_id) {
             child.parent = Some(parent_id);
         }
+        let placed_before = old_parent_id.is_some() || self.detached_from.contains_key(&child_id);
         self.count_reparent(child_id, old_parent_id, parent_id);
         // Insert before the target
         if let Some(parent) = self.elements.get_mut(&parent_id) {
@@ -1286,6 +1340,9 @@ impl RetainedTree {
         }
         if self.inert_count > 0 || self.visibility_count > 0 {
             self.track_focusable_subtree(child_id);
+        }
+        if placed_before {
+            self.note_moved_below_display_none(parent_id, child_id);
         }
         if let Some(old_parent_id) = old_parent_id {
             self.mark_changed(old_parent_id);
@@ -1410,6 +1467,7 @@ impl RetainedTree {
             self.relevance.note_transform_write(id);
         }
         let was_declared = element.declared_hidden();
+        let was_display_none = styles_display_none(element);
         let was_contents = crate::layout::contents::is_display_contents(element);
         let regrouped =
             !crate::text::inline::same_paragraphs(element.style.as_deref(), style.as_deref());
@@ -1437,6 +1495,11 @@ impl RetainedTree {
         self.escaping_count -= usize::from(escaped_before);
         self.container_rule_count += usize::from(has_container_rules(element));
         self.container_rule_count -= usize::from(container_rules_before);
+        let now_display_none = styles_display_none(element);
+        self.display_none_count = self.display_none_count + usize::from(now_display_none) - usize::from(was_display_none);
+        if now_display_none && !was_display_none {
+            self.pending_hides.get_mut().push(id);
+        }
         let now_declared = element.declared_hidden();
         let visibility_changed = was_declared != now_declared;
         if visibility_changed {
@@ -3490,6 +3553,40 @@ mod tests {
         apply(&mut tree, r##"[["setUniversalStyle",null],["setStyle",2,{"color":"#222222"}]]"##);
         assert!(tree.elements[&1].style_before_transition().is_none());
         assert!(tree.elements[&1].extras.is_none());
+    }
+
+    #[test]
+    fn display_none_and_a_move_below_it_queue_the_element_for_its_subtree_to_be_cancelled() {
+        let mut tree = RetainedTree::new();
+        for id in 1..=5 {
+            tree.create_element(id, "div".to_string());
+        }
+        tree.append_child(1, 2);
+        tree.append_child(2, 3);
+        tree.append_child(1, 4);
+        assert!(tree.take_pending_hides().is_empty());
+
+        apply(&mut tree, r##"[["setStyle",2,{"display":"none"}]]"##);
+        assert_eq!(tree.take_pending_hides(), vec![2]);
+        assert!(tree.take_pending_hides().is_empty(), "taken once");
+
+        // Not hidden again by the time a frame drains it: nothing to cancel.
+        apply(&mut tree, r##"[["setStyle",2,{"display":"block"}],["setStyle",2,{"display":"none"}],["setStyle",2,{"display":"block"}]]"##);
+        assert!(tree.take_pending_hides().is_empty());
+
+        apply(&mut tree, r##"[["setStyle",2,{"display":"none"}]]"##);
+        tree.take_pending_hides();
+        // An element placed before is moved below the hidden one; one that is new is not.
+        tree.append_child(2, 4);
+        tree.append_child(2, 5);
+        assert_eq!(tree.take_pending_hides(), vec![4]);
+        tree.insert_before(1, 4, 2);
+        assert!(tree.take_pending_hides().is_empty(), "moved out of it");
+
+        apply(&mut tree, r##"[["setStyle",3,{"display":"none"}]]"##);
+        tree.destroy_element(3);
+        assert!(tree.take_pending_hides().is_empty());
+        assert_eq!(tree.display_none_count, 1);
     }
 
     #[test]

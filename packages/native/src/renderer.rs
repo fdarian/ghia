@@ -10218,6 +10218,11 @@ impl gpui::Render for GpuixView {
         let pointer = pointer_state.borrow();
         // Before the motions are synced, which ask what has a box: the builds below read the same.
         crate::layout::box_generation::hold_display(self.css_transitions.held_displays());
+        // An element that went `display: none` is not built again, so this is where its subtree is told.
+        for id in tree.take_pending_hides() {
+            self.css_transitions.hide(&tree, id, now);
+            self.css_animations.hide(&tree, id, now);
+        }
         let (stepped, motion_settled) =
             self.sync_motions_for_build(&tree, window, now, &focus_styles, &pointer, None);
         let motion_animating = self.motion_synced.as_ref().map_or(stepped, |synced| synced.moving.clone());

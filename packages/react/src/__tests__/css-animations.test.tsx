@@ -176,6 +176,40 @@ describeNative("CSS animations", () => {
     expect(seen).toEqual(["start", "end"])
   })
 
+  it("cancels the animations of every element below an ancestor that goes display none, and starts them over when it shows", () => {
+    const { render, renderer } = createTestRoot()
+    const seen: string[] = []
+    const tree = (display?: "none") => (
+      <div testId="outer">
+        <div style={{ display }}>
+          <div>
+            <div
+              testId="box"
+              onAnimationStart={() => seen.push("start")}
+              onAnimationCancel={(event) => seen.push(`cancel ${event.animationName} ${event.elapsedTime}`)}
+              style={{ width: 50, height: 20, animation: "react-grow 1s linear" }}
+            />
+          </div>
+        </div>
+      </div>
+    )
+    renderer.clockPause()
+    render(tree())
+    renderer.clockFastForward(500)
+    expect(widthOf(renderer)).toBeCloseTo(150, 0)
+    render(tree("none"))
+    renderer.clockFastForward(16)
+    renderer.dispatchNativeEvents()
+    expect(seen).toEqual(["start", "cancel react-grow 0.5"])
+
+    seen.length = 0
+    render(tree())
+    renderer.clockFastForward(250)
+    renderer.dispatchNativeEvents()
+    expect(seen).toEqual(["start"])
+    expect(widthOf(renderer)).toBeCloseTo(125, 0)
+  })
+
   it("animates nothing for a name no keyframes were defined for", () => {
     const { render, renderer } = createTestRoot()
     renderer.clockPause()

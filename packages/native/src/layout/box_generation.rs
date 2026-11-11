@@ -43,7 +43,8 @@ pub(crate) fn is_display_none(element: &RetainedElement) -> bool {
     declares_display_none(element) && !DISPLAY_HELD.with(|held| held.borrow().contains(&element.id))
 }
 
-fn has_display_none_in_chain(tree: &RetainedTree, element: &RetainedElement) -> bool {
+/// Whether `element` or an ancestor is `display: none` and not kept shown by a `display` transition.
+pub(crate) fn has_display_none_in_chain(tree: &RetainedTree, element: &RetainedElement) -> bool {
     let mut current = Some(element);
     while let Some(element) = current {
         if is_display_none(element) {
