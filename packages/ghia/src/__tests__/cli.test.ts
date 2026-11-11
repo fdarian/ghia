@@ -74,10 +74,10 @@ function writeBareConfig(options: { inject: boolean }): string {
     `import { defineConfig } from "vite"
 import { ghia } from "ghia"
 
-const plugin = ghia({ entry: "bare.ts" })
-${options.inject ? "" : "delete plugin.transform"}
+const plugins = ghia({ entry: "bare.ts" })
+${options.inject ? "" : "delete plugins[0].transform"}
 
-export default defineConfig({ plugins: [plugin] })
+export default defineConfig({ plugins })
 `
   )
   return file
@@ -550,18 +550,101 @@ describe("ghia build with app Workers", () => {
   )
 
   test(
-    "a compiled binary runs both Workers alone",
+    "a compiled binary runs every Worker alone",
     async () => {
       await runToExit(["bun", CLI, "build"], workersDir)
       const copy = join(emptyDir, "app")
       cpSync(join(workersDir, "dist", "app"), copy)
       const run = spawn([copy], emptyDir)
-      await run.waitFor("SERVER_WORKER")
-      await run.waitFor("UI_WORKER")
+      for (const prefix of ["SERVER_WORKER", "UI_WORKER", "LAZY_WORKER", "COMMON_UI", "COMMON_SERVER", "NESTED_WORKER", "DYNAMIC_WORKER", "SELF_WORKER"]) {
+        await run.waitFor(prefix)
+      }
       expect(lines(run.output(), "UI_WORKER ")).toEqual([UI_WORKER])
       expect(lines(run.output(), "SERVER_WORKER ")).toEqual([SERVER_WORKER])
+      expect(lines(run.output(), "NESTED_WORKER ")).toEqual(["nested inner"])
+      expect(lines(run.output(), "DYNAMIC_WORKER ")).toEqual(["dynamic loaded lazily"])
+      expect(lines(run.output(), "SELF_WORKER ")).toEqual(["self parent got self child"])
     },
     COMPILE_TIMEOUT_MS
+  )
+
+  test(
+    "a Worker that starts a Worker, loads a chunk dynamically, or starts itself runs under plain bun",
+    async () => {
+      await runToExit(["bun", CLI, "build", "--no-compile"], workersDir)
+      const run = spawn(["bun", join(workersDir, "dist", "main.js")], workersDir)
+      await run.waitFor("NESTED_WORKER")
+      await run.waitFor("DYNAMIC_WORKER")
+      await run.waitFor("SELF_WORKER")
+      expect(lines(run.output(), "NESTED_WORKER ")).toEqual(["nested inner"])
+      expect(lines(run.output(), "DYNAMIC_WORKER ")).toEqual(["dynamic loaded lazily"])
+      expect(lines(run.output(), "SELF_WORKER ")).toEqual(["self parent got self child"])
+      const dist = readdirSync(join(workersDir, "dist"))
+      // A Worker is one file: the dynamic import is inlined, and the nested Worker is a file of its own beside it.
+      expect(dist.filter((name) => /^dynamic-lib/.test(name))).toEqual([])
+      expect(dist.filter((name) => /^inner-worker-[0-9a-f]{8}\.worker\.js$/.test(name))).toHaveLength(1)
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "each Worker's source map is its own, and its sourceMappingURL names it",
+    async () => {
+      await runToExit(["bun", CLI, "build", "--no-compile", "--config", "vite.config.sourcemap.ts"], workersDir)
+      const dist = join(workersDir, "dist")
+      const workers = readdirSync(dist).filter((name) => name.endsWith(".worker.js"))
+      // ui, server, common (twice), lazy, nest, inner, dynamic, self.
+      expect(workers.length).toBe(9)
+      for (const name of workers) {
+        const code = readFileSync(join(dist, name), "utf8")
+        expect(code.trimEnd().split("\n").at(-1)).toBe(`//# sourceMappingURL=${name}.map`)
+        const map = JSON.parse(readFileSync(join(dist, `${name}.map`), "utf8")) as { sources: string[] }
+        const stem = name.replace(/-[0-9a-f]{8}\.worker\.js$/, "")
+        expect(map.sources.some((source) => source.endsWith(`/${stem}.ts`))).toBe(true)
+        expect(map.sources.some((source) => /\/(main|server)\.ts$/.test(source))).toBe(false)
+      }
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "ignores a Worker call that is the text of a JSX element",
+    async () => {
+      const output = await runToExit(["bun", CLI, "build", "--no-compile"], workersDir)
+      expect(output).not.toContain("does-not-exist")
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "warns about a Worker file in node_modules that does not resolve, and keeps building",
+    async () => {
+      const library = join(workersDir, "node_modules", "worker-lib")
+      mkdirSync(library, { recursive: true })
+      writeFileSync(join(library, "package.json"), '{ "name": "worker-lib", "type": "module", "exports": "./index.js" }\n')
+      writeFileSync(join(library, "index.js"), 'export const start = () => new Worker(new URL("./missing.js", import.meta.url))\n')
+      const main = join(workersDir, "main.ts")
+      writeFileSync(main, `import "worker-lib"\n${readFileSync(main, "utf8")}`)
+      const output = await runToExit(["bun", CLI, "build", "--no-compile"], workersDir)
+      expect(output).toContain('Cannot resolve the Worker file "./missing.js"')
+      expect(output).toContain("it stays as written")
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "refuses Workers that start each other, with the way round",
+    async () => {
+      writeFileSync(join(workersDir, "ping.ts"), 'new Worker(new URL("./pong.ts", import.meta.url))\n')
+      writeFileSync(join(workersDir, "pong.ts"), 'new Worker(new URL("./ping.ts", import.meta.url))\n')
+      const main = join(workersDir, "main.ts")
+      writeFileSync(main, `${readFileSync(main, "utf8")}\nnew Worker(new URL("./ping.ts", import.meta.url))\n`)
+      const output = await runToFailure(["bun", CLI, "build", "--no-compile"], workersDir)
+      expect(output).toContain("starts itself through")
+      expect(output).toContain("Bundling the Worker")
+      expect(output).not.toContain("\u001b")
+    },
+    TIMEOUT_MS * 2
   )
 
   test(

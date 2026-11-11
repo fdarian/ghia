@@ -6,7 +6,7 @@ import { createRunnableDevEnvironment, DevEnvironment, type Plugin, type Resolve
 import { SERVER_PORT_SLOT_KEY } from "./protocol.js"
 import { createUiHotChannel, type UiHotChannel } from "./ui-channel.js"
 import { WorkerHotChannel } from "./worker-channel.js"
-import { readWorkerBuild, rewriteWorkerUrls, WorkerBundler, type WorkerBuild } from "./workers.js"
+import { readWorkerBuild, workerPlugin } from "./workers.js"
 
 export const ENVIRONMENT_NAME = "ghia"
 export const SERVER_ENVIRONMENT_NAME = "server"
@@ -68,13 +68,15 @@ const TEST_SETUP_FILE = fileURLToPath(new URL("./test-setup.js", import.meta.url
  * Under vitest there is no `ghia` environment: the test environment gets the same resolve
  * settings and inlines every dependency, and `@ghia/native/dom-globals` loads before every test file.
  */
-export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
+export function ghia(options: GhiaOptions = {}): [Plugin<GhiaPluginApi>, Plugin] {
+  return [ghiaPlugin(options), workerPlugin([ENVIRONMENT_NAME, SERVER_ENVIRONMENT_NAME])]
+}
+
+function ghiaPlugin(options: GhiaOptions): Plugin<GhiaPluginApi> {
   const underVitest = process.env.VITEST !== undefined
   let entry: string | undefined
   let serverEntry: string | undefined
   let compileOutfile: string | undefined
-  let workerBuild: WorkerBuild | undefined
-  let workerBundler: WorkerBundler | undefined
   const uiChannel = createUiHotChannel()
   const serverChannel = options.server === undefined ? undefined : new WorkerHotChannel()
 
@@ -171,8 +173,7 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
     },
 
     configResolved(config) {
-      workerBuild = readWorkerBuild(config.inlineConfig)
-      workerBundler = new WorkerBundler(config, workerBuild?.chain ?? [])
+      const workerBuild = readWorkerBuild(config.inlineConfig)
       const input = config.environments[ENVIRONMENT_NAME]?.build.rolldownOptions?.input ?? options.entry
       // A Worker is not the app entry: no `dom-globals` import in front of it.
       if (input !== undefined && workerBuild === undefined) {
@@ -183,10 +184,6 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
         serverEntry = realpathSync(resolve(config.root, options.server))
       }
       if (options.compile?.outfile !== undefined) compileOutfile = resolve(config.root, options.compile.outfile)
-    },
-
-    buildStart() {
-      workerBundler?.reset()
     },
 
     applyToEnvironment(environment) {
@@ -229,29 +226,10 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
 
     transform: {
       order: "pre",
-      async handler(code, id) {
-        const environment = this.environment
-        const bundler = workerBundler
-        // Dev runs Worker files from source, where `import.meta.url` is the real file.
-        const withWorkers =
-          underVitest || environment.mode !== "build" || bundler === undefined
-            ? undefined
-            : await rewriteWorkerUrls(
-                {
-                  root: environment.config.root,
-                  environmentName: environment.name,
-                  resolve: async (specifier, importer) => (await this.resolve(specifier, importer))?.id,
-                  emit: (file, fileName) => bundler.emit(this, environment.name, file, fileName),
-                  warn: (message) => this.warn(message),
-                },
-                code,
-                id
-              )
-        const isEntry = environment.name === ENVIRONMENT_NAME && id.split("?")[0] === entry
-        if (withWorkers === undefined && !isEntry) return
-        const current = withWorkers ?? code
+      handler(code, id) {
+        if (this.environment.name !== ENVIRONMENT_NAME || id.split("?")[0] !== entry) return
         // Same line, so the line numbers of the source map stay right.
-        return { code: isEntry ? `${DOM_GLOBALS_IMPORT} ${current}` : current, map: null }
+        return { code: `${DOM_GLOBALS_IMPORT} ${code}`, map: null }
       },
     },
 

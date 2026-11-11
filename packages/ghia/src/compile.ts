@@ -42,6 +42,8 @@ export async function compile(options: CompileOptions): Promise<void> {
     // A shipped binary must not read a bunfig.toml (a test preload, say) or a .env from whichever directory it is launched in.
     compile: { outfile: options.outfile, autoloadBunfig: false, autoloadDotenv: false },
     format: "esm",
+    // With the default naming, a compile of nine or more entrypoints does not find its entrypoints under `/$bunfs/root/<name>` (Bun 1.4.4): the Workers a built app starts fail with ModuleNotFound.
+    naming: "[name].[ext]",
     bytecode: true,
     minify: true,
     plugins: [nativeLoaderPlugin],
