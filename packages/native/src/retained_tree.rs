@@ -876,8 +876,9 @@ pub struct RetainedTree {
     /// Elements that went `display: none`, or were moved below one, since the frame last drained
     /// this (`take_pending_hides`). A parent builds only the children that have a box, so an element
     /// that stops having one is never built again and cannot tell the transitions and animations
-    /// running on it, and below it, that they are cancelled.
-    pending_hides: std::cell::RefCell<Vec<u64>>,
+    /// running on it, and below it, that they are cancelled. A set, so an element changed again while
+    /// no frame drains it is held once; it drains in id order.
+    pending_hides: std::cell::RefCell<std::collections::BTreeSet<u64>>,
     /// How many `anchored` elements exist. Without any (and without an absolute or fixed
     /// element), an `elements_at` walk can drop a clipped subtree whole.
     anchored_count: usize,
@@ -1014,13 +1015,15 @@ impl RetainedTree {
     /// are still without a box: what the transitions and animations in their subtrees are
     /// cancelled for.
     pub(crate) fn take_pending_hides(&self) -> Vec<u64> {
-        let mut pending = std::mem::take(&mut *self.pending_hides.borrow_mut());
-        pending.retain(|id| {
-            self.elements
-                .get(id)
-                .is_some_and(|element| crate::layout::box_generation::has_display_none_in_chain(self, element))
-        });
+        let pending = std::mem::take(&mut *self.pending_hides.borrow_mut());
         pending
+            .into_iter()
+            .filter(|id| {
+                self.elements
+                    .get(id)
+                    .is_some_and(|element| crate::layout::box_generation::has_display_none_in_chain(self, element))
+            })
+            .collect()
     }
 
     pub fn removals(&self) -> u64 {
@@ -1510,7 +1513,7 @@ impl RetainedTree {
                 return;
             };
             if crate::layout::box_generation::declares_display_none(element) {
-                self.pending_hides.get_mut().push(child_id);
+                self.pending_hides.get_mut().insert(child_id);
                 return;
             }
             current = element.parent;
@@ -1806,7 +1809,7 @@ impl RetainedTree {
         let now_display_none = styles_display_none(element);
         self.display_none_count = self.display_none_count + usize::from(now_display_none) - usize::from(was_display_none);
         if now_display_none && !was_display_none {
-            self.pending_hides.get_mut().push(id);
+            self.pending_hides.get_mut().insert(id);
         }
         self.var_style_count += usize::from(holds_var_declarations(element));
         self.var_style_count -= usize::from(var_declarations_before);
@@ -4041,6 +4044,19 @@ mod tests {
         tree.destroy_element(3);
         assert!(tree.take_pending_hides().is_empty());
         assert_eq!(tree.display_none_count, 1);
+    }
+
+    #[test]
+    fn an_element_hidden_again_before_a_frame_is_queued_once() {
+        let mut tree = RetainedTree::new();
+        tree.create_element(1, "div".to_string());
+        tree.create_element(2, "div".to_string());
+        tree.append_child(1, 2);
+        for _ in 0..3 {
+            apply(&mut tree, r##"[["setStyle",2,{"display":"block"}],["setStyle",2,{"display":"none"}]]"##);
+        }
+        assert_eq!(tree.pending_hides.borrow().len(), 1);
+        assert_eq!(tree.take_pending_hides(), vec![2]);
     }
 
     #[test]
