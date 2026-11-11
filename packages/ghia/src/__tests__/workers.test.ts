@@ -1,60 +1,67 @@
+import { createHash } from "node:crypto"
 import { describe, expect, test } from "bun:test"
-import { WorkerFiles, type WorkerBuildContext } from "../../dist/workers.js"
+import { rewriteWorkerUrls, type WorkerBuildContext } from "../../dist/workers.js"
 
 type Emitted = { file: string; fileName: string }
 
-function contextFor(emitted: Emitted[], files: Record<string, string | undefined> = {}): WorkerBuildContext {
-  return {
+const ROOT = "/app"
+
+function hash(path: string): string {
+  return createHash("sha256").update(path).digest("hex").slice(0, 8)
+}
+
+async function rewrite(code: string, options: { id?: string; files?: Record<string, string | undefined> } = {}) {
+  const emitted: Emitted[] = []
+  const files = options.files ?? {}
+  const context: WorkerBuildContext = {
+    root: ROOT,
     resolve: async (specifier) => (specifier in files ? files[specifier] : `/app/src/${specifier.replace(/^(\.\.?\/)+/, "")}`),
     emit: (file, fileName) => {
       emitted.push({ file, fileName })
     },
   }
+  const result = await rewriteWorkerUrls(context, code, options.id ?? "/app/src/main.ts")
+  return { result, emitted }
 }
 
-async function rewrite(code: string, options: { id?: string; files?: Record<string, string | undefined>; workers?: WorkerFiles } = {}) {
-  const emitted: Emitted[] = []
-  const workers = options.workers ?? new WorkerFiles()
-  const result = await workers.rewrite("ghia", contextFor(emitted, options.files), code, options.id ?? "/app/src/main.ts")
-  return { result, emitted, workers }
-}
+const RASTER = `raster-${hash("src/raster.ts")}.worker.js`
 
-describe("WorkerFiles.rewrite", () => {
+describe("rewriteWorkerUrls", () => {
   test.each(['"', "'", "`"])("rewrites a literal in %s quotes and emits the Worker file", async (quote) => {
     const { result, emitted } = await rewrite(`const w = new Worker(new URL(${quote}./raster.ts${quote}, import.meta.url))`)
-    expect(result).toBe('const w = new Worker(new URL("./raster.worker.js", import.meta.url))')
-    expect(emitted).toEqual([{ file: "/app/src/raster.ts", fileName: "raster.worker.js" }])
+    expect(result).toBe(`const w = new Worker(new URL("./${RASTER}", import.meta.url))`)
+    expect(emitted).toEqual([{ file: "/app/src/raster.ts", fileName: RASTER }])
   })
 
   test("leaves the options argument as written", async () => {
     const { result } = await rewrite(`new Worker(new URL("./raster.ts", import.meta.url), { type: "module", name: "r" })`)
-    expect(result).toBe(`new Worker(new URL("./raster.worker.js", import.meta.url), { type: "module", name: "r" })`)
+    expect(result).toBe(`new Worker(new URL("./${RASTER}", import.meta.url), { type: "module", name: "r" })`)
   })
 
   test("accepts whitespace and line breaks inside the call", async () => {
-    const { result } = await rewrite(`new Worker(\n  new URL(\n    "../raster.ts",\n    import.meta.url\n  )\n)`)
-    expect(result).toBe(`new Worker(\n  new URL(\n    "./raster.worker.js",\n    import.meta.url\n  )\n)`)
+    const { result } = await rewrite(`new Worker(\n  new URL(\n    "./raster.ts",\n    import.meta.url\n  )\n)`)
+    expect(result).toBe(`new Worker(\n  new URL(\n    "./${RASTER}",\n    import.meta.url\n  )\n)`)
   })
 
   test("rewrites every Worker in a module", async () => {
     const { result, emitted } = await rewrite(
       `new Worker(new URL("./a.ts", import.meta.url));\nnew Worker(new URL("./b.ts", import.meta.url))`
     )
-    expect(result).toBe(`new Worker(new URL("./a.worker.js", import.meta.url));\nnew Worker(new URL("./b.worker.js", import.meta.url))`)
-    expect(emitted.map((entry) => entry.fileName)).toEqual(["a.worker.js", "b.worker.js"])
+    expect(emitted.map((entry) => entry.fileName)).toEqual([`a-${hash("src/a.ts")}.worker.js`, `b-${hash("src/b.ts")}.worker.js`])
+    expect(result).toBe(
+      `new Worker(new URL("./${emitted[0].fileName}", import.meta.url));\nnew Worker(new URL("./${emitted[1].fileName}", import.meta.url))`
+    )
   })
 
-  test("gives one file one name across modules, and a second file with the same stem another", async () => {
-    const workers = new WorkerFiles()
+  test("names one file the same from every module, and two files with one stem differently", async () => {
     const files = { "./raster.ts": "/app/a/raster.ts", "./other/raster.ts": "/app/b/raster.ts" }
-    const first = await rewrite(`new Worker(new URL("./raster.ts", import.meta.url))`, { workers, files })
-    const again = await rewrite(`new Worker(new URL("./raster.ts", import.meta.url))`, { workers, files, id: "/app/a/other.ts" })
-    const collision = await rewrite(`new Worker(new URL("./other/raster.ts", import.meta.url))`, { workers, files })
-    expect(first.emitted[0].fileName).toBe("raster.worker.js")
-    expect(again.emitted[0].fileName).toBe("raster.worker.js")
-    expect(collision.emitted[0].fileName).toBe("raster-2.worker.js")
-    expect(workers.forEnvironment("ghia")).toEqual(["raster.worker.js", "raster-2.worker.js"])
-    expect(workers.forEnvironment("server")).toEqual([])
+    const first = await rewrite(`new Worker(new URL("./raster.ts", import.meta.url))`, { files })
+    const again = await rewrite(`new Worker(new URL("./raster.ts", import.meta.url))`, { files, id: "/app/a/other.ts" })
+    const other = await rewrite(`new Worker(new URL("./other/raster.ts", import.meta.url))`, { files })
+    expect(first.emitted[0].fileName).toBe(`raster-${hash("a/raster.ts")}.worker.js`)
+    expect(again.emitted[0].fileName).toBe(first.emitted[0].fileName)
+    expect(other.emitted[0].fileName).toBe(`raster-${hash("b/raster.ts")}.worker.js`)
+    expect(other.emitted[0].fileName).not.toBe(first.emitted[0].fileName)
   })
 
   test.each(["virtual:ghia/server", "\0virtual:ghia/server"])("skips the virtual module %s", async (id) => {

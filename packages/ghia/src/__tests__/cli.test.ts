@@ -483,12 +483,15 @@ describe("ghia build with app Workers", () => {
     async () => {
       await runToExit(["bun", CLI, "build", "--no-compile"], workersDir)
       const dist = join(workersDir, "dist")
-      expect(existsSync(join(dist, "ui-worker.worker.js"))).toBe(true)
-      expect(existsSync(join(dist, "server-worker.worker.js"))).toBe(true)
-      expect(readFileSync(join(dist, "main.js"), "utf8")).toContain('new URL("./ui-worker.worker.js", import.meta.url)')
-      expect(readFileSync(join(dist, "server.js"), "utf8")).toContain('new URL("./server-worker.worker.js", import.meta.url)')
+      const main = readFileSync(join(dist, "main.js"), "utf8")
+      const server = readFileSync(join(dist, "server.js"), "utf8")
+      const uiWorker = /new URL\("\.\/(ui-worker-[0-9a-f]{8}\.worker\.js)", import\.meta\.url\)/.exec(main)
+      const serverWorker = /new URL\("\.\/(server-worker-[0-9a-f]{8}\.worker\.js)", import\.meta\.url\)/.exec(server)
+      if (uiWorker === null || serverWorker === null) throw new Error(`no rewritten Worker URL:\n${main}\n${server}`)
+      expect(existsSync(join(dist, uiWorker[1]))).toBe(true)
+      expect(existsSync(join(dist, serverWorker[1]))).toBe(true)
       // The server bundle's own Worker, started from the UI bundle, is not an app Worker.
-      expect(readFileSync(join(dist, "main.js"), "utf8")).toContain('new URL("./server.js", import.meta.url)')
+      expect(main).toContain('new URL("./server.js", import.meta.url)')
     },
     TIMEOUT_MS * 2
   )

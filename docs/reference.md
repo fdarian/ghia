@@ -139,7 +139,7 @@ which runs with plain `bun`.
 
 A Worker the app starts with `new Worker(new URL('./raster.ts', import.meta.url))`
 (a relative string literal, in the UI or the server code) is bundled into
-`dist/raster.worker.js` and carried by the binary; see
+`dist/raster-<hash>.worker.js` and carried by the binary; see
 [App Workers](solid.md#app-workers).
 
 For a smaller ship set, run the same React app on

@@ -6,7 +6,7 @@ import { createRunnableDevEnvironment, DevEnvironment, type Plugin, type Resolve
 import { SERVER_PORT_SLOT_KEY } from "./protocol.js"
 import { createUiHotChannel, type UiHotChannel } from "./ui-channel.js"
 import { WorkerHotChannel } from "./worker-channel.js"
-import { WorkerFiles } from "./workers.js"
+import { rewriteWorkerUrls } from "./workers.js"
 
 export const ENVIRONMENT_NAME = "ghia"
 export const SERVER_ENVIRONMENT_NAME = "server"
@@ -47,12 +47,6 @@ export interface GhiaPluginApi {
   readonly serverChannel: WorkerHotChannel
   /** Absolute path of the `compile.outfile` option; undefined when it is not set. Set once the config is resolved. */
   readonly compileOutfile: string | undefined
-  /**
-   * The Worker files a build emitted next to its entry, named `<stem>.worker.js`: the modules found as
-   * `new Worker(new URL("./file.ts", import.meta.url))` in the code of the `environment` build. `ghia build`
-   * compiles them into the executable.
-   */
-  workerFiles(environment: string): readonly string[]
 }
 
 export const ENTRY_FILE_NAMES: Record<string, string> = {
@@ -81,7 +75,6 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
   let compileOutfile: string | undefined
   const uiChannel = createUiHotChannel()
   const serverChannel = options.server === undefined ? undefined : new WorkerHotChannel()
-  const workerFiles = new WorkerFiles()
 
   return {
     name: PLUGIN_NAME,
@@ -105,10 +98,6 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
         // `dev()` and `build()` pass an entry from the command line as this very input, in the inline config.
         const input = userConfig.environments?.[ENVIRONMENT_NAME]?.build?.rolldownOptions?.input ?? options.entry
         return {
-          // Without it every environment build gets a fresh copy of this plugin, and the Worker files the
-          // `ghia` and `server` builds emit would be known to copies that cannot tell `ghia build` about them
-          // or keep two Workers of the same file name apart.
-          builder: { sharedPlugins: true },
           environments: {
             [ENVIRONMENT_NAME]: {
               // `client` would get Vite's browser HMR client and no dependency externalization.
@@ -233,9 +222,9 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
         const withWorkers =
           underVitest || environment.mode !== "build"
             ? undefined
-            : await workerFiles.rewrite(
-                environment.name,
+            : await rewriteWorkerUrls(
                 {
+                  root: environment.config.root,
                   resolve: async (specifier, importer) => (await this.resolve(specifier, importer))?.id,
                   emit: (file, fileName) => {
                     this.emitFile({ type: "chunk", id: file, fileName })
@@ -261,9 +250,6 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
       },
       get compileOutfile() {
         return compileOutfile
-      },
-      workerFiles(environment) {
-        return workerFiles.forEnvironment(environment)
       },
       get uiChannel() {
         return uiChannel

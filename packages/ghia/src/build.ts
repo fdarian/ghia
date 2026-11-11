@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path"
-import { createBuilder } from "vite"
+import { createBuilder, type BuildEnvironment, type ViteBuilder } from "vite"
 import { compile } from "./compile.js"
 import { ENTRY_FILE_NAMES, ENVIRONMENT_NAME, SERVER_ENVIRONMENT_NAME } from "./plugin.js"
 import { clearVitestMarker, entryEnvironments, findPluginApi, requireEntry } from "./plugin-api.js"
@@ -18,19 +18,24 @@ export async function build(options: BuildOptions = {}): Promise<void> {
   if (environment === undefined) {
     throw new Error(`The "${ENVIRONMENT_NAME}" environment is not defined; add ghia() to your Vite config`)
   }
-  await builder.build(environment)
+  const entrypoints = entryChunkPaths(environment, await builder.build(environment))
   const serverEnvironment = builder.environments[SERVER_ENVIRONMENT_NAME]
   // After the `ghia` build, which empties the output directory.
-  if (serverEnvironment !== undefined) await builder.build(serverEnvironment)
+  if (serverEnvironment !== undefined) entrypoints.push(...entryChunkPaths(serverEnvironment, await builder.build(serverEnvironment)))
 
   if (options.compile === false) return
   const outDir = resolve(builder.config.root, environment.config.build.outDir)
-  const entrypoints = [join(outDir, ENTRY_FILE_NAMES[ENVIRONMENT_NAME])]
-  const workerFiles = api.workerFiles(ENVIRONMENT_NAME).map((name) => join(outDir, name))
-  if (serverEnvironment !== undefined) {
-    const serverOutDir = resolve(builder.config.root, serverEnvironment.config.build.outDir)
-    entrypoints.push(join(serverOutDir, ENTRY_FILE_NAMES[SERVER_ENVIRONMENT_NAME]))
-    workerFiles.push(...api.workerFiles(SERVER_ENVIRONMENT_NAME).map((name) => join(serverOutDir, name)))
-  }
-  await compile({ entrypoints: [...entrypoints, ...workerFiles], outfile: api.compileOutfile ?? join(outDir, "app") })
+  await compile({ entrypoints, outfile: api.compileOutfile ?? join(outDir, "app") })
+}
+
+/** The entry chunks a build wrote, as absolute paths with the environment's own entry first: its entry, and a `.worker.js` file for each Worker it starts. */
+function entryChunkPaths(environment: BuildEnvironment, result: Awaited<ReturnType<ViteBuilder["build"]>>): string[] {
+  const outputs = Array.isArray(result) ? result : [result]
+  const outDir = resolve(environment.config.root, environment.config.build.outDir)
+  const entryFileName = ENTRY_FILE_NAMES[environment.name]
+  const names = outputs.flatMap((output) => {
+    if (!("output" in output)) throw new Error(`The "${environment.name}" build returned a watcher instead of its output`)
+    return output.output.flatMap((item) => (item.type === "chunk" && item.isEntry ? [item.fileName] : []))
+  })
+  return [...names.filter((name) => name === entryFileName), ...names.filter((name) => name !== entryFileName)].map((name) => join(outDir, name))
 }
