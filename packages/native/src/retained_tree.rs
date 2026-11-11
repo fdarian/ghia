@@ -1590,6 +1590,7 @@ impl RetainedTree {
         }
         let mut changed = false;
         let is_input_type = is_input && key == "type";
+        let is_hidden_attribute = key == "hidden";
         let is_input_group = is_input && matches!(key.as_str(), "type" | "name");
         let is_highlight = key == "highlight";
         let is_motion = key == "motion";
@@ -1667,6 +1668,11 @@ impl RetainedTree {
         }
         if affects_focusability {
             self.track_focusable(id);
+        }
+        if is_hidden_attribute {
+            // The user agent style of any element is `display: none` while it is `hidden`.
+            let change = self.refresh_effective_style(id, false);
+            self.settle_style_change(id, change);
         }
         if is_input_group {
             if is_input_type {
@@ -3482,6 +3488,26 @@ mod tests {
 
         apply(&mut tree, r##"[["setUniversalStyle",null]]"##);
         assert_eq!(style_of(&tree, 21).unwrap().display.as_deref(), Some("block"));
+    }
+
+    #[test]
+    fn the_hidden_attribute_is_display_none_under_the_elements_own_style() {
+        let mut tree = layered_tree();
+        apply(&mut tree, r##"[["createElement",20,"div"],["createElement",21,"h1"],["createElement",22,"div"]]"##);
+        apply(&mut tree, r##"[["setCustomProp",20,"hidden",true],["setCustomProp",21,"hidden",""],["setCustomProp",22,"hidden","until-found"]]"##);
+        assert_eq!(style_of(&tree, 20).unwrap().display.as_deref(), Some("none"), "a div has no user agent style of its own");
+        let h1 = style_of(&tree, 21).unwrap();
+        assert_eq!(h1.display.as_deref(), Some("none"));
+        assert!(h1.font_size.is_some(), "the rest of the tag's style stays under it");
+        assert!(style_of(&tree, 22).is_none(), "until-found keeps its box");
+        assert!(Arc::ptr_eq(style_of_arc(&tree, 20), style_of_arc(&tree, 20)));
+
+        apply(&mut tree, r##"[["setStyle",20,{"display":"block"}]]"##);
+        assert_eq!(style_of(&tree, 20).unwrap().display.as_deref(), Some("block"), "the author's display is over the user agent's");
+        apply(&mut tree, r##"[["setStyle",20,{}],["setCustomProp",20,"hidden",false]]"##);
+        assert!(style_of(&tree, 20).is_none_or(|style| style.display.is_none()), "hidden off, and nothing sets a display");
+        apply(&mut tree, r##"[["setCustomProp",21,"hidden",null]]"##);
+        assert_eq!(style_of(&tree, 21).unwrap().display.as_deref(), Some("block"), "the tag's display is back");
     }
 
     #[test]

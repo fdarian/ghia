@@ -46,10 +46,45 @@ pub fn ua_style(element_type: &str) -> Option<Arc<StyleDesc>> {
     styles().get(element_type).cloned()
 }
 
+/// Whether the `hidden` attribute is on: Chrome's `html.css` has `[hidden]:not([hidden=until-found i]) { display: none }`
+/// for every element. `until-found` keeps its box (it skips the content, which Ghia does not do).
+fn hidden_by_attribute(element: &crate::retained_tree::RetainedElement) -> bool {
+    match element.custom_props().get("hidden") {
+        Some(serde_json::Value::Bool(on)) => *on,
+        Some(serde_json::Value::String(text)) => !text.eq_ignore_ascii_case("until-found"),
+        _ => false,
+    }
+}
+
+/// `base` with `display: none`, one allocation for each base: a base is a user agent style that lives as long as
+/// the process (or none, which is keyed by 0), so its address is a stable key and equal styles stay one allocation.
+fn displayed_as_none(base: Option<Arc<StyleDesc>>) -> Arc<StyleDesc> {
+    static HIDDEN: OnceLock<std::sync::Mutex<FxHashMap<usize, Arc<StyleDesc>>>> = OnceLock::new();
+    let key = base.as_ref().map_or(0, |base| Arc::as_ptr(base) as usize);
+    let mut hidden = HIDDEN.get_or_init(Default::default).lock().expect("the hidden styles lock is never poisoned");
+    hidden
+        .entry(key)
+        .or_insert_with(|| {
+            let mut style = base.map(|base| (*base).clone()).unwrap_or_default();
+            style.display = Some("none".to_string());
+            Arc::new(style)
+        })
+        .clone()
+}
+
 /// The user agent style of `element`: its tag's, and for an `<input>` its `type`'s, since Chrome's `html.css`
 /// has a rule for each (a checkbox and a radio are small `inline-block` boxes with a margin, a hidden input
-/// is not displayed). A text field has none.
+/// is not displayed). A text field has none. An element with the `hidden` attribute is `display: none` over
+/// that, whatever its tag.
 pub fn ua_style_of(element: &crate::retained_tree::RetainedElement) -> Option<Arc<StyleDesc>> {
+    let tag_style = ua_style_of_tag_and_type(element);
+    if hidden_by_attribute(element) {
+        return Some(displayed_as_none(tag_style));
+    }
+    tag_style
+}
+
+fn ua_style_of_tag_and_type(element: &crate::retained_tree::RetainedElement) -> Option<Arc<StyleDesc>> {
     if element.element_type != "input" {
         return ua_style(&element.element_type);
     }

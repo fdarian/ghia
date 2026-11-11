@@ -256,6 +256,18 @@ export function querySelector(root: Node, selector: string, owner: string): Elem
   return found
 }
 
+/** The first element below `root`, in document order, whose `id` attribute is `id`. An empty `id` is none. */
+export function elementById(root: Node, id: string): Element | null {
+  if (id === "") return null
+  let found: Element | null = null
+  walkDescendants(root, (element) => {
+    if (element.getAttribute("id") !== id) return false
+    found = element
+    return true
+  })
+  return found
+}
+
 export function matchesSelector(element: Element, selector: string): boolean {
   const query = queryFor(String(selector), "matches", "Element")
   return runScoped(element, () => query(element))

@@ -46,7 +46,28 @@ A new deviation goes in the section of its topic, as a bullet with a bold lead p
 - **A boolean or number attribute reads back its prop's text.** `setAttribute('disabled', 'x')` reads back `""` (a boolean attribute is on whatever its value) and `setAttribute('tabindex', '+1')` reads back `"1"`; the DOM keeps the text as written.
 - **A write that changes nothing makes no `MutationObserver` record.** The DOM queues one for `setAttribute('a', 'same')`; here only a write that changes what `getAttribute` reads does, as for a prop a framework commits.
 - **No `setAttributeNS`, `removeAttributeNS` or `getAttributeNS`.** An element has no namespaced attributes (a `MutationRecord`'s `attributeNamespace` is always `null`).
+- **`contenteditable` does nothing, and `isContentEditable` is `false`.** Ghia has no editing host other than `<input>` and `<textarea>`, so the attribute is stored as text and no element is editable; reading it as `true` would tell a library (Base UI's tabbable walk) that an element can take focus and be typed into when it cannot.
+- **`hidden="until-found"` keeps its box.** The attribute that Chrome shows only to find-in-page is not hidden here, and nothing skips its content (`content-visibility: hidden` is not applied); any other `hidden` is `display: none`.
 - **Only the listed attributes are typed.** An attribute that is not in the table is the string prop of that name, so `setAttribute('contenteditable', 'true')` stores `"true"`, and a prop whose type is not a string, number or boolean (an object) cannot be set this way.
+
+## DOM box members
+
+`offsetParent`, `offsetLeft`, `offsetTop`, `clientLeft`, `clientTop` and `getClientRects` (`packages/native/js/dom/box-members.ts`) read the box native laid out; native has no layout-space position, only the box after transforms.
+
+- **`offsetLeft` and `offsetTop` read the transformed box.** The DOM measures the layout position, before any transform; here a `transform` on the element or on an ancestor between it and its offset parent moves the number. `offsetWidth` and `offsetHeight` are untransformed (`getElementBounds` carries `layoutWidth`), so only the position is affected. Closing it takes a layout origin in `ElementBounds`.
+- **A transformed ancestor is not an offset parent.** Chrome also stops at an ancestor that has a `transform`, `filter` or `perspective` (it contains absolute descendants); `offsetParent` stops only at a positioned one, a table part for a static element, and `body`. `offsetLeft` stays consistent with whichever it returns.
+- **`getClientRects()` is one rect.** An inline box that wraps over several lines is the box around its lines, where Chrome gives one rect for each line; native does not report the line boxes of a span.
+
+## `document.createElement`
+
+`document.createElement(name)` makes an HTML element that is in no tree (`packages/native/js/dom/detached-element.ts`). It is not one of a framework's host elements and nothing can insert it: there is no `appendChild`, `cloneNode` or `append`, and `document.body.appendChild(el)` is not there. That is enough for the calls that only measure or feature-test (Base UI's arrow stand-in for `@floating-ui`, its `focus({ preventScroll })` test), and not for the two Base UI call sites that insert one:
+
+- `usePopupViewport` (the content of a popup that moves between triggers, in `Popover`, `Menu`, `Tooltip` and `PreviewCard`): `createElement('div')`, then `appendChild(child.cloneNode(true))` of the old content into it, which is shown while the popup resizes.
+- `DrawerVirtualKeyboardProvider`: a `position: fixed; visibility: hidden` probe appended to `document.body` to read the small viewport height.
+
+Both need a node that is built outside the framework and inserted into its tree, which Ghia does not have.
+
+- **A write to a detached element's attribute makes no `MutationObserver` record.** The observer's records come from the framework's prop path, which a detached element is not on.
 
 ## `element.style`
 

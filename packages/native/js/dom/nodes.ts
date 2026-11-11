@@ -10,7 +10,9 @@
 
 import type { ElementType, NativeRenderer } from "../host.js"
 import { NOT_ATTRIBUTES, attributeNameOf, storedAttributeNames } from "./attribute-names.js"
-import { closestElement, matchesSelector, querySelector, querySelectorAll, type ElementList } from "./selectors.js"
+import type { DOMRectList } from "./dom-rect.js"
+import { defineReflectedMembers, type ReflectedMembers } from "./reflected-members.js"
+import { closestElement, elementById, matchesSelector, querySelector, querySelectorAll, type ElementList } from "./selectors.js"
 
 /** Where `[DOM_BINDING]()` is read, so two copies of this package find each other's nodes. */
 export const DOM_BINDING: unique symbol = Symbol.for("@ghia/native/dom-binding")
@@ -71,8 +73,14 @@ function illegalConstructor(): never {
   throw new TypeError("Illegal constructor")
 }
 
-/** The document the nodes belong to, set by the one `Document` the runtime creates. */
-const documentState: { document: DocumentClass | null } = { document: null }
+/**
+ * The document the nodes belong to, set by the one `Document` the runtime creates, and the one
+ * way to make an element that is in no tree, which `detached-element` registers.
+ */
+const documentState: {
+  document: DocumentClass | null
+  createElement: ((localName: string) => Element) | null
+} = { document: null, createElement: null }
 
 /** Order given to the trees that are not in one document, so a comparison between them is stable. */
 const treeOrder = new WeakMap<object, number>()
@@ -326,6 +334,21 @@ abstract class ElementClass extends NodeClass {
   /** Dispatches an event an app built at the element. The adapters' DOM members (`defineDomMembers`) define it on their prototypes. */
   declare dispatchEvent: (event: Event) => boolean
 
+  /**
+   * Where the box is, read from native's layout. The adapters' DOM members (`defineDomMembers`) define
+   * them on their prototypes; `defineBoxMembers` documents each.
+   */
+  declare readonly offsetParent: Element | null
+  declare readonly offsetLeft: number
+  declare readonly offsetTop: number
+  declare readonly clientLeft: number
+  declare readonly clientTop: number
+  declare getClientRects: () => DOMRectList
+
+  /** The scroll offsets, defined with the scroll members (`defineScrollMembers`). */
+  declare scrollLeft: number
+  declare scrollTop: number
+
   abstract get tagName(): string
 
   get nodeType(): number {
@@ -459,6 +482,9 @@ abstract class ElementClass extends NodeClass {
   }
 }
 
+interface ElementClass extends ReflectedMembers {}
+defineReflectedMembers(ElementClass.prototype)
+
 function isElement(node: Node): node is Element {
   return node.nodeType === ELEMENT_NODE
 }
@@ -511,6 +537,21 @@ abstract class DocumentClass extends NodeClass {
 
   querySelectorAll(selector: string): ElementList {
     return querySelectorAll(this as unknown as Node, selector, "Document")
+  }
+
+  /**
+   * An HTML element of that tag that is in no tree: nothing mounts it and it has no box. The name
+   * is lowercased, and one that is not a valid name throws an `InvalidCharacterError`.
+   */
+  createElement(localName: string): Element {
+    const create = documentState.createElement
+    if (create === null) throw new Error("document.createElement needs @ghia/native/host to be imported first")
+    return create(localName)
+  }
+
+  /** The first element of any window's tree, in document order, with that `id`; `null` for none. */
+  getElementById(id: string): Element | null {
+    return elementById(this as unknown as Node, String(id))
   }
 }
 
@@ -615,6 +656,11 @@ export const DocumentFragment = shared.DocumentFragment
 export type DocumentFragment = DocumentFragmentClass
 export const ShadowRoot = shared.ShadowRoot
 export type ShadowRoot = ShadowRootClass
+
+/** @internal Where `detached-element` hands `document.createElement` its way to make an element. */
+export function registerElementFactory(create: (localName: string) => Element): void {
+  shared.state.createElement = create
+}
 
 /** @internal Makes `document` the owner of every node. Called once, by the module that creates it. */
 export function registerDocument(document: Document): void {

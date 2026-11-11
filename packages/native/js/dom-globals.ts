@@ -13,6 +13,9 @@ import {
   SVGElement,
   Text,
 } from "./dom/nodes.js"
+import "./dom/detached-element.js"
+import { DOMRect, DOMRectReadOnly } from "./dom/dom-rect.js"
+import { HTMLInputElement, HTMLTextAreaElement } from "./dom/html-element-classes.js"
 import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
 import { CSSStyleDeclaration } from "./dom/style-declaration.js"
 import { Selection } from "./dom/selection.js"
@@ -39,6 +42,8 @@ const DOM_CLASSES = {
   Text,
   Element,
   HTMLElement,
+  HTMLInputElement,
+  HTMLTextAreaElement,
   SVGElement,
   Document,
   DocumentFragment,
@@ -47,6 +52,8 @@ const DOM_CLASSES = {
   MutationObserver,
   MutationRecord,
   CSSStyleDeclaration,
+  DOMRect,
+  DOMRectReadOnly,
   ...EVENT_CLASSES,
 }
 

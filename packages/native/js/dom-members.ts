@@ -27,6 +27,8 @@ import {
 } from "./dom/style-declaration.js"
 import { Element, SVGElement, type Node } from "./dom/nodes.js"
 import { defineInputMembers } from "./dom/input-members.js"
+import { defineBoxMembers } from "./dom/box-members.js"
+import type { DOMRectList } from "./dom/dom-rect.js"
 
 /** The DOM members every host element has beside the scroll ones. */
 export interface DomElement {
@@ -58,6 +60,23 @@ export interface DomElement {
   readonly offsetWidth: number
   /** The border box's height, rounded, before any transform. 0 for an element with no box. */
   readonly offsetHeight: number
+  /**
+   * The nearest ancestor that is positioned (`position` is not `static`), a table part for a static
+   * element, or `body`: what `offsetLeft` and `offsetTop` are measured from. `null` for an
+   * element with no box (not mounted, `display: none`), for `html`, `body` and a `fixed` element.
+   */
+  readonly offsetParent: Element | null
+  /** The distance from the padding edge of `offsetParent` to the element's border edge, rounded, as laid out: a transform is not in it and neither is a scroll. 0 for an element with no box. */
+  readonly offsetLeft: number
+  readonly offsetTop: number
+  /** The widths of the left and top borders, rounded. 0 for an element with no box. */
+  readonly clientLeft: number
+  readonly clientTop: number
+  /**
+   * The element's border box in window coordinates, as one rect in a `DOMRectList`: an empty list for an
+   * element with no box. An inline box that wraps over lines is one rect, the box around all its lines.
+   */
+  getClientRects(): DOMRectList
   addEventListener(
     type: string,
     listener: ElementEventListener | null,
@@ -178,6 +197,7 @@ export function defineDomMembers<This extends object>(
   bind: (self: This) => DomElementBinding
 ): void {
   defineInputMembers(target, bind)
+  defineBoxMembers(target, bind as unknown as (self: Element) => DomElementBinding)
   Object.defineProperties(target, {
     ownerDocument: { configurable: true, get: () => document },
     isConnected: {

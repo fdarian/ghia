@@ -279,6 +279,7 @@ const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "tabIndex",
   "draggable",
   "inert",
+  "hidden",
   "colSpan",
   "rowSpan",
   "span",

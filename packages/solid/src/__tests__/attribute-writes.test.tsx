@@ -69,7 +69,7 @@ describe.skipIf(!hasNativeTestRenderer)("attribute writes on a Solid element", (
     target.setAttribute("tabindex", "-1")
     expect(target.getAttribute("tabindex")).toBe("-1")
     expect(target.props.get("tabIndex")).toBe(-1)
-    target.setAttribute("hidden", "until-found")
+    target.setAttribute("hidden", "any text")
     expect(target.props.get("hidden")).toBe(true)
     expect(target.getAttribute("hidden")).toBe("")
     target.toggleAttribute("hidden")

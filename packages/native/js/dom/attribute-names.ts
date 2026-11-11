@@ -25,7 +25,7 @@ export const NOT_ATTRIBUTES: ReadonlySet<string> = new Set(["children", "key", "
  * reflection does: a number attribute is the integer it holds, a boolean attribute is on when it
  * is present whatever its value, and `draggable`, which is enumerated, is on for "true".
  */
-type AttributeKind = "number" | "presence" | "true-text"
+type AttributeKind = "number" | "presence" | "true-text" | "until-found"
 
 const WRITTEN_AS_PROP: Readonly<Record<string, { prop: string; kind?: AttributeKind }>> = {
   class: { prop: "className" },
@@ -39,7 +39,7 @@ const WRITTEN_AS_PROP: Readonly<Record<string, { prop: string; kind?: AttributeK
   readonly: { prop: "readOnly", kind: "presence" },
   inert: { prop: "inert", kind: "presence" },
   disabled: { prop: "disabled", kind: "presence" },
-  hidden: { prop: "hidden", kind: "presence" },
+  hidden: { prop: "hidden", kind: "until-found" },
   required: { prop: "required", kind: "presence" },
   checked: { prop: "checked", kind: "presence" },
   multiple: { prop: "multiple", kind: "presence" },
@@ -77,6 +77,9 @@ export function propWrittenBy(
       return { prop, value: INTEGER.test(text) ? Number(text) : text }
     case "presence":
       return { prop, value: true }
+    case "until-found":
+      // `hidden="until-found"` is its own state: it keeps its box, so it is the text and not a presence.
+      return { prop, value: text.toLowerCase() === "until-found" ? "until-found" : true }
     case "true-text":
       return { prop, value: text === "true" }
     default:
