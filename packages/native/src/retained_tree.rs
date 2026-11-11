@@ -219,7 +219,8 @@ impl RetainedElement {
     }
 
     /// Whether the element must own a gpui focus handle, which is what DOM calls
-    /// focusable: an enabled text control, a `<webview>`, or any other element with a `tabIndex`.
+    /// focusable: an enabled text control or `<button>`, an `<a>` with an `href`, a `<webview>`, or any
+    /// other element with a `tabIndex`.
     /// A key or focus listener does not make an element focusable; an ancestor's
     /// key listener still hears the keys of a focused descendant.
     pub fn needs_focus(&self) -> bool {
@@ -230,11 +231,11 @@ impl RetainedElement {
         if crate::custom_elements::is_focusable_by_default(&self.element_type) {
             return true;
         }
-        if crate::focus::is_text_control(&self.element_type) {
+        if crate::focus::is_text_control(&self.element_type) || self.element_type == "button" {
             // `disabled` outranks `tabIndex`: a disabled control cannot be focused at all.
             !self.is_disabled()
         } else {
-            self.tab_index().is_some()
+            crate::html::is_focusable_by_default(self) || self.tab_index().is_some()
         }
     }
 
@@ -1568,7 +1569,7 @@ impl RetainedTree {
         let is_highlight = key == "highlight";
         let is_motion = key == "motion";
         let is_motion_values = key == "motionValues" || key == "layout";
-        let affects_focusability = key == "tabIndex" || key == "disabled";
+        let affects_focusability = key == "tabIndex" || key == "disabled" || key == "href";
         let is_inert = key == "inert";
         let relation_key = RelationRegistry::reads(&key).then(|| key.clone());
         let mut previous_relation = None;

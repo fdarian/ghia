@@ -3,7 +3,13 @@
 //! stylesheet gives the tag. The style is the lowest layer under an element: below the universal
 //! style, which is below the element's own (`RetainedTree::refresh_effective_style`).
 
+mod semantics;
 mod tags;
+
+pub(crate) use semantics::{
+    activation_keys, button_type, heading_level, implicit_role, is_activatable, is_focusable_by_default, ActivationKeys,
+    ButtonType,
+};
 
 use std::sync::{Arc, OnceLock};
 
@@ -24,6 +30,10 @@ fn styles() -> &'static FxHashMap<&'static str, Arc<StyleDesc>> {
             .collect()
     })
 }
+
+/// What `<wbr>` puts in the text of its paragraph: a zero width space, where a line may break. It is
+/// not read out.
+pub const BREAK_OPPORTUNITY: char = '\u{200B}';
 
 /// Whether `element_type` is an HTML tag with a user agent style.
 pub fn is_tag(element_type: &str) -> bool {

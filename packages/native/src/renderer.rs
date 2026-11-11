@@ -7225,7 +7225,9 @@ impl GpuixView {
             if matches!(element.element_type.as_str(), "input" | "textarea") {
                 return false;
             }
-            if key.activates_controls && element.events().contains("click") {
+            if key.activates_controls
+                && (element.events().contains("click") || crate::html::activation_keys(element).is_some_and(|keys| keys.space))
+            {
                 return false;
             }
             let reaching = crate::layout::containing_block::reaching_ancestors(&tree, focused);
@@ -12296,14 +12298,11 @@ pub(crate) fn build_host_container(
     } else {
         None
     };
-    let default_role = crate::accessibility::role_without_props(element, text.as_deref());
+    let default_role = crate::accessibility::role_without_props(ctx.tree, element, text.as_deref());
     el = if exposed.is_empty() {
-        apply_accessibility(el, element.id, element.custom_props(), default_role)
+        crate::accessibility::apply_element(el, element, default_role, false)
     } else {
-        crate::accessibility::skipped::host(
-            crate::accessibility::apply_hosting(el, element.id, element.custom_props(), default_role),
-            exposed,
-        )
+        crate::accessibility::skipped::host(crate::accessibility::apply_element(el, element, default_role, true), exposed)
     };
     el = crate::accessibility::describe_text(el, element, default_role, text);
     if is_label && !inert {
@@ -13746,16 +13745,17 @@ fn scroll_reporter(
 
 /// The retained path a non-pointer click on `element` bubbles along. Empty when
 /// nothing would receive it, which is also when it is never read: nothing
-/// listens for a click and the element is not a label that activates a control,
+/// listens for a click and the element is not a label that activates a control
+/// or a button or link, which have an activation of their own,
 /// or the element is in a disabled form control, which an accessibility click
 /// does nothing on.
 pub(crate) fn click_path(tree: &RetainedTree, element: &crate::retained_tree::RetainedElement) -> Vec<u64> {
-    let listens = element.events().contains("click");
-    if (!listens && element.element_type != "label") || tree.in_disabled_form_control(element.id) {
+    let activates = element.events().contains("click") || crate::html::is_activatable(element);
+    if (!activates && element.element_type != "label") || tree.in_disabled_form_control(element.id) {
         return Vec::new();
     }
     let path = crate::events::path::event_path(tree, element.id);
-    if listens || crate::accessibility::label::activated_control(tree, &path).is_some() {
+    if activates || crate::accessibility::label::activated_control(tree, &path).is_some() {
         path
     } else {
         Vec::new()

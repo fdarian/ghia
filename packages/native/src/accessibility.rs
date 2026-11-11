@@ -32,21 +32,29 @@ pub(crate) fn apply_accessibility<E>(
 where
     E: StatefulInteractiveElement,
 {
-    apply(el, host_id, props, default_role, false)
+    apply(el, host_id, props, default_role, false, None)
 }
 
-/// [`apply_accessibility`] for an element that holds the nodes of content it skips
-/// (`skipped`): it gets a node even with no role, so they have one to hang off.
-pub(crate) fn apply_hosting<E>(
+/// [`apply_accessibility`] for a container `element` of the retained tree, with what its tag implies
+/// beyond a role (a heading's level). An element that `hosts` the nodes of content it skips (`skipped`)
+/// gets a node even with no role, so they have one to hang off.
+pub(crate) fn apply_element<E>(
     el: E,
-    host_id: u64,
-    props: &HashMap<String, serde_json::Value>,
+    element: &crate::retained_tree::RetainedElement,
     default_role: Option<Role>,
+    hosts: bool,
 ) -> E
 where
     E: StatefulInteractiveElement,
 {
-    apply(el, host_id, props, default_role, true)
+    apply(
+        el,
+        element.id,
+        element.custom_props(),
+        default_role,
+        hosts,
+        crate::html::heading_level(&element.element_type),
+    )
 }
 
 fn resolve_role(props: &HashMap<String, serde_json::Value>, default_role: Option<Role>) -> Option<Role> {
@@ -61,7 +69,7 @@ fn resolve_role(props: &HashMap<String, serde_json::Value>, default_role: Option
 }
 
 /// Whether the author named the element with `aria-label` or `aria-labelledby`.
-fn named_by_aria(props: &HashMap<String, serde_json::Value>) -> bool {
+pub(crate) fn named_by_aria(props: &HashMap<String, serde_json::Value>) -> bool {
     props.contains_key("aria-label")
         || aria::relations(props)
             .iter()
@@ -74,6 +82,7 @@ fn apply<E>(
     props: &HashMap<String, serde_json::Value>,
     default_role: Option<Role>,
     hosts: bool,
+    implicit_level: Option<usize>,
 ) -> E
 where
     E: StatefulInteractiveElement,
@@ -106,8 +115,17 @@ where
     if let Some(author_id) = author_id {
         el = el.accessibility_id(author_id);
     }
-    if let Some(aria) = aria {
-        el = el.a11y_node(move |node| aria.write(node));
+    // The hook is one slot, so the level a heading tag has goes in before `aria-level`, which wins.
+    let implicit_level = implicit_level.filter(|_| role == Role::Heading);
+    if aria.is_some() || implicit_level.is_some() {
+        el = el.a11y_node(move |node| {
+            if let Some(level) = implicit_level {
+                node.set_level(level);
+            }
+            if let Some(aria) = &aria {
+                aria.write(node);
+            }
+        });
     }
 
     let mut relations = aria::relations(props);
@@ -127,7 +145,10 @@ where
 }
 
 /// The role an element has when its props give none.
-pub(crate) fn default_role(element: &crate::retained_tree::RetainedElement) -> Option<Role> {
+pub(crate) fn default_role(
+    tree: &crate::retained_tree::RetainedTree,
+    element: &crate::retained_tree::RetainedElement,
+) -> Option<Role> {
     match element.element_type.as_str() {
         "form" => Some(Role::Form),
         "label" => Some(Role::Label),
@@ -143,7 +164,7 @@ pub(crate) fn default_role(element: &crate::retained_tree::RetainedElement) -> O
                 element.element_type == "textarea",
             ))
         }
-        _ => None,
+        _ => crate::html::implicit_role(tree, element),
     }
 }
 
@@ -178,8 +199,12 @@ pub(crate) fn read_text_unplanned(
 /// The role of `element` when its props give none: its type's, or `Label` when it reads out text.
 /// An element an `aria-*` reference names has none from its text: it is a `Group` named by it
 /// (`links::referenced_text`).
-pub(crate) fn role_without_props(element: &crate::retained_tree::RetainedElement, text: Option<&str>) -> Option<Role> {
-    default_role(element).or_else(|| {
+pub(crate) fn role_without_props(
+    tree: &crate::retained_tree::RetainedTree,
+    element: &crate::retained_tree::RetainedElement,
+    text: Option<&str>,
+) -> Option<Role> {
+    default_role(tree, element).or_else(|| {
         text.filter(|_| links::current().referenced_text(element.id).is_none())
             .map(|_| Role::Label)
     })

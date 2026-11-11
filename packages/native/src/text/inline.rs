@@ -418,7 +418,7 @@ impl Builder {
         self.only_whitespace = false;
         self.tail = Tail::Content;
         let start = self.text.len();
-        self.text.push('\u{200B}');
+        self.text.push(crate::html::BREAK_OPPORTUNITY);
         self.pieces.push(Piece {
             range: start..self.text.len(),
             boxes: boxes.to_vec(),
@@ -705,13 +705,18 @@ pub fn leaf_run(tree: &RetainedTree, parent: &RetainedElement, leaves: &[u64]) -
 }
 
 /// The text an inline formatting context reads out, as painted: that of every
-/// paragraph in `plan`, in order. The placeholders of atomic inlines are not
-/// text.
+/// paragraph in `plan`, in order. The placeholders of atomic inlines and the break
+/// opportunities of `<wbr>` are not text.
 pub fn accessible_text<'a>(plan: impl IntoIterator<Item = &'a Child>) -> Option<String> {
     fn collect(child: &Child, text: &mut String) {
         match child {
             Child::Paragraph(paragraph) => {
-                text.extend(paragraph.text.chars().filter(|c| *c != gpui::OBJECT_REPLACEMENT_CHARACTER))
+                text.extend(
+                    paragraph
+                        .text
+                        .chars()
+                        .filter(|c| *c != gpui::OBJECT_REPLACEMENT_CHARACTER && *c != crate::html::BREAK_OPPORTUNITY),
+                )
             }
             Child::AnonymousCell(cell) => cell.iter().for_each(|(child, _)| collect(child, text)),
             Child::Block(_) | Child::AnonymousTable(_) | Child::EmptyLine => {}
