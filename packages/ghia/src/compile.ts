@@ -30,17 +30,20 @@ export const nativeLoaderPlugin: Bun.BunPlugin = {
 }
 
 export interface CompileOptions {
-  /** Absolute paths: the UI bundle first, then the server bundle when the app has one. */
+  /** Absolute paths: the UI bundle first, then the server bundle when the app has one, each followed by the Worker files that bundle emitted. */
   readonly entrypoints: readonly string[]
   readonly outfile: string
 }
 
-/** Bundles the build output into one executable that carries Bun and the native addon. The server bundle is an entrypoint too, because the built UI starts its Worker from the executable's own filesystem. */
+/** Bundles the build output into one executable that carries Bun and the native addon. The server bundle and the app's Worker files are entrypoints too, because the built code starts them from the executable's own filesystem. */
 export async function compile(options: CompileOptions): Promise<void> {
   const result = await Bun.build({
     entrypoints: [...options.entrypoints],
-    compile: { outfile: options.outfile },
+    // A shipped binary must not read a bunfig.toml (a test preload, say) or a .env from whichever directory it is launched in.
+    compile: { outfile: options.outfile, autoloadBunfig: false, autoloadDotenv: false },
     format: "esm",
+    // With the default naming, a compile of nine or more entrypoints does not find its entrypoints under `/$bunfs/root/<name>` (Bun 1.4.4): the Workers a built app starts fail with ModuleNotFound.
+    naming: "[name].[ext]",
     bytecode: true,
     minify: true,
     plugins: [nativeLoaderPlugin],

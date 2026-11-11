@@ -69,6 +69,10 @@ export default defineConfig({
 })
 ```
 
+`ghia()` returns two plugins (the main one and `ghia:workers`), so put its
+result in the `plugins` array as it is; do not index into it or wrap it in a
+single `Plugin`.
+
 Use `vite.config.mts` when your `package.json` has no `"type": "module"`.
 
 ### 3. Write the entry file
@@ -134,8 +138,13 @@ ghia build
 
 `ghia build` writes `dist/main.js` and compiles it into `dist/app`, one
 executable that carries Bun and the renderer (about 128 MB), so it runs with no
-Bun and no Node install. `ghia build --no-compile` writes only `dist/main.js`,
-which runs with plain `bun`.
+Bun and no Node install. `ghia build --no-compile` writes `dist/main.js` plus
+the Worker files and chunks, all flat in `dist/`, which run with plain `bun`.
+
+A Worker the app starts with `new Worker(new URL('./raster.ts', import.meta.url))`
+(a relative string literal, in the UI or the server code) is bundled into
+`dist/raster-<hash>.worker.js` and carried by the binary; see
+[App Workers](solid.md#app-workers).
 
 For a smaller ship set, run the same React app on
 [hermes-node](../hermes/README.md) instead of Bun. That path is
@@ -657,7 +666,7 @@ Run it with `ghia dev`. A save applies a component edit as a hot update
 (local signal state resets) and re-runs the entry when no component accepts
 the edit. `ghia build` writes `dist/main.js` and compiles it into `dist/app`,
 one executable that embeds Bun and the native addon (about 128 MB). `ghia build
---no-compile` writes only `dist/main.js`, which runs with plain `bun`, and
+--no-compile` writes `dist/main.js` plus the Worker files and chunks, which run with plain `bun`, and
 `ghia({ entry, compile: { outfile } })` moves the binary.
 
 ```bash
