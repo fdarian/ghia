@@ -2662,18 +2662,25 @@ describeNative("events", () => {
         {
           "children": [
             {
+              "id": 2,
+              "style": {
+                "display": "none",
+              },
+              "type": "head",
+            },
+            {
               "children": [
                 {
                   "children": [
                     {
                       "children": [
                         {
-                          "id": 3,
+                          "id": 4,
                           "text": "Hello",
                           "type": "#text",
                         },
                       ],
-                      "id": 4,
+                      "id": 5,
                       "type": "div",
                     },
                     {
@@ -2681,23 +2688,23 @@ describeNative("events", () => {
                         {
                           "children": [
                             {
-                              "id": 5,
+                              "id": 6,
                               "text": "Click me",
                               "type": "#text",
                             },
                           ],
-                          "id": 6,
+                          "id": 7,
                           "type": "div",
                         },
                       ],
                       "events": [
                         "click",
                       ],
-                      "id": 7,
+                      "id": 8,
                       "type": "div",
                     },
                   ],
-                  "id": 8,
+                  "id": 9,
                   "style": {
                     "display": "flex",
                     "gap": 8,
@@ -2705,7 +2712,7 @@ describeNative("events", () => {
                   "type": "div",
                 },
               ],
-              "id": 2,
+              "id": 3,
               "style": {
                 "display": "block",
                 "height": "100%",

@@ -147,7 +147,7 @@ describeNative("pointer lock", () => {
       testRoot.render(<Boxes />)
       const seen: Array<[string, boolean, boolean, number]> = []
       const record = (name: string) => (event: LockEvent) =>
-        seen.push([name, event.target === document, event.currentTarget === (name.startsWith("window") ? window : document), event.eventPhase])
+        seen.push([name, event.target === document, event.currentTarget === (name.startsWith("window") ? globalThis : document), event.eventPhase])
       const listeners: Array<[typeof document | typeof window, string, boolean]> = [
         [window, "window-capture", true],
         [document, "document-capture", true],

@@ -196,13 +196,13 @@ describeNative("mutation lifecycle", () => {
         </div>
       )
 
-      // Ids 1 and 2 are each window's html and body.
-      expect(a.renderer.findByType("#text")[0]?.id).toBe(3)
-      expect(b.renderer.findByType("#text")[0]?.id).toBe(3)
-      expect(a.renderer.getRoot()?.id).toBe(4)
-      expect(b.renderer.getRoot()?.id).toBe(4)
+      // Ids 1, 2 and 3 are each window's html, head and body.
+      expect(a.renderer.findByType("#text")[0]?.id).toBe(4)
+      expect(b.renderer.findByType("#text")[0]?.id).toBe(4)
+      expect(a.renderer.getRoot()?.id).toBe(5)
+      expect(b.renderer.getRoot()?.id).toBe(5)
 
-      const click = { elementId: 4, eventType: "click" }
+      const click = { elementId: 5, eventType: "click" }
       handleGpuixEvent(click, a.renderer)
       expect(onA).toHaveBeenCalledTimes(1)
       expect(onB).not.toHaveBeenCalled()
@@ -230,8 +230,8 @@ describeNative("mutation lifecycle", () => {
     flushSync(() => first.render(tree(onFirst)))
     renderer.flush()
     const firstRootId = renderer.getRoot()?.id
-    // After the first root's html and body, and the text in it.
-    expect(firstRootId).toBe(4)
+    // After the first root's html, head and body, and the text in it.
+    expect(firstRootId).toBe(5)
     first.unmount()
 
     const second = createRoot(renderer)
