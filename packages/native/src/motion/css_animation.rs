@@ -5554,6 +5554,15 @@ mod tests {
     }
 
     #[test]
+    fn a_number_written_as_text_is_read_by_a_property_that_takes_a_number() {
+        let mut frames = Frames::new();
+        let json = r#"[{ "offset": 0, "opacity": "0" }, { "offset": 1, "opacity": " 1 " }]"#;
+        animate(&mut frames, 0, json, timing(1000.0, |_| {}));
+        frames.frame(0, &bare());
+        near(opacity(&frames.frame(500, &bare())), 0.5);
+    }
+
+    #[test]
     fn a_script_animation_tells_the_dom_nothing_and_the_api_its_finish() {
         let mut frames = Frames::new();
         let id = animate(&mut frames, 0, RAMP, timing(100.0, |_| {}));

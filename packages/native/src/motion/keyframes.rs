@@ -130,8 +130,16 @@ impl Keyframes {
                     "composite" => {}
                     TIMING_FUNCTION => {}
                     _ => {
-                        let single = Value::Object(std::iter::once((name, value)).collect());
-                        if let Ok(block) = parse_block(&single) {
+                        let single = |value: Value| Value::Object(std::iter::once((name.clone(), value)).collect());
+                        // A property that takes a number (`opacity`) is given its text, which only a
+                        // number reads: the number is tried first, since a name both tables know keeps
+                        // whichever of its two parses.
+                        let number = value
+                            .as_str()
+                            .and_then(|text| text.trim().parse::<f64>().ok())
+                            .and_then(serde_json::Number::from_f64)
+                            .and_then(|number| parse_block(&single(Value::Number(number))).ok());
+                        if let Some(block) = number.or_else(|| parse_block(&single(value)).ok()) {
                             frame.merge(&block);
                         }
                     }

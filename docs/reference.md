@@ -9515,8 +9515,9 @@ await animation.finished
   object with a value or an array of values for each property (`{ translate:
   [from, to] }`, `{ opacity: 0.5 }` animates from what the element has to `0.5`),
   with `offset` and `easing` as a value or an array. Names are camelCase
-  (`backgroundColor`), values strings as in CSS (a number is read as its text, so
-  a bare `100` is not a length). Offsets left out are spread evenly. A property
+  (`backgroundColor`), values strings as in CSS (a number is read as its text: it
+  is an `opacity`, and for a length it is read as `style` reads it, in px, where
+  Chrome ignores it). Offsets left out are spread evenly. A property
   Ghia does not animate, and a value that does not read for its property, is left
   out as a browser leaves it out. A wrong offset (outside 0 to 1, or not
   ascending) or easing, or no object, throws a `TypeError`. Keyframes at one
