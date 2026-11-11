@@ -207,17 +207,18 @@ impl StyleSheets {
             return hit;
         }
         crate::perf_counters::cascade_computed();
-        let declarations = match own {
+        let (declarations, important) = match own {
             Some(own) => {
                 let raw = styles.raw_of(own);
                 let own = serde_json::from_slice::<crate::css::lenient::Declarations>(&raw)
                     .expect("an interned style is a JSON object")
                     .0;
-                self.validator.filter_own(own)
+                let (normal, important) = crate::css::inline_important::split(own);
+                (self.validator.filter_own(normal), self.validator.filter_own(important))
             }
-            None => Vec::new(),
+            None => (Vec::new(), Vec::new()),
         };
-        let text = merge(&self.index, matched, &declarations);
+        let text = merge(&self.index, matched, &declarations, &important);
         let style = match styles.intern(text.as_bytes()) {
             Ok(style) => Some(style.into_arc()),
             Err(error) => {

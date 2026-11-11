@@ -24,6 +24,7 @@ pub(crate) mod font_features;
 pub(crate) mod font_smoothing;
 pub(crate) mod font_variations;
 pub(crate) mod gradient;
+pub(crate) mod inline_important;
 pub(crate) mod length;
 pub(crate) mod lenient;
 pub(crate) mod line_height;

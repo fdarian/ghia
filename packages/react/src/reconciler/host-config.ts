@@ -251,13 +251,15 @@ function sameStyle(left: Props["style"], right: Props["style"]): boolean {
   return left === right || sameMutationValue(left ?? NO_STYLE, right ?? NO_STYLE)
 }
 
-/** The style a hidden element keeps: its own, minus the states, plus `visibility: hidden`. */
+/**
+ * The style a hidden element keeps: its own, minus the states, plus `display: none !important`,
+ * which is what React DOM writes, so a sheet rule cannot show what Suspense hides.
+ */
 function hiddenStyle(style: Props["style"]) {
   // Hover and active go, because a hidden element must stay hidden. A hover
-  // style that sets `visibility` would otherwise paint an element React
-  // asked to hide.
+  // style that sets `display` would otherwise show an element React asked to hide.
   const { hover: _hover, active: _active, ...base } = splitMotionStyle(style).style ?? {}
-  return { ...base, visibility: "hidden" }
+  return { ...base, display: "none !important" }
 }
 
 // ── Custom prop forwarding ───────────────────────────────────────────
@@ -668,9 +670,8 @@ export const hostConfig = {
   },
 
   hideInstance(instance: Instance): void {
-    // Keep the element's own style. `visibility: hidden` skips the paint and
-    // keeps the layout box, so replacing the whole style here would collapse
-    // the box and lose every other style on the element.
+    // Keep the element's own style: only `display` is replaced, and it comes back with
+    // `unhideInstance`.
     stateFor(instance).hidden = true
     rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(instance.props.style))
   },

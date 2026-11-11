@@ -2,7 +2,8 @@
 //!
 //! The cascade runs on declarations, before any style is parsed: the normal declarations of the
 //! matched rules in cascade order, then the element's own inline declarations in written order,
-//! then the important declarations of the matched rules. A key declared again replaces the
+//! then the important declarations of the matched rules, then the element's own inline declarations
+//! that were written `!important`, which beat an author `!important` as in CSS. A key declared again replaces the
 //! earlier one and moves to the end, which is where `css::covers` reads written order from when
 //! the merged text is interned.
 
@@ -100,7 +101,8 @@ fn is_shadowed(list: &[Declaration], longhand: KeyId) -> bool {
 }
 
 /// The merged declarations of the matched rules and the element's own, as the style prop's JSON.
-pub fn merge(index: &RuleIndex, matched: &MatchedRules, own: &[Declaration]) -> String {
+/// `own_important` are the own declarations that were written `!important`.
+pub fn merge(index: &RuleIndex, matched: &MatchedRules, own: &[Declaration], own_important: &[Declaration]) -> String {
     let mut list: Vec<Declaration> = Vec::new();
     for rule in &matched.normal {
         for declaration in &index.rules[*rule as usize].normal {
@@ -114,6 +116,9 @@ pub fn merge(index: &RuleIndex, matched: &MatchedRules, own: &[Declaration]) -> 
         for declaration in &index.rules[*rule as usize].important {
             apply(&mut list, declaration);
         }
+    }
+    for declaration in own_important {
+        apply(&mut list, declaration);
     }
     render_declarations(&list)
 }

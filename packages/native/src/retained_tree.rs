@@ -583,12 +583,14 @@ impl StyleTable {
                 return Ok(InternedStyle(hit.style.clone()));
             }
         }
-        let style = if crate::css::var_substitution::mentions_var(raw) {
-            crate::css::var_substitution::parse(raw)?
+        // The payload is kept as it came: the cascade reads which values were `!important` from it.
+        let parsed = crate::css::inline_important::strip_payload(raw);
+        let style = if crate::css::var_substitution::mentions_var(&parsed) {
+            crate::css::var_substitution::parse(&parsed)?
         } else {
-            match parse_style(raw) {
+            match parse_style(&parsed) {
                 Ok(style) => style,
-                Err(error) => crate::css::lenient::recover(raw, error)?,
+                Err(error) => crate::css::lenient::recover(&parsed, error)?,
             }
         };
         let shared = Arc::new(style);

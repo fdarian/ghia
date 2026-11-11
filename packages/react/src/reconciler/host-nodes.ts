@@ -43,7 +43,7 @@ export interface HostNodeState {
   mounted: boolean
   /**
    * React hid this element (Suspense, Activity). Its native style carries
-   * `visibility: hidden`, so a style update must keep that rather than
+   * `display: none !important`, so a style update must keep that rather than
    * overwrite it with the visible one.
    */
   hidden: boolean

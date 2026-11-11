@@ -1,5 +1,5 @@
 /** A `<style>` element's text is a sheet native matches against the tree, so classes and attributes style elements. */
-import React from "react"
+import React, { Suspense } from "react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { getComputedStyle } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
@@ -38,6 +38,34 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in React", () => {
     expect(getComputedStyle(refs.inline).paddingLeft).toBe("3px")
     expect(getComputedStyle(refs.inline).opacity).toBe("0.9")
     expect(getComputedStyle(refs.inline).paddingTop).toBe("1px")
+  })
+
+  it("keeps an element Suspense hid hidden under a rule that sets its display", () => {
+    const refs: Record<string, any> = {}
+    const pending = new Promise<never>(() => {})
+    function Maybe(props: { suspend: boolean }) {
+      if (props.suspend) throw pending
+      return null
+    }
+    const view = (suspend: boolean) => (
+      <div>
+        <style>{`.shown { display: flex !important }`}</style>
+        <Suspense fallback={<div>fallback</div>}>
+          <div
+            ref={(element: unknown) => {
+              refs.hidden = element
+            }}
+            className="shown"
+            style={{ display: "block" }}
+          />
+          <Maybe suspend={suspend} />
+        </Suspense>
+      </div>
+    )
+    app.render(view(false))
+    expect(getComputedStyle(refs.hidden).display).toBe("flex")
+    app.render(view(true))
+    expect(getComputedStyle(refs.hidden).display).toBe("none")
   })
 
   it("matches again when a class or a data attribute toggles", () => {
