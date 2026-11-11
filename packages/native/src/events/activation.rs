@@ -1,6 +1,6 @@
 //! A `click` that has been delivered, and the activation behaviour that follows
-//! it: a `<label>` on its path focuses its control and clicks it, unless a
-//! handler cancelled the click.
+//! it, unless a handler cancelled the click: a `<label>` on its path focuses its
+//! control and clicks it, and a `<button>` on its path submits its form.
 //!
 //! Three sources feed it: a pointer release, `element.click()` and a
 //! VoiceOver Press. DOM runs the same activation behaviour for all of them.
@@ -47,14 +47,21 @@ impl Activation {
         sync_dispatch::emit(window, cx, &self.callback, payload);
     }
 
+    /// The activation behaviour of `click`, a click no handler cancelled.
+    pub(crate) fn activate(&self, click: &EventPayload, window: &mut Window, cx: &mut App) {
+        self.activate_label(click, window, cx);
+        let path: Vec<u64> = click.path.iter().flatten().map(|id| *id as u64).collect();
+        crate::forms::button_clicked(&self.tree, &path, window, cx);
+    }
+
     /// Delivers a click that no pointer made and then runs its activation
     /// behaviour, as `HTMLElement.click()` does. A handler that cancels the
-    /// click keeps a label from activating its control, where the outcome is
+    /// click keeps its activation from running, where the outcome is
     /// known (see `sync_dispatch::emit`).
     pub(crate) fn click(&self, click: EventPayload, window: &mut Window, cx: &mut App) {
         let outcome = sync_dispatch::emit(window, cx, &self.callback, click.clone());
         if !outcome.default_prevented {
-            self.activate_label(&click, window, cx);
+            self.activate(&click, window, cx);
         }
     }
 

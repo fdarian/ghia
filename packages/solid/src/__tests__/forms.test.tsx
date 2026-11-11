@@ -186,6 +186,26 @@ describe.skipIf(!hasNativeTestRenderer)("Solid form", () => {
     expect(submits).toEqual([])
   })
 
+  it("submits with the button as the submitter when a submit button is pressed, and on Enter in a field", () => {
+    const submits: Array<{ entries: [string, FormDataEntryValue][]; submitter: unknown }> = []
+    let button!: HostElement
+    const { type } = setup(() => (
+      <form onSubmit={(event) => submits.push({ entries: Array.from(event.formData.entries()), submitter: event.submitter })}>
+        <input testId="a" name="a" value="1" style={field} />
+        <input testId="b" name="b" value="2" style={field} />
+        <button ref={button} testId="go">Go</button>
+        <button testId="plain" type="button">Plain</button>
+      </form>
+    ))
+    type("plain", "Enter")
+    expect(submits).toEqual([])
+    type("go", "Enter")
+    type("go", "Space")
+    type("a", "Enter")
+    expect(submits.map((submit) => submit.submitter)).toEqual([button, button, button])
+    expect(submits[0]!.entries).toEqual([["a", "1"], ["b", "2"]])
+  })
+
   it("does not submit when keydown is prevented", () => {
     const submits: number[] = []
     const { type } = setup(() => (

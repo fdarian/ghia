@@ -1932,6 +1932,11 @@ export interface EventPayload {
    */
   formEntries?: Array<Array<string>>
   /**
+   * Id of the `<button>` that submitted the form, when one did.
+   * Populated for: `<form>` submit.
+   */
+  submitterId?: number
+  /**
    * Id of the element the event was aimed at (JS makes it `event.target`, the
    * element itself). Absent means `element_id` is the target. Ids are `f64`
    * like `element_id`: `u64` would reach JS as a `bigint` and never match the

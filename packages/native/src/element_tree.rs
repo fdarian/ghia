@@ -214,6 +214,10 @@ pub struct EventPayload {
     /// order. Populated for: `<form>` submit.
     pub form_entries: Option<Vec<Vec<String>>>,
 
+    /// Id of the `<button>` that submitted the form, when one did.
+    /// Populated for: `<form>` submit.
+    pub submitter_id: Option<f64>,
+
     // ── DOM event propagation ────────────────────────────────────────
     /// Id of the element the event was aimed at (JS makes it `event.target`, the
     /// element itself). Absent means `element_id` is the target. Ids are `f64`
@@ -395,6 +399,7 @@ impl Default for EventPayload {
             motion_generation: None,
             files: None,
             form_entries: None,
+            submitter_id: None,
             target: None,
             path: None,
             related_target: None,

@@ -114,7 +114,7 @@ export function captureHandlerKey(eventType: string): string {
  * carry element ids, which the event replaces with elements. `elementId` stays
  * the numeric id of the element the payload was addressed to.
  */
-export type PublicEventFields = Omit<EventPayload, "target" | "relatedTarget" | "path" | "data"> & {
+export type PublicEventFields = Omit<EventPayload, "target" | "relatedTarget" | "path" | "data" | "submitterId"> & {
   /** `null` for an edit that inserted no text, see `HostInputEvent`. */
   data?: string | null
 }
@@ -202,11 +202,15 @@ export interface DomDispatchHooks {
   afterBubble?(event: DomEvent, state: DomEventState, fail: (error: unknown) => void): void
 }
 
-/** What a form's `submit` event adds: the `FormData` and no submitter button. */
-function formSubmission(entries: string[][]): { formData: FormData; submitter: null } {
+/** What a form's `submit` event adds: the `FormData` and the button that submitted, `null` for `requestSubmit()` and for Enter in a form with no submit button. */
+function formSubmission(
+  root: DomEventRoot,
+  entries: string[][],
+  submitter: number | undefined
+): { formData: FormData; submitter: object | null } {
   const formData = new FormData()
   for (const [name, value] of entries) formData.append(name, value)
-  return { formData, submitter: null }
+  return { formData, submitter: optionalElement(root, submitter) }
 }
 
 /** The element for `id`, or throws: the root dropped an element native still names. */
@@ -231,9 +235,10 @@ export function optionalElement(root: DomEventRoot, id: number | undefined): obj
 
 /** The payload as a public event: element ids replaced by the elements they name. */
 export function toRootEvent(root: DomEventRoot, payload: EventPayload, target: object | null): RootEvent {
-  const fields: PublicEventFields & Partial<Pick<EventPayload, "target" | "relatedTarget" | "path">> = {
+  const fields: PublicEventFields & Partial<Pick<EventPayload, "target" | "relatedTarget" | "path" | "submitterId">> = {
     ...payload,
   }
+  delete fields.submitterId
   delete fields.target
   delete fields.relatedTarget
   delete fields.path
@@ -255,7 +260,7 @@ export function createDomEvent(
   const cancelable = eventIsCancelable(payload.eventType)
   const event: DomEvent = {
     ...toRootEvent(root, payload, path[0] ?? pathlessTarget),
-    ...(payload.formEntries && formSubmission(payload.formEntries)),
+    ...(payload.formEntries && formSubmission(root, payload.formEntries, payload.submitterId)),
     // An edit has no data unless it inserted text, and the DOM says so with null.
     ...(payload.eventType === "change" && { data: payload.data ?? null }),
     type: payload.eventType,

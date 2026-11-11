@@ -1976,17 +1976,18 @@ export type SubmitEvent = DomEvent & {
   /** The `name` and `value` of every named, enabled `<input>` and `<textarea>`
    *  in the form, in document order. */
   formData: FormData
-  /** The button that submitted the form. Always null: there is no submit button. */
-  submitter: null
+  /** The `<button>` whose click submitted the form, or the default button an Enter in a field clicked.
+   *  `null` for `requestSubmit()` and for Enter in a form with no submit button. */
+  submitter: object | null
 }
 
 /** `<form>`: groups `<input>` and `<textarea>` controls and submits them together. */
 export interface FormProps extends Omit<HostProps, "onSubmit"> {
   /**
-   * Enter in an `<input>` of this form, or `requestSubmit()`, once every
-   * `required` control has a value. Cancelable and bubbling, like the DOM; there
-   * is no navigation, so there is nothing to cancel. Enter in a `<textarea>`
-   * inserts a newline and never submits.
+   * A click on a submit `<button>` of this form, Enter in an `<input>` of it (HTML's implicit
+   * submission), or `requestSubmit()`, once every `required` control has a value. Cancelable
+   * and bubbling, like the DOM; there is no navigation, so there is nothing to cancel. Enter in a
+   * `<textarea>` inserts a newline and never submits.
    */
   onSubmit?: (event: SubmitEvent) => void
 }

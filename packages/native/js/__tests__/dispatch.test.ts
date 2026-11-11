@@ -238,7 +238,7 @@ describe("dispatchDomEvent", () => {
     expect(result.defaultPrevented).toBe(true)
   })
 
-  it("gives a submit event its FormData and no submitter", () => {
+  it("gives a submit event its FormData and its submitter, which is null without a button", () => {
     const { root, listen } = setup()
     let seen: { formData: FormData; submitter: unknown } | undefined
     listen(ROOT, "submit", (event) => {
@@ -262,6 +262,16 @@ describe("dispatchDomEvent", () => {
     ])
     expect(seen!.formData.getAll("a")).toEqual(["1", "2"])
     expect(seen!.submitter).toBeNull()
+  })
+
+  it("resolves the submitter of a submit event to its element", () => {
+    const { root, listen } = setup()
+    let seen: { submitter: unknown } | undefined
+    listen(ROOT, "submit", (event) => {
+      seen = event as unknown as { submitter: unknown }
+    })
+    dispatchDomEvent(root, payload("submit", { path: PATH, formEntries: [], submitterId: OTHER }))
+    expect(seen!.submitter).toBe(element(OTHER))
   })
 
   it("handles an event without a path at its element only", () => {

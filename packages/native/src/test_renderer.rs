@@ -2302,7 +2302,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn request_submit(&self, id: f64) -> Result<()> {
         let id = to_element_id(id)?;
-        window_call(move |window, cx| crate::forms::request_submit(window, cx, id))?
+        window_call(move |window, cx| crate::forms::request_submit(window, cx, id, None))?
             .map_err(Error::from_reason)
     }
 

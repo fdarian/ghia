@@ -7,8 +7,14 @@
 //! invalid the form gets a cancelable, bubbling `submit` event carrying the
 //! `[name, value]` entries of its named, enabled controls in document order.
 //!
+//! A `<button>` in a form whose `type` is missing or `submit` submits it when
+//! clicked, and its element is the event's `submitter`. `type="button"` does
+//! nothing. `type="reset"` does nothing either: gpuix does not reset controls.
+//!
 //! Enter in an `<input>` submits its form by HTML's implicit submission rule:
-//! with no submit button in gpuix, only when the form has at most one `<input>`.
+//! when the form has a submit button, the first one is the default button and
+//! gets a `click` (nothing happens if it is disabled); when it has none, only
+//! if at most one field blocks implicit submission.
 //!
 //! Both events are sent with `sync_dispatch::emit`, with the root view released:
 //! a handler is free to call back into the renderer.
@@ -39,6 +45,18 @@ fn is_form(tree: &RetainedTree, id: u64) -> bool {
 /// The controls that belong to `form`, in document order. A nested form's
 /// controls belong to that form.
 fn controls_of(tree: &RetainedTree, form: u64) -> Vec<u64> {
+    members_of(tree, form, |element| is_text_control(&element.element_type))
+}
+
+/// The submit buttons of `form`, in document order.
+fn submit_buttons_of(tree: &RetainedTree, form: u64) -> Vec<u64> {
+    members_of(tree, form, |element| {
+        element.element_type == "button" && crate::html::button_type(element) == crate::html::ButtonType::Submit
+    })
+}
+
+/// The elements below `form` that `keep` accepts, in document order, leaving out those of a nested form.
+fn members_of(tree: &RetainedTree, form: u64, keep: impl Fn(&crate::retained_tree::RetainedElement) -> bool) -> Vec<u64> {
     let mut controls = Vec::new();
     let mut pending: Vec<u64> = tree
         .elements
@@ -52,7 +70,7 @@ fn controls_of(tree: &RetainedTree, form: u64) -> Vec<u64> {
         if element.element_type == "form" {
             continue;
         }
-        if is_text_control(&element.element_type) {
+        if keep(element) {
             controls.push(id);
         }
         pending.extend(element.children.iter().rev().copied());
@@ -142,8 +160,8 @@ fn path_payload(payload: &mut EventPayload, path: &[u64]) {
     payload.path = Some(path.iter().map(|id| *id as f64).collect());
 }
 
-/// `form.requestSubmit()`: validate, then submit.
-pub(crate) fn request_submit(window: &mut Window, cx: &mut App, form: u64) -> Result<(), String> {
+/// `form.requestSubmit()`: validate, then submit. `submitter` is the button that asked, if one did.
+pub(crate) fn request_submit(window: &mut Window, cx: &mut App, form: u64, submitter: Option<u64>) -> Result<(), String> {
     let view = window
         .root::<GpuixView>()
         .flatten()
@@ -183,30 +201,36 @@ pub(crate) fn request_submit(window: &mut Window, cx: &mut App, form: u64) -> Re
     sync_dispatch::emit_full(window, cx, &read.callback, form, "submit", |payload| {
         path_payload(payload, &read.path);
         payload.form_entries = Some(entries);
+        payload.submitter_id = submitter.map(|id| id as f64);
     });
     Ok(())
 }
 
-/// Whether Enter in a text field submits `form`, by HTML's implicit submission
-/// rule. gpuix has no submit button (a `div` with `role="button"` is not one),
-/// so no form has a default button and the rule is the fallback: submit only
-/// when at most one field blocks implicit submission. Every `<input>` blocks it,
-/// whatever its `type`, `disabled` or `readOnly`; a `<textarea>` does not.
-fn implicit_submission_allowed(tree: &RetainedTree, form: u64) -> bool {
-    controls_of(tree, form)
-        .into_iter()
-        .filter(|id| {
-            tree.elements
-                .get(id)
-                .is_some_and(|element| element.element_type == "input")
-        })
-        .count()
-        <= 1
+/// What Enter in a text field does to `form`.
+#[derive(Debug, PartialEq, Eq)]
+enum ImplicitSubmission {
+    /// Click the default button, which submits as a click on it does.
+    Click(u64),
+    Submit,
 }
 
-/// Enter in an `<input>`: submit its form, if it has one and the form's fields
-/// allow it. Runs once the key dispatch is over, so the form is read after the
-/// keydown handlers have changed it.
+/// What Enter in a text field of `form` does, by HTML's implicit submission rule. The first submit
+/// button is the default button: it is clicked, or nothing happens when it is disabled. A form
+/// with none submits only when at most one field blocks implicit submission. Every `<input>`
+/// blocks it, whatever its `type`, `disabled` or `readOnly`; a `<textarea>` does not.
+fn implicit_submission_of(tree: &RetainedTree, form: u64) -> Option<ImplicitSubmission> {
+    if let Some(default_button) = submit_buttons_of(tree, form).first().and_then(|id| tree.elements.get(id)) {
+        return (!default_button.is_disabled()).then_some(ImplicitSubmission::Click(default_button.id));
+    }
+    let blocking = controls_of(tree, form)
+        .into_iter()
+        .filter(|id| tree.elements.get(id).is_some_and(|element| element.element_type == "input"))
+        .count();
+    (blocking <= 1).then_some(ImplicitSubmission::Submit)
+}
+
+/// Enter in an `<input>`: submit its form, if it has one and the rule above allows it. Runs once the
+/// key dispatch is over, so the form is read after the keydown handlers have changed it.
 pub(crate) fn implicit_submission(
     view: gpui::WeakEntity<GpuixView>,
     control: u64,
@@ -217,17 +241,46 @@ pub(crate) fn implicit_submission(
         let Some(view) = view.upgrade() else {
             return;
         };
-        let form = {
+        let submission = {
             let tree = view.read(cx).tree.lock().unwrap();
-            enclosing_form(&tree, control).filter(|form| implicit_submission_allowed(&tree, *form))
+            enclosing_form(&tree, control).and_then(|form| implicit_submission_of(&tree, form).map(|what| (form, what)))
         };
-        let Some(form) = form else {
-            return;
+        let result = match submission {
+            None => return,
+            Some((form, ImplicitSubmission::Submit)) => request_submit(window, cx, form, None),
+            Some((_, ImplicitSubmission::Click(button))) => crate::events::activation::click_element(button, window, cx),
         };
-        if let Err(error) = request_submit(window, cx, form) {
-            log::error!("Implicit submission of form {form} failed: {error}");
+        if let Err(error) = result {
+            log::error!("Implicit submission from element {control} failed: {error}");
         }
     });
+}
+
+/// The default action of a `click` no handler cancelled, on `path` (innermost first): the nearest
+/// `button` on it submits its form when its `type` says so. Runs once the click is over, so the form
+/// is read after the click handlers have changed it.
+pub(crate) fn button_clicked(tree: &std::sync::Mutex<RetainedTree>, path: &[u64], window: &mut Window, cx: &mut App) {
+    let Some((form, button)) = submission_by_click(&tree.lock().unwrap(), path) else {
+        return;
+    };
+    window.defer(cx, move |window, cx| {
+        if let Err(error) = request_submit(window, cx, form, Some(button)) {
+            log::error!("Submitting form {form} from button {button} failed: {error}");
+        }
+    });
+}
+
+/// The form a click on `path` submits and the button that does it: the nearest `button` on the path,
+/// when its `type` is `submit` and it is inside a form. A click has to be delivered for it even with
+/// no listener, since the submission is decided after the event ran.
+pub(crate) fn submission_by_click(tree: &RetainedTree, path: &[u64]) -> Option<(u64, u64)> {
+    let button = path
+        .iter()
+        .filter_map(|id| tree.elements.get(id))
+        .find(|element| element.element_type == "button")?;
+    (crate::html::button_type(button) == crate::html::ButtonType::Submit && !button.is_disabled())
+        .then(|| enclosing_form(tree, button.id).map(|form| (form, button.id)))
+        .flatten()
 }
 
 #[cfg(test)]
@@ -275,19 +328,64 @@ mod tests {
     }
 
     #[test]
-    fn enter_submits_only_a_form_with_at_most_one_input() {
+    fn without_a_submit_button_enter_submits_only_a_form_with_at_most_one_input() {
         let one = tree_of(
             &[(1, "form"), (2, "input"), (3, "textarea"), (4, "form"), (5, "input")],
             &[(1, 2), (1, 3), (1, 4), (4, 5)],
         );
-        assert!(implicit_submission_allowed(&one, 1));
+        assert_eq!(implicit_submission_of(&one, 1), Some(ImplicitSubmission::Submit));
         let two = tree_of(
             &[(1, "form"), (2, "input"), (3, "div"), (4, "input")],
             &[(1, 2), (1, 3), (3, 4)],
         );
-        assert!(!implicit_submission_allowed(&two, 1));
+        assert_eq!(implicit_submission_of(&two, 1), None);
         let none = tree_of(&[(1, "form"), (2, "textarea")], &[(1, 2)]);
-        assert!(implicit_submission_allowed(&none, 1));
+        assert_eq!(implicit_submission_of(&none, 1), Some(ImplicitSubmission::Submit));
+    }
+
+    fn typed_button(tree: &mut RetainedTree, id: u64, button_type: Option<&str>, disabled: bool) {
+        if let Some(button_type) = button_type {
+            tree.set_custom_prop(id, "type".to_string(), serde_json::json!(button_type));
+        }
+        if disabled {
+            tree.set_custom_prop(id, "disabled".to_string(), serde_json::json!(true));
+        }
+    }
+
+    #[test]
+    fn the_first_submit_button_is_the_default_button_and_two_inputs_do_not_matter() {
+        let mut tree = tree_of(
+            &[(1, "form"), (2, "input"), (3, "input"), (4, "button"), (5, "button"), (6, "button")],
+            &[(1, 2), (1, 3), (1, 4), (1, 5), (1, 6)],
+        );
+        typed_button(&mut tree, 4, Some("button"), false);
+        typed_button(&mut tree, 5, Some("bogus"), false);
+        assert_eq!(submit_buttons_of(&tree, 1), vec![5, 6]);
+        assert_eq!(implicit_submission_of(&tree, 1), Some(ImplicitSubmission::Click(5)));
+    }
+
+    #[test]
+    fn a_disabled_default_button_leaves_enter_with_nothing_to_do() {
+        let mut tree = tree_of(&[(1, "form"), (2, "input"), (3, "button"), (4, "button")], &[(1, 2), (1, 3), (1, 4)]);
+        typed_button(&mut tree, 3, None, true);
+        assert_eq!(implicit_submission_of(&tree, 1), None);
+    }
+
+    #[test]
+    fn a_form_of_buttons_that_do_not_submit_falls_back_to_the_field_count() {
+        let mut tree = tree_of(&[(1, "form"), (2, "input"), (3, "button")], &[(1, 2), (1, 3)]);
+        typed_button(&mut tree, 3, Some("reset"), false);
+        assert_eq!(implicit_submission_of(&tree, 1), Some(ImplicitSubmission::Submit));
+    }
+
+    #[test]
+    fn the_buttons_of_a_nested_form_are_its_own() {
+        let tree = tree_of(
+            &[(1, "form"), (2, "form"), (3, "button"), (4, "div"), (5, "button")],
+            &[(1, 2), (2, 3), (1, 4), (4, 5)],
+        );
+        assert_eq!(submit_buttons_of(&tree, 1), vec![5]);
+        assert_eq!(submit_buttons_of(&tree, 2), vec![3]);
     }
 
     fn control(name: Option<&str>, value: &str) -> Control {

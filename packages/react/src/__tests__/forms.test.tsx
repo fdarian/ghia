@@ -150,8 +150,9 @@ describeNative("form", () => {
   })
 
   describe("implicit submission without a submit button", () => {
-    // gpuix has no submit button, so a form has no default button: HTML submits
-    // on Enter only when at most one field blocks implicit submission.
+    // With no submit button a form has no default button: HTML submits on Enter
+    // only when at most one field blocks implicit submission. With one, Enter
+    // clicks it (see html-semantics.test.tsx).
     it("does not submit on Enter when the form has two inputs", () => {
       mountForm(
         <>

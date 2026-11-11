@@ -1300,7 +1300,7 @@ async fn run_ui_commands(
             UiCommand::RequestSubmit { id, response } => gpui::AnyWindowHandle::from(window)
                 .update(cx, move |_view, window, cx| {
                     response
-                        .send(crate::forms::request_submit(window, cx, id))
+                        .send(crate::forms::request_submit(window, cx, id, None))
                         .ok();
                 }),
             UiCommand::RegisterFont { bytes, response } => {
@@ -4387,7 +4387,7 @@ impl GpuixRenderer {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
         return update_window_without_view(move |window, cx| {
-            crate::forms::request_submit(window, cx, id)
+            crate::forms::request_submit(window, cx, id, None)
         })?
         .map_err(Error::from_reason);
 
@@ -5701,7 +5701,7 @@ impl WebGpuixRenderer {
     pub fn request_submit(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
         update_web_window_without_view(move |window, cx| {
-            crate::forms::request_submit(window, cx, id)
+            crate::forms::request_submit(window, cx, id, None)
         })?
         .map_err(|error| wasm_bindgen::JsValue::from_str(&error))
     }
