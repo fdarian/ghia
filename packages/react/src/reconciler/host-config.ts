@@ -12,11 +12,12 @@ import {
   createWebviewMethods,
   eventTypesWithOverrides,
   isReservedProp,
-  ROOT_ELEMENT_STYLE,
-  ROOT_HEAD_STYLE,
   ROOT_ELEMENT_TYPES,
   sameMutationValue,
   serializeCustomProp,
+  attributesOfProps,
+  isNotAttribute,
+  isSvgType,
   forwardsCustomProp,
   hasMutationObservers,
   queueCharacterDataMutation,
@@ -252,13 +253,15 @@ function sameStyle(left: Props["style"], right: Props["style"]): boolean {
   return left === right || sameMutationValue(left ?? NO_STYLE, right ?? NO_STYLE)
 }
 
-/** The style a hidden element keeps: its own, minus the states, plus `visibility: hidden`. */
+/**
+ * The style a hidden element keeps: its own, minus the states, plus `display: none !important`,
+ * which is what React DOM writes, so a sheet rule cannot show what Suspense hides.
+ */
 function hiddenStyle(style: Props["style"]) {
   // Hover and active go, because a hidden element must stay hidden. A hover
-  // style that sets `visibility` would otherwise paint an element React
-  // asked to hide.
+  // style that sets `display` would otherwise show an element React asked to hide.
   const { hover: _hover, active: _active, ...base } = splitMotionStyle(style).style ?? {}
-  return { ...base, visibility: "hidden" }
+  return { ...base, display: "none !important" }
 }
 
 // ── Custom prop forwarding ───────────────────────────────────────────
@@ -275,6 +278,54 @@ function syncCustomProps(
     if (isReservedProp(key)) continue
     if (!forwardsCustomProp(type, key)) continue
     renderer.setCustomProp(id, key, serializeCustomProp(value))
+  }
+}
+
+function syncAttributes(renderer: MutationRenderer, id: number, type: string, props: Props): void {
+  if (!renderer.forwardsAttributes) return
+  for (const [name, text] of attributesOfProps(Object.entries(props), isSvgType(type))) {
+    renderer.setAttribute(id, name, text)
+  }
+}
+
+/** A handler or an object is no attribute, so one is as good as another: an inline handler is new on every render. */
+function isNoAttributeValue(value: unknown): boolean {
+  return typeof value === "function" || (typeof value === "object" && value !== null)
+}
+
+function sameAttributeProp(previous: unknown, next: unknown): boolean {
+  return previous === next || (isNoAttributeValue(previous) && isNoAttributeValue(next))
+}
+
+/** Whether a prop that can be an attribute differs, compared in place: most commits change none, and this allocates nothing. */
+function attributePropsDiffer(oldProps: Props, newProps: Props): boolean {
+  const previous = oldProps as unknown as Record<string, unknown>
+  const next = newProps as unknown as Record<string, unknown>
+  for (const key in next) {
+    if (!isNotAttribute(key) && !sameAttributeProp(previous[key], next[key])) return true
+  }
+  for (const key in previous) {
+    if (!(key in next) && !isNotAttribute(key) && !sameAttributeProp(previous[key], undefined)) return true
+  }
+  return false
+}
+
+function diffAttributes(
+  renderer: MutationRenderer,
+  id: number,
+  type: string,
+  oldProps: Props,
+  newProps: Props
+): void {
+  if (!renderer.forwardsAttributes || !attributePropsDiffer(oldProps, newProps)) return
+  const svg = isSvgType(type)
+  const previous = attributesOfProps(Object.entries(oldProps), svg)
+  const next = attributesOfProps(Object.entries(newProps), svg)
+  for (const [name, text] of next) {
+    if (previous.get(name) !== text) renderer.setAttribute(id, name, text)
+  }
+  for (const name of previous.keys()) {
+    if (!next.has(name)) renderer.setAttribute(id, name, null)
   }
 }
 
@@ -339,6 +390,7 @@ function materialize(node: HostNode): ReturnType<typeof stateFor> {
     syncMotionBindings(state.container, node.nativeId, node.props.style, node.type)
     syncEventListeners(state.container, node)
     syncCustomProps(renderer, node.nativeId, node.type, node.props)
+    syncAttributes(renderer, node.nativeId, node.type, node.props)
   } else {
     renderer.createElement(node.nativeId, "#text")
     renderer.setText(node.nativeId, node.text)
@@ -369,24 +421,9 @@ export function publicInstanceById(container: Container, id: number): PublicInst
 export function installDocumentElements(base: Omit<Container, "html" | "head" | "body">): Container {
   // `html`, `head` and `body` are assigned below, before anything reads them.
   const container = base as Container
-  const html = createHostElement(
-    nextId(container),
-    ROOT_ELEMENT_TYPES.html,
-    { style: { ...ROOT_ELEMENT_STYLE } },
-    container
-  )
-  const head = createHostElement(
-    nextId(container),
-    ROOT_ELEMENT_TYPES.head,
-    { style: { ...ROOT_HEAD_STYLE } },
-    container
-  )
-  const body = createHostElement(
-    nextId(container),
-    ROOT_ELEMENT_TYPES.body,
-    { style: { ...ROOT_ELEMENT_STYLE } },
-    container
-  )
+  const html = createHostElement(nextId(container), ROOT_ELEMENT_TYPES.html, {}, container)
+  const head = createHostElement(nextId(container), ROOT_ELEMENT_TYPES.head, {}, container)
+  const body = createHostElement(nextId(container), ROOT_ELEMENT_TYPES.body, {}, container)
   container.html = html
   container.head = head
   container.body = body
@@ -601,6 +638,7 @@ export const hostConfig = {
     }
     // Custom prop diff (for non-div/text elements)
     diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
+    diffAttributes(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
     if (hasMutationObservers()) {
       recordAttributeChanges(instance, new Set([...Object.keys(oldProps), ...Object.keys(newProps)]), () => {
         instance.props = newProps
@@ -641,9 +679,8 @@ export const hostConfig = {
   },
 
   hideInstance(instance: Instance): void {
-    // Keep the element's own style. `visibility: hidden` skips the paint and
-    // keeps the layout box, so replacing the whole style here would collapse
-    // the box and lose every other style on the element.
+    // Keep the element's own style: only `display` is replaced, and it comes back with
+    // `unhideInstance`.
     stateFor(instance).hidden = true
     rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(instance.props.style))
   },

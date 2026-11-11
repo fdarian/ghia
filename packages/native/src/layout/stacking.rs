@@ -679,7 +679,7 @@ mod tests {
         tree.create_element(2, parent_type.into());
         tree.create_element(3, "div".into());
         for (id, display) in [(1, None), (2, display), (3, None)] {
-            tree.set_style(
+            tree.set_style_arc(
                 id,
                 Arc::new(StyleDesc {
                     display: display.map(str::to_string),
@@ -716,7 +716,7 @@ mod tests {
     fn a_display_contents_parent_hands_its_children_to_the_container_around_it() {
         let mut tree = container_tree(Some("flex"), "div");
         tree.create_element(4, "div".into());
-        tree.set_style(
+        tree.set_style_arc(
             4,
             Arc::new(StyleDesc {
                 display: Some("contents".into()),
@@ -724,7 +724,7 @@ mod tests {
             }),
         );
         tree.create_element(5, "div".into());
-        tree.set_style(5, Arc::new(StyleDesc::default()));
+        tree.set_style_desc(5, StyleDesc::default());
         tree.append_child(2, 4);
         tree.append_child(4, 5);
         assert!(is_item(&tree, &tree.elements[&5]));
@@ -737,7 +737,7 @@ mod tests {
     #[test]
     fn a_virtual_list_row_is_no_item() {
         let mut tree = container_tree(Some("flex"), "virtual-list");
-        tree.set_style(
+        tree.set_style_arc(
             2,
             Arc::new(StyleDesc {
                 display: Some("flex".into()),
@@ -756,7 +756,7 @@ mod tests {
                 display: display.map(str::to_string),
                 ..Default::default()
             };
-            tree.set_style(*id, Arc::new(style));
+            tree.set_style_desc(*id, style);
         }
         tree.set_root(nodes[0].0);
         for window in nodes.windows(2) {

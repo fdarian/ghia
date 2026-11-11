@@ -73,4 +73,17 @@ pub enum BatchOp<'a> {
         key: String,
         value: serde_json::Value,
     },
+    /// `None` removes the attribute.
+    SetAttribute {
+        id: u64,
+        name: &'a str,
+        value: Option<&'a str>,
+    },
+    /// A constructed stylesheet; `None` deletes it. Sheet ids are their own namespace.
+    SetStyleSheet {
+        sheet_id: u64,
+        text: Option<&'a str>,
+    },
+    /// The constructed sheets that apply, in order, after the document's `<style>` elements.
+    SetAdoptedStyleSheets { sheet_ids: Vec<u64> },
 }

@@ -146,8 +146,8 @@ mod tests {
                 tree.append_child(parent_id, id);
             }
         }
-        tree.set_style(1, style(parent));
-        tree.set_style(2, style(own));
+        tree.set_style_arc(1, style(parent));
+        tree.set_style_arc(2, style(own));
         tree
     }
 
@@ -216,14 +216,14 @@ mod tests {
         let mut tree = page(COLUMN, r#"{"height": 56}"#);
         tree.create_element(4, "span".to_owned());
         tree.append_child(1, 4);
-        tree.set_style(4, style(r#"{"height": 56}"#));
+        tree.set_style_arc(4, style(r#"{"height": 56}"#));
         assert!(!is_candidate(&tree, tree.elements.get(&4).expect("a span")));
         let mut list = page(r#"{}"#, r#"{"height": 56}"#);
         list.create_element(5, "virtual-list".to_owned());
         list.append_child(1, 5);
         list.create_element(6, "div".to_owned());
         list.append_child(5, 6);
-        list.set_style(6, style(r#"{"height": 56}"#));
+        list.set_style_arc(6, style(r#"{"height": 56}"#));
         assert!(!is_candidate(&list, list.elements.get(&6).expect("a row")));
     }
 }

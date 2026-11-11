@@ -3,10 +3,22 @@
 //! The tree serialiser passes through what resvg reads and warns about the
 //! rest, so a name missing here is a prop that never reaches the rasteriser.
 
-/// The tags that exist only inside an `<svg>`. `text` is not among them: it is
-/// also a host element, so it is an SVG one only by where it sits (see
-/// `svg_tree::is_svg_element`).
-pub(super) const TAGS: &[&str] = &[
+// One list gives both `TAGS` and `is_tag`: a `match` on the name compares by length first, where a scan of
+// the table cost every element of an app with a stylesheet about 50 string compares (`is_svg` asks once per element).
+macro_rules! svg_tags {
+    ($($tag:literal),* $(,)?) => {
+        /// The tags that exist only inside an `<svg>`. `text` is not among them: it is
+        /// also a host element, so it is an SVG one only by where it sits (see
+        /// `svg_tree::is_svg_element`).
+        pub(super) const TAGS: &[&str] = &[$($tag),*];
+
+        pub(super) fn is_tag(tag: &str) -> bool {
+            matches!(tag, $($tag)|*)
+        }
+    };
+}
+
+svg_tags!(
     "path",
     "circle",
     "ellipse",
@@ -54,14 +66,10 @@ pub(super) const TAGS: &[&str] = &[
     "feSpotLight",
     "feTile",
     "feTurbulence",
-];
+);
 
 /// The elements whose children are a string.
 const TEXT_CONTENT_TAGS: &[&str] = &["text", "tspan", "textPath"];
-
-pub(super) fn is_tag(tag: &str) -> bool {
-    TAGS.contains(&tag)
-}
 
 pub(super) fn holds_text(tag: &str) -> bool {
     TEXT_CONTENT_TAGS.contains(&tag)

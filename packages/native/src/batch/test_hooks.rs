@@ -54,5 +54,17 @@ fn op_json(op: &BatchOp<'_>) -> String {
         BatchOp::SetCustomProp { id, key, value } => {
             format!(r#"["setCustomProp",{id},{},{value}]"#, text(key))
         }
+        BatchOp::SetAttribute { id, name, value } => match value {
+            Some(value) => format!(r#"["setAttribute",{id},{},{}]"#, text(name), text(value)),
+            None => format!(r#"["setAttribute",{id},{},null]"#, text(name)),
+        },
+        BatchOp::SetStyleSheet { sheet_id, text: sheet } => match sheet {
+            Some(sheet) => format!(r#"["setStyleSheet",{sheet_id},{}]"#, text(sheet)),
+            None => format!(r#"["setStyleSheet",{sheet_id},null]"#),
+        },
+        BatchOp::SetAdoptedStyleSheets { sheet_ids } => {
+            let ids: Vec<String> = sheet_ids.iter().map(u64::to_string).collect();
+            format!(r#"["setAdoptedStyleSheets",[{}]]"#, ids.join(","))
+        }
     }
 }

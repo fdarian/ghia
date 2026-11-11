@@ -49,6 +49,12 @@ pub(crate) fn is_svg_child_type(tag: &str) -> bool {
     svg_names::is_tag(tag)
 }
 
+/// Whether an element of this type is an SVG element wherever it is put: `<svg>`, a tag only an
+/// `<svg>` holds, and `<text>`, which is a host element only inside an `<svg>`.
+pub(crate) fn is_svg_tag(tag: &str) -> bool {
+    tag == "svg" || tag == "text" || is_svg_child_type(tag)
+}
+
 /// Whether `element` is drawn by an `<svg>` instead of laid out: an SVG-only tag,
 /// or a `<text>` inside an SVG. A string (`#text`) is character data, not an element.
 pub(crate) fn is_svg_element(tree: &RetainedTree, element: &crate::retained_tree::RetainedElement) -> bool {
@@ -1503,7 +1509,7 @@ mod tests {
     fn animated_circle(tree: &mut RetainedTree, animation: &str) {
         tree.create_element(2, "circle".to_string());
         tree.set_custom_prop(2, "r".to_string(), 5.into());
-        tree.set_style(
+        tree.set_style_arc(
             2,
             Arc::new(serde_json::from_value(serde_json::json!({ "animation": animation })).unwrap()),
         );
@@ -1591,7 +1597,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "svg".to_string());
         tree.create_element(2, "g".to_string());
-        tree.set_style(
+        tree.set_style_arc(
             2,
             Arc::new(serde_json::from_value(serde_json::json!({ "animation": "thick 1s linear" })).unwrap()),
         );
@@ -1609,7 +1615,7 @@ mod tests {
     fn transitioning_circle(tree: &mut RetainedTree, transition: &str) {
         tree.create_element(2, "circle".to_string());
         tree.set_custom_prop(2, "r".to_string(), 5.into());
-        tree.set_style(
+        tree.set_style_arc(
             2,
             Arc::new(serde_json::from_value(serde_json::json!({ "transition": transition })).unwrap()),
         );
@@ -1645,7 +1651,7 @@ mod tests {
         svg.at(0).markup(&tree);
         tree.set_custom_prop(2, "r".to_string(), 15.into());
         svg.at(100).markup(&tree);
-        tree.set_style(
+        tree.set_style_arc(
             2,
             Arc::new(
                 serde_json::from_value(serde_json::json!({ "transition": "r 1s linear", "animation": "grow 10s linear" }))

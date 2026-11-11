@@ -82,6 +82,14 @@ export function createRoot(
     eventHandlers,
     allocateId: () => ++state.ids.nextElementId,
   })
+  mutations.setElementSource({
+    forEachElement(visit) {
+      for (const node of container.elements.values()) visit(node.nativeId, node.type, node.props)
+    },
+    rememberAttributes(id, attributes) {
+      container.elements.get(id)?.sent.rememberAttributes(attributes)
+    },
+  })
   let binding: RendererRootBinding | undefined
   let stopWindowEventListeners: (() => void) | undefined
   let selectionChange: ReturnType<typeof syncWindowSelectionChange> | undefined

@@ -822,6 +822,8 @@ pub struct StyleDesc {
     /// `"only light"`, `"only dark"`. Inherited. Picks the side of `light-dark()`
     /// that applies; `"light dark"` follows the window appearance.
     pub color_scheme: Option<String>,
+    /// A number, or text of a number or a percentage (`"50%"` is 0.5), as CSS reads `opacity`.
+    #[serde(default, deserialize_with = "crate::css::opacity::deserialize_opacity")]
     pub opacity: Option<f64>,
 
     // Border

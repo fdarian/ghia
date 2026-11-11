@@ -210,7 +210,7 @@ mod tests {
     #[test]
     fn a_span_with_a_hover_style_restyles_when_it_is_entered_and_left() {
         let mut tree = paragraph(&[]);
-        tree.set_style(
+        tree.set_style_arc(
             4,
             Arc::new(serde_json::from_value(serde_json::json!({"hover": {"color": "red"}})).unwrap()),
         );
@@ -223,7 +223,7 @@ mod tests {
         let left = dispatch(&mut state, &tree, &mv(over(7)));
         assert_eq!((left.restyle, left.paint), (false, vec![4]));
         assert!(!state.is_hovered(4));
-        tree.set_style(
+        tree.set_style_arc(
             4,
             Arc::new(serde_json::from_value(serde_json::json!({"hover": {"fontWeight": 700}})).unwrap()),
         );
@@ -233,7 +233,7 @@ mod tests {
     #[test]
     fn a_span_is_active_while_the_primary_button_is_held_on_it() {
         let mut tree = paragraph(&[]);
-        tree.set_style(
+        tree.set_style_arc(
             4,
             Arc::new(serde_json::from_value(serde_json::json!({"active": {"color": "red"}})).unwrap()),
         );

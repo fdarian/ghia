@@ -40,7 +40,7 @@ use crate::css::length::LengthContext;
 use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::events::app_region::AppRegion;
 use crate::element_tree::EventPayload;
-use crate::retained_tree::{Dirty, RetainedTree, StyleTable};
+use crate::retained_tree::{Dirty, InternedStyle, RetainedTree, StyleTable};
 use crate::style::StyleDesc;
 use crate::text::white_space::StyledWhiteSpace as _;
 use crate::text::{selectable_text, selection_frame_reset, SharedSelection};
@@ -10319,6 +10319,7 @@ impl gpui::Render for GpuixView {
             }
             None => gpui::Empty.into_any_element(),
         };
+        tree.note_frame_built();
         self.retain.finish_frame();
         self.retain.publish_anchors(&tree);
         drop(pointer);
@@ -13902,16 +13903,16 @@ pub type BatchResult<T> = std::result::Result<T, String>;
 fn intern_style_payload(
     styles: &mut StyleTable,
     payload: &str,
-) -> BatchResult<Arc<StyleDesc>> {
+) -> BatchResult<InternedStyle> {
     styles.intern(payload.trim().as_bytes())
 }
 
 /// The styles a batch's payloads resolved to, in op order.
 struct ResolvedStyles {
     /// One per `setStyle`.
-    elements: Vec<Arc<StyleDesc>>,
+    elements: Vec<InternedStyle>,
     /// One per `setUniversalStyle`; `None` clears the layer.
-    universal: Vec<Option<Arc<StyleDesc>>>,
+    universal: Vec<Option<InternedStyle>>,
 }
 
 /// Resolve every `setStyle` and `setUniversalStyle` payload in the batch, in op
@@ -14025,13 +14026,25 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
                 let shared = universal_styles
                     .next()
                     .expect("one resolved style per setUniversalStyle op");
-                tree.set_universal_style(shared);
+                tree.set_universal_style(shared.map(InternedStyle::into_arc));
             }
             BatchOp::SetCustomProp { id, key, value } => {
                 tree.set_custom_prop(id, key, value);
             }
+            BatchOp::SetAttribute { id, name, value } => {
+                tree.set_attribute(id, name, value.map(str::to_owned));
+            }
+            BatchOp::SetStyleSheet { sheet_id, text } => {
+                tree.set_style_sheet(sheet_id, text);
+            }
+            BatchOp::SetAdoptedStyleSheets { sheet_ids } => {
+                tree.set_adopted_style_sheets(sheet_ids);
+            }
         }
     }
+
+    // Every mutation above only noted what the sheets must match again; this is where they do.
+    tree.flush_styles();
 
     // Release styles nothing references any more. Without this a dragged
     // element, which produces a distinct style every frame, would grow the
@@ -16288,7 +16301,7 @@ mod font_size_cascade_tests {
                 for node in nodes {
                     let style: StyleDesc = serde_json::from_str(node.style).unwrap();
                     tree.create_element(node.id, node.element_type.to_owned());
-                    tree.set_style(node.id, Arc::new(style));
+                    tree.set_style_desc(node.id, style);
                     tree.create_element(probe(node.id), "div".to_owned());
                     tree.create_element(probe(node.id) + 10_000, "#text".to_owned());
                     tree.set_text(probe(node.id) + 10_000, "m".to_owned());
@@ -16347,7 +16360,7 @@ mod font_size_cascade_tests {
 
         fn set_style(&self, cx: &mut gpui::TestAppContext, id: u64, style: &str) {
             let style: StyleDesc = serde_json::from_str(style).unwrap();
-            self.tree.lock().unwrap().set_style(id, Arc::new(style));
+            self.tree.lock().unwrap().set_style_desc(id, style);
             self.draw(cx);
         }
     }
@@ -16697,7 +16710,7 @@ mod dimension_length_tests {
                 for (id, parent, style) in nodes {
                     let style: StyleDesc = serde_json::from_str(style).unwrap();
                     tree.create_element(*id, "div".to_owned());
-                    tree.set_style(*id, Arc::new(style));
+                    tree.set_style_desc(*id, style);
                     if let Some(parent) = parent {
                         tree.append_child(*parent, *id);
                     }
@@ -16739,7 +16752,7 @@ mod dimension_length_tests {
 
         fn set_style(&self, cx: &mut gpui::TestAppContext, id: u64, style: &str) {
             let style: StyleDesc = serde_json::from_str(style).unwrap();
-            self.tree.lock().unwrap().set_style(id, Arc::new(style));
+            self.tree.lock().unwrap().set_style_desc(id, style);
             self.draw(cx);
         }
 
@@ -18149,14 +18162,14 @@ mod inline_run_size_tests {
             let mut tree = tree.lock().unwrap();
             let container: StyleDesc = serde_json::from_str(style).unwrap();
             tree.create_element(1, "div".to_owned());
-            tree.set_style(1, Arc::new(container));
+            tree.set_style_desc(1, container);
             tree.set_root(1);
             tree.create_element(2, "#text".to_owned());
             tree.set_text(2, text.to_owned());
             tree.append_child(1, 2);
             tree.create_element(3, "span".to_owned());
             let span: StyleDesc = serde_json::from_str(span_style).unwrap();
-            tree.set_style(3, Arc::new(span));
+            tree.set_style_desc(3, span);
             tree.append_child(1, 3);
             tree.create_element(4, "#text".to_owned());
             tree.set_text(4, span_text.to_owned());
@@ -18243,13 +18256,13 @@ mod inline_run_size_tests {
             let mut tree = tree.lock().unwrap();
             let container: StyleDesc = serde_json::from_str(style).unwrap();
             tree.create_element(1, "div".to_owned());
-            tree.set_style(1, Arc::new(container));
+            tree.set_style_desc(1, container);
             tree.set_root(1);
             for (ix, (span_style, text)) in spans.iter().enumerate() {
                 let (span, text_id) = (10 + 2 * ix as u64, 11 + 2 * ix as u64);
                 tree.create_element(span, "span".to_owned());
                 let span_style: StyleDesc = serde_json::from_str(span_style).unwrap();
-                tree.set_style(span, Arc::new(span_style));
+                tree.set_style_desc(span, span_style);
                 tree.append_child(1, span);
                 tree.create_element(text_id, "#text".to_owned());
                 tree.set_text(text_id, (*text).to_owned());
@@ -18366,7 +18379,7 @@ mod inline_run_size_tests {
             let mut tree = tree.lock().unwrap();
             let container: StyleDesc = serde_json::from_str(CONTAINER).unwrap();
             tree.create_element(1, "div".to_owned());
-            tree.set_style(1, Arc::new(container));
+            tree.set_style_desc(1, container);
             tree.set_root(1);
             for (span, style, text) in [
                 (3, r#"{"fontSize": 30}"#, "Big "),
@@ -18375,7 +18388,7 @@ mod inline_run_size_tests {
             ] {
                 tree.create_element(span, "span".to_owned());
                 let style: StyleDesc = serde_json::from_str(style).unwrap();
-                tree.set_style(span, Arc::new(style));
+                tree.set_style_desc(span, style);
                 tree.append_child(1, span);
                 tree.create_element(span + 1, "#text".to_owned());
                 tree.set_text(span + 1, text.to_owned());
@@ -18482,7 +18495,7 @@ mod stacking_build_tests {
     fn labelled(tree: &mut RetainedTree, id: u64, parent: u64, style: &str, label: &str) {
         let style: StyleDesc = serde_json::from_str(style).unwrap();
         tree.create_element(id, "div".to_owned());
-        tree.set_style(id, Arc::new(style));
+        tree.set_style_desc(id, style);
         tree.append_child(parent, id);
         tree.create_element(id + 100, "#text".to_owned());
         tree.set_text(id + 100, label.to_owned());
@@ -18516,7 +18529,7 @@ mod stacking_build_tests {
                 let mut tree = tree.lock().unwrap();
                 let root: StyleDesc = serde_json::from_str(root).unwrap();
                 tree.create_element(1, "div".to_owned());
-                tree.set_style(1, Arc::new(root));
+                tree.set_style_desc(1, root);
                 tree.set_root(1);
                 labelled(&mut tree, 2, 1, a, "a");
                 labelled(&mut tree, 3, 2, b, "b");
@@ -18722,7 +18735,7 @@ mod state_position_escape_tests {
                 for (id, parent, style) in nodes {
                     let style: StyleDesc = serde_json::from_str(style).unwrap();
                     tree.create_element(*id, "div".to_owned());
-                    tree.set_style(*id, Arc::new(style));
+                    tree.set_style_desc(*id, style);
                     if let Some(parent) = parent {
                         tree.append_child(*parent, *id);
                     }
@@ -18947,14 +18960,14 @@ mod paint_integration_tests {
             let mut tree = tree.lock().unwrap();
             let container: StyleDesc = serde_json::from_str(container_style).unwrap();
             tree.create_element(1, "div".to_owned());
-            tree.set_style(1, Arc::new(container));
+            tree.set_style_desc(1, container);
             tree.set_root(1);
             tree.create_element(2, "#text".to_owned());
             tree.set_text(2, "a ".to_owned());
             tree.append_child(1, 2);
             tree.create_element(3, "span".to_owned());
             let span: StyleDesc = serde_json::from_str(span_style).unwrap();
-            tree.set_style(3, Arc::new(span));
+            tree.set_style_desc(3, span);
             tree.append_child(1, 3);
             tree.create_element(4, "#text".to_owned());
             tree.set_text(4, "bbbbbbbb".to_owned());
@@ -19153,10 +19166,10 @@ mod decoration_paint_tests {
         {
             let mut tree = tree.lock().unwrap();
             tree.create_element(1, "div".to_owned());
-            tree.set_style(1, Arc::new(serde_json::from_str(r##"{"textDecoration": "underline #ff0000"}"##).unwrap()));
+            tree.set_style_desc(1, serde_json::from_str(r##"{"textDecoration": "underline #ff0000"}"##).unwrap());
             tree.set_root(1);
             tree.create_element(2, "div".to_owned());
-            tree.set_style(2, Arc::new(serde_json::from_str(r##"{"textDecoration": "underline wavy 2px #0000ff"}"##).unwrap()));
+            tree.set_style_desc(2, serde_json::from_str(r##"{"textDecoration": "underline wavy 2px #0000ff"}"##).unwrap());
             tree.append_child(1, 2);
             tree.create_element(3, "#text".to_owned());
             tree.set_text(3, "nested".to_owned());
@@ -19333,7 +19346,7 @@ mod running_motion_tests {
         tree.append_child(2, 3);
         tree.append_child(1, 4);
         let hidden = serde_json::json!({"contentVisibility": "hidden"});
-        tree.set_style(2, Arc::new(serde_json::from_value(hidden).expect("a style")));
+        tree.set_style_desc(2, serde_json::from_value(hidden).expect("a style"));
         tree
     }
 

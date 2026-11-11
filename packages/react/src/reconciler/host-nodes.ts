@@ -18,7 +18,7 @@ import {
   hasMutationObservers,
   queueChildListMutation,
   readBoundingClientRect,
-  SVG_CHILD_TYPES,
+  isSvgType,
   SVGElement,
   Text,
 } from "@ghia/native/host"
@@ -43,7 +43,7 @@ export interface HostNodeState {
   mounted: boolean
   /**
    * React hid this element (Suspense, Activity). Its native style carries
-   * `visibility: hidden`, so a style update must keep that rather than
+   * `display: none !important`, so a style update must keep that rather than
    * overwrite it with the visible one.
    */
   hidden: boolean
@@ -268,7 +268,7 @@ export function createHostElement(
   container: Container
 ): Instance {
   const instance =
-    type === "svg" || SVG_CHILD_TYPES.has(type)
+    isSvgType(type)
       ? (Reflect.construct(ReactHostElement, [id, type, props], ReactSvgElement) as ReactHostElement)
       : new ReactHostElement(id, type, props)
   hostNodeStates.set(instance, createState(container))

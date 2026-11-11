@@ -589,7 +589,7 @@ mod tests {
             tree.set_text(id, text.to_string());
         }
         for (id, style) in styles {
-            tree.set_style(*id, Arc::new(serde_json::from_value(style.clone()).expect("a style")));
+            tree.set_style_desc(*id, serde_json::from_value(style.clone()).expect("a style"));
         }
         tree
     }
@@ -942,7 +942,7 @@ mod tests {
             (5, serde_json::json!({"marginLeft": 4, "borderLeftWidth": 8, "borderLeftStyle": "solid", "paddingRight": 5, "marginRight": 6})),
         ];
         for (id, style) in styles {
-            tree.set_style(id, Arc::new(serde_json::from_value(style).expect("a style")));
+            tree.set_style_desc(id, serde_json::from_value(style).expect("a style"));
         }
         let insets = resting_paragraph(&tree, "a c");
         assert_eq!(texts(&insets), vec![(2..3, 3.0, 30.0), (2..3, 12.0, 11.0)]);

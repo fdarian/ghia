@@ -19,6 +19,9 @@ function setup() {
     setKeyboardFocusDim() {},
     setUniversalStyle() {},
     setCustomProp() {},
+    setAttribute() {},
+    setStyleSheet() {},
+    setAdoptedStyleSheets() {},
     requestFlush() {},
     flushMutations() {},
   }

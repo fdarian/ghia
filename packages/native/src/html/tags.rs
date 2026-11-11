@@ -7,6 +7,11 @@
 //! size they inherit).
 
 pub(super) const TAGS: &[(&str, &str)] = &[
+    // The root of every window. Not Chrome's: `html` and `body` fill the window, because the box above the root is
+    // the window and the app's top element sizes against it. `head` has no box: it holds what the page loads.
+    ("html", r#"{"display":"block","width":"100%","height":"100%"}"#),
+    ("head", r#"{"display":"none"}"#),
+    ("body", r#"{"display":"block","width":"100%","height":"100%"}"#),
     ("p", r#"{"display":"block","marginTop":"1em","marginBottom":"1em"}"#),
     ("h1", r#"{"display":"block","fontSize":"2em","fontWeight":700,"marginTop":"0.67em","marginBottom":"0.67em"}"#),
     ("h2", r#"{"display":"block","fontSize":"1.5em","fontWeight":700,"marginTop":"0.83em","marginBottom":"0.83em"}"#),

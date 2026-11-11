@@ -161,6 +161,8 @@ export namespace JSX {
     feTile: SolidHostProps<SvgFeTileProps>
     feTurbulence: SolidHostProps<SvgFeTurbulenceProps>
     canvas: SolidHostProps
+    /** A stylesheet: its text children are the CSS. It is never drawn. */
+    style: SolidHostProps
     input: SolidHostProps<InputProps>
     textarea: SolidHostProps<TextareaProps>
     label: SolidHostProps<LabelProps>
