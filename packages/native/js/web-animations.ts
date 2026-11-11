@@ -1,11 +1,13 @@
 import type {
   ElementWebAnimationInfo,
   EventPayload,
+  GpuixRenderer,
   WebAnimationEffectInfo,
   WebAnimationInfo,
   WebAnimationKeyframeInfo,
   WebAnimationTimingUpdate,
 } from "../index.js"
+import { normalizeKeyframes, type KeyframesInput } from "./animate-keyframes.js"
 import { flushPendingMutations } from "./bounds.js"
 import { EVENT_PHASE_AT_TARGET, EVENT_PHASE_NONE, reportUncaught, type DomEvent } from "./events/dispatch.js"
 import {
@@ -16,6 +18,8 @@ import {
   type WindowEventListener,
 } from "./events/window-target.js"
 import type { NativeRenderer } from "./host.js"
+
+export type { KeyframeObject, KeyframesInput } from "./animate-keyframes.js"
 
 export type AnimationPlayState = "idle" | "running" | "paused" | "finished"
 
@@ -380,59 +384,62 @@ function readEffect(state: State): WebAnimationEffectInfo {
   return info
 }
 
-/** A member the DOM takes as a finite number, which `updateTiming()` refuses to leave anything else. */
-function finite(name: string, value: unknown): number {
+const UPDATE_TIMING = "Failed to execute 'updateTiming' on 'AnimationEffect'"
+const ANIMATE = "Failed to execute 'animate' on 'Element'"
+
+/** A member the DOM takes as a finite number, which it refuses to leave anything else. */
+function finite(name: string, value: unknown, where: string): number {
   const number = Number(value)
-  if (!Number.isFinite(number)) throw new TypeError(`Failed to execute 'updateTiming' on 'AnimationEffect': ${name} must be a finite number`)
+  if (!Number.isFinite(number)) throw new TypeError(`${where}: ${name} must be a finite number`)
   return number
 }
 
-function oneOf<T extends string>(name: string, value: unknown, names: readonly T[]): T {
+function oneOf<T extends string>(name: string, value: unknown, names: readonly T[], where: string): T {
   if (typeof value !== "string" || !names.includes(value as T)) {
-    throw new TypeError(`Failed to execute 'updateTiming' on 'AnimationEffect': ${String(value)} is not a valid ${name}`)
+    throw new TypeError(`${where}: ${String(value)} is not a valid ${name}`)
   }
   return value as T
 }
 
-/** The `updateTiming()` argument as native takes it, or the `TypeError` the DOM throws for a member that is wrong. */
-function timingUpdate(timing: OptionalEffectTiming | undefined): WebAnimationTimingUpdate {
+/** The timing of `updateTiming()` or `animate()` as native takes it, or the `TypeError` the DOM throws for a member that is wrong. */
+function timingUpdate(timing: OptionalEffectTiming | undefined, where = UPDATE_TIMING): WebAnimationTimingUpdate {
   if (timing === undefined || timing === null) return {}
   if (typeof timing !== "object") {
-    throw new TypeError("Failed to execute 'updateTiming' on 'AnimationEffect': the timing is not an object")
+    throw new TypeError(`${where}: the timing is not an object`)
   }
   const update: WebAnimationTimingUpdate = {}
-  if (timing.delay !== undefined) update.delay = finite("delay", timing.delay)
-  if (timing.endDelay !== undefined) update.endDelay = finite("endDelay", timing.endDelay)
+  if (timing.delay !== undefined) update.delay = finite("delay", timing.delay, where)
+  if (timing.endDelay !== undefined) update.endDelay = finite("endDelay", timing.endDelay, where)
   if (timing.iterationStart !== undefined) {
-    update.iterationStart = finite("iterationStart", timing.iterationStart)
-    if (update.iterationStart < 0) throw new TypeError("Failed to execute 'updateTiming' on 'AnimationEffect': iterationStart must not be negative")
+    update.iterationStart = finite("iterationStart", timing.iterationStart, where)
+    if (update.iterationStart < 0) throw new TypeError(`${where}: iterationStart must not be negative`)
   }
   if (timing.iterations !== undefined) {
     const iterations = Number(timing.iterations)
     if (Number.isNaN(iterations) || iterations < 0) {
-      throw new TypeError("Failed to execute 'updateTiming' on 'AnimationEffect': iterations must not be negative")
+      throw new TypeError(`${where}: iterations must not be negative`)
     }
     update.iterations = iterations
   }
   if (timing.duration !== undefined) {
     if (typeof timing.duration === "string") {
-      if (timing.duration !== "auto") throw new TypeError(`Failed to execute 'updateTiming' on 'AnimationEffect': ${timing.duration} is not a valid duration`)
+      if (timing.duration !== "auto") throw new TypeError(`${where}: ${timing.duration} is not a valid duration`)
       update.duration = "auto"
     } else {
       const duration = Number(timing.duration)
       if (Number.isNaN(duration) || duration < 0) {
-        throw new TypeError("Failed to execute 'updateTiming' on 'AnimationEffect': duration must not be negative")
+        throw new TypeError(`${where}: duration must not be negative`)
       }
       update.duration = duration
     }
   }
   // `auto` is no fill: an effect has none of its own.
   if (timing.fill !== undefined) {
-    const fill = oneOf("fill", timing.fill, ["none", "forwards", "backwards", "both", "auto"] as const)
+    const fill = oneOf("fill", timing.fill, ["none", "forwards", "backwards", "both", "auto"] as const, where)
     update.fill = fill === "auto" ? "none" : fill
   }
   if (timing.direction !== undefined) {
-    update.direction = oneOf("direction", timing.direction, ["normal", "reverse", "alternate", "alternate-reverse"] as const)
+    update.direction = oneOf("direction", timing.direction, ["normal", "reverse", "alternate", "alternate-reverse"] as const, where)
   }
   if (timing.easing !== undefined) update.easing = String(timing.easing)
   return update
@@ -583,9 +590,9 @@ export class KeyframeEffect {
 }
 
 /**
- * A CSS animation or transition of an element, or an animation of a `motion` element that Motion would hand to the
- * browser's Web Animations (an `opacity` or `backgroundColor` animation, a colour in `oklch()`, ...; a plain
- * `Animation`, as the one `element.animate()` makes), as `element.getAnimations()`
+ * A CSS animation or transition of an element, an animation `element.animate()` made, or an animation of a `motion` element
+ * that Motion would hand to the browser's Web Animations (an `opacity` or `backgroundColor` animation, a colour in
+ * `oklch()`, ...; a plain `Animation`, as the one `element.animate()` makes), as `element.getAnimations()`
  * returns it: the Web Animations `Animation` of the DOM, for what the CSS
  * engine runs. `getAnimations()` gives the same object for the same run every
  * time. `playState`, `currentTime`, `playbackRate`, `startTime` and `pending`
@@ -600,7 +607,7 @@ export class KeyframeEffect {
  * and a command plays it again as in Chrome, without the style owning it any more, for as long as the app holds it.
  */
 export class Animation extends GpuixEventTarget {
-  /** Empty for what `getAnimations()` lists: the animations of CSS and of Motion have no id. */
+  /** The `id` option of `element.animate()`; empty for the animations of CSS and of Motion. */
   id = ""
 
   constructor(init: AnimationInit) {
@@ -1061,6 +1068,45 @@ export function getElementAnimations(
     .map((listed) => adoptListed(registry, host, timeline, renderer, listed, elementId, target))
 }
 
+/** What `Element.animate()` takes beside the timing. */
+export interface AnimateOptions extends OptionalEffectTiming {
+  /** The `id` of the animation. */
+  id?: string
+}
+
+/**
+ * `element.animate(keyframes, options)`: a plain `Animation` the app made, running from the next frame on
+ * above the animations the style makes. The keyframes are an array of objects or an object of arrays, the
+ * options a duration or the timing members of the DOM. A property the engine does not animate, or a value
+ * it cannot read, is left out, as the browser leaves out what it cannot read. Pending changes are sent
+ * first, so the keyframes meet the style just set.
+ */
+export function animateElement(
+  renderer: NativeRenderer,
+  elementId: number,
+  target: object,
+  keyframes: KeyframesInput,
+  options?: number | AnimateOptions
+): Animation {
+  const host = hostOf(renderer)
+  const animate = (renderer as Partial<Pick<GpuixRenderer, "animateElement">>).animateElement
+  if (!animate) throw new Error("This renderer does not support animateElement")
+  const json = normalizeKeyframes(keyframes)
+  const timing = typeof options === "number" ? timingUpdate({ duration: options }, ANIMATE) : timingUpdate(options, ANIMATE)
+  flushPendingMutations(renderer)
+  let info: WebAnimationInfo
+  try {
+    info = animate.call(renderer, elementId, json, timing)
+  } catch (error) {
+    throw refusal(error)
+  }
+  const registry = registryOf(renderer)
+  const timeline = (registry.timeline ??= new DocumentTimeline(host))
+  const animation = adopt(registry, host, timeline, target, elementId, info)
+  if (typeof options === "object" && options !== null && options.id !== undefined) animation.id = String(options.id)
+  return animation
+}
+
 /** `document.getAnimations()` of one renderer: the animations of its window, in document order. */
 function getRendererAnimations(renderer: NativeRenderer): Animation[] {
   const host = hostOf(renderer)
@@ -1147,13 +1193,32 @@ function detach(animation: Animation): void {
   // A command can have played it again since the cancel, which the event only now tells of.
   if (now.playState === "finished") state.holdFinished = true
   if (now.playState !== "idle") return
+  holdWeakly(state, animation)
+}
+
+/** Lets go of the animation but for a weak reference, which native is told of (`forgetAnimation`) when it is collected. */
+function holdWeakly(state: State, animation: Animation): void {
   const registry = state.registry
+  if (registry.weak.has(state.id)) return
   registry.byId.delete(state.id)
   const siblings = registry.byElement.get(state.elementId)
   siblings?.delete(animation)
   if (siblings?.size === 0) registry.byElement.delete(state.elementId)
   registry.weak.set(state.id, new WeakRef(animation))
   registry.finalizer.register(animation, state.id, animation)
+}
+
+/**
+ * An animation a script made that finished and no longer shows (no fill holds its effect) is nothing
+ * `getAnimations()` lists, so the registry stops holding it: an app that lets go of it lets native drop
+ * the run. A command that plays it again holds it again.
+ */
+function releaseFinishedScript(renderer: NativeRenderer, state: State, animation: Animation): void {
+  if (state.last.kind !== "script" || state.mode !== "live") return
+  if (readLive(state).playState !== "finished") return
+  const listed = hostOf(renderer).getAnimations(state.elementId)
+  if (listed.some((info) => info.id === state.id)) return
+  holdWeakly(state, animation)
 }
 
 function dispatchPlaybackEvent(
@@ -1237,6 +1302,7 @@ export function deliverWebAnimationEvent(renderer: NativeRenderer, event: EventP
           state.finished.resolve(animation)
         }
         dispatchPlaybackEvent(animation, "finish", event.currentTime ?? null, timelineTime)
+        releaseFinishedScript(renderer, state, animation)
         return
       default:
         if (state.cancelEvents > 0) {

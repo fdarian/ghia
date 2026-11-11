@@ -70,9 +70,9 @@ describeNative("attribute writes on a React host instance", () => {
     const target = element!
     target.setAttribute("tabindex", "-1")
     expect(target.getAttribute("tabindex")).toBe("-1")
-    expect((target as unknown as { props: Record<string, unknown> }).props.tabIndex).toBe(-1)
+    expect(target.tabIndex).toBe(-1)
     target.setAttribute("hidden", "any text")
-    expect((target as unknown as { props: Record<string, unknown> }).props.hidden).toBe(true)
+    expect(target.hidden).toBe(true)
     expect(target.getAttribute("hidden")).toBe("")
     target.toggleAttribute("hidden")
     expect(target.hasAttribute("hidden")).toBe(false)

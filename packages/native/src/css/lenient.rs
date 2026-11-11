@@ -44,6 +44,10 @@ pub(crate) const UNITLESS: &[&str] = &[
     "strokeOpacity", "strokeWidth",
 ];
 
+/// Properties whose bare number is degrees (`StyleDesc` reads it so), not px: `rotate` and Motion's
+/// angle keys.
+pub(crate) const DEGREES: &[&str] = &["rotate", "motionRotate", "rotateX", "rotateY", "rotateZ", "skew", "skewX", "skewY"];
+
 /// How many dropped declarations are remembered before the set starts over.
 const REPORTED_LIMIT: usize = 1024;
 
@@ -193,14 +197,16 @@ pub(crate) fn is_unitless(key: &str) -> bool {
     UNITLESS.contains(&key)
 }
 
-/// The text React DOM would write for a number `value` of `key`, or `None` when `value` is not a
-/// number.
+/// The text React DOM would write for a number `value` of `key` (`deg` for an angle, which
+/// `StyleDesc` reads a bare number as), or `None` when `value` is not a number.
 pub(crate) fn number_text(key: &str, value: &str) -> Option<String> {
     let number: serde_json::Number = serde_json::from_str(value).ok()?;
     Some(if number.as_f64() == Some(0.0) {
         "0".to_owned()
     } else if is_unitless(key) {
         number.to_string()
+    } else if DEGREES.contains(&key) {
+        format!("{number}deg")
     } else {
         format!("{number}px")
     })
@@ -255,6 +261,16 @@ mod tests {
         assert_eq!(style.opacity, Some(0.5));
         assert_eq!(style.z_index, Some(3.0));
         assert_eq!(style.width, None);
+    }
+
+    #[test]
+    fn a_number_angle_is_degrees() {
+        assert_eq!(number_as_text("rotate", "45"), Some(r#""45deg""#.to_owned()));
+        assert_eq!(number_as_text("rotate", "-12.5"), Some(r#""-12.5deg""#.to_owned()));
+        assert_eq!(number_as_text("rotate", "0"), Some(r#""0""#.to_owned()));
+        for key in ["motionRotate", "rotateX", "rotateY", "rotateZ", "skew", "skewX", "skewY"] {
+            assert_eq!(number_text(key, "30"), Some("30deg".to_owned()), "{key}");
+        }
     }
 
     #[test]

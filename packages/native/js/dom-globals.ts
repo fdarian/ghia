@@ -14,11 +14,11 @@ import {
   SVGElement,
   Text,
 } from "./dom/nodes.js"
-import "./dom/detached-element.js"
+import { CSSStyleDeclaration } from "./dom/css-style-declaration.js"
 import { DOMRect, DOMRectReadOnly } from "./dom/dom-rect.js"
 import { HTMLInputElement, HTMLTextAreaElement } from "./dom/html-element-classes.js"
 import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
-import { CSSStyleDeclaration } from "./dom/style-declaration.js"
+import { ToggleEvent } from "./dom/toggle-event.js"
 import { Selection } from "./dom/selection.js"
 import { EVENT_CLASSES } from "./events/classes.js"
 import { document, window } from "./events/window-target.js"
@@ -49,6 +49,7 @@ const DOM_CLASSES = {
   Document,
   DocumentFragment,
   ShadowRoot,
+  CSSStyleDeclaration,
   CSSStyleSheet,
   CSSRule,
   CSSStyleRule,
@@ -56,9 +57,9 @@ const DOM_CLASSES = {
   Selection,
   MutationObserver,
   MutationRecord,
-  CSSStyleDeclaration,
   DOMRect,
   DOMRectReadOnly,
+  ToggleEvent,
   ...EVENT_CLASSES,
 }
 

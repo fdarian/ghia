@@ -434,6 +434,49 @@ export function dispatchDomEvent(
 }
 
 /**
+ * Runs the listeners of one element for an event that code made, aimed at that element alone and
+ * not travelling along its path (`beforetoggle`, `toggle`). `event` is a real `Event`: its
+ * `target`, `currentTarget` and `eventPhase` are set here for the length of the call, and a handler
+ * that throws does not end the dispatch.
+ */
+export function dispatchAtElement(root: DomEventRoot, elementId: number, element: object, event: Event): void {
+  const state = { propagationStopped: false, immediatePropagationStopped: false }
+  const errors: unknown[] = []
+  const fail = (error: unknown) => errors.push(error)
+  const stopImmediatePropagation = event.stopImmediatePropagation.bind(event)
+  Object.defineProperties(event, {
+    target: { value: element, configurable: true },
+    currentTarget: { value: element, configurable: true, writable: true },
+    eventPhase: { value: EVENT_PHASE_AT_TARGET, configurable: true, writable: true },
+    stopImmediatePropagation: {
+      configurable: true,
+      value() {
+        state.propagationStopped = true
+        state.immediatePropagationStopped = true
+        stopImmediatePropagation()
+      },
+    },
+  })
+  const handlers = root.eventHandlers.get(elementId)
+  for (const key of [captureHandlerKey(event.type), event.type]) {
+    if (state.immediatePropagationStopped) break
+    const handler = handlers?.get(key)
+    if (!handler) continue
+    try {
+      if (isListenerRunner(handler)) handler[LISTENER_RUNNER](event as unknown as DomEvent, state, fail)
+      else handler(event as unknown as DomEvent)
+    } catch (error) {
+      fail(error)
+    }
+  }
+  Object.defineProperties(event, {
+    currentTarget: { value: null, configurable: true, writable: true },
+    eventPhase: { value: EVENT_PHASE_NONE, configurable: true, writable: true },
+  })
+  reportHandlerErrors(root, errors)
+}
+
+/**
  * `event.preventDefault()` for a handler typed with the plain payload. Throws
  * for an event that did not come through `dispatchDomEvent`, where there is no
  * default to cancel.

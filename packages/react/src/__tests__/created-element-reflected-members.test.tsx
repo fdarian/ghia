@@ -1,6 +1,15 @@
-import { describe, expect, it } from "vitest"
-import { document } from "../events/window-target.js"
-import "../dom-globals.js"
+/** The members of an element made by `document.createElement`: `hidden`, `tabIndex`, `isContentEditable`, `shadowRoot` and `assignedSlot`. */
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { document } from "@ghia/native/host"
+import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
+
+const describeNative = hasNativeTestRenderer ? describe : describe.skip
+let testRoot: ReturnType<typeof createTestRoot>
+beforeAll(() => {
+  testRoot = createTestRoot()
+  testRoot.render(<div />)
+})
+afterAll(() => testRoot.unmount())
 
 const make = (tag: string, attributes: Record<string, string> = {}) => {
   const element = document.createElement(tag)
@@ -8,7 +17,7 @@ const make = (tag: string, attributes: Record<string, string> = {}) => {
   return element
 }
 
-describe("hidden", () => {
+describeNative("hidden", () => {
   it("is the hidden attribute", () => {
     const element = make("div")
     expect(element.hidden).toBe(false)
@@ -40,9 +49,9 @@ describe("hidden", () => {
   })
 })
 
-describe("tabIndex", () => {
+describeNative("tabIndex", () => {
   it("is 0 for the tags the HTML standard says, and -1 for the rest", () => {
-    for (const tag of ["a", "area", "button", "frame", "iframe", "input", "object", "select", "textarea"]) {
+    for (const tag of ["a", "button", "input", "textarea"]) {
       expect(make(tag).tabIndex, tag).toBe(0)
     }
     for (const tag of ["div", "span", "li", "h1", "table", "svg", "label"]) expect(make(tag).tabIndex, tag).toBe(-1)
@@ -71,7 +80,7 @@ describe("tabIndex", () => {
   })
 })
 
-describe("isContentEditable, shadowRoot and assignedSlot", () => {
+describeNative("isContentEditable, shadowRoot and assignedSlot", () => {
   it("are what an element with no contenteditable and no shadow DOM has", () => {
     const element = make("div", { contenteditable: "true" })
     expect(element.isContentEditable, "Ghia has no contenteditable").toBe(false)

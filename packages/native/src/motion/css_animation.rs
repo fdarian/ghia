@@ -1022,6 +1022,9 @@ struct Run {
     /// as Chrome does: the same keyframes and timing, not changed by any later style, and no event
     /// of the DOM.
     disowned: bool,
+    /// Made by `Element.animate()`: it has no name, no `animation-*` style behind it and no DOM
+    /// events of CSS animations, and is listed as a plain `Animation`.
+    script: bool,
     /// An `Animation` object was handed to JS for the run, so the style letting go of it keeps it.
     handed: Cell<bool>,
     iteration: u64,
@@ -1074,6 +1077,7 @@ impl Run {
             begun: false,
             silent: false,
             disowned: false,
+            script: false,
             handed: Cell::new(false),
             iteration: 0,
             progress: None,
@@ -1082,6 +1086,49 @@ impl Run {
             quiet_until: None,
             events: Events::default(),
         }
+    }
+
+    /// The run of `Element.animate()`. `update` is the timing as the caller gave it, with the
+    /// members it left out at their defaults in `getTiming()`: the whole-effect easing is the
+    /// effect's, so what the keyframes ease by is linear.
+    fn script(keyframes: Keyframes, update: TimingUpdate, now: Instant) -> Self {
+        let timing = update.over(Timing {
+            delay: 0.0,
+            duration: 0.0,
+            iterations: IterationCount::Finite(1.0),
+            direction: Direction::Normal,
+            fill: FillMode::None,
+            end_delay: 0.0,
+            iteration_start: 0.0,
+        });
+        let params = Animation {
+            name: None,
+            duration: timing.duration,
+            delay: timing.delay,
+            timing: Ease::Name("linear".to_string()),
+            iteration_count: timing.iterations,
+            direction: timing.direction,
+            fill_mode: timing.fill,
+            play_state: PlayState::Running,
+        };
+        let keyframes = Arc::new(keyframes);
+        let mut run = Self::start("", keyframes.clone(), &params, now);
+        run.update = update;
+        run.disowned = true;
+        run.script = true;
+        // What a read finds before any frame has built the element: the keyframes as given. The
+        // first build replaces it with one that knows what the element stands at.
+        let key = ViewKey {
+            keyframes: Arc::as_ptr(&keyframes) as usize,
+            target: PropTarget::Element,
+            timing: params.timing.clone(),
+            colors: Colors::root(),
+            custom: None,
+            underlying: Vec::new(),
+        };
+        let properties: Vec<PropKey> = run.properties.iter().copied().filter(|key| PropTarget::Element.takes(*key)).collect();
+        run.view = Some(View::new(key, &keyframes, &properties));
+        run
     }
 
     /// Keeps what `getKeyframes()` reads up to date with the element it runs on: the values it
@@ -1537,7 +1584,8 @@ impl Run {
     }
 
     fn info(&self, now: Instant) -> Info {
-        Info::of(Kind::Animation, self.name.clone(), &self.clock, now, self.end_time())
+        let kind = if self.script { Kind::Script } else { Kind::Animation };
+        Info::of(kind, self.name.clone(), &self.clock, now, self.end_time())
     }
 
     /// [`Self::info`] for what the API reads, which is the `Animation` object JS holds from here on.
@@ -2240,6 +2288,13 @@ impl CssAnimations {
             for run in &mut state.runs {
                 run.cancel(hidden, now, &mut self.events, &mut self.api_events);
             }
+            // The animations of scripts are not CSS animations: `display: none` leaves them running.
+            if !state.disowned.is_empty() {
+                state.runs.clear();
+                state.list = AnimationList::default();
+                state.config = Default::default();
+                self.states.insert(hidden, state);
+            }
         }
     }
 
@@ -2282,6 +2337,30 @@ impl CssAnimations {
         self.states.get(&element).map_or_else(Vec::new, |state| {
             state.disowned.iter().filter(|run| run.is_relevant()).map(|run| run.handed_info(now)).collect()
         })
+    }
+
+    /// `element.animate(keyframes, timing)`: a run no style owns, which plays above the animations
+    /// of the style in the order the scripts made them, and is listed as a plain `Animation`.
+    pub(crate) fn animate(
+        &mut self,
+        element: u64,
+        keyframes_json: &str,
+        mut update: TimingUpdate,
+        now: Instant,
+    ) -> Result<Info, String> {
+        let keyframes = Keyframes::parse_script(keyframes_json)?;
+        update.duration.get_or_insert(DurationUpdate::Auto);
+        if update.easing.is_none() {
+            update.easing = Some(Ease::Name("linear".to_string()));
+        }
+        let run = Run::script(keyframes, update, now);
+        let info = run.handed_info(now);
+        self.states.entry(element).or_insert_with(|| Box::new(ElementState::new())).disowned.push(run);
+        self.commanded.push(element);
+        if self.dormant.contains(&element) {
+            self.sleepers.next.insert(element);
+        }
+        Ok(info)
     }
 
     /// The animation `id`, relevant or not. `None` once it is cancelled for good.
@@ -5430,5 +5509,248 @@ mod tests {
             frames.animations.retain(|_| true);
         }
         assert_eq!(frames.animations.states.capacity(), capacity);
+    }
+
+    // ── Element.animate() ────────────────────────────────────────────
+
+    const RAMP: &str = r#"[{ "offset": 0, "opacity": 0 }, { "offset": 1, "opacity": 1 }]"#;
+
+    fn timing(milliseconds: f64, rest: impl FnOnce(&mut TimingUpdate)) -> TimingUpdate {
+        let mut update = TimingUpdate {
+            duration: Some(DurationUpdate::Seconds(milliseconds / 1000.0)),
+            ..Default::default()
+        };
+        rest(&mut update);
+        update
+    }
+
+    fn animate(frames: &mut Frames, millis: u64, json: &str, update: TimingUpdate) -> u64 {
+        let at = frames.at(millis);
+        frames.animations.animate(1, json, update, at).unwrap().id
+    }
+
+    fn scripts(frames: &Frames, millis: u64) -> Vec<Info> {
+        frames.animations.list_disowned(1, frames.at(millis))
+    }
+
+    fn bare() -> StyleDesc {
+        style("{}")
+    }
+
+    #[test]
+    fn a_script_animation_samples_its_keyframes_on_an_element_with_no_animation_style() {
+        let mut frames = Frames::new();
+        let id = animate(&mut frames, 0, RAMP, timing(1000.0, |_| {}));
+        near(opacity(&frames.frame(0, &bare())), 0.0);
+        near(opacity(&frames.frame(250, &bare())), 0.25);
+        near(opacity(&frames.frame(750, &bare())), 0.75);
+        let listed = scripts(&frames, 750);
+        assert_eq!(listed.iter().map(|info| (info.id, info.kind, info.status)).collect::<Vec<_>>(), [(id, Kind::Script, Status::Running)]);
+        assert_eq!(listed[0].name, "");
+        // No fill: the effect ends with the animation and the element shows what it declares.
+        assert_eq!(frames.frame(1000, &bare()).opacity, None);
+        assert!(scripts(&frames, 1000).is_empty());
+        assert_eq!(frames.animations.info(id, frames.at(1000)).unwrap().status, Status::Finished);
+    }
+
+    #[test]
+    fn a_number_written_as_text_is_read_by_a_property_that_takes_a_number() {
+        let mut frames = Frames::new();
+        let json = r#"[{ "offset": 0, "opacity": "0" }, { "offset": 1, "opacity": " 1 " }]"#;
+        animate(&mut frames, 0, json, timing(1000.0, |_| {}));
+        frames.frame(0, &bare());
+        near(opacity(&frames.frame(500, &bare())), 0.5);
+    }
+
+    #[test]
+    fn a_script_animation_tells_the_dom_nothing_and_the_api_its_finish() {
+        let mut frames = Frames::new();
+        let id = animate(&mut frames, 0, RAMP, timing(100.0, |_| {}));
+        frames.frame(0, &bare());
+        frames.frame(200, &bare());
+        assert!(frames.animations.take_events().is_empty());
+        assert_eq!(api_events(&mut frames), [(ApiEventKind::Finish, id)]);
+    }
+
+    #[test]
+    fn fill_and_delay_decide_what_shows_before_and_after() {
+        let mut frames = Frames::new();
+        animate(&mut frames, 0, RAMP, timing(1000.0, |update| {
+            update.delay = Some(0.5);
+            update.fill = Some(FillMode::Both);
+        }));
+        near(opacity(&frames.frame(0, &bare())), 0.0);
+        near(opacity(&frames.frame(250, &bare())), 0.0);
+        near(opacity(&frames.frame(1000, &bare())), 0.5);
+        near(opacity(&frames.frame(5000, &bare())), 1.0);
+
+        let mut frames = Frames::new();
+        animate(&mut frames, 0, RAMP, timing(1000.0, |update| {
+            update.delay = Some(0.5);
+            update.fill = Some(FillMode::Forwards);
+        }));
+        assert_eq!(frames.frame(0, &bare()).opacity, None);
+        assert_eq!(frames.frame(250, &bare()).opacity, None);
+        near(opacity(&frames.frame(1000, &bare())), 0.5);
+        near(opacity(&frames.frame(5000, &bare())), 1.0);
+        assert_eq!(scripts(&frames, 5000).len(), 1, "an effect held by a fill is in effect");
+    }
+
+    #[test]
+    fn iterations_and_direction_repeat_and_turn_the_keyframes() {
+        let mut frames = Frames::new();
+        animate(&mut frames, 0, RAMP, timing(1000.0, |update| {
+            update.iterations = Some(IterationCount::Finite(2.5));
+            update.direction = Some(Direction::Alternate);
+            update.fill = Some(FillMode::Forwards);
+        }));
+        frames.frame(0, &bare());
+        near(opacity(&frames.frame(250, &bare())), 0.25);
+        near(opacity(&frames.frame(1250, &bare())), 0.75);
+        near(opacity(&frames.frame(2250, &bare())), 0.25);
+        near(opacity(&frames.frame(9000, &bare())), 0.5);
+
+        let mut frames = Frames::new();
+        animate(&mut frames, 0, RAMP, timing(1000.0, |update| update.iterations = Some(IterationCount::Infinite)));
+        frames.frame(0, &bare());
+        near(opacity(&frames.frame(3250, &bare())), 0.25);
+        assert!(frames.animations.take_active(), "an animation that repeats for ever asks for frames");
+        assert!(frames.animations.take_api_events().iter().all(|event| event.kind != ApiEventKind::Finish));
+    }
+
+    #[test]
+    fn the_effect_easing_shapes_the_whole_iteration_and_a_keyframe_easing_its_own_interval() {
+        let mut frames = Frames::new();
+        animate(&mut frames, 0, RAMP, timing(1000.0, |update| update.easing = Some(parse_timing_function("ease-in").unwrap())));
+        frames.frame(0, &bare());
+        let eased = opacity(&frames.frame(500, &bare()));
+        assert!((eased - 0.315).abs() < 0.001, "{eased}");
+
+        let mut frames = Frames::new();
+        let steps = r#"[{ "offset": 0, "opacity": 0, "easing": "step-end" }, { "offset": 1, "opacity": 1 }]"#;
+        animate(&mut frames, 0, steps, timing(1000.0, |_| {}));
+        frames.frame(0, &bare());
+        near(opacity(&frames.frame(900, &bare())), 0.0);
+    }
+
+    #[test]
+    fn a_property_with_no_keyframe_at_an_end_starts_from_what_the_element_has() {
+        let mut frames = Frames::new();
+        animate(&mut frames, 0, r#"[{ "offset": 1, "opacity": 0 }]"#, timing(1000.0, |_| {}));
+        let declared = style(r#"{ "opacity": 0.8 }"#);
+        near(opacity(&frames.frame(0, &declared)), 0.8);
+        near(opacity(&frames.frame(500, &declared)), 0.4);
+    }
+
+    #[test]
+    fn a_script_animation_beats_the_css_animations_and_the_later_one_wins() {
+        let mut frames = Frames::new();
+        frames.define("fade", FADE);
+        let animated = fading("fade 1s linear forwards");
+        frames.frame(0, &animated);
+        animate(&mut frames, 0, r#"[{ "offset": 0, "opacity": 0.9 }, { "offset": 1, "opacity": 0.9 }]"#, timing(1000.0, |_| {}));
+        frames.frame(16, &animated);
+        near(opacity(&frames.frame(500, &animated)), 0.9);
+        animate(&mut frames, 500, r#"[{ "offset": 0, "opacity": 0.1 }, { "offset": 1, "opacity": 0.1 }]"#, timing(1000.0, |_| {}));
+        frames.frame(516, &animated);
+        near(opacity(&frames.frame(600, &animated)), 0.1);
+        // The animations of the style come first in `getAnimations()`, the scripts after in the order they were made.
+        let ids: Vec<u64> = scripts(&frames, 600).iter().map(|info| info.id).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids[0] < ids[1]);
+        assert_eq!(listed(&frames, 600).len(), 1);
+    }
+
+    #[test]
+    fn a_style_change_leaves_a_script_animation_alone() {
+        let mut frames = Frames::new();
+        frames.define("fade", FADE);
+        animate(&mut frames, 0, RAMP, timing(1000.0, |_| {}));
+        frames.frame(0, &fading("fade 1s linear"));
+        frames.frame(100, &fading("none"));
+        near(opacity(&frames.frame(500, &bare())), 0.5);
+        assert_eq!(scripts(&frames, 500).len(), 1);
+    }
+
+    #[test]
+    fn pause_holds_finish_jumps_to_the_end_and_cancel_removes_the_effect() {
+        let mut frames = Frames::new();
+        let id = animate(&mut frames, 0, RAMP, timing(1000.0, |update| update.fill = Some(FillMode::Forwards)));
+        frames.frame(0, &bare());
+        frames.frame(250, &bare());
+        command(&mut frames, 250, id, Command::Pause);
+        frames.frame(266, &bare());
+        frames.animations.take_active();
+        near(opacity(&frames.frame(5000, &bare())), 0.25);
+        assert!(!frames.animations.take_active(), "a paused animation needs no frames");
+
+        command(&mut frames, 5000, id, Command::Finish);
+        near(opacity(&frames.frame(5016, &bare())), 1.0);
+        assert_eq!(frames.animations.info(id, frames.at(5016)).unwrap().status, Status::Finished);
+        assert_eq!(api_events(&mut frames), [(ApiEventKind::Finish, id)]);
+
+        command(&mut frames, 5016, id, Command::Cancel);
+        assert_eq!(frames.frame(5032, &bare()).opacity, None);
+        assert_eq!(api_events(&mut frames), [(ApiEventKind::Cancel, id)]);
+        assert!(scripts(&frames, 5032).is_empty());
+        assert_eq!(frames.animations.info(id, frames.at(5032)).unwrap().status, Status::Idle);
+        // The run stays for `play()` until JS lets go of it.
+        command(&mut frames, 5032, id, Command::Play);
+        frames.frame(5048, &bare());
+        near(opacity(&frames.frame(5298, &bare())), 0.25);
+        frames.animations.forget(id);
+        assert!(frames.animations.info(id, frames.at(5298)).is_none());
+    }
+
+    #[test]
+    fn a_script_animation_reads_back_its_timing_and_keyframes() {
+        let mut frames = Frames::new();
+        let id = animate(&mut frames, 0, RAMP, timing(1000.0, |update| update.delay = Some(0.25)));
+        frames.frame(0, &bare());
+        let effect = frames.animations.effect(id, frames.at(0)).unwrap().unwrap();
+        assert_eq!((effect.delay, effect.duration, effect.fill, effect.easing.as_str()), (250.0, Some(1000.0), "none", "linear"));
+        // Before any frame built it with the element's values the keyframes are the ones given.
+        let keyframes = frames.animations.keyframes(id).unwrap().unwrap();
+        assert_eq!(keyframes.iter().map(|frame| frame.offset).collect::<Vec<_>>(), [0.0, 1.0]);
+        assert_eq!(keyframes[1].values, [("opacity".to_string(), "1".to_string())]);
+
+        let auto = animate(&mut frames, 0, RAMP, TimingUpdate::default());
+        let effect = frames.animations.effect(auto, frames.at(0)).unwrap().unwrap();
+        assert_eq!((effect.duration, effect.end_time), (None, 0.0));
+    }
+
+    #[test]
+    fn what_a_property_cannot_do_is_left_out_and_a_wrong_offset_or_easing_is_a_type_error() {
+        let mut frames = Frames::new();
+        let json = r#"[{ "offset": 0, "opacity": 0, "nonsense": 1, "width": "wide" }, { "offset": 1, "opacity": 1 }]"#;
+        let id = animate(&mut frames, 0, json, timing(1000.0, |_| {}));
+        frames.frame(0, &bare());
+        let keyframes = frames.animations.keyframes(id).unwrap().unwrap();
+        assert!(keyframes.iter().all(|frame| frame.values.iter().all(|(name, _)| name == "opacity")), "{keyframes:?}");
+
+        let at = frames.at(0);
+        for bad in [
+            r#"[{ "offset": 2, "opacity": 0 }]"#,
+            r#"[{ "opacity": 0 }]"#,
+            r#"[{ "offset": 0, "easing": "nope", "opacity": 0 }]"#,
+            "{}",
+        ] {
+            let error = frames.animations.animate(1, bad, TimingUpdate::default(), at).unwrap_err();
+            assert!(error.starts_with(crate::motion::effect::TYPE_ERROR), "{bad}: {error}");
+        }
+    }
+
+    #[test]
+    fn a_script_animation_survives_display_none() {
+        let mut tree = crate::retained_tree::RetainedTree::new();
+        tree.create_element(1, "div".to_string());
+        let mut frames = Frames::new();
+        frames.define("fade", FADE);
+        frames.frame(0, &fading("fade 1s linear forwards"));
+        let id = animate(&mut frames, 0, RAMP, timing(1000.0, |_| {}));
+        frames.frame(16, &fading("fade 1s linear forwards"));
+        frames.animations.hide(&tree, 1, frames.at(100));
+        assert_eq!(frames.animations.info(id, frames.at(100)).unwrap().status, Status::Running);
+        assert!(listed(&frames, 100).is_empty(), "the CSS animation was cancelled");
     }
 }

@@ -21,13 +21,11 @@ import {
   storedAttribute,
 } from "./dom/attribute-names.js"
 import { hasMutationObservers, queueAttributeMutation } from "./dom/mutation-observer.js"
-import {
-  styleAttributeOf,
-  styleDeclarationOf,
-  writeStyleAttribute,
-  type StyleBinding,
-} from "./dom/style-declaration.js"
-import { Element, SVGElement, type Node } from "./dom/nodes.js"
+import { serializeStyle } from "./dom/css-style-declaration.js"
+import { DOM_BINDING, Element, SVGElement, type Node } from "./dom/nodes.js"
+import { popoverProperty } from "./dom/popover-attribute.js"
+import { hidePopover, showPopover, togglePopover, writePopoverAttribute } from "./dom/popover.js"
+import type { StyleDesc } from "./host.js"
 import { defineInputMembers } from "./dom/input-members.js"
 import { defineBoxMembers } from "./dom/box-members.js"
 import type { DOMRectList } from "./dom/dom-rect.js"
@@ -52,12 +50,22 @@ export interface DomElement {
   setAttribute(name: string, value: string): void
   removeAttribute(name: string): void
   /**
-   * The inline style: the framework's `style` prop with what this declaration wrote over it. A
-   * write reaches native before the next frame and before any read of layout. A framework
-   * commit that changes a property replaces the written value. Assigning a string sets `cssText`.
-   * See docs/fork/deviations.md for what is stored and not applied.
+   * The HTML popover API, for an element with a `popover` attribute: `showPopover()` opens it, in the
+   * top layer, and fires `beforetoggle` (cancelable) and then `toggle`; `hidePopover()` closes it;
+   * `togglePopover(force?)` does either and says whether it is open. Showing a showing popover and
+   * hiding a hidden one do nothing. They throw `NotSupportedError` without the attribute and
+   * `InvalidStateError` for an element that is not in the document.
    */
-  style: CSSStyleDeclaration
+  showPopover(): void
+  hidePopover(): void
+  togglePopover(force?: boolean): boolean
+  /**
+   * The `popover` attribute limited to its known values (`""` is `"auto"`, an unknown value
+   * `"manual"`), or `null` without one. Setting it to `null` or `undefined` takes the attribute
+   * away; a showing popover that is not the same kind afterwards is hidden, with its events.
+   */
+  get popover(): "auto" | "manual" | "hint" | null
+  set popover(value: string | null | undefined)
   /** The border box's width, rounded, before any transform. 0 for an element with no box. */
   readonly offsetWidth: number
   /** The border box's height, rounded, before any transform. 0 for an element with no box. */
@@ -100,7 +108,7 @@ export interface DomElement {
   dispatchEvent(event: Event): boolean
 }
 
-export interface DomElementBinding extends StyleBinding {
+export interface DomElementBinding {
   readonly listeners: ElementListeners
   readonly connected: boolean
   /** The renderer and id of the element while it is mounted. */
@@ -108,11 +116,13 @@ export interface DomElementBinding extends StyleBinding {
   /** What the element was given: the props of a Solid element, of a React instance. */
   prop(name: string): unknown
   propNames(): Iterable<string>
+  /** The live style, read when `getAttribute("style")` asks for it. */
+  readonly style: StyleDesc
   /**
    * Sets the prop as the framework's own prop path does (`undefined` unsets it): the stored prop, the
    * native write, the observers' records, and a flush so native has it before the call returns.
    */
-  writeProp(name: string, value: string | number | boolean | undefined): void
+  setProp(name: string, value: string | number | boolean | undefined): void
 }
 
 /** The element and its ancestors that are elements, target first: the path of an event dispatched at it. */
@@ -164,13 +174,13 @@ function writeAttribute(element: Element, bound: DomElementBinding, name: string
   }
   const attribute = attributeLookupName(requested, svg)
   if (attribute === "style") {
-    writeStyleAttribute(styleDeclarationOf(element, () => bound), text)
+    element.style.cssText = text ?? ""
     return
   }
   const defaultProp = defaultPropOf(element, bound, attribute)
   if (defaultProp !== undefined) {
     const value = text === null ? undefined : defaultProp === "defaultChecked" ? true : text
-    bound.writeProp(defaultProp, value)
+    bound.setProp(defaultProp, value)
     return
   }
   if (isStoredAttribute(attribute) || (attribute === "value" && element.localName === "textarea")) {
@@ -182,7 +192,7 @@ function writeAttribute(element: Element, bound: DomElementBinding, name: string
     return
   }
   const write = propWrittenBy(attribute, text, propKeyForAttribute(bound, attribute, svg))
-  bound.writeProp(write.prop, write.value)
+  bound.setProp(write.prop, write.value)
 }
 
 /**
@@ -209,7 +219,8 @@ export function defineDomMembers<This extends object>(
       value(this: This, name: string) {
         const svg = this instanceof SVGElement
         if (attributeLookupName(name, svg) === "style") {
-          return styleAttributeOf(styleDeclarationOf(this as unknown as Element, () => bind(this)))
+          const text = serializeStyle(bind(this).style)
+          return text === "" ? null : text
         }
         const stored = storedAttribute(this, attributeLookupName(name, svg))
         if (stored !== undefined) return stored
@@ -217,6 +228,38 @@ export function defineDomMembers<This extends object>(
         const defaultProp = defaultPropOf(this as unknown as Element, bound, attributeLookupName(name, svg))
         const written = defaultProp === undefined ? undefined : bound.prop(defaultProp)
         return attributeText(name, written ?? propForAttribute(bound, name, svg))
+      },
+    },
+    showPopover: {
+      configurable: true,
+      writable: true,
+      value(this: This) {
+        showPopover(this as unknown as Element, () => bind(this))
+      },
+    },
+    hidePopover: {
+      configurable: true,
+      writable: true,
+      value(this: This) {
+        hidePopover(this as unknown as Element, () => bind(this))
+      },
+    },
+    togglePopover: {
+      configurable: true,
+      writable: true,
+      value(this: This, force?: boolean | { force?: boolean }) {
+        return togglePopover(this as unknown as Element, () => bind(this), force)
+      },
+    },
+    popover: {
+      configurable: true,
+      get(this: This) {
+        return popoverProperty((this as unknown as Element).getAttribute("popover"))
+      },
+      set(this: This, value: string | null | undefined) {
+        const element = this as unknown as Element
+        const text = value === null || value === undefined ? null : String(value)
+        writePopoverAttribute(element, () => element[DOM_BINDING]().setProp("popover", text === null ? false : text))
       },
     },
     setAttribute: {
@@ -231,15 +274,6 @@ export function defineDomMembers<This extends object>(
       writable: true,
       value(this: This, name: string) {
         writeAttribute(this as unknown as Element, bind(this), name, null)
-      },
-    },
-    style: {
-      configurable: true,
-      get(this: This) {
-        return styleDeclarationOf(this as unknown as Element, () => bind(this))
-      },
-      set(this: This, text: string) {
-        styleDeclarationOf(this as unknown as Element, () => bind(this)).cssText = text
       },
     },
     offsetWidth: {

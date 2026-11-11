@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { HOST_BINDING } from "../bounds.js"
-import { COMPUTED_STYLE_PROPERTIES, getComputedStyle } from "../computed-style.js"
+import { COMPUTED_STYLE_PROPERTIES, getComputedStyle, invalidateComputedStyles } from "../computed-style.js"
 import type { MutationRenderer, NativeRenderer } from "../host.js"
 
 function fakeElement(id: number, pairs: string[] | null, mounted = true) {
@@ -50,6 +50,24 @@ describe("getComputedStyle", () => {
     await Promise.resolve()
     expect(style.fontSize).toBe("20px")
     expect(reads).toHaveLength(2)
+  })
+
+  it("reads again in the same turn after time moved or a frame was drawn", () => {
+    let opacity = "0"
+    const renderer = {
+      applyBatch: () => [],
+      getComputedStyle: () => ["opacity", opacity],
+    } as unknown as NativeRenderer
+    const element = {
+      nativeId: 3,
+      [HOST_BINDING]: () => ({ renderer, mutations: {} as MutationRenderer }),
+    }
+    const style = getComputedStyle(element)
+    expect(style.opacity).toBe("0")
+    opacity = "0.5"
+    expect(style.opacity, "nothing happened in between: the kept answer stands").toBe("0")
+    invalidateComputedStyles()
+    expect(style.opacity).toBe("0.5")
   })
 
   it("asks for an absent pseudo-element for ::before and ::after, and reads empty for any other", () => {

@@ -463,7 +463,8 @@ export function recordAttributeChanges(element: Element, propNames: Iterable<str
   const names: string[] = []
   const svg = element instanceof SVGElement
   for (const prop of propNames) {
-    if (isNotAttribute(prop)) continue
+    // `style` is no prop attribute that is sent to native, but `getAttribute("style")` reads the live style.
+    if (prop !== "style" && isNotAttribute(prop)) continue
     const name = attributeNameOf(prop, svg)
     if (!names.includes(name)) names.push(name)
   }

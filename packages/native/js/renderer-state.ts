@@ -3,6 +3,7 @@ import { addFrameSource, runAnimationFrame } from "./animation-frame.js"
 import { reportUncaught, type DomDispatchResult } from "./events/dispatch.js"
 import { createDragDispatcher } from "./events/drag.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
+import { popoversOfRendererGone } from "./dom/popover.js"
 import { elementOf, GpuixEventTarget, noteFocusEvent } from "./events/window-target.js"
 import { mountedRenderers, notifyMountedRenderer } from "./mounted-renderer.js"
 import { deliverObservation } from "./observers.js"
@@ -276,6 +277,7 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         detach() {
           if (active !== binding) return false
           active = undefined
+          popoversOfRendererGone(renderer)
           removeFrameSource?.()
           removeFrameSource = undefined
           const mounted = mountedRenderers()

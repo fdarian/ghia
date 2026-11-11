@@ -28,8 +28,8 @@ export interface InputMembers {
 export interface InputBinding {
   readonly layout: { renderer: NativeRenderer; id: number } | undefined
   prop(name: string): unknown
-  /** Sets the prop as the framework's own prop path does; see `DomElementBinding.writeProp`. */
-  writeProp(name: string, value: string | number | boolean | undefined): void
+  /** Sets the prop as the framework's own prop path does; see `DomElementBinding.setProp`. */
+  setProp(name: string, value: string | number | boolean | undefined): void
 }
 
 type Layout = NonNullable<InputBinding["layout"]>
@@ -132,7 +132,7 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
     },
     set(this: This, value: unknown) {
       if (!isInput(this)) return plain(this, name, value)
-      bind(this).writeProp(name, String(value))
+      bind(this).setProp(name, String(value))
     },
   })
   Object.defineProperties(target, {

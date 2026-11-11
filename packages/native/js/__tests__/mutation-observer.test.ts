@@ -36,6 +36,7 @@ class FakeElement extends HTMLElement {
       type: this.type,
       prop: (name) => this.props[name],
       propNames: () => Object.keys(this.props),
+      style: {},
     }
   }
 }
@@ -67,6 +68,7 @@ class FakeSvg extends SVGElement {
       type: this.type,
       prop: (name) => this.props[name],
       propNames: () => Object.keys(this.props),
+      style: {},
     }
   }
 }
@@ -74,11 +76,11 @@ class FakeSvg extends SVGElement {
 for (const prototype of [FakeElement.prototype, FakeSvg.prototype]) {
   defineDomMembers(prototype, (element: FakeElement | FakeSvg) => ({
     listeners: undefined as never,
-    readStyle: () => undefined,
-    writeStyle: () => {},
+    style: {},
     connected: true,
     prop: (name) => element.props[name],
     propNames: () => Object.keys(element.props),
+    style: {},
   }))
 }
 

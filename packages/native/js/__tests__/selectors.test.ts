@@ -100,8 +100,7 @@ function elementBinding(element: FakeHtml | FakeSvg): ElementBinding {
 for (const prototype of [FakeHtml.prototype, FakeSvg.prototype]) {
   defineDomMembers(prototype, (element: FakeHtml | FakeSvg) => ({
     listeners: undefined as never,
-    readStyle: () => undefined,
-    writeStyle: () => {},
+    style: {},
     connected: true,
     prop: (name) => element.props[name],
     propNames: () => Object.keys(element.props),

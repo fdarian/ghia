@@ -100,14 +100,18 @@ describeNative("MutationObserver in React", () => {
     expect(filtered.takeRecords().map((record) => [record.attributeName, record.oldValue])).toEqual([["data-b", null]])
   })
 
-  it("makes no record for a handler, children or an unchanged value", () => {
+  it("makes a record for a style change, none for a handler, children or an unchanged value", () => {
     let box: PublicInstance | null = null
     const setColor = stateful("red", (color) => (
-      <div ref={(instance) => (box = instance)} data-a="1" style={{ background: "red" }} onClick={() => {}}>
+      <div ref={(instance) => (box = instance)} data-a="1" style={{ background: color }} onClick={() => {}}>
         {color}
       </div>
     ))
-    const observer = observe(box!, { attributes: true })
+    const observer = observe(box!, { attributes: true, attributeOldValue: true })
+    setColor("blue")
+    expect(observer.takeRecords().map((record) => [record.attributeName, record.oldValue])).toEqual([
+      ["style", "background: red;"],
+    ])
     setColor("blue")
     expect(observer.takeRecords()).toHaveLength(0)
   })

@@ -74,6 +74,7 @@ const NOT_CALLABLE_FROM_A_HANDLER = new Set([
 function calls(r, ids) {
   return {
     activateElement: () => r.activateElement(ids.check),
+    animateElement: () => r.animateElement(ids.box, JSON.stringify([{ offset: 0, easing: "linear", width: "50px" }, { offset: 1, easing: "linear", width: "80px" }]), { duration: 100 }),
     animateMotionValue: () => r.animateMotionValue(910, 5),
     applyBatch: () => r.applyBatch(encodeWireBatchForTest([])),
     blurElement: () => r.blurElement(ids.field),

@@ -10,6 +10,7 @@ import {
   type SheetSink,
 } from "./css/index.js"
 import { attributesOfProps } from "./dom/attribute-names.js"
+import { popoversDestroyed } from "./dom/popover.js"
 import { isSvgType } from "./svg.js"
 import { createBlobImageLoader, type BlobImageHost } from "./blob-images.js"
 import type { MutationHost, MutationRenderer } from "./host.js"
@@ -55,24 +56,11 @@ export interface ElementSource {
 export function createMutationQueue(
   renderer: MutationHost & BlobImageHost & StyleImageHost,
   onDestroyed: (ids: readonly number[]) => void = () => {},
-  scheduleFlush?: (flush: () => void) => void,
-  scheduleWrites?: (flush: () => void) => void
+  scheduleFlush?: (flush: () => void) => void
 ): MutationQueue {
   const writer = new WireWriter()
   let flushScheduled = false
   const deferred = new Map<object, () => void>()
-
-  /** `scheduleFlush` when the adapter has one for every op, else the scheduler for deferred writes alone. */
-  const requestDeferredFlush = () => {
-    const schedule = scheduleFlush ?? scheduleWrites
-    if (!schedule || flushScheduled) return
-    flushScheduled = true
-    schedule(() => {
-      if (!flushScheduled) return
-      flushScheduled = false
-      mutations.flushMutations()
-    })
-  }
 
   const requestFlush = () => {
     if (!scheduleFlush || flushScheduled) return
@@ -198,7 +186,7 @@ export function createMutationQueue(
     requestFlush,
     deferWrite(key, write) {
       deferred.set(key, write)
-      requestDeferredFlush()
+      requestFlush()
     },
     flushMutations() {
       flushScheduled = false
@@ -226,6 +214,7 @@ export function createMutationQueue(
           try {
             const destroyed = renderer.applyBatch(batch.wire)
             cancelAnimationsOfElements(renderer, destroyed)
+            popoversDestroyed(renderer, destroyed)
             onDestroyed(destroyed)
             applied = true
             break
@@ -364,6 +353,7 @@ const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "role",
   "id",
   "htmlFor",
+  "popover",
 ])
 
 /** Props a `div`, `span`, `label`, `form` or HTML tag forwards to native; every other prop is dropped. */

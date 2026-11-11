@@ -93,10 +93,23 @@ type Values = ReadonlyMap<string, string>
 type Cached = {
   /** Batches of mutations applied when it was read: one more and the record may be stale. */
   batches: number
+  /** `generation` when it was read: a clock move or a frame since makes the record stale. */
+  generation: number
   values: Values | undefined
 }
 
 let turnEnds = false
+let generation = 0
+
+/**
+ * Ends every kept computed style at once. Time moving and a frame being drawn change what native
+ * answers without a batch of mutations, so whatever advances the clock or draws inside one turn (the
+ * test renderer's `clockFastForward` and `drawFrame`) calls this; a live window only does either
+ * between turns, where the turn's end already empties the cache.
+ */
+export function invalidateComputedStyles(): void {
+  generation += 1
+}
 // Per renderer, so that a burst of getters (`style.width`, then `style.height`) is one native read.
 const cache = new WeakMap<object, Map<string, Cached>>()
 // Native state moves on between turns without a batch, so an entry is only valid for the turn it
@@ -130,8 +143,8 @@ function pairsToValues(pairs: readonly string[]): Values {
  * `getBoundingClientRect`. `undefined` while the element is not in the document. `pseudo` reads the
  * `::before` or `::after` of an element, which Ghia has none of.
  *
- * The answer is kept until a batch of mutations reaches the renderer or the current turn of the
- * event loop ends, so reading ten properties costs one call and a read after a write is fresh.
+ * The answer is kept until a batch of mutations reaches the renderer, the clock moves or a frame is
+ * drawn (`invalidateComputedStyles`), or the current turn of the event loop ends, so reading ten properties costs one call and a read after a write is fresh.
  */
 export function readComputedStyle(
   renderer: NativeRenderer,
@@ -150,10 +163,10 @@ export function readComputedStyle(
   }
   const batches = appliedBatchCount()
   const kept = records.get(key)
-  if (kept && kept.batches === batches) return kept.values
+  if (kept && kept.batches === batches && kept.generation === generation) return kept.values
   const pairs = renderer.getComputedStyle(id, pseudo)
   const values = pairs ? pairsToValues(pairs) : undefined
-  records.set(key, { batches, values })
+  records.set(key, { batches, generation, values })
   filledThisTurn.add(records)
   endTurnLater()
   return values

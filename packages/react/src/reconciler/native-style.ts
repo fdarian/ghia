@@ -13,8 +13,3 @@ export function hiddenStyle(style: Props["style"]) {
   delete base.active
   return { ...base, display: "none !important" }
 }
-
-/** What native is given for an element's `style` prop. */
-export function nativeStyleOf(style: Props["style"], hidden: boolean) {
-  return hidden ? hiddenStyle(style) : (splitMotionStyle(style).style ?? {})
-}

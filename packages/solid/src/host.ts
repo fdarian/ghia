@@ -1,9 +1,11 @@
 // Host-tree shape is based on jhomra21/gpuix-solid (MIT), stripped to GPUIX's
 // native elements and event contract.
 import {
+  applyStyleChange,
   assertSvgPlacement,
   createElementMethods,
   createWebviewMethods,
+  crossRootError,
   defineDomMembers,
   document,
   DOM_BINDING,
@@ -21,13 +23,12 @@ import {
   isSvgType,
   isNotNativeAttribute,
   forwardsCustomProp,
-  isHtmlTag,
+  isElementType,
   isNativeviewHandlerProp,
   HOST_BINDING,
   HOST_MOUNT,
   copyPrototypeMembers,
   hasMutationObservers,
-  keepWrittenEntries,
   queueCharacterDataMutation,
   queueChildListMutation,
   recordAttributeChanges,
@@ -36,6 +37,7 @@ import {
   toBoundingClientRect,
   retireMotionBindings,
   SentWrites,
+  writePopoverAttribute,
   serializeCustomProp,
   splitMotionStyle,
   syncMotionBindings,
@@ -47,10 +49,12 @@ import {
   setTextControlSelectionRange,
 } from "@ghia/native/host"
 import type {
+  AnimateOptions,
   Animation,
   Document,
   DomElement,
   InputMembers,
+  Element as DomNodeElement,
   ElementBinding,
   ElementMethods,
   GetAnimationsOptions,
@@ -61,12 +65,14 @@ import type {
   HostBinding,
   HostProps,
   ImagePixelsOptions,
+  KeyframesInput,
   MotionBinding,
   MotionBindingHost,
   MotionValue,
   MotionValueStyle,
   MutationRenderer,
   NativeRenderer,
+  Node,
   NodeBinding,
   SelectionDirection,
   ScrollableElement,
@@ -171,7 +177,7 @@ export class HostRoot implements MotionBindingHost {
     const removed = [...this.removals]
     this.removals.clear()
     for (const node of removed) {
-      if (node.parent !== null || !node.mounted) continue
+      if (!node.mounted || isConnected(node)) continue
       markUnmounted(node)
       this.mutations.destroyElement(node.nativeId)
     }
@@ -207,11 +213,18 @@ export class HostElement extends HTMLElement {
   root: HostRoot | null = null
   nativeId = 0
   mounted = false
-  /** The style the element has: what the framework committed, with what `element.style` wrote over it. */
-  inlineStyle: StyleDesc = {}
-  /** The style the framework committed last, without motion values. */
-  committedStyle: StyleDesc = {}
-  /** Laid over `inlineStyle` while it is set, however that changes: the box a leaving `popLayout` child keeps. */
+  /**
+   * The style the element has: what the framework rendered into `style` and what code wrote through
+   * `element.style`, as one. Never changed in place.
+   */
+  liveStyle: StyleDesc = {}
+  /**
+   * The style the framework rendered last, kept once code wrote to the style: `liveStyle` is then
+   * not it, and the framework's next change is applied as a difference from this onto `liveStyle`.
+   * `undefined` while code has not written, when `liveStyle` is the framework's own.
+   */
+  private frameworkStyle: StyleDesc | undefined
+  /** Laid over `liveStyle` while it is set, however `liveStyle` changes: the box a leaving `popLayout` child keeps. */
   pin: StyleDesc | undefined
   /**
    * Held on the instance, not in a module map: the JSX runtime can load a second
@@ -235,15 +248,28 @@ export class HostElement extends HTMLElement {
     return this.domBinding
   }
 
-  /** What the renderer is given: `inlineStyle` under `pin`. */
+  /** What the renderer is given: `liveStyle` under `pin`. */
   appliedStyle(): StyleDesc {
-    return this.pin === undefined ? this.inlineStyle : { ...this.inlineStyle, ...this.pin }
+    return this.pin === undefined ? this.liveStyle : { ...this.liveStyle, ...this.pin }
   }
 
-  /** The framework committed `style`: it replaces what `element.style` wrote, for the properties it changed. */
-  setCommittedStyle(style: StyleDesc): void {
-    this.inlineStyle = keepWrittenEntries(this.inlineStyle, this.committedStyle, style) ?? style
-    this.committedStyle = style
+  /** The framework's `style` prop. Until code writes a style it replaces the live one. */
+  setFrameworkStyle(next: StyleDesc): void {
+    if (this.frameworkStyle === undefined) {
+      this.liveStyle = next
+      return
+    }
+    this.liveStyle = applyStyleChange(this.liveStyle, this.frameworkStyle, next)
+    this.frameworkStyle = next
+  }
+
+  /** A write from code: `next` is the whole live style. */
+  setCodeStyle(next: StyleDesc): void {
+    this.frameworkStyle ??= this.liveStyle
+    this.liveStyle = next
+    // A burst of writes (a drag writing the transform on every pointer move) is one `setStyle` for the next flush.
+    if (this.root) this.root.mutations.deferWrite(this, () => this.writeStyle())
+    else this.writeStyle()
   }
 
   setPin(pin: StyleDesc | undefined): void {
@@ -437,6 +463,10 @@ export class HostElement extends HTMLElement {
     return this.methods().getAnimations.call(this, options)
   }
 
+  animate(keyframes: KeyframesInput, options?: number | AnimateOptions): Animation {
+    return this.methods().animate.call(this, keyframes, options)
+  }
+
   [HOST_MOUNT](listener: () => void): () => void {
     this.mountListeners.add(listener)
     return () => this.mountListeners.delete(listener)
@@ -474,19 +504,18 @@ export interface HostElement extends ScrollableElement, Omit<DomElement, "ownerD
 }
 defineDomMembers(HostElement.prototype, (element: HostElement) => ({
   listeners: element.listeners,
-  connected: isConnected(element),
+  get connected() {
+    return isConnected(element)
+  },
   layout: element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.nativeId } : undefined,
   prop: (name) => element.props.get(name),
   propNames: () => element.props.keys(),
-  writeProp: (name, value) => {
+  setProp: (name, value) => {
     setHostProperty(element, name, value)
     if (element.root && element.mounted) element.root.mutations.flushMutations()
   },
-  readStyle: () => element.inlineStyle as Record<string, unknown>,
-  writeStyle: (next) => {
-    element.inlineStyle = next as StyleDesc
-    // Sent once at the next flush, however many writes come before it.
-    if (element.root && element.mounted) element.root.mutations.deferWrite(element, () => element.writeStyle())
+  get style() {
+    return element.liveStyle
   },
 }))
 defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
@@ -504,12 +533,7 @@ copyPrototypeMembers(HostElement.prototype, SvgHostElement.prototype)
 
 /** In the tree of a root: every ancestor up to the root still holds it, as `removeChild` takes a node out of the DOM. */
 function isConnected(node: HostNode): boolean {
-  let current: HostNode | HostRoot = node
-  while (current.kind !== "root") {
-    if (current.parent === null) return false
-    current = current.parent
-  }
-  return true
+  return treeRoot(node) !== null
 }
 
 export class HostText extends Text {
@@ -569,9 +593,44 @@ class ElementDomBinding implements ElementBinding {
     return this.element.props.keys()
   }
 
+  get style(): StyleDesc {
+    return this.element.liveStyle
+  }
+
+  setStyle(next: StyleDesc): void {
+    if (hasMutationObservers()) recordAttributeChanges(this.element, ["style"], () => this.element.setCodeStyle(next))
+    else this.element.setCodeStyle(next)
+  }
+
+  setProp(name: string, value: string): void {
+    setHostProperty(this.element, name, value)
+  }
+
   get native(): ElementBinding["native"] {
     const element = this.element
     return element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.nativeId } : undefined
+  }
+
+  assertSameWindow(child: Node): void {
+    const target = crossRootTarget(this.element)
+    if (target !== null && belongsToOtherRoot(child as unknown as HostNode, target)) throw crossRootError()
+  }
+
+  insertBefore(child: Node, before: Node | null): void {
+    this.assertSameWindow(child)
+    insertHostNode(this.element, child as unknown as HostNode, before as unknown as HostNode | null)
+  }
+
+  removeChild(child: Node): void {
+    removeHostNode(this.element, child as unknown as HostNode)
+  }
+
+  createText(data: string): Text {
+    return createHostText(data)
+  }
+
+  createElement(type: string): DomNodeElement {
+    return createHostElement(type) as unknown as DomNodeElement
   }
 }
 
@@ -597,6 +656,14 @@ class TextDomBinding implements TextBinding {
   get data(): string {
     return this.text.text
   }
+
+  setData(data: string): void {
+    replaceHostText(this.text, data)
+  }
+
+  createText(data: string): Text {
+    return createHostText(data)
+  }
 }
 
 export function createHostElement(type: string): HostElement {
@@ -605,82 +672,6 @@ export function createHostElement(type: string): HostElement {
     return Reflect.construct(HostElement, [type], SvgHostElement) as HostElement
   }
   return new HostElement(type)
-}
-
-function isElementType(type: string): type is ElementType {
-  switch (type) {
-    case "html":
-    case "head":
-    case "body":
-    case "div":
-    case "text":
-    case "span":
-    case "img":
-    case "svg":
-    case "canvas":
-    case "input":
-    case "textarea":
-    case "label":
-    case "form":
-    case "anchored":
-    case "code":
-    case "diff":
-    case "markdown":
-    case "webview":
-    case "nativeview":
-    case "virtual-list":
-    case "style":
-    case "path":
-    case "circle":
-    case "ellipse":
-    case "rect":
-    case "line":
-    case "polyline":
-    case "polygon":
-    case "g":
-    case "defs":
-    case "linearGradient":
-    case "radialGradient":
-    case "stop":
-    case "clipPath":
-    case "mask":
-    case "use":
-    case "symbol":
-    case "pattern":
-    case "marker":
-    case "image":
-    case "tspan":
-    case "textPath":
-    case "filter":
-    case "feBlend":
-    case "feColorMatrix":
-    case "feComponentTransfer":
-    case "feFuncR":
-    case "feFuncG":
-    case "feFuncB":
-    case "feFuncA":
-    case "feComposite":
-    case "feConvolveMatrix":
-    case "feDiffuseLighting":
-    case "feDisplacementMap":
-    case "feDistantLight":
-    case "feDropShadow":
-    case "feFlood":
-    case "feGaussianBlur":
-    case "feImage":
-    case "feMerge":
-    case "feMergeNode":
-    case "feMorphology":
-    case "feOffset":
-    case "fePointLight":
-    case "feSpecularLighting":
-    case "feSpotLight":
-    case "feTile":
-    case "feTurbulence":
-      return true
-    default:
-      return isHtmlTag(type)
-  }
 }
 
 export function createHostText(value: string): HostText {
@@ -718,15 +709,13 @@ export function setHostProperty(
   }
   if (name === "style") {
     const split = splitMotionStyle(isStyle(value) ? value : undefined)
-    const write = () => {
-      node.setCommittedStyle(split.style ?? {})
-      node.motionValues = split.motionValues
-    }
-    if (hasMutationObservers()) recordAttributeChanges(node, ["style"], write)
-    else write()
+    const next = split.style ?? {}
+    if (hasMutationObservers()) recordAttributeChanges(node, ["style"], () => node.setFrameworkStyle(next))
+    else node.setFrameworkStyle(next)
+    node.motionValues = split.motionValues
     if (node.root && node.mounted) {
       node.writeStyle()
-      syncMotionBindings(node.root, node.root.mutations, node.nativeId, node.motionValues, node.kind === "element" ? node.type : undefined, node.inlineStyle)
+      syncMotionBindings(node.root, node.root.mutations, node.nativeId, node.motionValues, node.kind === "element" ? node.type : undefined, node.liveStyle)
     }
     return
   }
@@ -747,6 +736,15 @@ export function setHostProperty(
     setMergedClass(node, name, value)
     return
   }
+  if (name === "popover" && node.props.get(name) !== value) {
+    // A showing popover whose prop changed closes, with its events, once the prop is stored and sent.
+    writePopoverAttribute(node, () => storeAndSyncProp(node, name, value))
+    return
+  }
+  storeAndSyncProp(node, name, value)
+}
+
+function storeAndSyncProp(node: HostElement, name: string, value: HostPropertyValue): void {
   if (hasMutationObservers()) recordAttributeChanges(node, [name], () => storeHostProp(node, name, value))
   else storeHostProp(node, name, value)
   syncStoredProp(node, name, value)
@@ -862,7 +860,7 @@ function mount(root: HostRoot, node: HostNode): void {
   } else {
     node.sent.reset()
     node.writeStyle()
-    if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.type, node.inlineStyle)
+    if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.type, node.liveStyle)
     node.listeners.attach({ eventHandlers: root.eventHandlers, renderer: root.mutations, elementId: node.nativeId })
     for (const [name, value] of node.props) {
       syncAttribute(root, node, name, value)
@@ -914,8 +912,13 @@ export function insertHostNode(
   if (hasMutationObservers()) {
     queueChildListMutation(parent, [node], [], parent.childList[index - 1] ?? null, parent.childList[index + 1] ?? null)
   }
-  const root = parent.root
-  if (!root) return
+  const root = parent.mounted ? parent.root : null
+  if (root === null) {
+    // The new parent has no native element (it was never mounted, or was released), so a node
+    // moved into it leaves native's tree too.
+    retireNode(node)
+    return
+  }
   root.removals.delete(node)
   mount(root, node)
   if (anchor) root.mutations.insertBefore(parent.nativeId, node.nativeId, anchor.nativeId)
@@ -949,13 +952,50 @@ export function removeHostNode(requestedParent: HostParent, node: HostNode): voi
   const parent = requestedParent.kind === "root" ? requestedParent.body : requestedParent
   if (node.parent !== parent) return
   removeFromParent(node)
-  const root = parent.root
+  retireNode(node)
+}
+
+/**
+ * Takes a mounted node out of native's tree and leaves it to `finishRemovals`, which releases it
+ * unless it is in a connected tree again by then.
+ */
+function retireNode(node: HostNode): void {
+  const root = node.root
   if (!root || !node.mounted) return
   root.removals.add(node)
   // Native is told now, not at the flush: a layout read in this turn flushes the queue and
   // must not lay out a subtree the DOM would already have taken out of the document.
   root.mutations.detachChild(node.nativeId)
   root.mutations.requestFlush()
+}
+
+/**
+ * Whether `node`, or a node under it, was mounted by a root other than `target`: mounting it there
+ * would throw after the tree was changed. A mounted node's subtree is in its own root already.
+ */
+function belongsToOtherRoot(node: HostNode, target: HostRoot): boolean {
+  if (node.root !== null && node.root !== target) return true
+  if (node.mounted || node.kind !== "element") return false
+  return node.childList.some((child) => belongsToOtherRoot(child, target))
+}
+
+/**
+ * The root a node put into `parent` has to belong to: `parent`'s own while it has a native element,
+ * which holds for a parent that code took out of the document this turn and native has not yet
+ * released; else the root of the tree it is in.
+ */
+function crossRootTarget(parent: HostNode): HostRoot | null {
+  return parent.mounted ? parent.root : treeRoot(parent)
+}
+
+/** The root whose tree `node` is in, or `null` for a node that is in none. */
+function treeRoot(node: HostNode): HostRoot | null {
+  let current: HostNode | HostRoot = node
+  while (current.kind !== "root") {
+    if (current.parent === null) return null
+    current = current.parent
+  }
+  return current
 }
 
 export function getParentNode(node: HostNode): HostParent | undefined {

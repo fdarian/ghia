@@ -707,9 +707,12 @@ pub struct StyleDesc {
     pub justify_content: Option<String>,
     /// A number is px; a string is `<row-gap> <column-gap>?`, each a CSS length. `%` is of the
     /// container's content box. `rowGap` and `columnGap` win over it.
-    #[serde(default, deserialize_with = "shorthand::deserialize_gap")]
+    /// `normal` is no value.
+    #[serde(default, deserialize_with = "crate::css::keyword_number::deserialize_gap")]
     pub gap: Option<Gap>,
+    #[serde(default, deserialize_with = "crate::css::keyword_number::deserialize_gap_length")]
     pub row_gap: Option<LinearLength>,
+    #[serde(default, deserialize_with = "crate::css::keyword_number::deserialize_gap_length")]
     pub column_gap: Option<LinearLength>,
     /// Stable-sorts the children of a flex or grid container. Default 0.
     pub order: Option<f64>,
@@ -747,7 +750,10 @@ pub struct StyleDesc {
     pub height: Option<DimensionValue>,
     pub min_width: Option<DimensionValue>,
     pub min_height: Option<DimensionValue>,
+    /// `none` is no value.
+    #[serde(default, deserialize_with = "crate::css::keyword_number::deserialize_max_size")]
     pub max_width: Option<DimensionValue>,
+    #[serde(default, deserialize_with = "crate::css::keyword_number::deserialize_max_size")]
     pub max_height: Option<DimensionValue>,
 
     // Spacing (padding): px or a CSS length; `%` is of the containing block's width. The
@@ -785,6 +791,8 @@ pub struct StyleDesc {
     // Position
     pub position: Option<String>,
     /// Paint order among positioned siblings. Only applies when `position` is set.
+    /// `auto` is no value.
+    #[serde(default, deserialize_with = "crate::css::keyword_number::deserialize_z_index")]
     pub z_index: Option<f64>,
     /// One to four lengths or `auto` for `top`, `right`, `bottom` and `left` in CSS order. The
     /// four longhands win over it.
@@ -1077,6 +1085,8 @@ pub struct StyleDesc {
     pub caption_side: Option<crate::css::table::CaptionSide>,
     /// CSS `empty-cells`, inherited.
     pub empty_cells: Option<crate::css::table::EmptyCells>,
+    /// `none` is no value.
+    #[serde(default, deserialize_with = "crate::css::keyword_number::deserialize_line_clamp")]
     pub line_clamp: Option<f64>,
     /// CSS `text-decoration` and its longhands. `css::text_decoration` says what
     /// is drawn.
@@ -2829,12 +2839,13 @@ mod tests {
         assert_eq!(style(r#"{"gap": "1em calc(1px + 1em)"}"#), gap("1em", "calc(1px + 1em)"));
         assert_eq!(style(r#"{"gap": "10% 0"}"#), gap("10%", "0"));
         assert_eq!(style(r#"{"gap": null}"#), None);
+        assert_eq!(style(r#"{"gap": "normal"}"#), None);
         for json in [
             r#"{"gap": ""}"#,
             r#"{"gap": "1px 2px 3px"}"#,
             r#"{"gap": "1px auto"}"#,
             r#"{"gap": "1px 2"}"#,
-            r#"{"gap": "normal"}"#,
+            r#"{"gap": "1px normal"}"#,
             r#"{"gap": [1, 2]}"#,
         ] {
             assert!(serde_json::from_str::<StyleDesc>(json).is_err(), "{json}");

@@ -3,6 +3,7 @@
 //! stylesheet gives the tag. The style is the lowest layer under an element: below the universal
 //! style, which is below the element's own (`RetainedTree::refresh_effective_style`).
 
+pub(crate) mod popover;
 mod semantics;
 mod tags;
 

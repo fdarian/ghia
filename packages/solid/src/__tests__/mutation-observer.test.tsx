@@ -76,14 +76,20 @@ describe.skipIf(!hasNativeTestRenderer)("MutationObserver in Solid", () => {
     expect(filtered.takeRecords().map((record) => [record.attributeName, record.oldValue])).toEqual([["data-b", null]])
   })
 
-  it("makes no record for a handler or an unchanged value", () => {
+  it("makes a record for a style change, none for a handler or an unchanged value", () => {
+    const [color, setColor] = createSignal("red")
     const [handler, setHandler] = createSignal(() => {})
     let box: HTMLElement | undefined
     app.render(() => (
-      <div ref={(element) => (box = element as unknown as HTMLElement)} data-a="1" style={{ background: "red" }} onClick={handler()} />
+      <div ref={(element) => (box = element as unknown as HTMLElement)} data-a="1" style={{ background: color() }} onClick={handler()} />
     ))
-    const observer = observe(box!, { attributes: true })
+    const observer = observe(box!, { attributes: true, attributeOldValue: true })
+    setColor("blue")
     setHandler(() => () => {})
+    expect(observer.takeRecords().map((record) => [record.attributeName, record.oldValue])).toEqual([
+      ["style", "background: red;"],
+    ])
+    setColor("blue")
     expect(observer.takeRecords()).toHaveLength(0)
   })
 

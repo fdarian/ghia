@@ -3619,6 +3619,25 @@ impl GpuixRenderer {
         self.with_motion_state(Repaint::None, move |view, now| Ok(view.web_animations(id, now)))
     }
 
+    /// `element.animate(keyframes, options)`: starts an animation of the element that no style
+    /// owns and returns it as `getAnimations()` lists it. `keyframesJson` is a JSON array of
+    /// `{ offset, easing?, <property>: value }` with every offset set, JS having normalised both
+    /// forms of the DOM's keyframes; `timing` is what `options` set, a member left out at its
+    /// default. Throws `TypeError: ...` for an offset or an easing that is wrong, and for an
+    /// element that is not in the tree.
+    #[napi]
+    pub fn animate_element(
+        &self,
+        element_id: f64,
+        keyframes_json: String,
+        timing: WebAnimationTimingUpdate,
+    ) -> Result<WebAnimationInfo> {
+        let id = to_element_id(element_id)?;
+        self.with_motion_state(Repaint::Layout, move |view, now| {
+            view.animate_element(id, &keyframes_json, timing, now)
+        })
+    }
+
     /// `getAnimations({ subtree: true })` of an element: the CSS transitions, then the CSS
     /// animations, of the element and the elements below it, each in document order of the
     /// elements, with the element each is of. Throws for an element id that is not valid; an
@@ -7041,6 +7060,23 @@ impl GpuixView {
             .collect()
     }
 
+    /// `Element.animate()`: see `animateElement`. The caller requests the frame that paints it.
+    pub(crate) fn animate_element(
+        &mut self,
+        element: u64,
+        keyframes_json: &str,
+        timing: WebAnimationTimingUpdate,
+        now: web_time::Instant,
+    ) -> std::result::Result<WebAnimationInfo, String> {
+        if !self.tree.lock().unwrap().elements.contains_key(&element) {
+            return Err(format!("Element {element} is not in the tree"));
+        }
+        let update = timing.into_update()?;
+        let at = self.api_instant(Some(element), now).unwrap_or(now);
+        let info = self.css_animations.animate(element, keyframes_json, update, at)?;
+        Ok(WebAnimationInfo::at(info, &self.clock))
+    }
+
     /// The run `id` as it is now, or as it showed when its finish or cancel
     /// was reported while JS has not consumed that event.
     pub(crate) fn web_animation(&self, id: u64, now: web_time::Instant) -> std::result::Result<WebAnimationInfo, String> {
@@ -10360,6 +10396,11 @@ impl gpui::Render for GpuixView {
         let pointer = pointer_state.borrow();
         // Before the motions are synced, which ask what has a box: the builds below read the same.
         crate::layout::box_generation::hold_display(self.css_transitions.held_displays());
+        // An element that went `display: none` is not built again, so this is where its subtree is told.
+        for id in tree.take_pending_hides() {
+            self.css_transitions.hide(&tree, id, now);
+            self.css_animations.hide(&tree, id, now);
+        }
         let (stepped, motion_settled) =
             self.sync_motions_for_build(&tree, window, now, &focus_styles, &pointer, None);
         let motion_animating = self.motion_synced.as_ref().map_or(stepped, |synced| synced.moving.clone());
@@ -12124,6 +12165,14 @@ fn build_element_unpumped(
             // It moves the element by an offset of its own.
             ctx.subtree.block();
             ctx.layout_flips.wrap(id, source, built, ctx.now, ctx.motion_values)
+        }
+        None => built,
+    };
+    // An open popover draws in the top layer, outside its box in the tree.
+    let built = match crate::html::popover::top_layer_priority(element) {
+        Some(priority) => {
+            ctx.subtree.block();
+            crate::html::popover::into_top_layer(built, priority)
         }
         None => built,
     };

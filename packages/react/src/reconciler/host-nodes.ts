@@ -16,32 +16,35 @@ import {
   HTMLElement,
   hasMutationObservers,
   queueChildListMutation,
-  recordAttributeChanges,
   readBoundingClientRect,
+  splitMotionStyle,
   isSvgType,
   SVGElement,
   Text,
 } from "@ghia/native/host"
 import type {
+  AnimateOptions,
   BoundingClientRect,
+  Element,
   ElementBinding,
   ElementMethods,
   FocusOptions,
   GetAnimationsOptions,
   HostBinding,
+  KeyframesInput,
+  Node,
   NodeBinding,
+  StyleDesc,
   TextBinding,
 } from "@ghia/native/host"
 import type { Container, ElementType, Instance, Props, TextInstance } from "../types/host.js"
-import { diffAttributes, diffCustomProps } from "./custom-props.js"
+import { assertSameWindow, createDomElement, createDomText, insertDomNode, removeDomNode, setDomProp, setDomStyle, setDomTextData } from "./dom-mutation.js"
 import { listenersOf } from "./event-registry.js"
-import { nativeStyleOf } from "./native-style.js"
 
 export type HostNode = Instance | TextInstance
 
 export interface HostNodeState {
   container: Container
-  initialChildren?: HostNode[]
   mounted: boolean
   /**
    * React hid this element (Suspense, Activity). Its native style carries
@@ -55,9 +58,18 @@ export interface HostNodeState {
   children: HostNode[]
   /** The members of its type (`<input>`, `<form>`, ...) were attached when its ref was handed out. */
   typeMembersAttached: boolean
-  /** React deleted it: native destroys the element in the next batch, so nothing more is sent for it. */
-  destroyed: boolean
   binding?: NodeBinding
+  /**
+   * The style the element has once code wrote to it, which is not what its `style` prop renders:
+   * React's next change of the prop is applied as a difference onto it. Absent until code writes.
+   */
+  codeStyle?: StyleDesc
+  /**
+   * Props code set (`el.id = ...`) that the props React gave do not hold: a later render that
+   * leaves the prop as it was keeps them, one that changes or removes the prop drops them.
+   * Absent until code sets one.
+   */
+  propOverrides?: Map<string, unknown>
 }
 
 const hostNodeStates = new WeakMap<HostNode, HostNodeState>()
@@ -82,8 +94,37 @@ function createState(container: Container): HostNodeState {
     parent: null,
     children: [],
     typeMembersAttached: false,
-    destroyed: false,
   }
+}
+
+/** The style an element has: what code wrote if it did, else what its `style` prop renders. */
+export function liveStyleOf(instance: Instance): StyleDesc {
+  return stateFor(instance).codeStyle ?? splitMotionStyle(instance.props.style).style ?? {}
+}
+
+/** A prop as code and React have left it. */
+export function propOf(instance: Instance, name: string): unknown {
+  const overrides = stateFor(instance).propOverrides
+  if (overrides?.has(name)) return overrides.get(name)
+  return (instance.props as Record<string, unknown>)[name]
+}
+
+export function propNamesOf(instance: Instance): string[] {
+  const names = Object.keys(instance.props)
+  const overrides = stateFor(instance).propOverrides
+  if (overrides === undefined) return names
+  for (const name of overrides.keys()) if (!names.includes(name)) names.push(name)
+  return names
+}
+
+/** The props an element has for the attributes sent to native: what React rendered, with what code wrote over it. */
+export function livePropEntries(instance: Instance): Array<[string, unknown]> {
+  const overrides = stateFor(instance).propOverrides
+  const entries = Object.entries(instance.props)
+  if (overrides === undefined) return entries
+  const merged = new Map<string, unknown>(entries)
+  for (const [name, value] of overrides) merged.set(name, value)
+  return [...merged]
 }
 
 function methodsOf(instance: HostNode): ElementMethods {
@@ -132,6 +173,10 @@ class ReactHostElement extends HTMLElement implements Instance {
     return methodsOf(this).getAnimations.call(this, options)
   }
 
+  animate(keyframes: KeyframesInput, options?: number | AnimateOptions) {
+    return methodsOf(this).animate.call(this, keyframes, options)
+  }
+
   focus(options?: FocusOptions): void {
     focusHostElement(containerFor(this).nativeRenderer, this.nativeId, options)
   }
@@ -158,58 +203,32 @@ defineScrollMembers(ReactHostElement.prototype, (instance: ReactHostElement) => 
 }))
 defineDomMembers(ReactHostElement.prototype, (instance: ReactHostElement) => ({
   listeners: listenersOf(instance),
-  connected: isConnected(instance),
+  get connected() {
+    return isConnected(instance)
+  },
   layout: stateFor(instance).mounted
     ? { renderer: containerFor(instance).nativeRenderer, id: instance.nativeId }
     : undefined,
-  prop: (name) => (instance.props as Record<string, unknown>)[name],
-  propNames: () => Object.keys(instance.props),
-  writeProp: (name, value) => writeInstanceProp(instance, name, value),
-  readStyle: () => instance.props.style as Record<string, unknown> | undefined,
-  writeStyle: (next) => writeInstanceStyle(instance, next),
+  prop: (name) => propOf(instance, name),
+  propNames: () => propNamesOf(instance),
+  setProp: (name, value) => setDomProp(instance, name, value),
+  get style() {
+    return liveStyleOf(instance)
+  },
 }))
 
-/**
- * What `setAttribute` does: the prop changes as a commit would change it, and native hears it
- * before the call returns, which a root that only sends at the end of a commit would not do.
- */
-function writeInstanceProp(instance: ReactHostElement, name: string, value: string | number | boolean | undefined): void {
-  const state = stateFor(instance)
-  const current = instance.props as Record<string, unknown>
-  const next = { ...current }
-  if (value === undefined) delete next[name]
-  else next[name] = value
-  const apply = () => {
-    instance.props = next as Props
-  }
-  if (state.mounted) {
-    diffCustomProps(state.container.renderer, instance.nativeId, instance.type, instance.props, next as Props)
-    diffAttributes(state.container.renderer, instance.nativeId, instance.type, instance.props, next as Props)
-  }
-  if (hasMutationObservers()) recordAttributeChanges(instance, [name], apply)
-  else apply()
-  if (state.mounted) state.container.renderer.flushMutations()
-}
-
-/**
- * What a write through `element.style` does: the element's style is `next` and native is sent it
- * once at the next flush, however many writes come before that.
- */
-function writeInstanceStyle(instance: ReactHostElement, next: Record<string, unknown>): void {
-  instance.props = { ...instance.props, style: next } as Props
-  const state = stateFor(instance)
-  if (state.mounted) state.container.renderer.deferWrite(instance, () => sendInstanceStyle(instance))
-}
-
-function sendInstanceStyle(instance: ReactHostElement): void {
-  const state = stateFor(instance)
-  if (state.destroyed) return
-  state.container.renderer.setStyle(instance.nativeId, nativeStyleOf(instance.props.style, state.hidden))
-}
-
-/** Mounted, which a destroyed element is not any more. */
+/** Mounted, which a destroyed element is not any more, and in the tree of its window's `<html>`. */
 function isConnected(instance: Instance): boolean {
-  return containerFor(instance).instances.get(instance.nativeId) === instance
+  return containerFor(instance).instances.get(instance.nativeId) === instance && isInTree(instance)
+}
+
+/** The node or an ancestor of it is the window's `<html>`: nothing took it out of the document. */
+export function isInTree(node: HostNode): boolean {
+  const html = containerFor(node).html
+  for (let current: HostNode | null = node; current !== null; current = stateFor(current).parent) {
+    if (current === html) return true
+  }
+  return false
 }
 
 /**
@@ -267,11 +286,43 @@ class ElementDomBinding implements ElementBinding {
   }
 
   prop(name: string): unknown {
-    return (this.instance.props as Record<string, unknown>)[name]
+    return propOf(this.instance, name)
   }
 
   propNames(): Iterable<string> {
-    return Object.keys(this.instance.props)
+    return propNamesOf(this.instance)
+  }
+
+  get style(): StyleDesc {
+    return liveStyleOf(this.instance)
+  }
+
+  setStyle(next: StyleDesc): void {
+    setDomStyle(this.instance, next)
+  }
+
+  setProp(name: string, value: string): void {
+    setDomProp(this.instance, name, value)
+  }
+
+  assertSameWindow(child: Node): void {
+    assertSameWindow(this.instance, child as unknown as HostNode)
+  }
+
+  insertBefore(child: Node, before: Node | null): void {
+    insertDomNode(this.instance, child as unknown as HostNode, before as unknown as HostNode | null)
+  }
+
+  removeChild(child: Node): void {
+    removeDomNode(this.instance, child as unknown as HostNode)
+  }
+
+  createText(data: string): Text {
+    return createDomText(this.state.container, data) as unknown as Text
+  }
+
+  createElement(type: string): Element {
+    return createDomElement(this.state.container, type) as unknown as Element
   }
 
   get native(): ElementBinding["native"] {
@@ -306,6 +357,14 @@ class TextDomBinding implements TextBinding {
 
   get data(): string {
     return this.text.text
+  }
+
+  createText(data: string): Text {
+    return createDomText(this.state.container, data) as unknown as Text
+  }
+
+  setData(data: string): void {
+    setDomTextData(this.text, data)
   }
 }
 

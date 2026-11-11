@@ -43,6 +43,7 @@ import { forgetElementSource, forgetWindowSource } from "./events/window-target.
 import type { HostDropEffect } from "./events/types.js"
 import { matchableText } from "./text-match.js"
 import { flushPendingMutations } from "./bounds.js"
+import { invalidateComputedStyles } from "./computed-style.js"
 import { closeWebAnimations } from "./web-animations.js"
 import { flushObservations, settleObservations } from "./observers.js"
 import { readFontFiles, type WindowFontsOption } from "./fonts.js"
@@ -398,6 +399,7 @@ interface NativeTestRendererApi
   writeRangeValue(elementId: number, value: string): void
   restoreControlledState(elementId: number): void
   getAnimations(elementId: number): WebAnimationInfo[]
+  animateElement(elementId: number, keyframesJson: string, timing: WebAnimationTimingUpdate): WebAnimationInfo
   getSubtreeAnimations(elementId: number): ElementWebAnimationInfo[]
   getDocumentAnimations(): ElementWebAnimationInfo[]
   getSvgMarkup(elementId: number): string | null
@@ -797,6 +799,7 @@ export class TestRenderer implements NativeRenderer {
   /** Trigger the real GPUI rendering pipeline (GpuixView::render() →
    *  build_element() → apply_styles() → layout). */
   flush(): void {
+    invalidateComputedStyles()
     this.native.flush()
   }
 
@@ -824,6 +827,7 @@ export class TestRenderer implements NativeRenderer {
    *  `postNativeEvent`) to it, then to the JS handlers, as `dispatchNativeEvents` does. Draws
    *  nothing: frames stay `flush` and `drawFrame`. */
   tick(): boolean {
+    invalidateComputedStyles()
     const running = this.native.tick()
     this.dispatchNativeEvents()
     return running
@@ -1381,6 +1385,7 @@ export class TestRenderer implements NativeRenderer {
   /** One display-link frame: deliver the queued frame callbacks, then draw a
    *  pending change once. Pairs with `setInlineDraws(false)`. */
   drawFrame(): void {
+    invalidateComputedStyles()
     this.native.drawFrame()
   }
 
@@ -1441,20 +1446,24 @@ export class TestRenderer implements NativeRenderer {
   }
 
   clockSet(nowMs: number): number {
+    invalidateComputedStyles()
     return this.native.clockSet(nowMs)
   }
 
   clockFastForward(deltaMs: number): number {
+    invalidateComputedStyles()
     return this.native.clockFastForward(deltaMs)
   }
 
   /** `clockFastForward` without telling the window, as time passing does in a live one: the frame
    *  after it is a tick, which patches the frame before it when only paint-only animations ran. */
   clockAdvance(deltaMs: number): number {
+    invalidateComputedStyles()
     return this.native.clockAdvance(deltaMs)
   }
 
   clockResume(): number {
+    invalidateComputedStyles()
     return this.native.clockResume()
   }
 
@@ -1747,6 +1756,10 @@ export class TestRenderer implements NativeRenderer {
 
   getAnimations(elementId: number): WebAnimationInfo[] {
     return this.native.getAnimations(elementId)
+  }
+
+  animateElement(elementId: number, keyframesJson: string, timing: WebAnimationTimingUpdate): WebAnimationInfo {
+    return this.native.animateElement(elementId, keyframesJson, timing)
   }
 
   getSubtreeAnimations(elementId: number): ElementWebAnimationInfo[] {
