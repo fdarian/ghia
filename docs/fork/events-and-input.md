@@ -109,6 +109,12 @@ A `<webview>` is focusable like a text control, and its page holds the keyboard 
 
 `<label htmlFor>` names and activates its control. After a `click` whose path contains a label (and whose target is not inside the labelled control or other interactive content in the label), if it was not default-prevented, gpuix focuses the control and dispatches a `click` on it. A pointer release, `element.click()` and the VoiceOver Press all run it (`events/activation.rs`). The release goes through the synchronous dispatch from a deferred step, so queued focus handlers run first. A disabled control gets no activation.
 
+### Button and link activation
+
+A click no handler cancelled also runs the activation of the nearest `<button>` on its path (`Activation::activate`): in a `<form>`, a `type` of `submit` (or none, or one HTML does not know) submits it with that button as `event.submitter`. `type="button"` does nothing, and so does `type="reset"`, because gpuix does not reset controls. An `<a href>` does nothing on click: Ghia has no navigation.
+
+A focused `<button>` is clicked by Enter on key down (repeating while held) and by Space on key up; a focused `<a href>` by Enter (`events/key_activation.rs`, which the tag table in `html/semantics.rs` feeds). Space arms the button on key down and clicks on key up only if that button still has focus; a `keydown` or `keyup` a handler cancelled ends it, and a key with ctrl, alt or cmd is not an activation. Space on a button does not scroll. A disabled button gets no click from the pointer, a key or `click()`. The click is the non-pointer one (`detail` 0). The React and Solid `Button` components are `div`s and keep their own JS key handling.
+
 ## Keyboard
 
 - `event.key` and `event.code` are DOM values (`"Enter"`, `" "`, `"ArrowLeft"`), with `repeat` and modifier fields (zed reports key auto-repeat).
@@ -121,13 +127,15 @@ A `<webview>` is focusable like a text control, and its page holds the keyboard 
 ## Inputs and forms
 
 - `<input>` has `select()`, `setSelectionRange`, `selectionStart/End/Direction`, `disabled`, `type`, `maxLength` and number `min/max/step`.
-- `<form onSubmit>`, `name`, `required`, Enter to submit, `requestSubmit()` and `invalid` events.
+- `<form onSubmit>`, `name`, `required`, `requestSubmit()` and `invalid` events. Enter in an `<input>` follows HTML's implicit submission: with a submit button the first is the default button and gets a `click` (nothing happens if it is disabled); without one the form submits only if at most one `<input>` blocks it (every `<input>` does, a `<textarea>` does not).
 - The per-edit event is `onChange` with `inputType`, `data` and `isComposing`, once per edit like the DOM `input`. A composition's last `change` comes before `compositionend`.
 - In a textarea, Enter always inserts a newline.
 
 ## Accessibility
 
 Every `aria-*` attribute is accepted and mapped to AccessKit where a mapping exists. `id` replaces `aria-id`. Relations resolve by author id (a zed commit). `<label htmlFor>` names its control (activation is above), and `inert` is supported.
+
+An HTML tag has the implicit role Chrome gives it (`html/semantics.rs`): `button`, `a` with an `href` (link), `h1`-`h6` (heading with the level as `aria-level`), lists, `nav`, `main`, `aside`, `article`, `hr` (separator), `blockquote`, `dialog`, `p`, `figure`, the table family, and `dl`/`dt`/`dd`. A `header` or `footer` is the banner or content info only outside `article`, `aside`, `main`, `nav` and `section`, and a `section` is a region only with `aria-label` or `aria-labelledby`. An explicit `role` or `aria-level` wins. A `th` is always a column header (`scope` is not forwarded), and `<wbr>`'s zero width space is not read out. A `button` and an `a[href]` are tab stops without a `tabIndex` (a disabled button is not focusable at all).
 
 The test renderer's tree dump reports a descendant of an `aria-hidden` or `inert` node as hidden (a zed commit: AccessKit's flag covers descendants, the dump read only the node that carries it). A referenced element with no role becomes a `group` node so `aria-labelledby` can name it from its text.
 

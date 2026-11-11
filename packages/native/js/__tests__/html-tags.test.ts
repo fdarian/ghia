@@ -32,7 +32,7 @@ describe("HTML tags", () => {
 
   it("list as inline the tags whose native style is display inline", () => {
     const source = fs.readFileSync(new URL("../../src/html/tags.rs", import.meta.url), "utf8")
-    const inline = [...source.matchAll(/^\s*\(\s*"([a-z0-9]+)",\s*r#?"\{"display":"inline"/gm)].map((match) => match[1])
+    const inline = [...source.matchAll(/^\s*\(\s*"([a-z0-9]+)",\s*r#*"\{"display":"inline"/gm)].map((match) => match[1])
     expect([...HTML_INLINE_TAGS].sort()).toEqual(inline.sort())
     expect(isInlineHtmlTag("a")).toBe(true)
     expect(isInlineHtmlTag("span")).toBe(false)
