@@ -72,8 +72,9 @@ pub struct RetainedElement {
     pub id: u64,
     pub element_type: String,
     /// `element_type` is an SVG element wherever it is put, which decides the case of its attribute
-    /// names (`attributes.rs`). Kept because every attribute read and write asks.
-    pub(crate) is_svg: bool,
+    /// names (`attributes.rs`). Worked out at the first attribute read or write, which an app with no
+    /// sheet never makes, and kept because every one after asks.
+    is_svg: std::cell::OnceCell<bool>,
     /// Shared, not owned. `StyleDesc` is ~1.4 KB, and holding it inline made an
     /// unstyled element pay for a style it does not have: `RetainedElement` was
     /// 1624 bytes, and the `HashMap` stores values inline, so the whole table
@@ -303,7 +304,7 @@ impl RetainedElement {
     pub fn new(id: u64, element_type: String, revision: u64) -> Self {
         Self {
             id,
-            is_svg: crate::custom_elements::svg_tree::is_svg_tag(&element_type),
+            is_svg: std::cell::OnceCell::new(),
             element_type,
             style: None,
             own_style: None,
@@ -365,13 +366,17 @@ impl RetainedElement {
         self.extras.as_deref()?.before_transition.as_deref()
     }
 
+    pub(crate) fn is_svg(&self) -> bool {
+        *self.is_svg.get_or_init(|| crate::custom_elements::svg_tree::is_svg_tag(&self.element_type))
+    }
+
     pub(crate) fn attribute_store(&self) -> Option<&crate::attributes::AttributeStore> {
         self.extras.as_deref().map(|extras| &extras.attributes)
     }
 
     /// Returns whether the attribute changed.
     pub(crate) fn set_attribute(&mut self, name: &str, value: Option<String>) -> bool {
-        let name = &*crate::attributes::stored_name(self.is_svg, name);
+        let name = &*crate::attributes::stored_name(self.is_svg(), name);
         if value.is_none() && self.attribute_store().is_none_or(|store| store.get(name).is_none()) {
             return false;
         }

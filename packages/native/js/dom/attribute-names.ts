@@ -9,7 +9,19 @@ export function attributeNameOf(prop: string, svg: boolean): string {
   if (prop === "className") return "class"
   if (svg) return prop
   if (prop === "htmlFor") return "for"
-  return prop.toLowerCase()
+  return lowerCased(prop)
+}
+
+const LOWER_CASED_LIMIT = 1024
+const lowerCasedProps = new Map<string, string>()
+
+/** `toLowerCase` of a prop name, remembered: an adapter asks for every prop of every element, and the names repeat. */
+function lowerCased(prop: string): string {
+  const known = lowerCasedProps.get(prop)
+  if (known !== undefined) return known
+  const lower = prop.toLowerCase()
+  if (lowerCasedProps.size < LOWER_CASED_LIMIT) lowerCasedProps.set(prop, lower)
+  return lower
 }
 
 /** The name `getAttribute(name)` looks for: HTML names are case-insensitive, SVG names are not. */
@@ -26,14 +38,27 @@ export const NOT_ATTRIBUTES: ReadonlySet<string> = new Set(["children", "key", "
  * (empty) for true and absent for false.
  */
 export function attributeText(name: string, value: unknown): string | null {
-  if (value === undefined || value === null) return null
-  // A handler or a style object is not an attribute: there is no text to give for it.
-  if (typeof value === "function" || typeof value === "object") return null
-  const lower = name.toLowerCase()
-  if (lower.startsWith("data-") || lower.startsWith("aria-")) return String(value)
-  if (value === false) return null
-  if (value === true) return ""
-  return String(value)
+  switch (typeof value) {
+    case "string":
+      return value
+    case "number":
+      return String(value)
+    case "boolean":
+      if (holdsBooleanText(name)) return String(value)
+      return value ? "" : null
+    case "undefined":
+    case "function":
+    case "object":
+      // A handler or a style object is not an attribute: there is no text to give for it.
+      return null
+    default:
+      return String(value)
+  }
+}
+
+function holdsBooleanText(name: string): boolean {
+  const lower = lowerCased(name)
+  return lower.startsWith("data-") || lower.startsWith("aria-")
 }
 
 /**

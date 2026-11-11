@@ -78,7 +78,7 @@ impl RetainedElement {
     /// The attribute `name` JS stored with `set_attribute`, by the DOM's rule for the case of the
     /// name: ignored on an HTML element, kept on an SVG one.
     pub fn attribute(&self, name: &str) -> Option<Cow<'_, str>> {
-        let name = stored_name(self.is_svg, name);
+        let name = stored_name(self.is_svg(), name);
         self.attribute_store()?.get(&name).map(Cow::Borrowed)
     }
 }

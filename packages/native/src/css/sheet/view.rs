@@ -97,7 +97,7 @@ impl ElementView for TreeView<'_> {
     fn attr(&self, name: AttrName) -> Option<AttrValue<'_>> {
         let sheets = &self.tree.sheets;
         let element = self.element();
-        let name = if element.is_svg { name.written } else { name.lower };
+        let name = if element.is_svg() { name.written } else { name.lower };
         if name == sheets.style {
             let own = element.own_style()?;
             let raw = self.tree.styles.raw_of(own).expect("an own style comes from StyleTable::intern");
