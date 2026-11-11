@@ -19,7 +19,7 @@ export type StyleBinding = {
 
 type StyleRecord = Record<string, unknown>
 
-/** The properties whose `StyleDesc` value is a number only: native does not read their text. */
+/** The properties whose `StyleDesc` value is a number when the text is one; other text (`50%`, `auto`, `none`, `inherit`) goes to native as it is. */
 const NUMBER_ONLY: ReadonlySet<string> = new Set(["flexGrow", "flexShrink", "order", "zIndex", "opacity", "lineClamp"])
 
 /**
@@ -98,12 +98,11 @@ export function serializeStyle(style: StyleDesc): string {
   return text
 }
 
-/** What a declaration's value is in a `StyleDesc`, or `undefined` for a value CSS would drop. */
-function storedValue(key: string, text: string): string | number | undefined {
-  if (!isCustom(key) && NUMBER_ONLY.has(key)) {
-    const number = Number(text)
-    return Number.isFinite(number) ? number : undefined
-  }
+const NUMERIC_TEXT = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i
+
+/** What a declaration's value is in a `StyleDesc`: a number for numeric text on a number property, else the text for native to judge. */
+function storedValue(key: string, text: string): string | number {
+  if (!isCustom(key) && NUMBER_ONLY.has(key) && NUMERIC_TEXT.test(text)) return Number(text)
   return text
 }
 
@@ -182,8 +181,8 @@ function sameValue(left: unknown, right: unknown): boolean {
 /**
  * `live` with a framework's change from `previous` to `next` applied: what `next` set or changed
  * is written over code's, what `previous` had and `next` does not is removed, and every other
- * property keeps what the live style holds, code's included. A property already in `live` keeps
- * its place, because a shorthand written after a longhand covers it.
+ * property keeps what the live style holds, code's included. What `next` set or changed moves last,
+ * because the last of a shorthand and a longhand wins.
  */
 export function applyStyleChange(live: StyleDesc, previous: StyleDesc, next: StyleDesc): StyleDesc {
   const result = { ...live } as StyleRecord
@@ -192,8 +191,8 @@ export function applyStyleChange(live: StyleDesc, previous: StyleDesc, next: Sty
   for (const key of Object.keys(after)) {
     const value = after[key]
     if (sameValue(before[key], value)) continue
-    if (value === undefined) delete result[key]
-    else result[key] = value
+    delete result[key]
+    if (value !== undefined) result[key] = value
   }
   for (const key of Object.keys(before)) if (!(key in after)) delete result[key]
   return result as StyleDesc
@@ -265,10 +264,9 @@ class CSSStyleDeclarationClass {
     if (IMPORTANT.test(text)) return
     if (priority !== undefined && priority !== "" && String(priority).toLowerCase() !== "important") return
     const stored = storedValue(key, text)
-    if (stored === undefined) return
     const live = this.#binding.style as StyleRecord
-    if (live[key] === stored) return
-    // Written last, as in CSS: the last of a shorthand and a longhand wins.
+    // Written last even when the value is the same: the last of a shorthand and a longhand wins.
+    if (live[key] === stored && Object.keys(live).at(-1) === key) return
     const next = { ...live }
     delete next[key]
     next[key] = stored
@@ -301,10 +299,8 @@ class CSSStyleDeclarationClass {
     for (const [name, value] of parseDeclarations(text)) {
       const key = keyOf(name)
       if (key === undefined) continue
-      const stored = storedValue(key, value)
-      if (stored === undefined) continue
       delete declared[key]
-      declared[key] = stored
+      declared[key] = storedValue(key, value)
     }
     return declared
   }

@@ -72,9 +72,23 @@ describe("CSSStyleDeclaration", () => {
     const { owner, style } = declare()
     style.setProperty("opacity", "0.5")
     style.zIndex = "3" as never
-    style.setProperty("order", "x")
     expect(owner.style).toEqual({ opacity: 0.5, zIndex: 3 })
     expect(style.opacity).toBe("0.5")
+  })
+
+  it("passes text that is not a number on to native, so auto, none, percentages and keywords are not dropped", () => {
+    const { owner, style } = declare()
+    style.zIndex = "10" as never
+    expect(owner.style).toEqual({ zIndex: 10 })
+    style.zIndex = "auto" as never
+    expect(owner.style).toEqual({ zIndex: "auto" })
+    style.opacity = "50%" as never
+    style.lineClamp = "none" as never
+    style.flexGrow = "inherit" as never
+    expect(owner.style).toEqual({ zIndex: "auto", opacity: "50%", lineClamp: "none", flexGrow: "inherit" })
+    expect(style.cssText).toBe("z-index: auto; opacity: 50%; line-clamp: none; flex-grow: inherit;")
+    style.cssText = "z-index: auto; opacity: 0.25"
+    expect(owner.style).toEqual({ zIndex: "auto", opacity: 0.25 })
   })
 
   it("removes a property for an empty value or null, and ignores what it cannot hold", () => {
@@ -124,6 +138,14 @@ describe("CSSStyleDeclaration", () => {
     const { owner, style } = declare({ padding: 4, paddingTop: 8 })
     style.setProperty("padding", "2px")
     expect(Object.keys(owner.style)).toEqual(["paddingTop", "padding"])
+  })
+
+  it("moves a property last even when its value did not change", () => {
+    const { owner, style } = declare()
+    style.marginLeft = "5px"
+    style.margin = "0"
+    style.marginLeft = "5px"
+    expect(Object.keys(owner.style)).toEqual(["margin", "marginLeft"])
   })
 
   it("serializes cssText as Chrome writes it", () => {
@@ -196,9 +218,12 @@ describe("applyStyleChange", () => {
     expect(result).toEqual(hovered)
   })
 
-  it("keeps the place of a property that is already there", () => {
-    const result = applyStyleChange({ padding: 1, paddingTop: 2 } as StyleDesc, { padding: 1 }, { padding: 3 })
+  it("moves what the framework changed after what code wrote earlier", () => {
+    const result = applyStyleChange({ padding: 1, paddingTop: 2 } as StyleDesc, { paddingTop: 2 }, { paddingTop: 3 })
     expect(Object.keys(result)).toEqual(["padding", "paddingTop"])
+    expect(result).toEqual({ padding: 1, paddingTop: 3 })
+    const shorthand = applyStyleChange({ padding: 1, paddingTop: 2 } as StyleDesc, { padding: 1 }, { padding: 3 })
+    expect(Object.keys(shorthand)).toEqual(["paddingTop", "padding"])
   })
 
   it("does not change the live style in place", () => {
