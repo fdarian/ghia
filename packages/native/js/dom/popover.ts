@@ -187,13 +187,15 @@ function hideAutoPopoversAfter(renderer: NativeRenderer, until: Showing | undefi
   }
 }
 
-function hide(record: Showing, fireEvents: boolean): void {
+/** `attributeChanged`: the `popover` attribute was just changed, so a record whose attribute is gone is the one being hidden, not a stale one. */
+function hide(record: Showing, fireEvents: boolean, attributeChanged = false): void {
+  const isOpen = () => (attributeChanged ? showing.get(record.element) === record : current(record.element) === record)
   if (record.kind === "auto") hideAutoPopoversAfter(record.renderer, record)
-  if (current(record.element) !== record) return
+  if (!isOpen()) return
   if (fireEvents) {
     fire(record, record.element, "beforetoggle", "open", "closed", false)
     // A listener can have hidden it, or taken the attribute away.
-    if (current(record.element) !== record) return
+    if (!isOpen()) return
   }
   forget(record, true)
   if (fireEvents) queueToggle(record, record.element, "open", "closed")
@@ -244,14 +246,15 @@ export function togglePopover(element: Element, probe: PopoverProbe, force?: boo
 }
 
 /**
- * Code is about to set the `popover` attribute of `element` to `value` (`null` takes it away): a
- * popover that is showing and is not the same kind afterwards is hidden, with the events of any
- * hide. They run before the attribute changes, so a listener still reads the old one.
+ * Code sets the `popover` attribute of `element` to `value` (`null` takes it away): the attribute is
+ * written by `write`, then a popover that is showing and is not the same kind afterwards is hidden,
+ * with the events of any hide, which read the new attribute as the spec's attribute change steps do.
  */
-export function popoverAttributeWillChange(element: Element, value: string | null): void {
+export function writePopoverAttribute(element: Element, value: string | null, write: () => void): void {
   const record = current(element)
+  write()
   if (record === undefined || popoverKind(value) === record.kind) return
-  hide(record, true)
+  hide(record, true, true)
 }
 
 /** The showing `auto` popover that holds `target`: the nearest one of it or of an ancestor. */

@@ -9,7 +9,7 @@ import { document, type GpuixDocument } from "./events/window-target.js"
 import { attributeLookupName, attributeNameOf, attributeText } from "./dom/attribute-names.js"
 import { DOM_BINDING, SVGElement, type Element } from "./dom/nodes.js"
 import { popoverProperty } from "./dom/popover-attribute.js"
-import { hidePopover, popoverAttributeWillChange, showPopover, togglePopover } from "./dom/popover.js"
+import { hidePopover, showPopover, togglePopover, writePopoverAttribute } from "./dom/popover.js"
 import { serializeStyle } from "./dom/css-style-declaration.js"
 import type { StyleDesc } from "./host.js"
 
@@ -138,8 +138,7 @@ export function defineDomMembers<This extends object>(
       set(this: This, value: string | null | undefined) {
         const element = this as unknown as Element
         const text = value === null || value === undefined ? null : String(value)
-        popoverAttributeWillChange(element, text)
-        element[DOM_BINDING]().setProp("popover", text === null ? false : text)
+        writePopoverAttribute(element, text, () => element[DOM_BINDING]().setProp("popover", text === null ? false : text))
       },
     },
     offsetWidth: {

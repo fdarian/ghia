@@ -416,6 +416,32 @@ describeNative("popover in React", () => {
     expect(seen).toEqual(["before closed", "toggle closed"])
   })
 
+  it("runs the events of a hide caused by the popover property after the attribute changed, so a listener reads the new value", async () => {
+    const found = mount((grab) => (
+      <div>
+        <div ref={grab("box")} popover="auto">
+          <div style={popoverStyle} />
+        </div>
+      </div>
+    ))
+    const read: Array<string | null> = []
+    found.box.addEventListener("beforetoggle", () => read.push(found.box.getAttribute("popover")))
+    found.box.addEventListener("toggle", () => read.push(found.box.getAttribute("popover")))
+    found.box.showPopover()
+    await nextTask()
+    read.length = 0
+    found.box.popover = null
+    await nextTask()
+    expect(read).toEqual([null, null])
+    found.box.popover = "auto"
+    found.box.showPopover()
+    await nextTask()
+    read.length = 0
+    found.box.popover = "manual"
+    await nextTask()
+    expect(read).toEqual(["manual", "manual"])
+  })
+
   it("keeps the open state out of the attributes, and a clone is closed", () => {
     const found = mount((grab) => (
       <div ref={grab("box")} popover="manual" id="pop">
