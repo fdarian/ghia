@@ -5,13 +5,15 @@
  * A selector is compiled once and kept by its text, so a library that asks the same question on
  * every focus change (a focus trap's list of tabbable elements) pays the parse once. The tree is
  * walked in JavaScript; only `:focus`, `:focus-visible`, `:focus-within`, `:hover` and `:active`
- * ask the native renderer, because focus and pointer state live there.
+ * ask the native renderer, because focus and pointer state live there, and `:checked` and `:indeterminate`,
+ * because so does the state of a checkbox or radio.
  */
 
 import { _compileUnsafe, type Options } from "css-select"
 import { isTraversal, parse, SelectorType, type Selector } from "css-what"
 import { hostElementMatches } from "../focus.js"
 import { namedError } from "../named-error.js"
+import { readInputChoice } from "./input-members.js"
 import { DOM_BINDING, SVGElement, type Element, type Node } from "./nodes.js"
 
 const ELEMENT_NODE = 1
@@ -105,6 +107,20 @@ function nativeState(pseudo: StatePseudo): (element: Element) => boolean {
   }
 }
 
+/** What `:checked` is written in terms of, so the live state of a control decides it and not the `checked` attribute. */
+const CHECKED_PSEUDO = "ghia-checked"
+
+/** An `<input>` checkbox or radio that is checked, or a checkbox that is indeterminate, as native holds it now. */
+function choiceState(wanted: (state: { checked: boolean; indeterminate: boolean; kind: string }) => boolean): (element: Element) => boolean {
+  return (element) => {
+    if (element.localName !== "input") return false
+    const native = element[DOM_BINDING]().native
+    if (native === undefined) return false
+    const state = readInputChoice(native)
+    return (state.kind === "checkbox" || state.kind === "radio") && wanted(state)
+  }
+}
+
 /**
  * What a written `:scope` is renamed to. `css-select` puts its own `:scope` in front of every selector it
  * makes relative, which `:has(> a)` is, and that one must keep meaning the `:has()` subject.
@@ -137,6 +153,10 @@ const OPTIONS: Options<Node, Element> = {
   cacheResults: false,
   pseudos: {
     [SCOPE_PSEUDO]: (element) => (scoping.root === null ? hasNoElementParent(element) : element === scoping.root),
+    // The alias replaces css-select's, which reads the `checked` attribute; `:selected` is still its own.
+    checked: `:is(:${CHECKED_PSEUDO}, :selected)`,
+    [CHECKED_PSEUDO]: choiceState((state) => state.checked),
+    indeterminate: choiceState((state) => state.kind === "checkbox" && state.indeterminate),
     focus: nativeState(":focus"),
     "focus-visible": nativeState(":focus-visible"),
     "focus-within": nativeState(":focus-within"),

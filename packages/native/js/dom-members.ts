@@ -4,7 +4,7 @@ import {
   type ElementEventListener,
   type ElementListenerOptions,
 } from "./events/element-listeners.js"
-import { activateAfterClick } from "./events/activation.js"
+import { activateAfterClick, preActivateClick } from "./events/activation.js"
 import { reportUncaught } from "./events/dispatch.js"
 import { createRendererState } from "./renderer-state.js"
 import { readLayoutSize } from "./bounds.js"
@@ -26,6 +26,7 @@ import {
   type StyleBinding,
 } from "./dom/style-declaration.js"
 import { Element, SVGElement, type Node } from "./dom/nodes.js"
+import { defineInputMembers } from "./dom/input-members.js"
 
 /** The DOM members every host element has beside the scroll ones. */
 export interface DomElement {
@@ -176,6 +177,7 @@ export function defineDomMembers<This extends object>(
   target: object,
   bind: (self: This) => DomElementBinding
 ): void {
+  defineInputMembers(target, bind)
   Object.defineProperties(target, {
     ownerDocument: { configurable: true, get: () => document },
     isConnected: {
@@ -247,6 +249,8 @@ export function defineDomMembers<This extends object>(
         const bound = bind(this)
         const path = pathFrom(this as unknown as Element)
         const report = bound.layout ? createRendererState(bound.layout.renderer).reportError : reportUncaught
+        // A click toggles a checkbox or radio before its listeners run, and puts it back when one cancels it.
+        preActivateClick(bound.layout, event)
         dispatchEventAlongPath(event, path, (index) => listenersOf(path[index]), bound.connected, report)
         activateAfterClick(bound.layout, event)
         return !event.defaultPrevented

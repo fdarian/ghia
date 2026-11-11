@@ -4393,7 +4393,9 @@ reported as disabled to assistive technology. The `disabled` and `enabled`
 [state styles](#form-control-state-disabled-enabled) follow it.
 
 `type` on an `<input>` is `'text'` (the default), `'password'`, `'number'`,
-`'email'`, `'search'`, `'tel'` or `'url'`. `type` on a `<textarea>` is ignored.
+`'email'`, `'search'`, `'tel'`, `'url'`, `'checkbox'`, `'radio'` or `'hidden'`
+(see [Checkbox, radio and hidden inputs](#checkbox-radio-and-hidden-inputs)); an
+unknown value is `'text'`. `type` on a `<textarea>` is ignored.
 
 - `'password'` paints one bullet per character. `onChange` and `value` carry
   the real text. Copy and cut do nothing, double click selects all, and the
@@ -4412,6 +4414,51 @@ many UTF-16 code units. A `value` set from code is kept whole even when it is
 longer; the user can then only delete. An edit with no room for what it inserts
 is rejected whole, so typing over a selection in a value that is already too
 long leaves the text and the selection as they were.
+
+### Checkbox, radio and hidden inputs
+
+`<input type="checkbox">`, `<input type="radio">` and `<input type="hidden">` work as in HTML, so
+`@base-ui/react`'s Checkbox, Switch and Radio, which render a `<span role="checkbox">` beside a visually
+hidden `<input>` and click it, run unchanged. A change of `type` builds the other control and keeps the props.
+
+- **A checkbox and a radio are a box with nothing painted in it:** `display: inline-block`, 13 by 13 px, with
+  the margin Chrome gives them (`3px 3px 3px 4px`, a radio `3px 3px 0 5px`). Style it, or hide it and draw
+  your own, as Base UI does. See [deviations](./fork/deviations.md#checkbox-radio-and-hidden-inputs).
+- **State.** `checked` sets the checkedness each time its value is written (as React DOM sets the property),
+  and makes it dirty. `defaultChecked` sets it only while it is not dirty: a write to `checked` or a user's
+  toggle makes it dirty. `indeterminate` is a property only (no attribute); a user's toggle clears it.
+  `value` is the form value and defaults to `"on"`. A ref to the element has them as properties:
+
+  ```tsx
+  ref.current.checked           // live: a click, a prop or an assignment changed it
+  ref.current.defaultChecked
+  ref.current.indeterminate = true
+  ref.current.value             // "on"; for a text input, its text
+  ```
+
+  Reading `checked` and writing any of them send the pending changes to native first, so they are never stale.
+  Another element has none of these properties, and an assignment makes an own property, as in the DOM.
+- **Activation.** A click, Space on the focused control (on key up, like a button), `element.click()` and a
+  `click` an app dispatches at the element (`new PointerEvent('click', …)`) activate it, and a click on its
+  `<label>` does once. A disabled or `inert` control does nothing. Before the click's listeners run the control
+  is toggled (a radio becomes checked and unchecks its group), so a click handler reads the new `checked`.
+  If a listener cancels the click, the control is put back. Otherwise `input` and then `change` fire,
+  bubbling and not cancelable, after the click. A radio that was checked fires nothing. A radio's group is the radios
+  with the same non-empty `name` in the same form, or in the same tree when they have no form.
+  Arrow keys do not move between the radios of a group.
+- **Events.** `onInput` (or `addEventListener('input')`) and `onChange` (`'change'`) each fire once per toggle, `input`
+  first. On a text control `onChange` is the per-edit event and `onInput` never fires.
+- **Controlled.** A control with a `checked` prop goes back to that prop after the change handlers have run
+  (as React DOM restores a controlled input), so a handler that does not take the new value leaves the control
+  as it was.
+- **Forms.** A checkbox or radio is in `formData` under its `name` and `value` only while it is checked; a
+  `required` checkbox must be checked, and a `required` radio needs one of its group checked. A hidden input
+  submits its `value`, which is how Base UI submits the unchecked value of a checkbox. Neither blocks implicit
+  submission. `formData` is in document order.
+- **Hidden** builds no box (`display: none`) and takes no focus, and it has no accessibility node.
+- **Accessibility, focus and selectors.** The role is `checkbox` or `radio`, with the toggled state (`mixed` for an
+  indeterminate checkbox; an explicit `aria-checked` wins). Both are tab stops unless disabled, and a click
+  focuses them without `:focus-visible`. `:checked` and `:indeterminate` read the live state.
 
 ### Scrollbars
 
@@ -4699,6 +4746,9 @@ submission while the control is empty.
   `submitter` becomes `event.submitter`. As in the DOM it throws a `TypeError`
   when it is not a submit `<button>` and a `NotFoundError` `DOMException` when it
   belongs to another form; a disabled submit button is accepted.
+- **Checkbox, radio and hidden inputs.** A checked checkbox or radio is submitted
+  under its `value` (`"on"` by default), an unchecked one is not, and a hidden
+  input always is: see [Checkbox, radio and hidden inputs](#checkbox-radio-and-hidden-inputs).
 - **What is not there.** A `<button>` is not submitted with a `name` and `value`
   (`formData` holds `<input>` and `<textarea>` controls), and there is no form
   reset. See [deviations](./fork/deviations.md#html-tags).
@@ -4910,7 +4960,7 @@ sequence.
 ### The change event
 
 `onChange` fires once per edit of the text of an `<input>` or `<textarea>`, which is
-what the DOM calls `input` (there is no `onInput`, and no `beforeinput`). Besides
+what the DOM calls `input` (`onInput` fires for a checkbox or radio only, and there is no `beforeinput`). Besides
 `value` it carries the fields of a DOM `InputEvent`, filled as Chrome fills them:
 
 | Edit | `inputType` | `data` |
@@ -4952,7 +5002,7 @@ A host element (a React ref, a Solid `HostElement`) has the members a library wr
 
 #### Activation of a dispatched click
 
-As in the DOM, a `click` that is a `MouseEvent` (a `PointerEvent` too) and was not canceled runs the activation behaviour of the first element on its path that has one, once the dispatch is over, whether or not it bubbles and though it is not trusted. In Ghia that is native's own behaviour, the one a real click runs: a `<label>` focuses its control and dispatches a click on it, and a submit `<button>` in a `<form>` submits it with the button as `event.submitter`; an `<a href>` does nothing, as with a real click. A disabled control, a click a listener canceled, another event type and a click that is a plain `Event` run nothing. The activation click on a label's control is a native one (`detail` 0, no position). Checkbox and radio toggling is not there yet.
+As in the DOM, a `click` that is a `MouseEvent` (a `PointerEvent` too) and was not canceled runs the activation behaviour of the first element on its path that has one, once the dispatch is over, whether or not it bubbles and though it is not trusted. In Ghia that is native's own behaviour, the one a real click runs: a `<label>` focuses its control and dispatches a click on it, and a submit `<button>` in a `<form>` submits it with the button as `event.submitter`; an `<a href>` does nothing, as with a real click. A disabled control, a click a listener canceled, another event type and a click that is a plain `Event` run nothing. The activation click on a label's control is a native one (`detail` 0, no position). A checkbox or radio is toggled before the dispatched click's listeners run and put back when one cancels it, and fires `input` and `change` after it: see [Checkbox, radio and hidden inputs](#checkbox-radio-and-hidden-inputs). `input.checked`, `defaultChecked`, `indeterminate` and `value` are members of an `<input>` element.
 
 ```tsx
 // What Base UI's checkbox does to toggle its input with the modifiers of the click it heard:
@@ -4972,7 +5022,7 @@ Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `
 | `children`, `childElementCount`, `firstElementChild`, `lastElementChild`, `previousElementSibling`, `nextElementSibling` | The same, elements only. `children` is an array, not an `HTMLCollection`. |
 | `contains(node)`, `getRootNode()`, `compareDocumentPosition(node)` | `contains` includes the node itself. `getRootNode()` is `document` for a mounted node and the top of its tree otherwise. `compareDocumentPosition` gives the `DOCUMENT_POSITION_*` bits (`DISCONNECTED`, `PRECEDING`, `FOLLOWING`, `CONTAINS`, `CONTAINED_BY`); two trees that are not in one document are `DISCONNECTED` and `IMPLEMENTATION_SPECIFIC` with a stable order. `document.contains(node)` is `node.isConnected`. |
 | `textContent` | The text of the node and its descendants. Read only: there is no setter yet. |
-| `matches(selector)`, `closest(selector)` | A real selector, as in the DOM: type, class, id, attribute (`=`, `~=`, `\|=`, `^=`, `$=`, `*=`, with `i` and `s`), the combinators (space, `>`, `+`, `~`), selector lists, and `:not()`, `:is()`, `:where()`, `:has()`, `:root`, `:empty`, `:scope`, `:first-child`, `:last-child`, `:only-child`, `:nth-child()`, `:nth-last-child()` and the `-of-type` forms, `:lang()`, `:disabled`, `:enabled` and `:checked` (read from the attributes). `closest` starts at the element itself and walks up through the parents. `:scope` is the element the method is called on. `:focus`, `:focus-visible`, `:focus-within`, `:hover` and `:active` ask the window, so they answer for the focus and pointer as they are at that moment (and are `false` for an element that is not mounted). A selector the engine cannot parse, or a pseudo-class or pseudo-element it does not have, throws a `SyntaxError` `DOMException`; see [the deviations](fork/deviations.md#dom-selectors). Tag names are compared without case (`P` matches a `<p>`), as an HTML document does. |
+| `matches(selector)`, `closest(selector)` | A real selector, as in the DOM: type, class, id, attribute (`=`, `~=`, `\|=`, `^=`, `$=`, `*=`, with `i` and `s`), the combinators (space, `>`, `+`, `~`), selector lists, and `:not()`, `:is()`, `:where()`, `:has()`, `:root`, `:empty`, `:scope`, `:first-child`, `:last-child`, `:only-child`, `:nth-child()`, `:nth-last-child()` and the `-of-type` forms, `:lang()`, `:disabled`, `:enabled` (read from the attributes), and `:checked` and `:indeterminate` (the live state of a checkbox or radio). `closest` starts at the element itself and walks up through the parents. `:scope` is the element the method is called on. `:focus`, `:focus-visible`, `:focus-within`, `:hover` and `:active` ask the window, so they answer for the focus and pointer as they are at that moment (and are `false` for an element that is not mounted). A selector the engine cannot parse, or a pseudo-class or pseudo-element it does not have, throws a `SyntaxError` `DOMException`; see [the deviations](fork/deviations.md#dom-selectors). Tag names are compared without case (`P` matches a `<p>`), as an HTML document does. |
 | `querySelector(selector)`, `querySelectorAll(selector)` | On an element, on `document` and on a `DocumentFragment`. The elements below the node that match, in document order: the node itself is not one, but the whole selector is matched against the tree, so `el.querySelectorAll('main p')` finds a `p` in `el` whose `main` is above it. `querySelectorAll` returns a static list (an `Array` with `item(index)`, `length` and `forEach`) that does not follow later changes to the tree, and `querySelector` the first or `null`. `document.querySelector(…)` searches the `<html>` of every window, so an app's elements and a portal into `document.body` are both found; with nothing mounted it finds nothing. `:scope` in a query on `document` is `<html>`. A selector is compiled once and kept by its text, so asking the same question on every focus change (a focus trap's tabbable list, `a[href], button:not([disabled]), [tabindex]`) walks the tree and parses nothing. |
 | `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `className` or `class` prop (`""` without one), an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a frozen read-only snapshot of the `data-*` props with the names in camel case (`data-row-id` is `rowId`). |
 | `setAttribute(name, value)`, `removeAttribute(name)`, `toggleAttribute(name, force?)` | Write the prop the attribute stands for through the framework's own prop path, so native applies it as if the app had rendered that prop, at once (the mutations are flushed before the call returns), and `getAttribute` gives it back. This is what `@floating-ui`'s `markOthers` and Base UI's focus manager do: `setAttribute('aria-hidden', 'true')` leaves the element out of the accessibility tree, `setAttribute('inert', '')` makes the subtree inert, `setAttribute('tabindex', '-1')` makes the element focusable and `'0'` a tab stop. Names are lowercased on HTML elements, as in the DOM, and an empty name or one with a space, `/`, `>`, `=` or NUL throws `InvalidCharacterError`. The value is text: `tabindex`, `colspan`, `rowspan`, `span` and `maxlength` hold the integer the text is (text that is no integer is kept as it is, and native ignores it); `inert`, `disabled`, `hidden`, `required`, `readonly`, `autofocus`, `checked`, `multiple`, `selected` and `open` are on whatever the text is (`""` too), and `draggable` is on for `"true"`. `class` is `className` (or `class`, where the element was given that), `for` is `htmlFor`, and any other name is the prop of that name (`aria-*`, `data-*`). An element keeps the key its framework used for an attribute. Like the DOM, a later commit of the same prop by React or Solid overwrites the attribute, a commit that leaves the prop as it was does not, and an attribute the framework never set stays. `setAttribute('style', text)` sets `style.cssText` (below), and `on*` is kept as text for `getAttribute` and does nothing else: see [deviations](./fork/deviations.md#dom-attributes). `toggleAttribute` follows the DOM and returns whether the attribute is there afterwards. A `MutationObserver` with `attributes` gets a record, with `oldValue` where it asked, for each write that changes what `getAttribute` reads. |
@@ -8770,11 +8820,11 @@ ancestors that declare `hasDisabled` or `hasEnabled` in the same frame.
 [Transitions](#css-transitions), [animations](#css-animations) and
 [`<UniversalStyle>`](#universal-style) refinements work in them as in `hover`.
 
-**`:checked` is not available.** It needs a checkable element, and Ghia has none:
-every `<input type>` is text-like, and there is no checkbox, radio or `<option>`
-to be checked or selected. So there is no `checked` or `hasChecked` key; derive the
-state in your component and pass the style, as for a custom checkbox built from a
-`div`. It can be added together with a native checkbox control.
+**`:checked` is not a state style.** A checkbox and a radio have a checkedness now
+([Checkbox, radio and hidden inputs](#checkbox-radio-and-hidden-inputs)) and
+`matches(':checked')` reads it, but there is no `checked` or `hasChecked` key in a
+style: derive the state in your component and pass the style, as for a custom
+checkbox built from a `div`.
 
 ### Container queries
 

@@ -79,6 +79,7 @@ import type {
   RootEventHandlers,
   Text,
   TextControlSelection,
+  InputMembers,
   ScrollableElement,
   WindowKeyEventHandlers,
 } from "@ghia/native/host"
@@ -308,7 +309,7 @@ export interface WebviewInstance extends PublicInstance, WebviewMethods {
 }
 
 /** The ref of an `<input>` or `<textarea>`: the DOM selection API. */
-export interface TextControlInstance extends PublicInstance, TextControlSelection {
+export interface TextControlInstance extends PublicInstance, TextControlSelection, Partial<InputMembers> {
   type: "input" | "textarea"
 }
 

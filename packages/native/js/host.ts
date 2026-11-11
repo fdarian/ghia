@@ -77,6 +77,7 @@ export * from "./observers.js"
 export * from "./presence.js"
 export * from "./renderer-state.js"
 export * from "./text-selection.js"
+export type { InputMembers } from "./dom/input-members.js"
 export * from "./nativeview.js"
 export * from "./webview.js"
 export * from "./scroll.js"
@@ -1816,8 +1817,13 @@ export interface HostProps
   // `onCompositionStart`, `onCompositionUpdate` and `onCompositionEnd`, with
   // `on…Capture` twins: see CompositionEventProps. They bubble from the
   // `<input>` or `<textarea>` being composed in.
-  /** One edit of the text, the DOM `input`: see `HostInputEvent`. */
+  /** One edit of the text, the DOM `input`: see `HostInputEvent`. On a checkbox or radio, a click
+   *  that changed its checkedness, once, after `onInput`. */
   onChange?: (event: HostInputEvent) => void
+  /** A checkbox or radio was toggled by a click, Space, `click()` or a dispatched click: the DOM
+   *  `input` event, bubbling and not cancelable, before `change`. On a text control, `onChange`
+   *  is the per-edit event and `onInput` never fires. */
+  onInput?: (event: DomEvent) => void
   /** The DOM `submit` event of a descendant `<form>`, bubbling: see
    *  `FormProps.onSubmit`. Not available on `<input>` or `<textarea>`: handle
    *  Enter in `onKeyDown` and call `preventDefault()` to keep it from submitting
@@ -1953,7 +1959,7 @@ export interface TextControlProps extends Omit<HostProps, "onSubmit"> {
 }
 
 /** Values of `<input type>`. */
-export type InputType = "text" | "password" | "number" | "email" | "search" | "tel" | "url"
+export type InputType = "text" | "password" | "number" | "email" | "search" | "tel" | "url" | "checkbox" | "radio" | "hidden"
 
 export interface InputProps extends TextControlProps {
   /**
@@ -1966,8 +1972,21 @@ export interface InputProps extends TextControlProps {
    *   number. There is no spinner.
    * - `"search"` is exposed to assistive technology as a search field.
    * - `"email"`, `"tel"` and `"url"` behave as `"text"`.
+   * - `"checkbox"` and `"radio"` are a 13 by 13 box with nothing painted in it (style it, or hide it
+   *   and draw your own), a tab stop that a click or Space toggles, with `onInput` then `onChange`
+   *   after a toggle. They submit `name=value` (`value` defaults to `"on"`) only while checked.
+   * - `"hidden"` builds no box, takes no focus and submits its `value`.
    */
   type?: InputType
+  /**
+   * `type="checkbox"` and `"radio"`: the checkedness, set as React DOM sets the property, each time
+   * the prop changes (and so dirty: `defaultChecked` no longer decides it). A user's toggle changes
+   * it natively, and after the change handlers it goes back to this prop, as React DOM restores a
+   * controlled input.
+   */
+  checked?: boolean
+  /** `type="checkbox"` and `"radio"`: the checkedness until a user or a `checked` write sets it. */
+  defaultChecked?: boolean
   /** `type="number"` only. A number or numeric string. */
   min?: number | string
   /** `type="number"` only. A number or numeric string. */
@@ -2813,6 +2832,9 @@ export type NativeRenderer = MutationHost &
       | "hasPointerCapture"
       | "clickElement"
       | "activateElement"
+      | "preActivateElement"
+      | "cancelActivation"
+      | "getInputChoice"
       | "getAnimations"
       | "getSubtreeAnimations"
       | "getDocumentAnimations"

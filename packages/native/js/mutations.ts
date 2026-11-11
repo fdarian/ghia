@@ -217,6 +217,7 @@ export const EVENT_PROPS: readonly (readonly [string, string])[] = [
   ["onLayoutAnimationStart", "layoutAnimationStart"],
   ["onLayoutAnimationComplete", "layoutAnimationComplete"],
   ["onChange", "change"],
+  ["onInput", "input"],
   ["onSubmit", "submit"],
   ["onInvalid", "invalid"],
   ...DOM_DISPATCHED_HANDLER_PROPS,

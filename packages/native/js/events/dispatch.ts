@@ -77,6 +77,8 @@ const NON_BUBBLING_TYPES: ReadonlySet<string> = new Set([...PLAIN_NOTIFICATIONS,
 /** `preventDefault()` is a no-op on these, as in the DOM. */
 const NON_CANCELABLE_TYPES: ReadonlySet<string> = new Set([
   ...PLAIN_NOTIFICATIONS,
+  "input",
+  "change",
   "focusin",
   "focusout",
   "pointercancel",

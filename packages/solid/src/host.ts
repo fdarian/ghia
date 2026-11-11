@@ -49,6 +49,7 @@ import type {
   Animation,
   Document,
   DomElement,
+  InputMembers,
   ElementBinding,
   ElementMethods,
   GetAnimationsOptions,
@@ -457,7 +458,7 @@ export class HostElement extends HTMLElement {
 }
 
 /** The DOM scroll members: `scrollTop`, `scrollTo`, `scrollIntoView` and the rest. */
-export interface HostElement extends ScrollableElement, Omit<DomElement, "ownerDocument"> {
+export interface HostElement extends ScrollableElement, Omit<DomElement, "ownerDocument">, Partial<InputMembers> {
   /** Narrower than `Node.ownerDocument`: the app's `document`, whose `defaultView` is the window. */
   readonly ownerDocument: DomElement["ownerDocument"]
 }

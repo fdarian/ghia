@@ -115,6 +115,7 @@ describeNative("text control selection", () => {
       start: 1,
       end: 2,
       direction: "none",
+      value: "abc",
     })
   })
 
@@ -167,6 +168,7 @@ describeNative("text control selection", () => {
       start: 0,
       end: 5,
       direction: "none",
+      value: "hello",
     })
     testRoot.renderer.simulateKeystrokes("x")
     expect(testRoot.renderer.getAllText()).toContain("Value: x")

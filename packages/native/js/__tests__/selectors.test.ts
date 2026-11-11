@@ -12,7 +12,14 @@ type Props = Record<string, unknown>
 const states = { focus: new Set<number>(), focusVisible: new Set<number>(), focusWithin: new Set<number>(), hover: new Set<number>(), active: new Set<number>() }
 const asked: string[] = []
 
+/** The props of each element by id: the state of a checkbox the renderer reports. */
+const propsById = new Map<number, Props>()
+
 const renderer = {
+  getInputChoice(id: number) {
+    const props = propsById.get(id) ?? {}
+    return { kind: props.type, checked: props.checked === true, defaultChecked: false, indeterminate: props.indeterminate === true, value: "" }
+  },
   matchesFocus(id: number, selector: string): boolean {
     asked.push(selector)
     switch (selector) {
@@ -44,6 +51,7 @@ class FakeHtml extends HTMLElement {
     readonly props: Props = {}
   ) {
     super()
+    propsById.set(this.nativeId, props)
   }
   [DOM_BINDING](): ElementBinding {
     return elementBinding(this)
@@ -331,7 +339,7 @@ describe("closest", () => {
 })
 
 describe("the attributes a selector reads", () => {
-  it("matches :disabled, :enabled and :checked from the props", () => {
+  it("matches :disabled and :enabled from the props, and :checked and :indeterminate from the state native reports", () => {
     const off = el("button", { id: "off", disabled: true })
     const on = el("button", { id: "on", disabled: false })
     const field = el("input", { id: "field", type: "text" })
@@ -341,6 +349,9 @@ describe("the attributes a selector reads", () => {
     expect(ids(root.querySelectorAll(":disabled"))).toEqual(["off"])
     expect(ids(root.querySelectorAll(":enabled"))).toEqual(["on", "field", "box", "unchecked"])
     expect(ids(root.querySelectorAll(":checked"))).toEqual(["box"])
+    expect(ids(root.querySelectorAll(":indeterminate"))).toEqual([])
+    box.props.indeterminate = true
+    expect(ids(root.querySelectorAll(":indeterminate"))).toEqual(["box"])
     expect(ids(root.querySelectorAll("input:not([type='hidden'])"))).toEqual(["field", "box", "unchecked"])
   })
 

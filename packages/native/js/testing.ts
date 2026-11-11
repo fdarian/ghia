@@ -17,6 +17,7 @@ import {
   validateKeyframes,
   type ElementWebAnimationInfo,
   type EventPayload,
+  type InputChoiceState,
   type MediaFeatures,
   type MotionValuePlayback,
   type PatchCounters,
@@ -388,6 +389,9 @@ interface NativeTestRendererApi
   hasPointerCapture(elementId: number, pointerId: number): boolean
   clickElement(elementId: number): void
   activateElement(elementId: number): void
+  preActivateElement(elementId: number): void
+  cancelActivation(elementId: number): void
+  getInputChoice(elementId: number): InputChoiceState
   getAnimations(elementId: number): WebAnimationInfo[]
   getSubtreeAnimations(elementId: number): ElementWebAnimationInfo[]
   getDocumentAnimations(): ElementWebAnimationInfo[]
@@ -424,7 +428,7 @@ interface NativeTestRendererApi
   failStyleImage(url: string, message: string): void
   selectText(elementId: number): void
   setSelectionRange(elementId: number, start: number, end: number, direction?: string): void
-  getTextSelection(elementId: number): { start: number; end: number; direction: string }
+  getTextSelection(elementId: number): { start: number; end: number; direction: string; value: string }
   requestSubmit(elementId: number, submitterId?: number): void
   webviewCommand(elementId: number, command: string, argument?: string): void
   webviewState(elementId: number): {
@@ -1710,6 +1714,18 @@ export class TestRenderer implements NativeRenderer {
     this.native.activateElement(elementId)
   }
 
+  preActivateElement(elementId: number): void {
+    this.native.preActivateElement(elementId)
+  }
+
+  cancelActivation(elementId: number): void {
+    this.native.cancelActivation(elementId)
+  }
+
+  getInputChoice(elementId: number): InputChoiceState {
+    return this.native.getInputChoice(elementId)
+  }
+
   getAnimations(elementId: number): WebAnimationInfo[] {
     return this.native.getAnimations(elementId)
   }
@@ -1891,7 +1907,7 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
-  getTextSelection(elementId: number): { start: number; end: number; direction: string } {
+  getTextSelection(elementId: number): { start: number; end: number; direction: string; value: string } {
     this.native.flush()
     return this.native.getTextSelection(elementId)
   }

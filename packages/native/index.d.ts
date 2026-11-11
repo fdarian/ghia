@@ -528,6 +528,23 @@ export declare class GpuixRenderer {
    */
   getTextSelection(elementId: number): TextSelection
   /**
+   * `checked`, `defaultChecked`, `indeterminate` and `value` of an `<input>`: its state in the
+   * tree, which a click or a prop write changes (`custom_elements::input_choice`).
+   */
+  getInputChoice(elementId: number): InputChoiceState
+  /**
+   * The toggle of the checkbox or radio that a click an app dispatches at `element_id` is about
+   * to activate, which has to be made before the click's listeners run so that they see the new
+   * state. JS calls it before delivering the click; `cancelActivation` or `activateElement`
+   * follows. Does nothing for another element, a disabled control or one that is inert.
+   */
+  preActivateElement(elementId: number): void
+  /**
+   * A click an app dispatched at `element_id` was canceled: the checkbox or radio that
+   * `preActivateElement` toggled is put back.
+   */
+  cancelActivation(elementId: number): void
+  /**
    * `form.requestSubmit(submitter)`: validate the form's controls, then emit `submit`.
    * The events are delivered before this returns. A `submitter` that is not a submit button
    * refuses with `TypeError: ...`, and one of another form with `NotFoundError: ...`.
@@ -1193,6 +1210,18 @@ export declare class TestGpuixRenderer {
   requestSubmit(id: number, submitterId?: number | undefined | null): void
   /** `selectionStart`, `selectionEnd` and `selectionDirection`. */
   getTextSelection(elementId: number): TextSelection
+  /** `checked`, `defaultChecked`, `indeterminate` and `value` of an `<input>`. */
+  getInputChoice(elementId: number): InputChoiceState
+  /**
+   * The toggle of the checkbox or radio that a click an app dispatches at `element_id` is about
+   * to activate, made before the click's listeners run.
+   */
+  preActivateElement(elementId: number): void
+  /**
+   * A click an app dispatched at `element_id` was canceled: what `preActivateElement` toggled is
+   * put back.
+   */
+  cancelActivation(elementId: number): void
   /**
    * `loadURL(url)` (with the URL as `argument`), `reload()`, `stop()`, `goBack()` and
    * `goForward()` of a `<webview>`.
@@ -2177,6 +2206,20 @@ export interface HighlightRect {
   height: number
 }
 
+/** What the `checked`, `defaultChecked`, `indeterminate` and `value` properties of an `<input>` read. */
+export interface InputChoiceState {
+  /** `"checkbox"`, `"radio"`, `"hidden"` or `"text"`, which covers every other type. */
+  kind: string
+  checked: boolean
+  defaultChecked: boolean
+  indeterminate: boolean
+  /**
+   * The `value` attribute of a checkbox, radio or hidden input, with its default. Empty for a
+   * text field, whose value is its text (`getTextSelection`).
+   */
+  value: string
+}
+
 /**
  * Wayland `wlr-layer-shell` surface options. Linux/Wayland only; ignored on
  * every other platform. When present on `WindowOptions`, the window is opened
@@ -2671,6 +2714,8 @@ export interface TextSelection {
   end: number
   /** `"forward"`, `"backward"` or `"none"`. */
   direction: string
+  /** The text of the control, which is its `value`. */
+  value: string
 }
 
 /** One extra HTTP header on the feed or download request. */
