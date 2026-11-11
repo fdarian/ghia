@@ -9,6 +9,35 @@
 use crate::retained_tree::{RetainedElement, RetainedTree};
 use crate::style::{DimensionValue, StyleDesc};
 
+/// `element`, the box root `id` that runs something that paints (a caret) and so is built by every frame and recorded by
+/// none (`Retain::unrecorded_box_root` says which `subtree` it is, if it is one), as a root that gpui records as a source for a
+/// patch that lays it out again and never replays: its key is the frame's, as a unit's is. `env` is the build the root
+/// keeps for building it again. Anything else is `element` as it is.
+pub(crate) fn wrap_unrecorded(
+    id: u64,
+    subtree: Option<super::cull::Subtree>,
+    env: Option<crate::renderer::FrameEnv>,
+    element: gpui::AnyElement,
+    ctx: &mut crate::renderer::BuildCtx,
+) -> gpui::AnyElement {
+    use gpui::IntoElement;
+
+    let (Some(subtree), Some(env)) = (subtree, env) else {
+        return element;
+    };
+    let hook = crate::renderer::replay_hook(id, ctx.tapes.clone(), ctx.measurements.clone());
+    let retained = gpui::retained(
+        crate::renderer::retained_id(id),
+        ctx.retain.unit_key(),
+        crate::renderer::taped_build(id, element, ctx.tapes.clone()),
+    )
+    .on_replay_translated(hook)
+    .cull_outset(subtree.outset())
+    .patchable_relayout();
+    ctx.retain.add_box_root(crate::retain::Unit { id, env });
+    retained.into_any_element()
+}
+
 /// Whether `element` is a plain box that is a candidate for a box root, as far as its own style and its parent's say.
 /// What is in it (an excluded element, something lifted, too many elements) and where it is built (a row of a virtual
 /// list, inside another root) are judged by `Retain`, which has the build.

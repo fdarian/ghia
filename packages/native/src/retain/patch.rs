@@ -146,13 +146,12 @@ impl GpuixView {
                     return false;
                 }
             };
-            let rewritten_before = window.patch_counters().rewritten_recordings;
             let done = if finishing { window.finish_prepared_patch(app, accepted) } else { window.repaint_in_place(units, app, accepted) };
             let Ok(outcome) = done else {
                 return false;
             };
             window.repaint_scroll_thumbs(thumbs, app);
-            let rewritten = window.patch_counters().rewritten_recordings - rewritten_before >= anchors.len() as u64;
+            let rewritten: Vec<u64> = anchors.iter().copied().filter(|id| outcome.rewritten.contains(&crate::renderer::retained_id(*id))).collect();
             // An anchor laid out again wrote other boxes, texts and paragraphs than the frame did: they
             // take the place of the ones it wrote. A row repainted wrote the same, but its text layouts are the
             // new ones, which gpui moves with the recording it rewrote and the frames that move the row move.
@@ -211,7 +210,7 @@ impl GpuixView {
                 let (handle, viewport, tree) = (window.window_handle(), window.viewport_size(), tree.clone());
                 app.defer(move |cx| crate::observers::sweep_after_translate(handle, viewport, &reports, &tree, &callback, cx));
             }
-            view.update(app, |view, cx| view.continue_after_patch(window, &built.stepped, &anchors, rewritten, cx));
+            view.update(app, |view, cx| view.continue_after_patch(window, &built.stepped, &anchors, &rewritten, cx));
             true
         };
         window.set_frame_patcher(Some(Rc::new(patcher)));
@@ -438,7 +437,7 @@ impl GpuixView {
     }
 
     /// Asks for the frames that what still runs after a patch needs, as the end of a frame does.
-    fn continue_after_patch(&mut self, window: &mut gpui::Window, stepped: &Stepped, anchors: &[u64], rewritten: bool, cx: &mut gpui::Context<Self>) {
+    fn continue_after_patch(&mut self, window: &mut gpui::Window, stepped: &Stepped, anchors: &[u64], rewritten: &[u64], cx: &mut gpui::Context<Self>) {
         // The elements a hover restyled by paint are drawn: the roots that hold them are older than
         // what is shown, and the frame built whole after the patches builds them again.
         let hovered = self.pointer.borrow().take_paint_pending();
@@ -451,7 +450,7 @@ impl GpuixView {
             tree.take_structure();
             self.retain.note_patched(tree.root_revision());
             for &anchor in anchors {
-                self.retain.anchor_repainted(&tree, anchor, rewritten);
+                self.retain.anchor_repainted(&tree, anchor, rewritten.contains(&anchor));
             }
         }
         crate::renderer::layout_is_drawn(cx.entity_id());

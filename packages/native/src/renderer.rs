@@ -7779,7 +7779,7 @@ pub(crate) struct BuildCtx<'a> {
     css_animations: &'a mut crate::motion::CssAnimations,
     contents_styles: &'a mut HashMap<u64, Arc<ContentsFrame>>,
     keyframes: &'a crate::motion::KeyframesRegistry,
-    measurements: &'a crate::motion::measure::Measurements,
+    pub measurements: &'a crate::motion::measure::Measurements,
     layout_flips: &'a crate::motion::LayoutFlips,
     svg_trees: &'a mut crate::custom_elements::svg_tree::SvgTrees,
     pub now: web_time::Instant,
@@ -7856,7 +7856,7 @@ pub(crate) struct BuildCtx<'a> {
     /// What this build is recording for the next, see `retain`.
     pub retain: &'a mut crate::retain::Retain,
     /// See `GpuixView::tapes`.
-    tapes: &'a crate::tape::Tapes,
+    pub tapes: &'a crate::tape::Tapes,
 }
 
 impl BuildCtx<'_> {
@@ -10533,10 +10533,7 @@ fn build_element_in(
             anchor_root(id, env, subtree, element, ctx)
         }
         (None, Some(recording)) => recorded_root(id, recording, patch_root_env, box_root_env, element, ctx),
-        (None, None) => match (unrecorded_box, patch_root_env.or(box_root_env)) {
-            (Some(subtree), Some(env)) => box_root_unrecorded(id, env, subtree, element, ctx),
-            _ => element,
-        },
+        (None, None) => crate::layout::box_root::wrap_unrecorded(id, unrecorded_box, patch_root_env.or(box_root_env), element, ctx),
     }
 }
 
@@ -10698,7 +10695,7 @@ pub(crate) fn retained_id(id: u64) -> gpui::ElementId {
 
 /// What a replay of the retained root `id` does outside the frame: the registries it wrote are
 /// written again from its tape.
-fn replay_hook(
+pub(crate) fn replay_hook(
     id: u64,
     tapes: crate::tape::Tapes,
     measurements: crate::motion::measure::Measurements,
@@ -10777,26 +10774,6 @@ fn anchor_root(
     retained.into_any_element()
 }
 
-/// `element`, the box root `id` that runs something that paints (a caret) and so is built by every frame, as a root that
-/// gpui records as a source for a patch that lays it out again and never replays: its key is the frame's, as a unit's is.
-fn box_root_unrecorded(
-    id: u64,
-    env: FrameEnv,
-    subtree: crate::layout::cull::Subtree,
-    element: gpui::AnyElement,
-    ctx: &mut BuildCtx,
-) -> gpui::AnyElement {
-    use gpui::IntoElement;
-
-    let hook = replay_hook(id, ctx.tapes.clone(), ctx.measurements.clone());
-    let retained = gpui::retained(retained_id(id), ctx.retain.unit_key(), taped_build(id, element, ctx.tapes.clone()))
-        .on_replay_translated(hook)
-        .cull_outset(subtree.outset())
-        .patchable_relayout();
-    ctx.retain.add_box_root(crate::retain::Unit { id, env });
-    retained.into_any_element()
-}
-
 /// `element`, just built whole, as the root gpui records in this frame for the next to replay
 /// (`Retain::exit`): the key is the one the record this build leaves has, so the frame after enters
 /// the element with a key that gpui has a recording of, and builds nothing, where a root that is
@@ -10848,7 +10825,7 @@ fn recorded_root(
 
 /// What a retained root hands gpui for a subtree built already: the element, with the tape of what
 /// its prepaint and paint write into the registries when gpui records it.
-fn taped_build(
+pub(crate) fn taped_build(
     id: u64,
     element: gpui::AnyElement,
     tapes: crate::tape::Tapes,

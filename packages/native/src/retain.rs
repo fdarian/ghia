@@ -696,7 +696,8 @@ struct Node {
     anchor: bool,
     /// The element is a candidate box root, see [`Entry::box_root`], and nothing above it is one.
     box_root: bool,
-    /// Its style and its parent's make it a box root candidate (`Entry::box_root`), whether the frame could make it one.
+    /// Its style and its parent's make it a box root candidate (`Entry::box_root`) and it is built where one is made
+    /// (`Retain::fits_box_root`): all that `box_root` asks but a record of its last build.
     box_candidate: bool,
     /// Only with `verify`: a hash of what the build made of the element itself.
     digest: u64,
@@ -2445,12 +2446,14 @@ impl Retain {
     /// box root that holds it (the outermost box holds an edit), and the build of it before found what is in it
     /// recordable, not lifted and small enough. Nothing else is known before the build: `to_record` judges that one.
     fn may_be_box_root(&self, node: &Node) -> bool {
-        self.makes_box_roots
-            && node.records
-            && !self.layout_only
-            && !self.row
-            && self.box_open.is_none()
+        self.fits_box_root(node)
             && self.records.get(&node.id).is_some_and(|record| record.eligible && !record.lifts && record.size <= UNIT_MAX_ELEMENTS)
+    }
+
+    /// What `may_be_box_root` asks of where the element is built, which is all that is known of a box that has no record
+    /// yet: such a box is a candidate (`Retain::box_candidates`) for the root a frame after this one makes.
+    fn fits_box_root(&self, node: &Node) -> bool {
+        self.makes_box_roots && node.records && !self.layout_only && !self.row && self.box_open.is_none()
     }
 
     /// The element just entered is a box root if the build leaves it recorded (`Recording::box_root`): the key it was
@@ -2592,6 +2595,18 @@ impl Retain {
         let mut at = Some(id);
         while let Some(up) = at.filter(|up| *up != holder) {
             if self.box_candidates.contains(&up) {
+                return true;
+            }
+            at = tree.elements.get(&up).and_then(|element| element.parent);
+        }
+        false
+    }
+
+    /// Whether an element of `roots` is above `id` in the tree.
+    fn nested_in(&self, tree: &crate::retained_tree::RetainedTree, id: u64, roots: &FxHashSet<u64>) -> bool {
+        let mut at = tree.elements.get(&id).and_then(|element| element.parent);
+        while let Some(up) = at {
+            if roots.contains(&up) {
                 return true;
             }
             at = tree.elements.get(&up).and_then(|element| element.parent);
@@ -2795,7 +2810,10 @@ impl Retain {
             .into_iter()
             .filter(|id| !covered(*id))
             .collect();
-        let anchors = in_plan_order(&relaid, &[&self.plan.anchors, &self.plan.box_roots, &self.plan.units, &self.plan.patch_roots]);
+        // A root laid out again builds everything in it: one nested in another that is relaid has nothing to patch of its own, and
+        // gpui declines a patch of both (the outer splices what the inner was).
+        let outermost: FxHashSet<u64> = relaid.iter().copied().filter(|id| !self.nested_in(sources.tree, *id, &relaid)).collect();
+        let anchors = in_plan_order(&outermost, &[&self.plan.anchors, &self.plan.box_roots, &self.plan.units, &self.plan.patch_roots]);
         if let Some(&id) = anchors.iter().find(|id| self.plan.enclosing_forgotten.contains(id)) {
             return Err(Unpatchable::AnchorStale(id));
         }
@@ -2923,7 +2941,7 @@ impl Retain {
             patch_root: entry.patch_root,
             anchor: false,
             box_root: false,
-            box_candidate: entry.box_root,
+            box_candidate: false,
             digest: 0,
             absent: false,
             absent_children: Vec::new(),
@@ -2953,6 +2971,7 @@ impl Retain {
                 && entry.prekeyed.is_none(),
         };
         let at = self.nodes.len() as u32;
+        node.box_candidate = entry.box_root && self.fits_box_root(&node);
         node.box_root = entry.box_root && self.may_be_box_root(&node);
         match self.skippable(&node, &entry) {
             Ok(record) => {
@@ -3148,7 +3167,7 @@ impl Retain {
     }
 
     /// [`Self::to_record`] for the box root that `box_root` says it is. With `candidate` it is what the frame would record if
-    /// it could judge the box by a record of it (`Retain::box_candidates`), whether or not this frame records, and a scroller that moved it is no reason.
+    /// it could judge the box by a record of it (`Retain::box_candidates`), and a scroller that moved it is no reason.
     fn recording_as(&self, at: usize, box_root: bool, candidate: bool) -> Option<Recording> {
         let node = &self.nodes[at];
         let own = &self.below[at];
@@ -3156,7 +3175,7 @@ impl Retain {
         // frame after a patch of a row builds it (the record the patch kept is of the build before the edit), and it has
         // to be a recorded root again for the next edit of the row to be a patch.
         let moved = node.moved && !(box_root && (candidate || self.relocates(node, self.records.get(&node.id))));
-        if !(node.records || candidate) || node.absent || moved || own.dynamic || node.vol.dynamic != 0 {
+        if !node.records || node.absent || moved || own.dynamic || node.vol.dynamic != 0 {
             return None;
         }
         if crate::background_images::still_loading() != node.loading {
@@ -7268,7 +7287,43 @@ mod tests {
         page.tree.set_text(5, "again".to_owned());
         let mut both = page.preview(&[], false).expect("each is held by a root");
         both.sort();
-        assert_eq!(both, vec![1, 2], "both, each in its own root");
+        assert_eq!(both, vec![1], "the anchor builds the box root in it too, which a patch of both would decline");
+    }
+
+    #[test]
+    fn edits_in_an_anchor_and_in_a_box_root_nested_in_it_preview_to_the_anchor_alone() {
+        let mut page = anchored_page();
+        page.tree.set_text(5, "words".to_owned());
+        page.tree.set_text(4, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "the patch of the anchor builds the box root in it, which gpui would decline to patch too");
+        page.tree.take_structure();
+        page.tree.set_text(4, "again".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![2]), "the box root alone is still patched on its own");
+    }
+
+    #[test]
+    fn only_a_box_built_where_a_box_root_is_made_is_a_candidate() {
+        let mut page = Units::new();
+        page.box_roots = [2, 3].into_iter().collect();
+        page.tree.set_commit_patching(true);
+        let build = |page: &mut Units| {
+            page.frame(&[], false, |page| {
+                page.element(1, None, |page| {
+                    page.box_root(2, |page| {
+                        page.box_root(3, |page| page.leaf(4));
+                    });
+                    page.leaf(5);
+                });
+            });
+        };
+        build(&mut page);
+        assert!(page.retain.box_candidates.contains(&3), "nothing is a root yet to hold it");
+        for id in [1, 2, 3] {
+            page.edit(id);
+        }
+        build(&mut page);
+        assert!(page.retain.is_box_root(2) && page.retain.box_candidates.contains(&2), "the outermost box is one");
+        assert!(!page.retain.box_candidates.contains(&3), "the box root that holds it holds the edits of it");
     }
 
     #[test]
