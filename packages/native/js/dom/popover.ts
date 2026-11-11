@@ -7,10 +7,11 @@
  * closed), which `native/src/html/popover.rs` reads. It is sent straight to the renderer and never
  * stored in the adapter's props, so `getAttribute`, `getAttributeNames` and `cloneNode` cannot see it.
  *
- * Nothing tells this module that a popover left the document. A record is checked against the
- * element each time it is used (`current`): once the element is disconnected, or was made again
- * natively (a Solid element is created on every insertion), the popover is no longer showing, and
- * no event is sent, as the spec's removing steps do.
+ * A popover that left the document is no longer showing, and no event is sent, as the spec's
+ * removing steps do. The record goes when native destroys the element (`popoversDestroyed`, called
+ * where the mutation queue applies a batch) and when its window closes (`popoversOfRendererGone`);
+ * it is also checked against the element each time it is used (`current`), which catches an
+ * element that is out of the document but not yet destroyed.
  */
 
 import { flushPendingMutations } from "../bounds.js"
@@ -22,7 +23,6 @@ import { namedError } from "../named-error.js"
 import { createRendererState, pushDismissLayer } from "../renderer-state.js"
 import { WireWriter } from "../wire.js"
 import type { Element, Node } from "./nodes.js"
-import { popoverHooks } from "./nodes.js"
 import { popoverKind, type PopoverKind } from "./popover-attribute.js"
 import { ToggleEvent } from "./toggle-event.js"
 
@@ -72,7 +72,27 @@ function forget(record: Showing, native: boolean): void {
   record.removeLayer?.()
   record.removeLayer = undefined
   if (native) sendOpen(record.renderer, record.id, null)
-  if (open.length === 0) stopLightDismiss()
+  if (!open.some((other) => other.kind === "auto")) stopLightDismiss()
+}
+
+/**
+ * Native destroyed these elements, and a destroyed element is closed: their records go, with no
+ * events. A node code put back is made again under the same id, so a record that stayed would claim
+ * a popover that is closed.
+ */
+export function popoversDestroyed(renderer: unknown, ids: readonly number[]): void {
+  if (open.length === 0 || ids.length === 0) return
+  const destroyed = new Set(ids)
+  for (const record of open.slice()) {
+    if (record.renderer === renderer && destroyed.has(record.id)) forget(record, false)
+  }
+}
+
+/** The window of `renderer` closed: every popover of it is gone with it. */
+export function popoversOfRendererGone(renderer: unknown): void {
+  for (const record of open.slice()) {
+    if (record.renderer === renderer) forget(record, false)
+  }
 }
 
 function sendOpen(renderer: NativeRenderer, id: number, order: number | null): void {
@@ -223,18 +243,22 @@ export function togglePopover(element: Element, probe: PopoverProbe, force?: boo
   return current(element) !== undefined
 }
 
-/** The `popover` attribute changed from code: a popover that is showing and is not the same kind any more is hidden. */
-export function popoverAttributeChanged(element: Element): void {
-  const record = showing.get(element)
-  if (record === undefined) return
-  if (kindOf(element) !== record.kind && current(element) === record) hide(record, true)
+/**
+ * Code is about to set the `popover` attribute of `element` to `value` (`null` takes it away): a
+ * popover that is showing and is not the same kind afterwards is hidden, with the events of any
+ * hide. They run before the attribute changes, so a listener still reads the old one.
+ */
+export function popoverAttributeWillChange(element: Element, value: string | null): void {
+  const record = current(element)
+  if (record === undefined || popoverKind(value) === record.kind) return
+  hide(record, true)
 }
 
-/** The popover that holds `target`: the nearest showing popover of it or of an ancestor. */
+/** The showing `auto` popover that holds `target`: the nearest one of it or of an ancestor. */
 function popoverHolding(target: unknown): Showing | undefined {
   for (let node = target as Node | null; node !== null && node !== undefined; node = node.parentNode) {
     const record = showing.get(node as Element)
-    if (record !== undefined && current(node as Element) === record) return record
+    if (record !== undefined && record.kind === "auto" && current(node as Element) === record) return record
   }
   return undefined
 }
@@ -262,5 +286,3 @@ function stopLightDismiss(): void {
   lightDismissing = false
   document.removeEventListener("pointerdown", lightDismiss, true)
 }
-
-popoverHooks.attributeChanged = popoverAttributeChanged

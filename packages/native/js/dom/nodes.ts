@@ -10,7 +10,6 @@
 
 import type { ElementType } from "../host.js"
 import { cloneNode } from "./clone.js"
-import { popoverProperty } from "./popover-attribute.js"
 import * as tree from "./tree-mutation.js"
 
 export { crossRootError } from "./tree-mutation.js"
@@ -26,9 +25,6 @@ export const ROOT_ELEMENT_TYPES = {
   head: "head",
   body: "body",
 } as const satisfies Record<string, ElementType>
-
-/** Filled in by `popover.ts`, which cannot be imported here: it reaches the document, which extends the classes below. */
-export const popoverHooks: { attributeChanged: ((element: Element) => void) | undefined } = { attributeChanged: undefined }
 
 /** What an adapter tells the DOM members about one of its nodes. */
 export type NodeBinding = {
@@ -420,17 +416,6 @@ abstract class ElementClass extends NodeClass {
   /** Sets the `id` prop, so the element is found by `#id` and `getAttribute("id")`. */
   set id(value: string) {
     this[DOM_BINDING]().setProp("id", String(value))
-  }
-
-  /** The `popover` attribute limited to its known values (`""` is `"auto"`, an unknown value `"manual"`), or `null` without one. */
-  get popover(): "auto" | "manual" | "hint" | null {
-    return popoverProperty(this.getAttribute("popover"))
-  }
-
-  /** Sets the `popover` attribute; `null` takes it away, and a showing popover of another kind is hidden. */
-  set popover(value: string | null) {
-    this[DOM_BINDING]().setProp("popover", value === null ? false : String(value))
-    popoverHooks.attributeChanged?.(this as unknown as Element)
   }
 
   /**

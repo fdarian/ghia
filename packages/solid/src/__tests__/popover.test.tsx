@@ -4,8 +4,9 @@
  * `toggle` fire as in a browser, and `auto` closes on Escape and on a press outside.
  */
 import type { JSX } from "solid-js"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { document, getComputedStyle, ToggleEvent } from "@ghia/native/host"
+import { createSignal, Show } from "solid-js"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { document, getComputedStyle, pushDismissLayer, ToggleEvent } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 const WINDOW = { width: 800, height: 600 }
@@ -320,6 +321,103 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
     expect(found.box.offsetWidth, "closed again").toBe(0)
     found.box.showPopover()
     expect(found.box.offsetWidth).toBe(114)
+  })
+
+  it("is closed natively and in the record when it is put back after the flush released it", async () => {
+    const found = mount((grab) => (
+      <div ref={grab("box")} popover="manual">
+        <div style={popoverStyle} />
+      </div>
+    ))
+    const seen: string[] = []
+    found.box.addEventListener("beforetoggle", (event) => seen.push(`before ${(event as unknown as ToggleEvent).newState}`))
+    found.box.addEventListener("toggle", (event) => seen.push(`toggle ${(event as unknown as ToggleEvent).newState}`))
+    found.box.showPopover()
+    await nextTask()
+    seen.length = 0
+    found.box.remove()
+    await Promise.resolve()
+    await Promise.resolve()
+    app.renderer.flush()
+    document.body.appendChild(found.box)
+    app.renderer.flush()
+    expect(found.box.offsetWidth, "closed").toBe(0)
+    expect(found.box.togglePopover(), "the record is gone, so this shows it").toBe(true)
+    expect(found.box.offsetWidth).toBe(114)
+    await nextTask()
+    expect(seen).toEqual(["before open", "toggle open"])
+  })
+
+  it("lets Escape reach the layer below when an auto popover is unmounted while it shows", () => {
+    const below = vi.fn()
+    const remove = pushDismissLayer(app.renderer, { onEscapeKeyDown: below })
+    const [present, setPresent] = createSignal(true)
+    const found: Record<string, Popover> = {}
+    app.render(() => (
+      <div>
+        <Show when={present()}>
+          <div ref={(instance) => (found.box = instance as unknown as Popover)} popover="auto" />
+        </Show>
+      </div>
+    ))
+    found.box.showPopover()
+    setPresent(false)
+    app.renderer.flush()
+    app.renderer.simulateKeystrokes("Escape")
+    expect(below).toHaveBeenCalledTimes(1)
+    remove()
+  })
+
+  it("does not let a manual popover hold a press: a press in it closes an auto popover it is not in", () => {
+    const found = mount((grab) => (
+      <div style={{ width: WINDOW.width, height: WINDOW.height }}>
+        <div ref={grab("auto")} popover="auto">
+          <div style={popoverStyle} />
+        </div>
+        <div ref={grab("manual")} popover="manual" style={{ top: 10, left: 10, margin: 0 }}>
+          <div style={popoverStyle} />
+        </div>
+      </div>
+    ))
+    found.auto.showPopover()
+    found.manual.showPopover()
+    app.renderer.nativeSimulateClick(20, 20)
+    expect(found.auto.offsetWidth).toBe(0)
+    expect(found.manual.offsetWidth).toBe(114)
+  })
+
+  it("fires the events of a hide when the popover attribute of a showing popover is taken away or changed", async () => {
+    const found = mount((grab) => (
+      <div>
+        <div ref={grab("box")} popover="auto">
+          <div style={popoverStyle} />
+        </div>
+      </div>
+    ))
+    const seen: string[] = []
+    found.box.addEventListener("beforetoggle", (event) => seen.push(`before ${(event as unknown as ToggleEvent).newState}`))
+    found.box.addEventListener("toggle", (event) => seen.push(`toggle ${(event as unknown as ToggleEvent).newState}`))
+    found.box.showPopover()
+    await nextTask()
+    seen.length = 0
+    found.box.popover = null
+    await nextTask()
+    expect(seen).toEqual(["before closed", "toggle closed"])
+    found.box.popover = "auto"
+    found.box.showPopover()
+    await nextTask()
+    seen.length = 0
+    found.box.popover = undefined as unknown as null
+    await nextTask()
+    expect(found.box.getAttribute("popover")).toBeNull()
+    expect(seen).toEqual(["before closed", "toggle closed"])
+    found.box.popover = "auto"
+    found.box.showPopover()
+    await nextTask()
+    seen.length = 0
+    found.box.popover = "manual"
+    await nextTask()
+    expect(seen).toEqual(["before closed", "toggle closed"])
   })
 
   it("keeps the open state out of the attributes, and a clone is closed", () => {

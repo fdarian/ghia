@@ -7,8 +7,9 @@ import { readLayoutSize } from "./bounds.js"
 import type { NativeRenderer } from "./host.js"
 import { document, type GpuixDocument } from "./events/window-target.js"
 import { attributeLookupName, attributeNameOf, attributeText } from "./dom/attribute-names.js"
-import { SVGElement, type Element } from "./dom/nodes.js"
-import { hidePopover, showPopover, togglePopover } from "./dom/popover.js"
+import { DOM_BINDING, SVGElement, type Element } from "./dom/nodes.js"
+import { popoverProperty } from "./dom/popover-attribute.js"
+import { hidePopover, popoverAttributeWillChange, showPopover, togglePopover } from "./dom/popover.js"
 import { serializeStyle } from "./dom/css-style-declaration.js"
 import type { StyleDesc } from "./host.js"
 
@@ -34,6 +35,12 @@ export interface DomElement {
   showPopover(): void
   hidePopover(): void
   togglePopover(force?: boolean): boolean
+  /**
+   * The `popover` attribute limited to its known values (`""` is `"auto"`, an unknown value
+   * `"manual"`), or `null` without one. Setting it to `null` or `undefined` takes the attribute
+   * away; a showing popover that is not the same kind afterwards is hidden, with its events.
+   */
+  popover: "auto" | "manual" | "hint" | null
   /** The border box's width, rounded, before any transform. 0 for an element with no box. */
   readonly offsetWidth: number
   /** The border box's height, rounded, before any transform. 0 for an element with no box. */
@@ -121,6 +128,18 @@ export function defineDomMembers<This extends object>(
       writable: true,
       value(this: This, force?: boolean | { force?: boolean }) {
         return togglePopover(this as unknown as Element, () => bind(this), force)
+      },
+    },
+    popover: {
+      configurable: true,
+      get(this: This) {
+        return popoverProperty((this as unknown as Element).getAttribute("popover"))
+      },
+      set(this: This, value: string | null | undefined) {
+        const element = this as unknown as Element
+        const text = value === null || value === undefined ? null : String(value)
+        popoverAttributeWillChange(element, text)
+        element[DOM_BINDING]().setProp("popover", text === null ? false : text)
       },
     },
     offsetWidth: {
