@@ -135,7 +135,7 @@ function attachTextControlMethods(control: TextControlInstance, container: Conta
   })
 }
 
-function adopt(parent: Instance | undefined, child: Instance | TextInstance): void {
+export function adopt(parent: Instance | undefined, child: Instance | TextInstance): void {
   if (!("type" in child)) return
   if (parent) child.parentId = parent.nativeId
   else delete child.parentId
@@ -145,12 +145,12 @@ function rendererFor(node: HostNode): MutationRenderer {
   return containerFor(node).renderer
 }
 
-function nextId(container: Container): number {
+export function nextId(container: Container): number {
   return ++container.ids.nextElementId
 }
 
 /** SVG shapes exist only inside an `<svg>`; text and other elements go anywhere. */
-function assertPlacement(parent: Instance | undefined, child: Instance | TextInstance): void {
+export function assertPlacement(parent: Instance | undefined, child: Instance | TextInstance): void {
   if ("type" in child) assertSvgPlacement(parent?.type, child.type)
 }
 
@@ -323,7 +323,7 @@ function diffCustomProps(
  * the commit phase. Abandoned concurrent renders stay as collectable JS
  * objects and never enter the native mutation queue.
  */
-function materialize(node: HostNode): ReturnType<typeof stateFor> {
+export function materialize(node: HostNode): ReturnType<typeof stateFor> {
   const state = stateFor(node)
   if (state.mounted) return state
 
@@ -342,14 +342,31 @@ function materialize(node: HostNode): ReturnType<typeof stateFor> {
   }
   state.mounted = true
 
-  if (state.initialChildren) {
-    for (const child of state.initialChildren) {
-      materialize(child)
-      renderer.appendChild(node.nativeId, child.nativeId)
-    }
-    state.initialChildren = undefined
+  // Its children are the ones React gave it as initial children, and any that code placed in it
+  // while it had no native element.
+  for (const child of state.children) {
+    materialize(child)
+    renderer.appendChild(node.nativeId, child.nativeId)
   }
   return state
+}
+
+/**
+ * Marks a node whose native element is gone, and everything inside it, as not mounted, so a
+ * later placement creates it again.
+ */
+export function markUnmounted(node: HostNode): void {
+  const state = stateFor(node)
+  state.mounted = false
+  for (const child of state.children) markUnmounted(child)
+}
+
+function destroyNative(container: Container, node: HostNode): void {
+  markUnmounted(node)
+  const destroyed = container.renderer.destroyElement(node.nativeId)
+  for (const id of destroyed) {
+    unregisterEventHandlers(container.eventHandlers, id)
+  }
 }
 
 /** What a `ref` gives for the mounted element `id`, or `undefined` once it is gone. */
@@ -460,12 +477,8 @@ export const hostConfig = {
   // every removed text node: `detachDeletedInstance` runs for host components
   // only, so nothing else would ever destroy a `HostText`.
   removeChild(parent: Instance, child: Instance | TextInstance): void {
-    const container = containerFor(parent)
     unlinkChild(child)
-    const destroyed = container.renderer.destroyElement(child.nativeId)
-    for (const id of destroyed) {
-      unregisterEventHandlers(container.eventHandlers, id)
-    }
+    destroyNative(containerFor(parent), child)
   },
 
   insertBefore(
@@ -499,10 +512,7 @@ export const hostConfig = {
 
   removeChildFromContainer(parent: Container, child: Instance): void {
     unlinkChild(child)
-    const destroyed = parent.renderer.destroyElement(child.nativeId)
-    for (const id of destroyed) {
-      unregisterEventHandlers(parent.eventHandlers, id)
-    }
+    destroyNative(parent, child)
   },
 
   prepareForCommit(_containerInfo: Container): Record<string, unknown> | null {
@@ -583,6 +593,12 @@ export const hostConfig = {
   ): void {
     const state = stateFor(instance)
     const { container } = state
+    if (!state.mounted) {
+      // Code took it out of the document and native let it go: it is made again, from these
+      // props, when it is inserted.
+      instance.props = newProps
+      return
+    }
     // `commitUpdate` runs for every host element whose props object is new,
     // which is every element a parent re-rendered. Most of those did not change
     // their style, so send it only when it did.
@@ -613,7 +629,7 @@ export const hostConfig = {
     _oldText: string,
     newText: string
   ): void {
-    rendererFor(textInstance).setText(textInstance.nativeId, newText)
+    if (stateFor(textInstance).mounted) rendererFor(textInstance).setText(textInstance.nativeId, newText)
     const oldValue = textInstance.text
     textInstance.text = newText
     queueCharacterDataMutation(textInstance, oldValue)
@@ -633,22 +649,21 @@ export const hostConfig = {
     assertPlacement(parent, child)
     adopt(parent, child)
     linkChild(parent, child)
-    const state = stateFor(parent)
-    state.initialChildren ??= []
-    state.initialChildren.push(child)
   },
 
   hideInstance(instance: Instance): void {
     // Keep the element's own style. `visibility: hidden` skips the paint and
     // keeps the layout box, so replacing the whole style here would collapse
     // the box and lose every other style on the element.
-    stateFor(instance).hidden = true
-    rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(instance.props.style))
+    const state = stateFor(instance)
+    state.hidden = true
+    if (state.mounted) rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(instance.props.style))
   },
 
   unhideInstance(instance: Instance, props: Props): void {
-    stateFor(instance).hidden = false
-    rendererFor(instance).setStyle(instance.nativeId, splitMotionStyle(props.style).style ?? {})
+    const state = stateFor(instance)
+    state.hidden = false
+    if (state.mounted) rendererFor(instance).setStyle(instance.nativeId, splitMotionStyle(props.style).style ?? {})
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},
@@ -699,11 +714,7 @@ export const hostConfig = {
   },
 
   detachDeletedInstance(instance: Instance): void {
-    const container = containerFor(instance)
-    const destroyed = container.renderer.destroyElement(instance.nativeId)
-    for (const id of destroyed) {
-      unregisterEventHandlers(container.eventHandlers, id)
-    }
+    destroyNative(containerFor(instance), instance)
   },
 
   getPublicInstance(instance: Instance): PublicInstance {

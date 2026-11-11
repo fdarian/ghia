@@ -35,6 +35,7 @@ export * from "./events/listeners.js"
 export * from "./events/element-listeners.js"
 export * from "./dom-members.js"
 export * from "./dom/nodes.js"
+export * from "./dom/element-types.js"
 export * from "./dom/mutation-observer.js"
 export * from "./animation-frame.js"
 export * from "./events/types.js"
@@ -50,6 +51,7 @@ export {
   syncWindowSelectionChange,
   window,
   type AddEventListenerOptions,
+  type DomNodeFactory,
   type WindowEventListener,
 } from "./events/window-target.js"
 export { isWebBuild } from "./web-build.js"

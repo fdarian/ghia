@@ -27,17 +27,18 @@ import type {
   FocusOptions,
   GetAnimationsOptions,
   HostBinding,
+  Node,
   NodeBinding,
   TextBinding,
 } from "@ghia/native/host"
 import type { Container, ElementType, Instance, Props, TextInstance } from "../types/host.js"
+import { createDomText, insertDomNode, removeDomNode, setDomTextData } from "./dom-mutation.js"
 import { listenersOf } from "./event-registry.js"
 
 export type HostNode = Instance | TextInstance
 
 export interface HostNodeState {
   container: Container
-  initialChildren?: HostNode[]
   mounted: boolean
   /**
    * React hid this element (Suspense, Activity). Its native style carries
@@ -162,9 +163,18 @@ defineDomMembers(ReactHostElement.prototype, (instance: ReactHostElement) => ({
   prop: (name) => (instance.props as Record<string, unknown>)[name],
 }))
 
-/** Mounted, which a destroyed element is not any more. */
+/** Mounted, which a destroyed element is not any more, and in the tree of its window's `<html>`. */
 function isConnected(instance: Instance): boolean {
-  return containerFor(instance).instances.get(instance.nativeId) === instance
+  return containerFor(instance).instances.get(instance.nativeId) === instance && isInTree(instance)
+}
+
+/** The node or an ancestor of it is the window's `<html>`: nothing took it out of the document. */
+export function isInTree(node: HostNode): boolean {
+  const html = containerFor(node).html
+  for (let current: HostNode | null = node; current !== null; current = stateFor(current).parent) {
+    if (current === html) return true
+  }
+  return false
 }
 
 /**
@@ -233,6 +243,18 @@ class ElementDomBinding implements ElementBinding {
   propNames(): Iterable<string> {
     return Object.keys(this.instance.props)
   }
+
+  insertBefore(child: Node, before: Node | null): void {
+    insertDomNode(this.instance, child as unknown as HostNode, before as unknown as HostNode | null)
+  }
+
+  removeChild(child: Node): void {
+    removeDomNode(this.instance, child as unknown as HostNode)
+  }
+
+  createText(data: string): Text {
+    return createDomText(this.state.container, data) as unknown as Text
+  }
 }
 
 class TextDomBinding implements TextBinding {
@@ -260,6 +282,10 @@ class TextDomBinding implements TextBinding {
 
   get data(): string {
     return this.text.text
+  }
+
+  setData(data: string): void {
+    setDomTextData(this.text, data)
   }
 }
 

@@ -9,6 +9,9 @@
  */
 
 import type { ElementType } from "../host.js"
+import * as tree from "./tree-mutation.js"
+
+export { crossRootError } from "./tree-mutation.js"
 
 /** Where `[DOM_BINDING]()` is read, so two copies of this package find each other's nodes. */
 export const DOM_BINDING: unique symbol = Symbol.for("@ghia/native/dom-binding")
@@ -38,7 +41,22 @@ export type NodeBinding = {
   readonly root: object | null
 }
 
-export type ElementBinding = NodeBinding & {
+/**
+ * What an adapter does for a node that can hold children. Each goes through the adapter's own
+ * paths for the same change (its mirror of the tree, the native tree, the records a
+ * `MutationObserver` is handed), so a tree changed from code and one changed by the framework
+ * stay one tree. The members check what the DOM checks before they call these.
+ */
+export type ParentBinding = NodeBinding & {
+  /** Places `child` before `before`, or last when it is `null`, taking it out of the node it is in. */
+  insertBefore(child: Node, before: Node | null): void
+  /** Takes `child`, one of its children, out. The node is kept: it can be inserted again. */
+  removeChild(child: Node): void
+  /** A text node of the adapter that owns this node, not in any tree yet. */
+  createText(data: string): Text
+}
+
+export type ElementBinding = ParentBinding & {
   /** The element type as written: `div`, `svg`, `linearGradient`. */
   readonly type: string
   /** The prop of that name. */
@@ -49,6 +67,8 @@ export type ElementBinding = NodeBinding & {
 
 export type TextBinding = NodeBinding & {
   readonly data: string
+  /** Replaces the text, and tells native and `MutationObserver` as a framework's own update does. */
+  setData(data: string): void
 }
 
 const ELEMENT_NODE = 1
@@ -120,6 +140,7 @@ abstract class NodeClass {
   abstract get nodeType(): number
   abstract get nodeName(): string
   abstract get textContent(): string | null
+  abstract set textContent(value: string | null)
 
   /**
    * Declared as a property, defined as a getter below: an adapter's element type narrows it to
@@ -168,6 +189,22 @@ abstract class NodeClass {
 
   hasChildNodes(): boolean {
     return this[DOM_BINDING]().children.length > 0
+  }
+
+  appendChild<Child extends Node>(node: Child): Child {
+    return tree.appendChild(this as unknown as Node, node)
+  }
+
+  insertBefore<Child extends Node>(node: Child, child: Node | null): Child {
+    return tree.insertBefore(this as unknown as Node, node, child)
+  }
+
+  removeChild<Child extends Node>(child: Child): Child {
+    return tree.removeChild(this as unknown as Node, child)
+  }
+
+  replaceChild<Child extends Node>(node: Node, child: Child): Child {
+    return tree.replaceChild(this as unknown as Node, node, child)
   }
 
   /** Whether `other` is this node or one of its descendants, as the DOM has it. */
@@ -263,16 +300,44 @@ abstract class CharacterDataClass extends NodeClass {
     return this[DOM_BINDING]().data
   }
 
+  set data(value: string) {
+    this[DOM_BINDING]().setData(value === null ? "" : String(value))
+  }
+
   get nodeValue(): string {
     return this.data
+  }
+
+  set nodeValue(value: string | null) {
+    this.data = value as string
   }
 
   get textContent(): string {
     return this.data
   }
 
+  set textContent(value: string | null) {
+    this.data = value as string
+  }
+
   get length(): number {
     return this.data.length
+  }
+
+  remove(): void {
+    tree.remove(this as unknown as Node)
+  }
+
+  before(...nodes: Array<Node | string>): void {
+    tree.before(this as unknown as Node, nodes)
+  }
+
+  after(...nodes: Array<Node | string>): void {
+    tree.after(this as unknown as Node, nodes)
+  }
+
+  replaceWith(...nodes: Array<Node | string>): void {
+    tree.replaceWith(this as unknown as Node, nodes)
   }
 }
 
@@ -382,6 +447,47 @@ abstract class ElementClass extends NodeClass {
     return text
   }
 
+  /** Every child goes; a non-empty string becomes the one child, a text node. */
+  set textContent(value: string | null) {
+    tree.replaceAllWithText(this as unknown as Node, value)
+  }
+
+  remove(): void {
+    tree.remove(this as unknown as Node)
+  }
+
+  before(...nodes: Array<Node | string>): void {
+    tree.before(this as unknown as Node, nodes)
+  }
+
+  after(...nodes: Array<Node | string>): void {
+    tree.after(this as unknown as Node, nodes)
+  }
+
+  replaceWith(...nodes: Array<Node | string>): void {
+    tree.replaceWith(this as unknown as Node, nodes)
+  }
+
+  append(...nodes: Array<Node | string>): void {
+    tree.append(this as unknown as Node, nodes)
+  }
+
+  prepend(...nodes: Array<Node | string>): void {
+    tree.prepend(this as unknown as Node, nodes)
+  }
+
+  replaceChildren(...nodes: Array<Node | string>): void {
+    tree.replaceChildren(this as unknown as Node, nodes)
+  }
+
+  insertAdjacentElement(where: string, element: Element): Element | null {
+    return tree.insertAdjacentElement(this as unknown as Node, where, element)
+  }
+
+  insertAdjacentText(where: string, data: string): void {
+    tree.insertAdjacentText(this as unknown as Node, where, data)
+  }
+
   hasAttribute(name: string): boolean {
     return this.getAttribute(name) !== null
   }
@@ -453,6 +559,8 @@ abstract class DocumentClass extends NodeClass {
     return null
   }
 
+  set textContent(_value: string | null) {}
+
   declare readonly ownerDocument: null
 }
 
@@ -478,6 +586,8 @@ abstract class DocumentFragmentClass extends NodeClass {
     for (const child of this[DOM_BINDING]().children) text += child.textContent ?? ""
     return text
   }
+
+  set textContent(_value: string | null) {}
 }
 
 /** Never instantiated, like `DocumentFragment`, which it extends in the DOM. */

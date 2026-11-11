@@ -124,11 +124,15 @@ describe("the nodes React builds", () => {
       expect(t.a.isConnected).toBe(false)
       container.instances.set(t.root.nativeId, t.root)
       container.instances.set(t.second.nativeId, t.second)
+      // Mounted is not enough: the node has to be in the tree of the window's `<html>`.
+      expect(t.root.isConnected).toBe(false)
+      container.html = t.root
       expect(t.root.isConnected).toBe(true)
       expect(t.a.isConnected).toBe(true)
       expect(t.deep.isConnected).toBe(false)
       container.instances.delete(t.root.nativeId)
       container.instances.delete(t.second.nativeId)
+      container.html = undefined as never
     })
 
     it("exposes the binding the members read", () => {

@@ -4,6 +4,7 @@ import {
   assertSvgPlacement,
   createElementMethods,
   createWebviewMethods,
+  crossRootError,
   defineDomMembers,
   document,
   DOM_BINDING,
@@ -19,6 +20,7 @@ import {
   focusHostElement,
   hostElementMatches,
   forwardsCustomProp,
+  isElementType,
   isNativeviewHandlerProp,
   HOST_BINDING,
   HOST_MOUNT,
@@ -63,6 +65,7 @@ import type {
   MotionValueStyle,
   MutationRenderer,
   NativeRenderer,
+  Node,
   NodeBinding,
   SelectionDirection,
   ScrollableElement,
@@ -157,7 +160,7 @@ export class HostRoot implements MotionBindingHost {
     const removed = [...this.removals]
     this.removals.clear()
     for (const node of removed) {
-      if (node.parent !== null || !node.mounted) continue
+      if (!node.mounted || isConnected(node)) continue
       markUnmounted(node)
       this.mutations.destroyElement(node.nativeId)
     }
@@ -541,6 +544,21 @@ class ElementDomBinding implements ElementBinding {
   propNames(): Iterable<string> {
     return this.element.props.keys()
   }
+
+  insertBefore(child: Node, before: Node | null): void {
+    const node = child as unknown as HostNode
+    const target = treeRoot(this.element)
+    if (target !== null && node.root !== null && node.root !== target) throw crossRootError()
+    insertHostNode(this.element, node, before as unknown as HostNode | null)
+  }
+
+  removeChild(child: Node): void {
+    removeHostNode(this.element, child as unknown as HostNode)
+  }
+
+  createText(data: string): Text {
+    return createHostText(data)
+  }
 }
 
 class TextDomBinding implements TextBinding {
@@ -565,6 +583,10 @@ class TextDomBinding implements TextBinding {
   get data(): string {
     return this.text.text
   }
+
+  setData(data: string): void {
+    replaceHostText(this.text, data)
+  }
 }
 
 export function createHostElement(type: string): HostElement {
@@ -573,81 +595,6 @@ export function createHostElement(type: string): HostElement {
     return Reflect.construct(HostElement, [type], SvgHostElement) as HostElement
   }
   return new HostElement(type)
-}
-
-function isElementType(type: string): type is ElementType {
-  switch (type) {
-    case "html":
-    case "head":
-    case "body":
-    case "div":
-    case "text":
-    case "span":
-    case "img":
-    case "svg":
-    case "canvas":
-    case "input":
-    case "textarea":
-    case "label":
-    case "form":
-    case "anchored":
-    case "code":
-    case "diff":
-    case "markdown":
-    case "webview":
-    case "nativeview":
-    case "virtual-list":
-    case "path":
-    case "circle":
-    case "ellipse":
-    case "rect":
-    case "line":
-    case "polyline":
-    case "polygon":
-    case "g":
-    case "defs":
-    case "linearGradient":
-    case "radialGradient":
-    case "stop":
-    case "clipPath":
-    case "mask":
-    case "use":
-    case "symbol":
-    case "pattern":
-    case "marker":
-    case "image":
-    case "tspan":
-    case "textPath":
-    case "filter":
-    case "feBlend":
-    case "feColorMatrix":
-    case "feComponentTransfer":
-    case "feFuncR":
-    case "feFuncG":
-    case "feFuncB":
-    case "feFuncA":
-    case "feComposite":
-    case "feConvolveMatrix":
-    case "feDiffuseLighting":
-    case "feDisplacementMap":
-    case "feDistantLight":
-    case "feDropShadow":
-    case "feFlood":
-    case "feGaussianBlur":
-    case "feImage":
-    case "feMerge":
-    case "feMergeNode":
-    case "feMorphology":
-    case "feOffset":
-    case "fePointLight":
-    case "feSpecularLighting":
-    case "feSpotLight":
-    case "feTile":
-    case "feTurbulence":
-      return true
-    default:
-      return false
-  }
 }
 
 export function createHostText(value: string): HostText {
@@ -792,8 +739,13 @@ export function insertHostNode(
   parent.childList.splice(index, 0, node)
   node.parent = parent
   queueChildListMutation(parent, [node], [], parent.childList[index - 1] ?? null, parent.childList[index + 1] ?? null)
-  const root = parent.root
-  if (!root) return
+  const root = parent.mounted ? parent.root : null
+  if (root === null) {
+    // The new parent has no native element (it was never mounted, or was released), so a node
+    // moved into it leaves native's tree too.
+    retireNode(node)
+    return
+  }
   root.removals.delete(node)
   mount(root, node)
   if (anchor) root.mutations.insertBefore(parent.nativeId, node.nativeId, anchor.nativeId)
@@ -827,13 +779,31 @@ export function removeHostNode(requestedParent: HostParent, node: HostNode): voi
   const parent = requestedParent.kind === "root" ? requestedParent.body : requestedParent
   if (node.parent !== parent) return
   removeFromParent(node)
-  const root = parent.root
+  retireNode(node)
+}
+
+/**
+ * Takes a mounted node out of native's tree and leaves it to `finishRemovals`, which releases it
+ * unless it is in a connected tree again by then.
+ */
+function retireNode(node: HostNode): void {
+  const root = node.root
   if (!root || !node.mounted) return
   root.removals.add(node)
   // Native is told now, not at the flush: a layout read in this turn flushes the queue and
   // must not lay out a subtree the DOM would already have taken out of the document.
   root.mutations.detachChild(node.nativeId)
   root.mutations.requestFlush()
+}
+
+/** The root whose tree `node` is in, or `null` for a node that is in none. */
+function treeRoot(node: HostNode): HostRoot | null {
+  let current: HostNode | HostRoot = node
+  while (current.kind !== "root") {
+    if (current.parent === null) return null
+    current = current.parent
+  }
+  return current
 }
 
 export function getParentNode(node: HostNode): HostParent | undefined {
