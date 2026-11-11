@@ -24,6 +24,7 @@ import {
   Text,
 } from "@ghia/native/host"
 import type {
+  AnimateOptions,
   BoundingClientRect,
   Element,
   ElementBinding,
@@ -31,6 +32,7 @@ import type {
   FocusOptions,
   GetAnimationsOptions,
   HostBinding,
+  KeyframesInput,
   Node,
   NodeBinding,
   StyleDesc,
@@ -160,6 +162,10 @@ class ReactHostElement extends HTMLElement implements Instance {
 
   getAnimations(options?: GetAnimationsOptions) {
     return methodsOf(this).getAnimations.call(this, options)
+  }
+
+  animate(keyframes: KeyframesInput, options?: number | AnimateOptions) {
+    return methodsOf(this).animate.call(this, keyframes, options)
   }
 
   focus(options?: FocusOptions): void {

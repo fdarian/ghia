@@ -48,6 +48,7 @@ import {
   setTextControlSelectionRange,
 } from "@ghia/native/host"
 import type {
+  AnimateOptions,
   Animation,
   Document,
   DomElement,
@@ -62,6 +63,7 @@ import type {
   HostBinding,
   HostProps,
   ImagePixelsOptions,
+  KeyframesInput,
   MotionBinding,
   MotionBindingHost,
   MotionValue,
@@ -450,6 +452,10 @@ export class HostElement extends HTMLElement {
   getAnimations(options?: GetAnimationsOptions): Animation[] {
     if (!this.root || !this.mounted) return []
     return this.methods().getAnimations.call(this, options)
+  }
+
+  animate(keyframes: KeyframesInput, options?: number | AnimateOptions): Animation {
+    return this.methods().animate.call(this, keyframes, options)
   }
 
   [HOST_MOUNT](listener: () => void): () => void {
