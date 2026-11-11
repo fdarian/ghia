@@ -105,6 +105,50 @@ impl Keyframes {
         Ok(Self { frames })
     }
 
+    /// The keyframes of `Element.animate()`, which JS has normalised to a JSON array of
+    /// `{ offset, easing?, composite?, <property>: value }` with every offset set. A property that
+    /// cannot be animated or whose value does not parse is left out, as the browser ignores it.
+    /// Keyframes at one offset merge, as those of a rule do: the later value wins.
+    pub(super) fn parse_script(frames_json: &str) -> Result<Self, String> {
+        let type_error = |message: String| format!("{}{message}", super::effect::TYPE_ERROR);
+        let list: Vec<Blocks> = serde_json::from_str(frames_json)
+            .map_err(|error| type_error(format!("the keyframes must be a JSON array of objects: {error}")))?;
+        let mut frames: Vec<Keyframe> = Vec::new();
+        for Blocks(entries) in list {
+            let mut offset = None;
+            let mut frame = Keyframe { offset: 0.0, values: Vec::new(), timing: None };
+            for (name, value) in entries {
+                match name.as_str() {
+                    "offset" => offset = value.as_f64(),
+                    "easing" => {
+                        let text = value.as_str().ok_or_else(|| type_error("easing must be a string".to_string()))?;
+                        frame.timing = Some(
+                            parse_timing_function(text).map_err(|error| type_error(format!("easing: {error}")))?,
+                        );
+                    }
+                    // Only `replace` is built, which is what `auto` is.
+                    "composite" => {}
+                    TIMING_FUNCTION => {}
+                    _ => {
+                        let single = Value::Object(std::iter::once((name, value)).collect());
+                        if let Ok(block) = parse_block(&single) {
+                            frame.merge(&block);
+                        }
+                    }
+                }
+            }
+            frame.offset = offset
+                .filter(|offset| (0.0..=1.0).contains(offset))
+                .ok_or_else(|| type_error("a keyframe offset must be a number from 0 to 1".to_string()))?;
+            match frames.iter_mut().find(|existing| existing.offset == frame.offset) {
+                Some(existing) => existing.merge(&frame),
+                None => frames.push(frame),
+            }
+        }
+        frames.sort_by(|a, b| a.offset.total_cmp(&b.offset));
+        Ok(Self { frames })
+    }
+
     /// The rule a definition has to pass before any renderer takes it: the
     /// name and the frames, with errors that say which keyframes they are for.
     fn parse_named(name: &str, frames_json: &str) -> Result<Self, String> {

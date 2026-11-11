@@ -3610,6 +3610,25 @@ impl GpuixRenderer {
         self.with_motion_state(Repaint::None, move |view, now| Ok(view.web_animations(id, now)))
     }
 
+    /// `element.animate(keyframes, options)`: starts an animation of the element that no style
+    /// owns and returns it as `getAnimations()` lists it. `keyframesJson` is a JSON array of
+    /// `{ offset, easing?, <property>: value }` with every offset set, JS having normalised both
+    /// forms of the DOM's keyframes; `timing` is what `options` set, a member left out at its
+    /// default. Throws `TypeError: ...` for an offset or an easing that is wrong, and for an
+    /// element that is not in the tree.
+    #[napi]
+    pub fn animate_element(
+        &self,
+        element_id: f64,
+        keyframes_json: String,
+        timing: WebAnimationTimingUpdate,
+    ) -> Result<WebAnimationInfo> {
+        let id = to_element_id(element_id)?;
+        self.with_motion_state(Repaint::Layout, move |view, now| {
+            view.animate_element(id, &keyframes_json, timing, now)
+        })
+    }
+
     /// `getAnimations({ subtree: true })` of an element: the CSS transitions, then the CSS
     /// animations, of the element and the elements below it, each in document order of the
     /// elements, with the element each is of. Throws for an element id that is not valid; an
@@ -6866,6 +6885,23 @@ impl GpuixView {
                 info: WebAnimationInfo::at(info, &self.clock),
             })
             .collect()
+    }
+
+    /// `Element.animate()`: see `animateElement`. The caller requests the frame that paints it.
+    pub(crate) fn animate_element(
+        &mut self,
+        element: u64,
+        keyframes_json: &str,
+        timing: WebAnimationTimingUpdate,
+        now: web_time::Instant,
+    ) -> std::result::Result<WebAnimationInfo, String> {
+        if !self.tree.lock().unwrap().elements.contains_key(&element) {
+            return Err(format!("Element {element} is not in the tree"));
+        }
+        let update = timing.into_update()?;
+        let at = self.api_instant(Some(element), now).unwrap_or(now);
+        let info = self.css_animations.animate(element, keyframes_json, update, at)?;
+        Ok(WebAnimationInfo::at(info, &self.clock))
     }
 
     /// The run `id` as it is now, or as it showed when its finish or cancel
