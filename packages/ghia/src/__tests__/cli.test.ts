@@ -53,8 +53,8 @@ async function runToExit(command: string[], cwd: string): Promise<string> {
   return run.output()
 }
 
-async function runToFailure(command: string[], cwd: string): Promise<string> {
-  const run = spawn(command, cwd)
+async function runToFailure(command: string[], cwd: string, env: Record<string, string | undefined> = process.env): Promise<string> {
+  const run = spawn(command, cwd, env)
   const code = await run.process.exited
   if (code === 0) throw new Error(`${command.join(" ")} succeeded, expected a failure:\n${run.output()}`)
   return run.output()
@@ -608,6 +608,25 @@ describe("ghia build with app Workers", () => {
   )
 
   test(
+    "with an inline source map, a Worker keeps its inline map and no .map file is written",
+    async () => {
+      writeFileSync(
+        join(workersDir, "vite.config.inline-sourcemap.ts"),
+        readFileSync(join(workersDir, "vite.config.sourcemap.ts"), "utf8").replace("sourcemap: true", 'sourcemap: "inline"')
+      )
+      await runToExit(["bun", CLI, "build", "--no-compile", "--config", "vite.config.inline-sourcemap.ts"], workersDir)
+      const dist = join(workersDir, "dist")
+      const workers = readdirSync(dist).filter((name) => name.endsWith(".worker.js"))
+      expect(workers.length).toBe(9)
+      expect(readdirSync(dist).filter((name) => name.endsWith(".map"))).toEqual([])
+      for (const name of workers) {
+        expect(readFileSync(join(dist, name), "utf8").trimEnd().split("\n").at(-1)).toMatch(/^\/\/# sourceMappingURL=data:application\/json/)
+      }
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
     "ignores a Worker call that is the text of a JSX element",
     async () => {
       const output = await runToExit(["bun", CLI, "build", "--no-compile"], workersDir)
@@ -639,10 +658,14 @@ describe("ghia build with app Workers", () => {
       writeFileSync(join(workersDir, "pong.ts"), 'new Worker(new URL("./ping.ts", import.meta.url))\n')
       const main = join(workersDir, "main.ts")
       writeFileSync(main, `${readFileSync(main, "utf8")}\nnew Worker(new URL("./ping.ts", import.meta.url))\n`)
-      const output = await runToFailure(["bun", CLI, "build", "--no-compile"], workersDir)
+      const output = await runToFailure(["bun", CLI, "build", "--no-compile"], workersDir, { ...process.env, FORCE_COLOR: "1" })
       expect(output).toContain("starts itself through")
       expect(output).toContain("Bundling the Worker")
-      expect(output).not.toContain("\u001b")
+      // Rolldown wraps its own "Build failed" message in red (and Vite prints "Build failed" lines), so with colors forced those carry escapes; the text of the nested Worker errors is what Ghia produces.
+      const nested = output.slice(output.indexOf("Bundling the Worker"), output.indexOf("\n    at "))
+      expect(nested).toContain("starts itself through")
+      expect(nested).not.toContain("\u001b")
+      expect(nested).not.toContain("\\x1b")
     },
     TIMEOUT_MS * 2
   )

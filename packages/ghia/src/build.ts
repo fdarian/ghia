@@ -1,6 +1,7 @@
 import { join, resolve } from "node:path"
 import { createBuilder, type BuildEnvironment, type ViteBuilder } from "vite"
 import { compile } from "./compile.js"
+import { WORKER_FILE_SUFFIX } from "./workers.js"
 import { ENTRY_FILE_NAMES, ENVIRONMENT_NAME, SERVER_ENVIRONMENT_NAME } from "./plugin.js"
 import { clearVitestMarker, entryEnvironments, findPluginApi, requireEntry } from "./plugin-api.js"
 import type { BuildOptions } from "./options.js"
@@ -35,7 +36,7 @@ function entryChunkPaths(environment: BuildEnvironment, result: Awaited<ReturnTy
   const entryFileName = ENTRY_FILE_NAMES[environment.name]
   const names = outputs.flatMap((output) => {
     if (!("output" in output)) throw new Error(`The "${environment.name}" build returned a watcher instead of its output`)
-    return output.output.flatMap((item) => (item.type === "chunk" && item.isEntry ? [item.fileName] : []))
+    return output.output.flatMap((item) => (item.type === "chunk" && item.isEntry && (item.fileName === entryFileName || item.fileName.endsWith(WORKER_FILE_SUFFIX)) ? [item.fileName] : []))
   })
   return [...names.filter((name) => name === entryFileName), ...names.filter((name) => name !== entryFileName)].map((name) => join(outDir, name))
 }

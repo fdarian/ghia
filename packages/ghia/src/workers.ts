@@ -85,6 +85,7 @@ type Emitter = { emitFile(file: Rolldown.EmittedPrebuiltChunk | Rolldown.Emitted
 type BundledFile = { type: "chunk" | "asset"; fileName: string; content: string }
 
 const SOURCE_MAP_COMMENT = /\/\/# sourceMappingURL=\S+\s*$/
+const INLINE_SOURCE_MAP_COMMENT = /\/\/# sourceMappingURL=data:\S+\s*$/
 
 /**
  * Finds `new Worker(new URL("./file.ts", import.meta.url))` in the modules of a build and bundles each
@@ -179,7 +180,7 @@ export class WorkerBundler {
       return await this.bundle(environmentName, file, fileName)
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
-      throw new Error(`Bundling the Worker ${file} failed:\n${stripVTControlCharacters(reason)}`, { cause: error })
+      throw new Error(`Bundling the Worker ${file} failed:\n${stripVTControlCharacters(reason)}`)
     }
   }
 
@@ -211,19 +212,25 @@ export class WorkerBundler {
       for (const item of output.output) {
         // The Workers this Worker starts come out of its build as the chunks (and source maps) they were emitted as.
         if (item.type === "asset") {
-          if (item.fileName.endsWith(`${WORKER_FILE_SUFFIX}.map`)) files.push({ type: "asset", fileName: item.fileName, content: String(item.source) })
+          if (item.fileName.endsWith(`${WORKER_FILE_SUFFIX}.map`)) files.push({ type: "asset", fileName: item.fileName, content: textOf(item.source) })
         } else if (item.fileName.endsWith(WORKER_FILE_SUFFIX)) {
           files.push({ type: "chunk", fileName: item.fileName, content: item.code })
         } else if (item.isEntry) {
-          files.push({ type: "chunk", fileName, content: item.map == null ? item.code : pointSourceMapAt(item.code, fileName) })
+          // An inline map is a `data:` URL in the code, which stays as it is; only a `sourcemap: true` build has a map to emit.
+          const hasFileMap = item.map != null && !INLINE_SOURCE_MAP_COMMENT.test(item.code)
+          files.push({ type: "chunk", fileName, content: hasFileMap ? pointSourceMapAt(item.code, fileName) : item.code })
           // Rolldown does not write the map of a prebuilt chunk, so it is emitted as a file of its own; Vite keeps `.js.map` assets in every environment.
-          if (item.map != null) files.push({ type: "asset", fileName: `${fileName}.map`, content: JSON.stringify(item.map) })
+          if (item.map != null && hasFileMap) files.push({ type: "asset", fileName: `${fileName}.map`, content: JSON.stringify({ ...item.map, file: fileName }) })
         }
       }
     }
     if (!files.some((item) => item.type === "chunk" && item.fileName === fileName)) throw new Error(`The build of the Worker ${file} has no entry chunk`)
     return files
   }
+}
+
+function textOf(source: string | Uint8Array): string {
+  return typeof source === "string" ? source : new TextDecoder().decode(source)
 }
 
 /** The build names its entry `main.js` or `server.js`, and its source map comment says so; the file is written as `fileName`. */
