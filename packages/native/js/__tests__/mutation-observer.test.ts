@@ -532,6 +532,22 @@ describe("MutationObserver", () => {
       expect(hasMutationObservers()).toBe(false)
     })
 
+    it("collects an observed node its own callback captures once the observer is dropped", async () => {
+      let holder: WeakRef<FakeElement>
+      ;(() => {
+        const node = new FakeElement("div")
+        holder = new WeakRef(node)
+        const dropped = new MutationObserver(() => {
+          node.props.touched = true
+        })
+        dropped.observe(node, { attributes: true })
+        expect(hasMutationObservers()).toBe(true)
+      })()
+      await collect()
+      expect(holder!.deref()).toBeUndefined()
+      expect(hasMutationObservers()).toBe(false)
+    })
+
     it("counts a registration once when its node is collected after a disconnect", async () => {
       const mo = observer(() => {})
       const kept = new FakeElement("div")

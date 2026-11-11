@@ -71,8 +71,12 @@ type ObserverState = {
 
 export type MutationCallback = (records: MutationRecord[], observer: MutationObserver) => void
 
+/**
+ * What the finalization registry holds, strongly and from a global root: only the observer's set of
+ * refs, never the observer, whose callback usually captures the observed node.
+ */
 type CollectedRegistration = {
-  readonly state: ObserverState
+  readonly set: Set<WeakRef<Registration>>
   readonly ref: WeakRef<Registration>
 }
 
@@ -231,7 +235,7 @@ class MutationObserverClass {
     const registration: Registration = { node: target, options: normalized, source: null, observer: state }
     const ref = new WeakRef(registration)
     state.registrations.add(ref)
-    runtime.collected.register(registration, { state, ref }, registration)
+    runtime.collected.register(registration, { set: state.registrations, ref }, registration)
     addRegistration(runtime, registration)
   }
 
@@ -278,7 +282,7 @@ const shared: Runtime = (() => {
     registrations: new WeakMap(),
     count: 0,
     collected: new FinalizationRegistry((held) => {
-      held.state.registrations.delete(held.ref)
+      held.set.delete(held.ref)
       created.count -= 1
     }),
     nextOrder: 0,

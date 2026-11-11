@@ -4996,7 +4996,8 @@ microtask per batch, in the order the observers were made, with `type`, `target`
 `removedNodes`, `previousSibling`, `nextSibling`, `attributeName`, `attributeNamespace` (`null`)
 and `oldValue`; `takeRecords()` empties the queue and `disconnect()` drops it. An observer does not
 keep the nodes it observes alive, as in the standard: an unmounted node nothing else refers to is
-collected, and its registration goes with it. The adapters report
+collected with its registration. A callback that captures the node keeps it alive for as long as
+the observer is reachable, and both are collected once the observer is dropped too. The adapters report
 the changes they make to their tree: a node placed or removed (a move is a removal, then an
 insertion), a text change (`characterData`) and a prop change. An attribute is what `getAttribute`
 reads, so a record is made only when that string changed, with the old string as `oldValue`, and
