@@ -320,7 +320,7 @@ describe("element members", () => {
     expect(el.hasAttribute("disabled")).toBe(false)
     expect(el.hasAttribute("missing")).toBe(false)
     expect(el.dataset).toEqual({ index: "7", rowId: "r1" })
-    expect(Object.isFrozen(el.dataset)).toBe(true)
+    expect(el.dataset).toBe(el.dataset)
   })
 })
 

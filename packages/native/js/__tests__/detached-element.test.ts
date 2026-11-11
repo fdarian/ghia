@@ -141,3 +141,33 @@ describe("window.scrollX and scrollY", () => {
     expect(window.scrollY).toBe(0)
   })
 })
+
+describe("dataset", () => {
+  it("is a live map of the data attributes, in camel case", () => {
+    const element = document.createElement("div")
+    element.setAttribute("data-row-id", "7")
+    const map = element.dataset
+    expect(map.rowId).toBe("7")
+    expect(map.missing).toBeUndefined()
+    expect("rowId" in map).toBe(true)
+    expect("missing" in map).toBe(false)
+    map.tabindex = "3"
+    map.fooBar = "x"
+    expect(element.getAttribute("data-tabindex")).toBe("3")
+    expect(element.getAttribute("data-foo-bar")).toBe("x")
+    expect(Object.keys(map).sort()).toEqual(["fooBar", "rowId", "tabindex"])
+    expect({ ...map }).toEqual({ rowId: "7", tabindex: "3", fooBar: "x" })
+    delete map.tabindex
+    expect(element.hasAttribute("data-tabindex")).toBe(false)
+    element.removeAttribute("data-row-id")
+    expect(map.rowId).toBeUndefined()
+    expect(element.dataset).toBe(map)
+  })
+
+  it("rejects a write to a name with a dash before a lowercase letter", () => {
+    const map = document.createElement("div").dataset
+    expect(() => {
+      map["a-b"] = "x"
+    }).toThrowError(expect.objectContaining({ name: "SyntaxError" }))
+  })
+})

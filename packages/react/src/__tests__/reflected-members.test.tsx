@@ -186,3 +186,25 @@ describeNative("the members with a fixed answer", () => {
     }
   })
 })
+
+describeNative("dataset", () => {
+  it("writes through to the element's props and reads what a framework committed", () => {
+    let box: PublicInstance | null = null
+    const root = createTestRoot()
+    root.render(<div ref={(element) => { box = element }} data-row-id="r1" tabIndex={0} />)
+    try {
+      expect(box!.dataset.rowId).toBe("r1")
+      // What Base UI's focus guards do: keep the tabindex in the dataset, then put it back.
+      box!.dataset.tabindex = box!.getAttribute("tabindex") ?? ""
+      box!.setAttribute("tabindex", "-1")
+      expect(box!.tabIndex).toBe(-1)
+      expect(box!.getAttribute("data-tabindex")).toBe("0")
+      box!.setAttribute("tabindex", box!.dataset.tabindex)
+      delete box!.dataset.tabindex
+      expect(box!.tabIndex).toBe(0)
+      expect(box!.hasAttribute("data-tabindex")).toBe(false)
+    } finally {
+      root.unmount()
+    }
+  })
+})

@@ -10,6 +10,7 @@
 
 import type { ElementType, NativeRenderer } from "../host.js"
 import { NOT_ATTRIBUTES, attributeNameOf, storedAttributeNames } from "./attribute-names.js"
+import { datasetOf } from "./dataset.js"
 import type { DOMRectList } from "./dom-rect.js"
 import { defineReflectedMembers, type ReflectedMembers } from "./reflected-members.js"
 import { closestElement, elementById, matchesSelector, querySelector, querySelectorAll, type ElementList } from "./selectors.js"
@@ -303,12 +304,6 @@ abstract class TextClass extends CharacterDataClass {
   }
 }
 
-/** The `data-*` props are the attributes `dataset` reads, with the name in camel case. */
-const DATA_ATTRIBUTE = /^data-(.+)$/
-function camelCase(dashed: string): string {
-  return dashed.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase())
-}
-
 abstract class ElementClass extends NodeClass {
   constructor() {
     super()
@@ -469,16 +464,9 @@ abstract class ElementClass extends NodeClass {
     return querySelectorAll(this as unknown as Element, selector, "Element")
   }
 
-  /** A read-only view of the `data-*` attributes, with the names in camel case. */
-  get dataset(): Readonly<Record<string, string>> {
-    const view: Record<string, string> = {}
-    for (const name of this.getAttributeNames()) {
-      const match = DATA_ATTRIBUTE.exec(name)
-      if (match === null) continue
-      const value = this.getAttribute(name)
-      if (value !== null) view[camelCase(match[1])] = value
-    }
-    return Object.freeze(view)
+  /** The `data-*` attributes as a live map, with the names in camel case: see `datasetOf`. */
+  get dataset(): DOMStringMap {
+    return datasetOf(this as unknown as Element)
   }
 }
 
