@@ -792,9 +792,34 @@ fn own_styles_that_all_merge_to_one_style_are_not_pinned_by_it() {
         doc.flush();
         doc.tree.styles.sweep();
     }
-    assert!(doc.tree.styles.cascaded.len() <= 1, "cascade entries: {}", doc.tree.styles.cascaded.len());
+    // The element's current own style, and the rules alone, which stay while the rules are held.
+    assert!(doc.tree.styles.cascaded.len() <= 2, "cascade entries: {}", doc.tree.styles.cascaded.len());
     assert!(doc.tree.styles.len() <= 3, "interned styles: {}", doc.tree.styles.len());
     assert!(doc.style(item).is_some_and(|style| style.left.is_some()));
+}
+
+#[test]
+fn a_cascade_entry_with_no_own_style_survives_sweeps_when_the_elements_holding_it_hold_a_layered_style() {
+    let mut doc = Doc::new();
+    // An `li` has a user agent style, so each element holds the layer over the merge and not the merge.
+    let items: Vec<u64> = (0..30).map(|_| doc.classed("li", ROOT, "item")).collect();
+    // The inline style is what the sheet merges to, so that entry's merged style is its own style.
+    let equal = doc.classed("li", ROOT, "item");
+    doc.inline(equal, r#"{"color":"red"}"#);
+    doc.style_element(ROOT, ".item { color: red }");
+    doc.flush();
+    for _ in 0..3 {
+        doc.tree.styles.sweep();
+    }
+    let entries = doc.tree.styles.cascaded.len();
+    assert!(entries >= 2, "an entry for the tag alone and one for the own style: {entries}");
+
+    crate::perf_counters::reset();
+    let later = doc.classed("li", ROOT, "item");
+    doc.flush();
+    assert_eq!(counts().cascades_computed, 0, "a new item is a hit on the entry that was kept");
+    assert_eq!(doc.tree.styles.cascaded.len(), entries);
+    assert!(items.iter().chain([&equal, &later]).all(|id| doc.color(*id) == Some("red")));
 }
 
 #[test]
