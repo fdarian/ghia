@@ -175,7 +175,7 @@ export interface DomEvent extends RootEvent {
   composedPath(): object[]
   /** The event itself, as a synthetic event wrapper's `nativeEvent` is the DOM event under it. */
   readonly nativeEvent: DomEvent
-  /** `true` on a pointer event: Ghia has one pointer, so it is always the primary one. Absent on other events. */
+  /** Whether a pointer event is from the primary pointer: Ghia has one pointer, so `true` on any event a pointer made and `false` on a click no pointer made. Absent on other events. */
   readonly isPrimary?: boolean
   eventPhase: number
   readonly bubbles: boolean
