@@ -5,6 +5,12 @@ use rustc_hash::FxHashMap;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct Atom(u32);
 
+impl Atom {
+    pub(super) fn index(self) -> u32 {
+        self.0
+    }
+}
+
 /// One interner per document, shared by every sheet of it. Case is the caller's business: the
 /// parser interns a type and an attribute name both lower-cased and as written, and keeps classes
 /// and ids as written.

@@ -186,7 +186,7 @@ impl StyleSheets {
             }
             sheets.push(sheet);
         }
-        self.index = RuleIndex::build(sheets, &layers.order());
+        self.index = RuleIndex::build(sheets, &layers.order(), self.style);
         self.interner = MatchedInterner::default();
         self.loaded = texts;
     }

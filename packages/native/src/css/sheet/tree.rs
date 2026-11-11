@@ -17,7 +17,7 @@ use super::atoms::{Atom, Atoms};
 use super::document::ClassAtoms;
 use super::cascade::MatchedRules;
 use super::invalidation::Reach;
-use super::selector::Specificity;
+use super::share::{Found, StyleSharing};
 use super::view::{count_sibling_work, SiblingPositions, TreeView};
 
 /// Elements of a subtree `contains_style_element` walks for each `<style>` element there is, which
@@ -456,8 +456,9 @@ impl RetainedTree {
         let all = std::mem::take(&mut self.sheets.mark_all);
         let restyle = self.restyle_set(&marks, all);
 
-        let mut found: Vec<(u64, Vec<(u32, Specificity)>)> = Vec::new();
+        let mut found: Vec<(u64, Found)> = Vec::new();
         let positions = SiblingPositions::default();
+        let mut sharing = StyleSharing::default();
         for (id, connected) in restyle {
             crate::perf_counters::element_rematched();
             let Some(element) = self.elements.get(&id) else {
@@ -466,19 +467,30 @@ impl RetainedTree {
             let css = element.css();
             let (element_id, classes) = css.map_or((None, &[][..]), |css| (css.id, &css.classes[..]));
             let matched = if connected && element.is_matchable() && self.sheets.index.may_match(element_id, classes) {
-                self.sheets.index.matching(&TreeView::new(self, id, &positions), element_id, classes)
+                let view = TreeView::new(self, id, &positions);
+                sharing.matching(&self.sheets, element, &view, element_id, classes)
             } else {
-                Vec::new()
+                Found::Own(Vec::new())
             };
             let was_matched = css.is_some_and(|css| css.matched.is_some());
-            if !matched.is_empty() || was_matched {
+            if !sharing.is_empty(&matched) || was_matched {
                 found.push((id, matched));
             }
         }
 
+        let mut shared: Vec<Option<Arc<MatchedRules>>> = vec![None; sharing.lists.len()];
         let mut changes: Vec<(u64, Option<Arc<MatchedRules>>)> = Vec::new();
         for (id, matched) in found {
-            let new = if matched.is_empty() { None } else { Some(self.sheets.interner.intern(&self.sheets.index, matched)) };
+            let new = match matched {
+                Found::Own(list) if list.is_empty() => None,
+                Found::Own(list) => Some(self.sheets.interner.intern(&self.sheets.index, list)),
+                Found::Shared(list) if sharing.lists[list].is_empty() => None,
+                Found::Shared(list) => Some(
+                    shared[list]
+                        .get_or_insert_with(|| self.sheets.interner.intern(&self.sheets.index, sharing.lists[list].clone()))
+                        .clone(),
+                ),
+            };
             let old = self.elements.get(&id).and_then(|element| element.css()).and_then(|css| css.matched.as_ref());
             let same = match (old, &new) {
                 (None, None) => true,

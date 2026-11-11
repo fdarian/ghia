@@ -1615,3 +1615,199 @@ fn the_style_attribute_has_the_units_and_omissions_of_the_dom() {
     assert_eq!(doc.style(div).and_then(|style| style.display.as_deref()), Some("flex"));
     assert_eq!(doc.style(div).and_then(|style| style.cursor.as_deref()), Some("pointer"));
 }
+
+fn full_matches() -> usize {
+    super::share::FULL_MATCHES.with(|count| count.get())
+}
+
+fn reset_full_matches() {
+    super::share::FULL_MATCHES.with(|count| count.set(0));
+}
+
+#[test]
+fn elements_that_look_alike_are_matched_once() {
+    let mut doc = Doc::new();
+    let rows: Vec<u64> = (0..40).map(|_| doc.classed("div", ROOT, "row")).collect();
+    doc.style_element(ROOT, ".row { color: red }");
+    reset_full_matches();
+    doc.flush();
+    assert_eq!(full_matches(), 1, "forty rows, one match");
+    let first = doc.tree.elements[&rows[0]].css().unwrap().matched.clone().unwrap();
+    for row in &rows {
+        assert_eq!(doc.color(*row), Some("red"));
+        assert!(Arc::ptr_eq(doc.tree.elements[row].css().unwrap().matched.as_ref().unwrap(), &first));
+    }
+
+    let more: Vec<u64> = (0..5).map(|_| doc.classed("div", ROOT, "row")).collect();
+    reset_full_matches();
+    doc.flush();
+    assert_eq!(full_matches(), 1, "the memo lives for one flush: the first row of the next is matched");
+    assert!(more.iter().all(|row| doc.color(*row) == Some("red")));
+}
+
+#[test]
+fn the_order_of_the_classes_and_classes_no_sheet_names_do_not_tell_elements_apart() {
+    let mut doc = Doc::new();
+    let first = doc.classed("div", ROOT, "a b");
+    let swapped = doc.classed("div", ROOT, "b a");
+    let extra = doc.classed("div", ROOT, "x a  b  a");
+    let fewer = doc.classed("div", ROOT, "a");
+    doc.style_element(ROOT, ".a { color: red } .a.b { background-color: blue }");
+    reset_full_matches();
+    doc.flush();
+    assert_eq!(full_matches(), 2, "{{a, b}} and {{a}}");
+    for id in [first, swapped, extra] {
+        assert_eq!((doc.color(id), doc.background(id)), (Some("red"), Some("blue")));
+    }
+    assert_eq!((doc.color(fewer), doc.background(fewer)), (Some("red"), None));
+}
+
+#[test]
+fn a_different_attribute_value_is_a_different_match() {
+    let mut doc = Doc::new();
+    let with = |doc: &mut Doc, value: Option<&str>| {
+        let id = doc.classed("div", ROOT, "row");
+        if let Some(value) = value {
+            doc.tree.set_attribute(id, "data-k", Some(value.into()));
+        }
+        id
+    };
+    let a = with(&mut doc, Some("a"));
+    let b = with(&mut doc, Some("b"));
+    let again = with(&mut doc, Some("a"));
+    let none = with(&mut doc, None);
+    let prefixed = with(&mut doc, Some("ba"));
+    doc.style_element(ROOT, ".row { opacity: 0.5 } [data-k=a] { color: red } [data-k^=b] { background-color: blue }");
+    reset_full_matches();
+    doc.flush();
+    // The root and the `<style>` element are candidates for the attribute rules too.
+    assert_eq!(full_matches(), 4 + 2, "a, b, none and ba; the second a is shared");
+    assert_eq!((doc.color(a), doc.background(a)), (Some("red"), None));
+    assert_eq!((doc.color(again), doc.background(again)), (Some("red"), None));
+    assert_eq!((doc.color(b), doc.background(b)), (None, Some("blue")));
+    assert_eq!((doc.color(prefixed), doc.background(prefixed)), (None, Some("blue")));
+    assert_eq!((doc.color(none), doc.background(none)), (None, None));
+}
+
+#[test]
+fn an_html_and_an_svg_element_with_the_same_name_and_attribute_are_matched_apart() {
+    let mut doc = Doc::new();
+    let html = doc.element("div", ROOT);
+    let lower = doc.element("svg", ROOT);
+    let written = doc.element("svg", ROOT);
+    doc.tree.set_attribute(html, "viewBox", Some("1".into()));
+    doc.tree.set_attribute(lower, "viewbox", Some("1".into()));
+    doc.tree.set_attribute(written, "viewBox", Some("1".into()));
+    doc.style_element(ROOT, "[viewBox] { color: red }");
+    doc.flush();
+    assert_eq!(doc.color(html), Some("red"), "an HTML element's names are lower-cased");
+    assert_eq!(doc.color(lower), None, "an SVG element's names are as written");
+    assert_eq!(doc.color(written), Some("red"));
+
+    let mut doc = Doc::new();
+    let svg = doc.element("linearGradient", ROOT);
+    let html = doc.element("lineargradient", ROOT);
+    doc.style_element(ROOT, "lineargradient { color: red } linearGradient { background-color: blue }");
+    reset_full_matches();
+    doc.flush();
+    assert_eq!(full_matches(), 2 + 2, "the two, and the root and the `<style>` element");
+    assert_eq!((doc.color(svg), doc.background(svg)), (None, Some("blue")));
+    assert_eq!((doc.color(html), doc.background(html)), (Some("red"), Some("blue")));
+}
+
+#[test]
+fn an_element_a_combinator_rule_could_match_is_matched_in_full() {
+    let mut doc = Doc::new();
+    let list = doc.classed("div", ROOT, "list");
+    let inside: Vec<u64> = (0..3).map(|_| doc.classed("div", list, "row")).collect();
+    let outside: Vec<u64> = (0..3).map(|_| doc.classed("div", ROOT, "row")).collect();
+    doc.style_element(ROOT, ".row { color: red } .list .row { background-color: blue }");
+    reset_full_matches();
+    doc.flush();
+    assert_eq!(full_matches(), 6 + 1, "every row has the combinator rule as a candidate, and the list is tried");
+    assert!(inside.iter().all(|id| (doc.color(*id), doc.background(*id)) == (Some("red"), Some("blue"))));
+    assert!(outside.iter().all(|id| (doc.color(*id), doc.background(*id)) == (Some("red"), None)));
+
+    // The elements without that candidate are still shared.
+    let plain: Vec<u64> = (0..4).map(|_| doc.classed("div", ROOT, "cell")).collect();
+    doc.style_element(ROOT, ".cell { opacity: 0.5 }");
+    reset_full_matches();
+    doc.flush();
+    assert_eq!(full_matches(), 6 + 1 + 1, "the rows and the list again, one cell");
+    assert!(plain.iter().all(|id| doc.style(*id).and_then(|style| style.opacity) == Some(0.5)));
+}
+
+#[test]
+fn a_rule_reading_an_attribute_inside_a_combinator_rule_still_tells_elements_apart() {
+    let mut doc = Doc::new();
+    let list = doc.classed("div", ROOT, "list");
+    let with = doc.element("div", list);
+    let without = doc.element("div", list);
+    doc.tree.set_attribute(with, "data-k", Some("1".into()));
+    doc.style_element(ROOT, "* { opacity: 0.5 } .list [data-k] { color: red }");
+    doc.flush();
+    assert_eq!(doc.color(with), Some("red"));
+    assert_eq!(doc.color(without), None);
+}
+
+#[test]
+fn arguments_that_read_the_tree_make_a_selector_not_self_contained() {
+    let mut doc = Doc::new();
+    let list = doc.classed("div", ROOT, "list");
+    let inside = doc.classed("div", list, "row");
+    let outside = doc.classed("div", ROOT, "row");
+    doc.style_element(ROOT, ":is(.list .row) { color: red } .row:not(.x) { background-color: blue } .row:where(.y, [z]) { opacity: 0.5 }");
+    reset_full_matches();
+    doc.flush();
+    assert_eq!(full_matches(), 5, "the universal list holds the :is rule: every element is matched in full");
+    assert_eq!((doc.color(inside), doc.background(inside)), (Some("red"), Some("blue")));
+    assert_eq!((doc.color(outside), doc.background(outside)), (None, Some("blue")));
+
+    let mut doc = Doc::new();
+    let rows: Vec<u64> = (0..10).map(|_| doc.classed("div", ROOT, "row")).collect();
+    doc.style_element(ROOT, ".row:not(.x):is(.row, .y) { background-color: blue } .row:where(.y, [z]) { opacity: 0.5 }");
+    reset_full_matches();
+    doc.flush();
+    assert_eq!(full_matches(), 1, "self-contained arguments are shared");
+    assert!(rows.iter().all(|id| doc.background(*id) == Some("blue")));
+}
+
+#[test]
+fn a_style_selector_and_root_are_matched_in_full() {
+    let mut doc = Doc::new();
+    let first = doc.classed("div", ROOT, "row");
+    let second = doc.classed("div", ROOT, "row");
+    let third = doc.classed("div", ROOT, "row");
+    doc.inline(first, r#"{"--s":"1"}"#);
+    doc.inline(second, r#"{"--t":"1"}"#);
+    doc.inline(third, r#"{"--s":"2"}"#);
+    let bare = doc.classed("div", ROOT, "row");
+    let bare_too = doc.classed("div", ROOT, "row");
+    doc.style_element(ROOT, ".row { opacity: 0.5 } [style*='--s'] { color: blue }");
+    reset_full_matches();
+    doc.flush();
+    assert_eq!(doc.color(first), Some("blue"));
+    assert_eq!(doc.color(second), None, "the same key as the first, another own style");
+    assert_eq!(doc.color(third), Some("blue"));
+    assert_eq!(full_matches(), 3 + 1 + 2, "three rows with an own style, the bare ones once, the root and the `<style>` element");
+    assert_eq!((doc.color(bare), doc.color(bare_too)), (None, None));
+
+    let mut doc = Doc::new();
+    let sibling = doc.element("div", ROOT);
+    doc.style_element(ROOT, ":root { color: red } div { opacity: 0.5 }");
+    doc.flush();
+    assert_eq!(doc.color(ROOT), Some("red"));
+    assert_eq!(doc.color(sibling), None, "looks like the root and is not it");
+}
+
+#[test]
+fn a_reload_matches_again_with_the_new_rules_and_nothing_of_the_old() {
+    let mut doc = Doc::new();
+    let rows: Vec<u64> = (0..5).map(|_| doc.classed("div", ROOT, "row")).collect();
+    let (_, text) = doc.style_element(ROOT, ".row { color: red }");
+    doc.flush();
+    assert!(rows.iter().all(|id| doc.color(*id) == Some("red")));
+    doc.tree.set_text(text, ".row { color: blue }".into());
+    doc.flush();
+    assert!(rows.iter().all(|id| doc.color(*id) == Some("blue")));
+}

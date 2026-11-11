@@ -25,6 +25,7 @@ mod matching;
 mod parser;
 mod selector;
 mod selector_parse;
+mod share;
 mod tokenizer;
 mod tree;
 mod validate;
