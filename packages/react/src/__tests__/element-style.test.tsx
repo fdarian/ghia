@@ -164,7 +164,7 @@ describeNative("element.style and element.id in React", () => {
     expect(records.map((record) => [record.attributeName, record.oldValue])).toEqual([
       ["style", "width: 30px;"],
       ["style", "width: 30px; --dnd-top: 10px;"],
-      ["style", "--dnd-top: 10px; width: 40px;"],
+      ["style", "width: 40px; --dnd-top: 10px;"],
     ])
     box.style.setProperty("--dnd-top", "10px")
     box.style.setProperty("--dnd-top", "10px")
