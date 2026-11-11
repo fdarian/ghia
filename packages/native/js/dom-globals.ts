@@ -13,6 +13,7 @@ import {
   SVGElement,
   Text,
 } from "./dom/nodes.js"
+import { CSSStyleDeclaration } from "./dom/css-style-declaration.js"
 import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
 import { Selection } from "./dom/selection.js"
 import { document, window } from "./events/window-target.js"
@@ -41,6 +42,7 @@ const DOM_CLASSES = {
   Document,
   DocumentFragment,
   ShadowRoot,
+  CSSStyleDeclaration,
   Selection,
   MutationObserver,
   MutationRecord,

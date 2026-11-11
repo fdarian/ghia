@@ -1,6 +1,7 @@
 // Host-tree shape is based on jhomra21/gpuix-solid (MIT), stripped to GPUIX's
 // native elements and event contract.
 import {
+  applyStyleChange,
   assertSvgPlacement,
   createElementMethods,
   createWebviewMethods,
@@ -172,9 +173,9 @@ export class HostRoot implements MotionBindingHost {
     const html = createHostElement(ROOT_ELEMENT_TYPES.html)
     const head = createHostElement(ROOT_ELEMENT_TYPES.head)
     const body = createHostElement(ROOT_ELEMENT_TYPES.body)
-    html.style = { ...ROOT_ELEMENT_STYLE }
-    head.style = { ...ROOT_HEAD_STYLE }
-    body.style = { ...ROOT_ELEMENT_STYLE }
+    html.liveStyle = { ...ROOT_ELEMENT_STYLE }
+    head.liveStyle = { ...ROOT_HEAD_STYLE }
+    body.liveStyle = { ...ROOT_ELEMENT_STYLE }
     html.parent = this
     for (const child of [head, body]) {
       html.childList.push(child)
@@ -198,8 +199,18 @@ export class HostElement extends HTMLElement {
   root: HostRoot | null = null
   nativeId = 0
   mounted = false
-  style: StyleDesc = {}
-  /** Laid over `style` while it is set, however `style` changes: the box a leaving `popLayout` child keeps. */
+  /**
+   * The style the element has: what the framework rendered into `style` and what code wrote through
+   * `element.style`, as one. Never changed in place.
+   */
+  liveStyle: StyleDesc = {}
+  /**
+   * The style the framework rendered last, kept once code wrote to the style: `liveStyle` is then
+   * not it, and the framework's next change is applied as a difference from this onto `liveStyle`.
+   * `undefined` while code has not written, when `liveStyle` is the framework's own.
+   */
+  private frameworkStyle: StyleDesc | undefined
+  /** Laid over `liveStyle` while it is set, however `liveStyle` changes: the box a leaving `popLayout` child keeps. */
   pin: StyleDesc | undefined
   /**
    * Held on the instance, not in a module map: the JSX runtime can load a second
@@ -223,9 +234,26 @@ export class HostElement extends HTMLElement {
     return this.domBinding
   }
 
-  /** What the renderer is given: `style` under `pin`. */
+  /** What the renderer is given: `liveStyle` under `pin`. */
   appliedStyle(): StyleDesc {
-    return this.pin === undefined ? this.style : { ...this.style, ...this.pin }
+    return this.pin === undefined ? this.liveStyle : { ...this.liveStyle, ...this.pin }
+  }
+
+  /** The framework's `style` prop. Until code writes a style it replaces the live one. */
+  setFrameworkStyle(next: StyleDesc): void {
+    if (this.frameworkStyle === undefined) {
+      this.liveStyle = next
+      return
+    }
+    this.liveStyle = applyStyleChange(this.liveStyle, this.frameworkStyle, next)
+    this.frameworkStyle = next
+  }
+
+  /** A write from code: `next` is the whole live style. */
+  setCodeStyle(next: StyleDesc): void {
+    this.frameworkStyle ??= this.liveStyle
+    this.liveStyle = next
+    this.writeStyle()
   }
 
   setPin(pin: StyleDesc | undefined): void {
@@ -464,6 +492,9 @@ defineDomMembers(HostElement.prototype, (element: HostElement) => ({
   layout: element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.nativeId } : undefined,
   prop: (name) => element.props.get(name),
   propNames: () => element.props.keys(),
+  get style() {
+    return element.liveStyle
+  },
 }))
 defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
   renderer: element.root?.nativeRenderer,
@@ -543,6 +574,19 @@ class ElementDomBinding implements ElementBinding {
 
   propNames(): Iterable<string> {
     return this.element.props.keys()
+  }
+
+  get style(): StyleDesc {
+    return this.element.liveStyle
+  }
+
+  setStyle(next: StyleDesc): void {
+    if (hasMutationObservers()) recordAttributeChanges(this.element, ["style"], () => this.element.setCodeStyle(next))
+    else this.element.setCodeStyle(next)
+  }
+
+  setProp(name: string, value: string): void {
+    setHostProperty(this.element, name, value)
   }
 
   insertBefore(child: Node, before: Node | null): void {
@@ -632,11 +676,13 @@ export function setHostProperty(
   }
   if (name === "style") {
     const split = splitMotionStyle(isStyle(value) ? value : undefined)
-    node.style = split.style ?? {}
+    const next = split.style ?? {}
+    if (hasMutationObservers()) recordAttributeChanges(node, ["style"], () => node.setFrameworkStyle(next))
+    else node.setFrameworkStyle(next)
     node.motionValues = split.motionValues
     if (node.root && node.mounted) {
       node.writeStyle()
-      syncMotionBindings(node.root, node.root.mutations, node.nativeId, node.motionValues, node.kind === "element" ? node.type : undefined, node.style)
+      syncMotionBindings(node.root, node.root.mutations, node.nativeId, node.motionValues, node.kind === "element" ? node.type : undefined, node.liveStyle)
     }
     return
   }
@@ -690,7 +736,7 @@ function mount(root: HostRoot, node: HostNode): void {
   } else {
     node.sent.reset()
     node.writeStyle()
-    if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.type, node.style)
+    if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.type, node.liveStyle)
     node.listeners.attach({ eventHandlers: root.eventHandlers, renderer: root.mutations, elementId: node.nativeId })
     for (const [name, value] of node.props) {
       if (!EVENT_PROP_NAMES.has(name) && customPropAllowed(node, name)) {

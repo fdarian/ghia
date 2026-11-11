@@ -13,6 +13,7 @@ import * as tree from "./tree-mutation.js"
 
 export { crossRootError } from "./tree-mutation.js"
 import { attributeNameOf } from "./attribute-names.js"
+import { serializeStyle, styleDeclarationFor, type CSSStyleDeclaration, type StyleBinding } from "./css-style-declaration.js"
 
 /** Where `[DOM_BINDING]()` is read, so two copies of this package find each other's nodes. */
 export const DOM_BINDING: unique symbol = Symbol.for("@ghia/native/dom-binding")
@@ -57,13 +58,19 @@ export type ParentBinding = NodeBinding & {
   createText(data: string): Text
 }
 
-export type ElementBinding = ParentBinding & {
+export type ElementBinding = ParentBinding & StyleBinding & {
   /** The element type as written: `div`, `svg`, `linearGradient`. */
   readonly type: string
   /** The prop of that name. */
   prop(name: string): unknown
   /** The names of the props it was given. */
   propNames(): Iterable<string>
+  /**
+   * Gives the prop a value, through the adapter's own path for a prop it renders: native, the
+   * adapter's record of the props and the `MutationObserver` records. Code's write, which the
+   * framework's next render of the same prop overwrites.
+   */
+  setProp(name: string, value: string): void
 }
 
 export type TextBinding = NodeBinding & {
@@ -359,8 +366,11 @@ abstract class TextClass extends CharacterDataClass {
 
 /** The `data-*` props are the attributes `dataset` reads, with the name in camel case. */
 const DATA_ATTRIBUTE = /^data-(.+)$/
-/** Props that are not attributes: `getAttributeNames` skips them. */
-export const NOT_ATTRIBUTES: ReadonlySet<string> = new Set(["children", "key", "ref", "style"])
+/**
+ * Props that are not attributes: `getAttributeNames` skips them. `style` is one, as a prop; the
+ * `style` attribute is the text of the live style, which `getAttribute` and `getAttributeNames` give.
+ */
+export const NOT_ATTRIBUTES: ReadonlySet<string> = new Set(["children", "key", "ref"])
 
 function camelCase(dashed: string): string {
   return dashed.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase())
@@ -398,6 +408,24 @@ abstract class ElementClass extends NodeClass {
   get id(): string {
     const value = this.getAttribute("id")
     return value === null ? "" : value
+  }
+
+  /** Sets the `id` prop, so the element is found by `#id` and `getAttribute("id")`. */
+  set id(value: string) {
+    this[DOM_BINDING]().setProp("id", String(value))
+  }
+
+  /**
+   * The inline style, one with what the framework rendered into `style`: a write from code changes
+   * the live style and a framework's next change to another property keeps it. Made on the first
+   * read.
+   */
+  get style(): CSSStyleDeclaration {
+    return styleDeclarationFor(this, this[DOM_BINDING]())
+  }
+
+  set style(cssText: string) {
+    this.style.cssText = cssText
   }
 
   get className(): string {
@@ -501,6 +529,7 @@ abstract class ElementClass extends NodeClass {
       const name = attributeNameOf(prop, svg)
       if (this.getAttribute(name) !== null && !names.includes(name)) names.push(name)
     }
+    if (!names.includes("style") && serializeStyle(this[DOM_BINDING]().style) !== "") names.push("style")
     return names
   }
 

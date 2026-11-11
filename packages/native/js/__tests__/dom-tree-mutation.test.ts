@@ -58,6 +58,7 @@ function elementBinding(element: FakeEl): ElementBinding {
     type: element.type,
     prop: () => undefined,
     propNames: () => [],
+    style: {},
     insertBefore(child, before) {
       const node = child as unknown as FakeEl | FakeTx
       detach(node)

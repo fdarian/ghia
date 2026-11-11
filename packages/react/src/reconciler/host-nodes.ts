@@ -18,6 +18,7 @@ import {
   hasMutationObservers,
   queueChildListMutation,
   readBoundingClientRect,
+  splitMotionStyle,
   SVG_CHILD_TYPES,
   SVGElement,
   Text,
@@ -31,10 +32,11 @@ import type {
   HostBinding,
   Node,
   NodeBinding,
+  StyleDesc,
   TextBinding,
 } from "@ghia/native/host"
 import type { Container, ElementType, Instance, Props, TextInstance } from "../types/host.js"
-import { createDomText, insertDomNode, removeDomNode, setDomTextData } from "./dom-mutation.js"
+import { createDomText, insertDomNode, removeDomNode, setDomProp, setDomStyle, setDomTextData } from "./dom-mutation.js"
 import { listenersOf } from "./event-registry.js"
 
 export type HostNode = Instance | TextInstance
@@ -55,6 +57,17 @@ export interface HostNodeState {
   /** The members of its type (`<input>`, `<form>`, ...) were attached when its ref was handed out. */
   typeMembersAttached: boolean
   binding?: NodeBinding
+  /**
+   * The style the element has once code wrote to it, which is not what its `style` prop renders:
+   * React's next change of the prop is applied as a difference onto it. Absent until code writes.
+   */
+  codeStyle?: StyleDesc
+  /**
+   * Props code set (`el.id = ...`) that the props React gave do not hold: a later render that
+   * leaves the prop as it was keeps them, one that changes or removes the prop drops them.
+   * Absent until code sets one.
+   */
+  propOverrides?: Map<string, unknown>
 }
 
 const hostNodeStates = new WeakMap<HostNode, HostNodeState>()
@@ -80,6 +93,26 @@ function createState(container: Container): HostNodeState {
     children: [],
     typeMembersAttached: false,
   }
+}
+
+/** The style an element has: what code wrote if it did, else what its `style` prop renders. */
+export function liveStyleOf(instance: Instance): StyleDesc {
+  return stateFor(instance).codeStyle ?? splitMotionStyle(instance.props.style).style ?? {}
+}
+
+/** A prop as code and React have left it. */
+export function propOf(instance: Instance, name: string): unknown {
+  const overrides = stateFor(instance).propOverrides
+  if (overrides?.has(name)) return overrides.get(name)
+  return (instance.props as Record<string, unknown>)[name]
+}
+
+export function propNamesOf(instance: Instance): string[] {
+  const names = Object.keys(instance.props)
+  const overrides = stateFor(instance).propOverrides
+  if (overrides === undefined) return names
+  for (const name of overrides.keys()) if (!names.includes(name)) names.push(name)
+  return names
 }
 
 function methodsOf(instance: HostNode): ElementMethods {
@@ -162,8 +195,11 @@ defineDomMembers(ReactHostElement.prototype, (instance: ReactHostElement) => ({
   layout: stateFor(instance).mounted
     ? { renderer: containerFor(instance).nativeRenderer, id: instance.nativeId }
     : undefined,
-  prop: (name) => (instance.props as Record<string, unknown>)[name],
-  propNames: () => Object.keys(instance.props),
+  prop: (name) => propOf(instance, name),
+  propNames: () => propNamesOf(instance),
+  get style() {
+    return liveStyleOf(instance)
+  },
 }))
 
 /** Mounted, which a destroyed element is not any more, and in the tree of its window's `<html>`. */
@@ -235,11 +271,23 @@ class ElementDomBinding implements ElementBinding {
   }
 
   prop(name: string): unknown {
-    return (this.instance.props as Record<string, unknown>)[name]
+    return propOf(this.instance, name)
   }
 
   propNames(): Iterable<string> {
-    return Object.keys(this.instance.props)
+    return propNamesOf(this.instance)
+  }
+
+  get style(): StyleDesc {
+    return liveStyleOf(this.instance)
+  }
+
+  setStyle(next: StyleDesc): void {
+    setDomStyle(this.instance, next)
+  }
+
+  setProp(name: string, value: string): void {
+    setDomProp(this.instance, name, value)
   }
 
   insertBefore(child: Node, before: Node | null): void {

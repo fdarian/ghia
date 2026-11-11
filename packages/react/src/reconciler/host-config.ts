@@ -6,8 +6,9 @@
 
 import { createContext } from "react"
 import { DefaultEventPriority } from "react-reconciler/constants.js"
-import type { HostEventHandler } from "@ghia/native/host"
+import type { HostEventHandler, StyleDesc } from "@ghia/native/host"
 import {
+  applyStyleChange,
   assertSvgPlacement,
   createWebviewMethods,
   eventTypesWithOverrides,
@@ -65,9 +66,11 @@ import {
   createHostElement,
   createHostText,
   linkChild,
+  liveStyleOf,
   stateFor,
   unlinkChild,
   type HostNode,
+  type HostNodeState,
 } from "./host-nodes.js"
 
 let currentUpdatePriority = NoEventPriority
@@ -231,10 +234,15 @@ function diffEventListeners(instance: Instance, oldProps: Props, newProps: Props
 
 const NO_STYLE = {}
 
-function sendStyle(renderer: MutationRenderer, id: number, props: Props): void {
-  const style = splitMotionStyle(props.style).style
+function sendStyle(renderer: MutationRenderer, id: number, style: StyleDesc | undefined): void {
   if (style == null || Object.keys(style).length === 0) return
   renderer.setStyle(id, style)
+}
+
+/** Sends the live style of a mounted element, under `visibility: hidden` while React hides it. */
+export function sendLiveStyle(instance: Instance, state: HostNodeState): void {
+  const style = liveStyleOf(instance)
+  state.container.renderer.setStyle(instance.nativeId, state.hidden ? hiddenStyle(style) : style)
 }
 
 /**
@@ -334,11 +342,17 @@ export function materialize(node: HostNode): ReturnType<typeof stateFor> {
   if ("type" in node) {
     renderer.createElement(node.nativeId, node.type)
     state.container.instances.set(node.nativeId, node)
-    if (state.hidden) renderer.setStyle(node.nativeId, hiddenStyle(node.props.style))
-    else sendStyle(renderer, node.nativeId, node.props)
+    const style = state.codeStyle ?? splitMotionStyle(node.props.style).style
+    if (state.hidden) renderer.setStyle(node.nativeId, hiddenStyle(style))
+    else sendStyle(renderer, node.nativeId, style)
     syncMotionBindings(state.container, node.nativeId, node.props.style, node.type)
     syncEventListeners(state.container, node)
     syncCustomProps(renderer, node.nativeId, node.type, node.props)
+    if (state.propOverrides !== undefined) {
+      for (const [name, value] of state.propOverrides) {
+        if (forwardsCustomProp(node.type, name)) renderer.setCustomProp(node.nativeId, name, serializeCustomProp(value as Parameters<typeof serializeCustomProp>[0]))
+      }
+    }
   } else {
     renderer.createElement(node.nativeId, "#text")
     renderer.setText(node.nativeId, node.text)
@@ -445,6 +459,34 @@ export function portalContainerFor(target: Instance): Container {
     portalContainers.set(target, container)
   }
   return container
+}
+
+/**
+ * React's new props become the element's. What code wrote stays unless React changed it: the
+ * change of the `style` prop is applied onto the style code wrote, property by property, and a
+ * prop React changed or removed drops code's value for it.
+ */
+function adoptProps(
+  instance: Instance,
+  state: HostNodeState,
+  oldProps: Props,
+  newProps: Props,
+  styleChanged: boolean
+): void {
+  if (styleChanged && state.codeStyle !== undefined) {
+    state.codeStyle = applyStyleChange(
+      state.codeStyle,
+      splitMotionStyle(oldProps.style).style ?? {},
+      splitMotionStyle(newProps.style).style ?? {}
+    )
+  }
+  const overrides = state.propOverrides
+  if (overrides !== undefined) {
+    const previous = oldProps as Record<string, unknown>
+    const next = newProps as Record<string, unknown>
+    for (const name of [...overrides.keys()]) if (previous[name] !== next[name]) overrides.delete(name)
+  }
+  instance.props = newProps
 }
 
 // ── Host config ──────────────────────────────────────────────────────
@@ -595,20 +637,22 @@ export const hostConfig = {
   ): void {
     const state = stateFor(instance)
     const { container } = state
-    if (!state.mounted) {
-      // Code took it out of the document and native let it go: it is made again, from these
-      // props, when it is inserted.
-      instance.props = newProps
-      return
-    }
     // `commitUpdate` runs for every host element whose props object is new,
     // which is every element a parent re-rendered. Most of those did not change
     // their style, so send it only when it did.
-    if (!sameStyle(oldProps.style, newProps.style)) {
-      container.renderer.setStyle(
-        instance.nativeId,
-        state.hidden ? hiddenStyle(newProps.style) : (splitMotionStyle(newProps.style).style ?? {})
-      )
+    const styleChanged = !sameStyle(oldProps.style, newProps.style)
+    if (hasMutationObservers()) {
+      recordAttributeChanges(instance, new Set([...Object.keys(oldProps), ...Object.keys(newProps)]), () => {
+        adoptProps(instance, state, oldProps, newProps, styleChanged)
+      })
+    } else {
+      adoptProps(instance, state, oldProps, newProps, styleChanged)
+    }
+    // Code took it out of the document and native let it go: it is made again, from these
+    // props, when it is inserted.
+    if (!state.mounted) return
+    if (styleChanged) {
+      sendLiveStyle(instance, state)
       syncMotionBindings(container, instance.nativeId, newProps.style, instance.type)
     }
     diffEventListeners(instance, oldProps, newProps)
@@ -617,13 +661,6 @@ export const hostConfig = {
     }
     // Custom prop diff (for non-div/text elements)
     diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
-    if (hasMutationObservers()) {
-      recordAttributeChanges(instance, new Set([...Object.keys(oldProps), ...Object.keys(newProps)]), () => {
-        instance.props = newProps
-      })
-    } else {
-      instance.props = newProps
-    }
   },
 
   commitTextUpdate(
@@ -659,13 +696,13 @@ export const hostConfig = {
     // the box and lose every other style on the element.
     const state = stateFor(instance)
     state.hidden = true
-    if (state.mounted) rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(instance.props.style))
+    if (state.mounted) rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(liveStyleOf(instance)))
   },
 
   unhideInstance(instance: Instance, props: Props): void {
     const state = stateFor(instance)
     state.hidden = false
-    if (state.mounted) rendererFor(instance).setStyle(instance.nativeId, splitMotionStyle(props.style).style ?? {})
+    if (state.mounted) rendererFor(instance).setStyle(instance.nativeId, state.codeStyle ?? splitMotionStyle(props.style).style ?? {})
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},

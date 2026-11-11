@@ -8,6 +8,8 @@ import type { NativeRenderer } from "./host.js"
 import { document, type GpuixDocument } from "./events/window-target.js"
 import { attributeLookupName, attributeNameOf } from "./dom/attribute-names.js"
 import { SVGElement } from "./dom/nodes.js"
+import { serializeStyle } from "./dom/css-style-declaration.js"
+import type { StyleDesc } from "./host.js"
 
 /** The DOM members every host element has beside the scroll ones. */
 export interface DomElement {
@@ -17,7 +19,8 @@ export interface DomElement {
   readonly isConnected: boolean
   /**
    * The prop of that name (case-insensitive) as a string, or `null` when the element was not given
-   * it, or when it is a function or an object (`onClick`, `style`). `false` is `null` and `true` is `""`, except for `data-*` and `aria-*`, which hold "true" and "false".
+   * it, or when it is a function or an object (`onClick`). `style` is the text of the live style
+   * (`width: 10px; --x: 1;`), `null` while it has no declaration. `false` is `null` and `true` is `""`, except for `data-*` and `aria-*`, which hold "true" and "false".
    */
   getAttribute(name: string): string | null
   /** The border box's width, rounded, before any transform. 0 for an element with no box. */
@@ -44,6 +47,8 @@ export interface DomElementBinding {
   /** What the element was given: the props of a Solid element, of a React instance. */
   prop(name: string): unknown
   propNames(): Iterable<string>
+  /** The live style, read when `getAttribute("style")` asks for it. */
+  readonly style: StyleDesc
 }
 
 /** The prop an attribute name stands for: `attributeNameOf` is the name a prop has as an attribute. */
@@ -95,6 +100,10 @@ export function defineDomMembers<This extends object>(
       configurable: true,
       writable: true,
       value(this: This, name: string) {
+        if (String(name).toLowerCase() === "style") {
+          const text = serializeStyle(bind(this).style)
+          return text === "" ? null : text
+        }
         return attributeOf(name, propForAttribute(bind(this), name, this instanceof SVGElement))
       },
     },

@@ -3,10 +3,17 @@
 /// (`linkChild`/`unlinkChild`), native calls and `MutationObserver` records as React's own
 /// placements, so a node React made and a node code made sit in one tree.
 
-import { crossRootError, queueCharacterDataMutation } from "@ghia/native/host"
-import type { DomNodeFactory, Text } from "@ghia/native/host"
+import {
+  crossRootError,
+  forwardsCustomProp,
+  hasMutationObservers,
+  queueCharacterDataMutation,
+  recordAttributeChanges,
+  serializeCustomProp,
+} from "@ghia/native/host"
+import type { DomNodeFactory, StyleDesc, Text } from "@ghia/native/host"
 import type { Container, ElementType, Instance, TextInstance } from "../types/host.js"
-import { adopt, assertPlacement, markUnmounted, materialize, nextId } from "./host-config.js"
+import { adopt, assertPlacement, markUnmounted, materialize, nextId, sendLiveStyle } from "./host-config.js"
 import {
   containerFor,
   createHostElement,
@@ -108,4 +115,32 @@ export function setDomTextData(text: TextInstance, data: string): void {
   queueCharacterDataMutation(text, previous)
   const state = stateFor(text)
   if (state.mounted) state.container.renderer.setText(text.nativeId, data)
+}
+
+/**
+ * Code's write of the whole style of an element: it is the live style from now on, and native is
+ * sent it as it is sent React's own style change.
+ */
+export function setDomStyle(instance: Instance, next: StyleDesc): void {
+  const state = stateFor(instance)
+  const apply = () => {
+    state.codeStyle = next
+  }
+  if (hasMutationObservers()) recordAttributeChanges(instance, ["style"], apply)
+  else apply()
+  if (state.mounted) sendLiveStyle(instance, state)
+}
+
+/** Code's write of one prop (`el.id = ...`): React's next render of the same prop overwrites it. */
+export function setDomProp(instance: Instance, name: string, value: string): void {
+  const state = stateFor(instance)
+  const apply = () => {
+    state.propOverrides ??= new Map()
+    state.propOverrides.set(name, value)
+  }
+  if (hasMutationObservers()) recordAttributeChanges(instance, [name], apply)
+  else apply()
+  if (state.mounted && forwardsCustomProp(instance.type, name)) {
+    state.container.renderer.setCustomProp(instance.nativeId, name, serializeCustomProp(value))
+  }
 }
