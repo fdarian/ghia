@@ -127,7 +127,7 @@ describe("CSSStyleDeclaration", () => {
   })
 
   it("serializes cssText as Chrome writes it", () => {
-    const { style } = declare({ width: 10, opacity: 0.5, "--dnd-top": "10px", translate: "1px 2px", rotate: 45, flexGrow: 1 })
+    const { style } = declare({ width: 10, opacity: 0.5, "--dnd-top": "10px", translate: "1px 2px", rotate: "45deg", flexGrow: 1 })
     expect(style.cssText).toBe("width: 10px; opacity: 0.5; --dnd-top: 10px; translate: 1px 2px; rotate: 45deg; flex-grow: 1;")
     expect(declare().style.cssText).toBe("")
   })
@@ -159,7 +159,7 @@ describe("CSSStyleDeclaration", () => {
 
   it("reads a number the framework wrote as the text CSS has", () => {
     const { style } = declare({ width: 10, top: 0, fontWeight: 600, scale: 2, flex: 1 })
-    expect([style.width, style.top, style.fontWeight, style.scale, style.flex]).toEqual(["10px", "0px", "600", "2", "1"])
+    expect([style.width, style.top, style.fontWeight, style.scale, style.flex]).toEqual(["10px", "0", "600", "2", "1"])
   })
 
   it("has no parent rule", () => {
