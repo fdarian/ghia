@@ -7,6 +7,8 @@
  * the renderer then sends the attributes of the elements it already holds.
  */
 
+import { pruneDeadRefs } from "./weak-refs.js"
+
 /** What a queue offers the gate: sending the attributes of the elements it holds. */
 export interface AttributeGateMember {
   backfillAttributes(): void
@@ -33,7 +35,9 @@ export function attributesForwarded(renderer: object): boolean {
 }
 
 export function registerAttributeGateMember(renderer: object, member: AttributeGateMember): void {
-  gateOf(renderer).members.add(new WeakRef(member))
+  const gate = gateOf(renderer)
+  pruneDeadRefs(gate.members)
+  gate.members.add(new WeakRef(member))
 }
 
 /**

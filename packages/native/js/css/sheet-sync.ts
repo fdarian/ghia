@@ -5,6 +5,8 @@
  * queues it has. A renderer that registers later is brought up to date when its queue registers.
  */
 
+import { pruneDeadRefs } from "./weak-refs.js"
+
 /** What the queue of a renderer offers: the two sheet ops of `MutationRenderer`. */
 export interface SheetSink {
   setStyleSheet(sheetId: number, text: string | null): void
@@ -47,12 +49,7 @@ export function allocateSheetId(): number {
 }
 
 function liveSink(state: RendererSheets): SheetSink | undefined {
-  for (const ref of state.sinks) {
-    const sink = ref.deref()
-    if (sink) return sink
-    state.sinks.delete(ref)
-  }
-  return undefined
+  return pruneDeadRefs(state.sinks)
 }
 
 /** The ids of the sheets that apply, each at the place of its last appearance: a repeated sheet counts once. */
