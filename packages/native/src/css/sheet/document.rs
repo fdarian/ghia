@@ -22,6 +22,9 @@ use super::layers::Layers;
 use super::parser::parse_sheet;
 use super::validate::Validator;
 
+/// How many distinct skipped rules are logged before the rest are summed up in one warning.
+const SKIP_LOG_LIMIT: usize = 1024;
+
 /// What an element has for the matcher, kept on the element while sheets exist.
 #[derive(Default)]
 pub struct ElementCss {
@@ -61,6 +64,8 @@ pub struct StyleSheets {
     /// The skipped rules already logged, kept across reloads (every sheet is parsed again when
     /// one changes) so each is logged once.
     logged_skips: FxHashSet<String>,
+    /// Whether the summary warning for the skips past `SKIP_LOG_LIMIT` was logged.
+    skip_log_capped: bool,
     /// How many warnings `logged_skips` let through, for the tests.
     #[cfg(test)]
     pub(crate) skip_warnings: usize,
@@ -90,6 +95,7 @@ impl Default for StyleSheets {
             interner: MatchedInterner::default(),
             validator: Validator::default(),
             logged_skips: FxHashSet::default(),
+            skip_log_capped: false,
             #[cfg(test)]
             skip_warnings: 0,
             style_texts: RefCell::default(),
@@ -185,6 +191,19 @@ impl StyleSheets {
         if self.logged_skips.contains(&skipped) {
             return;
         }
+        // CSS-in-JS writes a new `.css-xxx:hover` per component, so the set would grow for as
+        // long as the app runs.
+        if self.logged_skips.len() >= SKIP_LOG_LIMIT {
+            if !self.skip_log_capped {
+                self.skip_log_capped = true;
+                log::warn!("Stylesheet: further skipped rules not logged");
+                #[cfg(test)]
+                {
+                    self.skip_warnings += 1;
+                }
+            }
+            return;
+        }
         log::warn!("Stylesheet: not supported, skipped: {skipped}");
         #[cfg(test)]
         {
@@ -248,6 +267,7 @@ impl StyleSheets {
         self.atoms_fresh = false;
         self.loaded.clear();
         self.logged_skips.clear();
+        self.skip_log_capped = false;
         self.index = Default::default();
         self.interner = Default::default();
         self.atoms = Atoms::default();

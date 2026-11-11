@@ -1579,3 +1579,21 @@ fn an_inline_value_that_gains_or_loses_important_restyles() {
     doc.flush();
     assert_eq!(doc.color(div), Some("blue"));
 }
+
+#[test]
+fn skipped_rules_are_logged_up_to_a_cap_and_then_summed_up_once() {
+    let mut doc = Doc::new();
+    let limit = 1024;
+    let rules = |from: usize, to: usize| (from..to).map(|n| format!(".css-{n}:hover {{ color: red }} ")).collect::<String>();
+    let (_, text) = doc.style_element(ROOT, &rules(0, limit));
+    doc.flush();
+    assert_eq!(doc.tree.sheets.skip_warnings, limit);
+
+    doc.tree.set_text(text, rules(0, limit + 5));
+    doc.flush();
+    assert_eq!(doc.tree.sheets.skip_warnings, limit + 1, "one summary, for the five past the cap");
+
+    doc.tree.set_text(text, rules(0, limit + 50));
+    doc.flush();
+    assert_eq!(doc.tree.sheets.skip_warnings, limit + 1, "the summary is not repeated");
+}
