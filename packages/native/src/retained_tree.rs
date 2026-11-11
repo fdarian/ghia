@@ -1448,18 +1448,20 @@ impl RetainedTree {
     }
 
     /// Recompute the effective style of `id` from the style it declared, over the universal
-    /// layer, over the user agent style of its tag, and assign it.
+    /// layer, over the user agent style of its tag and of its `popover`, and assign it.
     fn refresh_effective_style(&mut self, id: u64, classify: bool) -> StyleChange {
         let Some(element) = self.elements.get(&id) else {
             return StyleChange::default();
         };
         let universal = self.universal.as_ref().filter(|_| element.takes_universal_style());
-        let user_agent = crate::html::ua_style(&element.element_type);
+        let tag_style = crate::html::ua_style(&element.element_type);
+        let user_agent = crate::html::popover::user_agent(element, tag_style.as_ref()).or(tag_style);
         let effective = match (self.styles.layered.base(universal, user_agent.as_ref()), &element.own_style) {
             (Some(base), Some(own)) => Some(self.styles.layered.effective(&base, own)),
             (Some(base), None) => Some(base),
             (None, own) => own.clone(),
         };
+        let effective = crate::html::popover::used_style(element, effective);
         self.assign_style(id, crate::html::used_style(&element.element_type, effective), classify)
     }
 
@@ -1634,6 +1636,7 @@ impl RetainedTree {
         let is_motion_values = key == "motionValues" || key == "layout";
         let affects_focusability = key == "tabIndex" || key == "disabled" || key == "href";
         let is_inert = key == "inert";
+        let is_popover = crate::html::popover::is_popover_prop(&key);
         let relation_key = RelationRegistry::reads(&key).then(|| key.clone());
         let mut previous_relation = None;
         let is_form_control = key == FORM_CONTROL_PROP;
@@ -1720,6 +1723,10 @@ impl RetainedTree {
                 .is_some_and(RetainedElement::has_inert_prop);
             self.inert_count = self.inert_count + usize::from(now_inert) - usize::from(was_inert);
             self.track_focusable_subtree(id);
+        }
+        if is_popover {
+            let change = self.refresh_effective_style(id, false);
+            self.settle_style_change(id, change);
         }
         if is_motion {
             if self
@@ -1922,6 +1929,22 @@ impl RetainedTree {
                 walk.layers[met].2 = layer.paint_order(own, in_flow);
                 return Vec::new();
             }
+        }
+
+        if let Some(priority) = crate::html::popover::top_layer_priority(element) {
+            // Drawn after the tree like an `anchored` layer, by show order, and outside the clip of the
+            // elements around it. Its own `overflow` clips what it holds.
+            let own_clip = (resolved.overflow.x.clips() || resolved.overflow.y.clips())
+                && !own_box.as_ref().is_some_and(|bounds| inside(bounds, resolved.overflow.x.clips(), resolved.overflow.y.clips()));
+            let met = walk.layers.len();
+            walk.layers.push((priority as u64, met, Vec::new()));
+            let mut layer = Context::default();
+            walk.frames.push((own_clip, containing_block::contains_fixed(self, element)));
+            let in_flow = self.paint_children(element, none, inert, own_clip, hidden, walk, Some(&mut layer));
+            walk.frames.pop();
+            let own = (!none && !hidden && own_box.is_some_and(|bounds| inside(&bounds, true, true))).then_some(id);
+            walk.layers[met].2 = layer.paint_order(own, in_flow);
+            return Vec::new();
         }
 
         let item = crate::layout::stacking::is_item(self, element);
@@ -2965,6 +2988,58 @@ mod tests {
         // Not deferred: painted in place, in tree order, under the clip.
         tree.set_custom_prop(2, "deferred".to_string(), serde_json::json!(false));
         assert_eq!(tree.elements_at(10.0, 10.0, &boxed(&boxes)), vec![5, 3, 1]);
+    }
+
+    fn open_popover(tree: &mut RetainedTree, id: u64, order: u64) {
+        tree.set_custom_prop(id, "popover".to_string(), serde_json::json!("manual"));
+        tree.set_custom_prop(id, "popoverOpen".to_string(), serde_json::json!(order));
+    }
+
+    /// An open popover is hit above a later sibling with a z-index, above an `anchored` layer, and
+    /// outside the clip of the scroller it is written in; of two, the one shown last is on top.
+    #[test]
+    fn elements_at_puts_an_open_popover_in_the_top_layer_in_show_order() {
+        let mut tree = RetainedTree::new();
+        for (id, kind) in [(1, "div"), (2, "div"), (3, "div"), (4, "div"), (5, "div"), (6, "anchored"), (7, "div"), (8, "div")] {
+            tree.create_element(id, kind.to_string());
+        }
+        tree.set_root(1);
+        for (parent, child) in [(1, 2), (2, 3), (3, 4), (1, 5), (1, 6), (6, 7), (1, 8)] {
+            tree.append_child(parent, child);
+        }
+        tree.set_style(2, Arc::new(StyleDesc { overflow: Some("hidden".to_string()), ..Default::default() }));
+        tree.set_style(
+            5,
+            Arc::new(StyleDesc { position: Some("absolute".to_string()), z_index: Some(9.0), ..Default::default() }),
+        );
+        let boxes = [
+            (1, (0.0, 0.0, 100.0, 100.0)),
+            (2, (0.0, 0.0, 20.0, 20.0)),
+            (3, (40.0, 40.0, 40.0, 40.0)),
+            (4, (50.0, 50.0, 10.0, 10.0)),
+            (5, (0.0, 0.0, 100.0, 100.0)),
+            (7, (0.0, 0.0, 100.0, 100.0)),
+            (8, (45.0, 45.0, 20.0, 20.0)),
+        ];
+        // Closed: a popover is `display: none` and nothing of it is painted.
+        tree.set_custom_prop(3, "popover".to_string(), serde_json::json!("manual"));
+        assert!(!tree.elements_at(55.0, 55.0, &boxed(&boxes)).contains(&3));
+
+        open_popover(&mut tree, 3, 1);
+        let hits = tree.elements_at(55.0, 55.0, &boxed(&boxes));
+        assert_eq!(&hits[..2], &[4, 3], "its content, then its box, above the sibling and the layer");
+        assert!(hits.iter().position(|id| *id == 3) < hits.iter().position(|id| *id == 5));
+        assert!(hits.iter().position(|id| *id == 3) < hits.iter().position(|id| *id == 7), "above the anchored layer");
+
+        // A second one shown later is above the first, though it is earlier in the tree.
+        tree.set_custom_prop(8, "popover".to_string(), serde_json::json!("auto"));
+        tree.set_custom_prop(8, "popoverOpen".to_string(), serde_json::json!(2));
+        assert_eq!(&tree.elements_at(55.0, 55.0, &boxed(&boxes))[..3], &[8, 4, 3]);
+        open_popover(&mut tree, 3, 3);
+        assert_eq!(&tree.elements_at(55.0, 55.0, &boxed(&boxes))[..3], &[4, 3, 8]);
+
+        tree.set_custom_prop(3, "popoverOpen".to_string(), serde_json::Value::Null);
+        assert!(!tree.elements_at(55.0, 55.0, &boxed(&boxes)).contains(&3));
     }
 
     /// A tree from `(id, parent, type, style)`, the first node being the root. Every box is the

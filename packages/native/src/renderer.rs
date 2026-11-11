@@ -11989,6 +11989,14 @@ fn build_element_unpumped(
         }
         None => built,
     };
+    // An open popover draws in the top layer, outside its box in the tree.
+    let built = match crate::html::popover::top_layer_priority(element) {
+        Some(priority) => {
+            ctx.subtree.block();
+            crate::html::popover::into_top_layer(built, priority)
+        }
+        None => built,
+    };
     let below = std::mem::replace(&mut ctx.subtree, enclosing);
     ctx.retain.subtree(below);
     ctx.subtree.merge(below);
