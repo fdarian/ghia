@@ -1622,6 +1622,11 @@ fn full_matches() -> usize {
 
 fn reset_full_matches() {
     super::share::FULL_MATCHES.with(|count| count.set(0));
+    super::share::INSERTS.with(|count| count.set(0));
+}
+
+fn memo_inserts() -> usize {
+    super::share::INSERTS.with(|count| count.get())
 }
 
 #[test]
@@ -1643,6 +1648,47 @@ fn elements_that_look_alike_are_matched_once() {
     doc.flush();
     assert_eq!(full_matches(), 1, "the memo lives for one flush: the first row of the next is matched");
     assert!(more.iter().all(|row| doc.color(*row) == Some("red")));
+}
+
+#[test]
+fn a_flush_of_elements_that_all_differ_stops_using_the_memo_after_the_trial() {
+    let mut doc = Doc::new();
+    let rows: Vec<(u64, String)> = (0..200)
+        .map(|at| {
+            let id = doc.classed("div", ROOT, "row");
+            let value = format!("v{at}");
+            doc.tree.set_attribute(id, "data-k", Some(value.as_str().into()));
+            (id, value)
+        })
+        .collect();
+    doc.style_element(ROOT, ".row { opacity: 0.5 } [data-k^=v1] { color: red }");
+    reset_full_matches();
+    doc.flush();
+    assert!(memo_inserts() <= 64, "the memo took {} keys, one per lookup of the trial at most", memo_inserts());
+    for (id, value) in &rows {
+        assert_eq!(doc.color(*id), value.starts_with("v1").then_some("red"), "{value}");
+        assert_eq!(doc.style(*id).and_then(|style| style.opacity), Some(0.5));
+    }
+}
+
+#[test]
+fn a_flush_whose_elements_share_keys_keeps_the_memo_past_the_trial() {
+    let mut doc = Doc::new();
+    let rows: Vec<u64> = (0..300)
+        .map(|at| {
+            let id = doc.classed("div", ROOT, "row");
+            doc.tree.set_attribute(id, "data-k", Some(format!("v{}", at % 3).into()));
+            id
+        })
+        .collect();
+    doc.style_element(ROOT, ".row { opacity: 0.5 } [data-k=v1] { color: red }");
+    reset_full_matches();
+    doc.flush();
+    // The root and the `<style>` element are candidates for the attribute rule too.
+    assert_eq!(full_matches(), 3 + 2, "three values, matched once each");
+    for (at, id) in rows.iter().enumerate() {
+        assert_eq!(doc.color(*id), (at % 3 == 1).then_some("red"));
+    }
 }
 
 #[test]

@@ -7,7 +7,9 @@
 //! (a combinator, `:root`, `[style]`) is matched in full, and the memo remembers that for its key.
 //!
 //! The memo lives for one flush: the tree does not change while it matches, and a sheet reload
-//! comes before it.
+//! comes before it. A flush whose elements mostly differ (a unique attribute value on each) would
+//! pay a key and a map entry per element for nothing, so the memo stops after its first
+//! [`TRIAL`] lookups if fewer than one in [`MIN_HIT_RATE`] hit.
 
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -27,11 +29,23 @@ thread_local! {
     /// Times a full match of an element against the index ran, which the tests compare with the
     /// number of elements to see what was shared.
     pub(super) static FULL_MATCHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Keys the memo inserted, which stops growing once a flush gives the memo up.
+    pub(super) static INSERTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
+
+/// Lookups a flush makes before it judges whether the memo pays.
+const TRIAL: usize = 64;
+/// The memo is kept when at least one lookup in this many of the trial hit.
+const MIN_HIT_RATE: usize = 4;
 
 pub(super) fn count_full_match() {
     #[cfg(test)]
     FULL_MATCHES.with(|count| count.set(count.get() + 1));
+}
+
+fn count_insert() {
+    #[cfg(test)]
+    INSERTS.with(|count| count.set(count.get() + 1));
 }
 
 enum Slot {
@@ -54,6 +68,11 @@ pub(super) struct StyleSharing {
     /// One list per distinct key that was matched in full and shared.
     pub(super) lists: Vec<MatchedList>,
     key: Vec<u8>,
+    lookups: usize,
+    hits: usize,
+    /// Set when the trial found that elements rarely share a key: the rest of the flush is matched
+    /// directly.
+    given_up: bool,
 }
 
 impl StyleSharing {
@@ -74,22 +93,34 @@ impl StyleSharing {
         classes: &[Atom],
     ) -> Found {
         let index = &sheets.index;
-        if !index.shares() {
+        if !index.shares() || self.given_up {
             return Found::Own(index.matching(view, id, classes));
         }
         self.build_key(sheets, element, view, id, classes);
-        match self.slots.get(self.key.as_slice()) {
+        self.lookups += 1;
+        let slot = self.slots.get(self.key.as_slice());
+        self.hits += usize::from(slot.is_some());
+        if self.lookups == TRIAL && self.hits * MIN_HIT_RATE < TRIAL {
+            self.given_up = true;
+        }
+        match slot {
             Some(Slot::Shared(list)) => return Found::Shared(*list),
             Some(Slot::Unshareable) => return Found::Own(index.matching(view, id, classes)),
             None => {}
         }
+        // A flush that has just given up has no use for this key either.
+        if self.given_up {
+            return Found::Own(index.matching(view, id, classes));
+        }
         let (matched, shareable) = index.matching_in_full(view, id, classes);
         if !shareable {
+            count_insert();
             self.slots.insert(self.key.as_slice().into(), Slot::Unshareable);
             return Found::Own(matched);
         }
         self.lists.push(matched);
         let list = self.lists.len() - 1;
+        count_insert();
         self.slots.insert(self.key.as_slice().into(), Slot::Shared(list));
         Found::Shared(list)
     }
