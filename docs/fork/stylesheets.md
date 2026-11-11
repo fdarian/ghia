@@ -49,7 +49,7 @@ No sheet at all is a branch: every hook of the tree returns at `StyleSheets::ena
 
 `RuleIndex::matching(element)` visits the buckets of the element's id, its classes, every attribute name some selector reads (and the element has), its tag, and the universal list, runs the full right-to-left match (`matching.rs`, over the `ElementView` trait; `view.rs` is the retained tree's implementation) on each candidate, and sorts the matches by (layer rank, specificity, source number). A rule counts once, at the specificity of the most specific of its selectors that matched.
 
-`TreeView::attr` reads an attribute from the element's attribute store (`attributes.rs`, set by wire op 13) and, failing that, from the prop of the same name (`id`, `role`, `aria-*` arrive as props; a boolean `data-*`/`aria-*` is `"true"`/`"false"`), where `attributes.rs` keeps one table of the props whose DOM attribute is named otherwise (`tabIndex` is `tabindex`, `htmlFor` is `for`, `colSpan`, `rowSpan`, `autoFocus`) that the lookup and `sheets_prop_changed` both use. `style` is special: the text is synthesized from the element's own style declarations (`kebab-key: value;`, cached per own-style `Arc`, `StyleSheets::style_text`, and handed to the matcher as a shared `AttrValue`), so `[style*="--dnd-scale"]` works. The attribute operators compare in place (ASCII case-insensitively for the `i` flag), so a check allocates nothing. The cached texts are released at the end of every flush for own styles no element holds, and cleared at wind-down. A text node (a `text` element holding a string) is not matchable.
+`TreeView::attr` reads an attribute from the element's attribute store (`attributes.rs`, set by wire op 13) and, failing that, from the prop of the same name (`id`, `role`, `aria-*` arrive as props; a boolean `data-*`/`aria-*` is `"true"`/`"false"`), where `attributes.rs` keeps one table of the props whose DOM attribute is named otherwise (`tabIndex` is `tabindex`, `htmlFor` is `for`, `colSpan`, `rowSpan`, `autoFocus`) that the lookup and `sheets_prop_changed` both use. `style` is special: the text is synthesized from the element's own style declarations (`kebab-key: value;`, cached per own-style `Arc`, `StyleSheets::style_text`, and handed to the matcher as a shared `AttrValue`), so `[style*="--dnd-scale"]` works. The attribute operators compare in place (ASCII case-insensitively for the `i` flag), so a check allocates nothing. The cached texts are released at the end of every flush for own styles no element holds, and cleared at wind-down. A `#text` node is not matchable.
 
 ### Matched sets are interned
 
@@ -83,7 +83,6 @@ The tree's hooks (`tree.rs`) collect `(element, Reach)` marks:
 | own style change | the reach of `[style]`, which is empty unless a selector reads it |
 | element inserted or moved | the element and its subtree, plus `structure` |
 | element about to be removed | the next matchable sibling, with `structure`, since what follows matches without it |
-| a `text` element given a string (it stops being matchable) | the next matchable sibling, with `structure`, as for a removal |
 | text of a `<style>` element, `<style>` inserted, removed or moved, root changed, constructed sheet changed or the adopted list changed | the sources are dirty: every element matches again |
 
 ### The flush
@@ -103,7 +102,7 @@ An element that is not in the document, or is not matchable, matches nothing: re
 
 ## Sheet sources
 
-- **`<style>` elements.** An element of type `style` registers in `style_elements` when created. Its sheet text is the concatenation of its `text` children. It takes part while connected to the root, in tree order. `display` reads `none` for it (`RetainedElement::display`), so layout skips it and the build never draws it. Solid lists `style` as an element type (`isElementType`) and React's host config forwards any type and a string child becomes a text element as anywhere.
+- **`<style>` elements.** An element of type `style` registers in `style_elements` when created. Its sheet text is the concatenation of its `#text` children. It takes part while connected to the root, in tree order. `display` reads `none` for it (`RetainedElement::display`), so layout skips it and the build never draws it. Solid lists `style` as an element type (`isElementType`) and React's host config forwards any type and a string child becomes a `#text` node as anywhere.
 - **Constructed sheets**, wire ops 14 and 15 (`batch/wire.rs`, `BatchOp::SetStyleSheet`, `SetAdoptedStyleSheets`). `constructed` maps a sheet id to its text; `adopted` is the ordered list that applies, after the `<style>` elements. A sheet in the map and not in the list does nothing. Sheet ids are a namespace of their own.
 
 ## Attributes and wire ops 13 to 15

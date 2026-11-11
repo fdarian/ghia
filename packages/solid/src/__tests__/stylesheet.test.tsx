@@ -39,6 +39,23 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in Solid", () => {
     expect(getComputedStyle(inline).paddingTop).toBe("1px")
   })
 
+  it("reads a custom property a sheet sets, and the var() it resolves, in getComputedStyle", () => {
+    let parent: any
+    let child: any
+    app.render(() => (
+      <div>
+        <style>{`.theme { --gap: 12px } .theme > .row { padding-top: var(--gap); opacity: 0.5 }`}</style>
+        <div ref={(element: unknown) => (parent = element)} class="theme">
+          <div ref={(element: unknown) => (child = element)} class="row" />
+        </div>
+      </div>
+    ))
+    expect(getComputedStyle(parent).getPropertyValue("--gap")).toBe("12px")
+    expect(getComputedStyle(child).getPropertyValue("--gap")).toBe("12px")
+    expect(getComputedStyle(child).paddingTop).toBe("12px")
+    expect(getComputedStyle(child).opacity).toBe("0.5")
+  })
+
   it("matches again when a class or a data attribute toggles", () => {
     let box: any
     let child: any

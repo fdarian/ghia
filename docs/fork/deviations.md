@@ -231,7 +231,7 @@ How sheets work is in [stylesheets.md](stylesheets.md); the behaviour is in [ref
 - **`cssRules` is a JS split of the text, not native's parse.** `cssText` is the rule as written (comments inside included), a rule native rejects for an invalid selector is still listed, and `insertRule` throws `SyntaxError` only for text that is not exactly one rule, not for a selector it cannot parse. At-rules are plain `CSSRule`s of `type` 0 (or 4, 5, 7, 12) with no `cssRules` or `insertRule` of their own, there is no `CSSStyleRule.style` and `selectorText` cannot be set, and `sheet.media` does not exist. `replace()` is not locked while it is pending.
 - **There are no shadow roots.** `adoptedStyleSheets` exists on `document` only, and `:host` never matches. The one document spans every window, so one list applies to all of them. A `<style>` element has no `sheet` property, and only its direct text children are the CSS.
 - **Only five props are renamed to their attribute.** `tabIndex`, `htmlFor`, `colSpan`, `rowSpan` and `autoFocus` read as `tabindex`, `for`, `colspan`, `rowspan` and `autofocus`. Any other camelCase prop that native reads (`testId`, `formControl`, the SVG `<text>` props such as `strokeWidth`) is matched under its prop name, not as `data-testid` or `stroke-width`.
-- **A text node is never matched.** A `<text>` element that holds a string does not match any selector, not even `*`.
+- **A text node is never matched.** A string is a `#text` node, and no selector matches it, not even `*`.
 
 ## Window
 

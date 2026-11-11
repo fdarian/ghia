@@ -45,7 +45,7 @@ impl Doc {
     /// A `<style>` element under `parent` holding `css`, and the id of its text node.
     fn style_element(&mut self, parent: u64, css: &str) -> (u64, u64) {
         let style = self.make("style");
-        let text = self.make("text");
+        let text = self.make("#text");
         self.tree.set_text(text, css.into());
         self.tree.append_child(style, text);
         self.tree.append_child(parent, style);
@@ -557,18 +557,19 @@ fn inserting_a_sibling_matches_the_ones_after_it_again() {
 }
 
 #[test]
-fn a_text_element_given_a_string_matches_its_following_siblings_again() {
+fn a_text_node_is_skipped_by_sibling_combinators() {
     let mut doc = Doc::new();
     doc.classed("span", ROOT, "a");
-    let text = doc.element("text", ROOT);
+    let text = doc.element("#text", ROOT);
+    doc.tree.set_text(text, "hello".into());
     let last = doc.classed("span", ROOT, "b");
     doc.style_element(ROOT, ".a + .b { color: red }");
     doc.flush();
-    assert_eq!(doc.color(last), None, "the empty text element sits between them");
+    assert_eq!(doc.color(last), Some("red"));
 
-    doc.tree.set_text(text, "hello".into());
+    doc.tree.destroy_element(text);
     doc.flush();
-    assert_eq!(doc.color(last), Some("red"), "a text node is skipped by sibling combinators");
+    assert_eq!(doc.color(last), Some("red"));
 }
 
 #[test]
@@ -624,7 +625,7 @@ fn a_style_elements_text_is_the_sheet_and_a_change_to_it_applies() {
     assert_eq!(doc.color(div), Some("blue"));
 
     // The sheet is every text child of the element.
-    let more = doc.make("text");
+    let more = doc.make("#text");
     doc.tree.set_text(more, " .a { background-color: red }".into());
     doc.tree.append_child(style, more);
     doc.flush();
@@ -928,14 +929,11 @@ fn the_universal_layer_goes_under_the_cascade() {
 #[test]
 fn a_text_node_is_never_matched() {
     let mut doc = Doc::new();
-    let text = doc.make("text");
+    let text = doc.make("#text");
+    doc.tree.set_text(text, "hello".into());
     doc.tree.set_attribute(text, "class", Some("a".into()));
     doc.tree.append_child(ROOT, text);
-    doc.style_element(ROOT, ".a { color: red } text { color: red }");
-    doc.flush();
-    assert_eq!(doc.color(text), Some("red"), "a text element that holds no string is an element");
-
-    doc.tree.set_text(text, "hello".into());
+    doc.style_element(ROOT, ".a { color: red } * { color: red } #text { color: red }");
     doc.flush();
     assert_eq!(doc.color(text), None);
 }
