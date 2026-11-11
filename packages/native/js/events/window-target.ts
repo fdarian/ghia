@@ -1,6 +1,7 @@
 import type { EventPayload } from "../../index.js"
 import type { Animation } from "../web-animations.js"
-import { Document, DOM_BINDING, registerDocument, type Node, type NodeBinding } from "../dom/nodes.js"
+import { isElementType, isSvgElementType } from "../dom/element-types.js"
+import { Document, DOM_BINDING, registerDocument, type HTMLElement, type Node, type NodeBinding, type Text } from "../dom/nodes.js"
 import { getAdoptedStyleSheets, replaceAdoptedStyleSheets, type CSSStyleSheet } from "../css/index.js"
 import { getSelection, type Selection } from "../dom/selection.js"
 import { mountedRenderer } from "../mounted-renderer.js"
@@ -150,6 +151,19 @@ type ElementSource = {
   elementById(id: number): object | undefined
   /** The `<html>`, `<head>` and `<body>` elements the root's adapter made for its window, or `null` for a source that has none. */
   documentElements(): DocumentElements | null
+  /** Makes the nodes of the root's window, or `null` for a source that has no way to. */
+  nodeFactory: DomNodeFactory | null
+}
+
+/**
+ * How an adapter makes the nodes `document.createElement` and `document.createTextNode` hand out
+ * for its window: its own element and text classes, in no tree yet and not known to native until
+ * they are inserted under a connected node.
+ */
+export type DomNodeFactory = {
+  /** `type` is one of the element types, as written: `isElementType` has checked it. */
+  createElement(type: string): object
+  createTextNode(data: string): Text
 }
 
 /** The elements every window root is made of: `html`, with `head` and `body` in it, the latter holding the app. */
@@ -196,6 +210,33 @@ const DOCUMENT_BINDING: NodeBinding = {
   },
   connected: true,
   root: null,
+}
+
+/** The way the window `document` stands for makes nodes; throws while nothing is mounted. */
+function currentNodeFactory(method: string): DomNodeFactory {
+  const renderer = mountedRenderer()
+  if (renderer === undefined) {
+    throw new Error(`document.${method} needs a mounted Ghia root. Call it after render().`)
+  }
+  const factory = elementSources.get(renderer)?.source.nodeFactory
+  if (factory === undefined || factory === null) {
+    throw new Error(`The root of this window cannot make nodes, so document.${method} is unavailable`)
+  }
+  return factory
+}
+
+const XML_NAME = /^[A-Za-z_:][-A-Za-z0-9_:.]*$/
+const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml"
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg"
+
+function assertElementName(name: string, method: string): void {
+  if (!XML_NAME.test(name)) {
+    throw new DOMException(`Failed to execute '${method}' on 'Document': The tag name provided ('${name}') is not a valid name.`, "InvalidCharacterError")
+  }
+}
+
+function unsupportedElement(name: string, method: string): DOMException {
+  return new DOMException(`Failed to execute '${method}' on 'Document': <${name}> is not an element Ghia draws.`, "NotSupportedError")
 }
 
 /** The elements of the window `document` stands for: the most recently mounted root's. */
@@ -277,6 +318,36 @@ export class GpuixDocument<Element = unknown> extends Document {
     fail: (error: unknown) => void
   ): void {
     this.target.run(event, state, capture, phase, fail)
+  }
+
+  /**
+   * A new element of the window that mounted last, in no tree: insert it under a node in the
+   * document and it is drawn. `tagName` is lowercased, as in an HTML document. A name that is
+   * not one of the element types throws `NotSupportedError`, where a browser has an unknown
+   * element.
+   */
+  createElement(tagName: string): HTMLElement {
+    const name = String(tagName)
+    assertElementName(name, "createElement")
+    const type = name.toLowerCase()
+    if (!isElementType(type)) throw unsupportedElement(type, "createElement")
+    return currentNodeFactory("createElement").createElement(type) as HTMLElement
+  }
+
+  /** `createElement` for the SVG namespace (names as written, `linearGradient`) or the HTML one. */
+  createElementNS(namespace: string | null, qualifiedName: string): Element {
+    const name = String(qualifiedName)
+    assertElementName(name, "createElementNS")
+    const wanted = namespace === SVG_NAMESPACE ? "svg" : namespace === HTML_NAMESPACE ? "html" : null
+    if (wanted === null || !isElementType(name) || isSvgElementType(name) !== (wanted === "svg")) {
+      throw unsupportedElement(name, "createElementNS")
+    }
+    return currentNodeFactory("createElementNS").createElement(name) as Element
+  }
+
+  /** A new text node of the window that mounted last, in no tree. */
+  createTextNode(data: string): Text {
+    return currentNodeFactory("createTextNode").createTextNode(String(data))
   }
 
   /** The `<html>` element of the window that mounted last, or `null` while nothing is mounted. */
@@ -424,14 +495,16 @@ registerDocument(document)
  * `elementById`: the object the adapter gives for an element id, as a `ref`
  * does. `document.activeElement` and the `target`, `currentTarget` and
  * `relatedTarget` of every event read it, and `document.documentElement`,
- * `document.head` and `document.body` read `documentElements`. The returned function takes the root
+ * `document.head` and `document.body` read `documentElements`. `nodeFactory` is what
+ * `document.createElement` and `document.createTextNode` build nodes with. The returned function takes the root
  * out again. A renderer that cannot report focus still names its elements; it
  * just never has an `activeElement`.
  */
 export function installElementSource(
   renderer: { getFocusedElementId?: () => number | null; pointerLockElement?: () => number | null },
   elementById: (id: number) => object | undefined,
-  documentElements?: () => DocumentElements
+  documentElements?: () => DocumentElements,
+  nodeFactory?: DomNodeFactory
 ): () => void {
   const getFocusedElementId = renderer.getFocusedElementId
   const getPointerLockElement = renderer.pointerLockElement
@@ -441,6 +514,7 @@ export function installElementSource(
       pointerLockId: () => (getPointerLockElement ? getPointerLockElement.call(renderer) : null),
       elementById,
       documentElements: () => (documentElements ? documentElements() : null),
+      nodeFactory: nodeFactory ?? null,
     },
     windowGone: false,
     focusedAt: 0,

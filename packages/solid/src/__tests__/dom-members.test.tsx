@@ -220,7 +220,7 @@ describe.skipIf(!hasNativeTestRenderer)("DOM members of a Solid element", () => 
         <div ref={box} className="card" data-row-id="r1" data-index={3} style={{ width: 10, height: 10 }} />
       ))
       expect(box.className).toBe("card")
-      expect(box.getAttributeNames().sort()).toEqual(["class", "data-index", "data-row-id"])
+      expect(box.getAttributeNames().sort()).toEqual(["class", "data-index", "data-row-id", "style"])
       expect(box.hasAttribute("data-index")).toBe(true)
       expect(box.hasAttribute("data-missing")).toBe(false)
       expect(box.dataset).toEqual({ rowId: "r1", index: "3" })
@@ -315,7 +315,7 @@ describe.skipIf(!hasNativeTestRenderer)("DOM members of a Solid element", () => 
       />
     ))
     expect(row.getAttribute("onclick")).toBeNull()
-    expect(row.getAttribute("style")).toBeNull()
+    expect(row.getAttribute("style")).toBe("width: 10px; height: 10px;")
     expect(row.getAttribute("DATA-flag")).toBe("false")
     expect(row.getAttribute("data-on")).toBe("true")
     expect(row.getAttribute("Aria-Expanded")).toBe("false")

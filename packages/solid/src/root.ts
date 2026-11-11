@@ -18,7 +18,7 @@ import type {
   RootEvent,
   RootEventHandlers,
 } from "@ghia/native/host"
-import { HostRoot, removeHostNode } from "./host.js"
+import { createHostElement, createHostText, HostRoot, removeHostNode } from "./host.js"
 import { universalRender } from "./universal.js"
 
 export interface GpuixContextValue {
@@ -145,7 +145,8 @@ export function createRoot(
     stopElementSource = installElementSource(
       renderer,
       (id) => container.elements.get(id),
-      () => ({ html: container.html, head: container.head, body: container.body })
+      () => ({ html: container.html, head: container.head, body: container.body }),
+      { createElement: createHostElement, createTextNode: createHostText }
     )
     // Sent on every attach, so a remount without the option restores the default.
     mutations.setKeyboardFocusDim(rootHandlers.keyboardFocusDim !== false)

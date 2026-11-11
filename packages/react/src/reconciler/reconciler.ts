@@ -22,6 +22,8 @@ import {
   idAllocatorFor,
   unregisterEventHandlers,
 } from "./event-registry.js"
+import { createDomFactory, releaseDetachedNodes } from "./dom-mutation.js"
+import { livePropEntries } from "./host-nodes.js"
 import {
   destroyDocumentElements,
   hostConfig,
@@ -91,6 +93,17 @@ export function createRoot(
       gpuixContainer.instances.delete(id)
     }
     releaseMotionBindings(gpuixContainer, destroyedIds)
+  }, (flush) => {
+    // Code that changes the tree outside a React commit (`document.createElement`, `appendChild`)
+    // has no commit to flush it.
+    queueMicrotask(() => {
+      try {
+        releaseDetachedNodes(gpuixContainer)
+        flush()
+      } catch (error) {
+        onUncaughtError(error instanceof Error ? error : new Error(String(error)), {})
+      }
+    })
   })
   gpuixContainer = installDocumentElements({
     nativeRenderer: renderer,
@@ -110,7 +123,7 @@ export function createRoot(
   batchedRenderer.setElementSource({
     forEachElement(visit) {
       for (const instance of gpuixContainer.instances.values()) {
-        visit(instance.nativeId, instance.type, Object.entries(instance.props))
+        visit(instance.nativeId, instance.type, livePropEntries(instance))
       }
     },
   })
@@ -145,7 +158,8 @@ export function createRoot(
     stopElementSource = installElementSource(
       renderer,
       (id) => publicInstanceById(gpuixContainer, id),
-      () => ({ html: gpuixContainer.html, head: gpuixContainer.head, body: gpuixContainer.body })
+      () => ({ html: gpuixContainer.html, head: gpuixContainer.head, body: gpuixContainer.body }),
+      createDomFactory(gpuixContainer)
     )
   } catch (error) {
     detachRoot(renderer, gpuixContainer)

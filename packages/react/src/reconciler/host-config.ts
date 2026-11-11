@@ -6,8 +6,9 @@
 
 import { createContext } from "react"
 import { DefaultEventPriority } from "react-reconciler/constants.js"
-import type { HostEventHandler } from "@ghia/native/host"
+import type { HostEventHandler, StyleDesc } from "@ghia/native/host"
 import {
+  applyStyleChange,
   assertSvgPlacement,
   createWebviewMethods,
   eventTypesWithOverrides,
@@ -28,6 +29,7 @@ import {
   setTextControlSelectionRange,
   splitMotionStyle,
   syncNativeviewListeners,
+  writePopoverAttribute,
 } from "@ghia/native/host"
 
 const NoEventPriority = 0
@@ -61,14 +63,19 @@ import type {
 } from "../types/host.js"
 import { syncMotionBindings } from "./motion-bindings.js"
 import { listenersOf, unregisterEventHandlers } from "./event-registry.js"
+import { insertDomNode } from "./dom-mutation.js"
 import {
   containerFor,
   createHostElement,
   createHostText,
+  isInTree,
   linkChild,
+  livePropEntries,
+  liveStyleOf,
   stateFor,
   unlinkChild,
   type HostNode,
+  type HostNodeState,
 } from "./host-nodes.js"
 
 let currentUpdatePriority = NoEventPriority
@@ -139,22 +146,30 @@ function attachTextControlMethods(control: TextControlInstance, container: Conta
   })
 }
 
-function adopt(parent: Instance | undefined, child: Instance | TextInstance): void {
+export function adopt(parent: Instance | undefined, child: Instance | TextInstance): void {
   if (!("type" in child)) return
   if (parent) child.parentId = parent.nativeId
   else delete child.parentId
+}
+
+/**
+ * A parent code took out of the document and a flush released has no native element. What React
+ * places in it is only linked, as code's own placement does, so no native orphan is made.
+ */
+function isReleased(parent: Instance): boolean {
+  return !stateFor(parent).mounted && !isInTree(parent)
 }
 
 function rendererFor(node: HostNode): MutationRenderer {
   return containerFor(node).renderer
 }
 
-function nextId(container: Container): number {
+export function nextId(container: Container): number {
   return ++container.ids.nextElementId
 }
 
 /** SVG shapes, `<text>` among them, exist only inside an `<svg>`; every other element goes anywhere. */
-function assertPlacement(parent: Instance | undefined, child: Instance | TextInstance): void {
+export function assertPlacement(parent: Instance | undefined, child: Instance | TextInstance): void {
   if ("type" in child) assertSvgPlacement(parent?.type, child.type)
 }
 
@@ -232,10 +247,15 @@ function diffEventListeners(instance: Instance, oldProps: Props, newProps: Props
 
 const NO_STYLE = {}
 
-function sendStyle(renderer: MutationRenderer, id: number, props: Props): void {
-  const style = splitMotionStyle(props.style).style
+function sendStyle(renderer: MutationRenderer, id: number, style: StyleDesc | undefined): void {
   if (style == null || Object.keys(style).length === 0) return
   renderer.setStyle(id, style)
+}
+
+/** Sends the live style of a mounted element, as `display: none !important` while React hides it. */
+export function sendLiveStyle(instance: Instance, state: HostNodeState): void {
+  const style = liveStyleOf(instance)
+  state.container.renderer.setStyle(instance.nativeId, state.hidden ? hiddenStyle(style) : style)
 }
 
 /**
@@ -272,18 +292,23 @@ function syncCustomProps(
   renderer: MutationRenderer,
   id: number,
   type: string,
-  props: Props
+  props: Iterable<readonly [string, unknown]>
 ): void {
-  for (const [key, value] of Object.entries(props)) {
+  for (const [key, value] of props) {
     if (isReservedProp(key)) continue
     if (!forwardsCustomProp(type, key)) continue
-    renderer.setCustomProp(id, key, serializeCustomProp(value))
+    renderer.setCustomProp(id, key, serializeCustomProp(value as Parameters<typeof serializeCustomProp>[0]))
   }
 }
 
-function syncAttributes(renderer: MutationRenderer, id: number, type: string, props: Props): void {
+function syncAttributes(
+  renderer: MutationRenderer,
+  id: number,
+  type: string,
+  props: Iterable<readonly [string, unknown]>
+): void {
   if (!renderer.forwardsAttributes) return
-  for (const [name, text] of attributesOfProps(Object.entries(props), isSvgType(type))) {
+  for (const [name, text] of attributesOfProps(props, isSvgType(type))) {
     renderer.setAttribute(id, name, text)
   }
 }
@@ -377,7 +402,7 @@ function diffCustomProps(
  * the commit phase. Abandoned concurrent renders stay as collectable JS
  * objects and never enter the native mutation queue.
  */
-function materialize(node: HostNode): ReturnType<typeof stateFor> {
+export function materialize(node: HostNode): ReturnType<typeof stateFor> {
   const state = stateFor(node)
   if (state.mounted) return state
 
@@ -385,26 +410,45 @@ function materialize(node: HostNode): ReturnType<typeof stateFor> {
   if ("type" in node) {
     renderer.createElement(node.nativeId, node.type)
     state.container.instances.set(node.nativeId, node)
-    if (state.hidden) renderer.setStyle(node.nativeId, hiddenStyle(node.props.style))
-    else sendStyle(renderer, node.nativeId, node.props)
+    const style = state.codeStyle ?? splitMotionStyle(node.props.style).style
+    if (state.hidden) renderer.setStyle(node.nativeId, hiddenStyle(style))
+    else sendStyle(renderer, node.nativeId, style)
     syncMotionBindings(state.container, node.nativeId, node.props.style, node.type)
     syncEventListeners(state.container, node)
-    syncCustomProps(renderer, node.nativeId, node.type, node.props)
-    syncAttributes(renderer, node.nativeId, node.type, node.props)
+    const liveProps = livePropEntries(node)
+    syncCustomProps(renderer, node.nativeId, node.type, liveProps)
+    syncAttributes(renderer, node.nativeId, node.type, liveProps)
   } else {
     renderer.createElement(node.nativeId, "#text")
     renderer.setText(node.nativeId, node.text)
   }
   state.mounted = true
 
-  if (state.initialChildren) {
-    for (const child of state.initialChildren) {
-      materialize(child)
-      renderer.appendChild(node.nativeId, child.nativeId)
-    }
-    state.initialChildren = undefined
+  // Its children are the ones React gave it as initial children, and any that code placed in it
+  // while it had no native element.
+  for (const child of state.children) {
+    materialize(child)
+    renderer.appendChild(node.nativeId, child.nativeId)
   }
   return state
+}
+
+/**
+ * Marks a node whose native element is gone, and everything inside it, as not mounted, so a
+ * later placement creates it again.
+ */
+export function markUnmounted(node: HostNode): void {
+  const state = stateFor(node)
+  state.mounted = false
+  for (const child of state.children) markUnmounted(child)
+}
+
+function destroyNative(container: Container, node: HostNode): void {
+  markUnmounted(node)
+  const destroyed = container.renderer.destroyElement(node.nativeId)
+  for (const id of destroyed) {
+    unregisterEventHandlers(container.eventHandlers, id)
+  }
 }
 
 /** What a `ref` gives for the mounted element `id`, or `undefined` once it is gone. */
@@ -467,6 +511,68 @@ export function portalContainerFor(target: Instance): Container {
   return container
 }
 
+/**
+ * React's new props become the element's. What code wrote stays unless React changed it: the
+ * change of the `style` prop is applied onto the style code wrote, property by property, and a
+ * prop React changed or removed drops code's value for it.
+ */
+function adoptProps(
+  instance: Instance,
+  state: HostNodeState,
+  oldProps: Props,
+  newProps: Props,
+  styleChanged: boolean
+): void {
+  if (styleChanged && state.codeStyle !== undefined) {
+    state.codeStyle = applyStyleChange(
+      state.codeStyle,
+      splitMotionStyle(oldProps.style).style ?? {},
+      splitMotionStyle(newProps.style).style ?? {}
+    )
+  }
+  const overrides = state.propOverrides
+  if (overrides !== undefined) {
+    const previous = oldProps as Record<string, unknown>
+    const next = newProps as Record<string, unknown>
+    for (const name of [...overrides.keys()]) if (previous[name] !== next[name]) overrides.delete(name)
+  }
+  instance.props = newProps
+}
+
+function applyUpdate(instance: Instance, oldProps: Props, newProps: Props): void {
+  const state = stateFor(instance)
+  const container = state.container
+  // `commitUpdate` runs for every host element whose props object is new,
+  // which is every element a parent re-rendered. Most of those did not change
+  // their style, so send it only when it did.
+  const styleChanged = !sameStyle(oldProps.style, newProps.style)
+  if (hasMutationObservers()) {
+    recordAttributeChanges(instance, new Set([...Object.keys(oldProps), ...Object.keys(newProps)]), () => {
+      adoptProps(instance, state, oldProps, newProps, styleChanged)
+    })
+  } else {
+    adoptProps(instance, state, oldProps, newProps, styleChanged)
+  }
+  // Code took it out of the document and native let it go: it is made again, from these
+  // props, when it is inserted. Its handler slots are kept up to date meanwhile, because that
+  // re-registers them; they do not reach native, which has no element for them.
+  if (!state.mounted) {
+    diffEventListeners(instance, oldProps, newProps)
+    return
+  }
+  if (styleChanged) {
+    sendLiveStyle(instance, state)
+    syncMotionBindings(container, instance.nativeId, newProps.style, instance.type)
+  }
+  diffEventListeners(instance, oldProps, newProps)
+  if (instance.type === "nativeview") {
+    diffNativeviewProps(container, instance.nativeId, oldProps, newProps)
+  }
+  // Custom prop diff (for non-div/text elements)
+  diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
+  diffAttributes(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
+}
+
 // ── Host config ──────────────────────────────────────────────────────
 
 export const hostConfig = {
@@ -487,6 +593,7 @@ export const hostConfig = {
   },
 
   appendChild(parent: Instance, child: Instance | TextInstance): void {
+    if (isReleased(parent)) return insertDomNode(parent, child, null)
     assertPlacement(parent, child)
     const parentState = materialize(parent)
     materialize(child)
@@ -500,12 +607,8 @@ export const hostConfig = {
   // every removed text node: `detachDeletedInstance` runs for host components
   // only, so nothing else would ever destroy a `HostText`.
   removeChild(parent: Instance, child: Instance | TextInstance): void {
-    const container = containerFor(parent)
     unlinkChild(child)
-    const destroyed = container.renderer.destroyElement(child.nativeId)
-    for (const id of destroyed) {
-      unregisterEventHandlers(container.eventHandlers, id)
-    }
+    destroyNative(containerFor(parent), child)
   },
 
   insertBefore(
@@ -513,6 +616,7 @@ export const hostConfig = {
     child: Instance | TextInstance,
     beforeChild: Instance | TextInstance
   ): void {
+    if (isReleased(parent)) return insertDomNode(parent, child, beforeChild)
     assertPlacement(parent, child)
     const parentState = materialize(parent)
     materialize(child)
@@ -530,6 +634,7 @@ export const hostConfig = {
     beforeChild: Instance
   ): void {
     const target = container.portalTarget ?? container.body
+    if (isReleased(target)) return insertDomNode(target, child, beforeChild)
     assertPlacement(target, child)
     materialize(child)
     adopt(target, child)
@@ -539,10 +644,7 @@ export const hostConfig = {
 
   removeChildFromContainer(parent: Container, child: Instance): void {
     unlinkChild(child)
-    const destroyed = parent.renderer.destroyElement(child.nativeId)
-    for (const id of destroyed) {
-      unregisterEventHandlers(parent.eventHandlers, id)
-    }
+    destroyNative(parent, child)
   },
 
   prepareForCommit(_containerInfo: Container): Record<string, unknown> | null {
@@ -620,31 +722,11 @@ export const hostConfig = {
     newProps: Props,
     _internalInstanceHandle: unknown
   ): void {
-    const state = stateFor(instance)
-    const { container } = state
-    // `commitUpdate` runs for every host element whose props object is new,
-    // which is every element a parent re-rendered. Most of those did not change
-    // their style, so send it only when it did.
-    if (!sameStyle(oldProps.style, newProps.style)) {
-      container.renderer.setStyle(
-        instance.nativeId,
-        state.hidden ? hiddenStyle(newProps.style) : (splitMotionStyle(newProps.style).style ?? {})
-      )
-      syncMotionBindings(container, instance.nativeId, newProps.style, instance.type)
-    }
-    diffEventListeners(instance, oldProps, newProps)
-    if (instance.type === "nativeview") {
-      diffNativeviewProps(container, instance.nativeId, oldProps, newProps)
-    }
-    // Custom prop diff (for non-div/text elements)
-    diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
-    diffAttributes(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
-    if (hasMutationObservers()) {
-      recordAttributeChanges(instance, new Set([...Object.keys(oldProps), ...Object.keys(newProps)]), () => {
-        instance.props = newProps
-      })
+    // A showing popover whose `popover` prop changed closes, with its events, once the whole update is queued.
+    if (oldProps.popover !== newProps.popover) {
+      writePopoverAttribute(instance, () => applyUpdate(instance, oldProps, newProps))
     } else {
-      instance.props = newProps
+      applyUpdate(instance, oldProps, newProps)
     }
   },
 
@@ -653,7 +735,7 @@ export const hostConfig = {
     _oldText: string,
     newText: string
   ): void {
-    rendererFor(textInstance).setText(textInstance.nativeId, newText)
+    if (stateFor(textInstance).mounted) rendererFor(textInstance).setText(textInstance.nativeId, newText)
     const oldValue = textInstance.text
     textInstance.text = newText
     queueCharacterDataMutation(textInstance, oldValue)
@@ -661,6 +743,7 @@ export const hostConfig = {
 
   appendChildToContainer(container: Container, child: Instance): void {
     const target = container.portalTarget ?? container.body
+    if (isReleased(target)) return insertDomNode(target, child, null)
     assertPlacement(target, child)
     materialize(child)
     adopt(target, child)
@@ -673,21 +756,20 @@ export const hostConfig = {
     assertPlacement(parent, child)
     adopt(parent, child)
     linkChild(parent, child)
-    const state = stateFor(parent)
-    state.initialChildren ??= []
-    state.initialChildren.push(child)
   },
 
   hideInstance(instance: Instance): void {
-    // Keep the element's own style: only `display` is replaced, and it comes back with
-    // `unhideInstance`.
-    stateFor(instance).hidden = true
-    rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(instance.props.style))
+    // Keep the element's own style under `display: none !important`, so a sheet
+    // rule cannot show what Suspense hides and unhiding restores it as it was.
+    const state = stateFor(instance)
+    state.hidden = true
+    if (state.mounted) rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(liveStyleOf(instance)))
   },
 
-  unhideInstance(instance: Instance, props: Props): void {
-    stateFor(instance).hidden = false
-    rendererFor(instance).setStyle(instance.nativeId, splitMotionStyle(props.style).style ?? {})
+  unhideInstance(instance: Instance, _props: Props): void {
+    const state = stateFor(instance)
+    state.hidden = false
+    if (state.mounted) sendLiveStyle(instance, state)
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},
@@ -738,11 +820,7 @@ export const hostConfig = {
   },
 
   detachDeletedInstance(instance: Instance): void {
-    const container = containerFor(instance)
-    const destroyed = container.renderer.destroyElement(instance.nativeId)
-    for (const id of destroyed) {
-      unregisterEventHandlers(container.eventHandlers, id)
-    }
+    destroyNative(containerFor(instance), instance)
   },
 
   getPublicInstance(instance: Instance): PublicInstance {

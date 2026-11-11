@@ -11,7 +11,8 @@ import type {
   WindowInsetsHost,
   WindowSizeHost,
 } from "./host.js"
-import { getElementAnimations, type Animation, type GetAnimationsOptions } from "./web-animations.js"
+import type { KeyframesInput } from "./animate-keyframes.js"
+import { animateElement, getElementAnimations, type AnimateOptions, type Animation, type GetAnimationsOptions } from "./web-animations.js"
 
 /**
  * `setPointerCapture`, `releasePointerCapture` and `hasPointerCapture` for one
@@ -64,6 +65,18 @@ export interface ElementMethods extends PointerCaptureMethods {
    * Call it on the element: that is the `target` of the effects it returns.
    */
   getAnimations(options?: GetAnimationsOptions): Animation[]
+  /**
+   * Starts an animation of the element and returns its `Animation`: `keyframes` is an array of
+   * objects with `offset`, `easing` and the properties, or one object with an array of values for
+   * each property (`{ translate: [from, to] }`), `options` a duration in milliseconds or the timing
+   * members of the DOM (`delay`, `endDelay`, `duration`, `iterations`, `iterationStart`,
+   * `direction`, `fill`, `easing`) and an `id`. It plays above the animations of the style, from
+   * the next frame, and is listed by `getAnimations()`. A property that is not animated, or a
+   * value that cannot be read, is left out; a wrong offset, easing or timing member throws a
+   * `TypeError`. `composite` other than `replace` is not built. Call it on the element: that is
+   * the `target` of its effect.
+   */
+  animate(keyframes: KeyframesInput, options?: number | AnimateOptions): Animation
 }
 
 export function createElementMethods(
@@ -92,6 +105,9 @@ export function createElementMethods(
     requestPointerLock: () => supported("requestPointerLock")(elementId),
     getAnimations(this: object, options?: GetAnimationsOptions) {
       return getElementAnimations(renderer, elementId, this, options)
+    },
+    animate(this: object, keyframes: KeyframesInput, options?: number | AnimateOptions) {
+      return animateElement(renderer, elementId, this, keyframes, options)
     },
   }
 }

@@ -71,6 +71,7 @@ function elementBinding(element: FakeHtml | FakeSvg): ElementBinding {
     type: element.type,
     prop: (name) => element.props[name],
     propNames: () => Object.keys(element.props),
+    style: {},
   }
 }
 
@@ -79,12 +80,14 @@ defineDomMembers(FakeHtml.prototype, (element: FakeHtml) => ({
   connected: element.connected,
   prop: (name) => element.props[name],
   propNames: () => Object.keys(element.props),
+  style: {},
 }))
 defineDomMembers(FakeSvg.prototype, (element: FakeSvg) => ({
   listeners: undefined as never,
   connected: element.connected,
   prop: (name) => element.props[name],
   propNames: () => Object.keys(element.props),
+  style: {},
 }))
 
 function place(parent: FakeHtml, ...children: Array<FakeHtml | FakeText>): void {

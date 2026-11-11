@@ -10,6 +10,7 @@ import {
   type SheetSink,
 } from "./css/index.js"
 import { attributesOfProps } from "./dom/attribute-names.js"
+import { popoversDestroyed } from "./dom/popover.js"
 import { isSvgType } from "./svg.js"
 import { createBlobImageLoader, type BlobImageHost } from "./blob-images.js"
 import type { MutationHost, MutationRenderer } from "./host.js"
@@ -201,6 +202,7 @@ export function createMutationQueue(
           try {
             const destroyed = renderer.applyBatch(batch.wire)
             cancelAnimationsOfElements(renderer, destroyed)
+            popoversDestroyed(renderer, destroyed)
             onDestroyed(destroyed)
             applied = true
             break
@@ -337,6 +339,7 @@ const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "role",
   "id",
   "htmlFor",
+  "popover",
 ])
 
 /** Props a `div`, `span`, `label`, `form` or HTML tag forwards to native; every other prop is dropped. */

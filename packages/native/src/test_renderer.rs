@@ -3147,6 +3147,20 @@ impl TestGpuixRenderer {
         self.with_motion_state(Repaint::None, move |view, now| Ok(view.web_animations(id, now)))
     }
 
+    /// `element.animate(keyframes, options)`. See `GpuixRenderer.animateElement`.
+    #[napi]
+    pub fn animate_element(
+        &self,
+        element_id: f64,
+        keyframes_json: String,
+        timing: crate::renderer::WebAnimationTimingUpdate,
+    ) -> Result<crate::renderer::WebAnimationInfo> {
+        let id = to_element_id(element_id)?;
+        self.with_motion_state(Repaint::Layout, move |view, now| {
+            view.animate_element(id, &keyframes_json, timing, now)
+        })
+    }
+
     /// `getAnimations({ subtree: true })` of an element. See `GpuixRenderer.getSubtreeAnimations`.
     #[napi]
     pub fn get_subtree_animations(&self, element_id: f64) -> Result<Vec<crate::renderer::ElementWebAnimationInfo>> {

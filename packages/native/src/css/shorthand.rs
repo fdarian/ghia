@@ -245,17 +245,6 @@ pub(crate) fn deserialize_length_sides<'de, D: Deserializer<'de>>(
     )
 }
 
-/// `gap`: a number of px or one or two CSS lengths.
-pub(crate) fn deserialize_gap<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Gap>, D::Error> {
-    let token = length_token("gap", "a CSS length with a unit, or calc()", super::dimension::parse_linear_length);
-    deserialize_optional(
-        deserializer,
-        "a number of px or a string of one or two CSS lengths",
-        |value| px_length(value, "gap").map(Gap::all),
-        |text| parse_gap(text, &token),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

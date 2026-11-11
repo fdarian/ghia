@@ -2,6 +2,7 @@ import type { Key, ReactNode, Ref } from "react"
 import type { EventPayload } from "@ghia/native"
 import { HOST_BINDING } from "@ghia/native/host"
 import type {
+  AnimateOptions,
   Animation,
   BoundingClientRect,
   ElementIdAllocator,
@@ -16,6 +17,7 @@ import type {
   HTMLElement,
   ImagePixelsOptions,
   InputProps as NativeInputProps,
+  KeyframesInput,
   LabelProps as NativeLabelProps,
   TextareaProps as NativeTextareaProps,
   ImgProps as NativeImgProps,
@@ -288,6 +290,7 @@ export interface Instance extends Partial<FocusableElement>, HTMLElement {
    * the elements below are listed too. See `Animation`.
    */
   getAnimations?(options?: GetAnimationsOptions): Animation[]
+  animate?(keyframes: KeyframesInput, options?: number | AnimateOptions): Animation
   [HOST_BINDING]?(): HostBinding | undefined
 }
 

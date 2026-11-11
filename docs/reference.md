@@ -4951,7 +4951,7 @@ A host element (a React ref, a Solid `HostElement`) has the members a library wr
 | `addEventListener(type, listener, options?)`, `removeEventListener(type, listener, options?)` | For any event type, with the DOM's arguments: `listener` is a function or an object with `handleEvent`, `options` is `{ capture, once, passive, signal }` or the `capture` boolean. The same function in the same phase is added once. `once` removes it before it runs, `passive` makes `event.preventDefault()` do nothing while it runs, and a `signal` removes it when it aborts (an aborted one adds nothing). A listener is called with the element as `this`. A type native never emits (`touchstart`, `touchend`, `touchcancel`) is accepted and never fires. |
 | `ownerDocument` | The `document` object the adapters export. Its `defaultView` is the global `window` (`globalThis`), which has `setTimeout`, `requestAnimationFrame` and `ResizeObserver`, so `element.ownerDocument.defaultView` works as the window of a library that asks for it. |
 | `isConnected` | True while the element is in the tree of a mounted root. |
-| `getAttribute(name)` | The prop whose attribute name is `name` as a string (a prop is an attribute under the name the DOM gives it: lowercase on an HTML element, so `tabIndex={0}` is `tabindex` and `getAttribute("tabIndex")` finds it, `className` is `class` and `htmlFor` is `for`; an SVG element keeps the case of its props, `viewBox`, and matches names exactly), or `null` when the element was not given it or its value is a function or an object (`onClick`, `style`). `data-index={5}` reads `"5"`; `false`, `null` and `undefined` read `null` and `true` reads `""`, except for `data-*` and `aria-*`, where `false` reads `"false"` and `true` `"true"`. |
+| `getAttribute(name)` | The prop whose attribute name is `name` as a string (a prop is an attribute under the name the DOM gives it: lowercase on an HTML element, so `tabIndex={0}` is `tabindex` and `getAttribute("tabIndex")` finds it, `className` is `class` and `htmlFor` is `for`; an SVG element keeps the case of its props, `viewBox`, and matches names exactly), or `null` when the element was not given it or its value is a function or an object (`onClick`). `getAttribute("style")` is the text of the element's live style, `width: 10px; --dnd-top: 4px;` as Chrome writes `cssText` and as a `[style]` selector reads it (a `null` or empty value is no declaration, a number on a property that is not unitless and not zero has `px`), and `null` while it has no declaration ([Style from code](#style-and-id-from-code)). `data-index={5}` reads `"5"`; `false`, `null` and `undefined` read `null` and `true` reads `""`, except for `data-*` and `aria-*`, where `false` reads `"false"` and `true` `"true"`. |
 | `offsetWidth`, `offsetHeight` | The border box's layout size, rounded half up, before any `transform` (a `scale(2)` element has the offset size it had without it; `getBoundingClientRect()` is the transformed box). The read lays out first, as `getBoundingClientRect` does. `0` for an element that is not mounted or has no box. `renderer.getElementBounds(id)` carries the unrounded size as `layoutWidth` and `layoutHeight`. |
 
 **Attributes on native.** The adapters also send the DOM attributes an element has to native (`MutationRenderer.setAttribute`,
@@ -4968,7 +4968,28 @@ constructed sheet is adopted), and then sends those of the elements already moun
 ([the attribute gate](fork/stylesheets.md#the-attribute-gate)). What it still pays is the props themselves: 5000 items with a class and two `data-*` attributes each mount in 146 Minstr of JS and batch work against 125 for the same items without them (batch noise is about 12), with no op sent and native unchanged at 14.7 Minstr, and a class or `data-*` toggle costs 1.4 Minstr either way (`profile-stylesheet-cost`, `attrs` against `inline`). Setting an attribute changes nothing drawn by itself. `className` is no longer
 a prop of the native element on any element type: `class` is its attribute. In Solid, `class`, `className`, `classList` and `class:name` all end in the one `class` attribute: `class` wins over `className` (as an attribute written as such does everywhere), and `classList` and `class:name` add the token of a truthy key and, as Solid's DOM `classList` does, take it away from a key that was truthy and no longer is, so `getAttribute("class")`, `className` and `.name` rules all see the result.
 
+`style` is not one of them: native builds the `[style]` text from the element's own style, so a style written from code (`el.style`, [below](#style-and-id-from-code)) is read by a `[style]` selector as a framework's is. `el.id = "x"` is sent as the `id` attribute, as a prop is.
+
 A `<style>` element and `CSSStyleSheet` add CSS rules that read these attributes: see [Stylesheets](#stylesheets).
+### Popovers
+
+`popover` on a `div`, a `span` or an HTML tag makes the element a popover, as in the DOM: `"auto"` (also `""` and `"hint"`) or `"manual"` (any other value). It is an attribute (`getAttribute("popover")`, and `el.popover` reads it limited to `"auto"`, `"manual"`, `"hint"` or `null`; writing it goes through the same path as `el.id`, and `null` or `undefined` takes the attribute away). A closed popover has no box: the user agent style is `display: none`, and an author `display` shows it, as in Chrome. `showPopover()` opens it, and while it is open:
+
+- it is a `position: fixed` box against the window with Chrome's popover style (`top: 0; right: 0; left: 0; width: max-content; max-width: 100%; margin: auto; border: 3px solid; padding: 0.25em; overflow: auto`, centred across the window and at the top of it, `color` and `background-color` as `CanvasText` and `Canvas`, which follow `color-scheme`: `#000000` on `#ffffff`, `#ffffff` on `#121212` when dark). The style is a user agent layer, between the style of the tag and the universal style, so every declared style overrides it, and its `position` is `fixed` whatever is declared;
+- it is drawn in the top layer: above its siblings whatever their `z-index`, above every `<anchored>` layer, and not clipped by any ancestor. Of two open popovers the one shown last is on top. Hit testing and pointer events follow (`document.elementFromPoint`), and its box takes no part in the layout of its parent;
+- it fires `beforetoggle` before it opens (cancelable; `event.preventDefault()` keeps it closed) and `toggle` after, `ToggleEvent`s with `oldState` and `newState` (`"closed"` or `"open"`), which do not bubble. `toggle` is queued as a task, and changes made in one task fire one.
+
+| Member | |
+|---|---|
+| `showPopover()` | Opens the popover. A showing popover does nothing. Throws `NotSupportedError` for an element with no `popover` attribute and `InvalidStateError` for one that is not in the document. |
+| `hidePopover()` | Closes it, firing `beforetoggle` (not cancelable) and `toggle`. A hidden popover does nothing; the throws are `showPopover()`'s. |
+| `togglePopover(force?)` | Shows, hides, or with `force` makes sure; returns whether the popover is open. |
+| `popover` | The attribute, as above. Writing it on a showing popover to another kind, or removing it, hides the popover with `beforetoggle` and `toggle`. A framework's `popover` prop that is removed or changed from a showing popover's kind does the same. |
+| `ToggleEvent` | The class of the events; a global, and exported by `@ghia/native/host`. |
+
+An `auto` popover is light dismissed: Escape closes the topmost one (it joins the layer stack of [Escape closes the top layer](#escape-closes-the-top-layer), so a Dialog above it closes first), and a press outside closes every open `auto` popover but the one the press is in and the ones that hold it. Showing an `auto` popover closes the other open `auto` popovers that do not hold it (a popover is held by its DOM ancestors). A `manual` popover is closed by `hidePopover()` alone, and neither of these touches it. Focus is not moved when a popover opens or closes.
+
+A popover that leaves the document while open closes with no event, when native lets its element go (the next flush) or the next call that looks at it (`showPopover()`, `hidePopover()`, a press) finds it closed. `getAttributeNames()` and `cloneNode()` never see whether it is open, and a clone is closed. Not built: `::backdrop`, `popovertarget` and `popovertargetaction`, the `:popover-open` pseudo-class (there is no selector engine, so `matches(":popover-open")` is not there), and anchor positioning. The deviations are in [deviations.md](fork/deviations.md#popovers).
 
 ### DOM classes and the tree
 
@@ -4981,12 +5002,49 @@ Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `
 | `parentNode`, `parentElement`, `childNodes`, `firstChild`, `lastChild`, `previousSibling`, `nextSibling`, `hasChildNodes()` | The tree as the framework built it, text included. `childNodes` is a copy: an array, not a live `NodeList`. |
 | `children`, `childElementCount`, `firstElementChild`, `lastElementChild`, `previousElementSibling`, `nextElementSibling` | The same, elements only. `children` is an array, not an `HTMLCollection`. |
 | `contains(node)`, `getRootNode()`, `compareDocumentPosition(node)` | `contains` includes the node itself. `getRootNode()` is `document` for a mounted node and the top of its tree otherwise. `compareDocumentPosition` gives the `DOCUMENT_POSITION_*` bits (`DISCONNECTED`, `PRECEDING`, `FOLLOWING`, `CONTAINS`, `CONTAINED_BY`); two trees that are not in one document are `DISCONNECTED` and `IMPLEMENTATION_SPECIFIC` with a stable order. `document.contains(node)` is `node.isConnected`. |
-| `textContent` | The text of the node and its descendants. Read only: there is no setter yet. |
-| `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `class` attribute (`""` without one; `class` wins over `className`, as `getAttribute("class")` does), an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a frozen read-only snapshot of the `data-*` props with the names in camel case (`data-row-id` is `rowId`). |
+| `textContent` | The text of the node and its descendants. Setting it on an element replaces its children with one `Text` (`""` or `null` removes them all); on a `Text` it sets its data. |
+| `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `class` attribute (`""` without one; `class` wins over `className`, as `getAttribute("class")` does), an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG; `style` while the style has a declaration). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a frozen read-only snapshot of the `data-*` props with the names in camel case (`data-row-id` is `rowId`). |
 
 Every window root is a real `<html>` with a `<head>` and a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.head` the `<head>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; all four are `null` while no root is mounted, and with several windows they are those of the window that mounted last (the rule `matchMedia` follows). `html.parentNode` is `document`, `head.parentNode` and `body.parentNode` are `html` (`documentElement.children` is `[head, body]`), a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin (the [user agent style](#html-tags) of those tags, which a stylesheet rule such as `body { display: flex }` overrides, and neither has a `style` attribute); they add no accessibility node. `head` is `display: none`: it has no box, and an element appended to it is never drawn, laid out or hit, though it is a real element in the tree (a library that prepends a node to `document.head` finds one).
 
-Nothing here changes the tree: `setAttribute`, `appendChild` and the other writing members are not there. `el.id` is the `id` prop as a string, `""` without one, as in the DOM (read only for now). The number native knows an element by, which the renderer methods take, is `el.nativeId` (`renderer.scrollToItem(ref.nativeId, i)`).
+`setAttribute` and the other attribute writers are not there. `el.id` is the `id` prop as a string, `""` without one, as in the DOM, and `el.id = "x"` sets it ([below](#style-and-id-from-code)). The number native knows an element by, which the renderer methods take, is `el.nativeId` (`renderer.scrollToItem(ref.nativeId, i)`).
+
+#### Building and moving nodes from code
+
+Code that is not the framework (a library such as `@dnd-kit/dom`) changes the tree as it would in a browser, mixed with the nodes the framework made. The framework's own next update keeps working on the tree the code left, and a node the framework made can be moved, removed or put back by code.
+
+| Member | |
+|---|---|
+| `document.createElement(tagName)`, `document.createElementNS(ns, name)`, `document.createTextNode(data)` | New nodes of the window that mounted last, in no tree: a node is drawn once it is inserted under a node that is in the document (`document.body`, `document.head` and `document.documentElement` work). `createElement` lowercases the name; `createElementNS` takes the HTML or the SVG namespace, and the SVG names keep their case (`linearGradient`). Before a root is mounted they throw. A `<style>` element is one of the element types, and a [stylesheet](#stylesheets) once it is in the document. A name that is not one of the element types (`marquee`) throws `NotSupportedError`, where a browser makes an unknown element; a name that is not an XML name throws `InvalidCharacterError`. |
+| `appendChild`, `insertBefore`, `removeChild`, `replaceChild` | With the DOM's return values (the node, the node, the child, the replaced child). A node that has a parent is moved: its old parent's `MutationObserver` hears a removal and the new parent's an insertion, and a node in the document moves natively, it is not made again. `HierarchyRequestError` for a node that contains the new parent, for a parent that is `Text` or `document`, and for a node that is neither element nor text; `NotFoundError` for a reference or child that is not a child of the parent; `TypeError` for an argument that is not a `Node`. A throw changes nothing. |
+| `remove()`, `before(...)`, `after(...)`, `replaceWith(...)` | On elements and text. Strings become `Text` nodes. A node among the arguments that is already beside the target moves, as in the DOM. |
+| `append(...)`, `prepend(...)`, `replaceChildren(...)` | On elements. These and `before`, `after` and `replaceWith` with several nodes first take every node out of its parent, as a browser does when it gathers them in a fragment, so a node that cannot go (`HierarchyRequestError`: for `before`, `after` and `replaceWith` it contains the target's parent, for `append`, `prepend` and `replaceChildren` it contains the target itself) leaves the others detached; with one node a throw changes nothing. A node of another window throws before any node is taken out. |
+| `insertAdjacentElement(where, element)`, `insertAdjacentText(where, data)` | `beforebegin`, `afterbegin`, `beforeend`, `afterend` in any letter case; `null` (or nothing) for `beforebegin` and `afterend` on a node with no parent, `SyntaxError` for another position. |
+| `textContent`, `nodeValue`, `data` | Setters, as above. A text node's `data` and `nodeValue` change what is drawn. |
+| `cloneNode(deep = false)` | On elements and text. An element is made again as the same type by the window that owns the original (an SVG element stays an `SVGElement`), with every attribute prop (`id`, `className`, `role`, `tabIndex`, `data-*`, `aria-*`, a `false` one too) and a copy of the live style, code-written properties such as `--x` included; with `deep`, the same for every descendant, in order, and a text node is a copy of its data. The clone is in no tree (`isConnected` is `false`, `parentNode` is `null`) and has no native element until it is inserted; no framework owns it, so the framework's next update of the original never reaches it. It has **no event handlers**: the `on*` props and listeners from `addEventListener` are not copied, as in the DOM; refs, keys, children props and the `motion` and `layout` props are not copied either ([deviations](fork/deviations.md#dom-building-from-code)). `NotSupportedError` for `document`. |
+
+A node that code takes out of the document is kept: it stays an object with its children, props, text, style and listeners, `isConnected` is `false`, and it can be inserted again. Native drops the element at the next flush if the node is still out of the document by then, and makes it again, with all of it, when it is inserted; a node put back in the same turn is never dropped (it keeps its focus and scroll offset, [deviations](fork/deviations.md#dom-building-from-code)). A node a framework removes by itself (a `<Show>` that hides it, an unmounted React child) is destroyed as before. A node cannot move between windows: inserting a node of one window's tree under another's throws `HierarchyRequestError`. As in React DOM, a node React places a sibling before has to still be a child of the same parent: code that takes it out makes React's next placement before it throw. `DocumentFragment` is never instantiated, so `createDocumentFragment` does not exist and a fragment cannot be appended; pass the nodes to `append()`.
+
+#### Style and id from code
+
+`element.style` is a `CSSStyleDeclaration` (the global class, no public constructor) over the element's **live style**: what the framework rendered into `style` and what code wrote, as one style. It is made on the first read of `el.style`, so an element whose style nothing reads costs what it did.
+
+```ts
+el.style.setProperty("--dnd-top", "10px")   // custom properties are kept as written
+el.style.translate = "4px 8px"              // camelCase members, one for every style property
+el.style.removeProperty("--dnd-top")        // returns the old value, "" when there was none
+```
+
+| Member | |
+|---|---|
+| `setProperty(name, value, priority?)`, `removeProperty(name)`, `getPropertyValue(name)`, `getPropertyPriority(name)` | `name` is the CSS name (`background-color`, `-webkit-font-smoothing`, `--x`) in any case, except that a custom property keeps its case. `""` or `null` removes the property. A property Ghia has no style for (`touch-action`, `will-change`) and a value ending in `!important` change nothing. A value is not checked against the property: an invalid one is stored and native's lenient parser drops it ([deviations](fork/deviations.md#dom-building-from-code)). A number property takes numeric text as a number (`"10"` is `10`) and any other text (`"auto"`, `"50%"`, `"none"`, a CSS-wide keyword) as written. `priority` `"important"` is accepted and ignored ([deviations](fork/deviations.md#dom-building-from-code)). |
+| `cssText` | The declarations as `a: b; --c: d;`, and `""` for none. Setting it replaces every declaration (the state blocks and queries of the framework's style stay: they are no CSS text). |
+| `length`, `item(index)`, `[Symbol.iterator]`, `parentRule` | The declarations' names in written order; `parentRule` is `null`. |
+| `el.style.backgroundColor`, `el.style.translate`, ... | A camelCase member to read and to write for every property of `StyleDesc`, which is the list `STYLE_PROPERTIES` in `@ghia/native/host`. A number is read as CSS has it: `10px` for a length, a plain number for `opacity`, `zIndex`, `flex`, `scale` and the like, `45deg` for `rotate`. |
+
+A write from code makes the whole new style the element's and sends it as the framework's own style change is sent; the framework's next change of `style` is applied **property by property** onto it: a property the framework sets or changes overwrites code's, a property it had and no longer has is removed, and every other property keeps what code wrote. So a re-render that leaves `--dnd-top` alone keeps it, and one that sets `width` replaces a `width` code set. A property written by code replaces its declaration where it stands. An unchanged value is no change (nothing is sent and no `MutationObserver` record is made) unless a later declaration overlaps it, and then it moves last, as CSS has it: of two overlapping declarations the later one wins. Two declarations overlap when one covers the other (a shorthand and a longhand it covers) and when two shorthands share a longhand (`borderTop` and `borderWidth`). `el.style = "..."` sets `cssText`.
+
+`el.id = "x"` sets the `id` prop (`getAttribute("id")`, `el.id`, native) and the framework's next render that changes or removes the `id` prop overwrites it; a render that leaves `id` as it was keeps what code set. Both writes make the `MutationObserver` record an attribute change would (`attributeName` `style` or `id`, `oldValue` the old text), and only when the text changed.
 
 The `on*` prop and the listeners of one type and phase are one list, called in the order the DOM gives: a listener in the order it was added, the prop where it was first set (so before the listeners added after it), and a prop that is set again after it was unset last. A change of the prop replaces its handler in place. At the target the capture listeners run first, then the bubble ones, as in current browsers.
 
@@ -5061,8 +5119,9 @@ the changes they make to their tree: a node placed or removed (a move is a remov
 insertion), a text change (`characterData`) and a prop change. An attribute is what `getAttribute`
 reads, so a record is made only when that string changed, with the old string as `oldValue`, and
 `attributeName` is the attribute's name (`tabindex` for a `tabIndex` prop, so an `attributeFilter`
-of `["tabindex"]` matches): `className` is the `class` attribute, and a handler, an object, `style` and `children` are no
-attribute and make no record. `html`, `head` and `body` are in the tree, so
+of `["tabindex"]` matches): `className` is the `class` attribute, a handler, an object and `children` are no
+attribute and make no record, and a change of the style, from the framework or from code, is a record for `style` with the old
+`cssText` as `oldValue`. `html`, `head` and `body` are in the tree, so
 `observe(document.body, { childList: true, subtree: true })` sees the app's nodes. A subtree
 observer keeps hearing of changes inside a node that was removed from the subtree until its next
 delivery, as in the standard. With no observer alive each hook is one integer check and no node
@@ -9476,7 +9535,8 @@ await animation.finished // resolves with the animation
   stays set against a later style. Values are written as Chrome writes them:
   transforms with the functions they were written with, colours in the space they
   were written in, shadows, SVG lengths, dash lists and paths. The effect cannot
-  be made or replaced, and there is no `setKeyframes()`, `composite` or
+  be made with `new KeyframeEffect()` or replaced (`element.animate()` makes one
+  with its animation), and there is no `setKeyframes()`, `composite` or
   `pseudoElement`
 - **`getAnimations({ subtree: true })` and `document.getAnimations()`.** The
   animations of the element and everything below it, or of every window, in
@@ -9488,6 +9548,61 @@ await animation.finished // resolves with the animation
   cannot be constructed by an app. `replaceState`, `persist()`, `commitStyles()`
   and `onremove` do not exist, and `animation-composition` is not supported
   ([deviations](./fork/deviations.md#motion))
+
+##### `element.animate()`
+
+`element.animate(keyframes, options)` starts an animation of the element and returns
+its `Animation`, as in the Web Animations API. An element that has no native element yet, one made by code and not inserted or one released after its removal, throws: [deviations](fork/deviations.md#dom-building-from-code). It is how `@dnd-kit/dom` moves a
+dropped item, and it runs unchanged:
+
+```tsx
+const animation = ref.current.animate(
+  { translate: ["0px 0px", "100px 0px"] },
+  { duration: 200, easing: "ease-out", fill: "forwards" },
+)
+await animation.finished
+```
+
+- **Keyframes.** An array of objects with `offset`, `easing` and the properties
+  (`[{ opacity: 0 }, { offset: 0.8, opacity: 1 }, { opacity: 0.5 }]`), or one
+  object with a value or an array of values for each property (`{ translate:
+  [from, to] }`, `{ opacity: 0.5 }` animates from what the element has to `0.5`),
+  with `offset` and `easing` as a value or an array. Names are camelCase
+  (`backgroundColor`), values strings as in CSS (a number is read as its text: it
+  is an `opacity`, and for a length it is read as `style` reads it, in px, where
+  Chrome ignores it). Offsets left out are spread evenly. A property
+  Ghia does not animate, and a value that does not read for its property, is left
+  out as a browser leaves it out. A wrong offset (outside 0 to 1, or not
+  ascending) or easing, or no object, throws a `TypeError`. Keyframes at one
+  offset merge, the later value winning; a missing 0% or 100% is what the element
+  has without the animation, as for `@keyframes`.
+- **Options.** A number is the `duration` in milliseconds; an object takes
+  `delay`, `endDelay`, `duration` (a number or `"auto"`), `iterations` (`Infinity`
+  repeats for ever), `iterationStart`, `direction`, `fill` (`"auto"` is `"none"`),
+  `easing` and `id`. A negative `duration`, a negative or `NaN` `iterations` or a
+  negative `iterationStart` throws a `TypeError`. `composite` and `pseudoElement`
+  are ignored: only `replace` is built.
+- **What it is.** A plain `Animation` (not a `CSSAnimation`), with an effect whose
+  `target` is the element, and every member of the [list above](#web-animations):
+  `pause()`, `finish()`, `cancel()` (which rejects `finished` with an
+  `AbortError` and removes the effect), `reverse()`, `currentTime`, `playbackRate`,
+  `ready`, `finished`, `onfinish`, `oncancel`, `effect.getKeyframes()`,
+  `getTiming()` and `updateTiming()`. `id` is the `id` option. It plays from the next
+  frame (`pending` until then) and no style owns it: a change of `animation` or
+  `transition` leaves it alone, and `display: none` does not cancel it.
+- **How it shows.** Sampled and interpolated as `@keyframes` are, by the same
+  engine: the property table of CSS animations, the same easing parser, the same
+  timing model. The animations of scripts play above the CSS animations of the
+  style, in the order they were made, and `getAnimations()` lists them after the
+  style's animations, also in that order. An element that is a unit with a running
+  animation is rebuilt every frame as it is for a CSS animation.
+- **Held and released.** An animation that finished with no fill is no longer in
+  `getAnimations()`; Ghia keeps its run only while your code holds the object (or
+  it plays again with `play()`), so an app that lets go of it frees it. One a `fill`
+  holds stays listed, as in Chrome, until it is cancelled.
+- **Not built.** `composite: "add"` and `"accumulate"`, `commitStyles()`, `persist()`,
+  `document.timeline`, and `new KeyframeEffect()` / `new Animation()`
+  ([deviations](./fork/deviations.md#motion)).
 
 ##### Animations of `motion`
 
