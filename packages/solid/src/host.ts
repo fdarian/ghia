@@ -19,6 +19,7 @@ import {
   focusHostElement,
   hostElementMatches,
   forwardsCustomProp,
+  isHtmlTag,
   isNativeviewHandlerProp,
   HOST_BINDING,
   HOST_MOUNT,
@@ -370,17 +371,20 @@ export class HostElement extends HTMLElement {
   }
 
   /** `<form>` only: validate the controls, then submit. */
-  requestSubmit(): void {
+  requestSubmit(submitter?: object | null): void {
     const root = this.root
     if (!root || !this.mounted) throw new Error("requestSubmit() needs a mounted element")
     if (this.type !== "form") {
       throw new Error(`requestSubmit() is only valid on <form>, got <${this.type}>`)
     }
-    requestFormSubmit({
-      id: this.nativeId,
-      nativeRenderer: root.nativeRenderer,
-      flushMutations: () => root.mutations.flushMutations(),
-    })
+    requestFormSubmit(
+      {
+        id: this.nativeId,
+        nativeRenderer: root.nativeRenderer,
+        flushMutations: () => root.mutations.flushMutations(),
+      },
+      submitter,
+    )
   }
 
   private textControl(member: string): TextControlHost {
@@ -643,7 +647,7 @@ function isElementType(type: string): type is ElementType {
     case "feTurbulence":
       return true
     default:
-      return false
+      return isHtmlTag(type)
   }
 }
 
@@ -686,7 +690,7 @@ export function setHostProperty(
     node.motionValues = split.motionValues
     if (node.root && node.mounted) {
       node.writeStyle()
-      syncMotionBindings(node.root, node.root.mutations, node.nativeId, node.motionValues, node.kind === "element" ? node.type : undefined)
+      syncMotionBindings(node.root, node.root.mutations, node.nativeId, node.motionValues, node.kind === "element" ? node.type : undefined, node.style)
     }
     return
   }
@@ -740,7 +744,7 @@ function mount(root: HostRoot, node: HostNode): void {
   } else {
     node.sent.reset()
     node.writeStyle()
-    if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.type)
+    if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.type, node.style)
     node.listeners.attach({ eventHandlers: root.eventHandlers, renderer: root.mutations, elementId: node.nativeId })
     for (const [name, value] of node.props) {
       if (!EVENT_PROP_NAMES.has(name) && customPropAllowed(node, name)) {

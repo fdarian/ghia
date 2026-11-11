@@ -18,6 +18,7 @@ import type {
   HostInputEvent,
   PointerEventProps,
 } from "./events/types.js"
+import type { HtmlTag } from "./html-tags.js"
 import type { ScrollEvent } from "./scroll.js"
 import type { MotionValue } from "./motion-value.js"
 import type { MotionGestureName } from "./motion-variants.js"
@@ -69,6 +70,7 @@ export * from "./motion-config.js"
 export * from "./motion-span.js"
 export * from "./motion-variants.js"
 export * from "./motion-value.js"
+export * from "./html-tags.js"
 export * from "./mutations.js"
 export * from "./observers.js"
 export * from "./presence.js"
@@ -1580,6 +1582,7 @@ export type ElementType =
   | "webview"
   | "nativeview"
   | "virtual-list"
+  | HtmlTag
   | SvgChildType
 
 // ── Theme ────────────────────────────────────────────────────────────
@@ -1982,17 +1985,18 @@ export type SubmitEvent = DomEvent & {
   /** The `name` and `value` of every named, enabled `<input>` and `<textarea>`
    *  in the form, in document order. */
   formData: FormData
-  /** The button that submitted the form. Always null: there is no submit button. */
-  submitter: null
+  /** The `<button>` whose click submitted the form, or the default button an Enter in a field clicked.
+   *  `null` for `requestSubmit()` and for Enter in a form with no submit button. */
+  submitter: object | null
 }
 
 /** `<form>`: groups `<input>` and `<textarea>` controls and submits them together. */
 export interface FormProps extends Omit<HostProps, "onSubmit"> {
   /**
-   * Enter in an `<input>` of this form, or `requestSubmit()`, once every
-   * `required` control has a value. Cancelable and bubbling, like the DOM; there
-   * is no navigation, so there is nothing to cancel. Enter in a `<textarea>`
-   * inserts a newline and never submits.
+   * A click on a submit `<button>` of this form, Enter in an `<input>` of it (HTML's implicit
+   * submission), or `requestSubmit()`, once every `required` control has a value. Cancelable
+   * and bubbling, like the DOM; there is no navigation, so there is nothing to cancel. Enter in a
+   * `<textarea>` inserts a newline and never submits.
    */
   onSubmit?: (event: SubmitEvent) => void
 }
@@ -2004,14 +2008,17 @@ export interface FormMethods {
    * gets `invalid`, and the first whose handlers did not call `preventDefault()`
    * takes focus; the form is not submitted. Otherwise `submit` fires. The events
    * are delivered before this returns.
+   *
+   * `submitter` becomes the event's `submitter`. It throws a `TypeError` when it is not a
+   * submit `<button>`, and a `NotFoundError` `DOMException` when that button belongs to another form.
    */
-  requestSubmit(): void
+  requestSubmit(submitter?: object | null): void
 }
 
 /** `<label>`: names a control and forwards a click to it. */
 export interface LabelProps extends HostProps {
-  /** The `id` of the control to label. Without it, the first `<input>` or
-   *  `<textarea>` inside the label is the control. */
+  /** The `id` of the control to label. Without it, the first `<input>`, `<textarea>`
+   *  or `<button>` inside the label is the control. */
   htmlFor?: string
 }
 

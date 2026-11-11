@@ -28,6 +28,7 @@ fn lift_of_surface(style: &str, lift_absorbed: bool) -> Option<i32> {
         tree: Arc::new(Mutex::new(RetainedTree::new())),
         callback: None,
         routing: Default::default(),
+        pointer: Default::default(),
     };
     let props = HashMap::new();
     let ctx = CustomRenderContext {

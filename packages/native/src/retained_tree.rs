@@ -81,15 +81,16 @@ pub struct RetainedElement {
     /// style. A 10k-turn chat has 59 320 `setStyle` ops and 90 distinct styles.
     ///
     /// This is the effective style: the one the element declared, over the
-    /// universal layer when there is one. Every reader wants it. Only `set_style`
-    /// and `set_universal_style` write it (`RetainedTree::assign_style`).
+    /// universal layer and the user agent style of its tag when there are any. Every
+    /// reader wants it. Only `set_style`, `set_universal_style` and `create_element` write it
+    /// (`RetainedTree::assign_style`).
     ///
     /// Read it with `.as_deref()` to get `Option<&StyleDesc>`. Never mutate
     /// through it; `Arc` has no `DerefMut`, so the compiler enforces that.
     pub style: Option<Arc<StyleDesc>>,
     /// What the element declared with `setStyle`, which the effective `style`
     /// is recomputed from when the universal layer changes. The same pointer as
-    /// `style` while there is no layer.
+    /// `style` while no layer is under it.
     own_style: Option<Arc<StyleDesc>>,
     pub content: Option<String>,
     pub children: Vec<u64>,
@@ -218,7 +219,8 @@ impl RetainedElement {
     }
 
     /// Whether the element must own a gpui focus handle, which is what DOM calls
-    /// focusable: an enabled text control, a `<webview>`, or any other element with a `tabIndex`.
+    /// focusable: an enabled text control or `<button>`, an `<a>` with an `href`, a `<webview>`, or any
+    /// other element with a `tabIndex`.
     /// A key or focus listener does not make an element focusable; an ancestor's
     /// key listener still hears the keys of a focused descendant.
     pub fn needs_focus(&self) -> bool {
@@ -229,11 +231,11 @@ impl RetainedElement {
         if crate::custom_elements::is_focusable_by_default(&self.element_type) {
             return true;
         }
-        if crate::focus::is_text_control(&self.element_type) {
+        if crate::focus::is_text_control(&self.element_type) || self.element_type == "button" {
             // `disabled` outranks `tabIndex`: a disabled control cannot be focused at all.
             !self.is_disabled()
         } else {
-            self.tab_index().is_some()
+            crate::html::is_focusable_by_default(self) || self.tab_index().is_some()
         }
     }
 
@@ -963,7 +965,7 @@ impl RetainedTree {
         let revision = self.take_revision_covered();
         self.elements
             .insert(id, RetainedElement::new(id, element_type, revision));
-        if self.universal.is_some() {
+        if self.universal.is_some() || crate::html::is_tag(&self.elements[&id].element_type) {
             self.refresh_effective_style(id, false);
         }
         self.track_focusable(id);
@@ -1388,20 +1390,20 @@ impl RetainedTree {
         }
     }
 
-    /// Recompute the effective style of `id` from the style it declared and the
-    /// universal layer, and assign it.
+    /// Recompute the effective style of `id` from the style it declared, over the universal
+    /// layer, over the user agent style of its tag, and assign it.
     fn refresh_effective_style(&mut self, id: u64, classify: bool) -> StyleChange {
         let Some(element) = self.elements.get(&id) else {
             return StyleChange::default();
         };
-        let effective = match (&self.universal, &element.own_style) {
-            (Some(universal), own) if element.takes_universal_style() => Some(match own {
-                Some(own) => self.styles.layered.effective(universal, own),
-                None => universal.clone(),
-            }),
-            (_, own) => own.clone(),
+        let universal = self.universal.as_ref().filter(|_| element.takes_universal_style());
+        let user_agent = crate::html::ua_style(&element.element_type);
+        let effective = match (self.styles.layered.base(universal, user_agent.as_ref()), &element.own_style) {
+            (Some(base), Some(own)) => Some(self.styles.layered.effective(&base, own)),
+            (Some(base), None) => Some(base),
+            (None, own) => own.clone(),
         };
-        self.assign_style(id, effective, classify)
+        self.assign_style(id, crate::html::used_style(&element.element_type, effective), classify)
     }
 
     /// The one place `RetainedElement::style` is written, and the bookkeeping
@@ -1567,7 +1569,7 @@ impl RetainedTree {
         let is_highlight = key == "highlight";
         let is_motion = key == "motion";
         let is_motion_values = key == "motionValues" || key == "layout";
-        let affects_focusability = key == "tabIndex" || key == "disabled";
+        let affects_focusability = key == "tabIndex" || key == "disabled" || key == "href";
         let is_inert = key == "inert";
         let relation_key = RelationRegistry::reads(&key).then(|| key.clone());
         let mut previous_relation = None;
@@ -3419,6 +3421,54 @@ mod tests {
         assert_eq!(tree.styles.layered.len(), 2);
         assert!(Arc::ptr_eq(style_of_arc(&tree, 1), style_of_arc(&tree, 3)));
         assert!(!Arc::ptr_eq(style_of_arc(&tree, 1), style_of_arc(&tree, 2)));
+    }
+
+    #[test]
+    fn a_tag_has_its_user_agent_style_under_the_universal_layer_and_its_own() {
+        let mut tree = layered_tree();
+        apply(&mut tree, r##"[["createElement",20,"h1"],["createElement",21,"p"],["createElement",22,"div"]]"##);
+        let h1 = style_of(&tree, 20).unwrap();
+        assert_eq!(h1.display.as_deref(), Some("block"));
+        assert!(h1.font_size.is_some() && h1.margin_top.is_some(), "no style was ever set on it");
+        assert!(tree.elements[&20].own_style.is_none());
+        assert!(style_of(&tree, 22).is_none(), "a div has no user agent style");
+
+        apply(&mut tree, r##"[["setUniversalStyle",{"marginTop":0,"opacity":0.5}]]"##);
+        let h1 = style_of(&tree, 20).unwrap();
+        assert_eq!(h1.margin_top, tree.universal.as_ref().unwrap().margin_top, "the universal layer beats the user agent");
+        assert_eq!(h1.margin_bottom, crate::html::ua_style("h1").unwrap().margin_bottom, "and leaves what it does not set");
+        assert_eq!(h1.opacity, Some(0.5));
+
+        apply(&mut tree, r##"[["setStyle",20,{"margin":3}]]"##);
+        let h1 = style_of(&tree, 20).unwrap();
+        assert!(h1.margin.is_some() && h1.margin_top.is_none() && h1.margin_bottom.is_none(), "an own shorthand shadows both");
+        assert_eq!(h1.display.as_deref(), Some("block"));
+
+        apply(&mut tree, r##"[["setUniversalStyle",null]]"##);
+        assert_eq!(style_of(&tree, 21).unwrap().display.as_deref(), Some("block"));
+    }
+
+    #[test]
+    fn a_button_that_says_inline_is_inline_block_as_in_chrome() {
+        let mut tree = layered_tree();
+        apply(&mut tree, r##"[["createElement",20,"button"],["createElement",21,"a"],["createElement",22,"button"]]"##);
+        apply(&mut tree, r##"[["setStyle",20,{"display":"inline"}],["setStyle",21,{"display":"inline"}],["setStyle",22,{"display":"block"}]]"##);
+        assert_eq!(style_of(&tree, 20).unwrap().display.as_deref(), Some("inline-block"));
+        assert_eq!(style_of(&tree, 21).unwrap().display.as_deref(), Some("inline"), "only a button");
+        assert_eq!(style_of(&tree, 22).unwrap().display.as_deref(), Some("block"));
+        assert!(style_of(&tree, 20).unwrap().padding.is_some(), "the rest of its style is kept");
+    }
+
+    #[test]
+    fn two_tags_with_the_same_own_style_do_not_share_a_layered_style() {
+        let mut tree = layered_tree();
+        apply(&mut tree, r##"[["createElement",20,"p"],["createElement",21,"h1"],["createElement",22,"p"]]"##);
+        for id in [20, 21, 22] {
+            apply(&mut tree, &format!(r##"[["setStyle",{id},{{"width":10}}]]"##));
+        }
+        assert!(Arc::ptr_eq(style_of_arc(&tree, 20), style_of_arc(&tree, 22)));
+        assert!(!Arc::ptr_eq(style_of_arc(&tree, 20), style_of_arc(&tree, 21)));
+        assert_ne!(style_of(&tree, 20).unwrap().margin_top, style_of(&tree, 21).unwrap().margin_top);
     }
 
     #[test]

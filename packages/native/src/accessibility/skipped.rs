@@ -130,12 +130,12 @@ fn skips_all(tree: &RetainedTree, element: &RetainedElement) -> bool {
 /// element without a role.
 fn node_of(tree: &RetainedTree, element: &RetainedElement) -> Option<(gpui::accesskit::Node, Vec<(A11yRelation, Vec<SharedString>)>)> {
     let text = super::read_text_unplanned(tree, element);
-    let default_role = super::role_without_props(element, text.as_deref());
-    let mut probe = super::apply_accessibility(
+    let default_role = super::role_without_props(tree, element, text.as_deref());
+    let mut probe = super::apply_element(
         gpui::div().id(crate::events::ids::host_element_id(element.id)),
-        element.id,
-        element.custom_props(),
+        element,
         default_role,
+        false,
     );
     probe = super::describe_text(probe, element, default_role, text);
     if element.element_type == "label" {

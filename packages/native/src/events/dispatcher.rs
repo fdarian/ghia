@@ -297,12 +297,13 @@ impl<'a> Emitter<'a> {
         });
     }
 
-    /// A `click`, which also has to reach a label with no listener: whether
-    /// the label activates its control is decided after the event ran.
+    /// A `click`, which also has to reach a label with no listener, and a submit button: whether
+    /// they activate something is decided after the event ran.
     fn emit_click(&mut self, target: u64, fields: Fields) {
         let activates = || {
             let path = event_path(self.tree, target);
             crate::accessibility::label::activated_control(self.tree, &path).is_some()
+                || crate::forms::submission_by_click(self.tree, &path).is_some()
         };
         if path_listens(self.tree, target, "click")
             || self.requests.window_listens("click")
@@ -1561,6 +1562,27 @@ mod tests {
             r#"[["createElement",1,"div"],["setRoot",1],
                 ["createElement",2,"label"],["appendChild",1,2],["setCustomProp",2,"htmlFor","email"],
                 ["createElement",3,"input"],["appendChild",1,3],["setCustomProp",3,"id","email"],
+                ["createElement",4,"div"],["appendChild",2,4]]"#,
+        )
+        .unwrap();
+        let mut state = PointerState::default();
+        dispatch(&mut state, &tree, &down(0, 1, chain_of(&[4, 2, 1])));
+        let output = dispatch(&mut state, &tree, &up(0, 1, chain_of(&[4, 2, 1])));
+        assert_eq!(names(&output), ["click@4"]);
+
+        dispatch(&mut state, &tree, &down(0, 1, chain_of(&[3, 1])));
+        let output = dispatch(&mut state, &tree, &up(0, 1, chain_of(&[3, 1])));
+        assert!(output.events.is_empty());
+    }
+
+    #[test]
+    fn a_click_on_a_submit_button_of_a_form_is_emitted_with_no_listener() {
+        let mut tree = RetainedTree::new();
+        crate::batch::test_json::apply(
+            &mut tree,
+            r#"[["createElement",1,"form"],["setRoot",1],
+                ["createElement",2,"button"],["appendChild",1,2],
+                ["createElement",3,"button"],["appendChild",1,3],["setCustomProp",3,"type","button"],
                 ["createElement",4,"div"],["appendChild",2,4]]"#,
         )
         .unwrap();

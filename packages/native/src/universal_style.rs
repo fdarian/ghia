@@ -59,27 +59,51 @@ fn refine(universal: Option<&StyleDesc>, own: Option<&StyleDesc>) -> Option<Box<
 }
 
 struct Layered {
-    /// Held so the address the entry is keyed by cannot be reused by another style.
+    /// Held so the addresses the entry is keyed by cannot be reused by other styles.
+    _base: Arc<StyleDesc>,
     _own: Arc<StyleDesc>,
     effective: Arc<StyleDesc>,
 }
 
-/// The layered style of each own style, so the thousands of elements that share
-/// one own style (a 10k-turn chat has 90) share one layered style too.
+/// The layered style of each pair of base layer and own style, so the thousands of elements that
+/// share one own style (a 10k-turn chat has 90) share one layered style too. The base layer is
+/// what is under the own style: the universal style, a tag's user agent style, or the first over
+/// the second.
 ///
 /// Valid for one universal style: the tree clears it when the layer changes.
 #[derive(Default)]
 pub struct LayerCache {
-    entries: rustc_hash::FxHashMap<usize, Layered>,
+    entries: rustc_hash::FxHashMap<(usize, usize), Layered>,
+    /// The universal style over the user agent style of a tag, by the address of the latter.
+    bases: rustc_hash::FxHashMap<usize, Arc<StyleDesc>>,
 }
 
 impl LayerCache {
-    pub fn effective(&mut self, universal: &StyleDesc, own: &Arc<StyleDesc>) -> Arc<StyleDesc> {
+    /// What lies under the own style of an element: `None` when no layer applies to it.
+    pub fn base(
+        &mut self,
+        universal: Option<&Arc<StyleDesc>>,
+        user_agent: Option<&Arc<StyleDesc>>,
+    ) -> Option<Arc<StyleDesc>> {
+        match (universal, user_agent) {
+            (Some(universal), Some(user_agent)) => Some(
+                self.bases
+                    .entry(Arc::as_ptr(user_agent) as usize)
+                    .or_insert_with(|| Arc::new(layer_under(user_agent, universal)))
+                    .clone(),
+            ),
+            (Some(only), None) | (None, Some(only)) => Some(only.clone()),
+            (None, None) => None,
+        }
+    }
+
+    pub fn effective(&mut self, base: &Arc<StyleDesc>, own: &Arc<StyleDesc>) -> Arc<StyleDesc> {
         self.entries
-            .entry(Arc::as_ptr(own) as usize)
+            .entry((Arc::as_ptr(base) as usize, Arc::as_ptr(own) as usize))
             .or_insert_with(|| Layered {
+                _base: base.clone(),
                 _own: own.clone(),
-                effective: Arc::new(layer_under(universal, own)),
+                effective: Arc::new(layer_under(base, own)),
             })
             .effective
             .clone()
@@ -87,6 +111,7 @@ impl LayerCache {
 
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.bases.clear();
     }
 
     /// Forget the layered styles no element holds. An entry also holds its own
@@ -103,9 +128,7 @@ impl LayerCache {
 
     #[cfg(test)]
     fn holds(&self, own: &Arc<StyleDesc>) -> bool {
-        self.entries
-            .get(&(Arc::as_ptr(own) as usize))
-            .is_some_and(|entry| Arc::ptr_eq(&entry._own, own))
+        self.entries.values().any(|entry| Arc::ptr_eq(&entry._own, own))
     }
 }
 
@@ -248,7 +271,7 @@ mod tests {
 
     #[test]
     fn one_layered_style_serves_every_element_with_the_same_own_style() {
-        let universal = style(r#"{ "opacity": 0.5 }"#);
+        let universal = Arc::new(style(r#"{ "opacity": 0.5 }"#));
         let own = Arc::new(style(r#"{ "width": 10 }"#));
         let mut cache = LayerCache::default();
         let first = cache.effective(&universal, &own);
@@ -261,7 +284,7 @@ mod tests {
 
     #[test]
     fn release_unused_keeps_what_an_element_holds() {
-        let universal = style(r#"{ "opacity": 0.5 }"#);
+        let universal = Arc::new(style(r#"{ "opacity": 0.5 }"#));
         let held = Arc::new(style(r#"{ "width": 10 }"#));
         let dropped = Arc::new(style(r#"{ "width": 20 }"#));
         let mut cache = LayerCache::default();

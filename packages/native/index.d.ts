@@ -521,10 +521,11 @@ export declare class GpuixRenderer {
    */
   getTextSelection(elementId: number): TextSelection
   /**
-   * `form.requestSubmit()`: validate the form's controls, then emit `submit`.
-   * The events are delivered before this returns.
+   * `form.requestSubmit(submitter)`: validate the form's controls, then emit `submit`.
+   * The events are delivered before this returns. A `submitter` that is not a submit button
+   * refuses with `TypeError: ...`, and one of another form with `NotFoundError: ...`.
    */
-  requestSubmit(elementId: number): void
+  requestSubmit(elementId: number, submitterId?: number | undefined | null): void
   /**
    * Make the fonts in a TrueType or OpenType file (or a collection) usable by
    * `fontFamily`, under the family names the file declares. Call it before
@@ -1175,8 +1176,8 @@ export declare class TestGpuixRenderer {
   selectText(elementId: number): void
   /** `setSelectionRange(start, end, direction)`; offsets are UTF-16 units. */
   setSelectionRange(elementId: number, start: number, end: number, direction?: string | undefined | null): void
-  /** `form.requestSubmit()`: validate, then emit `submit`. */
-  requestSubmit(id: number): void
+  /** `form.requestSubmit(submitter)`: validate, then emit `submit`. */
+  requestSubmit(id: number, submitterId?: number | undefined | null): void
   /** `selectionStart`, `selectionEnd` and `selectionDirection`. */
   getTextSelection(elementId: number): TextSelection
   /**
@@ -1942,6 +1943,11 @@ export interface EventPayload {
    * order. Populated for: `<form>` submit.
    */
   formEntries?: Array<Array<string>>
+  /**
+   * Id of the `<button>` that submitted the form, when one did.
+   * Populated for: `<form>` submit.
+   */
+  submitterId?: number
   /**
    * Id of the element the event was aimed at (JS makes it `event.target`, the
    * element itself). Absent means `element_id` is the target. Ids are `f64`

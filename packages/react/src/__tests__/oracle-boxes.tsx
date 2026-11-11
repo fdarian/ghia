@@ -22,7 +22,7 @@ const DISPLAY: Record<string, string> = {
   colgroup: "table-column-group",
 }
 
-const VOID = new Set(["col", "img"])
+const VOID = new Set(["col", "img", "hr", "br", "wbr"])
 const COUNTS: Record<string, string> = { colspan: "colSpan", rowspan: "rowSpan", span: "span" }
 
 interface Node {
@@ -35,7 +35,7 @@ function parse(html: string): (Node | string)[] {
   const root: Node = { tag: "", attrs: {}, children: [] }
   const open: Node[] = [root]
   for (const token of html.split(/(<[^>]+>)/).filter(Boolean)) {
-    const tag = /^<(\/?)([a-z]+)([^>]*?)(\/?)>$/.exec(token)
+    const tag = /^<(\/?)([a-z][a-z0-9]*)([^>]*?)(\/?)>$/.exec(token)
     if (!tag) {
       open.at(-1)!.children.push(token)
       continue
@@ -65,7 +65,13 @@ export interface Override {
 /** Props to put on the element with this `id`, such as the handlers of a hit test. */
 export type Extra = (id: string) => Record<string, unknown>
 
-function render(nodes: (Node | string)[], override: Override | undefined, extra: Extra | undefined, key = ""): React.ReactNode[] {
+function render(
+  nodes: (Node | string)[],
+  override: Override | undefined,
+  extra: Extra | undefined,
+  tags: boolean,
+  key = ""
+): React.ReactNode[] {
   return nodes.map((node, index) => {
     if (typeof node === "string") return node
     const props: Record<string, unknown> = { key: `${key}${index}` }
@@ -74,7 +80,7 @@ function render(nodes: (Node | string)[], override: Override | undefined, extra:
       Object.assign(props, extra?.(node.attrs.id))
     }
     for (const [name, prop] of Object.entries(COUNTS)) if (node.attrs[name]) props[prop] = Number(node.attrs[name])
-    const display = DISPLAY[node.tag]
+    const display = tags ? undefined : DISPLAY[node.tag]
     const style = {
       ...(display ? { display } : {}),
       ...styleOf(node.attrs.style ?? ""),
@@ -84,17 +90,22 @@ function render(nodes: (Node | string)[], override: Override | undefined, extra:
       const size = { width: Number(node.attrs.width), height: Number(node.attrs.height) }
       return React.createElement("img", { ...props, src: node.attrs.src, style: { ...style, ...size } })
     }
-    const Tag = node.tag === "span" ? "span" : "div"
+    const Tag = tags || node.tag === "span" ? node.tag : "div"
     if (override?.motion && node.attrs.id === override.id) {
-      return React.createElement(motion.div, { ...props, ...override.motion, style }, ...render(node.children, override, extra, `${key}${index}.`))
+      return React.createElement(motion.div, { ...props, ...override.motion, style }, ...render(node.children, override, extra, tags, `${key}${index}.`))
     }
-    return React.createElement(Tag, { ...props, style }, ...render(node.children, override, extra, `${key}${index}.`))
+    return React.createElement(Tag, { ...props, style }, ...render(node.children, override, extra, tags, `${key}${index}.`))
   })
 }
 
 /** The elements of `html`. */
 export function elementsOf(html: string, override?: Override, extra?: Extra): React.ReactNode[] {
-  return render(parse(html), override, extra)
+  return render(parse(html), override, extra, false)
+}
+
+/** The elements of `html` with the tags it has, `<p>` and `<table>` included, and no `display` of theirs. */
+export function tagsOf(html: string, override?: Override, extra?: Extra): React.ReactNode[] {
+  return render(parse(html), override, extra, true)
 }
 
 type Rect = [number, number, number, number]

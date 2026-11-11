@@ -1020,6 +1020,7 @@ enum UiCommand {
     },
     RequestSubmit {
         id: u64,
+        submitter: Option<u64>,
         response: SyncSender<std::result::Result<(), String>>,
     },
     RegisterFont {
@@ -1297,10 +1298,10 @@ async fn run_ui_commands(
                     response.send(view.text_selection(id, cx)).ok();
                 })
             }
-            UiCommand::RequestSubmit { id, response } => gpui::AnyWindowHandle::from(window)
+            UiCommand::RequestSubmit { id, submitter, response } => gpui::AnyWindowHandle::from(window)
                 .update(cx, move |_view, window, cx| {
                     response
-                        .send(crate::forms::request_submit(window, cx, id))
+                        .send(crate::forms::request_submit(window, cx, id, submitter))
                         .ok();
                 }),
             UiCommand::RegisterFont { bytes, response } => {
@@ -4400,21 +4401,23 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
-    /// `form.requestSubmit()`: validate the form's controls, then emit `submit`.
-    /// The events are delivered before this returns.
+    /// `form.requestSubmit(submitter)`: validate the form's controls, then emit `submit`.
+    /// The events are delivered before this returns. A `submitter` that is not a submit button
+    /// refuses with `TypeError: ...`, and one of another form with `NotFoundError: ...`.
     #[napi]
-    pub fn request_submit(&self, element_id: f64) -> Result<()> {
+    pub fn request_submit(&self, element_id: f64, submitter_id: Option<f64>) -> Result<()> {
         let id = to_element_id(element_id)?;
+        let submitter = submitter_id.map(to_element_id).transpose()?;
         #[cfg(target_os = "macos")]
         return update_window_without_view(move |window, cx| {
-            crate::forms::request_submit(window, cx, id)
+            crate::forms::request_submit(window, cx, id, submitter)
         })?
         .map_err(Error::from_reason);
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::RequestSubmit { id, response })?;
+            self.send_ui_command(UiCommand::RequestSubmit { id, submitter, response })?;
             return recv_ui_response(receiver, "the form submission")?.map_err(Error::from_reason);
         }
 
@@ -5718,10 +5721,11 @@ impl WebGpuixRenderer {
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = requestSubmit)]
-    pub fn request_submit(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
+    pub fn request_submit(&self, element_id: f64, submitter_id: Option<f64>) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
+        let submitter = submitter_id.map(web_element_id).transpose()?;
         update_web_window_without_view(move |window, cx| {
-            crate::forms::request_submit(window, cx, id)
+            crate::forms::request_submit(window, cx, id, submitter)
         })?
         .map_err(|error| wasm_bindgen::JsValue::from_str(&error))
     }
@@ -6465,7 +6469,7 @@ fn sync_motions(
         // An SVG shape animates its attributes, not a style.
         let svg_attributes = crate::custom_elements::svg_tree::is_svg_element(tree, element)
             .then(|| element.custom_props());
-        let inline = element.element_type == "span";
+        let inline = crate::text::inline::is_inline_wrapper(element);
         let state = match states.entry(id) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::hash_map::Entry::Vacant(entry) => {
@@ -7245,7 +7249,9 @@ impl GpuixView {
             if matches!(element.element_type.as_str(), "input" | "textarea") {
                 return false;
             }
-            if key.activates_controls && element.events().contains("click") {
+            if key.activates_controls
+                && (element.events().contains("click") || crate::html::activation_keys(element).is_some_and(|keys| keys.space))
+            {
                 return false;
             }
             let reaching = crate::layout::containing_block::reaching_ancestors(&tree, focused);
@@ -9693,6 +9699,7 @@ impl GpuixView {
             tree: self.tree.clone(),
             callback: self.event_callback.clone(),
             routing: self.routing.clone(),
+            pointer: self.pointer.clone(),
         }
     }
 }
@@ -9805,9 +9812,9 @@ struct Fixed {
 
 impl Fixed {
     fn of(tree: &crate::retained_tree::RetainedTree, element: &crate::retained_tree::RetainedElement) -> Self {
-        // A span is painted by its paragraph, a shape of an `<svg>` by the raster of the `<svg>`, and a
+        // An inline box is painted by its paragraph, a shape of an `<svg>` by the raster of the `<svg>`, and a
         // `layout` element glides between boxes: none is an element whose frame is only paint.
-        let excluded = element.element_type == "span"
+        let excluded = crate::text::inline::is_inline_wrapper(element)
             || crate::custom_elements::svg_tree::is_svg_element(tree, element)
             || element.custom_props().contains_key("layout")
             || !element
@@ -10365,6 +10372,7 @@ impl gpui::Render for GpuixView {
                     tree_arc.clone(),
                     callback.clone(),
                     self.routing.clone(),
+                    self.pointer.clone(),
                 ))
                 .child(selection_frame_reset(
                     self.selection.clone(),
@@ -12399,14 +12407,11 @@ pub(crate) fn build_host_container(
     } else {
         None
     };
-    let default_role = crate::accessibility::role_without_props(element, text.as_deref());
+    let default_role = crate::accessibility::role_without_props(ctx.tree, element, text.as_deref());
     el = if exposed.is_empty() {
-        apply_accessibility(el, element.id, element.custom_props(), default_role)
+        crate::accessibility::apply_element(el, element, default_role, false)
     } else {
-        crate::accessibility::skipped::host(
-            crate::accessibility::apply_hosting(el, element.id, element.custom_props(), default_role),
-            exposed,
-        )
+        crate::accessibility::skipped::host(crate::accessibility::apply_element(el, element, default_role, true), exposed)
     };
     el = crate::accessibility::describe_text(el, element, default_role, text);
     if is_label && !inert {
@@ -13849,16 +13854,17 @@ fn scroll_reporter(
 
 /// The retained path a non-pointer click on `element` bubbles along. Empty when
 /// nothing would receive it, which is also when it is never read: nothing
-/// listens for a click and the element is not a label that activates a control,
+/// listens for a click and the element is not a label that activates a control
+/// or a button or link, which have an activation of their own,
 /// or the element is in a disabled form control, which an accessibility click
 /// does nothing on.
 pub(crate) fn click_path(tree: &RetainedTree, element: &crate::retained_tree::RetainedElement) -> Vec<u64> {
-    let listens = element.events().contains("click");
-    if (!listens && element.element_type != "label") || tree.in_disabled_form_control(element.id) {
+    let activates = element.events().contains("click") || crate::html::is_activatable(element);
+    if (!activates && element.element_type != "label") || tree.in_disabled_form_control(element.id) {
         return Vec::new();
     }
     let path = crate::events::path::event_path(tree, element.id);
-    if listens || crate::accessibility::label::activated_control(tree, &path).is_some() {
+    if activates || crate::accessibility::label::activated_control(tree, &path).is_some() {
         path
     } else {
         Vec::new()

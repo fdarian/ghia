@@ -776,6 +776,9 @@ impl GpuixView {
             window.last_input_was_keyboard(),
             window.is_window_active(),
         ) {
+            if let Some(from) = change.from {
+                crate::events::key_activation::blurred(&self.routing, &self.pointer, tree, from);
+            }
             self.focus.push_change(tree, &change);
             #[cfg(not(target_family = "wasm"))]
             self.focus.push_page_moves(tree, &change);

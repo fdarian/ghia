@@ -564,12 +564,12 @@ fn join_spans(spans: &[Span]) -> String {
                 out.push('\n');
             }
         }
-        // The placeholder of an atomic inline is not text; what is inside the box is a
-        // text of its own.
+        // The placeholder of an atomic inline is not text, and what is inside the box is a text of
+        // its own; nor is the break opportunity of a `<wbr>`.
         out.extend(
             span.text[span.range.clone()]
                 .chars()
-                .filter(|c| *c != gpui::OBJECT_REPLACEMENT_CHARACTER),
+                .filter(|c| *c != gpui::OBJECT_REPLACEMENT_CHARACTER && *c != crate::html::BREAK_OPPORTUNITY),
         );
         previous = Some(span);
     }
@@ -628,6 +628,20 @@ mod tests {
 
     fn on_line<'a>(key: &'a str, text: &'a str, line: &'a str) -> RegisteredText<'a> {
         RegisteredText { line: Some(line), ..RegisteredText::whole(key, text, None) }
+    }
+
+    #[test]
+    fn copied_text_leaves_out_the_break_opportunity_of_a_wbr() {
+        let text = "foo\u{200B}bar \u{FFFC} baz";
+        let span = Span {
+            key: "p".to_string(),
+            range: 0..text.len(),
+            text: text.to_string(),
+            group: None,
+            line: None,
+            cell: None,
+        };
+        assert_eq!(join_spans(&[span]), "foobar  baz");
     }
 
     fn elems<'a>() -> Vec<RegisteredText<'a>> {

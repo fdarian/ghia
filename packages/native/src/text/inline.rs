@@ -52,7 +52,7 @@ pub const TEXT_NODE: &str = "#text";
 /// tree's own `div` rules. Paint dispatches on this and search collects by it, so
 /// the two cannot disagree about which elements lay out a paragraph.
 pub fn is_host_type(element_type: &str) -> bool {
-    matches!(element_type, TEXT_NODE | "div" | "label" | "form" | "span" | "nativeview" | "html" | "head" | "body")
+    matches!(element_type, TEXT_NODE | "div" | "label" | "form" | "span" | "nativeview" | "html" | "head" | "body") || crate::html::is_tag(element_type)
 }
 
 pub fn is_host_container(element: &RetainedElement) -> bool {
@@ -392,6 +392,41 @@ impl Builder {
         }
     }
 
+    /// `<br>`: a line feed whatever `white-space` says, with the collapsible space before it
+    /// removed as the end of a line.
+    fn push_line_break(&mut self, boxes: &[u64]) {
+        self.has_text = true;
+        self.only_whitespace = false;
+        if self.tail == Tail::Space {
+            self.pop();
+        }
+        let start = self.text.len();
+        self.text.push('\n');
+        self.tail = Tail::LineStart;
+        self.pieces.push(Piece {
+            range: start..self.text.len(),
+            boxes: boxes.to_vec(),
+            atomic: None,
+            placeholder: false,
+        });
+    }
+
+    /// `<wbr>`: a zero width space, where the line may break. Content, so a collapsible space on
+    /// either side of it is not at the end of a line.
+    fn push_break_opportunity(&mut self, boxes: &[u64]) {
+        self.has_text = true;
+        self.only_whitespace = false;
+        self.tail = Tail::Content;
+        let start = self.text.len();
+        self.text.push(crate::html::BREAK_OPPORTUNITY);
+        self.pieces.push(Piece {
+            range: start..self.text.len(),
+            boxes: boxes.to_vec(),
+            atomic: None,
+            placeholder: false,
+        });
+    }
+
     /// An atomic inline is content: it ends a collapsible space before it and
     /// starts one after it.
     fn push_atomic(&mut self, element: &RetainedElement, boxes: &[u64]) {
@@ -450,6 +485,11 @@ impl Builder {
         chain.push(element.id);
         self.modes.push(white_space::of_box(element, self.mode()));
         let text_before = self.text.len();
+        match element.element_type.as_str() {
+            "br" => self.push_line_break(chain),
+            "wbr" => self.push_break_opportunity(chain),
+            _ => {}
+        }
         if let Some(content) = element.content.as_deref() {
             self.push_text(content, chain);
         }
@@ -665,13 +705,18 @@ pub fn leaf_run(tree: &RetainedTree, parent: &RetainedElement, leaves: &[u64]) -
 }
 
 /// The text an inline formatting context reads out, as painted: that of every
-/// paragraph in `plan`, in order. The placeholders of atomic inlines are not
-/// text.
+/// paragraph in `plan`, in order. The placeholders of atomic inlines and the break
+/// opportunities of `<wbr>` are not text.
 pub fn accessible_text<'a>(plan: impl IntoIterator<Item = &'a Child>) -> Option<String> {
     fn collect(child: &Child, text: &mut String) {
         match child {
             Child::Paragraph(paragraph) => {
-                text.extend(paragraph.text.chars().filter(|c| *c != gpui::OBJECT_REPLACEMENT_CHARACTER))
+                text.extend(
+                    paragraph
+                        .text
+                        .chars()
+                        .filter(|c| *c != gpui::OBJECT_REPLACEMENT_CHARACTER && *c != crate::html::BREAK_OPPORTUNITY),
+                )
             }
             Child::AnonymousCell(cell) => cell.iter().for_each(|(child, _)| collect(child, text)),
             Child::Block(_) | Child::AnonymousTable(_) | Child::EmptyLine => {}
@@ -802,6 +847,42 @@ mod tests {
         let plan = f.plan(2);
         assert_eq!(paragraphs(&plan)[0].text, "ab");
         assert_eq!(plan.len(), 1);
+    }
+
+    #[test]
+    fn an_html_inline_tag_is_a_run_of_the_paragraph_and_a_block_tag_splits_it() {
+        let mut f = Fixture::new();
+        f.text(1, 2, "a ");
+        f.add(1, 3, "strong").text(3, 4, "b");
+        f.add(1, 5, "a").text(5, 6, "c");
+        f.text(1, 7, " d");
+        let plan = f.plan(1);
+        assert_eq!(plan.len(), 1);
+        assert_eq!(paragraphs(&plan)[0].text, "a bc d");
+
+        let mut f = Fixture::new();
+        f.text(1, 2, "a");
+        f.add(1, 3, "p").text(3, 4, "block");
+        let plan = f.plan(1);
+        assert_eq!(plan.len(), 2, "a paragraph, then the block");
+        assert_eq!(plan[1], Child::Block(3));
+
+        let mut f = Fixture::new();
+        f.text(1, 2, "a");
+        f.add(1, 3, "em").styled(3, serde_json::json!({"display": "block"}));
+        assert_eq!(f.plan(1)[1], Child::Block(3), "its own display wins");
+    }
+
+    #[test]
+    fn a_br_is_a_line_feed_whatever_the_white_space_and_drops_the_space_before_it() {
+        let mut f = Fixture::new();
+        f.text(1, 2, "a ");
+        f.add(1, 3, "br");
+        f.text(1, 4, "b");
+        f.add(1, 5, "br");
+        f.add(1, 6, "br");
+        f.text(1, 7, "c");
+        assert_eq!(paragraphs(&f.plan(1))[0].text, "a\nb\n\nc");
     }
 
     #[test]
@@ -1152,7 +1233,7 @@ mod tests {
 
     #[test]
     fn label_and_form_are_host_containers_and_never_inline_boxes() {
-        for kind in ["div", "#text", "span", "label", "form", "html", "head", "body"] {
+        for kind in ["div", "#text", "span", "label", "form", "html", "head", "body", "p", "a", "table", "button"] {
             assert!(is_host_type(kind), "{kind}");
         }
         for kind in ["img", "svg", "input", "virtual-list", "markdown"] {
@@ -1164,6 +1245,33 @@ mod tests {
         f.text(3, 4, "b");
         let plan = f.plan(1);
         assert_eq!(plan[1], Child::Block(3));
+    }
+
+    #[test]
+    fn a_button_that_says_display_inline_stays_an_atomic_inline() {
+        let mut f = Fixture::new();
+        f.text(1, 2, "a ");
+        f.add(1, 3, "button").styled(3, serde_json::json!({"display": "inline"}));
+        f.text(3, 4, "b");
+        f.text(1, 5, " c");
+        let plan = f.plan(1);
+        assert_eq!(plan.len(), 1, "one paragraph: {plan:?}");
+        assert_eq!(paragraphs(&plan)[0].atomics().map(|(id, _)| id).collect::<Vec<_>>(), vec![3]);
+        assert!(is_atomic(&f.tree.elements[&3]));
+        assert!(!is_inline_wrapper(&f.tree.elements[&3]));
+    }
+
+    #[test]
+    fn the_display_of_an_element_and_not_its_tag_decides_whether_it_is_an_inline_wrapper() {
+        let mut f = Fixture::new();
+        f.add(1, 2, "a").styled(2, serde_json::json!({"display": "block"}));
+        f.add(1, 3, "a");
+        f.add(1, 4, "span").styled(4, serde_json::json!({"display": "block"}));
+        f.add(1, 5, "div").styled(5, serde_json::json!({"display": "inline"}));
+        f.add(1, 6, "span");
+        f.add(1, 7, "strong").styled(7, serde_json::json!({"position": "absolute"}));
+        let wrapper: Vec<bool> = (2..=7).map(|id| is_inline_wrapper(&f.tree.elements[&id])).collect();
+        assert_eq!(wrapper, vec![false, true, false, true, true, false]);
     }
 
     #[test]

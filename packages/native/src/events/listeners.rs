@@ -339,9 +339,9 @@ impl PointerDispatch {
     }
 
     /// Dispatches a release and delivers its events in order. A `click` that
-    /// no handler cancelled activates the control of a label on its path, as
-    /// the DOM's activation behaviour does: the control takes focus and gets a
-    /// `click` of its own.
+    /// no handler cancelled runs the DOM's activation behaviour (`Activation::activate`):
+    /// the control of a label on its path takes focus and gets a `click` of its own,
+    /// and a button submits its form.
     fn release(
         &self,
         view: &WeakEntity<GpuixView>,
@@ -355,7 +355,7 @@ impl PointerDispatch {
             let click = (payload.event_type == "click").then(|| payload.clone());
             let outcome = sync_dispatch::emit(window, cx, &self.activation.callback, payload);
             if let Some(click) = click.filter(|_| !outcome.default_prevented) {
-                self.activation.activate_label(&click, window, cx);
+                self.activation.activate(&click, window, cx);
             }
         }
     }
