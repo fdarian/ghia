@@ -285,6 +285,15 @@ fn an_unclosed_block_ends_at_the_end_of_the_sheet() {
 }
 
 #[test]
+fn a_stray_closer_does_not_end_a_block() {
+    let mut doc = Doc::new();
+    let sheet = doc.parse(".a { width: calc(1px + 2px)); } .b { color: red }");
+    assert_eq!(pairs(&sheet.rules.last().expect("a rule").normal), [("color", r#""red""#)]);
+    let sheet = doc.parse(".a { width: calc(1px + 2px)]; } .b { color: red }");
+    assert_eq!(pairs(&sheet.rules.last().expect("a rule").normal), [("color", r#""red""#)]);
+}
+
+#[test]
 fn a_rule_without_declarations_is_not_kept() {
     let sheet = Doc::new().parse("a { } b { /* nothing */ ; } c { color: red }");
     assert_eq!(sheet.rules.len(), 1);

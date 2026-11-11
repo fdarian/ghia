@@ -60,19 +60,33 @@ pub(super) fn tokenize(src: &str) -> Vec<Token> {
 }
 
 /// The index of the token that closes the opener at `open`, or `tokens.len()` when it never does.
+/// A block ends only at its own closer: a closer that does not match the innermost open bracket is
+/// an ordinary token (CSS Syntax 5.4.7), so a stray `)` does not end a rule early.
 pub(super) fn find_close(tokens: &[Token], open: usize) -> usize {
-    let mut depth = 0usize;
+    let mut open_brackets: Vec<&Kind> = Vec::new();
     for (index, token) in tokens.iter().enumerate().skip(open) {
         if token.kind.is_opener() {
-            depth += 1;
+            open_brackets.push(&token.kind);
         } else if token.kind.is_closer() {
-            depth -= 1;
-            if depth == 0 {
-                return index;
+            let matches_innermost = open_brackets.last().is_some_and(|innermost| closes(innermost, &token.kind));
+            if matches_innermost {
+                open_brackets.pop();
+                if open_brackets.is_empty() {
+                    return index;
+                }
             }
         }
     }
     tokens.len()
+}
+
+fn closes(opener: &Kind, closer: &Kind) -> bool {
+    matches!(
+        (opener, closer),
+        (Kind::OpenParen | Kind::Function(_), Kind::CloseParen)
+            | (Kind::OpenBracket, Kind::CloseBracket)
+            | (Kind::OpenBrace, Kind::CloseBrace)
+    )
 }
 
 pub(super) fn trim(mut tokens: &[Token]) -> &[Token] {
