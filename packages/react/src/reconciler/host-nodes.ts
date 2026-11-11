@@ -25,6 +25,7 @@ import {
 } from "@ghia/native/host"
 import type {
   BoundingClientRect,
+  Element,
   ElementBinding,
   ElementMethods,
   FocusOptions,
@@ -36,7 +37,7 @@ import type {
   TextBinding,
 } from "@ghia/native/host"
 import type { Container, ElementType, Instance, Props, TextInstance } from "../types/host.js"
-import { createDomText, insertDomNode, removeDomNode, setDomProp, setDomStyle, setDomTextData } from "./dom-mutation.js"
+import { createDomElement, createDomText, insertDomNode, removeDomNode, setDomProp, setDomStyle, setDomTextData } from "./dom-mutation.js"
 import { listenersOf } from "./event-registry.js"
 
 export type HostNode = Instance | TextInstance
@@ -301,6 +302,10 @@ class ElementDomBinding implements ElementBinding {
   createText(data: string): Text {
     return createDomText(this.state.container, data) as unknown as Text
   }
+
+  createElement(type: string): Element {
+    return createDomElement(this.state.container, type) as unknown as Element
+  }
 }
 
 class TextDomBinding implements TextBinding {
@@ -328,6 +333,10 @@ class TextDomBinding implements TextBinding {
 
   get data(): string {
     return this.text.text
+  }
+
+  createText(data: string): Text {
+    return createDomText(this.state.container, data) as unknown as Text
   }
 
   setData(data: string): void {

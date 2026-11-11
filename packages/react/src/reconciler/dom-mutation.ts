@@ -42,9 +42,13 @@ function detachedOf(container: Container): Set<HostNode> {
 
 export function createDomFactory(container: Container): DomNodeFactory {
   return {
-    createElement: (type) => createHostElement(nextId(container), type as ElementType, {}, container),
+    createElement: (type) => createDomElement(container, type),
     createTextNode: (data) => createDomText(container, data) as unknown as Text,
   }
+}
+
+export function createDomElement(container: Container, type: string): Instance {
+  return createHostElement(nextId(container), type as ElementType, {}, container)
 }
 
 export function createDomText(container: Container, data: string): TextInstance {
@@ -132,7 +136,7 @@ export function setDomStyle(instance: Instance, next: StyleDesc): void {
 }
 
 /** Code's write of one prop (`el.id = ...`): React's next render of the same prop overwrites it. */
-export function setDomProp(instance: Instance, name: string, value: string): void {
+export function setDomProp(instance: Instance, name: string, value: string | number | boolean): void {
   const state = stateFor(instance)
   const apply = () => {
     state.propOverrides ??= new Map()

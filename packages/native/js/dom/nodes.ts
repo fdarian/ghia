@@ -9,6 +9,7 @@
  */
 
 import type { ElementType } from "../host.js"
+import { cloneNode } from "./clone.js"
 import * as tree from "./tree-mutation.js"
 
 export { crossRootError } from "./tree-mutation.js"
@@ -56,6 +57,8 @@ export type ParentBinding = NodeBinding & {
   removeChild(child: Node): void
   /** A text node of the adapter that owns this node, not in any tree yet. */
   createText(data: string): Text
+  /** An element of the window that owns this node, in no tree yet: `type` is one of the element types. */
+  createElement(type: string): Element
 }
 
 export type ElementBinding = ParentBinding & StyleBinding & {
@@ -70,13 +73,15 @@ export type ElementBinding = ParentBinding & StyleBinding & {
    * adapter's record of the props and the `MutationObserver` records. Code's write, which the
    * framework's next render of the same prop overwrites.
    */
-  setProp(name: string, value: string): void
+  setProp(name: string, value: string | number | boolean): void
 }
 
 export type TextBinding = NodeBinding & {
   readonly data: string
   /** Replaces the text, and tells native and `MutationObserver` as a framework's own update does. */
   setData(data: string): void
+  /** A text node of the window that owns this one, in no tree yet. */
+  createText(data: string): Text
 }
 
 const ELEMENT_NODE = 1
@@ -193,6 +198,15 @@ abstract class NodeClass {
     const siblings = this.siblings()
     if (siblings === null) return null
     return siblings[this.indexIn(siblings) + 1] ?? null
+  }
+
+  /**
+   * A copy in no tree: an element with the attributes and the live style of this one, or a text
+   * node with its data, and with `deep` the copies of its descendants. What a framework gave
+   * the element beside attributes (event handlers, refs, `motion`, `layout`) is not copied.
+   */
+  cloneNode(deep: boolean = false): Node {
+    return cloneNode(this as unknown as Node, Boolean(deep))
   }
 
   hasChildNodes(): boolean {

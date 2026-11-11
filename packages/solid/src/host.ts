@@ -51,6 +51,7 @@ import type {
   Animation,
   Document,
   DomElement,
+  Element as DomNodeElement,
   ElementBinding,
   ElementMethods,
   GetAnimationsOptions,
@@ -603,6 +604,10 @@ class ElementDomBinding implements ElementBinding {
   createText(data: string): Text {
     return createHostText(data)
   }
+
+  createElement(type: string): DomNodeElement {
+    return createHostElement(type) as unknown as DomNodeElement
+  }
 }
 
 class TextDomBinding implements TextBinding {
@@ -630,6 +635,10 @@ class TextDomBinding implements TextBinding {
 
   setData(data: string): void {
     replaceHostText(this.text, data)
+  }
+
+  createText(data: string): Text {
+    return createHostText(data)
   }
 }
 
