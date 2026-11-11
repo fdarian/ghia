@@ -80,7 +80,6 @@ Both need a node that is built outside the framework and inserted into its tree,
 - **`getAttribute('style')` is the serialized `cssText`,** `"height: 33px; color: red;"`, not the text `setAttribute` was given. An element nothing wrote a style to has no attribute (`null`), one whose style was written and then emptied has `""`.
 - **No index access and no dashed accessors.** `style[0]` and `style['background-color']` are not there; use `item(0)` and `getPropertyValue`.
 - **A framework's own style change is a `style` attribute record,** which the DOM also queues for React DOM's updates; a write through the declaration that leaves `cssText` as it was queues none (`setAttribute('style', same)` included, the one deviation for any attribute above).
-- **An element React hides (Suspense, `<Activity>`) and shows again has the style the framework committed,** not what was written in between.
 
 ## Checkbox, radio and hidden inputs
 

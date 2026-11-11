@@ -8,8 +8,8 @@
 //     `scrollTop = 0` lines go with the detail pane.
 //  3. The messages come in as a prop instead of `fetch('./messages.json')`, and `inputEl.focus()` is `autoFocus`.
 //  4. The text of `onInput` is `event.value`, not `event.currentTarget.value` (docs/reference.md, "The input and
-//     change events"). `inputEl.value = ''` is kept; an input element has no `value` member on Ghia, so on Escape
-//     it clears nothing.
+//     change events"). `inputEl.value = ''` is kept: an `<input>` element has a `value` member on Ghia, so on Escape
+//     it clears the field.
 //  5. `listEl` is typed as the host element of Ghia, whose type is not an `HTMLDivElement`, hence the `as never`.
 //  6. `<section>` is a `<div>`: Ghia has no `section` element.
 //  7. The list and its inner div have a `testId`, which the test finds them by.
