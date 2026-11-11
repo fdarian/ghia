@@ -40,7 +40,8 @@ export interface DomElement {
    * `"manual"`), or `null` without one. Setting it to `null` or `undefined` takes the attribute
    * away; a showing popover that is not the same kind afterwards is hidden, with its events.
    */
-  popover: "auto" | "manual" | "hint" | null
+  get popover(): "auto" | "manual" | "hint" | null
+  set popover(value: string | null | undefined)
   /** The border box's width, rounded, before any transform. 0 for an element with no box. */
   readonly offsetWidth: number
   /** The border box's height, rounded, before any transform. 0 for an element with no box. */
@@ -138,7 +139,7 @@ export function defineDomMembers<This extends object>(
       set(this: This, value: string | null | undefined) {
         const element = this as unknown as Element
         const text = value === null || value === undefined ? null : String(value)
-        writePopoverAttribute(element, text, () => element[DOM_BINDING]().setProp("popover", text === null ? false : text))
+        writePopoverAttribute(element, () => element[DOM_BINDING]().setProp("popover", text === null ? false : text))
       },
     },
     offsetWidth: {

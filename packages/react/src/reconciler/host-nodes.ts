@@ -39,7 +39,7 @@ import type {
   TextBinding,
 } from "@ghia/native/host"
 import type { Container, ElementType, Instance, Props, TextInstance } from "../types/host.js"
-import { createDomElement, createDomText, insertDomNode, removeDomNode, setDomProp, setDomStyle, setDomTextData } from "./dom-mutation.js"
+import { assertSameWindow, createDomElement, createDomText, insertDomNode, removeDomNode, setDomProp, setDomStyle, setDomTextData } from "./dom-mutation.js"
 import { listenersOf } from "./event-registry.js"
 
 export type HostNode = Instance | TextInstance
@@ -307,6 +307,10 @@ class ElementDomBinding implements ElementBinding {
 
   setProp(name: string, value: string): void {
     setDomProp(this.instance, name, value)
+  }
+
+  assertSameWindow(child: Node): void {
+    assertSameWindow(this.instance, child as unknown as HostNode)
   }
 
   insertBefore(child: Node, before: Node | null): void {

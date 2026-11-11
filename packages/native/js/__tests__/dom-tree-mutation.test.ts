@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { DOM_BINDING, HTMLElement, Text, type ElementBinding, type Node, type TextBinding } from "../dom/nodes.js"
+import { crossRootError, DOM_BINDING, HTMLElement, Text, type ElementBinding, type Node, type TextBinding } from "../dom/nodes.js"
 import { document, installElementSource, type DomNodeFactory } from "../events/window-target.js"
 import { createRendererState } from "../renderer-state.js"
 import type { NativeRenderer } from "../host.js"
@@ -11,6 +11,7 @@ class FakeEl extends HTMLElement {
   parent: FakeEl | null = null
   readonly kids: Array<FakeEl | FakeTx> = []
   readonly log: string[] = []
+  windowName = "main"
 
   constructor(readonly type: string) {
     super()
@@ -23,6 +24,7 @@ class FakeEl extends HTMLElement {
 
 class FakeTx extends Text {
   parent: FakeEl | null = null
+  windowName = "main"
 
   constructor(public text: string) {
     super()
@@ -59,6 +61,9 @@ function elementBinding(element: FakeEl): ElementBinding {
     prop: () => undefined,
     propNames: () => [],
     style: {},
+    assertSameWindow(child) {
+      if ((child as unknown as FakeEl).windowName !== element.windowName) throw crossRootError()
+    },
     insertBefore(child, before) {
       const node = child as unknown as FakeEl | FakeTx
       detach(node)
@@ -328,23 +333,58 @@ describe("ParentNode", () => {
     expect(shape(parent)).toBe("<div><i></i></div>")
   })
 
-  it("append, prepend, before, after and replaceWith validate every node before moving one", () => {
-    const writers: Array<[string, (target: FakeEl, nodes: FakeEl[]) => void]> = [
-      ["append", (target, nodes) => target.append(...nodes)],
-      ["prepend", (target, nodes) => target.prepend(...nodes)],
-      ["before", (target, nodes) => target.before(...nodes)],
-      ["after", (target, nodes) => target.after(...nodes)],
-      ["replaceWith", (target, nodes) => target.replaceWith(...nodes)],
-    ]
-    for (const [name, write] of writers) {
+  const multiNodeWriters: Array<[string, (target: FakeEl, nodes: FakeEl[]) => void]> = [
+    ["append", (target, nodes) => target.append(...nodes)],
+    ["prepend", (target, nodes) => target.prepend(...nodes)],
+    ["before", (target, nodes) => target.before(...nodes)],
+    ["after", (target, nodes) => target.after(...nodes)],
+    ["replaceWith", (target, nodes) => target.replaceWith(...nodes)],
+    ["replaceChildren", (target, nodes) => target.replaceChildren(...nodes)],
+  ]
+
+  it("several nodes are taken out of their parents before the insert throws, as a browser's fragment does", () => {
+    for (const [name, write] of multiNodeWriters) {
       const moved = el("m")
       const holder = el("h", moved)
       const target = el("t")
       const grand = el("g", el("p", target))
       expect(code(() => write(target, [moved, grand])), name).toBe("HierarchyRequestError")
-      expect(shape(holder), name).toBe("<h><m></m></h>")
+      expect(shape(holder), name).toBe("<h></h>")
+      expect(moved.parentNode, name).toBeNull()
       expect(shape(grand), name).toBe("<g><p><t></t></p></g>")
     }
+  })
+
+  it("one node that cannot go is validated before it is moved", () => {
+    for (const [name, write] of multiNodeWriters) {
+      const target = el("t")
+      const grand = el("g", el("p", target))
+      expect(code(() => write(target, [grand])), name).toBe("HierarchyRequestError")
+      expect(shape(grand), name).toBe("<g><p><t></t></p></g>")
+    }
+  })
+
+  it("a node of another window is refused before any node is moved", () => {
+    for (const [name, write] of multiNodeWriters) {
+      const moved = el("m")
+      const holder = el("h", moved)
+      const target = el("t")
+      const parent = el("p", target)
+      const foreign = el("f")
+      foreign.windowName = "other"
+      expect(() => write(target, [moved, foreign]), name).toThrow(expect.objectContaining({ name: "HierarchyRequestError" }))
+      expect(shape(holder), name).toBe("<h><m></m></h>")
+      expect(shape(parent), name).toBe("<p><t></t></p>")
+    }
+  })
+
+  it("replaceChild refuses a node of another window before it removes the child", () => {
+    const child = el("c")
+    const parent = el("p", child)
+    const foreign = el("f")
+    foreign.windowName = "other"
+    expect(() => parent.replaceChild(foreign, child)).toThrow(expect.objectContaining({ name: "HierarchyRequestError" }))
+    expect(shape(parent)).toBe("<p><c></c></p>")
   })
 
   it("insertAdjacentElement uses the four positions, in any letter case, and returns the element", () => {

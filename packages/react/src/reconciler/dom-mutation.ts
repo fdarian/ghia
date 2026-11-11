@@ -58,14 +58,18 @@ export function createDomText(container: Container, data: string): TextInstance 
   return createHostText(nextId(container), data, container)
 }
 
+export function assertSameWindow(parent: Instance, child: HostNode): void {
+  if (containerFor(child).nativeRenderer !== stateFor(parent).container.nativeRenderer) throw crossRootError()
+}
+
 /**
  * Places `child` in `parent` before `before`, or last, as `insertBefore` does. A node that is in
  * the document is moved natively, not made again.
  */
 export function insertDomNode(parent: Instance, child: HostNode, before: HostNode | null): void {
+  assertSameWindow(parent, child)
   const parentState = stateFor(parent)
   const container = parentState.container
-  if (containerFor(child).nativeRenderer !== container.nativeRenderer) throw crossRootError()
   assertPlacement(parent, child)
   adopt(parent, child)
   linkChild(parent, child, before ?? undefined)

@@ -38,6 +38,7 @@ import {
   toBoundingClientRect,
   retireMotionBindings,
   SentWrites,
+  writePopoverAttribute,
   serializeCustomProp,
   splitMotionStyle,
   syncMotionBindings,
@@ -603,11 +604,14 @@ class ElementDomBinding implements ElementBinding {
     setHostProperty(this.element, name, value)
   }
 
+  assertSameWindow(child: Node): void {
+    const target = crossRootTarget(this.element)
+    if (target !== null && belongsToOtherRoot(child as unknown as HostNode, target)) throw crossRootError()
+  }
+
   insertBefore(child: Node, before: Node | null): void {
-    const node = child as unknown as HostNode
-    const target = treeRoot(this.element)
-    if (target !== null && belongsToOtherRoot(node, target)) throw crossRootError()
-    insertHostNode(this.element, node, before as unknown as HostNode | null)
+    this.assertSameWindow(child)
+    insertHostNode(this.element, child as unknown as HostNode, before as unknown as HostNode | null)
   }
 
   removeChild(child: Node): void {
@@ -725,6 +729,15 @@ export function setHostProperty(
     setMergedClass(node, name, value)
     return
   }
+  if (name === "popover" && node.props.get(name) !== value) {
+    // A showing popover whose prop changed closes, with its events, once the prop is stored and sent.
+    writePopoverAttribute(node, () => storeAndSyncProp(node, name, value))
+    return
+  }
+  storeAndSyncProp(node, name, value)
+}
+
+function storeAndSyncProp(node: HostElement, name: string, value: HostPropertyValue): void {
   if (hasMutationObservers()) recordAttributeChanges(node, [name], () => storeHostProp(node, name, value))
   else storeHostProp(node, name, value)
   syncStoredProp(node, name, value)
@@ -957,6 +970,15 @@ function belongsToOtherRoot(node: HostNode, target: HostRoot): boolean {
   if (node.root !== null && node.root !== target) return true
   if (node.mounted || node.kind !== "element") return false
   return node.childList.some((child) => belongsToOtherRoot(child, target))
+}
+
+/**
+ * The root a node put into `parent` has to belong to: `parent`'s own while it has a native element,
+ * which holds for a parent that code took out of the document this turn and native has not yet
+ * released; else the root of the tree it is in.
+ */
+function crossRootTarget(parent: HostNode): HostRoot | null {
+  return parent.mounted ? parent.root : treeRoot(parent)
 }
 
 /** The root whose tree `node` is in, or `null` for a node that is in none. */

@@ -8,6 +8,7 @@ import { document } from "@ghia/native/host"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import { hostConfig } from "../reconciler/host-config.js"
+import { createPortal } from "../reconciler/portal.js"
 import type { Container, PublicInstance } from "../types/host.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -232,6 +233,37 @@ describeNative("DOM building from code in React", () => {
     document.body!.appendChild(element)
     await settle()
     expect(testRoot.renderer.findByText("late")).toBeDefined()
+  })
+
+  it("only links what React places in a portal target code removed and native released", async () => {
+    let layer: PublicInstance | null = null
+    let mutations: ReturnType<typeof useGpuix>["mutations"] | undefined
+    function Probe() {
+      mutations = useGpuix().mutations
+      return null
+    }
+    const tree = (items: string[]) => (
+      <div>
+        <Probe />
+        <div ref={(instance) => (layer = instance ?? layer)} style={{ width: 30, height: 10 }} />
+        {items.length > 0 && layer !== null
+          ? createPortal(items.map((item) => <span key={item}>{item}</span>), layer)
+          : null}
+      </div>
+    )
+    testRoot.render(tree([]))
+    const element = layer as unknown as HTMLElement
+    element.remove()
+    await settle()
+    const created = vi.spyOn(mutations!, "createElement")
+    testRoot.render(tree(["b"]))
+    testRoot.render(tree(["a", "b"]))
+    await settle()
+    expect([...element.children].map((child) => child.textContent), "appended, then inserted before").toEqual(["a", "b"])
+    expect(created, "no native element for the released target or its new children").not.toHaveBeenCalled()
+    document.body!.appendChild(element)
+    await settle()
+    expect(testRoot.renderer.findByText("a")).toBeDefined()
   })
 
   it("does not send a framework update to an element native let go", async () => {

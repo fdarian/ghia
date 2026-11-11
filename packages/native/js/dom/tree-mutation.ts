@@ -50,6 +50,7 @@ function assertNode(value: unknown, method: string, owner: string, position: num
 /** The DOM's "ensure pre-insertion validity", for the node types that exist here. */
 function assertCanInsert(parent: Node, node: Node, before: Node | null): ParentBinding {
   const binding = parentBindingOf(parent)
+  binding.assertSameWindow(node)
   if (node.nodeType !== ELEMENT_NODE && node.nodeType !== TEXT_NODE) {
     throw hierarchyRequestError(`Nodes of type '${node.nodeName}' may not be inserted inside nodes of type '${parent.nodeName}'`)
   }
@@ -62,8 +63,16 @@ function assertCanInsert(parent: Node, node: Node, before: Node | null): ParentB
   return binding
 }
 
-/** A writer of several nodes validates all of them before it moves one, so a bad later node leaves the earlier ones where they were. */
-function assertAllCanInsert(parent: Node, nodes: readonly Node[]): void {
+/**
+ * What `append`, `before` and the other writers do with their nodes before they insert one. Several
+ * nodes are first moved into a fragment, which takes each out of its parent, and only the insert
+ * validates them, so a node that cannot go leaves the others detached, as in a browser. A node of
+ * another window is refused before any of that: it is a Ghia rule, not the DOM's.
+ */
+function takeNodes(parent: Node, nodes: readonly Node[]): void {
+  const binding = parentBindingOf(parent)
+  for (const node of nodes) binding.assertSameWindow(node)
+  if (nodes.length > 1) for (const node of nodes) detach(node)
   for (const node of nodes) assertCanInsert(parent, node, null)
 }
 
@@ -144,13 +153,13 @@ export function before(node: Node, items: readonly (Node | string)[]): void {
   const parent = node.parentNode
   if (parent === null) return
   const nodes = toNodes(parentBindingOf(parent), items)
-  assertAllCanInsert(parent, nodes)
+  // The place to insert at is found without the node and the nodes, which are moved.
+  const previous = nodes.includes(node) ? viableSibling(node.previousSibling, nodes, (sibling) => sibling.previousSibling) : null
+  takeNodes(parent, nodes)
   if (!nodes.includes(node)) {
     for (const item of nodes) insertNode(parent, item, node)
     return
   }
-  // The node is moved too, so the place to insert at is found without it and the nodes.
-  const previous = viableSibling(node.previousSibling, nodes, (sibling) => sibling.previousSibling)
   for (const item of nodes) detach(item)
   const reference = previous === null ? parent.firstChild : previous.nextSibling
   for (const item of nodes) insertNode(parent, item, reference)
@@ -160,8 +169,8 @@ export function after(node: Node, items: readonly (Node | string)[]): void {
   const parent = node.parentNode
   if (parent === null) return
   const nodes = toNodes(parentBindingOf(parent), items)
-  assertAllCanInsert(parent, nodes)
   const reference = viableSibling(node.nextSibling, nodes, (sibling) => sibling.nextSibling)
+  takeNodes(parent, nodes)
   if (nodes.includes(node)) for (const item of nodes) detach(item)
   for (const item of nodes) insertNode(parent, item, reference)
 }
@@ -170,35 +179,35 @@ export function replaceWith(node: Node, items: readonly (Node | string)[]): void
   const parent = node.parentNode
   if (parent === null) return
   const nodes = toNodes(parentBindingOf(parent), items)
-  assertAllCanInsert(parent, nodes)
   const reference = viableSibling(node.nextSibling, nodes, (sibling) => sibling.nextSibling)
+  takeNodes(parent, nodes)
   if (nodes.includes(node)) {
     for (const item of nodes) detach(item)
     for (const item of nodes) insertNode(parent, item, reference)
     return
   }
-  // Inserted first, so a node that cannot go here leaves this one in place.
+  // Inserted first, so a single node that cannot go here leaves this one in place.
   for (const item of nodes) insertNode(parent, item, reference)
   removeNode(parent, node)
 }
 
 export function append(parent: Node, items: readonly (Node | string)[]): void {
   const nodes = toNodes(parentBindingOf(parent), items)
-  assertAllCanInsert(parent, nodes)
+  takeNodes(parent, nodes)
   for (const item of nodes) insertNode(parent, item, null)
 }
 
 export function prepend(parent: Node, items: readonly (Node | string)[]): void {
   const nodes = toNodes(parentBindingOf(parent), items)
-  assertAllCanInsert(parent, nodes)
   const reference = viableSibling(parent.firstChild, nodes, (sibling) => sibling.nextSibling)
+  takeNodes(parent, nodes)
   for (const item of nodes) insertNode(parent, item, reference)
 }
 
 export function replaceChildren(parent: Node, items: readonly (Node | string)[]): void {
   const binding = parentBindingOf(parent)
   const nodes = toNodes(binding, items)
-  assertAllCanInsert(parent, nodes)
+  takeNodes(parent, nodes)
   for (const child of binding.children.slice()) if (!nodes.includes(child)) binding.removeChild(child)
   for (const item of nodes) insertNode(parent, item, null)
 }

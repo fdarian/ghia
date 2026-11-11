@@ -29,6 +29,7 @@ import {
   setTextControlSelectionRange,
   splitMotionStyle,
   syncNativeviewListeners,
+  writePopoverAttribute,
 } from "@ghia/native/host"
 
 const NoEventPriority = 0
@@ -61,7 +62,7 @@ import type {
   WebviewInstance,
 } from "../types/host.js"
 import { syncMotionBindings } from "./motion-bindings.js"
-import { detachListeners, listenersOf, unregisterEventHandlers } from "./event-registry.js"
+import { listenersOf, unregisterEventHandlers } from "./event-registry.js"
 import { insertDomNode } from "./dom-mutation.js"
 import {
   containerFor,
@@ -538,6 +539,40 @@ function adoptProps(
   instance.props = newProps
 }
 
+function applyUpdate(instance: Instance, oldProps: Props, newProps: Props): void {
+  const state = stateFor(instance)
+  const container = state.container
+  // `commitUpdate` runs for every host element whose props object is new,
+  // which is every element a parent re-rendered. Most of those did not change
+  // their style, so send it only when it did.
+  const styleChanged = !sameStyle(oldProps.style, newProps.style)
+  if (hasMutationObservers()) {
+    recordAttributeChanges(instance, new Set([...Object.keys(oldProps), ...Object.keys(newProps)]), () => {
+      adoptProps(instance, state, oldProps, newProps, styleChanged)
+    })
+  } else {
+    adoptProps(instance, state, oldProps, newProps, styleChanged)
+  }
+  // Code took it out of the document and native let it go: it is made again, from these
+  // props, when it is inserted. Its handler slots are kept up to date meanwhile, because that
+  // re-registers them; they do not reach native, which has no element for them.
+  if (!state.mounted) {
+    diffEventListeners(instance, oldProps, newProps)
+    return
+  }
+  if (styleChanged) {
+    sendLiveStyle(instance, state)
+    syncMotionBindings(container, instance.nativeId, newProps.style, instance.type)
+  }
+  diffEventListeners(instance, oldProps, newProps)
+  if (instance.type === "nativeview") {
+    diffNativeviewProps(container, instance.nativeId, oldProps, newProps)
+  }
+  // Custom prop diff (for non-div/text elements)
+  diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
+  diffAttributes(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
+}
+
 // ── Host config ──────────────────────────────────────────────────────
 
 export const hostConfig = {
@@ -599,6 +634,7 @@ export const hostConfig = {
     beforeChild: Instance
   ): void {
     const target = container.portalTarget ?? container.body
+    if (isReleased(target)) return insertDomNode(target, child, beforeChild)
     assertPlacement(target, child)
     materialize(child)
     adopt(target, child)
@@ -686,38 +722,12 @@ export const hostConfig = {
     newProps: Props,
     _internalInstanceHandle: unknown
   ): void {
-    const state = stateFor(instance)
-    const { container } = state
-    // `commitUpdate` runs for every host element whose props object is new,
-    // which is every element a parent re-rendered. Most of those did not change
-    // their style, so send it only when it did.
-    const styleChanged = !sameStyle(oldProps.style, newProps.style)
-    if (hasMutationObservers()) {
-      recordAttributeChanges(instance, new Set([...Object.keys(oldProps), ...Object.keys(newProps)]), () => {
-        adoptProps(instance, state, oldProps, newProps, styleChanged)
-      })
+    // A showing popover whose `popover` prop changed closes, with its events, once the whole update is queued.
+    if (oldProps.popover !== newProps.popover) {
+      writePopoverAttribute(instance, () => applyUpdate(instance, oldProps, newProps))
     } else {
-      adoptProps(instance, state, oldProps, newProps, styleChanged)
+      applyUpdate(instance, oldProps, newProps)
     }
-    // Code took it out of the document and native let it go: it is made again, from these
-    // props, when it is inserted. Its handler slots are kept up to date meanwhile, because that
-    // re-registers them; they do not reach native, which has no element for them.
-    if (!state.mounted) {
-      detachListeners(instance)
-      diffEventListeners(instance, oldProps, newProps)
-      return
-    }
-    if (styleChanged) {
-      sendLiveStyle(instance, state)
-      syncMotionBindings(container, instance.nativeId, newProps.style, instance.type)
-    }
-    diffEventListeners(instance, oldProps, newProps)
-    if (instance.type === "nativeview") {
-      diffNativeviewProps(container, instance.nativeId, oldProps, newProps)
-    }
-    // Custom prop diff (for non-div/text elements)
-    diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
-    diffAttributes(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
   },
 
   commitTextUpdate(
@@ -733,6 +743,7 @@ export const hostConfig = {
 
   appendChildToContainer(container: Container, child: Instance): void {
     const target = container.portalTarget ?? container.body
+    if (isReleased(target)) return insertDomNode(target, child, null)
     assertPlacement(target, child)
     materialize(child)
     adopt(target, child)

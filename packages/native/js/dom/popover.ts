@@ -60,7 +60,7 @@ function current(element: Element): Showing | undefined {
     binding.connected &&
     binding.layout?.renderer === record.renderer &&
     binding.layout.id === record.id &&
-    kindOf(element) !== null
+    kindOf(element) === record.kind
   if (unchanged) return record
   forget(record, binding.layout?.renderer === record.renderer && binding.layout.id === record.id)
   return undefined
@@ -219,10 +219,16 @@ export function showPopover(element: Element, probe: PopoverProbe): void {
   open.push(record)
   sendOpen(record.renderer, record.id, ++shownCount)
   if (kind === "auto") {
-    record.removeLayer = pushDismissLayer(record.renderer, { onEscapeKeyDown: () => hidePopover(element, probe) })
+    record.removeLayer = pushDismissLayer(record.renderer, { onEscapeKeyDown: () => hideShowing(element) })
     startLightDismiss()
   }
   queueToggle(record, element, "closed", "open")
+}
+
+/** Hides `element` if it is showing; never throws, so a layer or a light dismiss can call it for an element whose attribute or place changed under it. */
+function hideShowing(element: Element): void {
+  const record = current(element)
+  if (record !== undefined) hide(record, true)
 }
 
 export function hidePopover(element: Element, probe: PopoverProbe): void {
@@ -246,14 +252,14 @@ export function togglePopover(element: Element, probe: PopoverProbe, force?: boo
 }
 
 /**
- * Code sets the `popover` attribute of `element` to `value` (`null` takes it away): the attribute is
- * written by `write`, then a popover that is showing and is not the same kind afterwards is hidden,
- * with the events of any hide, which read the new attribute as the spec's attribute change steps do.
+ * The `popover` attribute of `element` changes, by code or by a framework's prop: it is written by
+ * `write`, then a popover that is showing and is not the same kind afterwards is hidden, with the
+ * events of any hide, which read the new attribute as the spec's attribute change steps do.
  */
-export function writePopoverAttribute(element: Element, value: string | null, write: () => void): void {
+export function writePopoverAttribute(element: Element, write: () => void): void {
   const record = current(element)
   write()
-  if (record === undefined || popoverKind(value) === record.kind) return
+  if (record === undefined || kindOf(element) === record.kind) return
   hide(record, true, true)
 }
 

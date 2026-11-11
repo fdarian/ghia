@@ -317,6 +317,25 @@ describe.skipIf(!hasNativeTestRenderer)("DOM building from code in Solid", () =>
     expect([...holder.childNodes]).toEqual([sibling, box])
   })
 
+  it("refuses a node of another window in a parent that code removed this turn and native still holds", () => {
+    const box = mountFramework()
+    const quiet = new Proxy({}, { get: () => () => {} }) as MutationRenderer
+    let nextId = 1000
+    const otherWindow = new HostRoot({
+      mutations: quiet,
+      nativeRenderer: {} as NativeRenderer,
+      eventHandlers: new Map(),
+      allocateId: () => ++nextId,
+    })
+    const holder = document.createElement("div")
+    box.appendChild(holder)
+    holder.remove()
+    expect(() => holder.appendChild(otherWindow.body as unknown as Node)).toThrow(
+      expect.objectContaining({ name: "HierarchyRequestError" })
+    )
+    expect(holder.childNodes).toHaveLength(0)
+  })
+
   it("tells a MutationObserver what code does, moves as a removal and an insertion", async () => {
     const box = mountFramework()
     const observer = new MutationObserver(() => {})

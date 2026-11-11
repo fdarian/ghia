@@ -11,7 +11,7 @@ import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 const WINDOW = { width: 800, height: 600 }
 
-type Popover = HTMLElement & { popover: string | null }
+type Popover = HTMLElement
 
 const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 5))
 
@@ -221,7 +221,7 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
     expect(() => found.plain.showPopover()).toThrow(expect.objectContaining({ name: "NotSupportedError" }))
     expect(() => found.plain.hidePopover()).toThrow(expect.objectContaining({ name: "NotSupportedError" }))
     expect(() => found.plain.togglePopover()).toThrow(expect.objectContaining({ name: "NotSupportedError" }))
-    const loose = document.createElement("div") as unknown as Popover
+    const loose = document.createElement("div")
     loose.popover = "manual"
     expect(() => loose.showPopover()).toThrow(expect.objectContaining({ name: "InvalidStateError" }))
     loose.hidePopover()
@@ -370,6 +370,48 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
     remove()
   })
 
+  describe("a framework changes the popover prop of a showing popover", () => {
+    /** Shows the popover, with the layer below it and the events recorded; `change` is what the framework does to it. */
+    async function changeShowing(change: (set: (value: "auto" | "manual" | undefined) => void) => void) {
+      const below = vi.fn()
+      const remove = pushDismissLayer(app.renderer, { onEscapeKeyDown: below })
+      const [popover, setPopover] = createSignal<"auto" | "manual" | undefined>("auto")
+      const found: Record<string, Popover> = {}
+      app.render(() => (
+        <div>
+          <div ref={(instance) => (found.box = instance as unknown as Popover)} popover={popover()}>
+            <div style={popoverStyle} />
+          </div>
+        </div>
+      ))
+      const seen: string[] = []
+      found.box.addEventListener("beforetoggle", (event) =>
+        seen.push(`before ${(event as unknown as ToggleEvent).newState} ${String(found.box.getAttribute("popover"))}`)
+      )
+      found.box.addEventListener("toggle", (event) => seen.push(`toggle ${(event as unknown as ToggleEvent).newState}`))
+      found.box.showPopover()
+      await nextTask()
+      seen.length = 0
+      change(setPopover)
+      await nextTask()
+      expect(getComputedStyle(found.box).position, "not in the top layer").not.toBe("fixed")
+      expect(() => app.renderer.simulateKeystrokes("Escape")).not.toThrow()
+      expect(below, "Escape reaches the layer below").toHaveBeenCalledTimes(1)
+      remove()
+      return seen
+    }
+
+    it("closes it, with the events of a hide, when the prop is removed", async () => {
+      const seen = await changeShowing((set) => set(undefined))
+      expect(seen).toEqual(["before closed null", "toggle closed"])
+    })
+
+    it("closes it, with the events of a hide, when the kind changes from auto to manual", async () => {
+      const seen = await changeShowing((set) => set("manual"))
+      expect(seen).toEqual(["before closed manual", "toggle closed"])
+    })
+  })
+
   it("does not let a manual popover hold a press: a press in it closes an auto popover it is not in", () => {
     const found = mount((grab) => (
       <div style={{ width: WINDOW.width, height: WINDOW.height }}>
@@ -409,7 +451,7 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
     found.box.showPopover()
     await nextTask()
     seen.length = 0
-    found.box.popover = undefined as unknown as null
+    found.box.popover = undefined
     await nextTask()
     expect(found.box.getAttribute("popover")).toBeNull()
     expect(seen).toEqual(["before closed", "toggle closed"])

@@ -45,6 +45,8 @@ export type NodeBinding = {
  * stay one tree. The members check what the DOM checks before they call these.
  */
 export type ParentBinding = NodeBinding & {
+  /** Throws `crossRootError()` when `child`, or a node under it, belongs to another window: it is checked before any change. */
+  assertSameWindow(child: Node): void
   /** Places `child` before `before`, or last when it is `null`, taking it out of the node it is in. */
   insertBefore(child: Node, before: Node | null): void
   /** Takes `child`, one of its children, out. The node is kept: it can be inserted again. */
@@ -551,6 +553,18 @@ abstract class ElementClass extends NodeClass {
 
 function isElement(node: Node): node is Element {
   return node.nodeType === ELEMENT_NODE
+}
+
+/**
+ * The popover members, defined by the adapters' DOM members (`defineDomMembers`). `popover` reads
+ * the attribute limited to its known values and takes any string, `null` or `undefined`.
+ */
+interface ElementClass {
+  showPopover(): void
+  hidePopover(): void
+  togglePopover(force?: boolean): boolean
+  get popover(): "auto" | "manual" | "hint" | null
+  set popover(value: string | null | undefined)
 }
 
 abstract class HTMLElementClass extends ElementClass {
