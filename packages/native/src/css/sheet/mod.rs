@@ -30,6 +30,7 @@ mod tokenizer;
 mod tree;
 mod validate;
 mod view;
+mod wide_keyword;
 
 #[cfg(test)]
 mod tests;
@@ -44,6 +45,8 @@ pub use invalidation::{Invalidation, Reach};
 pub use layers::{LayerId, LayerOrder, Layers};
 pub use matching::{matches, AttrValue, ElementView, SiblingTest};
 pub use parser::parse_sheet;
+pub(crate) use initial::style_of as initial_style_of;
+pub(crate) use wide_keyword::resolve;
 pub use selector::{
     AttrMatcher, AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, SelectorList, Simple, Specificity, TypeName,
 };

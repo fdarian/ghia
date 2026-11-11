@@ -82,6 +82,20 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
     expect(rect.top + rect.height / 2).toBeCloseTo(WINDOW.height / 2, 0)
   })
 
+  it("is not centred when an author sheet unsets the user agent's right and margin", () => {
+    const found = mount((grab) => (
+      <div>
+        <style>{`[popover].moved { left: 40px !important; right: unset !important; margin: unset }`}</style>
+        <div ref={grab("box")} popover="manual" class="moved" style={{ width: 100, height: 50 }} />
+        <div ref={grab("centred")} popover="manual" style={{ width: 100, height: 50 }} />
+      </div>
+    ))
+    found.box.showPopover()
+    found.centred.showPopover()
+    expect(found.box.getBoundingClientRect().left).toBe(40)
+    expect(found.centred.getBoundingClientRect().left, "a popover no rule matches is still centred").toBeGreaterThan(40)
+  })
+
   it("is above a later sibling with a z-index, an anchored layer, and escapes a clipping ancestor", () => {
     const found = mount((grab) => (
       <div style={{ width: WINDOW.width, height: WINDOW.height }}>

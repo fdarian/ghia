@@ -3,6 +3,7 @@ import React, { Suspense } from "react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { getComputedStyle } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
+import { UniversalStyle } from "../index.js"
 
 describe.skipIf(!hasNativeTestRenderer)("stylesheets in React", () => {
   let app: TestRoot
@@ -124,5 +125,58 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in React", () => {
     expect(getComputedStyle(refs.box).opacity).toBe("0.75")
     app.render(view(null))
     expect(getComputedStyle(refs.box).opacity).toBe("1")
+  })
+
+  it("lets an author keyword beat the user agent style: unset, initial and inherit win, revert gives it back", () => {
+    const nodes: Record<string, any> = {}
+    const ref = (name: string) => (element: unknown) => {
+      nodes[name] = element
+    }
+    app.render(
+      <div>
+        <style>{`
+          .unset { margin: unset }
+          .initial { margin-block: initial }
+          .revert { margin: revert }
+          .inherit { font-weight: inherit }
+          .inherit-margin { margin: inherit }
+        `}</style>
+        <p ref={ref("plain")} />
+        <p ref={ref("unset")} className="unset" />
+        <p ref={ref("initial")} className="initial" />
+        <p ref={ref("revert")} className="revert" />
+        <p ref={ref("inheritMargin")} className="inherit-margin" />
+        <h1 ref={ref("h1")} />
+        <h1 ref={ref("inherit")} className="inherit" />
+        <p ref={ref("inline")} style={{ marginTop: "unset", marginBottom: "revert" }} />
+      </div>
+    )
+    const margins = (name: string) => [getComputedStyle(nodes[name]).marginTop, getComputedStyle(nodes[name]).marginBottom]
+    expect(margins("plain")).toEqual(["16px", "16px"])
+    expect(margins("unset")).toEqual(["0px", "0px"])
+    expect(margins("initial")).toEqual(["0px", "0px"])
+    expect(margins("revert")).toEqual(["16px", "16px"])
+    expect(margins("inheritMargin"), "inherit on a property that does not inherit is not read").toEqual(["16px", "16px"])
+    expect(margins("inline")).toEqual(["0px", "16px"])
+    const effective = (name: string) => app.renderer.getElement(nodes[name].nativeId)!.style
+    expect(effective("h1")).toHaveProperty("fontWeight")
+    expect(effective("inherit"), "the user agent's bold is taken back").not.toHaveProperty("fontWeight")
+  })
+
+  it("lets an author keyword beat the universal style", () => {
+    const nodes: Record<string, any> = {}
+    const ref = (name: string) => (element: unknown) => {
+      nodes[name] = element
+    }
+    app.render(
+      <div>
+        <UniversalStyle style={{ opacity: 0.5, paddingTop: 4 }} />
+        <style>{`.taken { opacity: unset; padding-top: initial }`}</style>
+        <div ref={ref("taken")} className="taken" />
+        <div ref={ref("kept")} />
+      </div>
+    )
+    expect([getComputedStyle(nodes.taken).opacity, getComputedStyle(nodes.taken).paddingTop]).toEqual(["1", "0px"])
+    expect([getComputedStyle(nodes.kept).opacity, getComputedStyle(nodes.kept).paddingTop]).toEqual(["0.5", "4px"])
   })
 })

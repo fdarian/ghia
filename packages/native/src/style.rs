@@ -1287,6 +1287,12 @@ pub struct StyleDesc {
     /// styles included) read. Set when the style is interned, never by JS.
     #[serde(skip)]
     pub container_unit_axes: crate::css::container_query::Axes,
+    /// The properties an author `initial`, `unset` or `inherit` named: the style gives them no
+    /// value of its own, and they take back what the layers under it (the user agent style, the
+    /// universal style) set. Set when the style is interned (`css::sheet::wide_keyword`), never by
+    /// JS, and consumed by `overlay`.
+    #[serde(skip)]
+    pub reset: Option<std::sync::Arc<Vec<String>>>,
     /// Counts the clones of this struct for the test renderer. Carries no data.
     #[serde(skip)]
     pub clone_probe: crate::perf_counters::CloneProbe<{ crate::perf_counters::STYLE_DESC }>,

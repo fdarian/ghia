@@ -1,9 +1,10 @@
 //! The initial value of the longhands a shorthand covers.
 //!
 //! A CSS-wide keyword on a longhand takes back what the cascade gave it, including the part a
-//! shorthand declared earlier gave it. The cascade works on declarations, and a longhand cannot be
-//! removed from a shorthand's value, so the keyword is turned into the longhand's initial value
-//! written after the shorthand, which `css::covers` ranks above it.
+//! shorthand declared earlier gave it, in the same declarations or in a layer under them. A
+//! longhand cannot be removed from a shorthand's value, so the keyword is turned into the
+//! longhand's initial value written after the shorthand, which `css::covers` ranks above it
+//! (`wide_keyword`, and `overlay` for a layer under).
 //!
 //! Only longhands with a plain initial value are here. The rest keep the keyword's old meaning,
 //! which is to remove the earlier declarations of the key, and are listed in the deviations.
@@ -13,7 +14,9 @@ use std::sync::LazyLock;
 use rustc_hash::FxHashMap;
 
 use crate::css::covers::{self, KeyId};
-use crate::css::lenient::Declaration;
+use crate::css::lenient::{object_text, Declaration};
+use crate::retained_tree::parse_style;
+use crate::style::StyleDesc;
 
 const SIDES: [&str; 4] = ["Top", "Right", "Bottom", "Left"];
 const CORNERS: [&str; 4] = ["TopLeft", "TopRight", "BottomLeft", "BottomRight"];
@@ -113,6 +116,22 @@ static INITIAL: LazyLock<FxHashMap<KeyId, Declaration>> = LazyLock::new(|| {
 /// `key` at its initial value, for a longhand that has one here.
 pub(super) fn of(key: KeyId) -> Option<&'static Declaration> {
     INITIAL.get(&key)
+}
+
+static INITIAL_STYLES: LazyLock<FxHashMap<KeyId, StyleDesc>> = LazyLock::new(|| {
+    INITIAL
+        .iter()
+        .map(|(key, declaration)| {
+            let style = parse_style(object_text(std::slice::from_ref(declaration)).as_bytes())
+                .unwrap_or_else(|error| panic!("the initial value of {} is a style: {error}", declaration.key));
+            (*key, style)
+        })
+        .collect()
+});
+
+/// A style that sets `key` to its initial value and nothing else, for a longhand that has one here.
+pub(crate) fn style_of(key: KeyId) -> Option<&'static StyleDesc> {
+    INITIAL_STYLES.get(&key)
 }
 
 /// The initial value of a property written as a keyword the style parser has no form for, so the

@@ -33,6 +33,8 @@ macro_rules! overlay_fields {
             has_enabled: None,
             container_rules: None,
             container_unit_axes: $base.container_unit_axes.union($over.container_unit_axes),
+            // Applied to the base before the layers merge; the result is a style no layer lies under.
+            reset: None,
             custom_properties: crate::css::custom_properties::CustomProperties::layered(
                 $base.custom_properties.as_ref(),
                 $over.custom_properties.as_ref(),
@@ -117,6 +119,42 @@ macro_rules! property_readers {
     };
 }
 
+/// The clears of the properties `overlay` takes, by the name a style object writes them.
+macro_rules! property_clearers {
+    (; $($field:ident),+ $(,)?) => {
+        vec![$((
+            crate::css::covers::camel_case(stringify!($field)),
+            (|style: &mut StyleDesc| style.$field = None) as fn(&mut StyleDesc),
+        )),+]
+    };
+}
+
+static PROPERTY_CLEARERS: LazyLock<FxHashMap<String, fn(&mut StyleDesc)>> =
+    LazyLock::new(|| overlaid_fields!(property_clearers,).into_iter().collect());
+
+/// `base` without the properties named in `names` (camel case), which a layer above reset with a
+/// CSS-wide keyword. A name that is not a property of the style is skipped.
+///
+/// A longhand that a shorthand of `base` still covers (`padding-left` reset over `padding: 1px 6px`)
+/// is put at its initial value, because the shorthand would go on giving it its own.
+fn clear_properties(base: &mut Cow<'_, StyleDesc>, names: &[String]) {
+    for name in names {
+        if sets_property(base, name) {
+            if let Some(clear) = PROPERTY_CLEARERS.get(name.as_str()) {
+                clear(base.to_mut());
+            }
+        }
+    }
+    for name in names {
+        let Some(key) = crate::css::covers::key_id(name) else {
+            continue;
+        };
+        if let Some(initial) = crate::css::sheet::initial_style_of(key).filter(|_| crate::css::covers::is_covered_in(base, key)) {
+            crate::css::covers::restore(base.to_mut(), initial, &[key]);
+        }
+    }
+}
+
 static PROPERTY_READERS: LazyLock<FxHashMap<String, fn(&StyleDesc) -> bool>> =
     LazyLock::new(|| overlaid_fields!(property_readers,).into_iter().collect());
 
@@ -124,6 +162,11 @@ static PROPERTY_READERS: LazyLock<FxHashMap<String, fn(&StyleDesc) -> bool>> =
 /// name that is not a property.
 pub(crate) fn sets_property(style: &StyleDesc, name: &str) -> bool {
     PROPERTY_READERS.get(name).is_some_and(|reads| reads(style))
+}
+
+#[cfg(test)]
+pub(crate) fn is_property(name: &str) -> bool {
+    PROPERTY_READERS.contains_key(name)
 }
 
 /// The layer that sets nothing, for a fold that applies no state: [`overlay`] over it is a copy.
@@ -232,6 +275,7 @@ pub(crate) fn is_overlay_fixed_point(style: &StyleDesc) -> bool {
         && style.contents_levels.is_none()
         && !style.measure_natural_width
         && !style.atomic_inline
+        && style.reset.is_none()
 }
 
 /// `style` with the refinements of `states` folded in and every state style
@@ -310,6 +354,7 @@ pub(crate) fn laid_over(base: &StyleDesc, over: &StyleDesc) -> StyleDesc {
         contents_levels: base.contents_levels.clone(),
         measure_natural_width: base.measure_natural_width,
         atomic_inline: base.atomic_inline,
+        reset: base.reset.clone(),
         ..overlay(base, over)
     }
 }
@@ -319,6 +364,9 @@ pub(crate) fn overlay(base: &StyleDesc, over: &StyleDesc) -> StyleDesc {
     let over = without_invalid_values(over);
     let over = over.as_ref();
     let mut base = Cow::Borrowed(base);
+    if let Some(reset) = over.reset.as_deref() {
+        clear_properties(&mut base, reset);
+    }
     drop_shadowed_longhands(&mut base, over);
     overlaid_fields!(overlay_fields, base, over)
 }

@@ -616,14 +616,17 @@ impl StyleTable {
         }
         // The payload is kept as it came: the cascade reads which values were `!important` from it.
         let parsed = crate::css::inline_important::strip_payload(raw);
-        let style = if crate::css::var_substitution::mentions_var(&parsed) {
-            crate::css::var_substitution::parse(&parsed)?
+        let resolved = crate::css::sheet::resolve(&parsed);
+        let parsed = resolved.as_ref().map_or(&*parsed, |resolved| resolved.text.as_bytes());
+        let mut style = if crate::css::var_substitution::mentions_var(parsed) {
+            crate::css::var_substitution::parse(parsed)?
         } else {
-            match parse_style(&parsed) {
+            match parse_style(parsed) {
                 Ok(style) => style,
-                Err(error) => crate::css::lenient::recover(&parsed, error)?,
+                Err(error) => crate::css::lenient::recover(parsed, error)?,
             }
         };
+        style.reset = resolved.and_then(|resolved| resolved.reset);
         let shared = Arc::new(style);
         let raw: Arc<[u8]> = raw.into();
         self.raws.insert(Arc::as_ptr(&shared) as usize, raw.clone());

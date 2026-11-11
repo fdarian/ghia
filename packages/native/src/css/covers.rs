@@ -319,6 +319,11 @@ pub(crate) fn key_id(name: &str) -> Option<KeyId> {
     COVERS.ids.get(name).copied()
 }
 
+/// The name of `key` as a style object writes it (camel case).
+pub(crate) fn name_of(key: KeyId) -> String {
+    camel_case(COVERS.keys[key].name)
+}
+
 /// What `key` covers, through the shorthands it covers as well. Empty for a longhand.
 pub(crate) fn covered_by(key: KeyId) -> &'static [KeyId] {
     &COVERS.covered[key]
