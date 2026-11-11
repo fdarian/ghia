@@ -44,6 +44,7 @@ const EVENT_TYPE_BY_PROP = eventTypesWithOverrides({
   onAttach: null,
   onDetach: null,
 })
+import { diffCustomProps, keepAttributeWrites } from "./custom-props.js"
 import type {
   Container,
   ElementType,
@@ -275,49 +276,6 @@ function syncCustomProps(
     if (isReservedProp(key)) continue
     if (!forwardsCustomProp(type, key)) continue
     renderer.setCustomProp(id, key, serializeCustomProp(value))
-  }
-}
-
-/**
- * Diff and send changed custom props to Rust.
- *
- * Compared by value after serialization: a handler or an inline object is new on
- * every render, and a function serializes to `null` either way, so resending it
- * would only make Rust parse and discard the same value again.
- */
-function diffCustomProps(
-  renderer: MutationRenderer,
-  id: number,
-  type: string,
-  oldProps: Props,
-  newProps: Props
-): void {
-  const previous = oldProps as Record<string, unknown>
-  const next = newProps as Record<string, unknown>
-  // Updated or added props
-  for (const key in next) {
-    if (isReservedProp(key)) continue
-    if (!forwardsCustomProp(type, key)) continue
-    const value = next[key]
-    const oldValue = previous[key]
-    if (value === oldValue) continue
-    const serialized = serializeCustomProp(value as Parameters<typeof serializeCustomProp>[0])
-    if (
-      key in previous &&
-      sameMutationValue(
-        serializeCustomProp(oldValue as Parameters<typeof serializeCustomProp>[0]),
-        serialized
-      )
-    ) {
-      continue
-    }
-    renderer.setCustomProp(id, key, serialized)
-  }
-  // Removed props
-  for (const key in previous) {
-    if (isReservedProp(key)) continue
-    if (!forwardsCustomProp(type, key)) continue
-    if (!(key in next)) renderer.setCustomProp(id, key, null)
   }
 }
 
@@ -600,13 +558,17 @@ export const hostConfig = {
       diffNativeviewProps(container, instance.nativeId, oldProps, newProps)
     }
     // Custom prop diff (for non-div/text elements)
-    diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
+    // `setAttribute` may have changed props since the last commit: keep what the framework did not
+    // commit over, and diff native from what it has.
+    const current = instance.props
+    const next = current === oldProps ? newProps : keepAttributeWrites(current, oldProps, newProps)
+    diffCustomProps(container.renderer, instance.nativeId, instance.type, current, next)
     if (hasMutationObservers()) {
-      recordAttributeChanges(instance, new Set([...Object.keys(oldProps), ...Object.keys(newProps)]), () => {
-        instance.props = newProps
+      recordAttributeChanges(instance, new Set([...Object.keys(current), ...Object.keys(next)]), () => {
+        instance.props = next
       })
     } else {
-      instance.props = newProps
+      instance.props = next
     }
   },
 

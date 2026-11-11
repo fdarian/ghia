@@ -457,6 +457,10 @@ defineDomMembers(HostElement.prototype, (element: HostElement) => ({
   layout: element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.nativeId } : undefined,
   prop: (name) => element.props.get(name),
   propNames: () => element.props.keys(),
+  writeProp: (name, value) => {
+    setHostProperty(element, name, value)
+    if (element.root && element.mounted) element.root.mutations.flushMutations()
+  },
 }))
 defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
   renderer: element.root?.nativeRenderer,

@@ -16,6 +16,7 @@ import {
   HTMLElement,
   hasMutationObservers,
   queueChildListMutation,
+  recordAttributeChanges,
   readBoundingClientRect,
   SVG_CHILD_TYPES,
   SVGElement,
@@ -32,6 +33,7 @@ import type {
   TextBinding,
 } from "@ghia/native/host"
 import type { Container, ElementType, Instance, Props, TextInstance } from "../types/host.js"
+import { diffCustomProps } from "./custom-props.js"
 import { listenersOf } from "./event-registry.js"
 
 export type HostNode = Instance | TextInstance
@@ -158,7 +160,27 @@ defineDomMembers(ReactHostElement.prototype, (instance: ReactHostElement) => ({
     : undefined,
   prop: (name) => (instance.props as Record<string, unknown>)[name],
   propNames: () => Object.keys(instance.props),
+  writeProp: (name, value) => writeInstanceProp(instance, name, value),
 }))
+
+/**
+ * What `setAttribute` does: the prop changes as a commit would change it, and native hears it
+ * before the call returns, which a root that only sends at the end of a commit would not do.
+ */
+function writeInstanceProp(instance: ReactHostElement, name: string, value: string | number | boolean | undefined): void {
+  const state = stateFor(instance)
+  const current = instance.props as Record<string, unknown>
+  const next = { ...current }
+  if (value === undefined) delete next[name]
+  else next[name] = value
+  const apply = () => {
+    instance.props = next as Props
+  }
+  if (state.mounted) diffCustomProps(state.container.renderer, instance.nativeId, instance.type, instance.props, next as Props)
+  if (hasMutationObservers()) recordAttributeChanges(instance, [name], apply)
+  else apply()
+  if (state.mounted) state.container.renderer.flushMutations()
+}
 
 /** Mounted, which a destroyed element is not any more. */
 function isConnected(instance: Instance): boolean {

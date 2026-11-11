@@ -6,8 +6,16 @@ import {
 import { readLayoutSize } from "./bounds.js"
 import type { NativeRenderer } from "./host.js"
 import { document, type GpuixDocument } from "./events/window-target.js"
-import { attributeLookupName, attributeNameOf } from "./dom/attribute-names.js"
-import { SVGElement } from "./dom/nodes.js"
+import {
+  attributeLookupName,
+  attributeNameOf,
+  isStoredAttribute,
+  propWrittenBy,
+  storeAttribute,
+  storedAttribute,
+} from "./dom/attribute-names.js"
+import { hasMutationObservers, queueAttributeMutation } from "./dom/mutation-observer.js"
+import { SVGElement, type Element } from "./dom/nodes.js"
 
 /** The DOM members every host element has beside the scroll ones. */
 export interface DomElement {
@@ -20,6 +28,14 @@ export interface DomElement {
    * it, or when it is a function or an object (`onClick`, `style`). `false` is `null` and `true` is `""`, except for `data-*` and `aria-*`, which hold "true" and "false".
    */
   getAttribute(name: string): string | null
+  /**
+   * Writes the prop the attribute stands for, through the same path as a rendered prop, so native
+   * has it at once and `getAttribute(name)` gives it back as text. A framework's next commit of
+   * that prop overwrites it; an attribute it never set stays. `style` and `on*` are kept for
+   * `getAttribute` only. See docs/fork/deviations.md.
+   */
+  setAttribute(name: string, value: string): void
+  removeAttribute(name: string): void
   /** The border box's width, rounded, before any transform. 0 for an element with no box. */
   readonly offsetWidth: number
   /** The border box's height, rounded, before any transform. 0 for an element with no box. */
@@ -44,6 +60,11 @@ export interface DomElementBinding {
   /** What the element was given: the props of a Solid element, of a React instance. */
   prop(name: string): unknown
   propNames(): Iterable<string>
+  /**
+   * Sets the prop as the framework's own prop path does (`undefined` unsets it): the stored prop, the
+   * native write, the observers' records, and a flush so native has it before the call returns.
+   */
+  writeProp(name: string, value: string | number | boolean | undefined): void
 }
 
 /** The prop an attribute name stands for: `attributeNameOf` is the name a prop has as an attribute. */
@@ -57,6 +78,36 @@ function propForAttribute(bound: DomElementBinding, name: string, svg: boolean):
     if (value !== undefined) return value
   }
   return undefined
+}
+
+/** The key the element already holds for an attribute, whatever its value. */
+function propKeyForAttribute(bound: DomElementBinding, attribute: string, svg: boolean): string | undefined {
+  for (const key of bound.propNames()) {
+    if (attributeNameOf(key, svg) === attribute) return key
+  }
+  return undefined
+}
+
+/** The DOM rejects an empty name and one with a space, a slash, `>`, `=` or NUL. */
+const INVALID_NAME = /[\s\0/>=]|^$/
+
+function writeAttribute(element: Element, bound: DomElementBinding, name: string, text: string | null): void {
+  const svg = element instanceof SVGElement
+  const requested = String(name)
+  if (INVALID_NAME.test(requested)) {
+    throw new DOMException(`'${requested}' is not a valid attribute name.`, "InvalidCharacterError")
+  }
+  const attribute = attributeLookupName(requested, svg)
+  if (isStoredAttribute(attribute)) {
+    const before = element.getAttribute(attribute)
+    storeAttribute(element, attribute, text)
+    if (hasMutationObservers() && element.getAttribute(attribute) !== before) {
+      queueAttributeMutation(element, attribute, before)
+    }
+    return
+  }
+  const write = propWrittenBy(attribute, text, propKeyForAttribute(bound, attribute, svg))
+  bound.writeProp(write.prop, write.value)
 }
 
 /**
@@ -95,7 +146,24 @@ export function defineDomMembers<This extends object>(
       configurable: true,
       writable: true,
       value(this: This, name: string) {
-        return attributeOf(name, propForAttribute(bind(this), name, this instanceof SVGElement))
+        const svg = this instanceof SVGElement
+        const stored = storedAttribute(this, attributeLookupName(name, svg))
+        if (stored !== undefined) return stored
+        return attributeOf(name, propForAttribute(bind(this), name, svg))
+      },
+    },
+    setAttribute: {
+      configurable: true,
+      writable: true,
+      value(this: This, name: string, value: string) {
+        writeAttribute(this as unknown as Element, bind(this), name, String(value))
+      },
+    },
+    removeAttribute: {
+      configurable: true,
+      writable: true,
+      value(this: This, name: string) {
+        writeAttribute(this as unknown as Element, bind(this), name, null)
       },
     },
     offsetWidth: {

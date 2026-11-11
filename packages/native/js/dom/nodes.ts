@@ -9,7 +9,7 @@
  */
 
 import type { ElementType, NativeRenderer } from "../host.js"
-import { attributeNameOf } from "./attribute-names.js"
+import { NOT_ATTRIBUTES, attributeNameOf, storedAttributeNames } from "./attribute-names.js"
 import { closestElement, matchesSelector, querySelector, querySelectorAll, type ElementList } from "./selectors.js"
 
 /** Where `[DOM_BINDING]()` is read, so two copies of this package find each other's nodes. */
@@ -297,9 +297,6 @@ abstract class TextClass extends CharacterDataClass {
 
 /** The `data-*` props are the attributes `dataset` reads, with the name in camel case. */
 const DATA_ATTRIBUTE = /^data-(.+)$/
-/** Props that are not attributes: `getAttributeNames` skips them. */
-export const NOT_ATTRIBUTES: ReadonlySet<string> = new Set(["children", "key", "ref", "style"])
-
 function camelCase(dashed: string): string {
   return dashed.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase())
 }
@@ -317,6 +314,14 @@ abstract class ElementClass extends NodeClass {
    * (`defineDomMembers`) define it on their prototypes.
    */
   declare getAttribute: (name: string) => string | null
+
+  /**
+   * Writes the prop the attribute stands for, as if the app had rendered it. The adapters' DOM
+   * members (`defineDomMembers`) define it on their prototypes.
+   */
+  declare setAttribute: (name: string, value: string) => void
+
+  declare removeAttribute: (name: string) => void
 
   abstract get tagName(): string
 
@@ -398,7 +403,24 @@ abstract class ElementClass extends NodeClass {
       const name = attributeNameOf(prop, svg)
       if (this.getAttribute(name) !== null && !names.includes(name)) names.push(name)
     }
+    for (const name of storedAttributeNames(this)) if (!names.includes(name)) names.push(name)
     return names
+  }
+
+  /** Adds the attribute, empty, or removes it. Gives whether it is there afterwards. */
+  toggleAttribute(name: string, force?: boolean): boolean {
+    if (this.hasAttribute(name)) {
+      if (force === undefined || force === false) {
+        this.removeAttribute(name)
+        return false
+      }
+      return true
+    }
+    if (force === undefined || force === true) {
+      this.setAttribute(name, "")
+      return true
+    }
+    return false
   }
 
   matches(selector: string): boolean {
