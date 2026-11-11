@@ -1999,8 +1999,11 @@ export interface FormMethods {
    * gets `invalid`, and the first whose handlers did not call `preventDefault()`
    * takes focus; the form is not submitted. Otherwise `submit` fires. The events
    * are delivered before this returns.
+   *
+   * `submitter` becomes the event's `submitter`. It throws a `TypeError` when it is not a
+   * submit `<button>`, and a `NotFoundError` `DOMException` when that button belongs to another form.
    */
-  requestSubmit(): void
+  requestSubmit(submitter?: object | null): void
 }
 
 /** `<label>`: names a control and forwards a click to it. */

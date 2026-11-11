@@ -118,12 +118,15 @@ function attachHostMethods(instance: Instance): PublicInstance {
     attachTextControlMethods(instance as TextControlInstance, container)
   } else if (instance.type === "form") {
     const form = instance as FormInstance
-    form.requestSubmit = () =>
-      requestFormSubmit({
-        id: form.id,
-        nativeRenderer: container.nativeRenderer,
-        flushMutations: () => container.renderer.flushMutations(),
-      })
+    form.requestSubmit = (submitter) =>
+      requestFormSubmit(
+        {
+          id: form.id,
+          nativeRenderer: container.nativeRenderer,
+          flushMutations: () => container.renderer.flushMutations(),
+        },
+        submitter,
+      )
   } else if (instance.type === "webview") {
     Object.assign(
       instance as WebviewInstance,

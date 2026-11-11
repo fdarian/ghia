@@ -2298,11 +2298,12 @@ impl TestGpuixRenderer {
         )
     }
 
-    /// `form.requestSubmit()`: validate, then emit `submit`.
+    /// `form.requestSubmit(submitter)`: validate, then emit `submit`.
     #[napi]
-    pub fn request_submit(&self, id: f64) -> Result<()> {
+    pub fn request_submit(&self, id: f64, submitter_id: Option<f64>) -> Result<()> {
         let id = to_element_id(id)?;
-        window_call(move |window, cx| crate::forms::request_submit(window, cx, id, None))?
+        let submitter = submitter_id.map(to_element_id).transpose()?;
+        window_call(move |window, cx| crate::forms::request_submit(window, cx, id, submitter))?
             .map_err(Error::from_reason)
     }
 

@@ -1020,6 +1020,7 @@ enum UiCommand {
     },
     RequestSubmit {
         id: u64,
+        submitter: Option<u64>,
         response: SyncSender<std::result::Result<(), String>>,
     },
     RegisterFont {
@@ -1297,10 +1298,10 @@ async fn run_ui_commands(
                     response.send(view.text_selection(id, cx)).ok();
                 })
             }
-            UiCommand::RequestSubmit { id, response } => gpui::AnyWindowHandle::from(window)
+            UiCommand::RequestSubmit { id, submitter, response } => gpui::AnyWindowHandle::from(window)
                 .update(cx, move |_view, window, cx| {
                     response
-                        .send(crate::forms::request_submit(window, cx, id, None))
+                        .send(crate::forms::request_submit(window, cx, id, submitter))
                         .ok();
                 }),
             UiCommand::RegisterFont { bytes, response } => {
@@ -4380,21 +4381,23 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
-    /// `form.requestSubmit()`: validate the form's controls, then emit `submit`.
-    /// The events are delivered before this returns.
+    /// `form.requestSubmit(submitter)`: validate the form's controls, then emit `submit`.
+    /// The events are delivered before this returns. A `submitter` that is not a submit button
+    /// refuses with `TypeError: ...`, and one of another form with `NotFoundError: ...`.
     #[napi]
-    pub fn request_submit(&self, element_id: f64) -> Result<()> {
+    pub fn request_submit(&self, element_id: f64, submitter_id: Option<f64>) -> Result<()> {
         let id = to_element_id(element_id)?;
+        let submitter = submitter_id.map(to_element_id).transpose()?;
         #[cfg(target_os = "macos")]
         return update_window_without_view(move |window, cx| {
-            crate::forms::request_submit(window, cx, id, None)
+            crate::forms::request_submit(window, cx, id, submitter)
         })?
         .map_err(Error::from_reason);
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::RequestSubmit { id, response })?;
+            self.send_ui_command(UiCommand::RequestSubmit { id, submitter, response })?;
             return recv_ui_response(receiver, "the form submission")?.map_err(Error::from_reason);
         }
 
@@ -5698,10 +5701,11 @@ impl WebGpuixRenderer {
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = requestSubmit)]
-    pub fn request_submit(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
+    pub fn request_submit(&self, element_id: f64, submitter_id: Option<f64>) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
+        let submitter = submitter_id.map(web_element_id).transpose()?;
         update_web_window_without_view(move |window, cx| {
-            crate::forms::request_submit(window, cx, id, None)
+            crate::forms::request_submit(window, cx, id, submitter)
         })?
         .map_err(|error| wasm_bindgen::JsValue::from_str(&error))
     }

@@ -742,3 +742,82 @@ describeNative("a label of a button", () => {
     expect(byAuthorId(tree, "c").labelled_by).toEqual([keyOf(tree, "other")])
   })
 })
+
+describeNative("form.requestSubmit(submitter)", () => {
+  let testRoot: TestRoot
+  let submits: Array<{ submitter: { props: { testId?: string } } | null }>
+  const refs: Record<string, any> = {}
+  const ref = (name: string) => (instance: unknown) => {
+    refs[name] = instance
+  }
+  beforeEach(() => {
+    testRoot = createTestRoot({ width: 600, height: 400 })
+    submits = []
+  })
+
+  const onSubmit = (event) => submits.push({ submitter: event.submitter })
+  const submitterNames = () => submits.map((submit) => submit.submitter?.props.testId ?? null)
+
+  const renderForms = () =>
+    testRoot.render(
+      <div>
+        <form ref={ref("form")} onSubmit={onSubmit}>
+          <button ref={ref("submit")} testId="submit">a</button>
+          <button ref={ref("disabled")} testId="disabled" disabled>b</button>
+          <button ref={ref("plain")} type="button" testId="plain">c</button>
+          <div ref={ref("div")}>d</div>
+        </form>
+        <form onSubmit={onSubmit}>
+          <button ref={ref("other")} testId="other">e</button>
+        </form>
+      </div>,
+    )
+
+  it("submits with the given submit button as the submitter, and with none by default", () => {
+    renderForms()
+    refs.form.requestSubmit()
+    refs.form.requestSubmit(null)
+    refs.form.requestSubmit(refs.submit)
+    expect(submitterNames()).toEqual([null, null, "submit"])
+  })
+
+  it("takes a disabled submit button as the submitter, as the DOM does", () => {
+    renderForms()
+    refs.form.requestSubmit(refs.disabled)
+    expect(submitterNames()).toEqual(["disabled"])
+  })
+
+  it("throws a TypeError for an element that is not a submit button, and submits nothing", () => {
+    renderForms()
+    for (const notSubmitter of [refs.plain, refs.div, refs.form, {}, "submit", 3]) {
+      expect(() => refs.form.requestSubmit(notSubmitter)).toThrow(TypeError)
+    }
+    expect(submits).toEqual([])
+  })
+
+  it("throws a NotFoundError for a submit button of another form, and submits nothing", () => {
+    renderForms()
+    let thrown: unknown
+    try {
+      refs.form.requestSubmit(refs.other)
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toBeInstanceOf(DOMException)
+    expect((thrown as DOMException).name).toBe("NotFoundError")
+    expect(submits).toEqual([])
+  })
+
+  it("validates before it submits with a submitter", () => {
+    const invalid: string[] = []
+    testRoot.render(
+      <form ref={ref("form")} onSubmit={onSubmit}>
+        <input name="n" required onInvalid={() => invalid.push("n")} style={{ width: 100, height: 24 }} />
+        <button ref={ref("submit")} testId="submit">a</button>
+      </form>,
+    )
+    refs.form.requestSubmit(refs.submit)
+    expect(invalid).toEqual(["n"])
+    expect(submits).toEqual([])
+  })
+})

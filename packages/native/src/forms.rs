@@ -160,6 +160,24 @@ fn path_payload(payload: &mut EventPayload, path: &[u64]) {
     payload.path = Some(path.iter().map(|id| *id as f64).collect());
 }
 
+/// What a refusal starts with when the DOM would throw a `TypeError` or a `NotFoundError`, which JS turns into one.
+pub(crate) const TYPE_ERROR: &str = "TypeError: ";
+pub(crate) const NOT_FOUND_ERROR: &str = "NotFoundError: ";
+
+/// What `form.requestSubmit(submitter)` requires of `submitter`: a submit button of `form`.
+fn check_submitter(tree: &RetainedTree, form: u64, submitter: u64) -> Result<(), String> {
+    let is_submit_button = tree.elements.get(&submitter).is_some_and(|element| {
+        element.element_type == "button" && crate::html::button_type(element) == crate::html::ButtonType::Submit
+    });
+    if !is_submit_button {
+        return Err(format!("{TYPE_ERROR}The specified element is not a submit button"));
+    }
+    if enclosing_form(tree, submitter) != Some(form) {
+        return Err(format!("{NOT_FOUND_ERROR}The specified element is not owned by this form element"));
+    }
+    Ok(())
+}
+
 /// `form.requestSubmit()`: validate, then submit. `submitter` is the button that asked, if one did.
 pub(crate) fn request_submit(window: &mut Window, cx: &mut App, form: u64, submitter: Option<u64>) -> Result<(), String> {
     let view = window
@@ -168,6 +186,9 @@ pub(crate) fn request_submit(window: &mut Window, cx: &mut App, form: u64, submi
         .ok_or_else(|| "The window has no GpuixView".to_string())?;
     if view.is_updating(cx) {
         return Err(sync_dispatch::VIEW_BUSY.to_string());
+    }
+    if let Some(submitter) = submitter {
+        check_submitter(&view.read(cx).tree.lock().unwrap(), form, submitter)?;
     }
     let read = view.update(cx, |view, cx| view.read_form(form, cx))?;
 
@@ -386,6 +407,25 @@ mod tests {
         );
         assert_eq!(submit_buttons_of(&tree, 1), vec![5]);
         assert_eq!(submit_buttons_of(&tree, 2), vec![3]);
+    }
+
+    #[test]
+    fn a_submitter_is_a_submit_button_of_the_form() {
+        let mut tree = tree_of(
+            &[(1, "form"), (2, "button"), (3, "button"), (4, "div"), (5, "form"), (6, "button"), (7, "button"), (8, "button")],
+            &[(1, 2), (1, 3), (1, 4), (1, 5), (5, 6), (1, 7), (1, 8)],
+        );
+        typed_button(&mut tree, 3, Some("button"), false);
+        typed_button(&mut tree, 7, Some("reset"), false);
+        assert_eq!(check_submitter(&tree, 1, 2), Ok(()));
+        typed_button(&mut tree, 8, Some("submit"), true);
+        assert_eq!(check_submitter(&tree, 1, 8), Ok(()), "a disabled button is still a submitter");
+        for not_a_submit_button in [3, 4, 7, 99] {
+            assert!(check_submitter(&tree, 1, not_a_submit_button).unwrap_err().starts_with(TYPE_ERROR), "{not_a_submit_button}");
+        }
+        assert!(check_submitter(&tree, 1, 6).unwrap_err().starts_with(NOT_FOUND_ERROR), "a button of a nested form");
+        assert!(check_submitter(&tree, 5, 2).unwrap_err().starts_with(NOT_FOUND_ERROR), "a button of the outer form");
+        assert_eq!(check_submitter(&tree, 5, 6), Ok(()));
     }
 
     fn control(name: Option<&str>, value: &str) -> Control {

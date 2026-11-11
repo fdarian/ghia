@@ -289,17 +289,20 @@ export class HostElement {
   }
 
   /** `<form>` only: validate the controls, then submit. */
-  requestSubmit(): void {
+  requestSubmit(submitter?: object | null): void {
     const root = this.root
     if (!root || !this.mounted) throw new Error("requestSubmit() needs a mounted element")
     if (this.type !== "form") {
       throw new Error(`requestSubmit() is only valid on <form>, got <${this.type}>`)
     }
-    requestFormSubmit({
-      id: this.id,
-      nativeRenderer: root.nativeRenderer,
-      flushMutations: () => root.mutations.flushMutations(),
-    })
+    requestFormSubmit(
+      {
+        id: this.id,
+        nativeRenderer: root.nativeRenderer,
+        flushMutations: () => root.mutations.flushMutations(),
+      },
+      submitter,
+    )
   }
 
   private textControl(member: string): TextControlHost {

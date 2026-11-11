@@ -127,7 +127,7 @@ A focused `<button>` is clicked by Enter on key down (repeating while held) and 
 ## Inputs and forms
 
 - `<input>` has `select()`, `setSelectionRange`, `selectionStart/End/Direction`, `disabled`, `type`, `maxLength` and number `min/max/step`.
-- `<form onSubmit>`, `name`, `required`, `requestSubmit()` and `invalid` events. Enter in an `<input>` follows HTML's implicit submission: with a submit button the first is the default button and gets a `click` (nothing happens if it is disabled); without one the form submits only if at most one `<input>` blocks it (every `<input>` does, a `<textarea>` does not).
+- `<form onSubmit>`, `name`, `required`, `requestSubmit(submitter)` and `invalid` events. `requestSubmit(submitter)` sets the event's `submitter`, throws a `TypeError` when `submitter` is not a submit `<button>` and a `NotFoundError` `DOMException` when it belongs to another form (a disabled submit button is accepted, as in the DOM). Enter in an `<input>` follows HTML's implicit submission: with a submit button the first is the default button and gets a `click` (nothing happens if it is disabled); without one the form submits only if at most one `<input>` blocks it (every `<input>` does, a `<textarea>` does not).
 - The per-edit event is `onChange` with `inputType`, `data` and `isComposing`, once per edit like the DOM `input`. A composition's last `change` comes before `compositionend`.
 - In a textarea, Enter always inserts a newline.
 
