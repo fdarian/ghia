@@ -75,7 +75,7 @@ describe("host config hideInstance", () => {
       width: 80,
       height: 40,
       backgroundColor: "#f38ba8",
-      visibility: "hidden",
+      display: "none !important",
     })
 
     hostConfig.unhideInstance(instance, props)
@@ -112,7 +112,7 @@ describe("host config hideInstance", () => {
 
     hostConfig.hideInstance(instance)
     hostConfig.commitUpdate(instance, "div", before, after, null)
-    expect(renderer.styles.at(-1)).toEqual({ width: 120, visibility: "hidden" })
+    expect(renderer.styles.at(-1)).toEqual({ width: 120, display: "none !important" })
 
     hostConfig.unhideInstance(instance, after)
     expect(renderer.styles.at(-1)).toEqual(after.style)

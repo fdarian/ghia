@@ -53,7 +53,8 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in React", () => {
         <Suspense fallback={<div>fallback</div>}>
           <div
             ref={(element: unknown) => {
-              refs.hidden = element
+              // React clears the ref while it hides the element.
+              refs.hidden ??= element
             }}
             className="shown"
             style={{ display: "block" }}
