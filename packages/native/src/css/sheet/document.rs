@@ -291,7 +291,8 @@ impl StyleSheets {
 }
 
 /// `kebab-key: value;` per declaration, as the `style` attribute of an element that was given
-/// the style would read.
+/// the style would read. A key whose value is no string or number (a state block such as `hover`,
+/// `"@container"`, a switch) is not one declaration and is left out, as `serializeStyle` does in JS.
 fn style_attribute_text(raw: &[u8]) -> String {
     let declarations = serde_json::from_slice::<crate::css::lenient::Declarations>(raw)
         .expect("an interned style is a JSON object");
@@ -300,6 +301,7 @@ fn style_attribute_text(raw: &[u8]) -> String {
         // As the DOM reads `style.cssText`: no value, no declaration, and a number has its unit.
         let value = match declaration.value.as_str() {
             "null" | "\"\"" => continue,
+            value if !value.starts_with('"') && !value.starts_with(|c: char| c == '-' || c.is_ascii_digit()) => continue,
             value if value.starts_with('"') => serde_json::from_str::<String>(value).expect("a JSON string value"),
             // A custom property takes its number as written, as React DOM sets it.
             value if declaration.key.starts_with("--") => value.to_owned(),
@@ -342,5 +344,13 @@ mod tests {
     fn a_number_rotate_is_written_in_degrees_and_a_number_length_in_px() {
         let text = style_attribute_text(br#"{"width":10,"rotate":45,"skewX":-3.5,"opacity":0.5,"top":0}"#);
         assert_eq!(text, "width: 10px; rotate: 45deg; skew-x: -3.5deg; opacity: 0.5; top: 0;");
+    }
+
+    #[test]
+    fn a_state_block_a_query_and_a_switch_are_not_declarations() {
+        let text = style_attribute_text(
+            br#"{"width":10,"hover":{"opacity":0.5},"@container":{"(min-width: 10px)":{"top":1}},"keyboardFocusDim":true,"color":"red"}"#,
+        );
+        assert_eq!(text, "width: 10px; color: red;");
     }
 }
