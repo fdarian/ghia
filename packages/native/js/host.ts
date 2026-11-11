@@ -69,6 +69,7 @@ export * from "./host-runtime.js"
 export * from "./keyframes.js"
 export * from "./layout-animation.js"
 export * from "./match-media.js"
+export { ToggleEvent, type ToggleEventInit } from "./dom/toggle-event.js"
 export * from "./motion-bindings.js"
 export * from "./motion-config.js"
 export * from "./motion-span.js"
@@ -1915,6 +1916,13 @@ export interface HostProps
    * that one of those props names gets a group node, named by its text.
    */
   id?: string
+  /**
+   * Like the DOM `popover` attribute: the element is hidden until `showPopover()` opens it, and an
+   * open one is drawn above everything else, `position: fixed` in the window. `"auto"` (and `""`,
+   * and `"hint"`) closes on Escape and on a press outside and closes the other `auto` popovers
+   * that do not hold it; `"manual"` only closes with `hidePopover()`. See `docs/reference.md`.
+   */
+  popover?: "auto" | "manual" | "hint" | ""
   /** Stable locator id for automation. */
   testId?: string
   /**

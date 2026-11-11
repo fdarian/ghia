@@ -264,6 +264,7 @@ const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "role",
   "id",
   "htmlFor",
+  "popover",
 ])
 
 /** Props a `div`, `span`, `label`, `form` or HTML tag forwards to native; every other prop is dropped. */

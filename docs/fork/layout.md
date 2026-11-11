@@ -39,6 +39,14 @@ zed (`Div::stacking_context`, `Element::lift_z`, `Window::lift_lists`) takes eve
 
 Barriers where nothing lifts and the old per-parent `paint_rank` applies: layout roots (`prepaint_at`, `prepaint_as_root`), deferred layers and `visibility: hidden` subtrees. An element that is not a `Div`, `Img`, `Svg`, `List`, `UniformList`, `Canvas` or `Surface` is never lifted, and gpuix elements positioned only for layout (the text wrapper, anchored placement boxes) are `.unlifted()`.
 
+### The top layer
+
+An open popover (`popover` attribute, `showPopover()`; the API is in [reference.md](../reference.md#popovers)) is the one thing that draws in the top layer. It is a deferred draw in window space, which is what a `<anchored deferred>` layer is, so the top layer is not a second mechanism: `renderer.rs` wraps the element `build_host_container` built in `gpui::deferred(..).in_window_space().with_priority(..)` after everything else about the element is decided (`html/popover.rs`, `into_top_layer`), and `RetainedTree::elements_at` orders its hits the way it does an `anchored` layer's. The priority is `1 << 20` plus the show order, above every `anchored` priority in use (a Dialog is 0, a Select and a Tooltip 1) and later shows on top. The box still lays out as a node of its parent's taffy tree, but a `position: fixed` one, which takes no part in the flow, and the user agent layer sees to it that an open popover is fixed whatever its author declared (`used_style`).
+
+Two props carry the state, and neither is read by JS afterwards: `popover` is the attribute, `popoverOpen` the show order JS writes straight to the renderer with `setCustomProp` when it shows or hides the popover (absent while closed). `popoverOpen` alone opens nothing, and a custom element has no popover. The user agent style is `RetainedTree::refresh_effective_style`'s layer between the tag's style and the universal style, so a write of either prop restyles the element: `display: none` while closed (Chrome's `[popover]:not(:popover-open)`), the open style while open. A stylesheet that wants `:popover-open` matches `popoverOpen` being a number. The layer is under the declared style: an author `display` shows a closed popover.
+
+An open popover is never in a retained recording (it is `position: fixed`, `Exclusion::Fixed`) and blocks the culling of what is around it, since it draws outside its box.
+
 ### Tab order is document order whatever `order` does
 
 The builder sorts the children of a flex or grid container by `order` (`plan_children_at`), so the sorted position is not the document position. It hands gpui each child's document index (`Placement`, `build_content`), and `Div::document_order` makes the tab stops they register follow it, with a positive `tabIndex` still first and Shift+Tab walking the same order back. Nested containers, `display: contents` items, anonymous cells and a change of `order` follow the document.

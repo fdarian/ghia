@@ -262,6 +262,15 @@ An HTML tag ([docs/reference.md](../reference.md#html-tags)) is the user agent s
 - **`element.style` ignores a property Ghia has no style for.** `style.setProperty("touch-action", "none")` and `style.willChange = ...` change nothing and say nothing, where a browser accepts them; the properties are those of `STYLE_PROPERTIES`. `cssText` keeps a shorthand as written and does not expand it.
 - **A removed node that stays out of the document across a flush is made again on insertion.** The node and everything below it keep their props, text, style and listeners, but native drops the element at the flush, so its focus, pointer capture, scroll offset and running layout animation are gone when the node is inserted again, where a browser's removed node keeps its scroll offset until it is blurred. A node put back in the same turn keeps them (see "A node removed and put back in the same turn" under Forced reads).
 
+## Popovers
+
+- **No `::backdrop`, `popovertarget`, `:popover-open` in `matches()`, or anchor positioning.** An open popover has no backdrop box; a stylesheet that styles `::backdrop` does nothing. `:popover-open` is a native state the user agent style reads (the `popoverOpen` custom prop, see [layout.md](layout.md#the-top-layer)), not a selector JS can ask.
+- **Focus does not move.** Showing a popover does not run the popover focusing steps (`autofocus`, the first focusable descendant), and hiding one does not return focus to the element that had it.
+- **A popover that is removed is found closed by the next call that looks at it, not at the removal.** JS has no hook on a removal, so it checks the element (connected, and the native element it opened) each time it is used. No event fires either way, as in the spec's removing steps. A popover that is removed and put back before any such call is closed too: a re-inserted Solid or React element is made again natively without the flag.
+- **A popover inside a transformed ancestor is laid out against it.** It is drawn in window space, but taffy resolves `position: fixed` against the nearest ancestor with a transform or layout containment, as for any fixed box (zed `taffy/containing_block.rs`), so a popover under a `transform` is placed from that ancestor's box and drawn in the window. In Chrome the top layer ignores the ancestors.
+- **A deferred layer inside an open popover is below it.** `anchored` layers, a Select popup in a popover included, are ordered by priority with the rest of the deferred layers, and the top layer's priority is above all of them, where Chrome stacks what opens later on top. Put the popup in the popover's own layer instead of `anchored`.
+- **`toggle` is a timer.** It is queued with `setTimeout(0)`, where the DOM queues a task on the DOM manipulation task source; `hint` is `auto`, and `onToggle` and `onBeforeToggle` props are not wired: use `addEventListener`.
+
 ## Window
 
 ### Drag regions (`appRegion`), from Electron

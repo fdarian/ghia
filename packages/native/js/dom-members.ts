@@ -7,7 +7,8 @@ import { readLayoutSize } from "./bounds.js"
 import type { NativeRenderer } from "./host.js"
 import { document, type GpuixDocument } from "./events/window-target.js"
 import { attributeLookupName, attributeNameOf } from "./dom/attribute-names.js"
-import { SVGElement } from "./dom/nodes.js"
+import { SVGElement, type Element } from "./dom/nodes.js"
+import { hidePopover, showPopover, togglePopover } from "./dom/popover.js"
 import { serializeStyle } from "./dom/css-style-declaration.js"
 import type { StyleDesc } from "./host.js"
 
@@ -23,6 +24,16 @@ export interface DomElement {
    * (`width: 10px; --x: 1;`), `null` while it has no declaration. `false` is `null` and `true` is `""`, except for `data-*` and `aria-*`, which hold "true" and "false".
    */
   getAttribute(name: string): string | null
+  /**
+   * The HTML popover API, for an element with a `popover` attribute: `showPopover()` opens it, in the
+   * top layer, and fires `beforetoggle` (cancelable) and then `toggle`; `hidePopover()` closes it;
+   * `togglePopover(force?)` does either and says whether it is open. Showing a showing popover and
+   * hiding a hidden one do nothing. They throw `NotSupportedError` without the attribute and
+   * `InvalidStateError` for an element that is not in the document.
+   */
+  showPopover(): void
+  hidePopover(): void
+  togglePopover(force?: boolean): boolean
   /** The border box's width, rounded, before any transform. 0 for an element with no box. */
   readonly offsetWidth: number
   /** The border box's height, rounded, before any transform. 0 for an element with no box. */
@@ -105,6 +116,27 @@ export function defineDomMembers<This extends object>(
           return text === "" ? null : text
         }
         return attributeOf(name, propForAttribute(bind(this), name, this instanceof SVGElement))
+      },
+    },
+    showPopover: {
+      configurable: true,
+      writable: true,
+      value(this: This) {
+        showPopover(this as unknown as Element, () => bind(this))
+      },
+    },
+    hidePopover: {
+      configurable: true,
+      writable: true,
+      value(this: This) {
+        hidePopover(this as unknown as Element, () => bind(this))
+      },
+    },
+    togglePopover: {
+      configurable: true,
+      writable: true,
+      value(this: This, force?: boolean | { force?: boolean }) {
+        return togglePopover(this as unknown as Element, () => bind(this), force)
       },
     },
     offsetWidth: {

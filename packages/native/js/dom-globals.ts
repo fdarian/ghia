@@ -15,6 +15,7 @@ import {
 } from "./dom/nodes.js"
 import { CSSStyleDeclaration } from "./dom/css-style-declaration.js"
 import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
+import { ToggleEvent } from "./dom/toggle-event.js"
 import { Selection } from "./dom/selection.js"
 import { document, window } from "./events/window-target.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
@@ -46,6 +47,7 @@ const DOM_CLASSES = {
   Selection,
   MutationObserver,
   MutationRecord,
+  ToggleEvent,
 }
 
 const getSelection = () => document.getSelection()
