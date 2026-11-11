@@ -14,8 +14,8 @@ import { popoverProperty } from "./popover-attribute.js"
 import * as tree from "./tree-mutation.js"
 
 export { crossRootError } from "./tree-mutation.js"
-import { attributeNameOf } from "./attribute-names.js"
 import { serializeStyle, styleDeclarationFor, type CSSStyleDeclaration, type StyleBinding } from "./css-style-declaration.js"
+import { attributeNameOf, isNotAttribute } from "./attribute-names.js"
 
 /** Where `[DOM_BINDING]()` is read, so two copies of this package find each other's nodes. */
 export const DOM_BINDING: unique symbol = Symbol.for("@ghia/native/dom-binding")
@@ -26,12 +26,6 @@ export const ROOT_ELEMENT_TYPES = {
   head: "head",
   body: "body",
 } as const satisfies Record<string, ElementType>
-
-/** Both fill the window: the box above the root is the window, and the app's top element sizes against it. */
-export const ROOT_ELEMENT_STYLE = { display: "block", width: "100%", height: "100%" } as const
-
-/** `head` has no box and its children are never drawn: it holds what the page loads, not what it shows. */
-export const ROOT_HEAD_STYLE = { display: "none" } as const
 
 /** Filled in by `popover.ts`, which cannot be imported here: it reaches the document, which extends the classes below. */
 export const popoverHooks: { attributeChanged: ((element: Element) => void) | undefined } = { attributeChanged: undefined }
@@ -384,11 +378,6 @@ abstract class TextClass extends CharacterDataClass {
 
 /** The `data-*` props are the attributes `dataset` reads, with the name in camel case. */
 const DATA_ATTRIBUTE = /^data-(.+)$/
-/**
- * Props that are not attributes: `getAttributeNames` skips them. `style` is one, as a prop; the
- * `style` attribute is the text of the live style, which `getAttribute` and `getAttributeNames` give.
- */
-export const NOT_ATTRIBUTES: ReadonlySet<string> = new Set(["children", "key", "ref"])
 
 function camelCase(dashed: string): string {
   return dashed.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase())
@@ -457,10 +446,10 @@ abstract class ElementClass extends NodeClass {
     this.style.cssText = cssText
   }
 
+  /** The `class` attribute, which is what `getAttribute` and the attributes sent to native read: `class` wins over `className`. */
   get className(): string {
-    const binding = this[DOM_BINDING]()
-    const value = binding.prop("className") ?? binding.prop("class")
-    return typeof value === "string" ? value : ""
+    const value = this.getAttribute("class")
+    return value === null ? "" : value
   }
 
   get children(): readonly Element[] {
@@ -554,7 +543,7 @@ abstract class ElementClass extends NodeClass {
     const names: string[] = []
     const svg = this instanceof shared.SVGElement
     for (const prop of this[DOM_BINDING]().propNames()) {
-      if (NOT_ATTRIBUTES.has(prop)) continue
+      if (isNotAttribute(prop)) continue
       const name = attributeNameOf(prop, svg)
       if (this.getAttribute(name) !== null && !names.includes(name)) names.push(name)
     }

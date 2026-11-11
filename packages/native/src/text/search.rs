@@ -1336,7 +1336,7 @@ mod tests {
         tree.set_text(2, "a ".to_string());
         tree.create_element(3, "div".to_string());
         tree.append_child(1, 3);
-        tree.set_style(
+        tree.set_style_arc(
             3,
             Arc::new(serde_json::from_value(serde_json::json!({"display": "inline-block"})).expect("a style")),
         );
@@ -1928,7 +1928,7 @@ mod tests {
         ] {
             tree.create_element(id, "div".to_string());
             tree.append_child(1, id);
-            tree.set_style(id, Arc::new(serde_json::from_str(style).expect("a style")));
+            tree.set_style_desc(id, serde_json::from_str(style).expect("a style"));
             tree.create_element(id + 10, "#text".to_string());
             tree.append_child(id, id + 10);
             tree.set_text(id + 10, text.to_string());

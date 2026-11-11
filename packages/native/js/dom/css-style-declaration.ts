@@ -22,24 +22,17 @@ type StyleRecord = Record<string, unknown>
 /** The properties whose `StyleDesc` value is a number only: native does not read their text. */
 const NUMBER_ONLY: ReadonlySet<string> = new Set(["flexGrow", "flexShrink", "order", "zIndex", "opacity", "lineClamp"])
 
-/** The properties a bare number is not a length for. Any other number is px. */
+/**
+ * The properties a bare number is not a length for: the list native's `[style]` text uses
+ * (`css/lenient.rs`, React DOM's own), so `getAttribute("style")` and a `[style]` selector read one text.
+ */
 const UNITLESS_NUMBER: ReadonlySet<string> = new Set([
-  ...NUMBER_ONLY,
-  "flex",
-  "fontWeight",
-  "lineHeight",
-  "scale",
-  "aspectRatio",
-  "tabSize",
-  "gridColumn",
-  "gridRow",
-  "gridColumnStart",
-  "gridColumnEnd",
-  "gridRowStart",
-  "gridRowEnd",
-  "gridArea",
-  "gridTemplateColumns",
-  "gridTemplateRows",
+  "animationIterationCount", "aspectRatio", "borderImageOutset", "borderImageSlice", "borderImageWidth",
+  "columnCount", "columns", "flex", "flexGrow", "flexShrink", "fontWeight", "gridArea", "gridColumn",
+  "gridColumnEnd", "gridColumnStart", "gridRow", "gridRowEnd", "gridRowStart", "lineClamp", "lineHeight",
+  "opacity", "order", "orphans", "scale", "tabSize", "widows", "zIndex", "zoom",
+  "fillOpacity", "floodOpacity", "stopOpacity", "strokeDasharray", "strokeDashoffset", "strokeMiterlimit",
+  "strokeOpacity", "strokeWidth",
 ])
 
 const IMPORTANT = /!\s*important\s*$/i
@@ -73,12 +66,12 @@ function nameOf(key: string): string | undefined {
   return isStyleProperty(key) ? kebabOf(key) : undefined
 }
 
+/** The text of a value as native's `[style]` text has it: no text for `null` or `""`, `px` on a number, `0` for zero. */
 function valueText(key: string, value: unknown): string | undefined {
-  if (typeof value === "string") return value
+  if (typeof value === "string") return value === "" ? undefined : value
   if (typeof value !== "number") return undefined
   if (isCustom(key) || UNITLESS_NUMBER.has(key)) return String(value)
-  if (key === "rotate") return `${value}deg`
-  return `${value}px`
+  return value === 0 ? "0" : `${value}px`
 }
 
 /** The declarations a style holds, as CSS names and texts, in written order. */

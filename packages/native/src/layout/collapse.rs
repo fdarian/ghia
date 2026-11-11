@@ -446,7 +446,7 @@ mod tests {
 
         fn part(&mut self, id: u64, parent: Option<u64>, display: &str) -> &mut Self {
             self.tree.create_element(id, "div".to_string());
-            self.tree.set_style(id, Arc::new(serde_json::from_value(serde_json::json!({ "display": display })).unwrap()));
+            self.tree.set_style_desc(id, serde_json::from_value(serde_json::json!({ "display": display })).unwrap());
             if let Some(parent) = parent {
                 self.tree.append_child(parent, id);
             }

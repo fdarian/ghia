@@ -149,7 +149,7 @@ mod tests {
         tree.set_text(3, "a   b".to_string());
         tree.append_child(2, 3);
         assert_eq!(text(&planned(&tree, &tree.elements[&2])), "a b");
-        tree.set_style(1, Arc::new(serde_json::from_value(serde_json::json!({ "whiteSpace": "pre" })).unwrap()));
+        tree.set_style_desc(1, serde_json::from_value(serde_json::json!({ "whiteSpace": "pre" })).unwrap());
         assert_eq!(text(&planned(&tree, &tree.elements[&2])), "a   b");
     }
 
@@ -159,7 +159,7 @@ mod tests {
         for id in [1, 4] {
             tree.create_element(id, "div".to_string());
         }
-        tree.set_style(4, Arc::new(serde_json::from_value(serde_json::json!({ "whiteSpace": "pre" })).unwrap()));
+        tree.set_style_desc(4, serde_json::from_value(serde_json::json!({ "whiteSpace": "pre" })).unwrap());
         tree.create_element(2, "div".to_string());
         tree.create_element(3, "#text".to_string());
         tree.set_text(3, "a   b".to_string());

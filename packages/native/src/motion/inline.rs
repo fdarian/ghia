@@ -318,6 +318,7 @@ mod tests {
             }
             tree.set_text(4, "b".to_string());
             tree.set_text(6, "c".to_string());
+            tree.set_root(1);
             Self {
                 origin: Instant::now(),
                 tree,
@@ -374,7 +375,8 @@ mod tests {
 
         fn style(&mut self, id: u64, json: &str) {
             let style = serde_json::from_str(json).expect("a style");
-            self.tree.set_style(id, Arc::new(style));
+            self.tree.set_style_desc(id, style);
+            self.tree.note_frame_built();
         }
 
         fn paragraph(&self) -> crate::text::inline::Paragraph {
@@ -461,8 +463,8 @@ mod tests {
     fn a_box_with_no_motion_reads_the_custom_properties_of_the_boxes_around_it() {
         let mut page = Page::new();
         let held = |json: &str| Arc::new(crate::css::var_substitution::parse(json.as_bytes()).expect("a style"));
-        page.tree.set_style(3, held(r#"{ "--outer": "red", "--len": "7px", "paddingLeft": "var(--len)" }"#));
-        page.tree.set_style(5, held(r#"{ "--own": "lime", "backgroundColor": "var(--outer)", "color": "var(--own)" }"#));
+        page.tree.set_style_arc(3, held(r#"{ "--outer": "red", "--len": "7px", "paddingLeft": "var(--len)" }"#));
+        page.tree.set_style_arc(5, held(r#"{ "--own": "lime", "backgroundColor": "var(--outer)", "color": "var(--own)" }"#));
         let before = crate::css::custom_properties::reads::count();
         let styles = page.frame(0);
         assert!(crate::css::custom_properties::reads::count() > before, "a read of the custom properties is noted");

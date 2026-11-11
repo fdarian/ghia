@@ -19,7 +19,7 @@ import {
   queueChildListMutation,
   readBoundingClientRect,
   splitMotionStyle,
-  SVG_CHILD_TYPES,
+  isSvgType,
   SVGElement,
   Text,
 } from "@ghia/native/host"
@@ -49,7 +49,7 @@ export interface HostNodeState {
   mounted: boolean
   /**
    * React hid this element (Suspense, Activity). Its native style carries
-   * `visibility: hidden`, so a style update must keep that rather than
+   * `display: none !important`, so a style update must keep that rather than
    * overwrite it with the visible one.
    */
   hidden: boolean
@@ -116,6 +116,16 @@ export function propNamesOf(instance: Instance): string[] {
   if (overrides === undefined) return names
   for (const name of overrides.keys()) if (!names.includes(name)) names.push(name)
   return names
+}
+
+/** The props an element has for the attributes sent to native: what React rendered, with what code wrote over it. */
+export function livePropEntries(instance: Instance): Array<[string, unknown]> {
+  const overrides = stateFor(instance).propOverrides
+  const entries = Object.entries(instance.props)
+  if (overrides === undefined) return entries
+  const merged = new Map<string, unknown>(entries)
+  for (const [name, value] of overrides) merged.set(name, value)
+  return [...merged]
 }
 
 function methodsOf(instance: HostNode): ElementMethods {
@@ -357,7 +367,7 @@ export function createHostElement(
   container: Container
 ): Instance {
   const instance =
-    type === "svg" || SVG_CHILD_TYPES.has(type)
+    isSvgType(type)
       ? (Reflect.construct(ReactHostElement, [id, type, props], ReactSvgElement) as ReactHostElement)
       : new ReactHostElement(id, type, props)
   hostNodeStates.set(instance, createState(container))

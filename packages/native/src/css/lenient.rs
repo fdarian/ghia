@@ -33,7 +33,7 @@ use crate::retained_tree::parse_style;
 use crate::style::StyleDesc;
 
 /// Properties React DOM sends a number for without adding `px`.
-const UNITLESS: &[&str] = &[
+pub(crate) const UNITLESS: &[&str] = &[
     "animationIterationCount", "aspectRatio", "borderImageOutset", "borderImageSlice", "borderImageWidth",
     "columnCount", "columns", "flex", "flexGrow", "flexShrink", "fontWeight", "gridArea", "gridColumn",
     "gridColumnEnd", "gridColumnStart", "gridRow", "gridRowEnd", "gridRowStart", "lineClamp", "lineHeight",
@@ -47,6 +47,7 @@ const REPORTED_LIMIT: usize = 1024;
 
 static REPORTED: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Mutex::default);
 
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Declaration {
     pub(crate) key: String,
     /// The JSON text of the value.

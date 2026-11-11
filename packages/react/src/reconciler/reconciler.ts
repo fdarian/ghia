@@ -23,6 +23,7 @@ import {
   unregisterEventHandlers,
 } from "./event-registry.js"
 import { createDomFactory, releaseDetachedNodes } from "./dom-mutation.js"
+import { livePropEntries } from "./host-nodes.js"
 import {
   destroyDocumentElements,
   hostConfig,
@@ -118,6 +119,13 @@ export function createRoot(
     windowAppearanceEventId: 0,
     onEvent: rootEventHandlers.onEvent,
     onUncaughtError,
+  })
+  batchedRenderer.setElementSource({
+    forEachElement(visit) {
+      for (const instance of gpuixContainer.instances.values()) {
+        visit(instance.nativeId, instance.type, livePropEntries(instance))
+      }
+    },
   })
   // The flush stands in for the microtask checkpoint a browser runs before it renders.
   attachRoot(renderer, gpuixContainer, (run) => flushSync(run))

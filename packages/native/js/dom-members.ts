@@ -6,7 +6,7 @@ import {
 import { readLayoutSize } from "./bounds.js"
 import type { NativeRenderer } from "./host.js"
 import { document, type GpuixDocument } from "./events/window-target.js"
-import { attributeLookupName, attributeNameOf } from "./dom/attribute-names.js"
+import { attributeLookupName, attributeNameOf, attributeText } from "./dom/attribute-names.js"
 import { SVGElement, type Element } from "./dom/nodes.js"
 import { hidePopover, showPopover, togglePopover } from "./dom/popover.js"
 import { serializeStyle } from "./dom/css-style-declaration.js"
@@ -76,22 +76,6 @@ function propForAttribute(bound: DomElementBinding, name: string, svg: boolean):
 }
 
 /**
- * A prop as the string a DOM attribute holds, or null where the DOM would have no attribute. A
- * `data-*` or `aria-*` attribute holds "false" for false; any other boolean attribute is present
- * (empty) for true and absent for false.
- */
-function attributeOf(name: string, value: unknown): string | null {
-  if (value === undefined || value === null) return null
-  // A handler or a style object is not an attribute: there is no text to give for it.
-  if (typeof value === "function" || typeof value === "object") return null
-  const lower = name.toLowerCase()
-  if (lower.startsWith("data-") || lower.startsWith("aria-")) return String(value)
-  if (value === false) return null
-  if (value === true) return ""
-  return String(value)
-}
-
-/**
  * Defines the DOM members on `target`, which is a prototype or one instance. `bind` finds what is
  * behind `this`.
  */
@@ -115,7 +99,7 @@ export function defineDomMembers<This extends object>(
           const text = serializeStyle(bind(this).style)
           return text === "" ? null : text
         }
-        return attributeOf(name, propForAttribute(bind(this), name, this instanceof SVGElement))
+        return attributeText(name, propForAttribute(bind(this), name, this instanceof SVGElement))
       },
     },
     showPopover: {

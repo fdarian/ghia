@@ -933,7 +933,7 @@ mod tests {
         tree.set_text(7, " end".to_string());
         for (id, style) in styles {
             let style = serde_json::from_value(style.clone()).expect("a style");
-            tree.set_style(*id, Arc::new(style));
+            tree.set_style_desc(*id, style);
         }
         tree
     }
@@ -1520,7 +1520,7 @@ mod tests {
         tree.append_child(2, 3);
         tree.set_text(3, "red".to_string());
         let style = serde_json::json!({"display": "contents", "color": "#ff0000", "fontWeight": 700});
-        tree.set_style(2, Arc::new(serde_json::from_value(style).expect("a style")));
+        tree.set_style_desc(2, serde_json::from_value(style).expect("a style"));
         let runs = runs_of(&tree);
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].weight, Some(FontWeight(700.0)));
@@ -1594,7 +1594,7 @@ mod tests {
         let mut tree = tree_with(styles);
         tree.create_element(8, "div".to_string());
         tree.append_child(3, 8);
-        tree.set_style(
+        tree.set_style_arc(
             8,
             Arc::new(serde_json::from_value(serde_json::json!({"display": "inline-block"})).expect("a style")),
         );

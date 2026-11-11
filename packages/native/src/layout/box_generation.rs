@@ -96,7 +96,7 @@ mod tests {
         tree.append_child(2, 3);
         tree.append_child(1, 4);
         let none = serde_json::json!({"display": "none"});
-        tree.set_style(2, Arc::new(serde_json::from_value(none).expect("a style")));
+        tree.set_style_desc(2, serde_json::from_value(none).expect("a style"));
         assert!(is_hidden(&tree, &tree.elements[&3]));
         assert!(is_hidden(&tree, &tree.elements[&2]));
         assert!(!is_hidden(&tree, &tree.elements[&4]));

@@ -4,9 +4,12 @@
 /// placements, so a node React made and a node code made sit in one tree.
 
 import {
+  attributeNameOf,
+  attributeText,
   crossRootError,
   forwardsCustomProp,
   hasMutationObservers,
+  isSvgType,
   queueCharacterDataMutation,
   recordAttributeChanges,
   serializeCustomProp,
@@ -146,5 +149,13 @@ export function setDomProp(instance: Instance, name: string, value: string | num
   else apply()
   if (state.mounted && forwardsCustomProp(instance.type, name)) {
     state.container.renderer.setCustomProp(instance.nativeId, name, serializeCustomProp(value))
+  }
+  if (state.mounted) {
+    // The attribute store natively reads is the one a framework prop writes, so a code write goes there too.
+    state.container.renderer.setAttribute(
+      instance.nativeId,
+      attributeNameOf(name, isSvgType(instance.type)),
+      attributeText(name, value)
+    )
   }
 }

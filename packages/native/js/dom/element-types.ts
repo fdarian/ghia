@@ -23,6 +23,7 @@ const NON_CHILD_ELEMENT_TYPES: ReadonlySet<string> = new Set<ElementType>([
   "webview",
   "nativeview",
   "virtual-list",
+  "style",
 ])
 
 /** Whether `type` is one of the element types Ghia draws, as written (`div`, `linearGradient`). */

@@ -1,5 +1,6 @@
 import { cancelAnimationFrame, requestAnimationFrame } from "./animation-frame.js"
 import { getComputedStyle } from "./computed-style.js"
+import { CSSRule, CSSRuleList, CSSStyleRule, CSSStyleSheet } from "./css/index.js"
 import { matchMedia } from "./match-media.js"
 import { IntersectionObserver, ResizeObserver } from "./observers.js"
 import {
@@ -44,6 +45,10 @@ const DOM_CLASSES = {
   DocumentFragment,
   ShadowRoot,
   CSSStyleDeclaration,
+  CSSStyleSheet,
+  CSSRule,
+  CSSStyleRule,
+  CSSRuleList,
   Selection,
   MutationObserver,
   MutationRecord,

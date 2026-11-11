@@ -5,7 +5,8 @@
  * framework rendered into the original reaches the clone as it stood, and never again.
  */
 
-import { DOM_BINDING, NOT_ATTRIBUTES, type Element, type ElementBinding, type Node, type TextBinding } from "./nodes.js"
+import { isNotAttribute } from "./attribute-names.js"
+import { DOM_BINDING, type Element, type ElementBinding, type Node, type TextBinding } from "./nodes.js"
 
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
@@ -21,7 +22,7 @@ function cloneElement(source: Element, deep: boolean): Element {
   const clone = binding.createElement(binding.type)
   const cloneBinding: ElementBinding = clone[DOM_BINDING]()
   for (const name of binding.propNames()) {
-    if (NOT_ATTRIBUTES.has(name)) continue
+    if (isNotAttribute(name)) continue
     // A handler, a ref, a `motion` or `layout` object and the style object are not attributes:
     // what is left is what `getAttribute` can read, with the types native was given.
     const value = binding.prop(name)

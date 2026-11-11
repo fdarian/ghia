@@ -18,11 +18,13 @@ const NO_STYLE = "{}"
 export class SentWrites {
   private style = NO_STYLE
   private props: Map<string, string> | undefined
+  private attributes: Map<string, string> | undefined
 
   /** Call when the native element is created: it holds no style and no prop. */
   reset(): void {
     this.style = NO_STYLE
     this.props = undefined
+    this.attributes = undefined
   }
 
   /** The JSON of the style written last: what `writesStyle` compared, and what native is sent. */
@@ -47,6 +49,23 @@ export class SentWrites {
     const json = JSON.stringify(value)
     if (this.props.get(name) === json) return false
     this.props.set(name, json)
+    return true
+  }
+
+  /** Records the attributes native holds for the element, which the host did not write through `writesAttribute`. It owns `attributes`. */
+  rememberAttributes(attributes: Map<string, string>): void {
+    this.attributes = attributes.size > 0 ? attributes : undefined
+  }
+
+  /**
+   * Whether `value` is not what the attribute `name` holds in native; remembers it when it is
+   * not. An attribute never written holds nothing, so removing it writes nothing.
+   */
+  writesAttribute(name: string, value: string | null): boolean {
+    if (value === null) return this.attributes?.delete(name) ?? false
+    this.attributes ??= new Map()
+    if (this.attributes.get(name) === value) return false
+    this.attributes.set(name, value)
     return true
   }
 }

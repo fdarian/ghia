@@ -44,7 +44,7 @@ impl Page {
             let mut create = |id: u64, element_type: &str, style: &str, parent: Option<u64>| {
                 let style: StyleDesc = serde_json::from_str(style).unwrap();
                 tree.create_element(id, element_type.to_owned());
-                tree.set_style(id, Arc::new(style));
+                tree.set_style_desc(id, style);
                 if let Some(parent) = parent {
                     tree.append_child(parent, id);
                 }

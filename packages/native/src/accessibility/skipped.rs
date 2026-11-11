@@ -187,7 +187,7 @@ mod tests {
         for (key, value) in props {
             tree.set_custom_prop(id, key.to_string(), value.clone());
         }
-        tree.set_style(id, Arc::new(serde_json::from_value(style).expect("a style")));
+        tree.set_style_desc(id, serde_json::from_value(style).expect("a style"));
     }
 
     fn role(role: &str) -> [(&str, serde_json::Value); 1] {
@@ -230,7 +230,7 @@ mod tests {
         add(&mut tree, 1, 2, &role("region"), serde_json::json!({ "contentVisibility": "hidden" }));
         add(&mut tree, 2, 3, &role("button"), serde_json::json!({}));
         assert_eq!(outline_of(&tree, 1), [(0, 2, Role::Region)]);
-        tree.set_style(1, Arc::new(serde_json::from_value(serde_json::json!({ "contentVisibility": "hidden" })).unwrap()));
+        tree.set_style_desc(1, serde_json::from_value(serde_json::json!({ "contentVisibility": "hidden" })).unwrap());
         assert_eq!(outline_of(&tree, 1), []);
     }
 
@@ -260,7 +260,7 @@ mod tests {
         let mut tree = tree();
         add(&mut tree, 1, 2, &role("button"), serde_json::json!({ "order": 2 }));
         add(&mut tree, 1, 3, &role("heading"), serde_json::json!({ "order": 1 }));
-        tree.set_style(1, Arc::new(serde_json::from_value(serde_json::json!({ "display": "flex" })).unwrap()));
+        tree.set_style_desc(1, serde_json::from_value(serde_json::json!({ "display": "flex" })).unwrap());
         assert_eq!(outline_of(&tree, 1), [(0, 2, Role::Button), (0, 3, Role::Heading)]);
     }
 
@@ -275,7 +275,7 @@ mod tests {
         tree.create_element(4, "#text".to_string());
         tree.append_child(2, 4);
         tree.set_text(4, "there".to_string());
-        tree.set_style(2, Arc::new(serde_json::from_value(serde_json::json!({ "height": 10 })).unwrap()));
+        tree.set_style_desc(2, serde_json::from_value(serde_json::json!({ "height": 10 })).unwrap());
         tree.create_element(5, "label".to_string());
         tree.append_child(1, 5);
         let nodes = exposed(&tree, &tree.elements[&1]);

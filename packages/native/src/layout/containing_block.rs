@@ -156,7 +156,7 @@ mod tests {
                 position: position.map(str::to_string),
                 ..Default::default()
             };
-            tree.set_style(*id, Arc::new(style));
+            tree.set_style_desc(*id, style);
         }
         for window in nodes.windows(2) {
             tree.append_child(window[0].0, window[1].0);
@@ -209,7 +209,7 @@ mod tests {
             display: display.map(str::to_string),
             ..Default::default()
         };
-        tree.set_style(id, Arc::new(style));
+        tree.set_style_desc(id, style);
     }
 
     #[test]
@@ -234,7 +234,7 @@ mod tests {
             display: display.map(str::to_string),
             ..Default::default()
         };
-        tree.set_style(id, Arc::new(style));
+        tree.set_style_desc(id, style);
     }
 
     #[test]
@@ -295,7 +295,7 @@ mod tests {
             position: Some("relative".into()),
             ..Default::default()
         };
-        tree.set_style(3, Arc::new(contents));
+        tree.set_style_desc(3, contents);
         let positioned = |id| is_positioned(&tree, &tree.elements[&id]);
         assert!(!positioned(1));
         assert!(positioned(2));
@@ -334,7 +334,7 @@ mod tests {
         let style = |json: &str| -> RetainedElement {
             let mut tree = RetainedTree::new();
             tree.create_element(1, "div".to_owned());
-            tree.set_style(1, Arc::new(serde_json::from_str(json).unwrap()));
+            tree.set_style_desc(1, serde_json::from_str(json).unwrap());
             tree.elements.remove(&1).unwrap()
         };
         assert!(!may_escape(&style(r#"{"position": "relative"}"#)));
