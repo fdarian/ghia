@@ -33,6 +33,7 @@ pub(crate) fn implicit_role(tree: &RetainedTree, element: &RetainedElement) -> O
         "dialog" => Role::Dialog,
         "p" => Role::Paragraph,
         "figure" => Role::Figure,
+        "fieldset" | "details" => Role::Group,
         "table" => Role::Table,
         "thead" | "tbody" | "tfoot" => Role::RowGroup,
         "tr" => Role::Row,
@@ -216,5 +217,16 @@ mod tests {
         assert_eq!(activation_target(&tree, &[3, 2, 1]), Some(3));
         assert_eq!(activation_target(&tree, &[2, 1]), Some(2));
         assert_eq!(activation_target(&tree, &[1]), None);
+    }
+
+    #[test]
+    fn a_fieldset_and_a_details_are_groups() {
+        let tree = tree(
+            r#"[["createElement",1,"div"],["setRoot",1],
+                ["createElement",2,"fieldset"],["appendChild",1,2],
+                ["createElement",3,"details"],["appendChild",1,3]]"#,
+        );
+        assert_eq!(role(&tree, 2), Some(Role::Group));
+        assert_eq!(role(&tree, 3), Some(Role::Group));
     }
 }

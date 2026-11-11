@@ -45,6 +45,8 @@ describeNative("HTML tag roles", () => {
         <blockquote id="blockquote"><p>said</p></blockquote>
         <p id="p">paragraph</p>
         <figure id="figure"><p>caption</p></figure>
+        <fieldset id="fieldset"><p>fields</p></fieldset>
+        <details id="details"><summary>more</summary><p>body</p></details>
         <dl id="dl"><dt id="dt">term</dt><dd id="dd">meaning</dd></dl>
         <table id="table">
           <thead id="thead"><tr id="tr"><th id="th">head</th></tr></thead>
@@ -67,6 +69,8 @@ describeNative("HTML tag roles", () => {
       blockquote: roleOf("blockquote"),
       p: roleOf("p"),
       figure: roleOf("figure"),
+      fieldset: roleOf("fieldset"),
+      details: roleOf("details"),
       dl: roleOf("dl"),
       dt: roleOf("dt"),
       dd: roleOf("dd"),
@@ -91,6 +95,8 @@ describeNative("HTML tag roles", () => {
       blockquote: "Blockquote",
       p: "Paragraph",
       figure: "Figure",
+      fieldset: "Group",
+      details: "Group",
       dl: "DescriptionList",
       dt: "Term",
       dd: "Definition",

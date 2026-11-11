@@ -6337,7 +6337,7 @@ Markup written for the web works: `<p>`, `<h1>`, `<ul>`, `<strong>`, `<button>`,
 | `figure`, `blockquote` | `block` | `1em` block margins and `40px` inline margins; roles `figure` and `blockquote` |
 | `pre` | `block` | `white-space: pre`, `1em` block margins, `Menlo` at the inherited size |
 | `address` | `block` | Italic |
-| `fieldset`, `hr` | `block` | A `2px` groove border for the fieldset; a `1px` inset grey rule with `0.5em` margins for `hr` (role `separator`) |
+| `fieldset`, `hr` | `block` | A `2px` groove border for the fieldset (role `group`, as for `details`); a `1px` inset grey rule with `0.5em` margins for `hr` (role `separator`) |
 | `dialog` | `none` | Closed: see [Deviations](#html-tag-deviations) |
 | `strong`, `b` | `inline` | Bold |
 | `em`, `i`, `cite`, `var` | `inline` | Italic |
