@@ -20,17 +20,17 @@ describe.skipIf(!hasNativeTestRenderer || !scenario)("thread exit fixture", () =
     if (scenario === "tooltip") {
       app.render(() => (
         <Tooltip defaultOpen>
-          <TooltipTrigger style={{ width: 100, height: 32 }}><text>hover</text></TooltipTrigger>
-          <TooltipContent><text>help</text></TooltipContent>
+          <TooltipTrigger style={{ width: 100, height: 32 }}><div>hover</div></TooltipTrigger>
+          <TooltipContent><div>help</div></TooltipContent>
         </Tooltip>
       ))
     } else {
       app.render(() => (
         <Dialog defaultOpen>
-          <DialogTrigger style={{ width: 80, height: 24 }}><text>Open</text></DialogTrigger>
+          <DialogTrigger style={{ width: 80, height: 24 }}><div>Open</div></DialogTrigger>
           <DialogPortal>
             <DialogBackdrop style={{ backgroundColor: "#00000080" }} />
-            <DialogPopup style={{ width: 300, backgroundColor: "#1e293b" }}><text>Settings</text></DialogPopup>
+            <DialogPopup style={{ width: 300, backgroundColor: "#1e293b" }}><div>Settings</div></DialogPopup>
           </DialogPortal>
         </Dialog>
       ))

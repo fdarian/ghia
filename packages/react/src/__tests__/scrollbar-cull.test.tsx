@@ -19,7 +19,7 @@ function scene(offscreen: boolean) {
         <div style={{ height: offscreen ? 140 : 0 }} />
         <div testId="scroller" style={{ overflow: "auto", width: 200, height: 50 }}>
           <div testId="child" style={{ width: "100%", height: 200, backgroundColor: "#ff0000" }}>
-            <text>content</text>
+            <div>content</div>
           </div>
         </div>
       </div>
@@ -35,7 +35,7 @@ function feed(cullable: boolean) {
         <div key={index} style={{ marginBottom: 8 }}>
           <div testId={`block-${index}`} style={{ overflowX: "auto", width: 280 }}>
             <div style={{ width: 600, height: 20, backgroundColor: "#335577" }}>
-              <text>{`wide line ${index}`}</text>
+              <div>{`wide line ${index}`}</div>
             </div>
             {/* Takes no room, and a subtree with an absolutely placed box in it is never culled itself. */}
             {cullable ? null : <div style={{ position: "absolute", width: 0, height: 0 }} />}

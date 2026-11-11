@@ -12,6 +12,7 @@ import type { ElementType } from "../host.js"
 import * as tree from "./tree-mutation.js"
 
 export { crossRootError } from "./tree-mutation.js"
+import { attributeNameOf } from "./attribute-names.js"
 
 /** Where `[DOM_BINDING]()` is read, so two copies of this package find each other's nodes. */
 export const DOM_BINDING: unique symbol = Symbol.for("@ghia/native/dom-binding")
@@ -494,9 +495,10 @@ abstract class ElementClass extends NodeClass {
 
   getAttributeNames(): string[] {
     const names: string[] = []
+    const svg = this instanceof shared.SVGElement
     for (const prop of this[DOM_BINDING]().propNames()) {
       if (NOT_ATTRIBUTES.has(prop)) continue
-      const name = prop === "className" ? "class" : prop
+      const name = attributeNameOf(prop, svg)
       if (this.getAttribute(name) !== null && !names.includes(name)) names.push(name)
     }
     return names

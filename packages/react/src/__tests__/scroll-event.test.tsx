@@ -30,6 +30,7 @@ describeNative("onScroll", () => {
 
       const id = renderer.findByTestId("scroller")!.id
       renderer.scrollTo(id, 0, 100)
+      renderer.flush()
       renderer.dispatchNativeEvents()
       expect(offsets).toEqual([[0, 100]])
       expect(renderer.getScrollOffset(id)).toEqual([0, 100])
@@ -62,11 +63,13 @@ describeNative("onScroll", () => {
       render(app())
       const id = renderer.findByTestId("scroller")!.id
       renderer.scrollTo(id, 0, 30)
+      renderer.flush()
       renderer.dispatchNativeEvents()
       expect(offsets).toHaveLength(1)
 
       render(app())
       renderer.scrollTo(id, 0, 30.004)
+      renderer.flush()
       renderer.dispatchNativeEvents()
       expect(offsets).toHaveLength(1)
     } finally {
@@ -87,6 +90,7 @@ describeNative("onScroll", () => {
       expect(offsets).toEqual([])
 
       renderer.scrollTo(id, 0, 120)
+      renderer.flush()
       renderer.dispatchNativeEvents()
       expect(offsets).toEqual([[0, 120]])
     } finally {

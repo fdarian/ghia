@@ -1,4 +1,5 @@
 import type { ElementType } from "../host.js"
+import { isHtmlTag } from "../html-tags.js"
 import { SVG_CHILD_TYPES } from "../svg.js"
 
 const NON_CHILD_ELEMENT_TYPES: ReadonlySet<string> = new Set<ElementType>([
@@ -26,7 +27,7 @@ const NON_CHILD_ELEMENT_TYPES: ReadonlySet<string> = new Set<ElementType>([
 
 /** Whether `type` is one of the element types Ghia draws, as written (`div`, `linearGradient`). */
 export function isElementType(type: string): type is ElementType {
-  return NON_CHILD_ELEMENT_TYPES.has(type) || SVG_CHILD_TYPES.has(type)
+  return NON_CHILD_ELEMENT_TYPES.has(type) || SVG_CHILD_TYPES.has(type) || isHtmlTag(type)
 }
 
 /** The element types that are SVG elements: `svg` and what only lives inside it. */

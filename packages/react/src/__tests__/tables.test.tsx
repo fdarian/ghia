@@ -1423,10 +1423,10 @@ describeNative("tables: parts are elements", () => {
             loose a
             <Row id="r">
               <Cell id="c1">
-                <text>alpha</text>
+                <div>alpha</div>
               </Cell>
               <Cell id="c2">
-                <text>beta</text>
+                <div>beta</div>
               </Cell>
             </Row>
           </Table>
@@ -1470,18 +1470,18 @@ describeNative("tables: parts are elements", () => {
           <Table id="t">
             <Row id="r1">
               <Cell id="a">
-                <text>aa</text>
+                <div>aa</div>
               </Cell>
               <Cell id="b">
-                <text>bb</text>
+                <div>bb</div>
               </Cell>
             </Row>
             <Row id="r2">
               <Cell id="c">
-                <text>cc</text>
+                <div>cc</div>
               </Cell>
               <Cell id="d">
-                <text>dd</text>
+                <div>dd</div>
               </Cell>
             </Row>
           </Table>,
@@ -1494,10 +1494,10 @@ describeNative("tables: parts are elements", () => {
         copy(
           <div>
             <Cell id="a">
-              <text>x</text>
+              <div>x</div>
             </Cell>
             <Cell id="b">
-              <text>y</text>
+              <div>y</div>
             </Cell>
           </div>,
           "a",
@@ -1511,10 +1511,10 @@ describeNative("tables: parts are elements", () => {
             loose
             <Row id="r">
               <Cell id="a">
-                <text>aa</text>
+                <div>aa</div>
               </Cell>
               <Cell id="b">
-                <text>bb</text>
+                <div>bb</div>
               </Cell>
             </Row>
           </Table>,
@@ -1596,26 +1596,86 @@ describeNative("tables: parts are elements", () => {
     }
   })
 
-  it("reports a borderSpacing, tableLayout, captionSide, borderCollapse or emptyCells that CSS rejects", () => {
-    for (const [style, message] of [
-      [{ borderSpacing: "-1px" }, /invalid borderSpacing "-1px"/],
-      [{ borderSpacing: "1px 2px 3px" }, /invalid borderSpacing "1px 2px 3px"/],
-      [{ borderSpacing: "10%" }, /invalid borderSpacing "10%"/],
-      [{ tableLayout: "balanced" }, /invalid tableLayout: "balanced"/],
-      [{ captionSide: "left" }, /invalid captionSide: "left"/],
-      [{ borderCollapse: "yes" }, /invalid borderCollapse: "yes"/],
-      [{ emptyCells: "none" }, /invalid emptyCells: "none"/],
-      [{ hover: { borderSpacing: -3 } }, /invalid borderSpacing/],
+  it("drops a borderSpacing, tableLayout, captionSide, borderCollapse or emptyCells that CSS rejects and reports nothing", () => {
+    for (const style of [
+      { borderSpacing: "-1px" },
+      { borderSpacing: "1px 2px 3px" },
+      { borderSpacing: "10%" },
+      { tableLayout: "balanced" },
+      { captionSide: "left" },
+      { borderCollapse: "yes" },
+      { emptyCells: "none" },
+      { hover: { borderSpacing: -3 } },
     ] as const) {
       const errors: Error[] = []
       const { render, unmount } = createTestRoot({ onUncaughtError: (error) => errors.push(error) })
       try {
         render(<Table id="t" style={style as Style} />)
-        expect(errors.map((error) => error.message).join("\n"), JSON.stringify(style)).toMatch(message)
+        expect(errors, JSON.stringify(style)).toEqual([])
       } finally {
         unmount()
       }
     }
+  })
+
+  /** The boxes of a table holding two cells, with `style` on the table, and again once the pointer is over it. */
+  function tableBoxes(style: Style) {
+    const { render, renderer, unmount } = createTestRoot()
+    try {
+      render(
+        <Table id="t" style={style}>
+          <Row id="r">
+            <Cell id="a">
+              <Box id="a1" w={20} h={10} />
+            </Cell>
+            <Cell id="b">
+              <Box id="b1" w={30} h={10} />
+            </Cell>
+          </Row>
+        </Table>
+      )
+      const read = () => ["t", "a", "b"].map((id) => boxOf(renderer, id))
+      const at = read()
+      const table = boxOf(renderer, "t")
+      renderer.nativeSimulateMouseMove(table[0] + 1, table[1] + 1)
+      renderer.clockFastForward(16)
+      return { at, on: read() }
+    } finally {
+      unmount()
+    }
+  }
+
+  it("drops only the bad table style: the boxes are as without it, with the rest of the style applied", () => {
+    const rest = { padding: 3, width: 200 }
+    const without = tableBoxes({ ...rest, borderSpacing: 6 })
+    expect(without.at[1][0]).toBe(without.at[0][0] + 3 + 6)
+    for (const bad of [
+      { borderSpacing: "-1px" },
+      { borderSpacing: "1px 2px 3px" },
+      { borderSpacing: "10%" },
+    ] as const) {
+      expect(tableBoxes({ ...rest, ...bad } as Style).at, JSON.stringify(bad)).toEqual(tableBoxes(rest).at)
+    }
+    for (const bad of [
+      { tableLayout: "balanced" },
+      { captionSide: "left" },
+      { borderCollapse: "yes" },
+      { emptyCells: "none" },
+    ] as const) {
+      expect(tableBoxes({ ...rest, borderSpacing: 6, ...bad } as Style).at, JSON.stringify(bad)).toEqual(without.at)
+    }
+  })
+
+  it("leaves the boxes as they were for a bad state borderSpacing, and applies the rest of the state", () => {
+    const base = { padding: 3, width: 200, borderSpacing: 6 }
+    const reference = tableBoxes(base).at
+    const bad = tableBoxes({ ...base, hover: { borderSpacing: -3 } } as Style)
+    expect(bad.at).toEqual(reference)
+    expect(bad.on).toEqual(reference)
+    const withPadding = tableBoxes({ ...base, hover: { borderSpacing: -3, padding: 8 } } as Style)
+    expect(withPadding.at).toEqual(reference)
+    expect(withPadding.on).toEqual(tableBoxes({ ...base, hover: { padding: 8 } }).on)
+    expect(withPadding.on).not.toEqual(reference)
   })
 })
 

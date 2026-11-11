@@ -17,7 +17,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid virtual-list itemCount", () => {
         <For each={Array.from({ length: 60 }, (_, offset) => start() + offset)}>
           {(index) => (
             <div style={{ height: ROW, flexShrink: 0 }}>
-              <text>{`row-${index}`}</text>
+              <div>{`row-${index}`}</div>
             </div>
           )}
         </For>

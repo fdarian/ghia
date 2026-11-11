@@ -97,7 +97,9 @@ paint repaints those roots in the frame that is shown and leaves the rest as it 
   of its own (`PaintRecord::is_plain_or_relocated`: nothing handed to a stacking context). The unit is registered in the frame that
   records the root and in a frame that replays it with the key it was recorded with (`delta` zero and the key equal, not merely a
   place the recording fits); a frame that replays it elsewhere (a list scrolled since) notes it as *relocated* instead
-  (`Frame::relocated`), and a patch of it declines as `PatchDecline::Relocated`, where a root that was never patchable is
+  (`Frame::relocated`), and a patch of it declines as `PatchDecline::Relocated`, unless it is `patchable_relayout()` and the mask
+  around it is the one it recorded under: that one is registered at any `delta` and a patch that lays it out again paints it in its
+  region and puts the result `delta` away ([Box roots](#patch-roots)). A root that was never patchable is
   `UnknownUnit`. `Window::patch_blocker` answers the same question without painting, for an embedder that would build the root for
   nothing. The scratch frame paints the root under the content mask captured when it was recorded, which is what a recording at its
   own place was cut by, so what it writes over the frame is what a replay would have put there. A patch of such a root makes the
@@ -460,6 +462,17 @@ over the page, each in something that did not move.
   and a frame samples them all (`sync_values`). `BindingIndex` holds the bindings parsed once per revision of the tree, by element
   and by value: `value_demand` asks only the elements bound to a value that moves, and `preview` and a frame ask `element_due` of
   it. `getBuildCounters().motionValuesSampled` counts the values sampled for the elements that bind them.
+- **A patch asks for the roots it touches, not for every root or every registry entry.** On a page of 10000 live rows a header
+  edit, a hover and a row edit cost 9.1M, 3.4M and 6.3M instructions against 2.2M, 1.5M and 2.2M at 1000, and the growth was
+  walks over what did not change: the text registries (`Layered`, `tape.rs`) drained and rotated the tail of a window-long vector
+  and asked every entry whose list it was (`replace`), `publish_captured_text` compared the key of every entry, and `preview` and
+  `Retain::unit` walked every root of the frame. A registry keeps where each list wrote (`placed`, and `placed_pending` for the
+  replays it holds unexpanded), made when a patch first asks and kept while patches write as many entries as they take out
+  (`replace_runs` then overwrites in place); a push, an expansion, a `order_by_rows` or a patch that writes another number makes it
+  again. `CHILDREN` is `PARENTS` the other way round, so the lists a root holds are found from the root. `Plan` keeps each list of
+  units with their position (`UnitList`), and `preview` looks up the few ids it touches. 10000 rows, a1 / a2 / d: 1.44M / 1.68M /
+  1.33M (1000 rows: 1.44M / 1.67M / 1.34M). Still made again by the frame that moves rows (`order_by_rows`): the first patch
+  after a wheel tick pays one pass over the registries (a4 at 10000 rows is 6.2M against 2.2M at 1000).
 
 Patched ticks alone: the showcase page went from mean 4.11 to 1.82 ms (median 4.27 to 1.18) against 1.92 (median 1.55) for the tile
 alone, so nothing of the page is left in it. At window scale 2, which is what the machine gave for the sweep, the patched tick is 3.05 ms against 3.06 for the tile alone. Over a full sweep at window scale 2 the showcase went from 4.0 to 4.2 ms a draw and 28%
@@ -503,8 +516,7 @@ Nothing is built or drawn for an animation nobody sees.
   which asks every sleeper again. A frame that does not record (retention off or resting, planning off) lets them all go, and a
   destroyed element is let go by `prune`. What `holds` reads of the tree (a span, an SVG element, a `layout` element, a
   `motionValues` binding that moves a box, the shapes an `<svg>` draws) is `PaintStatics`, kept per element while its
-  `subtree_revision` and its parent are the same and pruned when the map doubles; a `<text>` in a `<text>` is read every time, since
-  what makes it an SVG element is above its parent.
+  `subtree_revision` and its parent are the same and pruned when the map doubles.
 - **Their clocks advance without a build.** `CssAnimations::advance_clock(id, now)` and the same for transitions move the runs to
   `now` as the first half of a frame does (`Run::tick`, shared with `advance`), report iterations, ends and finishes, and note
   whether a run still moves. A dormant run is not ticked until something can be due: `Run::quiet_until` is the next of the start,
@@ -885,16 +897,85 @@ the patcher turns it on with `Window::set_contained_patches`.
   nothing runs in it, nothing in it is lifted out or placed against a block outside it, it is not itself absolute or lifted,
   and it holds at most `ANCHOR_MAX_ELEMENTS` (1024). An anchor is tried before a patch root for a scroller: a scroller is never
   recorded as a root.
+- **Box roots.** A layout edit in a box whose border box what is in it cannot change is patched at that *box root*, whether a scroller
+  anchor holds it or none does: a plain `div` whose own border box what is in it cannot change (`layout/box_root.rs`: a definite height,
+  a length or `min-height` equal to `max-height`; a width that is a length, or auto and stretched across a block or a column flex
+  parent, with `align-self` stretching and no auto inline margin; not positioned or lifted, no intrinsic size keyword, group,
+  `@container` rule or `aspect-ratio`; a flex, grid or block box). It is a root like any other, recorded by the frame built whole,
+  replayed by the frames that find it unchanged and wrapped as `retained(..).patchable_relayout()`, with its `FrameEnv` in
+  `Plan::box_roots` (`Retain::begin_box_root`, `add_box_root`); no scroller is involved, so what is in it keeps the roots it has,
+  as in an anchor. The element is one when the build before judged it recordable (`Record::eligible`: nothing excluded in it, not
+  lifted, at most `UNIT_MAX_ELEMENTS`) and it is built in a plain context outside a unit, a patch root, a row of a virtual list (gpui
+  lays a row out as a root of its own and declines it) and another box root: the outermost box that qualifies holds the edit. A
+  root that was recorded before it qualified (the first frame has no record to judge by, and a root a frame skips keeps the record it
+  was made with) becomes one when a frame built whole builds it again, which an edit in it makes, so the first layout edit of a box
+  root is a frame built whole. A unit or a patch root that meets the rule is the same root with `patchable_relayout()` (`Plan::box_ids`
+  names every box root, whichever list holds it) and counts as a root a hover or a running animation repaints too: only a root that
+  holds a changed element is laid out again (`Retain::is_relaid`). The innermost relayout root wins: a scroller that is an anchor
+  keeps the box roots in it (`Retain::relayout_holding`), so a text edit in a fixed-height row of a 100-row scroller builds the row (5 elements,
+  1.7M instructions) and not the 501 of the anchor (32M, more than the 5M of a frame built whole). The anchor holds what no box root does: a
+  child added to or removed from the scroller, an edit of a child that is no box root. The two coexist as follows.
+  - A patch of a box root in an anchor splices what it paints, and gpui forgets the recordings made around the root, the anchor's: the next
+    patch of the anchor would be declined `StaleRecording` after it was built, so `Retain::anchor_repainted` notes the anchors above the root
+    (`Plan::enclosing_forgotten`) and the preview declines them `Anchor:StaleRecording` before anything is built; the frame built whole in the
+    same draw records the anchor again. The box roots beside the patched one are untouched, so edits of other rows go on being patches.
+  - A patch of the anchor builds and paints all of it flat, so the box roots in it are of the layout before: their records are dropped
+    (`anchor_repainted`) and none is patched (`Unpatchable::AnchorStale`, `Retain::nested_in_repainted`) until a frame built whole has built and
+    recorded them.
+  - An anchor patch leaves no record, so a row edit that the anchor would hold, while the row is a box that a frame could make a root and is none
+    yet, is drawn whole instead (`Retain::box_candidates`, `is_anchor_beside_candidate`, counted `Structure`): the frame builds that row alone,
+    makes it a root, and the edits after it are patches. Without it every edit would be an anchor patch, which never leaves a record to judge a box
+    by (a1-a4 at 100 rows stayed at 32M). A box that no frame records (one element, not worth a root) is no candidate.
+  So after an anchor patch (a row appended) the first edit of a row is `AnchorStale` and the next a candidate `Structure`: two frames built
+  whole before that row is patched again. Tests: `retain.rs` (`an_edit_in_a_box_root_in_an_anchor_...`, `a_box_root_patch_in_an_anchor_...`,
+  `an_anchor_patch_makes_the_box_roots_...`, `an_edit_in_a_box_that_is_a_candidate_...`), `box-root-patch.test.tsx` (the 100-row cases).
+  gpui verifies the box (`NotContained` when it changed): the decline
+  is a frame built whole in the same draw, as the anchors' is. `GPUIX_BOX_ROOTS_OFF=1` makes none.
+  A box that something runs in that only paints (a focused input's caret) is built by every frame and so is never recorded or
+  replayed: it is wrapped keyed by the frame, as a unit is (`Retain::unrecorded_box_root`, `box_root_unrecorded`), and a patch builds
+  the caret's unit flat with the rest. A box that is a row of a scroller is recorded to be put elsewhere (`relocatable`), and a patch that
+  lays it out again paints it in its region as a frame built whole records it (only where the frame has it where it was recorded: one that
+  a scroll moved is `Relocated` unless it lays out again: it is painted in its region and the splice puts it `delta` away) and rewrites its
+  recording from the patch, relocation included (zed `PatchSource::relocated_rewritable`, `Window::relocated_rewrite`), so every edit of a
+  row is a patch, not one in three, in a scroller that was scrolled too.
+  A box root whose recording gpui rewrote keeps its own record when the patch is over (`Retain::anchor_repainted`), as the record is
+  what qualifies a box: the frame built whole after the patch makes it a box root again. When gpui did not rewrite it (the reasons
+  the recording cannot be put elsewhere changed) the record goes with the recording, and the box is a root again
+  only on the build after the next frame built whole. The first layout edit of a box root that no frame built whole has made one is a frame
+  built whole too; the edits after it are patches, also after a frame built whole that an edit outside every root made.
+  **Scroll anchoring.** A scroller that was scrolled (`overflow-anchor: auto`, the default) moves its offset after a layout by what moved the
+  box it anchors to, in its own prepaint ([scroll.md](scroll.md#scroll-anchoring-82)), which a patch of a root inside it never runs. gpui's
+  relayout patch therefore makes the scrollers above the root pick their anchor before the patch's layout (`TaffyLayoutEngine::pick_anchors_of`,
+  from the boxes of the layout before it, as a frame's pick is) and asks after it what the step would do (`ScrollAnchoring::would_act`): one
+  that would scroll the scroller or drop its anchor is declined `NotContained` and the frame built whole in the same draw does it. That is an edit
+  that moves a box the scroller anchors to inside the root (a taller box above the anchor in a fixed-height row at the top of the view) or restyles
+  it; an edit that moves nothing the scroller anchors to (the anchor is another row, the row itself, or the root is out of view) is a patch. A decline
+  has set the styles, so the frame after it finds no restyle where a frame built whole from the page before drops the anchor: the flags of the pass
+  are held across the patch's end of pass and released when the patch is kept (`hold_anchor_restyles`, `release_anchor_restyles`). Tests:
+  `splice_patch_tests.rs` (5 edits at 5 offsets, offset and frame equal to a page built whole), `box-root-patch.test.tsx` (the anchored case).
+  **Measured** (`examples/solid/layout-scale/profile.tsx`, release addon, instructions per op; a1 is a text edit in the header
+  that holds a focused input, a2 a text edit in a row of the scroller): a1 at 1000, 3000 and 10000 rows 26.2M, 73.3M and 241.0M
+  before, 2.23M, 3.68M and 9.13M after (a patch of the header, `relayoutPatches` 1, nothing declined); a2 35.4M, 99.8M and 328M
+  before the rows' recordings were rewritten, 9.84M, 26.3M and 83.9M after (a patch every op, `relayoutPatches` 1, `unpatchable` and `declines`
+  empty; what was left at 10000 was taffy's flexbox pass over the scroller's children, which a row that answers its parent as it did no longer starts: 2.23M, 3.01M and 6.27M, [layout](layout.md#relayout-boundaries)); a hover (d) 1.53M, 1.94M and 3.37M (as before). The scroller scrolled to its middle and
+  moved one wheel tick, a row edited (a3): 3.28M, 3.24M and 6.54M; a row edited after a wheel tick that moved a recording a patch had rewritten (a4,
+  alternating up and down): 2.37M, 4.26M and 9.13M, a patch every op at each count (before: a frame built whole, 28M, 100M and 245M, `Box:Relocated`).
+  At 230 rows (a scroller of 1151 elements, the size of `box-root-patch.test.tsx`) a4 is a patch every op as well. The tick after a patch
+  moves the row, and the frame it builds finds the row's record (the one the patch kept) of the build before the edit, so it builds the row
+  while its scroller moves it. A box root that a scroller moved is recorded all the same, when `skippable` would take its record
+  (`Retain::to_record`: `relocates`): the row is a recorded box root of the frame shown, not an unrecorded plain element, and the next edit
+  is a patch, not a `Structure` frame built whole (it used to be every second one, at 230 and at 1000 rows).
+
 - **Which commits.** The tree notes the elements a commit changed (`RetainedTree::pending_structure`: props, style, text and children
   other than a strict restyle by paint; a created element is covered by the element it is put under, a destroyed one by the
   parent it left) and moves `patch_barrier` only for a change no element is named for (`setRoot`, the universal style,
-  `autoFocus`, `testId`, `white-space` below an element). While the frame shown has anchors (`RetainedTree::set_anchors`, published
+  `autoFocus`, `testId`, `white-space` below an element). While the frame shown has anchors or box roots (`RetainedTree::set_anchors`, published
   by `Retain::publish_anchors` when the frame is over) a batch whose changes are all attributed is `Dirty::LayoutPatchable`:
   `invalidate_after_mutation` asks for a tick (`Window::request_tick`) and notes the view in `LAYOUT_PENDING`, where a batch with
   an unattributed change notifies as before.
-- **The preview.** `Retain::preview` maps each pending changed element, still in the tree, to the innermost anchor of the frame shown
-  that holds it (walking up); one that no anchor holds is `Unpatchable::Structure` and the frame is built whole in the same
-  draw, which makes the anchors the next commit is patched in. A restyle by paint, a hover or a running animation that lies in a
+- **The preview.** `Retain::preview` maps each pending changed element, still in the tree, to the innermost anchor or box root of the
+  frame shown that holds it (walking up); one that no such root holds is `Unpatchable::Structure` and the frame is built whole in the
+  same draw, which makes the roots the next commit is patched in. A restyle by paint, a hover or a running animation that lies in a
   relaid anchor needs no root of its own: the anchor builds everything in it, so it is dropped from the units. Anchors come
   after the units in the list handed to the patcher.
 - **The patch.** `GpuixView::build_patch` builds each anchor with `build_unit` (retention suspended: everything in the anchor is
@@ -903,8 +984,8 @@ the patcher turns it on with `Window::set_contained_patches`.
   those in the place of what the frame wrote for the anchor: the boxes (`getBoundingClientRect`) are published and those of elements
   the anchor no longer paints forgotten, and the selection text, start regions, painted-text log and inline paragraphs take the
   place, in the registry's order, of the writes of the tape before (`Layered::replace`). The observers are swept after the patch
-  as after a scroll translate. `Retain::anchor_repainted` drops the records of everything in the anchor, so the next frame built
-  whole builds and records all of it: gpui's splice forgets the recordings of the roots nested in the anchor and around it, which
+  as after a scroll translate. `Retain::anchor_repainted` drops the records of everything in the anchor (but a box root's own
+  record when gpui rewrote its recording), so the next frame built whole builds and records all of it: gpui's splice forgets the recordings of the roots nested in the anchor and around it, which
   are of the layout before, so none of them is skipped (`Plan::repainted`), and a unit or patch root in a patched anchor that a
   commit does not relay is `Anchor:StaleRecording` until a frame is built whole.
 - **What the splice and the rewrite changed.** The anchor is built flat, so the patch registers other counts than the recording: gpui
@@ -924,7 +1005,7 @@ the patcher turns it on with `Window::set_contained_patches`.
 - **Declines.** gpui declines `NotContained` when something outside the anchor moved or the anchor's own box changed (a detail
   that is as wide as its content, with a sibling that shrinks), `StaleRecording` when it has no recording of the anchor (only
   when Ghia could not tell: Ghia declines first), and `LayoutMismatch` while an accessibility tree is built. Ghia declines before
-  building: `Structure`, `Anchor:StaleRecording`, and `Anchor:<blocker>` for what `Window::patch_blocker` says. A declined patch is
+  building: `Structure`, `Anchor:StaleRecording`, and `Anchor:<blocker>` or `Box:<blocker>` for what `Window::patch_blocker` says of a root that is laid out again. A declined patch is
   drawn whole in the same draw, with the layout work of the patch kept.
 - **Reads.** A batch that moved boxes (`LayoutPatchable`) leaves the layout older than the tree while its tick is waiting. A read of
   boxes or scroll metrics before the draw (`settle_pending_layout`, called by every read that lays out) prepares the patch instead of
@@ -943,7 +1024,7 @@ the patcher turns it on with `Window::set_contained_patches`.
   so the frame after a discard is built whole (`StaleRecording`) and records it again. A decline of the prepare (gpui's, `NotContained`
   for one) falls back to what a read did before: the view is notified, a pass runs, and the tick is drawn whole (`PendingView`); a
   preview that declines is counted in `unpatchable` as `Read:<kind>`.
-- **Counters.** `getPatchCounters().relayoutPatches` (anchors repainted after a layout), `rewrittenRecordings` (of those, the ones
+- **Counters.** `getPatchCounters().relayoutPatches` (anchors and box roots repainted after a layout), `rewrittenRecordings` (of those, the ones
   whose recording gpui made again), the `declines` above of gpui, and in `unpatchable`: `Structure`, `Anchor:StaleRecording`,
   `Anchor:Relocated` and the like.
 

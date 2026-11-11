@@ -91,7 +91,7 @@ describe.skipIf(!hasNativeTestRenderer)("MutationObserver in Solid", () => {
 
   it("reports a text change as characterData with the old text", () => {
     const [text, setText] = createSignal("one")
-    app.render(() => <text>{text()}</text>)
+    app.render(() => <div>{text()}</div>)
     const node = document.body!.firstElementChild!.firstChild!
     const observer = observe(node, { characterData: true, characterDataOldValue: true })
     setText("two")

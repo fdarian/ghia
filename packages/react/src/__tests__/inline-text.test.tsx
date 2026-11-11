@@ -48,9 +48,9 @@ describeNative("inline text", () => {
     const testRoot = createTestRoot()
     testRoot.render(
       <div style={{ width: 600, backgroundColor: "#ffffff" }}>
-        <text testId="p" style={{ ...TEXT, color: "#000000" }}>
+        <div testId="p" style={{ ...TEXT, color: "#000000" }}>
           plain <span style={{ color: "#ff0000", fontWeight: 700 }}>red <span style={{ backgroundColor: "#ffff00" }}>marked</span></span> tail
-        </text>
+        </div>
       </div>
     )
 
@@ -68,11 +68,11 @@ describeNative("inline text", () => {
     const testRoot = createTestRoot()
     testRoot.render(
       <div style={{ width: 600, backgroundColor: "#ffffff" }}>
-        <text testId="p" style={{ ...TEXT, color: "#000000" }}>
+        <div testId="p" style={{ ...TEXT, color: "#000000" }}>
           <span style={{ color: "#0000ff", backgroundColor: "#00ff00" }}>
             outer<span>inner</span>
           </span>
-        </text>
+        </div>
       </div>
     )
 
@@ -89,10 +89,10 @@ describeNative("inline text", () => {
     const spanned = createTestRoot()
     spanned.render(
       <div style={{ width: 140 }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           alpha beta gamma <span style={{ fontWeight: 700 }}>delta epsilon zeta</span> eta theta{" "}
           <span style={{ color: "#ff0000" }}>iota kappa</span> lambda mu
-        </text>
+        </div>
       </div>
     )
     expect(spanned.renderer.getPaintedText()).toEqual([words])
@@ -102,9 +102,9 @@ describeNative("inline text", () => {
     const plain = createTestRoot()
     plain.render(
       <div style={{ width: 140 }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           {words}
-        </text>
+        </div>
       </div>
     )
     // Bold is wider, so it may wrap further, never less.
@@ -147,8 +147,8 @@ describeNative("inline text", () => {
     const testRoot = createTestRoot()
     testRoot.render(
       <div testId="d" style={{ width: 600, ...TEXT }}>
-        <text>first</text>
-        <text>second</text>
+        <div>first</div>
+        <div>second</div>
       </div>
     )
 
@@ -159,9 +159,9 @@ describeNative("inline text", () => {
   it("makes a nested text an inline run", () => {
     const testRoot = createTestRoot()
     testRoot.render(
-      <text testId="p" style={{ ...TEXT, width: 600 }}>
-        a<text style={{ color: "#ff0000" }}>b</text>c
-      </text>
+      <div testId="p" style={{ ...TEXT, width: 600 }}>
+        a<span style={{ color: "#ff0000" }}>b</span>c
+      </div>
     )
 
     expect(testRoot.renderer.getPaintedText()).toEqual(["abc"])
@@ -257,9 +257,9 @@ describeNative("inline text", () => {
       const testRoot = createTestRoot()
       testRoot.render(
         <div style={{ padding: 20 }}>
-          <text style={{ fontSize: 20 }}>
+          <div style={{ fontSize: 20 }}>
             Hello <span style={{ fontWeight: 700 }}>big</span> world
-          </text>
+          </div>
         </div>
       )
 
@@ -270,10 +270,10 @@ describeNative("inline text", () => {
       const testRoot = createTestRoot()
       testRoot.render(
         <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-          <text style={{ fontSize: 20 }}>
+          <div style={{ fontSize: 20 }}>
             one <span>two</span>
-          </text>
-          <text style={{ fontSize: 20 }}>three</text>
+          </div>
+          <div style={{ fontSize: 20 }}>three</div>
         </div>
       )
 
@@ -284,9 +284,9 @@ describeNative("inline text", () => {
       const testRoot = createTestRoot()
       testRoot.render(
         <div highlight={{ query: "o bi" }}>
-          <text style={{ fontSize: 20 }}>
+          <div style={{ fontSize: 20 }}>
             Hello <span style={{ fontWeight: 700 }}>big</span> world
-          </text>
+          </div>
         </div>
       )
 
@@ -334,9 +334,9 @@ describeNative("inline text", () => {
     it("reads nested inline text in the accessibility value", () => {
       const testRoot = createTestRoot()
       testRoot.render(
-        <text style={{ ...TEXT, width: 300 }}>
-          Hello <span>big <text>wide</text></span> world
-        </text>
+        <div style={{ ...TEXT, width: 300 }}>
+          Hello <span>big <span>wide</span></span> world
+        </div>
       )
 
       const labels = Object.values(testRoot.renderer.getA11yTree().nodes ?? {})
@@ -350,9 +350,9 @@ describeNative("inline text", () => {
     it("joins the children of a display contents child to the paragraph", () => {
       const testRoot = createTestRoot()
       testRoot.render(
-        <text testId="p" style={{ ...TEXT, width: 600 }}>
+        <div testId="p" style={{ ...TEXT, width: 600 }}>
           a <span testId="s"><span style={{ display: "contents" }}>b</span></span> c
-        </text>
+        </div>
       )
 
       expect(testRoot.renderer.getPaintedText()).toEqual(["a b c"])
@@ -362,17 +362,17 @@ describeNative("inline text", () => {
     it("flattens a display contents chain and still lets a block inside split the span out", () => {
       const testRoot = createTestRoot()
       testRoot.render(
-        <text testId="p" style={{ ...TEXT, width: 600 }}>
+        <div testId="p" style={{ ...TEXT, width: 600 }}>
           a<span><span style={{ display: "contents" }}><span style={{ display: "contents" }}>b</span>c</span></span>d
-        </text>
+        </div>
       )
       expect(testRoot.renderer.getPaintedText()).toEqual(["abcd"])
 
       const block = createTestRoot()
       block.render(
-        <text testId="p" style={{ ...TEXT, width: 600 }}>
+        <div testId="p" style={{ ...TEXT, width: 600 }}>
           a<span><span style={{ display: "contents" }}><div style={{ height: 30 }} /></span></span>d
-        </text>
+        </div>
       )
       expect(block.renderer.getPaintedText()).toEqual(["a", "d"])
     })
@@ -381,9 +381,9 @@ describeNative("inline text", () => {
       const testRoot = createTestRoot()
       testRoot.render(
         <div style={{ width: 600, backgroundColor: "#ffffff" }}>
-          <text testId="p" style={{ ...TEXT, color: "#000000" }}>
+          <div testId="p" style={{ ...TEXT, color: "#000000" }}>
             <span><span style={{ display: "contents", color: "#ff0000" }}>redred</span></span>
-          </text>
+          </div>
         </div>
       )
 
@@ -397,9 +397,9 @@ describeNative("inline text", () => {
       const testRoot = createTestRoot()
       testRoot.render(
         <div style={{ width: 600, backgroundColor: "#ffffff" }}>
-          <text testId="p" style={{ ...TEXT, color: "#000000" }}>
+          <div testId="p" style={{ ...TEXT, color: "#000000" }}>
             <span style={{ display: "contents", color: "#ff0000" }}>redred</span>
-          </text>
+          </div>
           <div testId="q" style={{ ...TEXT, color: "#000000" }}>
             <div style={{ display: "contents", color: "#0000ff" }}>blue</div>
           </div>
@@ -439,9 +439,9 @@ describeNative("inline text", () => {
       const testRoot = createTestRoot()
       testRoot.render(
         <div style={{ width: 600, backgroundColor: "#ffffff" }}>
-          <text testId="p" style={{ ...TEXT, color: "#000000" }}>
+          <div testId="p" style={{ ...TEXT, color: "#000000" }}>
             <span><span style={{ display: "contents", backgroundColor: "#ffff00" }}>text</span></span>
-          </text>
+          </div>
         </div>
       )
 
@@ -455,10 +455,10 @@ describeNative("inline text", () => {
     function Line({ first }: { first: boolean }) {
       return (
         <div style={{ padding: 20, backgroundColor: "#ffffff", width: 400, selectionColor: "#00ff00" }}>
-          <text testId="p" style={{ fontSize: 20, color: "#000000" }}>
+          <div testId="p" style={{ fontSize: 20, color: "#000000" }}>
             {first ? "Hello " : null}
             <span>big</span> world
-          </text>
+          </div>
         </div>
       )
     }
@@ -481,9 +481,9 @@ describeNative("inline text", () => {
     function signature(name: string, decoration: React.CSSProperties, paragraph: object = {}) {
       const testRoot = createTestRoot()
       testRoot.render(
-        <text style={{ ...WHITE, ...paragraph }}>
+        <div style={{ ...WHITE, ...paragraph }}>
           <span style={decoration as never}>xx</span>
-        </text>
+        </div>
       )
       return digest(shoot(testRoot, `decoration-${name}`))
     }
@@ -499,9 +499,9 @@ describeNative("inline text", () => {
     function colored(name: string, decoration: object, color: Rgb) {
       const testRoot = createTestRoot()
       testRoot.render(
-        <text testId="p" style={WHITE}>
+        <div testId="p" style={WHITE}>
           <span style={decoration as never}>xx</span>
-        </text>
+        </div>
       )
       return count(shoot(testRoot, `decoration-${name}`), bounds(testRoot, "p"), color)
     }
@@ -519,11 +519,11 @@ describeNative("inline text", () => {
     it("draws the same as the lines set one box at a time", () => {
       const testRoot = createTestRoot()
       testRoot.render(
-        <text style={WHITE}>
+        <div style={WHITE}>
           <span style={{ textDecoration: "underline" }}>
             <span style={{ textDecoration: "line-through" }}>xx</span>
           </span>
-        </text>
+        </div>
       )
       expect(signature("ul-both", { textDecoration: "underline line-through" })).toBe(
         digest(shoot(testRoot, "decoration-nested"))
@@ -574,9 +574,9 @@ describeNative("inline text", () => {
     it("draws the line of a block's shorthand in its colour", () => {
       const testRoot = createTestRoot()
       testRoot.render(
-        <text testId="p" style={{ ...WHITE, textDecoration: "underline line-through #ff0000" }}>
+        <div testId="p" style={{ ...WHITE, textDecoration: "underline line-through #ff0000" }}>
           xx
-        </text>
+        </div>
       )
       const area = bounds(testRoot, "p")
       const pixels = shoot(testRoot, "decoration-block")
@@ -586,11 +586,11 @@ describeNative("inline text", () => {
     it("keeps the colour of the box that declared the line when a descendant changes the text colour", () => {
       const testRoot = createTestRoot()
       testRoot.render(
-        <text testId="p" style={WHITE}>
+        <div testId="p" style={WHITE}>
           <span style={{ textDecoration: "underline" }}>
             <span style={{ color: "#ff0000" }}>xx</span>
           </span>
-        </text>
+        </div>
       )
       const area = bounds(testRoot, "p")
       const pixels = shoot(testRoot, "decoration-owner-color")
@@ -602,9 +602,9 @@ describeNative("inline text", () => {
     it("draws the underline of a box inside an underlined box besides the outer one", () => {
       const testRoot = createTestRoot()
       testRoot.render(
-        <text testId="p" style={{ ...WHITE, textDecoration: "underline #ff0000" }}>
+        <div testId="p" style={{ ...WHITE, textDecoration: "underline #ff0000" }}>
           <span style={{ textDecoration: "underline dotted 3px #0000ff" }}>xx</span>
-        </text>
+        </div>
       )
       const area = bounds(testRoot, "p")
       const pixels = shoot(testRoot, "decoration-accumulated")
@@ -634,13 +634,13 @@ describeNative("inline text", () => {
     }
 
     it("slants a block's text and a span inside it inherits it", () => {
-      const plain = signature("style-plain", <text style={WHITE}>Hilly fish</text>)
-      const italic = signature("style-italic", <text style={{ ...WHITE, fontStyle: "italic" }}>Hilly fish</text>)
+      const plain = signature("style-plain", <div style={WHITE}>Hilly fish</div>)
+      const italic = signature("style-italic", <div style={{ ...WHITE, fontStyle: "italic" }}>Hilly fish</div>)
       const inherited = signature(
         "style-inherited",
-        <text style={{ ...WHITE, fontStyle: "italic" }}>
+        <div style={{ ...WHITE, fontStyle: "italic" }}>
           Hilly <span>fish</span>
-        </text>
+        </div>
       )
 
       expect(italic).not.toBe(plain)
@@ -648,19 +648,19 @@ describeNative("inline text", () => {
     })
 
     it("lets a span set and reset the style of its own run", () => {
-      const plain = signature("style-run-plain", <text style={WHITE}>Hilly fish</text>)
-      const italic = signature("style-run-italic", <text style={{ ...WHITE, fontStyle: "italic" }}>Hilly fish</text>)
+      const plain = signature("style-run-plain", <div style={WHITE}>Hilly fish</div>)
+      const italic = signature("style-run-italic", <div style={{ ...WHITE, fontStyle: "italic" }}>Hilly fish</div>)
       const spanItalic = signature(
         "style-run-set",
-        <text style={WHITE}>
+        <div style={WHITE}>
           Hilly <span style={{ fontStyle: "italic" }}>fish</span>
-        </text>
+        </div>
       )
       const spanNormal = signature(
         "style-run-reset",
-        <text style={{ ...WHITE, fontStyle: "italic" }}>
+        <div style={{ ...WHITE, fontStyle: "italic" }}>
           Hilly <span style={{ fontStyle: "normal" }}>fish</span>
-        </text>
+        </div>
       )
 
       expect(spanItalic).not.toBe(plain)

@@ -139,7 +139,7 @@ describeNative("form", () => {
             style={{ width: 200, height: 80 }}
             onChange={(event) => setText(event.value)}
           />
-          <text testId="out">{JSON.stringify(text)}</text>
+          <div testId="out">{JSON.stringify(text)}</div>
         </form>
       )
     }
@@ -150,8 +150,9 @@ describeNative("form", () => {
   })
 
   describe("implicit submission without a submit button", () => {
-    // gpuix has no submit button, so a form has no default button: HTML submits
-    // on Enter only when at most one field blocks implicit submission.
+    // With no submit button a form has no default button: HTML submits on Enter
+    // only when at most one field blocks implicit submission. With one, Enter
+    // clicks it (see html-semantics.test.tsx).
     it("does not submit on Enter when the form has two inputs", () => {
       mountForm(
         <>

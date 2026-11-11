@@ -26,7 +26,7 @@ describeNative("React unmount", () => {
     expect(testRoot.renderer.getRetainedElementCount()).toBe(0)
   })
 
-  it("destroys sibling top-level nodes, and the html and body above them", () => {
+  it("destroys sibling top-level nodes, and the html, head and body above them", () => {
     const testRoot = createTestRoot()
     testRoot.render(
       <>
@@ -34,8 +34,8 @@ describeNative("React unmount", () => {
         <div style={{ width: 10, height: 10 }} />
       </>
     )
-    // html, body and the two divs
-    expect(testRoot.renderer.getRetainedElementCount()).toBe(4)
+    // html, head, body and the two divs
+    expect(testRoot.renderer.getRetainedElementCount()).toBe(5)
     testRoot.unmount()
     expect(testRoot.renderer.getRetainedElementCount()).toBe(0)
   })

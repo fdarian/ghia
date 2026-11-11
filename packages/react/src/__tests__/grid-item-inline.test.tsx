@@ -1,6 +1,6 @@
 /// Inline content in a grid or flex item. CSS Grid 6.1 blockifies the in-flow children of the container
 /// itself, and wraps each contiguous run of text in an anonymous item; whatever is inside an item (a
-/// `<div>`, a `<text>`, a `<span>`, which blockify as items) is an ordinary inline formatting context, so
+/// `<div>`, a `<span>`, which blockify as items) is an ordinary inline formatting context, so
 /// a `<span>` there stays on the line with its text and its weight moves only what follows it.
 /// Numbers are from headless Chrome (chrome-headless-shell). The square font is GpuixTestSquare at 20px/20px:
 /// 20px a letter (no spaces: the fallback glyph of a space differs). Helvetica Neue is the system face, so only x and width are compared.

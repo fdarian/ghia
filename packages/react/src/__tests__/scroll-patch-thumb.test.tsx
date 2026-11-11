@@ -38,7 +38,7 @@ function Page({ count = COUNT }: { count?: number }) {
     >
       {Array.from({ length: count }, (_, index) => (
         <div key={index} testId={`row-${index}`} style={{ width: 150, height: ROW, flexShrink: 0, backgroundColor: index % 2 === 0 ? "#223344" : "#334455" }}>
-          <text style={{ color: "#ffffff" }}>{`row-${index}`}</text>
+          <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
         </div>
       ))}
     </virtual-list>

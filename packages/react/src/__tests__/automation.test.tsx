@@ -20,7 +20,7 @@ function Counter() {
         style={{ width: 200, height: 80 }}
         onClick={() => setCount((value) => value + 1)}
       >
-        <text>{`Count: ${count}`}</text>
+        <div>{`Count: ${count}`}</div>
       </div>
     </div>
   )
@@ -51,7 +51,7 @@ describeNative("automation", () => {
             transition: { duration: 0.3, ease: "linear" },
           }}
         >
-          <text>box</text>
+          <div>box</div>
         </div>
       )
     }
@@ -104,7 +104,7 @@ describeNative("automation", () => {
               setOrigin(null)
             }}
           >
-            <text>{`x=${Math.round(x)}`}</text>
+            <div>{`x=${Math.round(x)}`}</div>
           </div>
         </div>
       )
@@ -136,7 +136,7 @@ describeNative("automation", () => {
           onClick={(event) => seen.push({ click: event.isRightClick })}
           onAuxClick={(event) => seen.push({ aux: event.isRightClick })}
         >
-          <text>target</text>
+          <div>target</div>
         </div>
       )
     }
@@ -174,7 +174,7 @@ describeNative("automation", () => {
             })
           }
         >
-          <text>surface</text>
+          <div>surface</div>
         </div>
       )
     }

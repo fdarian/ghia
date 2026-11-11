@@ -87,12 +87,15 @@ function attachTypeMembers(instance: Instance, container: Container): void {
     attachTextControlMethods(instance as TextControlInstance, container)
   } else if (instance.type === "form") {
     const form = instance as FormInstance
-    form.requestSubmit = () =>
-      requestFormSubmit({
-        id: form.nativeId,
-        nativeRenderer: container.nativeRenderer,
-        flushMutations: () => container.renderer.flushMutations(),
-      })
+    form.requestSubmit = (submitter) =>
+      requestFormSubmit(
+        {
+          id: form.nativeId,
+          nativeRenderer: container.nativeRenderer,
+          flushMutations: () => container.renderer.flushMutations(),
+        },
+        submitter,
+      )
   } else if (instance.type === "webview") {
     Object.assign(
       instance as WebviewInstance,
@@ -149,7 +152,7 @@ export function nextId(container: Container): number {
   return ++container.ids.nextElementId
 }
 
-/** SVG shapes exist only inside an `<svg>`; text and other elements go anywhere. */
+/** SVG shapes, `<text>` among them, exist only inside an `<svg>`; every other element goes anywhere. */
 export function assertPlacement(parent: Instance | undefined, child: Instance | TextInstance): void {
   if ("type" in child) assertSvgPlacement(parent?.type, child.type)
 }
@@ -337,7 +340,7 @@ export function materialize(node: HostNode): ReturnType<typeof stateFor> {
     syncEventListeners(state.container, node)
     syncCustomProps(renderer, node.nativeId, node.type, node.props)
   } else {
-    renderer.createElement(node.nativeId, "text")
+    renderer.createElement(node.nativeId, "#text")
     renderer.setText(node.nativeId, node.text)
   }
   state.mounted = true
@@ -535,16 +538,15 @@ export const hostConfig = {
   },
 
   getRootHostContext(_rootContainerInstance: Container): HostContext {
-    return { isInsideText: false }
+    return {}
   },
 
   getChildHostContext(
     parentHostContext: HostContext,
-    type: ElementType,
+    _type: ElementType,
     _rootContainerInstance: Container
   ): HostContext {
-    const isInsideText = type === "text" || type === "span"
-    return { ...parentHostContext, isInsideText }
+    return parentHostContext
   },
 
   shouldSetTextContent(_type: ElementType, _props: Props): boolean {

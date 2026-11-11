@@ -202,5 +202,6 @@ describe.skipIf(!hasNativeTestRenderer)("Solid svg children", () => {
     const app = createTestRoot()
     expect(() => app.render(() => <div><circle r={1} /></div>)).toThrow(/only valid inside <svg>/)
     expect(() => app.render(() => <div><filter /></div>)).toThrow(/only valid inside <svg>/)
+    expect(() => app.render(() => <div><text>Hi</text></div>)).toThrow(/<text> is only valid inside <svg>/)
   })
 })

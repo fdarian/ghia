@@ -71,7 +71,7 @@ function Avatar(props: { name: string; size: number; fontSize: number; style?: S
         ...props.style,
       }}
     >
-      <text style={{ fontSize: props.fontSize, fontWeight: 600, color: '#FFFFFF' }}>{initials(props.name)}</text>
+      <div style={{ fontSize: props.fontSize, fontWeight: 600, color: '#FFFFFF' }}>{initials(props.name)}</div>
     </div>
   )
 }
@@ -100,7 +100,7 @@ function Sidebar(props: { unreadCount: number }) {
           paddingLeft: 16,
         }}
       >
-        <text style={{ fontSize: 15, fontWeight: 600, color: '#18181B' }}>Mailbox</text>
+        <div style={{ fontSize: 15, fontWeight: 600, color: '#18181B' }}>Mailbox</div>
       </div>
       <For each={FOLDERS}>
         {(name) => {
@@ -123,10 +123,10 @@ function Sidebar(props: { unreadCount: number }) {
                 hover: { backgroundColor: selected ? '#E4E4E7' : '#EBEBED' },
               }}
             >
-              <text style={{ fontSize: 13, color: '#27272A' }}>{name}</text>
-              <text style={{ fontSize: 12, color: '#71717A' }}>
+              <div style={{ fontSize: 13, color: '#27272A' }}>{name}</div>
+              <div style={{ fontSize: 12, color: '#71717A' }}>
                 {formatCount(selected ? props.unreadCount : FOLDER_COUNTS[name])}
-              </text>
+              </div>
             </div>
           )
         }}
@@ -142,7 +142,7 @@ function Sidebar(props: { unreadCount: number }) {
           paddingLeft: 16,
         }}
       >
-        <text style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA' }}>LABELS</text>
+        <div style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA' }}>LABELS</div>
       </div>
       <For each={LABELS}>
         {(label) => (
@@ -161,7 +161,7 @@ function Sidebar(props: { unreadCount: number }) {
             }}
           >
             <div style={{ width: 8, height: 8, flexShrink: 0, borderRadius: 4, backgroundColor: label.color }} />
-            <text style={{ fontSize: 13, color: '#3F3F46' }}>{label.name}</text>
+            <div style={{ fontSize: 13, color: '#3F3F46' }}>{label.name}</div>
           </div>
         )}
       </For>
@@ -207,7 +207,7 @@ function Row(props: { message: Message; selected: boolean; onSelect: () => void 
             height: 18,
           }}
         >
-          <text
+          <div
             style={{
               ...oneLine,
               minWidth: 0,
@@ -217,15 +217,15 @@ function Row(props: { message: Message; selected: boolean; onSelect: () => void 
             }}
           >
             {props.message.fromName}
-          </text>
-          <text style={{ flexShrink: 0, fontSize: 12, color: '#71717A' }}>{props.message.time}</text>
+          </div>
+          <div style={{ flexShrink: 0, fontSize: 12, color: '#71717A' }}>{props.message.time}</div>
         </div>
-        <text style={{ ...oneLine, height: 18, lineHeight: '18px', fontSize: 13, color: '#27272A' }}>
+        <div style={{ ...oneLine, height: 18, lineHeight: '18px', fontSize: 13, color: '#27272A' }}>
           {props.message.subject}
-        </text>
-        <text style={{ ...oneLine, height: 16, lineHeight: '16px', fontSize: 12, color: '#71717A' }}>
+        </div>
+        <div style={{ ...oneLine, height: 16, lineHeight: '16px', fontSize: 12, color: '#71717A' }}>
           {props.message.snippet}
-        </text>
+        </div>
       </div>
     </div>
   )
@@ -251,13 +251,13 @@ function Detail(props: { message: Message | undefined; ref: (element: HostElemen
         keyed
         fallback={
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexGrow: 1 }}>
-            <text style={{ fontSize: 14, color: '#A1A1AA' }}>No message selected</text>
+            <div style={{ fontSize: 14, color: '#A1A1AA' }}>No message selected</div>
           </div>
         }
       >
         {(message) => (
           <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-            <text style={{ fontSize: 22, lineHeight: '28px', fontWeight: 600, color: '#18181B' }}>{message.subject}</text>
+            <div style={{ fontSize: 22, lineHeight: '28px', fontWeight: 600, color: '#18181B' }}>{message.subject}</div>
             <div
               style={{
                 display: 'flex',
@@ -270,16 +270,16 @@ function Detail(props: { message: Message | undefined; ref: (element: HostElemen
             >
               <Avatar name={message.fromName} size={40} fontSize={15} />
               <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <text style={{ height: 20, lineHeight: '20px', fontSize: 14, fontWeight: 600, color: '#18181B' }}>
+                <div style={{ height: 20, lineHeight: '20px', fontSize: 14, fontWeight: 600, color: '#18181B' }}>
                   {message.fromName}
-                </text>
-                <text style={{ height: 20, lineHeight: '20px', fontSize: 13, color: '#71717A' }}>{message.fromEmail}</text>
+                </div>
+                <div style={{ height: 20, lineHeight: '20px', fontSize: 13, color: '#71717A' }}>{message.fromEmail}</div>
               </div>
-              <text style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 12, color: '#71717A' }}>{message.dateLong}</text>
+              <div style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 12, color: '#71717A' }}>{message.dateLong}</div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 24 }}>
               <For each={message.body}>
-                {(paragraph) => <text style={{ fontSize: 14, lineHeight: '22px', color: '#27272A' }}>{paragraph}</text>}
+                {(paragraph) => <div style={{ fontSize: 14, lineHeight: '22px', color: '#27272A' }}>{paragraph}</div>}
               </For>
             </div>
           </div>
@@ -384,7 +384,7 @@ export function App(props: { messages: Message[] }) {
           />
         </div>
         <div style={{ flexShrink: 0, height: 28, display: 'flex', alignItems: 'center', paddingLeft: 16 }}>
-          <text style={{ fontSize: 12, color: '#71717A' }}>{`${numberFormat.format(results().length)} conversations`}</text>
+          <div style={{ fontSize: 12, color: '#71717A' }}>{`${numberFormat.format(results().length)} conversations`}</div>
         </div>
         <virtual-list
           ref={list}

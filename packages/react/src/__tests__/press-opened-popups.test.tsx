@@ -163,7 +163,7 @@ function ComboboxScene() {
       <div style={{ display: "flex", flexDirection: "row", width: 400, height: 40 }}>
         <ComboboxInput testId="input" style={{ width: 180, height: 32 }} />
         <ComboboxTrigger testId="trigger" style={{ width: 40, height: 32, backgroundColor: "#333333" }}>
-          <text>v</text>
+          <div>v</div>
         </ComboboxTrigger>
       </div>
       <ComboboxContent testId="content" style={{ width: 180, backgroundColor: "#222222" }}>

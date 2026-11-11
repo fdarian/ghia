@@ -76,7 +76,7 @@ describeNative("appearance", () => {
   it("moves matchMedia(prefers-color-scheme) and tells its listeners", () => {
     const system = systemAppearance()
     const { render, renderer, unmount } = createTestRoot()
-    render(<text>x</text>)
+    render(<div>x</div>)
     const dark = matchMedia("(prefers-color-scheme: dark)")
     const changes: boolean[] = []
     dark.addEventListener("change", (event) => changes.push((event as { matches: boolean }).matches))

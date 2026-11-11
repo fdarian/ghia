@@ -31,7 +31,9 @@ const NO_ROOT = { eventHandlers: new Map(), elementById: () => undefined }
 
 /** Runs the `resize` listeners of `listeners` with `target` as the event's target. */
 function sendResize(listeners: GpuixEventTarget, target: object): void {
-  const { event, state } = createDomEvent(NO_ROOT, { elementId: 0, eventType: "resize" }, [], target)
+  const created = createDomEvent(NO_ROOT, { elementId: 0, eventType: "resize" }, [], target)
+  const event = created.event
+  const state = created.state
   const errors: unknown[] = []
   listeners.run(event, state, true, EVENT_PHASE_AT_TARGET, (error) => errors.push(error))
   listeners.run(event, state, false, EVENT_PHASE_AT_TARGET, (error) => errors.push(error))

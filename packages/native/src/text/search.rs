@@ -1,7 +1,7 @@
 //! Highlight ranges painted behind text: search matches and explicit ranges.
 //!
 //! There is deliberately no joined "document" for the `query` case. React makes
-//! a separate host node for every interpolated string, so `<text>Hello {name}!`
+//! a separate host node for every interpolated string, so `<div>Hello {name}!</div>`
 //! is three painted runs of ONE logical line. Those runs are merged into a
 //! [`Group`]; a match never crosses a group. Chrome's find behaves the same way
 //! across a paragraph boundary, and it means a 5k-row list is 5k small strings
@@ -228,11 +228,15 @@ impl std::fmt::Debug for Needle {
 ///
 /// Lowercasing alone is not enough: Unicode case conversion changes byte length
 /// (`İ` is 2 bytes and folds to 3), so a match offset in folded space does not
-/// index the original. The map converts it back exactly.
+/// index the original. The map converts it back exactly. The break opportunities of
+/// `<wbr>` are left out, see [`without_break_opportunities`].
 fn fold(text: &str) -> (String, Vec<u32>) {
     let mut folded = String::with_capacity(text.len());
     let mut map: Vec<u32> = Vec::with_capacity(text.len() + 1);
     for (ix, ch) in text.char_indices() {
+        if ch == crate::html::BREAK_OPPORTUNITY {
+            continue;
+        }
         for lower in ch.to_lowercase() {
             let len = lower.len_utf8();
             folded.push(lower);
@@ -243,6 +247,35 @@ fn fold(text: &str) -> (String, Vec<u32>) {
     }
     map.push(text.len() as u32);
     (folded, map)
+}
+
+/// `text` without the zero width spaces `<wbr>` puts in a paragraph, and the byte of `text` each byte of the
+/// result came from: find-in-page does not see a break opportunity, so a query matches across one. `None`
+/// when `text` has none, which is the case of nearly every group.
+fn without_break_opportunities(text: &str) -> Option<(String, Vec<u32>)> {
+    if !text.contains(crate::html::BREAK_OPPORTUNITY) {
+        return None;
+    }
+    let mut kept = String::with_capacity(text.len());
+    let mut map: Vec<u32> = Vec::with_capacity(text.len() + 1);
+    for (ix, ch) in text.char_indices() {
+        if ch == crate::html::BREAK_OPPORTUNITY {
+            continue;
+        }
+        kept.push(ch);
+        map.extend(std::iter::repeat_n(ix as u32, ch.len_utf8()));
+    }
+    map.push(text.len() as u32);
+    Some((kept, map))
+}
+
+/// The range of `text` that the match `hit` of a text read through `map` stands for. A break opportunity
+/// just after the match is not part of it, though the map of its end points past it.
+fn original_range(text: &str, map: &[u32], hit: Range<usize>) -> Option<Range<usize>> {
+    let (&start, &end) = (map.get(hit.start)?, map.get(hit.end)?);
+    let end = text[..end as usize].trim_end_matches(crate::html::BREAK_OPPORTUNITY).len();
+    let range = start as usize..end;
+    (!range.is_empty()).then_some(range)
 }
 
 // ── Offsets ──────────────────────────────────────────────────────────
@@ -285,8 +318,9 @@ fn is_word_char(ch: char) -> bool {
 }
 
 fn is_whole_word(text: &str, range: &Range<usize>) -> bool {
-    let before = text[..range.start].chars().next_back();
-    let after = text[range.end..].chars().next();
+    let is_text = |c: &char| *c != crate::html::BREAK_OPPORTUNITY;
+    let before = text[..range.start].chars().rev().find(is_text);
+    let after = text[range.end..].chars().find(is_text);
     !before.is_some_and(is_word_char) && !after.is_some_and(is_word_char)
 }
 
@@ -494,7 +528,7 @@ pub fn settle_frame(window: WindowId) -> Vec<u64> {
 ///
 /// Numbering at build time cannot work: retained matches are located before the
 /// frame, native text only exists during it, and a subtree can interleave them
-/// (`<code>` then `<text>`). Numbering each kind separately made `activeIndex`
+/// (`<code>` then a string). Numbering each kind separately made `activeIndex`
 /// point at the wrong match whenever a native element came first.
 ///
 /// Numbering in paint order cannot work either: a positioned element paints after the
@@ -540,7 +574,7 @@ fn wash(
     }
 }
 
-/// Washes for a retained `<text>` run, looked up by selection key.
+/// Washes for a retained text run, looked up by selection key.
 pub fn washes_for_retained_run(
     window: WindowId,
     ctx: &HighlightContext,
@@ -624,21 +658,23 @@ fn matches_in(
     }
     let mut out = Vec::new();
     if spec.case_sensitive {
-        for range in spec.needle.find(text) {
-            if !spec.whole_word || is_whole_word(text, &range) {
+        let stripped = without_break_opportunities(text);
+        let haystack = stripped.as_ref().map_or(text, |(kept, _)| kept.as_str());
+        for hit in spec.needle.find(haystack) {
+            let range = match &stripped {
+                Some((_, map)) => original_range(text, map, hit),
+                None => Some(hit),
+            };
+            if let Some(range) = range.filter(|range| !spec.whole_word || is_whole_word(text, range)) {
                 out.push(range);
             }
         }
         return out;
     }
     for hit in spec.needle.find(folded) {
-        let (Some(&start), Some(&end)) = (fold_map.get(hit.start), fold_map.get(hit.end)) else {
+        let Some(range) = original_range(text, fold_map, hit) else {
             continue;
         };
-        let range = start as usize..end as usize;
-        if range.start >= range.end {
-            continue;
-        }
         if !spec.whole_word || is_whole_word(text, &range) {
             out.push(range);
         }
@@ -721,22 +757,11 @@ impl GroupList {
     }
 }
 
-/// True for a primitive text node, the kind React makes for a raw string.
-///
-/// Shape only: an empty one is transparent rather than a run boundary, so
-/// `{'a'}{''}{'b'}` stays one line. Copy uses the same predicate through
-/// [`group_id`], which is the only way the two can agree.
-pub fn is_text_leaf(element: &RetainedElement) -> bool {
-    element.element_type == "text"
-        && element.children.is_empty()
-        && !element.custom_props().contains_key("highlight")
-}
-
 /// The adjacent primitive text leaves of `parent` that `id` is one of, or an
 /// empty slice when `id` is not a leaf. A non-text sibling ends the run for search,
 /// so it must end it for copy too, and this is the one place that decides.
 fn leaf_siblings<'a>(tree: &RetainedTree, parent: &'a RetainedElement, id: u64) -> &'a [u64] {
-    let is_leaf = |id: &u64| tree.elements.get(id).is_some_and(is_text_leaf);
+    let is_leaf = |id: &u64| tree.elements.get(id).is_some_and(super::inline::is_raw_text);
     let Some(position) = parent.children.iter().position(|child| *child == id) else {
         return &[];
     };
@@ -855,7 +880,7 @@ fn collect_content(tree: &RetainedTree, element: &RetainedElement, out: &mut Vec
         let Some(child) = tree.elements.get(&child_id) else {
             continue;
         };
-        if is_text_leaf(child) {
+        if super::inline::is_raw_text(child) {
             run.push(child_id);
             continue;
         }
@@ -1101,6 +1126,33 @@ mod tests {
         matches_in(text, &folded, &map, spec)
     }
 
+    #[test]
+    fn a_match_crosses_the_break_opportunity_of_a_wbr() {
+        let text = "a foo\u{200B}bar b";
+        for case_sensitive in [false, true] {
+            let mut spec = spec("foobar");
+            spec.case_sensitive = case_sensitive;
+            spec.needle = Needle::new("foobar", case_sensitive);
+            assert_eq!(find(text, &spec), vec![2..11], "case sensitive: {case_sensitive}");
+            assert_eq!(&text[2..11], "foo\u{200B}bar");
+            // The break opportunity is no part of what a match ends or starts at.
+            spec.query = "foo".to_string();
+            spec.needle = Needle::new("foo", case_sensitive);
+            assert_eq!(find(text, &spec), vec![2..5], "case sensitive: {case_sensitive}");
+            spec.query = "bar".to_string();
+            spec.needle = Needle::new("bar", case_sensitive);
+            assert_eq!(find(text, &spec), vec![8..11], "case sensitive: {case_sensitive}");
+            // And it is no letter or space either: `foo` is not a whole word of `foo<wbr>bar`.
+            spec.whole_word = true;
+            spec.query = "foo".to_string();
+            spec.needle = Needle::new("foo", case_sensitive);
+            assert!(find(text, &spec).is_empty(), "case sensitive: {case_sensitive}");
+            spec.query = "foobar".to_string();
+            spec.needle = Needle::new("foobar", case_sensitive);
+            assert_eq!(find(text, &spec), vec![2..11]);
+        }
+    }
+
     fn context(groups: &GroupList, set: HighlightSet) -> HighlightContext {
         HighlightContext {
             declaration: 1,
@@ -1212,22 +1264,22 @@ mod tests {
 
     // ── Grouping ─────────────────────────────────────────────────────
 
-    /// `<div><text>Hello {name}!</text></div>` — React splits one line into
+    /// `<div><div>Hello {name}!</div></div>` — React splits one line into
     /// three host nodes that must search as one string.
     fn interpolated_tree() -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
-        tree.create_element(2, "text".to_string());
+        tree.create_element(2, "div".to_string());
         tree.append_child(1, 2);
         for (id, text) in [(3, "Hello "), (4, "Tommy"), (5, "!")] {
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "#text".to_string());
             tree.append_child(2, id);
             tree.set_text(id, text.to_string());
         }
         tree
     }
 
-    /// Text nodes of a `<text>` are one paragraph, painted as one string under
+    /// The `#text` children of a `<div>` are one paragraph, painted as one string under
     /// the key of their container.
     #[test]
     fn interpolated_children_form_one_group() {
@@ -1253,13 +1305,13 @@ mod tests {
     #[test]
     fn a_match_crosses_the_inline_boxes_of_a_paragraph() {
         let mut tree = RetainedTree::new();
-        tree.create_element(1, "text".to_string());
-        tree.create_element(2, "text".to_string());
+        tree.create_element(1, "div".to_string());
+        tree.create_element(2, "#text".to_string());
         tree.append_child(1, 2);
         tree.set_text(2, "Hello ".to_string());
         tree.create_element(3, "span".to_string());
         tree.append_child(1, 3);
-        tree.create_element(4, "text".to_string());
+        tree.create_element(4, "#text".to_string());
         tree.append_child(3, 4);
         tree.set_text(4, "World".to_string());
         let groups = GroupList::collect(&tree, 1);
@@ -1278,8 +1330,8 @@ mod tests {
     #[test]
     fn an_atomic_inline_splits_its_paragraph_in_document_order() {
         let mut tree = RetainedTree::new();
-        tree.create_element(1, "text".to_string());
-        tree.create_element(2, "text".to_string());
+        tree.create_element(1, "div".to_string());
+        tree.create_element(2, "#text".to_string());
         tree.append_child(1, 2);
         tree.set_text(2, "a ".to_string());
         tree.create_element(3, "div".to_string());
@@ -1288,10 +1340,10 @@ mod tests {
             3,
             Arc::new(serde_json::from_value(serde_json::json!({"display": "inline-block"})).expect("a style")),
         );
-        tree.create_element(4, "text".to_string());
+        tree.create_element(4, "#text".to_string());
         tree.append_child(3, 4);
         tree.set_text(4, "b a".to_string());
-        tree.create_element(5, "text".to_string());
+        tree.create_element(5, "#text".to_string());
         tree.append_child(1, 5);
         tree.set_text(5, " a".to_string());
         let groups = GroupList::collect(&tree, 1);
@@ -1315,7 +1367,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "anchored".to_string());
         for (id, text) in [(3, "Hello "), (4, "Tommy"), (5, "!")] {
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "#text".to_string());
             tree.append_child(1, id);
             tree.set_text(id, text.to_string());
         }
@@ -1342,7 +1394,7 @@ mod tests {
         tree.create_element(1, parent.to_string());
         for (ix, text) in texts.iter().enumerate() {
             let id = ix as u64 + 2;
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "#text".to_string());
             tree.append_child(1, id);
             tree.set_text(id, text.to_string());
         }
@@ -1394,7 +1446,7 @@ mod tests {
         let mut tree = leaves_under("anchored", &["a ", "b "]);
         tree.create_element(9, "div".to_string());
         tree.append_child(1, 9);
-        tree.create_element(10, "text".to_string());
+        tree.create_element(10, "#text".to_string());
         tree.append_child(1, 10);
         tree.set_text(10, " c".to_string());
         let groups = GroupList::collect(&tree, 1);
@@ -1415,9 +1467,9 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
         for (wrapper, leaf, text) in [(2, 3, "quick "), (4, 5, "brown")] {
-            tree.create_element(wrapper, "text".to_string());
+            tree.create_element(wrapper, "div".to_string());
             tree.append_child(1, wrapper);
-            tree.create_element(leaf, "text".to_string());
+            tree.create_element(leaf, "#text".to_string());
             tree.append_child(wrapper, leaf);
             tree.set_text(leaf, text.to_string());
         }
@@ -1474,8 +1526,8 @@ mod tests {
     #[test]
     fn a_non_text_sibling_ends_the_group_for_both() {
         let mut tree = RetainedTree::new();
-        tree.create_element(1, "text".to_string());
-        for (id, kind) in [(2, "text"), (3, "div"), (4, "text")] {
+        tree.create_element(1, "div".to_string());
+        for (id, kind) in [(2, "#text"), (3, "div"), (4, "#text")] {
             tree.create_element(id, kind.to_string());
             tree.append_child(1, id);
         }
@@ -1518,7 +1570,7 @@ mod tests {
     #[test]
     fn a_declaring_leaf_collects_its_own_content() {
         let mut tree = RetainedTree::new();
-        tree.create_element(1, "text".to_string());
+        tree.create_element(1, "#text".to_string());
         tree.set_text(1, "a fox here".to_string());
         let groups = GroupList::collect(&tree, 1);
         assert_eq!(groups.groups.len(), 1);
@@ -1596,7 +1648,7 @@ mod tests {
 
     /// The blocker a review caught: a native element and retained text share one numbering, so
     /// the native element's matches come before the text's exactly when it comes first in the
-    /// DOCUMENT. Numbering retained matches first made `activeIndex: 0` mark the `<text>` match.
+    /// DOCUMENT. Numbering retained matches first made `activeIndex: 0` mark the retained text match.
     /// Paint order does not decide it: a positioned element paints late.
     #[test]
     fn ordinals_follow_document_order_across_both_kinds() {
@@ -1702,7 +1754,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "anchored".to_string());
         for (id, text) in [(2, "ab"), (3, "ab")] {
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "#text".to_string());
             tree.append_child(1, id);
             tree.set_text(id, text.to_string());
         }
@@ -1865,7 +1917,7 @@ mod tests {
 
     // ── content-visibility ───────────────────────────────────────────
 
-    /// `<div><text auto>alpha a</text><text hidden>alpha b</text><text>alpha c</text></div>`
+    /// `<div><div auto>alpha a</div><div hidden>alpha b</div><div>alpha c</div></div>`
     fn skipping_tree() -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
@@ -1874,10 +1926,12 @@ mod tests {
             (3, "alpha b", r#"{"contentVisibility":"hidden"}"#),
             (4, "alpha c", "{}"),
         ] {
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "div".to_string());
             tree.append_child(1, id);
-            tree.set_text(id, text.to_string());
             tree.set_style(id, Arc::new(serde_json::from_str(style).expect("a style")));
+            tree.create_element(id + 10, "#text".to_string());
+            tree.append_child(id, id + 10);
+            tree.set_text(id + 10, text.to_string());
         }
         tree
     }

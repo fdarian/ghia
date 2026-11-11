@@ -33,15 +33,15 @@ const scenes: Scene[] = [
     name: "plain",
     page: () => (
       <div style={{ width: 300, display: "flex", flexDirection: "column", backgroundColor: "#ffffff" }}>
-        <text testId="a" style={TEXT}>{sentence}</text>
-        <text testId="b" style={{ ...TEXT, textAlign: "center", fontWeight: 700, color: "#aa2200" }}>centered label</text>
-        <text testId="c" style={{ ...TEXT, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", width: 120 }}>{sentence}</text>
-        <text testId="d" style={{ ...TEXT, lineClamp: 2, width: 140 }}>{sentence}</text>
-        <text testId="e" style={{ ...TEXT, textDecoration: "underline", letterSpacing: 1, textAlign: "right" }}>underlined</text>
-        <text testId="f" style={{ ...TEXT, userSelect: "none" }}>not selectable</text>
+        <div testId="a" style={TEXT}>{sentence}</div>
+        <div testId="b" style={{ ...TEXT, textAlign: "center", fontWeight: 700, color: "#aa2200" }}>centered label</div>
+        <div testId="c" style={{ ...TEXT, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", width: 120 }}>{sentence}</div>
+        <div testId="d" style={{ ...TEXT, lineClamp: 2, width: 140 }}>{sentence}</div>
+        <div testId="e" style={{ ...TEXT, textDecoration: "underline", letterSpacing: 1, textAlign: "right" }}>underlined</div>
+        <div testId="f" style={{ ...TEXT, userSelect: "none" }}>not selectable</div>
         <div style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
-          <text testId="g" style={{ ...TEXT, fontSize: 28, lineHeight: "32px" }}>Big</text>
-          <text testId="h" style={TEXT}>small beside</text>
+          <div testId="g" style={{ ...TEXT, fontSize: 28, lineHeight: "32px" }}>Big</div>
+          <div testId="h" style={TEXT}>small beside</div>
         </div>
       </div>
     ),
@@ -50,10 +50,10 @@ const scenes: Scene[] = [
     name: "selection",
     page: () => (
       <div style={{ width: 300, display: "flex", flexDirection: "column", backgroundColor: "#ffffff" }}>
-        <text testId="a" style={TEXT}>{sentence}</text>
-        <text testId="b" style={TEXT}>second paragraph of the page</text>
-        <text testId="c" style={{ ...TEXT, userSelect: "none" }}>chrome</text>
-        <text testId="d" style={TEXT}>{sentence}</text>
+        <div testId="a" style={TEXT}>{sentence}</div>
+        <div testId="b" style={TEXT}>second paragraph of the page</div>
+        <div testId="c" style={{ ...TEXT, userSelect: "none" }}>chrome</div>
+        <div testId="d" style={TEXT}>{sentence}</div>
       </div>
     ),
     act: (renderer) => {
@@ -64,17 +64,17 @@ const scenes: Scene[] = [
     name: "paragraph",
     page: () => (
       <div style={{ width: 320, backgroundColor: "#ffffff" }}>
-        <text testId="p1" style={TEXT}>
+        <div testId="p1" style={TEXT}>
           plain <span style={{ color: "#cc0000", fontWeight: 700 }}>red <span style={{ backgroundColor: "#ffee00" }}>marked</span></span> tail
           and <span style={{ backgroundColor: "#cceeff", padding: "0 4px", borderRadius: 4 }}>a pill</span> then more words to wrap the line
-        </text>
-        <text testId="p2" style={TEXT}>
+        </div>
+        <div testId="p2" style={TEXT}>
           one <span onClick={() => {}} style={{ color: "#0000ff", textDecoration: "underline" }}>clickable</span> span and{" "}
           <span style={{ fontSize: 22, verticalAlign: "top" }}>big</span> ones
-        </text>
-        <text testId="p3" style={TEXT}>
+        </div>
+        <div testId="p3" style={TEXT}>
           Hello {"name"}! <span style={{ color: "#008800" }}>{"interpolated"}</span>
-        </text>
+        </div>
       </div>
     ),
     act: (renderer) => {
@@ -85,21 +85,21 @@ const scenes: Scene[] = [
     name: "paragraph-extras",
     page: () => (
       <div style={{ width: 320, backgroundColor: "#ffffff" }}>
-        <text testId="o1" style={TEXT}>
+        <div testId="o1" style={TEXT}>
           with <span style={{ outline: "2px solid #ff00ff", outlineOffset: 1 }}>an outline</span> inside
-        </text>
-        <text testId="o2" style={TEXT}>
+        </div>
+        <div testId="o2" style={TEXT}>
           with <span style={{ opacity: 0.4, backgroundColor: "#ffaa00" }}>a faded span</span> inside
-        </text>
-        <text testId="o3" style={TEXT}>
+        </div>
+        <div testId="o3" style={TEXT}>
           with <span style={{ cursor: "pointer" }}>a cursor</span> inside
-        </text>
-        <text testId="o4" style={TEXT}>
+        </div>
+        <div testId="o4" style={TEXT}>
           with <span style={{ display: "inline-block", width: 40, height: 14, backgroundColor: "#00aa88" }} /> a box
-        </text>
-        <text testId="o5" style={TEXT}>
+        </div>
+        <div testId="o5" style={TEXT}>
           with <span tabIndex={0} style={{ color: "#6600cc" }}>a tab stop</span> inside
-        </text>
+        </div>
       </div>
     ),
   },
@@ -107,10 +107,10 @@ const scenes: Scene[] = [
     name: "highlight",
     page: () => (
       <div style={{ width: 300, backgroundColor: "#ffffff" }} highlight={{ query: "quick" }}>
-        <text testId="a" style={TEXT}>{sentence}</text>
-        <text testId="b" style={TEXT}>
+        <div testId="a" style={TEXT}>{sentence}</div>
+        <div testId="b" style={TEXT}>
           a <span style={{ color: "#cc0000" }}>quick</span> paragraph that is quick too
-        </text>
+        </div>
       </div>
     ),
   },
@@ -122,7 +122,7 @@ const scenes: Scene[] = [
       <div testId="scroller" style={{ width: 300, height: 200, overflow: "auto", backgroundColor: "#ffffff" }}>
         {Array.from({ length: 60 }, (_, index) => (
           <div key={index} style={{ height: 26, padding: "3px 8px", backgroundColor: index % 2 ? "#f4f4f4" : "#ffffff" }}>
-            <text style={TEXT}>{`row ${index} ${sentence.slice(0, 12 + (index % 5) * 6)}`}</text>
+            <div style={TEXT}>{`row ${index} ${sentence.slice(0, 12 + (index % 5) * 6)}`}</div>
           </div>
         ))}
       </div>
@@ -141,7 +141,7 @@ const scenes: Scene[] = [
       <div style={{ width: 300, display: "flex", flexDirection: "column", backgroundColor: "#ffffff" }}>
         {Array.from({ length: 6 }, (_, index) => (
           <div key={index} style={{ height: 30, padding: "4px 8px", backgroundColor: "#eeeeee", hover: { backgroundColor: "#ffddaa" } }}>
-            <text style={TEXT}>{`hover row ${index}`}</text>
+            <div style={TEXT}>{`hover row ${index}`}</div>
           </div>
         ))}
       </div>
@@ -157,11 +157,11 @@ const scenes: Scene[] = [
     page: () => (
       <div style={{ width: 300, height: 160, backgroundColor: "#ffffff" }}>
         <div style={{ transform: "rotate(6deg)", transformOrigin: "0 0", margin: 20, width: 200 }}>
-          <text testId="r" style={TEXT}>{sentence}</text>
+          <div testId="r" style={TEXT}>{sentence}</div>
         </div>
         <div style={{ perspective: 300 }}>
           <div style={{ transformStyle: "preserve-3d", transform: "rotateY(20deg)", width: 160 }}>
-            <text testId="s" style={TEXT}>tilted plane of text</text>
+            <div testId="s" style={TEXT}>tilted plane of text</div>
           </div>
         </div>
       </div>
@@ -175,20 +175,20 @@ const scenes: Scene[] = [
     page: () => (
       <div style={{ width: 320, backgroundColor: "#ffffff" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 4 }}>
-          <text style={TEXT}>left cell</text>
-          <text style={TEXT}>{sentence}</text>
-          <text style={TEXT}>second row</text>
-          <text style={TEXT}>x</text>
+          <div style={TEXT}>left cell</div>
+          <div style={TEXT}>{sentence}</div>
+          <div style={TEXT}>second row</div>
+          <div style={TEXT}>x</div>
         </div>
         <div style={{ display: "table", borderCollapse: "collapse" }}>
           <div style={{ display: "table-row" }}>
-            <div style={{ display: "table-cell", padding: 4 }}><text style={TEXT}>cell one</text></div>
-            <div style={{ display: "table-cell", padding: 4 }}><text style={TEXT}>cell two is longer</text></div>
+            <div style={{ display: "table-cell", padding: 4 }}><div style={TEXT}>cell one</div></div>
+            <div style={{ display: "table-cell", padding: 4 }}><div style={TEXT}>cell two is longer</div></div>
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <text style={{ ...TEXT, flexShrink: 0 }}>no shrink</text>
-          <text style={{ ...TEXT, flex: 1 }}>{sentence}</text>
+          <div style={{ ...TEXT, flexShrink: 0 }}>no shrink</div>
+          <div style={{ ...TEXT, flex: 1 }}>{sentence}</div>
         </div>
       </div>
     ),

@@ -50,6 +50,7 @@ const PLAIN_NOTIFICATIONS: ReadonlySet<string> = new Set([
   "did-fail-load",
   "attach",
   "detach",
+  "resize",
 ])
 
 /**
@@ -111,6 +112,13 @@ const POINTER_EVENT_TYPES: ReadonlySet<string> = new Set([
   "contextmenu",
 ])
 
+/** Clicks that a keyboard, an assistive technology or `el.click()` makes have no pointer (`pointerId` -1). */
+const CLICK_TYPES: ReadonlySet<string> = new Set(["click", "auxclick", "contextmenu"])
+
+function isPrimaryPointer(payload: EventPayload, eventType: string): boolean {
+  return !CLICK_TYPES.has(eventType) || payload.pointerId !== -1
+}
+
 export function eventBubbles(eventType: string): boolean {
   return !NON_BUBBLING_TYPES.has(eventType.toLowerCase())
 }
@@ -132,7 +140,7 @@ export function captureHandlerKey(eventType: string): string {
  * carry element ids, which the event replaces with elements. `elementId` stays
  * the numeric id of the element the payload was addressed to.
  */
-export type PublicEventFields = Omit<EventPayload, "target" | "relatedTarget" | "path" | "data"> & {
+export type PublicEventFields = Omit<EventPayload, "target" | "relatedTarget" | "path" | "data" | "submitterId"> & {
   /** `null` for an edit that inserted no text, see `HostInputEvent`. */
   data?: string | null
 }
@@ -167,8 +175,8 @@ export interface DomEvent extends RootEvent {
   composedPath(): object[]
   /** The event itself, as a synthetic event wrapper's `nativeEvent` is the DOM event under it. */
   readonly nativeEvent: DomEvent
-  /** `true` on a pointer event: Ghia has one pointer, so it is always the primary one. Absent on other events. */
-  readonly isPrimary?: true
+  /** Whether a pointer event is from the primary pointer: Ghia has one pointer, so `true` on any event a pointer made and `false` on a click no pointer made. Absent on other events. */
+  readonly isPrimary?: boolean
   eventPhase: number
   readonly bubbles: boolean
   readonly cancelable: boolean
@@ -224,11 +232,15 @@ export interface DomDispatchHooks {
   afterBubble?(event: DomEvent, state: DomEventState, fail: (error: unknown) => void): void
 }
 
-/** What a form's `submit` event adds: the `FormData` and no submitter button. */
-function formSubmission(entries: string[][]): { formData: FormData; submitter: null } {
+/** What a form's `submit` event adds: the `FormData` and the button that submitted, `null` for `requestSubmit()` and for Enter in a form with no submit button. */
+function formSubmission(
+  root: DomEventRoot,
+  entries: string[][],
+  submitter: number | undefined
+): { formData: FormData; submitter: object | null } {
   const formData = new FormData()
   for (const [name, value] of entries) formData.append(name, value)
-  return { formData, submitter: null }
+  return { formData, submitter: optionalElement(root, submitter) }
 }
 
 /** The element for `id`, or throws: the root dropped an element native still names. */
@@ -253,9 +265,10 @@ export function optionalElement(root: DomEventRoot, id: number | undefined): obj
 
 /** The payload as a public event: element ids replaced by the elements they name. */
 export function toRootEvent(root: DomEventRoot, payload: EventPayload, target: object | null): RootEvent {
-  const fields: PublicEventFields & Partial<Pick<EventPayload, "target" | "relatedTarget" | "path">> = {
+  const fields: PublicEventFields & Partial<Pick<EventPayload, "target" | "relatedTarget" | "path" | "submitterId">> = {
     ...payload,
   }
+  delete fields.submitterId
   delete fields.target
   delete fields.relatedTarget
   delete fields.path
@@ -277,10 +290,12 @@ export function createDomEvent(
   const cancelable = eventIsCancelable(payload.eventType)
   const event: DomEvent = {
     ...toRootEvent(root, payload, path[0] ?? pathlessTarget),
-    ...(payload.formEntries && formSubmission(payload.formEntries)),
+    ...(payload.formEntries && formSubmission(root, payload.formEntries, payload.submitterId)),
     // An edit has no data unless it inserted text, and the DOM says so with null.
     ...(payload.eventType === "change" && { data: payload.data ?? null }),
-    ...(POINTER_EVENT_TYPES.has(payload.eventType.toLowerCase()) && { isPrimary: true as const }),
+    ...(POINTER_EVENT_TYPES.has(payload.eventType.toLowerCase()) && {
+      isPrimary: isPrimaryPointer(payload, payload.eventType.toLowerCase()),
+    }),
     type: payload.eventType,
     currentTarget: null,
     composedPath: () => [...path],

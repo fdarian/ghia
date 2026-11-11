@@ -205,7 +205,21 @@ describeNative("setUniversalStyle on the test renderer", () => {
     }
   })
 
-  it("rejects an invalid layer with the batch around it and changes nothing", () => {
+  it("drops an invalid declaration of a layer and applies the rest of the batch", () => {
+    const renderer = mount()
+    try {
+      apply(renderer, [["setUniversalStyle", { width: 50, height: 20, flexShrink: 0 }]])
+      apply(renderer, [
+        ["setStyle", 2, { width: 99 }],
+        ["setUniversalStyle", { width: "wide", height: 30 }],
+      ])
+      expect(sizeOf(renderer, 2)).toEqual([99, 30])
+    } finally {
+      renderer.dispose()
+    }
+  })
+
+  it("rejects a layer that is not a style object with the batch around it and changes nothing", () => {
     const renderer = mount()
     try {
       apply(renderer, [["setUniversalStyle", { width: 50, height: 20, flexShrink: 0 }]])
@@ -213,7 +227,7 @@ describeNative("setUniversalStyle on the test renderer", () => {
         renderer.applyBatch(
           encodeWireBatchForTest([
             ["setStyle", 2, { width: 99 }],
-            ["setUniversalStyle", { width: "wide" }],
+            ["setUniversalStyle", 5],
           ])
         )
       ).toThrow(/Batch op 1 setUniversalStyle parse error/)

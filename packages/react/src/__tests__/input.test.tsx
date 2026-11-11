@@ -26,7 +26,7 @@ describeNative("native text editors", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -56,7 +56,7 @@ describeNative("native text editors", () => {
             style={{ width: 300 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${JSON.stringify(text)}`}</text>
+          <div>{`Value: ${JSON.stringify(text)}`}</div>
         </div>
       )
     }
@@ -82,7 +82,7 @@ describeNative("native text editors", () => {
             style={{ width: 300 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${JSON.stringify(text)}`}</text>
+          <div>{`Value: ${JSON.stringify(text)}`}</div>
         </div>
       )
     }
@@ -104,7 +104,7 @@ describeNative("native text editors", () => {
             style={{ width: 300 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${JSON.stringify(text)}`}</text>
+          <div>{`Value: ${JSON.stringify(text)}`}</div>
         </div>
       )
     }
@@ -136,8 +136,8 @@ describeNative("native text editors", () => {
               setSubmits((count) => count + 1)
             }}
           />
-          <text>{`Value: ${JSON.stringify(text)}`}</text>
-          <text>{`Submits: ${submits}`}</text>
+          <div>{`Value: ${JSON.stringify(text)}`}</div>
+          <div>{`Submits: ${submits}`}</div>
         </div>
       )
     }
@@ -178,8 +178,8 @@ describeNative("native text editors", () => {
                 : undefined
             }
           />
-          <text>{`Value: ${JSON.stringify(text)}`}</text>
-          <text>{`Submits: ${submits}`}</text>
+          <div>{`Value: ${JSON.stringify(text)}`}</div>
+          <div>{`Submits: ${submits}`}</div>
         </div>
       )
     }
@@ -211,7 +211,7 @@ describeNative("native text editors", () => {
             style={{ width: 300 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${JSON.stringify(text)}`}</text>
+          <div>{`Value: ${JSON.stringify(text)}`}</div>
         </div>
       )
     }
@@ -233,7 +233,7 @@ describeNative("native text editors", () => {
             style={{ width: 300 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${JSON.stringify(text)}`}</text>
+          <div>{`Value: ${JSON.stringify(text)}`}</div>
         </div>
       )
     }
@@ -255,7 +255,7 @@ describeNative("native text editors", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -277,7 +277,7 @@ describeNative("native text editors", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -301,7 +301,7 @@ describeNative("native text editors", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -324,7 +324,7 @@ describeNative("native text editors", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -348,7 +348,7 @@ describeNative("native text editors", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -370,7 +370,7 @@ describeNative("native text editors", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -396,7 +396,7 @@ describeNative("native text editors", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -422,7 +422,7 @@ describeNative("native text editors", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -466,7 +466,7 @@ describeNative("native text editors", () => {
               if (event.key === "Enter") setText("")
             }}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -489,7 +489,7 @@ describeNative("native text editors", () => {
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
           />
-          <text>{`Value: ${text}`}</text>
+          <div>{`Value: ${text}`}</div>
         </div>
       )
     }
@@ -518,7 +518,7 @@ describeNative("native text editors", () => {
             }}
             onKeyDown={() => setKeys((count) => count + 1)}
           />
-          <text>{`Events: ${clicks}/${keys}`}</text>
+          <div>{`Events: ${clicks}/${keys}`}</div>
         </div>
       )
     }

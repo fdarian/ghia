@@ -6,6 +6,8 @@ import {
 import { readLayoutSize } from "./bounds.js"
 import type { NativeRenderer } from "./host.js"
 import { document, type GpuixDocument } from "./events/window-target.js"
+import { attributeLookupName, attributeNameOf } from "./dom/attribute-names.js"
+import { SVGElement } from "./dom/nodes.js"
 
 /** The DOM members every host element has beside the scroll ones. */
 export interface DomElement {
@@ -13,7 +15,10 @@ export interface DomElement {
   readonly ownerDocument: GpuixDocument
   /** Whether the element is in the tree of a mounted root. */
   readonly isConnected: boolean
-  /** The prop of that name as a string, or `null` when the element was not given it. */
+  /**
+   * The prop of that name (case-insensitive) as a string, or `null` when the element was not given
+   * it, or when it is a function or an object (`onClick`, `style`). `false` is `null` and `true` is `""`, except for `data-*` and `aria-*`, which hold "true" and "false".
+   */
   getAttribute(name: string): string | null
   /** The border box's width, rounded, before any transform. 0 for an element with no box. */
   readonly offsetWidth: number
@@ -38,21 +43,36 @@ export interface DomElementBinding {
   readonly layout: { renderer: NativeRenderer; id: number } | undefined
   /** What the element was given: the props of a Solid element, of a React instance. */
   prop(name: string): unknown
+  propNames(): Iterable<string>
 }
 
-/** A prop as the string a DOM attribute holds, or null where the DOM would have no attribute. */
-function attributeOf(value: unknown): string | null {
-  switch (typeof value) {
-    case "string":
-      return value
-    case "number":
-    case "bigint":
-      return String(value)
-    case "boolean":
-      return value ? "true" : null
-    default:
-      return null
+/** The prop an attribute name stands for: `attributeNameOf` is the name a prop has as an attribute. */
+function propForAttribute(bound: DomElementBinding, name: string, svg: boolean): unknown {
+  const wanted = attributeLookupName(name, svg)
+  const exact = bound.prop(wanted)
+  if (exact !== undefined && attributeNameOf(wanted, svg) === wanted) return exact
+  for (const key of bound.propNames()) {
+    if (attributeNameOf(key, svg) !== wanted) continue
+    const value = bound.prop(key)
+    if (value !== undefined) return value
   }
+  return undefined
+}
+
+/**
+ * A prop as the string a DOM attribute holds, or null where the DOM would have no attribute. A
+ * `data-*` or `aria-*` attribute holds "false" for false; any other boolean attribute is present
+ * (empty) for true and absent for false.
+ */
+function attributeOf(name: string, value: unknown): string | null {
+  if (value === undefined || value === null) return null
+  // A handler or a style object is not an attribute: there is no text to give for it.
+  if (typeof value === "function" || typeof value === "object") return null
+  const lower = name.toLowerCase()
+  if (lower.startsWith("data-") || lower.startsWith("aria-")) return String(value)
+  if (value === false) return null
+  if (value === true) return ""
+  return String(value)
 }
 
 /**
@@ -75,9 +95,7 @@ export function defineDomMembers<This extends object>(
       configurable: true,
       writable: true,
       value(this: This, name: string) {
-        const bound = bind(this)
-        const value = bound.prop(name)
-        return attributeOf(name === "class" && value === undefined ? bound.prop("className") : value)
+        return attributeOf(name, propForAttribute(bind(this), name, this instanceof SVGElement))
       },
     },
     offsetWidth: {

@@ -1,9 +1,8 @@
 //! The inline boxes under the pointer, in front of the hit chain.
 //!
 //! GPUI's hit test ends at the host element that holds a paragraph. When that
-//! element is the target, the pointer may still be on a glyph of a `<span>` (or
-//! a nested `<text>`) inside it, and that box is the DOM target. Its retained
-//! ancestors are the path from there on (`events/path.rs`), so the chain only has
+//! element is the target, the pointer may still be on a glyph of a `<span>` inside it, and that box is the DOM target. Its
+//! retained ancestors are the path from there on (`events/path.rs`), so the chain only has
 //! to name the boxes and where the first line fragment of each starts, which is
 //! what `offsetX` is measured from.
 
@@ -44,10 +43,10 @@ mod tests {
     use crate::events::state::PointerState;
     use crate::retained_tree::RetainedTree;
 
-    /// root(1) > text(2) > ["Hello ", span(4) > "world", "!", span(7) > "again"]
+    /// root(1) > div(2) > ["Hello ", span(4) > "world", "!", span(7) > "again"]
     fn paragraph(listening: &[(u64, &str)]) -> RetainedTree {
         let mut tree = RetainedTree::new();
-        for (id, kind) in [(1, "div"), (2, "text"), (4, "span"), (7, "span")] {
+        for (id, kind) in [(1, "div"), (2, "div"), (4, "span"), (7, "span")] {
             tree.create_element(id, kind.to_string());
         }
         tree.set_root(1);
@@ -55,7 +54,7 @@ mod tests {
         tree.append_child(2, 4);
         tree.append_child(2, 7);
         for (id, text, parent) in [(3, "Hello ", 2), (5, "world", 4), (6, "!", 2), (8, "again", 7)] {
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "#text".to_string());
             tree.append_child(parent, id);
             tree.set_text(id, text.to_string());
         }

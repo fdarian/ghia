@@ -38,7 +38,11 @@ export function idAllocatorFor(renderer: NativeRenderer): ElementIdAllocator {
   return createRendererState(renderer).ids
 }
 
-export function attachRoot(renderer: NativeRenderer, container: Container): void {
+export function attachRoot(
+  renderer: NativeRenderer,
+  container: Container,
+  schedule: (dispatch: () => void) => void
+): void {
   const binding = createRendererState(renderer).attach({
     eventHandlers: container.eventHandlers,
     onWindowKeyDown: container.windowKeyEventHandlers.onKeyDown,
@@ -47,6 +51,7 @@ export function attachRoot(renderer: NativeRenderer, container: Container): void
     onAppearanceChange: container.windowKeyEventHandlers.onAppearanceChange,
     tabNavigation: container.windowKeyEventHandlers.tabNavigation,
     onEvent: container.onEvent,
+    schedule,
   })
   container.windowKeyEventId = binding.windowKeyEventId
   container.windowSelectionEventId = binding.windowSelectionEventId

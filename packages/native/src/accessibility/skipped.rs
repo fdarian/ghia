@@ -4,7 +4,9 @@
 //! from the DOM, no layout is needed) and leaves a `hidden` one out. Nothing below a skipped element is
 //! built here, so the element hosts a synthetic node for each element below it that has one, made from
 //! the retained tree by the code that makes the node of a built element ([`super::apply_accessibility`]):
-//! role, name, `aria-*`, relations and the text of a `<text>`. The nodes have no bounds and no actions.
+//! role, name, `aria-*`, relations and the text of an element whose content is one paragraph. The paragraphs
+//! beside blocks each get a `Label` node, as a built element's do ([`super::paragraph_label`]). The nodes have
+//! no bounds and no actions.
 
 use gpui::prelude::*;
 use gpui::{A11yRelation, A11ySubtreeBuilder, Element, SharedString};
@@ -12,9 +14,17 @@ use gpui::{A11yRelation, A11ySubtreeBuilder, Element, SharedString};
 use crate::layout::content_visibility::ContentVisibility;
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
+/// What names a node among the ones one skipped element hosts: the element it is of, or the paragraph
+/// beside blocks that has no element, by its [`Paragraph::anchor`](crate::text::inline::Paragraph::anchor).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Key {
+    Element(u64),
+    Paragraph(u64),
+}
+
 /// A node for an element below a skipped one, with the nodes of the elements below it.
 pub(crate) struct Exposed {
-    id: u64,
+    key: Key,
     node: gpui::accesskit::Node,
     relations: Vec<(A11yRelation, Vec<SharedString>)>,
     children: Vec<Exposed>,
@@ -43,7 +53,7 @@ where
 
 fn push(builder: &mut A11ySubtreeBuilder, nodes: Vec<Exposed>) {
     for exposed in nodes {
-        let id = builder.synthetic_node_id(exposed.id);
+        let id = builder.synthetic_node_id(exposed.key);
         let children = exposed.children;
         if builder.push_nested(id, exposed.node, |builder| push(builder, children)) {
             for (relation, targets) in &exposed.relations {
@@ -56,7 +66,12 @@ fn push(builder: &mut A11ySubtreeBuilder, nodes: Vec<Exposed>) {
 /// Appends the nodes of the children of `parent` to `into`. `hidden` is whether `visibility: hidden`
 /// is inherited from `parent`.
 fn below(tree: &RetainedTree, parent: &RetainedElement, hidden: bool, into: &mut Vec<Exposed>) {
-    for id in crate::layout::contents::flatten(tree, &parent.children).iter() {
+    let paragraphs = if hidden { None } else { paragraph_nodes(tree, parent) };
+    let mut paragraphs = paragraphs.unwrap_or_default().into_iter().peekable();
+    for (at, id) in crate::layout::contents::flatten(tree, &parent.children).iter().enumerate() {
+        while let Some(paragraph) = paragraphs.next_if(|(first, _)| *first as usize <= at) {
+            into.push(paragraph.1);
+        }
         let Some(element) = tree.elements.get(id) else { continue };
         if crate::layout::box_generation::is_display_none(element)
             || crate::text::inline::is_part_of_paragraph(tree, element)
@@ -70,10 +85,37 @@ fn below(tree: &RetainedTree, parent: &RetainedElement, hidden: bool, into: &mut
             below(tree, element, hidden, &mut children);
         }
         match node_of(tree, element).filter(|_| !hidden) {
-            Some((node, relations)) => into.push(Exposed { id: element.id, node, relations, children }),
+            Some((node, relations)) => into.push(Exposed { key: Key::Element(element.id), node, relations, children }),
             None => into.extend(children),
         }
     }
+    into.extend(paragraphs.map(|(_, paragraph)| paragraph));
+}
+
+/// The node of each paragraph of `parent` that sits beside blocks, with where it sits among the
+/// children of `parent` in the document. `None` when `parent` has none: it reads out its text itself.
+fn paragraph_nodes(tree: &RetainedTree, parent: &RetainedElement) -> Option<Vec<(u32, Exposed)>> {
+    if !super::carries_text(parent) {
+        return None;
+    }
+    let plan = crate::text::inline::plan_children_at(tree, parent);
+    if !super::labels_paragraphs(true, parent, &plan) {
+        return None;
+    }
+    let mut nodes: Vec<_> = plan
+        .iter()
+        .filter_map(|(child, at)| {
+            let crate::text::inline::Child::Paragraph(paragraph) = child else { return None };
+            let text = crate::text::inline::accessible_text(std::iter::once(child))?;
+            let probe = super::paragraph_label(paragraph.anchor, text);
+            let mut node = gpui::accesskit::Node::new(probe.a11y_role()?);
+            probe.write_a11y_info(&mut node);
+            Some((*at, Exposed { key: Key::Paragraph(paragraph.anchor), node, relations: Vec::new(), children: Vec::new() }))
+        })
+        .collect();
+    // The plan is in paint order, which `order` reorders; the nodes are in document order.
+    nodes.sort_by_key(|(at, _)| *at);
+    Some(nodes)
 }
 
 /// Whether `element` skips its content whatever is near: `hidden`. A nested `auto` element is
@@ -87,19 +129,15 @@ fn skips_all(tree: &RetainedTree, element: &RetainedElement) -> bool {
 /// The node the build of `element` would give it, and the relations of the node. `None` for an
 /// element without a role.
 fn node_of(tree: &RetainedTree, element: &RetainedElement) -> Option<(gpui::accesskit::Node, Vec<(A11yRelation, Vec<SharedString>)>)> {
-    let plan = if element.element_type == "text" && !element.children.is_empty() {
-        crate::text::inline::plan_children_at(tree, element)
-    } else {
-        Vec::new()
-    };
-    let mut probe = super::apply_accessibility(
+    let text = super::read_text_unplanned(tree, element);
+    let default_role = super::role_without_props(tree, element, text.as_deref());
+    let mut probe = super::apply_element(
         gpui::div().id(crate::events::ids::host_element_id(element.id)),
-        element.id,
-        element.custom_props(),
-        super::default_role(element),
+        element,
+        default_role,
+        false,
     );
-    let text = crate::text::inline::accessible_text(plan.iter().map(|(child, _)| child));
-    probe = super::describe_text(probe, element, text.as_deref());
+    probe = super::describe_text(probe, element, default_role, text);
     if element.element_type == "label" {
         probe = super::label::describe(probe, element.id);
     }
@@ -156,10 +194,12 @@ mod tests {
         [("role", serde_json::json!(role))]
     }
 
-    /// The ids of the nodes, in order, as `(id, role)` and the nodes below, indented by depth.
+    /// The nodes, in order, as `(depth, id, role)`: the id of the element, or of the `#text` node a
+    /// paragraph is anchored on.
     fn outline(nodes: &[Exposed], depth: usize, into: &mut Vec<(usize, u64, Role)>) {
         for exposed in nodes {
-            into.push((depth, exposed.id, exposed.node.role()));
+            let (Key::Element(id) | Key::Paragraph(id)) = exposed.key;
+            into.push((depth, id, exposed.node.role()));
             outline(&exposed.children, depth + 1, into);
         }
     }
@@ -225,14 +265,14 @@ mod tests {
     }
 
     #[test]
-    fn a_text_host_reads_out_its_text_and_a_label_its_default_role() {
+    fn a_container_of_one_paragraph_reads_out_its_text_and_a_label_its_default_role() {
         let mut tree = tree();
-        tree.create_element(2, "text".to_string());
+        tree.create_element(2, "div".to_string());
         tree.append_child(1, 2);
-        tree.create_element(3, "text".to_string());
+        tree.create_element(3, "#text".to_string());
         tree.append_child(2, 3);
         tree.set_text(3, "Hello ".to_string());
-        tree.create_element(4, "text".to_string());
+        tree.create_element(4, "#text".to_string());
         tree.append_child(2, 4);
         tree.set_text(4, "there".to_string());
         tree.set_style(2, Arc::new(serde_json::from_value(serde_json::json!({ "height": 10 })).unwrap()));
@@ -242,6 +282,34 @@ mod tests {
         assert_eq!(nodes.len(), 2);
         assert_eq!((nodes[0].node.role(), nodes[0].node.value()), (Role::Label, Some("Hello there")));
         assert_eq!(nodes[1].node.role(), Role::Label);
+    }
+
+    #[test]
+    fn paragraphs_beside_blocks_are_nodes_in_document_order_and_a_group_reads_its_text_as_its_value() {
+        let mut tree = tree();
+        add(&mut tree, 1, 2, &[], serde_json::json!({}));
+        tree.create_element(3, "#text".to_string());
+        tree.append_child(2, 3);
+        tree.set_text(3, "Before".to_string());
+        add(&mut tree, 2, 4, &role("button"), serde_json::json!({}));
+        tree.create_element(5, "#text".to_string());
+        tree.append_child(2, 5);
+        tree.set_text(5, "After".to_string());
+        add(&mut tree, 1, 6, &[], serde_json::json!({}));
+        tree.create_element(7, "#text".to_string());
+        tree.append_child(6, 7);
+        tree.set_text(7, "  ".to_string());
+        add(&mut tree, 1, 8, &role("group"), serde_json::json!({}));
+        tree.create_element(9, "#text".to_string());
+        tree.append_child(8, 9);
+        tree.set_text(9, "Group text".to_string());
+        assert_eq!(
+            outline_of(&tree, 1),
+            [(0, 3, Role::Label), (0, 4, Role::Button), (0, 5, Role::Label), (0, 8, Role::Group)]
+        );
+        let nodes = exposed(&tree, &tree.elements[&1]);
+        assert_eq!((nodes[0].node.value(), nodes[2].node.value()), (Some("Before"), Some("After")));
+        assert_eq!((nodes[3].node.label(), nodes[3].node.value()), (None, Some("Group text")));
     }
 
     #[test]

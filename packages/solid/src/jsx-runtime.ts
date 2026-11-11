@@ -5,6 +5,9 @@ import type {
   DiffProps,
   FormProps,
   HostProps,
+  HtmlAnchorProps,
+  HtmlButtonProps,
+  HtmlTag,
   ImgProps,
   InputProps,
   LabelProps,
@@ -100,9 +103,11 @@ export function Fragment(props: { children?: unknown }): SolidJSX.Element {
 export namespace JSX {
   export type Element = SolidJSX.Element
   export interface ElementChildrenAttribute { children: {} }
-  export interface IntrinsicElements {
+  export interface IntrinsicElements extends Record<HtmlTag, SolidHostProps> {
+    a: SolidHostProps<HostProps & HtmlAnchorProps>
+    button: SolidHostProps<HostProps & HtmlButtonProps>
     div: SolidHostProps
-    text: SolidHostProps<HostProps & Omit<SvgTextProps, keyof HostProps>>
+    text: SolidHostProps<SvgTextProps>
     span: SolidHostProps
     img: SolidHostProps<ImgProps>
     webview: SolidHostProps<WebviewProps>

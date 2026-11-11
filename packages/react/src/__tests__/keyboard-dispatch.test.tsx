@@ -42,7 +42,7 @@ describeNative("synchronous key dispatch", () => {
           onKeyDown={props.onKeyDown}
           onChange={(event) => setText(event.value ?? "")}
         />
-        <text>{`Value: ${JSON.stringify(text)}`}</text>
+        <div>{`Value: ${JSON.stringify(text)}`}</div>
       </div>
     )
   }
@@ -155,7 +155,7 @@ describeNative("synchronous key dispatch", () => {
           />
           <div ref={other} testId="b" tabIndex={0} style={{ width: 40, height: 20 }} />
           <input ref={field} value="hello" onChange={() => {}} style={{ width: 100, height: 30 }} />
-          <text>{`count=${count}`}</text>
+          <div>{`count=${count}`}</div>
         </div>
       )
     }

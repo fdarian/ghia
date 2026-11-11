@@ -18,6 +18,7 @@ import type {
   HostInputEvent,
   PointerEventProps,
 } from "./events/types.js"
+import type { HtmlTag } from "./html-tags.js"
 import type { ScrollEvent } from "./scroll.js"
 import type { MotionValue } from "./motion-value.js"
 import type { MotionGestureName } from "./motion-variants.js"
@@ -37,6 +38,8 @@ export * from "./dom-members.js"
 export * from "./dom/nodes.js"
 export * from "./dom/element-types.js"
 export * from "./dom/mutation-observer.js"
+export * from "./dom/attribute-names.js"
+export * from "./dom/prototype-members.js"
 export * from "./animation-frame.js"
 export * from "./events/types.js"
 export type { AriaProps }
@@ -69,6 +72,7 @@ export * from "./motion-config.js"
 export * from "./motion-span.js"
 export * from "./motion-variants.js"
 export * from "./motion-value.js"
+export * from "./html-tags.js"
 export * from "./mutations.js"
 export * from "./observers.js"
 export * from "./presence.js"
@@ -1402,7 +1406,7 @@ export interface StyleDesc {
    * it is only its padding and border (a flex item or an absolutely positioned
    * box with an `inline-size` container inside shrinks to nothing, as in a
    * browser). `"size"` contains the height too. `"normal"` (the default) makes
-   * no container. Applies to `div`, `text`, an atomic `span`, `label`, `form`,
+   * no container. Applies to `div`, an atomic `span`, `label`, `form`,
    * `<virtual-list>` (its rows are queried against it), `<img>` and `<svg>`
    * (which only lose their natural size on the contained axes) as in CSS. A
    * `span` that is not atomic, a `display: contents` element and a table or
@@ -1439,7 +1443,7 @@ export interface StyleDesc {
    * wins), it is a stacking context and the containing block of its `position: "absolute"`
    * descendants. A skipped element also has size containment on both axes, sized by
    * `containIntrinsicSize` (none, so zero, by default) plus its padding and border. Applies to
-   * `div`, `text`, `label`, `form` and block `span`; another element has the containment and
+   * `div`, `label`, `form` and block `span`; another element has the containment and
    * is never skipped. Not modelled: the element is not an independent formatting context (a
    * margin of its first or last child can collapse through it), and a `position: "fixed"`
    * descendant is placed against the viewport. An observer on an element inside a skipped
@@ -1558,15 +1562,13 @@ export type StateStyleDesc = Omit<
  *  follow (default group when omitted). */
 export type GroupStateStyleDesc = StateStyleDesc & { group?: string | true }
 
-// Element types supported by GPUIX. `span` is inline: it, raw strings and a
-// `text` inside a `text` or `span` are runs of one paragraph, see docs/reference.md
-// "Inline text".
+// Element types supported by GPUIX. `span` is inline: it and raw strings are runs of one
+// paragraph, see docs/reference.md "Inline text".
 export type ElementType =
   | "div"
   | "html"
   | "head"
   | "body"
-  | "text"
   | "span"
   | "img"
   | "svg"
@@ -1582,6 +1584,7 @@ export type ElementType =
   | "webview"
   | "nativeview"
   | "virtual-list"
+  | HtmlTag
   | SvgChildType
 
 // ── Theme ────────────────────────────────────────────────────────────
@@ -1694,7 +1697,7 @@ export interface HighlightSpec {
    *
    * A match never crosses a line, exactly like browser find. It DOES cross the
    * several host nodes a JSX renderer makes for one interpolated line, so
-   * `<text>Hello {name}!</text>` matches `Hello Tommy`.
+   * `<div>Hello {name}!</div>` matches `Hello Tommy`.
    */
   query?: string
   caseSensitive?: boolean
@@ -1798,7 +1801,7 @@ export interface HostProps
   /**
    * The element's border box, reported after the first paint and each time its
    * size changes: `width` and `height`, plus `x` and `y` in window coordinates.
-   * Moving without resizing reports nothing. Supported on `div` and `text`.
+   * Moving without resizing reports nothing. Supported on `div` and `span`.
    */
   onLayout?: (event: DomEvent) => void
 
@@ -1984,17 +1987,18 @@ export type SubmitEvent = DomEvent & {
   /** The `name` and `value` of every named, enabled `<input>` and `<textarea>`
    *  in the form, in document order. */
   formData: FormData
-  /** The button that submitted the form. Always null: there is no submit button. */
-  submitter: null
+  /** The `<button>` whose click submitted the form, or the default button an Enter in a field clicked.
+   *  `null` for `requestSubmit()` and for Enter in a form with no submit button. */
+  submitter: object | null
 }
 
 /** `<form>`: groups `<input>` and `<textarea>` controls and submits them together. */
 export interface FormProps extends Omit<HostProps, "onSubmit"> {
   /**
-   * Enter in an `<input>` of this form, or `requestSubmit()`, once every
-   * `required` control has a value. Cancelable and bubbling, like the DOM; there
-   * is no navigation, so there is nothing to cancel. Enter in a `<textarea>`
-   * inserts a newline and never submits.
+   * A click on a submit `<button>` of this form, Enter in an `<input>` of it (HTML's implicit
+   * submission), or `requestSubmit()`, once every `required` control has a value. Cancelable
+   * and bubbling, like the DOM; there is no navigation, so there is nothing to cancel. Enter in a
+   * `<textarea>` inserts a newline and never submits.
    */
   onSubmit?: (event: SubmitEvent) => void
 }
@@ -2006,14 +2010,17 @@ export interface FormMethods {
    * gets `invalid`, and the first whose handlers did not call `preventDefault()`
    * takes focus; the form is not submitted. Otherwise `submit` fires. The events
    * are delivered before this returns.
+   *
+   * `submitter` becomes the event's `submitter`. It throws a `TypeError` when it is not a
+   * submit `<button>`, and a `NotFoundError` `DOMException` when that button belongs to another form.
    */
-  requestSubmit(): void
+  requestSubmit(submitter?: object | null): void
 }
 
 /** `<label>`: names a control and forwards a click to it. */
 export interface LabelProps extends HostProps {
-  /** The `id` of the control to label. Without it, the first `<input>` or
-   *  `<textarea>` inside the label is the control. */
+  /** The `id` of the control to label. Without it, the first `<input>`, `<textarea>`
+   *  or `<button>` inside the label is the control. */
   htmlFor?: string
 }
 
@@ -2128,6 +2135,7 @@ export interface ImagePixelsOptions {
 
 /** The tags that are valid only inside an `<svg>`. */
 export type SvgChildType =
+  | "text"
   | "path"
   | "circle"
   | "ellipse"
@@ -2424,10 +2432,7 @@ export interface SvgImageProps extends SvgShapeProps {
   preserveAspectRatio?: string
 }
 
-/**
- * `<text>` inside an `<svg>`. Its string children are the text. Outside an
- * `<svg>`, `<text>` is the host text element and takes none of these.
- */
+/** `<text>` inside an `<svg>`. Its string children are the text. It is valid only inside an `<svg>`. */
 export interface SvgTextProps extends SvgShapeProps {
   x?: SvgLength | SvgLength[]
   y?: SvgLength | SvgLength[]

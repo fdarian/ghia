@@ -41,7 +41,7 @@ function Avatar(props: { name: string; size: number; fontSize: number; style?: S
         ...props.style,
       }}
     >
-      <text style={{ fontSize: props.fontSize, fontWeight: 600, color: '#FFFFFF' }}>{initials(props.name)}</text>
+      <div style={{ fontSize: props.fontSize, fontWeight: 600, color: '#FFFFFF' }}>{initials(props.name)}</div>
     </div>
   )
 }
@@ -84,7 +84,7 @@ function Row(props: { message: Message; selected: boolean; onSelect: () => void 
             height: 18,
           }}
         >
-          <text
+          <div
             style={{
               ...oneLine,
               minWidth: 0,
@@ -94,15 +94,15 @@ function Row(props: { message: Message; selected: boolean; onSelect: () => void 
             }}
           >
             {props.message.fromName}
-          </text>
-          <text style={{ flexShrink: 0, fontSize: 12, color: '#71717A' }}>{props.message.time}</text>
+          </div>
+          <div style={{ flexShrink: 0, fontSize: 12, color: '#71717A' }}>{props.message.time}</div>
         </div>
-        <text style={{ ...oneLine, height: 18, lineHeight: '18px', fontSize: 13, color: '#27272A' }}>
+        <div style={{ ...oneLine, height: 18, lineHeight: '18px', fontSize: 13, color: '#27272A' }}>
           {props.message.subject}
-        </text>
-        <text style={{ ...oneLine, height: 16, lineHeight: '16px', fontSize: 12, color: '#71717A' }}>
+        </div>
+        <div style={{ ...oneLine, height: 16, lineHeight: '16px', fontSize: 12, color: '#71717A' }}>
           {props.message.snippet}
-        </text>
+        </div>
       </div>
     </div>
   )

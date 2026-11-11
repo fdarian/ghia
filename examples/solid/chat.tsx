@@ -394,7 +394,7 @@ function SidebarAction(props: { icon: IconName; label: string; onClick?: () => v
       >
         <Icon name={props.icon} size={14} color={C.secondary} />
       </div>
-      <text style={{ fontSize: 13, color: C.secondary }}>{props.label}</text>
+      <div style={{ fontSize: 13, color: C.secondary }}>{props.label}</div>
     </Button>
   )
 }
@@ -422,7 +422,7 @@ function ConversationRow(props: {
       }}
       onClick={() => props.onSelect(props.conversation.id)}
     >
-      <text
+      <div
         style={{
           fontSize: 13.5,
           lineHeight: "18px",
@@ -432,10 +432,10 @@ function ConversationRow(props: {
         }}
       >
         {props.conversation.title}
-      </text>
+      </div>
       <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 5 }}>
         <Icon name="folder" size={12.5} color={C.tertiary} />
-        <text
+        <div
           style={{
             fontSize: 13,
             lineHeight: "15px",
@@ -447,8 +447,8 @@ function ConversationRow(props: {
           }}
         >
           {props.conversation.project}
-        </text>
-        <text style={{ fontSize: 12.5, color: C.ghost, flexShrink: 0 }}>{props.conversation.time}</text>
+        </div>
+        <div style={{ fontSize: 12.5, color: C.ghost, flexShrink: 0 }}>{props.conversation.time}</div>
       </div>
     </Button>
   )
@@ -540,9 +540,9 @@ function Sidebar(props: {
                   paddingRight: 8,
                 }}
               >
-                <text style={{ fontSize: 13, fontWeight: 500, color: C.secondary, flexGrow: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: C.secondary, flexGrow: 1, minWidth: 0 }}>
                   {group.name}
-                </text>
+                </div>
                 <Show when={groupIndex() === 0}>
                   <Button
                     testId="thread-filter"
@@ -610,9 +610,9 @@ function UserTurn(props: { text: string }) {
           paddingRight: 12,
         }}
       >
-        <text style={{ fontSize: 14, lineHeight: "20px", color: C.text, minWidth: 0, maxWidth: "100%" }}>
+        <div style={{ fontSize: 14, lineHeight: "20px", color: C.text, minWidth: 0, maxWidth: "100%" }}>
           {props.text}
-        </text>
+        </div>
       </div>
     </div>
   )
@@ -637,17 +637,17 @@ function WorkedFor(props: { duration: string }) {
       >
         <div style={{ height: 1, flexGrow: 1, backgroundColor: C.border }} />
         <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 5, flexShrink: 0 }}>
-          <text style={{ fontSize: 13.5, lineHeight: "18px", fontWeight: 500, color: C.tertiary }}>
+          <div style={{ fontSize: 13.5, lineHeight: "18px", fontWeight: 500, color: C.tertiary }}>
             {props.duration}
-          </text>
+          </div>
           <Icon name={open() ? "chevronDown" : "chevronRight"} size={11.5} color={C.tertiary} />
         </div>
         <div style={{ height: 1, flexGrow: 1, backgroundColor: C.border }} />
       </Button>
       <Show when={open()}>
-        <text style={{ fontSize: 13, lineHeight: "18px", color: C.secondary }}>
+        <div style={{ fontSize: 13, lineHeight: "18px", color: C.secondary }}>
           Demo reasoning. No model ran. The fold is here so the chrome has something to open.
-        </text>
+        </div>
       </Show>
     </div>
   )
@@ -719,7 +719,7 @@ function CodeBlock(props: { code: string; language?: string; showLineNumbers?: b
     <div style={CODE_CARD_STYLE}>
       <Show when={props.language}>
         <div style={CODE_HEADER_STYLE}>
-          <text style={{ fontSize: 12, color: C.secondary }}>{props.language}</text>
+          <div style={{ fontSize: 12, color: C.secondary }}>{props.language}</div>
         </div>
       </Show>
       <code
@@ -814,12 +814,12 @@ function Inspector(props: {
         gap: 10,
       }}
     >
-      <text style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Inspector</text>
+      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Inspector</div>
       <For each={rows()}>
         {([label, value]) => (
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <text style={{ fontSize: 11.5, color: C.ghost }}>{label}</text>
-            <text style={{ fontSize: 13, color: C.secondary }}>{value}</text>
+            <div style={{ fontSize: 11.5, color: C.ghost }}>{label}</div>
+            <div style={{ fontSize: 13, color: C.secondary }}>{value}</div>
           </div>
         )}
       </For>
@@ -862,7 +862,7 @@ function OverlayCard(props: {
         >
           <div style={{ display: "flex", flexDirection: "row", alignItems: "center" }}>
             <DialogTitle style={{ flexGrow: 1 }}>
-              <text style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{props.title}</text>
+              <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{props.title}</div>
             </DialogTitle>
             <DialogClose
               testId="overlay-close"
@@ -878,7 +878,7 @@ function OverlayCard(props: {
                 hover: { backgroundColor: C.overlay },
               }}
             >
-              <text style={{ fontSize: 12, color: C.secondary }}>Close</text>
+              <div style={{ fontSize: 12, color: C.secondary }}>Close</div>
             </DialogClose>
           </div>
           {props.children}
@@ -967,7 +967,7 @@ function Header(props: {
           </div>
         </div>
       </Show>
-      <text
+      <div
         style={{
           fontSize: 13,
           fontWeight: 500,
@@ -979,11 +979,11 @@ function Header(props: {
         }}
       >
         {props.title}
-      </text>
+      </div>
       <Show when={props.turnCount > TURNS.length}>
-        <text style={{ fontSize: 12, fontWeight: 500, color: C.tertiary, whiteSpace: "nowrap", flexShrink: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 500, color: C.tertiary, whiteSpace: "nowrap", flexShrink: 0 }}>
           {props.turnCount.toLocaleString("en-US")} messages
-        </text>
+        </div>
       </Show>
       <div style={{ flexGrow: 1 }} />
       <IconButton icon="panelRight" testId="inspector-toggle" onClick={props.onToggleInspector} />
@@ -1036,7 +1036,7 @@ function MenuRowInner(props: {
     <>
       <Show when={props.icon}>{(icon) => <Icon name={icon()} size={14} color={C.tertiary} />}</Show>
       <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, minWidth: 0 }}>
-        <text
+        <div
           style={{
             fontSize: 12.5,
             fontWeight: props.selected ? 600 : 500,
@@ -1046,15 +1046,15 @@ function MenuRowInner(props: {
           }}
         >
           {props.label}
-        </text>
+        </div>
         <Show when={props.description}>
-          <text style={{ fontSize: 12.5, lineHeight: "14px", color: C.tertiary, paddingTop: 2 }}>
+          <div style={{ fontSize: 12.5, lineHeight: "14px", color: C.tertiary, paddingTop: 2 }}>
             {props.description}
-          </text>
+          </div>
         </Show>
       </div>
       <Show when={props.hint}>
-        <text style={{ fontSize: 11.5, color: C.ghost, flexShrink: 0 }}>{props.hint}</text>
+        <div style={{ fontSize: 11.5, color: C.ghost, flexShrink: 0 }}>{props.hint}</div>
       </Show>
       <Show when={props.selected}>
         <Icon name="check" size={11} color={C.tertiary} />
@@ -1095,7 +1095,7 @@ function ChipSelect(props: {
           })}
         >
           <Icon name={props.icon} size={12} color={props.accent ? C.accent : C.tertiary} />
-          <text
+          <div
             style={{
               fontSize: 13,
               lineHeight: "16px",
@@ -1105,7 +1105,7 @@ function ChipSelect(props: {
             }}
           >
             {props.label}
-          </text>
+          </div>
           <Show when={props.caret ?? true}>
             <Icon name="chevronDown" size={10.5} color={C.ghost} />
           </Show>
@@ -1145,7 +1145,7 @@ function ModelPicker(props: { value: string; onChange: (next: string) => void })
               <div style={{ height: 1, backgroundColor: C.border, marginTop: 4, marginBottom: 4 }} />
             </Show>
             <SelectLabel style={{ height: 22, paddingLeft: 8, paddingRight: 8, display: "flex", alignItems: "center" }}>
-              <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>{group.name}</text>
+              <div style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>{group.name}</div>
             </SelectLabel>
             <For each={group.items}>
               {(model) => (
@@ -1173,7 +1173,7 @@ function ReasoningPicker(props: { value: string; onChange: (next: string) => voi
       caret={false}
     >
       <SelectLabel style={{ height: 22, paddingLeft: 8, display: "flex", alignItems: "center" }}>
-        <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Reasoning</text>
+        <div style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Reasoning</div>
       </SelectLabel>
       <For each={REASONING}>
         {(option) => (
@@ -1254,7 +1254,7 @@ function WorkspacePicker(props: { value: string; onChange: (next: string) => voi
       caret={false}
     >
       <SelectLabel style={{ height: 22, paddingLeft: 8, display: "flex", alignItems: "center" }}>
-        <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Work in</text>
+        <div style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Work in</div>
       </SelectLabel>
       <For each={WORKSPACES}>
         {(option) => (
@@ -1308,9 +1308,9 @@ function ModeToggle(props: { value: "build" | "plan"; onChange: (next: "build" |
       onClick={() => props.onChange(plan() ? "build" : "plan")}
     >
       <Icon name={plan() ? "list" : "wrench"} size={12} color={plan() ? C.accent : C.tertiary} />
-      <text style={{ fontSize: 13, lineHeight: "16px", color: plan() ? C.accent : C.secondary }}>
+      <div style={{ fontSize: 13, lineHeight: "16px", color: plan() ? C.accent : C.secondary }}>
         {plan() ? "Plan" : "Build"}
-      </text>
+      </div>
     </Button>
   )
 }
@@ -1515,7 +1515,7 @@ function GhostButton(props: {
     >
       <Icon name={props.icon} size={16} color={color()} />
       <Show when={props.label}>
-        <text style={{ fontSize: 12.5, color: color() }}>{props.label}</text>
+        <div style={{ fontSize: 12.5, color: color() }}>{props.label}</div>
       </Show>
     </Button>
   )
@@ -1574,7 +1574,7 @@ function ActionBar(props: { onRetry?: () => void }) {
         <GhostButton icon="more" onClick={() => setNote("More actions are a demo.")} />
       </div>
       <Show when={note()}>
-        <text style={{ fontSize: 12, color: C.tertiary, paddingLeft: 9 }}>{note()}</text>
+        <div style={{ fontSize: 12, color: C.tertiary, paddingLeft: 9 }}>{note()}</div>
       </Show>
     </div>
   )
@@ -1860,16 +1860,16 @@ export function ChatApp(propsIn: { turnCount?: number } = {}) {
                   hover: { backgroundColor: C.overlay },
                 }}
               >
-                <text style={{ fontSize: 13, color: C.text }}>{conversation.title}</text>
+                <div style={{ fontSize: 13, color: C.text }}>{conversation.title}</div>
               </Button>
             )}
           </For>
         </div>
       </OverlayCard>
       <OverlayCard title="Settings" open={overlay() === "settings"} onClose={() => setOverlay(null)}>
-        <text style={{ fontSize: 13, lineHeight: "18px", color: C.secondary }}>
+        <div style={{ fontSize: 13, lineHeight: "18px", color: C.secondary }}>
           This is the GPUIX chat demo. Threads, drafts, and replies stay in this window.
-        </text>
+        </div>
         <Button
           testId="cycle-overlay"
           onClick={() => context?.renderer?.cycleDebugFrameOverlay?.()}
@@ -1884,7 +1884,7 @@ export function ChatApp(propsIn: { turnCount?: number } = {}) {
             hover: { backgroundColor: C.overlayStrong },
           }}
         >
-          <text style={{ fontSize: 13, color: C.text }}>Cycle frame overlay</text>
+          <div style={{ fontSize: 13, color: C.text }}>Cycle frame overlay</div>
         </Button>
       </OverlayCard>
     </div>

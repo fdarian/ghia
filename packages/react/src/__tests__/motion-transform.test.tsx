@@ -640,7 +640,7 @@ function Page({ head }: { head: React.ReactNode }) {
         <div key={row} style={{ display: "flex", flexDirection: "row", gap: 4, padding: 2 }}>
           {Array.from({ length: 4 }, (_, cell) => (
             <div key={cell} style={{ borderWidth: 1, borderColor: "#cccccc", padding: 2 }}>
-              <text style={{ fontSize: 11, color: "#333333" }}>{`r${row} c${cell}`}</text>
+              <div style={{ fontSize: 11, color: "#333333" }}>{`r${row} c${cell}`}</div>
             </div>
           ))}
         </div>
@@ -806,7 +806,7 @@ describeNative("a tick of an animation of the transform keys", { timeout: TIMEOU
         animate={{ rotate: [0, 30, 0], x: [0, 100, 0] }}
         transition={{ duration: 1.6, ease: "linear", repeat: Infinity }}
       >
-        <text style={{ fontSize: 14, color: "#222222" }}>moving</text>
+        <div style={{ fontSize: 14, color: "#222222" }}>moving</div>
       </motion.div>
     ),
   }
@@ -829,7 +829,7 @@ describeNative("a tick of an animation of the transform keys", { timeout: TIMEOU
             animate={{ y: "0%" }}
             transition={{ duration: 1.5, ease: "linear" }}
           >
-            <text style={{ fontSize: 14, color: "#222222" }}>rolling</text>
+            <div style={{ fontSize: 14, color: "#222222" }}>rolling</div>
           </motion.div>
         </div>
       )

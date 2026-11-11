@@ -3,7 +3,7 @@ import { isServer } from "solid-js/web"
 import { TestRenderer, encodeWireBatchForTest } from "@ghia/native/testing"
 
 const renderer = new TestRenderer()
-renderer.applyBatch(encodeWireBatchForTest([["createElement", 1, "text"], ["setText", 1, "marker v1"], ["setRoot", 1]]))
+renderer.applyBatch(encodeWireBatchForTest([["createElement", 1, "div"], ["createElement", 2, "#text"], ["appendChild", 1, 2], ["setText", 2, "marker v1"], ["setRoot", 1]]))
 renderer.flush()
 console.log(`IS_SERVER ${isServer}`)
 console.log(`RENDERED ${renderer.getAllText().join("")}`)

@@ -62,7 +62,7 @@ function scene(children: React.ReactNode, style: Style = {}) {
 const CHILD = <div testId="child" style={{ width: 20, height: 10 }} />
 
 describeNative("padding takes one to four values", () => {
-  const laidOut = (padding: string | number, style: Style = {}) => {
+  const laidOut = (padding: string | number | undefined, style: Style = {}) => {
     let result: number[][] = []
     withRoot(
       scene(
@@ -100,18 +100,25 @@ describeNative("padding takes one to four values", () => {
     expect(laidOut("1px 2px", { paddingLeft: 9 })[0]).toEqual([9, 1, 20, 10])
   })
 
-  it("is an error for a value CSS would drop", () => {
-    expect(errorsOf({ padding: "1px auto" })).toMatch(/invalid padding "auto"/)
-    expect(errorsOf({ padding: "1px 12" })).toMatch(/invalid padding "12"/)
-    expect(errorsOf({ padding: "1px 2px 3px 4px 5px" })).toMatch(/one to four values/)
-    expect(errorsOf({ padding: "" })).toMatch(/one to four values/)
-    expect(errorsOf({ hover: { padding: "1px bogus" } })).toMatch(/invalid padding "bogus"/)
+  it("drops a value CSS would drop and reports nothing", () => {
+    expect(errorsOf({ padding: "1px auto" })).toBe("")
+    expect(errorsOf({ padding: "1px 12" })).toBe("")
+    expect(errorsOf({ padding: "1px 2px 3px 4px 5px" })).toBe("")
+    expect(errorsOf({ padding: "" })).toBe("")
+    expect(errorsOf({ hover: { padding: "1px bogus" } })).toBe("")
+  })
+
+  it("drops only the bad padding: the box is the one without it, with the rest of the style applied", () => {
+    for (const padding of ["1px auto", "1px 12", "1px 2px 3px 4px 5px", ""]) {
+      expect(laidOut(padding, { paddingLeft: 9 }), padding).toEqual(laidOut(undefined, { paddingLeft: 9 }))
+    }
+    expect(laidOut("1px auto", { paddingLeft: 9 })[0]).toEqual([9, 0, 20, 10])
   })
 })
 
 describeNative("margin takes one to four values, each of which may be auto", () => {
   // The 1px of padding keeps the child's top margin inside the scene instead of collapsing through it.
-  const placed = (margin: string, style: Style = {}) => {
+  const placed = (margin: string | undefined, style: Style = {}) => {
     let result: number[] = []
     withRoot(
       scene(<div testId="child" style={{ width: 100, height: 10, margin, ...style }} />, { paddingTop: 1 }),
@@ -141,13 +148,18 @@ describeNative("margin takes one to four values, each of which may be auto", () 
     expect(placed("0 auto", { marginLeft: 7 })).toEqual([7, 1, 100, 10])
   })
 
-  it("is an error for an intrinsic size keyword in any value", () => {
-    expect(errorsOf({ margin: "0 max-content" })).toMatch(/invalid margin "max-content"/)
+  it("drops an intrinsic size keyword in any value and reports nothing", () => {
+    expect(errorsOf({ margin: "0 max-content" })).toBe("")
+  })
+
+  it("drops only the bad margin: the box is the one without it, with the rest of the style applied", () => {
+    expect(placed("0 max-content", { marginLeft: 7 })).toEqual(placed(undefined, { marginLeft: 7 }))
+    expect(placed("0 max-content", { marginLeft: 7 })).toEqual([7, 1, 100, 10])
   })
 })
 
 describeNative("inset takes one to four values", () => {
-  const placed = (inset: string | number, style: Style = {}) => {
+  const placed = (inset: string | number | undefined, style: Style = {}) => {
     let result: number[] = []
     withRoot(
       scene(<div testId="child" style={{ position: "absolute", inset, ...style }} />, { position: "relative" }),
@@ -177,13 +189,18 @@ describeNative("inset takes one to four values", () => {
     expect(placed("10px 20px", { left: 0, bottom: 50 })).toEqual([0, 10, 280, 140])
   })
 
-  it("is an error for an intrinsic size keyword", () => {
-    expect(errorsOf({ inset: "10px fit-content" })).toMatch(/invalid inset "fit-content"/)
+  it("drops an intrinsic size keyword and reports nothing", () => {
+    expect(errorsOf({ inset: "10px fit-content" })).toBe("")
+  })
+
+  it("drops only the bad inset: the box is the one without it, with the rest of the style applied", () => {
+    expect(placed("10px fit-content", { left: 5 })).toEqual(placed(undefined, { left: 5 }))
+    expect(placed("10px fit-content", { left: 5 })[0]).toBe(5)
   })
 })
 
 describeNative("gap takes a row and a column", () => {
-  const wrapped = (gap: string | number, style: Style = {}) => {
+  const wrapped = (gap: string | number | undefined, style: Style = {}) => {
     let result: number[][] = []
     withRoot(
       scene(
@@ -232,14 +249,25 @@ describeNative("gap takes a row and a column", () => {
     ])
   })
 
-  it("is an error for three values and for auto", () => {
-    expect(errorsOf({ gap: "1px 2px 3px" })).toMatch(/one or two values/)
-    expect(errorsOf({ gap: "1px auto" })).toMatch(/invalid gap "auto"/)
+  it("drops three values and auto and reports nothing", () => {
+    expect(errorsOf({ gap: "1px 2px 3px" })).toBe("")
+    expect(errorsOf({ gap: "1px auto" })).toBe("")
+  })
+
+  it("drops only the bad gap: the layout is the one without it, with the rest of the style applied", () => {
+    for (const gap of ["1px 2px 3px", "1px auto"]) {
+      expect(wrapped(gap, { columnGap: 2 }), gap).toEqual(wrapped(undefined, { columnGap: 2 }))
+    }
+    expect(wrapped("1px auto", { columnGap: 2 })).toEqual([
+      [0, 0],
+      [42, 0],
+      [0, 10],
+    ])
   })
 })
 
 describeNative("borderWidth takes one to four values", () => {
-  const bordered = (borderWidth: string | number, style: Style = {}) => {
+  const bordered = (borderWidth: string | number | undefined, style: Style = {}) => {
     let result: number[][] = []
     withRoot(
       scene(
@@ -279,9 +307,18 @@ describeNative("borderWidth takes one to four values", () => {
     expect(bordered("1px 2px 3px 4px", { borderLeftWidth: 10 })[0]).toEqual([10, 1, 20, 10])
   })
 
-  it("is an error for a percentage and for five values", () => {
-    expect(errorsOf({ borderWidth: "1px 10%" })).toMatch(/invalid border width "10%"/)
-    expect(errorsOf({ borderWidth: "1px 1px 1px 1px 1px" })).toMatch(/one to four values/)
+  it("drops a percentage and five values and reports nothing", () => {
+    expect(errorsOf({ borderWidth: "1px 10%" })).toBe("")
+    expect(errorsOf({ borderWidth: "1px 1px 1px 1px 1px" })).toBe("")
+  })
+
+  it("drops only the bad borderWidth: the box is the one without it, with the rest of the style applied", () => {
+    for (const borderWidth of ["1px 10%", "1px 1px 1px 1px 1px"]) {
+      expect(bordered(borderWidth, { borderTopWidth: 3 }), borderWidth).toEqual(
+        bordered(undefined, { borderTopWidth: 3 })
+      )
+    }
+    expect(bordered("1px 10%", { borderTopWidth: 3 })[0]).toEqual([3, 3, 20, 10])
   })
 })
 
@@ -390,6 +427,98 @@ describeNative("the shorthands in a state style", () => {
   })
 })
 
+describeNative("a bad shorthand in a state style", () => {
+  function hoveredBoxes(ui: React.ReactElement, over: string, point: [number, number], read: (renderer: Renderer) => number[][]) {
+    const { render, renderer, unmount } = createTestRoot()
+    try {
+      render(ui)
+      const at = read(renderer)
+      const target = box(renderer, over)
+      renderer.nativeSimulateMouseMove(target.x + point[0], target.y + point[1])
+      renderer.clockFastForward(16)
+      return { at, on: read(renderer) }
+    } finally {
+      unmount()
+    }
+  }
+
+  const host = (rest: Style, hover: Style) =>
+    scene(
+      <div testId="host" style={{ display: "flex", width: 120, height: 90, ...rest, hover }}>
+        {CHILD}
+      </div>
+    )
+  const child = (renderer: Renderer) => [rect(renderer, "child")]
+
+  it("leaves the box as it was and applies the rest of the state for padding", () => {
+    const { at, on } = hoveredBoxes(host({ paddingLeft: 30 }, { padding: "1px bogus" }), "host", [100, 80], child)
+    expect(on).toEqual(at)
+    expect(at[0]).toEqual([30, 0, 20, 10])
+    const withTop = hoveredBoxes(host({ paddingLeft: 30 }, { padding: "1px bogus", paddingTop: 5 }), "host", [100, 80], child)
+    expect(withTop.on[0]).toEqual([30, 5, 20, 10])
+  })
+
+  it("leaves the box as it was and applies the rest of the state for borderWidth", () => {
+    const base = { borderStyle: "solid", borderWidth: 2 }
+    const { at, on } = hoveredBoxes(host(base, { borderWidth: "1px 10%" }), "host", [100, 80], child)
+    expect(on).toEqual(at)
+    expect(at[0]).toEqual([2, 2, 20, 10])
+    const withTop = hoveredBoxes(host(base, { borderWidth: "1px 10%", borderTopWidth: 4 }), "host", [100, 80], child)
+    expect(withTop.on[0]).toEqual([2, 4, 20, 10])
+  })
+
+  const margined = (hover: Style) =>
+    scene(
+      <div testId="parent" style={{ width: 150, height: 40 }}>
+        <div testId="child" style={{ width: 100, height: 10, hover }} />
+      </div>
+    )
+
+  it("leaves the box as it was and applies the rest of the state for margin", () => {
+    const { at, on } = hoveredBoxes(margined({ margin: "0 max-content" }), "child", [50, 5], child)
+    expect(on).toEqual(at)
+    expect(at[0]).toEqual([0, 0, 100, 10])
+    const withLeft = hoveredBoxes(margined({ margin: "0 max-content", marginLeft: 7 }), "child", [50, 5], child)
+    expect(withLeft.on[0]).toEqual([7, 0, 100, 10])
+  })
+
+  const positioned = (hover: Style) =>
+    scene(
+      <div testId="parent" style={{ position: "relative", width: 200, height: 100 }}>
+        <div testId="child" style={{ position: "absolute", top: 0, left: 0, width: 100, height: 50, hover }} />
+      </div>
+    )
+
+  it("leaves the box as it was and applies the rest of the state for inset", () => {
+    const { at, on } = hoveredBoxes(positioned({ inset: "10px fit-content" }), "child", [50, 30], child)
+    expect(on).toEqual(at)
+    expect(at[0]).toEqual([0, 0, 100, 50])
+    const withLeft = hoveredBoxes(positioned({ inset: "10px fit-content", left: 20 }), "child", [50, 30], child)
+    expect(withLeft.on[0]).toEqual([20, 0, 100, 50])
+  })
+
+  const flowing = (hover: Style) =>
+    scene(
+      <div testId="flow" style={{ display: "flex", flexWrap: "wrap", width: 100, hover }}>
+        <div testId="a" style={{ width: 40, height: 10 }} />
+        <div testId="b" style={{ width: 40, height: 10 }} />
+        <div testId="c" style={{ width: 40, height: 10 }} />
+      </div>
+    )
+  const corners = (renderer: Renderer) => ["a", "b", "c"].map((id) => rect(renderer, id).slice(0, 2))
+
+  it("leaves the layout as it was and applies the rest of the state for gap", () => {
+    const { at, on } = hoveredBoxes(flowing({ gap: "1px auto" }), "flow", [5, 5], corners)
+    expect(on).toEqual(at)
+    const withRow = hoveredBoxes(flowing({ gap: "1px auto", rowGap: 4 }), "flow", [5, 5], corners)
+    expect(withRow.on).toEqual([
+      [0, 0],
+      [40, 0],
+      [0, 14],
+    ])
+  })
+})
+
 describeNative("the shorthands on an inline span", () => {
   const TEXT = { fontSize: 16, lineHeight: "20px", fontFamily: "Menlo", color: "#000000" } as const
 
@@ -401,10 +530,10 @@ describeNative("the shorthands on an inline span", () => {
       try {
         render(
           <div style={{ width: 400 }}>
-            <text style={TEXT}>
+            <div style={TEXT}>
               aa <span style={style}>bb</span>
               <span ref={(instance: PublicInstance | null) => instance && refs.set("after", instance)}>cc</span>
-            </text>
+            </div>
           </div>
         )
         return refs.get("after")!.getBoundingClientRect().x

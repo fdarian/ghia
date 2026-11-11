@@ -272,7 +272,7 @@ describeNative("a --p set from JS each frame", () => {
           <div key={row} style={{ display: "flex", gap: 4, padding: 2 }}>
             {Array.from({ length: 4 }, (_, cell) => (
               <div key={cell} style={{ borderWidth: 1, borderColor: "#cccccc", padding: 2 }}>
-                <text style={{ fontSize: 11, color: "#333333" }}>{`r${row} c${cell}`}</text>
+                <div style={{ fontSize: 11, color: "#333333" }}>{`r${row} c${cell}`}</div>
               </div>
             ))}
           </div>

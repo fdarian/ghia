@@ -20,7 +20,7 @@ describeNative("document.getSelection", () => {
     cleanups.push(() => document.removeEventListener("selectionchange", listener, { capture: true }))
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <text style={{ fontSize: 20 }}>hello world</text>
+        <div style={{ fontSize: 20 }}>hello world</div>
       </div>
     )
 

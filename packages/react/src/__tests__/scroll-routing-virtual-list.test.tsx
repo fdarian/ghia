@@ -21,7 +21,7 @@ function listInScroller(options: { list?: StyleDesc } = {}) {
       >
         {Array.from({ length: 20 }, (_, index) => (
           <div key={index} style={{ height: 40, flexShrink: 0 }}>
-            <text>{`row-${index}`}</text>
+            <div>{`row-${index}`}</div>
           </div>
         ))}
       </virtual-list>

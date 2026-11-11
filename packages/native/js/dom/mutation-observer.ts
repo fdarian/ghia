@@ -7,10 +7,16 @@
  *
  * With no observer alive every hook is one integer check, and no node gets a field: the
  * registrations live in a `WeakMap` that is only written by `observe()`.
+ *
+ * An observer does not keep what it observes alive, as in the DOM standard (its node list is
+ * weak). The only strong edge is node to registration, in that `WeakMap`; the observer holds
+ * `WeakRef`s of its registrations, and a `FinalizationRegistry` takes a collected registration
+ * out of the observer and out of the live count.
  */
 
 import { reportUncaught } from "../events/dispatch.js"
-import { NOT_ATTRIBUTES, Node, type Element } from "./nodes.js"
+import { attributeNameOf } from "./attribute-names.js"
+import { NOT_ATTRIBUTES, Node, SVGElement, type Element } from "./nodes.js"
 
 export type MutationObserverInit = {
   childList?: boolean
@@ -59,11 +65,20 @@ type ObserverState = {
   /** Observers are notified in the order they were made. */
   readonly order: number
   records: MutationRecordClass[]
-  readonly registrations: Set<Registration>
+  readonly registrations: Set<WeakRef<Registration>>
   readonly transients: Set<Registration>
 }
 
 export type MutationCallback = (records: MutationRecord[], observer: MutationObserver) => void
+
+/**
+ * What the finalization registry holds, strongly and from a global root: only the observer's set of
+ * refs, never the observer, whose callback usually captures the observed node.
+ */
+type CollectedRegistration = {
+  readonly set: Set<WeakRef<Registration>>
+  readonly ref: WeakRef<Registration>
+}
 
 const CREATE = Symbol("create mutation record")
 
@@ -99,8 +114,13 @@ type Runtime = {
   /** The records made by the copy that owns the classes: its `CREATE` is the only token they accept. */
   createRecord(init: RecordInit): MutationRecordClass
   registrations: WeakMap<Node, Registration[]>
-  /** Registrations in `registrations`, transient ones too: 0 means every hook has nothing to do. */
+  /**
+   * Registrations in `registrations`, transient ones too: 0 means every hook has nothing to do.
+   * It drops when `observe()`d nodes are collected, through `collected`.
+   */
   count: number
+  /** Notices a registration made by `observe()` being collected: it was not disconnected. */
+  collected: FinalizationRegistry<CollectedRegistration>
   nextOrder: number
   /** Observers with records waiting for the next delivery. */
   pending: Set<ObserverState>
@@ -163,6 +183,7 @@ function removeRegistration(runtime: Runtime, registration: Registration): void 
   if (list === undefined) return
   const index = list.indexOf(registration)
   if (index < 0) return
+  runtime.collected.unregister(registration)
   list.splice(index, 1)
   if (list.length === 0) runtime.registrations.delete(registration.node)
   runtime.count -= 1
@@ -212,14 +233,19 @@ class MutationObserverClass {
       return
     }
     const registration: Registration = { node: target, options: normalized, source: null, observer: state }
-    state.registrations.add(registration)
+    const ref = new WeakRef(registration)
+    state.registrations.add(ref)
+    runtime.collected.register(registration, { set: state.registrations, ref }, registration)
     addRegistration(runtime, registration)
   }
 
   disconnect(): void {
     const runtime = shared
     const state = stateOf(this)
-    for (const registration of state.registrations) removeRegistration(runtime, registration)
+    for (const ref of state.registrations) {
+      const registration = ref.deref()
+      if (registration !== undefined) removeRegistration(runtime, registration)
+    }
     state.registrations.clear()
     dropTransients(runtime, state)
     state.records = []
@@ -255,6 +281,10 @@ const shared: Runtime = (() => {
     createRecord: (init) => new MutationRecordClass(CREATE, init),
     registrations: new WeakMap(),
     count: 0,
+    collected: new FinalizationRegistry((held) => {
+      held.set.delete(held.ref)
+      created.count -= 1
+    }),
     nextOrder: 0,
     pending: new Set(),
     transientHolders: new Set(),
@@ -431,9 +461,10 @@ export function queueCharacterDataMutation(target: Node, oldValue: string): void
  */
 export function recordAttributeChanges(element: Element, propNames: Iterable<string>, apply: () => void): void {
   const names: string[] = []
+  const svg = element instanceof SVGElement
   for (const prop of propNames) {
     if (NOT_ATTRIBUTES.has(prop)) continue
-    const name = prop === "className" ? "class" : prop
+    const name = attributeNameOf(prop, svg)
     if (!names.includes(name)) names.push(name)
   }
   const before = names.map((name) => element.getAttribute(name))

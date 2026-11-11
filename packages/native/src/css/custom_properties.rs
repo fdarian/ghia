@@ -6,8 +6,9 @@
 //!
 //! They inherit. [`CustomProperties::descend`] lays an element's declarations over its parent's
 //! computed map, substituting the `var()` in a value where it is declared. Two things read them:
-//! `style()` container queries, and [`substitute`], which puts them into the text of the transform
-//! properties. No other property substitutes `var()`.
+//! `style()` container queries, and [`substitute`], which puts them into the text of a value:
+//! the transform properties keep it in their field, and every other property holds its declaration
+//! until it is built (`css::var_substitution`).
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashSet};

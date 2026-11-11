@@ -29,10 +29,10 @@ function Row({ index }: { index: number }) {
   return (
     <div style={{ display: "flex", flexDirection: "row", gap: 4, padding: 2 }}>
       <div style={{ borderWidth: 1, borderColor: "#cccccc", padding: 2 }}>
-        <text style={{ fontSize: 11, color: "#333333" }}>{label}</text>
+        <div style={{ fontSize: 11, color: "#333333" }}>{label}</div>
       </div>
       <div style={{ borderWidth: 1, borderColor: "#cccccc", padding: 2 }}>
-        <text style={{ fontSize: 11, color: "#333333" }}>{`cell ${index}`}</text>
+        <div style={{ fontSize: 11, color: "#333333" }}>{`cell ${index}`}</div>
       </div>
     </div>
   )

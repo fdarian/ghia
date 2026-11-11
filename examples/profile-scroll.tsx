@@ -43,8 +43,8 @@ function Page({ shape }: { shape: Shape }) {
             <div key={index} style={{ height: 60, padding: 8, borderBottom: '1px solid #333', display: 'flex', flexDirection: 'row', gap: 8 }}>
               <div style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#456' }} />
               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <text style={{ fontSize: 14, color: '#fff' }}>{`Card ${index}`}</text>
-                <text style={{ fontSize: 12, color: '#aaa' }}>{`Some description for card ${index}`}</text>
+                <div style={{ fontSize: 14, color: '#fff' }}>{`Card ${index}`}</div>
+                <div style={{ fontSize: 12, color: '#aaa' }}>{`Some description for card ${index}`}</div>
               </div>
             </div>
           ))

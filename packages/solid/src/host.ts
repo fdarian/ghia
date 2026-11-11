@@ -24,6 +24,7 @@ import {
   isNativeviewHandlerProp,
   HOST_BINDING,
   HOST_MOUNT,
+  copyPrototypeMembers,
   hasMutationObservers,
   queueCharacterDataMutation,
   queueChildListMutation,
@@ -372,17 +373,20 @@ export class HostElement extends HTMLElement {
   }
 
   /** `<form>` only: validate the controls, then submit. */
-  requestSubmit(): void {
+  requestSubmit(submitter?: object | null): void {
     const root = this.root
     if (!root || !this.mounted) throw new Error("requestSubmit() needs a mounted element")
     if (this.type !== "form") {
       throw new Error(`requestSubmit() is only valid on <form>, got <${this.type}>`)
     }
-    requestFormSubmit({
-      id: this.nativeId,
-      nativeRenderer: root.nativeRenderer,
-      flushMutations: () => root.mutations.flushMutations(),
-    })
+    requestFormSubmit(
+      {
+        id: this.nativeId,
+        nativeRenderer: root.nativeRenderer,
+        flushMutations: () => root.mutations.flushMutations(),
+      },
+      submitter,
+    )
   }
 
   private textControl(member: string): TextControlHost {
@@ -459,6 +463,7 @@ defineDomMembers(HostElement.prototype, (element: HostElement) => ({
   connected: isConnected(element),
   layout: element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.nativeId } : undefined,
   prop: (name) => element.props.get(name),
+  propNames: () => element.props.keys(),
 }))
 defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
   renderer: element.root?.nativeRenderer,
@@ -471,12 +476,7 @@ defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
  * fields come from one constructor and the prototype chain from this one.
  */
 abstract class SvgHostElement extends SVGElement {}
-for (const key of Reflect.ownKeys(HostElement.prototype)) {
-  if (key === "constructor") continue
-  const descriptor = Object.getOwnPropertyDescriptor(HostElement.prototype, key)
-  if (descriptor === undefined) throw new Error(`HostElement.prototype has no own ${String(key)}`)
-  Object.defineProperty(SvgHostElement.prototype, key, descriptor)
-}
+copyPrototypeMembers(HostElement.prototype, SvgHostElement.prototype)
 
 /** In the tree of a root: every ancestor up to the root still holds it, as `removeChild` takes a node out of the DOM. */
 function isConnected(node: HostNode): boolean {
@@ -636,7 +636,7 @@ export function setHostProperty(
     node.motionValues = split.motionValues
     if (node.root && node.mounted) {
       node.writeStyle()
-      syncMotionBindings(node.root, node.root.mutations, node.nativeId, node.motionValues, node.kind === "element" ? node.type : undefined)
+      syncMotionBindings(node.root, node.root.mutations, node.nativeId, node.motionValues, node.kind === "element" ? node.type : undefined, node.style)
     }
     return
   }
@@ -684,13 +684,13 @@ function mount(root: HostRoot, node: HostNode): void {
   if (node.mounted) return
   node.mounted = true
   if (node.kind === "element") root.elements.set(node.nativeId, node)
-  root.mutations.createElement(node.nativeId, node.kind === "text" ? "text" : node.type)
+  root.mutations.createElement(node.nativeId, node.kind === "text" ? "#text" : node.type)
   if (node.kind === "text") {
     root.mutations.setText(node.nativeId, node.text)
   } else {
     node.sent.reset()
     node.writeStyle()
-    if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.type)
+    if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.type, node.style)
     node.listeners.attach({ eventHandlers: root.eventHandlers, renderer: root.mutations, elementId: node.nativeId })
     for (const [name, value] of node.props) {
       if (!EVENT_PROP_NAMES.has(name) && customPropAllowed(node, name)) {
@@ -715,7 +715,7 @@ function removeFromParent(node: HostNode): void {
   const index = parent.childList.indexOf(node)
   if (index >= 0) parent.childList.splice(index, 1)
   node.parent = null
-  if (index >= 0 && parent.kind === "element") {
+  if (index >= 0 && parent.kind === "element" && hasMutationObservers()) {
     queueChildListMutation(parent, [], [node], parent.childList[index - 1] ?? null, parent.childList[index] ?? null)
   }
 }
@@ -738,7 +738,9 @@ export function insertHostNode(
   const index = anchor ? parent.childList.indexOf(anchor) : parent.childList.length
   parent.childList.splice(index, 0, node)
   node.parent = parent
-  queueChildListMutation(parent, [node], [], parent.childList[index - 1] ?? null, parent.childList[index + 1] ?? null)
+  if (hasMutationObservers()) {
+    queueChildListMutation(parent, [node], [], parent.childList[index - 1] ?? null, parent.childList[index + 1] ?? null)
+  }
   const root = parent.mounted ? parent.root : null
   if (root === null) {
     // The new parent has no native element (it was never mounted, or was released), so a node

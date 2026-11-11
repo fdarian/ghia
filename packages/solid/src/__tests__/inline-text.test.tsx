@@ -17,9 +17,9 @@ describe.skipIf(!hasNativeTestRenderer)("Solid inline text", () => {
   it("accepts a span host element", () => {
     const app = createTestRoot()
     app.render(() => (
-      <text>
+      <div>
         a<span>b</span>
-      </text>
+      </div>
     ))
     expect(app.renderer.findByType("span")).toHaveLength(1)
   })
@@ -29,9 +29,9 @@ describe.skipIf(!hasNativeTestRenderer)("Solid inline text", () => {
     const app = createTestRoot()
     app.render(() => (
       <div style={{ width: 600 }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           Hello <span style={{ color: "#ff0000", fontWeight: 700 }}>big <span style={{ backgroundColor: "#ffff00" }}>{name()}</span></span>!
-        </text>
+        </div>
       </div>
     ))
 
@@ -46,9 +46,9 @@ describe.skipIf(!hasNativeTestRenderer)("Solid inline text", () => {
     const app = createTestRoot()
     app.render(() => (
       <div style={{ padding: 20 }}>
-        <text style={{ fontSize: 20 }}>
+        <div style={{ fontSize: 20 }}>
           Hello <span style={{ fontWeight: 700 }}>big</span> world
-        </text>
+        </div>
       </div>
     ))
 

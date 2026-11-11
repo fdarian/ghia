@@ -272,7 +272,7 @@ describe("<code>", () => {
           language="ts"
         />
         <div style={{ height: 400 }}>
-          <text>below</text>
+          <div>below</div>
         </div>
       </div>
     )

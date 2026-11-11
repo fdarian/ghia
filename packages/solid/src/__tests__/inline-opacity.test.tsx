@@ -47,9 +47,9 @@ describe.skipIf(!hasNativeTestRenderer)("Solid opacity of an inline box against 
       try {
         app.render(() => (
           <div style={{ width: 300, height: 80, backgroundColor: "#ffffff" }}>
-            <text testId="p" style={TEXT as never}>
+            <div testId="p" style={TEXT as never}>
               {body() as never}
-            </text>
+            </div>
           </div>
         ))
         const renderer = app.renderer

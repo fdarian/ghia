@@ -565,7 +565,7 @@ describeNative("events", () => {
             style={{ width: 200, height: 50 }}
             onClick={() => setCount((c) => c + 1)}
           >
-            <text>{`Count: ${count}`}</text>
+            <div>{`Count: ${count}`}</div>
           </div>
         )
       }
@@ -681,7 +681,7 @@ describeNative("events", () => {
             tabIndex={0}
             onKeyDown={(e: EventPayload) => setLastKey(e.key ?? "unknown")}
           >
-            <text>{`Key: ${lastKey}`}</text>
+            <div>{`Key: ${lastKey}`}</div>
           </div>
         )
       }
@@ -751,7 +751,7 @@ describeNative("events", () => {
             onMouseEnter={() => setHovered(true)}
             onMouseLeave={() => setHovered(false)}
           >
-            <text>{hovered ? "hovered" : "not hovered"}</text>
+            <div>{hovered ? "hovered" : "not hovered"}</div>
           </div>
         )
       }
@@ -844,14 +844,14 @@ describeNative("events", () => {
               style={{ width: 100, height: 30 }}
               onClick={() => setOpen(true)}
             >
-              <text>trigger</text>
+              <div>trigger</div>
             </div>
             {open && (
               <div
                 style={{ width: 100, height: 100 }}
                 onMouseDownOutside={() => setOpen(false)}
               >
-                <text>dropdown content</text>
+                <div>dropdown content</div>
               </div>
             )}
           </div>
@@ -903,10 +903,10 @@ describeNative("events", () => {
             style={{ width: 100, height: 40 }}
             onMouseDownOutside={(event) => log.push([event.button ?? -1, event.target])}
           >
-            <text>x</text>
+            <div>x</div>
             <anchored position={{ x: 300, y: 200 }} style={{ width: 120, height: 80 }}>
               <div testId="popup" style={{ width: 120, height: 80 }}>
-                <text>popup</text>
+                <div>popup</div>
               </div>
             </anchored>
           </div>
@@ -985,7 +985,7 @@ describeNative("events", () => {
               }}
               onClick={() => setOpen(true)}
             >
-              <text>Open dialog</text>
+              <div>Open dialog</div>
             </div>
 
             {open && (
@@ -1006,8 +1006,8 @@ describeNative("events", () => {
                 }}
                 onMouseDownOutside={() => setOpen(false)}
               >
-                <text>Tooltip Dialog</text>
-                <text>Some content inside</text>
+                <div>Tooltip Dialog</div>
+                <div>Some content inside</div>
               </div>
             )}
           </div>
@@ -1084,7 +1084,7 @@ describeNative("events", () => {
                   backgroundColor: "#3a5ecf",
                 }}
               >
-                <text>Open dialog</text>
+                <div>Open dialog</div>
               </div>
 
               {open && (
@@ -1104,8 +1104,8 @@ describeNative("events", () => {
                     backgroundColor: "#0d172b",
                   }}
                 >
-                  <text>Tooltip Dialog</text>
-                  <text>Visual screenshot probe</text>
+                  <div>Tooltip Dialog</div>
+                  <div>Visual screenshot probe</div>
                 </div>
               )}
             </div>
@@ -1158,7 +1158,7 @@ describeNative("events", () => {
               }}
               onClick={() => setOpen(true)}
             >
-              <text>Open anchored</text>
+              <div>Open anchored</div>
               {open && (
                 <anchored
                   position={{ x: 700, y: 360 }}
@@ -1180,8 +1180,8 @@ describeNative("events", () => {
                     }}
                     onMouseDownOutside={() => setOpen(false)}
                   >
-                    <text>Anchored Dialog</text>
-                    <text>Deferred popover layer</text>
+                    <div>Anchored Dialog</div>
+                    <div>Deferred popover layer</div>
                   </div>
                 </anchored>
               )}
@@ -1247,7 +1247,7 @@ describeNative("events", () => {
           >
             {items.map((item, i) => (
               <div key={item}>
-                <text>{`${i === selected ? "> " : "  "}${item}`}</text>
+                <div>{`${i === selected ? "> " : "  "}${item}`}</div>
               </div>
             ))}
           </div>
@@ -1319,7 +1319,7 @@ describeNative("events", () => {
             style={{ width: 200, height: 200 }}
             onWheel={(e: EventPayload) => receivedEvents.push(e)}
           >
-            <text>scrollable</text>
+            <div>scrollable</div>
           </div>
         )
       }
@@ -1349,7 +1349,7 @@ describeNative("events", () => {
             style={{ width: 200, height: 200 }}
             onWheel={() => setScrollCount((c) => c + 1)}
           >
-            <text>{`Scrolls: ${scrollCount}`}</text>
+            <div>{`Scrolls: ${scrollCount}`}</div>
           </div>
         )
       }
@@ -1873,7 +1873,7 @@ describeNative("events", () => {
             tabIndex={0}
             onKeyDown={(e: EventPayload) => setLastKey(e.key ?? "unknown")}
           >
-            <text>{`Key: ${lastKey}`}</text>
+            <div>{`Key: ${lastKey}`}</div>
           </div>
         )
       }
@@ -1927,7 +1927,7 @@ describeNative("events", () => {
             tabIndex={0}
             onKeyUp={(e: EventPayload) => setLastKey(e.key ?? "unknown")}
           >
-            <text>{`Released: ${lastKey}`}</text>
+            <div>{`Released: ${lastKey}`}</div>
           </div>
         )
       }
@@ -1962,7 +1962,7 @@ describeNative("events", () => {
             onMouseDown={() => setPressed(true)}
             onMouseUp={() => setPressed(false)}
           >
-            <text>{pressed ? "pressed" : "released"}</text>
+            <div>{pressed ? "pressed" : "released"}</div>
           </div>
         )
       }
@@ -2081,7 +2081,7 @@ describeNative("events", () => {
               setPos(`${Math.round(e.x ?? 0)},${Math.round(e.y ?? 0)}`)
             }
           >
-            <text>{`Position: ${pos}`}</text>
+            <div>{`Position: ${pos}`}</div>
           </div>
         )
       }
@@ -2119,7 +2119,7 @@ describeNative("events", () => {
             }
             onMouseUp={() => received.push("up")}
           >
-            <text>handle</text>
+            <div>handle</div>
           </div>
         )
       }
@@ -2143,7 +2143,7 @@ describeNative("events", () => {
             onMouseMove={() => received.push("move")}
             onMouseUp={() => received.push("up")}
           >
-            <text>handle</text>
+            <div>handle</div>
           </div>
         )
       }
@@ -2172,7 +2172,7 @@ describeNative("events", () => {
               style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
               onClick={() => received.push("child-click")}
             >
-              <text>child</text>
+              <div>child</div>
             </div>
           </div>
         )
@@ -2195,7 +2195,7 @@ describeNative("events", () => {
             onMouseDown={() => received.push("down")}
             onMouseUp={() => received.push("up")}
           >
-            <text>press</text>
+            <div>press</div>
           </div>
         )
       }
@@ -2228,7 +2228,7 @@ describeNative("events", () => {
                 setDragging(true)
               }}
             >
-              <text>clip</text>
+              <div>clip</div>
             </div>
             {dragging && (
               <div
@@ -2243,7 +2243,7 @@ describeNative("events", () => {
                 onMouseMove={() => received.push("overlay-move")}
                 onMouseUp={() => received.push("overlay-up")}
               >
-                <text>overlay</text>
+                <div>overlay</div>
               </div>
             )}
           </div>
@@ -2274,7 +2274,7 @@ describeNative("events", () => {
             onMouseMove={() => received.push("move")}
             onMouseUp={() => received.push("up")}
           >
-            <text>handle</text>
+            <div>handle</div>
           </div>
         )
       }
@@ -2304,14 +2304,14 @@ describeNative("events", () => {
               onMouseMove={() => received.push("handle-move")}
               onMouseUp={() => received.push("handle-up")}
             >
-              <text>handle</text>
+              <div>handle</div>
             </div>
             <div
               style={{ width: 200, height: 40, backgroundColor: "#22aa66" }}
               onMouseMove={() => received.push("sibling-move")}
               onMouseUp={() => received.push("sibling-up")}
             >
-              <text>sibling</text>
+              <div>sibling</div>
             </div>
           </div>
         )
@@ -2338,7 +2338,7 @@ describeNative("events", () => {
               onMouseMove={() => received.push("replacement-move")}
               onMouseUp={() => received.push("replacement-up")}
             >
-              <text>replacement</text>
+              <div>replacement</div>
             </div>
           )
         }
@@ -2354,7 +2354,7 @@ describeNative("events", () => {
             onMouseMove={() => received.push("handle-move")}
             onMouseUp={() => received.push("handle-up")}
           >
-            <text>handle</text>
+            <div>handle</div>
           </div>
         )
       }
@@ -2384,13 +2384,13 @@ describeNative("events", () => {
               onMouseMove={() => received.push("handle-move")}
               onMouseUp={() => received.push("handle-up")}
             >
-              <text>handle</text>
+              <div>handle</div>
             </div>
             <div
               style={{ width: 200, height: 40, backgroundColor: "#22aa66" }}
               onMouseEnter={() => received.push("sibling-enter")}
             >
-              <text>sibling</text>
+              <div>sibling</div>
             </div>
           </div>
         )
@@ -2429,7 +2429,7 @@ describeNative("events", () => {
               }
             }}
           >
-            <text>{`Action: ${action}`}</text>
+            <div>{`Action: ${action}`}</div>
           </div>
         )
       }
@@ -2500,12 +2500,12 @@ describeNative("events", () => {
               }}
               onClick={() => setActive((v) => !v)}
             >
-              <text style={{ color: active ? "#1f2333" : "#cbd5ff", fontSize: 18 }}>
+              <div style={{ color: active ? "#1f2333" : "#cbd5ff", fontSize: 18 }}>
                 {active ? "active" : "idle"}
-              </text>
-              <text style={{ color: active ? "#525b76" : "#7f8bb3", fontSize: 12 }}>
+              </div>
+              <div style={{ color: active ? "#525b76" : "#7f8bb3", fontSize: 12 }}>
                 click to toggle theme
-              </text>
+              </div>
             </div>
           </div>
         )
@@ -2561,8 +2561,8 @@ describeNative("events", () => {
                 if (e.key === "Enter") setState("enter")
               }}
             >
-              <text style={{ color: "#e8edff", fontSize: 18 }}>{`State: ${state}`}</text>
-              <text style={{ color: "#a8b2d8", fontSize: 12 }}>press Enter to switch</text>
+              <div style={{ color: "#e8edff", fontSize: 18 }}>{`State: ${state}`}</div>
+              <div style={{ color: "#a8b2d8", fontSize: 12 }}>press Enter to switch</div>
             </div>
           </div>
         )
@@ -2616,12 +2616,12 @@ describeNative("events", () => {
               onMouseEnter={() => setHovered(true)}
               onMouseLeave={() => setHovered(false)}
             >
-              <text style={{ color: hovered ? "#46361e" : "#d5daf2", fontSize: 18 }}>
+              <div style={{ color: hovered ? "#46361e" : "#d5daf2", fontSize: 18 }}>
                 {hovered ? "hovered" : "not-hovered"}
-              </text>
-              <text style={{ color: hovered ? "#7a5e2c" : "#9da6c8", fontSize: 12 }}>
+              </div>
+              <div style={{ color: hovered ? "#7a5e2c" : "#9da6c8", fontSize: 12 }}>
                 move cursor over card
-              </text>
+              </div>
             </div>
           </div>
         )
@@ -2649,9 +2649,9 @@ describeNative("events", () => {
       function App() {
         return (
           <div style={{ display: "flex", gap: 8 }}>
-            <text>Hello</text>
+            <div>Hello</div>
             <div onClick={() => {}}>
-              <text>Click me</text>
+              <div>Click me</div>
             </div>
           </div>
         )
@@ -2662,42 +2662,49 @@ describeNative("events", () => {
         {
           "children": [
             {
+              "id": 2,
+              "style": {
+                "display": "none",
+              },
+              "type": "head",
+            },
+            {
               "children": [
                 {
                   "children": [
                     {
                       "children": [
                         {
-                          "id": 3,
+                          "id": 4,
                           "text": "Hello",
-                          "type": "text",
+                          "type": "#text",
                         },
                       ],
-                      "id": 4,
-                      "type": "text",
+                      "id": 5,
+                      "type": "div",
                     },
                     {
                       "children": [
                         {
                           "children": [
                             {
-                              "id": 5,
+                              "id": 6,
                               "text": "Click me",
-                              "type": "text",
+                              "type": "#text",
                             },
                           ],
-                          "id": 6,
-                          "type": "text",
+                          "id": 7,
+                          "type": "div",
                         },
                       ],
                       "events": [
                         "click",
                       ],
-                      "id": 7,
+                      "id": 8,
                       "type": "div",
                     },
                   ],
-                  "id": 8,
+                  "id": 9,
                   "style": {
                     "display": "flex",
                     "gap": 8,
@@ -2705,7 +2712,7 @@ describeNative("events", () => {
                   "type": "div",
                 },
               ],
-              "id": 2,
+              "id": 3,
               "style": {
                 "display": "block",
                 "height": "100%",
@@ -2732,19 +2739,19 @@ describeNative("events", () => {
         return (
           <div style={{ width: 300, height: 200, overflow: "scroll" }}>
             <div style={{ height: 100, backgroundColor: "#ff0000" }}>
-              <text>Item 1</text>
+              <div>Item 1</div>
             </div>
             <div style={{ height: 100, backgroundColor: "#00ff00" }}>
-              <text>Item 2</text>
+              <div>Item 2</div>
             </div>
             <div style={{ height: 100, backgroundColor: "#0000ff" }}>
-              <text>Item 3</text>
+              <div>Item 3</div>
             </div>
             <div style={{ height: 100, backgroundColor: "#ffff00" }}>
-              <text>Item 4</text>
+              <div>Item 4</div>
             </div>
             <div style={{ height: 100, backgroundColor: "#ff00ff" }}>
-              <text>Item 5</text>
+              <div>Item 5</div>
             </div>
           </div>
         )
@@ -2777,11 +2784,11 @@ describeNative("events", () => {
           <div style={{ width: 240, height: 120, overflowY: "scroll" }}>
             <div style={{ width: 240, height: 80, overflowX: "scroll" }}>
               <div style={{ width: 800, height: 80 }}>
-                <text>wide row</text>
+                <div>wide row</div>
               </div>
             </div>
             <div style={{ height: 400 }}>
-              <text>below</text>
+              <div>below</div>
             </div>
           </div>
         )
@@ -2814,7 +2821,7 @@ describeNative("events", () => {
           <div style={{ width: 240, height: 80 }}>
             <div style={{ width: "100%", height: 80, overflowX: "scroll" }}>
               <div style={{ width: 800, height: 80, flexShrink: 0 }}>
-                <text>wide row</text>
+                <div>wide row</div>
               </div>
             </div>
           </div>
@@ -2839,10 +2846,10 @@ describeNative("events", () => {
         return (
           <div style={{ width: 240, height: 120, overflowY: "scroll" }}>
             <div style={{ height: 80, width: "100%", backgroundColor: "#1e1e2e" }}>
-              <text>card</text>
+              <div>card</div>
             </div>
             <div style={{ height: 400 }}>
-              <text>below</text>
+              <div>below</div>
             </div>
           </div>
         )
@@ -2879,7 +2886,7 @@ describeNative("events", () => {
                 backgroundColor: "#3366ff",
               }}
             >
-              <text>clip</text>
+              <div>clip</div>
             </div>
           </div>
         )
@@ -2900,7 +2907,7 @@ describeNative("events", () => {
           <div style={{ width: 320, height: 200, position: "relative" }}>
             <div style={{ width: 320, height: 200, overflowY: "scroll" }}>
               <div style={{ height: 900, backgroundColor: "#1e1e2e" }}>
-                <text>tall</text>
+                <div>tall</div>
               </div>
             </div>
             <div
@@ -2914,7 +2921,7 @@ describeNative("events", () => {
                 pointerEvents: passThrough ? "none" : undefined,
               }}
             >
-              <text>card</text>
+              <div>card</div>
             </div>
           </div>
         )
@@ -2952,7 +2959,7 @@ describeNative("events", () => {
                 pointerEvents: "auto",
               }}
             >
-              <text>modal</text>
+              <div>modal</div>
             </div>
           </div>
         )
@@ -2974,7 +2981,7 @@ describeNative("events", () => {
             style={{ width: 200, height: 200, backgroundColor: "#101010" }}
             onWheel={(e: EventPayload) => held.push(e.modifiers?.cmd)}
           >
-            <text>surface</text>
+            <div>surface</div>
           </div>
         )
       }
@@ -2991,7 +2998,7 @@ describeNative("events", () => {
         return (
           <div style={{ width: 300, height: 100, overflowY: "scroll" }}>
             <div style={{ height: 500 }}>
-              <text>Tall content</text>
+              <div>Tall content</div>
             </div>
           </div>
         )
@@ -3019,7 +3026,7 @@ describeNative("events", () => {
         return (
           <div style={{ width: 200, height: 100, overflow: "scroll" }}>
             <div style={{ height: 500 }}>
-              <text>Very tall content</text>
+              <div>Very tall content</div>
             </div>
           </div>
         )
@@ -3047,16 +3054,16 @@ describeNative("events", () => {
         return (
           <div style={{ width: 200, height: 100, overflow: "scroll" }}>
             <div style={{ height: 80 }}>
-              <text>Item A</text>
+              <div>Item A</div>
             </div>
             <div style={{ height: 80 }}>
-              <text>Item B</text>
+              <div>Item B</div>
             </div>
             <div style={{ height: 80 }}>
-              <text>Item C</text>
+              <div>Item C</div>
             </div>
             <div style={{ height: 80 }}>
-              <text>Item D</text>
+              <div>Item D</div>
             </div>
           </div>
         )
@@ -3106,19 +3113,19 @@ describeNative("events", () => {
               }}
             >
               <div style={{ height: 80, backgroundColor: "#e94560", padding: 16 }}>
-                <text style={{ color: "#ffffff", fontSize: 20 }}>Section 1 (Red)</text>
+                <div style={{ color: "#ffffff", fontSize: 20 }}>Section 1 (Red)</div>
               </div>
               <div style={{ height: 80, backgroundColor: "#0f3460", padding: 16 }}>
-                <text style={{ color: "#ffffff", fontSize: 20 }}>Section 2 (Blue)</text>
+                <div style={{ color: "#ffffff", fontSize: 20 }}>Section 2 (Blue)</div>
               </div>
               <div style={{ height: 80, backgroundColor: "#533483", padding: 16 }}>
-                <text style={{ color: "#ffffff", fontSize: 20 }}>Section 3 (Purple)</text>
+                <div style={{ color: "#ffffff", fontSize: 20 }}>Section 3 (Purple)</div>
               </div>
               <div style={{ height: 80, backgroundColor: "#e94560", padding: 16 }}>
-                <text style={{ color: "#ffffff", fontSize: 20 }}>Section 4 (Red)</text>
+                <div style={{ color: "#ffffff", fontSize: 20 }}>Section 4 (Red)</div>
               </div>
               <div style={{ height: 80, backgroundColor: "#0f3460", padding: 16 }}>
-                <text style={{ color: "#ffffff", fontSize: 20 }}>Section 5 (Blue)</text>
+                <div style={{ color: "#ffffff", fontSize: 20 }}>Section 5 (Blue)</div>
               </div>
             </div>
           </div>
@@ -3161,7 +3168,7 @@ describeNative("events", () => {
             onWheel={(e: EventPayload) => receivedScrollEvents.push(e)}
           >
             <div style={{ height: 500 }}>
-              <text>Scrollable with events</text>
+              <div>Scrollable with events</div>
             </div>
           </div>
         )
@@ -3203,13 +3210,13 @@ describeNative("events", () => {
             style={{ width: 200, height: 100, overflow: "scroll" }}
           >
             <div style={{ height: 80 }}>
-              <text>Item A</text>
+              <div>Item A</div>
             </div>
             <div style={{ height: 80 }}>
-              <text>Item B</text>
+              <div>Item B</div>
             </div>
             <div style={{ height: 80 }}>
-              <text>Item C</text>
+              <div>Item C</div>
             </div>
           </div>
         )
@@ -3243,10 +3250,10 @@ describeNative("events", () => {
         return (
           <div testId="scroller" style={{ width: 200, height: 100, overflow: "scroll" }}>
             <div style={{ height: 80 }}>
-              <text>Item A</text>
+              <div>Item A</div>
             </div>
             <div style={{ height: 80 }}>
-              <text>Item B</text>
+              <div>Item B</div>
             </div>
             <div
               ref={(instance) => {
@@ -3255,7 +3262,7 @@ describeNative("events", () => {
               testId="item-d"
               style={{ height: 80 }}
             >
-              <text>Item D</text>
+              <div>Item D</div>
             </div>
           </div>
         )

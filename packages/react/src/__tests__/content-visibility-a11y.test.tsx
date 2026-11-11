@@ -48,7 +48,7 @@ function Entry({ index, value = "auto", children }: EntryProps) {
     >
       <div role="heading" aria-level={2} aria-label={`Title ${index}`} style={{ height: 24 }} />
       <div role="button" id={`btn-${index}`} aria-label={`Go ${index}`} testId={`btn-${index}`} tabIndex={0} style={{ height: 24 }} />
-      <text style={{ height: 20 }}>Paragraph {index}</text>
+      <div style={{ height: 20 }}>Paragraph {index}</div>
       {children}
     </div>
   )
@@ -118,6 +118,37 @@ describeNative("the accessibility tree of skipped content", { timeout: 120_000 }
       const entry = nodesOf(tree).find((node) => node.children.includes(heading[0]!.key))!
       expect(entry.aria.role).toBe("Group")
       expect(entry.children.map((key) => tree.nodes![key]!.aria!.role)).toEqual(["Heading", "Button", "Label"])
+    } finally {
+      finish(root, renderer)
+    }
+  })
+
+  it("gives each paragraph beside a block in skipped content a Label, in order, as a built entry does", () => {
+    const { root, renderer, ids } = mount(
+      <Page
+        entry={(index) => (
+          <Entry key={index} index={index}>
+            <div role="group" aria-label={`Mixed ${index}`} style={{ height: 30 }}>
+              Before
+              <div role="button" aria-label={`Inside ${index}`} style={{ height: 10 }} />
+              After
+            </div>
+          </Entry>
+        )}
+      />
+    )
+    try {
+      expect(isBuilt(renderer, ids, "btn-3"), "an entry near the viewport is built").toBe(true)
+      expect(isBuilt(renderer, ids, "btn-30"), "a far entry is skipped").toBe(false)
+      const tree = renderer.getA11yTree()
+      const childrenOf = (index: number) =>
+        withLabel(tree, `Mixed ${index}`)[0]!.children.map((key) => {
+          const aria = tree.nodes![key]!.aria!
+          return [aria.role, aria.value ?? aria.label]
+        })
+      const expected = (index: number) => [["Label", "Before"], ["Button", `Inside ${index}`], ["Label", "After"]]
+      expect(childrenOf(3)).toEqual(expected(3))
+      expect(childrenOf(30)).toEqual(expected(30))
     } finally {
       finish(root, renderer)
     }
@@ -300,17 +331,17 @@ describeNative("the accessibility tree of skipped content", { timeout: 120_000 }
     }
   })
 
-  it("reads out a skipped <text>", () => {
+  it("reads out a skipped element holding text", () => {
     const { root, renderer } = mount(
       <Page
         entry={(index) => (
-          <text
+          <div
             key={index}
             testId={`entry-${index}`}
             style={{ height: ENTRY, flexShrink: 0, contentVisibility: "auto", containIntrinsicSize: `auto ${ENTRY}px` } as CSSProperties}
           >
             Line {index}
-          </text>
+          </div>
         )}
       />
     )

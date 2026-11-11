@@ -59,9 +59,9 @@ function painted(name: string): Record<string, Rgb> {
   try {
     testRoot.render(
       <div style={{ width: 300, height: 80, backgroundColor: "#ffffff" }}>
-        <text testId="p" style={TEXT as never}>
+        <div testId="p" style={TEXT as never}>
           {CASES[name]}
-        </text>
+        </div>
       </div>
     )
     const renderer = testRoot.renderer

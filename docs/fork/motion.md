@@ -160,12 +160,12 @@ What is not covered: a `display: none` that only an `@container` block folds in 
 
 ## A style native rejects does not freeze React
 
-An invalid animation, transition or grid track used to make `applyBatch` fail inside `resetAfterCommit`. That left react-reconciler's `isFlushingWork` set, so no root in the process committed a sync update again. The batch is now resent without the offending `setStyle`, and the error goes to the root's `onUncaughtError`. Don't let a native style error propagate out of `resetAfterCommit`: every root stops committing.
+An invalid animation, transition or grid track used to make `applyBatch` fail inside `resetAfterCommit`. That left react-reconciler's `isFlushingWork` set, so no root in the process committed a sync update again. The batch is now resent without the offending `setStyle`, and the error goes to the root's `onUncaughtError`. Don't let a native style error propagate out of `resetAfterCommit`: every root stops committing. An invalid declaration no longer reaches that path, since native drops it; a style that is not an object still does.
 
 ## Breaking changes
 
 - **A `motion` key with no transition runs Motion's default for it**, not a 0.3 s `easeOut` tween: a transform key springs (`x`, `y`, `rotate`, `scale`, ...), more than two keyframes take 0.8 s, and the rest use `cubic-bezier(0.25, 0.1, 0.35, 1)`. So does `animate(value, target)` on a motion value, and a transition that holds only a `delay` or a repeat field.
-- An unknown or non-animatable key in `motion` `animate`, `initial`, `exit` or `transition` throws (it was ignored). Invalid `transition*` and `animation*` values throw when the batch flushes.
+- An unknown or non-animatable key in `motion` `animate`, `initial`, `exit` or `transition` throws (it was ignored). An invalid `transition*` or `animation*` value is dropped like any other invalid declaration ([Invalid values](../reference.md#invalid-values)).
 - A `motion` or keyframe target written with `calc()`, `em`, `rem`, a viewport unit or a mixed length no longer throws, and a CSS transition from or to one no longer jumps. `borderRadius` and the corner longhands are not circular-only: a percentage or elliptical corner animates.
 - A `width`, `height` or `px`-to-`%` animation that waits for a measurement starts its clock at the change, not at the frame that measured, so its first moving sample is one frame earlier than it was.
 - A cubic-bezier `ease` can overshoot (it was clamped to 0..1). Applied values still clamp per property.

@@ -87,12 +87,12 @@ function Motion({ i, plan, st }: { i: number; plan: CardPlan; st: CardState }) {
   }
   return (
     <div style={{ height: 14 }}>
-      <text>
+      <div>
         fx{" "}
         <motion.span testId={`fx-${i}`} style={{ display }} initial={{ color: "#ff0000" }} animate={{ color: colour }} transition={transition}>
           span
         </motion.span>
-      </text>
+      </div>
     </div>
   )
 }
@@ -121,12 +121,12 @@ function Card({ i, st, plan }: { i: number; st: CardState; plan: CardPlan }) {
       }}
     >
       <div testId={`title-${i}`} id={`t-${i}`} style={{ height: 18, backgroundColor: "#00000055" }}>
-        <text>{st.label}</text>
+        <div>{st.label}</div>
       </div>
       <div style={{ height: 18, groupHover: { backgroundColor: "#ffff00" } }}>
-        <text>
+        <div>
           plain <span testId={`span-${i}`} style={{ color: "#ff8800", hover: { color: "#00ffff" } }}>span {i}</span> tail
-        </text>
+        </div>
       </div>
       <div
         testId={`btn-${i}`}
@@ -137,12 +137,12 @@ function Card({ i, st, plan }: { i: number; st: CardState; plan: CardPlan }) {
       />
       {st.extra ? (
         <div style={{ height: 14, position: i % 3 === 0 ? "relative" : undefined, zIndex: i % 4 === 0 ? 2 : undefined, opacity: 0.9 }}>
-          <text>extra</text>
+          <div>extra</div>
         </div>
       ) : null}
       {i % 7 === 6 ? (
         <label htmlFor={`in-${i}`} testId={`lab-${i}`} style={{ height: 14, display: "flex" }}>
-          <text>{`name ${st.label}`}</text>
+          <div>{`name ${st.label}`}</div>
         </label>
       ) : null}
       {i % 7 === 6 ? <input id={`in-${i}`} testId={`in-${i}`} style={{ height: 16, width: 60 }} /> : null}
@@ -154,7 +154,7 @@ function Card({ i, st, plan }: { i: number; st: CardState; plan: CardPlan }) {
       {i % 5 === 2 ? <img testId={`img-${i}`} src={IMAGE} style={{ width: 14, height: 10 }} /> : null}
       {i % 4 === 3 ? (
         <div style={{ position: "absolute", right: 2, bottom: 2, width: 20, height: 10, backgroundColor: "#ff00ff", zIndex: 3 }}>
-          <text>z</text>
+          <div>z</div>
         </div>
       ) : null}
       {i % 2 === 0 ? (
@@ -182,14 +182,14 @@ function Card({ i, st, plan }: { i: number; st: CardState; plan: CardPlan }) {
               hover: { backgroundColor: "#ffff00" },
             }}
           >
-            <text>{`p${st.tag}`}</text>
+            <div>{`p${st.tag}`}</div>
             {st.tag % 2 === 0 ? (
               <div style={{ position: "relative", opacity: 0.7, height: 4, width: 8, backgroundColor: "#0088ff" }}>
                 <div style={{ position: "absolute", left: 2, top: 1, width: 3, height: 3, backgroundColor: "#ffffff" }} />
               </div>
             ) : null}
           </div>
-          <text>{`row ${i}`}</text>
+          <div>{`row ${i}`}</div>
         </div>
       ) : null}
       {i % 8 === 4 ? (
@@ -215,7 +215,7 @@ function Table() {
         <div key={r} style={{ display: "table-row", hover: { backgroundColor: "#334455" } }}>
           {[0, 1, 2].map((c) => (
             <div key={c} style={{ display: "table-cell", padding: 2, hover: { backgroundColor: "#445566" } }}>
-              <text>{`r${r}c${c}`}</text>
+              <div>{`r${r}c${c}`}</div>
             </div>
           ))}
         </div>
@@ -235,7 +235,7 @@ function LiftedRows({ rounded }: { rounded: boolean }) {
         <div testId="C">
           {Array.from({ length: 12 }, (_, k) => (
             <div key={k} testId={`lrow-${k}`} style={{ height: 32, position: "relative" }}>
-              <text>{`row ${k}`}</text>
+              <div>{`row ${k}`}</div>
             </div>
           ))}
         </div>
@@ -274,13 +274,13 @@ function run(seed: number, steps: number) {
           <Table />
           <div testId="lifts">
             <div testId="ctr" style={{ height: 14 }}>
-              <text>{`tick ${state.tick}`}</text>
+              <div>{`tick ${state.tick}`}</div>
             </div>
             <LiftedRows rounded={state.rounded} />
           </div>
         </div>
         <div testId="footer" style={{ height: 40 }}>
-          <text>footer</text>
+          <div>footer</div>
         </div>
       </div>
     )

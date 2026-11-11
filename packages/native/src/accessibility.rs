@@ -32,21 +32,48 @@ pub(crate) fn apply_accessibility<E>(
 where
     E: StatefulInteractiveElement,
 {
-    apply(el, host_id, props, default_role, false)
+    apply(el, host_id, props, default_role, false, None)
 }
 
-/// [`apply_accessibility`] for an element that holds the nodes of content it skips
-/// (`skipped`): it gets a node even with no role, so they have one to hang off.
-pub(crate) fn apply_hosting<E>(
+/// [`apply_accessibility`] for a container `element` of the retained tree, with what its tag implies
+/// beyond a role (a heading's level). An element that `hosts` the nodes of content it skips (`skipped`)
+/// gets a node even with no role, so they have one to hang off.
+pub(crate) fn apply_element<E>(
     el: E,
-    host_id: u64,
-    props: &HashMap<String, serde_json::Value>,
+    element: &crate::retained_tree::RetainedElement,
     default_role: Option<Role>,
+    hosts: bool,
 ) -> E
 where
     E: StatefulInteractiveElement,
 {
-    apply(el, host_id, props, default_role, true)
+    apply(
+        el,
+        element.id,
+        element.custom_props(),
+        default_role,
+        hosts,
+        crate::html::heading_level(&element.element_type),
+    )
+}
+
+fn resolve_role(props: &HashMap<String, serde_json::Value>, default_role: Option<Role>) -> Option<Role> {
+    let explicit = props.get("role").and_then(|value| value.as_str());
+    if matches!(explicit, Some("none" | "presentation")) {
+        return None;
+    }
+    explicit
+        .and_then(role_from_aria)
+        .or(default_role)
+        .filter(|role| *role != Role::GenericContainer)
+}
+
+/// Whether the author named the element with `aria-label` or `aria-labelledby`.
+pub(crate) fn named_by_aria(props: &HashMap<String, serde_json::Value>) -> bool {
+    props.contains_key("aria-label")
+        || aria::relations(props)
+            .iter()
+            .any(|(relation, _)| *relation == gpui::A11yRelation::LabelledBy)
 }
 
 fn apply<E>(
@@ -55,6 +82,7 @@ fn apply<E>(
     props: &HashMap<String, serde_json::Value>,
     default_role: Option<Role>,
     hosts: bool,
+    implicit_level: Option<usize>,
 ) -> E
 where
     E: StatefulInteractiveElement,
@@ -62,15 +90,7 @@ where
     let aria = aria::has_node_props(props).then(|| aria::AriaNode::parse(props));
     let hidden = aria.as_ref().is_some_and(aria::AriaNode::hidden);
 
-    let explicit = props.get("role").and_then(|value| value.as_str());
-    let role = if matches!(explicit, Some("none" | "presentation")) {
-        None
-    } else {
-        explicit
-            .and_then(role_from_aria)
-            .or(default_role)
-            .filter(|role| *role != Role::GenericContainer)
-    };
+    let role = resolve_role(props, default_role);
     let links = links::current();
     let referenced_text = links.referenced_text(host_id);
     // `aria-hidden` removes the whole subtree, and only a node can carry that.
@@ -95,17 +115,22 @@ where
     if let Some(author_id) = author_id {
         el = el.accessibility_id(author_id);
     }
-    if let Some(aria) = aria {
-        el = el.a11y_node(move |node| aria.write(node));
+    // The hook is one slot, so the level a heading tag has goes in before `aria-level`, which wins.
+    let implicit_level = implicit_level.filter(|_| role == Role::Heading);
+    if aria.is_some() || implicit_level.is_some() {
+        el = el.a11y_node(move |node| {
+            if let Some(level) = implicit_level {
+                node.set_level(level);
+            }
+            if let Some(aria) = &aria {
+                aria.write(node);
+            }
+        });
     }
 
     let mut relations = aria::relations(props);
     // A DOM `aria-label` or `aria-labelledby` outranks a `<label>`.
-    let named_by_author = props.contains_key("aria-label")
-        || relations
-            .iter()
-            .any(|(relation, _)| *relation == gpui::A11yRelation::LabelledBy);
-    if let Some(labels) = links.labels_of(host_id).filter(|_| !named_by_author) {
+    if let Some(labels) = links.labels_of(host_id).filter(|_| !named_by_aria(props)) {
         let labels = labels
             .iter()
             .cloned()
@@ -120,13 +145,12 @@ where
 }
 
 /// The role an element has when its props give none.
-pub(crate) fn default_role(element: &crate::retained_tree::RetainedElement) -> Option<Role> {
+pub(crate) fn default_role(
+    tree: &crate::retained_tree::RetainedTree,
+    element: &crate::retained_tree::RetainedElement,
+) -> Option<Role> {
     match element.element_type.as_str() {
         "form" => Some(Role::Form),
-        // A text instance (`createTextInstance`) is also type `text` and holds `content`; the
-        // host `<text>` is the one that is read. The text instances stay out of the tree so
-        // that VoiceOver does not hear the same string twice.
-        "text" if element.content.is_none() => Some(Role::Label),
         "label" => Some(Role::Label),
         "img" => Some(Role::Image),
         "input" | "textarea" => {
@@ -140,28 +164,130 @@ pub(crate) fn default_role(element: &crate::retained_tree::RetainedElement) -> O
                 element.element_type == "textarea",
             ))
         }
-        _ => None,
+        _ => crate::html::implicit_role(tree, element),
     }
 }
 
-/// A `<text>` that holds children and no string of its own: what it reads out is the text of the
-/// paragraphs of those children.
-pub(crate) fn is_text_host(element: &crate::retained_tree::RetainedElement) -> bool {
-    element.element_type == "text" && element.content.is_none()
+/// Whether `element` carries the text of its paragraph: a host container that is not a string child.
+pub(crate) fn carries_text(element: &crate::retained_tree::RetainedElement) -> bool {
+    crate::text::inline::is_host_container(element) && element.element_type != crate::text::inline::TEXT_NODE
 }
 
-/// The text a host `<text>` reads out: `text`, the text of the paragraphs of its children
-/// (`text::inline::accessible_text`).
-pub(crate) fn describe_text<E>(el: E, element: &crate::retained_tree::RetainedElement, text: Option<&str>) -> E
+/// What a host container reads out when its content is one paragraph: that paragraph's text.
+pub(crate) fn read_text(
+    element: &crate::retained_tree::RetainedElement,
+    planned: Option<&crate::text::plan_cache::Planned>,
+) -> Option<String> {
+    if !carries_text(element) {
+        return None;
+    }
+    planned?.accessible_text.clone()
+}
+
+/// [`read_text`] for an element nobody planned: one below a skipped subtree, or one a reference names.
+pub(crate) fn read_text_unplanned(
+    tree: &crate::retained_tree::RetainedTree,
+    element: &crate::retained_tree::RetainedElement,
+) -> Option<String> {
+    if !carries_text(element) || element.children.is_empty() {
+        return None;
+    }
+    let plan = crate::text::inline::plan_children_at(tree, element);
+    crate::text::inline::sole_paragraph_text(plan.iter().map(|(child, _)| child))
+}
+
+/// The role of `element` when its props give none: its type's, or `Label` when it reads out text.
+/// An element an `aria-*` reference names has none from its text: it is a `Group` named by it
+/// (`links::referenced_text`).
+pub(crate) fn role_without_props(
+    tree: &crate::retained_tree::RetainedTree,
+    element: &crate::retained_tree::RetainedElement,
+    text: Option<&str>,
+) -> Option<Role> {
+    default_role(tree, element).or_else(|| {
+        text.filter(|_| links::current().referenced_text(element.id).is_none())
+            .map(|_| Role::Label)
+    })
+}
+
+/// What a host container's `text` is to its node, which got `default_role` from
+/// [`role_without_props`]: the name of a role ARIA names from content ([`names_from_content`]),
+/// the value of any other (a `Label`, a `list`, a `region`), unless the author gave
+/// `aria-valuetext`. An author's name (`aria-label`, `aria-labelledby`, a `<label>`) is kept, and so
+/// is the one the `Group` of a referenced container got from the same text.
+pub(crate) fn describe_text<E>(
+    el: E,
+    element: &crate::retained_tree::RetainedElement,
+    default_role: Option<Role>,
+    text: Option<String>,
+) -> E
 where
     E: StatefulInteractiveElement,
 {
-    if is_text_host(element) && element.custom_props().get("aria-valuetext").is_none() {
-        if let Some(text) = text {
-            return el.aria_value(text.to_string());
-        }
+    let Some(text) = text else {
+        return el;
+    };
+    let props = element.custom_props();
+    let role = resolve_role(props, default_role);
+    let links = links::current();
+    if role.is_none() && links.referenced_text(element.id).is_some() {
+        return el;
     }
-    el
+    if !role.is_some_and(names_from_content) {
+        return if props.contains_key("aria-valuetext") { el } else { el.aria_value(text) };
+    }
+    if named_by_aria(props) || links.labels_of(element.id).is_some() {
+        return el;
+    }
+    el.aria_label(text)
+}
+
+/// Whether ARIA names a `role` from its content: a button is named by its text, a list is not.
+fn names_from_content(role: Role) -> bool {
+    matches!(
+        role,
+        Role::Button
+            | Role::Link
+            | Role::Heading
+            | Role::CheckBox
+            | Role::RadioButton
+            | Role::Switch
+            | Role::MenuItem
+            | Role::MenuItemCheckBox
+            | Role::MenuItemRadio
+            | Role::Tab
+            | Role::ListBoxOption
+            | Role::TreeItem
+            | Role::Cell
+            | Role::GridCell
+            | Role::ColumnHeader
+            | Role::RowHeader
+            | Role::Row
+            | Role::Tooltip
+    )
+}
+
+/// Whether each paragraph of `element` gets a node of its own: with a screen reader on, when blocks
+/// stand beside the paragraphs, which then have no element to carry their text.
+pub(crate) fn labels_paragraphs(
+    a11y_active: bool,
+    element: &crate::retained_tree::RetainedElement,
+    plan: &[(crate::text::inline::Child, u32)],
+) -> bool {
+    use crate::text::inline::Child;
+    a11y_active
+        && carries_text(element)
+        && plan.iter().any(|(child, _)| !matches!(child, Child::Paragraph(_) | Child::EmptyLine))
+}
+
+/// The node of a paragraph that sits beside blocks in `host`, which has no element of its own to carry
+/// its text. `anchor` is [`crate::text::inline::Paragraph::anchor`]: the node keeps its id when a
+/// sibling is inserted before the paragraph.
+pub(crate) fn paragraph_label(anchor: u64, text: String) -> gpui::Stateful<gpui::Div> {
+    gpui::div()
+        .id(gpui::ElementId::NamedInteger(gpui::SharedString::new_static("gpuix-paragraph"), anchor))
+        .role(Role::Label)
+        .aria_value(text)
 }
 
 /// What `apply_accessibility` reads of the elements around `host_id` rather than of it: the labels
@@ -313,5 +439,73 @@ mod tests {
         assert_eq!(role_from_aria("presentation"), Some(Role::GenericContainer));
         assert_eq!(role_from_aria("Button"), None);
         assert_eq!(role_from_aria("not-a-role"), None);
+    }
+
+    fn container(children: &[(&str, &str)]) -> crate::retained_tree::RetainedTree {
+        let mut tree = crate::retained_tree::RetainedTree::new();
+        tree.create_element(1, "div".to_string());
+        for (index, (kind, text)) in children.iter().enumerate() {
+            let id = 2 + index as u64;
+            tree.create_element(id, kind.to_string());
+            tree.append_child(1, id);
+            if *kind == "#text" {
+                tree.set_text(id, text.to_string());
+            }
+        }
+        tree
+    }
+
+    #[test]
+    fn paragraphs_beside_blocks_are_labelled_only_with_a_screen_reader() {
+        let tree = container(&[("#text", "Before"), ("div", ""), ("#text", "After")]);
+        let host = &tree.elements[&1];
+        let plan = crate::text::inline::plan_children_at(&tree, host);
+        assert!(super::labels_paragraphs(true, host, &plan));
+        assert!(!super::labels_paragraphs(false, host, &plan));
+        let one = container(&[("#text", "Only")]);
+        let host = &one.elements[&1];
+        let plan = crate::text::inline::plan_children_at(&one, host);
+        assert!(!super::labels_paragraphs(true, host, &plan));
+    }
+
+    #[test]
+    fn a_paragraph_beside_blocks_keeps_its_node_id_when_a_sibling_is_inserted_before_it() {
+        let mut tree = container(&[("div", ""), ("#text", "After")]);
+        let anchor = |tree: &crate::retained_tree::RetainedTree| {
+            let plan = crate::text::inline::plan_children_at(tree, &tree.elements[&1]);
+            plan.iter()
+                .find_map(|(child, _)| match child {
+                    crate::text::inline::Child::Paragraph(paragraph) => Some(paragraph.anchor),
+                    _ => None,
+                })
+                .expect("a paragraph")
+        };
+        assert_eq!(anchor(&tree), 3);
+        tree.create_element(9, "div".to_string());
+        tree.insert_before(1, 9, 2);
+        assert_eq!(anchor(&tree), 3);
+    }
+
+    #[test]
+    fn a_container_reads_out_its_one_paragraph_and_has_the_label_role_unless_it_has_another() {
+        let tree = container(&[("#text", "Hello")]);
+        let host = &tree.elements[&1];
+        let text = super::read_text_unplanned(&tree, host);
+        assert_eq!(text.as_deref(), Some("Hello"));
+        assert_eq!(super::role_without_props(&tree, host, text.as_deref()), Some(Role::Label));
+        let mut form = container(&[("#text", "Hello")]);
+        form.create_element(9, "form".to_string());
+        form.append_child(1, 9);
+        form.create_element(10, "#text".to_string());
+        form.set_text(10, "Hi".to_string());
+        form.append_child(9, 10);
+        let host = &form.elements[&9];
+        let text = super::read_text_unplanned(&form, host);
+        assert_eq!(text.as_deref(), Some("Hi"));
+        assert_eq!(super::role_without_props(&form, host, text.as_deref()), Some(Role::Form));
+        let blank = container(&[("#text", "  ")]);
+        assert_eq!(super::read_text_unplanned(&blank, &blank.elements[&1]), None);
+        let beside_block = container(&[("#text", "Before"), ("div", "")]);
+        assert_eq!(super::read_text_unplanned(&beside_block, &beside_block.elements[&1]), None);
     }
 }

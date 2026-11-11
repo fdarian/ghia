@@ -92,7 +92,7 @@ function App() {
           hover: { backgroundColor: '#2c2c2c' },
         }}
       >
-        <text style={{ color: '#e2e2e2' }}>Count: {count()}</text>
+        <div style={{ color: '#e2e2e2' }}>Count: {count()}</div>
       </div>
     </div>
   )
@@ -101,7 +101,7 @@ function App() {
 render(() => <App />, { title: 'Solid Ghia', width: 800, height: 600 })
 ```
 
-Give every **`<text>`** a `color`. GPUI does not inherit color from a parent. Text with no color paints black and disappears on a dark surface.
+Set a `color` for text on a dark surface. `color` is inherited: put it on the element that holds the text or on an ancestor. Text with no color paints black and disappears on a dark surface.
 
 Read signals with **`count()`**. `render` takes a function, not a pre-built element: `render(() => <App />)`.
 
@@ -154,6 +154,20 @@ ghia build
 - `ghia build --no-compile` stops after the bundle and writes no binary.
 - `ghia({ entry, compile: { outfile: 'out/tool' } })` moves the binary. The path is relative to the project root, and the default is `app` inside the build's output directory.
 - `build({ compile: false })` is the programmatic form of `--no-compile`.
+
+The binary ignores a `bunfig.toml` (a test preload, say) and a `.env` in whichever directory it is launched from.
+
+#### App Workers
+
+A Worker your app starts with `new Worker(new URL('./raster.ts', import.meta.url))` works in the built app and the compiled binary with no configuration. The build finds that pattern, in the UI code and in the server code, when the URL is a relative string literal (a pattern inside a comment or a string does not count). Each Worker file is bundled as a build of its own, in the environment that starts it, and written next to `main.js` as `dist/raster-<hash>.worker.js`; the URL in the output points at it, and the compile carries the file. Nothing is shared with `main.js`, so a module that the app and a Worker both import runs again in each, the way it would in a browser, and `@ghia/native/dom-globals` runs only before the app. The hash is 8 hex digits of the environment and the file's path relative to the project root, so two Workers with the same file name, or one file started from the UI and from the server code, never collide. The options argument (`{ type: 'module' }`) is left as written. A Worker that starts another Worker is found in turn, and a Worker that starts its own file (with a `name` option to tell the copies apart, say) is a Worker of one file. With `build.sourcemap: true`, each Worker gets its own `.map` and its `sourceMappingURL` names it; with `'inline'` the map stays inline in the Worker and no `.map` is written. Inside a Worker build, a plugin's `configResolved` sees the top-level `build` config (`ssr` false, no input), because the Worker builds share one resolved config.
+
+Each Worker is a build of its own, so a plugin's build hooks (`buildStart`, `generateBundle`, `closeBundle`) run once more for every Worker, and the Vite config file is evaluated again for it.
+
+A URL that is not a relative literal (a variable, a template with `${}`, a package specifier) is not found, and the Worker is not in the binary. A Worker started inside a dependency of the server code is not found either, because server-side dependencies in `node_modules` are not bundled; list the package in `resolve.noExternal` to bundle it. A Worker file that does not resolve fails the build when the call is in your code and warns when it is in `node_modules`, leaving the call as written.
+
+A Worker started from the UI code is bundled with the same browser export conditions as the UI, so `solid-js/web`'s `isServer` is `false` there, and it has no `window` or `document`. A Worker started from the server code resolves as the server does.
+
+`ghia dev` needs none of this: the UI and the server code run through Vite's module runner, whose `import.meta.url` is the real file, so Bun starts the Worker from the `.ts` source. Bun resolves that file's imports itself, so Vite's aliases, `define`, `import.meta.env`, JSX plugin and the `browser` conditions do not apply to it, and editing it does not reload the server; restart `ghia dev` to pick the edit up. `ghia build` bundles the Worker in its environment, so a UI Worker can resolve a different build of a package in dev than in the build (`isServer` from `solid-js/web` is the example).
 
 The compile rewrites `@ghia/native`'s loader on the fly, because Bun's bundler embeds an addon only for a plain `require('./x.node')` and the generated loader gets its `require` from `createRequire`. It fails the build with a clear error if that loader changes shape.
 
@@ -265,7 +279,7 @@ function App() {
         onClick={async () => mutate(await client.increment({ by: 1 }))}
         style={{ padding: 12, borderRadius: 8, cursor: 'pointer', backgroundColor: '#232323' }}
       >
-        <text style={{ color: '#e2e2e2' }}>Server count: {count()}</text>
+        <div style={{ color: '#e2e2e2' }}>Server count: {count()}</div>
       </div>
     </div>
   )
@@ -282,7 +296,7 @@ Import the router into the UI as a type only. A value import would pull the serv
 
 `ghia dev` runs the server entry in the Worker through Vite's module runner. When you edit a module the server imports, the Worker calls the function `serve` returned, imports the entry again and calls `serve(port)` on the **same port**. The UI keeps `serverPort` and its client. Module state on the server starts over: `count` above returns to 0.
 
-`ghia build` writes `dist/main.js` and `dist/server.js`. The built UI creates its Worker with `new Worker(new URL('./server.js', import.meta.url))`, so the two files stay together. `bun dist/main.js` starts both. The compiled `dist/app` carries both, and a Worker that fails to start ends the app with the Worker's error instead of leaving the UI waiting.
+`ghia build` writes `dist/main.js` and `dist/server.js` (and a `dist/<name>-<hash>.worker.js` for each [app Worker](#app-workers)). The built UI creates its Worker with `new Worker(new URL('./server.js', import.meta.url))`, so the two files stay together. `bun dist/main.js` starts both. The compiled `dist/app` carries both, and a Worker that fails to start ends the app with the Worker's error instead of leaving the UI waiting.
 
 ### What dev does not cover
 
@@ -389,7 +403,7 @@ import { TestRenderer } from '@ghia/solid/testing'
 
 const renderer = new TestRenderer()
 const root = createRoot(renderer)
-root.render(() => <text>hello</text>)
+root.render(() => <div>hello</div>)
 root.flush()
 ```
 
@@ -417,13 +431,13 @@ function WindowControls() {
   return (
     <div style={{ display: 'flex', gap: 8 }}>
       <div onClick={() => renderer.minimizeWindow?.()}>
-        <text style={{ color: '#e2e2e2' }}>Minimize</text>
+        <div style={{ color: '#e2e2e2' }}>Minimize</div>
       </div>
       <div onClick={() => renderer.zoomWindow?.()}>
-        <text style={{ color: '#e2e2e2' }}>Zoom</text>
+        <div style={{ color: '#e2e2e2' }}>Zoom</div>
       </div>
       <div onClick={() => renderer.toggleFullscreen?.()}>
-        <text style={{ color: '#e2e2e2' }}>Fullscreen</text>
+        <div style={{ color: '#e2e2e2' }}>Fullscreen</div>
       </div>
     </div>
   )
@@ -443,7 +457,7 @@ function AttachFiles() {
   }
   return (
     <div onClick={attach}>
-      <text style={{ color: '#e2e2e2' }}>Attach files</text>
+      <div style={{ color: '#e2e2e2' }}>Attach files</div>
     </div>
   )
 }
@@ -490,9 +504,9 @@ function Layout() {
   const insets = createWindowInsets()
   return (
     <div style={{ width: size().width, paddingBottom: insets().ime.bottom }}>
-      <text style={{ color: '#e2e2e2' }}>
+      <div style={{ color: '#e2e2e2' }}>
         {size().width} x {size().height}
-      </text>
+      </div>
     </div>
   )
 }
@@ -507,7 +521,7 @@ import { createSelectedText } from '@ghia/solid'
 
 function SelectionLabel() {
   const selected = createSelectedText()
-  return <text style={{ color: '#e2e2e2' }}>{selected() ?? 'none'}</text>
+  return <div style={{ color: '#e2e2e2' }}>{selected() ?? 'none'}</div>
 }
 ```
 
@@ -518,7 +532,7 @@ import { createAppearance } from '@ghia/solid'
 
 function Scheme() {
   const appearance = createAppearance()
-  return <text style={{ color: appearance() === 'dark' ? '#e2e2e2' : '#1a1a1a' }}>{appearance()}</text>
+  return <div style={{ color: appearance() === 'dark' ? '#e2e2e2' : '#1a1a1a' }}>{appearance()}</div>
 }
 ```
 
@@ -539,11 +553,11 @@ function FindBar() {
         value={query()}
         onChange={(event) => setQuery(event.value ?? '')}
       />
-      <text style={{ color: '#e2e2e2' }}>
+      <div style={{ color: '#e2e2e2' }}>
         {search.active + 1} / {search.total}
-      </text>
+      </div>
       <div onClick={() => search.next()}>
-        <text style={{ color: '#e2e2e2' }}>Next</text>
+        <div style={{ color: '#e2e2e2' }}>Next</div>
       </div>
     </div>
   )
@@ -568,7 +582,7 @@ function WelcomeCard() {
       transition={{ duration: 0.25, ease: 'easeOut' }}
       style={{ overflow: 'hidden' }}
     >
-      <text style={{ color: '#ffffff' }}>Welcome</text>
+      <div style={{ color: '#ffffff' }}>Welcome</div>
     </motion.div>
   )
 }
@@ -582,7 +596,7 @@ function Toast(props: { visible: boolean }) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          <text style={{ color: '#e2e2e2' }}>Saved</text>
+          <div style={{ color: '#e2e2e2' }}>Saved</div>
         </motion.div>
       </Show>
     </AnimatePresence>
@@ -631,11 +645,11 @@ function Controls() {
   return (
     <Select value={value()} onValueChange={setValue}>
       <SelectTrigger style={{ width: 220, height: 36, backgroundColor: '#1e293b' }}>
-        <SelectValue placeholder={<text style={{ color: '#94a3b8' }}>Pick</text>} />
+        <SelectValue placeholder={<div style={{ color: '#94a3b8' }}>Pick</div>} />
       </SelectTrigger>
       <SelectContent style={{ width: 220, backgroundColor: '#0f172a' }}>
-        <SelectItem value="a"><text style={{ color: '#e2e8f0' }}>Alpha</text></SelectItem>
-        <SelectItem value="b"><text style={{ color: '#e2e8f0' }}>Beta</text></SelectItem>
+        <SelectItem value="a"><div style={{ color: '#e2e8f0' }}>Alpha</div></SelectItem>
+        <SelectItem value="b"><div style={{ color: '#e2e8f0' }}>Beta</div></SelectItem>
       </SelectContent>
     </Select>
   )
@@ -699,7 +713,7 @@ import { createTestRoot, hasNativeTestRenderer } from '@ghia/solid/testing'
 const app = createTestRoot()
 app.render(() => (
   <div testId="bump" onClick={() => {}}>
-    <text>hi</text>
+    <div>hi</div>
   </div>
 ))
 app.renderer.nativeSimulateClick(50, 20)
@@ -725,7 +739,7 @@ interface TestRoot {
 
 > **Info.** Prefer `createTestRoot()` when you can. Reach for `launch()` plus `focus: false` when the check needs a real window or a real process.
 
-`getAllText()` only sees **`<text>`** nodes. For `<code>`, `<diff>`, and `<markdown>`, use `renderer.getPaintedText()`.
+`getAllText()` only sees the string (`#text`) nodes. For `<code>`, `<diff>`, and `<markdown>`, use `renderer.getPaintedText()`.
 
 The subpath re-exports **`@ghia/native/testing`**, including `TestRenderer` and `hasNativeTestRenderer`.
 

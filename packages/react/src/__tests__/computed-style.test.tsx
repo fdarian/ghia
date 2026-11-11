@@ -220,3 +220,46 @@ describeNative("the declaration", () => {
     t.unmount()
   })
 })
+
+describeNative("var()", () => {
+  it("is substituted in the values an element reads and in the ones it passes down", () => {
+    const t = mount({
+      id: "a",
+      style: { "--s": "30px", "--c": "red", fontSize: "var(--s)", minWidth: "2em", color: "var(--c)", width: 200 },
+      children: [{ id: "b", style: { minWidth: "1em" }, children: [{ id: "c", style: { minWidth: "1em" }, children: [] }] }],
+    })
+    try {
+      const own = getComputedStyle(t.ref("a"))
+      expect([own.fontSize, own.minWidth, own.color]).toEqual(["30px", "60px", "rgb(255, 0, 0)"])
+      for (const id of ["b", "c"]) {
+        const inherited = getComputedStyle(t.ref(id))
+        expect([inherited.fontSize, inherited.minWidth, inherited.color]).toEqual(["30px", "30px", "rgb(255, 0, 0)"])
+      }
+    } finally {
+      t.unmount()
+    }
+  })
+})
+
+describeNative("a pseudo-element", () => {
+  it("inherits from its element, not from the element's parent", () => {
+    const t = mount({
+      id: "a",
+      style: { fontSize: 18, color: "blue", "--gap": "1px" },
+      children: [{ id: "b", style: { fontSize: 20, color: "red", direction: "rtl", "--gap": "2px" }, children: [] }],
+    })
+    try {
+      for (const pseudo of ["::before", "::after"]) {
+        const style = getComputedStyle(t.ref("b"), pseudo)
+        expect([style.fontSize, style.color, style.direction, style.getPropertyValue("--gap")], pseudo).toEqual([
+          "20px",
+          "rgb(255, 0, 0)",
+          "rtl",
+          "2px",
+        ])
+      }
+    } finally {
+      t.unmount()
+    }
+  })
+})

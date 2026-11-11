@@ -227,6 +227,26 @@ struct ContainerRule {
 }
 
 impl ContainerRules {
+    /// The blocks as they were written, a style for each query. A block whose query does not
+    /// parse is dropped.
+    pub(crate) fn from_blocks(blocks: impl IntoIterator<Item = (String, StyleDesc)>) -> Self {
+        let rules: Vec<ContainerRule> = blocks
+            .into_iter()
+            .filter_map(|(source, style)| match ContainerQuery::parse(&source) {
+                Ok(query) => Some(ContainerRule { source, query, style }),
+                Err(error) => {
+                    log::warn!("Dropped style declaration @container.{source}: {error}");
+                    None
+                }
+            })
+            .collect();
+        Self(rules.into())
+    }
+
+    pub(crate) fn any_style(&self, test: impl Fn(&StyleDesc) -> bool) -> bool {
+        self.0.iter().any(|rule| test(&rule.style))
+    }
+
     /// `earlier`'s blocks, then `later`'s: the order a layered style cascades in.
     pub(crate) fn concat(earlier: Option<&Self>, later: Option<&Self>) -> Option<Self> {
         match (earlier, later) {
@@ -340,7 +360,7 @@ fn settle_among(tree: &RetainedTree, parent: &RetainedElement, containers: &dyn 
             let folded = fold(style, containers);
             *changed |= settle(child, folded.as_ref().or(Some(style)));
         }
-        if crate::text::inline::is_inline_wrapper(child, parent) {
+        if crate::text::inline::is_inline_wrapper(child) {
             settle_among(tree, child, containers, changed);
         }
     }

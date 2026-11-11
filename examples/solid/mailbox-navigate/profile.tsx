@@ -184,10 +184,10 @@ if (focusedId !== inputId) throw new Error(`search input ${inputId} is not focus
 // header block also holds the sender's email; a list row with the same subject does not.
 function detailShows(message: Message): boolean {
   const title = renderer
-    .findByType("text")
+    .findByType("#text")
     .filter((element) => element.text === message.subject)
     .at(-1)
-  // The match is the raw text node inside the <text> element, so the header block is two levels up.
+  // The match is the raw text node inside the element, so the header block is two levels up.
   const titleElement = title?.parentId == null ? undefined : renderer.getElement(title.parentId)
   if (!titleElement || titleElement.parentId == null) return false
   const texts: Array<string | null> = []

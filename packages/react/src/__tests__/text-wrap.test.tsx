@@ -24,7 +24,7 @@ function paint(node: React.ReactNode) {
 function measureColumn() {
   const testRoot = paint(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   return testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -49,7 +49,7 @@ function rowsOf(
 ) {
   const testRoot = paint(
     <div highlight={{ query: text }} style={{ width: (columns + 0.5) * COLUMN, ...box }}>
-      <text style={{ ...TEXT, ...style }}>{text}</text>
+      <div style={{ ...TEXT, ...style }}>{text}</div>
     </div>
   )
   return { testRoot, widths: rowWidths(testRoot) }
@@ -204,7 +204,7 @@ describeNative("text-wrap", () => {
       const testRoot = paint(
         <div style={{ width: 20.5 * COLUMN, ...parent }}>
           <div highlight={{ query: text }}>
-            <text style={{ ...TEXT, ...child }}>{text}</text>
+            <div style={{ ...TEXT, ...child }}>{text}</div>
           </div>
         </div>
       )
@@ -255,7 +255,7 @@ describeNative("text-wrap", () => {
             highlight={{ query: text }}
             style={{ width: 20.5 * COLUMN, hover: { textWrap: "balance" } }}
           >
-            <text style={TEXT}>{text}</text>
+            <div style={TEXT}>{text}</div>
           </div>
         )
         testRoot.renderer.nativeSimulateMouseMove(900, 900)
@@ -280,7 +280,7 @@ describeNative("text-wrap", () => {
             highlight={{ query: text }}
             style={{ width: 20.5 * COLUMN, hover: { textWrapMode: "nowrap" } }}
           >
-            <text style={TEXT}>{text}</text>
+            <div style={TEXT}>{text}</div>
           </div>
         )
         testRoot.renderer.nativeSimulateMouseMove(900, 900)
@@ -302,7 +302,7 @@ describeNative("text-wrap", () => {
       const testRoot = paint(
         <div style={{ width: 400, alignItems: "flex-start", flexDirection: "column", display: "flex" }}>
           <div testId="box" style={{ maxWidth: 20.5 * COLUMN }}>
-            <text style={{ ...TEXT, ...style }}>{text}</text>
+            <div style={{ ...TEXT, ...style }}>{text}</div>
           </div>
         </div>
       )
@@ -333,7 +333,7 @@ describeNative("text-wrap", () => {
         const balanced = shoot(
           `${textAlign}-balanced`,
           <div style={{ width, backgroundColor: "#101010" }}>
-            <text style={{ ...INK, textAlign, textWrap: "balance" }}>{text}</text>
+            <div style={{ ...INK, textAlign, textWrap: "balance" }}>{text}</div>
           </div>
         )
         // The same two rows, broken by hand, with no space left on them.

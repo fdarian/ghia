@@ -1286,6 +1286,11 @@ pub struct StyleDesc {
     /// ancestors pass down that no field of this style carries. Never from JS.
     #[serde(skip)]
     pub(crate) contents_levels: Option<std::sync::Arc<[crate::layout::contents::ContentsLevel]>>,
+    /// The declarations whose text has a `var()`, in written order, which are not parsed into a
+    /// field until the custom properties of the element are known (`css::var_substitution`). Never
+    /// from JS.
+    #[serde(skip)]
+    pub(crate) var_declarations: Option<std::sync::Arc<[crate::css::var_substitution::VarDeclaration]>>,
 }
 
 /// The derived deserialiser is wrapped so that a shorthand drops the longhands written before it:
@@ -1453,6 +1458,22 @@ impl StyleDesc {
         let mut same = self.clone();
         same.custom_properties = other.custom_properties.clone();
         same.differs_only_in_paint(other)
+    }
+
+    /// Whether the style, or a state style or `@container` block of it, holds a declaration that
+    /// reads the custom properties of the element it is built for.
+    pub(crate) fn holds_var_declarations(&self) -> bool {
+        macro_rules! any_state {
+            ($($field:ident),+ $(,)?) => {
+                false $(|| self.$field.as_deref().is_some_and(Self::holds_var_declarations))+
+            };
+        }
+        self.var_declarations.is_some()
+            || any_state!(
+                hover, active, focus_visible, focus_within, group_hover, group_active, group_focus_within,
+                has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
+            )
+            || self.container_rules.as_ref().is_some_and(|rules| rules.any_style(Self::holds_var_declarations))
     }
 
     /// Whether the style depends on the size of a query container: it has `@container` blocks

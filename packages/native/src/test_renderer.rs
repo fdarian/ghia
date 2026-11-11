@@ -343,6 +343,18 @@ fn with_test_state<R>(
     })
 }
 
+/// `with_test_state` for a simulated input. The draw that ends it stands for the frame a live
+/// window draws after an input, so it runs the frame steps (see `frame_steps`).
+fn with_input_state<R>(
+    f: impl FnOnce(
+        &mut gpui::VisualTestAppContext,
+        gpui::AnyWindowHandle,
+        &gpui::Entity<GpuixView>,
+    ) -> Result<R>,
+) -> Result<R> {
+    crate::frame_steps::as_frame(|| with_test_state(f))
+}
+
 /// Runs `update` on the view and the window, from anywhere: from inside a sync
 /// event handler it borrows nothing new and uses the window being dispatched
 /// to. The test context is not run until parked, since the dispatch that is
@@ -681,7 +693,7 @@ impl TestGpuixRenderer {
         &self,
         input: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> std::result::Result<(), String>,
     ) -> Result<()> {
-        with_test_state(|cx, window, _view| {
+        with_input_state(|cx, window, _view| {
             let result = cx
                 .update_window(window, |_, window, app| input(window, app))
                 .map_err(|error| Error::from_reason(error.to_string()))?;
@@ -1312,7 +1324,7 @@ impl TestGpuixRenderer {
     /// hit testing requires elements to be laid out).
     #[napi]
     pub fn flush(&self) -> Result<()> {
-        self.flush_for(Dirty::Layout)
+        crate::frame_steps::as_frame(|| self.flush_for(Dirty::Layout))
     }
 
     /// Whether the test window is drawn whenever an update or a simulated input flushes, which
@@ -1333,13 +1345,15 @@ impl TestGpuixRenderer {
     pub fn draw_frame(&self) -> Result<()> {
         // A frame covers every batch applied before it, so it pays the notify they are owed as a
         // read does. Left set, the next `flushIfDirty` would invalidate a page this frame drew.
-        let unflushed = take_unflushed();
-        if unflushed != Dirty::Clean {
-            self.flush_for(unflushed)?;
-        } else {
-            deliver_frame()?;
-        }
-        window_call(|window, cx| window.paint_if_dirty(cx)).map(|_| ())
+        crate::frame_steps::as_frame(|| {
+            let unflushed = take_unflushed();
+            if unflushed != Dirty::Clean {
+                self.flush_for(unflushed)?;
+            } else {
+                deliver_frame()?;
+            }
+            window_call(|window, cx| window.paint_if_dirty(cx)).map(|_| ())
+        })
     }
 
     /// Draws only what a live window would: a pending change, nothing on a clean window.
@@ -1349,11 +1363,13 @@ impl TestGpuixRenderer {
     /// layout in between) and not two more.
     #[napi]
     pub fn flush_if_dirty(&self) -> Result<()> {
-        let unflushed = take_unflushed();
-        if unflushed != Dirty::Clean {
-            return self.flush_for(unflushed);
-        }
-        window_call(|window, cx| window.paint_if_dirty(cx)).map(|_| ())
+        crate::frame_steps::as_frame(|| {
+            let unflushed = take_unflushed();
+            if unflushed != Dirty::Clean {
+                return self.flush_for(unflushed);
+            }
+            window_call(|window, cx| window.paint_if_dirty(cx)).map(|_| ())
+        })
     }
 
     /// Simulate a click at the given window coordinates.
@@ -1373,7 +1389,7 @@ impl TestGpuixRenderer {
         let button = button.unwrap_or(0);
         // The release leaves the button up, whatever an earlier press left held.
         self.set_button_held(button, false);
-        with_test_state(|cx, window, _view| {
+        with_input_state(|cx, window, _view| {
             // Not `cx.simulate_click`: that helper hard-codes the left button,
             // so a right click silently became a left click.
             let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
@@ -1459,7 +1475,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn simulate_modifiers_changed(&self, modifiers: Option<String>) -> Result<()> {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
-        with_test_state(|cx, window, _view| {
+        with_input_state(|cx, window, _view| {
             cx.simulate_event(
                 window,
                 gpui::ModifiersChangedEvent {
@@ -1494,7 +1510,7 @@ impl TestGpuixRenderer {
         self.platform
             .set_movement((movement_x.unwrap_or(0.0), movement_y.unwrap_or(0.0)));
         let pressed_button = self.pressed_button();
-        with_test_state(|cx, window, _view| {
+        with_input_state(|cx, window, _view| {
             cx.simulate_event(
                 window,
                 gpui::MouseMoveEvent {
@@ -1513,7 +1529,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn simulate_mouse_exit(&self, x: f64, y: f64) -> Result<()> {
         let pressed_button = self.pressed_button();
-        with_test_state(|cx, window, _view| {
+        with_input_state(|cx, window, _view| {
             cx.simulate_event(
                 window,
                 gpui::MouseExitEvent {
@@ -1761,7 +1777,7 @@ impl TestGpuixRenderer {
     ) -> Result<()> {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         self.set_button_held(button.unwrap_or(0), true);
-        with_test_state(|cx, window, _view| {
+        with_input_state(|cx, window, _view| {
             cx.simulate_event(
                 window,
                 gpui::MouseDownEvent {
@@ -1790,7 +1806,7 @@ impl TestGpuixRenderer {
     ) -> Result<()> {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         self.set_button_held(button.unwrap_or(0), false);
-        with_test_state(|cx, window, _view| {
+        with_input_state(|cx, window, _view| {
             cx.simulate_event(
                 window,
                 gpui::MouseUpEvent {
@@ -1824,7 +1840,7 @@ impl TestGpuixRenderer {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         let touch_phase =
             crate::scroll::parse_touch_phase(phase.as_deref()).map_err(Error::from_reason)?;
-        with_test_state(|cx, window, _view| {
+        with_input_state(|cx, window, _view| {
             cx.simulate_event(
                 window,
                 gpui::ScrollWheelEvent {
@@ -1849,7 +1865,7 @@ impl TestGpuixRenderer {
         y: f64,
         paths: Vec<String>,
     ) -> Result<Option<String>> {
-        with_test_state(|cx, window, _view| {
+        with_input_state(|cx, window, _view| {
             let paths =
                 gpui::ExternalPaths(paths.into_iter().map(std::path::PathBuf::from).collect());
             let result = simulate_event_with_result(
@@ -1868,7 +1884,7 @@ impl TestGpuixRenderer {
     /// operation the window answered the drag source with, as `simulateFileDragEnter` does.
     #[napi]
     pub fn simulate_file_drag_move(&self, x: f64, y: f64) -> Result<Option<String>> {
-        with_test_state(|cx, window, _view| {
+        with_input_state(|cx, window, _view| {
             let result = simulate_event_with_result(
                 cx,
                 window,
@@ -1883,7 +1899,7 @@ impl TestGpuixRenderer {
     /// The dragged files are released at `x`, `y` (`FileDropEvent::Submit`).
     #[napi]
     pub fn simulate_file_drag_submit(&self, x: f64, y: f64) -> Result<()> {
-        with_test_state(|cx, window, _view| {
+        with_input_state(|cx, window, _view| {
             cx.simulate_event(
                 window,
                 gpui::FileDropEvent::Submit {
@@ -1897,7 +1913,7 @@ impl TestGpuixRenderer {
     /// The dragged files leave the window (`FileDropEvent::Exited`).
     #[napi]
     pub fn simulate_file_drag_exit(&self) -> Result<()> {
-        with_test_state(|cx, window, _view| {
+        with_input_state(|cx, window, _view| {
             cx.simulate_event(window, gpui::FileDropEvent::Exited);
             Ok(())
         })
@@ -1906,7 +1922,7 @@ impl TestGpuixRenderer {
     /// The platform's drag session ends (`FileDropEvent::Ended`).
     #[napi]
     pub fn simulate_file_drag_end(&self) -> Result<()> {
-        with_test_state(|cx, window, _view| {
+        with_input_state(|cx, window, _view| {
             cx.simulate_event(window, gpui::FileDropEvent::Ended);
             Ok(())
         })
@@ -1953,12 +1969,12 @@ impl TestGpuixRenderer {
 
     /// Every string painted in the last frame, in paint order.
     ///
-    /// `getAllText()` only sees `<text>` nodes in the retained tree. Native
+    /// `getAllText()` only sees string nodes in the retained tree. Native
     /// elements such as `<code>` and `<diff>` draw their text inside gpui, so
     /// this is the only way to assert on what they actually rendered.
     #[napi]
     pub fn get_painted_text(&self) -> Result<Vec<String>> {
-        self.flush()?;
+        self.flush_for(Dirty::Layout)?;
         Ok(crate::text::painted_text(test_window_id()?))
     }
 
@@ -1969,7 +1985,7 @@ impl TestGpuixRenderer {
     /// so a soft-wrapped match is provably two boxes.
     #[napi]
     pub fn get_painted_highlights(&self) -> Result<Vec<crate::element_tree::HighlightMatch>> {
-        self.flush()?;
+        self.flush_for(Dirty::Layout)?;
         Ok(crate::text::painted_highlights(test_window_id()?)
             .into_iter()
             .map(Into::into)
@@ -2102,7 +2118,7 @@ impl TestGpuixRenderer {
     /// `flush` and `drawFrame` deliver it, or any draw that comes first runs them.
     #[napi]
     pub fn request_animation_frame(&self) -> Result<bool> {
-        update_view(|view, window, _cx| view.request_animation_frame(window))?;
+        update_view_or_defer(|view, window, _cx| view.request_animation_frame(window))?;
         Ok(true)
     }
 
@@ -2282,11 +2298,12 @@ impl TestGpuixRenderer {
         )
     }
 
-    /// `form.requestSubmit()`: validate, then emit `submit`.
+    /// `form.requestSubmit(submitter)`: validate, then emit `submit`.
     #[napi]
-    pub fn request_submit(&self, id: f64) -> Result<()> {
+    pub fn request_submit(&self, id: f64, submitter_id: Option<f64>) -> Result<()> {
         let id = to_element_id(id)?;
-        window_call(move |window, cx| crate::forms::request_submit(window, cx, id))?
+        let submitter = submitter_id.map(to_element_id).transpose()?;
+        window_call(move |window, cx| crate::forms::request_submit(window, cx, id, submitter))?
             .map_err(Error::from_reason)
     }
 
@@ -2610,7 +2627,7 @@ impl TestGpuixRenderer {
         if unflushed != Dirty::Clean {
             self.flush_for(unflushed)?;
         }
-        window_call(|window, cx| crate::renderer::read_computed_style(&self.tree, id, pseudo_element, window, cx))?
+        window_call(|window, cx| crate::css::computed_style::read_in_window(&self.tree, id, pseudo_element, window, cx))?
     }
 
     /// The DOM scroll position of a scrollable element, `[scrollLeft, scrollTop]` (zero or
@@ -2742,7 +2759,7 @@ impl TestGpuixRenderer {
         texts
     }
 
-    /// Find element IDs matching the given type (e.g. "div", "text").
+    /// Find element IDs matching the given type (e.g. "div", "span").
     #[napi]
     pub fn find_by_type(&self, element_type: String) -> Vec<f64> {
         let tree = self.tree.lock().unwrap();

@@ -16,7 +16,6 @@ import type {
   NativeRenderer,
   RendererRootBinding,
   RootEvent,
-  SyncDispatchResult,
   RootEventHandlers,
 } from "@ghia/native/host"
 import { createHostElement, createHostText, HostRoot, removeHostNode } from "./host.js"
@@ -47,7 +46,6 @@ export interface Root {
   flush(): void
   flushSync<Value>(fn: () => Value): Value
   dispatch(event: EventPayload): boolean
-  dispatchSync(event: EventPayload): SyncDispatchResult
   unmount(): void
 }
 
@@ -60,6 +58,8 @@ export function createRoot(
   const mutations = createMutationQueue(renderer, (ids) => {
     for (const id of ids) {
       unregisterEventHandlers(eventHandlers, id)
+      // `markUnmounted` leaves a `<nativeview>`'s listeners attached so it hears `detach` while this batch is applied; now they go.
+      container.elements.get(id)?.listeners.detach()
       container.elements.delete(id)
     }
     runMotionReleases(container)
@@ -117,6 +117,14 @@ export function createRoot(
       onAppearanceChange,
       tabNavigation: rootHandlers.tabNavigation,
       onEvent: rootHandlers.onEvent,
+      // The flush stands in for the microtask checkpoint a browser runs before it renders.
+      schedule: (run) => {
+        try {
+          run()
+        } finally {
+          flush()
+        }
+      },
     })
     renderer.setWindowKeyEvents?.(
       // Always on: the Tab and Escape defaults run on the key event, and
@@ -206,7 +214,7 @@ export function createRoot(
             return code()
           },
         }),
-        container
+        container.body
       )
       flush()
     },
@@ -221,13 +229,6 @@ export function createRoot(
     dispatch(event) {
       try {
         return state.dispatch(event)
-      } finally {
-        flush()
-      }
-    },
-    dispatchSync(event) {
-      try {
-        return state.dispatchSync(event)
       } finally {
         flush()
       }

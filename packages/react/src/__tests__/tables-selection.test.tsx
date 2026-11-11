@@ -77,18 +77,18 @@ describeNative("tables x selection order", () => {
       <Table id="t">
         <Row id="r1">
           <Cell id="a" style={{ position: "relative" }}>
-            <text>aa</text>
+            <div>aa</div>
           </Cell>
           <Cell id="b">
-            <text>bb</text>
+            <div>bb</div>
           </Cell>
         </Row>
         <Row id="r2">
           <Cell id="c">
-            <text>cc</text>
+            <div>cc</div>
           </Cell>
           <Cell id="d" style={{ position: "relative", zIndex: 2 }}>
-            <text>dd</text>
+            <div>dd</div>
           </Cell>
         </Row>
       </Table>
@@ -128,24 +128,24 @@ describeNative("tables x selection order", () => {
             <Foot id="tf">
               <Row>
                 <Cell id="ft">
-                  <text>ft</text>
+                  <div>ft</div>
                 </Cell>
               </Row>
             </Foot>
             <Head id="th">
               <Row>
                 <Cell id="hd">
-                  <text>hd</text>
+                  <div>hd</div>
                 </Cell>
               </Row>
             </Head>
             <Body id="tb">
               <Row>
                 <Cell id="b1">
-                  <text>b1</text>
+                  <div>b1</div>
                 </Cell>
                 <Cell id="b2">
-                  <text>b2</text>
+                  <div>b2</div>
                 </Cell>
               </Row>
             </Body>
@@ -181,19 +181,19 @@ describeNative("tables x selection order", () => {
         wrap(
           <Table id="t">
             <Caption id="cap">
-              <text>cap</text>
+              <div>cap</div>
             </Caption>
             <Row id="r1" style={{ position: "relative", top: 5 }}>
               <Cell id="x">
-                <text>x</text>
+                <div>x</div>
               </Cell>
               <Cell id="y">
-                <text>y</text>
+                <div>y</div>
               </Cell>
             </Row>
             <Row id="r2">
               <Cell id="z">
-                <text>z</text>
+                <div>z</div>
               </Cell>
             </Row>
           </Table>
@@ -214,10 +214,10 @@ describeNative("tables x selection order", () => {
             before
             <Row id="r" style={{ position: "relative" }}>
               <Cell id="a">
-                <text>aa</text>
+                <div>aa</div>
               </Cell>
               <Cell id="b">
-                <text>bb</text>
+                <div>bb</div>
               </Cell>
             </Row>
             after
@@ -239,15 +239,15 @@ describeNative("tables x selection order", () => {
           <Table>
             <Row>
               <Cell style={{ position: "relative" }}>
-                <text>x first</text>
+                <div>x first</div>
               </Cell>
               <Cell>
-                <text>x second</text>
+                <div>x second</div>
               </Cell>
             </Row>
             <Row>
               <Cell>
-                <text>x third</text>
+                <div>x third</div>
               </Cell>
             </Row>
           </Table>

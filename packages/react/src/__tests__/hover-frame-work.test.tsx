@@ -89,9 +89,9 @@ function Label({ text, ghost }: { text: string; ghost: boolean }) {
   return (
     <div style={{ display: "inline-grid" }}>
       {ghost ? (
-        <text style={{ ...cell, fontWeight: 600, opacity: 0 }}>{text}</text>
+        <div style={{ ...cell, fontWeight: 600, opacity: 0 }}>{text}</div>
       ) : null}
-      <text style={{ ...cell, color: "#222222" }}>{text}</text>
+      <div style={{ ...cell, color: "#222222" }}>{text}</div>
     </div>
   )
 }
@@ -102,8 +102,8 @@ function Card({ index, ghost }: { index: number; ghost: boolean }) {
       <div style={{ display: "flex" }}>
         <Label text={`Card title ${index}`} ghost={ghost} />
       </div>
-      <text style={{ fontSize: 12, color: "#666666" }}>{`Description line one of card ${index}`}</text>
-      <text style={{ fontSize: 12, color: "#666666" }}>{`Description line two of card ${index}`}</text>
+      <div style={{ fontSize: 12, color: "#666666" }}>{`Description line one of card ${index}`}</div>
+      <div style={{ fontSize: 12, color: "#666666" }}>{`Description line two of card ${index}`}</div>
       <div style={{ width: 60, height: 18, borderRadius: 9, backgroundColor: "#dddddd" }} />
     </div>
   )
@@ -116,7 +116,7 @@ function SidebarPage({ cards, place, ghost }: { cards: number; place: Place; gho
       <div style={{ width: 200, flexDirection: "column", flexShrink: 0, padding: 4 }}>
         {Array.from({ length: ROWS }, (_, index) => (
           <div key={index} style={{ height: ROW, flexShrink: 0, padding: 1, display: "flex", borderRadius: 4, hover: { backgroundColor: "#e5e5e5" } }}>
-            <text style={{ fontSize: 12, color: "#222222" }}>{`Sidebar item ${index}`}</text>
+            <div style={{ fontSize: 12, color: "#222222" }}>{`Sidebar item ${index}`}</div>
           </div>
         ))}
       </div>
@@ -232,9 +232,9 @@ function GhostPage({ ghosts, opacity, onGhost, tick, refs }: { ghosts: boolean; 
       <div style={{ display: "flex" }}>
         <div style={{ display: "inline-grid" }}>
           {ghosts ? (
-            <text style={{ gridColumnStart: 1, gridRowStart: 1, fontWeight: 600, opacity }}>Ghost label text</text>
+            <div style={{ gridColumnStart: 1, gridRowStart: 1, fontWeight: 600, opacity }}>Ghost label text</div>
           ) : null}
-          <text style={{ gridColumnStart: 1, gridRowStart: 1 }}>Ghost label text</text>
+          <div style={{ gridColumnStart: 1, gridRowStart: 1 }}>Ghost label text</div>
         </div>
       </div>
       {ghosts ? (
@@ -246,7 +246,7 @@ function GhostPage({ ghosts, opacity, onGhost, tick, refs }: { ghosts: boolean; 
           onMouseDown={onGhost}
           style={{ opacity, width: 80, height: 30, backgroundColor: "#ff0000", padding: 2 }}
         >
-          <text>GHOSTBOX</text>
+          <div>GHOSTBOX</div>
         </div>
       ) : null}
     </div>
@@ -328,14 +328,14 @@ const ANIM_ROWS = 600
 function AnimatedPage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", width: 1200, height: 760, overflow: "hidden" }}>
-      <text testId="animated" style={{ fontSize: 20, color: "#000000", animation: "hover-frame-work-pulse 1.5s linear infinite" }}>
+      <div testId="animated" style={{ fontSize: 20, color: "#000000", animation: "hover-frame-work-pulse 1.5s linear infinite" }}>
         animated
-      </text>
+      </div>
       {Array.from({ length: ANIM_ROWS }, (_, row) => (
         <div key={row} style={{ display: "flex", flexDirection: "row", gap: 4, padding: 2 }}>
           {Array.from({ length: 4 }, (_, cell) => (
             <div key={cell} style={{ borderWidth: 1, borderColor: "#cccccc", padding: 2 }}>
-              <text style={{ fontSize: 11, color: "#333333" }}>{`r${row} c${cell}`}</text>
+              <div style={{ fontSize: 11, color: "#333333" }}>{`r${row} c${cell}`}</div>
             </div>
           ))}
         </div>
@@ -384,12 +384,12 @@ function RecolorPage({ color, width, tick = 0 }: { color: string; width: number;
       <div style={{ width: 20 + tick, height: 4, backgroundColor: "#0000ff" }} />
       {Array.from({ length: LABELS }, (_, index) => (
         <div key={index} style={{ height: LABEL_HEIGHT, padding: 6, display: "flex" }}>
-          <text style={{ fontSize: 14, width: "50%" }}>{`Item number ${index} label`}</text>
+          <div style={{ fontSize: 14, width: "50%" }}>{`Item number ${index} label`}</div>
           <div style={{ display: "inline-grid" }}>
             {[600, 400].map((weight) => (
-              <text key={weight} style={{ gridColumnStart: 1, gridRowStart: 1, fontSize: 14, fontWeight: weight, opacity: 0 }}>{`Item number ${index} label`}</text>
+              <div key={weight} style={{ gridColumnStart: 1, gridRowStart: 1, fontSize: 14, fontWeight: weight, opacity: 0 }}>{`Item number ${index} label`}</div>
             ))}
-            <text style={{ gridColumnStart: 1, gridRowStart: 1, fontSize: 14 }}>{`Item number ${index} label`}</text>
+            <div style={{ gridColumnStart: 1, gridRowStart: 1, fontSize: 14 }}>{`Item number ${index} label`}</div>
           </div>
         </div>
       ))}

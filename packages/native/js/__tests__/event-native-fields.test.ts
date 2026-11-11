@@ -18,6 +18,12 @@ describe("event fields for a library that wraps events", () => {
       expect(eventOf(type).isPrimary).toBe(true)
     }
     for (const type of ["pointerDown", "pointerMove"]) expect(eventOf(type).isPrimary).toBe(true)
+    for (const type of ["click", "auxclick", "contextmenu"]) {
+      const made = createDomEvent(noRoot, { elementId: 0, eventType: type, pointerId: -1, pointerType: "" }, [], null).event
+      expect(made.isPrimary).toBe(false)
+    }
+    const pressed = createDomEvent(noRoot, { elementId: 0, eventType: "pointerdown", pointerId: -1 }, [], null).event
+    expect(pressed.isPrimary).toBe(true)
     for (const type of ["dblclick", "keydown", "mousedown", "pointerlockchange", "focus"]) {
       expect(eventOf(type)).not.toHaveProperty("isPrimary")
     }

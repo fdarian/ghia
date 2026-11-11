@@ -14,7 +14,7 @@ describe("text selection", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <text style={{ fontSize: 20 }}>hello world</text>
+        <div style={{ fontSize: 20 }}>hello world</div>
       </div>
     )
 
@@ -26,7 +26,7 @@ describe("text selection", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 40 }}>
-        <text style={{ fontSize: 20 }}>hello world</text>
+        <div style={{ fontSize: 20 }}>hello world</div>
       </div>
     )
 
@@ -41,7 +41,7 @@ describe("text selection", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 40 }}>
-        <text style={{ fontSize: 20 }}>hello world</text>
+        <div style={{ fontSize: 20 }}>hello world</div>
       </div>
     )
 
@@ -54,9 +54,9 @@ describe("text selection", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, gap: 8 }}>
-        <text style={{ fontSize: 20 }}>first line</text>
-        <text style={{ fontSize: 20 }}>second line</text>
-        <text style={{ fontSize: 20 }}>third line</text>
+        <div style={{ fontSize: 20 }}>first line</div>
+        <div style={{ fontSize: 20 }}>second line</div>
+        <div style={{ fontSize: 20 }}>third line</div>
       </div>
     )
 
@@ -71,9 +71,9 @@ describe("text selection", () => {
   describe("document order against paint order", () => {
     const lines = (first: React.CSSProperties, second: React.CSSProperties = {}) => (
       <div style={{ display: "flex", flexDirection: "column", padding: 20, gap: 8 }}>
-        <text style={{ fontSize: 20, ...first }}>first line</text>
-        <text style={{ fontSize: 20, ...second }}>second line</text>
-        <text style={{ fontSize: 20 }}>third line</text>
+        <div style={{ fontSize: 20, ...first }}>first line</div>
+        <div style={{ fontSize: 20, ...second }}>second line</div>
+        <div style={{ fontSize: 20 }}>third line</div>
       </div>
     )
     const expected = "first line\nsecond line\nthird line"
@@ -133,10 +133,10 @@ describe("text selection", () => {
       render(
         <div style={{ display: "flex", flexDirection: "column", padding: 20, gap: 8 }}>
           <div style={{ position: "relative" }}>
-            <text style={{ fontSize: 20 }}>alpha</text>
-            <text style={{ fontSize: 20, position: "relative" }}>beta</text>
+            <div style={{ fontSize: 20 }}>alpha</div>
+            <div style={{ fontSize: 20, position: "relative" }}>beta</div>
           </div>
-          <text style={{ fontSize: 20 }}>gamma</text>
+          <div style={{ fontSize: 20 }}>gamma</div>
         </div>
       )
       expect(renderer.dragSelect(21, 30, 900, 300)).toBe("alpha\nbeta\ngamma")
@@ -146,8 +146,8 @@ describe("text selection", () => {
       const { render, renderer } = createTestRoot()
       render(
         <div style={{ position: "relative", padding: 20 }}>
-          <text style={{ fontSize: 20 }}>underneath</text>
-          <text style={{ fontSize: 20, position: "absolute", left: 20, top: 20 }}>on top</text>
+          <div style={{ fontSize: 20 }}>underneath</div>
+          <div style={{ fontSize: 20, position: "absolute", left: 20, top: 20 }}>on top</div>
         </div>
       )
       // The press and the drag both land on glyphs of the two; paint order picks the later one.
@@ -162,8 +162,8 @@ describe("text selection", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, gap: 8 }}>
-        <text style={{ fontSize: 20 }}>aaaaaaaaaa</text>
-        <text style={{ fontSize: 20 }}>bbbb</text>
+        <div style={{ fontSize: 20 }}>aaaaaaaaaa</div>
+        <div style={{ fontSize: 20 }}>bbbb</div>
       </div>
     )
 
@@ -182,8 +182,8 @@ describe("text selection", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, gap: 8 }}>
-        <text style={{ fontSize: 20 }}>alpha</text>
-        <text style={{ fontSize: 20 }}>beta</text>
+        <div style={{ fontSize: 20 }}>alpha</div>
+        <div style={{ fontSize: 20 }}>beta</div>
       </div>
     )
 
@@ -199,7 +199,7 @@ describe("text selection", () => {
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
         <div style={{ display: "flex", backgroundColor: "#1e1e2e", padding: 4 }}>
-          <text style={{ fontSize: 20, color: "#cdd6f4" }}>nested text</text>
+          <div style={{ fontSize: 20, color: "#cdd6f4" }}>nested text</div>
         </div>
       </div>
     )
@@ -211,7 +211,7 @@ describe("text selection", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <text style={{ fontSize: 20, userSelect: "none" }}>untouchable</text>
+        <div style={{ fontSize: 20, userSelect: "none" }}>untouchable</div>
       </div>
     )
 
@@ -225,7 +225,7 @@ describe("text selection", () => {
         style={{ display: "flex", flexDirection: "column", padding: 20 }}
         onMouseDown={(event) => event.preventDefault()}
       >
-        <text style={{ fontSize: 20 }}>hello world</text>
+        <div style={{ fontSize: 20 }}>hello world</div>
       </div>
     )
 
@@ -237,7 +237,7 @@ describe("text selection", () => {
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, userSelect: "none" }}>
         <div style={{ display: "flex" }}>
-          <text style={{ fontSize: 20 }}>toolbar label</text>
+          <div style={{ fontSize: 20 }}>toolbar label</div>
         </div>
       </div>
     )
@@ -249,7 +249,7 @@ describe("text selection", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, userSelect: "none" }}>
-        <text style={{ fontSize: 20, userSelect: "text" }}>selectable again</text>
+        <div style={{ fontSize: 20, userSelect: "text" }}>selectable again</div>
       </div>
     )
 
@@ -260,7 +260,7 @@ describe("text selection", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <text style={{ fontSize: 20 }}>clear me</text>
+        <div style={{ fontSize: 20 }}>clear me</div>
       </div>
     )
 
@@ -273,7 +273,7 @@ describe("text selection", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <text style={{ fontSize: 20 }}>just a click</text>
+        <div style={{ fontSize: 20 }}>just a click</div>
       </div>
     )
 
@@ -284,7 +284,7 @@ describe("text selection", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <text style={{ fontSize: 20 }}>just a click</text>
+        <div style={{ fontSize: 20 }}>just a click</div>
       </div>
     )
 
@@ -296,9 +296,9 @@ describe("text selection", () => {
     const a = createTestRoot()
     a.render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, width: 200 }}>
-        <text style={{ fontSize: 16, lineHeight: "18px" }}>
+        <div style={{ fontSize: 16, lineHeight: "18px" }}>
           one two three four five six seven eight nine ten
-        </text>
+        </div>
       </div>
     )
     // A tight line height packs the wrapped lines closer, so a drag that ends
@@ -308,9 +308,9 @@ describe("text selection", () => {
     const b = createTestRoot()
     b.render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, width: 200 }}>
-        <text style={{ fontSize: 16, lineHeight: "40px" }}>
+        <div style={{ fontSize: 16, lineHeight: "40px" }}>
           one two three four five six seven eight nine ten
-        </text>
+        </div>
       </div>
     )
     const loose = b.renderer.dragSelect(21, 26, 900, 60)
@@ -340,7 +340,7 @@ describe("text selection", () => {
     })
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <text style={{ fontSize: 20 }}>hello world</text>
+        <div style={{ fontSize: 20 }}>hello world</div>
       </div>
     )
 

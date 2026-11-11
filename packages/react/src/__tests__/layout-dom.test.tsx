@@ -716,18 +716,40 @@ describeNative("DOM layout: display contents", () => {
 })
 
 describeNative("DOM layout: invalid values", () => {
-  it("reports an invalid track list as an uncaught error", () => {
+  it("drops an invalid track list and reports nothing", () => {
     const errors: Error[] = []
     const { render, unmount } = createTestRoot({ onUncaughtError: (error) => errors.push(error) })
     try {
       render(<div style={{ display: "grid", gridTemplateColumns: "minmax(1fr, 10px)" }} />)
-      expect(errors.map((error) => error.message).join()).toMatch(/gridTemplateColumns|minmax/)
+      expect(errors).toEqual([])
     } finally {
       unmount()
     }
   })
 
-  it("keeps an element's previous valid style when a re-render's style is rejected", () => {
+  it("drops only the invalid track list: the grid lays its items out as without it", () => {
+    const laidOut = (columns: string | undefined) => {
+      const { render, renderer, unmount } = createTestRoot()
+      try {
+        render(
+          <div testId="grid" style={{ display: "grid", gridTemplateColumns: columns, gridTemplateRows: "20px 30px", width: 100 }}>
+            <div testId="a" style={{ height: 10 }} />
+            <div testId="b" style={{ height: 10 }} />
+          </div>
+        )
+        return ["grid", "a", "b"].map((id) => box(renderer, id))
+      } finally {
+        unmount()
+      }
+    }
+    const without = laidOut(undefined)
+    expect(laidOut("minmax(1fr, 10px)")).toEqual(without)
+    expect(without[2].y - without[1].y).toBe(20)
+    const valid = laidOut("30px 70px")
+    expect(valid[2].x - valid[1].x).toBe(30)
+  })
+
+  it("applies the rest of a re-render's style when one declaration is dropped", () => {
     const errors: Error[] = []
     const { render, renderer, unmount } = createTestRoot({
       onUncaughtError: (error) => errors.push(error),
@@ -737,8 +759,8 @@ describeNative("DOM layout: invalid values", () => {
       expect(box(renderer, "box").width).toBe(50)
 
       render(<div testId="box" style={{ width: 80, height: 20, animation: "react-grow banana" }} />)
-      expect(errors.map((error) => error.message).join()).toMatch(/animation/)
-      expect(box(renderer, "box").width).toBe(50)
+      expect(errors).toEqual([])
+      expect(box(renderer, "box").width).toBe(80)
     } finally {
       unmount()
     }

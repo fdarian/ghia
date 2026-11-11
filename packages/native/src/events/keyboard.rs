@@ -20,7 +20,8 @@ use gpui::{App, WeakFocusHandle, Window};
 
 use crate::element_tree::{EventModifiers, EventPayload};
 use crate::events::state::PointerState;
-use crate::events::{key_codes, key_names, sync_dispatch};
+use crate::events::activation::Activation;
+use crate::events::{key_activation, key_codes, key_names, sync_dispatch};
 use crate::renderer::EventCallback;
 use crate::retained_tree::RetainedTree;
 
@@ -37,6 +38,8 @@ struct RoutingState {
     /// outlive the app at teardown.
     focusables: RefCell<HashMap<u64, WeakFocusHandle>>,
     modality: crate::focus::FocusModality,
+    /// The button a Space key down armed, which the key up clicks if it is still focused.
+    armed_space: Cell<Option<u64>>,
 }
 
 /// What the input listeners read from `GpuixView`, shared so they never have to
@@ -69,7 +72,19 @@ impl InputRouting {
         &self.0.modality
     }
 
-    fn focused_element(&self, window: &Window, cx: &App) -> Option<u64> {
+    pub(super) fn arm_space(&self, element: u64) {
+        self.0.armed_space.set(Some(element));
+    }
+
+    pub(super) fn take_armed_space(&self) -> Option<u64> {
+        self.0.armed_space.take()
+    }
+
+    pub(crate) fn armed_space(&self) -> Option<u64> {
+        self.0.armed_space.get()
+    }
+
+    pub(super) fn focused_element(&self, window: &Window, cx: &App) -> Option<u64> {
         let focused = window.focused(cx)?;
         self.0
             .focusables
@@ -198,6 +213,12 @@ pub(crate) fn install_key_down(
     let ime_routing = routing.clone();
     let ime_tree = tree.clone();
     let ime_callback = callback.clone();
+    let activation = Activation {
+        tree: tree.clone(),
+        callback: callback.clone(),
+        routing: routing.clone(),
+        pointer: pointer.clone(),
+    };
     let interception = cx.intercept_keystrokes(move |event, window, cx| {
         if window.window_handle().window_id() != window_id {
             return;
@@ -231,6 +252,7 @@ pub(crate) fn install_key_down(
         if prevented || tab_default_runs {
             cx.stop_propagation();
         }
+        key_activation::key_down(&activation, &event.keystroke, event.is_held, prevented, window, cx);
     });
     let ime_keys = cx.observe_ime_keystrokes(move |event, window, cx| {
         if window.window_handle().window_id() != window_id {
@@ -277,10 +299,10 @@ pub(crate) fn note_modifiers(
     }
 }
 
-/// A key can make the focused element match `:focus-visible` with no focus change, and the frame
-/// that shows it has to be asked for. gpui's own modality refresh does not cover a second key
+/// A key can make the focused element match `:focus-visible` with no focus change, or `:active` (a
+/// held Space), and the frame that shows it has to be asked for. gpui's own modality refresh does not cover a second key
 /// after a Ctrl chord, and the test renderer draws only a dirty view.
-fn redraw_for_focus_visible(window: &Window, cx: &mut App) {
+pub(super) fn redraw_for_focus_visible(window: &Window, cx: &mut App) {
     match sync_dispatch::root_view(window) {
         Ok(view) => cx.notify(view.entity_id()),
         Err(error) => sync_dispatch::report_deferred_error(error),
@@ -295,6 +317,7 @@ pub(crate) fn window_input_listeners(
     tree: Arc<Mutex<RetainedTree>>,
     callback: Option<EventCallback>,
     routing: InputRouting,
+    pointer: Rc<RefCell<PointerState>>,
 ) -> impl gpui::IntoElement {
     use gpui::prelude::*;
 
@@ -304,6 +327,12 @@ pub(crate) fn window_input_listeners(
             let key_up_routing = routing.clone();
             let key_up_tree = tree.clone();
             let callback = callback.clone();
+            let activation = Activation {
+                tree: tree.clone(),
+                callback: callback.clone(),
+                routing: routing.clone(),
+                pointer: pointer.clone(),
+            };
             window.on_root_key_event(move |event: &gpui::KeyUpEvent, phase, window, cx| {
                 if phase != gpui::DispatchPhase::Capture {
                     return;
@@ -324,6 +353,7 @@ pub(crate) fn window_input_listeners(
                 if prevented {
                     cx.stop_propagation();
                 }
+                key_activation::key_up(&activation, &event.keystroke, prevented, window, cx);
             });
         },
     )

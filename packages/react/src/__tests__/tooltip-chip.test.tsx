@@ -35,18 +35,18 @@ const CHIP = {
 const CHIPS: Record<string, React.ReactNode> = {
   "rich chip": (
     <div testId="body" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <text testId="t1" style={{ ...CAPTION, color: "#fafafa", fontVariationSettings: "'wght' 550, 'opsz' 18" }}>
+      <div testId="t1" style={{ ...CAPTION, color: "#fafafa", fontVariationSettings: "'wght' 550, 'opsz' 18" }}>
         Keyboard shortcut
-      </text>
-      <text testId="t2" style={{ ...CAPTION, color: "#a3a3a3" }}>
+      </div>
+      <div testId="t2" style={{ ...CAPTION, color: "#a3a3a3" }}>
         Ctrl + S
-      </text>
+      </div>
     </div>
   ),
   "plain chip nowrap": (
-    <text style={{ ...CAPTION, color: "#fafafa", whiteSpace: "nowrap" }}>
+    <div style={{ ...CAPTION, color: "#fafafa", whiteSpace: "nowrap" }}>
       Save your changes
-    </text>
+    </div>
   ),
 }
 
@@ -56,7 +56,7 @@ function tooltip(chip: React.ReactNode) {
     <div testId="card" style={{ display: "flex", flexDirection: "column", padding: 20 }}>
       <div testId="row" style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 16, minHeight: 36 }}>
         <div style={{ width: 96, flexShrink: 0 }}>
-          <text style={CAPTION}>Rich content</text>
+          <div style={CAPTION}>Rich content</div>
         </div>
         <div testId="group" style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 10 }}>
           <div testId="wrapper" style={{ position: "relative", display: "flex", flexShrink: 0 }}>
@@ -64,7 +64,7 @@ function tooltip(chip: React.ReactNode) {
               testId="trigger"
               style={{ height: 36, paddingLeft: 16, paddingRight: 16, display: "flex", alignItems: "center" }}
             >
-              <text style={CAPTION}>Save</text>
+              <div style={CAPTION}>Save</div>
             </div>
             <anchored side="bottom" align="start" gap={8} fit="flip" deferred priority={2} style={{ backgroundColor: "transparent" }}>
               <motion.div testId="chip" style={CHIP}>

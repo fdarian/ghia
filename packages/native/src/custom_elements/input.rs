@@ -629,7 +629,7 @@ impl CustomElement for TextEditorElement {
         // Custom elements paint themselves, so nothing registers their box for
         // automation unless the builder does it. Without this, a locator on an
         // editor fails with "Element has no painted bounds" and `click()` has
-        // no target. `<div>` and `<text>` get this from `build_element`.
+        // no target. `<div>` and `<span>` get this from `build_element`.
         //
         // `Some(false)` also claims the same box as a non-selectable
         // selection-start region: a drag inside an editor must move the caret,

@@ -714,7 +714,7 @@ describeNative("custom element: webview", () => {
         <div>
           {Array.from({ length: 6 }, (_, index) => (
             <div key={index} style={{ height: 20 }}>
-              <text>row {index}</text>
+              <div>row {index}</div>
               <webview testId={`w${index}`} style={{ width: 40, height: 15 }} />
             </div>
           ))}

@@ -424,7 +424,7 @@ interface NativeTestRendererApi
   selectText(elementId: number): void
   setSelectionRange(elementId: number, start: number, end: number, direction?: string): void
   getTextSelection(elementId: number): { start: number; end: number; direction: string }
-  requestSubmit(elementId: number): void
+  requestSubmit(elementId: number, submitterId?: number): void
   webviewCommand(elementId: number, command: string, argument?: string): void
   webviewState(elementId: number): {
     url: string
@@ -1198,7 +1198,7 @@ export class TestRenderer implements NativeRenderer {
     return this.buildElementMap().get(id)
   }
 
-  /** Find elements by type (e.g. "div", "text"). */
+  /** Find elements by type (e.g. "div", "#text" for a string node). */
   findByType(type: string): TestElement[] {
     return [...this.buildElementMap().values()].filter((el) => el.type === type)
   }
@@ -1891,9 +1891,9 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getTextSelection(elementId)
   }
 
-  requestSubmit(elementId: number): void {
+  requestSubmit(elementId: number, submitterId?: number): void {
     this.native.flushIfDirty()
-    this.native.requestSubmit(elementId)
+    this.native.requestSubmit(elementId, submitterId)
     this.dispatchNativeEvents()
     this.native.flushIfDirty()
   }
@@ -2119,7 +2119,7 @@ export class TestRenderer implements NativeRenderer {
 
   /** Every string painted in the last frame, in paint order.
    *
-   *  `getAllText()` only sees `<text>` nodes in the retained tree. Native
+   *  `getAllText()` only sees string nodes in the retained tree. Native
    *  elements like `<code>` and `<diff>` paint their text inside GPUI, so this
    *  is the only way to assert on what they rendered. */
   getPaintedText(): string[] {

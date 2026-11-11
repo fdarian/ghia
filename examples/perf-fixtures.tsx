@@ -17,7 +17,7 @@ export const LONG_TWEEN = { duration: 600, ease: 'linear' } as const
 function Chip({ label }: { label: string }) {
   return (
     <div style={{ paddingLeft: 6, paddingRight: 6, height: 20, borderRadius: 5, backgroundColor: C.chip, justifyContent: 'center' }}>
-      <text style={{ fontSize: 11, color: C.muted }}>{label}</text>
+      <div style={{ fontSize: 11, color: C.muted }}>{label}</div>
     </div>
   )
 }
@@ -25,7 +25,7 @@ function Chip({ label }: { label: string }) {
 function Action({ label }: { label: string }) {
   return (
     <div style={{ height: 28, paddingLeft: 10, paddingRight: 10, borderRadius: 6, backgroundColor: C.chip, justifyContent: 'center' }}>
-      <text style={{ fontSize: 12, color: C.fg }}>{label}</text>
+      <div style={{ fontSize: 12, color: C.fg }}>{label}</div>
     </div>
   )
 }
@@ -50,13 +50,13 @@ export function Card({ index }: { index: number }) {
       <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <div style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: C.chip }} />
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <text style={{ fontSize: 14, color: C.fg }}>{`Release ${index}`}</text>
-          <text style={{ fontSize: 12, color: C.muted }}>{`Month ${index % 12}`}</text>
+          <div style={{ fontSize: 14, color: C.fg }}>{`Release ${index}`}</div>
+          <div style={{ fontSize: 12, color: C.muted }}>{`Month ${index % 12}`}</div>
         </div>
       </div>
-      <text style={{ fontSize: 13, color: C.fg }}>Every change, month by month, with what moved.</text>
-      <text style={{ fontSize: 13, color: C.muted }}>A breaking change carries its diff and a prompt.</text>
-      <text style={{ fontSize: 13, color: C.muted }}>Nothing here is silent.</text>
+      <div style={{ fontSize: 13, color: C.fg }}>Every change, month by month, with what moved.</div>
+      <div style={{ fontSize: 13, color: C.muted }}>A breaking change carries its diff and a prompt.</div>
+      <div style={{ fontSize: 13, color: C.muted }}>Nothing here is silent.</div>
       <div style={{ display: 'flex', flexDirection: 'row', gap: 4 }}>
         <Chip label="breaking" />
         <Chip label="layout" />

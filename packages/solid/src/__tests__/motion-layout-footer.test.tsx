@@ -46,7 +46,7 @@ function Card(props: { name: string; layout: boolean; question: () => number; ti
         <motion.div testId={`${props.name}-skip`} layout={layout} transition={tween} style={{ width: 60, height: 28, backgroundColor: "#ff0000" }} />
       </div>
       <div style={{ height: 4, flexShrink: 0 }}>
-        <text>{String(props.tick())}</text>
+        <div>{String(props.tick())}</div>
       </div>
       <div style={{ height: 900, flexShrink: 0 }} />
     </div>

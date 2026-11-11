@@ -270,7 +270,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid motion values in style", () => {
         setSeenDouble(latest * 2)
       })
       createEffect(() => runs.push(`${seenX().toFixed(2)} ${seenDouble().toFixed(2)}`))
-      return <text>{`${seenX().toFixed(2)} ${seenDouble().toFixed(2)}`}</text>
+      return <div>{`${seenX().toFixed(2)} ${seenDouble().toFixed(2)}`}</div>
     })
     expect(app.renderer.getAllText()).toEqual(["0.00 0.00"])
     runs.length = 0

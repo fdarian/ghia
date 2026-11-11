@@ -1,4 +1,7 @@
 use std::borrow::Cow;
+use std::sync::LazyLock;
+
+use rustc_hash::FxHashMap;
 
 use crate::color::{ColorContext, Scheme};
 use crate::css::background::{self, Background, Property};
@@ -34,6 +37,7 @@ macro_rules! overlay_fields {
                 $base.custom_properties.as_ref(),
                 $over.custom_properties.as_ref(),
             ),
+            var_declarations: crate::css::var_substitution::merge(&$base, $over),
             contents_levels: None,
             measure_natural_width: false,
             // What the element is, not a property: the style on top of it is the same element's.
@@ -46,6 +50,88 @@ macro_rules! overlay_fields {
             clone_probe: Default::default(),
         }
     };
+}
+
+/// Runs `$callback` with `$args` and then the name of every property `overlay` takes, the one list
+/// of them: `overlay_fields!` takes them from the layer above, `property_readers!` says which one a
+/// layer sets.
+macro_rules! overlaid_fields {
+    ($callback:ident, $($args:tt)*) => {
+        $callback!(
+            $($args)*;
+        display, visibility,
+        flex_direction, flex_wrap, flex_grow, flex_shrink, flex_basis, flex, flex_flow, place_items,
+        place_content, place_self, align_items, align_self,
+        align_content, justify_content, gap, row_gap, column_gap, grid_template_columns,
+        grid_template_rows, grid_column_min, grid_row_min,
+        width, height, min_width, min_height, max_width, max_height,
+        padding, padding_block, padding_inline, padding_top, padding_right, padding_bottom, padding_left,
+        margin, margin_block, margin_inline, margin_top, margin_right, margin_bottom, margin_left,
+        position, top, right, bottom, left, inset, inset_block, inset_inline,
+        background, background_color, background_image, background_size, background_position,
+        background_repeat, background_origin, background_clip, color, color_scheme, opacity,
+        filter, backdrop_filter, mask_image, mask_size, mask_position, mask_repeat, mask_origin,
+        mask_clip, mask_mode, mask_composite, mask, mask_border_source, mask_border_slice,
+        mask_border_width, mask_border_outset, mask_border_repeat, mask_border_mode, mask_border,
+        clip_path, transform, translate, rotate, scale, transform_origin, perspective, perspective_origin,
+        transform_style, backface_visibility, x, y, z, translate_x, translate_y, translate_z, transform_perspective,
+        motion_scale, scale_x, scale_y, scale_z, motion_rotate, rotate_x, rotate_y, rotate_z, skew, skew_x, skew_y, origin_x, origin_y, origin_z, motion_transform, font_style,
+        border, border_block, border_inline, border_top, border_right, border_bottom, border_left, border_top_color,
+        border_right_color, border_bottom_color, border_left_color,
+        border_width, border_top_width, border_right_width, border_bottom_width,
+        border_left_width, border_color, border_radius, border_top_left_radius,
+        border_top_right_radius, border_bottom_left_radius, border_bottom_right_radius,
+        box_shadow, border_style, border_top_style, border_right_style, border_bottom_style,
+        border_left_style, aspect_ratio, outline_width, outline_style, outline_color, outline_offset, outline,
+        font_size, font_family, font_weight, font_variant_numeric, font_feature_settings, font_variation_settings, webkit_font_smoothing, text_align, direction, line_height, white_space, tab_size, text_box, text_box_trim, text_box_edge, word_break, overflow_wrap, text_wrap, text_wrap_mode, text_wrap_style, text_overflow, vertical_align,
+        table_layout, border_spacing, border_collapse, caption_side, empty_cells,
+        line_clamp, text_decoration, text_decoration_line, text_decoration_style,
+        text_decoration_color, text_decoration_thickness, text_underline_offset,
+        overflow, overflow_x, overflow_y, scrollbar_color, scrollbar_width,
+        cursor, pointer_events, app_region, user_select, selection_color,
+        transition, transition_property, transition_duration, transition_timing_function,
+        transition_delay, transition_behavior, interpolate_size,
+        animation, animation_name, animation_duration, animation_timing_function,
+        animation_delay, animation_iteration_count, animation_direction, animation_fill_mode,
+        animation_play_state,
+        focus_visible, focus_within, has_focus_visible, keyboard_focus_dim, group,
+        container_type, container_name, container, content_visibility, contain_intrinsic_size,
+        contain_intrinsic_width, contain_intrinsic_height, contain_intrinsic_inline_size,
+        contain_intrinsic_block_size,
+        order, justify_items, justify_self, grid_auto_columns, grid_auto_rows, grid_auto_flow,
+        grid_template_areas, grid_area, grid_column, grid_row, grid_column_start,
+        grid_column_end, grid_row_start, grid_row_end, z_index, overscroll_behavior,
+        overscroll_behavior_x, overscroll_behavior_y, scroll_behavior, overflow_anchor,
+        )
+    };
+}
+
+/// The properties `overlay` takes, by the name a style object writes them (camel case), each with
+/// the read of whether a style sets it.
+macro_rules! property_readers {
+    (; $($field:ident),+ $(,)?) => {
+        vec![$((
+            crate::css::covers::camel_case(stringify!($field)),
+            (|style: &StyleDesc| style.$field.is_some()) as fn(&StyleDesc) -> bool,
+        )),+]
+    };
+}
+
+static PROPERTY_READERS: LazyLock<FxHashMap<String, fn(&StyleDesc) -> bool>> =
+    LazyLock::new(|| overlaid_fields!(property_readers,).into_iter().collect());
+
+/// Whether `style` sets the property a style object writes as `name` (camel case). `false` for a
+/// name that is not a property.
+pub(crate) fn sets_property(style: &StyleDesc, name: &str) -> bool {
+    PROPERTY_READERS.get(name).is_some_and(|reads| reads(style))
+}
+
+/// The layer that sets nothing, for a fold that applies no state: [`overlay`] over it is a copy.
+pub(crate) static NO_LAYER: LazyLock<StyleDesc> = LazyLock::new(StyleDesc::default);
+
+/// Whether `layer` is [`NO_LAYER`], which sets nothing and so overrides nothing below it.
+pub(crate) fn is_no_layer(layer: &StyleDesc) -> bool {
+    std::ptr::eq(layer, &*NO_LAYER)
 }
 
 /// Which states apply to an element: its own pointer states, and those of the
@@ -164,7 +250,7 @@ pub(crate) fn is_overlay_fixed_point(style: &StyleDesc) -> bool {
 /// last three are in the fold only for an inline box; an element with a focus
 /// handle applies them after it, so they beat every layer here either way.
 pub fn resolve_pointer_states(style: &StyleDesc, states: PointerStates) -> StyleDesc {
-    let mut resolved = overlay(style, &StyleDesc::default());
+    let mut resolved = overlay(style, &NO_LAYER);
     resolved.keeps_background = style.keeps_background_quad();
     let layers = [
         (states.group_hovered, style.group_hover.as_deref(), true),
@@ -203,58 +289,38 @@ pub fn resolve_pointer_states(style: &StyleDesc, states: PointerStates) -> Style
     resolved
 }
 
+/// `over`'s set fields on top of `base`, which is an element's own style: what `overlay` clears
+/// (the state styles, `@container` blocks and what the element is) stays as `base` has it. Keep in
+/// step with `is_overlay_fixed_point`.
+pub(crate) fn laid_over(base: &StyleDesc, over: &StyleDesc) -> StyleDesc {
+    StyleDesc {
+        hover: base.hover.clone(),
+        active: base.active.clone(),
+        group_hover: base.group_hover.clone(),
+        group_active: base.group_active.clone(),
+        group_focus_within: base.group_focus_within.clone(),
+        has_hover: base.has_hover.clone(),
+        has_active: base.has_active.clone(),
+        has_focus: base.has_focus.clone(),
+        disabled: base.disabled.clone(),
+        enabled: base.enabled.clone(),
+        has_disabled: base.has_disabled.clone(),
+        has_enabled: base.has_enabled.clone(),
+        container_rules: base.container_rules.clone(),
+        contents_levels: base.contents_levels.clone(),
+        measure_natural_width: base.measure_natural_width,
+        atomic_inline: base.atomic_inline,
+        ..overlay(base, over)
+    }
+}
+
 /// `over`'s set fields on top of `base`, with every state refinement cleared.
 pub(crate) fn overlay(base: &StyleDesc, over: &StyleDesc) -> StyleDesc {
     let over = without_invalid_values(over);
     let over = over.as_ref();
     let mut base = Cow::Borrowed(base);
     drop_shadowed_longhands(&mut base, over);
-    overlay_fields!(
-        base, over;
-        display, visibility,
-        flex_direction, flex_wrap, flex_grow, flex_shrink, flex_basis, flex, flex_flow, place_items,
-        place_content, place_self, align_items, align_self,
-        align_content, justify_content, gap, row_gap, column_gap, grid_template_columns,
-        grid_template_rows, grid_column_min, grid_row_min,
-        width, height, min_width, min_height, max_width, max_height,
-        padding, padding_block, padding_inline, padding_top, padding_right, padding_bottom, padding_left,
-        margin, margin_block, margin_inline, margin_top, margin_right, margin_bottom, margin_left,
-        position, top, right, bottom, left, inset, inset_block, inset_inline,
-        background, background_color, background_image, background_size, background_position,
-        background_repeat, background_origin, background_clip, color, color_scheme, opacity,
-        filter, backdrop_filter, mask_image, mask_size, mask_position, mask_repeat, mask_origin,
-        mask_clip, mask_mode, mask_composite, mask, mask_border_source, mask_border_slice,
-        mask_border_width, mask_border_outset, mask_border_repeat, mask_border_mode, mask_border,
-        clip_path, transform, translate, rotate, scale, transform_origin, perspective, perspective_origin,
-        transform_style, backface_visibility, x, y, z, translate_x, translate_y, translate_z, transform_perspective,
-        motion_scale, scale_x, scale_y, scale_z, motion_rotate, rotate_x, rotate_y, rotate_z, skew, skew_x, skew_y, origin_x, origin_y, origin_z, motion_transform, font_style,
-        border, border_block, border_inline, border_top, border_right, border_bottom, border_left, border_top_color,
-        border_right_color, border_bottom_color, border_left_color,
-        border_width, border_top_width, border_right_width, border_bottom_width,
-        border_left_width, border_color, border_radius, border_top_left_radius,
-        border_top_right_radius, border_bottom_left_radius, border_bottom_right_radius,
-        box_shadow, border_style, border_top_style, border_right_style, border_bottom_style,
-        border_left_style, aspect_ratio, outline_width, outline_style, outline_color, outline_offset, outline,
-        font_size, font_family, font_weight, font_variant_numeric, font_feature_settings, font_variation_settings, webkit_font_smoothing, text_align, direction, line_height, white_space, tab_size, text_box, text_box_trim, text_box_edge, word_break, overflow_wrap, text_wrap, text_wrap_mode, text_wrap_style, text_overflow, vertical_align,
-        table_layout, border_spacing, border_collapse, caption_side, empty_cells,
-        line_clamp, text_decoration, text_decoration_line, text_decoration_style,
-        text_decoration_color, text_decoration_thickness, text_underline_offset,
-        overflow, overflow_x, overflow_y, scrollbar_color, scrollbar_width,
-        cursor, pointer_events, app_region, user_select, selection_color,
-        transition, transition_property, transition_duration, transition_timing_function,
-        transition_delay, transition_behavior, interpolate_size,
-        animation, animation_name, animation_duration, animation_timing_function,
-        animation_delay, animation_iteration_count, animation_direction, animation_fill_mode,
-        animation_play_state,
-        focus_visible, focus_within, has_focus_visible, keyboard_focus_dim, group,
-        container_type, container_name, container, content_visibility, contain_intrinsic_size,
-        contain_intrinsic_width, contain_intrinsic_height, contain_intrinsic_inline_size,
-        contain_intrinsic_block_size,
-        order, justify_items, justify_self, grid_auto_columns, grid_auto_rows, grid_auto_flow,
-        grid_template_areas, grid_area, grid_column, grid_row, grid_column_start,
-        grid_column_end, grid_row_start, grid_row_end, z_index, overscroll_behavior,
-        overscroll_behavior_x, overscroll_behavior_y, scroll_behavior, overflow_anchor,
-    )
+    overlaid_fields!(overlay_fields, base, over)
 }
 
 /// `over` without the values CSS drops as invalid when it parses the

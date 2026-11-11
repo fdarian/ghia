@@ -43,7 +43,7 @@ describeNative("clipboard", () => {
           style={{ width: 300, height: 40 }}
           onChange={(event: EventPayload) => setText(event.value ?? "")}
         />
-        <text>{`Value: ${text}`}</text>
+        <div>{`Value: ${text}`}</div>
       </div>
     )
   }

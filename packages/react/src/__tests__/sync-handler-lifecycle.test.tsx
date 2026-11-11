@@ -20,7 +20,7 @@ function Field(props: { onKeyDown: Function }) {
         onKeyDown={props.onKeyDown}
         onChange={(event) => setText(event.value ?? "")}
       />
-      <text>{`Value: ${JSON.stringify(text)}`}</text>
+      <div>{`Value: ${JSON.stringify(text)}`}</div>
     </div>
   )
 }

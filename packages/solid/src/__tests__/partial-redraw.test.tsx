@@ -51,7 +51,7 @@ function open(options: { group?: () => Group | null; transparent?: boolean } = {
   app.render(() => (
     <div style={{ width: 420, height: 500, backgroundColor: "#101820", flexDirection: "column" }}>
       <div style={{ height: 50, backgroundColor: "#203040", boxShadow: "0px 6px 12px rgba(0, 0, 0, 0.6)", padding: 8 }}>
-        <text style={{ color: "#ffffff" }}>header</text>
+        <div style={{ color: "#ffffff" }}>header</div>
       </div>
       <virtual-list testId="list" itemCount={COUNT} estimatedItemHeight={ROW} style={{ width: 300, height: 400, marginLeft: 20, marginTop: 10 }}>
         <For each={Array.from({ length: 40 }, (_, index) => index)}>
@@ -60,7 +60,7 @@ function open(options: { group?: () => Group | null; transparent?: boolean } = {
               testId={`row-${index}`}
               style={{ height: ROW, flexShrink: 0, backgroundColor: index % 2 ? "#223344" : "#2a3b4c", hover: { backgroundColor: "#664422" }, padding: 6 }}
             >
-              <text style={{ color: "#ffffff" }}>{`row ${index}`}</text>
+              <div style={{ color: "#ffffff" }}>{`row ${index}`}</div>
             </div>
           )}
         </For>

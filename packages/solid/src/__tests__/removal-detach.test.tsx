@@ -179,7 +179,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid removal takes a node out of the t
       <div>
         <Show when={shown()}>
           <div testId="panel" style={{ width: 50, height: 50 }}>
-            <text>panel</text>
+            <div>panel</div>
           </div>
         </Show>
       </div>

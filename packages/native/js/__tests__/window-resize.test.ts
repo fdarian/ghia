@@ -48,8 +48,9 @@ describe("the resize event", () => {
   it("sends window a resize, target the window, when the window size changes", () => {
     const fake = mountWindow()
     const seen: Array<{ type: string; target: unknown; width: number }> = []
-    const listener = (event: { type: string; target: unknown; currentTarget: unknown }) => {
+    const listener = (event: { type: string; target: unknown; currentTarget: unknown; bubbles: boolean; cancelable: boolean }) => {
       expect(event.currentTarget).toBe(window)
+      expect([event.bubbles, event.cancelable]).toEqual([false, false])
       seen.push({ type: event.type, target: event.target, width: window.innerWidth })
     }
     window.addEventListener("resize", listener)

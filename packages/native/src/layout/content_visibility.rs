@@ -9,7 +9,7 @@
 //! children: their DOM, animation and transition state and resolved styles are kept, they are not
 //! destroyed as under `display: none`.
 //!
-//! Only the host elements (`div`, `span`, `text`, `label`, `form`) skip their content. Any other
+//! Only the host elements (`div`, `span`, `label`, `form`) skip their content. Any other
 //! element has the containment and builds as it did.
 //!
 //! `auto` skips while the element is not relevant to the user: near the viewport (its border box,

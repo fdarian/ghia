@@ -214,6 +214,10 @@ pub struct EventPayload {
     /// order. Populated for: `<form>` submit.
     pub form_entries: Option<Vec<Vec<String>>>,
 
+    /// Id of the `<button>` that submitted the form, when one did.
+    /// Populated for: `<form>` submit.
+    pub submitter_id: Option<f64>,
+
     // ── DOM event propagation ────────────────────────────────────────
     /// Id of the element the event was aimed at (JS makes it `event.target`, the
     /// element itself). Absent means `element_id` is the target. Ids are `f64`
@@ -302,7 +306,8 @@ pub struct EventPayload {
 
     /// Milliseconds on the renderer's clock, the `timelineTime` of the
     /// `AnimationPlaybackEvent`: the timeline time the event was made at. Populated for:
-    /// webanimationfinish, webanimationcancel.
+    /// webanimationfinish, webanimationcancel, and animationframe, where it is the clock the frame
+    /// steps ran at: the timestamp `requestAnimationFrame` callbacks are given.
     pub timeline_time: Option<f64>,
 
     /// Seconds of the transition's or animation's active time, as the DOM
@@ -394,6 +399,7 @@ impl Default for EventPayload {
             motion_generation: None,
             files: None,
             form_entries: None,
+            submitter_id: None,
             target: None,
             path: None,
             related_target: None,
@@ -501,7 +507,7 @@ impl Default for EventModifiers {
 pub struct HighlightMatch {
     /// Numeric id of the element that painted the run.
     pub element_id: f64,
-    /// Index of the run within that element. 0 for a plain `<text>`.
+    /// Index of the run within that element. 0 for a plain string.
     pub sub: f64,
     /// The full string of the run, so `text.slice(start, end)` is the match.
     pub text: String,

@@ -236,13 +236,19 @@ mod tests {
         );
         let mut table = crate::retained_tree::StyleTable::default();
         assert!(table.intern(br#"{"textWrap": "nowrap balance"}"#).is_ok());
-        for (json, name) in [
-            (&br#"{"textWrap": "wide"}"#[..], "invalid textWrap"),
-            (&br#"{"textWrapMode": "balance"}"#[..], "invalid textWrapMode"),
-            (&br#"{"textWrapStyle": "nowrap"}"#[..], "invalid textWrapStyle"),
+        for json in [
+            &br#"{"textWrap": "wide", "opacity": 0.5}"#[..],
+            &br#"{"textWrapMode": "balance", "opacity": 0.5}"#[..],
+            &br#"{"textWrapStyle": "nowrap", "opacity": 0.5}"#[..],
         ] {
-            let error = table.intern(json).unwrap_err();
-            assert!(error.contains(name), "{error}");
+            let style = table.intern(json).unwrap();
+            assert_eq!(
+                (style.text_wrap, style.text_wrap_mode, style.text_wrap_style),
+                (None, None, None),
+                "{}",
+                String::from_utf8_lossy(json)
+            );
+            assert_eq!(style.opacity, Some(0.5));
         }
     }
 

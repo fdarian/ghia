@@ -48,6 +48,16 @@ pub(crate) fn gpui_tab_stop(dom_tab_index: isize) -> (isize, bool) {
     }
 }
 
+/// Calls `$each!` with the field of each focus variant of a style: the ones
+/// `FocusStyles::applying` lays over an element. Whatever has to reach all of them (the
+/// substitution of a `var()` in `css::var_substitution`) is written over this list.
+macro_rules! focus_variant_fields {
+    ($each:ident) => {
+        $each!(focus_within, has_focus_visible, focus_visible)
+    };
+}
+pub(crate) use focus_variant_fields;
+
 /// A style with the focus variants laid over it, or the style itself when none applies. Not a
 /// `Cow<StyleDesc>`: that is a `StyleDesc` wide (~13 KB) even when borrowed, and moves as one.
 pub(crate) enum FocusFolded<'a> {
@@ -89,6 +99,30 @@ impl FocusStyles {
             folded = FocusFolded::Owned(Box::new(crate::events::state_styles::overlay(&folded, declared)));
         }
         folded
+    }
+
+    /// The custom properties element `id` computes to below `parent`: the ones `style` declares
+    /// with those of the focus variants that apply laid over them, the later variant winning. A
+    /// custom property a variant sets is the element's, as in CSS, so its base, its other
+    /// variants and its descendants read it.
+    pub fn custom_of(
+        &self,
+        id: u64,
+        style: &StyleDesc,
+        focusable: bool,
+        parent: &crate::css::custom_properties::CustomProperties,
+    ) -> crate::css::custom_properties::CustomProperties {
+        let mut declared = style.custom_properties.clone();
+        for variant in self.applying(id, style, focusable) {
+            declared = crate::css::custom_properties::CustomProperties::layered(
+                declared.as_ref(),
+                variant.custom_properties.as_ref(),
+            );
+        }
+        match declared.as_ref() {
+            Some(declared) => parent.descend(declared),
+            None => parent.clone(),
+        }
     }
 
     /// The focus variants of `style` that apply to element `id`, weakest first.
@@ -742,6 +776,9 @@ impl GpuixView {
             window.last_input_was_keyboard(),
             window.is_window_active(),
         ) {
+            if let Some(from) = change.from {
+                crate::events::key_activation::blurred(&self.routing, &self.pointer, tree, from);
+            }
             self.focus.push_change(tree, &change);
             #[cfg(not(target_family = "wasm"))]
             self.focus.push_page_moves(tree, &change);
@@ -766,6 +803,65 @@ impl GpuixView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_focus_variant_list_is_the_one_a_focused_element_lays_over_it() {
+        // Element 1 is focus-visible and element 2 has it as a descendant.
+        let focus = FocusStyles { visible: Some(1), within: Arc::from([1_u64, 2]), ..Default::default() };
+        macro_rules! names {
+            ($($field:ident),+) => { vec![$(stringify!($field)),+] };
+        }
+        // Every state style a `StyleDesc` has, each alone on a style.
+        macro_rules! each_state_alone {
+            ($($field:ident),+ $(,)?) => {
+                vec![$((stringify!($field), StyleDesc { $field: Some(Box::new(StyleDesc::default())), ..Default::default() })),+]
+            };
+        }
+        let states = each_state_alone!(
+            hover, active, focus_visible, focus_within, group_hover, group_active, group_focus_within,
+            has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
+        );
+        let mut applied: Vec<&str> = states
+            .iter()
+            .filter(|(_, style)| [1_u64, 2].into_iter().any(|id| focus.applying(id, style, true).next().is_some()))
+            .map(|(field, _)| *field)
+            .collect();
+        let mut listed: Vec<&str> = focus_variant_fields!(names);
+        applied.sort_unstable();
+        listed.sort_unstable();
+        assert_eq!(applied, listed, "left: laid over an element by `applying`; right: in `focus_variant_fields!`");
+    }
+
+    fn custom(json: &str) -> crate::css::custom_properties::CustomProperties {
+        let style = crate::css::var_substitution::parse(json.as_bytes()).expect("a style");
+        style.custom_properties.expect("custom properties")
+    }
+
+    #[test]
+    fn a_focus_variant_that_applies_sets_the_custom_properties_of_its_element() {
+        let style = crate::css::var_substitution::parse(
+            br#"{"--a":"base","--b":"base","focusWithin":{"--a":"within","--c":"within"},"focusVisible":{"--a":"visible"}}"#,
+        )
+        .expect("a style");
+        let parent = custom(r#"{"--p":"parent"}"#);
+        let get = |custom: &crate::css::custom_properties::CustomProperties, name: &str| {
+            custom.get(name).map(str::to_owned)
+        };
+
+        let none = FocusStyles::default().custom_of(1, &style, true, &parent);
+        assert_eq!(get(&none, "--a").as_deref(), Some("base"));
+        assert_eq!(get(&none, "--c"), None);
+
+        let both = FocusStyles { visible: Some(1), within: Arc::from([1_u64]), ..Default::default() }
+            .custom_of(1, &style, true, &parent);
+        assert_eq!(get(&both, "--a").as_deref(), Some("visible"));
+        assert_eq!(get(&both, "--b").as_deref(), Some("base"));
+        assert_eq!(get(&both, "--c").as_deref(), Some("within"));
+        assert_eq!(get(&both, "--p").as_deref(), Some("parent"));
+
+        let within = FocusStyles { within: Arc::from([1_u64]), ..Default::default() }.custom_of(1, &style, true, &parent);
+        assert_eq!(get(&within, "--a").as_deref(), Some("within"));
+    }
 
     fn tree_with(elements: &[(u64, &str)]) -> RetainedTree {
         let mut tree = RetainedTree::new();

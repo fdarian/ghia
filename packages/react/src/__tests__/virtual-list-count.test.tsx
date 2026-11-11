@@ -29,7 +29,7 @@ function page(props: Page) {
   const rows = props.rows ?? Math.min(WINDOW, Math.max(0, props.count - props.start))
   return (
     <div style={{ width: 400, height: 340, flexDirection: "column" }}>
-      <text>{props.label ?? "label"}</text>
+      <div>{props.label ?? "label"}</div>
       <virtual-list
         ref={(handle: PublicInstance | null) => {
           instance = handle
@@ -45,7 +45,7 @@ function page(props: Page) {
             {props.start + offset === props.inputAt ? (
               <input autoFocus defaultValue="x" />
             ) : (
-              <text>{`row-${props.start + offset}`}</text>
+              <div>{`row-${props.start + offset}`}</div>
             )}
           </div>
         ))}

@@ -105,8 +105,8 @@ export interface HostMouseEvent extends HostDomEvent {
 }
 
 export interface HostPointerEvent extends HostMouseEvent {
-  /** Ghia has one pointer, so every pointer event is the primary one. */
-  readonly isPrimary: true
+  /** Ghia has one pointer, so every pointer event is the primary one. A click no pointer made (`pointerId` -1) is not. */
+  readonly isPrimary: boolean
 }
 
 /**

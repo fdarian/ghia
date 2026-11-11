@@ -33,6 +33,18 @@ describeNative("document.body in React", () => {
     testRoot = createTestRoot()
   })
 
+  it("takes the destroyed html out of the document", () => {
+    testRoot.render(<div style={{ width: 40, height: 20 }} />)
+    const html = document.documentElement!
+    expect(html.parentNode).toBe(document)
+    testRoot.unmount()
+    expect(html.parentNode).toBeNull()
+    expect(html.isConnected).toBe(false)
+    expect(document.contains(html)).toBe(false)
+    expect(html.nextSibling).toBeNull()
+    testRoot = createTestRoot()
+  })
+
   it("has html, body and the app's top-level element in a parent chain up to the document", () => {
     let box: PublicInstance | null = null
     testRoot.render(<div ref={(instance) => (box = instance)} style={{ width: 40, height: 20 }} />)

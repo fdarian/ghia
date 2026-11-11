@@ -413,7 +413,7 @@ mod tests {
         }
 
         fn text(&mut self, parent: u64, id: u64, content: &str) -> &mut Self {
-            self.tree.create_element(id, "text".to_string());
+            self.tree.create_element(id, "#text".to_string());
             self.tree.set_text(id, content.to_string());
             self.tree.append_child(parent, id);
             self

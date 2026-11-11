@@ -62,7 +62,7 @@ try {
 
   await check("send a message adds a user turn", async () => {
     // The demo reply is a native <markdown> node, invisible to the retained
-    // tree. Assert on the user turn instead: a plain <text>, unique and retained.
+    // tree. Assert on the user turn instead: a plain text element, unique and retained.
     const composer = app.getByTestId("composer")
     await composer.fill("hello from solid")
     await composer.press("Enter")

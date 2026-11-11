@@ -40,7 +40,7 @@ function painted(source: OracleCase): { scale: number; segs: Record<string, Mark
   try {
     testRoot.render(
       <div style={{ width: 600, height: 60, backgroundColor: "#ffffff" }}>
-        <text
+        <div
           style={
             {
               width: 600,
@@ -54,7 +54,7 @@ function painted(source: OracleCase): { scale: number; segs: Record<string, Mark
           }
         >
           {nodesOf(source.html)}
-        </text>
+        </div>
       </div>
     )
     const file = `${SHOTS_DIR}/text-decoration-oracle-${shots++}.png`

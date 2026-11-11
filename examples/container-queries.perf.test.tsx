@@ -72,11 +72,11 @@ function Card({ index, variant, wide }: { index: number; variant: Variant; wide:
           }}
         />
         <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
-          <text
+          <div
             style={pick(variant, wide, { fontSize: 13, color: '#f2f2f3' }, { fontSize: 15 })}
-          >{`Card ${index}`}</text>
+          >{`Card ${index}`}</div>
           <div style={pick(variant, wide, { paddingTop: 2 }, { paddingTop: 6 })}>
-            <text style={{ fontSize: 11, color: '#9a9aa1' }}>{`Description of card ${index}`}</text>
+            <div style={{ fontSize: 11, color: '#9a9aa1' }}>{`Description of card ${index}`}</div>
           </div>
         </div>
       </div>

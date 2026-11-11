@@ -21,7 +21,9 @@ function fakeElement(id: number, pairs: string[] | null, mounted = true) {
 
 describe("getComputedStyle", () => {
   it("reads camelCase members and kebab-case names from one native record", async () => {
-    const { element, reads } = fakeElement(3, ["font-size", "20px", "padding-inline-start", "4px", "--gap", "12px"])
+    const fake = fakeElement(3, ["font-size", "20px", "padding-inline-start", "4px", "--gap", "12px"])
+    const element = fake.element
+    const reads = fake.reads
     const style = getComputedStyle(element)
     expect([style.fontSize, style.paddingInlineStart, style.getPropertyValue("font-size"), style.getPropertyValue("--gap")]).toEqual([
       "20px",
@@ -37,8 +39,23 @@ describe("getComputedStyle", () => {
     expect(reads).toHaveLength(2)
   })
 
+  it("keeps no entry past the turn it was read in", async () => {
+    const fake = fakeElement(3, ["font-size", "20px"])
+    const element = fake.element
+    const reads = fake.reads
+    const style = getComputedStyle(element)
+    expect(style.fontSize).toBe("20px")
+    expect(style.fontSize).toBe("20px")
+    expect(reads).toHaveLength(1)
+    await Promise.resolve()
+    expect(style.fontSize).toBe("20px")
+    expect(reads).toHaveLength(2)
+  })
+
   it("asks for an absent pseudo-element for ::before and ::after, and reads empty for any other", () => {
-    const { element, reads } = fakeElement(3, ["content", "none"])
+    const fake = fakeElement(3, ["content", "none"])
+    const element = fake.element
+    const reads = fake.reads
     expect(getComputedStyle(element, "::before").content).toBe("none")
     expect(getComputedStyle(element, ":after").content).toBe("none")
     expect(getComputedStyle(element, "::marker").content).toBe("")
@@ -55,7 +72,7 @@ describe("getComputedStyle", () => {
 
   it("throws for what is not an element, and for a write", () => {
     expect(() => getComputedStyle({} as never)).toThrow(TypeError)
-    const { element } = fakeElement(3, [])
+    const element = fakeElement(3, []).element
     expect(() => getComputedStyle(element).setProperty("width", "1px")).toThrow(
       expect.objectContaining({ name: "NoModificationAllowedError" })
     )

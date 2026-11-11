@@ -257,7 +257,7 @@ describeNative("MotionConfig", () => {
   it("reports the resolved setting from useReducedMotionConfig", () => {
     const { render, renderer } = createTestRoot()
     function Probe() {
-      return <text>{useReducedMotionConfig() ? "reduced" : "full"}</text>
+      return <div>{useReducedMotionConfig() ? "reduced" : "full"}</div>
     }
     render(<Probe />)
     expect(renderer.getAllText()).toEqual(["full"])

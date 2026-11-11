@@ -298,15 +298,14 @@ describeNative("CSS animations", () => {
     expect(seen).toEqual(["parent capture", "child true false", "parent end"])
   })
 
-  it("reports an invalid animation as an uncaught error and keeps committing and delivering events", () => {
+  it("drops an invalid animation without an error and keeps committing and delivering events", () => {
     const errors: Error[] = []
     const rejected = createTestRoot({ onUncaughtError: (error) => errors.push(error) })
     rejected.render(
       <div testId="box" style={{ width: 50, height: 20, animation: "react-grow banana" }} />
     )
-    expect(errors).toHaveLength(1)
-    expect(errors[0]?.message).toMatch(/animation/)
-    // The rest of the batch landed: the element is there, without the style.
+    expect(errors).toHaveLength(0)
+    // Only the animation was dropped: the element is there with the rest of its style.
     expect(rejected.renderer.findByTestId("box")).toBeDefined()
 
     // The same root takes the next update, and animation events arrive.
@@ -323,7 +322,7 @@ describeNative("CSS animations", () => {
     rejected.renderer.clockFastForward(500)
     rejected.renderer.dispatchNativeEvents()
     expect(seen).toEqual(["start"])
-    expect(errors).toHaveLength(1)
+    expect(errors).toHaveLength(0)
 
     // And so does a root made afterwards: the failure left no React state behind.
     const other = createTestRoot()

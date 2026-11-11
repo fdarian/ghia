@@ -81,15 +81,16 @@ pub struct RetainedElement {
     /// style. A 10k-turn chat has 59 320 `setStyle` ops and 90 distinct styles.
     ///
     /// This is the effective style: the one the element declared, over the
-    /// universal layer when there is one. Every reader wants it. Only `set_style`
-    /// and `set_universal_style` write it (`RetainedTree::assign_style`).
+    /// universal layer and the user agent style of its tag when there are any. Every
+    /// reader wants it. Only `set_style`, `set_universal_style` and `create_element` write it
+    /// (`RetainedTree::assign_style`).
     ///
     /// Read it with `.as_deref()` to get `Option<&StyleDesc>`. Never mutate
     /// through it; `Arc` has no `DerefMut`, so the compiler enforces that.
     pub style: Option<Arc<StyleDesc>>,
     /// What the element declared with `setStyle`, which the effective `style`
     /// is recomputed from when the universal layer changes. The same pointer as
-    /// `style` while there is no layer.
+    /// `style` while no layer is under it.
     own_style: Option<Arc<StyleDesc>>,
     pub content: Option<String>,
     pub children: Vec<u64>,
@@ -224,7 +225,8 @@ impl RetainedElement {
     }
 
     /// Whether the element must own a gpui focus handle, which is what DOM calls
-    /// focusable: an enabled text control, a `<webview>`, or any other element with a `tabIndex`.
+    /// focusable: an enabled text control or `<button>`, an `<a>` with an `href`, a `<webview>`, or any
+    /// other element with a `tabIndex`.
     /// A key or focus listener does not make an element focusable; an ancestor's
     /// key listener still hears the keys of a focused descendant.
     pub fn needs_focus(&self) -> bool {
@@ -235,11 +237,11 @@ impl RetainedElement {
         if crate::custom_elements::is_focusable_by_default(&self.element_type) {
             return true;
         }
-        if crate::focus::is_text_control(&self.element_type) {
+        if crate::focus::is_text_control(&self.element_type) || self.element_type == "button" {
             // `disabled` outranks `tabIndex`: a disabled control cannot be focused at all.
             !self.is_disabled()
         } else {
-            self.tab_index().is_some()
+            crate::html::is_focusable_by_default(self) || self.tab_index().is_some()
         }
     }
 
@@ -263,10 +265,9 @@ impl RetainedElement {
     }
 
     /// Whether the universal style layer applies to this element. CSS `*`
-    /// matches elements, not text nodes: a `text` element that holds a string is
-    /// one, a `<text>` that holds children is an element.
+    /// matches elements, not text nodes.
     fn takes_universal_style(&self) -> bool {
-        !(self.element_type == "text" && self.content.is_some())
+        self.element_type != crate::text::inline::TEXT_NODE
     }
 
     pub fn is_disabled(&self) -> bool {
@@ -433,6 +434,24 @@ fn has_container_rules(element: &RetainedElement) -> bool {
     element.style.as_deref().is_some_and(|style| style.container_rules.is_some())
 }
 
+fn holds_var_declarations(element: &RetainedElement) -> bool {
+    element.style.as_deref().is_some_and(StyleDesc::holds_var_declarations)
+}
+
+/// The one check a style payload passes: the strict parse, then the validations that run on the
+/// result. `css::lenient` calls it again to judge each declaration alone.
+pub(crate) fn parse_style(raw: &[u8]) -> Result<StyleDesc, String> {
+    let mut style: StyleDesc = serde_json::from_slice(raw).map_err(|error| error.to_string())?;
+    // Read from the text: which container units a style names is a property of all of it,
+    // `@container` blocks and state styles included.
+    style.container_unit_axes = crate::css::length::LengthReads::container_axes(
+        std::str::from_utf8(raw).map_err(|error| error.to_string())?,
+    );
+    crate::motion::validate_transitions(&style)?;
+    crate::motion::validate_animations(&style)?;
+    Ok(style)
+}
+
 impl StyleTable {
     /// Parse a style payload, reusing the shared value when the same bytes
     /// arrived before. Hashing ~110 bytes is far cheaper than building the
@@ -446,14 +465,14 @@ impl StyleTable {
                 return Ok(hit.style.clone());
             }
         }
-        let mut style: StyleDesc = serde_json::from_slice(raw).map_err(|error| error.to_string())?;
-        // Read from the text: which container units a style names is a property of all of it,
-        // `@container` blocks and state styles included.
-        style.container_unit_axes = crate::css::length::LengthReads::container_axes(
-            std::str::from_utf8(raw).map_err(|error| error.to_string())?,
-        );
-        crate::motion::validate_transitions(&style)?;
-        crate::motion::validate_animations(&style)?;
+        let style = if crate::css::var_substitution::mentions_var(raw) {
+            crate::css::var_substitution::parse(raw)?
+        } else {
+            match parse_style(raw) {
+                Ok(style) => style,
+                Err(error) => crate::css::lenient::recover(raw, error)?,
+            }
+        };
         let shared = Arc::new(style);
         self.entries.entry(key).or_default().push(InternedStyle {
             raw: raw.into(),
@@ -688,6 +707,9 @@ pub struct RetainedTree {
     /// How many elements have `@container` blocks, so a tree without any skips looking for
     /// the children they keep from being built.
     container_rule_count: usize,
+    /// How many elements hold a declaration that reads custom properties (`var()`), which makes a
+    /// change of custom properties a change of layout as well as of paint.
+    var_style_count: usize,
     /// The elements the accessibility links start from, see [`RelationRegistry`].
     relations: RelationRegistry,
     pub styles: StyleTable,
@@ -766,6 +788,7 @@ impl RetainedTree {
             escaping_count: 0,
             style_serials: 0,
             container_rule_count: 0,
+            var_style_count: 0,
             relations: RelationRegistry::default(),
             styles: StyleTable::default(),
             resolved: Default::default(),
@@ -971,7 +994,7 @@ impl RetainedTree {
         let revision = self.take_revision_covered();
         self.elements
             .insert(id, RetainedElement::new(id, element_type, revision));
-        if self.universal.is_some() {
+        if self.universal.is_some() || crate::html::is_tag(&self.elements[&id].element_type) {
             self.refresh_effective_style(id, false);
         }
         self.track_focusable(id);
@@ -1230,6 +1253,7 @@ impl RetainedTree {
             self.anchored_count -= usize::from(element.element_type == "anchored");
             self.escaping_count -= usize::from(containing_block::may_escape(&element));
             self.container_rule_count -= usize::from(has_container_rules(&element));
+            self.var_style_count -= usize::from(holds_var_declarations(&element));
             self.relations.destroyed(&element);
             self.resolved.get_mut().forget(id);
             destroyed.push(id);
@@ -1423,20 +1447,20 @@ impl RetainedTree {
         }
     }
 
-    /// Recompute the effective style of `id` from the style it declared and the
-    /// universal layer, and assign it.
+    /// Recompute the effective style of `id` from the style it declared, over the universal
+    /// layer, over the user agent style of its tag, and assign it.
     fn refresh_effective_style(&mut self, id: u64, classify: bool) -> StyleChange {
         let Some(element) = self.elements.get(&id) else {
             return StyleChange::default();
         };
-        let effective = match (&self.universal, &element.own_style) {
-            (Some(universal), own) if element.takes_universal_style() => Some(match own {
-                Some(own) => self.styles.layered.effective(universal, own),
-                None => universal.clone(),
-            }),
-            (_, own) => own.clone(),
+        let universal = self.universal.as_ref().filter(|_| element.takes_universal_style());
+        let user_agent = crate::html::ua_style(&element.element_type);
+        let effective = match (self.styles.layered.base(universal, user_agent.as_ref()), &element.own_style) {
+            (Some(base), Some(own)) => Some(self.styles.layered.effective(&base, own)),
+            (Some(base), None) => Some(base),
+            (None, own) => own.clone(),
         };
-        self.assign_style(id, effective, classify)
+        self.assign_style(id, crate::html::used_style(&element.element_type, effective), classify)
     }
 
     /// The one place `RetainedElement::style` is written, and the bookkeeping
@@ -1454,7 +1478,7 @@ impl RetainedTree {
             return StyleChange::default();
         }
         let paints_only = match (element.style.as_deref(), style.as_deref()) {
-            (Some(old), Some(new)) if self.container_rule_count == 0 => {
+            (Some(old), Some(new)) if self.container_rule_count == 0 && self.var_style_count == 0 => {
                 old.differs_only_in_paint_or_custom_properties(new)
             }
             (Some(old), Some(new)) => old.differs_only_in_paint(new),
@@ -1475,6 +1499,7 @@ impl RetainedTree {
             != style.as_deref().and_then(|new| new.white_space.as_deref());
         let escaped_before = containing_block::may_escape(element);
         let container_rules_before = has_container_rules(element);
+        let var_declarations_before = holds_var_declarations(element);
         let before = element.style.take().filter(|old| {
             !crate::motion::declares_transitions(old)
                 && style.as_deref().is_some_and(crate::motion::declares_transitions)
@@ -1500,6 +1525,8 @@ impl RetainedTree {
         if now_display_none && !was_display_none {
             self.pending_hides.get_mut().push(id);
         }
+        self.var_style_count += usize::from(holds_var_declarations(element));
+        self.var_style_count -= usize::from(var_declarations_before);
         let now_declared = element.declared_hidden();
         let visibility_changed = was_declared != now_declared;
         if visibility_changed {
@@ -1576,8 +1603,7 @@ impl RetainedTree {
                 false
             };
             // Which listeners exist decides how the element is built, so it takes a revision:
-            // `retain` keys what it reuses by it. For a `<text>` it also decides whether it is
-            // raw text (`is_raw_text`), which the paragraph builder and search read it by.
+            // `retain` keys what it reuses by it.
             if changed {
                 if geometry {
                     let reports = self
@@ -1590,15 +1616,7 @@ impl RetainedTree {
                         self.geometry_ids.remove(&id);
                     }
                 }
-                if self
-                    .elements
-                    .get(&id)
-                    .is_some_and(|element| element.element_type == "text")
-                {
-                    self.mark_changed(id);
-                } else {
-                    self.mark_render_changed(id);
-                }
+                self.mark_render_changed(id);
             }
         }
     }
@@ -1614,7 +1632,7 @@ impl RetainedTree {
         let is_highlight = key == "highlight";
         let is_motion = key == "motion";
         let is_motion_values = key == "motionValues" || key == "layout";
-        let affects_focusability = key == "tabIndex" || key == "disabled";
+        let affects_focusability = key == "tabIndex" || key == "disabled" || key == "href";
         let is_inert = key == "inert";
         let relation_key = RelationRegistry::reads(&key).then(|| key.clone());
         let mut previous_relation = None;
@@ -1687,14 +1705,6 @@ impl RetainedTree {
         }
         if affects_focusability {
             self.track_focusable(id);
-            // A focusable `<text>` is a block rather than an inline box.
-            if self
-                .elements
-                .get(&id)
-                .is_some_and(|element| element.element_type == "text")
-            {
-                self.mark_changed(id);
-            }
         }
         if is_form_control {
             if self.elements.get(&id).is_some_and(|element| element.control_disabled().is_some()) {
@@ -2124,8 +2134,8 @@ mod tests {
     fn tree_with_child() -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
-        tree.create_element(2, "text".to_string());
-        tree.create_element(3, "text".to_string());
+        tree.create_element(2, "div".to_string());
+        tree.create_element(3, "#text".to_string());
         tree.append_child(1, 2);
         tree.append_child(2, 3);
         tree.set_text(3, "hello".to_string());
@@ -3361,7 +3371,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
         tree.create_element(2, "div".to_string());
-        tree.create_element(3, "text".to_string());
+        tree.create_element(3, "#text".to_string());
         tree.append_child(1, 2);
         tree.append_child(1, 3);
         tree.set_text(3, "hello".to_string());
@@ -3408,8 +3418,8 @@ mod tests {
         assert!(crate::text::inline::is_raw_text(&tree.elements[&3]));
 
         // A text node is created before its string arrives.
-        apply(&mut tree, r##"[["createElement",4,"text"],["createElement",5,"text"],["appendChild",4,5],["setText",5,"x"]]"##);
-        assert_eq!(style_of(&tree, 4).unwrap().opacity, Some(0.5), "a `<text>` element");
+        apply(&mut tree, r##"[["createElement",4,"div"],["createElement",5,"#text"],["appendChild",4,5],["setText",5,"x"]]"##);
+        assert_eq!(style_of(&tree, 4).unwrap().opacity, Some(0.5), "a `<div>` element");
         assert!(style_of(&tree, 5).is_none());
         assert!(crate::text::inline::is_raw_text(&tree.elements[&5]));
     }
@@ -3477,6 +3487,54 @@ mod tests {
     }
 
     #[test]
+    fn a_tag_has_its_user_agent_style_under_the_universal_layer_and_its_own() {
+        let mut tree = layered_tree();
+        apply(&mut tree, r##"[["createElement",20,"h1"],["createElement",21,"p"],["createElement",22,"div"]]"##);
+        let h1 = style_of(&tree, 20).unwrap();
+        assert_eq!(h1.display.as_deref(), Some("block"));
+        assert!(h1.font_size.is_some() && h1.margin_top.is_some(), "no style was ever set on it");
+        assert!(tree.elements[&20].own_style.is_none());
+        assert!(style_of(&tree, 22).is_none(), "a div has no user agent style");
+
+        apply(&mut tree, r##"[["setUniversalStyle",{"marginTop":0,"opacity":0.5}]]"##);
+        let h1 = style_of(&tree, 20).unwrap();
+        assert_eq!(h1.margin_top, tree.universal.as_ref().unwrap().margin_top, "the universal layer beats the user agent");
+        assert_eq!(h1.margin_bottom, crate::html::ua_style("h1").unwrap().margin_bottom, "and leaves what it does not set");
+        assert_eq!(h1.opacity, Some(0.5));
+
+        apply(&mut tree, r##"[["setStyle",20,{"margin":3}]]"##);
+        let h1 = style_of(&tree, 20).unwrap();
+        assert!(h1.margin.is_some() && h1.margin_top.is_none() && h1.margin_bottom.is_none(), "an own shorthand shadows both");
+        assert_eq!(h1.display.as_deref(), Some("block"));
+
+        apply(&mut tree, r##"[["setUniversalStyle",null]]"##);
+        assert_eq!(style_of(&tree, 21).unwrap().display.as_deref(), Some("block"));
+    }
+
+    #[test]
+    fn a_button_that_says_inline_is_inline_block_as_in_chrome() {
+        let mut tree = layered_tree();
+        apply(&mut tree, r##"[["createElement",20,"button"],["createElement",21,"a"],["createElement",22,"button"]]"##);
+        apply(&mut tree, r##"[["setStyle",20,{"display":"inline"}],["setStyle",21,{"display":"inline"}],["setStyle",22,{"display":"block"}]]"##);
+        assert_eq!(style_of(&tree, 20).unwrap().display.as_deref(), Some("inline-block"));
+        assert_eq!(style_of(&tree, 21).unwrap().display.as_deref(), Some("inline"), "only a button");
+        assert_eq!(style_of(&tree, 22).unwrap().display.as_deref(), Some("block"));
+        assert!(style_of(&tree, 20).unwrap().padding.is_some(), "the rest of its style is kept");
+    }
+
+    #[test]
+    fn two_tags_with_the_same_own_style_do_not_share_a_layered_style() {
+        let mut tree = layered_tree();
+        apply(&mut tree, r##"[["createElement",20,"p"],["createElement",21,"h1"],["createElement",22,"p"]]"##);
+        for id in [20, 21, 22] {
+            apply(&mut tree, &format!(r##"[["setStyle",{id},{{"width":10}}]]"##));
+        }
+        assert!(Arc::ptr_eq(style_of_arc(&tree, 20), style_of_arc(&tree, 22)));
+        assert!(!Arc::ptr_eq(style_of_arc(&tree, 20), style_of_arc(&tree, 21)));
+        assert_ne!(style_of(&tree, 20).unwrap().margin_top, style_of(&tree, 21).unwrap().margin_top);
+    }
+
+    #[test]
     fn sweeping_releases_the_layered_styles_no_element_holds() {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
@@ -3491,26 +3549,35 @@ mod tests {
     }
 
     #[test]
-    fn an_invalid_layer_rejects_the_batch_and_changes_nothing() {
+    fn an_invalid_layer_declaration_is_dropped_and_the_rest_of_the_batch_applies() {
+        let mut tree = layered_tree();
+        apply(
+            &mut tree,
+            r##"[["setStyle",2,{"color":"#abcdef"}],["setUniversalStyle",{"tabSize":"wide","opacity":0.5}]]"##,
+        );
+        assert_eq!(style_of(&tree, 2).unwrap().color.as_deref(), Some("#abcdef"));
+        assert_eq!(style_of(&tree, 2).unwrap().opacity, Some(0.5), "the valid declaration of the layer applies");
+        assert!(tree.universal.as_ref().unwrap().tab_size.is_none(), "the invalid one is dropped");
+        assert!(style_of(&tree, 2).unwrap().tab_size.is_none());
+
+        apply(&mut tree, r#"[["setUniversalStyle",{"transition":"width not-a-time","opacity":0.7}]]"#);
+        let layer = tree.universal.as_ref().unwrap();
+        assert!(layer.transition.is_none(), "transitions are validated too");
+        assert_eq!(layer.opacity, Some(0.7));
+    }
+
+    #[test]
+    fn a_layer_that_is_not_an_object_still_rejects_the_batch_and_changes_nothing() {
         let mut tree = layered_tree();
         let revision = tree.next_revision;
         let error = crate::batch::test_json::apply(
             &mut tree,
-            r##"[["setStyle",2,{"color":"#abcdef"}],["setUniversalStyle",{"color":5}]]"##,
+            r##"[["setStyle",2,{"color":"#abcdef"}],["setUniversalStyle",5]]"##,
         )
-        .expect_err("a layer is validated like any style");
+        .expect_err("a layer must be a style object");
         assert!(error.starts_with("Batch op 1 setUniversalStyle parse error:"), "{error}");
         assert_eq!(style_of(&tree, 2).unwrap().color.as_deref(), Some("#222222"));
         assert_eq!(tree.next_revision, revision);
-        assert!(tree.universal.is_none());
-
-        let error = crate::batch::test_json::apply(
-            &mut tree,
-            r#"[["setUniversalStyle",{"transition":"width not-a-time"}]]"#,
-        )
-        .expect_err("transitions are validated too");
-        assert!(error.contains("setUniversalStyle parse error"), "{error}");
-
         assert!(tree.universal.is_none());
     }
 

@@ -83,7 +83,7 @@ describeNative("transitions and animations of an inline box's colours", () => {
     const page = setup(
       (colour) => (
         <div style={PAGE}>
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             <span
               style={{
                 paddingLeft: 12,
@@ -94,7 +94,7 @@ describeNative("transitions and animations of an inline box's colours", () => {
               aaaa
             </span>{" "}
             tail
-          </text>
+          </div>
         </div>
       ),
       "red"
@@ -121,11 +121,11 @@ describeNative("transitions and animations of an inline box's colours", () => {
     const page = setup(
       (colour) => (
         <div style={PAGE}>
-          <text testId="p" style={{ ...TEXT, fontSize: 64, lineHeight: "70px" }}>
+          <div testId="p" style={{ ...TEXT, fontSize: 64, lineHeight: "70px" }}>
             <span style={{ color: colours[colour as keyof typeof colours], transition: "color 1s linear" }}>
               MM
             </span>
-          </text>
+          </div>
         </div>
       ),
       "red"
@@ -144,7 +144,7 @@ describeNative("transitions and animations of an inline box's colours", () => {
     const page = setup(
       (colour) => (
         <div style={PAGE}>
-          <text testId="p" style={{ ...TEXT, color: "#ffffff" }}>
+          <div testId="p" style={{ ...TEXT, color: "#ffffff" }}>
             <span
               style={{
                 textDecorationLine: "underline",
@@ -154,7 +154,7 @@ describeNative("transitions and animations of an inline box's colours", () => {
             >
               aaaaaaaa
             </span>
-          </text>
+          </div>
         </div>
       ),
       "red"
@@ -172,9 +172,9 @@ describeNative("transitions and animations of an inline box's colours", () => {
     const page = setup(
       () => (
         <div style={PAGE}>
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             <span style={{ paddingLeft: 12, animation: "inline-motion-wash 1s linear" }}>aaaa</span> tail
-          </text>
+          </div>
         </div>
       ),
       "start"
@@ -193,7 +193,7 @@ describeNative("transitions and animations of an inline box's colours", () => {
     const page = setup(
       (state) => (
         <div style={PAGE}>
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             <span
               style={{
                 borderWidth: 4,
@@ -205,7 +205,7 @@ describeNative("transitions and animations of an inline box's colours", () => {
             >
               aaaa
             </span>
-          </text>
+          </div>
         </div>
       ),
       "red"
@@ -226,9 +226,9 @@ describeNative("transitions and animations of an inline box's colours", () => {
     const page = setup(
       (colour) => (
         <div style={PAGE}>
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             <span style={{ paddingLeft: 12, backgroundColor: colours[colour as keyof typeof colours] }}>aaaa</span>
-          </text>
+          </div>
         </div>
       ),
       "red"
@@ -249,7 +249,7 @@ describeNative("transitions and animations of an inline box's colours", () => {
         style={PAGE}
         onTransitionEnd={(event) => seen.push([event.propertyName, String(event.target === span)])}
       >
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <span
             ref={(instance) => {
               if (instance) span = instance
@@ -258,7 +258,7 @@ describeNative("transitions and animations of an inline box's colours", () => {
           >
             aaaa
           </span>
-        </text>
+        </div>
       </div>
     )
     renderer.clockPause()
@@ -276,10 +276,10 @@ describeNative("transitions and animations of an inline box's colours", () => {
     const events: string[] = []
     const tree = (padding: number, width: number) => (
       <div style={PAGE} onTransitionRun={(event) => events.push(event.propertyName)}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <span style={{ paddingLeft: padding, width, transition: "all 1s linear" }}>aaaa</span>
           <span testId="tail">tail</span>
-        </text>
+        </div>
       </div>
     )
     const tailAt = () => renderer.getElementBounds(renderer.findByTestId("tail")!.id)!.x
