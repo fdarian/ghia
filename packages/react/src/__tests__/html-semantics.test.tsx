@@ -704,6 +704,21 @@ describeNative("a label of a button", () => {
     expect(submits).toEqual([])
   })
 
+  it("does not activate the control of a label for a click or Enter on a link inside it", () => {
+    testRoot.render(
+      <label style={{ width: 300, height: 40 }}>
+        <input testId="field" onClick={onClick("field")} style={{ width: 80, height: 20 }} />
+        <a testId="help" href="/help" onClick={onClick("link")} style={{ display: "block", width: 60, height: 20 }}>help</a>
+      </label>,
+    )
+    clickAt("help")
+    expect(log).toEqual(["link"])
+    expect(testRoot.renderer.getFocusedElementId()).toBe(idOf("help"))
+    testRoot.renderer.nativeSimulateKeystrokes(idOf("help"), "Enter")
+    expect(log).toEqual(["link", "link"])
+    expect(testRoot.renderer.getFocusedElementId()).toBe(idOf("help"))
+  })
+
   it("names the button from its label before its content", () => {
     testRoot.render(
       <div style={{ width: 300, height: 160 }}>
