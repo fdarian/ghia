@@ -35,6 +35,9 @@ export * from "./events/listeners.js"
 export * from "./events/element-listeners.js"
 export * from "./dom-members.js"
 export * from "./dom/nodes.js"
+export * from "./dom/mutation-observer.js"
+export * from "./dom/attribute-names.js"
+export * from "./dom/prototype-members.js"
 export * from "./animation-frame.js"
 export * from "./events/types.js"
 export type { AriaProps }
@@ -46,6 +49,7 @@ export {
   GpuixEventTarget,
   installElementSource,
   syncWindowEventListeners,
+  syncWindowSelectionChange,
   window,
   type AddEventListenerOptions,
   type WindowEventListener,
@@ -1399,7 +1403,7 @@ export interface StyleDesc {
    * it is only its padding and border (a flex item or an absolutely positioned
    * box with an `inline-size` container inside shrinks to nothing, as in a
    * browser). `"size"` contains the height too. `"normal"` (the default) makes
-   * no container. Applies to `div`, `text`, an atomic `span`, `label`, `form`,
+   * no container. Applies to `div`, an atomic `span`, `label`, `form`,
    * `<virtual-list>` (its rows are queried against it), `<img>` and `<svg>`
    * (which only lose their natural size on the contained axes) as in CSS. A
    * `span` that is not atomic, a `display: contents` element and a table or
@@ -1436,7 +1440,7 @@ export interface StyleDesc {
    * wins), it is a stacking context and the containing block of its `position: "absolute"`
    * descendants. A skipped element also has size containment on both axes, sized by
    * `containIntrinsicSize` (none, so zero, by default) plus its padding and border. Applies to
-   * `div`, `text`, `label`, `form` and block `span`; another element has the containment and
+   * `div`, `label`, `form` and block `span`; another element has the containment and
    * is never skipped. Not modelled: the element is not an independent formatting context (a
    * margin of its first or last child can collapse through it), and a `position: "fixed"`
    * descendant is placed against the viewport. An observer on an element inside a skipped
@@ -1555,12 +1559,13 @@ export type StateStyleDesc = Omit<
  *  follow (default group when omitted). */
 export type GroupStateStyleDesc = StateStyleDesc & { group?: string | true }
 
-// Element types supported by GPUIX. `span` is inline: it, raw strings and a
-// `text` inside a `text` or `span` are runs of one paragraph, see docs/reference.md
-// "Inline text".
+// Element types supported by GPUIX. `span` is inline: it and raw strings are runs of one
+// paragraph, see docs/reference.md "Inline text".
 export type ElementType =
   | "div"
-  | "text"
+  | "html"
+  | "head"
+  | "body"
   | "span"
   | "img"
   | "svg"
@@ -1689,7 +1694,7 @@ export interface HighlightSpec {
    *
    * A match never crosses a line, exactly like browser find. It DOES cross the
    * several host nodes a JSX renderer makes for one interpolated line, so
-   * `<text>Hello {name}!</text>` matches `Hello Tommy`.
+   * `<div>Hello {name}!</div>` matches `Hello Tommy`.
    */
   query?: string
   caseSensitive?: boolean
@@ -1793,7 +1798,7 @@ export interface HostProps
   /**
    * The element's border box, reported after the first paint and each time its
    * size changes: `width` and `height`, plus `x` and `y` in window coordinates.
-   * Moving without resizing reports nothing. Supported on `div` and `text`.
+   * Moving without resizing reports nothing. Supported on `div` and `span`.
    */
   onLayout?: (event: DomEvent) => void
 
@@ -2123,6 +2128,7 @@ export interface ImagePixelsOptions {
 
 /** The tags that are valid only inside an `<svg>`. */
 export type SvgChildType =
+  | "text"
   | "path"
   | "circle"
   | "ellipse"
@@ -2419,10 +2425,7 @@ export interface SvgImageProps extends SvgShapeProps {
   preserveAspectRatio?: string
 }
 
-/**
- * `<text>` inside an `<svg>`. Its string children are the text. Outside an
- * `<svg>`, `<text>` is the host text element and takes none of these.
- */
+/** `<text>` inside an `<svg>`. Its string children are the text. It is valid only inside an `<svg>`. */
 export interface SvgTextProps extends SvgShapeProps {
   x?: SvgLength | SvgLength[]
   y?: SvgLength | SvgLength[]

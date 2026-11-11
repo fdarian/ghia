@@ -12,7 +12,7 @@ function page(tick: number) {
     <div style={{ display: "contents" }}>
       <div style={{ display: "contents", color: "#ff0000", fontSize: 30 }}>
         <div testId="card" style={{ width: 200 }}>
-          <text testId="label">hi there</text>
+          <div testId="label">hi there</div>
         </div>
       </div>
       <div testId="tick" style={{ width: 10 + tick, height: 10 }} />

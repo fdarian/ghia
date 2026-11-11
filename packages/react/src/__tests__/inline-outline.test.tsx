@@ -29,7 +29,7 @@ function measureColumn() {
   const testRoot = createTestRoot()
   testRoot.render(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   const width = testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -78,12 +78,12 @@ describeNative("outline on inline boxes", () => {
    *  A second stop follows, to move focus to. */
   const wrapped = (span: object) => (
     <div style={PAGE}>
-      <text testId="p" style={{ ...TEXT, width: Math.ceil(10.5 * columnWidth()) }}>
+      <div testId="p" style={{ ...TEXT, width: Math.ceil(10.5 * columnWidth()) }}>
         aaaa{" "}
         <span tabIndex={0} style={span}>
           bbbb cccc
         </span>
-      </text>
+      </div>
       <div tabIndex={0} style={{ width: 10, height: 10 }} />
     </div>
   )
@@ -142,11 +142,11 @@ describeNative("outline on inline boxes", () => {
   it("draws a negative offset over the glyphs", () => {
     const { testRoot, shoot, tab } = setup(
       <div style={PAGE}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <span tabIndex={0} style={{ focusVisible: { outlineWidth: 6, outlineStyle: "solid", outlineColor: "#ff0000", outlineOffset: -6 } }}>
             mmmm
           </span>
-        </text>
+        </div>
       </div>
     )
     tab()
@@ -162,7 +162,7 @@ describeNative("outline on inline boxes", () => {
   /** `a [b [c] d] e`: the outer span is columns 2-6, the inner one column 4. */
   const nested = (outer: object, inner: object) => (
     <div style={PAGE}>
-      <text testId="p" style={TEXT}>
+      <div testId="p" style={TEXT}>
         a{" "}
         <span tabIndex={0} style={outer}>
           b{" "}
@@ -172,7 +172,7 @@ describeNative("outline on inline boxes", () => {
           d
         </span>{" "}
         e
-      </text>
+      </div>
     </div>
   )
   const BLUE_RING = { outlineWidth: 4, outlineStyle: "solid", outlineColor: "#0000ff" } as const
@@ -219,11 +219,11 @@ describeNative("outline on inline boxes", () => {
     const { testRoot, shoot, tab } = setup(
       <div style={PAGE}>
         <div style={{ overflow: "hidden", width: 200 }}>
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             <span tabIndex={0} style={{ focusVisible: RING }}>
               abcd
             </span>
-          </text>
+          </div>
         </div>
       </div>
     )

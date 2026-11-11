@@ -7,6 +7,7 @@ import {
   blurHostElement,
   createElementMethods,
   defineDomMembers,
+  copyPrototypeMembers,
   defineScrollMembers,
   document,
   DOM_BINDING,
@@ -14,6 +15,8 @@ import {
   HOST_BINDING,
   hostElementMatches,
   HTMLElement,
+  hasMutationObservers,
+  queueChildListMutation,
   readBoundingClientRect,
   SVG_CHILD_TYPES,
   SVGElement,
@@ -159,6 +162,7 @@ defineDomMembers(ReactHostElement.prototype, (instance: ReactHostElement) => ({
     ? { renderer: containerFor(instance).nativeRenderer, id: instance.nativeId }
     : undefined,
   prop: (name) => (instance.props as Record<string, unknown>)[name],
+  propNames: () => Object.keys(instance.props),
 }))
 
 /** Mounted, which a destroyed element is not any more. */
@@ -172,12 +176,7 @@ function isConnected(instance: Instance): boolean {
  * the fields come from one constructor and the prototype chain from this one.
  */
 abstract class ReactSvgElement extends SVGElement {}
-for (const key of Reflect.ownKeys(ReactHostElement.prototype)) {
-  if (key === "constructor") continue
-  const descriptor = Object.getOwnPropertyDescriptor(ReactHostElement.prototype, key)
-  if (descriptor === undefined) throw new Error(`ReactHostElement.prototype has no own ${String(key)}`)
-  Object.defineProperty(ReactSvgElement.prototype, key, descriptor)
-}
+copyPrototypeMembers(ReactHostElement.prototype, ReactSvgElement.prototype)
 
 class ReactHostText extends Text implements TextInstance {
   constructor(
@@ -202,11 +201,11 @@ class ElementDomBinding implements ElementBinding {
     private readonly state: HostNodeState
   ) {}
 
-  /** `<html>` is in the document, which is the top of every mounted tree. */
+  /** A mounted `<html>` is in the document, which is the top of every mounted tree; a destroyed one is in nothing. */
   get parent(): NodeBinding["parent"] {
     const parent = this.state.parent
     if (parent !== null) return parent
-    return this.state.container.html === this.instance ? document : null
+    return this.state.container.html === this.instance && isConnected(this.instance) ? document : null
   }
 
   get children(): NodeBinding["children"] {
@@ -294,6 +293,9 @@ export function linkChild(parent: HostNode, child: HostNode, before?: HostNode):
   if (index < 0) throw new Error(`GPUIX host node ${before?.nativeId} is not a child of node ${parent.nativeId}`)
   siblings.splice(index, 0, child)
   stateFor(child).parent = parent
+  if (hasMutationObservers()) {
+    queueChildListMutation(parent, [child], [], siblings[index - 1] ?? null, siblings[index + 1] ?? null)
+  }
 }
 
 export function unlinkChild(child: HostNode): void {
@@ -304,4 +306,7 @@ export function unlinkChild(child: HostNode): void {
   const index = siblings.indexOf(child)
   if (index >= 0) siblings.splice(index, 1)
   state.parent = null
+  if (index >= 0 && hasMutationObservers()) {
+    queueChildListMutation(parent, [], [child], siblings[index - 1] ?? null, siblings[index] ?? null)
+  }
 }

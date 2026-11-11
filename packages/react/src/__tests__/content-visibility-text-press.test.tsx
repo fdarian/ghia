@@ -22,14 +22,14 @@ const Section = memo(function Section({ outer }: { outer: number }) {
     <div
       style={{ display: "flex", flexDirection: "column", flexShrink: 0, paddingTop: 12, contentVisibility: "auto", containIntrinsicSize: "auto 800px" } as CSSProperties}
     >
-      <text style={{ fontSize: 20 }}>{`Section ${outer}`}</text>
+      <div style={{ fontSize: 20 }}>{`Section ${outer}`}</div>
       {Array.from({ length: INNERS }, (_, inner) => (
         <div
           key={inner}
           style={{ display: "flex", flexDirection: "row", gap: 8, padding: 6, contentVisibility: "auto", containIntrinsicSize: "auto 40px" } as CSSProperties}
         >
           <div testId={`bar-${outer}-${inner}`} style={{ width: 16, height: 16, backgroundColor: "#999999" }} />
-          <text style={{ fontSize: 14 }}>{`Card ${outer}.${inner}: a row of the demo page that is nested in a section`}</text>
+          <div style={{ fontSize: 14 }}>{`Card ${outer}.${inner}: a row of the demo page that is nested in a section`}</div>
         </div>
       ))}
     </div>

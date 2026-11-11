@@ -72,7 +72,7 @@ describeNative("what reads the boxes in the frames that move the rows of a list"
             testId={`row-${index}`}
             style={{ width: 150, height: ROW, flexShrink: 0, backgroundColor: index % 2 === 0 ? "#223344" : "#334455" }}
           >
-            <text style={{ color: "#ffffff" }}>{`row-${index}`}</text>
+            <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
           </div>
         ))}
       </virtual-list>

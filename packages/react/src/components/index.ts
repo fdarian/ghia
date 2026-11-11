@@ -77,7 +77,6 @@ export type { UniversalStyleProps } from "./universal-style.js"
 
 export const gpuixComponents = {
   div: "div",
-  text: "text",
   span: "span",
   img: "img",
   svg: "svg",

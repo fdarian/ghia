@@ -43,7 +43,7 @@ function measureColumn() {
   const testRoot = createTestRoot()
   testRoot.render(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   const width = testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -62,15 +62,15 @@ function setup() {
   return { ...root, ref, rect }
 }
 
-/** The height of `<text style={{ ...TEXT, ...style }}>Hello</text>`. */
+/** The height of `<div style={{ ...TEXT, ...style }}>Hello</div>`. */
 function heightOf(style: object, children: React.ReactNode = "Hello") {
   const { render, ref, rect, unmount } = setup()
   try {
     render(
       <div style={{ width: 300 }}>
-        <text ref={ref("box")} style={{ ...TEXT, ...style }}>
+        <div ref={ref("box")} style={{ ...TEXT, ...style }}>
           {children}
-        </text>
+        </div>
       </div>
     )
     return rect("box").height
@@ -162,9 +162,9 @@ describeNative("text-box-trim", () => {
     try {
       render(
         <div style={{ width: 300 }}>
-          <text ref={ref("box")} style={{ ...TEXT, textBoxTrim: "trim-both", textBoxEdge: "cap alphabetic" }}>
+          <div ref={ref("box")} style={{ ...TEXT, textBoxTrim: "trim-both", textBoxEdge: "cap alphabetic" }}>
             Hello
-          </text>
+          </div>
           <div ref={ref("next")} style={{ height: 10 }} />
         </div>
       )
@@ -180,9 +180,9 @@ describeNative("text-box-trim", () => {
     try {
       render(
         <div style={{ width: 300, paddingTop: 30 }} highlight={{ query: "Hello" }}>
-          <text ref={ref("box")} style={{ ...TEXT, textBoxTrim: "trim-both", textBoxEdge: "cap alphabetic" }}>
+          <div ref={ref("box")} style={{ ...TEXT, textBoxTrim: "trim-both", textBoxEdge: "cap alphabetic" }}>
             Hello
-          </text>
+          </div>
         </div>
       )
       const box = rect("box")
@@ -202,9 +202,9 @@ describeNative("text-box-trim", () => {
     try {
       render(
         <div style={{ width: 300 }}>
-          <text ref={ref("box")} testId="box" style={{ ...TEXT, textBoxTrim: "trim-both", textBoxEdge: "cap alphabetic" }}>
+          <div ref={ref("box")} testId="box" style={{ ...TEXT, textBoxTrim: "trim-both", textBoxEdge: "cap alphabetic" }}>
             Hello
-          </text>
+          </div>
         </div>
       )
       const bounds = renderer.getElementBounds(renderer.findByTestId("box")!.id)!
@@ -222,12 +222,12 @@ describeNative("text-box-edge", () => {
     try {
       render(
         <div style={{ width: 300, textBoxEdge: "cap alphabetic" }}>
-          <text ref={ref("trimmed")} style={{ ...TEXT, textBoxTrim: "trim-both" }}>
+          <div ref={ref("trimmed")} style={{ ...TEXT, textBoxTrim: "trim-both" }}>
             Hello
-          </text>
-          <text ref={ref("own")} style={{ ...TEXT, textBoxTrim: "trim-both", textBoxEdge: "ex alphabetic" }}>
+          </div>
+          <div ref={ref("own")} style={{ ...TEXT, textBoxTrim: "trim-both", textBoxEdge: "ex alphabetic" }}>
             Hello
-          </text>
+          </div>
         </div>
       )
       near(rect("trimmed").height, CAP)
@@ -243,9 +243,9 @@ describeNative("text-box-edge", () => {
       render(
         <div style={{ width: 300 }}>
           <div style={{ display: "contents", textBoxEdge: "cap alphabetic" }}>
-            <text ref={ref("box")} style={{ ...TEXT, textBoxTrim: "trim-both" }}>
+            <div ref={ref("box")} style={{ ...TEXT, textBoxTrim: "trim-both" }}>
               Hello
-            </text>
+            </div>
           </div>
         </div>
       )
@@ -278,15 +278,15 @@ describeNative("text-box-trim through blocks", () => {
     try {
       render(
         <div ref={ref("box")} style={{ width: 300, textBox: "trim-both cap alphabetic" }}>
-          <text ref={ref("first")} style={TEXT}>
+          <div ref={ref("first")} style={TEXT}>
             one
-          </text>
-          <text ref={ref("middle")} style={TEXT}>
+          </div>
+          <div ref={ref("middle")} style={TEXT}>
             two
-          </text>
-          <text ref={ref("last")} style={TEXT}>
+          </div>
+          <div ref={ref("last")} style={TEXT}>
             three
-          </text>
+          </div>
         </div>
       )
       near(rect("first").height, LINE - (BASELINE - CAP))
@@ -306,9 +306,9 @@ describeNative("text-box-trim through blocks", () => {
         <div ref={ref("box")} style={{ width: 300, textBox: "trim-both cap alphabetic" }}>
           <div>
             <div>
-              <text ref={ref("text")} style={TEXT}>
+              <div ref={ref("text")} style={TEXT}>
                 one
-              </text>
+              </div>
             </div>
           </div>
         </div>
@@ -326,14 +326,14 @@ describeNative("text-box-trim through blocks", () => {
       render(
         <div ref={ref("box")} style={{ width: 300, textBox: "trim-both cap alphabetic" }}>
           <div style={{ paddingTop: 4 }}>
-            <text ref={ref("padded")} style={TEXT}>
+            <div ref={ref("padded")} style={TEXT}>
               one
-            </text>
+            </div>
           </div>
           <div style={{ borderBottom: "1px solid red" }}>
-            <text ref={ref("bordered")} style={TEXT}>
+            <div ref={ref("bordered")} style={TEXT}>
               two
-            </text>
+            </div>
           </div>
         </div>
       )
@@ -352,9 +352,9 @@ describeNative("text-box-trim through blocks", () => {
       render(
         <div style={{ width: 300, textBox: "trim-both cap alphabetic" }}>
           <div style={{ textBoxEdge: "ex alphabetic" }}>
-            <text ref={ref("text")} style={TEXT}>
+            <div ref={ref("text")} style={TEXT}>
               one
-            </text>
+            </div>
           </div>
         </div>
       )
@@ -369,11 +369,11 @@ describeNative("text-box-trim through blocks", () => {
     try {
       render(
         <div style={{ width: 300, textBox: "trim-both cap alphabetic", position: "relative" }}>
-          <text style={{ ...TEXT, position: "absolute", top: 0, left: 0 }}>overlay</text>
-          <text ref={ref("text")} style={TEXT}>
+          <div style={{ ...TEXT, position: "absolute", top: 0, left: 0 }}>overlay</div>
+          <div ref={ref("text")} style={TEXT}>
             one
-          </text>
-          <text style={{ ...TEXT, position: "absolute", top: 0, left: 0 }}>overlay</text>
+          </div>
+          <div style={{ ...TEXT, position: "absolute", top: 0, left: 0 }}>overlay</div>
         </div>
       )
       near(rect("text").height, CAP)
@@ -388,14 +388,14 @@ describeNative("text-box-trim through blocks", () => {
       render(
         <div style={{ width: 300 }}>
           <div style={{ display: "flex", flexDirection: "column", textBox: "trim-both cap alphabetic" }}>
-            <text ref={ref("item")} style={TEXT}>
+            <div ref={ref("item")} style={TEXT}>
               one
-            </text>
+            </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column" }}>
-            <text ref={ref("own")} style={{ ...TEXT, textBox: "trim-both cap alphabetic" }}>
+            <div ref={ref("own")} style={{ ...TEXT, textBox: "trim-both cap alphabetic" }}>
               one
-            </text>
+            </div>
           </div>
         </div>
       )
@@ -412,9 +412,9 @@ describeNative("text-box-trim through blocks", () => {
     try {
       render(
         <div style={{ width: 300, textBox: "trim-both cap alphabetic" }}>
-          <text ref={ref("text")} style={{ ...TEXT, textBoxTrim: "none" }}>
+          <div ref={ref("text")} style={{ ...TEXT, textBoxTrim: "none" }}>
             one
-          </text>
+          </div>
         </div>
       )
       near(rect("text").height, CAP)

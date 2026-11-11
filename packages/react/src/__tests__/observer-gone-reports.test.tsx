@@ -37,7 +37,7 @@ describeNative("an observed element that is removed", () => {
 
       log.length = 0
       render(page(false))
-      renderer.getElementBounds(refs.get("other")!.id)
+      renderer.getElementBounds(refs.get("other")!.nativeId)
       renderer.dispatchNativeEvents()
       expect(log, "a read of layout does not run the rendering steps").toEqual([])
 

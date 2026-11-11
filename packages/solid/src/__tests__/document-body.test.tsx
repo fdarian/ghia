@@ -2,6 +2,7 @@
  * Every window root is `<html>` > `<body>`, the app's top-level nodes are in `body`, and
  * `document.body` is an ordinary element: a pointer-capture target and a member of event paths.
  */
+import { Match, Show, Switch, createSignal } from "solid-js"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { document, window, type DomEvent } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
@@ -20,6 +21,7 @@ describe.skipIf(!hasNativeTestRenderer)("document.body in Solid", () => {
   it("is null with nothing mounted", () => {
     app.unmount()
     expect(document.documentElement).toBeNull()
+    expect(document.head).toBeNull()
     expect(document.body).toBeNull()
     expect(document.scrollingElement).toBeNull()
     app = createTestRoot()
@@ -37,7 +39,7 @@ describe.skipIf(!hasNativeTestRenderer)("document.body in Solid", () => {
     expect(html.parentElement).toBeNull()
     expect(body.parentNode).toBe(html)
     expect(box!.parentNode).toBe(body)
-    expect([...html.children]).toEqual([body])
+    expect([...html.children]).toEqual([document.head, body])
     expect([...body.children]).toEqual([box])
     expect([...document.childNodes]).toEqual([html])
     expect(box!.getRootNode()).toBe(document)
@@ -51,6 +53,28 @@ describe.skipIf(!hasNativeTestRenderer)("document.body in Solid", () => {
     expect(body.compareDocumentPosition(box!)).toBe(20)
     expect(box!.compareDocumentPosition(body)).toBe(10)
     expect(box!.ownerDocument).toBe(document)
+  })
+
+  it("has a head before body in html, which draws nothing", () => {
+    let box: HTMLElement | undefined
+    app.render(() => <div ref={(element) => (box = element as unknown as HTMLElement)} style={{ width: 40, height: 20 }} />)
+    const html = document.documentElement!
+    const head = document.head!
+    expect(head.tagName).toBe("HEAD")
+    expect(head.localName).toBe("head")
+    expect(head.parentNode).toBe(html)
+    expect(head.parentElement).toBe(html)
+    expect(head.nextSibling).toBe(document.body)
+    expect(document.body!.previousSibling).toBe(head)
+    expect(head.ownerDocument).toBe(document)
+    expect(head.getRootNode()).toBe(document)
+    expect(head.isConnected).toBe(true)
+    expect(head.children.length).toBe(0)
+    expect(html.contains(head)).toBe(true)
+    expect(head.contains(box!)).toBe(false)
+    expect(head.compareDocumentPosition(document.body!)).toBe(4)
+    expect(head.getBoundingClientRect()).toMatchObject({ width: 0, height: 0 })
+    expect(box!.getBoundingClientRect()).toMatchObject({ x: 0, y: 0, width: 40, height: 20 })
   })
 
   it("draws and lays out every top-level sibling, one under the other", () => {
@@ -87,6 +111,51 @@ describe.skipIf(!hasNativeTestRenderer)("document.body in Solid", () => {
     expect(document.body).not.toBe(firstBody)
     expect(app.renderer.findByTestId("again")).toBeDefined()
     expect(document.body!.children).toHaveLength(1)
+  })
+
+  it("removes top-level nodes when the output goes from several nodes to one", () => {
+    const [many, setMany] = createSignal(true)
+    app.render(() => (
+      <Show when={many()} fallback={<div testId="one" style={{ width: 10, height: 10 }} />}>
+        <div testId="a" style={{ width: 10, height: 10 }} />
+        <div testId="b" style={{ width: 10, height: 10 }} />
+      </Show>
+    ))
+    expect(document.body!.children).toHaveLength(2)
+    app.flushSync(() => setMany(false))
+    expect(document.body!.children).toHaveLength(1)
+    expect(app.renderer.findByTestId("one")).toBeDefined()
+    expect(app.renderer.findByTestId("a")).toBeUndefined()
+    expect(app.renderer.findByTestId("b")).toBeUndefined()
+    app.flushSync(() => setMany(true))
+    expect(document.body!.children).toHaveLength(2)
+    expect(app.renderer.findByTestId("one")).toBeUndefined()
+    expect(app.renderer.findByTestId("a")).toBeDefined()
+  })
+
+  it("swaps a top-level fragment and a single node in a Switch", () => {
+    const [which, setWhich] = createSignal<"fragment" | "single">("fragment")
+    app.render(() => (
+      <Switch>
+        <Match when={which() === "fragment"}>
+          <>
+            <div testId="a" style={{ width: 10, height: 10 }} />
+            <div testId="b" style={{ width: 10, height: 10 }} />
+          </>
+        </Match>
+        <Match when={which() === "single"}>
+          <div testId="one" style={{ width: 10, height: 10 }} />
+        </Match>
+      </Switch>
+    ))
+    expect(document.body!.children).toHaveLength(2)
+    app.flushSync(() => setWhich("single"))
+    expect(document.body!.children).toHaveLength(1)
+    expect(app.renderer.findByTestId("a")).toBeUndefined()
+    expect(app.renderer.findByTestId("b")).toBeUndefined()
+    app.flushSync(() => setWhich("fragment"))
+    expect(document.body!.children).toHaveLength(2)
+    expect(app.renderer.findByTestId("one")).toBeUndefined()
   })
 
   it("routes moves to document.body once it takes pointer capture during a press", () => {

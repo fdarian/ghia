@@ -85,7 +85,7 @@ const pill = (index: number, clicks?: string[], extra = {}) => (
       ...extra,
     }}
   >
-    <text>{index}</text>
+    <div>{index}</div>
   </div>
 )
 
@@ -190,7 +190,7 @@ describeNative("positioned boxes inside replayed subtrees", () => {
                   backgroundColor: index % 2 ? "#33cc33" : "#3333cc",
                 }}
               >
-                <text>{`o${index}`}</text>
+                <div>{`o${index}`}</div>
               </div>
             }
           />
@@ -246,13 +246,13 @@ describeNative("positioned boxes inside replayed subtrees", () => {
           testId={`bar-${index}`}
           style={{ position: "absolute", left: 0, top: 4, width: 3, height: 20, backgroundColor: "#00aaff", hover: { backgroundColor: "#ffffff" } }}
         />
-        <text>{`item ${index}`}</text>
+        <div>{`item ${index}`}</div>
         <div
           testId={`badge-${index}`}
           onClick={() => clicks.push(`badge-${index}`)}
           style={{ position: "absolute", right: 6, top: 6, width: 24, height: 16, backgroundColor: "#aa4400" }}
         >
-          <text>{index}</text>
+          <div>{index}</div>
         </div>
       </div>
     )
@@ -297,9 +297,9 @@ describeNative("positioned boxes inside replayed subtrees", () => {
         style={{ position: "relative", zIndex: 10, height: 28, width: 180, backgroundColor: "#202830", hover: { backgroundColor: "#384858" } }}
       >
         <div style={{ position: "absolute", left: 0, top: 4, width: 3, height: 20, backgroundColor: "#00aaff" }} />
-        <text>{`item ${index}`}</text>
+        <div>{`item ${index}`}</div>
         <div style={{ position: "absolute", right: 6, top: 6, width: 24, height: 16, backgroundColor: "#aa4400" }}>
-          <text>{index}</text>
+          <div>{index}</div>
         </div>
       </div>
     )
@@ -346,7 +346,7 @@ describeNative("positioned boxes inside replayed subtrees", () => {
                   testId={`cover-${index}`}
                   style={{ position: "absolute", left: 0, top: 0, width: 140, height: 28, backgroundColor: "#445566", zIndex: 4 }}
                 >
-                  <text>{`cover ${index}`}</text>
+                  <div>{`cover ${index}`}</div>
                 </div>
               ) : undefined
             }
@@ -511,10 +511,10 @@ describeNative("positioned boxes inside replayed subtrees", () => {
             {Array.from({ length: 14 }, (_, index) => (
               <div key={index} testId={`card-${index}`} style={{ width: 140, height: 100, backgroundColor: "#335577" }}>
                 <div style={{ height: 18 }}>
-                  <text>{`card ${index}`}</text>
+                  <div>{`card ${index}`}</div>
                 </div>
                 <div style={{ height: 14, position: "relative", zIndex: 2 }}>
-                  <text>extra</text>
+                  <div>extra</div>
                 </div>
               </div>
             ))}
@@ -558,7 +558,7 @@ const LiftedRows = ({ tick, rounded }: { tick: number; rounded: boolean }) => (
         <div testId="C">
           {Array.from({ length: 14 }, (_, index) => (
             <div key={index} testId={`row-${index}`} style={{ height: 32, position: "relative" }}>
-              <text>{`row ${index}`}</text>
+              <div>{`row ${index}`}</div>
             </div>
           ))}
         </div>

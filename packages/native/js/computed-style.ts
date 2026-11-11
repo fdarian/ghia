@@ -93,21 +93,23 @@ type Values = ReadonlyMap<string, string>
 type Cached = {
   /** Batches of mutations applied when it was read: one more and the record may be stale. */
   batches: number
-  /** The microtask checkpoint it was read in: native state moves on between turns without a batch. */
-  turn: number
   values: Values | undefined
 }
 
-let turn = 0
 let turnEnds = false
 // Per renderer, so that a burst of getters (`style.width`, then `style.height`) is one native read.
 const cache = new WeakMap<object, Map<string, Cached>>()
+// Native state moves on between turns without a batch, so an entry is only valid for the turn it
+// was read in; the maps filled this turn are emptied when it ends, or every element ever read
+// would keep an entry.
+const filledThisTurn = new Set<Map<string, Cached>>()
 
 function endTurnLater(): void {
   if (turnEnds) return
   turnEnds = true
   queueMicrotask(() => {
-    turn++
+    for (const records of filledThisTurn) records.clear()
+    filledThisTurn.clear()
     turnEnds = false
   })
 }
@@ -148,10 +150,11 @@ export function readComputedStyle(
   }
   const batches = appliedBatchCount()
   const kept = records.get(key)
-  if (kept && kept.batches === batches && kept.turn === turn) return kept.values
+  if (kept && kept.batches === batches) return kept.values
   const pairs = renderer.getComputedStyle(id, pseudo)
   const values = pairs ? pairsToValues(pairs) : undefined
-  records.set(key, { batches, turn, values })
+  records.set(key, { batches, values })
+  filledThisTurn.add(records)
   endTurnLater()
   return values
 }

@@ -3,7 +3,7 @@
 /// handle, and a press on its glyphs focuses it.
 
 import React from "react"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import { document, window, type DomEvent } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
 
@@ -26,7 +26,7 @@ function measureColumn() {
   const testRoot = createTestRoot()
   testRoot.render(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   const width = testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -45,9 +45,22 @@ function cell(testRoot: TestRoot, testId: string, column: number, line = 0) {
 }
 
 describeNative("focus on inline boxes", () => {
+  // A root that is not unmounted keeps its `window` subscriptions after the next test renderer
+  // disposes its renderer, and the next `window.addEventListener` then resyncs a disposed one.
+  const mounted = new Set<TestRoot>()
+  afterEach(() => {
+    for (const testRoot of [...mounted]) testRoot.unmount()
+  })
+
   function setup(node: React.ReactNode) {
     columnWidth()
     const testRoot = createTestRoot({ width: 400, height: 300 })
+    mounted.add(testRoot)
+    const unmount = testRoot.unmount
+    testRoot.unmount = () => {
+      mounted.delete(testRoot)
+      unmount()
+    }
     testRoot.render(node)
     const focused = () =>
       testRoot.renderer.getElement(testRoot.renderer.getFocusedElementId())?.testId ?? null
@@ -67,7 +80,7 @@ describeNative("focus on inline boxes", () => {
     return (
       <div style={{ width: 300 }}>
         <div testId="first" tabIndex={0} style={STOP} />
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           Go to{" "}
           <span testId="one" tabIndex={tabIndexes.one}>
             one
@@ -77,7 +90,7 @@ describeNative("focus on inline boxes", () => {
             two
           </span>
           .
-        </text>
+        </div>
         <div testId="last" tabIndex={0} style={STOP} />
       </div>
     )
@@ -99,7 +112,7 @@ describeNative("focus on inline boxes", () => {
 
     it("orders a nested span after the span around it", () => {
       const { tab } = setup(
-        <text style={TEXT}>
+        <div style={TEXT}>
           <span testId="outer" tabIndex={0}>
             ab
             <span testId="inner" tabIndex={0}>
@@ -109,7 +122,7 @@ describeNative("focus on inline boxes", () => {
           <span testId="after" tabIndex={0}>
             ef
           </span>
-        </text>
+        </div>
       )
       expect([tab(), tab(), tab()]).toEqual(["outer", "inner", "after"])
     })
@@ -132,17 +145,17 @@ describeNative("focus on inline boxes", () => {
     it("leaves the tab order of two paragraphs in document order", () => {
       const { tab } = setup(
         <div style={{ width: 300 }}>
-          <text style={TEXT}>
+          <div style={TEXT}>
             <span testId="a" tabIndex={0}>
               a
             </span>
-          </text>
+          </div>
           <div testId="between" tabIndex={0} style={STOP} />
-          <text style={TEXT}>
+          <div style={TEXT}>
             <span testId="b" tabIndex={0}>
               b
             </span>
-          </text>
+          </div>
         </div>
       )
       expect([tab(), tab(), tab()]).toEqual(["a", "between", "b"])
@@ -153,14 +166,14 @@ describeNative("focus on inline boxes", () => {
     it("focuses and blurs a span, which is then document.activeElement", () => {
       const refs: Record<string, any> = {}
       const { testRoot, focused } = setup(
-        <text style={TEXT}>
+        <div style={TEXT}>
           <span ref={(element) => (refs.one = element)} testId="one" tabIndex={0}>
             one
           </span>{" "}
           <span ref={(element) => (refs.two = element)} testId="two" tabIndex={0}>
             two
           </span>
-        </text>
+        </div>
       )
       expect(document.activeElement).toBeNull()
       refs.one.focus()
@@ -180,12 +193,12 @@ describeNative("focus on inline boxes", () => {
       const refs: Record<string, any> = {}
       const { testRoot } = setup(
         <div ref={(element) => (refs.root = element)} style={{ width: 300 }}>
-          <text ref={(element) => (refs.text = element)} style={TEXT}>
+          <div ref={(element) => (refs.text = element)} style={TEXT}>
             Go to{" "}
             <span ref={(element) => (refs.span = element)} testId="one" tabIndex={0}>
               one
             </span>
-          </text>
+          </div>
         </div>
       )
       for (const element of [refs.root, refs.text, refs.span]) {
@@ -206,11 +219,11 @@ describeNative("focus on inline boxes", () => {
     it("ignores focus() on a span without a tabIndex", () => {
       const refs: Record<string, any> = {}
       const { focused } = setup(
-        <text style={TEXT}>
+        <div style={TEXT}>
           <span ref={(element) => (refs.span = element)} testId="plain">
             plain
           </span>
-        </text>
+        </div>
       )
       refs.span.focus()
       expect(focused()).toBeNull()
@@ -222,11 +235,11 @@ describeNative("focus on inline boxes", () => {
       const { testRoot } = setup(
         <div testId="scroller" style={{ width: 200, height: 60, overflow: "scroll" }}>
           <div style={{ width: 100, height: 200, flexShrink: 0 }} />
-          <text style={TEXT}>
+          <div style={TEXT}>
             <span ref={(element) => (refs.span = element)} testId="low" tabIndex={0}>
               low
             </span>
-          </text>
+          </div>
         </div>
       )
       const scroller = testRoot.renderer.findByTestId("scroller")!.id
@@ -244,11 +257,11 @@ describeNative("focus on inline boxes", () => {
       const { testRoot, tab } = setup(
         <div testId="scroller" style={{ width: 200, height: 60, overflow: "scroll" }}>
           <div style={{ width: 100, height: 200, flexShrink: 0 }} />
-          <text style={TEXT}>
+          <div style={TEXT}>
             <span testId="low" tabIndex={0}>
               low
             </span>
-          </text>
+          </div>
         </div>
       )
       const scroller = testRoot.renderer.findByTestId("scroller")!.id
@@ -273,7 +286,7 @@ describeNative("focus on inline boxes", () => {
         })
       const scene = (
         <div style={{ width: 300 }}>
-          <text style={TEXT}>
+          <div style={TEXT}>
             <span
               ref={(element) => (refs.one = element)}
               testId="one"
@@ -292,7 +305,7 @@ describeNative("focus on inline boxes", () => {
             >
               two
             </span>
-          </text>
+          </div>
         </div>
       )
       const cleanups = [
@@ -370,12 +383,12 @@ describeNative("focus on inline boxes", () => {
       const columns = 10
       const { focused, click } = setup(
         <div style={{ width: 300 }}>
-          <text testId="p" style={{ ...TEXT, width: Math.ceil((columns + 0.5) * columnWidth()) }}>
+          <div testId="p" style={{ ...TEXT, width: Math.ceil((columns + 0.5) * columnWidth()) }}>
             aaaa{" "}
             <span testId="wrap" tabIndex={0}>
               bbbb cccc
             </span>
-          </text>
+          </div>
         </div>
       )
       click("p", 1, 1)
@@ -406,7 +419,7 @@ describeNative("focus on inline boxes", () => {
 
     it("focuses the innermost focusable span, and a focusable one around a plain one", () => {
       const { focused, click } = setup(
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <span testId="outer" tabIndex={0}>
             ab
             <span testId="inner" tabIndex={0}>
@@ -414,7 +427,7 @@ describeNative("focus on inline boxes", () => {
             </span>
             <span>ef</span>
           </span>
-        </text>
+        </div>
       )
       click("p", 3)
       expect(focused()).toBe("inner")
@@ -435,12 +448,12 @@ describeNative("focus on inline boxes", () => {
           style={{ width: 300 }}
           onFocus={(event) => heard.push(event.target === refs.card ? "card" : "span")}
         >
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             Go to{" "}
             <span testId="one" tabIndex={0}>
               one
             </span>
-          </text>
+          </div>
         </div>
       )
       click("p", 7)
@@ -453,12 +466,12 @@ describeNative("focus on inline boxes", () => {
 
     it("focuses on the press and still starts a selection with a drag from the span", () => {
       const { testRoot, focused } = setup(
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           Hello{" "}
           <span testId="one" tabIndex={0}>
             world
           </span>
-        </text>
+        </div>
       )
       const from = cell(testRoot, "p", 6)
       const to = cell(testRoot, "p", 14)
@@ -472,11 +485,11 @@ describeNative("focus on inline boxes", () => {
 
     it("leaves focus to a prevented mousedown", () => {
       const { focused, click } = setup(
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <span testId="one" tabIndex={0} onMouseDown={(event) => event.preventDefault()}>
             one
           </span>
-        </text>
+        </div>
       )
       click("p", 1)
       expect(focused()).toBeNull()
@@ -501,9 +514,9 @@ describeNative("focus on inline boxes", () => {
           </span>
         )
         const paragraph = (
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             Go to {span}
-          </text>
+          </div>
         )
         const setupped = setup(
           <div style={{ width: 300 }}>
@@ -555,11 +568,11 @@ describeNative("focus on inline boxes", () => {
       it("does not carry a prevented press's focus over to the next press", () => {
         const { focused, click, testRoot } = setup(
           <div style={{ width: 300 }}>
-            <text testId="p" style={TEXT}>
+            <div testId="p" style={TEXT}>
               <span testId="one" tabIndex={0} onMouseDown={(event) => event.preventDefault()}>
                 one
               </span>
-            </text>
+            </div>
             <div testId="plain" tabIndex={0} style={STOP} />
           </div>
         )
@@ -574,11 +587,11 @@ describeNative("focus on inline boxes", () => {
     it("lets what covers the paragraph take the press", () => {
       const { focused, testRoot } = setup(
         <div style={{ width: 300, height: 100 }}>
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             <span testId="one" tabIndex={0}>
               one
             </span>
-          </text>
+          </div>
           <div testId="cover" style={{ position: "absolute", left: 0, top: 0, width: 300, height: 100 }} />
         </div>
       )
@@ -593,7 +606,7 @@ describeNative("focus on inline boxes", () => {
       const refs: Record<string, any> = {}
       const log: string[] = []
       const scene = (tabIndex?: number) => (
-        <text style={TEXT}>
+        <div style={TEXT}>
           <span
             ref={(element) => (refs.span = element)}
             testId="one"
@@ -602,7 +615,7 @@ describeNative("focus on inline boxes", () => {
           >
             one
           </span>
-        </text>
+        </div>
       )
       const { testRoot, focused } = setup(scene(0))
       refs.span.focus()
@@ -618,11 +631,11 @@ describeNative("focus on inline boxes", () => {
       const scene = (tabIndex?: number) => (
         <div style={{ width: 300 }}>
           <div testId="first" tabIndex={0} style={STOP} />
-          <text style={TEXT}>
+          <div style={TEXT}>
             <span testId="one" tabIndex={tabIndex}>
               one
             </span>
-          </text>
+          </div>
           <div testId="last" tabIndex={0} style={STOP} />
         </div>
       )
@@ -640,11 +653,11 @@ describeNative("focus on inline boxes", () => {
         <div style={{ width: 300 }}>
           <div testId="first" tabIndex={0} style={STOP} />
           <div inert>
-            <text style={TEXT}>
+            <div style={TEXT}>
               <span testId="one" tabIndex={0}>
                 one
               </span>
-            </text>
+            </div>
           </div>
           <div testId="last" tabIndex={0} style={STOP} />
         </div>

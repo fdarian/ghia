@@ -194,11 +194,7 @@ export type SvgFeSpotLightProps = SvgShapeElementProps<NativeSvgFeSpotLightProps
 export type SvgFeTileProps = SvgShapeElementProps<NativeSvgFeTileProps>
 export type SvgFeTurbulenceProps = SvgShapeElementProps<NativeSvgFeTurbulenceProps>
 
-/**
- * `<text>` is the host text element too, so its props are the host ones plus
- * the SVG attributes the host element does not have.
- */
-export type SvgTextProps = Props & Omit<NativeSvgTextProps, keyof Props>
+export type SvgTextProps = SvgShapeElementProps<NativeSvgTextProps>
 
 export interface CodeProps extends ReactHostProps<NativeCodeProps> {
   key?: Key | null
@@ -243,6 +239,8 @@ export interface Container {
   instances: Map<number, Instance>
   /** The window's `<html>`: its native root. A portal container shares its root's. */
   html: Instance
+  /** The `<head>` in `html`, before `body`. */
+  head: Instance
   /** The `<body>` in `html`, where the app's top-level nodes are. */
   body: Instance
   windowKeyEventHandlers: WindowKeyEventHandlers
@@ -332,8 +330,7 @@ export type PublicInstance = Instance &
   DomElement &
   Required<Pick<Instance, "getBoundingClientRect" | "getAnimations" | typeof HOST_BINDING>>
 
-export interface HostContext {
-  isInsideText: boolean
-}
+/** The reconciler keeps no context per host parent. */
+export type HostContext = Record<string, never>
 
 export type { ElementIdAllocator, EventHandlerMap, NativeRenderer, RootEventHandlers }

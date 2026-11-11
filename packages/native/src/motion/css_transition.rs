@@ -546,6 +546,7 @@ pub(crate) fn declares_transitions(style: &StyleDesc) -> bool {
 pub(crate) fn leaves_box_size(style: &StyleDesc) -> bool {
     let leaves = |style: &StyleDesc| {
         !super::css_animation::declares_animation(style)
+            && !crate::css::var_substitution::holds_family(style, "transition")
             && TransitionList::parse(style).is_ok_and(|list| {
                 AnimProp::ALL
                     .iter()
@@ -558,8 +559,12 @@ pub(crate) fn leaves_box_size(style: &StyleDesc) -> bool {
         && super::state_styles(style).into_iter().all(|(_, state)| state.is_none_or(leaves))
 }
 
-/// Whether `style` sets a `transition*` field that is more than `none`.
+/// Whether `style` sets a `transition*` field that is more than `none`, or holds a `transition*`
+/// declaration with a `var()`, which says what it is once the custom properties are known.
 fn declares_transition(style: &StyleDesc) -> bool {
+    if crate::css::var_substitution::holds_family(style, "transition") {
+        return true;
+    }
     let only_none = |text: &Option<String>| {
         text.as_deref()
             .is_none_or(|text| text.trim().eq_ignore_ascii_case("none"))

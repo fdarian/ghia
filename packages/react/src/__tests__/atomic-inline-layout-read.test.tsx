@@ -35,7 +35,7 @@ function Page(props: { name: string; rows: number; cells: number; width?: number
       <div testId={`${props.name}-scroller`} style={{ width: 300, height: 120, overflow: "scroll" }}>
         {rows}
       </div>
-      <text style={{ ...TEXT, width: 360 }}>
+      <div style={{ ...TEXT, width: 360 }}>
         {"Before the box "}
         <div
           testId={`${props.name}-atomic`}
@@ -52,7 +52,7 @@ function Page(props: { name: string; rows: number; cells: number; width?: number
           {cells}
         </div>
         {" and after it"}
-      </text>
+      </div>
     </div>
   )
 }

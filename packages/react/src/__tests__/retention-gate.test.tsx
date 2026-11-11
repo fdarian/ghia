@@ -17,7 +17,7 @@ const retained = process.env.GPUIX_RETAIN_OFF === undefined
 const PanPage = ({ x, clock = 0 }: { x: number; clock?: number }) => (
   <div testId="page" style={{ width: 640, height: 480, overflow: "hidden" }}>
     <div style={{ height: 20 }}>
-      <text>{`clock ${clock}`}</text>
+      <div>{`clock ${clock}`}</div>
     </div>
     <div style={{ position: "absolute", left: -x, top: 20, width: 9000, display: "flex", flexWrap: "wrap", gap: 8 }}>
       {Array.from({ length: CARDS }, (_, index) => (

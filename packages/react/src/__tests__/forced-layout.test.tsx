@@ -47,7 +47,7 @@ function Fixture(props: { grow: boolean; spans: Spans }) {
       <div testId="positioned" style={{ position: "relative", width: 100, height: 40 }}>
         <div testId="absolute" style={{ position: "absolute", left: 10, top: 5, width: 20, height: 20 }} />
       </div>
-      <text testId="paragraph" style={{ ...TEXT, width: props.grow ? 120 : 300 }}>
+      <div testId="paragraph" style={{ ...TEXT, width: props.grow ? 120 : 300 }}>
         {"Lead words "}
         <span ref={span("first")} style={{ paddingLeft: 4, paddingRight: 4 }}>
           a span with enough words to wrap across lines
@@ -55,7 +55,7 @@ function Fixture(props: { grow: boolean; spans: Spans }) {
         {" and a "}
         <span ref={span("second")}>tail</span>
         {" to finish"}
-      </text>
+      </div>
       <div testId="grid" style={{ display: "grid", gridTemplateColumns: "50px 70px", gap: 3 }}>
         <div testId="cell-a" style={{ height: 12 }} />
         <div testId="cell-b" style={{ height: props.grow ? 30 : 12 }} />
@@ -222,7 +222,7 @@ describeNative("a read on a dirty window", () => {
       )
       const painted = renderer.getPaintedFrameCount()
       new ResizeObserver((entries) => sizes.push(entries[0]!.borderBoxSize[0]!.inlineSize)).observe(element)
-      renderer.getElementBounds(element.id)
+      renderer.getElementBounds(element.nativeId)
       renderer.dispatchNativeEvents()
 
       expect(sizes, "the read laid out and reported nothing").toEqual([])

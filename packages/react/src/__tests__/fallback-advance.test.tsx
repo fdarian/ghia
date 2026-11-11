@@ -78,7 +78,7 @@ function mismatchesOf(families: Record<string, number[]>, scaleFactor: number, f
       const clusters = [...segmenter.segment(text)].map((g) => [g.index, g.index + g.segment.length] as [number, number])
       root.render(
         <div style={{ display: "flex", alignItems: "flex-start" }} highlight={{ ranges: clusters }}>
-          <text style={{ fontFamily: GPUIX_FAMILY[family] ?? family, fontSize: parseFloat(size), whiteSpace: "pre", color: "#000000" }}>{text}</text>
+          <div style={{ fontFamily: GPUIX_FAMILY[family] ?? family, fontSize: parseFloat(size), whiteSpace: "pre", color: "#000000" }}>{text}</div>
         </div>
       )
       const matches = root.renderer.getPaintedHighlights().sort((a, b) => a.start - b.start)

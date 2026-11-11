@@ -9,22 +9,23 @@
  */
 
 import type { ElementType } from "../host.js"
+import { attributeNameOf } from "./attribute-names.js"
 
 /** Where `[DOM_BINDING]()` is read, so two copies of this package find each other's nodes. */
 export const DOM_BINDING: unique symbol = Symbol.for("@ghia/native/dom-binding")
 
-/**
- * The element types of what every window root is made of, `html` and `body` in it, which each
- * adapter builds through its own host machinery. `ElementType` lists what an app writes, so
- * these are typed as what the adapters' constructors take.
- */
-export const ROOT_ELEMENT_TYPES = { html: "html", body: "body" } as unknown as {
-  html: ElementType
-  body: ElementType
-}
+/** The element types of what every window root is made of: `html`, with `head` and `body` in it. */
+export const ROOT_ELEMENT_TYPES = {
+  html: "html",
+  head: "head",
+  body: "body",
+} as const satisfies Record<string, ElementType>
 
 /** Both fill the window: the box above the root is the window, and the app's top element sizes against it. */
 export const ROOT_ELEMENT_STYLE = { display: "block", width: "100%", height: "100%" } as const
+
+/** `head` has no box and its children are never drawn: it holds what the page loads, not what it shows. */
+export const ROOT_HEAD_STYLE = { display: "none" } as const
 
 /** What an adapter tells the DOM members about one of its nodes. */
 export type NodeBinding = {
@@ -293,7 +294,8 @@ abstract class TextClass extends CharacterDataClass {
 
 /** The `data-*` props are the attributes `dataset` reads, with the name in camel case. */
 const DATA_ATTRIBUTE = /^data-(.+)$/
-const NOT_ATTRIBUTES: ReadonlySet<string> = new Set(["children", "key", "ref", "style"])
+/** Props that are not attributes: `getAttributeNames` skips them. */
+export const NOT_ATTRIBUTES: ReadonlySet<string> = new Set(["children", "key", "ref", "style"])
 
 function camelCase(dashed: string): string {
   return dashed.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase())
@@ -387,9 +389,10 @@ abstract class ElementClass extends NodeClass {
 
   getAttributeNames(): string[] {
     const names: string[] = []
+    const svg = this instanceof shared.SVGElement
     for (const prop of this[DOM_BINDING]().propNames()) {
       if (NOT_ATTRIBUTES.has(prop)) continue
-      const name = prop === "className" ? "class" : prop
+      const name = attributeNameOf(prop, svg)
       if (this.getAttribute(name) !== null && !names.includes(name)) names.push(name)
     }
     return names

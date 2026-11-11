@@ -6,6 +6,7 @@ import {
   installElementSource,
   runMotionReleases,
   syncWindowEventListeners,
+  syncWindowSelectionChange,
   unregisterEventHandlers,
 } from "@ghia/native/host"
 import { toAppearance } from "@ghia/native/host"
@@ -15,7 +16,6 @@ import type {
   NativeRenderer,
   RendererRootBinding,
   RootEvent,
-  SyncDispatchResult,
   RootEventHandlers,
 } from "@ghia/native/host"
 import { HostRoot, removeHostNode } from "./host.js"
@@ -46,7 +46,6 @@ export interface Root {
   flush(): void
   flushSync<Value>(fn: () => Value): Value
   dispatch(event: EventPayload): boolean
-  dispatchSync(event: EventPayload): SyncDispatchResult
   unmount(): void
 }
 
@@ -59,6 +58,8 @@ export function createRoot(
   const mutations = createMutationQueue(renderer, (ids) => {
     for (const id of ids) {
       unregisterEventHandlers(eventHandlers, id)
+      // `markUnmounted` leaves a `<nativeview>`'s listeners attached so it hears `detach` while this batch is applied; now they go.
+      container.elements.get(id)?.listeners.detach()
       container.elements.delete(id)
     }
     runMotionReleases(container)
@@ -88,6 +89,7 @@ export function createRoot(
   })
   let binding: RendererRootBinding | undefined
   let stopWindowEventListeners: (() => void) | undefined
+  let selectionChange: ReturnType<typeof syncWindowSelectionChange> | undefined
   let stopElementSource: (() => void) | undefined
   let dispose: (() => void) | undefined
   const selectionListeners = new Set<(text: string | null) => void>()
@@ -95,13 +97,7 @@ export function createRoot(
     rootHandlers.onSelectionChange?.(event, currentRenderer)
     for (const listener of selectionListeners) listener(event.value ?? null)
   }
-  const syncSelection = () => {
-    if (!binding) return
-    renderer.setWindowSelectionChange?.(
-      Boolean(rootHandlers.onSelectionChange) || selectionListeners.size > 0,
-      binding.windowSelectionEventId
-    )
-  }
+  const syncSelection = () => selectionChange?.resync()
 
   const appearanceListeners = new Set<(appearance: Appearance) => void>()
   const onAppearanceChange = (event: RootEvent, currentRenderer: NativeRenderer) => {
@@ -126,6 +122,14 @@ export function createRoot(
       onAppearanceChange,
       tabNavigation: rootHandlers.tabNavigation,
       onEvent: rootHandlers.onEvent,
+      // The flush stands in for the microtask checkpoint a browser runs before it renders.
+      schedule: (run) => {
+        try {
+          run()
+        } finally {
+          flush()
+        }
+      },
     })
     renderer.setWindowKeyEvents?.(
       // Always on: the Tab and Escape defaults run on the key event, and
@@ -138,11 +142,15 @@ export function createRoot(
     stopElementSource = installElementSource(
       renderer,
       (id) => container.elements.get(id),
-      () => ({ html: container.html, body: container.body })
+      () => ({ html: container.html, head: container.head, body: container.body })
     )
     // Sent on every attach, so a remount without the option restores the default.
     mutations.setKeyboardFocusDim(rootHandlers.keyboardFocusDim !== false)
-    syncSelection()
+    selectionChange = syncWindowSelectionChange(
+      renderer,
+      binding.windowSelectionEventId,
+      () => Boolean(rootHandlers.onSelectionChange) || selectionListeners.size > 0
+    )
     syncAppearance()
   }
 
@@ -153,7 +161,8 @@ export function createRoot(
     stopWindowEventListeners = undefined
     stopElementSource?.()
     stopElementSource = undefined
-    renderer.setWindowSelectionChange?.(false, binding.windowSelectionEventId)
+    selectionChange?.stop()
+    selectionChange = undefined
     renderer.setWindowAppearanceChange?.(false, binding.windowAppearanceEventId)
     binding = undefined
   }
@@ -209,7 +218,7 @@ export function createRoot(
             return code()
           },
         }),
-        container
+        container.body
       )
       flush()
     },
@@ -224,13 +233,6 @@ export function createRoot(
     dispatch(event) {
       try {
         return state.dispatch(event)
-      } finally {
-        flush()
-      }
-    },
-    dispatchSync(event) {
-      try {
-        return state.dispatchSync(event)
       } finally {
         flush()
       }

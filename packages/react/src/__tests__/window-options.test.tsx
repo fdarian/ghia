@@ -39,11 +39,11 @@ describeNative("test window options", () => {
   it("retitles the platform window, and keeps the title through later frames", () => {
     const { renderer, render, unmount } = createTestRoot({ title: "Inspector" })
     try {
-      render(<text>one</text>)
+      render(<div>one</div>)
       renderer.setWindowTitle("Inspector - edited")
       expect(renderer.getWindowTitle()).toBe("Inspector - edited")
 
-      render(<text>two</text>)
+      render(<div>two</div>)
       expect(renderer.getWindowTitle()).toBe("Inspector - edited")
 
       renderer.setWindowTitle("")
@@ -81,7 +81,7 @@ describeNative("the kind window option", () => {
   it("opens a test window for each kind, and renders in it", () => {
     for (const kind of ["normal", "panel"] as const) {
       const { renderer, render, unmount } = createTestRoot({ kind, width: 320, height: 240 })
-      render(<text>{`in ${kind}`}</text>)
+      render(<div>{`in ${kind}`}</div>)
       renderer.flush()
       expect(renderer.getAllText()).toEqual([`in ${kind}`])
       expect(renderer.getWindowSize()).toEqual({ width: 320, height: 240 })
@@ -104,7 +104,7 @@ describeRegions("titlebarTransparent", () => {
         style={{ appRegion: "drag", width: 200, height: 40 }}
         onMouseDown={() => setPressed((count) => count + 1)}
       >
-        <text testId="count">{`pressed ${pressed}`}</text>
+        <div testId="count">{`pressed ${pressed}`}</div>
       </div>
     )
   }

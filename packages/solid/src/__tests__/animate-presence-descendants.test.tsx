@@ -18,7 +18,7 @@ function Status(props: { log: string[] }) {
     props.log.push(isPresent() ? "present" : "leaving")
   })
   onCleanup(() => props.log.push("disposed"))
-  return <text>{isPresent() ? "here" : "leaving"}</text>
+  return <div>{isPresent() ? "here" : "leaving"}</div>
 }
 
 function Card(props: { log: string[] }) {
@@ -89,7 +89,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid usePresence safeToRemove", () => 
     createEffect(() => {
       if (!isPresent()) props.removers.set(props.name, safeToRemove)
     })
-    return <text>{props.name}</text>
+    return <div>{props.name}</div>
   }
 
   it("keeps a child with no exit until safeToRemove is called", () => {
@@ -201,7 +201,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid usePresence safeToRemove", () => 
               <Show when={inner()}>
                 <Participant name="a" removers={removers} />
               </Show>
-              <text>kept</text>
+              <div>kept</div>
             </div>
           </Show>
         </AnimatePresence>
@@ -218,7 +218,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid usePresence safeToRemove", () => 
     let remove: (() => void) | undefined
     function Early() {
       remove = usePresence()[1]
-      return <text>early</text>
+      return <div>early</div>
     }
     const app = createTestRoot()
     app.render(() => (
@@ -244,7 +244,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid AnimatePresence re-entry while a 
       createEffect(() => {
         if (!isPresent()) removers.set(props.name, safeToRemove)
       })
-      return <text>{isPresent() ? props.name : `${props.name} leaving`}</text>
+      return <div>{isPresent() ? props.name : `${props.name} leaving`}</div>
     }
     const app = createTestRoot()
     app.render(() => (
@@ -276,7 +276,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid AnimatePresence re-entry while a 
     const exits: string[] = []
     function Participant() {
       usePresence()
-      return <text>p</text>
+      return <div>p</div>
     }
     const app = createTestRoot()
     app.render(() => (

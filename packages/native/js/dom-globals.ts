@@ -1,6 +1,8 @@
 import { cancelAnimationFrame, requestAnimationFrame } from "./animation-frame.js"
-import { ResizeObserver } from "./observers.js"
+import { getComputedStyle } from "./computed-style.js"
 import { CSSRule, CSSRuleList, CSSStyleRule, CSSStyleSheet } from "./css/index.js"
+import { matchMedia } from "./match-media.js"
+import { IntersectionObserver, ResizeObserver } from "./observers.js"
 import {
   CharacterData,
   Document,
@@ -12,9 +14,12 @@ import {
   SVGElement,
   Text,
 } from "./dom/nodes.js"
+import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
+import { Selection } from "./dom/selection.js"
 import { document, window } from "./events/window-target.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
 import { isWebBuild } from "./web-build.js"
+import { installWindowMembers } from "./window-members.js"
 
 type AddListener = (
   type: string,
@@ -41,7 +46,14 @@ const DOM_CLASSES = {
   CSSRule,
   CSSStyleRule,
   CSSRuleList,
+  Selection,
+  MutationObserver,
+  MutationRecord,
 }
+
+const getSelection = () => document.getSelection()
+
+const DOM_FUNCTIONS = { ResizeObserver, IntersectionObserver, getComputedStyle, matchMedia, getSelection }
 
 /**
  * Marks the install as done on `globalThis`, so a second evaluation of this module
@@ -88,9 +100,15 @@ function install(): void {
     scroll: { value: noScroll, configurable: true, writable: true },
     scrollBy: { value: noScroll, configurable: true, writable: true },
   })
+  installWindowMembers()
   // A runtime that has its own keeps it, which is what a library that takes `window.ResizeObserver` gets elsewhere.
-  if (Reflect.get(globalThis, "ResizeObserver") === undefined) {
-    Object.defineProperty(globalThis, "ResizeObserver", { value: ResizeObserver, configurable: true, writable: true })
+  for (const name of Object.keys(DOM_FUNCTIONS)) {
+    if (Reflect.get(globalThis, name) !== undefined) continue
+    Object.defineProperty(globalThis, name, {
+      value: DOM_FUNCTIONS[name as keyof typeof DOM_FUNCTIONS],
+      configurable: true,
+      writable: true,
+    })
   }
   // Same for the DOM classes: `element instanceof HTMLElement` is what a library checks for.
   for (const name of Object.keys(DOM_CLASSES)) {

@@ -1391,6 +1391,7 @@ pub(crate) fn resolve_declared_style<'a>(
     id: u64,
     style: impl Into<StyleRef<'a>>,
     focus_visible: FocusVisible,
+    focus_styles: Option<&crate::focus::FocusStyles>,
     measurement: Option<&Measurement>,
     interpolate_size: InterpolateSize,
     scope: Scope,
@@ -1404,18 +1405,20 @@ pub(crate) fn resolve_declared_style<'a>(
             (before, Some(svg_before)) => {
                 let before = with_vars(
                     fold_state_styles(before.unwrap_or(&StyleDesc::default()), focus_visible, pointer),
+                    id,
                     parent_font,
+                    focus_styles,
                 );
                 transitions.seed(id, &before, Some(svg_before), parent_colors, parent_font);
             }
             (Some(before), None) => {
-                let before = with_vars(fold_state_styles(before, focus_visible, pointer), parent_font);
+                let before = with_vars(fold_state_styles(before, focus_visible, pointer), id, parent_font, focus_styles);
                 transitions.seed(id, &before, svg, parent_colors, parent_font);
             }
             (None, None) => {}
         }
     }
-    let mut after = with_vars(fold_state_styles(style, focus_visible, pointer), parent_font);
+    let mut after = with_vars(fold_state_styles(style, focus_visible, pointer), id, parent_font, focus_styles);
     let covered = animations
         .map(|(animations, registry)| animations.advance(id, &after, registry, scope, now))
         .unwrap_or_default();
@@ -1444,15 +1447,44 @@ pub(crate) struct DeclaredStyle {
     pub(crate) transitions: Option<TransitionStyle>,
 }
 
-/// `style` with its `var()` substituted from the custom properties the element computes to. Transitions and animations compare and blend computed values, so they are
-/// given the style after this: a `--p` that changes is a change of the property, from the value
-/// the last style computed to the one this does.
-fn with_vars(style: Arc<StyleDesc>, parent_font: &ParentValues) -> Arc<StyleDesc> {
-    if !crate::css::var_substitution::reads_vars(&style) {
-        return style;
+/// `style` with its `var()` substituted from the custom properties the element computes to. The
+/// style a transition or an animation compares and blends is the one folded here from the style
+/// table's, which no build has substituted (the build resolves the style with only the pointer
+/// states folded in); a style this runs for that no build resolves first (a text span, an
+/// `<svg>`) needs it too. Transitions and animations compare computed values, so a `--p` that
+/// changes is a change of the property, from the value the last style computed to the one this
+/// does.
+fn with_vars(
+    style: Arc<StyleDesc>,
+    id: u64,
+    parent_font: &ParentValues,
+    focus_styles: Option<&crate::focus::FocusStyles>,
+) -> Arc<StyleDesc> {
+    resolve_vars(&style, id, parent_font, focus_styles).map_or(style, Arc::new)
+}
+
+/// What [`with_vars`] makes of `style`, or `None` when it holds nothing to substitute. A box with
+/// no transition, animation or `motion` that does not go through it calls this itself.
+///
+/// `focus_styles` is the element's, which adds the custom properties of a `focusWithin` that
+/// applies (`FocusStyles::custom_of`, as the build does); a box has none, its focus variants are
+/// in its `PointerStates`. `focusable` is false there: `focusVisible` and `hasFocusVisible` were
+/// folded into `style` and are gone from it.
+fn resolve_vars(
+    style: &StyleDesc,
+    id: u64,
+    parent_font: &ParentValues,
+    focus_styles: Option<&crate::focus::FocusStyles>,
+) -> Option<StyleDesc> {
+    if !crate::css::var_substitution::reads_vars(style) {
+        return None;
     }
     crate::css::custom_properties::reads::note();
-    crate::css::var_substitution::resolve(&style, &parent_font.custom_of(&style)).map_or(style, Arc::new)
+    let custom = match focus_styles {
+        Some(focus_styles) => focus_styles.custom_of(id, style, false, &parent_font.custom),
+        None => parent_font.custom_of(style),
+    };
+    crate::css::var_substitution::resolve(style, &custom)
 }
 
 /// The style as `style` has it after the state styles that apply. Shared with `style` when it
@@ -3764,6 +3796,7 @@ mod tests {
             1,
             &plain,
             FocusVisible::default(),
+            None,
             None,
             InterpolateSize::default(),
             Scope::Element,
@@ -6211,6 +6244,7 @@ mod tests {
                 1,
                 style,
                 FocusVisible::default(),
+                None,
                 None,
                 InterpolateSize::default(),
                 Scope::Element,

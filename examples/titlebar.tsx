@@ -42,7 +42,7 @@ export function TitlebarApp() {
           onClick={(event) => setLastEvent(event.type)}
           style={{ flexGrow: 1, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          <text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600 }}>Titlebar</text>
+          <div style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600 }}>Titlebar</div>
         </div>
         <div style={{ appRegion: 'no-drag', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <div
@@ -60,7 +60,7 @@ export function TitlebarApp() {
               hover: { backgroundColor: '#FFFFFF2B' },
             }}
           >
-            <text style={{ color: '#FFFFFFE8', fontSize: 12 }}>{`Clicked ${clicks}`}</text>
+            <div style={{ color: '#FFFFFFE8', fontSize: 12 }}>{`Clicked ${clicks}`}</div>
           </div>
           <input
             testId="name-input"
@@ -82,14 +82,14 @@ export function TitlebarApp() {
       </div>
 
       <div style={{ padding: 24, gap: 8 }}>
-        <text style={{ color: muted, fontSize: 12, fontWeight: 600 }}>LAST EVENT ON THE TITLE</text>
-        <text testId="last-event" style={{ color: '#FFFFFF', fontSize: 22, fontWeight: 600 }}>
+        <div style={{ color: muted, fontSize: 12, fontWeight: 600 }}>LAST EVENT ON THE TITLE</div>
+        <div testId="last-event" style={{ color: '#FFFFFF', fontSize: 22, fontWeight: 600 }}>
           {lastEvent}
-        </text>
-        <text style={{ color: muted, fontSize: 13, lineHeight: "20px" }}>
+        </div>
+        <div style={{ color: muted, fontSize: 13, lineHeight: "20px" }}>
           Drag the bar to move the window. Presses and moves over a drag region never reach the page, so
           this stays put; the button and the input are no-drag and get theirs.
-        </text>
+        </div>
       </div>
     </div>
   )

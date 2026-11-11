@@ -13,13 +13,17 @@ import {
   eventTypesWithOverrides,
   isReservedProp,
   ROOT_ELEMENT_STYLE,
+  ROOT_HEAD_STYLE,
   ROOT_ELEMENT_TYPES,
   sameMutationValue,
   serializeCustomProp,
   attributeNameOfProp,
   attributeValue,
   forwardsCustomProp,
+  hasMutationObservers,
+  queueCharacterDataMutation,
   readTextControlSelection,
+  recordAttributeChanges,
   requestFormSubmit,
   selectTextControl,
   setTextControlSelectionRange,
@@ -377,7 +381,7 @@ function materialize(node: HostNode): ReturnType<typeof stateFor> {
     syncCustomProps(renderer, node.nativeId, node.type, node.props)
     syncAttributes(renderer, node.nativeId, node.type, node.props)
   } else {
-    renderer.createElement(node.nativeId, "text")
+    renderer.createElement(node.nativeId, "#text")
     renderer.setText(node.nativeId, node.text)
   }
   state.mounted = true
@@ -399,17 +403,23 @@ export function publicInstanceById(container: Container, id: number): PublicInst
 }
 
 /**
- * Makes the window's `<html>` and `<body>` as React makes an element and mounts them as the
+ * Makes the window's `<html>`, `<head>` and `<body>` as React makes an element and mounts them as the
  * native root, so a root's content and a portal into `document.body` go through the same
  * `body`. `base` is the container before it has them.
  */
-export function installDocumentElements(base: Omit<Container, "html" | "body">): Container {
-  // `html` and `body` are assigned below, before anything reads them.
+export function installDocumentElements(base: Omit<Container, "html" | "head" | "body">): Container {
+  // `html`, `head` and `body` are assigned below, before anything reads them.
   const container = base as Container
   const html = createHostElement(
     nextId(container),
     ROOT_ELEMENT_TYPES.html,
     { style: { ...ROOT_ELEMENT_STYLE } },
+    container
+  )
+  const head = createHostElement(
+    nextId(container),
+    ROOT_ELEMENT_TYPES.head,
+    { style: { ...ROOT_HEAD_STYLE } },
     container
   )
   const body = createHostElement(
@@ -419,17 +429,22 @@ export function installDocumentElements(base: Omit<Container, "html" | "body">):
     container
   )
   container.html = html
+  container.head = head
   container.body = body
-  adopt(html, body)
-  linkChild(html, body)
+  for (const child of [head, body]) {
+    adopt(html, child)
+    linkChild(html, child)
+  }
   materialize(html)
+  materialize(head)
   materialize(body)
+  container.renderer.appendChild(html.nativeId, head.nativeId)
   container.renderer.appendChild(html.nativeId, body.nativeId)
   container.renderer.setRoot(html.nativeId)
   return container
 }
 
-/** Destroys `<html>` and, with it, `<body>`, once the app's nodes are out of them. */
+/** Destroys `<html>` and, with it, `<head>` and `<body>`, once the app's nodes are out of them. */
 export function destroyDocumentElements(container: Container): void {
   if (container.instances.get(container.html.nativeId) !== container.html) return
   container.renderer.destroyElement(container.html.nativeId)
@@ -554,16 +569,15 @@ export const hostConfig = {
   },
 
   getRootHostContext(_rootContainerInstance: Container): HostContext {
-    return { isInsideText: false }
+    return {}
   },
 
   getChildHostContext(
     parentHostContext: HostContext,
-    type: ElementType,
+    _type: ElementType,
     _rootContainerInstance: Container
   ): HostContext {
-    const isInsideText = type === "text" || type === "span"
-    return { ...parentHostContext, isInsideText }
+    return parentHostContext
   },
 
   shouldSetTextContent(_type: ElementType, _props: Props): boolean {
@@ -629,7 +643,13 @@ export const hostConfig = {
     // Custom prop diff (for non-div/text elements)
     diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
     diffAttributes(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
-    instance.props = newProps
+    if (hasMutationObservers()) {
+      recordAttributeChanges(instance, new Set([...Object.keys(oldProps), ...Object.keys(newProps)]), () => {
+        instance.props = newProps
+      })
+    } else {
+      instance.props = newProps
+    }
   },
 
   commitTextUpdate(
@@ -638,7 +658,9 @@ export const hostConfig = {
     newText: string
   ): void {
     rendererFor(textInstance).setText(textInstance.nativeId, newText)
+    const oldValue = textInstance.text
     textInstance.text = newText
+    queueCharacterDataMutation(textInstance, oldValue)
   },
 
   appendChildToContainer(container: Container, child: Instance): void {

@@ -185,6 +185,18 @@ describeNative("flex", () => {
     expect(errorsOf({ hover: { flex: "bogus" } })).toBe("")
   })
 
+  it("drops only the bad flex: the items are laid out as without it, with the rest of the style applied", () => {
+    const second = { flex: 1, height: 10 }
+    const without = laidOut(ROW, [{ flexGrow: 3, height: 10 }, second])
+    expect(without).toEqual([
+      [0, 0, 225, 10],
+      [225, 0, 75, 10],
+    ])
+    for (const flex of ["1 2 3", -1, "1 -1", "1 auto 2", ""]) {
+      expect(laidOut(ROW, [{ flex, flexGrow: 3, height: 10 }, second]), String(flex)).toEqual(without)
+    }
+  })
+
   describe("in a hover state", () => {
     const hovered = (flex: Style) => {
       let result: number[][] = []
@@ -206,6 +218,14 @@ describeNative("flex", () => {
 
     it("replaces the base shorthand, and a base longhand it covers", () => {
       expect(hovered({ flexGrow: 9, hover: { flex: "3 1 0%" } })).toEqual([
+        [0, 0, 225, 10],
+        [225, 0, 75, 10],
+      ])
+    })
+
+    it("leaves the items as they were for a bad state flex, and applies the rest of the state", () => {
+      expect(hovered({ hover: { flex: "bogus" } })).toEqual(hovered({}))
+      expect(hovered({ hover: { flex: "bogus", flexGrow: 3 } })).toEqual([
         [0, 0, 225, 10],
         [225, 0, 75, 10],
       ])
@@ -280,6 +300,64 @@ describeNative("flexFlow", () => {
     expect(errorsOf({ flexFlow: "column column-reverse" })).toBe("")
     expect(errorsOf({ flexFlow: "sideways" })).toBe("")
     expect(errorsOf({ flexFlow: "" })).toBe("")
+  })
+
+  it("drops only the bad flexFlow: the items are laid out as without it, with the rest of the style applied", () => {
+    const items = [{ width: 50, height: 20 }, { width: 50, height: 20 }]
+    const without = laidOut({ ...ROW, flexDirection: "column" }, items)
+    expect(without).toEqual([
+      [0, 0, 50, 20],
+      [0, 20, 50, 20],
+    ])
+    for (const flexFlow of ["row row", "column column-reverse", "sideways", ""]) {
+      expect(laidOut({ ...ROW, flexFlow, flexDirection: "column" }, items), flexFlow).toEqual(without)
+    }
+  })
+
+  it("leaves the items as they were for a bad state flexFlow, and applies the rest of the state", () => {
+    const { render, renderer, unmount } = createTestRoot()
+    try {
+      render(
+        <div
+          testId="host"
+          style={{ position: "relative", display: "flex", flexDirection: "row-reverse", width: 300, height: 100, hover: { flexFlow: "sideways" } }}
+        >
+          <div testId="item0" style={{ width: 50, height: 20 }} />
+          <div testId="item1" style={{ width: 50, height: 20 }} />
+        </div>
+      )
+      const before = [rect(renderer, "item0"), rect(renderer, "item1")]
+      expect(before).toEqual([
+        [250, 0, 50, 20],
+        [200, 0, 50, 20],
+      ])
+      moveTo(renderer, box(renderer, "host").x + 5, box(renderer, "host").y + 90)
+      expect([rect(renderer, "item0"), rect(renderer, "item1")]).toEqual(before)
+    } finally {
+      unmount()
+    }
+  })
+
+  it("applies a state's flexDirection beside a bad state flexFlow", () => {
+    const { render, renderer, unmount } = createTestRoot()
+    try {
+      render(
+        <div
+          testId="host"
+          style={{ position: "relative", display: "flex", flexDirection: "row-reverse", width: 300, height: 100, hover: { flexFlow: "sideways", flexDirection: "column" } }}
+        >
+          <div testId="item0" style={{ width: 50, height: 20 }} />
+          <div testId="item1" style={{ width: 50, height: 20 }} />
+        </div>
+      )
+      moveTo(renderer, box(renderer, "host").x + 5, box(renderer, "host").y + 90)
+      expect([rect(renderer, "item0"), rect(renderer, "item1")]).toEqual([
+        [0, 0, 50, 20],
+        [0, 20, 50, 20],
+      ])
+    } finally {
+      unmount()
+    }
   })
 
   it("is replaced by a state's flexFlow", () => {
@@ -358,6 +436,42 @@ describeNative("placeItems, placeContent and placeSelf", () => {
     expect(errorsOf({ hover: { placeItems: "bogus" } })).toBe("")
   })
 
+  it("drops only the bad place shorthand: the box is as without it, with the rest of the style applied", () => {
+    const place = (host: Style, item: Style = CHILD) => laidOut({ ...GRID, ...host }, [item])
+    const items = place({ alignItems: "end" })
+    expect(items).toEqual([[0, 80, 50, 20]])
+    for (const placeItems of ["left", "space-between", "", "center end start"]) {
+      expect(place({ placeItems, alignItems: "end" }), placeItems).toEqual(items)
+    }
+    const tracks = place({ gridTemplateColumns: "50px", alignContent: "end" })
+    expect(tracks).toEqual([[0, 80, 50, 20]])
+    expect(place({ gridTemplateColumns: "50px", alignContent: "end", placeContent: "auto" })).toEqual(tracks)
+    const self = place({}, { ...CHILD, alignSelf: "end" })
+    expect(self).toEqual([[0, 80, 50, 20]])
+    for (const placeSelf of ["center end start", ""]) {
+      expect(place({}, { ...CHILD, alignSelf: "end", placeSelf }), placeSelf).toEqual(self)
+    }
+  })
+
+  it("leaves the box as it was for a bad state placeItems, and applies the rest of the state", () => {
+    const hovered = (hover: Style) => {
+      const { render, renderer, unmount } = createTestRoot()
+      try {
+        render(
+          <div testId="host" style={{ position: "relative", ...GRID, placeItems: "start", hover }}>
+            <div testId="item0" style={CHILD} />
+          </div>
+        )
+        moveTo(renderer, box(renderer, "host").x + 5, box(renderer, "host").y + 5)
+        return rect(renderer, "item0")
+      } finally {
+        unmount()
+      }
+    }
+    expect(hovered({ placeItems: "bogus" })).toEqual([0, 0, 50, 20])
+    expect(hovered({ placeItems: "bogus", alignItems: "end" })).toEqual([0, 80, 50, 20])
+  })
+
   it("is replaced by a state's placeItems", () => {
     const { render, renderer, unmount } = createTestRoot()
     try {
@@ -424,5 +538,12 @@ describeNative("grid placement shorthands", () => {
     expect(errorsOf({ gridArea: "1 / 2 / 3 / 4 / 5" })).toBe("")
     expect(errorsOf({ gridColumn: "span 0" })).toBe("")
     expect(errorsOf({ gridRow: "0" })).toBe("")
+  })
+
+  it("drops only the bad line: the box is as without it, with the rest of the style applied", () => {
+    expect(laidOut(GRID, [{ gridColumn: 2 }])).toEqual([[100, 0, 100, 30]])
+    expect(laidOut(GRID, [{ gridArea: "1 / 2 / 3 / 4 / 5", gridColumn: 2 }])).toEqual(laidOut(GRID, [{ gridColumn: 2 }]))
+    expect(laidOut(GRID, [{ gridColumn: "span 0", gridRow: 2 }])).toEqual(laidOut(GRID, [{ gridRow: 2 }]))
+    expect(laidOut(GRID, [{ gridRow: "0", gridColumn: 3 }])).toEqual(laidOut(GRID, [{ gridColumn: 3 }]))
   })
 })

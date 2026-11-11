@@ -261,16 +261,14 @@ impl RetainedElement {
     }
 
     /// Whether the universal style layer applies to this element. CSS `*`
-    /// matches elements, not text nodes: a `text` element that holds a string is
-    /// one, a `<text>` that holds children is an element.
+    /// matches elements, not text nodes.
     fn takes_universal_style(&self) -> bool {
         self.is_matchable()
     }
 
-    /// Whether selectors can match the element: a `text` element that holds a string is a text
-    /// node, which they never do.
+    /// Whether selectors can match the element: a `#text` node is never matched.
     pub(crate) fn is_matchable(&self) -> bool {
-        !(self.element_type == "text" && self.content.is_some())
+        self.element_type != crate::text::inline::TEXT_NODE
     }
 
     pub fn is_disabled(&self) -> bool {
@@ -1707,8 +1705,7 @@ impl RetainedTree {
                 false
             };
             // Which listeners exist decides how the element is built, so it takes a revision:
-            // `retain` keys what it reuses by it. For a `<text>` it also decides whether it is
-            // raw text (`is_raw_text`), which the paragraph builder and search read it by.
+            // `retain` keys what it reuses by it.
             if changed {
                 if geometry {
                     let reports = self
@@ -1721,15 +1718,7 @@ impl RetainedTree {
                         self.geometry_ids.remove(&id);
                     }
                 }
-                if self
-                    .elements
-                    .get(&id)
-                    .is_some_and(|element| element.element_type == "text")
-                {
-                    self.mark_changed(id);
-                } else {
-                    self.mark_render_changed(id);
-                }
+                self.mark_render_changed(id);
             }
         }
     }
@@ -1822,14 +1811,6 @@ impl RetainedTree {
         }
         if affects_focusability {
             self.track_focusable(id);
-            // A focusable `<text>` is a block rather than an inline box.
-            if self
-                .elements
-                .get(&id)
-                .is_some_and(|element| element.element_type == "text")
-            {
-                self.mark_changed(id);
-            }
         }
         if is_form_control {
             if self.elements.get(&id).is_some_and(|element| element.control_disabled().is_some()) {
@@ -2259,8 +2240,8 @@ mod tests {
     fn tree_with_child() -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
-        tree.create_element(2, "text".to_string());
-        tree.create_element(3, "text".to_string());
+        tree.create_element(2, "div".to_string());
+        tree.create_element(3, "#text".to_string());
         tree.append_child(1, 2);
         tree.append_child(2, 3);
         tree.set_text(3, "hello".to_string());
@@ -3496,7 +3477,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
         tree.create_element(2, "div".to_string());
-        tree.create_element(3, "text".to_string());
+        tree.create_element(3, "#text".to_string());
         tree.append_child(1, 2);
         tree.append_child(1, 3);
         tree.set_text(3, "hello".to_string());
@@ -3543,8 +3524,8 @@ mod tests {
         assert!(crate::text::inline::is_raw_text(&tree.elements[&3]));
 
         // A text node is created before its string arrives.
-        apply(&mut tree, r##"[["createElement",4,"text"],["createElement",5,"text"],["appendChild",4,5],["setText",5,"x"]]"##);
-        assert_eq!(style_of(&tree, 4).unwrap().opacity, Some(0.5), "a `<text>` element");
+        apply(&mut tree, r##"[["createElement",4,"div"],["createElement",5,"#text"],["appendChild",4,5],["setText",5,"x"]]"##);
+        assert_eq!(style_of(&tree, 4).unwrap().opacity, Some(0.5), "a `<div>` element");
         assert!(style_of(&tree, 5).is_none());
         assert!(crate::text::inline::is_raw_text(&tree.elements[&5]));
     }

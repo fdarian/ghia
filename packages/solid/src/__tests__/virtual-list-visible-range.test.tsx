@@ -33,7 +33,7 @@ function list(onVisibleRange: (event: DomEvent) => void) {
       <For each={Array.from({ length: 20 }, (_, index) => index)}>
         {(index) => (
           <div style={{ height: ROW, flexShrink: 0 }}>
-            <text>{`row-${index}`}</text>
+            <div>{`row-${index}`}</div>
           </div>
         )}
       </For>
@@ -129,7 +129,7 @@ function sizedList(exact: boolean, onVisibleRange: (event: DomEvent) => void, al
       <For each={Array.from({ length: ROWS }, (_, index) => index)}>
         {(index) => (
           <div testId={`row-${index}`} style={exact ? { height: ROW, flexShrink: 0 } : undefined}>
-            {exact ? <text>{`row-${index}`}</text> : <div style={{ height: ROW, flexShrink: 0 }} />}
+            {exact ? <div>{`row-${index}`}</div> : <div style={{ height: ROW, flexShrink: 0 }} />}
           </div>
         )}
       </For>
@@ -376,7 +376,7 @@ const rowColor = (index: number) => `rgb(${(index * 37) % 256}, ${(index * 91) %
 function Row(props: { index: number }) {
   return (
     <div testId={`row-${props.index}`} style={{ width: 150, height: ROW, flexShrink: 0, backgroundColor: rowColor(props.index) }}>
-      <text style={{ color: "#ffffff" }}>{`row-${props.index}`}</text>
+      <div style={{ color: "#ffffff" }}>{`row-${props.index}`}</div>
     </div>
   )
 }

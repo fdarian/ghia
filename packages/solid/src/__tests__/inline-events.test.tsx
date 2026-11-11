@@ -19,7 +19,7 @@ function measureColumn() {
   const app = createTestRoot()
   app.render(() => (
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   ))
   const width = app.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -42,14 +42,14 @@ describe.skipIf(!hasNativeTestRenderer)("Solid events on inline boxes", () => {
     const app = createTestRoot()
     app.render(() => (
       <div style={{ width: 400 }}>
-        <text
+        <div
           ref={text}
           testId="p"
           style={TEXT}
           onClick={(event) => seen.push(["text", event.target, event.currentTarget])}
         >
           Hello <span ref={span} onClick={(event) => seen.push(["span", event.target, event.currentTarget])}>world</span>!
-        </text>
+        </div>
       </div>
     ))
 
@@ -79,10 +79,10 @@ describe.skipIf(!hasNativeTestRenderer)("Solid events on inline boxes", () => {
     const app = createTestRoot()
     app.render(() => (
       <div style={{ width: 400 }}>
-        <text testId="p" style={TEXT} onMouseEnter={record("text enter")} onMouseLeave={record("text leave")}>
+        <div testId="p" style={TEXT} onMouseEnter={record("text enter")} onMouseLeave={record("text leave")}>
           <span onMouseEnter={record("a enter")} onMouseLeave={record("a leave")}>one</span>{" "}
           <span onMouseEnter={record("b enter")} onMouseLeave={record("b leave")}>two</span>
-        </text>
+        </div>
       </div>
     ))
     for (const column of [1, 5, 3]) {
@@ -97,9 +97,9 @@ describe.skipIf(!hasNativeTestRenderer)("Solid events on inline boxes", () => {
     const app = createTestRoot()
     app.render(() => (
       <div style={{ width: 400, backgroundColor: "#ffffff" }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           Hello <span style={{ hover: { color: "#0000ff" } }}>world</span>!
-        </text>
+        </div>
       </div>
     ))
     const shot = (name: string) => {

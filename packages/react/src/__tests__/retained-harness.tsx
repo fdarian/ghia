@@ -50,7 +50,7 @@ export function Card({ index, label = `card ${index}`, onClick, extra, style }: 
       }}
     >
       <div testId={`title-${index}`} style={{ height: 20, backgroundColor: "#223344" }}>
-        <text>{label}</text>
+        <div>{label}</div>
       </div>
       <div style={{ height: 20 }}>
         <span>one</span>

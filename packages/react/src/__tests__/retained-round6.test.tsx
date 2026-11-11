@@ -96,7 +96,7 @@ function Stack({ wrapper, line, first }: { wrapper?: Style; line?: Style; first?
       {Array.from({ length: CARDS }, (_, index) => (
         <div key={index} testId={`line-${index}`} style={{ ...line, ...(index === 0 ? first : undefined) }}>
           <div>
-            <text>{`line ${index}`}</text>
+            <div>{`line ${index}`}</div>
           </div>
         </div>
       ))}

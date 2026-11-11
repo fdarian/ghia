@@ -52,8 +52,8 @@ function Row({ index, clicks, observed }: { index: number; clicks: number[]; obs
     >
       <div testId={`avatar-${index}`} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#885566" }} />
       <div style={{ display: "flex", flexDirection: "column", width: 160 }}>
-        <text testId={`title-${index}`} style={{ fontSize: 14, color: "#ffffff" }}>{`Row ${index} title`}</text>
-        <text testId={`body-${index}`} style={{ fontSize: 12, color: "#aaaaaa" }}>{`Description of row ${index}`}</text>
+        <div testId={`title-${index}`} style={{ fontSize: 14, color: "#ffffff" }}>{`Row ${index} title`}</div>
+        <div testId={`body-${index}`} style={{ fontSize: 12, color: "#aaaaaa" }}>{`Description of row ${index}`}</div>
       </div>
       <div
         testId={`button-${index}`}

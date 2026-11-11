@@ -336,7 +336,7 @@ mod tests {
     /// `div(1) > [text "a ", span(3) > ["b", span(5) > "c"], text " d"]`.
     fn fixture(styles: &[(u64, serde_json::Value)]) -> RetainedTree {
         let mut tree = RetainedTree::new();
-        for (id, kind) in [(1, "div"), (2, "text"), (3, "span"), (4, "text"), (5, "span"), (6, "text"), (7, "text")] {
+        for (id, kind) in [(1, "div"), (2, "#text"), (3, "span"), (4, "#text"), (5, "span"), (6, "#text"), (7, "#text")] {
             tree.create_element(id, kind.to_string());
         }
         for (parent, child) in [(1, 2), (1, 3), (3, 4), (3, 5), (5, 6), (1, 7)] {

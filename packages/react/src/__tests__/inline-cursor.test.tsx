@@ -24,7 +24,7 @@ function measureColumn() {
   const testRoot = createTestRoot()
   testRoot.render(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   const width = testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -57,9 +57,9 @@ describeNative("cursor on inline boxes", () => {
   it("shows the cursor of a span over its glyphs and nothing over the rest", () => {
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           Hello <span style={{ cursor: "pointer" }}>world</span>!
-        </text>
+        </div>
       </div>
     )
     // "Hello world!": the span is columns 6-10.
@@ -75,9 +75,9 @@ describeNative("cursor on inline boxes", () => {
   it("leaves the container's cursor where no span sets one", () => {
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text testId="p" style={{ ...TEXT, cursor: "grab" }}>
+        <div testId="p" style={{ ...TEXT, cursor: "grab" }}>
           Hello <span>plain</span> <span style={{ cursor: "pointer" }}>link</span>
-        </text>
+        </div>
       </div>
     )
     // "Hello plain link": plain is 6-10, link is 12-15.
@@ -91,13 +91,13 @@ describeNative("cursor on inline boxes", () => {
   it("takes the cursor of the innermost box that sets one", () => {
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <span style={{ cursor: "pointer" }}>
             ab<span style={{ cursor: "text" }}>cd</span>
             <span style={{ color: "#ff0000" }}>ef</span>
             <span style={{ cursor: "default" }}>gh</span>
           </span>
-        </text>
+        </div>
       </div>
     )
     expect(cursorAt(testRoot, 0)).toBe("pointer")
@@ -111,11 +111,11 @@ describeNative("cursor on inline boxes", () => {
   it("lets a descendant of display: contents inherit its cursor", () => {
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <span style={{ display: "contents", cursor: "pointer" }}>
             ab<span style={{ color: "#ff0000" }}>cd</span>
           </span>
-        </text>
+        </div>
       </div>
     )
     expect(cursorAt(testRoot, 0)).toBe("default")
@@ -127,11 +127,11 @@ describeNative("cursor on inline boxes", () => {
     const column = columnWidth()
     const testRoot = setup(
       <div style={{ width: 12.5 * column }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           {"aa bbbbbb "}
           <span style={{ cursor: "pointer" }}>cccccc</span>
           {" dd"}
-        </text>
+        </div>
       </div>
     )
     // "aa bbbbbb " fills the first line, and "cccccc dd" is the second.
@@ -147,10 +147,10 @@ describeNative("cursor on inline boxes", () => {
     const column = columnWidth()
     const testRoot = setup(
       <div style={{ width: 8.5 * column }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           {"ab "}
           <span style={{ cursor: "pointer" }}>cdefg hijk</span>
-        </text>
+        </div>
       </div>
     )
     // "ab cdefg" then "hijk".
@@ -165,9 +165,9 @@ describeNative("cursor on inline boxes", () => {
     const column = columnWidth()
     const tree = (cursor: string | undefined) => (
       <div style={{ width: 20 * column }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           Hello <span style={{ color: "#0000ff", cursor }}>world</span>
-        </text>
+        </div>
       </div>
     )
     const testRoot = setup(tree("pointer"))
@@ -189,9 +189,9 @@ describeNative("cursor on inline boxes", () => {
   it("takes the cursor of a hover style once the span is hovered", () => {
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           Hello <span style={{ hover: { cursor: "pointer" } }}>world</span>
-        </text>
+        </div>
       </div>
     )
     expect(cursorAt(testRoot, 1)).toBe("default")
@@ -203,11 +203,11 @@ describeNative("cursor on inline boxes", () => {
   it("keeps a span with pointer-events: none off the cursor", () => {
     const testRoot = setup(
       <div style={{ width: 400 }}>
-        <text testId="p" style={TEXT}>
+        <div testId="p" style={TEXT}>
           <span style={{ cursor: "pointer" }}>
             ab<span style={{ cursor: "text", pointerEvents: "none" }}>cd</span>
           </span>
-        </text>
+        </div>
       </div>
     )
     expect(cursorAt(testRoot, 0)).toBe("pointer")
@@ -221,7 +221,7 @@ describeNative("cursor on inline boxes", () => {
       const elements: Record<string, unknown> = {}
       const testRoot = setup(
         <div style={{ width: 400 }}>
-          <text
+          <div
             testId="p"
             style={TEXT}
             onMouseEnter={() => seen.push("text enter")}
@@ -238,7 +238,7 @@ describeNative("cursor on inline boxes", () => {
               world
             </span>
             !
-          </text>
+          </div>
         </div>
       )
       cursorAt(testRoot, 1)
@@ -261,9 +261,9 @@ describeNative("cursor on inline boxes", () => {
     it("keeps an element in front of the paragraph in front of its cursor", () => {
       const testRoot = setup(
         <div style={{ width: 400, position: "relative" }}>
-          <text testId="p" style={TEXT}>
+          <div testId="p" style={TEXT}>
             <span style={{ cursor: "pointer" }}>Hello world</span>
-          </text>
+          </div>
           <div
             testId="cover"
             style={{ position: "absolute", left: 0, top: 0, width: 400, height: LINE, cursor: "grab" }}

@@ -85,7 +85,7 @@ function mismatchesOf(scaleFactor: number, file: string, only?: (id: string) => 
       const clusters = [...segmenter.segment(text)].map((g) => [g.index, g.index + g.segment.length] as [number, number])
       root.render(
         <div style={{ display: "flex", alignItems: "flex-start" }} highlight={{ ranges: clusters }}>
-          <text style={{ fontFamily: family, fontSize: parseFloat(size), whiteSpace: "pre", color: "#000000" }}>{text}</text>
+          <div style={{ fontFamily: family, fontSize: parseFloat(size), whiteSpace: "pre", color: "#000000" }}>{text}</div>
         </div>
       )
       const matches = root.renderer.getPaintedHighlights().sort((a, b) => a.start - b.start)
@@ -132,7 +132,7 @@ function hitOffsetsOf(scaleFactor: number, file: string) {
       const text = TEXTS[Number(textIx)]!
       root.render(
         <div style={{ display: "flex", alignItems: "flex-start" }}>
-          <text style={{ fontFamily: family, fontSize: parseFloat(size), whiteSpace: "pre", color: "#000000" }}>{text}</text>
+          <div style={{ fontFamily: family, fontSize: parseFloat(size), whiteSpace: "pre", color: "#000000" }}>{text}</div>
         </div>
       )
       // Chrome snaps the caret to the nearer edge of the box, gpuix selects from the start of the glyph the pointer is in:
@@ -166,7 +166,7 @@ function wrapMismatchesOf(scaleFactor: number, file: string) {
       const clusters = [...segmenter.segment(text)].map((g) => [g.index, g.index + g.segment.length] as [number, number])
       root.render(
         <div style={{ width: Number(boxWidth) }} highlight={{ ranges: clusters }}>
-          <text style={{ fontFamily: family, fontSize: 14, color: "#000000" }}>{text}</text>
+          <div style={{ fontFamily: family, fontSize: 14, color: "#000000" }}>{text}</div>
         </div>
       )
       const matches = root.renderer.getPaintedHighlights().sort((a, b) => a.start - b.start)

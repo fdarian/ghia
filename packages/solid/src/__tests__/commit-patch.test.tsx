@@ -73,9 +73,9 @@ function open(variant: Variant, shape: Shape = "hover") {
   const app = createTestRoot({ width: 300, height: 500 })
   app.render(() => (
     <div style={{ width: 300, height: 500, flexDirection: "column" }}>
-      <text testId="header" style={{ color: variant === "outside" ? `#${(0x808080 + selected()).toString(16)}` : "#cccccc" }}>
+      <div testId="header" style={{ color: variant === "outside" ? `#${(0x808080 + selected()).toString(16)}` : "#cccccc" }}>
         header
-      </text>
+      </div>
       {shape === "plain" || shape === "nested" ? (
         <div testId="list" style={{ width: 200, flexDirection: "column" }}>
           <For each={indices}>
@@ -101,7 +101,7 @@ function open(variant: Variant, shape: Shape = "hover") {
           <For each={indices}>
             {(index) => (
               <div testId={`row-${index}`} style={shape === "list" ? plainStyle(selected() === index) : styleOf(variant, selected() === index)}>
-                <text style={{ color: "#ffffff" }}>{`row-${index}`}</text>
+                <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
               </div>
             )}
           </For>

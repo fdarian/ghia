@@ -38,13 +38,13 @@ function Page({ ref }: { ref: (name: string) => (instance: PublicInstance | null
     <div style={{ ...FONT, flexDirection: "column", width: 400 }}>
       <div testId="row" ref={ref("row")} style={{ display: "flex", width: 300, alignItems: "flex-start" }}>
         <div testId="chip" ref={ref("chip")} style={{ display: "flex", padding: "0 6px", flexShrink: 0 }}>
-          <text>Label text</text>
+          <div>Label text</div>
         </div>
         <div testId="after" ref={ref("after")} style={{ width: 10, height: 10, flexShrink: 0 }} />
         <div testId="para" ref={ref("para")} style={{ width: 200 }}>
-          <text>
+          <div>
             Hello <span testId="span" ref={ref("span")}>wide world</span> end
-          </text>
+          </div>
         </div>
       </div>
       <div testId="thirds" ref={ref("thirds")} style={{ display: "flex", width: 100, alignItems: "flex-start" }}>
@@ -80,7 +80,7 @@ function Page({ ref }: { ref: (name: string) => (instance: PublicInstance | null
           }}
         >
           <div style={{ display: "flex", padding: "0 6px", height: 30, flexShrink: 0, alignItems: "flex-start" }}>
-            <text style={{ whiteSpace: "nowrap" }}>Label text Label text</text>
+            <div style={{ whiteSpace: "nowrap" }}>Label text Label text</div>
           </div>
         </div>
       </div>
@@ -149,9 +149,9 @@ describeNative("fractional bounds", () => {
           <div style={{ height: 10.5, flexShrink: 0 }} />
           <div style={{ display: "flex", width: 300, alignItems: "flex-start" }}>
             <div testId="item">
-              <text>
+              <div>
                 Hello <span testId="span">wide world</span> end
-              </text>
+              </div>
             </div>
           </div>
         </div>
@@ -207,7 +207,7 @@ describeNative("fractional bounds", () => {
     const { element, renderer, unmount } = setup()
     try {
       const scroller = element("scroller")
-      renderer.scrollTo(scroller.id, 12.5, 7.25, "instant")
+      renderer.scrollTo(scroller.nativeId, 12.5, 7.25, "instant")
       renderer.flush()
       // Chrome: scrollTo(12.5, 7.25) reads back 13, 7 at scale 1 (fixtures/scroll-fraction-oracle.json).
       expect([scroller.scrollLeft, scroller.scrollTop]).toEqual([13, 7])
@@ -267,7 +267,7 @@ describeNative("fractional bounds", () => {
       root.render(
         <div style={{ ...FONT, display: "flex", alignItems: "flex-start" }}>
           <div style={{ display: "flex", padding: "0 6px", flexShrink: 0 }}>
-            <text>Label text</text>
+            <div>Label text</div>
           </div>
           <div
             testId="laid"
@@ -315,12 +315,12 @@ function Rows() {
         {Array.from({ length: ROWS }, (_, index) => (
           <div key={index} testId={`row-${index}`} style={{ display: "flex", height: "26.6666%", flexShrink: 0, alignItems: "flex-start" }}>
             <div style={{ display: "flex", padding: "0 6px", flexShrink: 0 }}>
-              <text>{`Label text ${index}`}</text>
+              <div>{`Label text ${index}`}</div>
             </div>
             <div testId={`after-${index}`} style={{ width: "33.3333%", height: "33.3333%", flexShrink: 0, backgroundColor: "#335577" }} />
-            <text testId={`label-${index}`}>
+            <div testId={`label-${index}`}>
               Hello <span testId={`span-${index}`}>wide world</span>
-            </text>
+            </div>
           </div>
         ))}
       </div>

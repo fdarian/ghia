@@ -2,6 +2,7 @@ import type { EventPayload } from "../../index.js"
 import type { Animation } from "../web-animations.js"
 import { Document, DOM_BINDING, registerDocument, type Node, type NodeBinding } from "../dom/nodes.js"
 import { getAdoptedStyleSheets, replaceAdoptedStyleSheets, type CSSStyleSheet } from "../css/index.js"
+import { getSelection, type Selection } from "../dom/selection.js"
 import { mountedRenderer } from "../mounted-renderer.js"
 import {
   createDomEvent,
@@ -147,13 +148,14 @@ type ElementSource = {
   pointerLockId(): number | null
   /** The object the adapter hands out for that element (a ref's value), or `undefined` once the root has dropped it. */
   elementById(id: number): object | undefined
-  /** The `<html>` and `<body>` elements the root's adapter made for its window, or `null` for a source that has none. */
+  /** The `<html>`, `<head>` and `<body>` elements the root's adapter made for its window, or `null` for a source that has none. */
   documentElements(): DocumentElements | null
 }
 
-/** The elements every window root is made of: `html`, and `body` in it, holding the app. */
+/** The elements every window root is made of: `html`, with `head` and `body` in it, the latter holding the app. */
 export type DocumentElements = {
   html: object
+  head: object
   body: object
 }
 
@@ -201,6 +203,14 @@ function currentDocumentElements(): DocumentElements | null {
   const renderer = mountedRenderer()
   if (renderer === undefined) return null
   return elementSources.get(renderer)?.source.documentElements() ?? null
+}
+
+function finiteCoordinate(value: number, name: string): number {
+  const coordinate = Number(value)
+  if (!Number.isFinite(coordinate)) {
+    throw new TypeError(`Failed to execute 'elementsFromPoint' on 'Document': The provided double value for '${name}' is non-finite.`)
+  }
+  return coordinate
 }
 
 /**
@@ -274,6 +284,11 @@ export class GpuixDocument<Element = unknown> extends Document {
     return (currentDocumentElements()?.html as Element | undefined) ?? null
   }
 
+  /** The `<head>` element of the window that mounted last, before `body` in `documentElement`. */
+  get head(): Element | null {
+    return (currentDocumentElements()?.head as Element | undefined) ?? null
+  }
+
   /** The `<body>` element of the window that mounted last: where the app's top-level nodes are. */
   get body(): Element | null {
     return (currentDocumentElements()?.body as Element | undefined) ?? null
@@ -282,6 +297,40 @@ export class GpuixDocument<Element = unknown> extends Document {
   /** The element that scrolls the document, which is `documentElement` as in standards mode. */
   get scrollingElement(): Element | null {
     return this.documentElement
+  }
+
+  /**
+   * The elements under the point `(x, y)` of the window that mounted last, in CSS pixels from its
+   * top left corner, topmost first and ending with `body` then `html`: what `elementFromPoint`
+   * answers with its first. Empty for a point outside the window. The window is laid out first,
+   * so an element mounted in this turn is found, and `pointer-events: none`, `visibility: hidden`
+   * and `display: none` elements are left out.
+   */
+  elementsFromPoint(x: number, y: number): Element[] {
+    const renderer = mountedRenderer()
+    if (renderer === undefined) {
+      throw new Error("document.elementsFromPoint needs a mounted GPUIX root. Call it after render().")
+    }
+    if (renderer.getElementsAt === undefined) {
+      throw new Error("This renderer cannot hit test, so document.elementsFromPoint is unavailable")
+    }
+    return renderer.getElementsAt(finiteCoordinate(x, "x"), finiteCoordinate(y, "y")).map((id) => {
+      const element = elementOf(renderer, id)
+      if (element === undefined) {
+        throw new Error(`Element ${id} is under the point but its root has no element for it`)
+      }
+      return element as Element
+    })
+  }
+
+  /** The topmost of `elementsFromPoint`, or `null` for a point outside the window. */
+  elementFromPoint(x: number, y: number): Element | null {
+    return this.elementsFromPoint(x, y)[0] ?? null
+  }
+
+  /** The text selection of the window that mounted last. */
+  getSelection(): Selection {
+    return getSelection()
   }
 
   /**
@@ -357,7 +406,16 @@ export function setDocumentAnimations(list: (renderer: object) => Animation[]): 
   Reflect.set(globalThis, DOCUMENT_ANIMATIONS_KEY, list)
 }
 
-export const window = new GpuixEventTarget(notifyTypeSubscribers)
+/** Calls `listener` whenever a type gains its first listener or loses its last on `window` or `document`. */
+export function subscribeWindowEventTypes(listener: () => void): () => void {
+  typeSubscribers.add(listener)
+  return () => {
+    typeSubscribers.delete(listener)
+  }
+}
+
+/** Its listeners see the global object, which `dom-globals` installs as `window`, as `currentTarget`. */
+export const window = new GpuixEventTarget(notifyTypeSubscribers, globalThis)
 export const document = new GpuixDocument(notifyTypeSubscribers)
 registerDocument(document)
 
@@ -365,8 +423,8 @@ registerDocument(document)
  * Lets the runtime see the elements of the root that drives `renderer`, through
  * `elementById`: the object the adapter gives for an element id, as a `ref`
  * does. `document.activeElement` and the `target`, `currentTarget` and
- * `relatedTarget` of every event read it, and `document.documentElement` and
- * `document.body` read `documentElements`. The returned function takes the root
+ * `relatedTarget` of every event read it, and `document.documentElement`,
+ * `document.head` and `document.body` read `documentElements`. The returned function takes the root
  * out again. A renderer that cannot report focus still names its elements; it
  * just never has an `activeElement`.
  */
@@ -451,7 +509,44 @@ export function syncWindowEventListeners(renderer: {
   }
 }
 
-const DOCUMENT_EVENT_TYPES: ReadonlySet<string> = new Set(["pointerlockchange", "pointerlockerror"])
+/** Whether anything listens for `selectionchange`, which native only produces while it is asked to. */
+export function listensForSelectionChange(): boolean {
+  return document.hasListeners("selectionchange") || window.hasListeners("selectionchange")
+}
+
+/**
+ * Keeps the renderer's `selectionChange` event on while `rootListens()` says the root wants it or a
+ * `selectionchange` listener exists on `window` or `document`. `resync` after `rootListens` may
+ * have changed; `stop` turns it off. Native names the window's event with `eventId`.
+ */
+export function syncWindowSelectionChange(
+  renderer: { setWindowSelectionChange?: (enabled: boolean, eventId: number) => void },
+  eventId: number,
+  rootListens: () => boolean
+): { resync: () => void; stop: () => void } {
+  const resync = () => {
+    renderer.setWindowSelectionChange?.(rootListens() || listensForSelectionChange(), eventId)
+  }
+  resync()
+  typeSubscribers.add(resync)
+  return {
+    resync,
+    stop() {
+      typeSubscribers.delete(resync)
+      renderer.setWindowSelectionChange?.(false, eventId)
+    },
+  }
+}
+
+/**
+ * Sends `selectionchange` to `document`, as the DOM does: it does not bubble, so `window` hears
+ * it in the capture phase only. `payload.value` is the selected text, absent after a clear.
+ */
+export function dispatchSelectionChange(root: DomEventRoot, payload: EventPayload): void {
+  dispatchPropagating(root, { ...payload, eventType: "selectionchange", elementId: 0 })
+}
+
+const DOCUMENT_EVENT_TYPES: ReadonlySet<string> = new Set(["pointerlockchange", "pointerlockerror", "selectionchange"])
 
 /** Whether the DOM aims the event at `document` itself, with no element on the path. */
 export function isDocumentEvent(eventType: string): boolean {
@@ -513,7 +608,11 @@ export function dispatchPropagating(
   const errors: unknown[] = []
   const fail = (error: unknown) => errors.push(error)
   capture(event, state, fail)
-  if (event.bubbles && !state.propagationStopped) bubble(event, state, fail)
+  if (!state.propagationStopped) {
+    if (event.bubbles) bubble(event, state, fail)
+    // A non-bubbling event still reaches the bubble listeners of its own target.
+    else if (event.target === document) document.run(event, state, false, EVENT_PHASE_AT_TARGET, fail)
+  }
   event.currentTarget = null
   event.eventPhase = EVENT_PHASE_NONE
   reportHandlerErrors(root, errors)

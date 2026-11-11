@@ -714,32 +714,6 @@ pub(crate) fn read_bounds(
     crate::automation::get_bounds(window, id)
 }
 
-/// `GpuixRenderer::get_computed_style`: lays the window out as a bounds read does, then asks the view
-/// for the values at the instant of the read. Null for an element that is not in the document.
-pub(crate) fn read_computed_style(
-    tree: &Mutex<RetainedTree>,
-    id: u64,
-    pseudo_element: bool,
-    window: &mut gpui::Window,
-    cx: &mut gpui::App,
-) -> Result<Option<Vec<String>>> {
-    let parent = {
-        let tree = tree.lock().unwrap();
-        if !crate::css::computed_style::is_connected(&tree, id) {
-            return Ok(None);
-        }
-        tree.elements.get(&id).and_then(|element| element.parent)
-    };
-    let boxes = read_after_layout(tree, id, window, cx, SkippedContent::Force, gpui::Window::draw_if_dirty, |window_id| {
-        crate::css::computed_style::Boxes::read(window_id, id, parent)
-    })?;
-    let view = window
-        .root::<GpuixView>()
-        .flatten()
-        .ok_or_else(|| Error::from_reason("the window has no view to read a style from"))?;
-    Ok(view.update(cx, |view, _cx| view.computed_style(id, pseudo_element, &boxes, window)))
-}
-
 /// Lays out the window as `lay_out` does and reads what it published with `read`, laying out the
 /// content of the skipped ancestors of `id` too when it has any (`skipped` is `Force`): Chrome's forced layout of a
 /// locked subtree (`DisplayLockUtilities::ScopedForcedUpdate`) for a read of geometry. The
@@ -1060,12 +1034,6 @@ enum UiCommand {
         id: u64,
         response: SyncSender<Option<[f64; 6]>>,
     },
-    GetComputedStyle {
-        tree: Arc<Mutex<RetainedTree>>,
-        id: u64,
-        pseudo_element: bool,
-        response: SyncSender<Option<Vec<String>>>,
-    },
     ScrollByKey {
         key: String,
         shift: bool,
@@ -1283,29 +1251,6 @@ async fn run_ui_commands(
                     { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) };
                     response.send(scroll_metrics(window.window_handle().window_id(), id)).ok();
                 })
-            }
-            UiCommand::GetComputedStyle { tree, id, pseudo_element, response } => {
-                let handle = gpui::AnyWindowHandle::from(window);
-                let connected = tree.lock().unwrap();
-                let parent = crate::css::computed_style::is_connected(&connected, id)
-                    .then(|| connected.elements.get(&id).and_then(|element| element.parent));
-                drop(connected);
-                match parent {
-                    None => {
-                        response.send(None).ok();
-                        Ok(())
-                    }
-                    Some(parent) => {
-                        let boxes = handle.update(cx, move |_view, window, cx| {
-                            crate::renderer::settle_pending_layout(window, cx);
-                            window.draw_if_dirty(cx);
-                            crate::css::computed_style::Boxes::read(window.window_handle().window_id(), id, parent)
-                        })?;
-                        window.update(cx, move |view, window, _cx| {
-                            response.send(view.computed_style(id, pseudo_element, &boxes, window)).ok();
-                        })
-                    }
-                }
             }
             UiCommand::ScrollByKey { key, shift, response } => {
                 window.update(cx, move |view, window, cx| {
@@ -4144,23 +4089,11 @@ impl GpuixRenderer {
                 return Ok(None);
             }
             return update_window_without_view(|window, cx| {
-                read_computed_style(&self.tree, id, pseudo_element, window, cx)
+                crate::css::computed_style::read_in_window(&self.tree, id, pseudo_element, window, cx)
             })?;
         }
 
-        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        {
-            let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetComputedStyle { tree: self.tree.clone(), id, pseudo_element, response })?;
-            return recv_ui_response(receiver, "the computed style query");
-        }
-
-        #[cfg(not(any(
-            target_os = "macos",
-            target_os = "windows",
-            target_os = "linux",
-            target_os = "freebsd"
-        )))]
+        #[cfg(not(target_os = "macos"))]
         Err(Error::from_reason("Unsupported operating system"))
     }
 
@@ -7862,11 +7795,11 @@ pub(crate) struct BuildCtx<'a> {
     virtual_lists: &'a mut HashMap<u64, VirtualListEntry>,
     pub motion_states: &'a mut HashMap<u64, crate::motion::MotionState>,
     motion_values: &'a crate::motion::MotionValueStore,
-    css_transitions: &'a mut crate::motion::CssTransitions,
-    css_animations: &'a mut crate::motion::CssAnimations,
+    pub(crate) css_transitions: &'a mut crate::motion::CssTransitions,
+    pub(crate) css_animations: &'a mut crate::motion::CssAnimations,
     contents_styles: &'a mut HashMap<u64, Arc<ContentsFrame>>,
     keyframes: &'a crate::motion::KeyframesRegistry,
-    measurements: &'a crate::motion::measure::Measurements,
+    pub measurements: &'a crate::motion::measure::Measurements,
     layout_flips: &'a crate::motion::LayoutFlips,
     svg_trees: &'a mut crate::custom_elements::svg_tree::SvgTrees,
     pub now: web_time::Instant,
@@ -7943,13 +7876,30 @@ pub(crate) struct BuildCtx<'a> {
     /// What this build is recording for the next, see `retain`.
     pub retain: &'a mut crate::retain::Retain,
     /// See `GpuixView::tapes`.
-    tapes: &'a crate::tape::Tapes,
+    pub tapes: &'a crate::tape::Tapes,
 }
 
 impl BuildCtx<'_> {
     /// Where the element being built sits in the document, which orders its text in selection and find.
     pub fn doc_path(&self) -> crate::text::selection::DocPath {
         crate::text::selection::DocPath::new(self.doc_hosts.clone(), self.doc_path.as_slice().into())
+    }
+
+    /// What element `id` computes to for its `var()`: the custom properties it computes to (the
+    /// focus variants that apply to it included) and `style` with them substituted, `None` when it
+    /// holds no `var()`. `self.inherited` is the element's parent's.
+    pub(crate) fn substitute_vars(
+        &self,
+        id: u64,
+        style: Option<&StyleDesc>,
+    ) -> (Option<StyleDesc>, crate::css::custom_properties::CustomProperties) {
+        crate::css::var_substitution::substitute_for_element(
+            &self.focus_styles,
+            self.focus_handles.contains_key(&id),
+            id,
+            style,
+            &self.inherited.custom,
+        )
     }
 
     /// The states of `id` that `style` has a refinement for. Nothing applies in
@@ -8293,9 +8243,30 @@ impl Inherited {
         self
     }
 
+    /// The custom properties an element styled by `style` computes to, below this context.
+    fn custom_of(&self, style: Option<&StyleDesc>) -> crate::css::custom_properties::CustomProperties {
+        match style.and_then(|style| style.custom_properties.as_ref()) {
+            Some(declared) => self.custom.descend(declared),
+            None => self.custom.clone(),
+        }
+    }
+
     /// Apply the inheritable parts of `style` for the subtree below it.
-    pub(crate) fn descend(mut self, style: Option<&StyleDesc>, inert: bool) -> Self {
+    pub(crate) fn descend(self, style: Option<&StyleDesc>, inert: bool) -> Self {
+        let custom = self.custom_of(style);
+        self.descend_with_custom(style, inert, custom)
+    }
+
+    /// [`descend`](Self::descend) for an element whose `custom`, what `custom_of` says of its
+    /// style, is known already: its `var()` was substituted from it.
+    pub(crate) fn descend_with_custom(
+        mut self,
+        style: Option<&StyleDesc>,
+        inert: bool,
+        custom: crate::css::custom_properties::CustomProperties,
+    ) -> Self {
         self = self.enter_children();
+        self.custom = custom;
         self.lengths = self
             .lengths
             .descend(style.and_then(|style| style.font_size.as_ref()), self.above_root);
@@ -8310,9 +8281,6 @@ impl Inherited {
             self.pointer_events_none = true;
         }
         let Some(style) = style else { return self };
-        if let Some(declared) = &style.custom_properties {
-            self.custom = self.custom.descend(declared);
-        }
         self.underline_offset = self
             .underline_offset
             .inherit(style.text_underline_offset.as_ref(), &self.lengths);
@@ -9833,9 +9801,6 @@ struct Fixed {
     excluded: bool,
     /// The shapes an `<svg>` draws, whose animations change its picture.
     shapes: Vec<u64>,
-    /// A `<text>` in a `<text>`: whether it is an SVG element depends on the elements above its
-    /// parent, which a change there does not tell it.
-    unkept: bool,
 }
 
 impl Fixed {
@@ -9854,16 +9819,11 @@ impl Fixed {
             parent: element.parent,
             excluded,
             shapes: crate::custom_elements::svg_tree::shapes(tree, element).map(|shape| shape.id).collect(),
-            unkept: element.element_type == "text"
-                && element
-                    .parent
-                    .and_then(|parent| tree.elements.get(&parent))
-                    .is_some_and(|parent| parent.element_type == "text"),
         }
     }
 
     fn holds_for(&self, element: &crate::retained_tree::RetainedElement) -> bool {
-        !self.unkept && self.revision == element.subtree_revision && self.parent == element.parent
+        self.revision == element.subtree_revision && self.parent == element.parent
     }
 }
 
@@ -9999,19 +9959,18 @@ impl GpuixView {
         });
     }
 
-    /// The steps of "update the rendering" this window runs before a draw, see `frame_steps`.
-    fn frame_steps(&self) -> Rc<dyn Fn(&mut gpui::Window, &mut gpui::App)> {
-        let clock = self.clock.clone();
-        crate::frame_steps::steps(
+    /// The steps of "update the rendering" this window runs, see `frame_steps`.
+    fn frame_steps(&self) -> crate::frame_steps::FrameSteps {
+        crate::frame_steps::FrameSteps::new(
             self.paint_reports.clone(),
             self.event_callback.clone(),
-            move || clock.now(),
+            self.clock.clone(),
         )
     }
 
     /// `requestAnimationFrame`: the next frame's steps run the callbacks JS holds.
     pub(crate) fn request_animation_frame(&mut self, window: &mut gpui::Window) {
-        crate::frame_steps::request_animation_frame(&self.paint_reports, self.frame_steps(), window);
+        self.frame_steps().request_animation_frame(window);
     }
 
     /// Whether nothing is drawn of the motion at `id`: its element is culled and dormant, or it
@@ -10106,7 +10065,7 @@ impl gpui::Render for GpuixView {
             // there is no commit to survey that the update has not just made.
             move |_: &gpui::Window| tree.try_lock().is_ok_and(|tree| flips.wants_survey(tree.revision()))
         })));
-        window.set_frame_steps(Some(self.frame_steps()));
+        window.set_frame_steps(Some(self.frame_steps().before_draw()));
         window.set_scroll_patch_registries(verifies.then(|| {
             let window_id = window.window_handle().window_id();
             let tapes = self.tapes.clone();
@@ -10528,6 +10487,7 @@ fn build_element_in(
 ) -> gpui::AnyElement {
     let mut unit = None;
     let mut patch_root_env = None;
+    let mut box_root_env = None;
     let mut anchor_env = None;
     if let Some(known) = ctx.tree.elements.get(&id) {
         let plain = ctx.baseline_probe.is_none()
@@ -10546,6 +10506,7 @@ fn build_element_in(
             )
         );
         let patch_root = ctx.retain.can_be_patch_root(ctx.tree, id);
+        let box_root = ctx.retain.makes_box_roots() && crate::layout::box_root::is_candidate(ctx.tree, known);
         let skip = ctx.retain.enter(crate::retain::Entry {
             id,
             revision: known.subtree_revision,
@@ -10566,8 +10527,8 @@ fn build_element_in(
                 opacity_runs(known, ctx.css_animations, ctx.css_transitions, ctx.motion_states, ctx.motion_values, ctx.now)
                     || transform_runs(known, ctx.css_animations, ctx.css_transitions, ctx.motion_states, ctx.motion_values, ctx.now)
             },
-            costly: crate::retain::costly(known),
             patch_root,
+            box_root,
         });
         if let Some(skip) = skip {
             ctx.contents_overlay = None;
@@ -10603,6 +10564,14 @@ fn build_element_in(
                     relocatable: false,
                     forced: false,
                 });
+                if patch_root_env.is_none() {
+                    box_root_env = ctx.retain.begin_box_root().map(|enter| FrameEnv {
+                        start: BuildStart::of(ctx),
+                        enter,
+                        relocatable: false,
+                        forced: false,
+                    });
+                }
             }
         }
     }
@@ -10614,19 +10583,26 @@ fn build_element_in(
         ctx.inherited = outside;
     }
     let unit = unit.and_then(|env| ctx.retain.end_unit().map(|(subtree, lift_z)| (env, subtree, lift_z)));
+    let unit_is_box_root = unit.is_some() && ctx.retain.unit_is_box_root();
     // Every style resolves while its element is built, and a virtual-list row is
     // built in list layout, so this is the one place that sees both.
     crate::background_images::pump(window, cx);
     let anchor = anchor_env.and_then(|env| ctx.retain.end_anchor().map(|subtree| (env, subtree)));
-    let recording = if ctx.tree.elements.contains_key(&id) { ctx.retain.exit() } else { None };
+    let unrecorded_box = if patch_root_env.is_some() || box_root_env.is_some() { ctx.retain.unrecorded_box_root() } else { None };
+    let recording = if let Some(known) = ctx.tree.elements.get(&id) {
+        ctx.retain.costly(|| crate::retain::costly(ctx.tree, known));
+        ctx.retain.exit()
+    } else {
+        None
+    };
     match (unit, recording) {
-        (Some((env, subtree, lift_z)), _) => unit_root(id, env, subtree, lift_z, element, ctx),
+        (Some((env, subtree, lift_z)), _) => unit_root(id, env, subtree, lift_z, unit_is_box_root, element, ctx),
         (None, _) if anchor.is_some() => {
             let (env, subtree) = anchor.expect("checked");
             anchor_root(id, env, subtree, element, ctx)
         }
-        (None, Some(recording)) => recorded_root(id, recording, patch_root_env, element, ctx),
-        (None, None) => element,
+        (None, Some(recording)) => recorded_root(id, recording, patch_root_env, box_root_env, element, ctx),
+        (None, None) => crate::layout::box_root::wrap_unrecorded(id, unrecorded_box, patch_root_env.or(box_root_env), element, ctx),
     }
 }
 
@@ -10752,8 +10728,14 @@ fn retained_root(
         retained = retained.lift_z(z);
     }
     if skip.patch_root {
-        retained = retained.patchable();
+        retained = if skip.box_root { retained.patchable_relayout() } else { retained.patchable() };
         ctx.retain.add_patch_root(crate::retain::Unit { id, env: patch_root_env });
+        if skip.box_root {
+            ctx.retain.note_box_root(id);
+        }
+    } else if skip.box_root {
+        retained = retained.patchable_relayout();
+        ctx.retain.add_box_root(crate::retain::Unit { id, env: patch_root_env });
     }
     retained.into_any_element()
 }
@@ -10782,7 +10764,7 @@ pub(crate) fn retained_id(id: u64) -> gpui::ElementId {
 
 /// What a replay of the retained root `id` does outside the frame: the registries it wrote are
 /// written again from its tape.
-fn replay_hook(
+pub(crate) fn replay_hook(
     id: u64,
     tapes: crate::tape::Tapes,
     measurements: crate::motion::measure::Measurements,
@@ -10818,6 +10800,7 @@ fn unit_root(
     env: FrameEnv,
     subtree: crate::layout::cull::Subtree,
     lift_z: Option<i32>,
+    box_root: bool,
     element: gpui::AnyElement,
     ctx: &mut BuildCtx,
 ) -> gpui::AnyElement {
@@ -10830,8 +10813,11 @@ fn unit_root(
     if let Some(z) = lift_z {
         retained = retained.lift_z(z);
     }
-    retained = retained.patchable();
+    retained = if box_root { retained.patchable_relayout() } else { retained.patchable() };
     ctx.retain.add_unit(crate::retain::Unit { id, env });
+    if box_root {
+        ctx.retain.note_box_root(id);
+    }
     retained.into_any_element()
 }
 
@@ -10865,6 +10851,7 @@ fn recorded_root(
     id: u64,
     recording: crate::retain::Recording,
     patch_root_env: Option<FrameEnv>,
+    box_root_env: Option<FrameEnv>,
     element: gpui::AnyElement,
     ctx: &mut BuildCtx,
 ) -> gpui::AnyElement {
@@ -10883,16 +10870,31 @@ fn recorded_root(
     if let Some(z) = recording.lift_z {
         retained = retained.lift_z(z);
     }
-    if let Some(env) = patch_root_env.filter(|_| recording.patch_root) {
-        retained = retained.patchable();
-        ctx.retain.add_patch_root(crate::retain::Unit { id, env });
+    if let Some(env) = patch_root_env.or(box_root_env) {
+        match (recording.patch_root, recording.box_root) {
+            // A box root that is a patch root is one root: a patch lays it out again when a commit edits it.
+            (true, true) => {
+                retained = retained.patchable_relayout();
+                ctx.retain.add_patch_root(crate::retain::Unit { id, env });
+                ctx.retain.note_box_root(id);
+            }
+            (true, false) => {
+                retained = retained.patchable();
+                ctx.retain.add_patch_root(crate::retain::Unit { id, env });
+            }
+            (false, true) => {
+                retained = retained.patchable_relayout();
+                ctx.retain.add_box_root(crate::retain::Unit { id, env });
+            }
+            (false, false) => {}
+        }
     }
     retained.into_any_element()
 }
 
 /// What a retained root hands gpui for a subtree built already: the element, with the tape of what
 /// its prepaint and paint write into the registries when gpui records it.
-fn taped_build(
+pub(crate) fn taped_build(
     id: u64,
     element: gpui::AnyElement,
     tapes: crate::tape::Tapes,
@@ -10926,28 +10928,28 @@ fn enter_contents(ctx: &mut BuildCtx) -> Option<Inherited> {
 }
 
 /// What `animate_style` starts from.
-struct StyleInputs<'a> {
+pub(crate) struct StyleInputs<'a> {
     /// The style with the `@container` blocks folded in: what the stages ask whether they apply to.
-    declared: Option<&'a StyleDesc>,
+    pub(crate) declared: Option<&'a StyleDesc>,
     /// `declared` as the style table's own `Arc`, when no `@container` block changed it.
-    shared: Option<&'a Arc<StyleDesc>>,
+    pub(crate) shared: Option<&'a Arc<StyleDesc>>,
     /// `declared` with the state styles (`hover`, `focus`, ...) folded in.
-    base: Option<&'a StyleDesc>,
-    before_transition: Option<&'a StyleDesc>,
-    pointer_states: crate::events::state_styles::PointerStates,
+    pub(crate) base: Option<&'a StyleDesc>,
+    pub(crate) before_transition: Option<&'a StyleDesc>,
+    pub(crate) pointer_states: crate::events::state_styles::PointerStates,
     /// Until every container above has been laid out once, the style is a guess that the next
     /// pass replaces. It must not seed a transition or an animation: the correct style would
     /// then animate in from the guess.
-    provisional: bool,
+    pub(crate) provisional: bool,
     /// Whether a `display: none` that a transition produces ends the build: only an element with
     /// a box has one to end.
-    may_hide: bool,
+    pub(crate) may_hide: bool,
 }
 
 /// An element's style in this frame, after the stages that move with time. Owned, so that the
 /// build of an element and the overlay of a `display: contents` element that is never built read
 /// the one result.
-struct Animated {
+pub(crate) struct Animated {
     /// A `display` transition has hidden the element: no stage after it ran.
     hidden: bool,
     // Boxed: `StyleDesc` is ~13 KB and an `Option` of it is moved whole into this struct even when
@@ -10971,7 +10973,7 @@ impl Animated {
         self.transitioned.as_ref().map(|declared| &*declared.style).or(base)
     }
 
-    fn current<'s>(&'s self, base: Option<&'s StyleDesc>) -> Option<&'s StyleDesc> {
+    pub(crate) fn current<'s>(&'s self, base: Option<&'s StyleDesc>) -> Option<&'s StyleDesc> {
         self.animated
             .as_deref()
             .or(self.bound.as_deref())
@@ -11038,7 +11040,7 @@ fn animate_style(
 /// `steps`: the element is built for a frame, so what it runs counts (it marks the build dynamic, it
 /// is an effect group or has a transform for as long as it runs, and its measurement is kept). An
 /// element built for a read of skipped content or provisionally only has its values.
-fn animate_style_at(
+pub(crate) fn animate_style_at(
     ctx: &mut BuildCtx,
     window: &gpui::Window,
     element: &crate::retained_tree::RetainedElement,
@@ -11080,9 +11082,6 @@ fn animate_style_at(
     if motion_binding.is_some() {
         dynamic |= Dynamic::MotionValues as u8;
     }
-    if animations_wanted {
-        dynamic |= Dynamic::Animation as u8;
-    }
     let transitioned = (transitions_wanted || animations_wanted).then(|| {
         let focus_visible = crate::motion::FocusVisible {
             own: ctx.focus_handles.contains_key(&id) && ctx.focus_styles.is_focus_visible(id),
@@ -11103,6 +11102,7 @@ fn animate_style_at(
                 .shared
                 .map_or_else(|| input.declared.unwrap_or(&EMPTY_STYLE).into(), crate::motion::StyleRef::from),
             focus_visible,
+            Some(&ctx.focus_styles),
             measurement.as_ref(),
             ctx.inherited.interpolate_size,
             crate::motion::Scope::Element,
@@ -11125,7 +11125,14 @@ fn animate_style_at(
             svg_css: Vec::new(),
             measured,
             measurement,
-            dynamic,
+            dynamic: dynamic
+                | if animations_wanted
+                    && crate::motion::CssAnimations::declares(transitioned.as_ref().map(|declared| &*declared.style))
+                {
+                    Dynamic::Animation as u8
+                } else {
+                    0
+                },
         };
     }
     if transitioned.as_ref().is_some_and(|declared| declared.transitions.is_some()) {
@@ -11175,6 +11182,11 @@ fn animate_style_at(
             )
         })
         .flatten();
+    // Decided from the style as resolved and the state the update kept: a held `animation*` that
+    // came to no animation (`animation: var(--a)` with `--a: none`) has nothing to run.
+    if animations_wanted && ctx.css_animations.wants(id, declared_style) {
+        dynamic |= Dynamic::Animation as u8;
+    }
     // What the transitions and animations of an `<svg>` write on its root, for its shapes to inherit.
     let running = transitioned.as_ref().and_then(|declared| declared.transitions.as_ref());
     let mut svg_css = css_values.as_ref().map(|values| values.svg_attributes_beneath(running)).unwrap_or_default();
@@ -11220,55 +11232,6 @@ fn animate_style_at(
         measurement,
         dynamic,
     }
-}
-
-/// The style `element` is painted with at `ctx.now`, as a build of the frame would resolve it: state
-/// styles, CSS transitions, `motion`, motion values and CSS animations, then the focus variants. For
-/// `getComputedStyle`, which asks between frames: what the transitions and animations run is put back
-/// as a pass that reads forced content has it (see `animate_style`), so a read advances nothing.
-/// `ctx.inherited` is the element's parent's.
-pub(crate) fn style_at_read(
-    ctx: &mut BuildCtx,
-    window: &gpui::Window,
-    element: &crate::retained_tree::RetainedElement,
-) -> StyleDesc {
-    let id = element.id;
-    let declared = element.style.as_deref();
-    let focused = |ctx: &BuildCtx, style: &StyleDesc| -> StyleDesc {
-        (*ctx.focus_styles.folded(id, style, ctx.focus_handles.contains_key(&id))).clone()
-    };
-    if crate::layout::box_generation::is_display_none(element) {
-        return declared.map(|style| focused(ctx, style)).unwrap_or_default();
-    }
-    let pointer_states = declared
-        .map(|style| ctx.pointer_states(id, style, element.has_inert_prop()))
-        .unwrap_or_default();
-    let state_style = declared.and_then(|style| {
-        pointer_states
-            .any()
-            .then(|| crate::events::state_styles::resolve_pointer_states(style, pointer_states))
-    });
-    let base_style = state_style.as_ref().or(declared);
-    let animations = ctx.css_animations.rewind_point(id);
-    let transitions = ctx.css_transitions.rewind_point(id);
-    let animated = animate_style_at(
-        ctx,
-        window,
-        element,
-        StyleInputs {
-            declared,
-            shared: element.style.as_ref(),
-            base: base_style,
-            before_transition: element.style_before_transition(),
-            pointer_states,
-            provisional: false,
-            may_hide: false,
-        },
-        false,
-    );
-    ctx.css_animations.rewind(animations, ctx.now);
-    ctx.css_transitions.rewind(transitions);
-    animated.current(base_style).map(|style| focused(ctx, style)).unwrap_or_default()
 }
 
 /// Whether an animation or a transition of the `opacity` of `element` is current: a CSS animation or
@@ -11373,7 +11336,8 @@ fn contents_frame(
         || wrapper.custom_props().contains_key("motionValues")
         || ctx.css_transitions.wants(wrapper.id, declared)
         || ctx.css_animations.wants(wrapper.id, declared);
-    if !moves {
+    let reads_vars = declared.is_some_and(crate::css::var_substitution::reads_vars);
+    if !moves && !reads_vars {
         return ContentsFrame {
             now: ctx.now,
             style: wrapper.style.clone(),
@@ -11386,6 +11350,22 @@ fn contents_frame(
         inherited.descend(frame.style.as_deref(), above.has_inert_prop())
     });
     let outside = std::mem::replace(&mut ctx.inherited, inside);
+    let var_style = declared.and_then(|style| {
+        let custom = ctx.focus_styles.custom_of(wrapper.id, style, false, &ctx.inherited.custom);
+        crate::css::var_substitution::resolve(style, &custom)
+    });
+    if var_style.is_some() {
+        crate::css::custom_properties::reads::note();
+    }
+    let base = var_style.as_ref().or(declared);
+    if !moves {
+        ctx.inherited = outside;
+        return ContentsFrame {
+            now: ctx.now,
+            style: base.map(|style| Arc::new(style.clone())),
+            handed: crate::layout::contents::Handed::new(wrapper.id, base, 0),
+        };
+    }
     let animated = animate_style(
         ctx,
         window,
@@ -11393,7 +11373,7 @@ fn contents_frame(
         StyleInputs {
             declared,
             shared: wrapper.style.as_ref(),
-            base: declared,
+            base,
             before_transition: wrapper.style_before_transition(),
             pointer_states: Default::default(),
             provisional: false,
@@ -11401,10 +11381,14 @@ fn contents_frame(
         },
     );
     ctx.inherited = outside;
-    let shown = animated.current(declared);
+    let shown = animated.current(base);
     ContentsFrame {
         now: ctx.now,
-        style: if animated.restyled() { shown.map(|style| Arc::new(style.clone())) } else { wrapper.style.clone() },
+        style: if animated.restyled() || var_style.is_some() {
+            shown.map(|style| Arc::new(style.clone()))
+        } else {
+            wrapper.style.clone()
+        },
         handed: crate::layout::contents::Handed::new(wrapper.id, shown, animated.dynamic),
     }
 }
@@ -11485,6 +11469,14 @@ fn build_element_unpumped(
             .then(|| crate::events::state_styles::resolve_pointer_states(style, pointer_states))
     });
     let base_style = state_style.as_ref().or(declared);
+    // A `var()` reads the custom properties the element computes to, its own included, and those
+    // of the focus variants that apply to it. It is substituted before anything reads the style, so inheritance, transitions, animations and
+    // motion see what the element declares.
+    let (var_style, own_custom) = ctx.substitute_vars(id, base_style);
+    if var_style.is_some() {
+        crate::css::custom_properties::reads::note();
+    }
+    let base_style = var_style.as_ref().or(base_style);
     ctx.retain.pointer(pointer_states);
     ctx.retain.focus(&ctx.focus_styles, id, ctx.focus_handles.contains_key(&id));
     if let Some(links) = crate::accessibility::links_key(id) {
@@ -11591,14 +11583,12 @@ fn build_element_unpumped(
 
     // Inheritable style resolves once here so both built-ins and custom
     // elements see the same cascade.
-    let descended = ctx.inherited.clone().descend(style, element.has_inert_prop());
+    debug_assert!(
+        style.is_none_or(|style| style.var_declarations.is_none()),
+        "a held var() declaration reached the build unresolved"
+    );
+    let descended = ctx.inherited.clone().descend_with_custom(style, element.has_inert_prop(), own_custom);
     let parent_inherited = std::mem::replace(&mut ctx.inherited, descended);
-    // A `var()` reads the custom properties the element computes to, its own included.
-    let var_style = style.and_then(|style| crate::css::var_substitution::resolve(style, &ctx.inherited.custom));
-    if var_style.is_some() {
-        crate::css::custom_properties::reads::note();
-    }
-    let style = var_style.as_ref().or(style);
     crate::layout::table::enter(&mut ctx.inherited.table_row, &mut ctx.inherited.table_cell, element);
     // The start of a logical inline pair is the right side in an rtl element.
     let rtl_style = style
@@ -11714,11 +11704,10 @@ fn build_element_unpumped(
     // What the element holds is its own to say; the element above hears it once it is built.
     let enclosing = std::mem::replace(&mut ctx.subtree, crate::layout::cull::Subtree::empty());
     let built = match element.element_type.as_str() {
-        // `<text>` is a `<div>` that happens to carry a string. Giving it its
-        // own builder meant every interaction prop on the shared `Props` type
-        // (onClick, hover, focus, tabIndex) type-checked, registered a JS
-        // listener, and then silently did nothing. `<span>` is the same box;
-        // it only differs in being inline inside a paragraph.
+        // A separate builder per host type meant every interaction prop on the shared `Props`
+        // type (onClick, hover, focus, tabIndex) type-checked, registered a JS listener, and
+        // then silently did nothing. `<span>` is the same box as `<div>`; it only differs in
+        // being inline inside a paragraph.
         host if crate::text::inline::is_host_type(host) => {
             ctx.custom_registry.destroy_unless(id, host);
             if crate::layout::contents::is_display_contents(element) {
@@ -12178,15 +12167,6 @@ fn virtual_row_ancestor(tree: &RetainedTree, list_id: u64, element_id: u64) -> O
     }
 }
 
-/// A text instance: a bare string with no style, children or listeners.
-fn is_text_node(element: &crate::retained_tree::RetainedElement) -> bool {
-    element.element_type == "text"
-        && element.content.is_some()
-        && element.style.is_none()
-        && element.children.is_empty()
-        && element.events().is_empty()
-}
-
 /// What the build of `element` reads of the layout and the frames before that its key has to
 /// carry: the size layout gave it as a query container, and whether its `content-visibility`
 /// skips. Nothing above the element has them.
@@ -12204,7 +12184,7 @@ fn container_key(element: &crate::retained_tree::RetainedElement, ctx: &BuildCtx
     }
 }
 
-/// The one builder for `<div>`, `<text>` and `<span>`.
+/// The one builder for `<div>` and `<span>`.
 ///
 /// Both get the same stable GPUI id, so gpui keeps their interactive element
 /// state (hover, active, pointer capture, scroll, accessibility node) across
@@ -12228,7 +12208,7 @@ pub(crate) fn build_host_container(
     // Everything up to the children goes through the slot: the element is 1.6 KB, and a helper
     // that took and returned it copied it twice.
     let mut el = crate::slot::Slot::new(&mut host);
-    if !is_text_node(element) {
+    if !crate::text::inline::is_raw_text(element) {
         el = crate::events::ids::host_hitbox(el, ctx.inherited.pointer_events_none);
         el = crate::events::app_region::mark(el, ctx.inherited.app_region);
     }
@@ -12400,16 +12380,7 @@ pub(crate) fn build_host_container(
     } else {
         Vec::new()
     };
-    let default_role = crate::accessibility::default_role(element);
-    el = if exposed.is_empty() {
-        apply_accessibility(el, element.id, element.custom_props(), default_role)
-    } else {
-        crate::accessibility::skipped::host(
-            crate::accessibility::apply_hosting(el, element.id, element.custom_props(), default_role),
-            exposed,
-        )
-    };
-    // Planned once: the label below and the children further down read the same
+    // Planned once: the text below and the children further down read the same
     // paragraphs. A node with no children paints its own `content` instead.
     if !skipped {
         crate::layout::container::settle_children(
@@ -12419,10 +12390,25 @@ pub(crate) fn build_host_container(
             window,
         );
     }
-    // A skipped `<text>` is still read out, though its paragraphs are not built.
-    let reads_text = !skipped || (a11y_active && element.element_type == "text");
+    // A skipped element is still read out, though its paragraphs are not built.
+    let reads_text = !skipped || (a11y_active && crate::accessibility::carries_text(element));
     let planned = (!element.children.is_empty() && reads_text).then(|| crate::text::plan_cache::planned(ctx.tree, element));
-    el = crate::accessibility::describe_text(el, element, planned.as_ref().and_then(|planned| planned.accessible_text.as_deref()));
+    // Only a screen reader reads it, and the retained replay key has `a11y_active`.
+    let text = if a11y_active && reads_text {
+        crate::accessibility::read_text(element, planned.as_deref())
+    } else {
+        None
+    };
+    let default_role = crate::accessibility::role_without_props(element, text.as_deref());
+    el = if exposed.is_empty() {
+        apply_accessibility(el, element.id, element.custom_props(), default_role)
+    } else {
+        crate::accessibility::skipped::host(
+            crate::accessibility::apply_hosting(el, element.id, element.custom_props(), default_role),
+            exposed,
+        )
+    };
+    el = crate::accessibility::describe_text(el, element, default_role, text);
     if is_label && !inert {
         el = crate::accessibility::label::describe(el, element.id);
     }
@@ -12698,7 +12684,7 @@ fn build_content(
     cx: &mut gpui::Context<GpuixView>,
 ) -> (Vec<gpui::AnyElement>, Vec<Placement>, Vec<Rc<Cell<gpui::Pixels>>>) {
     let outer_heights = std::mem::take(&mut ctx.containing_heights);
-    // Text content — selectable, same as a <text> leaf.
+    // Text content — selectable, same as a string child.
     // An empty string paints no glyphs, so it must take no space: gpui's text
     // layout still reserves a full line for "", and Solid's universal renderer
     // creates an empty placeholder text node for every dynamic hole (`<Show>`,
@@ -12730,7 +12716,8 @@ fn build_content(
             .as_ref()
             .filter(|probe| probe.container == element.id)
             .map(crate::text::atomic::Probe::clone_handle);
-        build_plan(element, plan, trim, probe.as_ref(), &mut 0, &mut content_elements, &mut placements, ctx, window, cx);
+        let label_paragraphs = crate::accessibility::labels_paragraphs(window.is_a11y_active(), element, plan);
+        build_plan(element, plan, trim, probe.as_ref(), label_paragraphs, &mut 0, &mut content_elements, &mut placements, ctx, window, cx);
     }
     let containing_heights = std::mem::replace(&mut ctx.containing_heights, outer_heights);
     (content_elements, placements, containing_heights)
@@ -12743,6 +12730,7 @@ fn build_plan(
     plan: &[(crate::text::inline::Child, u32)],
     trim: gpui::TextBoxTrim,
     probe: Option<&crate::text::atomic::Probe>,
+    label_paragraphs: bool,
     anonymous: &mut usize,
     content_elements: &mut Vec<gpui::AnyElement>,
     placements: &mut Vec<Placement>,
@@ -12782,7 +12770,7 @@ fn build_plan(
                     .inherited
                     .table_row
                     .map(|row| crate::text::selection::TableCell { row, cell: key.token() });
-                build_plan(element, cell, gpui::TextBoxTrim::default(), probe, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
+                build_plan(element, cell, gpui::TextBoxTrim::default(), probe, label_paragraphs, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
                 ctx.inherited.table_cell = outside;
                 let halves = ctx.inherited.table.collapse.then(|| ctx.collapsed.cell(key));
                 let mut cell = crate::layout::table::anonymous_cell(halves);
@@ -12811,7 +12799,7 @@ fn build_plan(
                 let mut inside_placements = Vec::new();
                 let outside = (ctx.inherited.table_row, ctx.inherited.table_cell);
                 (ctx.inherited.table_row, ctx.inherited.table_cell) = (Some(key.token()), None);
-                build_plan(element, &blocks, gpui::TextBoxTrim::default(), probe, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
+                build_plan(element, &blocks, gpui::TextBoxTrim::default(), probe, label_paragraphs, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
                 (ctx.inherited.table_row, ctx.inherited.table_cell) = outside;
                 settle_collapsed_borders(ctx, key, used_from, window);
                 let mut table = crate::layout::table::anonymous_table(&ctx.inherited.table, ctx.collapsed.table(key));
@@ -12900,7 +12888,13 @@ fn build_plan(
                     }
                 }
                 let (paragraph_element, subtree) = paragraph_content(paragraph, child_trim, ctx, window, cx);
-                content_elements.push(paragraph_element);
+                let label = label_paragraphs
+                    .then(|| crate::text::inline::accessible_text(std::iter::once(child)))
+                    .flatten();
+                content_elements.push(match label {
+                    Some(text) => crate::accessibility::paragraph_label(paragraph.anchor, text).child(paragraph_element).into_any_element(),
+                    None => paragraph_element,
+                });
                 ctx.subtree.merge(subtree);
                 if let Some(outside) = outside {
                     ctx.inherited = outside;
@@ -12983,7 +12977,7 @@ fn build_contents_container(
 /// text keeps inheriting colour, weight and family from ancestor styles.
 ///
 /// The run's group is its parent host element, because React makes a separate
-/// host node for every interpolated string. `<text>Hello {name}!</text>` is one
+/// host node for every interpolated string. `<div>Hello {name}!</div>` is one
 /// logical line painted as three runs that all share the parent's id.
 /// A `userSelect: "none"` run still paints highlight washes, because a browser
 /// still finds that text with Ctrl+F. Element chrome that must never be found,
@@ -13047,7 +13041,7 @@ fn paragraph_content(
             mixed
         };
         ctx.retain.inline_pointer(inline_pointer);
-        if motion.is_active(ctx.tree, &ctx.inline_states()) {
+        if motion.is_active() {
             ctx.retain.dynamic(crate::retain::Dynamic::InlineMotion);
         }
     }
@@ -13108,10 +13102,11 @@ fn paragraph_content(
             ctx.inherited.pointer_events_none,
             ctx.inherited.inert,
             &states,
+            &motion,
             &insets,
         );
         let inline_regions = if ctx.inherited.frameless {
-            crate::text::inline_region::of(ctx.tree, paragraph, ctx.inherited.app_region, &states, &insets)
+            crate::text::inline_region::of(ctx.tree, paragraph, ctx.inherited.app_region, &states, &motion, &insets)
         } else {
             Vec::new()
         };
@@ -13153,6 +13148,8 @@ fn paragraph_content(
                 paragraph,
                 ctx.inherited.pointer_events_none,
                 ctx.inherited.inert,
+                &states,
+                &motion,
                 &insets,
             )
             .map(Arc::new),
@@ -13249,7 +13246,16 @@ fn build_atomics(
                 Box::new(overlay)
             });
             let own = tree.elements.get(&id).and_then(|element| element.style.as_deref());
-            let declared = own.map(|base| crate::events::state_styles::folded(base, states(id, base)));
+            let declared = own.map(|base| {
+                let declared = crate::events::state_styles::folded(base, states(id, base));
+                match crate::css::var_substitution::resolve(&declared, &inherited.custom_of(Some(&*declared))) {
+                    Some(resolved) => {
+                        crate::css::custom_properties::reads::note();
+                        std::borrow::Cow::Owned(resolved)
+                    }
+                    None => declared,
+                }
+            });
             let lengths = inherited
                 .lengths
                 .descend(declared.as_ref().and_then(|style| style.font_size.as_ref()), false);
@@ -15051,7 +15057,7 @@ mod highlight_cache_tests {
     fn tree_with_text() -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
-        tree.create_element(2, "text".to_string());
+        tree.create_element(2, "#text".to_string());
         tree.append_child(1, 2);
         tree.set_text(2, "a fox and a fox".to_string());
         tree
@@ -15202,7 +15208,7 @@ mod batch_tests {
     }
 
     const MOUNT: &str = r##"[
-        ["createElement",1,"div"],["createElement",2,"text"],["createElement",3,"div"],
+        ["createElement",1,"div"],["createElement",2,"#text"],["createElement",3,"div"],
         ["appendChild",1,2],["appendChild",1,3],["setRoot",1],
         ["setStyle",1,{"width":100,"backgroundColor":"#112233"}],
         ["setStyle",3,{"height":10}],
@@ -16097,6 +16103,41 @@ fn check_font(bytes: &[u8]) -> std::result::Result<(), String> {
 }
 
 #[cfg(test)]
+mod inherited_var_tests {
+    use super::*;
+
+    fn root() -> Inherited {
+        Inherited::root(&Theme::dark(), gpui::WindowAppearance::Dark, true, TEST_VIEWPORT)
+    }
+
+    fn declared(json: &str) -> StyleDesc {
+        crate::css::var_substitution::parse(json.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn a_var_color_and_font_size_are_inherited_once_the_style_is_resolved() {
+        let style = declared(r##"{"fontSize":"var(--s)","color":"var(--c)","--s":"20px","--c":"#ff0000"}"##);
+        let parent = root();
+        let custom = parent.custom_of(Some(&style));
+        let resolved = crate::css::var_substitution::resolve(&style, &custom).expect("it holds vars");
+        let below = parent.clone().descend_with_custom(Some(&resolved), false, custom);
+        assert_eq!(below.lengths.font_size, 20.0);
+        assert_eq!(below.colors.resolve("currentColor"), below.colors.resolve("#ff0000"));
+
+        let unresolved = parent.descend(Some(&style), false);
+        assert_ne!(unresolved.lengths.font_size, 20.0);
+    }
+
+    #[test]
+    fn descend_computes_the_custom_properties_the_element_computes_to() {
+        let style = declared(r#"{"--a":"1px","width":"var(--a)"}"#);
+        let parent = root();
+        assert_eq!(parent.custom_of(Some(&style)), parent.clone().descend(Some(&style), false).custom);
+        assert_eq!(parent.custom_of(None), parent.custom);
+    }
+}
+
+#[cfg(test)]
 mod inherited_pointer_events_tests {
     use super::*;
 
@@ -16255,7 +16296,7 @@ mod font_size_cascade_tests {
                     tree.create_element(node.id, node.element_type.to_owned());
                     tree.set_style(node.id, Arc::new(style));
                     tree.create_element(probe(node.id), "div".to_owned());
-                    tree.create_element(probe(node.id) + 10_000, "text".to_owned());
+                    tree.create_element(probe(node.id) + 10_000, "#text".to_owned());
                     tree.set_text(probe(node.id) + 10_000, "m".to_owned());
                     tree.append_child(probe(node.id), probe(node.id) + 10_000);
                     tree.append_child(node.id, probe(node.id));
@@ -16712,7 +16753,7 @@ mod dimension_length_tests {
         fn add_text(&self, cx: &mut gpui::TestAppContext, id: u64, parent: u64, content: &str) {
             {
                 let mut tree = self.tree.lock().unwrap();
-                tree.create_element(id, "text".to_owned());
+                tree.create_element(id, "#text".to_owned());
                 tree.set_text(id, content.to_owned());
                 tree.append_child(parent, id);
             }
@@ -18116,14 +18157,14 @@ mod inline_run_size_tests {
             tree.create_element(1, "div".to_owned());
             tree.set_style(1, Arc::new(container));
             tree.set_root(1);
-            tree.create_element(2, "text".to_owned());
+            tree.create_element(2, "#text".to_owned());
             tree.set_text(2, text.to_owned());
             tree.append_child(1, 2);
             tree.create_element(3, "span".to_owned());
             let span: StyleDesc = serde_json::from_str(span_style).unwrap();
             tree.set_style(3, Arc::new(span));
             tree.append_child(1, 3);
-            tree.create_element(4, "text".to_owned());
+            tree.create_element(4, "#text".to_owned());
             tree.set_text(4, span_text.to_owned());
             tree.append_child(3, 4);
         }
@@ -18216,7 +18257,7 @@ mod inline_run_size_tests {
                 let span_style: StyleDesc = serde_json::from_str(span_style).unwrap();
                 tree.set_style(span, Arc::new(span_style));
                 tree.append_child(1, span);
-                tree.create_element(text_id, "text".to_owned());
+                tree.create_element(text_id, "#text".to_owned());
                 tree.set_text(text_id, (*text).to_owned());
                 tree.append_child(span, text_id);
             }
@@ -18342,7 +18383,7 @@ mod inline_run_size_tests {
                 let style: StyleDesc = serde_json::from_str(style).unwrap();
                 tree.set_style(span, Arc::new(style));
                 tree.append_child(1, span);
-                tree.create_element(span + 1, "text".to_owned());
+                tree.create_element(span + 1, "#text".to_owned());
                 tree.set_text(span + 1, text.to_owned());
                 tree.append_child(span, span + 1);
             }
@@ -18449,7 +18490,7 @@ mod stacking_build_tests {
         tree.create_element(id, "div".to_owned());
         tree.set_style(id, Arc::new(style));
         tree.append_child(parent, id);
-        tree.create_element(id + 100, "text".to_owned());
+        tree.create_element(id + 100, "#text".to_owned());
         tree.set_text(id + 100, label.to_owned());
         tree.append_child(id, id + 100);
     }
@@ -18914,14 +18955,14 @@ mod paint_integration_tests {
             tree.create_element(1, "div".to_owned());
             tree.set_style(1, Arc::new(container));
             tree.set_root(1);
-            tree.create_element(2, "text".to_owned());
+            tree.create_element(2, "#text".to_owned());
             tree.set_text(2, "a ".to_owned());
             tree.append_child(1, 2);
             tree.create_element(3, "span".to_owned());
             let span: StyleDesc = serde_json::from_str(span_style).unwrap();
             tree.set_style(3, Arc::new(span));
             tree.append_child(1, 3);
-            tree.create_element(4, "text".to_owned());
+            tree.create_element(4, "#text".to_owned());
             tree.set_text(4, "bbbbbbbb".to_owned());
             tree.append_child(3, 4);
         }
@@ -19123,7 +19164,7 @@ mod decoration_paint_tests {
             tree.create_element(2, "div".to_owned());
             tree.set_style(2, Arc::new(serde_json::from_str(r##"{"textDecoration": "underline wavy 2px #0000ff"}"##).unwrap()));
             tree.append_child(1, 2);
-            tree.create_element(3, "text".to_owned());
+            tree.create_element(3, "#text".to_owned());
             tree.set_text(3, "nested".to_owned());
             tree.append_child(2, 3);
         }

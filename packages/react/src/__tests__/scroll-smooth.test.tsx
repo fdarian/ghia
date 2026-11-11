@@ -55,6 +55,7 @@ describeNative("scrollBehavior: smooth", () => {
     const { renderer, id, top, advance, unmount } = setup({ scrollBehavior: "smooth" })
     try {
       renderer.scrollTo(id, 0, 300)
+      renderer.flush() // the frame that starts the animation
       advance(250)
       expect(top(), "not done before the shortest duration").toBeLessThan(300)
       advance(250)
@@ -78,6 +79,7 @@ describeNative("scrollBehavior: smooth", () => {
     const { renderer, id, top, advance, unmount } = setup()
     try {
       renderer.scrollTo(id, 0, 300, "smooth")
+      renderer.flush() // the frame that starts the animation
       advance(100)
       expect(top()).toBeGreaterThan(0)
       expect(top()).toBeLessThan(300)
@@ -116,6 +118,7 @@ describeNative("scrollBehavior: smooth", () => {
     const { renderer, id, top, advance, unmount } = setup({ scrollBehavior: "smooth" })
     try {
       renderer.scrollTo(id, 0, 300)
+      renderer.flush() // the frame that starts the animation
       advance(100)
       renderer.nativeSimulateScrollWheel(50, 50, 0, -10)
       const afterWheel = top()

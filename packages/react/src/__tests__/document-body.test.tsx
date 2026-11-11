@@ -27,8 +27,21 @@ describeNative("document.body in React", () => {
     expect(document.body).not.toBeNull()
     testRoot.unmount()
     expect(document.documentElement).toBeNull()
+    expect(document.head).toBeNull()
     expect(document.body).toBeNull()
     expect(document.scrollingElement).toBeNull()
+    testRoot = createTestRoot()
+  })
+
+  it("takes the destroyed html out of the document", () => {
+    testRoot.render(<div style={{ width: 40, height: 20 }} />)
+    const html = document.documentElement!
+    expect(html.parentNode).toBe(document)
+    testRoot.unmount()
+    expect(html.parentNode).toBeNull()
+    expect(html.isConnected).toBe(false)
+    expect(document.contains(html)).toBe(false)
+    expect(html.nextSibling).toBeNull()
     testRoot = createTestRoot()
   })
 
@@ -46,7 +59,7 @@ describeNative("document.body in React", () => {
     expect(body.parentNode).toBe(html)
     expect(body.parentElement).toBe(html)
     expect(box!.parentNode).toBe(body)
-    expect([...html.children]).toEqual([body])
+    expect([...html.children]).toEqual([document.head, body])
     expect([...body.children]).toEqual([box])
     expect([...document.childNodes]).toEqual([html])
     expect(html.previousSibling).toBeNull()
@@ -63,6 +76,44 @@ describeNative("document.body in React", () => {
     expect(body.compareDocumentPosition(box!)).toBe(20)
     expect(html.compareDocumentPosition(body)).toBe(20)
     expect(box!.compareDocumentPosition(body)).toBe(10)
+  })
+
+  it("has a head before body in html, which draws nothing", () => {
+    let box: PublicInstance | null = null
+    testRoot.render(<div ref={(instance) => (box = instance)} style={{ width: 40, height: 20 }} />)
+    const html = document.documentElement!
+    const head = document.head!
+    expect(head.tagName).toBe("HEAD")
+    expect(head.localName).toBe("head")
+    expect(head.parentNode).toBe(html)
+    expect(head.parentElement).toBe(html)
+    expect(head.nextSibling).toBe(document.body)
+    expect(document.body!.previousSibling).toBe(head)
+    expect(head.ownerDocument).toBe(document)
+    expect(head.getRootNode()).toBe(document)
+    expect(head.isConnected).toBe(true)
+    expect(head.children.length).toBe(0)
+    expect(html.contains(head)).toBe(true)
+    expect(head.contains(box)).toBe(false)
+    expect(head.compareDocumentPosition(document.body!)).toBe(4)
+    expect(head.getBoundingClientRect()).toMatchObject({ width: 0, height: 0 })
+    expect(box!.getBoundingClientRect()).toMatchObject({ x: 0, y: 0, width: 40, height: 20 })
+  })
+
+  it("keeps an element appended to head out of the layout", () => {
+    let inHead: PublicInstance | null = null
+    testRoot.render(
+      <>
+        {createPortal(
+          <div ref={(instance) => (inHead = instance)} style={{ width: 70, height: 50 }} />,
+          document.head as unknown as PublicInstance
+        )}
+        <div style={{ width: 40, height: 20 }} />
+      </>
+    )
+    expect(inHead!.parentNode).toBe(document.head)
+    expect(inHead!.getBoundingClientRect()).toMatchObject({ width: 0, height: 0 })
+    expect(document.body!.children.length).toBe(1)
   })
 
   it("has the document as the owner of body and of the top-level element", () => {

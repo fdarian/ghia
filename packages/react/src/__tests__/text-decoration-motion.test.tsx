@@ -165,9 +165,9 @@ describeNative("text decoration lengths in motion, against Chrome's computed val
 describeNative("the underline of a span in motion", () => {
   const paragraph = (style: Style) => (
     <div style={{ fontSize: 16, lineHeight: "24px", color: "#000000" }}>
-      <text>
+      <div>
         <span style={{ textDecoration: "underline #ff0000", ...style }}>xxxxxx</span>
-      </text>
+      </div>
     </div>
   )
 

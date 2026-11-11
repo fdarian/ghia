@@ -81,12 +81,12 @@ describeNative("reads inside a press or release handler", () => {
           expect(read.focusedId).toBe(other.id)
           expect(read.otherFocus).toBe(true)
           expect(read.fieldFocus).toBe(false)
-          expect(read.active?.id).toBe(other.id)
+          expect(read.active?.nativeId).toBe(other.id)
         } else {
           expect(read.focusedId).toBe(field.id)
           expect(read.otherFocus).toBe(false)
           expect(read.fieldFocus).toBe(true)
-          expect(read.active?.id).toBe(field.id)
+          expect(read.active?.nativeId).toBe(field.id)
         }
       } finally {
         unmount()

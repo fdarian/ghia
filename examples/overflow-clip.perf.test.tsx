@@ -44,7 +44,7 @@ const Card = React.memo(function Card({ shape, index }: { shape: Shape; index: n
         }}
       >
         <div style={{ width: 200, height: 20, backgroundColor: `hsl(${hue} 80% 70%)` }} />
-        <text style={{ color: '#ffffff', fontSize: 11 }}>{`card ${index}`}</text>
+        <div style={{ color: '#ffffff', fontSize: 11 }}>{`card ${index}`}</div>
       </div>
     </div>
   )
@@ -53,7 +53,7 @@ const Card = React.memo(function Card({ shape, index }: { shape: Shape; index: n
 function Cards({ shape, tick }: { shape: Shape; tick: number }) {
   return (
     <div style={{ width: 900, height: 700, display: 'flex', flexWrap: 'wrap', gap: 4, padding: 4 }}>
-      <text style={{ width: '100%', color: '#000000' }}>{`tick ${tick}`}</text>
+      <div style={{ width: '100%', color: '#000000' }}>{`tick ${tick}`}</div>
       {Array.from({ length: CARDS }, (_, index) => (
         <Card key={index} shape={shape} index={index} />
       ))}

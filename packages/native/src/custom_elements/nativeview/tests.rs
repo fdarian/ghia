@@ -16,15 +16,22 @@ struct El {
     style: String,
     props: Vec<(&'static str, serde_json::Value)>,
     events: Vec<&'static str>,
+    text: Option<&'static str>,
 }
 
 fn el(id: u64, parent: Option<u64>, element_type: &'static str, style: &str) -> El {
-    El { id, parent, element_type, style: style.to_owned(), props: Vec::new(), events: Vec::new() }
+    El { id, parent, element_type, style: style.to_owned(), props: Vec::new(), events: Vec::new(), text: None }
 }
 
 impl El {
     fn prop(mut self, key: &'static str, value: serde_json::Value) -> Self {
         self.props.push((key, value));
+        self
+    }
+
+    /// The string of a `#text` node.
+    fn text(mut self, text: &'static str) -> Self {
+        self.text = Some(text);
         self
     }
 
@@ -66,6 +73,9 @@ impl Page {
                 tree.create_element(element.id, element.element_type.to_owned());
                 let style = tree.styles.intern(element.style.as_bytes()).unwrap();
                 tree.set_style(element.id, style);
+                if let Some(text) = element.text {
+                    tree.set_text(element.id, text.to_owned());
+                }
                 for (key, value) in &element.props {
                     tree.set_custom_prop(element.id, (*key).to_owned(), value.clone());
                 }
@@ -267,7 +277,8 @@ fn a_nativeview_is_a_block_whatever_its_display_says_of_inline(cx: &mut gpui::Te
         vec![
             el(1, None, "div", ROOT),
             nativeview(r#"{"display": "inline", "width": 50, "height": 20}"#),
-            el(3, Some(2), "text", "{}"),
+            el(3, Some(2), "div", "{}"),
+            el(4, Some(3), "#text", "{}").text("label"),
         ],
     );
     assert!(page.surface(cx, 2).is_some());

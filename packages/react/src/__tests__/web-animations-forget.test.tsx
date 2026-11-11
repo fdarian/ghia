@@ -39,7 +39,7 @@ function setup() {
     }
   }
   show("forget-grow 1s linear")
-  renderer.getElementBounds(element.current!.id)
+  renderer.getElementBounds(element.current!.nativeId)
   frames(2)
   return { renderer, element, show, frames, unmount }
 }
@@ -49,9 +49,9 @@ describeNative("An animation the style cancelled and nobody holds", () => {
     const { renderer, element, show, frames, unmount } = setup()
     try {
       const animation: Animation = element.current!.getAnimations()[0]
-      const id = renderer.getAnimations(element.current!.id)[0].id
+      const id = renderer.getAnimations(element.current!.nativeId)[0].id
       show("none")
-      renderer.getElementBounds(element.current!.id)
+      renderer.getElementBounds(element.current!.nativeId)
       frames(3)
       expect(animation.playState).toBe("idle")
       for (let round = 0; round < 3; round++) {
@@ -72,9 +72,9 @@ describeNative("An animation the style cancelled and nobody holds", () => {
     const { renderer, element, show, frames, unmount } = setup()
     try {
       let animation: Animation | null = element.current!.getAnimations()[0]
-      const id = renderer.getAnimations(element.current!.id)[0].id
+      const id = renderer.getAnimations(element.current!.nativeId)[0].id
       show("none")
-      renderer.getElementBounds(element.current!.id)
+      renderer.getElementBounds(element.current!.nativeId)
       frames(3)
       expect(animation.playState).toBe("idle")
       expect(renderer.getAnimation(id).playState).toBe("idle")

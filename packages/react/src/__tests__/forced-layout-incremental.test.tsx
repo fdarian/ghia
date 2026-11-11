@@ -267,7 +267,7 @@ describeNative("a forced read after a change that moves boxes", { timeout: 30_00
                 flexShrink: 0,
               }}
             >
-              <text style={{ fontFamily: "Menlo", lineHeight: 1.2 }}>moves</text>
+              <div style={{ fontFamily: "Menlo", lineHeight: 1.2 }}>moves</div>
             </div>
           </div>
         )
@@ -303,7 +303,7 @@ describeNative("a forced read after a change that moves boxes", { timeout: 30_00
 /** The probe box, its row, its entry, the list and the page: the elements from the changed box to the window's root. */
 const CHAIN = 5
 
-/** An entry of ten elements, nine `div` and one `text`: the shape of a row of a long list. The first
+/** An entry of ten `div` (the line of text is a `#text` node, which is not an element): the shape of a row of a long list. The first
  *  entry's box is the only one that ever changes. */
 function Entry(props: { probe: number | null; icon?: boolean }) {
   return (
@@ -321,7 +321,7 @@ function Entry(props: { probe: number | null; icon?: boolean }) {
           <div style={{ display: "flex", flexDirection: "row" }}>
             <div style={{ display: "flex", flexDirection: "column" }}>
               <div style={{ display: "flex" }}>
-                <text style={{ fontSize: 14, fontFamily: "Menlo", color: "#222222" }}>Entry: a short line of text</text>
+                <div style={{ fontSize: 14, fontFamily: "Menlo", color: "#222222" }}>Entry: a short line of text</div>
               </div>
             </div>
           </div>
@@ -571,11 +571,11 @@ function Related(props: { entries: number; hidden: number; labelled: boolean; pa
         {props.labelled && (
           <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
             <label htmlFor="who">
-              <text style={{ fontSize: 14, fontFamily: "Menlo" }}>{name}</text>
+              <div style={{ fontSize: 14, fontFamily: "Menlo" }}>{name}</div>
             </label>
             <input id="who" aria-describedby="hint" value="" style={{ width: 200, height: 24 }} />
             <div id="hint">
-              <text style={{ fontSize: 14, fontFamily: "Menlo" }}>Hint</text>
+              <div style={{ fontSize: 14, fontFamily: "Menlo" }}>Hint</div>
             </div>
           </div>
         )}
@@ -585,7 +585,7 @@ function Related(props: { entries: number; hidden: number; labelled: boolean; pa
         <div style={{ display: "none" }}>
           {Array.from({ length: props.hidden }, (_, index) => (
             <div key={index}>
-              <text style={{ fontSize: 14, fontFamily: "Menlo" }}>hidden</text>
+              <div style={{ fontSize: 14, fontFamily: "Menlo" }}>hidden</div>
             </div>
           ))}
         </div>

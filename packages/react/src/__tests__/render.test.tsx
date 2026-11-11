@@ -186,8 +186,8 @@ describeNative("render()", () => {
 
   it("reuses the injected renderer on the second call", () => {
     const ignored = new TestRenderer()
-    render(<text>one</text>, { renderer })
-    render(<text>two</text>, { renderer: ignored })
+    render(<div>one</div>, { renderer })
+    render(<div>two</div>, { renderer: ignored })
 
     renderer.flush()
     expect(renderer.getAllText()).toEqual(["two"])
@@ -221,11 +221,11 @@ describeNative("render()", () => {
   })
 
     it("replaces painted text when the entry is evaluated again", () => {
-      render(<text>hello</text>, { renderer })
+      render(<div>hello</div>, { renderer })
       renderer.flush()
       expect(renderer.getAllText()).toEqual(["hello"])
 
-      render(<text>world</text>, { renderer })
+      render(<div>world</div>, { renderer })
       renderer.flush()
       expect(renderer.getAllText()).toEqual(["world"])
     })
@@ -240,7 +240,7 @@ describeNative("render()", () => {
             style={{ width: 100, height: 100 }}
             onClick={() => setBoom(true)}
           >
-            <text>ok</text>
+            <div>ok</div>
           </div>
         )
       }
@@ -306,7 +306,7 @@ describeNative("render()", () => {
       }
 
       render(<Boom />, { renderer })
-      render(<text>fresh</text>, { renderer })
+      render(<div>fresh</div>, { renderer })
       await new Promise((resolve) => setTimeout(resolve, 0))
       renderer.flush()
       expect(renderer.getAllText()).toEqual(["fresh"])
@@ -314,7 +314,7 @@ describeNative("render()", () => {
 
     it("removes process error handlers on resetRender", () => {
       const before = process.listenerCount("unhandledRejection")
-      render(<text>ok</text>, { renderer })
+      render(<div>ok</div>, { renderer })
       expect(process.listenerCount("unhandledRejection")).toBeGreaterThan(before)
       resetRender()
       expect(process.listenerCount("unhandledRejection")).toBe(before)
@@ -332,7 +332,7 @@ describeNative("render()", () => {
         `import { TestRenderer } from ${JSON.stringify(testingPath)}`,
         `import { render } from ${JSON.stringify(rendererPath)}`,
         "const renderer = new TestRenderer()",
-        'render(React.createElement("text", null, "ok"), { renderer })',
+        'render(React.createElement("div", null, "ok"), { renderer })',
         "renderer.flush()",
         'void Promise.reject(new Error("promise boom"))',
         "setTimeout(() => {",
@@ -351,7 +351,7 @@ describeNative("render()", () => {
     })
 
   it("reports an error that reaches the first run's handlers to the module that rendered last", async () => {
-    render(<text>one</text>, { renderer })
+    render(<div>one</div>, { renderer })
     const firstRunHandlers = Reflect.get(globalThis, "__gpuixRuntimeErrorHandlers")
 
     const rootsCreatedByLastRun: unknown[] = []
@@ -369,7 +369,7 @@ describeNative("render()", () => {
     })
     try {
       const lastRun = await import("../reconciler/renderer.js")
-      lastRun.render(<text>two</text>, { renderer })
+      lastRun.render(<div>two</div>, { renderer })
       expect(rootsCreatedByLastRun).toHaveLength(1)
 
       firstRunHandlers.uncaughtException(new Error("late failure"))
@@ -387,12 +387,12 @@ describeNative("render()", () => {
   it("does not deliver a queued window event to a remounted root", () => {
     const received: string[] = []
     const observed: string[] = []
-    render(<text>first</text>, {
+    render(<div>first</div>, {
       renderer,
       onKeyDown: () => received.push("first"),
       onEvent: () => observed.push("first"),
     })
-    render(<text>second</text>, {
+    render(<div>second</div>, {
       renderer,
       onKeyDown: () => received.push("second"),
       onEvent: () => observed.push("second"),
@@ -520,7 +520,7 @@ describeNative("render()", () => {
     function makeApp(label: string) {
       return function App() {
         const [value] = useState(label)
-        return <text>{value}</text>
+        return <div>{value}</div>
       }
     }
 
@@ -536,7 +536,7 @@ describeNative("render()", () => {
   it("keeps the remounted tree after deferred React work", async () => {
     render(
       <div>
-        <text>before</text>
+        <div>before</div>
       </div>,
       { renderer }
     )
@@ -546,7 +546,7 @@ describeNative("render()", () => {
 
     render(
       <div>
-        <text>after</text>
+        <div>after</div>
       </div>,
       { renderer }
     )
@@ -563,7 +563,7 @@ describeNative("render()", () => {
     Reflect.set(globalThis, "window", {})
     try {
       await installBrowserAutomation(renderer)
-      render(<text>automated</text>, { renderer })
+      render(<div>automated</div>, { renderer })
       renderer.flush()
 
       const automation = Reflect.get(globalThis, "gpuix")

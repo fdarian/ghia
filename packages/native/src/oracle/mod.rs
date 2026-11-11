@@ -17,6 +17,7 @@
 
 mod direct;
 mod rows;
+mod settings;
 
 use std::cell::RefCell;
 
@@ -201,6 +202,8 @@ impl RowOracle {
         let kind = match kind.as_str() {
             "div" => RowKind::Div,
             "direct" => RowKind::Direct,
+            "settings" => RowKind::Settings,
+            "settingsWrapped" => RowKind::SettingsWrapped,
             other => return Err(Error::from_reason(format!("unknown row kind {other:?}"))),
         };
         with_oracle(|cx, _window, view| {
@@ -326,6 +329,21 @@ impl RowOracle {
                 let view = view.read(app);
                 vec![view.renders as f64, view.divs.get() as f64, view.texts.get() as f64]
             }))
+        })
+    }
+
+    /// `[nodesCreated, measures, nodesLaidOut, nodesSized, passes]` of the window's layout engine since it was made.
+    #[napi]
+    pub fn get_layout_counters(&self) -> Result<Vec<f64>> {
+        in_window(|window, _app| {
+            let counters = window.layout_counters();
+            vec![
+                counters.nodes_created as f64,
+                counters.measures as f64,
+                counters.nodes_laid_out as f64,
+                counters.nodes_sized as f64,
+                counters.passes as f64,
+            ]
         })
     }
 

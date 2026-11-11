@@ -2,6 +2,7 @@ import type { EventPayload } from "../../index.js"
 import type { NativeRenderer } from "../host.js"
 import type { ActiveRoot, DismissLayer } from "../renderer-state.js"
 import {
+  captureHandlerKey,
   createDomEvent,
   dispatchDomEvent,
   optionalElement,
@@ -17,7 +18,14 @@ import { scrollKeyName } from "../scroll.js"
 import { moveFocusByTab } from "../focus.js"
 import { isDragEvent } from "./drag.js"
 import { handlerEventType, hasDomListener, isOutsidePress } from "./route.js"
-import { dispatchPropagating, document, isDocumentEvent, window } from "./window-target.js"
+import {
+  dispatchPropagating,
+  dispatchSelectionChange,
+  document,
+  isDocumentEvent,
+  listensForSelectionChange,
+  window,
+} from "./window-target.js"
 
 export interface RootEventContext {
   readonly renderer: NativeRenderer
@@ -53,7 +61,10 @@ export function normalizeEventType(event: EventPayload): EventPayload {
 /** Whether `event` was meant for the live root, and something is there to hear it. */
 export function handlesEvent(root: ActiveRoot, event: EventPayload): boolean {
   if (event.eventType === "selectionChange") {
-    return event.elementId === root.windowSelectionEventId && Boolean(root.handlers.onSelectionChange)
+    return (
+      event.elementId === root.windowSelectionEventId &&
+      (Boolean(root.handlers.onSelectionChange) || listensForSelectionChange())
+    )
   }
   if (event.eventType === "appearanceChange") {
     return event.elementId === root.windowAppearanceEventId && Boolean(root.handlers.onAppearanceChange)
@@ -78,7 +89,11 @@ export function handlesEvent(root: ActiveRoot, event: EventPayload): boolean {
     return window.hasListeners(event.eventType) || document.hasListeners(event.eventType)
   }
   if (event.path == null || isOutsidePress(event.eventType)) {
-    return root.eventHandlers.get(event.elementId)?.has(event.eventType) === true
+    const handlers = root.eventHandlers.get(event.elementId)
+    return (
+      handlers?.has(event.eventType) === true ||
+      (event.path == null && handlers?.has(captureHandlerKey(event.eventType)) === true)
+    )
   }
   return (
     hasDomListener(root.eventHandlers, event) ||
@@ -99,6 +114,7 @@ export function runRootEvent(
 ): DomDispatchResult {
   if (event.eventType === "selectionChange") {
     root.handlers.onSelectionChange?.(windowLevelEvent(root, event), context.renderer)
+    if (listensForSelectionChange()) dispatchSelectionChange(root, event)
     return notHandled
   }
   if (event.eventType === "appearanceChange") {

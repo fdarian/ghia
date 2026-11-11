@@ -24,7 +24,13 @@ import {
   isNativeviewHandlerProp,
   HOST_BINDING,
   HOST_MOUNT,
+  copyPrototypeMembers,
+  hasMutationObservers,
+  queueCharacterDataMutation,
+  queueChildListMutation,
+  recordAttributeChanges,
   ROOT_ELEMENT_STYLE,
+  ROOT_HEAD_STYLE,
   ROOT_ELEMENT_TYPES,
   readBoundingClientRect,
   toBoundingClientRect,
@@ -105,6 +111,8 @@ export class HostRoot implements MotionBindingHost {
 
   /** The window's `<html>`: its native root. A child of this root only in that it is mounted through it. */
   html: HostElement
+  /** The `<head>` in `html`, before `body`. */
+  head: HostElement
   /** The `<body>` in `html`, where the app's top-level nodes are. */
   body: HostElement
 
@@ -120,6 +128,7 @@ export class HostRoot implements MotionBindingHost {
     this.allocateId = options.allocateId
     const elements = this.mountDocumentElements()
     this.html = elements.html
+    this.head = elements.head
     this.body = elements.body
   }
 
@@ -128,15 +137,16 @@ export class HostRoot implements MotionBindingHost {
     return this.body.childList
   }
 
-  /** Makes the `<html>` and `<body>` again for a root that was torn down and renders once more. */
+  /** Makes the `<html>`, `<head>` and `<body>` again for a root that was torn down and renders once more. */
   ensureDocumentElements(): void {
     if (this.html.mounted) return
     const elements = this.mountDocumentElements()
     this.html = elements.html
+    this.head = elements.head
     this.body = elements.body
   }
 
-  /** Destroys `<html>` and `<body>`, once the app's nodes are out of them. */
+  /** Destroys `<html>` and, with it, `<head>` and `<body>`, once the app's nodes are out of them. */
   destroyDocumentElements(): void {
     this.finishRemovals()
     if (!this.html.mounted) return
@@ -157,17 +167,21 @@ export class HostRoot implements MotionBindingHost {
   }
 
   /** Built through the host machinery an app's elements go through, then mounted as the window's root. */
-  private mountDocumentElements(): { html: HostElement; body: HostElement } {
+  private mountDocumentElements(): { html: HostElement; head: HostElement; body: HostElement } {
     const html = createHostElement(ROOT_ELEMENT_TYPES.html)
+    const head = createHostElement(ROOT_ELEMENT_TYPES.head)
     const body = createHostElement(ROOT_ELEMENT_TYPES.body)
     html.style = { ...ROOT_ELEMENT_STYLE }
+    head.style = { ...ROOT_HEAD_STYLE }
     body.style = { ...ROOT_ELEMENT_STYLE }
     html.parent = this
-    html.childList.push(body)
-    body.parent = html
+    for (const child of [head, body]) {
+      html.childList.push(child)
+      child.parent = html
+    }
     mount(this, html)
     this.mutations.setRoot(html.nativeId)
-    return { html, body }
+    return { html, head, body }
   }
 }
 
@@ -445,6 +459,7 @@ defineDomMembers(HostElement.prototype, (element: HostElement) => ({
   connected: isConnected(element),
   layout: element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.nativeId } : undefined,
   prop: (name) => element.props.get(name),
+  propNames: () => element.props.keys(),
 }))
 defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
   renderer: element.root?.nativeRenderer,
@@ -457,12 +472,7 @@ defineScrollMembers(HostElement.prototype, (element: HostElement) => ({
  * fields come from one constructor and the prototype chain from this one.
  */
 abstract class SvgHostElement extends SVGElement {}
-for (const key of Reflect.ownKeys(HostElement.prototype)) {
-  if (key === "constructor") continue
-  const descriptor = Object.getOwnPropertyDescriptor(HostElement.prototype, key)
-  if (descriptor === undefined) throw new Error(`HostElement.prototype has no own ${String(key)}`)
-  Object.defineProperty(SvgHostElement.prototype, key, descriptor)
-}
+copyPrototypeMembers(HostElement.prototype, SvgHostElement.prototype)
 
 /** In the tree of a root: every ancestor up to the root still holds it, as `removeChild` takes a node out of the DOM. */
 function isConnected(node: HostNode): boolean {
@@ -567,6 +577,7 @@ export function createHostElement(type: string): HostElement {
 function isElementType(type: string): type is ElementType {
   switch (type) {
     case "html":
+    case "head":
     case "body":
     case "div":
     case "text":
@@ -646,7 +657,9 @@ export function createHostText(value: string): HostText {
 export function replaceHostText(node: HostText, value: string): void {
   const next = String(value)
   if (node.text === next) return
+  const previous = node.text
   node.text = next
+  queueCharacterDataMutation(node, previous)
   if (node.root && node.mounted) node.root.mutations.setText(node.nativeId, next)
 }
 
@@ -693,8 +706,8 @@ export function setHostProperty(
     node.listeners.setProp(eventType, isEventHandler(value) ? value : undefined)
     return
   }
-  if (value === undefined) node.props.delete(name)
-  else node.props.set(name, value)
+  if (hasMutationObservers()) recordAttributeChanges(node, [name], () => storeHostProp(node, name, value))
+  else storeHostProp(node, name, value)
   if (!node.root || !node.mounted) return
   syncAttribute(node.root, node, name, value)
   if (!customPropAllowed(node, name)) return
@@ -707,6 +720,11 @@ function syncAttribute(root: HostRoot, node: HostElement, prop: string, value: H
   if (attribute === undefined) return
   const text = attributeValue(attribute, value)
   if (node.sent.writesAttribute(attribute, text)) root.mutations.setAttribute(node.nativeId, attribute, text)
+}
+
+function storeHostProp(node: HostElement, name: string, value: HostPropertyValue): void {
+  if (value === undefined) node.props.delete(name)
+  else node.props.set(name, value)
 }
 
 function syncNativeviewProps(root: HostRoot, node: HostElement): void {
@@ -728,7 +746,7 @@ function mount(root: HostRoot, node: HostNode): void {
   if (node.mounted) return
   node.mounted = true
   if (node.kind === "element") root.elements.set(node.nativeId, node)
-  root.mutations.createElement(node.nativeId, node.kind === "text" ? "text" : node.type)
+  root.mutations.createElement(node.nativeId, node.kind === "text" ? "#text" : node.type)
   if (node.kind === "text") {
     root.mutations.setText(node.nativeId, node.text)
   } else {
@@ -760,6 +778,9 @@ function removeFromParent(node: HostNode): void {
   const index = parent.childList.indexOf(node)
   if (index >= 0) parent.childList.splice(index, 1)
   node.parent = null
+  if (index >= 0 && parent.kind === "element" && hasMutationObservers()) {
+    queueChildListMutation(parent, [], [node], parent.childList[index - 1] ?? null, parent.childList[index] ?? null)
+  }
 }
 
 export function insertHostNode(
@@ -780,6 +801,9 @@ export function insertHostNode(
   const index = anchor ? parent.childList.indexOf(anchor) : parent.childList.length
   parent.childList.splice(index, 0, node)
   node.parent = parent
+  if (hasMutationObservers()) {
+    queueChildListMutation(parent, [node], [], parent.childList[index - 1] ?? null, parent.childList[index + 1] ?? null)
+  }
   const root = parent.root
   if (!root) return
   root.removals.delete(node)

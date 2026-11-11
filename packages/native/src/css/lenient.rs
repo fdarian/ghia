@@ -5,7 +5,7 @@
 //! written order (`css::covers` drops the longhands written before a shorthand, so the order is
 //! part of the meaning), judges each declaration alone with the same check `intern` runs, and
 //! parses the declarations that passed. Web code hands over values a CSS engine would ignore
-//! (`border: 0` as a number, `height: "inherit"`, `width: "var(--anchor-width)"`), and one of them
+//! (`border: 0` as a number, `height: "inherit"`, `width: "wide"`), and one of them
 //! must not take down the app.
 //!
 //! A declaration that fails alone is:
@@ -16,9 +16,12 @@
 //! - anything else, the CSS-wide keywords (`inherit`, `initial`, `unset`, `revert`,
 //!   `revert-layer`) among them: dropped, and logged once.
 //!
-//! Dropping is CSS's answer for `unset` and `revert` and for `initial` on a property that is not
-//! inherited. `initial` on an inherited property, and `inherit`, would need a value from the
-//! parent; see `docs/fork/deviations.md`.
+//! Dropping is CSS's answer for `unset`, `revert` and `initial` on a property that is not inherited
+//! only where no layer below sets it. An element's own style over the universal style, and a state
+//! style or an `@container` block over the element's own style, are the exceptions: the declaration
+//! is gone before it is laid over that layer, so the value below stays. A keyword inside the
+//! universal style matches CSS, since no layer lies under it. `initial` on an inherited property,
+//! and `inherit`, would need a value from the parent; see `docs/fork/deviations.md`.
 
 use std::collections::HashSet;
 use std::sync::{LazyLock, Mutex, PoisonError};
@@ -34,7 +37,7 @@ pub(crate) const UNITLESS: &[&str] = &[
     "animationIterationCount", "aspectRatio", "borderImageOutset", "borderImageSlice", "borderImageWidth",
     "columnCount", "columns", "flex", "flexGrow", "flexShrink", "fontWeight", "gridArea", "gridColumn",
     "gridColumnEnd", "gridColumnStart", "gridRow", "gridRowEnd", "gridRowStart", "lineClamp", "lineHeight",
-    "opacity", "order", "orphans", "scale", "tabSize", "webkitLineClamp", "widows", "zIndex", "zoom",
+    "opacity", "order", "orphans", "scale", "tabSize", "widows", "zIndex", "zoom",
     "fillOpacity", "floodOpacity", "stopOpacity", "strokeDasharray", "strokeDashoffset", "strokeMiterlimit",
     "strokeOpacity", "strokeWidth",
 ];
@@ -182,18 +185,26 @@ fn object_declarations(value: &str) -> Option<Vec<Declaration>> {
     serde_json::from_str::<Declarations>(value).ok().map(|declarations| declarations.0)
 }
 
-/// The JSON string React DOM would write for a number `value` of `key`, or `None` when `value` is
-/// not a number.
-fn number_as_text(key: &str, value: &str) -> Option<String> {
+/// Whether the value of `key` is a `<number>`, which React DOM writes without a unit.
+pub(crate) fn is_unitless(key: &str) -> bool {
+    UNITLESS.contains(&key)
+}
+
+/// The text React DOM would write for a number `value` of `key`, or `None` when `value` is not a
+/// number.
+pub(crate) fn number_text(key: &str, value: &str) -> Option<String> {
     let number: serde_json::Number = serde_json::from_str(value).ok()?;
-    let text = if number.as_f64() == Some(0.0) {
+    Some(if number.as_f64() == Some(0.0) {
         "0".to_owned()
-    } else if UNITLESS.contains(&key) {
+    } else if is_unitless(key) {
         number.to_string()
     } else {
         format!("{number}px")
-    };
-    Some(json_string(&text))
+    })
+}
+
+fn number_as_text(key: &str, value: &str) -> Option<String> {
+    number_text(key, value).map(|text| json_string(&text))
 }
 
 /// Whether this is the first time `name: value` is dropped, so a re-render does not log it again.

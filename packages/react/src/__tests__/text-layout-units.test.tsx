@@ -53,12 +53,12 @@ describeNative("a cap-trimmed label in a fixed-height box", () => {
             ref={ref("box")}
             style={{ width: 600, height: sample.box, display: "flex", alignItems: "center", color: "#000000" }}
           >
-            <text
+            <div
               ref={ref("label")}
               style={{ fontFamily: sample.family, fontSize: sample.size, lineHeight: sample.line, ...TRIM }}
             >
               {sample.text}
-            </text>
+            </div>
           </div>
         )
         const label = rect("label")
@@ -101,7 +101,7 @@ describeNative("a chip as wide as its text", () => {
             }}
           >
             <div ref={ref("chip")} style={{ display: "flex", padding: `0 ${sample.pad}px` }}>
-              <text>{sample.text}</text>
+              <div>{sample.text}</div>
             </div>
           </div>
         )

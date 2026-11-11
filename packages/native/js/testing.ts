@@ -1191,7 +1191,7 @@ export class TestRenderer implements NativeRenderer {
     const elements = this.buildElementMap()
     const html = elements.get(rootId)
     if (html?.type !== "html") return html
-    const body = elements.get(html.children[0])
+    const body = html.children.map((id) => elements.get(id)).find((child) => child?.type === "body")
     const top = body?.children.at(-1)
     return top === undefined ? undefined : elements.get(top)
   }
@@ -1201,7 +1201,7 @@ export class TestRenderer implements NativeRenderer {
     return this.buildElementMap().get(id)
   }
 
-  /** Find elements by type (e.g. "div", "text"). */
+  /** Find elements by type (e.g. "div", "#text" for a string node). */
   findByType(type: string): TestElement[] {
     return [...this.buildElementMap().values()].filter((el) => el.type === type)
   }
@@ -2128,7 +2128,7 @@ export class TestRenderer implements NativeRenderer {
 
   /** Every string painted in the last frame, in paint order.
    *
-   *  `getAllText()` only sees `<text>` nodes in the retained tree. Native
+   *  `getAllText()` only sees string nodes in the retained tree. Native
    *  elements like `<code>` and `<diff>` paint their text inside GPUI, so this
    *  is the only way to assert on what they rendered. */
   getPaintedText(): string[] {

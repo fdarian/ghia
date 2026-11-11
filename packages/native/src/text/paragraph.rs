@@ -915,20 +915,20 @@ mod tests {
     fn tree_with(styles: &[(u64, serde_json::Value)]) -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
-        tree.create_element(2, "text".to_string());
+        tree.create_element(2, "#text".to_string());
         tree.append_child(1, 2);
         tree.set_text(2, "a ".to_string());
         tree.create_element(3, "span".to_string());
         tree.append_child(1, 3);
-        tree.create_element(4, "text".to_string());
+        tree.create_element(4, "#text".to_string());
         tree.append_child(3, 4);
         tree.set_text(4, "bold".to_string());
         tree.create_element(5, "span".to_string());
         tree.append_child(3, 5);
-        tree.create_element(6, "text".to_string());
+        tree.create_element(6, "#text".to_string());
         tree.append_child(5, 6);
         tree.set_text(6, "red".to_string());
-        tree.create_element(7, "text".to_string());
+        tree.create_element(7, "#text".to_string());
         tree.append_child(1, 7);
         tree.set_text(7, " end".to_string());
         for (id, style) in styles {
@@ -1516,7 +1516,7 @@ mod tests {
         tree.create_element(1, "div".to_string());
         tree.create_element(2, "div".to_string());
         tree.append_child(1, 2);
-        tree.create_element(3, "text".to_string());
+        tree.create_element(3, "#text".to_string());
         tree.append_child(2, 3);
         tree.set_text(3, "red".to_string());
         let style = serde_json::json!({"display": "contents", "color": "#ff0000", "fontWeight": 700});
@@ -1649,7 +1649,7 @@ mod tests {
     fn a_paragraph_of_one_text_node_that_nothing_restyles_is_plain() {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
-        tree.create_element(2, "text".to_string());
+        tree.create_element(2, "#text".to_string());
         tree.append_child(1, 2);
         tree.set_text(2, "alone".to_string());
         assert!(runs_of(&tree).is_empty());

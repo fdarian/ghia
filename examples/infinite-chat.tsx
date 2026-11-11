@@ -308,15 +308,15 @@ const MessageRow = memo(function MessageRow({
             backgroundColor: message.author === 'Tommy' ? C.accent : C.avatar,
           }}
         >
-          <text style={{ color: C.text, fontSize: 12, fontWeight: 700 }}>
+          <div style={{ color: C.text, fontSize: 12, fontWeight: 700 }}>
             {message.author === 'Tommy' ? 'T' : 'G'}
-          </text>
+          </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, gap: 7 }}>
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <text style={{ color: C.text, fontSize: 14, fontWeight: 700 }}>{message.author}</text>
-            <text style={{ color: C.tertiary, fontSize: 12 }}>{message.time}</text>
-            <text style={{ color: C.tertiary, fontSize: 11 }}>{message.id}</text>
+            <div style={{ color: C.text, fontSize: 14, fontWeight: 700 }}>{message.author}</div>
+            <div style={{ color: C.tertiary, fontSize: 12 }}>{message.time}</div>
+            <div style={{ color: C.tertiary, fontSize: 11 }}>{message.id}</div>
           </div>
           <SafeMdxContent source={message.source} onLinkClick={onNavigate} />
         </div>
@@ -350,9 +350,9 @@ const EdgeRow = memo(function EdgeRow({
         justifyContent: 'center',
       }}
     >
-      <text style={{ color: loading ? C.tertiary : '#3A3A3A', fontSize: 12 }}>
+      <div style={{ color: loading ? C.tertiary : '#3A3A3A', fontSize: 12 }}>
         {loading ? 'Loading older messages…' : '·'}
-      </text>
+      </div>
     </div>
   )
 })
@@ -469,7 +469,7 @@ export function InfiniteChatApp({
       // the void pixel-fixed and replace the screen around it. Only the app
       // knows the void stands for the content that just arrived, so it reads
       // the anchor here and re-anchors after the commit.
-      const listId = listRef.current?.id
+      const listId = listRef.current?.nativeId
       const top = listId != null ? renderer?.getListScrollTop?.(listId) : null
 
       // TWO commits, never one. `VirtualListEntry::sync` turns the child ids
@@ -542,7 +542,7 @@ export function InfiniteChatApp({
       })
       pending.current = false
       const index = page.items.findIndex((message) => message.id === target)
-      const id = listRef.current?.id
+      const id = listRef.current?.nativeId
       // +1 for the leading edge row, which exists whenever there is history above.
       if (id != null && index >= 0) renderer?.scrollToItem?.(id, index + (page.before ? 1 : 0))
     },
@@ -594,8 +594,8 @@ export function InfiniteChatApp({
           borderBottomStyle: 'solid',
         }}
       >
-        <text style={{ color: C.text, fontSize: 14, fontWeight: 700 }}>Infinite history</text>
-        <text style={{ color: C.secondary, fontSize: 12 }}>{route}</text>
+        <div style={{ color: C.text, fontSize: 14, fontWeight: 700 }}>Infinite history</div>
+        <div style={{ color: C.secondary, fontSize: 12 }}>{route}</div>
       </div>
 
       <div style={{ display: 'flex', flexGrow: 1, minHeight: 0, position: 'relative' }}>
@@ -635,7 +635,7 @@ export function InfiniteChatApp({
                 borderStyle: 'solid',
               }}
             >
-              <text style={{ color: C.secondary, fontSize: 12 }}>● Jumping to message…</text>
+              <div style={{ color: C.secondary, fontSize: 12 }}>● Jumping to message…</div>
             </div>
           </div>
         )}

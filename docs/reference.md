@@ -95,7 +95,7 @@ function App() {
           hover: { backgroundColor: '#2c2c2c' },
         }}
       >
-        <text style={{ color: '#e2e2e2' }}>Count: {count}</text>
+        <div style={{ color: '#e2e2e2' }}>Count: {count}</div>
       </div>
     </div>
   )
@@ -105,9 +105,10 @@ render(<App />, { title: 'My App', width: 800, height: 600 })
 ```
 
 > [!IMPORTANT]
-> **Give every `<text>` a `color`.** GPUI does not inherit `color` from a
-> parent, so text with no color paints **black** and disappears on a dark
-> surface.
+> **Set a `color` on a dark surface.** Text with no `color` paints in the
+> default one, black under a light `colorScheme`, so it disappears on a dark
+> background. `color` is inherited: set it on the element that holds the text
+> or on any ancestor, and every string below it takes it.
 
 ### 4. Run it
 
@@ -321,7 +322,7 @@ GitHub will 404 the API. Optional: put a Cloudflare cache in front of
 | **mail** | `bun run mail` | A Superhuman-style mail client: three panes, thread list, and a Framer newsletter |
 | **native-text** | `bun run native-text` | The three native text components with a tab switcher |
 | **counter** | `bun run counter` | The smallest possible app: state, events, hover |
-| **diff** | `bun run diff` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
+| **diff** | `bun run diff` | A diff viewer composed from `<div>` and `<span>` in JS, for comparison |
 | **web** | `bun run web` from the repository root | The ChatGPT example rendered in a browser canvas with WebGPU |
 
 They live in [`examples/`](../examples/), which has one `vite.config.mts` for all of them: each script is `ghia dev <entry>`, and `bun run compile` runs `compile-chat.ts`, which is `ghia build chat.main.tsx` plus the app icons and a macOS `.app`. Where an example's `render()` is not in the file that holds its components, the entry is `<name>.main.tsx` (`chat.main.tsx`), so that a component edit is a Fast Refresh update. The commands need a clone of this repo and a local native build.
@@ -503,6 +504,8 @@ is atomic: native decodes it whole and resolves every style before it touches an
 | 14 | `setStyleSheet` | sheet id, bool present, then (when present) string text |
 | 15 | `setAdoptedStyleSheets` | varint count, then that many sheet ids |
 
+A string child is an element of type `"#text"` (a DOM text node): the adapters send `createElement id "#text"` and then `setText`. It takes no style, listener, prop or child, and `setText` is for it only.
+
 **A style is its JSON text**, the exact string `JSON.stringify(style)` gives, with the keys in the order written.
 Native interns styles by those bytes and reads `@container` rules from the text, so two styles are one style exactly
 when their text is equal. Native does not parse the JSON until it meets a text it has not interned.
@@ -652,7 +655,7 @@ function App() {
   return (
     <div style={{ padding: 24, backgroundColor: '#1a1a1a', height: '100%' }}>
       <div onClick={() => setCount((value) => value + 1)}>
-        <text style={{ color: '#e2e2e2' }}>Count: {count()}</text>
+        <div style={{ color: '#e2e2e2' }}>Count: {count()}</div>
       </div>
     </div>
   )
@@ -913,7 +916,7 @@ controls inside it:
     paddingLeft: 80, // clears the traffic lights
   }}
 >
-  <text>Inbox</text>
+  <div>Inbox</div>
   <div style={{ flexGrow: 1 }} />
   <div style={{ appRegion: 'no-drag' }} onClick={compose}>Compose</div>
 </div>
@@ -1576,7 +1579,7 @@ function WelcomeCard() {
       transition={{ duration: 0.25, ease: 'easeOut' }}
       style={{ overflow: 'hidden' }}
     >
-      <text style={{ color: '#ffffff' }}>Welcome</text>
+      <div style={{ color: '#ffffff' }}>Welcome</div>
     </motion.div>
   )
 }
@@ -2235,7 +2238,7 @@ gesture props, and answers to them natively, with no render per hover or press.
 of its props is `MotionSpanProps`.
 
 ```tsx
-<text style={{ color: '#e2e2e2' }}>
+<div style={{ color: '#e2e2e2' }}>
   Saved{' '}
   <motion.span
     initial={{ backgroundColor: '#ffe58a00', color: '#e2e2e2' }}
@@ -2245,7 +2248,7 @@ of its props is `MotionSpanProps`.
   >
     3 files
   </motion.span>
-</text>
+</div>
 ```
 
 A span is text that its paragraph paints, not a box of its own, so it animates
@@ -2358,7 +2361,7 @@ function Toast({ show }: { show: boolean }) {
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2, ease: 'easeOut' }}
         >
-          <text>Saved</text>
+          <div>Saved</div>
         </motion.div>
       ) : null}
     </AnimatePresence>
@@ -2402,7 +2405,7 @@ function DeferredRemoval() {
 
   return (
     <div onClick={() => !isPresent && safeToRemove?.()}>
-      <text>{isPresent ? 'Ready' : 'Click to remove'}</text>
+      <div>{isPresent ? 'Ready' : 'Click to remove'}</div>
     </div>
   )
 }
@@ -2428,7 +2431,7 @@ function DeferredRemoval() {
         exit={{ opacity: 0 }}
         transition={{ duration: 0.2 }}
       >
-        <text>{item.label}</text>
+        <div>{item.label}</div>
       </motion.div>
     ))}
   </AnimatePresence>
@@ -2775,7 +2778,7 @@ function Tasks() {
     <Reorder.Group axis="y" values={tasks} onReorder={setTasks}>
       {tasks.map((task) => (
         <Reorder.Item key={task} value={task} style={{ height: 32, bg: '#27272a' }}>
-          <text>{task}</text>
+          <div>{task}</div>
         </Reorder.Item>
       ))}
     </Reorder.Group>
@@ -3124,7 +3127,7 @@ Each **direct host child** is one virtual row. Give every row a stable React key
 </virtual-list>
 ```
 
-A row can contain nested `<div>`, `<text>`, `<markdown>`, `<code>`, `<diff>`, `<input>`, and `<textarea>` elements. Focusable rows stay active when they move offscreen, so keyboard input and native editor state are preserved. A scroller inside a row takes the wheel first. When it is at its limit the list takes the event, and when the list is at its limit the scrollers around it do (see [Scrolling](#scrolling)).
+A row can contain nested `<div>`, `<span>`, strings, `<markdown>`, `<code>`, `<diff>`, `<input>`, and `<textarea>` elements. Focusable rows stay active when they move offscreen, so keyboard input and native editor state are preserved. A scroller inside a row takes the wheel first. When it is at its limit the list takes the event, and when the list is at its limit the scrollers around it do (see [Scrolling](#scrolling)).
 
 A row can be `display: "contents"`. It has no box, so its `height`, `padding`, `margin`, `border` and `backgroundColor` do nothing, and the list measures it as its children stacked as a block: children 30 and 25 px tall make a 55 px row, and a row with no children (or only `display: "none"` ones) is 0 px. A browser has no such list, so this is the list's own definition. Its text style, `inert`, `pointerEvents` and `visibility` pass down to the children, and its own listeners hear them (see [Layout like CSS](#layout-like-css)). It can be keyed, reordered and switched to or from a block like any row, and Tab walks its children, never the row.
 
@@ -3379,7 +3382,7 @@ window and does not hold the focus, `"hidden"` always skips it, and `"visible"` 
 default) never does. A skipped element is built and painted itself (background, border,
 hit area) and builds, lays out, shapes and paints nothing inside it. Unlike `display:
 none` nothing is forgotten: the subtree's state, styles, transitions and animations stay,
-and it is built whole when it shows again. Only a `div`, `text`, `label`, `form` and a
+and it is built whole when it shows again. Only a `div`, `label`, `form` and a
 block `span` skip; any other element has the containment below and nothing more.
 
 ```tsx
@@ -3418,8 +3421,9 @@ and the extent changes as they are built.
 - Skipped `auto` content is in the accessibility tree, as in Chrome (a screen reader can
   find its headings and buttons, and `aria-labelledby` into it names a control): the
   skipped element holds a node for each element below it that has a role (`role`, or
-  the default one of a `<text>`, `<label>`, `<form>`, `<img>`, `<input>` and
-  `<textarea>`), with no bounds and no actions. A skipped element with no role of its own
+  the default one of a `<label>`, `<form>`, `<img>`, `<input>` and `<textarea>`, and of
+  an element whose content is one paragraph of text, see [Text](#text-in-the-accessibility-tree)),
+  with no bounds and no actions. A skipped element with no role of its own
   is a `Group` to hold them. `hidden` content is not in the tree, and neither is what
   is `aria-hidden`, `display: none` or `visibility: hidden` below an `auto` one.
 - Tab and Shift+Tab reach a focusable element inside skipped `auto` content, in tab
@@ -3478,16 +3482,17 @@ and the extent changes as they are built.
 
 ## Inline text
 
-Text lays out like the DOM's inline formatting. Raw strings and `<span>` are
-inline, and so is a `<text>` inside a `<text>` or `<span>`. A run of consecutive
+A string is a DOM text node, and it goes in any element: `<div>Saved</div>` and
+`<span>Saved</span>` need nothing between the element and its text. Text lays out like
+the DOM's inline formatting. Strings and `<span>` are inline. A run of consecutive
 inline children is one paragraph: one string that wraps across its runs, selects
 and copies as one line, and is searched by `highlight` as one piece of text.
 
 ```tsx
-<text style={{ color: '#e2e2e2' }}>
+<div style={{ color: '#e2e2e2' }}>
   Saved <span style={{ color: '#7ee787', fontWeight: 700 }}>3 files</span> in{' '}
   <span style={{ backgroundColor: '#ffe58a55' }}>2.1s</span>
-</text>
+</div>
 ```
 
 An inline box can set `color`, `fontWeight`, `fontStyle`, `fontFamily`,
@@ -3569,12 +3574,10 @@ it. The underline of the paragraph's own container is on the baseline of the row
 Chrome interrupts an underline where it crosses the ink of a glyph
 (`text-decoration-skip-ink: auto`); Ghia draws it whole.
 
-- A `<text>` anywhere else is a block, and a block child ends a paragraph.
-- A nested `<text>` with a `tabIndex` is a block too: it is an element of its own
-  with the focus handle, and it splits the paragraph around it. A `<span>` stays
-  inline whatever its `tabIndex`, see [Focus on an inline box](#focus-on-an-inline-box).
-- In a `display: flex` or `grid` container each run of raw strings is one item
-  and every `<span>` or nested `<text>` is an item of its own, with its content as
+- A `<div>` is a block, and a block child ends a paragraph, as in CSS. A `<span>`
+  stays inline whatever its `tabIndex`, see [Focus on an inline box](#focus-on-an-inline-box).
+- In a `display: flex` or `grid` container each run of consecutive strings is one
+  anonymous item and every `<span>` is an item of its own, with its content as
   a paragraph.
 - A paragraph that is only collapsible white space (space, tab, newline, CR,
   form feed; not a no-break space) makes no box, and neither does a child with
@@ -3629,7 +3632,7 @@ marks meet, as `text-spacing-trim: normal` does (there is no property for it).
 ### Space around an inline box
 
 `marginLeft`, `marginRight`, `paddingLeft`, `paddingRight`, `borderLeftWidth` and
-`borderRightWidth` on a `<span>` or a nested `<text>` take space along the line, as
+`borderRightWidth` on a `<span>` take space along the line, as
 on a CSS inline box: the text after the box moves right by their sum, the line
 and the container that wraps around it grow by it, and wrapping counts it, so a
 word followed by the closing padding of its span moves to the next line when the
@@ -3638,9 +3641,9 @@ padding does not fit. The shorthands `margin`, `padding`, `borderWidth`, `border
 it covers the one written later wins. `hover`, `active` and the other state styles change the space too.
 
 ```tsx
-<text>
+<div>
   Press <span style={{ paddingLeft: 6, paddingRight: 6, marginRight: 4 }}>Enter</span> to go on
-</text>
+</div>
 ```
 
 - Only the inline axis takes space. A vertical margin does nothing, and a vertical
@@ -3678,7 +3681,7 @@ it covers the one written later wins. `hover`, `active` and the other state styl
 
 ### Painting an inline box
 
-A `<span>` or nested `<text>` paints its `backgroundColor`, its border (`border`,
+A `<span>` paints its `backgroundColor`, its border (`border`,
 `borderWidth`, `borderColor` and the per-side forms) and its `borderRadius` (and
 the four corner longhands) around each line of its text, as a CSS inline box does
 by default (`box-decoration-break: slice`). They are painted behind the glyphs, by
@@ -3687,14 +3690,14 @@ change them, a nested box paints over the box around it, and a selection or a
 search match lies over them.
 
 ```tsx
-<text style={{ lineHeight: 28 }}>
+<div style={{ lineHeight: 28 }}>
   Press{' '}
   <span style={{ paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2,
     backgroundColor: '#2a2a35', border: '1px solid #44445a', borderRadius: 4 }}>
     Enter
   </span>{' '}
   to go on
-</text>
+</div>
 ```
 
 - **A box is as tall as the content area of its font, not the line.** Its border
@@ -3756,7 +3759,7 @@ search match lies over them.
 
 ### Events on inline boxes
 
-A `<span>`, and a nested `<text>`, take the pointer events of an element
+A `<span>` takes the pointer events of an element
 (`onClick`, `onPointerDown`, `onMouseEnter`, `onContextMenu`, `onDragStart`, ...)
 and stay inline. An inline box has no box of its own, so the pointer is on it when
 it is on one of its glyphs, and the span is then the event's `target`. The path
@@ -3765,9 +3768,9 @@ its ancestors, so the container's `onClick` hears a click on the span as it
 bubbles up, and `stopPropagation()` on the span keeps it from there.
 
 ```tsx
-<text onClick={() => console.log('line')}>
+<div onClick={() => console.log('line')}>
   Read the <span onClick={(event) => open(event.target)} style={{ color: '#7ee787' }}>docs</span> first
-</text>
+</div>
 ```
 
 - Every span under the pointer is the target, listening or not: a click on a
@@ -3789,6 +3792,8 @@ bubbles up, and `stopPropagation()` on the span keeps it from there.
   innermost box around the glyph that sets one wins, and a glyph in no box that
   sets one keeps the container's cursor (`hover` and `active` can carry it too).
   A `display: contents` span has no box but its descendants inherit its cursor.
+  The value may be a `var()` (`cursor: 'var(--cursor)'`), read from the custom properties around the span, as may
+  `pointerEvents` and `appRegion`.
   A span that wraps shows it on every line it covers, and, like events, not on the
   blank area of the lines. A paragraph whose container has `pointerEvents: "none"`
   or is `inert` shows none.
@@ -3829,9 +3834,9 @@ intersecting.
 A `<span>` with a `tabIndex` is focusable like any element, and stays inline:
 
 ```tsx
-<text>
+<div>
   Read the <span tabIndex={0} onKeyDown={(event) => event.key === 'Enter' && open()}>docs</span> first
-</text>
+</div>
 ```
 
 - It is in the tab order at its place in the document, between the focusables
@@ -3892,7 +3897,7 @@ can set change its run, and `outline` (or `outlineWidth`, `outlineStyle`,
 ### White space
 
 `whiteSpace` (`normal`, `nowrap`, `pre`, `pre-wrap`, `pre-line`, `break-spaces`) is inherited, so
-it can be set on a container, on a `<span>` or on a `<text>`. It decides what is
+it can be set on a container or on a `<span>`. It decides what is
 left of the spaces, tabs and newlines of a string before it is painted, and
 `getPaintedText()`, search, selection and copy all see that text.
 
@@ -3921,7 +3926,7 @@ left of the spaces, tabs and newlines of a string before it is painted, and
   never crosses a span.
 
 ```tsx
-<text style={{ whiteSpace: 'pre', fontFamily: 'Menlo' }}>{source}</text>
+<div style={{ whiteSpace: 'pre', fontFamily: 'Menlo' }}>{source}</div>
 ```
 
 #### Tab stops
@@ -3931,24 +3936,24 @@ so search, selection and copy see `\t`, and it advances to the next tab stop.
 `tabSize` sets how far apart the stops are. It is inherited and is 8 by default.
 
 ```tsx
-<text style={{ whiteSpace: 'pre', tabSize: 4 }}>{"name\tvalue"}</text>
-<text style={{ whiteSpace: 'pre', tabSize: '40px' }}>{"name\tvalue"}</text>
+<div style={{ whiteSpace: 'pre', tabSize: 4 }}>{"name\tvalue"}</div>
+<div style={{ whiteSpace: 'pre', tabSize: '40px' }}>{"name\tvalue"}</div>
 ```
 
 - A number is that many spaces, each as wide as a space in the font of the run
   that holds the tab. A string is a CSS [length](#lengths) without a percentage:
   `px`, the absolute units, `em`, `rem`, `vw`, `vh`, `vmin`, `vmax` and `calc()` of
   them (`em` is the container's font size). `ch`, a percentage and a negative value
-  throw, like any style that cannot be parsed.
+  are not valid, so the `tabSize` declaration is dropped ([Invalid values](#invalid-values)).
 - The stops are measured from the start of the line of text the tab is on, not
   from the box: a newline starts a new count, and so does a soft wrap. Where a
   line breaks therefore decides where its tabs end, and a tab that pushes a word
   past the edge sends the word to the next line.
 - A tab to a stop it already sits on goes to the next one, so a tab always has
   width (except with `tabSize: 0`, which makes it empty).
-- Only a container sets it. A `tabSize` on a `<span>` or on a `<text>` inside a
+- Only a container sets it. A `tabSize` on a `<span>` inside a
   paragraph does nothing, because a paragraph is one string with one tab size.
-  A `<text>` that is a block of its own, and a `<div>`, set it for their text.
+  A `<div>` sets it for its own text.
 - The text of `<code>` and `<diff>` inherits it too, so a tab there gets a stop
   where it used to get the font's own tab.
 
@@ -3977,7 +3982,7 @@ in aligning it.
 may break after every one of them, and none hangs.
 
 ```tsx
-<text style={{ whiteSpace: 'break-spaces', width: 120 }}>{"a      b"}</text>
+<div style={{ whiteSpace: 'break-spaces', width: 120 }}>{"a      b"}</div>
 ```
 
 - A space that does not fit moves to the next line and starts it, so a run of
@@ -3992,8 +3997,8 @@ may break after every one of them, and none hangs.
 
 `wordBreak` and `overflowWrap` are inherited and decide where a line may break
 inside a word, and what happens to a word that is longer than its line. They need
-a value of `whiteSpace` that wraps, and only a container sets them: a `<span>` or
-`<text>` inside a paragraph uses the paragraph's, because it is one string.
+a value of `whiteSpace` that wraps, and only a container sets them: a `<span>`
+inside a paragraph uses the paragraph's, because it is one string.
 
 | `overflowWrap` | A word that does not fit |
 |---|---|
@@ -4009,8 +4014,8 @@ a value of `whiteSpace` that wraps, and only a container sets them: a `<span>` o
 | `break-word` | as `normal` with `overflowWrap: 'anywhere'`, whatever `overflowWrap` says |
 
 ```tsx
-<text style={{ width: 120, overflowWrap: 'break-word' }}>{"https://example.com/a-very-long-address"}</text>
-<text style={{ width: 120, wordBreak: 'break-all' }}>{"aaaa bbbb cccc"}</text>
+<div style={{ width: 120, overflowWrap: 'break-word' }}>{"https://example.com/a-very-long-address"}</div>
+<div style={{ width: 120, wordBreak: 'break-all' }}>{"aaaa bbbb cccc"}</div>
 ```
 
 - Without `overflowWrap` a long word, a URL or an identifier is not broken: it
@@ -4045,7 +4050,7 @@ a value of `whiteSpace` that wraps, and only a container sets them: a `<span>` o
   one a run of them overflows, unless `overflowWrap` cuts it.
 - `<input>` and `<textarea>` ignore both and break a long word at the edge, as a browser's
   `textarea` does.
-- A value CSS does not have throws, like any style that cannot be parsed.
+- A value CSS does not have drops the declaration ([Invalid values](#invalid-values)).
 - Text laid out by GPUI itself, as Zed does, keeps breaking such a word at the
   edge: its `TextStyle::overflow_wrap` defaults to `BreakWord`, and `Normal` is
   what Ghia sets for all of its text.
@@ -4063,14 +4068,14 @@ A hanging space at a soft wrap stays in the text, ICU4X breaks a few rare sequen
 either order (`"balance"`, `"nowrap"`, `"nowrap pretty"`). What it leaves out is the
 longhand's initial value, so `"balance"` also turns wrapping on. Of the shorthand and a
 longhand on the same element the one written later wins, and in a state style the
-shorthand resets the base's `textWrapMode` and `textWrapStyle`. A value CSS does not have throws.
+shorthand resets the base's `textWrapMode` and `textWrapStyle`. A value CSS does not have drops the declaration.
 The mode is inherited by the text of a `<span>` and can be set on one; the style is read from the
 container of the paragraph alone, as Chrome does, so a `textWrapStyle` on a `<span>` does nothing (it is
 inherited by a block inside it).
 
 ```tsx
-<text style={{ width: 320, textWrap: 'balance' }}>{title}</text>
-<text style={{ width: 320, textWrap: 'pretty' }}>{paragraph}</text>
+<div style={{ width: 320, textWrap: 'balance' }}>{title}</div>
+<div style={{ width: 320, textWrap: 'pretty' }}>{paragraph}</div>
 ```
 
 - **`balance`** evens out the lines of a paragraph of at most 6 lines (each stretch
@@ -4129,7 +4134,7 @@ the space that shows.
 
 ```tsx
 <div style={{ padding: 8, backgroundColor: '#313244', textBox: 'trim-both cap alphabetic' }}>
-  <text>Title</text>
+  <div>Title</div>
 </div>
 ```
 
@@ -4169,18 +4174,18 @@ the space that shows.
 `display: 'inline-block'`, `'inline-flex'`, `'inline-grid'` and `'inline-table'` make an element an
 atomic inline: a box that sits on a line of text as one unit, wraps with the text
 around it, and is an ordinary element inside (a block, a flex container, a grid
-container or a [table](#tables)). It is a `<div>`, `<span>`, `<text>` or any other element; the
+container or a [table](#tables)). It is a `<div>`, `<span>` or any other element; the
 paragraph it is in lays it out, and everything else about it is the element's own.
 
 ```tsx
-<text>
+<div>
   Status{' '}
   <div style={{ display: 'inline-flex', gap: 4, padding: 2, backgroundColor: '#1f6feb' }}>
     <svg source={dot} style={{ width: 8, height: 8 }} />
     <span>online</span>
   </div>{' '}
   since <span style={{ verticalAlign: 'super', fontSize: 12 }}>3</span> days
-</text>
+</div>
 ```
 
 - **Where it is atomic.** In a block container (and inside the spans of a
@@ -4567,6 +4572,32 @@ target, named by its text content, as the DOM names an element from content.
 focused node. `aria-hidden` on an element with no role still works: the element
 gets a hidden `group` node to carry it.
 
+### Text in the accessibility tree
+
+A paragraph is not an element, so the element that holds it reads it. A host
+element whose content is one paragraph (strings and `<span>`s, nothing else) has
+that text, and is a `Label` when it has no role of its own: the text is its value
+(`aria-valuetext` overrides it), and so it is for any role ARIA does not name from
+content (`list`, `region`, `group`, `form`). With a role it does name from content
+(button, link, heading, checkbox, radio, switch, menu item, tab, option, tree item,
+cell, row, tooltip) the text is its name, as the DOM names a button, link or heading
+from its content, unless the author named it with `aria-label`, `aria-labelledby` or
+a `<label>`. `<div>Saved</div>` is read as "Saved"; a `role="button"` div with the
+same content is a button named "Saved"; `<div role="list">Items</div>` is a list
+whose value is "Items"; `<div aria-label="silent">Hello</div>` is a `Label` named
+"silent" whose value is "Hello".
+
+```tsx
+<div>Saved <span style={{ fontWeight: 700 }}>3 files</span></div> // Label "Saved 3 files"
+```
+
+While a screen reader is running, a container with a paragraph beside block
+children gives each paragraph a `Label` node of its own, in document order, so the
+text between two blocks is read too. With no screen reader the tree does not hold
+them and a frame costs nothing for it. Inside a
+[`contentVisibility`](#skipping-content-with-contentvisibility) subtree that is
+skipped they are there too, as Chrome has them.
+
 ### `<label>`
 
 `<label htmlFor="email">` names the `<input>` or `<textarea>` whose `id` is
@@ -4596,7 +4627,7 @@ Native defaults, so common elements are not silent:
 
 | Element       | Default role            | Name / value                         |
 | ------------- | ----------------------- | ------------------------------------ |
-| `<text>`      | `Label`                 | content as `aria-valuetext`          |
+| content of one paragraph | `Label` | the text as `aria-valuetext` |
 | `<input>`     | `TextInput`             | `value` and `placeholder`            |
 | `<textarea>`  | `MultilineTextInput`    | `value` and `placeholder`            |
 | `<img>`       | `Image`                 | `alt` as `aria-label`                |
@@ -4888,7 +4919,7 @@ A host element (a React ref, a Solid `HostElement`) has the members a library wr
 | `addEventListener(type, listener, options?)`, `removeEventListener(type, listener, options?)` | For any event type, with the DOM's arguments: `listener` is a function or an object with `handleEvent`, `options` is `{ capture, once, passive, signal }` or the `capture` boolean. The same function in the same phase is added once. `once` removes it before it runs, `passive` makes `event.preventDefault()` do nothing while it runs, and a `signal` removes it when it aborts (an aborted one adds nothing). A listener is called with the element as `this`. A type native never emits (`touchstart`, `touchend`, `touchcancel`) is accepted and never fires. |
 | `ownerDocument` | The `document` object the adapters export. Its `defaultView` is the global `window` (`globalThis`), which has `setTimeout`, `requestAnimationFrame` and `ResizeObserver`, so `element.ownerDocument.defaultView` works as the window of a library that asks for it. |
 | `isConnected` | True while the element is in the tree of a mounted root. |
-| `getAttribute(name)` | The prop of that name as a string, or `null` when the element was not given it (or its value is not a string, number or `true`). `data-index={5}` reads `"5"`. |
+| `getAttribute(name)` | The prop whose attribute name is `name` as a string (a prop is an attribute under the name the DOM gives it: lowercase on an HTML element, so `tabIndex={0}` is `tabindex` and `getAttribute("tabIndex")` finds it, `className` is `class` and `htmlFor` is `for`; an SVG element keeps the case of its props, `viewBox`, and matches names exactly), or `null` when the element was not given it or its value is a function or an object (`onClick`, `style`). `data-index={5}` reads `"5"`; `false`, `null` and `undefined` read `null` and `true` reads `""`, except for `data-*` and `aria-*`, where `false` reads `"false"` and `true` `"true"`. |
 | `offsetWidth`, `offsetHeight` | The border box's layout size, rounded half up, before any `transform` (a `scale(2)` element has the offset size it had without it; `getBoundingClientRect()` is the transformed box). The read lays out first, as `getBoundingClientRect` does. `0` for an element that is not mounted or has no box. `renderer.getElementBounds(id)` carries the unrounded size as `layoutWidth` and `layoutHeight`. |
 
 **Attributes on native.** The adapters also send the DOM attributes an element has to native (`MutationRenderer.setAttribute`,
@@ -4920,9 +4951,9 @@ Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `
 | `children`, `childElementCount`, `firstElementChild`, `lastElementChild`, `previousElementSibling`, `nextElementSibling` | The same, elements only. `children` is an array, not an `HTMLCollection`. |
 | `contains(node)`, `getRootNode()`, `compareDocumentPosition(node)` | `contains` includes the node itself. `getRootNode()` is `document` for a mounted node and the top of its tree otherwise. `compareDocumentPosition` gives the `DOCUMENT_POSITION_*` bits (`DISCONNECTED`, `PRECEDING`, `FOLLOWING`, `CONTAINS`, `CONTAINED_BY`); two trees that are not in one document are `DISCONNECTED` and `IMPLEMENTATION_SPECIFIC` with a stable order. `document.contains(node)` is `node.isConnected`. |
 | `textContent` | The text of the node and its descendants. Read only: there is no setter yet. |
-| `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `className` or `class` prop (`""` without one), an attribute exists where `getAttribute` is not `null`, and `className` is the attribute `class`. `dataset` is a frozen read-only snapshot of the `data-*` props with the names in camel case (`data-row-id` is `rowId`). |
+| `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `className` or `class` prop (`""` without one), an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a frozen read-only snapshot of the `data-*` props with the names in camel case (`data-row-id` is `rowId`). |
 
-Every window root is a real `<html>` with a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; all three are `null` while no root is mounted, and with several windows they are those of the window that mounted last (the rule `matchMedia` follows). `html.parentNode` is `document`, `body.parentNode` is `html`, a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin; they add no accessibility node. `document.head` does not exist.
+Every window root is a real `<html>` with a `<head>` and a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.head` the `<head>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; all four are `null` while no root is mounted, and with several windows they are those of the window that mounted last (the rule `matchMedia` follows). `html.parentNode` is `document`, `head.parentNode` and `body.parentNode` are `html` (`documentElement.children` is `[head, body]`), a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin; they add no accessibility node. `head` is `display: none`: it has no box, and an element appended to it is never drawn, laid out or hit, though it is a real element in the tree (a library that prepends a node to `document.head` finds one).
 
 Nothing here changes the tree: `setAttribute`, `appendChild` and the other writing members are not there. `el.id` is the `id` prop as a string, `""` without one, as in the DOM (read only for now). The number native knows an element by, which the renderer methods take, is `el.nativeId` (`renderer.scrollToItem(ref.nativeId, i)`).
 
@@ -4970,7 +5001,44 @@ own target, so `error`, `unhandledrejection` and `message` listeners keep
 working. `scrollTo`, `scroll` and `scrollBy` exist and do nothing: an app window
 has no document to scroll, as with a page that does not overflow. Libraries that
 check `typeof window` for a browser, such as TanStack Query, see a client.
-Nothing else is installed: `location`, `localStorage`, `innerWidth` and the rest
+`getComputedStyle`, `matchMedia` and `IntersectionObserver` are globals too, and
+so is a handful of members of `window`: `innerWidth` and `innerHeight` (the window's
+content size in CSS pixels, read live from the window that mounted last, and an
+error before any root is mounted, as for `matchMedia`), `visualViewport`,
+`frameElement` (`null`) and `parent`, `top` and `self` (the global object, unless the
+runtime defines them). `visualViewport` has `width` and `height` equal to the inner size,
+`offsetLeft`, `offsetTop`, `pageLeft` and `pageTop` of 0 (the document cannot scroll),
+`scale` of 1, and `addEventListener` and `removeEventListener` for `resize` (a listener
+added before any root is mounted is accepted, though `width` and `height` throw until one is). `window` gets
+a `resize` event too: both are sent when the size of the window that mounted last changes
+(not for a change of OS preference), `visualViewport` first, from one subscription that
+exists only while either has a listener, and a listener added before any root is mounted
+starts to hear the first one that is. The event's `target` and `currentTarget` are the
+global `window`, and `visualViewport` for its own. It neither bubbles nor can be cancelled, as in Chrome.
+`MutationObserver` and `MutationRecord` are globals too, with the standard's semantics.
+`observe(node, { childList, attributes, characterData, subtree, attributeOldValue,
+characterDataOldValue, attributeFilter })` throws a `TypeError` for the option sets the standard
+rejects (none of the three kinds, `attributeOldValue` or `attributeFilter` with `attributes: false`),
+and observing the same node again replaces its options. Records go to the observer in one
+microtask per batch, in the order the observers were made, with `type`, `target`, `addedNodes`,
+`removedNodes`, `previousSibling`, `nextSibling`, `attributeName`, `attributeNamespace` (`null`)
+and `oldValue`; `takeRecords()` empties the queue and `disconnect()` drops it. An observer does not
+keep the nodes it observes alive, as in the standard: an unmounted node nothing else refers to is
+collected with its registration. A callback that captures the node keeps it alive for as long as
+the observer is reachable, and both are collected once the observer is dropped too. The adapters report
+the changes they make to their tree: a node placed or removed (a move is a removal, then an
+insertion), a text change (`characterData`) and a prop change. An attribute is what `getAttribute`
+reads, so a record is made only when that string changed, with the old string as `oldValue`, and
+`attributeName` is the attribute's name (`tabindex` for a `tabIndex` prop, so an `attributeFilter`
+of `["tabindex"]` matches): `className` is the `class` attribute, and a handler, an object, `style` and `children` are no
+attribute and make no record. `html`, `head` and `body` are in the tree, so
+`observe(document.body, { childList: true, subtree: true })` sees the app's nodes. A subtree
+observer keeps hearing of changes inside a node that was removed from the subtree until its next
+delivery, as in the standard. With no observer alive each hook is one integer check and no node
+gets a field. Code that changes a host tree itself calls `queueChildListMutation`,
+`queueAttributeMutation` or `queueCharacterDataMutation` from `@ghia/native/host`
+([deviations](fork/deviations.md#observers-and-content-visibility) for what is not reported).
+Nothing else is installed: `location`, `localStorage` and the rest
 are missing, so reading them throws a `ReferenceError` or gives `undefined`. The browser (wasm) build runs in a real page and installs nothing.
 Installing twice is harmless. `isWebBuild`, exported by the adapters and
 `@ghia/native/host`, is `true` on the browser build and `false` on the native
@@ -4983,11 +5051,16 @@ window ([Web Animations](#web-animations)). `document.defaultView` is the global
 
 `requestAnimationFrame(callback)` and `cancelAnimationFrame(handle)` are globals too,
 and so is `ResizeObserver` (unless the runtime has one). A callback gets the time of the
-frame, as `performance.now()` reads it, and runs in the steps before the frame
+frame, on the clock the frame's steps ran at, and runs in the steps before the frame
 that paints what it changes: after the frame's `scroll` events and before anything is built,
 so a state write or a mutation it makes is in that frame. What a callback requests runs in
 the next frame, and `cancelAnimationFrame` stops a callback that has not run yet, one of
-the frame that is running included. Callbacks wait for the first window when none is open yet.
+the frame that is running included. The steps run once per frame and only for a frame (a draw
+that answers the display link): a `scrollTo`, a layout read or any other draw between two frames
+runs no callback and no `scroll` event. An error a callback throws goes to the renderer's
+error handler (`onError`), as a handler's does, and the other callbacks still run.
+`requestAnimationFrame` itself never throws; callbacks wait for the first window when none is
+open yet, or when a request fails.
 There is one list for the whole app, not one per window
 ([deviations](fork/deviations.md#events-and-input)).
 
@@ -5005,6 +5078,45 @@ path, so adding the first listener of a type is what turns it on.
 It is current inside a `mousedown` handler, where it is still the element the
 press is about to take focus from. With several windows (one root each), it is
 the focused element of the window that heard a focus event last.
+
+`document.elementFromPoint(x, y)` and `document.elementsFromPoint(x, y)` take client
+coordinates in CSS pixels from the top left of the window that mounted last, and answer
+as [`getElementsAt`](#find-what-is-under-a-point) does, with the elements a `ref` gives:
+`elementsFromPoint` lists them topmost first and ends with `body` then `html`, and
+`elementFromPoint` is its first, or `null` for a point outside the window (the list is
+empty there). They are forced reads: the pending mutations are flushed and the window is
+laid out first, so an element mounted in the same turn is found, and an element with
+`pointer-events: none`, `visibility: hidden` or `display: none` is left out. A coordinate
+that is not finite throws a `TypeError`, and both throw before a root is mounted.
+
+`document.getSelection()` and `window.getSelection()` give the one `Selection` of the app
+(`Selection` is a global, and its constructor throws `Illegal constructor`). It is
+the [text selection](#text-selection) of the window that mounted last: `rangeCount` is 1
+while text is selected and 0 otherwise, `isCollapsed` is the opposite of that, `type` is
+`"Range"` or `"None"` (never `"Caret"`), `toString()` is the selected text (`""` for none),
+and `removeAllRanges()` and `empty()` clear it. Every member needs a mounted root. The rest
+of the DOM `Selection` (`getRangeAt`, `addRange`, `anchorNode`, ...) does not exist, because
+a selection here is a set of spans over painted text and not a range of nodes
+([deviations](fork/deviations.md#events-and-input)).
+
+`document` hears `selectionchange` when the selected text changes, by a drag, a
+clear, `removeAllRanges()` or `renderer.clearSelection()`. Like the event of `onSelectionChange`
+(`event.value` is the selected text, absent after a clear) it comes from the frame that
+changed the selection, and it is the one native signal: a `selectionchange` listener on
+`document` or `window` turns it on, as a root's `onSelectionChange` does. It does not bubble, so
+`window` hears it in the capture phase only, and `target` is `document`.
+
+### `getComputedStyle(element, pseudoElt?)`
+
+A read-only `CSSStyleDeclaration` of Chrome's resolved values, with camelCase members and
+`getPropertyValue`, `length`, `item` and iteration, and `--custom` properties; a write throws a
+`NoModificationAllowedError`. It is a forced read (the pending mutations are flushed and the
+window is laid out first, see [deviations](fork/deviations.md#forced-reads)) and reads the
+transitions and animations at the instant of the read. The properties are those a library reads
+(`COMPUTED_STYLE_PROPERTIES`, 82 of them); any other reads `""`. Lengths are px (the used value
+for `width`, `height`, `padding`, `margin` and the border widths), `transform` is `none` or a
+`matrix()`, colours are `rgb()` or `rgba()`, durations are in seconds. An element that is not in
+the document reads `""`. `::before` and `::after` read as a pseudo-element the element does not have.
 
 ### Tab and Escape are defaults
 
@@ -5444,7 +5556,7 @@ the path of an event whose target is one of its descendants, so its own
 listeners still hear it.
 
 Text is hit by its glyphs. A paragraph is one painted string, so the topmost
-element over it is the `<text>` or `<div>` that holds it, and the inline `<span>`
+element over it is the element that holds it, and the inline `<span>`
 under a glyph is the target instead (see [Events on inline boxes](#events-on-inline-boxes)).
 
 A filled child of a click target (switch thumb, radio dot, check icon) needs no
@@ -5638,7 +5750,7 @@ and keeps the last rect of one that was. A `getBoundingClientRect` that forces t
 delivers nothing and changes no size reported. `display: none` and a removed element are
 still 0 by 0.
 
-Observers work on `<div>`, `<text>`, `<input>`, `<textarea>`, `<img>`, `<svg>`,
+Observers work on `<div>`, `<span>`, `<input>`, `<textarea>`, `<img>`, `<svg>`,
 `<anchored>`, `<code>`, `<diff>` and `<markdown>`. `<virtual-list>` itself does not
 report; its rows do, and a row outside the window reports as not painting.
 
@@ -5828,7 +5940,7 @@ To opt *out* — toolbars, buttons, line-number gutters — set
 
 ```tsx
 <div style={{ userSelect: 'none' }}>
-  <text>toolbar label, never selected</text>
+  <div>toolbar label, never selected</div>
 </div>
 ```
 
@@ -5882,11 +5994,11 @@ window and a container searches only that container.
 
 ```tsx
 <div highlight={{ query: 'fox' }}>
-  <text>the quick brown fox</text>
+  <div>the quick brown fox</div>
 </div>
 ```
 
-It reaches `<text>`, `<code>`, `<markdown>` and `<diff>` with no extra props,
+It reaches strings, `<code>`, `<markdown>` and `<diff>` with no extra props,
 because every string Ghia paints goes through the same funnel.
 
 Text in a [`contentVisibility`](#skipping-content-with-contentvisibility) subtree is
@@ -5914,9 +6026,9 @@ function Find() {
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <input value={query} onChange={(e) => setQuery(e.value ?? '')} />
-        <text>{search.total === 0 ? 'No results' : `${search.active + 1}/${search.total}`}</text>
-        <div onClick={search.previous}><text>↑</text></div>
-        <div onClick={search.next}><text>↓</text></div>
+        <div>{search.total === 0 ? 'No results' : `${search.active + 1}/${search.total}`}</div>
+        <div onClick={search.previous}>↑</div>
+        <div onClick={search.next}>↓</div>
       </div>
 
       <div {...search.props} style={{ flex: 1 }}>
@@ -5935,7 +6047,7 @@ instead of a query. They are `[start, end)` in **UTF-16 code units**, the units
 
 ```tsx
 <div highlight={{ ranges: [[6, 11]], color: '#f43f5e55' }}>
-  <text>Hello {name}!</text>
+  <div>Hello {name}!</div>
 </div>
 ```
 
@@ -5976,7 +6088,7 @@ than it sounds:
 ```tsx
 // React makes 3 host text nodes here. `Hello Tommy` still matches.
 <div highlight={{ query: 'Hello Tommy' }}>
-  <text>Hello {name}!</text>
+  <div>Hello {name}!</div>
 </div>
 ```
 
@@ -6089,7 +6201,7 @@ For a language header, or any other chrome, wrap it in a `<div>` you own:
 ```tsx
 <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 10, overflow: 'hidden' }}>
   <div style={{ padding: 6, backgroundColor: '#ffffff09' }}>
-    <text style={{ fontSize: 12, color: '#a3a3a3' }}>{language}</text>
+    <div style={{ fontSize: 12, color: '#a3a3a3' }}>{language}</div>
   </div>
   <code code={source} language={language} style={{ padding: 12, minWidth: 0 }} />
 </div>
@@ -6185,7 +6297,6 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | Element         | Description                                      |
 |-----------------|--------------------------------------------------|
 | `div`           | Container with flexbox layout                    |
-| `text`          | Text content, selectable                         |
 | `code`          | Syntax-highlighted code block                    |
 | `diff`          | Unified diff viewer. Flows by default            |
 | `markdown`      | GitHub-flavoured markdown                        |
@@ -6399,8 +6510,8 @@ JSX instead of a markup string: `path`, `circle`, `ellipse`, `rect`, `line`,
 `defs`, `linearGradient`, `radialGradient`, `stop`, `clipPath`, `mask`,
 `symbol`, `use`, `pattern`, `marker` and `filter` (`<rect fill="url(#fade)" />`,
 `clipPath="url(#left)"`, `<use href="#bar" />`). They are valid only inside
-`<svg>` (anywhere else is an error; `<text>` is the plain text element outside
-one), and they are not layout boxes: the `<svg>` paints them all as one image,
+`<svg>` (anywhere else is an error, `<text>` included: outside an `<svg>`, put the
+string in a `<div>` or `<span>`), and they are not layout boxes: the `<svg>` paints them all as one image,
 so they take no layout or paint `style` and no pointer events. Their `style` takes
 [CSS animations](#css-keyframes-on-svg-properties) only, and the animation events fire from them.
 
@@ -6524,8 +6635,8 @@ function Browser() {
   return (
     <div style={{ width: 640, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', gap: 12 }}>
-        <div onClick={() => view.current!.goBack()}><text>Back</text></div>
-        <text>{title}</text>
+        <div onClick={() => view.current!.goBack()}>Back</div>
+        <div>{title}</div>
       </div>
       <webview
         ref={view}
@@ -6551,8 +6662,8 @@ function Browser() {
   return (
     <div style={{ width: 640, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', gap: 12 }}>
-        <div onClick={() => view.goBack()}><text>Back</text></div>
-        <text>{title()}</text>
+        <div onClick={() => view.goBack()}>Back</div>
+        <div>{title()}</div>
       </div>
       <webview
         ref={view}
@@ -6700,7 +6811,7 @@ is never called.
   onAttach={(view) => library.attach(view)}
   onDetach={() => library.detach()}
 >
-  <text>Over the native view</text>
+  <div>Over the native view</div>
 </nativeview>
 ```
 
@@ -6792,7 +6903,7 @@ The details for a library author, with a minimal addon, are in
 | Wheel | `onWheel`, `onWheelCapture` | `deltaX`, `deltaY`, `deltaMode`, `clientX`, `clientY`, `offsetX`, `offsetY`, `buttons`, `precise`, `touchPhase`, `modifiers`. Bubbles, cancelable. See [The wheel](#the-wheel) |
 | Scroll | `onScroll` | `scrollTop`, `scrollLeft` — scroll containers, not `<virtual-list>` |
 | Content visibility | `onContentVisibilityAutoStateChange` | `skipped` — an element with `contentVisibility: "auto"` began or stopped skipping its content. Bubbles, cancelable, has an `…Capture` twin. See [Skipping content with `contentVisibility`](#skipping-content-with-contentvisibility) |
-| Layout | `onLayout` | `width`, `height`, `x`, `y` — any element a `ResizeObserver` works on (`<div>`, `<text>`, `<input>`, `<img>`, `<svg>` and the other built-in elements). See also `ResizeObserver` and `IntersectionObserver` under [Measure an element](#measure-an-element) |
+| Layout | `onLayout` | `width`, `height`, `x`, `y` — any element a `ResizeObserver` works on (`<div>`, `<span>`, `<input>`, `<img>`, `<svg>` and the other built-in elements). See also `ResizeObserver` and `IntersectionObserver` under [Measure an element](#measure-an-element) |
 | Change | `onChange` | `value`, `inputType`, `data`, `isComposing` — `<input>` and `<textarea>` only, once per edit like the DOM `input`. See [The change event](#the-change-event) |
 | Submit | `onSubmit` | `formData`, `submitter` — `<form>`, bubbling. See [Forms](#forms) |
 | Webview | `onDidStartLoading`, `onDidStopLoading`, `onDidNavigate`, `onPageTitleUpdated`, `onDidFailLoad` | `url`, `title`, `explicitSet`, `errorCode`, `errorDescription`, `validatedUrl` — `<webview>` only, at the element, not bubbling. See [`<webview>`](#webview) |
@@ -6993,7 +7104,13 @@ ancestors' `onClick`. A host ref has the same `click()`, and
 `select` that is `disabled`, or on an element inside one, as in HTML. A disabled
 `Button` or `SelectTrigger` is one too (see [Form control state](#form-control-state-disabled-enabled)).
 Every mouse and pointer event type has `pointerId` and `pointerType` as required
-fields: `1` and `"mouse"` for the mouse.
+fields: `1` and `"mouse"` for the mouse. A pointer event (`pointerdown`, `pointermove`,
+`pointerup`, `pointercancel`, `pointerover`, `pointerout`, `pointerenter`, `pointerleave`,
+`gotpointercapture`, `lostpointercapture`, and `click`, `auxclick` and `contextmenu`, which are
+PointerEvents in Chrome) also has `isPrimary`: `true`, because Ghia has one pointer, except on a
+`click`, `auxclick` or `contextmenu` that no pointer made (`pointerId` `-1`: Enter or Space on a
+button, the VoiceOver Press, `el.click()`), where it is `false`. Every event has `nativeEvent`, the event itself, which is what a library that wraps
+events reads the DOM event from (a React synthetic event has the same member).
 
 ### Pointer capture
 
@@ -7167,8 +7284,10 @@ CSS-like styling via the `style` prop:
 >   `{ padding: 8, paddingLeft: 4 }` by 4. See [Shorthands](#shorthands).
 > - **`boxShadow` takes the CSS string or a structured object.** See below.
 > - **No `<button>`.** Use `<div onClick>` with `cursor: "pointer"`.
-> - **Do not nest `<text>` in `<text>`.** Adjacent `<text>` siblings merge
->   into one line. A `<text>` child of another `<text>` is a nested div.
+> - **There is no `<text>` element.** A string is a text node in any element,
+>   and `<text>` is valid only inside an `<svg>`, where it is SVG text. Consecutive
+>   strings and `<span>`s are one line, as in the DOM; a `<div>` between them
+>   starts a new one.
 > - **`<input>` has no default inner padding.** Set `padding` on the input
 >   style, or pad the parent wrapper. The input clips to its own
 >   `borderRadius` automatically.
@@ -7196,9 +7315,12 @@ still drops the longhands written before it.
   `zIndex`, `flexGrow`, `fontWeight`, `lineHeight`, `order`, ...) is the number as text, and any other is `<n>px`.
   `border: 0` is `border: "0"`. A number that is still invalid is dropped.
 - A CSS-wide keyword (`inherit`, `initial`, `unset`, `revert`, `revert-layer`) that the property does not take on its own is
-  dropped. See [deviations](fork/deviations.md#layout) for where that is not what CSS does.
+  dropped, so the value of the layer below stays. In an element's own style that is the same as no declaration, which
+  differs from CSS only where the universal style sets the property. A state style (`hover`, ...) or an `@container` block
+  over the element's own style also keeps the lower value: `hover: { width: 'unset' }` over `width: 50` keeps 50, where
+  CSS gives `auto`. See [deviations](fork/deviations.md#layout).
 - A state style (`hover`, ...) and an `@container` block are recovered the same way inside, one declaration at a time.
-- Each dropped declaration is logged once as a warning, by its property and value.
+- A dropped declaration is silent, as in a browser. `RUST_LOG=warn` lists each one, once, by its property and value.
 - A style that is not a JSON object, or is not JSON, still rejects the `setStyle`.
 
 ### Lengths
@@ -7278,7 +7400,7 @@ written later wins, as in CSS. The ones below take CSS's several-value syntax.
 | `borderBlock`, `borderInline` | Written like `border` (`"1px solid red"`), for top and bottom or left and right (both sides get the one value, so `direction` does not matter) |
 | `flex` | A number `n` is `n 1 0%`. `none` is `0 0 auto`, `auto` is `1 1 auto`, `initial` is `0 1 auto`. Otherwise `<grow> <shrink>? \|\| <basis>`: `"2 3"`, `"2 100px"`, `"100px 2"`, and a lone basis (`"100px"`, `"50%"`, `"fit-content"`) is `1 1 <basis>`. The basis is what `flexBasis` takes: `"1 1 content"` is a basis of the content size |
 | `flexFlow` | `"<direction> \|\| <wrap>"` in either order (`"column wrap"`); a part left out is `row` or `nowrap` |
-| `placeItems`, `placeContent`, `placeSelf` | `"<align> <justify>"`; one value is both (`"center"`, `"center end"`). Each value is one the longhand takes, so `placeItems: "left"` throws as in CSS |
+| `placeItems`, `placeContent`, `placeSelf` | `"<align> <justify>"`; one value is both (`"center"`, `"center end"`). Each value is one the longhand takes, so `placeItems: "left"` is dropped as in CSS |
 | `outline` | See [Outline](#outline) |
 
 - **The later key wins.** `{ paddingLeft: 4, padding: 8 }` pads the left by 8 and
@@ -7293,8 +7415,9 @@ written later wins, as in CSS. The ones below take CSS's several-value syntax.
 - **Numbers.** A JS number is px. A bare number written inside a string reads as px
   only in `margin` and `inset` (`margin: "0 8"`), like their longhands; elsewhere
   it needs a unit, except `0`. A `calc()` is one value however many spaces it holds.
-  A bad count, a bad value, or `auto` where the property takes none throws when
-  the style is set. A numeric `border: 1` throws too: write `"1px solid"`.
+  A bad count, a bad value, or `auto` where the property takes none drops the
+  declaration. A numeric `border: 1` is read as React DOM writes it, `border: "1px"`, so
+  it is a 1px border with the default style (`none`) and draws nothing: write `"1px solid"`.
 - **Percentages** in `padding` and `margin` are of the containing block's width on
   every side, as in CSS.
 - **`flex` and the longhands.** `flexGrow`, `flexShrink` and `flexBasis` win over
@@ -7453,7 +7576,7 @@ section 5.5). Lengths are any [length](#lengths), including a `calc()` that mixe
 length and a percentage: the length part resolves against the element's font size,
 the root's and the window when the style is applied, and the percentage stays per
 axis. A radius that is negative whatever the units are, or invalid, in a state style
-too, throws instead of being ignored; one that only comes out negative
+too, is dropped; one that only comes out negative
 (`calc(1em - 20px)`) is zero. The radius cuts the background,
 the border, the shadow, the `overflow` clip and the hit area. The `round` of
 `clipPath` `inset()`, `rect()` and `xywh()` takes the same `a / b` form.
@@ -7608,7 +7731,7 @@ Also: `gridAutoColumns`, `gridAutoRows`, `gridAutoFlow` (`"row"`, `"column"`,
 `display` takes the CSS table values: `table`, `table-row-group`,
 `table-header-group`, `table-footer-group`, `table-row`, `table-cell`,
 `table-caption`, `table-column` and `table-column-group`. They are the layout of
-CSS Tables 3 as Chrome draws it, on any `div`, `text` or `span`:
+CSS Tables 3 as Chrome draws it, on any `div` or `span`:
 
 ```tsx
 <div style={{ display: 'table', borderSpacing: 4 }}>
@@ -8047,7 +8170,7 @@ last layer's clip, so with `text` there it is confined to the glyphs too. Set
     color: 'transparent',
   }}
 >
-  <text style={{ fontSize: 48, fontWeight: 800 }}>Gradient text</text>
+  <div style={{ fontSize: 48, fontWeight: 800 }}>Gradient text</div>
 </div>
 ```
 
@@ -8132,7 +8255,7 @@ const theme = {
 }
 
 <div style={{ backgroundColor: theme.surface, borderColor: theme.accent }}>
-  <text style={{ color: theme.text }}>Hello Ghia!</text>
+  <div style={{ color: theme.text }}>Hello Ghia!</div>
 </div>
 ```
 
@@ -8398,10 +8521,10 @@ selector. Mark the ancestor with `group` and style the descendants with
 
 ```tsx
 <div style={{ group: true, padding: 12, backgroundColor: '#fff' }}>
-  <text style={{ color: '#666', groupHover: { color: '#000' } }}>Title</text>
+  <div style={{ color: '#666', groupHover: { color: '#000' } }}>Title</div>
   <div style={{ opacity: 0, groupHover: { opacity: 1 }, groupActive: { backgroundColor: '#eee' } }} />
   <input style={{ borderColor: '#ccc' }} />
-  <text style={{ color: '#666', groupFocusWithin: { color: '#06f' } }}>Editing</text>
+  <div style={{ color: '#666', groupFocusWithin: { color: '#06f' } }}>Editing</div>
 </div>
 ```
 
@@ -8613,8 +8736,8 @@ a narrow one. A block cannot hold another `"@container"`, and a state style
 (`hover`, ...) cannot hold one. Everything else a style holds works in a block:
 layout, `display: none`, `color` for `currentColor`, transitions and animations
 (a flip starts the transition), and `<UniversalStyle>` blocks, which come before the
-element's own. Blocks do not apply to an inline `<span>`: put the style on a `<text>`, or
-use a container unit. An [`inline-block`](#inline-block-inline-flex-inline-grid-and-inline-table) span is a box of its own and
+element's own. Blocks do not apply to an inline `<span>`: put the style on the element that holds
+the text, or use a container unit. An [`inline-block`](#inline-block-inline-flex-inline-grid-and-inline-table) span is a box of its own and
 takes them.
 
 **Container units.** `cqw` and `cqi` are 1% of the width of the nearest ancestor
@@ -8727,10 +8850,22 @@ A key that starts with `--` is a CSS custom property, in a style, a state style 
   ancestor (`@base-ui/react` sets them on its Positioner) sizes what is below it, and changing it lays the
   element out again. The fallback may hold `var()`. A declaration that cannot be resolved (a missing name with no
   fallback, a cycle) or whose text is not a value of the property once substituted is invalid at computed-value time, as
-  in CSS: the property has its initial value, and a shorthand resets what it covers. Written order decides between
+  in CSS: the property is unset, and a shorthand resets what it covers. An unresolvable longhand does not reset what its
+  covering shorthand or a lower layer sets, though: `{ padding: 8, paddingTop: 'var(--missing)' }` keeps the top padding
+  at 8, where CSS gives 0 ([deviations](fork/deviations.md#layout)). Written order decides between
   a `var()` declaration and the plain ones around it, as in CSS: `{ borderWidth: 2, border: 'var(--b)' }` has no
-  `borderWidth`, `{ border: 'var(--b)', borderWidth: 2 }` has. A state style that declares the property wins over a `var()` of
-  the base, as a plain value does. Only a string is substituted: a number is not a `var()`.
+  `borderWidth`, `{ border: 'var(--b)', borderWidth: 2 }` has, and `{ borderWidth: 'var(--w)', borderTop: '1px solid' }` gives the
+  top side `1px`, the other three `--w`, like the literal. An invalid declaration written after a `var()` one covers nothing:
+  `{ paddingTop: 'var(--p)', padding: '1px bogus' }` keeps the top padding. A state style that declares the property wins over
+  a `var()` of the base, as a plain value does, and a side shorthand of the state (`hover: { borderTop }`) wins over a
+  base `borderWidth: 'var(--w)'` on its side only. Only a string is substituted: a number is not a `var()`. What it
+  substitutes to is a number only for a property whose value is a `<number>` (`opacity`, `zIndex`, `flexGrow`, `order`);
+  `padding: 'var(--n)'` with `--n: 8` is dropped, as `padding: '8'` is.
+  A custom property set in a focus style that applies (`focusVisible`, `focusWithin`, `hasFocusVisible`) is the
+  element's, as for `:focus-visible { --ring: ... }` in CSS: the element's own `var(--ring)`, in its base style and
+  in the other focus styles that apply with it, and its descendants read it while it applies, and the value it
+  covers is back after a blur. An element with a `transition` or an `animation` reads the same set. Where two focus styles that apply set one, the later of `focusWithin`,
+  `hasFocusVisible`, `focusVisible` wins.
 - **A normal property in `style()`** (`style(color: red)`, `style(display: block)`) is
   unknown, as in Chrome, which supports custom properties only.
 
@@ -8743,7 +8878,7 @@ Differences from the browser:
   [transform properties](#transforms) and not checked elsewhere ([deviations](fork/deviations.md#layout)). `style(--x: inherit)`, `unset` and `revert` are unknown, there is no `@property`
   registration (every value is text, and none transitions or animates), and a custom
   property cannot be set to `""` (that declares nothing)
-- Which elements are containers follows CSS. A `div`, `text`, `label`, `form`, an atomic
+- Which elements are containers follows CSS. A `div`, `label`, `form`, an atomic
   `span` (`inline-block`, `inline-flex`, `inline-grid`) and a table caption are size
   contained as `containerType` says, and so are a [`<virtual-list>`](#virtual-lists) (its rows are
   queried against it, and they follow its size in the frame that lays it out), an `<img>`
@@ -8805,7 +8940,7 @@ element the primary button went down on and its ancestors, until the release.
 Nesting is one level deep. A `hover` object cannot contain another `hover` or
 `active`.
 
-They work on **every** element, including `<text>`, `<code>`, `<markdown>`,
+They work on **every** element, including `<code>`, `<markdown>`,
 `<diff>`, `<img>`, `<svg>`, the editors and an inline `<span>` (see
 [Events on inline boxes](#events-on-inline-boxes)). The one exception is
 `<virtual-list>`, whose `style` type rejects them: gpui's list has no
@@ -8904,7 +9039,7 @@ layout space**, so a ring you add with `focusVisible` moves nothing. It follows
   nothing. With a style, the width defaults to `medium` (3px) and the colour to
   `currentColor`.
 - **`outline`** is `<width> <style> <colour>` in any order, each part at most
-  once. A part it leaves out is that default. `hidden` throws. `outlineWidth`,
+  once. A part it leaves out is that default. `hidden` drops the declaration. `outlineWidth`,
   `outlineStyle` and `outlineColor` win over it when written after it.
   `outlineOffset` is not part of it.
 - **Styles.** `solid`, `dashed`, `dotted`, `double`, `groove`, `ridge`, `inset` and
@@ -8943,8 +9078,8 @@ render per frame.
   `flex`, ...) cover their longhands. `transform`, `translate`, `rotate`, `scale` and
   `transform-origin`, `perspective` and `perspective-origin` transition too (see [Transforms](#transforms)); a valid CSS name
   Ghia does not animate (`transform-style`) is accepted and matches nothing. A camelCase name, a bad time or
-  timing function, or an unparsable value is rejected when the style is set, like
-  any other invalid style
+  timing function, or an unparsable value is dropped, like
+  any other invalid declaration
 - **Inline boxes.** A `<span>` transitions what an inline box shows too, and only that (see
   [Painting an inline box](#painting-an-inline-box))
 - **Discrete properties.** `display`, `visibility`, `position`, `overflow`, `overflowX`,
@@ -9105,8 +9240,8 @@ defineKeyframes('pulse', {
   `animationIterationCount`, `animationDirection`, `animationFillMode` and
   `animationPlayState` win over the shorthand when written after it, and shorter lists repeat to the
   length of `animationName`. The timing functions are the ones
-  [CSS transitions](#css-transitions) take. An invalid value is rejected when the
-  style is set. A name with no keyframes animates nothing, as in a browser
+  [CSS transitions](#css-transitions) take. An invalid value drops the
+  declaration. A name with no keyframes animates nothing, as in a browser
 - **Behaviour.** CSS Animations Level 1: `infinite` and fractional iteration
   counts, `reverse`, `alternate` and `alternate-reverse`, `backwards` / `forwards`
   / `both` fill, `paused` (freezes where it is and resumes from there), a negative
@@ -9248,7 +9383,7 @@ fire), `pause()` stops asking for frames, `currentTime`, `playbackRate`,
 with `play()`. A `motion` with no `transition` runs Motion's default for each key
 (see [Targets and timing](#targets-and-timing)).
 
-> **Note: GPUI defaults text color to black, not white.** Unlike CSS, GPUI does not inherit `color` from parent elements. Every `<text>` element that doesn't set an explicit `color` style will render as black — invisible on dark backgrounds. Always set `color` on your text elements or on a parent `<div>` (which applies `text_color` to all children in that subtree via GPUI's `Styled` trait).
+> **Note: the default text color is black, not white.** Text in an element with no `color` of its own or from an ancestor paints black under the default light `colorScheme`, which is invisible on a dark background. `color` inherits like CSS, so set it on the element that holds the text or on a parent `<div>`, and every string in that subtree takes it (see [`colorScheme`](#colors)).
 
 ### Universal style
 
@@ -9273,8 +9408,8 @@ does not use a component.
   own `transition` replaces the universal one, and a colour, filter or other CSS
   string that is invalid in the element's own style falls through to the layer's
 - **Every element.** Including ones mounted later and ones that never set a
-  `style`. A string child is a text node, not an element, and gets nothing; a
-  `<text>` element does
+  `style`. A string child is a text node, not an element, and gets nothing; the element
+  holding it does
 - **State refinements.** The layer may carry `hover`, `active`, `focusVisible`,
   `focusWithin`, `groupHover`, `groupActive`, `groupFocusWithin`, `hasHover`, `hasActive`, `hasFocus`,
   `hasFocusVisible`, `disabled`, `enabled`, `hasDisabled` and `hasEnabled`, like `*:hover`. Where the element declares the same refinement the two merge, the
@@ -9289,8 +9424,9 @@ does not use a component.
 - **One restyle.** A change of the layer restyles every element once, in one
   frame, with no per-element JavaScript. The result is the same as having set
   every element's style to its new combined one
-- **Validation.** The style is checked exactly like `style` on an element. An
-  invalid one rejects the batch it is in and nothing changes
+- **Validation.** The style is read exactly like `style` on an element. An
+  invalid declaration is dropped and the layer keeps the rest; a layer that is not
+  a JSON object rejects the batch it is in and nothing changes
 
 The CSS transition rules hold, which is what makes the cross-fade work. With the
 layer's `transition` in place, an element whose `light-dark()` colour flips with
@@ -9301,7 +9437,7 @@ moves a colour in the same change runs it, as a style that does so would.
 ```tsx
 <UniversalStyle style={{ transition: 'background-color 300ms, color 300ms' }} />
 <div style={{ colorScheme: 'light dark', backgroundColor: 'light-dark(#fff, #111)' }}>
-  <text>Fades when the appearance flips</text>
+  <div>Fades when the appearance flips</div>
 </div>
 ```
 
@@ -9310,7 +9446,7 @@ Costs and limits ([deviations](./fork/deviations.md#paint-and-transforms)):
 - A layer with a `transition` makes every element track transitions, which costs
   a little per element per frame. Name the properties as above instead of `all`
 - It is one layer. There are no selectors, no specificity and no cascade between
-  rules (a [stylesheet](#stylesheets) has them), so it cannot say "every `<text>`" or "every child of a card"
+  rules (a [stylesheet](#stylesheets) has them), so it cannot say "every `<span>`" or "every child of a card"
 - An element that had no style when the layer first gave it a `transition` has
   no earlier style to fade from, so a colour the same change gives it appears at
   once. Later changes fade
@@ -9767,7 +9903,7 @@ loop.stop()
 
 ### Testing native elements
 
-`getAllText()` only sees `<text>` nodes in the retained tree. `<code>`, `<diff>`
+`getAllText()` only sees the string nodes (`#text`) in the retained tree. `<code>`, `<diff>`
 and `<markdown>` paint their text inside GPUI, so use `getPaintedText()`, which
 returns every string painted in the last frame in paint order:
 
@@ -9791,7 +9927,7 @@ the boxes it actually drew, one per visual row:
 ```ts
 root.render(
   <div highlight={{ query: 'quick' }}>
-    <text>the quick brown fox</text>
+    <div>the quick brown fox</div>
   </div>,
 )
 const [hit] = renderer.getPaintedHighlights()
@@ -9949,7 +10085,7 @@ element and read it with `textContent()`. A screenshot tells you that something
 changed; a readout tells you what, and the failure message names the number.
 
 ```tsx
-<text testId="readout">{`x=${scrollX} y=${scrollY} zoom=${zoom} sel=${selected}`}</text>
+<div testId="readout">{`x=${scrollX} y=${scrollY} zoom=${zoom} sel=${selected}`}</div>
 ```
 
 ```ts

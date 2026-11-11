@@ -35,7 +35,7 @@ function measureColumn() {
   const testRoot = createTestRoot()
   testRoot.render(
     <div highlight={{ query: "aaaaaaaaaa" }}>
-      <text style={TEXT}>{"aaaaaaaaaa"}</text>
+      <div style={TEXT}>{"aaaaaaaaaa"}</div>
     </div>
   )
   const width = testRoot.renderer.getPaintedHighlights()[0]!.rects[0]!.width / 10
@@ -64,9 +64,9 @@ describeNative("bounds of an inline element", () => {
       const column = columnWidth()
       render(
         <div style={{ width: 400 }}>
-          <text ref={ref("text")} style={TEXT}>
+          <div ref={ref("text")} style={TEXT}>
             Hello <span ref={ref("span")}>world</span>!
-          </text>
+          </div>
         </div>
       )
       const text = element("text").getBoundingClientRect()
@@ -90,9 +90,9 @@ describeNative("bounds of an inline element", () => {
       // "aa bbbbbb" fills the first line, and "cccccc" does not fit on it.
       render(
         <div style={{ width: 12 * column }}>
-          <text ref={ref("text")} style={TEXT}>
+          <div ref={ref("text")} style={TEXT}>
             aa <span ref={ref("span")}>bbbbbb cccccc</span> dd
-          </text>
+          </div>
         </div>
       )
       const text = element("text").getBoundingClientRect()
@@ -104,7 +104,7 @@ describeNative("bounds of an inline element", () => {
       // The first line's fragment is "bbbbbb", plus the space that hangs at the wrap.
       expect(span.width, "reaches the end of the first line").toBeGreaterThanOrEqual(9 * column - 0.01)
       expect(span.width).toBeLessThanOrEqual(10 * column + 0.01)
-      expect(renderer.getElementBounds((element("span") as any).id)).toMatchObject({
+      expect(renderer.getElementBounds((element("span") as any).nativeId)).toMatchObject({
         height: span.height,
         width: span.width,
       })
@@ -119,11 +119,11 @@ describeNative("bounds of an inline element", () => {
       const column = columnWidth()
       render(
         <div style={{ width: 400 }}>
-          <text style={TEXT}>
+          <div style={TEXT}>
             <span ref={ref("outer")}>
               ab<span ref={ref("inner")}>cd</span>ef
             </span>
-          </text>
+          </div>
         </div>
       )
       const outer = element("outer").getBoundingClientRect()
@@ -143,12 +143,12 @@ describeNative("bounds of an inline element", () => {
       const column = columnWidth()
       render(
         <div style={{ width: 400 }}>
-          <text ref={ref("text")} style={TEXT}>
+          <div ref={ref("text")} style={TEXT}>
             ab<span ref={ref("small")}>cd</span>
             <span ref={ref("big")} style={{ fontSize: 32 }}>
               ef
             </span>
-          </text>
+          </div>
         </div>
       )
       const text = element("text").getBoundingClientRect()
@@ -172,16 +172,16 @@ describeNative("bounds of an inline element", () => {
     try {
       const app = (shown: boolean) => (
         <div style={{ width: 400 }}>
-          <text style={TEXT}>
+          <div style={TEXT}>
             Hello <span ref={ref("empty")}> </span>
             {shown ? <span ref={ref("span")}>world</span> : null}
-          </text>
+          </div>
         </div>
       )
       render(app(true))
       expect(element("span").getBoundingClientRect().width).toBeGreaterThan(0)
       expect(element("empty").getBoundingClientRect()).toMatchObject({ width: 0, height: 0 })
-      expect(renderer.getElementBounds((element("empty") as any).id)).toBeNull()
+      expect(renderer.getElementBounds((element("empty") as any).nativeId)).toBeNull()
 
       render(app(false))
       expect(element("span").getBoundingClientRect()).toMatchObject({ width: 0, height: 0 })
@@ -199,9 +199,9 @@ describeNative("observing an inline element", () => {
       const entries: ResizeObserverEntry[] = []
       const app = (columns: number) => (
         <div style={{ width: columns * column }}>
-          <text style={TEXT}>
+          <div style={TEXT}>
             aa <span ref={ref("span")}>bbbbbb cccccc</span>
-          </text>
+          </div>
         </div>
       )
       render(app(40))
@@ -228,9 +228,9 @@ describeNative("observing an inline element", () => {
       const entries: ResizeObserverEntry[] = []
       const app = (visibility: "visible" | "hidden") => (
         <div style={{ width: 400 }}>
-          <text style={{ ...TEXT, visibility }}>
+          <div style={{ ...TEXT, visibility }}>
             Hello <span ref={ref("span")}>world</span>
-          </text>
+          </div>
         </div>
       )
       render(app("visible"))
@@ -254,9 +254,9 @@ describeNative("observing an inline element", () => {
       // The container shows the first line only, and the span is on the second.
       const app = (height: number) => (
         <div style={{ width: 12 * column, height, overflow: "hidden" }}>
-          <text style={TEXT}>
+          <div style={TEXT}>
             aaaaaaaaaa <span ref={ref("span")}>bbbb</span>
-          </text>
+          </div>
         </div>
       )
       render(app(LINE))

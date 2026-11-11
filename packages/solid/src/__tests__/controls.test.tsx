@@ -32,11 +32,11 @@ describe.skipIf(!hasNativeTestRenderer)("Solid controls", () => {
     app.render(() => (
       <Select value={value()} onValueChange={setValue}>
         <SelectTrigger testId="trigger" style={{ width: 120, height: 32, backgroundColor: "#333333" }}>
-          <text>open</text>
+          <div>open</div>
         </SelectTrigger>
         <SelectContent style={{ width: 120, backgroundColor: "#222222" }}>
-          <SelectItem value="a"><text>A</text></SelectItem>
-          <SelectItem value="b" testId="b" style={{ height: 28 }}><text>B</text></SelectItem>
+          <SelectItem value="a"><div>A</div></SelectItem>
+          <SelectItem value="b" testId="b" style={{ height: 28 }}><div>B</div></SelectItem>
         </SelectContent>
       </Select>
     ))
@@ -57,11 +57,11 @@ describe.skipIf(!hasNativeTestRenderer)("Solid controls", () => {
     app.render(() => (
       <Select defaultValue="a">
         <SelectTrigger testId="trigger" style={{ width: 120, height: 32, backgroundColor: "#333333" }}>
-          <text>open</text>
+          <div>open</div>
         </SelectTrigger>
         <SelectContent style={{ width: 120, backgroundColor: "#222222" }}>
-          <SelectItem value="a"><text>A</text></SelectItem>
-          <SelectItem value="b"><text>B</text></SelectItem>
+          <SelectItem value="a"><div>A</div></SelectItem>
+          <SelectItem value="b"><div>B</div></SelectItem>
         </SelectContent>
       </Select>
     ))
@@ -78,8 +78,8 @@ describe.skipIf(!hasNativeTestRenderer)("Solid controls", () => {
       <Combobox items={["alpha", "beta"]} value={value()} onValueChange={setValue} defaultOpen>
         <ComboboxInput testId="input" style={{ width: 180, height: 32 }} />
         <ComboboxContent>
-          <ComboboxItem value="alpha"><text>alpha</text></ComboboxItem>
-          <ComboboxItem value="beta"><text>beta</text></ComboboxItem>
+          <ComboboxItem value="alpha"><div>alpha</div></ComboboxItem>
+          <ComboboxItem value="beta"><div>beta</div></ComboboxItem>
         </ComboboxContent>
       </Combobox>
     ))
@@ -94,9 +94,9 @@ describe.skipIf(!hasNativeTestRenderer)("Solid controls", () => {
     app.render(() => (
       <Tooltip>
         <TooltipTrigger testId="tip-trigger" style={{ width: 100, height: 32, backgroundColor: "#333333" }}>
-          <text>hover</text>
+          <div>hover</div>
         </TooltipTrigger>
-        <TooltipContent><text>help</text></TooltipContent>
+        <TooltipContent><div>help</div></TooltipContent>
       </Tooltip>
     ))
     const trigger = app.renderer.findByTestId("tip-trigger")!
@@ -121,19 +121,19 @@ describe.skipIf(!hasNativeTestRenderer)("Solid controls", () => {
                 onKeyDown={(event) => keys.push(`child:${event.key}`)}
                 style={{ width: 120, height: 32, backgroundColor: "#333333" }}
               >
-                <text>open</text>
+                <div>open</div>
               </div>
             </SelectTrigger>
             <SelectContent testId="content" style={{ width: 120, backgroundColor: "#222222" }}>
-              <SelectItem value="a"><text>A</text></SelectItem>
-              <SelectItem value="b"><text>B</text></SelectItem>
+              <SelectItem value="a"><div>A</div></SelectItem>
+              <SelectItem value="b"><div>B</div></SelectItem>
             </SelectContent>
           </Select>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div testId="tip" style={{ width: 80, height: 24 }}><text>tip</text></div>
+              <div testId="tip" style={{ width: 80, height: 24 }}><div>tip</div></div>
             </TooltipTrigger>
-            <TooltipContent><text>help</text></TooltipContent>
+            <TooltipContent><div>help</div></TooltipContent>
           </Tooltip>
         </div>
         <input testId="outside" style={{ width: 120, height: 28 }} />
@@ -176,20 +176,20 @@ describe.skipIf(!hasNativeTestRenderer)("Solid controls", () => {
     app.render(() => (
       <div style={{ display: "flex", flexDirection: "column", width: 600, height: 400, gap: 8 }}>
         <Dialog>
-          <DialogTrigger testId="open" style={{ width: 80, height: 24 }}><text>Open</text></DialogTrigger>
+          <DialogTrigger testId="open" style={{ width: 80, height: 24 }}><div>Open</div></DialogTrigger>
           <DialogPortal>
             <DialogBackdrop style={{ backgroundColor: "#00000080" }} />
             <DialogPopup testId="popup" style={{ width: 300, padding: 16, gap: 8, backgroundColor: "#1e293b" }}>
-              <DialogTitle><text>Settings</text></DialogTitle>
+              <DialogTitle><div>Settings</div></DialogTitle>
               <Select defaultValue="a">
                 <SelectTrigger testId="select" style={{ width: 120, height: 32, backgroundColor: "#333333" }}>
-                  <text>pick</text>
+                  <div>pick</div>
                 </SelectTrigger>
                 <SelectContent style={{ width: 120, backgroundColor: "#222222" }}>
-                  <SelectItem value="a"><text>A</text></SelectItem>
+                  <SelectItem value="a"><div>A</div></SelectItem>
                 </SelectContent>
               </Select>
-              <DialogClose testId="close" style={{ width: 60, height: 24 }}><text>Close</text></DialogClose>
+              <DialogClose testId="close" style={{ width: 60, height: 24 }}><div>Close</div></DialogClose>
             </DialogPopup>
           </DialogPortal>
         </Dialog>
@@ -305,20 +305,20 @@ describe.skipIf(!hasNativeTestRenderer)("Solid controls", () => {
     app.render(() => (
       <div style={{ display: "flex", flexDirection: "column", gap: 8, width: 400, height: 400 }}>
         <Select defaultOpen defaultValue="a">
-          <SelectTrigger style={{ width: 120, height: 32 }}><text>pick</text></SelectTrigger>
+          <SelectTrigger style={{ width: 120, height: 32 }}><div>pick</div></SelectTrigger>
           <SelectContent testId="select-content" style={style()}>
-            <SelectItem value="a"><text>A</text></SelectItem>
+            <SelectItem value="a"><div>A</div></SelectItem>
           </SelectContent>
         </Select>
         <Combobox defaultOpen items={["alpha"]}>
           <ComboboxInput style={{ width: 120, height: 32 }} />
           <ComboboxContent testId="combobox-content" style={style()}>
-            <ComboboxList>{(item: string) => <ComboboxItem value={item}><text>{item}</text></ComboboxItem>}</ComboboxList>
+            <ComboboxList>{(item: string) => <ComboboxItem value={item}><div>{item}</div></ComboboxItem>}</ComboboxList>
           </ComboboxContent>
         </Combobox>
         <Tooltip defaultOpen>
-          <TooltipTrigger style={{ width: 60, height: 24 }}><text>tip</text></TooltipTrigger>
-          <TooltipContent testId="tooltip-content" style={style()}><text>hint</text></TooltipContent>
+          <TooltipTrigger style={{ width: 60, height: 24 }}><div>tip</div></TooltipTrigger>
+          <TooltipContent testId="tooltip-content" style={style()}><div>hint</div></TooltipContent>
         </Tooltip>
       </div>
     ))
@@ -371,7 +371,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid controls", () => {
       <div style={{ display: "flex", gap: 8 }}>
         <div autoFocus tabIndex={0} testId="start" style={{ width: 20, height: 20 }} />
         <Button testId="save" disabled={disabled()} onClick={() => log.push("save")} style={{ width: 60, height: 24 }}>
-          <text>Save</text>
+          <div>Save</div>
         </Button>
         <div tabIndex={0} testId="end" style={{ width: 20, height: 20 }} />
       </div>
@@ -409,7 +409,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid controls", () => {
           onClick={(event) => seen.push({ at: "button", detail: event.detail, pointerId: event.pointerId, pointerType: event.pointerType, target: event.target, currentTarget: event.currentTarget })}
           style={{ width: 60, height: 24 }}
         >
-          <text>Save</text>
+          <div>Save</div>
         </Button>
       </div>
     ))
@@ -431,7 +431,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid controls", () => {
     app.render(() => (
       <Button testId="outer" onClick={() => seen.push("outer")} style={{ padding: 8 }}>
         <Button testId="inner" autoFocus onClick={() => seen.push("inner")} style={{ width: 60, height: 24 }}>
-          <text>Inner</text>
+          <div>Inner</div>
         </Button>
       </Button>
     ))
@@ -450,7 +450,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid controls", () => {
     const app = createTestRoot()
     app.render(() => (
       <div style={{ display: "flex", flexDirection: "column", gap: 8, width: 400, height: 400 }}>
-        <Button testId="button" ref={(element: HostElement) => refs.button.push(element)} data-mark={mark()} style={{ width: 60, height: 24 }}><text>Save</text></Button>
+        <Button testId="button" ref={(element: HostElement) => refs.button.push(element)} data-mark={mark()} style={{ width: 60, height: 24 }}><div>Save</div></Button>
         <Combobox items={["alpha"]}>
           <ComboboxInput testId="input" ref={(element: HostElement) => refs.input.push(element)} data-mark={mark()} style={{ width: 120, height: 32 }} />
         </Combobox>
@@ -515,7 +515,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid controls", () => {
     let built = 0
     const Probe = () => {
       built += 1
-      return <text>probe</text>
+      return <div>probe</div>
     }
     const [open, setOpen] = createSignal(false)
     const app = createTestRoot()
@@ -535,7 +535,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid controls", () => {
     let built = 0
     const Probe = () => {
       built += 1
-      return <text>probe</text>
+      return <div>probe</div>
     }
     const app = createTestRoot()
     app.render(() => (

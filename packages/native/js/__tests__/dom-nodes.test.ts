@@ -78,11 +78,13 @@ defineDomMembers(FakeHtml.prototype, (element: FakeHtml) => ({
   listeners: undefined as never,
   connected: element.connected,
   prop: (name) => element.props[name],
+  propNames: () => Object.keys(element.props),
 }))
 defineDomMembers(FakeSvg.prototype, (element: FakeSvg) => ({
   listeners: undefined as never,
   connected: element.connected,
   prop: (name) => element.props[name],
+  propNames: () => Object.keys(element.props),
 }))
 
 function place(parent: FakeHtml, ...children: Array<FakeHtml | FakeText>): void {
@@ -331,21 +333,25 @@ describe("document", () => {
     expect(document.textContent).toBeNull()
     expect(document.childNodes).toEqual([])
     expect(document.documentElement).toBeNull()
+    expect(document.head).toBeNull()
     expect(document.body).toBeNull()
     expect(document.scrollingElement).toBeNull()
   })
 
-  /** A window whose root is `html` > `body`, the most recently mounted. */
+  /** A window whose root is `html` > `head` + `body`, the most recently mounted. */
   function mountWindow() {
     const renderer = {} as NativeRenderer
     const html = new FakeHtml("html")
+    const head = new FakeHtml("head")
     const body = new FakeHtml("body")
     html.parent = document
+    place(html, head)
     place(html, body)
-    const remove = installElementSource(renderer, () => undefined, () => ({ html, body }))
+    const remove = installElementSource(renderer, () => undefined, () => ({ html, head, body }))
     mountedRenderers().push(renderer)
     return {
       html,
+      head,
       body,
       unmount() {
         mountedRenderers().splice(mountedRenderers().indexOf(renderer), 1)
@@ -358,6 +364,7 @@ describe("document", () => {
     const first = mountWindow()
     const second = mountWindow()
     expect(document.documentElement).toBe(second.html)
+    expect(document.head).toBe(second.head)
     expect(document.body).toBe(second.body)
     expect(document.scrollingElement).toBe(second.html)
     expect(document.childNodes).toEqual([first.html, second.html])
@@ -366,6 +373,7 @@ describe("document", () => {
     expect(document.documentElement).toBe(first.html)
     first.unmount()
     expect(document.documentElement).toBeNull()
+    expect(document.head).toBeNull()
     expect(document.body).toBeNull()
   })
 

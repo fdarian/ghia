@@ -20,7 +20,8 @@ use std::rc::Rc;
 use gpui::{canvas, prelude::*, CursorStyle, HitboxBehavior, TextLayout};
 
 use crate::css::length::LengthContext;
-use crate::events::state_styles::{folded, PointerStates};
+use crate::events::state_styles::PointerStates;
+use crate::motion::InlineStyles;
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
 
@@ -42,7 +43,8 @@ pub struct CursorBox {
 /// for nothing more.
 ///
 /// `states` says which pointer states apply to a box, as it does for
-/// [`super::paragraph::run_styles`], so a `hover` cursor is folded in. A
+/// [`super::paragraph::run_styles`], so a `hover` cursor is folded in, and `motion` has the style
+/// a box shows, its `var()` substituted. A
 /// container that keeps the pointer off its content has no cursor to give: the
 /// hitboxes would be hit where it is not.
 pub fn of(
@@ -51,6 +53,7 @@ pub fn of(
     pointer_events_none: bool,
     inert: bool,
     states: &dyn Fn(u64, &StyleDesc) -> PointerStates,
+    motion: &InlineStyles,
     insets: &Rc<InsetSpec>,
 ) -> Vec<CursorBox> {
     if pointer_events_none || inert {
@@ -63,7 +66,7 @@ pub fn of(
     // the box holds, so the first one decides.
     let mut inherited_by: HashMap<u64, Option<CursorStyle>> = HashMap::new();
     for piece in &paragraph.pieces {
-        let targets = piece_targets(tree, &with_box, piece, false, false);
+        let targets = piece_targets(tree, &with_box, piece, false, false, states, motion);
         let mut inherited = None;
         for id in &piece.boxes {
             let Some(base) = tree
@@ -73,7 +76,7 @@ pub fn of(
             else {
                 continue;
             };
-            let declared = folded(base, states(*id, base));
+            let declared = motion.declared(*id, base, states(*id, base));
             if let Some(cursor) = declared.cursor.as_deref().and_then(crate::style::parse_cursor)
             {
                 inherited = Some(cursor);
@@ -140,7 +143,7 @@ mod tests {
     /// text is "a bc d", and the pieces are 0..2, 2..3, 3..4 and 4..6.
     fn fixture(styles: &[(u64, serde_json::Value)]) -> RetainedTree {
         let mut tree = RetainedTree::new();
-        for (id, kind) in [(1, "div"), (2, "text"), (3, "span"), (4, "text"), (5, "span"), (6, "text"), (7, "text")] {
+        for (id, kind) in [(1, "div"), (2, "#text"), (3, "span"), (4, "#text"), (5, "span"), (6, "#text"), (7, "#text")] {
             tree.create_element(id, kind.to_string());
         }
         for (parent, child) in [(1, 2), (1, 3), (3, 4), (3, 5), (5, 6), (1, 7)] {
@@ -150,7 +153,13 @@ mod tests {
             tree.set_text(id, text.to_string());
         }
         for (id, style) in styles {
-            tree.set_style(*id, Arc::new(serde_json::from_value(style.clone()).expect("a style")));
+            let text = style.to_string();
+            let style = if crate::css::var_substitution::mentions_var(text.as_bytes()) {
+                crate::css::var_substitution::parse(text.as_bytes()).expect("a style")
+            } else {
+                serde_json::from_value(style.clone()).expect("a style")
+            };
+            tree.set_style(*id, Arc::new(style));
         }
         tree
     }
@@ -167,7 +176,8 @@ mod tests {
         };
         assert_eq!(paragraph.text, "a bc d");
         let insets = InsetSpec::of(tree, paragraph, &crate::color::ColorContext::root(crate::color::Scheme::Light), &LengthContext::initial(800.0, 600.0), states);
-        of(tree, paragraph, none, inert, states, &insets)
+        let motion = InlineStyles::at_rest(tree, paragraph, states);
+        of(tree, paragraph, none, inert, states, &motion, &insets)
             .into_iter()
             .map(|inline| (inline.range, inline.cursor))
             .collect()
@@ -228,6 +238,23 @@ mod tests {
     }
 
     #[test]
+    fn a_cursor_that_a_var_declares_is_the_one_the_custom_properties_of_the_boxes_say() {
+        let tree = fixture(&[
+            (3, serde_json::json!({"--own": "pointer", "--cursor": "grab", "cursor": "var(--own)"})),
+            (5, cursor("var(--cursor)")),
+        ]);
+        assert_eq!(resting(&tree), vec![(2..4, CursorStyle::PointingHand), (3..4, CursorStyle::OpenHand)]);
+    }
+
+    #[test]
+    fn a_hover_cursor_that_a_var_declares_applies_while_the_box_is_hovered() {
+        let tree = fixture(&[(3, serde_json::json!({"--c": "pointer", "hover": {"cursor": "var(--c)"}}))]);
+        assert_eq!(resting(&tree), vec![]);
+        let hovered = |id: u64, _: &StyleDesc| PointerStates { hovered: id == 3, ..PointerStates::default() };
+        assert_eq!(cursors(&tree, false, false, &hovered), vec![(2..4, CursorStyle::PointingHand)]);
+    }
+
+    #[test]
     fn an_unknown_keyword_sets_nothing() {
         let tree = fixture(&[(3, cursor("zoom-in"))]);
         assert_eq!(resting(&tree), vec![]);
@@ -284,7 +311,9 @@ mod tests {
             panic!("a paragraph")
         };
         let insets = InsetSpec::of(&tree, paragraph, &crate::color::ColorContext::root(crate::color::Scheme::Light), &LengthContext::initial(800.0, 600.0), &|_, _| PointerStates::default());
-        let boxes = of(&tree, paragraph, false, false, &|_, _| PointerStates::default(), &insets);
+        let states = |_: u64, _: &StyleDesc| PointerStates::default();
+        let motion = InlineStyles::at_rest(&tree, paragraph, &states);
+        let boxes = of(&tree, paragraph, false, false, &states, &motion, &insets);
         let edges: Vec<_> = boxes
             .iter()
             .map(|inline| (inline.range.clone(), f32::from(inline.edges.for_width(None).start), f32::from(inline.edges.for_width(None).end)))

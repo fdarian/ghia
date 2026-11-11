@@ -22,6 +22,8 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use rustc_hash::{FxHashMap, FxHashSet};
+
 use gpui::{AnyElement, App, Bounds, Edges, Element, ElementId, GlobalElementId, InspectorElementId, LayoutId, Pixels, Point, Window, WindowId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -130,7 +132,10 @@ enum Entry {
 thread_local! {
     /// The list each list that was nested in another was last nested in, and by how much: how a
     /// list is found to be put back by a replay of the lists around it, see [`Live::delta_of`].
-    static PARENTS: RefCell<rustc_hash::FxHashMap<u64, (u64, Point<Pixels>)>> = RefCell::new(rustc_hash::FxHashMap::default());
+    static PARENTS: RefCell<FxHashMap<u64, (u64, Point<Pixels>)>> = RefCell::new(FxHashMap::default());
+    /// `PARENTS` the other way round, kept with it: the lists nested in each list, for a registry to find what a root holds
+    /// without asking every list it has whether it is nested in one.
+    static CHILDREN: RefCell<FxHashMap<u64, FxHashSet<u64>>> = RefCell::new(FxHashMap::default());
     static SERIAL: Cell<u64> = const { Cell::new(1) };
     /// The serial of the list the write being made is recorded into, see [`owner`].
     static OWNER: Cell<u64> = const { Cell::new(0) };
@@ -156,10 +161,49 @@ impl Clone for Entries {
         let serial = next_serial() | (self.serial & LAID_OUT);
         for entry in &self.list {
             if let Entry::Nested(child, by) = entry {
-                PARENTS.with(|parents| parents.borrow_mut().insert(child.serial, (serial, *by)));
+                nest(child.serial, serial, *by);
             }
         }
         Self { serial, list: self.list.clone(), kinds: self.kinds, layout_kinds: self.layout_kinds }
+    }
+}
+
+/// Notes that the list `child` was nested in `parent`, `by` away, and in no other.
+fn nest(child: u64, parent: u64, by: Point<Pixels>) {
+    let before = PARENTS.with(|parents| parents.borrow_mut().insert(child, (parent, by)));
+    CHILDREN.with(|children| {
+        let mut children = children.borrow_mut();
+        match before {
+            Some((before, _)) if before == parent => return,
+            Some((before, _)) => forget_child(&mut children, before, child),
+            None => {}
+        }
+        children.entry(parent).or_default().insert(child);
+    });
+}
+
+/// Notes that the list `serial` is gone, or is no longer the list it was (see [`Entries::restart`]): it is nested in none, and
+/// what was nested in it still names it as the parent, as `PARENTS` always did.
+fn unnest(serial: u64) {
+    // The thread may be on its way out, with nothing left to forget.
+    let before = PARENTS.try_with(|parents| parents.borrow_mut().remove(&serial)).ok().flatten();
+    CHILDREN
+        .try_with(|children| {
+            let mut children = children.borrow_mut();
+            if let Some((parent, _)) = before {
+                forget_child(&mut children, parent, serial);
+            }
+            children.remove(&serial);
+        })
+        .ok();
+}
+
+fn forget_child(children: &mut FxHashMap<u64, FxHashSet<u64>>, parent: u64, child: u64) {
+    if let Some(of_parent) = children.get_mut(&parent) {
+        of_parent.remove(&child);
+        if of_parent.is_empty() {
+            children.remove(&parent);
+        }
     }
 }
 
@@ -179,8 +223,7 @@ pub(crate) fn is_laid_out(serial: u64) -> bool {
 
 impl Drop for Entries {
     fn drop(&mut self) {
-        // The thread may be on its way out, with nothing left to forget.
-        PARENTS.try_with(|parents| parents.borrow_mut().remove(&self.serial)).ok();
+        unnest(self.serial);
     }
 }
 
@@ -192,7 +235,7 @@ impl Entries {
         if self.list.is_empty() && is_laid_out(self.serial) == laid_out {
             return;
         }
-        PARENTS.try_with(|parents| parents.borrow_mut().remove(&self.serial)).ok();
+        unnest(self.serial);
         self.serial = next_serial() | if laid_out { LAID_OUT } else { 0 };
         self.list.clear();
         self.kinds = Kinds::default();
@@ -222,7 +265,7 @@ impl Entries {
         }
         self.kinds = self.kinds.union(child.kinds);
         self.layout_kinds = self.layout_kinds.union(child.layout_kinds);
-        PARENTS.with(|parents| parents.borrow_mut().insert(child.serial, (self.serial, by)));
+        nest(child.serial, self.serial, by);
         self.list.push(Entry::Nested(child, by));
     }
 
@@ -339,14 +382,14 @@ impl Live {
 
     /// Notes the list that the replay puts back as live, with how far from where it was written
     /// it is, for [`owner`] to be looked up in with [`delta_of`].
-    pub(crate) fn mark(&self, live: &mut rustc_hash::FxHashMap<u64, Point<Pixels>>) {
+    pub(crate) fn mark(&self, live: &mut FxHashMap<u64, Point<Pixels>>) {
         live.insert(self.entries.serial, self.delta);
     }
 }
 
 /// How far from where it was written the list `owner` is put back, if a replay in `live` puts it
 /// back: the replay of the list or of one that it was nested in, however deep.
-pub(crate) fn delta_of(owner: u64, live: &rustc_hash::FxHashMap<u64, Point<Pixels>>) -> Option<Point<Pixels>> {
+pub(crate) fn delta_of(owner: u64, live: &FxHashMap<u64, Point<Pixels>>) -> Option<Point<Pixels>> {
     PARENTS.with(|parents| {
         let parents = parents.borrow();
         let (mut list, mut offset) = (owner, Point::default());
@@ -377,7 +420,93 @@ pub(crate) struct Layered<T> {
     owners: Vec<u64>,
     /// What came since: a write is `Slot::One`, a replay that has not been expanded `Slot::Live`.
     pending: Vec<Slot<T>>,
+    /// Where each list's writes are in `read`, for a patch to find the writes of a root without asking every write whose they
+    /// are. Made when a patch first asks and kept while only patches that write as many as they took out change `read`.
+    placed: Option<FxHashMap<u64, Placed>>,
+    /// The same for `pending`, where a page that replayed its rows holds a replay for each.
+    placed_pending: Option<FxHashMap<u64, Placed>>,
 }
+
+/// The runs of `read` that one list wrote.
+struct Placed {
+    first: std::ops::Range<usize>,
+    more: Vec<std::ops::Range<usize>>,
+}
+
+impl Placed {
+    fn runs(&self) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
+        std::iter::once(self.first.clone()).chain(self.more.iter().cloned())
+    }
+}
+
+fn place(placed: &mut FxHashMap<u64, Placed>, owner: u64, run: std::ops::Range<usize>) {
+    match placed.entry(owner) {
+        std::collections::hash_map::Entry::Occupied(mut entry) => entry.get_mut().more.push(run),
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            entry.insert(Placed { first: run, more: Vec::new() });
+        }
+    }
+}
+
+/// Where the lists wrote, given the owner of each of `count` items (from `at`).
+fn place_owners(placed: &mut FxHashMap<u64, Placed>, count: usize, owner_at: impl Fn(usize) -> u64, at: usize) {
+    let mut start = 0;
+    while start < count {
+        let owner = owner_at(start);
+        let mut end = start + 1;
+        while end < count && owner_at(end) == owner {
+            end += 1;
+        }
+        place(placed, owner, at + start..at + end);
+        start = end;
+    }
+}
+
+/// The runs of a sequence of `len` items that the lists in `held` wrote, in order, with the ones that touch made one: found by
+/// list in `placed`, which is made from the sequence when it is not there.
+fn runs_held_by(
+    placed: &mut Option<FxHashMap<u64, Placed>>,
+    len: usize,
+    owner_at: impl Fn(usize) -> u64,
+    held: &FxHashSet<u64>,
+) -> Vec<std::ops::Range<usize>> {
+    let placed = placed.get_or_insert_with(|| {
+        let mut placed = FxHashMap::default();
+        place_owners(&mut placed, len, &owner_at, 0);
+        placed
+    });
+    let mut runs: Vec<std::ops::Range<usize>> = held.iter().filter_map(|list| placed.get(list)).flat_map(Placed::runs).collect();
+    runs.sort_unstable_by_key(|run| run.start);
+    let mut merged: Vec<std::ops::Range<usize>> = Vec::with_capacity(runs.len());
+    for run in runs {
+        match merged.last_mut() {
+            Some(last) if last.end == run.start => last.end = run.end,
+            _ => merged.push(run),
+        }
+    }
+    #[cfg(test)]
+    {
+        let mut owned: FxHashMap<u64, bool> = Default::default();
+        let scanned = held_runs(len, &owner_at, &mut |owner: u64| *owned.entry(owner).or_insert_with(|| held.contains(&owner)));
+        assert_eq!(merged, scanned, "the runs a registry finds by list are the runs a walk of its writes finds");
+    }
+    merged
+}
+
+/// What the writes that replaced the ones of `held`, in place from `at`, were written by, for the index of a sequence whose
+/// other items did not move.
+fn replace_placed(placed: &mut Option<FxHashMap<u64, Placed>>, held: &FxHashSet<u64>, at: Option<usize>, owners: &[u64]) {
+    match (at, placed.as_mut()) {
+        (Some(at), Some(placed)) => {
+            for list in held {
+                placed.remove(list);
+            }
+            place_owners(placed, owners.len(), |i| owners[i], at);
+        }
+        _ => *placed = None,
+    }
+}
+
 
 enum Slot<T> {
     One(T, u64),
@@ -395,21 +524,24 @@ impl<T> Slot<T> {
 
 impl<T> Default for Layered<T> {
     fn default() -> Self {
-        Self { read: Vec::new(), owners: Vec::new(), pending: Vec::new() }
+        Self { read: Vec::new(), owners: Vec::new(), pending: Vec::new(), placed: None, placed_pending: None }
     }
 }
 
 impl<T> Layered<T> {
     pub(crate) fn push(&mut self, value: T) {
         if self.pending.is_empty() {
+            self.placed = None;
             self.read.push(value);
             self.owners.push(owner());
         } else {
+            self.placed_pending = None;
             self.pending.push(Slot::One(value, owner()));
         }
     }
 
     pub(crate) fn push_live(&mut self, live: Live) {
+        self.placed_pending = None;
         self.pending.push(Slot::Live(live));
     }
 
@@ -427,6 +559,10 @@ impl<T> Layered<T> {
 
     /// [`Self::all`] for a registry whose entries a patch changes in place.
     pub(crate) fn all_mut(&mut self, kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T) -> &mut [T] {
+        if !self.pending.is_empty() {
+            self.placed = None;
+            self.placed_pending = None;
+        }
         for slot in self.pending.drain(..) {
             match slot {
                 Slot::One(value, owner) => {
@@ -455,52 +591,65 @@ impl<T> Layered<T> {
     /// the replays it holds, not what they stand for.
     ///
     /// A registry holds the writes of the whole window and a patch replaces a few rows of them, so this
-    /// only looks at who owns each write and moves the writes it takes out of the way in place: the runs
-    /// of writes that `old` holds are drained, and what is left is not copied.
+    /// only looks at who owns each write and puts the new writes over the ones it takes out ([`replace_runs`]): what is left
+    /// is not copied, and when as many come as went out nothing after them moves.
     pub(crate) fn replace(&mut self, old: &Roots, new: &[Live], kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T) {
         let brings = new.iter().any(|live| live.has(kind));
         if !brings && self.read.is_empty() && self.pending.is_empty() {
             return;
         }
-        let mut owned: rustc_hash::FxHashMap<u64, bool> = Default::default();
-        let mut last = (u64::MAX, false);
-        let mut holds = |owner: u64| {
-            if last.0 != owner {
-                last = (owner, *owned.entry(owner).or_insert_with(|| old.hold(owner)));
-            }
-            last.1
-        };
-
-        let taken = held_runs(self.owners.len(), |at| self.owners[at], &mut holds);
-        for run in taken.iter().rev() {
-            self.read.drain(run.clone());
-            self.owners.drain(run.clone());
-        }
-        let mut taken_pending = held_runs(self.pending.len(), |at| self.pending[at].owner(), &mut holds);
-        let Some(first) = taken.first() else {
+        let held = old.lists();
+        let taken = runs_held_by(&mut self.placed, self.owners.len(), |at| self.owners[at], &held);
+        let mut taken_pending = runs_held_by(&mut self.placed_pending, self.pending.len(), |at| self.pending[at].owner(), &held);
+        if taken.is_empty() {
             // The replays of `new` take the place of the first run, where a patch that puts back as many as it took
             // out moves nothing after it.
+            let lives: Vec<Live> = new.iter().filter(|live| live.has(kind)).cloned().collect();
+            let in_place = match taken_pending.as_slice() {
+                [] => Some(self.pending.len()),
+                [run] if run.len() == lives.len() => Some(run.start),
+                _ => None,
+            };
+            replace_placed(&mut self.placed_pending, &held, in_place, &lives.iter().map(|live| live.entries.serial).collect::<Vec<_>>());
             let first = if taken_pending.is_empty() { self.pending.len()..self.pending.len() } else { taken_pending.remove(0) };
             for run in taken_pending.iter().rev() {
                 self.pending.drain(run.clone());
             }
-            self.pending.splice(first, new.iter().filter(|live| live.has(kind)).cloned().map(Slot::Live));
+            self.pending.splice(first, lives.into_iter().map(Slot::Live));
             return;
-        };
+        }
+        if !taken_pending.is_empty() {
+            self.placed_pending = None;
+        }
         for run in taken_pending.iter().rev() {
             self.pending.drain(run.clone());
         }
-        let (at, before) = (first.start, self.read.len());
+        let (mut values, mut owners) = (Vec::new(), Vec::new());
         for live in new.iter().filter(|live| live.has(kind)) {
             let list = live.entries.serial;
             live.each(kind, |data, offset| {
-                self.read.push(from(data, offset));
-                self.owners.push(list);
+                values.push(from(data, offset));
+                owners.push(list);
             });
         }
-        let added = self.read.len() - before;
-        self.read[at..].rotate_right(added);
-        self.owners[at..].rotate_right(added);
+        // What is in `read` does not move when the writes that come are as many as the ones that go out, in one run.
+        let in_place = match taken.as_slice() {
+            [run] if run.len() == values.len() => Some(run.start),
+            _ => None,
+        };
+        replace_placed(&mut self.placed, &held, in_place, &owners);
+        replace_runs(&mut self.read, &taken, values);
+        replace_runs(&mut self.owners, &taken, owners);
+    }
+
+    /// Calls `visit` on every write that was made into one of the lists `roots` stand for (or one nested in them), for a patch
+    /// that changes what a root wrote without writing it again. Like [`Self::replace`] it asks the index, not every write.
+    pub(crate) fn for_each_held_mut(&mut self, roots: &Roots, kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T, mut visit: impl FnMut(&mut T)) {
+        self.all_mut(kind, from);
+        let held = roots.lists();
+        for run in runs_held_by(&mut self.placed, self.owners.len(), |at| self.owners[at], &held) {
+            self.read[run].iter_mut().for_each(&mut visit);
+        }
     }
 
     /// Puts the writes that were made into the lists of each of `rows` (or into one nested in them)
@@ -508,8 +657,10 @@ impl<T> Layered<T> {
     /// its order. For a registry that a frame which brought rows in put the writes of at its end.
     pub(crate) fn order_by_rows(&mut self, rows: &[Roots], kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T) {
         self.all_mut(kind, &from);
+        self.placed = None;
+        self.placed_pending = None;
         let (read, owners) = (std::mem::take(&mut self.read), std::mem::take(&mut self.owners));
-        let mut row_of: rustc_hash::FxHashMap<u64, Option<usize>> = Default::default();
+        let mut row_of: FxHashMap<u64, Option<usize>> = Default::default();
         let (mut block, mut rest) = (Vec::new(), Vec::new());
         let mut at = None;
         for (value, owner) in read.into_iter().zip(owners) {
@@ -560,6 +711,37 @@ impl<T> Layered<T> {
     }
 }
 
+/// Takes the items in `runs` (ascending, apart) out of `items` and puts `fresh` where the first of them was, so that the items
+/// around keep their order. A patch that writes as many as it took out (a text edit) moves nothing after the runs, whatever
+/// `items` holds: a window's registry is as long as its page, and a drain and a rotate each move everything after the runs.
+fn replace_runs<T>(items: &mut Vec<T>, runs: &[std::ops::Range<usize>], fresh: Vec<T>) {
+    let (Some(first), Some(last)) = (runs.first(), runs.last()) else { return };
+    let (start, end) = (first.start, last.end);
+    let removed: usize = runs.iter().map(|run| run.len()).sum();
+    if runs.len() > 1 {
+        // The items that stay in the span go first, in order, and the ones to remove after them.
+        let mut write = start;
+        let mut run = 0;
+        for at in start..end {
+            while runs[run].end <= at {
+                run += 1;
+            }
+            if at < runs[run].start {
+                items.swap(write, at);
+                write += 1;
+            }
+        }
+        items[start..end].rotate_right(removed);
+    }
+    if fresh.len() == removed {
+        for (slot, value) in items[start..start + removed].iter_mut().zip(fresh) {
+            *slot = value;
+        }
+    } else {
+        items.splice(start..start + removed, fresh);
+    }
+}
+
 /// The runs of a sequence of `len` items, by index, whose owner (`owner_at`) `holds`.
 fn held_runs(len: usize, owner_at: impl Fn(usize) -> u64, holds: &mut impl FnMut(u64) -> bool) -> Vec<std::ops::Range<usize>> {
     let mut runs = Vec::new();
@@ -598,6 +780,23 @@ impl Roots {
                 }
             }
         })
+    }
+
+    /// Every list that [`Self::hold`] holds: the roots and the lists nested in them, however deep.
+    fn lists(&self) -> FxHashSet<u64> {
+        let mut lists: FxHashSet<u64> = self.0.iter().copied().collect();
+        CHILDREN.with(|children| {
+            let children = children.borrow();
+            let mut pending: Vec<u64> = self.0.clone();
+            while let Some(list) = pending.pop() {
+                for child in children.get(&list).into_iter().flatten() {
+                    if lists.insert(*child) {
+                        pending.push(*child);
+                    }
+                }
+            }
+        });
+        lists
     }
 
     pub(crate) fn extend(&mut self, other: Roots) {
@@ -846,17 +1045,17 @@ pub(crate) type SharedTape = Rc<RefCell<Tape>>;
 /// The tape of the last build of each retained root, by element id.
 #[derive(Default)]
 pub(crate) struct TapeStore {
-    tapes: RefCell<rustc_hash::FxHashMap<u64, SharedTape>>,
+    tapes: RefCell<FxHashMap<u64, SharedTape>>,
     /// The tape of the last build of each retained root by a pass that only lays out. Kept apart
     /// from `tapes`, which belong to the recordings of presented frames: a pass that lays out must
     /// leave those for the draw after it.
-    laid_out: RefCell<rustc_hash::FxHashMap<u64, SharedTape>>,
+    laid_out: RefCell<FxHashMap<u64, SharedTape>>,
     /// While gpui compares frames that replayed with frames built whole: what the tape of each
     /// root that replayed was, when it was replayed.
     verifying: std::cell::Cell<bool>,
     /// How far from where the last build of a root wrote it the frame shown has it, for the roots a frame moved or replayed
     /// elsewhere. A root built again is where it was built and has none.
-    moved: RefCell<rustc_hash::FxHashMap<u64, Point<Pixels>>>,
+    moved: RefCell<FxHashMap<u64, Point<Pixels>>>,
     replayed: RefCell<Vec<(u64, String)>>,
     /// The writes of elements handed to the stacking context that a replay put back, by root and
     /// ordinal: a root that replayed has to have put back every one it wrote when it was built.
@@ -872,15 +1071,15 @@ pub(crate) struct TapeStore {
 #[derive(Default)]
 struct Rows {
     /// The rows of the frame shown, with the list each is a row of and its index in it.
-    shown: rustc_hash::FxHashMap<u64, (u64, usize)>,
+    shown: FxHashMap<u64, (u64, usize)>,
     /// The rows built since the frame shown was last settled: the rows of a frame built whole, or the
     /// ones that came in by a frame that moved the rows.
-    built: rustc_hash::FxHashMap<u64, (u64, usize)>,
+    built: FxHashMap<u64, (u64, usize)>,
     /// The rows that a frame that moved the rows in place left where the scroll took them.
-    kept: rustc_hash::FxHashSet<u64>,
+    kept: FxHashSet<u64>,
     /// The rows of the frame shown that the frame built again where they are, because the recording of each no longer fits
     /// where the scroll put it. They are in `built`; a frame that kept none of its rows has moved the rows all the same.
-    rebuilt: rustc_hash::FxHashSet<u64>,
+    rebuilt: FxHashSet<u64>,
     /// The rows that left and the page's records have not forgotten yet ([`TapeStore::take_left`]).
     left: Vec<u64>,
 }
@@ -950,7 +1149,7 @@ impl TapeStore {
             let (old, new) = (old.borrow(), captured.borrow());
             let roots = old.roots();
             crate::text::replace(window, &roots, &new.lives(moved));
-            let mut written = rustc_hash::FxHashSet::default();
+            let mut written = FxHashSet::default();
             new.each(Kind::Bounds, &mut |data, offset| {
                 written.insert(crate::automation::id_of_bounds_write(data));
                 crate::automation::publish_captured_bounds(data, offset + moved);
@@ -965,6 +1164,11 @@ impl TapeStore {
             crate::automation::forget_boxes(window, &gone);
         }
         self.tapes.borrow_mut().insert(root, captured.clone());
+    }
+
+    /// The lists the last build of `root` wrote into, for the registries to find what it wrote.
+    pub(crate) fn roots_of(&self, root: u64) -> Option<Roots> {
+        self.tapes.borrow().get(&root).map(|tape| tape.borrow().roots())
     }
 
     /// `captured`, the tape of a row of a list that a patch built again where it stands, has the writes the tape of the last build of
@@ -1088,7 +1292,7 @@ impl TapeStore {
         let kept = std::mem::take(&mut rows.kept);
         rows.rebuilt.clear();
         let entered = std::mem::take(&mut rows.built);
-        let lists: rustc_hash::FxHashSet<u64> = kept
+        let lists: FxHashSet<u64> = kept
             .iter()
             .filter_map(|row| rows.shown.get(row))
             .chain(entered.values())
@@ -1103,7 +1307,7 @@ impl TapeStore {
         for row in &left {
             rows.shown.remove(row);
         }
-        let came: rustc_hash::FxHashSet<u64> = entered.values().map(|(list, _)| *list).collect();
+        let came: FxHashSet<u64> = entered.values().map(|(list, _)| *list).collect();
         rows.shown.extend(entered);
         rows.left.extend(&left);
         let mut order: Vec<(u64, usize, u64)> = rows
@@ -2121,6 +2325,95 @@ mod tests {
         let mut empty: Layered<i32> = Layered::default();
         empty.replace(&roots, &[], Kind::Paragraph, read_number);
         assert!(numbers(&mut empty).is_empty());
+    }
+
+    #[test]
+    fn a_replace_that_writes_as_many_as_it_took_out_leaves_the_writes_around_in_place() {
+        let (old, inner, new, other) = (SharedTape::default(), SharedTape::default(), SharedTape::default(), SharedTape::default());
+        row_with_nested_list(&old, &inner);
+        record(&new, &[7, 8, 9]);
+        record(&other, &[40, 41]);
+        let (old_list, inner_list, other_list) = (owner_of(&old), owner_of(&inner), owner_of(&other));
+        let roots = old.borrow().roots();
+
+        // Three written by the root and its nested list, in two runs apart: the new three go where the first run was.
+        let mut apart = Layered::default();
+        push_owned(&mut apart, 0, &[10]);
+        push_owned(&mut apart, old_list, &[20]);
+        push_owned(&mut apart, other_list, &[30]);
+        push_owned(&mut apart, inner_list, &[21, 22]);
+        push_owned(&mut apart, 0, &[11]);
+        apart.replace(&roots, &lives_of(&new), Kind::Paragraph, read_number);
+        assert_eq!(numbers(&mut apart), [10, 7, 8, 9, 30, 11]);
+        assert_eq!(apart.owners.len(), apart.read.len());
+
+        // One run replaced by as many: the writes after it are where they were.
+        let mut one = Layered::default();
+        push_owned(&mut one, 0, &[10]);
+        push_owned(&mut one, old_list, &[20, 21, 22]);
+        push_owned(&mut one, other_list, &[30]);
+        one.replace(&roots, &lives_of(&new), Kind::Paragraph, read_number);
+        assert_eq!(numbers(&mut one), [10, 7, 8, 9, 30]);
+        assert_eq!(one.owners.len(), one.read.len());
+    }
+
+    #[test]
+    fn a_registry_finds_the_writes_of_a_root_by_list_while_patches_write_as_many_as_they_took_out() {
+        let (old, inner, first, second, third, other) =
+            (SharedTape::default(), SharedTape::default(), SharedTape::default(), SharedTape::default(), SharedTape::default(), SharedTape::default());
+        row_with_nested_list(&old, &inner);
+        record(&first, &[7, 8, 9]);
+        record(&second, &[17, 18, 19]);
+        record(&third, &[27]);
+        let (old_list, inner_list, other_list) = (owner_of(&old), owner_of(&inner), owner_of(&other));
+
+        let mut registry: Layered<i32> = Layered::default();
+        push_owned(&mut registry, 0, &[10]);
+        push_owned(&mut registry, old_list, &[20]);
+        push_owned(&mut registry, inner_list, &[21, 22]);
+        push_owned(&mut registry, other_list, &[30]);
+        assert!(registry.placed.is_none());
+
+        registry.replace(&old.borrow().roots(), &lives_of(&first), Kind::Paragraph, read_number);
+        assert!(registry.placed.is_some(), "the first patch makes the index and keeps it");
+        assert_eq!(numbers(&mut registry), [10, 7, 8, 9, 30]);
+
+        // The writes of the patch before are what the next one takes out.
+        registry.replace(&first.borrow().roots(), &lives_of(&second), Kind::Paragraph, read_number);
+        assert!(registry.placed.is_some());
+        assert_eq!(numbers(&mut registry), [10, 17, 18, 19, 30]);
+
+        // Fewer writes move what is after them, and the index is made again when it is asked for.
+        registry.replace(&second.borrow().roots(), &lives_of(&third), Kind::Paragraph, read_number);
+        assert!(registry.placed.is_none());
+        assert_eq!(numbers(&mut registry), [10, 27, 30]);
+        registry.replace(&third.borrow().roots(), &lives_of(&first), Kind::Paragraph, read_number);
+        assert_eq!(numbers(&mut registry), [10, 7, 8, 9, 30]);
+        registry.push(40);
+        assert!(registry.placed.is_none(), "a write made after the index may be of any list");
+    }
+
+    #[test]
+    fn a_registry_that_holds_replays_finds_the_replay_of_a_root_by_list_and_keeps_the_replays_in_place() {
+        let (kept, first, second, other) = (SharedTape::default(), SharedTape::default(), SharedTape::default(), SharedTape::default());
+        record(&kept, &[50]);
+        record(&first, &[7, 8]);
+        record(&second, &[17, 18, 19]);
+        record(&other, &[40]);
+
+        let mut registry: Layered<i32> = Layered::default();
+        registry.push_live(lives_of(&kept).remove(0));
+        registry.push_live(lives_of(&first).remove(0));
+        registry.push_live(lives_of(&other).remove(0));
+
+        // A replay for a replay: nothing after it moves, and the index is there for the next patch.
+        registry.replace(&first.borrow().roots(), &lives_of(&second), Kind::Paragraph, read_number);
+        assert!(registry.placed_pending.is_some());
+        assert_eq!(registry.read.len(), 0, "the replays that were not read are not expanded");
+        registry.replace(&second.borrow().roots(), &lives_of(&first), Kind::Paragraph, read_number);
+        assert!(registry.placed_pending.is_some());
+        assert_eq!(numbers(&mut registry), [50, 7, 8, 40]);
+        assert!(registry.placed_pending.is_none(), "reading takes the replays out of the registry");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Highlight ranges painted behind text: search matches and explicit ranges.
 //!
 //! There is deliberately no joined "document" for the `query` case. React makes
-//! a separate host node for every interpolated string, so `<text>Hello {name}!`
+//! a separate host node for every interpolated string, so `<div>Hello {name}!</div>`
 //! is three painted runs of ONE logical line. Those runs are merged into a
 //! [`Group`]; a match never crosses a group. Chrome's find behaves the same way
 //! across a paragraph boundary, and it means a 5k-row list is 5k small strings
@@ -494,7 +494,7 @@ pub fn settle_frame(window: WindowId) -> Vec<u64> {
 ///
 /// Numbering at build time cannot work: retained matches are located before the
 /// frame, native text only exists during it, and a subtree can interleave them
-/// (`<code>` then `<text>`). Numbering each kind separately made `activeIndex`
+/// (`<code>` then a string). Numbering each kind separately made `activeIndex`
 /// point at the wrong match whenever a native element came first.
 ///
 /// Numbering in paint order cannot work either: a positioned element paints after the
@@ -540,7 +540,7 @@ fn wash(
     }
 }
 
-/// Washes for a retained `<text>` run, looked up by selection key.
+/// Washes for a retained text run, looked up by selection key.
 pub fn washes_for_retained_run(
     window: WindowId,
     ctx: &HighlightContext,
@@ -721,22 +721,11 @@ impl GroupList {
     }
 }
 
-/// True for a primitive text node, the kind React makes for a raw string.
-///
-/// Shape only: an empty one is transparent rather than a run boundary, so
-/// `{'a'}{''}{'b'}` stays one line. Copy uses the same predicate through
-/// [`group_id`], which is the only way the two can agree.
-pub fn is_text_leaf(element: &RetainedElement) -> bool {
-    element.element_type == "text"
-        && element.children.is_empty()
-        && !element.custom_props().contains_key("highlight")
-}
-
 /// The adjacent primitive text leaves of `parent` that `id` is one of, or an
 /// empty slice when `id` is not a leaf. A non-text sibling ends the run for search,
 /// so it must end it for copy too, and this is the one place that decides.
 fn leaf_siblings<'a>(tree: &RetainedTree, parent: &'a RetainedElement, id: u64) -> &'a [u64] {
-    let is_leaf = |id: &u64| tree.elements.get(id).is_some_and(is_text_leaf);
+    let is_leaf = |id: &u64| tree.elements.get(id).is_some_and(super::inline::is_raw_text);
     let Some(position) = parent.children.iter().position(|child| *child == id) else {
         return &[];
     };
@@ -855,7 +844,7 @@ fn collect_content(tree: &RetainedTree, element: &RetainedElement, out: &mut Vec
         let Some(child) = tree.elements.get(&child_id) else {
             continue;
         };
-        if is_text_leaf(child) {
+        if super::inline::is_raw_text(child) {
             run.push(child_id);
             continue;
         }
@@ -1212,22 +1201,22 @@ mod tests {
 
     // ── Grouping ─────────────────────────────────────────────────────
 
-    /// `<div><text>Hello {name}!</text></div>` — React splits one line into
+    /// `<div><div>Hello {name}!</div></div>` — React splits one line into
     /// three host nodes that must search as one string.
     fn interpolated_tree() -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
-        tree.create_element(2, "text".to_string());
+        tree.create_element(2, "div".to_string());
         tree.append_child(1, 2);
         for (id, text) in [(3, "Hello "), (4, "Tommy"), (5, "!")] {
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "#text".to_string());
             tree.append_child(2, id);
             tree.set_text(id, text.to_string());
         }
         tree
     }
 
-    /// Text nodes of a `<text>` are one paragraph, painted as one string under
+    /// The `#text` children of a `<div>` are one paragraph, painted as one string under
     /// the key of their container.
     #[test]
     fn interpolated_children_form_one_group() {
@@ -1253,13 +1242,13 @@ mod tests {
     #[test]
     fn a_match_crosses_the_inline_boxes_of_a_paragraph() {
         let mut tree = RetainedTree::new();
-        tree.create_element(1, "text".to_string());
-        tree.create_element(2, "text".to_string());
+        tree.create_element(1, "div".to_string());
+        tree.create_element(2, "#text".to_string());
         tree.append_child(1, 2);
         tree.set_text(2, "Hello ".to_string());
         tree.create_element(3, "span".to_string());
         tree.append_child(1, 3);
-        tree.create_element(4, "text".to_string());
+        tree.create_element(4, "#text".to_string());
         tree.append_child(3, 4);
         tree.set_text(4, "World".to_string());
         let groups = GroupList::collect(&tree, 1);
@@ -1278,8 +1267,8 @@ mod tests {
     #[test]
     fn an_atomic_inline_splits_its_paragraph_in_document_order() {
         let mut tree = RetainedTree::new();
-        tree.create_element(1, "text".to_string());
-        tree.create_element(2, "text".to_string());
+        tree.create_element(1, "div".to_string());
+        tree.create_element(2, "#text".to_string());
         tree.append_child(1, 2);
         tree.set_text(2, "a ".to_string());
         tree.create_element(3, "div".to_string());
@@ -1288,10 +1277,10 @@ mod tests {
             3,
             Arc::new(serde_json::from_value(serde_json::json!({"display": "inline-block"})).expect("a style")),
         );
-        tree.create_element(4, "text".to_string());
+        tree.create_element(4, "#text".to_string());
         tree.append_child(3, 4);
         tree.set_text(4, "b a".to_string());
-        tree.create_element(5, "text".to_string());
+        tree.create_element(5, "#text".to_string());
         tree.append_child(1, 5);
         tree.set_text(5, " a".to_string());
         let groups = GroupList::collect(&tree, 1);
@@ -1315,7 +1304,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "anchored".to_string());
         for (id, text) in [(3, "Hello "), (4, "Tommy"), (5, "!")] {
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "#text".to_string());
             tree.append_child(1, id);
             tree.set_text(id, text.to_string());
         }
@@ -1342,7 +1331,7 @@ mod tests {
         tree.create_element(1, parent.to_string());
         for (ix, text) in texts.iter().enumerate() {
             let id = ix as u64 + 2;
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "#text".to_string());
             tree.append_child(1, id);
             tree.set_text(id, text.to_string());
         }
@@ -1394,7 +1383,7 @@ mod tests {
         let mut tree = leaves_under("anchored", &["a ", "b "]);
         tree.create_element(9, "div".to_string());
         tree.append_child(1, 9);
-        tree.create_element(10, "text".to_string());
+        tree.create_element(10, "#text".to_string());
         tree.append_child(1, 10);
         tree.set_text(10, " c".to_string());
         let groups = GroupList::collect(&tree, 1);
@@ -1415,9 +1404,9 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
         for (wrapper, leaf, text) in [(2, 3, "quick "), (4, 5, "brown")] {
-            tree.create_element(wrapper, "text".to_string());
+            tree.create_element(wrapper, "div".to_string());
             tree.append_child(1, wrapper);
-            tree.create_element(leaf, "text".to_string());
+            tree.create_element(leaf, "#text".to_string());
             tree.append_child(wrapper, leaf);
             tree.set_text(leaf, text.to_string());
         }
@@ -1474,8 +1463,8 @@ mod tests {
     #[test]
     fn a_non_text_sibling_ends_the_group_for_both() {
         let mut tree = RetainedTree::new();
-        tree.create_element(1, "text".to_string());
-        for (id, kind) in [(2, "text"), (3, "div"), (4, "text")] {
+        tree.create_element(1, "div".to_string());
+        for (id, kind) in [(2, "#text"), (3, "div"), (4, "#text")] {
             tree.create_element(id, kind.to_string());
             tree.append_child(1, id);
         }
@@ -1518,7 +1507,7 @@ mod tests {
     #[test]
     fn a_declaring_leaf_collects_its_own_content() {
         let mut tree = RetainedTree::new();
-        tree.create_element(1, "text".to_string());
+        tree.create_element(1, "#text".to_string());
         tree.set_text(1, "a fox here".to_string());
         let groups = GroupList::collect(&tree, 1);
         assert_eq!(groups.groups.len(), 1);
@@ -1596,7 +1585,7 @@ mod tests {
 
     /// The blocker a review caught: a native element and retained text share one numbering, so
     /// the native element's matches come before the text's exactly when it comes first in the
-    /// DOCUMENT. Numbering retained matches first made `activeIndex: 0` mark the `<text>` match.
+    /// DOCUMENT. Numbering retained matches first made `activeIndex: 0` mark the retained text match.
     /// Paint order does not decide it: a positioned element paints late.
     #[test]
     fn ordinals_follow_document_order_across_both_kinds() {
@@ -1702,7 +1691,7 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "anchored".to_string());
         for (id, text) in [(2, "ab"), (3, "ab")] {
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "#text".to_string());
             tree.append_child(1, id);
             tree.set_text(id, text.to_string());
         }
@@ -1865,7 +1854,7 @@ mod tests {
 
     // ── content-visibility ───────────────────────────────────────────
 
-    /// `<div><text auto>alpha a</text><text hidden>alpha b</text><text>alpha c</text></div>`
+    /// `<div><div auto>alpha a</div><div hidden>alpha b</div><div>alpha c</div></div>`
     fn skipping_tree() -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
@@ -1874,10 +1863,12 @@ mod tests {
             (3, "alpha b", r#"{"contentVisibility":"hidden"}"#),
             (4, "alpha c", "{}"),
         ] {
-            tree.create_element(id, "text".to_string());
+            tree.create_element(id, "div".to_string());
             tree.append_child(1, id);
-            tree.set_text(id, text.to_string());
             tree.set_style(id, Arc::new(serde_json::from_str(style).expect("a style")));
+            tree.create_element(id + 10, "#text".to_string());
+            tree.append_child(id, id + 10);
+            tree.set_text(id + 10, text.to_string());
         }
         tree
     }

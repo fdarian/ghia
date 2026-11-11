@@ -7,6 +7,7 @@ import {
   createMutationQueue,
   installElementSource,
   syncWindowEventListeners,
+  syncWindowSelectionChange,
 } from "@ghia/native/host"
 import { GpuixContext, type GpuixContextValue } from "../hooks/use-gpuix.js"
 import type {
@@ -113,13 +114,15 @@ export function createRoot(
       }
     },
   })
-  attachRoot(renderer, gpuixContainer)
+  // The flush stands in for the microtask checkpoint a browser runs before it renders.
+  attachRoot(renderer, gpuixContainer, (run) => flushSync(run))
   // Sent on every root, so a remount without the option restores the default.
   batchedRenderer.setKeyboardFocusDim(rootEventHandlers.keyboardFocusDim !== false)
   const windowKeyEventId = gpuixContainer.windowKeyEventId
   const windowSelectionEventId = gpuixContainer.windowSelectionEventId
   const windowAppearanceEventId = gpuixContainer.windowAppearanceEventId
   let stopWindowEventListeners: (() => void) | undefined
+  let stopSelectionChange: (() => void) | undefined
   let stopElementSource: (() => void) | undefined
   try {
     renderer.setWindowKeyEvents?.(
@@ -129,10 +132,11 @@ export function createRoot(
       true,
       windowKeyEventId
     )
-    renderer.setWindowSelectionChange?.(
-      Boolean(rootEventHandlers.onSelectionChange),
-      windowSelectionEventId
-    )
+    stopSelectionChange = syncWindowSelectionChange(
+      renderer,
+      windowSelectionEventId,
+      () => Boolean(rootEventHandlers.onSelectionChange)
+    ).stop
     renderer.setWindowAppearanceChange?.(
       Boolean(rootEventHandlers.onAppearanceChange),
       windowAppearanceEventId
@@ -141,7 +145,7 @@ export function createRoot(
     stopElementSource = installElementSource(
       renderer,
       (id) => publicInstanceById(gpuixContainer, id),
-      () => ({ html: gpuixContainer.html, body: gpuixContainer.body })
+      () => ({ html: gpuixContainer.html, head: gpuixContainer.head, body: gpuixContainer.body })
     )
   } catch (error) {
     detachRoot(renderer, gpuixContainer)
@@ -161,7 +165,7 @@ export function createRoot(
       renderer.setWindowKeyEvents?.(false, false, windowKeyEventId)
       stopWindowEventListeners?.()
       stopElementSource?.()
-      renderer.setWindowSelectionChange?.(false, windowSelectionEventId)
+      stopSelectionChange?.()
       renderer.setWindowAppearanceChange?.(false, windowAppearanceEventId)
     }
   }

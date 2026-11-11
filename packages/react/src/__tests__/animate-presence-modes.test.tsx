@@ -31,7 +31,7 @@ function Page(props: { name: string }) {
       transition={linear}
       style={{ height: 20 }}
     >
-      <text>{props.name}</text>
+      <div>{props.name}</div>
     </motion.div>
   )
 }
@@ -89,7 +89,7 @@ describeNative('AnimatePresence mode="wait"', () => {
       <div>
         <AnimatePresence mode="wait">
           <div key={name}>
-            <text>{name}</text>
+            <div>{name}</div>
           </div>
         </AnimatePresence>
       </div>
@@ -382,7 +382,7 @@ describeNative("useIsPresent", () => {
     const { render, renderer } = createTestRoot()
 
     function Label() {
-      return <text>{useIsPresent() ? "present" : "leaving"}</text>
+      return <div>{useIsPresent() ? "present" : "leaving"}</div>
     }
 
     const app = (show: boolean) => (

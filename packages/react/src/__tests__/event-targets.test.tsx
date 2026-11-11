@@ -101,7 +101,7 @@ describeNative("event targets are elements", () => {
     expect(seen[0][1]).toBe(button)
     expect(seen[0][2]).toBe(document)
     expect(seen[1][1]).toBe(button)
-    expect(seen[1][2]).toBe(window)
+    expect(seen[1][2]).toBe(globalThis)
   })
 
   it("keeps elementId numeric next to the element target", () => {
@@ -118,7 +118,7 @@ describeNative("event targets are elements", () => {
     testRoot.renderer.nativeSimulateClick(50, 50)
 
     expect(seen?.target).toBe(element)
-    expect(seen?.elementId).toBe(element?.id)
+    expect(seen?.elementId).toBe(element?.nativeId)
     expect(typeof seen?.elementId).toBe("number")
   })
 
@@ -131,6 +131,6 @@ describeNative("event targets are elements", () => {
 
     expect(seen).toHaveLength(1)
     expect(seen[0][0]).toBeNull()
-    expect(seen[0][1]).toBe(window)
+    expect(seen[0][1]).toBe(globalThis)
   })
 })
