@@ -37,6 +37,17 @@ describe("getComputedStyle", () => {
     expect(reads).toHaveLength(2)
   })
 
+  it("keeps no entry past the turn it was read in", async () => {
+    const { element, reads } = fakeElement(3, ["font-size", "20px"])
+    const style = getComputedStyle(element)
+    expect(style.fontSize).toBe("20px")
+    expect(style.fontSize).toBe("20px")
+    expect(reads).toHaveLength(1)
+    await Promise.resolve()
+    expect(style.fontSize).toBe("20px")
+    expect(reads).toHaveLength(2)
+  })
+
   it("asks for an absent pseudo-element for ::before and ::after, and reads empty for any other", () => {
     const { element, reads } = fakeElement(3, ["content", "none"])
     expect(getComputedStyle(element, "::before").content).toBe("none")
