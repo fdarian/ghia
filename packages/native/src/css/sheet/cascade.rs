@@ -175,28 +175,56 @@ impl CascadeCache {
     /// element holds either. Without that, many own styles that merge to one style (an inline
     /// `left` that an `!important` rule overrides, animated per frame) would each stay pinned by
     /// the entry whose merged style is still in use.
+    ///
+    /// Each pass decides from the counts as they stand when it starts and only then drops what
+    /// it found dead. Dropping an entry as it is visited lowers the counts the entries after it
+    /// read, so what survived would depend on the hash order, which is the entries' addresses.
     pub fn release_unused(&mut self) {
         loop {
             let mut held_by_cache: FxHashMap<*const StyleDesc, usize> = FxHashMap::default();
             for style in self.entries.values().filter_map(|entry| entry.style.as_ref()) {
                 *held_by_cache.entry(Arc::as_ptr(style)).or_default() += 1;
             }
-            let before = self.entries.len();
-            self.entries.retain(|_, entry| {
-                let matched_held = entry.matched.strong_count() > 0;
+            // The table holds a style, and every entry that has it as its style.
+            let held_elsewhere = |style: &Arc<StyleDesc>| Arc::strong_count(style) - 1 - held_by_cache[&Arc::as_ptr(style)];
+            let own_is_held = |entry: &Cascaded| {
                 // The table holds an own style, and an entry whose merge is the own style holds it.
-                let own_held = entry.own.as_ref().is_none_or(|own| {
-                    own.strong_count() > 1 + held_by_cache.get(&own.as_ptr()).copied().unwrap_or(0)
-                });
-                let style_held = entry
-                    .style
-                    .as_ref()
-                    .is_some_and(|style| Arc::strong_count(style) > 1 + held_by_cache[&Arc::as_ptr(style)]);
-                matched_held && own_held && style_held
-            });
-            // Dropping an entry lets go of its style, which can be another entry's own style.
-            if self.entries.len() == before {
+                entry.own.as_ref().is_none_or(|own| own.strong_count() > 1 + held_by_cache.get(&own.as_ptr()).copied().unwrap_or(0))
+            };
+
+            // An entry without an own style has no count of its own to read: it is looked up by
+            // the elements that matched its rules and declared no style. Elements that do declare
+            // one are counted by their entries, so what is left of a style's holders is the
+            // elements that can use an entry without one.
+            let mut claimed_by_own: FxHashMap<*const StyleDesc, usize> = FxHashMap::default();
+            for entry in self.entries.values() {
+                let Some(style) = entry.style.as_ref() else { continue };
+                if entry.own.is_some() && entry.matched.strong_count() > 0 && own_is_held(entry) {
+                    *claimed_by_own.entry(Arc::as_ptr(style)).or_default() += 1;
+                }
+            }
+
+            let dead: Vec<(usize, usize)> = self
+                .entries
+                .iter()
+                .filter(|(_, entry)| {
+                    let Some(style) = entry.style.as_ref() else { return true };
+                    let held = held_elsewhere(style);
+                    let claimed = claimed_by_own.get(&Arc::as_ptr(style)).copied().unwrap_or(0);
+                    let lookable = match entry.own {
+                        Some(_) => own_is_held(entry),
+                        None => held > claimed,
+                    };
+                    entry.matched.strong_count() == 0 || held == 0 || !lookable
+                })
+                .map(|(key, _)| *key)
+                .collect();
+            if dead.is_empty() {
                 return;
+            }
+            // Dropping an entry lets go of its style, which can be another entry's own style.
+            for key in dead {
+                self.entries.remove(&key);
             }
         }
     }
