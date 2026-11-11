@@ -89,6 +89,11 @@ describe("splitRules", () => {
     expect(splitRules(".a { top: 0 } .b").map((rule) => rule.text)).toEqual([".a { top: 0 }"])
   })
 
+  it("skips a stray top-level } and keeps the rules after it", () => {
+    expect(splitRules("} .a{} .b{}").map((rule) => rule.text)).toEqual([".a{}", ".b{}"])
+    expect(splitRules(".a{} }} @media print { .b{} } } .c{}").map((rule) => rule.prelude)).toEqual([".a", "@media print", ".c"])
+  })
+
   it("does not end a style rule at a semicolon outside its block, so a stray one belongs to the next prelude", () => {
     expect(splitRules("a; .b { top: 0 }").map((rule) => rule.prelude)).toEqual(["a; .b"])
     expect(splitRules("@layer a;; .b { top: 0 }").map((rule) => rule.prelude)).toEqual(["@layer a", "; .b"])

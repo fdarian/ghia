@@ -138,6 +138,11 @@ export function splitRules(text: string): RuleText[] {
       index += 3
       continue
     }
+    // Nothing is open at the top level, so a `}` here closes nothing: skip it, and the rules after it stay.
+    if (char === "}") {
+      index++
+      continue
+    }
     const atRule = char === "@"
     const found = scanRule(text, index, atRule)
     if (!atRule && found.blockAt === -1) break
