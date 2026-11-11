@@ -8,6 +8,9 @@
  * removes a property replaces the written one (`keepWrittenEntries`); the properties it leaves
  * alone keep what was written, as React DOM sets only the keys that changed.
  *
+ * An `!important` property is stored with the suffix `" !important"` on its value, as a framework
+ * writes one, and every read takes it off again; native ranks it above a stylesheet's `!important`.
+ *
  * Properties are stored under the keys of a style object (`backgroundColor`, `--x`), so a
  * property Ghia has no style key for is stored and read back and reaches nothing.
  */
@@ -69,7 +72,12 @@ const UNITLESS = new Set([
   "strokeOpacity", "strokeWidth",
 ])
 
-/** The text a style value is read as: a string as it is, a number as React DOM writes it, anything else (a state style, a motion value) as no value. */
+/**
+ * The text a style value is held as: a string as it is, a number as React DOM writes it, anything
+ * else (a state style, a motion value) as no value. An `!important` property keeps its suffix, which
+ * is how native is told (`css/inline_important.rs`) and how a framework writes one
+ * (`display: "none !important"`).
+ */
 function textOf(key: string, value: unknown): string {
   if (typeof value === "string") return value
   if (typeof value !== "number" || !Number.isFinite(value)) return ""
@@ -91,6 +99,7 @@ function propertyNameOf(key: string): string {
 type Declaration = { name: string; value: string; important: boolean }
 
 const IMPORTANT = /\s*!\s*important\s*$/i
+const IMPORTANT_SUFFIX = " !important"
 const PROPERTY_NAME = /^(?:--.+|-?[a-z_][a-z0-9_-]*)$/i
 
 /** Splits CSS text at the top-level `;`, skipping comments, strings and brackets. */
@@ -164,8 +173,6 @@ type DeclarationState = {
   readonly binding: () => StyleBinding
   /** Whether the style attribute exists: a write made it, `removeAttribute("style")` takes it away. */
   attribute: boolean
-  /** The text of each property written with `important`; it counts only while the property still holds that text. */
-  readonly important: Map<string, string>
 }
 
 const STATE = Symbol("@ghia/native/style-declaration-state")
@@ -179,8 +186,13 @@ function currentStyle(state: DeclarationState): Readonly<StyleObject> {
   return state.binding().readStyle() ?? NO_ENTRIES
 }
 
-function priorityOf(state: DeclarationState, key: string, text: string): string {
-  return state.important.get(key) === text ? "important" : ""
+/** What a property reads as: its text without the `!important` it was written with. */
+function valueOf(text: string): string {
+  return text.replace(IMPORTANT, "")
+}
+
+function priorityOf(text: string): string {
+  return IMPORTANT.test(text) ? "important" : ""
 }
 
 function cssTextOf(state: DeclarationState): string {
@@ -189,8 +201,7 @@ function cssTextOf(state: DeclarationState): string {
   for (const key of Object.keys(style)) {
     const text = textOf(key, style[key])
     if (text === "") continue
-    const priority = priorityOf(state, key, text)
-    declarations.push(`${propertyNameOf(key)}: ${text}${priority === "" ? "" : " !important"};`)
+    declarations.push(`${propertyNameOf(key)}: ${valueOf(text)}${priorityOf(text) === "" ? "" : IMPORTANT_SUFFIX};`)
   }
   return declarations.join(" ")
 }
@@ -209,7 +220,7 @@ function changeStyle(state: DeclarationState, edit: (next: StyleObject) => void)
 
 function readProperty(state: DeclarationState, name: string): string {
   const key = styleKeyOf(name)
-  return textOf(key, currentStyle(state)[key])
+  return valueOf(textOf(key, currentStyle(state)[key]))
 }
 
 function writeProperty(state: DeclarationState, name: string, value: string, priority: string): void {
@@ -221,11 +232,12 @@ function writeProperty(state: DeclarationState, name: string, value: string, pri
   }
   const important = priority.toLowerCase() === "important"
   if (priority !== "" && !important) return
-  if (textOf(key, currentStyle(state)[key]) === text && (priorityOf(state, key, text) === "important") === important) return
+  // A value that carries its own `!important` is not a value: CSS rejects it and the old one stays.
+  if (IMPORTANT.test(text)) return
+  const held = important ? `${text}${IMPORTANT_SUFFIX}` : text
+  if (textOf(key, currentStyle(state)[key]) === held) return
   changeStyle(state, (next) => {
-    next[key] = text
-    if (important) state.important.set(key, text)
-    else state.important.delete(key)
+    next[key] = held
   })
 }
 
@@ -233,10 +245,9 @@ function removeProperty(state: DeclarationState, name: string): string {
   const key = styleKeyOf(name)
   const style = currentStyle(state)
   if (style[key] === undefined) return ""
-  const old = textOf(key, style[key])
+  const old = valueOf(textOf(key, style[key]))
   changeStyle(state, (next) => {
     delete next[key]
-    state.important.delete(key)
   })
   return old
 }
@@ -250,13 +261,10 @@ function writeCssText(state: DeclarationState, text: string): void {
   changeStyle(state, (next) => {
     // A state style (`hover`) or a motion value is no CSS property: `cssText` has nothing to say about it.
     for (const key of Object.keys(next)) if (isProperty(next[key])) delete next[key]
-    state.important.clear()
     for (const declaration of declarations) {
       const key = styleKeyOf(declaration.name)
       delete next[key]
-      next[key] = declaration.value
-      if (declaration.important) state.important.set(key, declaration.value)
-      else state.important.delete(key)
+      next[key] = declaration.important ? `${declaration.value}${IMPORTANT_SUFFIX}` : declaration.value
     }
   })
 }
@@ -301,15 +309,11 @@ class CSSStyleDeclarationClass {
   }
 
   getPropertyPriority(name: string): string {
-    const state = stateOf(this)
     const key = styleKeyOf(String(name))
-    return priorityOf(state, key, textOf(key, currentStyle(state)[key]))
+    return priorityOf(textOf(key, currentStyle(stateOf(this))[key]))
   }
 
-  /**
-   * An empty value removes the property. `important` is stored and read back and has no effect:
-   * the inline style already wins over every other rule.
-   */
+  /** An empty value removes the property. `important` is written as an `!important` suffix on the value native is sent. */
   setProperty(name: string, value: string | null, priority: string = ""): void {
     writeProperty(stateOf(this), String(name), value === null ? "" : String(value), String(priority))
   }
@@ -331,8 +335,7 @@ function defineAccessor(accessor: string, key: string): void {
     configurable: true,
     enumerable: true,
     get(this: CSSStyleDeclarationClass) {
-      const state = stateOf(this)
-      return textOf(key, currentStyle(state)[key])
+      return valueOf(textOf(key, currentStyle(stateOf(this))[key]))
     },
     set(this: CSSStyleDeclarationClass, value: unknown) {
       writeProperty(stateOf(this), propertyNameOf(key), value === null || value === undefined ? "" : String(value), "")
@@ -357,7 +360,7 @@ const declarations = new WeakMap<Element, CSSStyleDeclarationClass>()
 export function styleDeclarationOf(owner: Element, binding: () => StyleBinding): CSSStyleDeclaration {
   const existing = declarations.get(owner)
   if (existing !== undefined) return existing
-  const created = new CSSStyleDeclarationClass(CREATE, { owner, binding, attribute: false, important: new Map() })
+  const created = new CSSStyleDeclarationClass(CREATE, { owner, binding, attribute: false })
   declarations.set(owner, created)
   return created
 }
