@@ -74,6 +74,13 @@ describe.skipIf(!hasNativeTestRenderer)("code-written DOM and stylesheets in Rea
     expect(getComputedStyle(box).paddingTop).toBe("0px")
   })
 
+  it("writes a number rotate to the [style] text as degrees, so a [style*=45deg] rule matches", async () => {
+    const box = mount('[style*="45deg"] { padding-top: 5px }', { style: { rotate: 45 } })
+    await settle()
+    expect(box.getAttribute("style")).toBe("rotate: 45deg;")
+    expect(getComputedStyle(box).paddingTop).toBe("5px")
+  })
+
   it("copies the class and the data attributes with cloneNode, so a rule matches the clone", async () => {
     const box = mount(".card { opacity: 0.5 } [data-k=v] { padding-top: 3px }", { className: "card", "data-k": "v" })
     const copy = box.cloneNode(false) as HTMLElement

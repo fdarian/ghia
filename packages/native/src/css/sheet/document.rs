@@ -333,3 +333,14 @@ fn kebab_case(key: &str) -> String {
     }
     kebab
 }
+
+#[cfg(test)]
+mod tests {
+    use super::style_attribute_text;
+
+    #[test]
+    fn a_number_rotate_is_written_in_degrees_and_a_number_length_in_px() {
+        let text = style_attribute_text(br#"{"width":10,"rotate":45,"skewX":-3.5,"opacity":0.5,"top":0}"#);
+        assert_eq!(text, "width: 10px; rotate: 45deg; skew-x: -3.5deg; opacity: 0.5; top: 0;");
+    }
+}

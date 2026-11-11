@@ -35,6 +35,9 @@ const UNITLESS_NUMBER: ReadonlySet<string> = new Set([
   "strokeOpacity", "strokeWidth",
 ])
 
+/** The properties whose bare number is degrees, as `StyleDesc` reads it (`DEGREES` in `css/lenient.rs`). */
+const DEGREES: ReadonlySet<string> = new Set(["rotate", "motionRotate", "rotateX", "rotateY", "rotateZ", "skew", "skewX", "skewY"])
+
 const IMPORTANT = /!\s*important\s*$/i
 
 function kebabOf(property: string): string {
@@ -66,12 +69,13 @@ function nameOf(key: string): string | undefined {
   return isStyleProperty(key) ? kebabOf(key) : undefined
 }
 
-/** The text of a value as native's `[style]` text has it: no text for `null` or `""`, `px` on a number, `0` for zero. */
+/** The text of a value as native's `[style]` text has it: no text for `null` or `""`, `px` (`deg` on an angle) on a number, `0` for zero. */
 function valueText(key: string, value: unknown): string | undefined {
   if (typeof value === "string") return value === "" ? undefined : value
   if (typeof value !== "number") return undefined
   if (isCustom(key) || UNITLESS_NUMBER.has(key)) return String(value)
-  return value === 0 ? "0" : `${value}px`
+  if (value === 0) return "0"
+  return DEGREES.has(key) ? `${value}deg` : `${value}px`
 }
 
 /** The declarations a style holds, as CSS names and texts, in written order. */

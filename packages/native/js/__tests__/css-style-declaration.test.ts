@@ -127,7 +127,7 @@ describe("CSSStyleDeclaration", () => {
   })
 
   it("serializes cssText as Chrome writes it", () => {
-    const { style } = declare({ width: 10, opacity: 0.5, "--dnd-top": "10px", translate: "1px 2px", rotate: "45deg", flexGrow: 1 })
+    const { style } = declare({ width: 10, opacity: 0.5, "--dnd-top": "10px", translate: "1px 2px", rotate: 45, flexGrow: 1 })
     expect(style.cssText).toBe("width: 10px; opacity: 0.5; --dnd-top: 10px; translate: 1px 2px; rotate: 45deg; flex-grow: 1;")
     expect(declare().style.cssText).toBe("")
   })
