@@ -16,6 +16,7 @@ import {
   sameMutationValue,
   serializeCustomProp,
   attributesOfProps,
+  isNotAttribute,
   isSvgType,
   forwardsCustomProp,
   hasMutationObservers,
@@ -287,6 +288,28 @@ function syncAttributes(renderer: MutationRenderer, id: number, type: string, pr
   }
 }
 
+/** A handler or an object is no attribute, so one is as good as another: an inline handler is new on every render. */
+function isNoAttributeValue(value: unknown): boolean {
+  return typeof value === "function" || (typeof value === "object" && value !== null)
+}
+
+function sameAttributeProp(previous: unknown, next: unknown): boolean {
+  return previous === next || (isNoAttributeValue(previous) && isNoAttributeValue(next))
+}
+
+/** Whether a prop that can be an attribute differs, compared in place: most commits change none, and this allocates nothing. */
+function attributePropsDiffer(oldProps: Props, newProps: Props): boolean {
+  const previous = oldProps as unknown as Record<string, unknown>
+  const next = newProps as unknown as Record<string, unknown>
+  for (const key in next) {
+    if (!isNotAttribute(key) && !sameAttributeProp(previous[key], next[key])) return true
+  }
+  for (const key in previous) {
+    if (!(key in next) && !isNotAttribute(key) && !sameAttributeProp(previous[key], undefined)) return true
+  }
+  return false
+}
+
 function diffAttributes(
   renderer: MutationRenderer,
   id: number,
@@ -294,7 +317,7 @@ function diffAttributes(
   oldProps: Props,
   newProps: Props
 ): void {
-  if (!renderer.forwardsAttributes) return
+  if (!renderer.forwardsAttributes || !attributePropsDiffer(oldProps, newProps)) return
   const svg = isSvgType(type)
   const previous = attributesOfProps(Object.entries(oldProps), svg)
   const next = attributesOfProps(Object.entries(newProps), svg)

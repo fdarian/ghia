@@ -73,6 +73,44 @@ describe.skipIf(!hasNativeTestRenderer)("attributes reach native once a sheet ca
     app.unmount()
   })
 
+  it("sends an update only for the attribute props that changed, whatever the handlers and styles do", () => {
+    const app = createTestRoot()
+    const sent = recordBatches(app.renderer)
+    let box: any
+    const view = (props: Record<string, unknown>) => (
+      <div>
+        <style>{".a { opacity: 0.25 } .b { padding-top: 4px }"}</style>
+        <div ref={(element: unknown) => { box = element }} {...props} />
+      </div>
+    )
+    app.render(view({ className: "a", "data-k": "v", onClick: () => {}, style: { width: 5 } }))
+    sent.clear()
+
+    app.render(view({ className: "a", "data-k": "v", onClick: () => {}, style: { width: 6 } }))
+    expect(sent.attributes()).toEqual([])
+
+    app.render(view({ className: "a", "data-k": "w", onClick: () => {} }))
+    expect(sent.attributes()).toEqual([["setAttribute", box.nativeId, "data-k", "w"]])
+
+    app.render(view({ className: "a", onClick: () => {} }))
+    expect(sent.attributes().slice(1)).toEqual([["setAttribute", box.nativeId, "data-k", null]])
+
+    sent.clear()
+    app.render(view({ className: "a", onClick: () => {}, extra: { x: 1 } }))
+    expect(sent.attributes()).toEqual([])
+
+    // `class` wins over `className`, so adding one that loses changes nothing and adding one that wins does.
+    app.render(view({ className: "a", class: "a" }))
+    expect(sent.attributes()).toEqual([])
+    app.render(view({ className: "b", class: "a" }))
+    expect(sent.attributes()).toEqual([])
+    sent.clear()
+    app.render(view({ className: "b" }))
+    expect(sent.attributes()).toEqual([["setAttribute", box.nativeId, "class", "b"]])
+    expect(getComputedStyle(box).paddingTop).toBe("4px")
+    app.unmount()
+  })
+
   it("sends the attributes of mounted elements when a constructed sheet is adopted", () => {
     const app = createTestRoot()
     const sent = recordBatches(app.renderer)
