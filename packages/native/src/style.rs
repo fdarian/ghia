@@ -212,34 +212,6 @@ fn deserialize_inset_sides<'de, D: Deserializer<'de>>(deserializer: D) -> Result
     dimension_sides(deserializer, "inset")
 }
 
-fn deserialize_opacity<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Opacity {
-        Number(f64),
-        Text(String),
-    }
-    let Some(opacity) = Option::<Opacity>::deserialize(deserializer)? else {
-        return Ok(None);
-    };
-    match opacity {
-        Opacity::Number(number) => Ok(Some(number)),
-        Opacity::Text(text) => {
-            let text = text.trim();
-            let (number, scale) = match text.strip_suffix('%') {
-                Some(percent) => (percent, 100.0),
-                None => (text, 1.0),
-            };
-            number
-                .parse::<f64>()
-                .ok()
-                .filter(|value| value.is_finite())
-                .map(|value| Some(value / scale))
-                .ok_or_else(|| serde::de::Error::custom(format!("opacity: expected a number or a percentage, found `{text}`")))
-        }
-    }
-}
-
 fn deserialize_padding<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Sides<LinearLength>>, D::Error> {
     shorthand::deserialize_length_sides(
         deserializer,
@@ -851,7 +823,7 @@ pub struct StyleDesc {
     /// that applies; `"light dark"` follows the window appearance.
     pub color_scheme: Option<String>,
     /// A number, or text of a number or a percentage (`"50%"` is 0.5), as CSS reads `opacity`.
-    #[serde(default, deserialize_with = "deserialize_opacity")]
+    #[serde(default, deserialize_with = "crate::css::opacity::deserialize_opacity")]
     pub opacity: Option<f64>,
 
     // Border
