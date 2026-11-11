@@ -3473,7 +3473,7 @@ and the extent changes as they are built.
 
 A string is a DOM text node, and it goes in any element: `<div>Saved</div>` and
 `<span>Saved</span>` need nothing between the element and its text. Text lays out like
-the DOM's inline formatting. Strings and `<span>` are inline. A run of consecutive
+the DOM's inline formatting. Strings, `<span>` and the inline [HTML tags](#html-tags) (`<strong>`, `<em>`, `<a>`, `<br>` and the rest) are inline. A run of consecutive
 inline children is one paragraph: one string that wraps across its runs, selects
 and copies as one line, and is searched by `highlight` as one piece of text.
 
@@ -4623,8 +4623,9 @@ Native defaults, so common elements are not silent:
 | `<label>`     | `Label`                 | its text as `aria-valuetext`         |
 | `<form>`      | `Form`                  |                                      |
 
+The [HTML tags](#html-tags) have their implicit roles too: `<button>` is a `button`, `<a href>` a `link`, `<h1>` to `<h6>` a `heading` with `aria-level`, and so on down that table.
 An explicit `role` wins over those defaults. A clickable `div` is **not** a
-button until you set `role="button"`. `onClick` registers AccessKit `Click`,
+button until you set `role="button"` (a `<button>` is one). `onClick` registers AccessKit `Click`,
 so VoiceOver Press fires the same JS `click` handler, as a DOM click no pointer
 made: see [Click without a pointer](#click-without-a-pointer).
 
@@ -4633,7 +4634,7 @@ no-ops there.
 
 ## Forms
 
-`<form>` groups `<input>` and `<textarea>` controls and submits them together.
+`<form>` groups `<input>` and `<textarea>` controls and `<button>`s and submits them together.
 A control belongs to its nearest `form` ancestor, wherever it sits below it.
 `name` is the key a control is submitted under, and `required` stops the
 submission while the control is empty.
@@ -4647,27 +4648,49 @@ submission while the control is empty.
 >
   <input name="email" required />
   <textarea name="notes" />
+  <button type="submit">Save</button>
 </form>
 ```
 
-- **Implicit submission.** Enter in an `<input>` submits its form when the form
-  has at most one `<input>`. Ghia has no submit button (a `div` with
-  `role="button"` is not one), so no form has a default button, and HTML's
-  fallback applies: a form with two or more `<input>`s does not submit on Enter,
-  whether they are disabled, read-only or of any `type`, and a nested form's
-  inputs do not count. Call `requestSubmit()` from a button's `onClick` for
-  those. A `keydown` handler that calls `preventDefault()` stops it. A
-  `<textarea>` does not count, and Enter in it always inserts a newline.
+- **`<button type>`.** A click on a `<button>` in a form submits it when its
+  `type` is `"submit"`, missing, or a value HTML does not know; `"button"` does
+  nothing, and so does `"reset"`, because Ghia does not reset controls. The
+  click is the default action of a `click` no handler cancelled
+  (`preventDefault()` on it stops the submission), whether it came from the
+  pointer, Enter or Space on the focused button, `click()`, the VoiceOver Press
+  or a [`<label>`](#label) of the button. A disabled button does not submit. The
+  submit button is the nearest `<button>` on the path of the click, so a click on
+  an element inside it counts. Only `<button>` is a submitter: `<input
+  type="submit">` does not exist.
+- **Implicit submission.** Enter in an `<input>` follows HTML's rule. A form with
+  a submit button has a default button, the first one in document order, and
+  Enter gives it a `click`: the form is submitted with that button as the
+  `submitter`, and nothing happens at all if the button is disabled. This holds
+  however many `<input>`s the form has. A form with no submit button submits on
+  Enter only when it has at most one `<input>` (a `type="button"` or `"reset"`
+  button is not a submit button): a form with two or more does not, whether they
+  are disabled, read-only or of any `type`, and a nested form's inputs do not
+  count. Call `requestSubmit()` for those. A `keydown` handler that calls
+  `preventDefault()` stops it. A `<textarea>` does not count, and Enter in it
+  always inserts a newline.
 - **Validation.** Each `required` control with an empty value gets a
   non-bubbling, cancelable `invalid` event (`onInvalid`). The first one whose
   handlers did not call `preventDefault()` takes focus, and the form is not
   submitted. A `disabled` or `readOnly` control is not validated.
 - **`submit`.** Cancelable and bubbling, aimed at the form. `event.formData`
   holds the `name` and `value` of every named, enabled control in document
-  order. `event.submitter` is `null`: there is no submit button. Nothing
-  navigates, so `preventDefault()` has no default to stop.
-- **`requestSubmit()`** on the form ref (a React ref or the Solid element)
-  validates, then submits, and delivers the events before it returns.
+  order. `event.submitter` is the `<button>` that submitted it (its element, as
+  `event.target` is one), and `null` for `requestSubmit()` without an argument
+  and for Enter in a form with no submit button. Nothing navigates, so
+  `preventDefault()` has no default to stop.
+- **`requestSubmit(submitter?)`** on the form ref (a React ref or the Solid
+  element) validates, then submits, and delivers the events before it returns.
+  `submitter` becomes `event.submitter`. As in the DOM it throws a `TypeError`
+  when it is not a submit `<button>` and a `NotFoundError` `DOMException` when it
+  belongs to another form; a disabled submit button is accepted.
+- **What is not there.** A `<button>` is not submitted with a `name` and `value`
+  (`formData` holds `<input>` and `<textarea>` controls), and there is no form
+  reset. See [deviations](./fork/deviations.md#html-tags).
 
 Both events are sent synchronously on macOS, so a handler can call back into the
 renderer. On Windows and Linux they are queued like other events.
@@ -4689,7 +4712,7 @@ Retained element ID ► persistent gpui::FocusHandle ► keyboard/action dispatc
 
 ### What is focusable
 
-Like the DOM: an enabled `<input>` or `<textarea>`, or any element with a
+Like the DOM: an enabled `<input>`, `<textarea>` or `<button>`, an `<a>` with an `href`, or any element with a
 `tabIndex`, a `<span>` in a paragraph included (see
 [Focus on an inline box](#focus-on-an-inline-box)). **A key or focus listener does not make an element focusable.**
 `onKeyDown` on a parent still hears the keys of a focused descendant, by
@@ -4718,7 +4741,7 @@ bubbling, but a `div` that only declares `onKeyDown` never takes focus. Give it 
 | `tabIndex={n}`, `n > 0` | Tabbed first, in ascending order of `n` (document order among equal values), then the `0`s |
 | `tabIndex={-1}` | Focusable by click, `focus()` or `focusElement`, but never a Tab stop |
 | `autoFocus` | Takes focus once, when it mounts: in the commit that attaches it, as in React DOM. Windows and Linux focus it on the next frame |
-| `disabled` (`<input>`, `<textarea>`) | Not focusable. Focus leaves it when it becomes disabled |
+| `disabled` (`<input>`, `<textarea>`, `<button>`) | Not focusable, whatever its `tabIndex`. Focus leaves it when it becomes disabled |
 | `inert` | Nothing in the subtree is focusable; focus leaves it when an ancestor becomes inert. See below |
 
 ### `inert`
@@ -5670,8 +5693,11 @@ between, and everything else in tree order.
 
 ### Button
 
-Ghia has no native `<button>`, so a `div` with `onClick` is not reachable with
-Tab and ignores the keyboard. `Button` is the [Base UI Button](https://base-ui.com/react/components/button):
+A `div` with `onClick` is not reachable with Tab and ignores the keyboard; the
+native [`<button>`](#the-button-tag) is, with Chrome's default look and its form
+behaviour. `Button` is the [Base UI Button](https://base-ui.com/react/components/button)
+for a button you style, in the Base UI shape: a `div` that adds `focusableWhenDisabled`,
+`asChild` and a style that is a function of its state:
 
 ```tsx
 import { Button } from '@ghia/react/button'
@@ -6190,6 +6216,92 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `webview`       | A web page in a native view of the window (macOS) |
 | `nativeview`    | A `div` with an AppKit view from another library in it (macOS) |
 | `canvas`        | Custom drawing (planned)                         |
+
+HTML tags (`p`, `h1`, `ul`, `a`, `button`, `table` and the rest) are elements too: see [HTML tags](#html-tags).
+
+## HTML tags
+
+Markup written for the web works: `<p>`, `<h1>`, `<ul>`, `<strong>`, `<button>`, `<table>` and the rest of the tags below are host elements that look, lay out and behave as Chrome's defaults make them. A tag is a `div` (or a `span`, for the inline ones) with Chrome's user agent style under it, an implicit [accessibility role](#accessibility) and, for `button` and `a`, focus and key activation. Your own `style` wins over the default property by property, and so does [`<UniversalStyle>`](#universal-style) (the default is under both). `div`, `span`, `label`, `form`, `img`, `svg`, `input`, `textarea`, `code` and `select` are Ghia's own elements and take no part in this table: `code` is the [syntax-highlighted block](#code), not HTML's inline `<code>`, and `select` is not an HTML select.
+
+```tsx
+<article>
+  <h1>Release notes</h1>
+  <p>
+    Fixed <strong>three</strong> bugs, see <a href="/notes/42">the list</a>.<br />
+    Next release: <em>Friday</em>.
+  </p>
+  <ul>
+    <li>Scrolling</li>
+    <li>Forms</li>
+  </ul>
+</article>
+```
+
+| Tags | Default display | What they get |
+|---|---|---|
+| `p`, `section`, `nav`, `header`, `footer`, `main`, `article`, `aside`, `figcaption`, `details`, `summary`, `dt`, `li`, `legend` | `block` | `p` has `1em` margin above and below; `legend` has `2px` inline padding |
+| `h1` to `h6` | `block` | Chrome's sizes (`2em` to `0.67em`), bold, and the margins that go with them; role `heading` with `aria-level` 1 to 6 |
+| `ul`, `ol` | `block` | `1em` block margins and `40px` of start padding; role `list` (`li` is `listitem`) |
+| `dl`, `dd` | `block` | `dl` has `1em` block margins; `dd` has a `40px` start margin; `dl`, `dt` and `dd` are a description list, a term and a definition |
+| `figure`, `blockquote` | `block` | `1em` block margins and `40px` inline margins; roles `figure` and `blockquote` |
+| `pre` | `block` | `white-space: pre`, `1em` block margins, `Menlo` at the inherited size |
+| `address` | `block` | Italic |
+| `fieldset`, `hr` | `block` | A `2px` groove border for the fieldset; a `1px` inset grey rule with `0.5em` margins for `hr` (role `separator`) |
+| `dialog` | `none` | Closed: see [Deviations](#html-tag-deviations) |
+| `strong`, `b` | `inline` | Bold |
+| `em`, `i`, `cite`, `var` | `inline` | Italic |
+| `u`, `s` | `inline` | Underline, strikethrough |
+| `small`, `sub`, `sup` | `inline` | `0.8333em`; `sub` and `sup` also move the baseline |
+| `mark` | `inline` | Yellow background, black text |
+| `kbd`, `samp` | `inline` | `Menlo` at the inherited size |
+| `a`, `abbr`, `q`, `time` | `inline` | Nothing |
+| `br`, `wbr` | `inline` | `br` is a line break; `wbr` is a place where a line may break |
+| `button` | `inline-block` | Chrome's non-native button look (see below); a tab stop; key and form behaviour |
+| `table`, `thead`, `tbody`, `tfoot`, `tr`, `td`, `th`, `caption`, `colgroup`, `col` | the [table](#tables) values | `2px` border spacing, `1px` cell padding, cells vertically centred; `th` is bold and centred. Roles `table`, `rowgroup`, `row`, `cell`, `columnheader` |
+
+`nav`, `main`, `aside` and `article` are the `navigation`, `main`, `complementary` and `article` landmarks. A `header` or `footer` is the `banner` or `contentinfo` landmark only outside `article`, `aside`, `main`, `nav` and `section`, and a `section` is a `region` only with `aria-label` or `aria-labelledby`. A tag that has no role here (`div`-like, or inline) gets none from its tag. An explicit `role` or `aria-level` wins.
+
+### Inline and block
+
+A tag whose default `display` is `inline` takes part in a paragraph like a `<span>` (see [Inline text](#inline-text)): `a`, `strong`, `em`, `b`, `i`, `u`, `s`, `small`, `mark`, `abbr`, `cite`, `q`, `sub`, `sup`, `time`, `kbd`, `var`, `samp`, `br` and `wbr`. A run of strings and inline tags is one paragraph that wraps, selects and is searched as one. A block tag in the middle of the run ends the paragraph and starts the next after it. `style={{ display }}` overrides the default either way: `<em style={{ display: 'block' }}>` is a block, and `<p style={{ display: 'inline' }}>` joins its paragraph.
+
+An inline tag is an inline box: it shows what a `<span>` shows, and a motion value it binds is limited to what a span can animate (see [Animate an inline span](#animate-an-inline-span)). `display: "inline-block"` makes any tag an [atomic inline](#inline-block-inline-flex-inline-grid-and-inline-table), which is what `button` is by default.
+
+`<br>` is a line feed whatever `white-space` is, and a space before it is dropped as at the end of a line. `<wbr>` adds a zero width space, which is not read out.
+
+### The `<button>` tag
+
+A `<button>` paints Chrome's default button look: a `2px` outset border, `#efefef` background, black centred text in the system font at `13.3333px`, `1px 6px` padding and the default cursor. It is not the themed macOS button (see [Deviations](#html-tag-deviations)). Your style replaces any part of it; set `border: 'none'` and a `backgroundColor` to drop the outset look.
+
+```tsx
+<button type="button" disabled={saving} onClick={save} style={{ backgroundColor: '#3b82f6', color: '#fff' }}>
+  Save
+</button>
+```
+
+- **A tab stop.** An enabled `<button>` is focusable and in the Tab order without a `tabIndex`; `tabIndex` still orders it, and `-1` takes it out. A disabled button is not focusable, whatever its `tabIndex`.
+- **Keys.** Enter clicks a focused button on key down (repeating while held), and Space on key up if the button still has focus. A `keydown` or `keyup` a handler cancelled does nothing; a key with Ctrl, Alt or Cmd is no activation. Space on a button does not scroll the page. The click is the [non-pointer one](#click-without-a-pointer) (`detail` 0).
+- **`disabled`.** No click from the pointer, a key, `click()` or the VoiceOver Press, and the button matches `:disabled` (see [Form control state](#form-control-state-disabled-enabled)).
+- **Name.** A button is named by `aria-labelledby`, then `aria-label`, then its `<label>`s' text, then its own content. A label with no text leaves the content as the name.
+- **`<label>`.** A button is labelable: `<label htmlFor="save">` clicking activates it, and a click on the button's label submits its form as a click on the button does (see [`<label>`](#label)).
+- **In a form.** `type` is `"submit"` (the default, also for a value HTML does not know), `"button"` or `"reset"`. See [Forms](#forms).
+
+`Button` from `@ghia/react/button` is a different thing: the [Base UI Button](#button), a `div` with `focusableWhenDisabled` and a style that is a function of its state.
+
+### The `<a>` tag
+
+An `<a>` with an `href` has the `link` role and is a tab stop; Enter clicks it. An `<a>` without one is neither. Ghia has no navigation, so an `<a href>` fires `click` and stops: it is not underlined or blue, and it opens nothing. Handle the click, and style the link yourself. An inline `<a>` has no accessibility node (no inline box has one), and only an `<a>` with `display: block` or `inline-block` is a `link` in the accessibility tree.
+
+### HTML tag deviations
+
+What differs from Chrome is listed once in [deviations.md](./fork/deviations.md#html-tags) and not repeated here. A tag is the user agent style of one tag, and a rule that needs the element's place or its attributes cannot be one, so:
+
+- `a` has no link colour or underline (`a:any-link` needs the `href` attribute), and `ul ul` is not a smaller-margin list. Write the style you want.
+- `dialog` is always `display: none`: `open` is not forwarded. Set `display: "block"` yourself to show one.
+- `li` has no marker, `q` has no quotes, `legend` does not sit on the fieldset's border, `details` has no open state, `abbr[title]` has no dotted underline and a nested `h1` is not smaller.
+- `pre`, `kbd` and `samp` use `Menlo` at the inherited size, not the generic `monospace` at `13px`.
+- `<fieldset disabled>` does not disable its controls (see [Form control state](#form-control-state-disabled-enabled)).
+- `th` is always a column header (`scope` is not forwarded).
 
 ## Images and icons
 
@@ -6975,14 +7087,14 @@ move over the element, and the element's `hover` style ends with it.
 
 ### Click without a pointer
 
-The VoiceOver Press and Enter or Space on a `Button` (`buttonProps`) deliver a
+The VoiceOver Press and Enter or Space on a `<button>`, or on a `Button` (`buttonProps`), deliver a
 `click` like `HTMLElement.click()` does: `detail` 0, `pointerId` -1, `pointerType`
 `""`, `buttons` 0, no position, and a `target` and `path`, so it bubbles to the
 ancestors' `onClick`. A host ref has the same `click()`, and
 `renderer.clickElement(elementId)` is the same call on the renderer. In your own
 `onKeyDown` or `onKeyUp`, call `click()` on the ref of the element that listens.
 `click()` and the VoiceOver Press do nothing on a `button`, `input`, `textarea` or
-`select` that is `disabled`, or on an element inside one, as in HTML. A disabled
+`select` that is `disabled`, or on an element inside one, as in HTML (a `<fieldset disabled>` does not count: see [Form control state](#form-control-state-disabled-enabled)). A disabled
 `Button` or `SelectTrigger` is one too (see [Form control state](#form-control-state-disabled-enabled)).
 Every mouse and pointer event type has `pointerId` and `pointerType` as required
 fields: `1` and `"mouse"` for the mouse.
@@ -7158,7 +7270,9 @@ CSS-like styling via the `style` prop:
 >   CSS and React DOM. `{ paddingLeft: 4, padding: 8 }` pads the left by 8 and
 >   `{ padding: 8, paddingLeft: 4 }` by 4. See [Shorthands](#shorthands).
 > - **`boxShadow` takes the CSS string or a structured object.** See below.
-> - **No `<button>`.** Use `<div onClick>` with `cursor: "pointer"`.
+> - **Tags come with Chrome's default style.** `<p>`, `<h1>`, `<ul>`, `<button>` and
+>   the other [HTML tags](#html-tags) start from the user agent style of Chrome
+>   (margins, sizes, `display`); a `div` and a `span` start from nothing.
 > - **There is no `<text>` element.** A string is a text node in any element,
 >   and `<text>` is valid only inside an `<svg>`, where it is SVG text. Consecutive
 >   strings and `<span>`s are one line, as in the DOM; a `<div>` between them
@@ -8501,13 +8615,14 @@ they apply to a strict ancestor of such a control.
 </div>
 ```
 
-What counts as a form control is what Ghia has: an `<input>`, a `<textarea>`,
-and the components that stand in for a `<button>` or a `<select>`: `Button`, the
-triggers of `Dialog`, `Select` and `Combobox`, and the root of a `Select`. A
+What counts as a form control is what Ghia has: an `<input>`, a `<textarea>`, a
+`<button>`, and the components that stand in for a `<button>` or a `<select>`:
+`Button`, the triggers of `Dialog`, `Select` and `Combobox`, and the root of a `Select`. A
 control is `:enabled` unless it is `disabled`. A plain `<div disabled>` is not a
 control and matches neither, as in a DOM (`disabled` is not forwarded to a `div`),
-and nothing else is: there is no `<fieldset>`, so no control is disabled by its
-ancestor. A custom component that wants the same passes `buttonProps(...)`, which
+and nothing else is. A `<fieldset>` lays out (see [HTML tags](#html-tags)) but
+`disabled` on a `<fieldset>` has no effect: it does not disable the controls inside it,
+so no control is disabled by its ancestor. Put `disabled` on each control. A custom component that wants the same passes `buttonProps(...)`, which
 carries the marker.
 
 They fold in with the pointer states, after `active`: a disabled control keeps
@@ -9278,7 +9393,9 @@ layer is `setUniversalStyle(style | null)` on the mutation queue, for code that
 does not use a component.
 
 - **Lowest precedence.** An element's own style and its state styles win
-  property by property. Shorthands and longhands interplay as they do for
+  property by property, and it is above only the default style of an
+  [HTML tag](#html-tags) (a `<p>` margin or a `<button>` border it sets wins over
+  the tag's). Shorthands and longhands interplay as they do for
   `hover` over its base: an own `padding` replaces a universal `paddingTop`, an
   own `transition` replaces the universal one, and a colour, filter or other CSS
   string that is invalid in the element's own style falls through to the layer's

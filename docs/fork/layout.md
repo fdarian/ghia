@@ -1,6 +1,6 @@
 # Layout
 
-How boxes are placed: positioning and stacking, grid, tables, container queries, shorthands and lengths, intrinsic widths, the layout engine that persists across frames (and the vendored taffy it runs on), relayout boundaries, layout containment and the 1/64 px unit that boxes are measured and read back in. Text layout is in [text.md](text.md), scrolling in [scroll.md](scroll.md).
+How boxes are placed: positioning and stacking, grid, tables, HTML tags, container queries, shorthands and lengths, intrinsic widths, the layout engine that persists across frames (and the vendored taffy it runs on), relayout boundaries, layout containment and the 1/64 px unit that boxes are measured and read back in. Text layout is in [text.md](text.md), scrolling in [scroll.md](scroll.md).
 
 ## Positioning
 
@@ -114,6 +114,20 @@ In retention (see [retention.md](retention.md)), every part of a collapsed table
 - A patched tick still lays the unit out onto its own nodes (one pass, no node made).
 
 **Table styles in motion.** `borderSpacing` blends, and is cut to whole device pixels where it is laid out (gpui `snap_border_spacing_to_device_pixel`: 2.5 is 2px at scale 1 and 2.5px at scale 2, 0.99 counts as 1), as Chrome's `short` does it. An unset `borderSpacing` and the other inherited table styles start a transition from the value they inherit (`motion::Inheritable`, as do an unset `pointerEvents`, `visibility`, `textUnderlineOffset` and a unitless `lineHeight`; a `lineHeight` that is `normal` or a length is no number, so it starts at its target, as in Chrome). `motion` and keyframes take none of the discrete table styles.
+
+## HTML tags
+
+`p`, `h1`, `ul`, `strong`, `a`, `button`, `table` and the rest of the tags in `html/tags.rs` are host elements that lay out as a `div` or a `span` does. The tag's only difference is a style: one JSON object per tag, copied from Chrome's `html.css` (`display`, margins, padding, `font-size`, `font-weight`, borders and so on), parsed once with the path every `setStyle` goes through (`html::ua_style`, one `Arc<StyleDesc>` per tag). `packages/native/js/html-tags.ts` is the same list for the adapters (`HTML_INLINE_TAGS` is the rows whose `display` is `inline`), and a JS test reads `tags.rs` to keep the two equal.
+
+**The layer.** The user agent style is the lowest layer: under the universal style (`<UniversalStyle>`), which is under the element's own style. `RetainedTree::refresh_effective_style` composes them, and `LayerCache::base` keeps the universal style over a tag's user agent style by the address of the latter, so the layered style of an element is still shared by every element with the same tag and own style. An element of a tag has an effective style the moment it is created, before any `setStyle`, so `createElement` refreshes it. A shorthand in a higher layer shadows the longhands below it: an own `margin` replaces the tag's `marginTop` and `marginBottom`.
+
+**Inline or block.** The effective `display` decides, as for a `span` or a `div`: a tag whose style says `inline` is an inline wrapper in the paragraph of its parent (`text::inline::is_inline_wrapper`), any other is a block that ends the paragraph (a `button` is `inline-block`, so an [atomic inline](text.md)). The element's own `display` wins over the tag's either way. `text::inline::is_host_type` includes every tag, so each pass that treats a `div` one way (paragraph planning, paint ranks, stacking, culling, accessibility, focus order, search, `content-visibility`) treats a tag the same. Two passes ask for the inline ones apart from that, because a span is their special case: `sync_motions` and the paint-only frame record (`Fixed`), where a span is painted by its paragraph and is not an element whose frame is paint.
+
+`<br>` and `<wbr>` are not boxes: the paragraph builder adds a `\n` (a line feed whatever `white-space` is, with the collapsible space before it dropped) and a zero width space (content, so it keeps the spaces around it), with the tag as the box of the piece.
+
+**What a tag means** is in `html/semantics.rs`, apart from how it looks: the implicit role (`implicit_role`, with `heading_level`), whether it is a tab stop (`is_focusable_by_default`), the keys that click it (`activation_keys`), whether an assistive technology can press it (`is_activatable`) and the type of a `button`. The activation itself is in [events-and-input.md](events-and-input.md#button-and-link-activation), and form submission in `forms.rs`.
+
+**What the table leaves out** is a rule that needs a selector: `a:any-link`, `ul ul`, `details[open]`, `dialog[open]`, `abbr[title]`, the nested `h1` sizes, and Chrome's `monospace` family and 13px size. The markers of `li`, the quotes of `q` and the placement of `legend` are not styles at all. All are in [deviations.md](deviations.md#html-tags). The table is the stand-in for a user agent stylesheet: when stylesheets land, Chrome's `html.css` parsed as the lowest sheet replaces `tags.rs`, the selector-dependent rules above come with it, and `refresh_effective_style` keeps its place for the layer.
 
 ## Direction
 
