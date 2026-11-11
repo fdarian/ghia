@@ -1,6 +1,8 @@
 //! A `click` that has been delivered, and the activation behaviour that follows
-//! it, unless a handler cancelled the click: a `<label>` on its path focuses its
-//! control and clicks it, and a `<button>` on its path submits its form.
+//! it, unless a handler cancelled the click. The activation target is the first element on its
+//! path with an activation behaviour (`html::activation_target`), and only that behaviour runs: a
+//! `<label>` focuses its control and clicks it, a `<button>` submits its form, and an `<a href>`
+//! does nothing, since Ghia has no navigation.
 //!
 //! Three sources feed it: a pointer release, `element.click()` and a
 //! VoiceOver Press. DOM runs the same activation behaviour for all of them.
@@ -52,11 +54,21 @@ impl Activation {
         }
     }
 
-    /// The activation behaviour of `click`, a click no handler cancelled.
+    /// The activation behaviour of `click`, a click no handler cancelled: that of its one activation
+    /// target.
     pub(crate) fn activate(&self, click: &EventPayload, window: &mut Window, cx: &mut App) {
-        self.activate_label(click, window, cx);
         let path: Vec<u64> = click.path.iter().flatten().map(|id| *id as u64).collect();
-        crate::forms::button_clicked(&self.tree, &path, window, cx);
+        let target = {
+            let tree = self.tree.lock().unwrap();
+            crate::html::activation_target(&tree, &path)
+                .and_then(|id| tree.elements.get(&id))
+                .map(|element| element.element_type.clone())
+        };
+        match target.as_deref() {
+            Some("label") => self.activate_label(click, window, cx),
+            Some("button") => crate::forms::button_clicked(&self.tree, &path, window, cx),
+            _ => {}
+        }
     }
 
     /// Delivers a click that no pointer made and then runs its activation

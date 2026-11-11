@@ -25,18 +25,17 @@ fn is_interactive_content(element: &RetainedElement) -> bool {
     matches!(element.element_type.as_str(), "input" | "textarea" | "select") || crate::html::is_activatable(element)
 }
 
-/// The control a `click` activates, if it does. The nearest `<label>` on the
-/// click's path is the activation target, as in the DOM, and it does nothing
-/// when the click landed on interactive content inside it, on its control, or
-/// inside its control, or when the control is disabled or inert. `path` starts
-/// at the click's target.
+/// The control a `click` activates, if it does. The label is the activation target when it is the
+/// first element on the click's path with an activation behaviour (a link or a button inside it
+/// takes the click for itself), and it does nothing when the click landed on interactive content
+/// inside it, on its control, or inside its control, or when the control is disabled or inert.
+/// `path` starts at the click's target.
 pub(crate) fn activated_control(tree: &RetainedTree, path: &[u64]) -> Option<u64> {
-    let label_index = path.iter().position(|id| {
-        tree.elements
-            .get(id)
-            .is_some_and(|element| element.element_type == "label")
-    })?;
-    let label = path[label_index];
+    let label = crate::html::activation_target(tree, path)?;
+    if tree.elements.get(&label)?.element_type != "label" {
+        return None;
+    }
+    let label_index = path.iter().position(|id| *id == label)?;
     if tree.is_inert(label) {
         return None;
     }

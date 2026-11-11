@@ -719,6 +719,36 @@ describeNative("a label of a button", () => {
     expect(testRoot.renderer.getFocusedElementId()).toBe(idOf("help"))
   })
 
+  it("runs only the first activation target on the path: a link inside a button does not submit", () => {
+    testRoot.render(
+      <form onSubmit={onSubmit}>
+        <button testId="button" style={{ width: 120, height: 40 }}>
+          <a testId="link" href="/x" onClick={onClick("link")} style={{ display: "block", width: 60, height: 20 }}>x</a>
+          <span testId="text" style={{ display: "block", width: 60, height: 15 }}>y</span>
+        </button>
+      </form>,
+    )
+    clickAt("link")
+    expect(log).toEqual(["link"])
+    expect(submits).toEqual([])
+    clickAt("text")
+    expect(submits.map((submit) => submit.submitter?.props.testId)).toEqual(["button"])
+  })
+
+  it("runs only the label when it is inside a button: it focuses its field and does not submit", () => {
+    testRoot.render(
+      <form onSubmit={onSubmit}>
+        <button testId="button" style={{ width: 120, height: 40 }}>
+          <label testId="label" htmlFor="field" style={{ display: "block", width: 60, height: 20 }}>Name</label>
+        </button>
+        <input id="field" testId="field" style={{ width: 80, height: 20 }} />
+      </form>,
+    )
+    clickAt("label")
+    expect(submits).toEqual([])
+    expect(testRoot.renderer.getFocusedElementId()).toBe(idOf("field"))
+  })
+
   it("names the button from its label before its content", () => {
     testRoot.render(
       <div style={{ width: 300, height: 160 }}>

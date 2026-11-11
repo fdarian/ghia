@@ -291,17 +291,17 @@ pub(crate) fn button_clicked(tree: &std::sync::Mutex<RetainedTree>, path: &[u64]
     });
 }
 
-/// The form a click on `path` submits and the button that does it: the nearest `button` on the path,
-/// when its `type` is `submit` and it is inside a form. A click has to be delivered for it even with
-/// no listener, since the submission is decided after the event ran.
+/// The form a click on `path` submits and the button that does it: the button is the activation
+/// target, the first element on the path with an activation behaviour (a link or a label inside it
+/// takes the click for itself), when its `type` is `submit` and it is inside a form. A click has to
+/// be delivered for it even with no listener, since the submission is decided after the event ran.
 pub(crate) fn submission_by_click(tree: &RetainedTree, path: &[u64]) -> Option<(u64, u64)> {
-    let button = path
-        .iter()
-        .filter_map(|id| tree.elements.get(id))
-        .find(|element| element.element_type == "button")?;
-    (crate::html::button_type(button) == crate::html::ButtonType::Submit && !button.is_disabled())
-        .then(|| enclosing_form(tree, button.id).map(|form| (form, button.id)))
-        .flatten()
+    let button = tree.elements.get(&crate::html::activation_target(tree, path)?)?;
+    (button.element_type == "button"
+        && crate::html::button_type(button) == crate::html::ButtonType::Submit
+        && !button.is_disabled())
+    .then(|| enclosing_form(tree, button.id).map(|form| (form, button.id)))
+    .flatten()
 }
 
 #[cfg(test)]
@@ -466,5 +466,25 @@ mod tests {
         required.read_only = false;
         required.disabled = true;
         assert!(!required.is_invalid());
+    }
+
+    #[test]
+    fn a_click_submits_only_when_the_button_is_the_first_activation_target_on_the_path() {
+        let mut tree = RetainedTree::new();
+        crate::batch::test_json::apply(
+            &mut tree,
+            r#"[["createElement",1,"form"],["setRoot",1],
+                ["createElement",2,"button"],["appendChild",1,2],
+                ["createElement",3,"a"],["appendChild",2,3],["setCustomProp",3,"href","/x"],
+                ["createElement",4,"label"],["appendChild",2,4],
+                ["createElement",5,"span"],["appendChild",2,5],
+                ["createElement",6,"a"],["appendChild",2,6]]"#,
+        )
+        .unwrap();
+        assert_eq!(submission_by_click(&tree, &[2, 1]), Some((1, 2)));
+        assert_eq!(submission_by_click(&tree, &[5, 2, 1]), Some((1, 2)));
+        assert_eq!(submission_by_click(&tree, &[6, 2, 1]), Some((1, 2)), "an a without an href has no behaviour");
+        assert_eq!(submission_by_click(&tree, &[3, 2, 1]), None, "the link is the target");
+        assert_eq!(submission_by_click(&tree, &[4, 2, 1]), None, "the label is the target");
     }
 }

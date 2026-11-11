@@ -101,6 +101,17 @@ pub(crate) fn is_activatable(element: &RetainedElement) -> bool {
     element.element_type == "button" || (element.element_type == "a" && has_href(element))
 }
 
+/// The element a click on `path` (innermost first) activates: the first on it with an activation
+/// behaviour, `a[href]`, `label` or `button`, as in the DOM. Its behaviour is the only one that runs,
+/// so the others on the path do nothing, whatever they are.
+pub(crate) fn activation_target(tree: &RetainedTree, path: &[u64]) -> Option<u64> {
+    path.iter().copied().find(|id| {
+        tree.elements.get(id).is_some_and(|element| {
+            matches!(element.element_type.as_str(), "label" | "button") || is_activatable(element)
+        })
+    })
+}
+
 /// What a `button` does when clicked inside a `form`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ButtonType {
@@ -176,5 +187,22 @@ mod tests {
         assert_eq!(keys(5), None);
         assert!(tree.elements[&2].needs_focus() && tree.elements[&4].needs_focus());
         assert!(!tree.elements[&3].needs_focus() && !tree.elements[&5].needs_focus());
+    }
+
+    #[test]
+    fn the_first_element_with_an_activation_behaviour_on_the_path_is_the_target() {
+        let tree = tree(
+            r#"[["createElement",1,"div"],["setRoot",1],
+                ["createElement",2,"button"],["appendChild",1,2],
+                ["createElement",3,"a"],["appendChild",2,3],["setCustomProp",3,"href","/x"],
+                ["createElement",4,"label"],["appendChild",3,4],
+                ["createElement",5,"span"],["appendChild",4,5],
+                ["createElement",6,"a"],["appendChild",5,6]]"#,
+        );
+        assert_eq!(activation_target(&tree, &[5, 4, 3, 2, 1]), Some(4));
+        assert_eq!(activation_target(&tree, &[6, 5, 4, 3, 2, 1]), Some(4), "an a without an href is skipped");
+        assert_eq!(activation_target(&tree, &[3, 2, 1]), Some(3));
+        assert_eq!(activation_target(&tree, &[2, 1]), Some(2));
+        assert_eq!(activation_target(&tree, &[1]), None);
     }
 }

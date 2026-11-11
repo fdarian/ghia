@@ -60,6 +60,7 @@ An HTML tag ([docs/reference.md](../reference.md#html-tags)) is the user agent s
 
 - **No `li` markers** (bullets, numbers), no `q` quotes, and a `legend` does not sit on the `fieldset` border.
 - **`<button>` paints Chrome's non-native look:** a `2px` outset border, `#efefef` background. Chrome on macOS themes a button with the system's look; the tag draws no themed control.
+- **A `<button>` with a set height does not centre its content vertically,** where Chrome does. And `<button style={{ display: 'block' }}>` stretches to the container's width, where Chrome keeps a block button fit-content.
 
 **What is not there**
 
@@ -69,6 +70,8 @@ An HTML tag ([docs/reference.md](../reference.md#html-tags)) is the user agent s
 - **`th scope` is not forwarded,** so a `th` is always a `columnheader`, never a row header.
 - **`<fieldset disabled>` does not disable its controls,** and a `<fieldset>` is not a form control for `:disabled`.
 - **A button does not reset, and only `<button>` submits.** `<button type="reset">` does nothing, because Ghia does not reset controls. `<input type="submit">` does not exist (every `<input type>` is text-like), so only a `<button>` is a submitter. A `<button>` is not submitted as a `name` and `value` in `formData`.
+- **`type` is the host type, not the DOM `type` property.** `event.submitter.type`, and the `type` field of any element, is the element's host type: `"button"` for a submit button, where Chrome says `"submit"`.
+- **`aside` is always `complementary`.** An `<aside>` has the `complementary` role wherever it sits, including inside sectioning content (`article`, `aside`, `main`, `nav`, `section`), where Chrome does not give it that role. Unlike `header` and `footer`, it does not change with its place.
 - **`code` is Ghia's syntax element, not HTML `<code>`,** and `select` is Ghia's own, not an HTML select with `<option>`s: neither is in the tag table (see the [native text components](../reference.md#native-text-components) and [Headless controls](../reference.md#headless-controls)).
 
 ## Text
