@@ -143,7 +143,11 @@ impl Specificity {
     }
 
     fn add(self, other: Specificity) -> Specificity {
-        Specificity::new(self.ids + other.ids, self.classes + other.classes, self.types + other.types)
+        Specificity::new(
+            self.ids.saturating_add(other.ids),
+            self.classes.saturating_add(other.classes),
+            self.types.saturating_add(other.types),
+        )
     }
 }
 

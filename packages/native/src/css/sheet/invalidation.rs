@@ -16,7 +16,7 @@ use super::selector::{Combinator, ComplexSelector, Simple};
 /// for its next sibling and for all its following siblings. Nine bits, `sibling * 3 + depth`.
 /// "Children" and "below" are about the sibling named, so `NEXT_SIBLING_CHILDREN` is the
 /// children of the next sibling.
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug)]
 pub struct Reach(u16);
 
 const DEPTH_MASK: u16 = 0b111;
@@ -53,6 +53,14 @@ impl Reach {
     /// toward the subject.
     fn through(self, chain: &[Combinator]) -> Reach {
         chain.iter().fold(self, |reach, link| reach.step(*link))
+    }
+
+    const PLACES: usize = 9;
+
+    /// Where each place goes through `chain`. Every read of a selector is a union of the places of
+    /// `through`, so two chains with the same image read a list alike.
+    fn image(chain: &[Combinator]) -> [Reach; Self::PLACES] {
+        std::array::from_fn(|place| Reach(1 << place).through(chain))
     }
 
     fn step(self, link: Combinator) -> Reach {
@@ -127,9 +135,13 @@ pub struct Invalidation {
     /// What an element appearing or disappearing among its siblings can reach: the places
     /// that sibling combinators look at it from.
     pub structure: Reach,
-    /// The `&` lists already read, with the chain they were read through. A nested rule shares
-    /// its parent's list, so without this each level would read every level above it again.
-    shared_read: FxHashSet<(usize, Vec<Combinator>)>,
+    /// The `&` lists already read, with what the chain they were read through does to a reach
+    /// (`Reach::image`). A nested rule shares its parent's list, so without this each level would
+    /// read every level above it again. Keyed by the image, not the chain: chains that differ in
+    /// their combinators at every level (`& > &, & + &`) are many, and the images are few.
+    shared_read: FxHashSet<(usize, [Reach; Reach::PLACES])>,
+    #[cfg(test)]
+    reads: usize,
 }
 
 impl Invalidation {
@@ -144,6 +156,10 @@ impl Invalidation {
     /// then through the rest of the selector that holds it, so `:is(.a .b)` is read as the
     /// descendant combinator it holds and the combinators around it.
     fn read_through(&mut self, selector: &ComplexSelector, tail: &[Combinator]) {
+        #[cfg(test)]
+        {
+            self.reads += 1;
+        }
         for (position, compound) in selector.compounds.iter().enumerate() {
             let chain = chain_from(selector, position, tail);
             let reach = Reach::SELF.through(&chain);
@@ -153,7 +169,7 @@ impl Invalidation {
                     Simple::Id(id) => *self.ids.entry(*id).or_default() |= reach,
                     Simple::Attr(attr) => *self.attributes.entry(attr.name.lower).or_default() |= reach,
                     Simple::Is(list) => {
-                        if self.shared_read.insert((list.as_ptr() as usize, chain.clone())) {
+                        if self.shared_read.insert((list.as_ptr() as usize, Reach::image(&chain))) {
                             for inner in list.iter() {
                                 self.read_through(inner, &chain);
                             }
@@ -268,5 +284,30 @@ mod tests {
             following.from_next_sibling(),
             Reach::SELF | Reach::CHILDREN | Reach::FOLLOWING_SIBLINGS_CHILDREN
         );
+    }
+
+    #[test]
+    fn nesting_that_varies_its_combinators_at_every_level_is_read_in_bounded_steps() {
+        let depth = 32;
+        let mut text = String::from(".a { color: red } .b { ");
+        for _ in 0..depth {
+            text.push_str("& > &, & + & { color: red; ");
+        }
+        for _ in 0..depth {
+            text.push_str("} ");
+        }
+        text.push('}');
+        let mut atoms = Atoms::default();
+        let sheet = parse_sheet(&text, &mut atoms, &mut Layers::default());
+        let mut invalidation = Invalidation::default();
+        for rule in &sheet.rules {
+            for (selector, _) in &rule.selectors {
+                invalidation.read(selector);
+            }
+        }
+        assert!(invalidation.reads < 20_000, "{} reads", invalidation.reads);
+        let b = invalidation.classes[&atoms.get("b").unwrap()];
+        assert!(b.contains(Reach::SELF | Reach::CHILDREN | Reach::DESCENDANTS | Reach::NEXT_SIBLING));
+        assert_eq!(invalidation.classes[&atoms.get("a").unwrap()], Reach::SELF);
     }
 }
