@@ -1,6 +1,6 @@
 import fs from "fs"
 import { describe, expect, it } from "vitest"
-import { HTML_INLINE_TAGS, HTML_TAGS, isHtmlTag, isInlineHtmlTag } from "../html-tags.js"
+import { HTML_INLINE_TAGS, HTML_TAGS, isHtmlTag, isInlineBox, isInlineHtmlTag } from "../html-tags.js"
 import { motionValue } from "../host.js"
 import { syncMotionBindings, type MotionBindingHost } from "../motion-bindings.js"
 import { BUILT_IN_TYPES, forwardsCustomProp } from "../mutations.js"
@@ -39,6 +39,21 @@ describe("HTML tags", () => {
     expect(isInlineHtmlTag("button")).toBe(false)
   })
 
+  it("take an inline box from the effective display, never from the tag alone", () => {
+    expect(isInlineBox("span", undefined)).toBe(true)
+    expect(isInlineBox("a", {})).toBe(true)
+    expect(isInlineBox("a", { display: "block" })).toBe(false)
+    expect(isInlineBox("a", { display: "inline-block" })).toBe(false)
+    expect(isInlineBox("span", { display: "block" })).toBe(false)
+    expect(isInlineBox("div", { display: "inline" })).toBe(true)
+    expect(isInlineBox("p", { display: "inline" })).toBe(true)
+    expect(isInlineBox("div", undefined)).toBe(false)
+    expect(isInlineBox("strong", { position: "absolute" })).toBe(false)
+    expect(isInlineBox("button", { display: "inline" })).toBe(false)
+    expect(isInlineBox("label", { display: "inline" })).toBe(false)
+    expect(isInlineBox("svg", { display: "inline" })).toBe(false)
+  })
+
   describe("motion values", () => {
     const host = {} as MotionBindingHost
     const mutations = { setCustomProp() {} }
@@ -49,6 +64,12 @@ describe("HTML tags", () => {
           `A ${type} cannot take a motion value in style.width`
         )
       }
+    })
+
+    it("bind only what an inline box shows for a div that says display inline", () => {
+      expect(() => syncMotionBindings(host, mutations, 1, { x: motionValue(1) }, "div", { display: "inline" })).toThrow(
+        "A div cannot take a motion value in style.x"
+      )
     })
   })
 })

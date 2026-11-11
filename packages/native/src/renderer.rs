@@ -6469,7 +6469,7 @@ fn sync_motions(
         // An SVG shape animates its attributes, not a style.
         let svg_attributes = crate::custom_elements::svg_tree::is_svg_element(tree, element)
             .then(|| element.custom_props());
-        let inline = element.element_type == "span" || crate::html::is_inline_tag(&element.element_type);
+        let inline = crate::text::inline::is_inline_wrapper(element);
         let state = match states.entry(id) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::hash_map::Entry::Vacant(entry) => {
@@ -9812,10 +9812,9 @@ struct Fixed {
 
 impl Fixed {
     fn of(tree: &crate::retained_tree::RetainedTree, element: &crate::retained_tree::RetainedElement) -> Self {
-        // A span is painted by its paragraph, a shape of an `<svg>` by the raster of the `<svg>`, and a
+        // An inline box is painted by its paragraph, a shape of an `<svg>` by the raster of the `<svg>`, and a
         // `layout` element glides between boxes: none is an element whose frame is only paint.
-        let excluded = element.element_type == "span"
-            || crate::html::is_inline_tag(&element.element_type)
+        let excluded = crate::text::inline::is_inline_wrapper(element)
             || crate::custom_elements::svg_tree::is_svg_element(tree, element)
             || element.custom_props().contains_key("layout")
             || !element

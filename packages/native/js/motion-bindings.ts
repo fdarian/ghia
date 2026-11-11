@@ -4,7 +4,7 @@
 /// this; each owns a `MotionBindingHost` on its root.
 
 import type { MutationRenderer, NativeRenderer, StyleDesc } from "./host.js"
-import { isInlineHtmlTag } from "./html-tags.js"
+import { isInlineBox } from "./html-tags.js"
 import { assertSpanMotionValues } from "./motion-span.js"
 import { isMotionValue } from "./motion-value.js"
 import type { MotionValue } from "./motion-value.js"
@@ -80,10 +80,11 @@ export function syncMotionBindings(
   mutations: Pick<MutationRenderer, "setCustomProp">,
   id: number,
   next: Record<string, MotionValue> | undefined,
-  /** The element type: a span, or an inline HTML tag, can only bind what an inline box shows. */
-  type?: string
+  /** The element type and its style without the motion values: an inline box can only bind what an inline box shows. */
+  type?: string,
+  style?: StyleDesc
 ): void {
-  if (type !== undefined && (type === "span" || isInlineHtmlTag(type))) assertSpanMotionValues(next, type)
+  if (type !== undefined && isInlineBox(type, style)) assertSpanMotionValues(next, type)
   const previous = host.motionBindings.get(id)
   if (sameBindings(previous?.values, next)) return
 

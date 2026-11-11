@@ -1248,6 +1248,19 @@ mod tests {
     }
 
     #[test]
+    fn the_display_of_an_element_and_not_its_tag_decides_whether_it_is_an_inline_wrapper() {
+        let mut f = Fixture::new();
+        f.add(1, 2, "a").styled(2, serde_json::json!({"display": "block"}));
+        f.add(1, 3, "a");
+        f.add(1, 4, "span").styled(4, serde_json::json!({"display": "block"}));
+        f.add(1, 5, "div").styled(5, serde_json::json!({"display": "inline"}));
+        f.add(1, 6, "span");
+        f.add(1, 7, "strong").styled(7, serde_json::json!({"position": "absolute"}));
+        let wrapper: Vec<bool> = (2..=7).map(|id| is_inline_wrapper(&f.tree.elements[&id])).collect();
+        assert_eq!(wrapper, vec![false, true, false, true, true, false]);
+    }
+
+    #[test]
     fn a_display_contents_child_of_a_span_joins_the_paragraph() {
         let mut f = Fixture::new();
         f.text(1, 2, "a ");

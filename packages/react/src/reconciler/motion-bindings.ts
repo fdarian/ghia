@@ -7,7 +7,8 @@ import {
 import type { Container, Props } from "../types/host.js"
 
 export function syncMotionBindings(container: Container, id: number, style: Props["style"], type: string): void {
-  syncBindings(container, container.renderer, id, splitMotionStyle(style).motionValues, type)
+  const split = splitMotionStyle(style)
+  syncBindings(container, container.renderer, id, split.motionValues, type, split.style)
 }
 
 /** Runs once the mutation batch has been applied, with the ids it destroyed. */

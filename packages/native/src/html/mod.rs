@@ -46,11 +46,6 @@ pub fn ua_style(element_type: &str) -> Option<Arc<StyleDesc>> {
     styles().get(element_type).cloned()
 }
 
-/// Whether the tag is inline unless a style says otherwise, as a `span` is.
-pub fn is_inline_tag(element_type: &str) -> bool {
-    styles().get(element_type).is_some_and(|style| style.display.as_deref() == Some("inline"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,16 +69,6 @@ mod tests {
     fn the_tags_ghia_builds_itself_are_not_in_the_table() {
         for tag in ["div", "span", "label", "form", "img", "svg", "input", "textarea", "code", "select", "#text", "nativeview"] {
             assert!(!is_tag(tag), "<{tag}> has a built-in meaning");
-        }
-    }
-
-    #[test]
-    fn a_tag_is_inline_by_its_display() {
-        for tag in ["a", "strong", "em", "br", "sub", "kbd"] {
-            assert!(is_inline_tag(tag), "<{tag}>");
-        }
-        for tag in ["p", "h1", "li", "button", "td", "dialog", "span", "div"] {
-            assert!(!is_inline_tag(tag), "<{tag}>");
         }
     }
 

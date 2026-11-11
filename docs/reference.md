@@ -6356,7 +6356,7 @@ Markup written for the web works: `<p>`, `<h1>`, `<ul>`, `<strong>`, `<button>`,
 
 A tag whose default `display` is `inline` takes part in a paragraph like a `<span>` (see [Inline text](#inline-text)): `a`, `strong`, `em`, `b`, `i`, `u`, `s`, `small`, `mark`, `abbr`, `cite`, `q`, `sub`, `sup`, `time`, `kbd`, `var`, `samp`, `br` and `wbr`. A run of strings and inline tags is one paragraph that wraps, selects and is searched as one. A block tag in the middle of the run ends the paragraph and starts the next after it. `style={{ display }}` overrides the default either way: `<em style={{ display: 'block' }}>` is a block, and `<p style={{ display: 'inline' }}>` joins its paragraph.
 
-An inline tag is an inline box: it shows what a `<span>` shows, and a motion value it binds is limited to what a span can animate (see [Animate an inline span](#animate-an-inline-span)). `display: "inline-block"` makes any tag an [atomic inline](#inline-block-inline-flex-inline-grid-and-inline-table), which is what `button` is by default.
+An element is an inline box when its effective `display` is `inline`, whatever its tag: it shows what a `<span>` shows, and a motion value it binds is limited to what a span can animate (see [Animate an inline span](#animate-an-inline-span)). An `<a>` or `<span>` with `display: 'block'` is a block, so it takes a transform and a motion value in `style.x`; a `<div>` with `display: 'inline'` is an inline box and does not. `display: "inline-block"` makes any tag an [atomic inline](#inline-block-inline-flex-inline-grid-and-inline-table), which is what `button` is by default.
 
 `<br>` is a line feed whatever `white-space` is, and a space before it is dropped as at the end of a line. `<wbr>` adds a zero width space, which is not read out.
 
