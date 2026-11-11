@@ -1409,3 +1409,102 @@ fn custom_properties_var_and_css_wide_keywords_stay_in_the_cascade() {
     assert_eq!(doc.color(div), None, "`unset` took the inline color back");
     assert!(doc.style(div).is_some_and(|style| style.var_declarations.is_some()), "the `var()` is held for build time");
 }
+
+// ── The order of the layers under the inline style ──────────────────
+
+impl Doc {
+    fn universal(&mut self, json: &str) {
+        let style = crate::retained_tree::parse_style(json.as_bytes()).unwrap();
+        self.tree.set_universal_style(Some(Arc::new(style)));
+    }
+
+    fn margin_top(&self, id: u64) -> Option<String> {
+        self.style(id).and_then(|style| style.margin_top.as_ref()).map(|margin| format!("{margin:?}"))
+    }
+}
+
+#[test]
+fn a_rule_beats_the_user_agent_style_of_a_tag() {
+    let mut doc = Doc::new();
+    let p = doc.classed("p", ROOT, "x");
+    let other = doc.element("p", ROOT);
+    let button = doc.element("button", ROOT);
+    assert_eq!(doc.style(button).and_then(|style| style.display.as_deref()), Some("inline-block"));
+    let user_agent = doc.margin_top(p);
+    doc.style_element(ROOT, "p.x { margin-top: 0px } button { display: flex }");
+    doc.flush();
+    assert_ne!(doc.margin_top(p), user_agent, "the rule replaced the margin of the tag");
+    assert_eq!(doc.margin_top(other), user_agent, "a `p` the rule does not match keeps it");
+    assert_eq!(doc.style(p).and_then(|style| style.display.as_deref()), Some("block"), "and what the rule leaves out is the tag's");
+    assert_eq!(doc.style(button).and_then(|style| style.display.as_deref()), Some("flex"));
+}
+
+#[test]
+fn the_layers_stack_from_the_tag_to_an_important_inline_value() {
+    let mut doc = Doc::new();
+    let mark = doc.classed("mark", ROOT, "a");
+    assert_eq!(doc.color(mark), Some("#000000"), "the user agent style of the tag");
+
+    doc.universal(r##"{"color":"#111111","opacity":0.5}"##);
+    assert_eq!(doc.color(mark), Some("#111111"), "`*` beats the user agent style");
+    assert_eq!(doc.background(mark), Some("#ffff00"), "and leaves what it does not set");
+
+    doc.style_element(ROOT, ".a { color: red; opacity: 0.2 }");
+    doc.flush();
+    assert_eq!(doc.color(mark), Some("red"), "a rule beats `*`");
+    assert_eq!(doc.style(mark).and_then(|style| style.opacity), Some(0.2));
+
+    doc.inline(mark, r#"{"color":"green"}"#);
+    doc.flush();
+    assert_eq!(doc.color(mark), Some("green"), "an inline value beats a rule");
+
+    let (_, _) = doc.style_element(ROOT, ".a { color: blue !important }");
+    doc.flush();
+    assert_eq!(doc.color(mark), Some("blue"), "an important rule beats an inline value");
+
+    doc.inline(mark, r#"{"color":"purple !important"}"#);
+    doc.flush();
+    assert_eq!(doc.color(mark), Some("purple"), "an important inline value beats an important rule");
+    assert_eq!(doc.background(mark), Some("#ffff00"), "the tag still shows through where nothing else speaks");
+}
+
+#[test]
+fn a_rule_sets_the_display_of_html_and_body_and_the_style_attribute_selector_leaves_them_alone() {
+    let mut doc = Doc::new();
+    let html = doc.make("html");
+    let head = doc.make("head");
+    let body = doc.make("body");
+    doc.tree.append_child(html, head);
+    doc.tree.append_child(html, body);
+    doc.tree.set_root(html);
+    assert_eq!(doc.style(body).and_then(|style| style.display.as_deref()), Some("block"));
+    assert_eq!(doc.style(head).and_then(|style| style.display.as_deref()), Some("none"));
+    assert!(doc.style(body).is_some_and(|style| style.width.is_some() && style.height.is_some()));
+    assert!(doc.tree.elements[&body].own_style().is_none(), "nothing sends the defaults as an inline style");
+
+    let marked = doc.element("div", body);
+    doc.inline(marked, r#"{"color":"red"}"#);
+    doc.style_element(head, "body { display: flex } [style] { opacity: 0.3 }");
+    doc.flush();
+    assert_eq!(doc.style(body).and_then(|style| style.display.as_deref()), Some("flex"));
+    assert_eq!(doc.style(head).and_then(|style| style.display.as_deref()), Some("none"), "head is not matched");
+    assert!(doc.style(body).is_some_and(|style| style.width.is_some()), "the rest of the defaults stay");
+    assert_eq!(doc.style(body).and_then(|style| style.opacity), None);
+    assert_eq!(doc.style(html).and_then(|style| style.opacity), None);
+    assert_eq!(doc.style(marked).and_then(|style| style.opacity), Some(0.3));
+}
+
+#[test]
+fn a_type_selector_matches_the_html_tags_by_name() {
+    let mut doc = Doc::new();
+    let ids: Vec<(&str, u64)> = ["p", "button", "a", "h1", "ul", "li", "table", "td"].iter().map(|tag| (*tag, doc.element(tag, ROOT))).collect();
+    let rules: String = ids.iter().map(|(tag, _)| format!("{tag} {{ opacity: 0.25 }} ")).collect();
+    doc.style_element(ROOT, &rules);
+    doc.flush();
+    for (tag, id) in &ids {
+        assert_eq!(doc.style(*id).and_then(|style| style.opacity), Some(0.25), "<{tag}>");
+    }
+    let div = doc.element("div", ROOT);
+    doc.flush();
+    assert_eq!(doc.style(div).and_then(|style| style.opacity), None);
+}

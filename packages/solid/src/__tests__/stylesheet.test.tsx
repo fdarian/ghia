@@ -1,8 +1,9 @@
 /** A `<style>` element's text is a sheet native matches against the tree, so classes and attributes style elements. */
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { For, createSignal } from "solid-js"
-import { getComputedStyle } from "@ghia/native/host"
+import { document, getComputedStyle } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
+import { UniversalStyle } from "../components/universal-style.js"
 
 describe.skipIf(!hasNativeTestRenderer)("stylesheets in Solid", () => {
   let app: ReturnType<typeof createTestRoot>
@@ -124,5 +125,88 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in Solid", () => {
     expect(getComputedStyle(box).opacity).toBe("0.75")
     app.flushSync(() => setShown(false))
     expect(getComputedStyle(box).opacity).toBe("1")
+  })
+
+  it("stacks the user agent style of a tag, `*`, a rule, the inline style and the important ones of both", () => {
+    let mark: any
+    const [css, setCss] = createSignal(".a { color: rgb(255, 0, 0) }")
+    const [inline, setInline] = createSignal<Record<string, string> | undefined>(undefined)
+    app.render(() => (
+      <div>
+        <UniversalStyle style={{ color: "rgb(0, 0, 17)" }} />
+        <style>{css()}</style>
+        <mark ref={(element: unknown) => (mark = element)} class="a" style={inline()} />
+      </div>
+    ))
+    expect(getComputedStyle(mark).backgroundColor).toBe("rgb(255, 255, 0)")
+    expect(getComputedStyle(mark).color).toBe("rgb(255, 0, 0)")
+
+    app.flushSync(() => setInline({ color: "rgb(0, 128, 0)" }))
+    expect(getComputedStyle(mark).color).toBe("rgb(0, 128, 0)")
+
+    app.flushSync(() => setCss(".a { color: rgb(0, 0, 255) !important }"))
+    expect(getComputedStyle(mark).color).toBe("rgb(0, 0, 255)")
+
+    app.flushSync(() => setInline({ color: "rgb(128, 0, 128) !important" }))
+    expect(getComputedStyle(mark).color).toBe("rgb(128, 0, 128)")
+    expect(getComputedStyle(mark).backgroundColor).toBe("rgb(255, 255, 0)")
+  })
+
+  it("lets a rule beat the user agent style of a tag, and `*` beat it too", () => {
+    let heading: any
+    let paragraph: any
+    let button: any
+    app.render(() => (
+      <div>
+        <UniversalStyle style={{ marginBottom: 7 }} />
+        <style>{`h1 { margin-top: 3px } button { display: flex }`}</style>
+        <h1 ref={(element: unknown) => (heading = element)} />
+        <p ref={(element: unknown) => (paragraph = element)} />
+        <button ref={(element: unknown) => (button = element)} />
+      </div>
+    ))
+    expect(getComputedStyle(heading).marginTop).toBe("3px")
+    expect(getComputedStyle(heading).marginBottom).toBe("7px")
+    expect(getComputedStyle(heading).fontWeight).toBe("700")
+    expect(getComputedStyle(paragraph).marginTop).toBe("16px")
+    expect(getComputedStyle(paragraph).marginBottom).toBe("7px")
+    expect(getComputedStyle(button).display).toBe("flex")
+  })
+
+  it("matches a type selector against the tag of an HTML element", () => {
+    const refs: Record<string, any> = {}
+    app.render(() => (
+      <div>
+        <style>{`p, button, a, h2, ul, li { opacity: 0.25 }`}</style>
+        <p ref={(element: unknown) => (refs.p = element)} />
+        <button ref={(element: unknown) => (refs.button = element)} />
+        <a ref={(element: unknown) => (refs.a = element)} />
+        <h2 ref={(element: unknown) => (refs.h2 = element)} />
+        <ul ref={(element: unknown) => (refs.ul = element)}>
+          <li ref={(element: unknown) => (refs.li = element)} />
+        </ul>
+        <div ref={(element: unknown) => (refs.div = element)} />
+      </div>
+    ))
+    for (const tag of ["p", "button", "a", "h2", "ul", "li"]) expect(getComputedStyle(refs[tag]).opacity, tag).toBe("0.25")
+    expect(getComputedStyle(refs.div).opacity).toBe("1")
+  })
+
+  it("lets a sheet restyle body, and `[style]` does not match html, head or body", () => {
+    let marked: any
+    app.render(() => (
+      <div ref={(element: unknown) => (marked = element)} style={{ width: 10 }}>
+        <style>{`body { display: flex } [style] { opacity: 0.3 }`}</style>
+      </div>
+    ))
+    const body = document.body!
+    expect(getComputedStyle(body).display).toBe("flex")
+    expect(getComputedStyle(body).width).not.toBe("")
+    expect(getComputedStyle(document.head!).display).toBe("none")
+    expect(getComputedStyle(body).opacity).toBe("1")
+    expect(getComputedStyle(document.documentElement!).opacity).toBe("1")
+    expect(getComputedStyle(document.documentElement!).display).toBe("block")
+    expect(getComputedStyle(marked).opacity).toBe("0.3")
+    expect(body.hasAttribute("style")).toBe(false)
   })
 })
