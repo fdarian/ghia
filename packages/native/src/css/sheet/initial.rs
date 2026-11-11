@@ -47,7 +47,7 @@ fn table() -> Vec<(String, &'static str)> {
         ("justifyContent", "\"normal\""),
         ("alignSelf", "\"auto\""),
         ("justifySelf", "\"auto\""),
-        // `normal` is not a value the gap properties parse; it is zero in flex and grid layout.
+        // `normal` is not a value the gap properties parse (`UNREPRESENTABLE`); it is zero in flex and grid layout.
         ("rowGap", "0"),
         ("columnGap", "0"),
         ("overflowX", "\"visible\""),
@@ -115,13 +115,23 @@ pub(super) fn of(key: KeyId) -> Option<&'static Declaration> {
     INITIAL.get(&key)
 }
 
-/// Longhands that no shorthand covers, so they are not in the table, and whose initial value the
-/// style parser cannot represent.
-const UNREPRESENTABLE: [(&str, &str); 1] = [("zIndex", "auto")];
+/// The initial value of a property written as a keyword the style parser has no form for, so the
+/// keyword is `initial` for the cascade: it takes back an earlier rule's value, and the property
+/// is left unset, which is its initial value. The table holds the properties, whether a longhand
+/// or a shorthand, whose CSS initial value is such a keyword.
+const UNREPRESENTABLE: [(&str, &str); 7] = [
+    ("zIndex", "auto"),
+    ("maxWidth", "none"),
+    ("maxHeight", "none"),
+    ("gap", "normal"),
+    ("rowGap", "normal"),
+    ("columnGap", "normal"),
+    ("lineClamp", "none"),
+];
 
 /// Whether `declaration` is its property's initial value written as a keyword, which the cascade
-/// then reads as `initial`. A value the style parser has no form for (`z-index: auto`) could not
-/// otherwise take back an earlier rule's value.
+/// then reads as `initial`. A value the style parser has no form for (`z-index: auto`,
+/// `max-width: none`) could not otherwise take back an earlier rule's value.
 pub(super) fn is_initial_keyword(declaration: &Declaration) -> bool {
     let Ok(written) = serde_json::from_str::<String>(&declaration.value) else {
         return false;

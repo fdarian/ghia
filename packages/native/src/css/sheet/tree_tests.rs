@@ -1536,3 +1536,28 @@ fn an_element_does_not_transition_into_the_style_a_sheet_gives_it_on_mount() {
         Some("red")
     );
 }
+
+#[test]
+fn a_keyword_initial_value_takes_back_an_earlier_rules_value_in_a_sheet_and_inline() {
+    let mut doc = Doc::new();
+    let wide = doc.classed("div", ROOT, "a wide");
+    let tall = doc.classed("div", ROOT, "a");
+    let gapped = doc.classed("div", ROOT, "g normal");
+    let rowed = doc.classed("div", ROOT, "g r");
+    doc.style_element(
+        ROOT,
+        ".a { max-width: 300px; max-height: 40px } .a.wide { max-width: none } \
+         .g { gap: 5px; column-gap: 7px } .normal { gap: normal } .r { row-gap: normal }",
+    );
+    doc.inline(tall, r#"{"maxWidth":"none","maxHeight":"none"}"#);
+    doc.flush();
+    assert_eq!(doc.style(wide).and_then(|style| style.max_width.clone()), None);
+    assert!(doc.style(wide).is_some_and(|style| style.max_height.is_some()));
+    assert_eq!(doc.style(tall).and_then(|style| style.max_width.clone()), None, "inline over a sheet value");
+    assert_eq!(doc.style(tall).and_then(|style| style.max_height.clone()), None);
+    let gap_of = |id| doc.style(id).map(|style| (style.gap.is_some(), style.row_gap.clone(), style.column_gap.is_some()));
+    assert!(gap_of(gapped).is_none_or(|gap| gap == (false, None, false)), "gap: normal takes back the shorthand and the longhand");
+    let rowed = gap_of(rowed).expect("the shorthand still gives a gap");
+    assert!(rowed.0 && rowed.2, "row-gap: normal leaves the rest of the gap");
+    assert!(rowed.1.is_some(), "and is the initial row gap over the shorthand");
+}
