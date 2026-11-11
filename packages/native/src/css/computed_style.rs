@@ -11,17 +11,16 @@
 //! The result is a flat list `[name, value, name, value, ...]` with the names in kebab case.
 
 use gpui::{Pixels, Size};
+use napi::{Error, Result};
+use std::sync::Mutex;
 
 use crate::automation::ElementBounds;
+use crate::css::custom_properties::CustomProperties;
 use crate::css::length::{LengthContext, LinearLength};
 use crate::css::syntax::{split_commas, split_whitespace};
 use crate::motion::text::{length as length_text, pixels, six_digits};
-use crate::css::custom_properties::CustomProperties;
 use crate::renderer::{BuildCtx, GpuixView, Inherited, SkippedContent, StyleInputs};
-use crate::retained_tree::RetainedTree;
-use napi::{Error, Result};
-use std::sync::Mutex;
-use crate::retained_tree::RetainedElement;
+use crate::retained_tree::{RetainedElement, RetainedTree};
 use crate::style::{DimensionValue, StyleDesc};
 
 /// The laid-out boxes a read needs, taken right after the window was laid out.
@@ -109,8 +108,15 @@ pub(crate) fn read(
     let element = tree.elements.get(&id)?;
     let chain = crate::layout::content_visibility::ancestors_of(tree, id);
     let parent = enter_ancestors(ctx, &chain);
-    let (style, custom) =
-        if pseudo { (StyleDesc::default(), ctx.inherited.custom.clone()) } else { style_at_read(ctx, window, element) };
+    let (style, custom) = if pseudo {
+        // A pseudo-element inherits from its element, not from the element's parent.
+        let (element_style, element_custom) = style_at_read(ctx, window, element);
+        ctx.inherited =
+            ctx.inherited.clone().descend_with_custom(Some(&element_style), element.has_inert_prop(), element_custom);
+        (StyleDesc::default(), ctx.inherited.custom.clone())
+    } else {
+        style_at_read(ctx, window, element)
+    };
     let own = ctx.inherited.clone().descend_with_custom(Some(&style), element.has_inert_prop(), custom);
     let rtl = own.direction.direction.is_rtl();
     let mirrored = rtl.then(|| style.mirrored_inline_pairs()).flatten();

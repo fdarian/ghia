@@ -302,6 +302,24 @@ pub(crate) fn holds_family(style: &StyleDesc, family: &str) -> bool {
     style.var_declarations.as_deref().is_some_and(|held| held.iter().any(|declaration| declaration.key.starts_with(family)))
 }
 
+/// What element `id` computes to for its `var()`: the custom properties it computes to below
+/// `parent` (the focus variants that apply to it included) and `style` with them substituted,
+/// `None` when it holds no `var()`.
+pub(crate) fn substitute_for_element(
+    focus_styles: &crate::focus::FocusStyles,
+    focusable: bool,
+    id: u64,
+    style: Option<&StyleDesc>,
+    parent: &CustomProperties,
+) -> (Option<StyleDesc>, CustomProperties) {
+    let custom = match style {
+        Some(style) => focus_styles.custom_of(id, style, focusable, parent),
+        None => parent.clone(),
+    };
+    let substituted = style.and_then(|style| resolve(style, &custom));
+    (substituted, custom)
+}
+
 /// `style` with every `var()` in it substituted by what `custom`, the custom properties its element
 /// computes to, says, so that everything that reads the style (the build, the readers of the
 /// transform, stacking, the containing block, painting) sees the same values. `None` when there

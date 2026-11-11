@@ -240,3 +240,26 @@ describeNative("var()", () => {
     }
   })
 })
+
+describeNative("a pseudo-element", () => {
+  it("inherits from its element, not from the element's parent", () => {
+    const t = mount({
+      id: "a",
+      style: { fontSize: 18, color: "blue", "--gap": "1px" },
+      children: [{ id: "b", style: { fontSize: 20, color: "red", direction: "rtl", "--gap": "2px" }, children: [] }],
+    })
+    try {
+      for (const pseudo of ["::before", "::after"]) {
+        const style = getComputedStyle(t.ref("b"), pseudo)
+        expect([style.fontSize, style.color, style.direction, style.getPropertyValue("--gap")], pseudo).toEqual([
+          "20px",
+          "rgb(255, 0, 0)",
+          "rtl",
+          "2px",
+        ])
+      }
+    } finally {
+      t.unmount()
+    }
+  })
+})

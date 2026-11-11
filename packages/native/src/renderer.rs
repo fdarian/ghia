@@ -7893,14 +7893,13 @@ impl BuildCtx<'_> {
         id: u64,
         style: Option<&StyleDesc>,
     ) -> (Option<StyleDesc>, crate::css::custom_properties::CustomProperties) {
-        let custom = match style {
-            Some(style) => {
-                self.focus_styles.custom_of(id, style, self.focus_handles.contains_key(&id), &self.inherited.custom)
-            }
-            None => self.inherited.custom.clone(),
-        };
-        let substituted = style.and_then(|style| crate::css::var_substitution::resolve(style, &custom));
-        (substituted, custom)
+        crate::css::var_substitution::substitute_for_element(
+            &self.focus_styles,
+            self.focus_handles.contains_key(&id),
+            id,
+            style,
+            &self.inherited.custom,
+        )
     }
 
     /// The states of `id` that `style` has a refinement for. Nothing applies in
@@ -8245,7 +8244,7 @@ impl Inherited {
     }
 
     /// The custom properties an element styled by `style` computes to, below this context.
-    pub(crate) fn custom_of(&self, style: Option<&StyleDesc>) -> crate::css::custom_properties::CustomProperties {
+    fn custom_of(&self, style: Option<&StyleDesc>) -> crate::css::custom_properties::CustomProperties {
         match style.and_then(|style| style.custom_properties.as_ref()) {
             Some(declared) => self.custom.descend(declared),
             None => self.custom.clone(),
