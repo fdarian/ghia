@@ -2,7 +2,7 @@
 
 How CSS rules reach an element: `<style>` elements and constructed sheets, the rule parser, the rule index, matching, the cascade at the level of declarations, and what a change to the tree or a sheet marks to match again. The behaviour an app author sees is in [reference](../reference.md#stylesheets), the differences from CSS in [deviations](deviations.md#stylesheets).
 
-The code is `packages/native/src/css/sheet/` (parse, match, cascade, invalidate; `tree.rs` is the retained tree's side) and `packages/native/js/css/` (the CSSOM). `renderer.rs`, `retained_tree.rs` and `host.ts` only call into them.
+The code is `packages/native/src/css/sheet/` (parse, match, cascade, invalidate; `tree.rs` is the retained tree's side) and `packages/native/js/css/` (the CSSOM). `renderer.rs` and `host.ts` only call into them. `retained_tree.rs` calls into them and also holds what needs its private state: the accessors of an element's per-sheet data (`css`, `set_matched`, `set_css_atoms`, behind `ElementExtras`), the style table's `InternedStyle` and the payload it keeps of each style (`raw_of`, which the cascade reads an element's own declarations from), and the restyle that merges a matched set into an element's effective style (`apply_matched`, `refresh_effective_style`). None of it moved out, because each needs a private field of `RetainedElement` or `StyleTable`.
 
 ## The shape
 
