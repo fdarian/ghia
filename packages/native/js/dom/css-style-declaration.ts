@@ -180,20 +180,18 @@ function sameValue(left: unknown, right: unknown): boolean {
 }
 
 /**
- * `live` with the declaration of `key` set to `stored`, or `undefined` when that changes nothing. A
+ * Sets the declaration of `key` to `stored` in `style`, and says whether that changed anything. A
  * declaration is replaced where it stands, as CSS does, unless a later one overlaps it (a shorthand
  * and a longhand it covers), where the last wins: then it moves last.
  */
-function withDeclaration(live: StyleRecord, key: string, stored: unknown): StyleRecord | undefined {
-  const keys = Object.keys(live)
-  const index = live[key] === undefined ? -1 : keys.indexOf(key)
-  const inPlace = index >= 0 && !keys.slice(index + 1).some((later) => live[later] !== undefined && overlaps(key, later))
-  if (inPlace && sameValue(live[key], stored)) return undefined
-  if (inPlace) return { ...live, [key]: stored }
-  const next = { ...live }
-  delete next[key]
-  next[key] = stored
-  return next
+function declare(style: StyleRecord, key: string, stored: unknown): boolean {
+  const keys = Object.keys(style)
+  const index = style[key] === undefined ? -1 : keys.indexOf(key)
+  const inPlace = index >= 0 && !keys.slice(index + 1).some((later) => style[later] !== undefined && overlaps(key, later))
+  if (inPlace && sameValue(style[key], stored)) return false
+  if (!inPlace) delete style[key]
+  style[key] = stored
+  return true
 }
 
 /**
@@ -204,14 +202,14 @@ function withDeclaration(live: StyleRecord, key: string, stored: unknown): Style
  * and a longhand wins.
  */
 export function applyStyleChange(live: StyleDesc, previous: StyleDesc, next: StyleDesc): StyleDesc {
-  let result = { ...live } as StyleRecord
+  const result = { ...live } as StyleRecord
   const before = previous as StyleRecord
   const after = next as StyleRecord
   for (const key of Object.keys(after)) {
     const value = after[key]
     if (sameValue(before[key], value)) continue
     if (value === undefined) delete result[key]
-    else result = withDeclaration(result, key, value) ?? result
+    else declare(result, key, value)
   }
   for (const key of Object.keys(before)) if (!(key in after)) delete result[key]
   return result as StyleDesc
@@ -283,8 +281,8 @@ class CSSStyleDeclarationClass {
     if (IMPORTANT.test(text)) return
     if (priority !== undefined && priority !== "" && String(priority).toLowerCase() !== "important") return
     const stored = storedValue(key, text)
-    const next = withDeclaration(this.#binding.style as StyleRecord, key, stored)
-    if (next !== undefined) this.#binding.setStyle(next as StyleDesc)
+    const next = { ...this.#binding.style } as StyleRecord
+    if (declare(next, key, stored)) this.#binding.setStyle(next as StyleDesc)
   }
 
   /** The value the property had, `""` when it had none. */

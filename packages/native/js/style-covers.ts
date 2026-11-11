@@ -1,9 +1,13 @@
+import type { StyleDesc } from "./host.js"
+
+type StyleKey = keyof StyleDesc
+
 /**
- * Which properties a shorthand covers directly, mirroring `COVERS` in `native/src/css/covers.rs`
- * (keep the two the same). Two declarations of overlapping properties are one cascade: the one
+ * Which properties a shorthand covers directly, mirroring the `covers!` table in
+ * `native/src/css/covers.rs` (a test keeps the two the same). Two declarations of overlapping properties are one cascade: the one
  * written later wins, so the order of a style's keys carries meaning.
  */
-const DIRECT_COVERS: Readonly<Record<string, readonly string[]>> = {
+export const DIRECT_COVERS = {
   padding: ["paddingBlock", "paddingInline", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft"],
   paddingBlock: ["paddingTop", "paddingBottom"],
   paddingInline: ["paddingLeft", "paddingRight"],
@@ -46,10 +50,12 @@ const DIRECT_COVERS: Readonly<Record<string, readonly string[]>> = {
   mask: ["maskImage", "maskSize", "maskPosition", "maskRepeat", "maskOrigin", "maskClip", "maskMode", "maskComposite", "maskBorder"],
   maskBorder: ["maskBorderSource", "maskBorderSlice", "maskBorderWidth", "maskBorderOutset", "maskBorderRepeat", "maskBorderMode"],
   background: ["backgroundColor", "backgroundImage", "backgroundSize", "backgroundPosition", "backgroundRepeat", "backgroundOrigin", "backgroundClip"],
-}
+} as const satisfies Partial<Record<StyleKey, readonly StyleKey[]>>
+
+const COVERS: Readonly<Record<string, readonly string[] | undefined>> = DIRECT_COVERS
 
 function coveredBy(shorthand: string, into: Set<string>): void {
-  for (const property of DIRECT_COVERS[shorthand] ?? []) {
+  for (const property of COVERS[shorthand] ?? []) {
     if (into.has(property)) continue
     into.add(property)
     coveredBy(property, into)
@@ -70,9 +76,8 @@ export function overlaps(left: string, right: string): boolean {
   if (left === right) return true
   const leftReach = REACH.get(left)
   const rightReach = REACH.get(right)
-  if (leftReach === undefined && rightReach === undefined) return false
-  const leftSet = leftReach ?? new Set([left])
-  const rightSet = rightReach ?? new Set([right])
-  for (const property of leftSet) if (rightSet.has(property)) return true
+  if (leftReach === undefined) return rightReach !== undefined && rightReach.has(left)
+  if (rightReach === undefined) return leftReach.has(right)
+  for (const property of leftReach) if (rightReach.has(property)) return true
   return false
 }
