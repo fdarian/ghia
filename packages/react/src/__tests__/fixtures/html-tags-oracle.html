@@ -1,0 +1,80 @@
+<!doctype html>
+<!--
+  Oracle for html-tags.test.tsx: the border boxes (`[x, y, width, height]` relative to the case box at the top left of the
+  page) that headless Chrome lays out for HTML tags with their default style, no reset of margins or padding: what the
+  user agent stylesheet gives `p`, `h1` to `h6`, lists, `blockquote`, `figure`, `hr`, `pre`, `fieldset`, `button`,
+  tables and the inline tags. The font is GpuixTestSquare at 20px, `line-height: 1`: a letter is 20px wide and a
+  space 5px, and a line is as tall as its font size. `box-sizing: border-box` is the one reset, as in every oracle page:
+  gpuix has no `box-sizing`.
+  Regenerate with
+
+    sh html-tags-oracle.sh
+-->
+<html><head><meta charset="utf-8"><style>
+@font-face{font-family:GpuixTestSquare;src:url(gpuix-test-square.ttf)}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1 sans-serif}
+#case{position:absolute;left:0;top:0;width:400px;font:20px/1 GpuixTestSquare}
+</style></head><body>
+<div id="scene"></div>
+<script>
+const SQUARE = 'style="font-family:GpuixTestSquare;font-size:20px;line-height:1"';
+const cases = {
+  headings:
+    '<h1 id="h1"><span id="h1s">AA</span></h1><h2 id="h2"><span id="h2s">AA</span></h2><h3 id="h3"><span id="h3s">AA</span></h3>' +
+    '<h4 id="h4"><span id="h4s">AA</span></h4><h5 id="h5"><span id="h5s">AA</span></h5><h6 id="h6"><span id="h6s">AA</span></h6>' +
+    '<p id="after">AA</p>',
+  'a paragraph with inline tags':
+    '<p id="p" style="width:300px"><span id="p0">AAAA</span> <strong id="s">AAAA</strong> <em id="e">AAAA</em> <a id="a">AAAA</a> AAAA AAAA</p>',
+  'inline tags on one line':
+    '<p id="line">AA <b id="b">AA</b> <i id="i">AA</i> <u id="u">AA</u> <cite id="cite">AA</cite></p>' +
+    '<div id="d">AA <strong id="ds">AA</strong> <abbr id="abbr">AA</abbr> <time id="time">AA</time> <var id="var">A</var></div>',
+  'br and wbr':
+    '<p id="brp">AA<br>AAAA <br><br>AA</p><p id="wp" style="width:130px">AAAAAA<wbr>AAAAAA</p>',
+  'sub, sup, small, mark and s':
+    '<p id="sp">AA<sub id="sub">AA</sub>AA<sup id="sup">AA</sup>AA<small id="sm">AA</small></p>' +
+    '<p id="mp">AA <mark id="mk">AA</mark> <s id="st">AA</s></p>',
+  lists:
+    '<ul id="ul"><li id="li1">AA</li><li id="li2">AA</li></ul><ol id="ol"><li id="oli1">AA</li></ol><p id="after">AA</p>',
+  'nested lists':
+    '<ul id="ul"><li id="li1">AA<ul id="inner"><li id="li2">AA</li></ul></li><li id="li3">AA</li></ul><p id="after">AA</p>',
+  'blockquote, figure, address and dl':
+    '<blockquote id="bq"><p id="bqp">AA</p></blockquote><figure id="fig"><figcaption id="cap">AA</figcaption></figure>' +
+    '<address id="ad">AA</address><dl id="dl"><dt id="dt">AA</dt><dd id="dd">AA</dd></dl>',
+  'hr and pre':
+    `<p id="a1">AA</p><hr id="hr"><pre id="pre" ${SQUARE}>A A\n  AAA</pre><p id="a2">AA</p>`,
+  fieldset:
+    '<fieldset id="fs"><p id="fsp">AA</p></fieldset><p id="after">AA</p>',
+  button:
+    `<p id="bp">AA <button id="btn" ${SQUARE}>AAAA</button> AA</p><div id="bd"><button id="btn2" ${SQUARE}>AA</button></div>`,
+  table:
+    '<table id="t"><caption id="tcap">AA</caption><thead><tr id="hr1"><th id="th1">AA</th><th id="th2">AAAA</th></tr></thead>' +
+    '<tbody><tr id="tr1"><td id="td1">AA</td><td id="td2" style="width:40px">AA AA</td></tr></tbody>' +
+    '<tfoot><tr id="tr2"><td id="td3">AA</td><td id="td4">AA</td></tr></tfoot></table>',
+  'sectioning tags':
+    '<section id="sec"><header id="hd">AA</header><nav id="nv"><a id="na">AA</a></nav><main id="mn"><article id="ar">AA</article><aside id="as">AA</aside></main><footer id="ft">AA</footer></section>' +
+    '<details id="det"><summary id="sum">AA</summary></details>',
+};
+
+document.fonts.load('20px GpuixTestSquare', 'A').then(() => {
+  const scene = document.getElementById('scene');
+  const out = {};
+  for (const [name, html] of Object.entries(cases)) {
+    const holder = document.createElement('div');
+    holder.id = 'case';
+    holder.innerHTML = html;
+    scene.appendChild(holder);
+    const origin = holder.getBoundingClientRect();
+    const boxes = {};
+    for (const element of holder.querySelectorAll('[id]')) {
+      const rect = element.getBoundingClientRect();
+      boxes[element.id] = [rect.left - origin.left, rect.top - origin.top, rect.width, rect.height];
+    }
+    out[name] = { html, boxes };
+    scene.removeChild(holder);
+  }
+  const output = document.createElement('div');
+  output.setAttribute('data-oracle', JSON.stringify(out));
+  document.body.appendChild(output);
+});
+</script></body></html>
