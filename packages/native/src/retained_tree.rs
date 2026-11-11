@@ -1537,15 +1537,6 @@ impl RetainedTree {
         self.relations.restructured();
     }
 
-    /// Takes an interned style. Pointer identity is the fast path and covers
-    /// every resend, because `StyleTable::intern` returns the same `Arc` for
-    /// the same bytes. It is not sufficient on its own: interning keys on raw
-    /// bytes, so `{"color":"red","width":10}` and `{"width":10,"color":"red"}`
-    /// are two `Arc`s holding the same style. Only a pointer miss pays for the
-    /// ~80-field compare, which is what decides whether this repaints.
-    ///
-    /// The comparison is on the declared style, before the universal layer is
-    /// put under it, so a resend costs no merge.
     /// Whether the root has anything in it: the container a renderer mounts into is there, and is
     /// drawn, before the first element is.
     pub(crate) fn has_content(&self) -> bool {
@@ -1564,14 +1555,15 @@ impl RetainedTree {
         }
     }
 
+    /// Takes an interned style. `StyleTable::intern` returns the same `Arc` for the same bytes, so
+    /// every resend is a pointer match and costs no merge. Two payloads that parse to the same
+    /// style are two `Arc`s and restyle, which `assign_style` then finds changes nothing: the
+    /// parsed style cannot stand in for the payload, because it has dropped `!important`.
     pub fn set_style(&mut self, id: u64, style: InternedStyle) {
         let Some(element) = self.elements.get_mut(&id) else {
             return;
         };
-        let same = element
-            .own_style
-            .as_ref()
-            .is_some_and(|current| Arc::ptr_eq(current.arc(), style.arc()) || **current.arc() == **style.arc());
+        let same = element.own_style.as_ref().is_some_and(|current| Arc::ptr_eq(current.arc(), style.arc()));
         if same {
             return;
         }

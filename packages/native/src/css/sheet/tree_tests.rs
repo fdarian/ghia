@@ -1561,3 +1561,21 @@ fn a_keyword_initial_value_takes_back_an_earlier_rules_value_in_a_sheet_and_inli
     assert!(rowed.0 && rowed.2, "row-gap: normal leaves the rest of the gap");
     assert!(rowed.1.is_some(), "and is the initial row gap over the shorthand");
 }
+
+#[test]
+fn an_inline_value_that_gains_or_loses_important_restyles() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "x");
+    doc.style_element(ROOT, ".x { color: blue !important }");
+    doc.inline(div, r#"{"color":"red"}"#);
+    doc.flush();
+    assert_eq!(doc.color(div), Some("blue"));
+
+    doc.inline(div, r#"{"color":"red !important"}"#);
+    doc.flush();
+    assert_eq!(doc.color(div), Some("red"), "an important inline value beats an important rule");
+
+    doc.inline(div, r#"{"color":"red"}"#);
+    doc.flush();
+    assert_eq!(doc.color(div), Some("blue"));
+}
