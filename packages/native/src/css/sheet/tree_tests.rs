@@ -913,6 +913,31 @@ fn a_type_selector_ignores_case_on_an_html_element_and_not_on_an_svg_one() {
 }
 
 #[test]
+fn a_skipped_rule_is_logged_once_across_reloads_and_again_after_the_sheets_are_gone() {
+    let mut doc = Doc::new();
+    let (first, _) = doc.style_element(ROOT, "@media print { a { color: red } } a:hover { color: red } .a { color: blue }");
+    doc.flush();
+    assert_eq!(doc.tree.sheets.skip_warnings, 2);
+
+    let (second, text) = doc.style_element(ROOT, ".b { color: red }");
+    doc.flush();
+    doc.tree.set_text(text, ".b { color: red } @media print { a { color: red } } @font-face { x: y }".into());
+    doc.flush();
+    assert_eq!(doc.tree.sheets.skip_warnings, 3, "only @font-face is new");
+
+    doc.tree.destroy_element(first);
+    doc.flush();
+    assert_eq!(doc.tree.sheets.skip_warnings, 3);
+
+    doc.tree.destroy_element(second);
+    doc.flush();
+    assert!(!doc.tree.sheets.enabled);
+    doc.style_element(ROOT, "@font-face { x: y }");
+    doc.flush();
+    assert_eq!(doc.tree.sheets.skip_warnings, 4);
+}
+
+#[test]
 fn sibling_marks_under_one_parent_expand_the_following_siblings_once() {
     let mut doc = Doc::new();
     doc.style_element(ROOT, ".a ~ .b { color: red }");

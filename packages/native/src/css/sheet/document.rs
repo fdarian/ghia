@@ -58,6 +58,12 @@ pub struct StyleSheets {
     pub(crate) index: RuleIndex,
     pub(crate) interner: MatchedInterner,
     validator: Validator,
+    /// The skipped rules already logged, kept across reloads (every sheet is parsed again when
+    /// one changes) so each is logged once.
+    logged_skips: FxHashSet<String>,
+    /// How many warnings `logged_skips` let through, for the tests.
+    #[cfg(test)]
+    pub(crate) skip_warnings: usize,
     /// The text `[style]` selectors read, per own style, kept while the style is.
     style_texts: RefCell<FxHashMap<usize, (Arc<StyleDesc>, Arc<str>)>>,
 }
@@ -81,6 +87,9 @@ impl Default for StyleSheets {
             index: RuleIndex::default(),
             interner: MatchedInterner::default(),
             validator: Validator::default(),
+            logged_skips: FxHashSet::default(),
+            #[cfg(test)]
+            skip_warnings: 0,
             style_texts: RefCell::default(),
         }
     }
@@ -160,14 +169,26 @@ impl StyleSheets {
         for text in &texts {
             let mut sheet = parse_sheet(text, &mut self.atoms, &mut layers);
             self.validator.filter(&mut sheet.rules);
-            for skipped in &sheet.unsupported {
-                log::warn!("Stylesheet: not supported, skipped: {skipped}");
+            for skipped in sheet.unsupported.drain(..) {
+                self.warn_skipped(skipped);
             }
             sheets.push(sheet);
         }
         self.index = RuleIndex::build(sheets, &layers.order());
         self.interner = MatchedInterner::default();
         self.loaded = texts;
+    }
+
+    fn warn_skipped(&mut self, skipped: String) {
+        if self.logged_skips.contains(&skipped) {
+            return;
+        }
+        log::warn!("Stylesheet: not supported, skipped: {skipped}");
+        #[cfg(test)]
+        {
+            self.skip_warnings += 1;
+        }
+        self.logged_skips.insert(skipped);
     }
 
     /// The style of an element that matched `matched` and declared `own`. Run once per pair: the
@@ -222,6 +243,7 @@ impl StyleSheets {
         self.enabled = false;
         self.atoms_fresh = false;
         self.loaded.clear();
+        self.logged_skips.clear();
         self.index = Default::default();
         self.interner = Default::default();
         self.atoms = Atoms::default();
