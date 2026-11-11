@@ -73,10 +73,12 @@ const NOT_CALLABLE_FROM_A_HANDLER = new Set([
 
 function calls(r, ids) {
   return {
+    activateElement: () => r.activateElement(ids.check),
     animateMotionValue: () => r.animateMotionValue(910, 5),
     applyBatch: () => r.applyBatch(encodeWireBatchForTest([])),
     blurElement: () => r.blurElement(ids.field),
     buildElementMap: () => r.buildElementMap?.(),
+    cancelActivation: () => r.cancelActivation(ids.check),
     cancelDrag: () => r.cancelDrag(),
     clearSelection: () => r.clearSelection(),
     clickElement: () => r.clickElement(ids.box),
@@ -108,6 +110,7 @@ function calls(r, ids) {
     focusPreviousWithin: () => r.focusPreviousWithin(ids.form),
     getA11yTree: () => r.getA11yTree(),
     getAllText: () => r.getAllText(),
+    getInputChoice: () => r.getInputChoice(ids.check),
     getAnimation: () => r.getAnimation(r.getAnimations(ids.box)[0].id),
     getAnimations: () => r.getAnimations(ids.box),
     getSubtreeAnimations: () => r.getSubtreeAnimations(ids.box),
@@ -187,6 +190,7 @@ function calls(r, ids) {
     requiresTick: () => r.requiresTick(),
     resetBuildCounters: () => r.resetBuildCounters(),
     resetDebugFrameOverlayStats: () => r.resetDebugFrameOverlayStats(),
+    preActivateElement: () => r.preActivateElement(ids.check),
     scrollByKey: () => r.scrollByKey("down", false),
     scrollIntoView: () => r.scrollIntoView(ids.box),
     scrollTo: () => r.scrollTo(ids.scroller, 0, 10),
@@ -268,6 +272,7 @@ describeNative("renderer calls from a sync handler", () => {
             box: renderer.findByTestId("box").id,
             scroller: renderer.findByTestId("scroller").id,
             form: renderer.findByTestId("form").id,
+            check: renderer.findByTestId("check").id,
             img: renderer.findByTestId("img").id,
             webview: renderer.findByTestId("webview").id,
             nativeview: renderer.findByTestId("nativeview").id,
@@ -290,6 +295,7 @@ describeNative("renderer calls from a sync handler", () => {
             <form testId="form">
               <input testId="field" defaultValue="hi" style={{ width: 100, height: 20 }} onKeyDown={on === "keydown" ? run : undefined} />
             </form>
+            <input testId="check" type="checkbox" />
             <img testId="img" style={{ width: 10, height: 10 }} />
             <webview testId="webview" style={{ width: 10, height: 10 }} />
             <nativeview testId="nativeview" style={{ width: 10, height: 10 }} />
