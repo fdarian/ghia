@@ -81,6 +81,8 @@
     "test": "vitest run js/__tests__"
   },
   "dependencies": {
+    "css-select": "^7.0.0",
+    "css-what": "^8.0.0",
     "eventsource-parser": "^4.1.0",
     "zod": "^4.4.3"
   },

@@ -17,7 +17,6 @@ import {
   blurHostElement,
   eventTypesWithOverrides,
   focusHostElement,
-  hostElementMatches,
   forwardsCustomProp,
   isHtmlTag,
   isNativeviewHandlerProp,
@@ -264,10 +263,6 @@ export class HostElement extends HTMLElement {
 
   blur(): void {
     blurHostElement(this.mountedRenderer("blur"), this.nativeId)
-  }
-
-  matches(selector: string): boolean {
-    return hostElementMatches(this.mountedRenderer("matches"), this.nativeId, selector)
   }
 
   private methods(): ElementMethods {
@@ -541,6 +536,11 @@ class ElementDomBinding implements ElementBinding {
 
   propNames(): Iterable<string> {
     return this.element.props.keys()
+  }
+
+  get native(): ElementBinding["native"] {
+    const element = this.element
+    return element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.nativeId } : undefined
   }
 }
 

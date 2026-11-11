@@ -8,8 +8,9 @@
  * class implements. The members on the prototypes read only that.
  */
 
-import type { ElementType } from "../host.js"
+import type { ElementType, NativeRenderer } from "../host.js"
 import { attributeNameOf } from "./attribute-names.js"
+import { closestElement, matchesSelector, querySelector, querySelectorAll, type ElementList } from "./selectors.js"
 
 /** Where `[DOM_BINDING]()` is read, so two copies of this package find each other's nodes. */
 export const DOM_BINDING: unique symbol = Symbol.for("@ghia/native/dom-binding")
@@ -46,6 +47,8 @@ export type ElementBinding = NodeBinding & {
   prop(name: string): unknown
   /** The names of the props it was given. */
   propNames(): Iterable<string>
+  /** The renderer and id the element is known by while it is mounted: where `:focus` and `:hover` are answered. */
+  readonly native?: { readonly renderer: NativeRenderer; readonly id: number } | undefined
 }
 
 export type TextBinding = NodeBinding & {
@@ -398,6 +401,25 @@ abstract class ElementClass extends NodeClass {
     return names
   }
 
+  matches(selector: string): boolean {
+    return matchesSelector(this as unknown as Element, selector)
+  }
+
+  /** This element or its nearest ancestor that `selector` matches, or `null`. */
+  closest(selector: string): Element | null {
+    return closestElement(this as unknown as Element, selector)
+  }
+
+  /** The first descendant `selector` matches, in document order. `:scope` is this element. */
+  querySelector(selector: string): Element | null {
+    return querySelector(this as unknown as Element, selector, "Element")
+  }
+
+  /** The descendants `selector` matches, as a list that does not change with the tree. */
+  querySelectorAll(selector: string): ElementList {
+    return querySelectorAll(this as unknown as Element, selector, "Element")
+  }
+
   /** A read-only view of the `data-*` attributes, with the names in camel case. */
   get dataset(): Readonly<Record<string, string>> {
     const view: Record<string, string> = {}
@@ -456,6 +478,14 @@ abstract class DocumentClass extends NodeClass {
   }
 
   declare readonly ownerDocument: null
+
+  querySelector(selector: string): Element | null {
+    return querySelector(this as unknown as Node, selector, "Document")
+  }
+
+  querySelectorAll(selector: string): ElementList {
+    return querySelectorAll(this as unknown as Node, selector, "Document")
+  }
 }
 
 Object.defineProperty(DocumentClass.prototype, "ownerDocument", { configurable: true, get: () => null })
@@ -479,6 +509,14 @@ abstract class DocumentFragmentClass extends NodeClass {
     let text = ""
     for (const child of this[DOM_BINDING]().children) text += child.textContent ?? ""
     return text
+  }
+
+  querySelector(selector: string): Element | null {
+    return querySelector(this as unknown as Node, selector, "DocumentFragment")
+  }
+
+  querySelectorAll(selector: string): ElementList {
+    return querySelectorAll(this as unknown as Node, selector, "DocumentFragment")
   }
 }
 

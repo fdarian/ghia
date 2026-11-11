@@ -202,7 +202,9 @@ describe.skipIf(!hasNativeTestRenderer)("Solid focus model", () => {
     target.blur()
     expect(focused()).toBe(null)
     expect(log).toEqual(["focus", "blur"])
-    expect(() => target.matches(":visited")).toThrow(":focus")
+    expect(target.matches(":visited")).toBe(false)
+    expect(target.matches("[tabindex='0']")).toBe(true)
+    expect(() => target.matches("[")).toThrow(expect.objectContaining({ name: "SyntaxError" }))
   })
 
   it("scrolls into view unless preventScroll is set", () => {

@@ -389,7 +389,8 @@ impl FocusState {
         }
     }
 
-    /// `element.matches(selector)` for the focus pseudo-classes.
+    /// The focus half of `element.matches(selector)`. The JS selector engine (`js/dom/selectors.ts`) calls it for exactly
+    /// these pseudo-classes, so the `Err` is only for a caller that skips the engine.
     pub fn matches(&self, tree: &RetainedTree, id: u64, selector: &str) -> Result<bool, String> {
         match selector.trim() {
             ":focus" => Ok(self.focused == Some(id)),

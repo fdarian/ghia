@@ -13,7 +13,6 @@ import {
   DOM_BINDING,
   focusHostElement,
   HOST_BINDING,
-  hostElementMatches,
   HTMLElement,
   hasMutationObservers,
   queueChildListMutation,
@@ -135,10 +134,6 @@ class ReactHostElement extends HTMLElement implements Instance {
     blurHostElement(containerFor(this).nativeRenderer, this.nativeId)
   }
 
-  matches(selector: string): boolean {
-    return hostElementMatches(containerFor(this).nativeRenderer, this.nativeId, selector)
-  }
-
   getBoundingClientRect(): BoundingClientRect {
     return readBoundingClientRect(containerFor(this).nativeRenderer, this.nativeId)
   }
@@ -230,6 +225,12 @@ class ElementDomBinding implements ElementBinding {
 
   propNames(): Iterable<string> {
     return Object.keys(this.instance.props)
+  }
+
+  get native(): ElementBinding["native"] {
+    return this.state.mounted
+      ? { renderer: this.state.container.nativeRenderer, id: this.instance.nativeId }
+      : undefined
   }
 }
 
