@@ -141,6 +141,22 @@ mod tests {
     }
 
     #[test]
+    fn a_label_activates_its_button_unless_it_is_disabled() {
+        let batch = r#"[["createElement",1,"div"],["setRoot",1],
+            ["createElement",2,"label"],["appendChild",1,2],["setCustomProp",2,"htmlFor","go"],
+            ["createElement",3,"button"],["appendChild",1,3],["setCustomProp",3,"id","go"],
+            ["createElement",4,"label"],["appendChild",1,4],
+            ["createElement",5,"button"],["appendChild",4,5]]"#;
+        let mut tree = tree_with(batch);
+        assert_eq!(activated_control(&tree, &[2, 1]), Some(3));
+        assert_eq!(activated_control(&tree, &[4, 1]), Some(5));
+        assert_eq!(activated_control(&tree, &[5, 4, 1]), None, "a click on the button is its own");
+        crate::batch::test_json::apply(&mut tree, r#"[["setCustomProp",3,"disabled",true],["setCustomProp",5,"disabled",true]]"#).unwrap();
+        assert_eq!(activated_control(&tree, &[2, 1]), None);
+        assert_eq!(activated_control(&tree, &[4, 1]), None);
+    }
+
+    #[test]
     fn the_activation_click_keeps_the_original_coordinates_and_detail() {
         let tree = tree_with(SIBLING);
         let click = EventPayload {

@@ -606,3 +606,139 @@ describeNative("a button in a form", () => {
     })
   })
 })
+
+describeNative("a label of a button", () => {
+  let testRoot: TestRoot
+  let log: string[]
+  let submits: Array<{ submitter: { props: { testId?: string } } | null }>
+  beforeEach(() => {
+    testRoot = createTestRoot({ width: 600, height: 400 })
+    log = []
+    submits = []
+  })
+
+  const idOf = (testId: string) => testRoot.renderer.findByTestId(testId).id
+  const clickAt = (testId: string, dx = 5, dy = 5) => {
+    const bounds = testRoot.renderer.getElementBounds(idOf(testId))
+    testRoot.renderer.nativeSimulateClick(bounds.x + dx, bounds.y + dy)
+  }
+  const keyOf = (tree: A11yTreeDump, authorId: string) => {
+    const found = Object.entries(tree.nodes ?? {}).find(([, node]) => node.aria?.author_id === authorId)
+    if (!found) throw new Error(`no a11y node with author id ${authorId}`)
+    return found[0]
+  }
+  const onClick = (name: string) => () => log.push(name)
+  const onSubmit = (event) => submits.push({ submitter: event.submitter })
+  const box = { width: 200, height: 30 }
+
+  it("clicks a button with an htmlFor label, and focuses it", () => {
+    testRoot.render(
+      <div style={{ width: 300, height: 120 }}>
+        <label htmlFor="go" testId="label" onClick={onClick("label")} style={box}>Run it</label>
+        <button id="go" testId="go" onClick={onClick("button")} style={{ width: 80, height: 30 }}>Go</button>
+      </div>,
+    )
+    clickAt("label")
+    expect(log).toEqual(["label", "button"])
+    expect(testRoot.renderer.getFocusedElementId()).toBe(idOf("go"))
+  })
+
+  it("clicks a wrapped button when the label's own text is clicked, and not twice for the button", () => {
+    testRoot.render(
+      <label testId="label" style={{ width: 300, height: 40 }}>
+        <span testId="text" style={{ width: 100, height: 30 }}>Run it</span>
+        <button testId="go" onClick={onClick("button")} style={{ width: 80, height: 30 }}>Go</button>
+      </label>,
+    )
+    clickAt("text")
+    expect(log).toEqual(["button"])
+    clickAt("go")
+    expect(log).toEqual(["button", "button"])
+  })
+
+  it("submits the form of a submit button from its label, with the button as the submitter", () => {
+    testRoot.render(
+      <form onSubmit={onSubmit}>
+        <label htmlFor="go" testId="outer" style={box}>Send</label>
+        <label testId="wrap" style={{ width: 300, height: 40 }}>
+          <span testId="text" style={{ width: 100, height: 30 }}>Send too</span>
+          <button testId="wrapped" style={{ width: 80, height: 30 }}>Go</button>
+        </label>
+        <button id="go" testId="go" style={{ width: 80, height: 30 }}>Go</button>
+      </form>,
+    )
+    clickAt("outer")
+    clickAt("text")
+    expect(submits.map((submit) => submit.submitter?.props.testId)).toEqual(["go", "wrapped"])
+  })
+
+  it("does not submit for a button of type=button, or when a handler cancels the click on the button", () => {
+    testRoot.render(
+      <form onSubmit={onSubmit}>
+        <label htmlFor="plain" testId="plain-label" style={box}>Plain</label>
+        <button id="plain" type="button" style={{ width: 80, height: 30 }}>a</button>
+        <label htmlFor="cancel" testId="cancel-label" style={box}>Cancel</label>
+        <button id="cancel" onClick={(event) => event.preventDefault()} style={{ width: 80, height: 30 }}>b</button>
+      </form>,
+    )
+    clickAt("plain-label")
+    clickAt("cancel-label")
+    expect(submits).toEqual([])
+  })
+
+  it("does not click or submit a disabled button through its label", () => {
+    testRoot.render(
+      <form onSubmit={onSubmit}>
+        <label htmlFor="go" testId="outer" style={box}>Send</label>
+        <button id="go" disabled onClick={onClick("button")} style={{ width: 80, height: 30 }}>Go</button>
+        <label testId="wrap" style={{ width: 300, height: 40 }}>
+          <span testId="text" style={{ width: 100, height: 30 }}>Send too</span>
+          <button disabled onClick={onClick("wrapped")} style={{ width: 80, height: 30 }}>Go</button>
+        </label>
+      </form>,
+    )
+    clickAt("outer")
+    clickAt("text")
+    expect(log).toEqual([])
+    expect(submits).toEqual([])
+  })
+
+  it("names the button from its label before its content", () => {
+    testRoot.render(
+      <div style={{ width: 300, height: 160 }}>
+        <label htmlFor="go" id="go-label" style={{ height: 20 }}>Send the form</label>
+        <button id="go" style={{ width: 80, height: 30 }}>Go</button>
+        <label id="wrap-label" style={{ width: 300, height: 40 }}>
+          Remove
+          <button id="wrapped" style={{ width: 80, height: 30 }}>x</button>
+        </label>
+      </div>,
+    )
+    const tree = testRoot.renderer.getA11yTree()
+    expect(byAuthorId(tree, "go").labelled_by).toEqual([keyOf(tree, "go-label")])
+    expect(byAuthorId(tree, "go").label).toBeUndefined()
+    expect(tree.nodes?.[keyOf(tree, "go-label")]?.aria?.value).toBe("Send the form")
+    const wrapped = tree.nodes?.[byAuthorId(tree, "wrapped").labelled_by?.[0] ?? ""]?.aria
+    expect(wrapped?.value).toBe("Remove")
+  })
+
+  it("keeps the content as the name when the label has no text, and lets aria-label and aria-labelledby win", () => {
+    testRoot.render(
+      <div style={{ width: 300, height: 200 }}>
+        <label htmlFor="a" style={{ height: 20 }} />
+        <button id="a" style={{ width: 80, height: 30 }}>Own content</button>
+        <label htmlFor="b" style={{ height: 20 }}>Label b</label>
+        <button id="b" aria-label="Aria b" style={{ width: 80, height: 30 }}>Content b</button>
+        <label htmlFor="c" style={{ height: 20 }}>Label c</label>
+        <button id="c" aria-labelledby="other" style={{ width: 80, height: 30 }}>Content c</button>
+        <div id="other" style={{ height: 20 }}>Other</div>
+      </div>,
+    )
+    const tree = testRoot.renderer.getA11yTree()
+    expect(byAuthorId(tree, "a").label).toBe("Own content")
+    expect(byAuthorId(tree, "a").labelled_by).toBeUndefined()
+    expect(byAuthorId(tree, "b").labelled_by).toBeUndefined()
+    expect(byAuthorId(tree, "b").label).toBe("Aria b")
+    expect(byAuthorId(tree, "c").labelled_by).toEqual([keyOf(tree, "other")])
+  })
+})

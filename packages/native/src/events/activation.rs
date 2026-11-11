@@ -30,7 +30,8 @@ pub(crate) struct Activation {
 impl Activation {
     /// The activation behaviour of `click`, a click no handler cancelled: the
     /// control of the label on its path takes focus and gets a `click` of its
-    /// own, aimed at it and carrying the original position and detail.
+    /// own, aimed at it and carrying the original position and detail. That click is activated in
+    /// turn when the control is a button, which submits its form.
     pub(crate) fn activate_label(&self, click: &EventPayload, window: &mut Window, cx: &mut App) {
         let path: Vec<u64> = click.path.iter().flatten().map(|id| *id as u64).collect();
         let activation = {
@@ -44,7 +45,11 @@ impl Activation {
         if let Some(handle) = self.routing.first_focusable(&[control]) {
             window.focus(&handle, cx);
         }
-        sync_dispatch::emit(window, cx, &self.callback, payload);
+        let outcome = sync_dispatch::emit(window, cx, &self.callback, payload.clone());
+        if !outcome.default_prevented {
+            let path: Vec<u64> = payload.path.iter().flatten().map(|id| *id as u64).collect();
+            crate::forms::button_clicked(&self.tree, &path, window, cx);
+        }
     }
 
     /// The activation behaviour of `click`, a click no handler cancelled.

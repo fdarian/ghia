@@ -2005,8 +2005,8 @@ export interface FormMethods {
 
 /** `<label>`: names a control and forwards a click to it. */
 export interface LabelProps extends HostProps {
-  /** The `id` of the control to label. Without it, the first `<input>` or
-   *  `<textarea>` inside the label is the control. */
+  /** The `id` of the control to label. Without it, the first `<input>`, `<textarea>`
+   *  or `<button>` inside the label is the control. */
   htmlFor?: string
 }
 

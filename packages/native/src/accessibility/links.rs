@@ -17,7 +17,7 @@ use crate::retained_tree::{RetainedElement, RetainedTree};
 
 /// Element types a `<label>` can be associated with.
 pub(crate) fn is_labelable(element_type: &str) -> bool {
-    matches!(element_type, "input" | "textarea")
+    matches!(element_type, "input" | "textarea" | "button")
 }
 
 #[derive(Default)]
@@ -245,7 +245,7 @@ fn compute(tree: &RetainedTree) -> A11yLinks {
         if !has_role(element) && element.element_type != "label" {
             links
                 .referenced_text
-                .insert(element.id, text_of(tree, element));
+                .insert(element.id, text_of(tree, element, None));
         }
     }
 
@@ -266,8 +266,6 @@ fn compute(tree: &RetainedTree) -> A11yLinks {
                 generated
             }
         };
-        links.label_text.insert(label.id, text_of(tree, label));
-
         let control = match label.custom_props().get("htmlFor") {
             Some(target) => target
                 .as_str()
@@ -276,14 +274,22 @@ fn compute(tree: &RetainedTree) -> A11yLinks {
                 .map(|element| element.id),
             None => first_labelable_descendant(tree, label),
         };
+        let text = text_of(tree, label, control);
+        let text_is_empty = text.is_empty();
+        links.label_text.insert(label.id, text);
         let Some(control) = control else {
             continue;
         };
         links.control_of.insert(label.id, control);
-        by_control
-            .entry(control)
-            .or_default()
-            .push((path, label_author_id));
+        // A button is named by its labels' text before its content, so a label with no text must not
+        // take the content's place.
+        let names_nothing = text_is_empty && tree.elements.get(&control).is_some_and(|element| element.element_type == "button");
+        if !names_nothing {
+            by_control
+                .entry(control)
+                .or_default()
+                .push((path, label_author_id));
+        }
     }
     for (control, mut labels) in by_control {
         labels.sort_by(|(first, _), (second, _)| document_order(tree, first, second));
@@ -317,13 +323,13 @@ fn first_labelable_descendant(tree: &RetainedTree, label: &RetainedElement) -> O
     None
 }
 
-/// The label's text, without the text of any control nested in it.
-fn text_of(tree: &RetainedTree, label: &RetainedElement) -> String {
+/// The label's text, without the text of its `control` and of any field nested in it.
+fn text_of(tree: &RetainedTree, label: &RetainedElement, control: Option<u64>) -> String {
     let mut text = String::new();
     let mut stack = vec![label];
     while let Some(element) = stack.pop() {
         tree.relations().visit(1);
-        if is_labelable(&element.element_type) {
+        if Some(element.id) == control || matches!(element.element_type.as_str(), "input" | "textarea") {
             continue;
         }
         if let Some(content) = element.content.as_deref() {
@@ -430,6 +436,49 @@ mod tests {
         assert_eq!(links.referenced_text(3), Some("Be brief"));
         assert_eq!(links.referenced_text(5), None);
         assert_eq!(links.referenced_text(6), None);
+    }
+
+    #[test]
+    fn a_button_is_labelable_by_html_for_and_as_the_first_labelable_descendant() {
+        let tree = tree_with(
+            r#"[["createElement",1,"div"],["setRoot",1],
+                ["createElement",2,"label"],["appendChild",1,2],["setCustomProp",2,"htmlFor","go"],
+                ["createElement",3,"button"],["appendChild",1,3],["setCustomProp",3,"id","go"],
+                ["createElement",4,"label"],["appendChild",1,4],
+                ["createElement",5,"button"],["appendChild",4,5],
+                ["createElement",6,"input"],["appendChild",4,6]]"#,
+        );
+        let links = links_of(&tree);
+        assert_eq!(links.control_of(2), Some(3));
+        assert_eq!(links.control_of(4), Some(5));
+        assert_eq!(links.labels_of(5), None);
+    }
+
+    #[test]
+    fn a_label_with_no_text_does_not_name_a_button_but_still_activates_it() {
+        let tree = tree_with(
+            r#"[["createElement",1,"label"],["setRoot",1],
+                ["createElement",2,"button"],["appendChild",1,2]]"#,
+        );
+        let links = links_of(&tree);
+        assert_eq!(links.control_of(1), Some(2));
+        assert!(links.labels_of(2).is_none());
+    }
+
+    #[test]
+    fn the_text_of_a_label_leaves_out_its_button_and_keeps_the_text_of_another() {
+        let tree = tree_with(
+            r##"[["createElement",1,"label"],["setRoot",1],
+                ["createElement",2,"#text"],["appendChild",1,2],["setText",2,"Save "],
+                ["createElement",3,"button"],["appendChild",1,3],
+                ["createElement",4,"#text"],["appendChild",3,4],["setText",4,"go"],
+                ["createElement",5,"button"],["appendChild",1,5],
+                ["createElement",6,"#text"],["appendChild",5,6],["setText",6,"more"]]"##,
+        );
+        let links = links_of(&tree);
+        assert_eq!(links.control_of(1), Some(3));
+        assert_eq!(links.label_text(1), Some("Save more"));
+        assert_eq!(links.labels_of(3), Some(&["gpuix-label-1".to_string()][..]));
     }
 
     #[test]
