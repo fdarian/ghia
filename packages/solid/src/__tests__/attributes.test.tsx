@@ -104,4 +104,75 @@ describe.skipIf(!hasNativeTestRenderer)("attributes on native in Solid", () => {
     app.flushSync(() => setTabIndex(0))
     expect(getComputedStyle(refs.div).opacity).toBe("0.25")
   })
+
+  it("class:name and classList give the element a class attribute, so a .name rule matches and getAttribute reads it", () => {
+    let box: any
+    const [active, setActive] = createSignal(false)
+    app.render(() => (
+      <>
+        <style>{".active { opacity: 0.25 } .on { padding-top: 4px }"}</style>
+        <div ref={(element: unknown) => (box = element)} class:active={active()} classList={{ on: true }} />
+      </>
+    ))
+    const read = () => [app.renderer.getAttribute(box.nativeId, "class"), box.getAttribute("class"), box.className]
+    expect(read()).toEqual(["on", "on", "on"])
+    expect(getComputedStyle(box).opacity).toBe("1")
+    expect(getComputedStyle(box).paddingTop).toBe("4px")
+
+    app.flushSync(() => setActive(true))
+    expect(read()).toEqual(["on active", "on active", "on active"])
+    expect(getComputedStyle(box).opacity).toBe("0.25")
+
+    app.flushSync(() => setActive(false))
+    expect(read()).toEqual(["on", "on", "on"])
+    expect(getComputedStyle(box).opacity).toBe("1")
+  })
+
+  it("adds the classList tokens to class, and only a key that was on takes its token away", () => {
+    let box: any
+    const [klass, setKlass] = createSignal<string | undefined>("a b")
+    const [list, setList] = createSignal<Record<string, boolean>>({ c: true, a: false })
+    app.render(() => (
+      <>
+        <style>{".c { opacity: 0.25 }"}</style>
+        <div ref={(element: unknown) => (box = element)} class={klass()} classList={list()} />
+      </>
+    ))
+    const read = () => app.renderer.getAttribute(box.nativeId, "class")
+    // `a` was never on, so Solid's DOM leaves it where `class` put it.
+    expect(read()).toBe("a b c")
+    expect(getComputedStyle(box).opacity).toBe("0.25")
+
+    app.flushSync(() => setList({ c: true, a: true }))
+    expect(read()).toBe("a b c")
+    app.flushSync(() => setList({ c: false, a: false }))
+    expect(read()).toBe("b")
+    expect(getComputedStyle(box).opacity).toBe("1")
+
+    app.flushSync(() => setKlass(undefined))
+    expect(read()).toBeNull()
+    expect(box.getAttribute("class")).toBeNull()
+  })
+
+  it("lets class win over className, and className show again once class is undefined", () => {
+    let box: any
+    const [klass, setKlass] = createSignal<string | undefined>("a")
+    app.render(() => (
+      <>
+        <style>{".a { opacity: 0.25 } .b { padding-top: 4px }"}</style>
+        <div ref={(element: unknown) => (box = element)} class={klass()} {...{ className: "b" }} />
+      </>
+    ))
+    const read = () => [app.renderer.getAttribute(box.nativeId, "class"), box.getAttribute("class"), box.className]
+    expect(read()).toEqual(["a", "a", "a"])
+    expect(getComputedStyle(box).paddingTop).toBe("0px")
+
+    app.flushSync(() => setKlass(undefined))
+    expect(read()).toEqual(["b", "b", "b"])
+    expect(getComputedStyle(box).opacity).toBe("1")
+    expect(getComputedStyle(box).paddingTop).toBe("4px")
+
+    app.flushSync(() => setKlass("a"))
+    expect(read()).toEqual(["a", "a", "a"])
+  })
 })
