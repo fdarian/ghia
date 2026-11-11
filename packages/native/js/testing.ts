@@ -434,7 +434,8 @@ interface NativeTestRendererApi
   failStyleImage(url: string, message: string): void
   selectText(elementId: number): void
   setSelectionRange(elementId: number, start: number, end: number, direction?: string): void
-  getTextSelection(elementId: number): { start: number; end: number; direction: string; value: string }
+  getTextSelection(elementId: number): { start: number; end: number; direction: string }
+  getTextValue(elementId: number): string
   requestSubmit(elementId: number, submitterId?: number): void
   webviewCommand(elementId: number, command: string, argument?: string): void
   webviewState(elementId: number): {
@@ -1931,9 +1932,14 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
-  getTextSelection(elementId: number): { start: number; end: number; direction: string; value: string } {
+  getTextSelection(elementId: number): { start: number; end: number; direction: string } {
     this.native.flush()
     return this.native.getTextSelection(elementId)
+  }
+
+  getTextValue(elementId: number): string {
+    this.native.flush()
+    return this.native.getTextValue(elementId)
   }
 
   requestSubmit(elementId: number, submitterId?: number): void {

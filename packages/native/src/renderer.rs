@@ -1018,6 +1018,10 @@ enum UiCommand {
             std::result::Result<crate::custom_elements::text_selection::TextSelection, String>,
         >,
     },
+    GetTextValue {
+        id: u64,
+        response: SyncSender<std::result::Result<String, String>>,
+    },
     RequestSubmit {
         id: u64,
         submitter: Option<u64>,
@@ -1296,6 +1300,11 @@ async fn run_ui_commands(
             UiCommand::GetTextSelection { id, response } => {
                 window.update(cx, move |view, _window, cx| {
                     response.send(view.text_selection(id, cx)).ok();
+                })
+            }
+            UiCommand::GetTextValue { id, response } => {
+                window.update(cx, move |view, _window, cx| {
+                    response.send(view.text_control_value(id, cx)).ok();
                 })
             }
             UiCommand::RequestSubmit { id, submitter, response } => gpui::AnyWindowHandle::from(window)
@@ -4421,6 +4430,32 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// The text of an `<input>` or `<textarea>`, which is its `value`. A separate read from
+    /// `getTextSelection` so that reading a selection does not copy the text.
+    #[napi]
+    pub fn get_text_value(&self, element_id: f64) -> Result<String> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, _window, cx| view.text_control_value(id, cx))?
+            .map_err(Error::from_reason);
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetTextValue { id, response })?;
+            return recv_ui_response(receiver, "the text value query")?
+                .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     /// `checked`, `defaultChecked`, `indeterminate` and `value` of an `<input>`: its state in the
     /// tree, which a click or a prop write changes (`custom_elements::input_choice`).
     #[napi]
@@ -5849,6 +5884,13 @@ impl WebGpuixRenderer {
             js_sys::Reflect::set(&object, &wasm_bindgen::JsValue::from_str(key), &value)?;
         }
         Ok(object.into())
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getTextValue)]
+    pub fn get_text_value(&self, element_id: f64) -> Result<String, wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        update_web_window(move |view, _window, cx| view.text_control_value(id, cx))?
+            .map_err(|error| wasm_bindgen::JsValue::from_str(&error))
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = requestSubmit)]

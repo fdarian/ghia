@@ -115,8 +115,8 @@ describeNative("text control selection", () => {
       start: 1,
       end: 2,
       direction: "none",
-      value: "abc",
     })
+    expect(testRoot.renderer.getTextValue(input.id)).toBe("abc")
   })
 
   it("sees a controlled value update that is not painted yet", () => {
@@ -168,8 +168,8 @@ describeNative("text control selection", () => {
       start: 0,
       end: 5,
       direction: "none",
-      value: "hello",
     })
+    expect(testRoot.renderer.getTextValue(input.id)).toBe("hello")
     testRoot.renderer.simulateKeystrokes("x")
     expect(testRoot.renderer.getAllText()).toContain("Value: x")
   })

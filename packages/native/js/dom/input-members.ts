@@ -181,9 +181,9 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
           const state = readInputChoice(layout)
           if (state.kind !== "text") return state.value
         }
-        const read = layout.renderer.getTextSelection
-        if (typeof read !== "function") throw new Error("This renderer does not support getTextSelection, so a text input has no value to read")
-        return read.call(layout.renderer, layout.id).value
+        const read = layout.renderer.getTextValue
+        if (typeof read !== "function") throw new Error("This renderer does not support getTextValue, so a text input has no value to read")
+        return read.call(layout.renderer, layout.id)
       },
       set(this: This, value: unknown) {
         if (!hasValue(this)) return plain(this, "value", value)

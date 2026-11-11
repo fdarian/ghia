@@ -117,7 +117,7 @@ pub struct InputChoiceState {
     pub default_checked: bool,
     pub indeterminate: bool,
     /// The `value` attribute of a checkbox, radio or hidden input, with its default, and the
-    /// sanitized value of a range. Empty for a text field, whose value is its text (`getTextSelection`).
+    /// sanitized value of a range. Empty for a text field, whose value is its text (`getTextValue`).
     pub value: String,
     /// A range's limits and step, which `min`, `max` and `step` default and sanitize; 0 for another
     /// type. A `step` of 0 is `step="any"`.

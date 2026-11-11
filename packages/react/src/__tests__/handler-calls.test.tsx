@@ -158,6 +158,7 @@ function calls(r, ids) {
     getSvgMarkup: () => r.getSvgMarkup(ids.box),
     getSyntaxCacheStats: () => r.getSyntaxCacheStats(),
     getTextSelection: () => r.getTextSelection(ids.field),
+    getTextValue: () => r.getTextValue(ids.field),
     getCompositionLayers: () => r.getCompositionLayers(),
     getWebviewCommands: () => r.getWebviewCommands(ids.webview),
     getWebviewNativeView: () => r.getWebviewNativeView(ids.webview),

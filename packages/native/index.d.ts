@@ -528,6 +528,11 @@ export declare class GpuixRenderer {
    */
   getTextSelection(elementId: number): TextSelection
   /**
+   * The text of an `<input>` or `<textarea>`, which is its `value`. A separate read from
+   * `getTextSelection` so that reading a selection does not copy the text.
+   */
+  getTextValue(elementId: number): string
+  /**
    * `checked`, `defaultChecked`, `indeterminate` and `value` of an `<input>`: its state in the
    * tree, which a click or a prop write changes (`custom_elements::input_choice`).
    */
@@ -1232,6 +1237,8 @@ export declare class TestGpuixRenderer {
   requestSubmit(id: number, submitterId?: number | undefined | null): void
   /** `selectionStart`, `selectionEnd` and `selectionDirection`. */
   getTextSelection(elementId: number): TextSelection
+  /** The text of an `<input>` or `<textarea>`, which is its `value`. */
+  getTextValue(elementId: number): string
   /** `checked`, `defaultChecked`, `indeterminate` and `value` of an `<input>`. */
   getInputChoice(elementId: number): InputChoiceState
   /**
@@ -2258,7 +2265,7 @@ export interface InputChoiceState {
   indeterminate: boolean
   /**
    * The `value` attribute of a checkbox, radio or hidden input, with its default, and the
-   * sanitized value of a range. Empty for a text field, whose value is its text (`getTextSelection`).
+   * sanitized value of a range. Empty for a text field, whose value is its text (`getTextValue`).
    */
   value: string
   /**
@@ -2764,8 +2771,6 @@ export interface TextSelection {
   end: number
   /** `"forward"`, `"backward"` or `"none"`. */
   direction: string
-  /** The text of the control, which is its `value`. */
-  value: string
 }
 
 /** One extra HTTP header on the feed or download request. */

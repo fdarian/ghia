@@ -17,8 +17,6 @@ pub struct TextSelection {
     pub end: u32,
     /// `"forward"`, `"backward"` or `"none"`.
     pub direction: String,
-    /// The text of the control, which is its `value`.
-    pub value: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,7 +154,6 @@ pub(crate) fn describe(
         start: byte_to_utf16(content, range.start) as u32,
         end: byte_to_utf16(content, range.end) as u32,
         direction: direction.name().to_string(),
-        value: content.to_string(),
     }
 }
 
@@ -192,6 +189,19 @@ impl GpuixView {
             })
             .flatten()
             .ok_or_else(|| format!("Element {id} has no text selection"))
+    }
+
+    /// The text of `<input>` and `<textarea>` `id`, which is its `value`.
+    pub(crate) fn text_control_value(
+        &mut self,
+        id: u64,
+        cx: &mut gpui::Context<Self>,
+    ) -> Result<String, String> {
+        let (element_type, props) = self.text_control_props(id, "the value")?;
+        self.custom_registry
+            .with_element(id, &element_type, &props, |element| element.text_value(cx))
+            .flatten()
+            .ok_or_else(|| format!("Element {id} has no text value"))
     }
 
     pub(crate) fn set_text_selection(

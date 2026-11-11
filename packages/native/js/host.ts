@@ -2886,6 +2886,7 @@ export type NativeRenderer = MutationHost &
       | "selectText"
       | "setSelectionRange"
       | "getTextSelection"
+      | "getTextValue"
       | "webviewCommand"
       | "webviewState"
       | "webviewExecuteJavascript"

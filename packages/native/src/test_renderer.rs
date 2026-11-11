@@ -2341,6 +2341,13 @@ impl TestGpuixRenderer {
         update_view(|view, _window, cx| view.text_selection(id, cx))?.map_err(Error::from_reason)
     }
 
+    /// The text of an `<input>` or `<textarea>`, which is its `value`.
+    #[napi]
+    pub fn get_text_value(&self, element_id: f64) -> Result<String> {
+        let id = to_element_id(element_id)?;
+        update_view(|view, _window, cx| view.text_control_value(id, cx))?.map_err(Error::from_reason)
+    }
+
     /// `checked`, `defaultChecked`, `indeterminate` and `value` of an `<input>`.
     #[napi]
     pub fn get_input_choice(&self, element_id: f64) -> Result<crate::custom_elements::input_choice::InputChoiceState> {
