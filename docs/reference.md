@@ -71,6 +71,17 @@ export default defineConfig({
 
 Use `vite.config.mts` when your `package.json` has no `"type": "module"`.
 
+`react()` also makes the bare `react-dom` import resolve to `@ghia/react/react-dom`,
+for your modules and for packages in `node_modules` (Base UI imports it in many
+modules), under `ghia dev`, `ghia build` and vitest. That module exports what web
+libraries use of `react-dom`: `createPortal(children, container, key?)` (the
+`@ghia/react` one, so `document.body` and mounted elements are containers),
+`flushSync` (the `@ghia/react` one) and `version` (React's), and a default export
+object with the same three. Every other `react-dom` export is absent, so a library
+that needs `render`, `findDOMNode` or `unstable_batchedUpdates` fails at build
+instead of getting a stub. Only the exact `react-dom` is aliased: `react-dom/client`
+and `react-dom/server` do not resolve.
+
 ### 3. Write the entry file
 
 End the entry file with `render()`. That call creates the window, mounts React, and
