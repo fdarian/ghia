@@ -3315,8 +3315,8 @@ mod tests {
         for (parent, child) in [(1, 2), (2, 3), (3, 4), (1, 5), (1, 6), (6, 7), (1, 8)] {
             tree.append_child(parent, child);
         }
-        tree.set_style(2, Arc::new(StyleDesc { overflow: Some("hidden".to_string()), ..Default::default() }));
-        tree.set_style(
+        tree.set_style_arc(2, Arc::new(StyleDesc { overflow: Some("hidden".to_string()), ..Default::default() }));
+        tree.set_style_arc(
             5,
             Arc::new(StyleDesc { position: Some("absolute".to_string()), z_index: Some(9.0), ..Default::default() }),
         );

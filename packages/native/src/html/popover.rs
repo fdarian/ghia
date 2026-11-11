@@ -231,7 +231,7 @@ mod tests {
     fn an_author_style_overrides_the_user_agent_style() {
         let mut tree = tree_with(Some(json!("manual")));
         tree.set_custom_prop(1, OPEN_PROP.to_string(), json!(1));
-        tree.set_style(
+        tree.set_style_arc(
             1,
             Arc::new(StyleDesc { position: Some("absolute".to_string()), margin_top: None, overflow: Some("hidden".to_string()), ..Default::default() }),
         );
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn a_closed_popover_shows_when_the_author_says_display() {
         let mut tree = tree_with(Some(json!("manual")));
-        tree.set_style(1, Arc::new(StyleDesc { display: Some("block".to_string()), ..Default::default() }));
+        tree.set_style_arc(1, Arc::new(StyleDesc { display: Some("block".to_string()), ..Default::default() }));
         assert_eq!(style_of(&tree).unwrap().display.as_deref(), Some("block"));
     }
 
