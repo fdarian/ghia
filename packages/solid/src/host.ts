@@ -13,6 +13,7 @@ import {
   focusHostElement,
   hostElementMatches,
   forwardsCustomProp,
+  isHtmlTag,
   isNativeviewHandlerProp,
   HOST_BINDING,
   HOST_MOUNT,
@@ -473,7 +474,7 @@ function isElementType(type: string): type is ElementType {
     case "feTurbulence":
       return true
     default:
-      return false
+      return isHtmlTag(type)
   }
 }
 

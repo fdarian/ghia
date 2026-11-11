@@ -9,6 +9,9 @@ import type {
   CodeProps,
   DiffProps,
   FormProps,
+  HtmlAnchorProps,
+  HtmlButtonProps,
+  HtmlTag,
   ImgProps,
   InputProps,
   LabelProps,
@@ -75,7 +78,9 @@ export namespace JSX {
   type IntrinsicAttributes = React.JSX.IntrinsicAttributes
   type IntrinsicClassAttributes<T> = React.JSX.IntrinsicClassAttributes<T>
 
-  interface IntrinsicElements {
+  interface IntrinsicElements extends Record<HtmlTag, Props> {
+    a: Props & HtmlAnchorProps
+    button: Props & HtmlButtonProps
     div: Props
     text: SvgTextProps
     img: ImgProps

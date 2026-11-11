@@ -196,7 +196,7 @@ function nextId(container: Container): number {
   return ++container.ids.nextElementId
 }
 
-/** SVG shapes exist only inside an `<svg>`; text and other elements go anywhere. */
+/** SVG shapes, `<text>` among them, exist only inside an `<svg>`; every other element goes anywhere. */
 function assertPlacement(parent: Instance | undefined, child: Instance | TextInstance): void {
   if ("type" in child) assertSvgPlacement(parent?.type, child.type)
 }

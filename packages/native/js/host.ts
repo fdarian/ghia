@@ -18,6 +18,7 @@ import type {
   HostInputEvent,
   PointerEventProps,
 } from "./events/types.js"
+import type { HtmlTag } from "./html-tags.js"
 import type { ScrollEvent } from "./scroll.js"
 import type { MotionValue } from "./motion-value.js"
 import type { MotionGestureName } from "./motion-variants.js"
@@ -63,6 +64,7 @@ export * from "./motion-config.js"
 export * from "./motion-span.js"
 export * from "./motion-variants.js"
 export * from "./motion-value.js"
+export * from "./html-tags.js"
 export * from "./mutations.js"
 export * from "./observers.js"
 export * from "./presence.js"
@@ -1571,6 +1573,7 @@ export type ElementType =
   | "webview"
   | "nativeview"
   | "virtual-list"
+  | HtmlTag
   | SvgChildType
 
 // ── Theme ────────────────────────────────────────────────────────────

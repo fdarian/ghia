@@ -3,6 +3,7 @@ import { registerMutationQueue } from "./bounds.js"
 import { createBlobImageLoader, type BlobImageHost } from "./blob-images.js"
 import type { MutationHost, MutationRenderer } from "./host.js"
 import { createStyleImageLoader, type StyleImageHost } from "./style-images.js"
+import { HTML_TAGS, HTML_TAG_PROPS, isHtmlTag } from "./html-tags.js"
 import { WIRE_OPCODE, WireWriter } from "./wire.js"
 import { cancelAnimationsOfElements } from "./web-animations.js"
 
@@ -245,7 +246,7 @@ export const RESERVED_PROPS: ReadonlySet<string> = new Set([
   "ref",
 ])
 
-export const BUILT_IN_TYPES: ReadonlySet<string> = new Set(["div", "label", "form", "span"])
+export const BUILT_IN_TYPES: ReadonlySet<string> = new Set(["div", "label", "form", "span", ...HTML_TAGS])
 
 const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "autoFocus",
@@ -265,14 +266,16 @@ const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "htmlFor",
 ])
 
-/** Props a `div`, `span`, `label` or `form` forwards to native; every other prop is dropped. */
+/** Props a `div`, `span`, `label`, `form` or HTML tag forwards to native; every other prop is dropped. */
 export function isUniversalProp(name: string): boolean {
   return UNIVERSAL_PROPS.has(name) || name.startsWith("aria-")
 }
 
 /** Whether a prop of an element of this type reaches native. A host element forwards only its universal props. */
 export function forwardsCustomProp(type: string, name: string): boolean {
-  return !BUILT_IN_TYPES.has(type) || isUniversalProp(name)
+  if (!BUILT_IN_TYPES.has(type)) return true
+  const ofTag = isHtmlTag(type) ? HTML_TAG_PROPS[type] : undefined
+  return isUniversalProp(name) || ofTag?.includes(name) === true
 }
 
 export function isReservedProp(name: string): boolean {
