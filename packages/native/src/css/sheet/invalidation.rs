@@ -7,7 +7,7 @@
 //! elements sit relative to the changed one: a [`Reach`]. A feature that no selector names has
 //! no entry, and a change to it marks nothing.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::atoms::Atom;
 use super::selector::{Combinator, ComplexSelector, Simple};
@@ -127,6 +127,9 @@ pub struct Invalidation {
     /// What an element appearing or disappearing among its siblings can reach: the places
     /// that sibling combinators look at it from.
     pub structure: Reach,
+    /// The `&` lists already read, with the chain they were read through. A nested rule shares
+    /// its parent's list, so without this each level would read every level above it again.
+    shared_read: FxHashSet<(usize, Vec<Combinator>)>,
 }
 
 impl Invalidation {
@@ -149,7 +152,14 @@ impl Invalidation {
                     Simple::Class(class) => *self.classes.entry(*class).or_default() |= reach,
                     Simple::Id(id) => *self.ids.entry(*id).or_default() |= reach,
                     Simple::Attr(attr) => *self.attributes.entry(attr.name.lower).or_default() |= reach,
-                    Simple::Is(list) | Simple::Where(list) | Simple::Not(list) => {
+                    Simple::Is(list) => {
+                        if self.shared_read.insert((list.as_ptr() as usize, chain.clone())) {
+                            for inner in list.iter() {
+                                self.read_through(inner, &chain);
+                            }
+                        }
+                    }
+                    Simple::Where(list) | Simple::Not(list) => {
                         for inner in list {
                             self.read_through(inner, &chain);
                         }

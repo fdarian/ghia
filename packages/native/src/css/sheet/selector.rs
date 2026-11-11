@@ -1,9 +1,12 @@
 //! Selectors as the matcher wants them: a complex selector stored right to left.
 
+use std::ops::Deref;
+use std::sync::Arc;
+
 use super::atoms::Atom;
 
 /// What a [`ComplexSelector`] link says about the compound to its left.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Combinator {
     /// `a b`: the left compound matches some ancestor.
     Descendant,
@@ -35,7 +38,7 @@ pub enum Simple {
     Id(Atom),
     Attr(AttrSelector),
     /// `:is()`, and `&` of a nested rule (its parent's selector list).
-    Is(Vec<ComplexSelector>),
+    Is(SelectorList),
     /// `:where()`: matches like `:is()`, contributes no specificity.
     Where(Vec<ComplexSelector>),
     Not(Vec<ComplexSelector>),
@@ -45,6 +48,29 @@ pub enum Simple {
     /// `::x` and the legacy `:before`, `:after`, `:first-line`, `:first-letter`: they style a part
     /// of an element, so a selector holding one matches no element.
     PseudoElement,
+}
+
+/// A selector list that `&` can share: nesting `n` deep copies a pointer per `&`, not the list,
+/// and the specificity is worked out once, not once per level below.
+#[derive(Clone, PartialEq, Debug)]
+pub struct SelectorList {
+    selectors: Arc<[ComplexSelector]>,
+    specificity: Specificity,
+}
+
+impl SelectorList {
+    pub fn new(selectors: Vec<ComplexSelector>) -> Self {
+        let specificity = most_specific(&selectors);
+        SelectorList { selectors: selectors.into(), specificity }
+    }
+}
+
+impl Deref for SelectorList {
+    type Target = [ComplexSelector];
+
+    fn deref(&self) -> &[ComplexSelector] {
+        &self.selectors
+    }
 }
 
 /// The name a selector writes for an attribute. An HTML element holds lower-cased names and
@@ -124,7 +150,8 @@ impl Simple {
             Simple::Tag(_) | Simple::PseudoElement => Specificity::new(0, 0, 1),
             Simple::Class(_) | Simple::Attr(_) | Simple::Root | Simple::Host => Specificity::new(0, 1, 0),
             Simple::Id(_) => Specificity::new(1, 0, 0),
-            Simple::Is(list) | Simple::Not(list) => most_specific(list),
+            Simple::Is(list) => list.specificity,
+            Simple::Not(list) => most_specific(list),
             Simple::Where(_) => Specificity::default(),
         }
     }

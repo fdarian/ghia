@@ -5,7 +5,7 @@ use crate::css::lenient::Declaration;
 use super::atoms::Atoms;
 use super::declarations::{parse_declaration, push_declaration};
 use super::layers::{LayerId, Layers};
-use super::selector::{ComplexSelector, Specificity};
+use super::selector::{ComplexSelector, SelectorList, Specificity};
 use super::selector_parse::{parse_selector_list, Nesting};
 use super::tokenizer::{find_close, tokenize, trim, Kind, Token};
 use super::{Rule, StyleSheet};
@@ -18,6 +18,7 @@ pub fn parse_sheet(text: &str, atoms: &mut Atoms, layers: &mut Layers) -> StyleS
         atoms,
         layers,
         sheet: StyleSheet { rules: Vec::new(), unsupported: Vec::new() },
+        depth: 0,
     };
     parser.rule_list(0, tokens.len(), None);
     parser.sheet
@@ -29,7 +30,13 @@ struct Parser<'a> {
     atoms: &'a mut Atoms,
     layers: &'a mut Layers,
     sheet: StyleSheet,
+    /// How many style rules and `@layer` blocks enclose the one being parsed.
+    depth: usize,
 }
+
+/// Blocks nest this deep; a rule or `@layer` inside more is dropped like an invalid rule, so
+/// hostile input cannot overflow the stack.
+const MAX_BLOCK_DEPTH: usize = 32;
 
 enum Terminator {
     Block,
@@ -87,14 +94,22 @@ impl Parser<'_> {
         let (contents_end, after) = self.block(open, end);
         let prelude = &self.tokens[start..open];
         match parse_selector_list(prelude, self.atoms, nesting) {
-            Ok(selectors) => self.style_block(open + 1, contents_end, selectors, layer),
-            Err(_) if open == start => {}
-            Err(_) => {
-                let text = self.src[self.tokens[start].start..self.tokens[open - 1].end].trim().to_owned();
-                self.sheet.unsupported.push(text);
+            Ok(_) if self.depth == MAX_BLOCK_DEPTH => self.record_dropped(start, open),
+            Ok(selectors) => {
+                self.depth += 1;
+                self.style_block(open + 1, contents_end, selectors, layer);
+                self.depth -= 1;
             }
+            Err(_) if open == start => {}
+            Err(_) => self.record_dropped(start, open),
         }
         after
+    }
+
+    /// Records the prelude `start..open` as a rule that was dropped.
+    fn record_dropped(&mut self, start: usize, open: usize) {
+        let text = self.src[self.tokens[start].start..self.tokens[open - 1].end].trim().to_owned();
+        self.sheet.unsupported.push(text);
     }
 
     fn at_rule(&mut self, start: usize, end: usize, name: &str, layer: Option<LayerId>) -> usize {
@@ -119,7 +134,13 @@ impl Parser<'_> {
                     [path] => self.declare_path(layer, path),
                     _ => return after,
                 };
+                if self.depth == MAX_BLOCK_DEPTH {
+                    self.sheet.unsupported.push(name.to_owned());
+                    return after;
+                }
+                self.depth += 1;
                 self.rule_list(stop + 1, contents_end, Some(inner));
+                self.depth -= 1;
             }
             _ => {
                 for path in &names {
@@ -142,6 +163,7 @@ impl Parser<'_> {
     fn style_block(&mut self, start: usize, end: usize, selectors: Selectors, layer: Option<LayerId>) {
         let mut normal = Vec::new();
         let mut important = Vec::new();
+        let mut parents: Option<SelectorList> = None;
         let mut index = start;
         while index < end {
             match &self.tokens[index].kind {
@@ -160,9 +182,10 @@ impl Parser<'_> {
                     let (stop, terminator) = self.scan_prelude(index, end, true, !custom_property);
                     if matches!(terminator, Terminator::Block) {
                         self.flush(&selectors, &mut normal, &mut important, layer);
-                        let parents: Vec<ComplexSelector> =
-                            selectors.iter().map(|(selector, _)| selector.clone()).collect();
-                        index = self.qualified_rule(index, end, layer, Nesting::Parent(&parents));
+                        let parents = parents.get_or_insert_with(|| {
+                            SelectorList::new(selectors.iter().map(|(selector, _)| selector.clone()).collect())
+                        });
+                        index = self.qualified_rule(index, end, layer, Nesting::Parent(parents));
                         continue;
                     }
                     if let Some(parsed) = parse_declaration(self.src, &self.tokens[index..stop]) {

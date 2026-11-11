@@ -4,12 +4,16 @@
 
 use super::atoms::Atoms;
 use super::selector::{
-    AttrMatcher, AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, Simple, Specificity,
+    AttrMatcher, AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, SelectorList, Simple, Specificity,
 };
 use super::tokenizer::{find_close, trim, Kind, Token};
 
 #[derive(Debug, PartialEq)]
 pub(super) struct InvalidSelector;
+
+/// Functional pseudo-classes nest this deep; a deeper one is invalid, so hostile input cannot
+/// overflow the stack.
+pub(super) const MAX_FUNCTION_DEPTH: usize = 32;
 
 /// What `&` stands for.
 #[derive(Clone, Copy)]
@@ -18,7 +22,7 @@ pub(super) enum Nesting<'a> {
     Top,
     /// A nested rule: `&` is `:is(parent selector list)`, and a selector that does not mention
     /// `&` is relative to it.
-    Parent(&'a [ComplexSelector]),
+    Parent(&'a SelectorList),
 }
 
 pub(super) fn parse_selector_list(
@@ -26,7 +30,7 @@ pub(super) fn parse_selector_list(
     atoms: &mut Atoms,
     nesting: Nesting,
 ) -> Result<Vec<(ComplexSelector, Specificity)>, InvalidSelector> {
-    let mut parser = Parser { atoms, nesting, saw_nesting: false };
+    let mut parser = Parser { atoms, nesting, saw_nesting: false, depth: 0 };
     let relative = matches!(nesting, Nesting::Parent(_));
     let list = parser.list(tokens, false, relative, true)?;
     if list.is_empty() {
@@ -43,6 +47,8 @@ struct Parser<'a, 'n> {
     nesting: Nesting<'n>,
     /// Whether the complex selector being parsed has named `&` so far.
     saw_nesting: bool,
+    /// How many `:is(`, `:where(` and `:not(` the selector being parsed sits inside.
+    depth: usize,
 }
 
 fn combinator_of(kind: &Kind) -> Option<Combinator> {
@@ -112,7 +118,7 @@ impl Parser<'_, '_> {
             if relative {
                 let leading = combinator_of(&tokens[0].kind);
                 if leading.is_some() || !saw_nesting {
-                    let implicit = Compound { simples: vec![Simple::Is(parent.to_vec())] };
+                    let implicit = Compound { simples: vec![Simple::Is(parent.clone())] };
                     parts.insert(0, (implicit, Some(leading.unwrap_or(Combinator::Descendant))));
                 }
             }
@@ -191,7 +197,7 @@ impl Parser<'_, '_> {
                     self.saw_nesting = true;
                     simples.push(match self.nesting {
                         Nesting::Top => Simple::Root,
-                        Nesting::Parent(parent) => Simple::Is(parent.to_vec()),
+                        Nesting::Parent(parent) => Simple::Is(parent.clone()),
                     });
                 }
                 Kind::Delim('.') => match tokens.get(*index + 1).map(|next| &next.kind) {
@@ -266,20 +272,33 @@ impl Parser<'_, '_> {
                 if element {
                     return if allow_pseudo_element { Ok(Simple::PseudoElement) } else { Err(InvalidSelector) };
                 }
-                match name.as_str() {
-                    "is" => Ok(Simple::Is(self.list(arguments, true, false, false)?)),
-                    "where" => Ok(Simple::Where(self.list(arguments, true, false, false)?)),
-                    "not" => {
-                        let list = self.list(arguments, false, false, false)?;
-                        if list.is_empty() {
-                            return Err(InvalidSelector);
-                        }
-                        Ok(Simple::Not(list))
-                    }
-                    _ => Err(InvalidSelector),
+                if !matches!(name.as_str(), "is" | "where" | "not") {
+                    return Err(InvalidSelector);
                 }
+                if self.depth == MAX_FUNCTION_DEPTH {
+                    return Err(InvalidSelector);
+                }
+                self.depth += 1;
+                let result = self.functional_pseudo_class(&name, arguments);
+                self.depth -= 1;
+                result
             }
             _ => Err(InvalidSelector),
+        }
+    }
+
+    fn functional_pseudo_class(&mut self, name: &str, arguments: &[Token]) -> Result<Simple, InvalidSelector> {
+        match name {
+            "is" => Ok(Simple::Is(SelectorList::new(self.list(arguments, true, false, false)?))),
+            "where" => Ok(Simple::Where(self.list(arguments, true, false, false)?)),
+            "not" => {
+                let list = self.list(arguments, false, false, false)?;
+                if list.is_empty() {
+                    return Err(InvalidSelector);
+                }
+                Ok(Simple::Not(list))
+            }
+            _ => unreachable!("the caller passed only is, where and not"),
         }
     }
 

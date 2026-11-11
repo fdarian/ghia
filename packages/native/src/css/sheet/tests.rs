@@ -434,6 +434,51 @@ fn nesting_goes_several_levels_and_keeps_the_layer() {
 }
 
 #[test]
+fn nesting_with_lists_at_every_level_shares_the_parent_list() {
+    let depth = 20;
+    let mut text = String::from(".a, .b { color: red; ");
+    for _ in 1..depth {
+        text.push_str(".c, .d { color: red; ");
+    }
+    text.push_str(&"}".repeat(depth));
+    let mut doc = Doc::new();
+    let sheet = doc.parse(&text);
+    assert_eq!(sheet.rules.len(), depth);
+
+    let mut tree = Tree::default();
+    let mut parent = tree.add(&mut doc.atoms, "div", None, None, None, &["a"], &[]);
+    for _ in 1..depth {
+        parent = tree.add(&mut doc.atoms, "div", Some(parent), None, None, &["c"], &[]);
+    }
+    let deepest = &sheet.rules[depth - 1];
+    assert!(deepest.selectors.iter().any(|(selector, _)| matches(selector, &tree.view(parent))));
+    let top = &sheet.rules[0];
+    assert!(top.selectors.iter().all(|(selector, _)| !matches(selector, &tree.view(parent))));
+    assert_eq!(deepest.selectors[0].1, Specificity::new(0, depth as u32, 0));
+}
+
+#[test]
+fn hostile_nesting_is_cut_off_instead_of_overflowing_the_stack() {
+    let depth = 1000;
+    let mut doc = Doc::new();
+    let nested = format!("{}color: red;{}", ".a { top: 1px; ".repeat(depth), "}".repeat(depth));
+    let sheet = doc.parse(&nested);
+    assert!(sheet.rules.len() < 40, "{}", sheet.rules.len());
+    assert!(!sheet.rules.is_empty());
+    assert_eq!(sheet.unsupported.len(), 1);
+
+    let layers = format!("{}.a {{ color: red }}{}", "@layer l { ".repeat(depth), "}".repeat(depth));
+    assert!(doc.parse(&layers).rules.is_empty());
+
+    for function in ["is", "where", "not"] {
+        let selector = format!("{}.a{}", format!(":{function}(").repeat(depth), ")".repeat(depth));
+        let sheet = doc.parse(&format!("{selector} {{ color: red }}"));
+        assert!(sheet.rules.len() <= 1, ":{function}");
+    }
+    assert!(is_valid(":is(:is(:is(.a)))"));
+}
+
+#[test]
 fn an_invalid_nested_selector_drops_only_that_rule() {
     let sheet = Doc::new().parse("a { top: 1px; &:hover { top: 2px } b { top: 3px } }");
     let tops: Vec<_> = sheet.rules.iter().map(|rule| pairs(&rule.normal)[0].1.to_owned()).collect();
