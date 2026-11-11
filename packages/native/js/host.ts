@@ -1936,8 +1936,8 @@ export interface HostProps
 
 // Props shared by the native text editor elements.
 export interface TextControlProps extends Omit<HostProps, "onSubmit"> {
-  /** External editor value. Native edits apply immediately and report through `onInput` (`onChange` in React). */
-  value?: string
+  /** External editor value. Native edits apply immediately and report through `onInput` (`onChange` in React). A number is for `type="range"`. */
+  value?: string | number
   placeholder?: string
   readOnly?: boolean
   /**
@@ -1962,7 +1962,7 @@ export interface TextControlProps extends Omit<HostProps, "onSubmit"> {
 }
 
 /** Values of `<input type>`. */
-export type InputType = "text" | "password" | "number" | "email" | "search" | "tel" | "url" | "checkbox" | "radio" | "hidden"
+export type InputType = "text" | "password" | "number" | "email" | "search" | "tel" | "url" | "checkbox" | "radio" | "hidden" | "range"
 
 export interface InputProps extends TextControlProps {
   /**
@@ -1979,6 +1979,12 @@ export interface InputProps extends TextControlProps {
    *   and draw your own), a tab stop that a click or Space toggles, with `onInput` then `onChange`
    *   after a toggle. They submit `name=value` (`value` defaults to `"on"`) only while checked.
    * - `"hidden"` builds no box, takes no focus and submits its `value`.
+   * - `"range"` is a 129 by 16 focusable box with the slider role and nothing painted in it (draw your own track
+   *   and thumb, and handle the pointer). It holds a `value` between `min` (0) and `max` (100), snapped to `step`
+   *   (1, or `"any"`), the midpoint by default. When focused, the arrow keys, Page Up and Down, Home and End
+   *   change it unless `keydown` was canceled, each firing `onInput` then `onChange` (`onChange` alone in
+   *   React, as it is the `input` event there). A `value` written from code fires nothing. It submits
+   *   `name=value`.
    */
   type?: InputType
   /**
@@ -1990,11 +1996,13 @@ export interface InputProps extends TextControlProps {
   checked?: boolean
   /** `type="checkbox"` and `"radio"`: the checkedness until a user or a `checked` write sets it. */
   defaultChecked?: boolean
-  /** `type="number"` only. A number or numeric string. */
+  /** `type="range"`: the value a range has until `value` is written (and again if `value` is removed). */
+  defaultValue?: string | number
+  /** `type="number"` and `"range"`. A number or numeric string. Defaults to 0 for a range. */
   min?: number | string
-  /** `type="number"` only. A number or numeric string. */
+  /** `type="number"` and `"range"`. A number or numeric string. Defaults to 100 for a range. */
   max?: number | string
-  /** `type="number"` only: the ArrowUp and ArrowDown step. Defaults to 1. */
+  /** `type="number"`: the ArrowUp and ArrowDown step. `type="range"`: the step the value snaps to and the keys move by, or `"any"`. Defaults to 1. */
   step?: number | string
 }
 

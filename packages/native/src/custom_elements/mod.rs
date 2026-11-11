@@ -19,6 +19,7 @@ pub mod diff;
 pub mod img;
 pub mod input;
 pub(crate) mod input_choice;
+pub(crate) mod input_range;
 pub(crate) mod input_rules;
 pub mod markdown;
 pub(crate) mod text_selection;
@@ -121,6 +122,8 @@ pub struct CustomRenderContext<'a> {
     pub resolved: crate::resolved_style::Resolved,
     /// The state of a checkbox or a radio, which the tree holds: what assistive technology is told.
     pub toggled: Option<gpui::accesskit::Toggled>,
+    /// The value and limits of a range input, which the tree holds: what the slider node says.
+    pub range: Option<input_range::Reading>,
 }
 
 impl CustomRenderContext<'_> {

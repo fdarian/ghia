@@ -7,7 +7,7 @@
 //! invalid the form gets a cancelable, bubbling `submit` event carrying the
 //! `[name, value]` entries of its named, enabled controls in document order. A checkbox or a radio
 //! is in them, under its `value` (`"on"` by default), only when it is checked; a hidden input is,
-//! under its `value`.
+//! under its `value`, and a range input is, under its sanitized value.
 //!
 //! A `<button>` in a form whose `type` is missing or `submit` submits it when
 //! clicked, and its element is the event's `submitter`. `type="button"` does
@@ -24,6 +24,7 @@
 use gpui::{App, Window};
 
 use crate::custom_elements::input_choice::{self, Choice};
+use crate::custom_elements::input_range;
 use crate::element_tree::EventPayload;
 use crate::events::keyboard::path_to_root;
 use crate::events::sync_dispatch;
@@ -85,6 +86,8 @@ fn members_of(tree: &RetainedTree, form: u64, keep: impl Fn(&crate::retained_tre
 enum Kind {
     Text,
     Hidden,
+    /// A range input: it always has a value, and no constraint makes it invalid.
+    Range,
     Checkbox { checked: bool },
     /// `group_checked`: a radio of its group is checked, which is what a `required` radio needs.
     Radio { checked: bool, group_checked: bool },
@@ -109,7 +112,7 @@ impl Control {
         }
         match self.kind {
             Kind::Text => self.required && self.value.is_empty() && !self.read_only,
-            Kind::Hidden => false,
+            Kind::Hidden | Kind::Range => false,
             Kind::Checkbox { checked } => self.required && !checked,
             Kind::Radio { group_checked, .. } => self.required && !group_checked,
         }
@@ -120,7 +123,7 @@ impl Control {
     fn entry(&self) -> Option<Vec<String>> {
         let name = self.name.as_ref().filter(|name| !name.is_empty())?;
         let submits = match self.kind {
-            Kind::Text | Kind::Hidden => true,
+            Kind::Text | Kind::Hidden | Kind::Range => true,
             Kind::Checkbox { checked } | Kind::Radio { checked, .. } => checked,
         };
         (!self.disabled && submits).then(|| vec![name.clone(), self.value.clone()])
@@ -150,9 +153,14 @@ impl GpuixView {
                             Kind::Radio { checked: tree.is_checked(id), group_checked: tree.radio_group_has_checked(id) }
                         }
                         None if input_choice::is_hidden(element) => Kind::Hidden,
+                        None if input_range::is_range(element) => Kind::Range,
                         None => Kind::Text,
                     };
-                    let own_value = (!matches!(kind, Kind::Text)).then(|| input_choice::value_of(element));
+                    let own_value = match kind {
+                        Kind::Text => None,
+                        Kind::Range => input_range::reading_of(&tree, element).map(|reading| reading.text()),
+                        _ => Some(input_choice::value_of(element)),
+                    };
                     Some((
                         id,
                         element.element_type.clone(),

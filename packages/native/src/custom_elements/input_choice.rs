@@ -1,7 +1,8 @@
 //! `<input type="checkbox">`, `<input type="radio">` and `<input type="hidden">`.
 //!
 //! `<input>` is one custom element whose `type` picks what it builds (`InputElement`): the text
-//! editor for a text-like type, a choice control for `checkbox` and `radio`, nothing for `hidden`.
+//! editor for a text-like type, a choice control for `checkbox` and `radio`, nothing for `hidden`
+//! and the slider of `input_range` for `range`.
 //! A runtime change of `type` switches the control and replays the props it was given.
 //!
 //! A choice control is a box with Chrome's default size and nothing painted in it (see
@@ -110,14 +111,19 @@ pub(crate) fn toggled_of(tree: &RetainedTree, element: &RetainedElement) -> Opti
 /// What the `checked`, `defaultChecked`, `indeterminate` and `value` properties of an `<input>` read.
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
 pub struct InputChoiceState {
-    /// `"checkbox"`, `"radio"`, `"hidden"` or `"text"`, which covers every other type.
+    /// `"checkbox"`, `"radio"`, `"hidden"`, `"range"` or `"text"`, which covers every other type.
     pub kind: String,
     pub checked: bool,
     pub default_checked: bool,
     pub indeterminate: bool,
-    /// The `value` attribute of a checkbox, radio or hidden input, with its default. Empty for a
-    /// text field, whose value is its text (`getTextSelection`).
+    /// The `value` attribute of a checkbox, radio or hidden input, with its default, and the
+    /// sanitized value of a range. Empty for a text field, whose value is its text (`getTextSelection`).
     pub value: String,
+    /// A range's limits and step, which `min`, `max` and `step` default and sanitize; 0 for another
+    /// type. A `step` of 0 is `step="any"`.
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
 }
 
 /// The state of the `<input>` `id`, as the JS properties read it.
@@ -130,14 +136,23 @@ pub(crate) fn read(tree: &RetainedTree, id: u64) -> Result<InputChoiceState, Str
         InputType::Checkbox => "checkbox",
         InputType::Radio => "radio",
         InputType::Hidden => "hidden",
+        InputType::Range => "range",
         _ => "text",
     };
+    let range = super::input_range::reading_of(tree, element);
     Ok(InputChoiceState {
         kind: kind.to_string(),
         checked: tree.is_checked(id),
         default_checked: tree.default_checked(id),
         indeterminate: tree.is_indeterminate(id),
-        value: if kind == "text" { String::new() } else { value_of(element) },
+        value: match (kind, range) {
+            ("text", _) => String::new(),
+            (_, Some(range)) => range.text(),
+            _ => value_of(element),
+        },
+        min: range.map_or(0.0, |range| range.rules.min),
+        max: range.map_or(0.0, |range| range.rules.max),
+        step: range.map_or(0.0, |range| range.rules.step.unwrap_or(0.0)),
     })
 }
 
@@ -483,7 +498,7 @@ impl CustomElement for HiddenElement {
     }
 }
 
-const INPUT_EVENTS: &[&str] = &["change", "input", "keydown", "keyup", "focus", "blur"];
+pub(super) const INPUT_EVENTS: &[&str] = &["change", "input", "keydown", "keyup", "focus", "blur"];
 
 /// The `<input>` element: which control it is builds from its `type`.
 pub(crate) struct InputElement {
@@ -498,6 +513,7 @@ enum Kind {
     Text,
     Choice(Choice),
     Hidden,
+    Range,
 }
 
 impl Kind {
@@ -506,6 +522,7 @@ impl Kind {
             InputType::Checkbox => Self::Choice(Choice::Checkbox),
             InputType::Radio => Self::Choice(Choice::Radio),
             InputType::Hidden => Self::Hidden,
+            InputType::Range => Self::Range,
             _ => Self::Text,
         }
     }
@@ -515,6 +532,7 @@ impl Kind {
             Self::Text => Box::new(super::input::TextEditorElement::new(false)),
             Self::Choice(choice) => Box::new(ChoiceElement::new(choice)),
             Self::Hidden => Box::new(HiddenElement),
+            Self::Range => Box::new(super::input_range::RangeElement::new()),
         }
     }
 }

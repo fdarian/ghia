@@ -147,6 +147,15 @@ fn node_of(tree: &RetainedTree, element: &RetainedElement) -> Option<(gpui::acce
     if let Some(toggled) = crate::custom_elements::input_choice::toggled_of(tree, element) {
         probe = probe.aria_toggled(toggled);
     }
+    if let Some(range) = crate::custom_elements::input_range::reading_of(tree, element) {
+        probe = probe
+            .aria_numeric_value(range.value)
+            .aria_min_numeric_value(range.rules.min)
+            .aria_max_numeric_value(range.rules.max);
+        if let Some(step) = range.rules.step {
+            probe = probe.aria_numeric_value_step(step);
+        }
+    }
     let role = probe.a11y_role()?;
     let mut node = gpui::accesskit::Node::new(role);
     probe.write_a11y_info(&mut node);

@@ -79,6 +79,11 @@ pub(super) const TAGS: &[(&str, &str)] = &[
         r#"{"display":"inline-block","boxSizing":"border-box","width":13,"height":13,"marginTop":3,"marginRight":3,"marginBottom":0,"marginLeft":5}"#,
     ),
     ("input[type=hidden]", r#"{"display":"none"}"#),
+    // Chrome's slider: 129 by 16 with a 2px margin. The track and thumb are not painted (see `input_range`).
+    (
+        "input[type=range]",
+        r#"{"display":"inline-block","width":129,"height":16,"marginTop":2,"marginRight":2,"marginBottom":2,"marginLeft":2}"#,
+    ),
     ("table", r#"{"display":"table","borderSpacing":2}"#),
     ("thead", r#"{"display":"table-header-group"}"#),
     ("tbody", r#"{"display":"table-row-group"}"#),

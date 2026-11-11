@@ -7303,6 +7303,7 @@ impl GpuixView {
 
     /// Scrolls for a key nothing consumed. See `GpuixRenderer::scroll_by_key`.
     pub(crate) fn scroll_by_key(&self, key: &str, shift: bool, window: &gpui::Window) -> bool {
+        let key_name = key;
         let Some(key) = crate::scroll::KeyScroll::parse(key, shift) else {
             return false;
         };
@@ -7312,7 +7313,9 @@ impl GpuixView {
             let Some(element) = tree.elements.get(&focused) else {
                 return false;
             };
-            if crate::custom_elements::input_choice::is_text_editor(element) {
+            if crate::custom_elements::input_choice::is_text_editor(element)
+                || crate::custom_elements::input_range::takes_key(element, key_name)
+            {
                 return false;
             }
             if key.activates_controls
@@ -11943,6 +11946,7 @@ fn build_element_unpumped(
                 lift_absorbed,
                 resolved,
                 toggled: crate::custom_elements::input_choice::toggled_of(ctx.tree, element),
+                range: crate::custom_elements::input_range::reading_of(ctx.tree, element),
             };
             // What an adapter paints is not read by the build: it takes its text colour, and the
             // `currentColor` of its icons, when gpui paints it.

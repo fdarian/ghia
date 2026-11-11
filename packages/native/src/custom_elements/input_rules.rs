@@ -16,6 +16,7 @@ pub(crate) enum InputType {
     Checkbox,
     Radio,
     Hidden,
+    Range,
 }
 
 impl InputType {
@@ -25,6 +26,7 @@ impl InputType {
             "checkbox" => Self::Checkbox,
             "radio" => Self::Radio,
             "hidden" => Self::Hidden,
+            "range" => Self::Range,
             "password" => Self::Password,
             "number" => Self::Number,
             "email" => Self::Email,
@@ -39,7 +41,7 @@ impl InputType {
 impl InputType {
     /// Whether the control is edited as text, which is what the text editor builds.
     pub(crate) fn edits_text(self) -> bool {
-        !matches!(self, Self::Checkbox | Self::Radio | Self::Hidden)
+        !matches!(self, Self::Checkbox | Self::Radio | Self::Hidden | Self::Range)
     }
 }
 
@@ -106,7 +108,7 @@ pub(crate) fn step_from_json(value: Option<&serde_json::Value>) -> f64 {
         .unwrap_or(1.0)
 }
 
-fn decimals(value: f64) -> usize {
+pub(crate) fn decimals(value: f64) -> usize {
     format!("{value}")
         .split_once('.')
         .map(|(_, fraction)| fraction.len())

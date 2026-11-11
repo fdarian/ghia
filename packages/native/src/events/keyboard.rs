@@ -89,7 +89,7 @@ impl InputRouting {
         self.0.armed_space.get()
     }
 
-    pub(super) fn focused_element(&self, window: &Window, cx: &App) -> Option<u64> {
+    pub(crate) fn focused_element(&self, window: &Window, cx: &App) -> Option<u64> {
         let focused = window.focused(cx)?;
         self.0
             .focusables
@@ -258,6 +258,7 @@ pub(crate) fn install_key_down(
             cx.stop_propagation();
         }
         key_activation::key_down(&activation, &event.keystroke, event.is_held, prevented, window, cx);
+        crate::custom_elements::input_range::key_down(&activation, &event.keystroke, prevented, window, cx);
     });
     let ime_keys = cx.observe_ime_keystrokes(move |event, window, cx| {
         if window.window_handle().window_id() != window_id {

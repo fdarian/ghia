@@ -4394,8 +4394,9 @@ reported as disabled to assistive technology. The `disabled` and `enabled`
 [state styles](#form-control-state-disabled-enabled) follow it.
 
 `type` on an `<input>` is `'text'` (the default), `'password'`, `'number'`,
-`'email'`, `'search'`, `'tel'`, `'url'`, `'checkbox'`, `'radio'` or `'hidden'`
-(see [Checkbox, radio and hidden inputs](#checkbox-radio-and-hidden-inputs)); an
+`'email'`, `'search'`, `'tel'`, `'url'`, `'checkbox'`, `'radio'`, `'hidden'` or `'range'`
+(see [Checkbox, radio and hidden inputs](#checkbox-radio-and-hidden-inputs) and
+[Range inputs](#range-inputs)); an
 unknown value is `'text'`. `type` on a `<textarea>` is ignored.
 
 - `'password'` paints one bullet per character. `input` and `value` carry
@@ -4461,6 +4462,45 @@ hidden `<input>` and click it, run unchanged. A change of `type` builds the othe
 - **Accessibility, focus and selectors.** The role is `checkbox` or `radio`, with the toggled state (`mixed` for an
   indeterminate checkbox; an explicit `aria-checked` wins). Both are tab stops unless disabled, and a click
   focuses them without `:focus-visible`. `:checked` and `:indeterminate` read the live state.
+
+### Range inputs
+
+`<input type="range">` is a slider control with the DOM's value rules and keys, so `@base-ui/react`'s Slider, whose
+thumb renders one, runs unchanged. It is a focusable box (`display: inline-block`, 129 by 16 px, `2px` margin, as in
+Chrome) with the `slider` role and **nothing painted in it, and no pointer dragging**: a Slider draws its own track
+and thumb and moves its value from the pointer events it hears itself. See
+[deviations](./fork/deviations.md#range-inputs).
+
+- **Value.** `min`, `max` and `step` default to 0, 100 and 1; `step="any"` does not snap. A `max` below `min` is
+  `min`. The value is clamped to `[min, max]` and snapped to the nearest step counted from `min` (not past `max`),
+  and when there is none, or it is not a number, it is the midpoint. It is sanitized when read, so a new limit
+  sanitizes it again. `value` (a number or a numeric string) sets it each time the prop is written, `defaultValue`
+  is what it is while `value` was never written.
+- **Properties.** An `<input>` ref has `value` (the sanitized text, `"50"`), `valueAsNumber` (for `number` as well; `NaN`
+  for another type), `min`, `max` and `step` (the props as text, `""` when absent), and `stepUp(count = 1)` and
+  `stepDown(count = 1)`, which clamp and snap and throw an `InvalidStateError` for `step="any"`. Writing any of them
+  fires no event.
+
+  ```tsx
+  ref.current.value = "70"        // sanitized; no event
+  ref.current.valueAsNumber       // 70
+  ref.current.stepUp(2)           // 72 for step 1
+  ```
+- **Keys.** While it has focus and a `keydown` was not canceled, `ArrowRight` and `ArrowUp` add a `step`,
+  `ArrowLeft` and `ArrowDown` take one, `PageUp` and `PageDown` move by the larger of a step and a tenth of
+  the range, `Home` goes to `min` and `End` to `max`. With `step="any"` a step is a hundredth of the range. Each
+  key that moves the value fires `input` and then `change` (bubbling, not cancelable, `value` set), as Chrome does for the keyboard; a key
+  that leaves the value where it was fires nothing. With Ctrl, Alt or Cmd held, or when disabled, the key does nothing. The keys do not scroll
+  a scroller around the control.
+- **Events.** In React `onChange` is the `input` event, once per step, as it is for a text control, and
+  `event.currentTarget.valueAsNumber` reads the new value. In Solid `onInput` is `input` and `onChange` is `change`.
+- **Controlled.** A control with a `value` prop goes back to that prop after the change handlers have run, as React DOM
+  restores a controlled input.
+- **Forms.** A range is in `formData` under its `name` and its sanitized value (not when disabled or nameless), and does
+  not block implicit submission.
+- **Accessibility and focus.** The role is `slider`, with the value, `min`, `max` and `step` as the numeric value, minimum,
+  maximum and step (an explicit `aria-valuenow`, `aria-valuemin` or `aria-valuemax` wins). It is a tab stop unless disabled.
+  `:in-range` and `:out-of-range` are not supported.
 
 ### Scrollbars
 
@@ -4986,7 +5026,7 @@ Typing over a selection is `insertText` and deleting a selection is the delete t
 of its key. `data` is the text that fit under `maxLength`. `isComposing` is true for
 every edit of a composition, the commit included: it comes before `compositionend`.
 `data` is `null` rather than absent when the edit inserted no text. The handler's event is typed `HostInputEvent`.
-A checkbox or radio fires `input` too, once per toggle, before its `change`.
+A checkbox or radio fires `input` too, once per toggle, before its `change`, and a range once per key that moved it ([Range inputs](#range-inputs)).
 
 `change` fires when the user commits a value the control did not have at the last commit: on blur (before `blur`
 and `focusout`, also when focus moves to another control or the window loses it) when the value differs from the value
@@ -7096,8 +7136,8 @@ The details for a library author, with a minimal addon, are in
 | Scroll | `onScroll` | `scrollTop`, `scrollLeft` — scroll containers, not `<virtual-list>` |
 | Content visibility | `onContentVisibilityAutoStateChange` | `skipped` — an element with `contentVisibility: "auto"` began or stopped skipping its content. Bubbles, cancelable, has an `…Capture` twin. See [Skipping content with `contentVisibility`](#skipping-content-with-contentvisibility) |
 | Layout | `onLayout` | `width`, `height`, `x`, `y` — any element a `ResizeObserver` works on (`<div>`, `<span>`, `<input>`, `<img>`, `<svg>` and the other built-in elements). See also `ResizeObserver` and `IntersectionObserver` under [Measure an element](#measure-an-element) |
-| Input | `onInput` (React: also `onChange` of a text control) | `value`, `inputType`, `data`, `isComposing` — once per edit of an `<input>` or `<textarea>`, and once per toggle of a checkbox or radio. Bubbles, not cancelable. See [The input and change events](#the-input-and-change-events) |
-| Change | `onChange` (React: of a checkbox or radio) | `value` — an `<input>` or `<textarea>` whose value the user committed on blur or Enter, or a checkbox or radio that was toggled. Bubbles, not cancelable. See [The input and change events](#the-input-and-change-events) |
+| Input | `onInput` (React: also `onChange` of a text control) | `value`, `inputType`, `data`, `isComposing` — once per edit of an `<input>` or `<textarea>`, once per toggle of a checkbox or radio, and once per key that moves a range. Bubbles, not cancelable. See [The input and change events](#the-input-and-change-events) |
+| Change | `onChange` (React: of a checkbox or radio) | `value` — an `<input>` or `<textarea>` whose value the user committed on blur or Enter, a checkbox or radio that was toggled, or a range a key moved. Bubbles, not cancelable. See [The input and change events](#the-input-and-change-events) |
 | Submit | `onSubmit` | `formData`, `submitter` — `<form>`, bubbling. See [Forms](#forms) |
 | Webview | `onDidStartLoading`, `onDidStopLoading`, `onDidNavigate`, `onPageTitleUpdated`, `onDidFailLoad` | `url`, `title`, `explicitSet`, `errorCode`, `errorDescription`, `validatedUrl` — `<webview>` only, at the element, not bubbling. See [`<webview>`](#webview) |
 | Native view | `onAttach`, `onDetach` | `nativeHandle` (decimal digits) — `<nativeview>` only, at the element, not bubbling; the handlers get the `bigint` and no event. See [`<nativeview>`](#nativeview) |

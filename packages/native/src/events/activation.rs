@@ -42,7 +42,7 @@ pub(crate) struct Activation {
 
 impl Activation {
     /// Makes the window draw what the tree changed on its own: the state of a choice control.
-    fn invalidate(&self, window: &mut Window, cx: &mut App) {
+    pub(crate) fn invalidate(&self, window: &mut Window, cx: &mut App) {
         let dirty = self.tree.lock().unwrap().take_dirty();
         if let Some(view) = window.root::<GpuixView>().flatten() {
             crate::renderer::invalidate_after_mutation(window, cx, view.entity_id(), dirty);

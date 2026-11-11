@@ -675,6 +675,8 @@ pub struct RetainedTree {
     control_ids: FxHashSet<u64>,
     /// The checkedness of every `<input>` and the activations in progress: see `input_choice`.
     pub(crate) choices: crate::custom_elements::input_choice::Choices,
+    /// What was written to every range input's value: see `input_range`.
+    pub(crate) ranges: crate::custom_elements::input_range::Ranges,
     /// Elements that `needs_focus`, in id order. Kept as mutations arrive so the
     /// per-frame focus sync visits these few instead of every retained element:
     /// a large tree retains thousands, and nearly none are focusable.
@@ -770,6 +772,7 @@ impl RetainedTree {
             motion_value_ids: FxHashSet::default(),
             control_ids: FxHashSet::default(),
             choices: Default::default(),
+            ranges: Default::default(),
             focusable_ids: Default::default(),
             geometry_ids: FxHashSet::default(),
             inert_count: 0,
@@ -1226,6 +1229,7 @@ impl RetainedTree {
             self.motion_value_ids.remove(&id);
             self.control_ids.remove(&id);
             self.choices.destroyed(id);
+            self.ranges.destroyed(id);
             self.focusable_ids.remove(&id);
             self.geometry_ids.remove(&id);
             self.inert_count -= usize::from(element.has_inert_prop());
@@ -1581,6 +1585,9 @@ impl RetainedTree {
         if is_input && matches!(key.as_str(), "checked" | "defaultChecked" | "indeterminate") {
             self.input_prop_written(id, &key, &value);
         }
+        if is_input && key == "value" {
+            self.range_value_written(id, &value);
+        }
         let mut changed = false;
         let is_input_type = is_input && key == "type";
         let is_input_group = is_input && matches!(key.as_str(), "type" | "name");
@@ -1668,6 +1675,9 @@ impl RetainedTree {
                 self.settle_style_change(id, change);
             }
             self.input_group_changed(id);
+            if is_input_type {
+                self.range_type_changed(id);
+            }
         }
         if is_form_control {
             if self.elements.get(&id).is_some_and(|element| element.control_disabled().is_some()) {

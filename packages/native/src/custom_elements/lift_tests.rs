@@ -61,6 +61,7 @@ fn lift_of_surface(style: &str, lift_absorbed: bool) -> Option<i32> {
         lift_absorbed,
         resolved: crate::resolved_style::Resolved::UNSTYLED,
         toggled: None,
+        range: None,
     };
     custom_surface(gpui::div().id("surface"), &ctx).style().lift_z()
 }

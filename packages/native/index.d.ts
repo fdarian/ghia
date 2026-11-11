@@ -2208,16 +2208,23 @@ export interface HighlightRect {
 
 /** What the `checked`, `defaultChecked`, `indeterminate` and `value` properties of an `<input>` read. */
 export interface InputChoiceState {
-  /** `"checkbox"`, `"radio"`, `"hidden"` or `"text"`, which covers every other type. */
+  /** `"checkbox"`, `"radio"`, `"hidden"`, `"range"` or `"text"`, which covers every other type. */
   kind: string
   checked: boolean
   defaultChecked: boolean
   indeterminate: boolean
   /**
-   * The `value` attribute of a checkbox, radio or hidden input, with its default. Empty for a
-   * text field, whose value is its text (`getTextSelection`).
+   * The `value` attribute of a checkbox, radio or hidden input, with its default, and the
+   * sanitized value of a range. Empty for a text field, whose value is its text (`getTextSelection`).
    */
   value: string
+  /**
+   * A range's limits and step, which `min`, `max` and `step` default and sanitize; 0 for another
+   * type. A `step` of 0 is `step="any"`.
+   */
+  min: number
+  max: number
+  step: number
 }
 
 /**

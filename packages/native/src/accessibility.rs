@@ -160,6 +160,7 @@ pub(crate) fn default_role(
                 InputType::Checkbox if element.element_type == "input" => Some(Role::CheckBox),
                 InputType::Radio if element.element_type == "input" => Some(Role::RadioButton),
                 // A hidden input has no node.
+                InputType::Range if element.element_type == "input" => Some(Role::Slider),
                 InputType::Hidden if element.element_type == "input" => None,
                 _ => Some(crate::custom_elements::input::default_role(input_type, element.element_type == "textarea")),
             }

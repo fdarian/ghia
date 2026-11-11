@@ -57,6 +57,7 @@ pub fn ua_style_of(element: &crate::retained_tree::RetainedElement) -> Option<Ar
         crate::custom_elements::input_rules::InputType::Checkbox => "input[type=checkbox]",
         crate::custom_elements::input_rules::InputType::Radio => "input[type=radio]",
         crate::custom_elements::input_rules::InputType::Hidden => "input[type=hidden]",
+        crate::custom_elements::input_rules::InputType::Range => "input[type=range]",
         _ => return None,
     };
     styles().get(name).cloned()
