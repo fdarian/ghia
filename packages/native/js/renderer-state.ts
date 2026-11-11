@@ -244,11 +244,11 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       const scoped = new GpuixEventTarget()
       if (handlers.onWindowKeyDown) {
         const onKeyDown = handlers.onWindowKeyDown
-        scoped.addEventListener("keydown", (event) => onKeyDown(event, renderer))
+        scoped.addEventListener("keydown", (event) => onKeyDown(event as KeyEvent, renderer))
       }
       if (handlers.onWindowKeyUp) {
         const onKeyUp = handlers.onWindowKeyUp
-        scoped.addEventListener("keyup", (event) => onKeyUp(event, renderer))
+        scoped.addEventListener("keyup", (event) => onKeyUp(event as KeyEvent, renderer))
       }
       const binding: ActiveRoot = {
         ids,

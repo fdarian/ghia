@@ -2951,6 +2951,8 @@ export interface KeyEvent extends DomEvent {
   /** Skip the handlers further along the path, up to and including `window`.
    *  The default action still runs, like the DOM. */
   stopPropagation(): void
+  /** Whether a modifier is held: `"Shift"`, `"Control"`, `"Alt"` or `"Meta"`. The others (`"CapsLock"`) are never held. */
+  getModifierState(key: string): boolean
 }
 
 export type WindowKeyEventHandler = (

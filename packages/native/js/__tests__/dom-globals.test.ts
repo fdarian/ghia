@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+import * as classes from "../events/classes.js"
 import { document, window as ghiaWindow } from "../events/window-target.js"
 import "../dom-globals.js"
 import { getComputedStyle } from "../computed-style.js"
@@ -170,5 +171,15 @@ describe("window size members", () => {
     fake.width = 500
     fake.emitMediaChange()
     expect(seen.length).toBe(1)
+  })
+})
+
+describe("event classes as globals", () => {
+  it("installs the DOM event classes where the runtime has none, so a library can build events with them", () => {
+    for (const name of Object.keys(classes.EVENT_CLASSES)) {
+      expect(Reflect.get(globalThis, name)).toBe(classes.EVENT_CLASSES[name as keyof typeof classes.EVENT_CLASSES])
+    }
+    expect(window.PointerEvent).toBe(classes.PointerEvent)
+    expect(document.defaultView?.PointerEvent).toBe(classes.PointerEvent)
   })
 })

@@ -1,5 +1,7 @@
 import type { EventPayload } from "../../index.js"
 import type { EventHandlerMap, HostEventHandler } from "../host.js"
+import { defineDeliveredType, lookupDeliveredType } from "./delivered-events.js"
+import { STATE, type DispatchState } from "./event-state.js"
 import type { HostDropEffect } from "./types.js"
 
 /**
@@ -95,28 +97,11 @@ const NON_CANCELABLE_TYPES: ReadonlySet<string> = new Set([
   "pointerlockerror",
 ])
 
-const POINTER_EVENT_TYPES: ReadonlySet<string> = new Set([
-  "pointerdown",
-  "pointerup",
-  "pointermove",
-  "pointercancel",
-  "pointerover",
-  "pointerout",
-  "pointerenter",
-  "pointerleave",
-  "gotpointercapture",
-  "lostpointercapture",
-  // Chrome makes these PointerEvents too.
-  "click",
-  "auxclick",
-  "contextmenu",
-])
-
 /** Clicks that a keyboard, an assistive technology or `el.click()` makes have no pointer (`pointerId` -1). */
 const CLICK_TYPES: ReadonlySet<string> = new Set(["click", "auxclick", "contextmenu"])
 
-function isPrimaryPointer(payload: EventPayload, eventType: string): boolean {
-  return !CLICK_TYPES.has(eventType) || payload.pointerId !== -1
+function isPrimaryPointer(payload: EventPayload): boolean {
+  return payload.pointerId !== -1 || !CLICK_TYPES.has(payload.eventType.toLowerCase())
 }
 
 export function eventBubbles(eventType: string): boolean {
@@ -181,6 +166,8 @@ export interface DomEvent extends RootEvent {
   readonly bubbles: boolean
   readonly cancelable: boolean
   readonly timeStamp: number
+  /** `true` for an event Ghia delivered from native input, `false` for one an app dispatched. */
+  readonly isTrusted: boolean
   defaultPrevented: boolean
   stopPropagation(): void
   stopImmediatePropagation(): void
@@ -275,50 +262,54 @@ export function toRootEvent(root: DomEventRoot, payload: EventPayload, target: o
   return { ...fields, target, relatedTarget: optionalElement(root, payload.relatedTarget) }
 }
 
+/** The payload fields an event does not carry as they are: native sends ids where the event has elements. */
+function isElementField(key: string): boolean {
+  return key === "target" || key === "relatedTarget" || key === "path" || key === "submitterId"
+}
+
 /**
  * Creates the event object and the state behind its stop methods. `path` is
  * the propagation path as elements, target first; empty for an event aimed at
  * the window or the document, whose `target` is `pathlessTarget`.
+ *
+ * The event is an instance of the DOM class of its type (`PointerEvent` for `click`), built from
+ * the prototype of its type with the payload's fields as own properties: see `delivered-events.ts`.
  */
 export function createDomEvent(
   root: DomEventRoot,
   payload: EventPayload,
   path: readonly object[],
   pathlessTarget: object | null
-): { event: DomEvent; state: DomEventState } {
-  const state = { propagationStopped: false, immediatePropagationStopped: false }
-  const cancelable = eventIsCancelable(payload.eventType)
-  const event: DomEvent = {
-    ...toRootEvent(root, payload, path[0] ?? pathlessTarget),
-    ...(payload.formEntries && formSubmission(root, payload.formEntries, payload.submitterId)),
-    // An edit has no data unless it inserted text, and the DOM says so with null.
-    ...(payload.eventType === "change" && { data: payload.data ?? null }),
-    ...(POINTER_EVENT_TYPES.has(payload.eventType.toLowerCase()) && {
-      isPrimary: isPrimaryPointer(payload, payload.eventType.toLowerCase()),
-    }),
-    type: payload.eventType,
-    currentTarget: null,
-    composedPath: () => [...path],
-    get nativeEvent() {
-      return event
-    },
-    eventPhase: EVENT_PHASE_NONE,
-    bubbles: eventBubbles(payload.eventType),
-    cancelable,
-    timeStamp: performance.now(),
-    defaultPrevented: false,
-    stopPropagation() {
-      state.propagationStopped = true
-    },
-    stopImmediatePropagation() {
-      state.propagationStopped = true
-      state.immediatePropagationStopped = true
-    },
-    preventDefault() {
-      if (cancelable) event.defaultPrevented = true
-    },
+): { event: DomEvent; state: DispatchState } {
+  const type = payload.eventType
+  const delivered = lookupDeliveredType(type) ?? defineDeliveredType(type, eventBubbles(type), eventIsCancelable(type))
+  const state: DispatchState = { propagationStopped: false, immediatePropagationStopped: false, dispatching: false, path }
+  const event: Record<string | symbol, unknown> = Object.create(delivered.prototype)
+  event.timeStamp = performance.now()
+  event[STATE] = state
+  // Own from the start, so the walk's writes replace a property instead of adding one to each event.
+  event.currentTarget = null
+  event.eventPhase = EVENT_PHASE_NONE
+  event.defaultPrevented = false
+  const fields = payload as unknown as Record<string, unknown>
+  for (const key of Object.keys(fields)) {
+    if (!isElementField(key)) event[key] = fields[key]
   }
-  return { event, state }
+  event.target = path[0] ?? pathlessTarget
+  event.relatedTarget = optionalElement(root, payload.relatedTarget)
+  if (payload.formEntries) Object.assign(event, formSubmission(root, payload.formEntries, payload.submitterId))
+  // An edit has no data unless it inserted text, and the DOM says so with null.
+  if (type === "change") event.data = payload.data ?? null
+  if (delivered.pointer) event.isPrimary = isPrimaryPointer(payload)
+  if (delivered.modifiers) {
+    const held = payload.modifiers
+    // A mouse event carries `modifiers`, a key event the four booleans; either says what is held.
+    event.shiftKey = payload.shiftKey ?? held?.shift ?? false
+    event.ctrlKey = payload.ctrlKey ?? held?.ctrl ?? false
+    event.altKey = payload.altKey ?? held?.alt ?? false
+    event.metaKey = payload.metaKey ?? held?.cmd ?? false
+  }
+  return { event: event as unknown as DomEvent, state }
 }
 
 /**
@@ -338,6 +329,70 @@ export function reportUncaught(error: unknown): void {
 /** Reports the errors a dispatch collected, once it is over. */
 export function reportHandlerErrors(root: DomEventRoot, errors: readonly unknown[]): void {
   errors.forEach(root.reportError ?? reportUncaught)
+}
+
+/** The handlers of the element at `index` of the path, by handler key (the type, or the type and `Capture`). */
+export type HandlersAt = (index: number) => HandlerLookup | undefined
+
+/** What a dispatch asks of an element's handlers: the handler under a key. A `Map` is one, and so is `ElementListeners`. */
+export interface HandlerLookup {
+  get(key: string): HostEventHandler | undefined
+}
+
+/**
+ * Walks `event` along `elements` (target first): the hooks' capture phase, capture handlers from
+ * the root down to the target, then the target's, then the bubble handlers back up, then the
+ * hooks' bubble phase. Handlers run synchronously, and one that throws goes to `fail` while the
+ * rest run. An event that does not bubble skips the bubble phase. Leaves `currentTarget` null and
+ * `eventPhase` 0.
+ */
+export function walkDomEvent(
+  event: DomEvent,
+  state: DispatchState,
+  elements: readonly object[],
+  handlersAt: HandlersAt,
+  hooks: DomDispatchHooks | undefined,
+  fail: (error: unknown) => void
+): void {
+  const type = event.type
+  const captureKey = captureHandlerKey(type)
+  state.dispatching = true
+  const visit = (index: number, phase: number, keys: string[]) => {
+    event.currentTarget = elements[index]
+    event.eventPhase = phase
+    const handlers = handlersAt(index)
+    if (!handlers) return
+    for (const key of keys) {
+      if (state.immediatePropagationStopped) return
+      const handler = handlers.get(key)
+      if (!handler) continue
+      try {
+        // An element with listeners on this type keeps a list, which needs the state of the dispatch.
+        if (isListenerRunner(handler)) handler[LISTENER_RUNNER](event, state, fail)
+        else handler(event)
+      } catch (error) {
+        fail(error)
+      }
+    }
+  }
+
+  hooks?.beforeCapture?.(event, state, fail)
+  for (let index = elements.length - 1; index > 0 && !state.propagationStopped; index--) {
+    visit(index, EVENT_PHASE_CAPTURING, [captureKey])
+  }
+  if (!state.propagationStopped) {
+    visit(0, EVENT_PHASE_AT_TARGET, [captureKey, type])
+  }
+  if (event.bubbles) {
+    for (let index = 1; index < elements.length && !state.propagationStopped; index++) {
+      visit(index, EVENT_PHASE_BUBBLING, [type])
+    }
+  }
+  if (event.bubbles && !state.propagationStopped) hooks?.afterBubble?.(event, state, fail)
+
+  event.currentTarget = null
+  event.eventPhase = EVENT_PHASE_NONE
+  state.dispatching = false
 }
 
 /**
@@ -368,43 +423,7 @@ export function dispatchDomEvent(
   const elements = path.map((id) => requireElement(root, id, payload.eventType))
   const { event, state } = createDomEvent(root, payload, elements, null)
   const errors: unknown[] = []
-  const fail = (error: unknown) => errors.push(error)
-  const captureKey = captureHandlerKey(payload.eventType)
-  const visit = (index: number, phase: number, keys: string[]) => {
-    event.currentTarget = elements[index]
-    event.eventPhase = phase
-    const handlers = root.eventHandlers.get(path[index])
-    if (!handlers) return
-    for (const key of keys) {
-      if (state.immediatePropagationStopped) return
-      const handler = handlers.get(key)
-      if (!handler) continue
-      try {
-        // An element with listeners on this type keeps a list, which needs the state of the dispatch.
-        if (isListenerRunner(handler)) handler[LISTENER_RUNNER](event, state, fail)
-        else handler(event)
-      } catch (error) {
-        fail(error)
-      }
-    }
-  }
-
-  hooks?.beforeCapture?.(event, state, fail)
-  for (let index = path.length - 1; index > 0 && !state.propagationStopped; index--) {
-    visit(index, EVENT_PHASE_CAPTURING, [captureKey])
-  }
-  if (!state.propagationStopped) {
-    visit(0, EVENT_PHASE_AT_TARGET, [captureKey, payload.eventType])
-  }
-  if (event.bubbles) {
-    for (let index = 1; index < path.length && !state.propagationStopped; index++) {
-      visit(index, EVENT_PHASE_BUBBLING, [payload.eventType])
-    }
-  }
-  if (event.bubbles && !state.propagationStopped) hooks?.afterBubble?.(event, state, fail)
-
-  event.currentTarget = null
-  event.eventPhase = EVENT_PHASE_NONE
+  walkDomEvent(event, state, elements, (index) => root.eventHandlers.get(path[index]), hooks, (error) => errors.push(error))
   reportHandlerErrors(root, errors)
   return {
     defaultPrevented: event.defaultPrevented,

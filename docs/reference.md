@@ -7199,6 +7199,14 @@ PointerEvents in Chrome) also has `isPrimary`: `true`, because Ghia has one poin
 button, the VoiceOver Press, `el.click()`), where it is `false`. Every event has `nativeEvent`, the event itself, which is what a library that wraps
 events reads the DOM event from (a React synthetic event has the same member).
 
+### Event classes
+
+Every event Ghia delivers is an instance of the DOM class of its type, and of `Event`: a `click`, `auxclick`, `contextmenu` and every `pointer*` type is a `PointerEvent`; the other mouse types a `MouseEvent`; `wheel` a `WheelEvent`; the drag types a `DragEvent`; `keydown` and `keyup` a `KeyboardEvent`; `focus`, `blur`, `focusin` and `focusout` a `FocusEvent`; `onChange`'s event an `InputEvent`; the composition types a `CompositionEvent`; the transition types a `TransitionEvent` and the animation types an `AnimationEvent`. Any other type is a plain `Event`. The classes are exported by `@ghia/native/host` and installed as globals where the runtime has none (`UIEvent`, `MouseEvent`, `PointerEvent`, `WheelEvent`, `DragEvent`, `KeyboardEvent`, `FocusEvent`, `InputEvent`, `CompositionEvent`, `TransitionEvent`, `AnimationEvent`), so `event instanceof PointerEvent` and `new (element.ownerDocument.defaultView.PointerEvent)('click', { bubbles: true, shiftKey: true })` work as they do in a browser. Each takes the DOM's constructor arguments (the type and an init dictionary with the DOM's defaults: `new MouseEvent('click')` has `clientX` 0 and `relatedTarget` `null`), and is a subclass of the runtime's own `Event`, so `Event`, `CustomEvent` and `EventTarget` are untouched.
+
+`getModifierState(key)` is on `MouseEvent` (so on pointer, wheel and drag events) and `KeyboardEvent`: `"Shift"`, `"Control"`, `"Alt"` and `"Meta"` read the four modifier fields (`shiftKey`, `ctrlKey`, `altKey`, `metaKey`, which every mouse and key event has), and any other key (`"CapsLock"`, `"NumLock"`) is `false` on a delivered event, since no platform reports them to Ghia. A constructed event answers for the `modifier*` members of its init (`new KeyboardEvent('keydown', { modifierCapsLock: true })`).
+
+`isTrusted` is `true` on an event Ghia delivered from input. `returnValue` and `cancelBubble` read and write the same flags as `defaultPrevented` and `stopPropagation()`, and `srcElement` is `target`. A delivered event is built from the prototype of its class and not with the runtime's constructor, which is why it is cheap; [what that costs](fork/deviations.md#events-and-input) is that its inherited native methods (`initEvent`) throw, and that it cannot be given to a runtime `EventTarget`'s `dispatchEvent`.
+
 ### Pointer capture
 
 Nothing captures the pointer on its own. Listening for `onMouseDown` and

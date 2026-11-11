@@ -1,5 +1,5 @@
 import type { EventPayload } from "../../index.js"
-import type { NativeRenderer } from "../host.js"
+import type { KeyEvent, NativeRenderer } from "../host.js"
 import type { ActiveRoot, DismissLayer } from "../renderer-state.js"
 import {
   captureHandlerKey,
@@ -156,7 +156,7 @@ export function runRootEvent(
 function runKeyDefault(root: ActiveRoot, event: DomEvent, context: RootEventContext) {
   if (hasCommandModifier(event)) return
   if (event.key === "Escape") {
-    context.topLayer()?.onEscapeKeyDown(event)
+    context.topLayer()?.onEscapeKeyDown(event as KeyEvent)
   } else if (event.key === "Tab" && root.handlers.tabNavigation !== false) {
     moveFocusByTab(context.renderer, Boolean(event.modifiers?.shift))
   } else {

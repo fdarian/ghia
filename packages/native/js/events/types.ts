@@ -67,6 +67,8 @@ export interface HostDomEvent extends RootEvent {
   readonly bubbles: boolean
   readonly cancelable: boolean
   readonly timeStamp: number
+  /** `true` for an event Ghia delivered from native input, `false` for one an app dispatched with `dispatchEvent`. */
+  readonly isTrusted: boolean
   readonly defaultPrevented: boolean
   stopPropagation(): void
   stopImmediatePropagation(): void
@@ -102,6 +104,12 @@ export interface HostMouseEvent extends HostDomEvent {
   pointerId: number
   /** `""` for a click no pointer made. */
   pointerType: "mouse" | "pen" | "touch" | ""
+  readonly shiftKey: boolean
+  readonly ctrlKey: boolean
+  readonly altKey: boolean
+  readonly metaKey: boolean
+  /** Whether a modifier is held: `"Shift"`, `"Control"`, `"Alt"` or `"Meta"`. The others (`"CapsLock"`) are never held. */
+  getModifierState(key: string): boolean
 }
 
 export interface HostPointerEvent extends HostMouseEvent {

@@ -15,6 +15,7 @@ import {
 } from "./dom/nodes.js"
 import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
 import { Selection } from "./dom/selection.js"
+import { EVENT_CLASSES } from "./events/classes.js"
 import { document, window } from "./events/window-target.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
 import { isWebBuild } from "./web-build.js"
@@ -44,6 +45,7 @@ const DOM_CLASSES = {
   Selection,
   MutationObserver,
   MutationRecord,
+  ...EVENT_CLASSES,
 }
 
 const getSelection = () => document.getSelection()
