@@ -11,6 +11,8 @@
 //! A declaration that fails alone is:
 //! - a number: tried again as React DOM writes it, `0` as `"0"`, a unitless property
 //!   (`opacity`, `zIndex`, ...) as the bare number, anything else as `<n>px`;
+//! - a string that holds a number, of a unitless property (`opacity: "0.5"`, which `element.style`
+//!   and React DOM both accept): tried again as the number;
 //! - an object (a state style such as `hover`, or an `@container` block): recovered the same way
 //!   inside, and dropped whole only if what is left still fails;
 //! - anything else, the CSS-wide keywords (`inherit`, `initial`, `unset`, `revert`,
@@ -118,7 +120,8 @@ impl Recovery {
                     self.path.pop();
                     Some(object_text(&inner))
                 }
-                None => number_as_text(&declaration.key, &declaration.value),
+                None => number_as_text(&declaration.key, &declaration.value)
+                    .or_else(|| numeric_string(&declaration.key, &declaration.value)),
             };
             match replacement {
                 Some(value) if self.accepts(&declaration.key, &value) => {
@@ -206,6 +209,16 @@ fn number_as_text(key: &str, value: &str) -> Option<String> {
     number_text(key, value).map(|text| json_string(&text))
 }
 
+/// The number a JSON string holds, as JSON, when `key` is a property that takes a `<number>`.
+fn numeric_string(key: &str, value: &str) -> Option<String> {
+    if !is_unitless(key) {
+        return None;
+    }
+    let text: String = serde_json::from_str(value).ok()?;
+    let number: serde_json::Number = serde_json::from_str(text.trim()).ok()?;
+    Some(number.to_string())
+}
+
 /// Whether this is the first time `name: value` is dropped, so a re-render does not log it again.
 fn first_report(name: &str, value: &str) -> bool {
     let mut reported = REPORTED.lock().unwrap_or_else(PoisonError::into_inner);
@@ -233,6 +246,14 @@ mod tests {
         assert_eq!(number_as_text("zIndex", "3"), Some(r#""3""#.to_owned()));
         assert_eq!(number_as_text("opacity", "0.5"), Some(r#""0.5""#.to_owned()));
         assert_eq!(number_as_text("border", r#""2""#), None);
+    }
+
+    #[test]
+    fn a_string_that_holds_a_number_is_tried_as_the_number_for_a_unitless_property() {
+        let style = recovered(r#"{"opacity": "0.5", "zIndex": " 3 ", "width": "wide"}"#);
+        assert_eq!(style.opacity, Some(0.5));
+        assert_eq!(style.z_index, Some(3.0));
+        assert_eq!(style.width, None);
     }
 
     #[test]
