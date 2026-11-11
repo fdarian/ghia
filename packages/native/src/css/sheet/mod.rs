@@ -37,7 +37,7 @@ mod tree_tests;
 
 pub use atoms::{Atom, Atoms};
 pub use cascade::{CascadeCache, MatchedRules};
-pub use document::{ElementCss, StyleSheets};
+pub use document::{ClassAtoms, ElementCss, StyleSheets};
 pub use declarations::render_declarations;
 pub use invalidation::{Invalidation, Reach};
 pub use layers::{LayerId, LayerOrder, Layers};

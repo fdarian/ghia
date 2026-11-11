@@ -101,6 +101,10 @@ pub struct RetainedElement {
     pub parent: Option<u64>,
     /// Most host nodes have neither listeners nor custom props.
     extras: Option<Box<ElementExtras>>,
+    /// Only an element that was given an attribute or matched by a sheet has these, which an app
+    /// with no sheet never makes: boxed, they cost an element one pointer. Not in `extras`, so an
+    /// element with a class and no listener is one allocation and not two.
+    markup: Option<Box<Markup>>,
     /// Take keyboard focus the first time this element gets a focus handle.
     /// Without it an `<input>` is dead until the user clicks it.
     pub auto_focus: bool,
@@ -142,9 +146,6 @@ pub struct RetainedElement {
 struct ElementExtras {
     events: HashSet<String>,
     custom_props: HashMap<String, serde_json::Value>,
-    /// Only an element that was given an attribute or matched by a sheet has these, which an app
-    /// with no sheet never makes: boxed, they cost an element with extras one pointer.
-    markup: Option<Box<Markup>>,
     /// The style before the `setStyle` that made the element declare a CSS
     /// transition. Native only tracks elements that declare one, and the
     /// transitions of a change are the ones of the style after it, so without
@@ -327,6 +328,7 @@ impl RetainedElement {
             children: Vec::new(),
             parent: None,
             extras: None,
+            markup: None,
             auto_focus: false,
             svg_written: std::cell::Cell::new(false),
             container_display: Default::default(),
@@ -386,22 +388,22 @@ impl RetainedElement {
     }
 
     pub(crate) fn attribute_store(&self) -> Option<&crate::attributes::AttributeStore> {
-        self.extras.as_deref()?.markup.as_deref().map(|markup| &markup.attributes)
+        self.markup.as_deref().map(|markup| &markup.attributes)
     }
 
     /// Returns whether the attribute changed.
-    pub(crate) fn set_attribute(&mut self, name: &str, value: Option<String>) -> bool {
+    pub(crate) fn set_attribute(&mut self, names: &mut crate::attributes::AttributeNames, name: &str, value: Option<String>) -> bool {
         let name = &*crate::attributes::stored_name(self.is_svg(), name);
         if value.is_none() && self.attribute_store().is_none_or(|store| store.get(name).is_none()) {
             return false;
         }
-        let changed = self.markup_mut().attributes.set(name, value);
-        self.release_empty_extras();
+        let changed = self.markup_mut().attributes.set(names, name, value);
+        self.release_empty_markup();
         changed
     }
 
     pub(crate) fn css(&self) -> Option<&crate::css::sheet::ElementCss> {
-        self.extras.as_deref()?.markup.as_deref().map(|markup| &markup.css)
+        self.markup.as_deref().map(|markup| &markup.css)
     }
 
     pub(crate) fn css_mut(&mut self) -> &mut crate::css::sheet::ElementCss {
@@ -410,33 +412,33 @@ impl RetainedElement {
 
     /// Stores the id and class atoms for the matcher. An element that has none and kept nothing
     /// before costs no allocation.
-    pub(crate) fn set_css_atoms(&mut self, id: Option<crate::css::sheet::Atom>, classes: Vec<crate::css::sheet::Atom>) {
+    pub(crate) fn set_css_atoms(&mut self, id: Option<crate::css::sheet::Atom>, classes: crate::css::sheet::ClassAtoms) {
         if id.is_none() && classes.is_empty() && self.css().is_none() {
             return;
         }
         let css = self.css_mut();
         css.id = id;
         css.classes = classes;
-        self.release_empty_extras();
+        self.release_empty_markup();
     }
 
-    /// Sets the rules the sheets matched the element with, and lets go of the extras when that
-    /// leaves them empty.
+    /// Sets the rules the sheets matched the element with, and lets go of the markup when that
+    /// leaves it empty.
     pub(crate) fn set_matched(&mut self, matched: Option<Arc<crate::css::sheet::MatchedRules>>) {
         if matched.is_none() && self.css().is_none() {
             return;
         }
         self.css_mut().matched = matched;
-        self.release_empty_extras();
+        self.release_empty_markup();
     }
 
     /// Replaces the class atoms and returns the ones the element had.
-    pub(crate) fn replace_css_classes(&mut self, classes: Vec<crate::css::sheet::Atom>) -> Vec<crate::css::sheet::Atom> {
+    pub(crate) fn replace_css_classes(&mut self, classes: crate::css::sheet::ClassAtoms) -> crate::css::sheet::ClassAtoms {
         if classes.is_empty() && self.css().is_none_or(|css| css.classes.is_empty()) {
-            return Vec::new();
+            return Default::default();
         }
         let before = std::mem::replace(&mut self.css_mut().classes, classes);
-        self.release_empty_extras();
+        self.release_empty_markup();
         before
     }
 
@@ -446,14 +448,14 @@ impl RetainedElement {
             return None;
         }
         let before = std::mem::replace(&mut self.css_mut().id, id);
-        self.release_empty_extras();
+        self.release_empty_markup();
         before
     }
 
     pub(crate) fn clear_css(&mut self) {
-        if let Some(markup) = self.extras.as_mut().and_then(|extras| extras.markup.as_mut()) {
+        if let Some(markup) = self.markup.as_mut() {
             markup.css = Default::default();
-            self.release_empty_extras();
+            self.release_empty_markup();
         }
     }
 
@@ -467,22 +469,22 @@ impl RetainedElement {
     }
 
     fn markup_mut(&mut self) -> &mut Markup {
-        self.extras_mut().markup.get_or_insert_with(Default::default)
+        self.markup.get_or_insert_with(Default::default)
+    }
+
+    fn release_empty_markup(&mut self) {
+        if self.markup.as_ref().is_some_and(|markup| markup.is_empty()) {
+            self.markup = None;
+        }
     }
 
     fn release_empty_extras(&mut self) {
-        if let Some(extras) = self.extras.as_mut() {
-            if extras.markup.as_ref().is_some_and(|markup| markup.is_empty()) {
-                extras.markup = None;
-            }
-        }
         if self
             .extras
             .as_ref()
             .is_some_and(|extras| {
                 extras.events.is_empty()
                     && extras.custom_props.is_empty()
-                    && extras.markup.is_none()
                     && extras.before_transition.is_none()
                     && extras.props_before.lock().expect("props_before is never held across a panic").is_empty()
             })
@@ -883,6 +885,8 @@ pub struct RetainedTree {
     fresh: rustc_hash::FxHashSet<u64>,
     /// The document's stylesheets and what has to be matched against them again.
     pub(crate) sheets: crate::css::sheet::StyleSheets,
+    /// The attribute names the elements hold, one allocation each however many elements use it.
+    pub(crate) attribute_names: crate::attributes::AttributeNames,
     /// What each built element was painted with, for the walks that read the tree.
     pub(crate) resolved: std::cell::RefCell<crate::resolved_style::ResolvedStyles>,
     /// Whether the elements with `content-visibility: auto` skip their content, and the sizes
@@ -960,6 +964,7 @@ impl RetainedTree {
             relations: RelationRegistry::default(),
             styles: StyleTable::default(),
             sheets: Default::default(),
+            attribute_names: Default::default(),
             resolved: Default::default(),
             fresh: Default::default(),
             relevance: Default::default(),
@@ -2340,20 +2345,27 @@ mod tests {
     }
 
     #[test]
-    fn the_attribute_store_and_sheet_data_cost_extras_one_pointer_until_an_element_has_one() {
+    fn the_attribute_store_and_sheet_data_cost_an_element_one_pointer_until_it_has_one() {
         let mut tree = tree_with_child();
         tree.set_event_listener(2, "click".into(), true);
-        assert!(tree.elements[&2].extras.as_ref().is_some_and(|extras| extras.markup.is_none()));
+        assert!(tree.elements[&2].markup.is_none());
 
-        tree.elements.get_mut(&2).unwrap().set_attribute("data-x", Some("1".into()));
-        assert!(tree.elements[&2].extras.as_ref().is_some_and(|extras| extras.markup.is_some()));
-        tree.elements.get_mut(&2).unwrap().set_attribute("data-x", None);
-        assert!(tree.elements[&2].extras.as_ref().is_some_and(|extras| extras.markup.is_none()));
+        tree.set_attribute(2, "data-x", Some("1".into()));
+        assert!(tree.elements[&2].markup.is_some());
+        tree.set_attribute(2, "data-x", None);
+        assert!(tree.elements[&2].markup.is_none());
 
         tree.set_event_listener(2, "click".into(), false);
         assert!(tree.elements[&2].extras.is_none());
         // 240 with the store and the sheet data inline.
         assert!(std::mem::size_of::<ElementExtras>() <= 176);
+    }
+
+    #[test]
+    fn an_attribute_needs_no_listener_extras() {
+        let mut tree = tree_with_child();
+        tree.set_attribute(2, "class", Some("a".into()));
+        assert!(tree.elements[&2].extras.is_none());
     }
 
     #[test]

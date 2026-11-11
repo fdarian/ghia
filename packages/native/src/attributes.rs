@@ -8,14 +8,55 @@
 //! cascade that reads attributes decides what to invalidate when it exists.
 
 use std::borrow::Cow;
+use std::sync::Arc;
+
+use rustc_hash::FxHashSet;
+use smallvec::SmallVec;
 
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
+/// Names are pruned once the table has grown to this many, and again each time it doubles.
+const PRUNE_FROM: usize = 64;
+
+/// The attribute names the elements of a tree hold. An element stores a pointer to the name, not
+/// a copy, so `class` on five thousand elements is one allocation.
+pub(crate) struct AttributeNames {
+    names: FxHashSet<Arc<str>>,
+    prune_at: usize,
+}
+
+impl Default for AttributeNames {
+    fn default() -> Self {
+        AttributeNames { names: FxHashSet::default(), prune_at: PRUNE_FROM }
+    }
+}
+
+impl AttributeNames {
+    fn intern(&mut self, name: &str) -> Arc<str> {
+        if let Some(name) = self.names.get(name) {
+            return name.clone();
+        }
+        if self.names.len() >= self.prune_at {
+            // An app that makes up names would otherwise keep every one it ever used.
+            self.names.retain(|name| Arc::strong_count(name) > 1);
+            self.prune_at = (self.names.len() * 2).max(PRUNE_FROM);
+        }
+        let name: Arc<str> = name.into();
+        self.names.insert(name.clone());
+        name
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.names.len()
+    }
+}
+
 /// The attributes of one element. Most elements have none to three, so a list of pairs is
-/// smaller and as fast as a map.
+/// smaller and as fast as a map, and two of them sit inline.
 #[derive(Default)]
 pub(crate) struct AttributeStore {
-    pairs: Vec<(Box<str>, Box<str>)>,
+    pairs: SmallVec<[(Arc<str>, Box<str>); 2]>,
 }
 
 impl AttributeStore {
@@ -35,7 +76,7 @@ impl AttributeStore {
     }
 
     /// Whether the store changed.
-    pub(crate) fn set(&mut self, name: &str, value: Option<String>) -> bool {
+    pub(crate) fn set(&mut self, names: &mut AttributeNames, name: &str, value: Option<String>) -> bool {
         let position = self
             .pairs
             .iter()
@@ -51,12 +92,12 @@ impl AttributeStore {
             (Some(position), None) => {
                 self.pairs.remove(position);
                 if self.pairs.is_empty() {
-                    self.pairs = Vec::new();
+                    self.pairs = SmallVec::new();
                 }
                 true
             }
             (None, Some(value)) => {
-                self.pairs.push((name.into(), value.into_boxed_str()));
+                self.pairs.push((names.intern(name), value.into_boxed_str()));
                 true
             }
             (None, None) => false,
@@ -89,7 +130,7 @@ impl RetainedTree {
     /// element that does not exist changes nothing.
     pub fn set_attribute(&mut self, id: u64, name: &str, value: Option<String>) -> bool {
         let changed = match self.elements.get_mut(&id) {
-            Some(element) => element.set_attribute(name, value),
+            Some(element) => element.set_attribute(&mut self.attribute_names, name, value),
             None => false,
         };
         if changed && self.sheets.enabled {
@@ -207,6 +248,39 @@ mod tests {
             assert_eq!(tree.attribute(id, "viewbox"), None, "{tag}");
             assert_eq!(tree.attribute_names(id), ["viewBox"], "{tag}");
         }
+    }
+
+    #[test]
+    fn elements_share_the_allocation_of_a_name_and_a_name_nobody_holds_is_pruned() {
+        let mut tree = tree();
+        for id in 2..6 {
+            tree.create_element(id, "div".into());
+            tree.set_attribute(id, "class", Some("a".into()));
+        }
+        assert_eq!(tree.attribute_names.len(), 1);
+        let first = tree.elements[&2].attribute_store().unwrap().pairs[0].0.clone();
+        let last = tree.elements[&5].attribute_store().unwrap().pairs[0].0.clone();
+        assert!(Arc::ptr_eq(&first, &last));
+
+        for index in 0..PRUNE_FROM * 3 {
+            tree.set_attribute(1, &format!("data-{index}"), Some("1".into()));
+            tree.set_attribute(1, &format!("data-{index}"), None);
+        }
+        assert!(tree.attribute_names.len() <= PRUNE_FROM + 1, "{}", tree.attribute_names.len());
+        assert_eq!(tree.attribute(2, "class").as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn more_attributes_than_sit_inline_read_back() {
+        let mut tree = tree();
+        for index in 0..5 {
+            tree.set_attribute(1, &format!("data-{index}"), Some(index.to_string()));
+        }
+        assert_eq!(tree.attribute_names(1).len(), 5);
+        assert_eq!(tree.attribute(1, "data-4").as_deref(), Some("4"));
+        tree.set_attribute(1, "data-0", None);
+        assert_eq!(tree.attribute(1, "data-0"), None);
+        assert_eq!(tree.attribute(1, "data-4").as_deref(), Some("4"));
     }
 
     #[test]

@@ -26,11 +26,14 @@ use crate::css::lenient::number_text;
 /// How many distinct skipped rules are logged before the rest are summed up in one warning.
 const SKIP_LOG_LIMIT: usize = 1024;
 
+/// The class atoms of one element: a few sit inline.
+pub type ClassAtoms = smallvec::SmallVec<[Atom; 4]>;
+
 /// What an element has for the matcher, kept on the element while sheets exist.
 #[derive(Default)]
 pub struct ElementCss {
     pub id: Option<Atom>,
-    pub classes: Vec<Atom>,
+    pub classes: ClassAtoms,
     /// `None` for an element no rule matches, and for one that is not in the document.
     pub matched: Option<Arc<MatchedRules>>,
 }

@@ -14,6 +14,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
 use super::atoms::{Atom, Atoms};
+use super::document::ClassAtoms;
 use super::cascade::MatchedRules;
 use super::invalidation::Reach;
 use super::selector::Specificity;
@@ -33,7 +34,7 @@ fn lowercase(name: &str) -> Cow<'_, str> {
 
 /// A class or id no sheet names cannot match a selector, so it has no atom and an element keeps
 /// nothing of it: the interner holds the names of the sheets, not of every element ever seen.
-fn class_atoms(atoms: &Atoms, value: Option<Cow<'_, str>>) -> Vec<Atom> {
+fn class_atoms(atoms: &Atoms, value: Option<Cow<'_, str>>) -> ClassAtoms {
     value
         .map(|value| value.split_ascii_whitespace().filter_map(|class| atoms.get(class)).collect())
         .unwrap_or_default()
@@ -226,10 +227,10 @@ impl RetainedTree {
     // Atoms.
 
     /// Reads the class atoms again, and returns the ones the element had.
-    fn refresh_class_atoms(&mut self, id: u64) -> Vec<Atom> {
+    fn refresh_class_atoms(&mut self, id: u64) -> ClassAtoms {
         let atoms = &self.sheets.atoms;
         let Some(element) = self.elements.get_mut(&id) else {
-            return Vec::new();
+            return ClassAtoms::new();
         };
         let classes = class_atoms(atoms, element.attribute("class"));
         element.replace_css_classes(classes)
