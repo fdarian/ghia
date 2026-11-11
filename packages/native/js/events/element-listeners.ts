@@ -8,6 +8,9 @@ import {
 } from "./dispatch.js"
 import { registerEventListener, unregisterEventListener } from "./listeners.js"
 
+/** Where the dispatch of an app's event finds the listeners of an element: a method of the DOM members that returns its `ElementListeners`. */
+export const DOM_LISTENERS: unique symbol = Symbol.for("@ghia/native/dom-listeners")
+
 /** `addEventListener`'s second argument, shaped like the DOM's. */
 export type ElementEventListener =
   | ((event: DomEvent) => void)
@@ -89,6 +92,16 @@ export class ElementListeners {
   /** The element is gone natively, and its handlers with it. */
   detach(): void {
     this.#sink = undefined
+  }
+
+  /**
+   * The handler the element has under `key` (the type, or the type and `Capture`), which is what
+   * `attach` registers in the root's handler map: the dispatch of an app's event reads it here
+   * instead, so it needs neither the root nor an id, and reaches an element that is not mounted.
+   */
+  get(key: string): HostEventHandler | undefined {
+    const slot = this.#slots.get(key)
+    return slot === undefined ? undefined : this.#handlerOf(key, slot)
   }
 
   /** Sets the `on*` prop that is stored under `key`, or unsets it with `undefined`. */

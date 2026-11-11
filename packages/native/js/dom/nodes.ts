@@ -323,6 +323,9 @@ abstract class ElementClass extends NodeClass {
 
   declare removeAttribute: (name: string) => void
 
+  /** Dispatches an event an app built at the element. The adapters' DOM members (`defineDomMembers`) define it on their prototypes. */
+  declare dispatchEvent: (event: Event) => boolean
+
   abstract get tagName(): string
 
   get nodeType(): number {

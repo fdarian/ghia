@@ -10,12 +10,17 @@ import {
   EVENT_PHASE_CAPTURING,
   EVENT_PHASE_NONE,
   dispatchDomEvent,
+  type DomDispatchHooks,
   type DomDispatchResult,
   type DomEvent,
   type DomEventRoot,
   type DomEventState,
+  type HandlersAt,
   reportHandlerErrors,
+  reportUncaught,
+  walkDomEvent,
 } from "./dispatch.js"
+import { dispatchStateOf, type DispatchState } from "./event-state.js"
 
 export type WindowEventListener = (event: DomEvent) => void
 
@@ -267,6 +272,21 @@ export class GpuixDocument<Element = unknown> extends Document {
     fail: (error: unknown) => void
   ): void {
     this.target.run(event, state, capture, phase, fail)
+  }
+
+  /**
+   * Dispatches an event an app built (`new Event`, `new CustomEvent`, `new PointerEvent`) at
+   * `document`: `window` hears its capture phase, `document` its target phase, and `window` its
+   * bubble phase if it bubbles. Returns false when a listener called `preventDefault()` on a
+   * cancelable event. Throws an `InvalidStateError` for an event already being dispatched.
+   */
+  dispatchEvent(event: Event): boolean {
+    const state = beginDispatch(event, this)
+    const errors: unknown[] = []
+    walkAtTop(event as unknown as DomEvent, state, propagationHooks(), (error) => errors.push(error))
+    endDispatch(state)
+    errors.forEach(reportUncaught)
+    return !event.defaultPrevented
   }
 
   /** The `<html>` element of the window that mounted last, or `null` while nothing is mounted. */
@@ -561,29 +581,15 @@ export function dispatchPropagating(
   payload: EventPayload,
   scoped?: GpuixEventTarget
 ): PropagationResult {
-  // When `document` is the target, both its capture and bubble listeners run at the target.
-  const documentPhase = (event: DomEvent, phase: number) =>
-    event.target === document ? EVENT_PHASE_AT_TARGET : phase
-  const bubble = (event: DomEvent, state: DomEventState, fail: (error: unknown) => void) => {
-    document.run(event, state, false, documentPhase(event, EVENT_PHASE_BUBBLING), fail)
-    if (!state.propagationStopped) window.run(event, state, false, EVENT_PHASE_BUBBLING, fail)
-    if (!state.propagationStopped) scoped?.run(event, state, false, EVENT_PHASE_BUBBLING, fail)
-  }
-  const capture = (event: DomEvent, state: DomEventState, fail: (error: unknown) => void) => {
-    window.run(event, state, true, EVENT_PHASE_CAPTURING, fail)
-    if (!state.propagationStopped) {
-      document.run(event, state, true, documentPhase(event, EVENT_PHASE_CAPTURING), fail)
-    }
-  }
-
+  const hooks = propagationHooks(scoped)
   if (payload.path && payload.path.length > 0) {
     let seen: DomEvent | undefined
     const result = dispatchDomEvent(root, payload, {
       beforeCapture(event, state, fail) {
         seen = event
-        capture(event, state, fail)
+        hooks.beforeCapture(event, state, fail)
       },
-      afterBubble: bubble,
+      afterBubble: hooks.afterBubble,
     })
     if (!seen) throw new Error(`Event "${payload.eventType}" was dispatched without an event object.`)
     return { ...result, event: seen }
@@ -596,19 +602,101 @@ export function dispatchPropagating(
     isDocumentEvent(payload.eventType) ? document : null
   )
   const errors: unknown[] = []
-  const fail = (error: unknown) => errors.push(error)
-  capture(event, state, fail)
-  if (!state.propagationStopped) {
-    if (event.bubbles) bubble(event, state, fail)
-    // A non-bubbling event still reaches the bubble listeners of its own target.
-    else if (event.target === document) document.run(event, state, false, EVENT_PHASE_AT_TARGET, fail)
-  }
-  event.currentTarget = null
-  event.eventPhase = EVENT_PHASE_NONE
+  walkAtTop(event, state, hooks, (error) => errors.push(error))
   reportHandlerErrors(root, errors)
   return {
     defaultPrevented: event.defaultPrevented,
     propagationStopped: state.propagationStopped,
     event,
   }
+}
+
+/** The phases of `window` and `document` around an element path: both listen in capture, `document` then `window` bubble. */
+function propagationHooks(scoped?: GpuixEventTarget): Required<DomDispatchHooks> {
+  // When `document` is the target, both its capture and bubble listeners run at the target.
+  const documentPhase = (event: DomEvent, phase: number) =>
+    event.target === document ? EVENT_PHASE_AT_TARGET : phase
+  return {
+    beforeCapture(event, state, fail) {
+      window.run(event, state, true, EVENT_PHASE_CAPTURING, fail)
+      if (!state.propagationStopped) {
+        document.run(event, state, true, documentPhase(event, EVENT_PHASE_CAPTURING), fail)
+      }
+    },
+    afterBubble(event, state, fail) {
+      document.run(event, state, false, documentPhase(event, EVENT_PHASE_BUBBLING), fail)
+      if (!state.propagationStopped) window.run(event, state, false, EVENT_PHASE_BUBBLING, fail)
+      if (!state.propagationStopped) scoped?.run(event, state, false, EVENT_PHASE_BUBBLING, fail)
+    },
+  }
+}
+
+/** An event with no element path: aimed at the window or at `document`, which only they hear. */
+function walkAtTop(
+  event: DomEvent,
+  state: DispatchState,
+  hooks: Required<DomDispatchHooks>,
+  fail: (error: unknown) => void
+): void {
+  state.dispatching = true
+  hooks.beforeCapture(event, state, fail)
+  if (!state.propagationStopped) {
+    if (event.bubbles) hooks.afterBubble(event, state, fail)
+    // A non-bubbling event still reaches the bubble listeners of its own target.
+    else if (event.target === document) document.run(event, state, false, EVENT_PHASE_AT_TARGET, fail)
+  }
+  event.currentTarget = null
+  event.eventPhase = EVENT_PHASE_NONE
+  state.dispatching = false
+}
+
+/**
+ * `dispatchEvent` of a connected element: the event an app built walks the element's ancestors
+ * (`path`, target first), with `window` and `document` around them, as one Ghia delivered does.
+ * Listeners of a element that is not connected hear it alone. A listener that throws goes to
+ * `report`, after the walk.
+ */
+export function dispatchEventAlongPath(
+  event: Event,
+  path: readonly object[],
+  handlersAt: HandlersAt,
+  connected: boolean,
+  report: (error: unknown) => void
+): void {
+  const state = beginDispatch(event, path[0] ?? document)
+  state.path = path
+  const errors: unknown[] = []
+  walkDomEvent(
+    event as unknown as DomEvent,
+    state,
+    path,
+    handlersAt,
+    connected ? propagationHooks() : undefined,
+    (error) => errors.push(error)
+  )
+  endDispatch(state)
+  errors.forEach(report)
+}
+
+/** What the DOM clears when a dispatch ends: the stop flags and the path. The event keeps its target and its canceled flag. */
+function endDispatch(state: DispatchState): void {
+  state.propagationStopped = false
+  state.immediatePropagationStopped = false
+  state.path = []
+}
+
+/** The state of a dispatch of an app's `event` at `target`, which it must not already be in. */
+function beginDispatch(event: Event, target: object): DispatchState {
+  if (!(event instanceof Event)) {
+    throw new TypeError("Failed to execute 'dispatchEvent' on 'EventTarget': parameter 1 is not of type 'Event'.")
+  }
+  const state = dispatchStateOf(event)
+  if (state.dispatching) {
+    throw new DOMException(
+      "Failed to execute 'dispatchEvent' on 'EventTarget': The event is already being dispatched.",
+      "InvalidStateError"
+    )
+  }
+  ;(event as unknown as DomEvent & { target: object }).target = target
+  return state
 }

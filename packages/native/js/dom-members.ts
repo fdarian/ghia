@@ -1,11 +1,14 @@
 import {
+  DOM_LISTENERS,
   type ElementListeners,
   type ElementEventListener,
   type ElementListenerOptions,
 } from "./events/element-listeners.js"
+import { reportUncaught } from "./events/dispatch.js"
+import { createRendererState } from "./renderer-state.js"
 import { readLayoutSize } from "./bounds.js"
 import type { NativeRenderer } from "./host.js"
-import { document, type GpuixDocument } from "./events/window-target.js"
+import { dispatchEventAlongPath, document, type GpuixDocument } from "./events/window-target.js"
 import {
   attributeLookupName,
   attributeNameOf,
@@ -15,7 +18,7 @@ import {
   storedAttribute,
 } from "./dom/attribute-names.js"
 import { hasMutationObservers, queueAttributeMutation } from "./dom/mutation-observer.js"
-import { SVGElement, type Element } from "./dom/nodes.js"
+import { Element, SVGElement, type Node } from "./dom/nodes.js"
 
 /** The DOM members every host element has beside the scroll ones. */
 export interface DomElement {
@@ -50,6 +53,15 @@ export interface DomElement {
     listener: ElementEventListener | null,
     options?: boolean | Pick<ElementListenerOptions, "capture">
   ): void
+  /**
+   * Dispatches an event the app built (`new Event`, `new CustomEvent`, `new PointerEvent`) at the
+   * element, as one Ghia delivers: capture from the top down, the target, then the bubble phase
+   * if the event bubbles, heard by `on*` props, `addEventListener` listeners, and `document` and
+   * `window` when the element is connected. Returns false when a listener called `preventDefault()`
+   * on a cancelable event. Throws an `InvalidStateError` for an event already being dispatched.
+   * The dispatched event's `isTrusted` is false.
+   */
+  dispatchEvent(event: Event): boolean
 }
 
 export interface DomElementBinding {
@@ -65,6 +77,18 @@ export interface DomElementBinding {
    * native write, the observers' records, and a flush so native has it before the call returns.
    */
   writeProp(name: string, value: string | number | boolean | undefined): void
+}
+
+/** The element and its ancestors that are elements, target first: the path of an event dispatched at it. */
+function pathFrom(target: Element): Element[] {
+  const path: Element[] = []
+  for (let node: Node | null = target; node instanceof Element; node = node.parentNode) path.push(node)
+  return path
+}
+
+function listenersOf(node: object): ElementListeners | undefined {
+  const read: unknown = Reflect.get(node, DOM_LISTENERS)
+  return typeof read === "function" ? (read.call(node) as ElementListeners) : undefined
 }
 
 /** The prop an attribute name stands for: `attributeNameOf` is the name a prop has as an attribute. */
@@ -178,6 +202,23 @@ export function defineDomMembers<This extends object>(
       get(this: This) {
         const layout = bind(this).layout
         return layout ? Math.round(readLayoutSize(layout.renderer, layout.id).height) : 0
+      },
+    },
+    [DOM_LISTENERS]: {
+      configurable: true,
+      value(this: This) {
+        return bind(this).listeners
+      },
+    },
+    dispatchEvent: {
+      configurable: true,
+      writable: true,
+      value(this: This, event: Event) {
+        const bound = bind(this)
+        const path = pathFrom(this as unknown as Element)
+        const report = bound.layout ? createRendererState(bound.layout.renderer).reportError : reportUncaught
+        dispatchEventAlongPath(event, path, (index) => listenersOf(path[index]), bound.connected, report)
+        return !event.defaultPrevented
       },
     },
     addEventListener: {
