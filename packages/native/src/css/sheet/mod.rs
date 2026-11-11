@@ -26,6 +26,7 @@ mod parser;
 mod selector;
 mod selector_parse;
 mod share;
+mod states;
 mod tokenizer;
 mod tree;
 mod validate;
@@ -44,6 +45,7 @@ pub use invalidation::{Invalidation, Reach};
 pub use layers::{LayerId, LayerOrder, Layers};
 pub use matching::{matches, AttrValue, ElementView, SiblingTest};
 pub use parser::parse_sheet;
+pub use states::State;
 pub use selector::{
     AttrMatcher, AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, SelectorList, Simple, Specificity, TypeName,
 };

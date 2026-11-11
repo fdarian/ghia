@@ -18,18 +18,20 @@ use crate::style::StyleDesc;
 use super::declarations::render_declarations;
 use super::index::RuleIndex;
 use super::initial;
-use super::selector::Specificity;
+use super::states::{self, Applies, RuleMatch};
 
 /// The rules an element matched. Equal lists share one allocation, so two elements that match
 /// the same rules compare by pointer and share a cascaded style.
 pub struct MatchedRules {
-    /// Rule numbers in the order their normal declarations apply.
-    pub normal: Vec<u32>,
-    /// Rule numbers that have `!important` declarations, in the order those apply.
-    pub important: Vec<u32>,
+    /// The rules in the order their normal declarations apply.
+    pub normal: Vec<Applies>,
+    /// The rules that have `!important` declarations, in the order those apply.
+    pub important: Vec<Applies>,
+    /// Whether a rule applies under a pointer or focus state (`states.rs`).
+    conditional: bool,
 }
 
-type Key = Vec<(u32, Specificity)>;
+type Key = Vec<RuleMatch>;
 
 #[derive(Default)]
 pub struct MatchedInterner {
@@ -48,8 +50,9 @@ impl MatchedInterner {
             self.pruned_at = self.lists.len();
         }
         let list = Arc::new(MatchedRules {
-            normal: matched.iter().map(|(rule, _)| *rule).collect(),
+            normal: matched.iter().map(|found| Applies { rule: found.rule, condition: found.condition }).collect(),
             important: index.important_order(&matched),
+            conditional: matched.iter().any(|found| found.condition.is_some()),
         });
         self.lists.insert(matched, Arc::downgrade(&list));
         list
@@ -70,7 +73,7 @@ pub(super) fn is_css_wide(value: &str) -> bool {
         .any(|keyword| text.trim().eq_ignore_ascii_case(keyword))
 }
 
-fn apply(list: &mut Vec<Declaration>, declaration: &Declaration) {
+pub(super) fn apply(list: &mut Vec<Declaration>, declaration: &Declaration) {
     list.retain(|earlier| earlier.key != declaration.key);
     if !is_css_wide(&declaration.value) {
         list.push(declaration.clone());
@@ -103,17 +106,20 @@ fn is_shadowed(list: &[Declaration], longhand: KeyId) -> bool {
 /// The merged declarations of the matched rules and the element's own, as the style prop's JSON.
 /// `own_important` are the own declarations that were written `!important`.
 pub fn merge(index: &RuleIndex, matched: &MatchedRules, own: &[Declaration], own_important: &[Declaration]) -> String {
+    if matched.conditional {
+        return states::merge(index, matched, own, own_important);
+    }
     let mut list: Vec<Declaration> = Vec::new();
-    for rule in &matched.normal {
-        for declaration in &index.rules[*rule as usize].normal {
+    for applies in &matched.normal {
+        for declaration in &index.rules[applies.rule as usize].normal {
             apply(&mut list, declaration);
         }
     }
     for declaration in own {
         apply(&mut list, declaration);
     }
-    for rule in &matched.important {
-        for declaration in &index.rules[*rule as usize].important {
+    for applies in &matched.important {
+        for declaration in &index.rules[applies.rule as usize].important {
             apply(&mut list, declaration);
         }
     }

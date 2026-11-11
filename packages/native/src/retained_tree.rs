@@ -2012,6 +2012,7 @@ impl RetainedTree {
             self.track_focusable_subtree(id);
         }
         if is_popover {
+            self.sheets_popover_changed(id);
             let change = self.refresh_effective_style(id, false);
             self.settle_style_change(id, change);
         }

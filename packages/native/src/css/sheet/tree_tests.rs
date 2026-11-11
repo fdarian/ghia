@@ -1035,7 +1035,7 @@ fn a_type_selector_ignores_case_on_an_html_element_and_not_on_an_svg_one() {
 #[test]
 fn a_skipped_rule_is_logged_once_across_reloads_and_again_after_the_sheets_are_gone() {
     let mut doc = Doc::new();
-    let (first, _) = doc.style_element(ROOT, "@media print { a { color: red } } a:hover { color: red } .a { color: blue }");
+    let (first, _) = doc.style_element(ROOT, "@media print { a { color: red } } a:checked { color: red } .a { color: blue }");
     doc.flush();
     assert_eq!(doc.tree.sheets.skip_warnings, 2);
 
@@ -1692,7 +1692,7 @@ fn an_inline_value_that_gains_or_loses_important_restyles() {
 fn skipped_rules_are_logged_up_to_a_cap_and_then_summed_up_once() {
     let mut doc = Doc::new();
     let limit = 1024;
-    let rules = |from: usize, to: usize| (from..to).map(|n| format!(".css-{n}:hover {{ color: red }} ")).collect::<String>();
+    let rules = |from: usize, to: usize| (from..to).map(|n| format!(".css-{n}:checked {{ color: red }} ")).collect::<String>();
     let (_, text) = doc.style_element(ROOT, &rules(0, limit));
     doc.flush();
     assert_eq!(doc.tree.sheets.skip_warnings, limit);
@@ -2021,4 +2021,249 @@ fn a_reload_matches_again_with_the_new_rules_and_nothing_of_the_old() {
     doc.tree.set_text(text, ".row { color: blue }".into());
     doc.flush();
     assert!(rows.iter().all(|id| doc.color(*id) == Some("blue")));
+}
+
+
+mod states {
+    use super::*;
+    use crate::css::sheet::State;
+    use serde_json::json;
+
+    fn block<'a>(doc: &'a Doc, id: u64, state: &str) -> Option<&'a StyleDesc> {
+        let style = doc.style(id)?;
+        match state {
+            "hover" => style.hover.as_deref(),
+            "active" => style.active.as_deref(),
+            "focus" => style.focus.as_deref(),
+            "focusVisible" => style.focus_visible.as_deref(),
+            "focusWithin" => style.focus_within.as_deref(),
+            _ => panic!("{state}"),
+        }
+    }
+
+    fn with(css: &str, inline: Option<&str>) -> (Doc, u64) {
+        let mut doc = Doc::new();
+        let div = doc.classed("div", ROOT, "a");
+        if let Some(inline) = inline {
+            doc.inline(div, inline);
+        }
+        doc.style_element(ROOT, css);
+        doc.flush();
+        (doc, div)
+    }
+
+    #[test]
+    fn a_state_rule_becomes_the_state_block_of_the_element_and_leaves_its_base_alone() {
+        let (doc, div) = with(".a { color: red } .a:hover { color: blue; opacity: 0.5 }", None);
+        assert_eq!(doc.color(div), Some("red"));
+        let hover = block(&doc, div, "hover").expect("a hover block");
+        assert_eq!(hover.color.as_deref(), Some("blue"));
+        assert_eq!(hover.opacity, Some(0.5));
+        assert!(doc.style(div).is_some_and(|style| style.opacity.is_none()));
+    }
+
+    #[test]
+    fn each_state_has_its_block() {
+        let (doc, div) = with(
+            ".a:hover { top: 1px } .a:active { top: 2px } .a:focus { top: 3px } .a:focus-visible { top: 4px } .a:focus-within { top: 5px }",
+            None,
+        );
+        for (state, top) in [("hover", "1px"), ("active", "2px"), ("focus", "3px"), ("focusVisible", "4px"), ("focusWithin", "5px")] {
+            let found = block(&doc, div, state).unwrap_or_else(|| panic!("{state}"));
+            assert!(found.top.is_some(), "{state} has {top}");
+        }
+        assert_eq!(State::Focus.block_key(), "focus");
+    }
+
+    #[test]
+    fn an_inline_value_beats_a_sheet_state_value_of_a_property_it_sets() {
+        let (doc, div) = with(".a { color: red } .a:hover { color: green; opacity: 0.5 }", Some(r#"{"color":"blue"}"#));
+        assert_eq!(doc.color(div), Some("blue"));
+        assert!(block(&doc, div, "hover").is_none_or(|hover| hover.color.is_none()), "the inline base wins over the lower conditional value");
+        assert_eq!(block(&doc, div, "hover").and_then(|hover| hover.opacity), Some(0.5), "a property the inline style leaves alone stays conditional");
+    }
+
+    #[test]
+    fn a_more_specific_unconditional_rule_beats_a_state_rule() {
+        let mut doc = Doc::new();
+        let div = doc.classed("div", ROOT, "a");
+        doc.tree.set_attribute(div, "id", Some("x".into()));
+        doc.style_element(ROOT, "#x { color: blue } .a:hover { color: red; opacity: 0.5 }");
+        doc.flush();
+        assert_eq!(doc.color(div), Some("blue"));
+        assert!(block(&doc, div, "hover").is_none_or(|hover| hover.color.is_none()));
+        assert_eq!(block(&doc, div, "hover").and_then(|hover| hover.opacity), Some(0.5));
+    }
+
+    #[test]
+    fn a_more_specific_state_rule_beats_a_less_specific_base_rule() {
+        let (doc, div) = with(".a:hover { color: red } div { color: blue }", None);
+        assert_eq!(doc.color(div), Some("blue"));
+        assert_eq!(block(&doc, div, "hover").and_then(|hover| hover.color.as_deref()), Some("red"));
+        let (doc, div) = with("div { color: blue } :where(.a):hover { color: red }", None);
+        assert_eq!(block(&doc, div, "hover").and_then(|hover| hover.color.as_deref()), Some("red"), "equal specificity, later wins");
+    }
+
+    #[test]
+    fn an_unconditional_value_after_a_state_value_of_the_same_specificity_shadows_it() {
+        let (doc, div) = with(".a:where(:hover) { color: red } .b, .a { color: blue }", None);
+        assert_eq!(doc.color(div), Some("blue"));
+        assert!(block(&doc, div, "hover").is_none_or(|hover| hover.color.is_none()));
+    }
+
+    #[test]
+    fn a_shorthand_base_shadows_a_lower_longhand_under_a_state() {
+        let (doc, div) = with(".a:hover { background-color: red } div.a.a { background: blue }", None);
+        assert!(block(&doc, div, "hover").is_none_or(|hover| hover.background_color.is_none()));
+        assert!(doc.style(div).is_some_and(|style| style.background.is_some() || style.background_color.is_some()));
+    }
+
+    #[test]
+    fn a_rule_with_a_state_and_a_plain_selector_applies_both_ways() {
+        let (doc, div) = with(".a, .b:hover { color: red }", None);
+        assert_eq!(doc.color(div), Some("red"));
+        assert!(block(&doc, div, "hover").is_none(), ".b is not a class of the element");
+        let mut doc = Doc::new();
+        let both = doc.classed("div", ROOT, "a b");
+        doc.style_element(ROOT, ".a, .b:hover { color: red; top: 1px } .b:hover { top: 2px }");
+        doc.flush();
+        assert_eq!(doc.color(both), Some("red"));
+        assert!(block(&doc, both, "hover").is_some_and(|hover| hover.top.is_some()));
+    }
+
+    #[test]
+    fn important_inside_a_state_beats_an_inline_state_block() {
+        let (doc, div) = with(
+            ".a:hover { color: red !important; opacity: 0.5 }",
+            Some(r#"{"hover":{"color":"blue","opacity":0.9}}"#),
+        );
+        let hover = block(&doc, div, "hover").expect("a hover block");
+        assert_eq!(hover.color.as_deref(), Some("red"));
+        assert_eq!(hover.opacity, Some(0.9), "the inline state block beats a normal sheet value");
+    }
+
+    #[test]
+    fn an_inline_state_block_is_kept_when_no_rule_is_under_that_state() {
+        let (doc, div) = with(".a:active { color: red }", Some(r##"{"hover":{"backgroundColor":"#eee"}}"##));
+        assert!(block(&doc, div, "hover").is_some_and(|hover| hover.background_color.is_some()));
+        assert!(block(&doc, div, "active").is_some());
+    }
+
+    #[test]
+    fn a_rule_under_a_state_changes_with_the_classes_like_any_other() {
+        let mut doc = Doc::new();
+        let div = doc.element("div", ROOT);
+        doc.style_element(ROOT, ".a:hover { color: red }");
+        doc.flush();
+        assert!(block(&doc, div, "hover").is_none());
+        doc.tree.set_attribute(div, "class", Some("a".into()));
+        doc.flush();
+        assert!(block(&doc, div, "hover").is_some());
+        doc.tree.set_attribute(div, "class", None);
+        doc.flush();
+        assert!(block(&doc, div, "hover").is_none());
+    }
+
+    #[test]
+    fn elements_that_look_alike_share_the_style_that_has_the_state_block() {
+        let mut doc = Doc::new();
+        let first = doc.classed("div", ROOT, "a");
+        let second = doc.classed("div", ROOT, "a");
+        doc.style_element(ROOT, ".a:hover { color: red }");
+        doc.flush();
+        assert!(Arc::ptr_eq(&doc.style_arc(first).unwrap(), &doc.style_arc(second).unwrap()));
+    }
+
+    #[test]
+    fn a_state_rule_changes_only_the_state_block_so_it_is_a_paint_change() {
+        let mut doc = Doc::new();
+        let div = doc.classed("div", ROOT, "a");
+        doc.style_element(ROOT, ".a { width: 10px } .a:hover { color: red }");
+        doc.flush();
+        let before = doc.style_arc(div).unwrap();
+        let (other, other_div) = with(".a { width: 10px } .a:hover { color: blue }", None);
+        let after = other.style_arc(other_div).unwrap();
+        assert!(before.differs_only_in_paint(&after));
+    }
+
+    #[test]
+    fn a_state_block_from_a_sheet_is_the_one_an_inline_style_writes_and_is_classified_as_it_is() {
+        let (red, red_div) = with(".a:hover { background-color: red }", None);
+        let (blue, blue_div) = with(".a:hover { background-color: blue }", None);
+        let (inline_red, inline_red_div) = with("", Some(r#"{"hover":{"backgroundColor":"red"}}"#));
+        let (inline_blue, inline_blue_div) = with("", Some(r#"{"hover":{"backgroundColor":"blue"}}"#));
+        let sheet = (red.style(red_div).unwrap(), blue.style(blue_div).unwrap());
+        let inline = (inline_red.style(inline_red_div).unwrap(), inline_blue.style(inline_blue_div).unwrap());
+        assert_eq!(sheet.0.hover, inline.0.hover);
+        assert!(sheet.0.hover_sets_background_color());
+        let paints = crate::events::hover_paint::restyle_paints_of;
+        assert_eq!(paints(sheet.0, sheet.1), paints(inline.0, inline.1));
+        assert_eq!(sheet.0.differs_only_in_paint(sheet.1), inline.0.differs_only_in_paint(inline.1));
+    }
+
+    #[test]
+    fn popover_open_matches_while_the_popover_is_open_and_stops_when_it_closes() {
+        use crate::html::popover::OPEN_PROP;
+        let mut doc = Doc::new();
+        let popover = doc.element("div", ROOT);
+        doc.tree.set_attribute(popover, "popover", Some("".into()));
+        doc.tree.set_custom_prop(popover, "popover".into(), json!("manual"));
+        doc.style_element(ROOT, "[popover]:popover-open { color: red } [popover] { top: 1px }");
+        doc.flush();
+        assert_eq!(doc.color(popover), None);
+        assert!(doc.style(popover).is_some_and(|style| style.top.is_some()));
+
+        doc.tree.set_custom_prop(popover, OPEN_PROP.into(), json!(1));
+        doc.flush();
+        assert_eq!(doc.color(popover), Some("red"));
+
+        doc.tree.set_custom_prop(popover, OPEN_PROP.into(), serde_json::Value::Null);
+        doc.flush();
+        assert_eq!(doc.color(popover), None);
+    }
+
+    #[test]
+    fn popover_open_in_an_ancestor_position_reaches_the_descendants() {
+        use crate::html::popover::OPEN_PROP;
+        let mut doc = Doc::new();
+        let popover = doc.element("div", ROOT);
+        doc.tree.set_custom_prop(popover, "popover".into(), json!("manual"));
+        let child = doc.classed("span", popover, "c");
+        doc.style_element(ROOT, ":popover-open .c { color: red }");
+        doc.flush();
+        assert_eq!(doc.color(child), None);
+        doc.tree.set_custom_prop(popover, OPEN_PROP.into(), json!(1));
+        doc.flush();
+        assert_eq!(doc.color(child), Some("red"));
+    }
+
+    #[test]
+    fn a_selector_that_reads_popover_state_is_not_shared() {
+        use crate::html::popover::OPEN_PROP;
+        let mut doc = Doc::new();
+        let first = doc.classed("div", ROOT, "p");
+        let second = doc.classed("div", ROOT, "p");
+        for id in [first, second] {
+            doc.tree.set_custom_prop(id, "popover".into(), json!("manual"));
+        }
+        doc.style_element(ROOT, ".p:popover-open { color: red }");
+        doc.tree.set_custom_prop(first, OPEN_PROP.into(), json!(1));
+        doc.flush();
+        assert_eq!(doc.color(first), Some("red"));
+        assert_eq!(doc.color(second), None, "same classes, not the same state");
+    }
+
+    #[test]
+    fn a_sheet_that_reads_no_popover_state_marks_nothing_when_one_opens() {
+        use crate::html::popover::OPEN_PROP;
+        let mut doc = Doc::new();
+        let popover = doc.element("div", ROOT);
+        doc.tree.set_custom_prop(popover, "popover".into(), json!("manual"));
+        doc.style_element(ROOT, ".a { color: red }");
+        doc.flush();
+        let before = counts().elements_rematched;
+        doc.tree.set_custom_prop(popover, OPEN_PROP.into(), json!(1));
+        doc.flush();
+        assert_eq!(counts().elements_rematched, before);
+    }
 }

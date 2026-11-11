@@ -8681,7 +8681,7 @@ way, overflow included.
 
 **Selection:** `userSelect` (`"text"` | `"none"`), `selectionColor` — both inherit down the tree
 
-**Focus:** `focusVisible`, `focusWithin`. See [Focus styles](#focus-styles)
+**Focus:** `focus`, `focusVisible`, `focusWithin`. See [Focus styles](#focus-styles)
 
 **Ancestor state:** `group`, `groupHover`, `groupActive`, `groupFocusWithin`. See [Group state styles](#group-state-styles)
 
@@ -8719,7 +8719,7 @@ takes one of each. The pointer states are the pointer dispatcher's, the same tha
 drives `hover` and `active`, and the focus state is the one behind `focusWithin`.
 A group applies to its descendants, not to its own element. They fold in with the
 element's own states, later winning: base, `groupHover`, `hover`, `groupActive`,
-`active`, `groupFocusWithin`, then `focusWithin` and `focusVisible`, which the
+`active`, `groupFocusWithin`, then `focus`, `focusWithin` and `focusVisible`, which the
 focus code applies after the fold. Focus states sit above the pointer ones. The
 [`has*` keys](#relational-state-has) and the
 [control states](#form-control-state-disabled-enabled) fold in between these. So a
@@ -9131,10 +9131,12 @@ wrapping `<div>`.
 
 ### Focus styles
 
-`focusVisible` and `focusWithin` are nested style objects, like `hover`.
-`focusVisible` applies while the element matches CSS `:focus-visible`;
-`focusWithin` while it or any descendant has focus, like `:focus-within`, on
-focusable and plain elements alike. There is no separate `focus` key.
+`focus`, `focusVisible` and `focusWithin` are nested style objects, like `hover`.
+`focus` applies while the element is the focused one, like CSS `:focus`, however
+it got focus (a mouse press, Tab or script); `focusVisible` while the element
+matches CSS `:focus-visible`; `focusWithin` while it or any descendant has focus,
+like `:focus-within`, on focusable and plain elements alike. They fold in that
+order, `focus` weakest and `focusVisible` strongest, after the pointer states.
 
 `:focus-visible` follows Chrome's heuristic, which keeps two facts for the whole
 window instead of asking the element focus left:
@@ -9739,13 +9741,17 @@ An observable array of `CSSStyleSheet`: assigning the property, assigning an ind
 |---|---|
 | Simple selectors | type (`div`), universal (`*`), `.class`, `#id`, `[attr]`, `[attr=v]`, `[attr~=v]`, `[attr\|=v]`, `[attr^=v]`, `[attr$=v]`, `[attr*=v]`, with the `i` and `s` flags |
 | Combinators | descendant, `>`, `+`, `~` |
-| Pseudo-classes | `:is()` and `:where()` (forgiving lists, `:where` has no specificity), `:not()` (a selector list), `:root` (the `<html>` of the window), `:host` (never matches: there are no shadow roots) |
+| Pseudo-classes | `:hover`, `:active`, `:focus`, `:focus-visible` and `:focus-within` (as the state blocks of the element, see [State pseudo-classes](#state-pseudo-classes)), `:popover-open`, `:is()` and `:where()` (forgiving lists, `:where` has no specificity), `:not()` (a selector list), `:root` (the `<html>` of the window), `:host` (never matches: there are no shadow roots) |
 | Pseudo-elements | parse and never match |
 | Nesting | nested rules with `&` and the implicit `&` of a relative selector (`.a { .b { } }`, `.a { &:is(.c) { } }`), with the specificity of the parent's `:is()` |
 | At-rules | `@layer name { }`, `@layer a, b;`, anonymous `@layer { }`, nested layers (`a.b`) |
 | Declarations | `!important`; `var()`; every property of the style prop, with the kebab-case names CSS writes (`background-color`, `-webkit-user-select`) |
 
-Anything else makes the selector invalid and drops its rule (a list is all or nothing, except inside `:is()` and `:where()`): `:hover`, `:focus`, `:first-child`, `:nth-child()`, `:has()`, `:checked` and the other pseudo-classes. At-rules that are skipped with their block: `@media`, `@keyframes`, `@container`, `@supports`, `@font-face`, `@import`, `@namespace`, `@property`, and any at-rule inside a style rule. A declaration the style parser rejects (a value Ghia cannot represent, or one CSS would also ignore) is dropped alone and cannot take back an earlier rule's value; the exception is a property's initial value written as a keyword, which acts as `initial` (`z-index: auto`). Each skipped rule is logged once, and the values that are dropped where CSS would keep them are listed in [deviations](./fork/deviations.md#stylesheets). The full list of differences is in [deviations](./fork/deviations.md#stylesheets).
+Anything else makes the selector invalid and drops its rule (a list is all or nothing, except inside `:is()` and `:where()`): `:first-child`, `:nth-child()`, `:has()`, `:checked` and the other pseudo-classes, and the uses of the state pseudo-classes listed below. At-rules that are skipped with their block: `@media`, `@keyframes`, `@container`, `@supports`, `@font-face`, `@import`, `@namespace`, `@property`, and any at-rule inside a style rule. A declaration the style parser rejects (a value Ghia cannot represent, or one CSS would also ignore) is dropped alone and cannot take back an earlier rule's value; the exception is a property's initial value written as a keyword, which acts as `initial` (`z-index: auto`). Each skipped rule is logged once, and the values that are dropped where CSS would keep them are listed in [deviations](./fork/deviations.md#stylesheets). The full list of differences is in [deviations](./fork/deviations.md#stylesheets).
+
+**State pseudo-classes.** `:hover`, `:active`, `:focus`, `:focus-visible` and `:focus-within` in the subject compound (the one the rule styles) do not read the pointer or the focus. The rule applies under that state: what it declares is merged into the `hover`, `active`, `focus`, `focusVisible` or `focusWithin` block of the element, the one a `style` prop writes, so it folds, paints and animates as that block does, and the match does not change when the pointer moves. `.btn:hover { background: red }` is `style={{ hover: { background: 'red' } }}` on every `.btn`. Per property, the cascade decides which side a declaration is on: the highest-precedence declarations of a property that are under a state are that state's, down to the first with no state, which is the base value, and anything of the property below it is shadowed. So an inline `color: blue` beats `.btn:hover { color: red }` (the element stays blue hovered), `#x { color: blue }` beats `.btn:hover { color: red }`, and `.btn:hover { color: red }` beats `.btn { color: blue }`. An inline `hover` block counts at the inline style's place in that order, property by property, and `!important` works inside a state. `.a, .b:hover { }` applies `.a` always and `.b` under `:hover`. A state is not supported in a compound that is not the subject (`.card:hover .title`), twice in one compound (`:hover:focus`), inside `:not()`, or in `:is()` and `:where()` arguments that are not all under the same state: that selector is invalid, which drops the rule, or only the argument inside `:is()` and `:where()`. Where two states set one property and the cascade would pick the lower state, the fixed fold order wins ([deviations](./fork/deviations.md#stylesheets)).
+
+**`:popover-open`.** Matches an element with the `popover` attribute while `showPopover()` has it open, in any compound (`[popover]:popover-open`, `:not(:popover-open)`, `:popover-open .child`). It is tree state: `showPopover()` and `hidePopover()` match the affected elements again.
 
 **Attributes.** A selector reads the attributes `element.attributes` lists, as the DOM names them (`setAttribute`, wire op 13): `class` (from `class` or `className`), `tabindex` (from `tabIndex`), `for` (from `htmlFor`), `data-*`, `id`, `role`, `aria-*` and every other prop that holds a string, a number or a boolean. A `data-*` or `aria-*` boolean matches as `"true"` or `"false"`, so `[aria-expanded="false"]` matches `aria-expanded={false}`. On an HTML element a selector's attribute name compares without regard to case (`[tabindex]`, `[tabIndex]` and `[data-rowid]` match `tabIndex={0}` and `data-rowId="7"`); on an SVG element it compares exactly (`svg[viewBox]` matches, `svg[viewbox]` does not). Values compare case-sensitively unless the selector says `i`. `[style*="--x"]` reads the element's `style` prop as `kebab-case: value;` text. See [Listeners and DOM members](#listeners-and-dom-members-on-an-element) for what is sent.
 

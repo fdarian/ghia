@@ -32,6 +32,11 @@ export function appliedBatchCount(): number {
   return appliedBatches
 }
 
+/** A batch reached a renderer without going through a queue (`showPopover()` writes one itself). */
+export function noteBatchApplied(): void {
+  appliedBatches++
+}
+
 /** Atomic mutation queue shared by all framework adapters. */
 export interface MutationQueue extends MutationRenderer, AttributeGateMember, Pick<SheetSink, "sheetsDirty"> {
   readonly pending: number

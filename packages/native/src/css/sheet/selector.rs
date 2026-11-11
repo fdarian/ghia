@@ -4,6 +4,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use super::atoms::Atom;
+use super::states::State;
 
 /// What a [`ComplexSelector`] link says about the compound to its left.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -24,6 +25,9 @@ pub enum Combinator {
 pub struct ComplexSelector {
     pub compounds: Vec<Compound>,
     pub links: Vec<Combinator>,
+    /// The pointer or focus state the subject needs (`.a:hover`): not something the matcher
+    /// reads, the rule applies under it (`states.rs`).
+    pub condition: Option<State>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -43,6 +47,11 @@ pub enum Simple {
     Where(Vec<ComplexSelector>),
     Not(Vec<ComplexSelector>),
     Root,
+    /// `:hover`, `:active`, `:focus`, `:focus-visible` and `:focus-within`. Matches any element:
+    /// the selector's [`ComplexSelector::condition`] carries it, since these are not tree state.
+    State(State),
+    /// `:popover-open`: an element with the `popover` attribute that `showPopover()` opened.
+    PopoverOpen,
     /// Parses, but nothing in a document is a shadow host.
     Host,
     /// `::x` and the legacy `:before`, `:after`, `:first-line`, `:first-letter`: they style a part
@@ -171,7 +180,9 @@ impl Simple {
     fn specificity(&self) -> Specificity {
         match self {
             Simple::Tag(_) | Simple::PseudoElement => Specificity::new(0, 0, 1),
-            Simple::Class(_) | Simple::Attr(_) | Simple::Root | Simple::Host => Specificity::new(0, 1, 0),
+            Simple::Class(_) | Simple::Attr(_) | Simple::Root | Simple::Host | Simple::State(_) | Simple::PopoverOpen => {
+                Specificity::new(0, 1, 0)
+            }
             Simple::Id(_) => Specificity::new(1, 0, 0),
             Simple::Is(list) => list.specificity,
             Simple::Not(list) => most_specific(list),
