@@ -118,7 +118,7 @@ Op 13 `setAttribute(id, name, value | null)` stores into the element's attribute
 
 `packages/native/js/css/`, framework neutral:
 
-- `rules.ts` splits sheet text into top-level rules (strings, comments, escapes, parentheses and nested braces; an at-rule ends at its block or a `;`, a style rule only at its block, as in the native parser). A `}` with nothing open is skipped and the rules after it stay, as a browser drops only the bad part. It does not interpret a rule. `CSSStyleSheet.cssRules` lists what it finds.
+- `rules.ts` splits sheet text into top-level rules (strings, comments, escapes, parentheses and nested braces; an at-rule ends at its block or a `;`, a style rule only at its block, as in the native parser). A `}` with nothing open starts the next rule's prelude, as in CSS Syntax and the native parser, so that one rule is dropped with its block and the rules after it stay; a constructed sheet and a `<style>` with the same text list and style the same rules. It does not interpret a rule. `CSSStyleSheet.cssRules` lists what it finds.
 - `style-sheet.ts`: `CSSStyleSheet`, `CSSRule`, `CSSStyleRule`, `CSSRuleList`. Every change to the rule list calls `sheetChanged`, which sends the whole text (`sheetText()`: the rule texts joined by newlines).
 - `observable-array.ts`: a `Proxy` over an array that checks every value (`convert`) and reports once per change; the mutating methods are wrapped so they are one change, not one per element they touch.
 - `adopted.ts`: `document.adoptedStyleSheets`, one array for the document.

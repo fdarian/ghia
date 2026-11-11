@@ -89,9 +89,10 @@ describe("splitRules", () => {
     expect(splitRules(".a { top: 0 } .b").map((rule) => rule.text)).toEqual([".a { top: 0 }"])
   })
 
-  it("skips a stray top-level } and keeps the rules after it", () => {
-    expect(splitRules("} .a{} .b{}").map((rule) => rule.text)).toEqual([".a{}", ".b{}"])
-    expect(splitRules(".a{} }} @media print { .b{} } } .c{}").map((rule) => rule.prelude)).toEqual([".a", "@media print", ".c"])
+  it("takes a stray top-level } into the next rule's prelude, which drops that rule and keeps the ones after it", () => {
+    expect(splitRules("} .a{} .b{}").map((rule) => rule.text)).toEqual([".b{}"])
+    expect(splitRules(".a{} }} @media print { .b{} } .c{} } .d{} .e{}").map((rule) => rule.prelude)).toEqual([".a", ".c", ".e"])
+    expect(splitRules(".a{} .b } .c{} .d{}").map((rule) => rule.prelude)).toEqual([".a", ".b } .c", ".d"])
   })
 
   it("does not end a style rule at a semicolon outside its block, so a stray one belongs to the next prelude", () => {
@@ -198,6 +199,15 @@ describe("CSSStyleSheet", () => {
     expect(removed.parentStyleSheet).toBeNull()
     expect(errorName(() => sheet.deleteRule(1))).toBe("IndexSizeError")
     expect(errorName(() => sheet.deleteRule(-1))).toBe("IndexSizeError")
+  })
+
+  it("lists, and sends native, only what the parser keeps after a stray }", () => {
+    const recording = recordingRenderer()
+    const sheet = new CSSStyleSheet()
+    sheet.replaceSync("} .b{} .c{}")
+    expect(Array.from(sheet.cssRules, (rule) => (rule as CSSStyleRule).selectorText)).toEqual([".c"])
+    document.adoptedStyleSheets = [sheet]
+    expect(recording.sent()).toContainEqual(["setStyleSheet", sheet.id, ".c{}"])
   })
 
   it("keeps cssRules correct through interleaved inserts and deletes, the same list object", () => {

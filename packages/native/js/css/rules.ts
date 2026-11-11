@@ -86,8 +86,13 @@ function scanRule(text: string, start: number, atRule: boolean): RuleScan {
       depth++
       open.push("}")
     } else if (char === "}") {
+      // Nothing of the rule is open: the parser reads it as part of the prelude, as it does a stray `)`.
+      if (depth === 0) {
+        index++
+        continue
+      }
       depth--
-      if (depth <= 0) return { end: index + 1, blockAt, closing: "" }
+      if (depth === 0) return { end: index + 1, blockAt, closing: "" }
       open.length = open.lastIndexOf("}")
     } else if (char === ";" && depth === 0 && open.length === 0 && atRule) {
       return { end: index + 1, blockAt, closing: "" }
@@ -138,9 +143,11 @@ export function splitRules(text: string): RuleText[] {
       index += 3
       continue
     }
-    // Nothing is open at the top level, so a `}` here closes nothing: skip it, and the rules after it stay.
+    // Nothing is open at the top level, so a `}` here closes nothing. CSS Syntax (and the native parser)
+    // make it the start of the next rule's prelude, which no selector list matches: that rule is dropped
+    // with its block, and the rules after it stay.
     if (char === "}") {
-      index++
+      index = scanRule(text, index + 1, false).end
       continue
     }
     const atRule = char === "@"
