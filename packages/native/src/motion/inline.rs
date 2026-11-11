@@ -318,6 +318,7 @@ mod tests {
             }
             tree.set_text(4, "b".to_string());
             tree.set_text(6, "c".to_string());
+            tree.set_root(1);
             Self {
                 origin: Instant::now(),
                 tree,
@@ -375,7 +376,7 @@ mod tests {
         fn style(&mut self, id: u64, json: &str) {
             let style = serde_json::from_str(json).expect("a style");
             self.tree.set_style_desc(id, style);
-            self.tree.finish_batch();
+            self.tree.note_frame_built();
         }
 
         fn paragraph(&self) -> crate::text::inline::Paragraph {

@@ -881,8 +881,11 @@ pub struct RetainedTree {
     /// The elements the accessibility links start from, see [`RelationRegistry`].
     relations: RelationRegistry,
     pub styles: StyleTable,
-    /// The elements created in the batch being applied, which `finish_batch` forgets.
-    fresh: rustc_hash::FxHashSet<u64>,
+    /// The elements whose style no frame has drawn: created, or taken out of the document since,
+    /// which a browser gives no computed style. `assign_style` starts no transition from one, and
+    /// `note_frame_built` forgets those a frame has built. A `RefCell` because a frame holds the
+    /// tree shared.
+    fresh: std::cell::RefCell<rustc_hash::FxHashSet<u64>>,
     /// The document's stylesheets and what has to be matched against them again.
     pub(crate) sheets: crate::css::sheet::StyleSheets,
     /// The attribute names the elements hold, one allocation each however many elements use it.
@@ -1158,7 +1161,7 @@ impl RetainedTree {
             self.control_ids.insert(id);
         }
         let revision = self.take_revision_covered();
-        self.fresh.insert(id);
+        self.fresh.get_mut().insert(id);
         self.elements
             .insert(id, RetainedElement::new(id, element_type, revision));
         if is_style {
@@ -1431,7 +1434,7 @@ impl RetainedTree {
                 self.sheets_destroyed(id);
             }
             self.resolved.get_mut().forget(id);
-            self.fresh.remove(&id);
+            self.fresh.get_mut().remove(&id);
             destroyed.push(id);
             for child_id in element.children {
                 self.destroy_element_recursive(child_id, destroyed);
@@ -1457,6 +1460,7 @@ impl RetainedTree {
             element.parent = None;
         }
         self.detached_from.insert(id, parent_id);
+        self.mark_fresh_subtree(id);
         if self.sheets.enabled {
             self.sheets_linked(id);
         }
@@ -1550,13 +1554,28 @@ impl RetainedTree {
             .is_some_and(|root| !root.children.is_empty())
     }
 
-    /// The end of a batch. An element it created is no longer one whose style has never been
-    /// seen: a change to it can start a transition (`assign_style`).
-    pub(crate) fn finish_batch(&mut self) {
-        if self.fresh.capacity() > 1024 {
-            self.fresh = Default::default();
-        } else {
-            self.fresh.clear();
+    /// The end of a frame's build. What it built has been seen with its style, so a change to it
+    /// can start a transition (`assign_style`). An element outside the document was not built, and
+    /// stays one whose style has never been seen however many batches pass.
+    pub(crate) fn note_frame_built(&self) {
+        let mut fresh = self.fresh.borrow_mut();
+        if fresh.is_empty() {
+            return;
+        }
+        fresh.retain(|&id| !crate::css::computed_style::is_connected(self, id));
+        if fresh.is_empty() && fresh.capacity() > 1024 {
+            *fresh = Default::default();
+        }
+    }
+
+    /// Marks `id` and everything below it as never drawn.
+    fn mark_fresh_subtree(&mut self, id: u64) {
+        let mut pending = vec![id];
+        while let Some(current) = pending.pop() {
+            if let Some(element) = self.elements.get(&current) {
+                pending.extend(element.children.iter().copied());
+                self.fresh.get_mut().insert(current);
+            }
         }
     }
 
@@ -1702,9 +1721,9 @@ impl RetainedTree {
         let var_declarations_before = holds_var_declarations(element);
         // CSS never transitions the first style of an element, and a batch assigns an element
         // several (its own, the user agent's, then the sheets' cascade) before any is drawn.
-        let created_in_batch = self.fresh.contains(&id);
+        let never_drawn = self.fresh.get_mut().contains(&id);
         let before = element.style.take().filter(|old| {
-            !created_in_batch
+            !never_drawn
                 && !crate::motion::declares_transitions(old)
                 && style.as_deref().is_some_and(crate::motion::declares_transitions)
         });
@@ -3521,11 +3540,12 @@ mod tests {
     #[test]
     fn the_style_before_a_transition_declaration_is_kept_until_the_next_style() {
         let mut tree = tree_with_child();
+        tree.set_root(1);
         let intern = |tree: &mut RetainedTree, json: &str| tree.styles.intern(json.as_bytes()).unwrap();
         let plain = intern(&mut tree, r#"{"opacity":0}"#);
         tree.set_style(1, plain);
         assert!(tree.elements[&1].style_before_transition().is_none(), "the first style has nothing before it");
-        tree.finish_batch();
+        tree.note_frame_built();
 
         let declared = intern(&mut tree, r#"{"opacity":1,"transition":"opacity 1s"}"#);
         tree.set_style(1, declared);
@@ -3824,8 +3844,10 @@ mod tests {
     #[test]
     fn a_layer_that_introduces_a_transition_keeps_the_style_before_it() {
         let mut tree = layered_tree();
+        tree.set_root(1);
         apply(&mut tree, r##"[["setUniversalStyle",{"backgroundColor":"#ff0000"}]]"##);
         assert!(tree.elements[&2].style_before_transition().is_none());
+        tree.note_frame_built();
         apply(
             &mut tree,
             r##"[["setUniversalStyle",{"backgroundColor":"#0000ff","transition":"background-color 1s"}]]"##,

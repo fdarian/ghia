@@ -61,6 +61,11 @@ impl Doc {
         self.tree.flush_styles();
     }
 
+    /// A frame builds the document, as `GpuixView::render` does after a batch.
+    fn frame(&mut self) {
+        self.tree.note_frame_built();
+    }
+
     fn style(&self, id: u64) -> Option<&StyleDesc> {
         self.tree.elements[&id].style.as_deref()
     }
@@ -1527,7 +1532,7 @@ fn an_element_does_not_transition_into_the_style_a_sheet_gives_it_on_mount() {
     // In a later batch the element has a first style, and a class change transitions.
     let other = doc.classed("div", ROOT, "off");
     doc.flush();
-    doc.tree.finish_batch();
+    doc.frame();
     doc.tree.set_attribute(other, "class", Some("btn".into()));
     doc.flush();
     assert_eq!(doc.background(other), Some("blue"));
@@ -1560,6 +1565,84 @@ fn a_keyword_initial_value_takes_back_an_earlier_rules_value_in_a_sheet_and_inli
     let rowed = gap_of(rowed).expect("the shorthand still gives a gap");
     assert!(rowed.0 && rowed.2, "row-gap: normal leaves the rest of the gap");
     assert!(rowed.1.is_some(), "and is the initial row gap over the shorthand");
+}
+
+const TRANSITIONING: &str = ".btn { background-color: blue; transition: background-color .3s } .off { background-color: red }";
+
+fn transitions_from(doc: &Doc, id: u64) -> Option<String> {
+    doc.tree.elements[&id]
+        .style_before_transition()
+        .map(|before| before.background_color.clone().unwrap_or_default())
+}
+
+#[test]
+fn an_element_created_detached_and_inserted_in_a_later_batch_does_not_transition_into_the_first_style() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, TRANSITIONING);
+    let div = doc.make("div");
+    doc.tree.set_attribute(div, "class", Some("off".into()));
+    doc.flush();
+    doc.frame();
+
+    // It was not in the document, so that frame drew nothing of it, and the class it is given when
+    // it is inserted is the first style it has.
+    doc.tree.set_attribute(div, "class", Some("btn".into()));
+    doc.tree.append_child(ROOT, div);
+    doc.flush();
+    assert_eq!(doc.background(div), Some("blue"));
+    assert_eq!(transitions_from(&doc, div), None);
+
+    doc.frame();
+    doc.tree.set_attribute(div, "class", Some("off".into()));
+    doc.flush();
+    doc.tree.set_attribute(div, "class", Some("btn".into()));
+    doc.flush();
+    assert_eq!(transitions_from(&doc, div).as_deref(), Some("red"));
+}
+
+#[test]
+fn an_element_given_a_class_in_a_second_batch_before_any_frame_does_not_transition() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, TRANSITIONING);
+    let div = doc.classed("div", ROOT, "off");
+    doc.flush();
+    doc.tree.set_attribute(div, "class", Some("btn".into()));
+    doc.flush();
+    assert_eq!(doc.background(div), Some("blue"));
+    assert_eq!(transitions_from(&doc, div), None);
+
+    doc.frame();
+    doc.tree.set_attribute(div, "class", Some("off".into()));
+    doc.flush();
+    doc.tree.set_attribute(div, "class", Some("btn".into()));
+    doc.flush();
+    assert_eq!(transitions_from(&doc, div).as_deref(), Some("red"));
+}
+
+#[test]
+fn an_element_removed_and_inserted_again_in_a_later_batch_does_not_transition() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, TRANSITIONING);
+    let parent = doc.element("section", ROOT);
+    let child = doc.classed("div", parent, "off");
+    doc.flush();
+    doc.frame();
+
+    doc.tree.detach_child(parent);
+    doc.flush();
+    doc.frame();
+    doc.tree.set_attribute(child, "class", Some("btn".into()));
+    doc.tree.append_child(ROOT, parent);
+    doc.flush();
+    assert_eq!(doc.background(child), Some("blue"));
+    assert_eq!(transitions_from(&doc, child), None, "a descendant of what was removed is as new as it");
+
+    doc.frame();
+    doc.tree.set_attribute(child, "class", Some("off".into()));
+    doc.flush();
+    doc.tree.set_attribute(child, "class", Some("btn".into()));
+    doc.flush();
+    assert_eq!(transitions_from(&doc, child).as_deref(), Some("red"));
 }
 
 #[test]

@@ -9234,7 +9234,10 @@ render per frame.
   transition when its duration plus delay is above zero, using the `transition*`
   of the style after the change, so a change that also adds the transition (or a
   duration) runs. The first style an
-  element mounts with never transitions. A property that is unset starts from its
+  element is drawn with never transitions: not one given in a later batch before
+  the first frame, and not one an element has when it is inserted, whether it was
+  created detached or removed and put back (a browser gives an element outside the
+  document no computed style). A property that is unset starts from its
   CSS computed value: the initial one (`opacity` 1, padding `0`, `boxShadow`
   none, `backgroundColor` transparent) or the inherited one (`color` is the
   parent's colour, so `color` unset to `color: 'blue'` runs from it, and a
