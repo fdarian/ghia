@@ -21,6 +21,7 @@ use super::invalidation::Reach;
 use super::layers::Layers;
 use super::parser::parse_sheet;
 use super::validate::Validator;
+use crate::css::lenient::number_text;
 
 /// How many distinct skipped rules are logged before the rest are summed up in one warning.
 const SKIP_LOG_LIMIT: usize = 1024;
@@ -293,10 +294,13 @@ fn style_attribute_text(raw: &[u8]) -> String {
         .expect("an interned style is a JSON object");
     let mut text = String::new();
     for declaration in declarations.0 {
-        let value = if declaration.value.starts_with('"') {
-            serde_json::from_str::<String>(&declaration.value).expect("a JSON string value")
-        } else {
-            declaration.value
+        // As the DOM reads `style.cssText`: no value, no declaration, and a number has its unit.
+        let value = match declaration.value.as_str() {
+            "null" | "\"\"" => continue,
+            value if value.starts_with('"') => serde_json::from_str::<String>(value).expect("a JSON string value"),
+            // A custom property takes its number as written, as React DOM sets it.
+            value if declaration.key.starts_with("--") => value.to_owned(),
+            value => number_text(&declaration.key, value).unwrap_or_else(|| value.to_owned()),
         };
         text.push_str(&kebab_case(&declaration.key));
         text.push_str(": ");

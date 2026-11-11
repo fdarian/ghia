@@ -1597,3 +1597,21 @@ fn skipped_rules_are_logged_up_to_a_cap_and_then_summed_up_once() {
     doc.flush();
     assert_eq!(doc.tree.sheets.skip_warnings, limit + 1, "the summary is not repeated");
 }
+
+#[test]
+fn the_style_attribute_has_the_units_and_omissions_of_the_dom() {
+    let mut doc = Doc::new();
+    let div = doc.element("div", ROOT);
+    doc.inline(div, r#"{"width":10,"left":null,"zIndex":3,"top":0,"--n":2}"#);
+    doc.style_element(
+        ROOT,
+        "[style*='width: 10px'] { color: blue } [style*='left'] { opacity: 0.5 } [style*='z-index: 3;'] { background-color: red } \
+         [style*='top: 0;'] { display: flex } [style*='--n: 2'] { cursor: pointer }",
+    );
+    doc.flush();
+    assert_eq!(doc.color(div), Some("blue"));
+    assert_eq!(doc.style(div).and_then(|style| style.opacity), None, "a null value is no declaration");
+    assert_eq!(doc.background(div), Some("red"));
+    assert_eq!(doc.style(div).and_then(|style| style.display.as_deref()), Some("flex"));
+    assert_eq!(doc.style(div).and_then(|style| style.cursor.as_deref()), Some("pointer"));
+}
