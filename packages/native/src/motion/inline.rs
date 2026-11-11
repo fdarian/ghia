@@ -375,6 +375,7 @@ mod tests {
         fn style(&mut self, id: u64, json: &str) {
             let style = serde_json::from_str(json).expect("a style");
             self.tree.set_style_desc(id, style);
+            self.tree.finish_batch();
         }
 
         fn paragraph(&self) -> crate::text::inline::Paragraph {

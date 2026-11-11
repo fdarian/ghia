@@ -14044,6 +14044,7 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
 
     // Every mutation above only noted what the sheets must match again; this is where they do.
     tree.flush_styles();
+    tree.finish_batch();
 
     // Release styles nothing references any more. Without this a dragged
     // element, which produces a distinct style every frame, would grow the

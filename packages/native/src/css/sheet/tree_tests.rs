@@ -1508,3 +1508,31 @@ fn a_type_selector_matches_the_html_tags_by_name() {
     doc.flush();
     assert_eq!(doc.style(div).and_then(|style| style.opacity), None);
 }
+
+#[test]
+fn an_element_does_not_transition_into_the_style_a_sheet_gives_it_on_mount() {
+    let mut doc = Doc::new();
+    doc.style_element(
+        ROOT,
+        ".btn { background-color: blue; transition: background-color .3s } .off { background-color: red }",
+    );
+    let div = doc.make("div");
+    doc.inline(div, r#"{"opacity":0.5}"#);
+    doc.tree.set_attribute(div, "class", Some("btn".into()));
+    doc.tree.append_child(ROOT, div);
+    doc.flush();
+    assert_eq!(doc.background(div), Some("blue"));
+    assert!(doc.tree.elements[&div].style_before_transition().is_none());
+
+    // In a later batch the element has a first style, and a class change transitions.
+    let other = doc.classed("div", ROOT, "off");
+    doc.flush();
+    doc.tree.finish_batch();
+    doc.tree.set_attribute(other, "class", Some("btn".into()));
+    doc.flush();
+    assert_eq!(doc.background(other), Some("blue"));
+    assert_eq!(
+        doc.tree.elements[&other].style_before_transition().and_then(|before| before.background_color.as_deref()),
+        Some("red")
+    );
+}
