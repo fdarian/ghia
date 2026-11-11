@@ -12,16 +12,13 @@ export function attributeNameOf(prop: string, svg: boolean): string {
   return lowerCased(prop)
 }
 
-const LOWER_CASED_LIMIT = 1024
-const lowerCasedProps = new Map<string, string>()
-
-/** `toLowerCase` of a prop name, remembered: an adapter asks for every prop of every element, and the names repeat. */
+/** `toLowerCase` that allocates only for a name with a capital: an adapter asks for every prop of every element. */
 function lowerCased(prop: string): string {
-  const known = lowerCasedProps.get(prop)
-  if (known !== undefined) return known
-  const lower = prop.toLowerCase()
-  if (lowerCasedProps.size < LOWER_CASED_LIMIT) lowerCasedProps.set(prop, lower)
-  return lower
+  for (let index = 0; index < prop.length; index += 1) {
+    const code = prop.charCodeAt(index)
+    if (code >= 65 && code <= 90) return prop.toLowerCase()
+  }
+  return prop
 }
 
 /** The name `getAttribute(name)` looks for: HTML names are case-insensitive, SVG names are not. */
@@ -29,8 +26,18 @@ export function attributeLookupName(name: string, svg: boolean): string {
   return svg ? name : name.toLowerCase()
 }
 
-/** Props that are not attributes: `element.attributes` skips them, and so does what is sent to native. */
-export const NOT_ATTRIBUTES: ReadonlySet<string> = new Set(["children", "key", "ref", "style"])
+/** Whether a prop is not an attribute: `element.attributes` skips it, and so does what is sent to native. */
+export function isNotAttribute(prop: string): boolean {
+  switch (prop) {
+    case "children":
+    case "key":
+    case "ref":
+    case "style":
+      return true
+    default:
+      return false
+  }
+}
 
 /**
  * A prop as the string a DOM attribute holds, or null where the DOM would have no attribute. A
@@ -68,7 +75,7 @@ function holdsBooleanText(name: string): boolean {
 export function attributesOfProps(props: Iterable<readonly [string, unknown]>, svg: boolean): Map<string, string> {
   const values = new Map<string, unknown>()
   for (const [prop, value] of props) {
-    if (NOT_ATTRIBUTES.has(prop) || value === undefined) continue
+    if (isNotAttribute(prop) || value === undefined) continue
     const name = attributeNameOf(prop, svg)
     if (!values.has(name) || prop === name) values.set(name, value)
   }

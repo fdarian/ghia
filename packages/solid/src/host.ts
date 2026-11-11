@@ -20,7 +20,7 @@ import {
   attributeNameOf,
   attributeText,
   isSvgType,
-  NOT_ATTRIBUTES,
+  isNotAttribute,
   forwardsCustomProp,
   isNativeviewHandlerProp,
   HOST_BINDING,
@@ -717,8 +717,8 @@ export function setHostProperty(
 }
 
 function syncAttribute(root: HostRoot, node: HostElement, prop: string, value: HostPropertyValue): void {
-  if (NOT_ATTRIBUTES.has(prop)) return
-  const attribute = attributeNameOf(prop, isSvgType(node.type))
+  if (isNotAttribute(prop)) return
+  const attribute = attributeNameOf(prop, node instanceof SVGElement)
   const text = attributeText(attribute, value)
   if (node.sent.writesAttribute(attribute, text)) root.mutations.setAttribute(node.nativeId, attribute, text)
 }
