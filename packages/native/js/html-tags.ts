@@ -18,6 +18,18 @@ export function isHtmlTag(type: string): type is HtmlTag {
   return HTML_TAG_SET.has(type)
 }
 
+/** The tags that are inline unless a style says otherwise, as a `span` is: the rows of the native table whose
+ *  `display` is `inline`. An inline box can only show what a span shows (`assertSpanMotionValues`). */
+export const HTML_INLINE_TAGS = [
+  "a", "strong", "em", "b", "i", "u", "s", "small", "mark", "abbr", "cite", "q", "sub", "sup", "time", "kbd", "var", "samp", "br", "wbr",
+] as const satisfies readonly HtmlTag[]
+
+const HTML_INLINE_TAG_SET: ReadonlySet<string> = new Set(HTML_INLINE_TAGS)
+
+export function isInlineHtmlTag(type: string): boolean {
+  return HTML_INLINE_TAG_SET.has(type)
+}
+
 /** What a tag forwards to native beyond the props of every host element. */
 export const HTML_TAG_PROPS: Readonly<Partial<Record<HtmlTag, readonly string[]>>> = {
   a: ["href"],
