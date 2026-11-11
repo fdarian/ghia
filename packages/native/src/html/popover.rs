@@ -33,7 +33,14 @@ const TOP_LAYER_PRIORITY: usize = 1 << 20;
 
 /// Chrome's `[popover]` rules for an open popover. `Canvas` and `CanvasText` follow the
 /// `color-scheme` of the element, as they do there: `light-dark()` is the same lookup.
-const OPEN_STYLE: &str = r##"{"position":"fixed","inset":0,"width":"fit-content","height":"fit-content","margin":"auto","borderWidth":3,"borderStyle":"solid","borderColor":"currentColor","padding":"0.25em","overflow":"auto","color":"light-dark(#000000, #ffffff)","backgroundColor":"light-dark(#ffffff, #121212)"}"##;
+///
+/// Not what Chrome has in two places, because two things lay out differently here. `width:
+/// fit-content` on a fixed box leaves `margin: auto` no free space to take, so the box sits at the
+/// left; `max-content` capped by `max-width: 100%` is the same width and is centred. And `height:
+/// fit-content` is `auto`, which a fixed box with both `top` and `bottom` stretches to the window, so
+/// `inset: 0` is `bottom: auto` here and a popover with no declared `top` is at the top of the
+/// window, centred across.
+const OPEN_STYLE: &str = r##"{"position":"fixed","top":0,"right":0,"bottom":"auto","left":0,"width":"max-content","maxWidth":"100%","height":"fit-content","margin":"auto","borderWidth":3,"borderStyle":"solid","borderColor":"currentColor","padding":"0.25em","overflow":"auto","color":"light-dark(#000000, #ffffff)","backgroundColor":"light-dark(#ffffff, #121212)"}"##;
 
 /// Chrome's `[popover]:not(:popover-open) { display: none }`.
 const CLOSED_STYLE: &str = r#"{"display":"none"}"#;
@@ -204,7 +211,7 @@ mod tests {
         let style = style_of(&tree).unwrap();
         assert_eq!(style.display, None);
         assert_eq!(style.position.as_deref(), Some("fixed"));
-        assert!(style.inset.is_some() && style.margin.is_some());
+        assert!(style.top.is_some() && style.left.is_some() && style.margin.is_some());
         assert_eq!(style.width.is_some(), true);
         assert_eq!(style.overflow.as_deref(), Some("auto"));
         assert!(style.background_color.is_some() && style.color.is_some());

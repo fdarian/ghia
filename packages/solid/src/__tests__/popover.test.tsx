@@ -65,10 +65,20 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
     const computed = getComputedStyle(found.box)
     expect(computed.position).toBe("fixed")
     const rect = found.box.getBoundingClientRect()
-    // 100x50 content, 0.25em (4px) of padding and a 3px border on each side.
+    // 100x50 content, 0.25em (4px) of padding and a 3px border on each side. Centred across; the top is the deviation in deviations.md.
     expect([rect.width, rect.height]).toEqual([114, 64])
     expect(rect.left).toBeCloseTo((WINDOW.width - 114) / 2, 0)
-    expect(rect.top).toBeCloseTo((WINDOW.height - 64) / 2, 0)
+    expect(rect.top, "at the top: a height keyword is auto here, see deviations.md").toBe(0)
+  })
+
+  it("is centred by its auto margins when the author declares the insets and the size", () => {
+    const found = mount((grab) => (
+      <div ref={grab("box")} popover="manual" style={{ inset: 0, width: 100, height: 50 }} />
+    ))
+    found.box.showPopover()
+    const rect = found.box.getBoundingClientRect()
+    expect(rect.left + rect.width / 2).toBeCloseTo(WINDOW.width / 2, 0)
+    expect(rect.top + rect.height / 2).toBeCloseTo(WINDOW.height / 2, 0)
   })
 
   it("is above a later sibling with a z-index, an anchored layer, and escapes a clipping ancestor", () => {
@@ -88,7 +98,7 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
         </anchored>
       </div>
     ))
-    const centre = [WINDOW.width / 2, WINDOW.height / 2] as const
+    const centre = [WINDOW.width / 2, 20] as const
     expect(document.elementFromPoint(...centre)).toBe(found.layer)
     found.box.showPopover()
     expect(document.elementFromPoint(...centre)).toBe(found.inner)
@@ -108,7 +118,7 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
         </div>
       </div>
     ))
-    const centre = [WINDOW.width / 2, WINDOW.height / 2] as const
+    const centre = [WINDOW.width / 2, 20] as const
     found.second.showPopover()
     found.first.showPopover()
     expect(document.elementFromPoint(...centre)).toBe(found.firstInner)
@@ -250,7 +260,7 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
     ))
     found.manual.showPopover()
     found.auto.showPopover()
-    app.renderer.nativeSimulateClick(WINDOW.width / 2, WINDOW.height / 2)
+    app.renderer.nativeSimulateClick(WINDOW.width / 2, 20)
     expect(found.auto.offsetWidth, "a press inside").toBe(114)
     app.renderer.nativeSimulateClick(WINDOW.width - 5, WINDOW.height - 5)
     expect(found.auto.offsetWidth, "a press outside").toBe(0)
