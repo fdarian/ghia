@@ -192,6 +192,7 @@ function calls(r, ids) {
     resetBuildCounters: () => r.resetBuildCounters(),
     resetDebugFrameOverlayStats: () => r.resetDebugFrameOverlayStats(),
     preActivateElement: () => r.preActivateElement(ids.check),
+    restoreControlledState: () => r.restoreControlledState(ids.check),
     scrollByKey: () => r.scrollByKey("down", false),
     scrollIntoView: () => r.scrollIntoView(ids.box),
     scrollTo: () => r.scrollTo(ids.scroller, 0, 10),
@@ -245,6 +246,8 @@ function calls(r, ids) {
     takeSimulatedWindowActions: () => r.takeSimulatedWindowActions(),
     toJSON: () => r.toJSON(),
     writeClipboardText: () => r.writeClipboardText("x"),
+    writeInputFlag: () => r.writeInputFlag(ids.check, "indeterminate", true),
+    writeRangeValue: () => r.writeRangeValue(ids.range, "5"),
     // Last: a cancelled animation is not listed, which the calls above read.
     cancelAnimation: () => r.cancelAnimation(r.getAnimations(ids.box)[0].id),
   }
@@ -274,6 +277,7 @@ describeNative("renderer calls from a sync handler", () => {
             scroller: renderer.findByTestId("scroller").id,
             form: renderer.findByTestId("form").id,
             check: renderer.findByTestId("check").id,
+            range: renderer.findByTestId("range").id,
             img: renderer.findByTestId("img").id,
             webview: renderer.findByTestId("webview").id,
             nativeview: renderer.findByTestId("nativeview").id,
@@ -297,6 +301,7 @@ describeNative("renderer calls from a sync handler", () => {
               <input testId="field" defaultValue="hi" style={{ width: 100, height: 20 }} onKeyDown={on === "keydown" ? run : undefined} />
             </form>
             <input testId="check" type="checkbox" />
+            <input testId="range" type="range" />
             <img testId="img" style={{ width: 10, height: 10 }} />
             <webview testId="webview" style={{ width: 10, height: 10 }} />
             <nativeview testId="nativeview" style={{ width: 10, height: 10 }} />

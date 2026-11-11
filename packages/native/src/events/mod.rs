@@ -9,6 +9,7 @@ pub mod file_drag;
 pub(crate) mod hover_paint;
 pub mod ids;
 pub mod inline_target;
+pub(crate) mod input_state;
 pub(crate) mod key_activation;
 pub(crate) mod key_codes;
 pub(crate) mod key_names;

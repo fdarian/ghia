@@ -545,6 +545,23 @@ export declare class GpuixRenderer {
    */
   cancelActivation(elementId: number): void
   /**
+   * `input.checked = flag`, and `defaultChecked` and `indeterminate`, the writes of code: the
+   * state of the `<input>` changes and no prop does, so the framework's committed props stay what
+   * `restoreControlledState` goes back to. `name` is one of those three.
+   */
+  writeInputFlag(elementId: number, name: string, value: boolean): void
+  /**
+   * `input.value = text` on a range (and so `valueAsNumber`, `stepUp` and `stepDown`): native
+   * sanitizes the value, and no prop changes.
+   */
+  writeRangeValue(elementId: number, value: string): void
+  /**
+   * React DOM's `restoreControlledState` for `element_id`: a checkbox or radio (and the radios of
+   * its group) with a `checked` prop and a range with a `value` prop show the prop. Native never
+   * does this on its own: the React adapter calls it after an event's handlers ran.
+   */
+  restoreControlledState(elementId: number): void
+  /**
    * `form.requestSubmit(submitter)`: validate the form's controls, then emit `submit`.
    * The events are delivered before this returns. A `submitter` that is not a submit button
    * refuses with `TypeError: ...`, and one of another form with `NotFoundError: ...`.
@@ -1227,6 +1244,23 @@ export declare class TestGpuixRenderer {
    * put back.
    */
   cancelActivation(elementId: number): void
+  /**
+   * `input.checked = flag`, and `defaultChecked` and `indeterminate`, the writes of code: the
+   * state of the `<input>` changes and no prop does, so the framework's committed props stay what
+   * `restoreControlledState` goes back to. `name` is one of those three.
+   */
+  writeInputFlag(elementId: number, name: string, value: boolean): void
+  /**
+   * `input.value = text` on a range (and so `valueAsNumber`, `stepUp` and `stepDown`): native
+   * sanitizes the value, and no prop changes.
+   */
+  writeRangeValue(elementId: number, value: string): void
+  /**
+   * React DOM's `restoreControlledState` for `element_id`: a checkbox or radio (and the radios of
+   * its group) with a `checked` prop and a range with a `value` prop show the prop. Native never
+   * does this on its own: the React adapter calls it after an event's handlers ran.
+   */
+  restoreControlledState(elementId: number): void
   /**
    * `loadURL(url)` (with the URL as `argument`), `reload()`, `stop()`, `goBack()` and
    * `goForward()` of a `<webview>`.

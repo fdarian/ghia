@@ -4471,9 +4471,12 @@ hidden `<input>` and click it, run unchanged. A change of `type` builds the othe
 - **Events.** `onInput` (or `addEventListener('input')`) and `onChange` (`'change'`) each fire once per toggle, `input`
   first. In React `onChange` of a checkbox or radio is its `change`, as in React DOM, where a text control's is its
   `input`: see [The input and change events](#the-input-and-change-events).
-- **Controlled.** A control with a `checked` prop goes back to that prop after the change handlers have run
-  (as React DOM restores a controlled input), so a handler that does not take the new value leaves the control
-  as it was.
+- **Controlled.** In React a control with a `checked` prop goes back to that prop after the `change` handlers have
+  run and their update was flushed, as React DOM restores a controlled input (`restoreControlledState`), so a handler
+  that does not take the new value leaves the control as it was, and so does one that is not there. **In Solid it
+  does not**: a `checked` prop is written when the signal changes and never again, so the user's click stays, as it
+  does in Solid on the web. A write from code (`ref.current.checked = true`) is the control's own state and no prop,
+  so it is not what a controlled control goes back to, and a click toggles it from there.
 - **Forms.** A checkbox or radio is in `formData` under its `name` and `value` only while it is checked; a
   `required` checkbox must be checked, and a `required` radio needs one of its group checked. A hidden input
   submits its `value`, which is how Base UI submits the unchecked value of a checkbox. Neither blocks implicit
@@ -4514,8 +4517,10 @@ and thumb and moves its value from the pointer events it hears itself. See
   a scroller around the control.
 - **Events.** In React `onChange` is the `input` event, once per step, as it is for a text control, and
   `event.currentTarget.valueAsNumber` reads the new value. In Solid `onInput` is `input` and `onChange` is `change`.
-- **Controlled.** A control with a `value` prop goes back to that prop after the change handlers have run, as React DOM
-  restores a controlled input.
+- **Controlled.** In React a control with a `value` prop goes back to that prop after the `input` handlers have run and
+  their update was flushed, as React DOM restores a controlled input. In Solid it does not, as on the web. A write from
+  code (`value`, `valueAsNumber`, `stepUp()`, `stepDown()`) is the control's own value and no prop, so the keys move it
+  on from there and a restore does not go back to it.
 - **Forms.** A range is in `formData` under its `name` and its sanitized value (not when disabled or nameless), and does
   not block implicit submission.
 - **Accessibility and focus.** The role is `slider`, with the value, `min`, `max` and `step` as the numeric value, minimum,

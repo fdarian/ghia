@@ -90,7 +90,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid input type=range", () => {
     expect(log).toEqual([])
   })
 
-  it("a controlled value goes back to its prop unless the handler takes the change", () => {
+  it("a value prop is not restored: the user's move stays until the signal changes, as on the web", () => {
     testRoot.render(() => {
       const [value, setValue] = createSignal(30)
       return (
@@ -103,7 +103,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid input type=range", () => {
             style={track}
             onInput={(event) => {
               log.push(`input:${event.value}`)
-              if (log.length > 2) setValue(Number(event.value))
+              if (log.length > 2) setValue(Number(event.value) * 2)
             }}
           />
         </div>
@@ -111,11 +111,27 @@ describe.skipIf(!hasNativeTestRenderer)("Solid input type=range", () => {
     })
     range.focus()
     press("ArrowRight")
-    expect(range.value).toBe("30")
+    expect(range.value).toBe("31")
     press("ArrowRight")
-    expect(range.value).toBe("30")
+    expect(range.value).toBe("32")
+    press("ArrowRight")
+    expect(range.value).toBe("66")
+  })
+
+  it("a value prop with no handler keeps the user's move", () => {
+    mount({ value: 30 })
+    range.focus()
     press("ArrowRight")
     expect(range.value).toBe("31")
+  })
+
+  it("stepUp on a range with a defaultValue is moved on by the arrow keys", () => {
+    mount({ defaultValue: 10 })
+    range.stepUp()
+    expect(range.value).toBe("11")
+    range.focus()
+    press("ArrowRight ArrowRight")
+    expect(range.value).toBe("13")
   })
 
   it("submits name=value", () => {

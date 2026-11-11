@@ -1994,8 +1994,8 @@ export interface InputProps extends TextControlProps {
   /**
    * `type="checkbox"` and `"radio"`: the checkedness, set as React DOM sets the property, each time
    * the prop changes (and so dirty: `defaultChecked` no longer decides it). A user's toggle changes
-   * it natively, and after the change handlers it goes back to this prop, as React DOM restores a
-   * controlled input.
+   * it natively. In React it then goes back to this prop after the change handlers, as React DOM
+   * restores a controlled input; in Solid it does not, as on the web.
    */
   checked?: boolean
   /** `type="checkbox"` and `"radio"`: the checkedness until a user or a `checked` write sets it. */
@@ -2850,6 +2850,9 @@ export type NativeRenderer = MutationHost &
       | "preActivateElement"
       | "cancelActivation"
       | "getInputChoice"
+      | "writeInputFlag"
+      | "writeRangeValue"
+      | "restoreControlledState"
       | "getAnimations"
       | "getSubtreeAnimations"
       | "getDocumentAnimations"

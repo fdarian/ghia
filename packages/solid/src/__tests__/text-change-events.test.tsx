@@ -48,6 +48,13 @@ describe.skipIf(!hasNativeTestRenderer)("Solid input and change events of text c
     expect(log).toEqual(["onInput a", "onInput ab", "onChange ab", "blur"])
   })
 
+  it("a value prop with no handler keeps what the user typed, as on the web", () => {
+    app.render(() => <input ref={field} testId="field" value="ab" style={box} />)
+    field.focus()
+    press("c")
+    expect(field.value).toBe("abc")
+  })
+
   it("onChange does not fire on blur without an edit or for a write to value", () => {
     mount()
     field.focus()

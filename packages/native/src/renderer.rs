@@ -4467,6 +4467,71 @@ impl GpuixRenderer {
         }
     }
 
+    /// `input.checked = flag`, and `defaultChecked` and `indeterminate`, the writes of code: the
+    /// state of the `<input>` changes and no prop does, so the framework's committed props stay what
+    /// `restoreControlledState` goes back to. `name` is one of those three.
+    #[napi]
+    pub fn write_input_flag(&self, element_id: f64, name: String, value: bool) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        {
+            let tree = self.tree.clone();
+            return update_window_without_view(move |window, cx| {
+                crate::events::input_state::write_flag(&tree, id, &name, value, window, cx)
+            })?
+            .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (id, name, value);
+            Err(Error::from_reason("writeInputFlag is only implemented on macOS"))
+        }
+    }
+
+    /// `input.value = text` on a range (and so `valueAsNumber`, `stepUp` and `stepDown`): native
+    /// sanitizes the value, and no prop changes.
+    #[napi]
+    pub fn write_range_value(&self, element_id: f64, value: String) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        {
+            let tree = self.tree.clone();
+            return update_window_without_view(move |window, cx| {
+                crate::events::input_state::write_range_value(&tree, id, &value, window, cx)
+            })?
+            .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (id, value);
+            Err(Error::from_reason("writeRangeValue is only implemented on macOS"))
+        }
+    }
+
+    /// React DOM's `restoreControlledState` for `element_id`: a checkbox or radio (and the radios of
+    /// its group) with a `checked` prop and a range with a `value` prop show the prop. Native never
+    /// does this on its own: the React adapter calls it after an event's handlers ran.
+    #[napi]
+    pub fn restore_controlled_state(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        {
+            let tree = self.tree.clone();
+            return update_window_without_view(move |window, cx| {
+                crate::events::input_state::restore_controlled(&tree, id, window, cx)
+            })?
+            .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = id;
+            Err(Error::from_reason("restoreControlledState is only implemented on macOS"))
+        }
+    }
+
     /// `form.requestSubmit(submitter)`: validate the form's controls, then emit `submit`.
     /// The events are delivered before this returns. A `submitter` that is not a submit button
     /// refuses with `TypeError: ...`, and one of another form with `NotFoundError: ...`.

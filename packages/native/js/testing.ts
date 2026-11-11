@@ -394,6 +394,9 @@ interface NativeTestRendererApi
   preActivateElement(elementId: number): void
   cancelActivation(elementId: number): void
   getInputChoice(elementId: number): InputChoiceState
+  writeInputFlag(elementId: number, name: string, value: boolean): void
+  writeRangeValue(elementId: number, value: string): void
+  restoreControlledState(elementId: number): void
   getAnimations(elementId: number): WebAnimationInfo[]
   getSubtreeAnimations(elementId: number): ElementWebAnimationInfo[]
   getDocumentAnimations(): ElementWebAnimationInfo[]
@@ -1727,6 +1730,18 @@ export class TestRenderer implements NativeRenderer {
 
   getInputChoice(elementId: number): InputChoiceState {
     return this.native.getInputChoice(elementId)
+  }
+
+  writeInputFlag(elementId: number, name: string, value: boolean): void {
+    this.native.writeInputFlag(elementId, name, value)
+  }
+
+  writeRangeValue(elementId: number, value: string): void {
+    this.native.writeRangeValue(elementId, value)
+  }
+
+  restoreControlledState(elementId: number): void {
+    this.native.restoreControlledState(elementId)
   }
 
   getAnimations(elementId: number): WebAnimationInfo[] {

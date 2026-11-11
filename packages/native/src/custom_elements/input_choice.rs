@@ -388,11 +388,31 @@ impl RetainedTree {
         self.take_pending(id).is_some_and(|undo| undo.checked != self.is_checked(id))
     }
 
+    /// A script's assignment to `checked`, `defaultChecked` or `indeterminate`: it changes the state
+    /// and nothing the framework committed. The props are what `restore_controlled` goes back to, so
+    /// a write that landed there would make the control one the user can no longer change.
+    pub(crate) fn script_wrote_flag(&mut self, id: u64, name: &str, flag: bool) -> Result<(), String> {
+        let element = self.elements.get(&id).ok_or_else(|| format!("Unknown element id {id}"))?;
+        if element.element_type != "input" {
+            return Err(format!("Element {id} is a <{}>, not an <input>", element.element_type));
+        }
+        if !matches!(name, "checked" | "defaultChecked" | "indeterminate") {
+            return Err(format!("{name} is not a state of an <input>"));
+        }
+        self.input_prop_written(id, name, &Value::Bool(flag));
+        Ok(())
+    }
+
     /// What React DOM's `restoreControlledState` does after the handlers of a change: a control
     /// given a `checked` prop shows that prop, whatever the user's click made it, so a handler that
     /// does not take the new value leaves the control as it was. Its radio group is restored too,
-    /// since the click unchecked it.
+    /// since the click unchecked it. A range with a `value` prop goes back to it. A text control is
+    /// not restored.
     pub(crate) fn restore_controlled(&mut self, id: u64) {
+        if self.elements.get(&id).is_some_and(super::input_range::is_range) {
+            self.restore_range(id);
+            return;
+        }
         let mut ids = vec![id];
         ids.extend(self.radio_group(id));
         for id in ids {
@@ -736,6 +756,51 @@ mod tests {
         assert!(tree.finish_activation(4));
         tree.restore_controlled(4);
         assert!(tree.is_checked(3) && !tree.is_checked(4));
+    }
+
+    #[test]
+    fn a_script_write_changes_the_state_and_no_prop_so_there_is_nothing_to_go_back_to() {
+        let mut tree = tree(GROUPS);
+        tree.script_wrote_flag(5, "checked", true).expect("an input");
+        assert!(tree.is_checked(5));
+        assert!(!tree.elements[&5].custom_props().contains_key("checked"));
+        assert!(tree.pre_activate(5));
+        assert!(tree.finish_activation(5));
+        tree.restore_controlled(5);
+        assert!(!tree.is_checked(5), "the user's toggle stays: no committed prop");
+        tree.script_wrote_flag(5, "defaultChecked", false).expect("an input");
+        tree.script_wrote_flag(5, "indeterminate", true).expect("an input");
+        assert!(tree.is_indeterminate(5) && !tree.default_checked(5));
+        assert!(!tree.elements[&5].custom_props().contains_key("indeterminate"));
+    }
+
+    #[test]
+    fn a_restore_goes_back_to_the_committed_prop_and_not_to_a_script_write() {
+        let mut tree = tree(GROUPS);
+        tree.set_custom_prop(5, "checked".to_string(), Value::Bool(false));
+        tree.script_wrote_flag(5, "checked", true).expect("an input");
+        assert!(tree.is_checked(5));
+        tree.restore_controlled(5);
+        assert!(!tree.is_checked(5));
+    }
+
+    #[test]
+    fn nothing_restores_a_control_on_its_own() {
+        let mut tree = tree(GROUPS);
+        tree.set_custom_prop(5, "checked".to_string(), Value::Bool(false));
+        assert!(tree.pre_activate(5));
+        assert!(tree.finish_activation(5));
+        assert!(tree.is_checked(5), "the click is kept until the adapter asks for the restore");
+        tree.restore_controlled(5);
+        assert!(!tree.is_checked(5));
+    }
+
+    #[test]
+    fn a_script_write_of_another_element_or_another_state_is_refused() {
+        let mut tree = tree(GROUPS);
+        assert!(tree.script_wrote_flag(1, "checked", true).is_err(), "a div");
+        assert!(tree.script_wrote_flag(5, "value", true).is_err());
+        assert!(tree.script_wrote_flag(99, "checked", true).is_err());
     }
 
     #[test]

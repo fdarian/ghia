@@ -13,9 +13,9 @@
 //! The raw value is the last one written to the `value` prop or property (`Ranges`), or the one a key
 //! set, and failing both the `value` prop or `defaultValue`. A key (arrows, Page Up and Down, Home and
 //! End, as Chrome handles them) runs after the keydown's listeners and only if none cancelled it; it
-//! changes the value and fires `input` and then `change` when the value moved. A control that has a
-//! `value` prop then shows that prop, as React DOM restores a controlled input. A write from code fires
-//! nothing.
+//! changes the value and fires `input` and then `change` when the value moved. A write from code fires
+//! nothing. Going back to a `value` prop, as React DOM restores a controlled input, is `restore_range`,
+//! which the React adapter asks for after its handlers ran.
 
 use std::collections::HashMap;
 
@@ -148,12 +148,25 @@ impl RetainedTree {
         if !self.elements.get(&id).is_some_and(is_range) {
             return;
         }
-        if value.is_null() {
-            self.ranges.written.remove(&id);
+        let changed = if value.is_null() {
+            self.ranges.written.remove(&id).is_some()
         } else {
-            self.ranges.written.insert(id, number_from_json(value));
+            let raw = number_from_json(value);
+            self.ranges.written.insert(id, raw) != Some(raw)
+        };
+        if changed {
+            self.mark_render_changed(id);
         }
-        self.mark_render_changed(id);
+    }
+
+    /// A script's assignment to the `value` of a range: the value changes and the `value` prop the
+    /// framework committed, which `restore_range` goes back to, does not.
+    pub(crate) fn script_wrote_range_value(&mut self, id: u64, text: &str) -> Result<(), String> {
+        if !self.elements.get(&id).is_some_and(is_range) {
+            return Err(format!("Element {id} is not a range input"));
+        }
+        self.range_value_written(id, &Value::String(text.to_string()));
+        Ok(())
     }
 
     /// The `type` of `id` changed: a value written to a range is not one of the text field it became.
@@ -170,7 +183,7 @@ impl RetainedTree {
 
     /// What React DOM's `restoreControlledState` does after the handlers of a change: a slider given a
     /// `value` prop shows that prop, whatever the user's key made it.
-    fn restore_range(&mut self, id: u64) {
+    pub(super) fn restore_range(&mut self, id: u64) {
         let controlled = self.elements.get(&id).and_then(|element| element.custom_props().get("value")).map(number_from_json);
         if let Some(raw) = controlled {
             if self.ranges.written.get(&id) != Some(&raw) {
@@ -216,8 +229,6 @@ pub(crate) fn key_down(activation: &Activation, keystroke: &Keystroke, prevented
             payload.value = Some(format!("{target}"));
         });
     }
-    activation.tree.lock().unwrap().restore_range(focused);
-    activation.invalidate(window, cx);
 }
 
 /// `<input type="range">`: a tab stop with the slider role, and nothing painted in it.
@@ -391,6 +402,39 @@ mod tests {
         uncontrolled.range_moved(2, 31.0);
         uncontrolled.restore_range(2);
         assert_eq!(value_of(&uncontrolled, 2), 31.0, "no value prop, nothing to go back to");
+    }
+
+    #[test]
+    fn a_script_write_is_sanitized_and_leaves_the_props_alone() {
+        let mut tree = tree(RANGE);
+        tree.set_custom_prop(2, "defaultValue".to_string(), json!(10));
+        tree.script_wrote_range_value(2, "11").expect("a range");
+        assert_eq!(value_of(&tree, 2), 11.0);
+        tree.script_wrote_range_value(2, "500").expect("a range");
+        assert_eq!(value_of(&tree, 2), 100.0);
+        assert!(!tree.elements[&2].custom_props().contains_key("value"));
+        tree.range_moved(2, 12.0);
+        tree.restore_controlled(2);
+        assert_eq!(value_of(&tree, 2), 12.0, "no value prop, so nothing to go back to");
+        assert!(tree.script_wrote_range_value(3, "1").is_err(), "a text input");
+    }
+
+    #[test]
+    fn a_restore_goes_back_to_the_value_prop_and_not_to_a_script_write() {
+        let mut tree = tree(RANGE);
+        tree.set_custom_prop(2, "value".to_string(), json!(30));
+        tree.script_wrote_range_value(2, "60").expect("a range");
+        tree.restore_controlled(2);
+        assert_eq!(value_of(&tree, 2), 30.0);
+    }
+
+    #[test]
+    fn rewriting_the_same_value_is_not_a_change() {
+        let mut tree = tree(RANGE);
+        tree.set_custom_prop(2, "value".to_string(), json!(30));
+        tree.take_dirty();
+        tree.range_value_written(2, &json!(30));
+        assert_eq!(tree.take_dirty(), crate::retained_tree::Dirty::Clean);
     }
 
     #[test]

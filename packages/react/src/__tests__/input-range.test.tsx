@@ -293,11 +293,47 @@ describeNative("input type=range", () => {
       expect(nodes.range.value).toBe("62")
     })
 
+    it("a script write stays until the next key, which goes back to the prop when the handler does not take it", () => {
+      mount({ value: 30, onChange: () => log.push("onChange") })
+      nodes.range.value = "60"
+      expect(nodes.range.value).toBe("60")
+      nodes.range.focus()
+      press("ArrowRight")
+      expect(nodes.range.value).toBe("30")
+    })
+
     it("an uncontrolled range keeps what the user chose", () => {
       mount({ defaultValue: 30 })
       nodes.range.focus()
       press("ArrowRight ArrowRight")
       expect(nodes.range.value).toBe("32")
+    })
+  })
+
+  describe("a script write is the control's own value, not a prop", () => {
+    it("stepUp on a range with a defaultValue is moved on by the arrow keys", () => {
+      mount({ defaultValue: 10 })
+      nodes.range.stepUp()
+      expect(nodes.range.value).toBe("11")
+      nodes.range.focus()
+      press("ArrowRight ArrowRight")
+      expect(nodes.range.value).toBe("13")
+      press("ArrowLeft")
+      expect(nodes.range.value).toBe("12")
+    })
+
+    it("value, valueAsNumber and stepDown write the same way, sanitized, with no event", () => {
+      mount({ defaultValue: 10, min: 0, max: 20, step: 5 })
+      nodes.range.value = "13"
+      expect(nodes.range.value).toBe("15")
+      nodes.range.valueAsNumber = 100
+      expect(nodes.range.value).toBe("20")
+      nodes.range.stepDown(2)
+      expect(nodes.range.value).toBe("10")
+      nodes.range.focus()
+      press("ArrowRight")
+      expect(nodes.range.value).toBe("15")
+      expect(log).toEqual(["input:15", "change:15"])
     })
   })
 

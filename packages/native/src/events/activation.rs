@@ -70,8 +70,8 @@ impl Activation {
 
     /// The activation behaviour of a checkbox or radio, after its click: `input` and then
     /// `change`, both bubbling and not cancelable, when the click changed its checkedness. They are
-    /// delivered with `emit`, so a handler has run when `click()` returns. A control that has a
-    /// `checked` prop then shows that prop, as React DOM restores a controlled input.
+    /// delivered with `emit`, so a handler has run when `click()` returns. Native does not put a control
+    /// that has a `checked` prop back to it: that is the React adapter's `restoreControlledState`.
     fn choice_activated(&self, control: u64, window: &mut Window, cx: &mut App) {
         let (changed, path) = {
             let mut tree = self.tree.lock().unwrap();
@@ -86,8 +86,6 @@ impl Activation {
                 payload.path = Some(path.iter().map(|id| *id as f64).collect());
             });
         }
-        self.tree.lock().unwrap().restore_controlled(control);
-        self.invalidate(window, cx);
     }
 
     /// Delivers `click`, which native made, with the activation behaviour around it: the toggle of a

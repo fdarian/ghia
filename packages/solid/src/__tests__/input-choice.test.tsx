@@ -112,11 +112,43 @@ describe.skipIf(!hasNativeTestRenderer)("Solid checkbox, radio and hidden inputs
     expect(log).toEqual([])
   })
 
-  it("a controlled input whose handler does not take the change goes back to its prop", () => {
-    testRoot.render(() => <input ref={ref("box")} testId="box" type="checkbox" checked={false} onChange={() => log.push("change")} style={box} />)
+  it("a checked prop is not restored: the user's change stays until the signal changes, as on the web", () => {
+    const [checked, setChecked] = createSignal(false)
+    testRoot.render(() => <input ref={ref("box")} testId="box" type="checkbox" checked={checked()} onChange={() => log.push("change")} style={box} />)
     click("box")
     expect(log).toEqual(["change"])
+    expect(nodes.box.checked).toBe(true)
+    click("box")
     expect(nodes.box.checked).toBe(false)
+    click("box")
+    setChecked(true)
+    testRoot.renderer.flush()
+    expect(nodes.box.checked).toBe(true)
+    setChecked(false)
+    testRoot.renderer.flush()
+    expect(nodes.box.checked).toBe(false)
+  })
+
+  it("a checked prop with no handler keeps the user's change too", () => {
+    testRoot.render(() => <input ref={ref("box")} testId="box" type="checkbox" checked={false} style={box} />)
+    click("box")
+    expect(nodes.box.checked).toBe(true)
+  })
+
+  it("a script-written checked is the control's state, so the user's clicks toggle it both ways", () => {
+    testRoot.render(() => <input ref={ref("box")} testId="box" type="checkbox" style={box} />)
+    nodes.box.checked = true
+    click("box")
+    expect(nodes.box.checked).toBe(false)
+    click("box")
+    expect(nodes.box.checked).toBe(true)
+  })
+
+  it("an uncontrolled checkbox the Base UI way keeps what the user chose and fires its handlers", () => {
+    testRoot.render(() => <input ref={ref("box")} testId="box" type="checkbox" defaultChecked style={box} {...events("box")} />)
+    click("box")
+    expect(nodes.box.checked).toBe(false)
+    expect(log).toEqual(["box:click:false", "box:input:false", "box:change:false"])
   })
 
   it("clears indeterminate on a user's toggle", () => {

@@ -50,16 +50,39 @@ export function readInputChoice(layout: Layout): InputChoiceState {
   return read.call(layout.renderer, layout.id)
 }
 
+function required<Name extends "writeInputFlag" | "writeRangeValue">(layout: Layout, name: Name, member: string): NonNullable<NativeRenderer[Name]> {
+  const method = layout.renderer[name]
+  if (typeof method !== "function") throw new Error(`This renderer does not support ${name}, so ${member} cannot be assigned`)
+  return method.bind(layout.renderer) as NonNullable<NativeRenderer[Name]>
+}
+
 /**
- * Writes the prop as native's own state sees it, without touching the framework's props: a
- * property assignment on a DOM element is not an attribute, and the framework's next commit of
- * the prop writes it again.
+ * A property assignment is not an attribute and not a prop: it changes the control's own state, and
+ * the framework's props, which a controlled control is restored to, stay as they were committed.
+ * The state is native's, so the call is made once the pending mutations are sent.
  */
-function writeNative(self: object, layout: Layout, name: string, value: string | boolean): void {
+function writeFlag(layout: Layout, name: "checked" | "defaultChecked" | "indeterminate", value: boolean): void {
+  const write = required(layout, "writeInputFlag", name)
+  flushPendingMutations(layout.renderer)
+  write(layout.id, name, value)
+}
+
+function writeRangeValue(layout: Layout, text: string): void {
+  const write = required(layout, "writeRangeValue", "the value of a range")
+  flushPendingMutations(layout.renderer)
+  write(layout.id, text)
+}
+
+/**
+ * The `value` of a checkbox, radio or hidden input is its `value` attribute in the DOM (the
+ * "default/on" mode), and a text field's is its text; native holds both as the prop, so this is the
+ * one write that goes through `setCustomProp`.
+ */
+function writeValueProp(self: object, layout: Layout, value: string): void {
   const host = Reflect.get(self, HOST_BINDING) as (() => HostBinding | undefined) | undefined
   const binding = host?.call(self)
-  if (binding === undefined) throw new Error(`Setting ${name} needs a mounted element`)
-  binding.mutations.setCustomProp(layout.id, name, value)
+  if (binding === undefined) throw new Error("Setting value needs a mounted element")
+  binding.mutations.setCustomProp(layout.id, "value", value)
   binding.mutations.flushMutations()
 }
 
@@ -74,7 +97,7 @@ function stepBy<This extends object>(self: This, bind: (self: This) => InputBind
   if (state.kind !== "range") throw namedError("InvalidStateError", "stepUp and stepDown are only supported on a range input")
   if (state.step === 0) throw namedError("InvalidStateError", "This form element does not have an allowed value step")
   // Native sanitizes what it is written, so the result is clamped and snapped as the DOM's.
-  writeNative(self, layout, "value", String(Number(state.value) + direction * count * state.step))
+  writeRangeValue(layout, String(Number(state.value) + direction * count * state.step))
 }
 
 /** A member of an element that is not an `<input>` is a plain property, as it is before these accessors exist. */
@@ -99,7 +122,7 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
       if (!isInput(this)) return plain(this, name, value)
       const layout = bind(this).layout
       if (layout === undefined) throw new Error(`Setting ${name} needs a mounted element`)
-      writeNative(this, layout, name, Boolean(value))
+      writeFlag(layout, name, Boolean(value))
     },
   })
   const attribute = (name: "min" | "max" | "step") => ({
@@ -166,7 +189,9 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
         if (!hasValue(this)) return plain(this, "value", value)
         const layout = bind(this).layout
         if (layout === undefined) throw new Error("Setting value needs a mounted element")
-        writeNative(this, layout, "value", propText(value))
+        const text = propText(value)
+        if (isInput(this) && readInputChoice(layout).kind === "range") writeRangeValue(layout, text)
+        else writeValueProp(this, layout, text)
       },
     },
   })

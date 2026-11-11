@@ -107,6 +107,84 @@ describeNative("checkbox, radio and hidden inputs", () => {
     })
   })
 
+  describe("script writes and controlled restore", () => {
+    it("a script-written checked is the control's state, so the user's clicks toggle it both ways", () => {
+      testRoot.render(<input ref={ref("box")} testId="box" type="checkbox" style={box} />)
+      nodes.box.checked = true
+      click("box")
+      expect(nodes.box.checked).toBe(false)
+      click("box")
+      expect(nodes.box.checked).toBe(true)
+      nodes.box.checked = false
+      click("box")
+      expect(nodes.box.checked).toBe(true)
+    })
+
+    it("a script write to a radio unchecks its group and is no prop for a click to go back to", () => {
+      testRoot.render(
+        <div>
+          <input ref={ref("a")} testId="a" type="radio" name="g" style={box} />
+          <input ref={ref("b")} testId="b" type="radio" name="g" style={box} />
+        </div>,
+      )
+      nodes.a.checked = true
+      nodes.b.checked = true
+      expect([nodes.a.checked, nodes.b.checked]).toEqual([false, true])
+      click("a")
+      expect([nodes.a.checked, nodes.b.checked]).toEqual([true, false])
+    })
+
+    it("an uncontrolled checkbox the Base UI way keeps what the user chose and fires its handlers", () => {
+      testRoot.render(<input ref={ref("box")} testId="box" type="checkbox" defaultChecked style={box} {...events("box", () => nodes.box)} />)
+      click("box")
+      expect(nodes.box.checked).toBe(false)
+      expect(log).toEqual(["box:click:false", "box:input:false", "box:change:false"])
+    })
+
+    it("a controlled checkbox with no handler at all goes back to its prop, as in React DOM", () => {
+      testRoot.render(<input ref={ref("box")} testId="box" type="checkbox" checked={false} readOnly style={box} />)
+      click("box")
+      expect(nodes.box.checked).toBe(false)
+    })
+
+    it("goes back to its prop after the handlers, not before: they read the new checked", () => {
+      testRoot.render(
+        <input
+          ref={ref("box")}
+          testId="box"
+          type="checkbox"
+          checked={false}
+          style={box}
+          onInput={() => log.push(`input:${nodes.box.checked}`)}
+          onChange={(event) => log.push(`change:${event.currentTarget.checked}`)}
+        />,
+      )
+      click("box")
+      expect(log).toEqual(["input:true", "change:true"])
+      expect(nodes.box.checked).toBe(false)
+    })
+
+    it("a script write to a controlled checkbox stays until the next user event restores the prop", () => {
+      testRoot.render(<input ref={ref("box")} testId="box" type="checkbox" checked={false} onChange={() => log.push("change")} style={box} />)
+      nodes.box.checked = true
+      expect(nodes.box.checked).toBe(true)
+      click("box")
+      expect(nodes.box.checked).toBe(false)
+    })
+
+    it("a controlled checkbox follows the state a handler stores and a canceled click restores nothing", () => {
+      function Switch() {
+        const [on, setOn] = useState(false)
+        return <input ref={ref("box")} testId="box" type="checkbox" checked={on} onChange={(event) => setOn(event.currentTarget.checked)} style={box} />
+      }
+      testRoot.render(<Switch />)
+      click("box")
+      expect(nodes.box.checked).toBe(true)
+      click("box")
+      expect(nodes.box.checked).toBe(false)
+    })
+  })
+
   describe("activation", () => {
     function mountCheckbox(props: object = {}) {
       testRoot.render(
