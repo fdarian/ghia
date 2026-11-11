@@ -692,6 +692,19 @@ fn a_detached_style_element_stops_applying_and_applies_when_put_back() {
 }
 
 #[test]
+fn a_reload_matches_a_detached_element_even_when_a_child_id_has_no_element() {
+    let mut doc = Doc::new();
+    let detached = doc.make("div");
+    // The walk from the root lists the missing id, so it is as long as the element table.
+    doc.tree.elements.get_mut(&ROOT).unwrap().children.push(9999);
+    doc.style_element(ROOT, ".a { color: red }");
+    doc.flush();
+    let set = doc.tree.restyle_set(&[], true);
+    assert!(set.contains(&(detached, false)), "{set:?}");
+    assert!(set.contains(&(ROOT, true)));
+}
+
+#[test]
 fn a_style_element_under_a_detached_parent_does_not_apply() {
     let mut doc = Doc::new();
     let div = doc.classed("div", ROOT, "a");

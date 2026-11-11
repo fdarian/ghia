@@ -336,15 +336,14 @@ impl RetainedTree {
     }
 
     /// The elements to match again, each with whether it is in the document, once.
-    fn restyle_set(&self, marks: &[(u64, Reach)], all: bool) -> Vec<(u64, bool)> {
+    pub(super) fn restyle_set(&self, marks: &[(u64, Reach)], all: bool) -> Vec<(u64, bool)> {
         if all {
             let walked = self.document_order(None);
             let mut out: Vec<(u64, bool)> = Vec::with_capacity(self.elements.len());
             out.extend(walked.iter().map(|id| (*id, true)));
-            if walked.len() < self.elements.len() {
-                let in_document: FxHashSet<u64> = walked.into_iter().collect();
-                out.extend(self.elements.keys().filter(|id| !in_document.contains(id)).map(|id| (*id, false)));
-            }
+            // Not a comparison of counts: the walk also lists a child id that has no element.
+            let in_document: FxHashSet<u64> = walked.into_iter().collect();
+            out.extend(self.elements.keys().filter(|id| !in_document.contains(id)).map(|id| (*id, false)));
             return out;
         }
         let out: Vec<(u64, bool)> = Vec::with_capacity(marks.len());
