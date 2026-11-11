@@ -9,7 +9,6 @@
 
 use std::borrow::Cow;
 
-use crate::custom_elements::svg_tree::is_svg_tag;
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
 /// The attributes of one element. Most elements have none to three, so a list of pairs is
@@ -67,8 +66,8 @@ impl AttributeStore {
 
 /// The name an element of this type stores and reads an attribute under: HTML names are
 /// case-insensitive and kept lower-cased, SVG names (`viewBox`) are case-sensitive.
-pub(crate) fn stored_name<'a>(element_type: &str, name: &'a str) -> Cow<'a, str> {
-    if is_svg_tag(element_type) || !name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+pub(crate) fn stored_name(is_svg: bool, name: &str) -> Cow<'_, str> {
+    if is_svg || !name.bytes().any(|byte| byte.is_ascii_uppercase()) {
         Cow::Borrowed(name)
     } else {
         Cow::Owned(name.to_ascii_lowercase())
@@ -79,7 +78,7 @@ impl RetainedElement {
     /// The attribute `name` JS stored with `set_attribute`, by the DOM's rule for the case of the
     /// name: ignored on an HTML element, kept on an SVG one.
     pub fn attribute(&self, name: &str) -> Option<Cow<'_, str>> {
-        let name = stored_name(&self.element_type, name);
+        let name = stored_name(self.is_svg, name);
         self.attribute_store()?.get(&name).map(Cow::Borrowed)
     }
 }
