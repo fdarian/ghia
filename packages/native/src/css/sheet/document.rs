@@ -7,7 +7,7 @@
 //! `css::sheet::tree`).
 
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -64,8 +64,10 @@ pub struct StyleSheets {
     /// How many warnings `logged_skips` let through, for the tests.
     #[cfg(test)]
     pub(crate) skip_warnings: usize,
-    /// The text `[style]` selectors read, per own style, kept while the style is.
-    style_texts: RefCell<FxHashMap<usize, (Arc<StyleDesc>, Arc<str>)>>,
+    /// The text `[style]` selectors read, per own style, kept while an element has the style. Weak
+    /// so the text does not count as an element holding it, and the allocation stays reserved
+    /// so the address it is keyed by cannot be reused.
+    style_texts: RefCell<FxHashMap<usize, (Weak<StyleDesc>, Arc<str>)>>,
 }
 
 impl Default for StyleSheets {
@@ -233,7 +235,7 @@ impl StyleSheets {
             return text.clone();
         }
         let text: Arc<str> = style_attribute_text(raw).into();
-        self.style_texts.borrow_mut().insert(key, (own.arc().clone(), text.clone()));
+        self.style_texts.borrow_mut().insert(key, (Arc::downgrade(own.arc()), text.clone()));
         text
     }
 
@@ -259,7 +261,7 @@ impl StyleSheets {
 
     /// Forget the `[style]` texts of own styles no element holds any more.
     pub(crate) fn release_unused(&mut self) {
-        self.style_texts.get_mut().retain(|_, (own, _)| Arc::strong_count(own) > 2);
+        self.style_texts.get_mut().retain(|_, (own, _)| own.strong_count() > 1);
     }
 }
 

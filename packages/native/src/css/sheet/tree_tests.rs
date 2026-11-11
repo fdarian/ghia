@@ -764,6 +764,22 @@ fn a_drag_over_a_rule_naming_the_dragged_keys_leaves_the_cascade_cache_and_style
 }
 
 #[test]
+fn own_styles_that_all_merge_to_one_style_are_not_pinned_by_it() {
+    let mut doc = Doc::new();
+    let item = doc.classed("div", ROOT, "x");
+    doc.style_element(ROOT, ".x { left: 0px !important }");
+    doc.flush();
+    for frame in 1..200 {
+        doc.inline(item, &format!(r#"{{"left":{frame}}}"#));
+        doc.flush();
+        doc.tree.styles.sweep();
+    }
+    assert!(doc.tree.styles.cascaded.len() <= 1, "cascade entries: {}", doc.tree.styles.cascaded.len());
+    assert!(doc.tree.styles.len() <= 3, "interned styles: {}", doc.tree.styles.len());
+    assert!(doc.style(item).is_some_and(|style| style.left.is_some()));
+}
+
+#[test]
 fn entries_that_share_one_cascaded_style_are_released_once_no_element_uses_it() {
     let mut doc = Doc::new();
     let first = doc.classed("div", ROOT, "a");

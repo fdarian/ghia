@@ -119,9 +119,10 @@ pub fn merge(index: &RuleIndex, matched: &MatchedRules, own: &[Declaration]) -> 
 }
 
 struct Cascaded {
-    /// Held so the addresses the entry is keyed by cannot be reused by other values.
-    _matched: Arc<MatchedRules>,
-    _own: Option<Arc<StyleDesc>>,
+    /// Weak so the entry does not keep what its key is the address of alive, and the allocation
+    /// stays reserved while the entry exists, so the address cannot be reused by another value.
+    matched: Weak<MatchedRules>,
+    own: Option<Weak<StyleDesc>>,
     /// `None` when the merged text did not parse: the element then has its own style alone.
     style: Option<Arc<StyleDesc>>,
 }
@@ -150,34 +151,45 @@ impl CascadeCache {
         own: Option<&Arc<StyleDesc>>,
         style: Option<Arc<StyleDesc>>,
     ) {
-        self.entries
-            .insert(key(matched, own), Cascaded { _matched: matched.clone(), _own: own.cloned(), style });
+        self.entries.insert(
+            key(matched, own),
+            Cascaded { matched: Arc::downgrade(matched), own: own.map(Arc::downgrade), style },
+        );
     }
 
     pub fn clear(&mut self) {
         self.entries.clear();
     }
 
-    /// Forget the styles no element holds. The style table holds each one too, and so does every
-    /// entry that has it as its style or its own style (the merge of a sheet that names the keys
-    /// an inline style sets is the own style itself): an entry whose style has no other holder is
-    /// unused, and would keep the table from sweeping it.
+    /// Forget the entries no element can look up again, or whose style no element holds. The
+    /// style table holds each style too, and so does every entry that has it as its style (the
+    /// merge of a sheet that names the keys an inline style sets is the own style itself): a
+    /// style with no other holder is unused, and would keep the table from sweeping it.
+    ///
+    /// An entry is looked up by the rules and the own style of an element, so it is dead once no
+    /// element holds either. Without that, many own styles that merge to one style (an inline
+    /// `left` that an `!important` rule overrides, animated per frame) would each stay pinned by
+    /// the entry whose merged style is still in use.
     pub fn release_unused(&mut self) {
         loop {
             let mut held_by_cache: FxHashMap<*const StyleDesc, usize> = FxHashMap::default();
-            for entry in self.entries.values() {
-                for style in entry.style.iter().chain(entry._own.iter()) {
-                    *held_by_cache.entry(Arc::as_ptr(style)).or_default() += 1;
-                }
+            for style in self.entries.values().filter_map(|entry| entry.style.as_ref()) {
+                *held_by_cache.entry(Arc::as_ptr(style)).or_default() += 1;
             }
             let before = self.entries.len();
             self.entries.retain(|_, entry| {
-                entry
+                let matched_held = entry.matched.strong_count() > 0;
+                // The table holds an own style, and an entry whose merge is the own style holds it.
+                let own_held = entry.own.as_ref().is_none_or(|own| {
+                    own.strong_count() > 1 + held_by_cache.get(&own.as_ptr()).copied().unwrap_or(0)
+                });
+                let style_held = entry
                     .style
                     .as_ref()
-                    .is_some_and(|style| Arc::strong_count(style) > 1 + held_by_cache[&Arc::as_ptr(style)])
+                    .is_some_and(|style| Arc::strong_count(style) > 1 + held_by_cache[&Arc::as_ptr(style)]);
+                matched_held && own_held && style_held
             });
-            // Dropping an entry lets go of its own style, which can be another entry's style.
+            // Dropping an entry lets go of its style, which can be another entry's own style.
             if self.entries.len() == before {
                 return;
             }
