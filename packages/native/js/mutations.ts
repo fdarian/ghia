@@ -7,6 +7,7 @@ import {
   flushDirtySheets,
   registerSheetSink,
   type AttributeGateMember,
+  type SheetSink,
 } from "./css/index.js"
 import { attributesOfProps } from "./dom/attribute-names.js"
 import { isSvgType } from "./svg.js"
@@ -31,7 +32,7 @@ export function appliedBatchCount(): number {
 }
 
 /** Atomic mutation queue shared by all framework adapters. */
-export interface MutationQueue extends MutationRenderer, AttributeGateMember {
+export interface MutationQueue extends MutationRenderer, AttributeGateMember, Pick<SheetSink, "sheetsDirty"> {
   readonly pending: number
   /**
    * The mounted elements of this queue's adapter, which the queue reads when the attributes start
@@ -44,6 +45,11 @@ export interface MutationQueue extends MutationRenderer, AttributeGateMember {
 export interface ElementSource {
   /** `props` are the element's current props, in the order it was given them. */
   forEachElement(visit: (id: number, type: string, props: Iterable<readonly [string, unknown]>) => void): void
+  /**
+   * An adapter that keeps a record of the attributes it sent skips them while the gate is closed, so it is given
+   * what the backfill sent for `id`: the record then says what native holds. It owns `attributes` from here on.
+   */
+  rememberAttributes?(id: number, attributes: Map<string, string>): void
 }
 
 export function createMutationQueue(
@@ -170,7 +176,9 @@ export function createMutationQueue(
     backfillAttributes() {
       forwardsAttributes = true
       elementSource?.forEachElement((id, type, props) => {
-        for (const [name, text] of attributesOfProps(props, isSvgType(type))) mutations.setAttribute(id, name, text)
+        const attributes = attributesOfProps(props, isSvgType(type))
+        for (const [name, text] of attributes) mutations.setAttribute(id, name, text)
+        elementSource?.rememberAttributes?.(id, attributes)
       })
     },
     requestFlush,

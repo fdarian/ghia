@@ -52,6 +52,11 @@ export class SentWrites {
     return true
   }
 
+  /** Records the attributes native holds for the element, which the host did not write through `writesAttribute`. It owns `attributes`. */
+  rememberAttributes(attributes: Map<string, string>): void {
+    this.attributes = attributes.size > 0 ? attributes : undefined
+  }
+
   /**
    * Whether `value` is not what the attribute `name` holds in native; remembers it when it is
    * not. An attribute never written holds nothing, so removing it writes nothing.

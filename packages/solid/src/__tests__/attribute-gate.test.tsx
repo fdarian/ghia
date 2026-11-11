@@ -76,6 +76,35 @@ describe.skipIf(!hasNativeTestRenderer)("attributes reach native once a sheet ca
     app.unmount()
   })
 
+  it("keeps no record of attributes while the gate is closed, and the backfill fills it", () => {
+    const app = createTestRoot()
+    const sent = recordBatches(app.renderer)
+    const [withStyle, setWithStyle] = createSignal(false)
+    const [klass, setKlass] = createSignal<string | undefined>("a")
+    let box: any
+    app.render(() => (
+      <div>
+        <div ref={(element: unknown) => (box = element)} class={klass()} data-k="v" />
+        <Show when={withStyle()}>
+          <style>{".a { opacity: 0.25 }"}</style>
+        </Show>
+      </div>
+    ))
+    // Removing what is recorded reports it; removing what is not recorded does not.
+    const recorded = () => box.sent.writesAttribute("data-k", null)
+    app.flushSync(() => setKlass("b"))
+    expect(recorded()).toBe(false)
+
+    app.flushSync(() => setWithStyle(true))
+    sent.clear()
+    app.flushSync(() => setKlass("b"))
+    expect(sent.attributes()).toEqual([])
+    app.flushSync(() => setKlass(undefined))
+    expect(sent.attributes()).toEqual([["setAttribute", box.nativeId, "class", null]])
+    expect(recorded()).toBe(true)
+    app.unmount()
+  })
+
   it("sends the attributes of mounted elements when a constructed sheet is adopted", () => {
     const app = createTestRoot()
     const sent = recordBatches(app.renderer)

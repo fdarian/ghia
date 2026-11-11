@@ -800,7 +800,8 @@ function tokensOf(text: string): string[] {
 }
 
 function syncAttribute(root: HostRoot, node: HostElement, prop: string, value: HostPropertyValue): void {
-  if (isNotAttribute(prop)) return
+  // The record of what was sent is filled when the gate opens (`ElementSource.rememberAttributes`).
+  if (!root.mutations.forwardsAttributes || isNotAttribute(prop)) return
   const attribute = attributeNameOf(prop, node instanceof SVGElement)
   const text = attributeText(attribute, value)
   if (node.sent.writesAttribute(attribute, text)) root.mutations.setAttribute(node.nativeId, attribute, text)
