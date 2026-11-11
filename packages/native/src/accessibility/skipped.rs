@@ -141,8 +141,11 @@ fn node_of(tree: &RetainedTree, element: &RetainedElement) -> Option<(gpui::acce
     if element.element_type == "label" {
         probe = super::label::describe(probe, element.id);
     }
-    if matches!(element.element_type.as_str(), "input" | "textarea") {
+    if crate::custom_elements::input_choice::is_text_editor(element) {
         probe = describe_field(probe, element);
+    }
+    if let Some(toggled) = crate::custom_elements::input_choice::toggled_of(tree, element) {
+        probe = probe.aria_toggled(toggled);
     }
     let role = probe.a11y_role()?;
     let mut node = gpui::accesskit::Node::new(role);

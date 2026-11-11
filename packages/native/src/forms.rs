@@ -5,7 +5,9 @@
 //! every `required` control with an empty value gets a non-bubbling `invalid`
 //! event, and the first one no handler cancelled takes focus. When nothing is
 //! invalid the form gets a cancelable, bubbling `submit` event carrying the
-//! `[name, value]` entries of its named, enabled controls in document order.
+//! `[name, value]` entries of its named, enabled controls in document order. A checkbox or a radio
+//! is in them, under its `value` (`"on"` by default), only when it is checked; a hidden input is,
+//! under its `value`.
 //!
 //! A `<button>` in a form whose `type` is missing or `submit` submits it when
 //! clicked, and its element is the event's `submitter`. `type="button"` does
@@ -21,6 +23,7 @@
 
 use gpui::{App, Window};
 
+use crate::custom_elements::input_choice::{self, Choice};
 use crate::element_tree::EventPayload;
 use crate::events::keyboard::path_to_root;
 use crate::events::sync_dispatch;
@@ -78,26 +81,49 @@ fn members_of(tree: &RetainedTree, form: u64, keep: impl Fn(&crate::retained_tre
     controls
 }
 
+/// What a control submits and what makes it invalid.
+enum Kind {
+    Text,
+    Hidden,
+    Checkbox { checked: bool },
+    /// `group_checked`: a radio of its group is checked, which is what a `required` radio needs.
+    Radio { checked: bool, group_checked: bool },
+}
+
 struct Control {
     id: u64,
     path: Vec<u64>,
     name: Option<String>,
     value: String,
+    kind: Kind,
     required: bool,
     disabled: bool,
     read_only: bool,
 }
 
 impl Control {
-    /// Disabled and read-only controls are barred from constraint validation.
+    /// Disabled controls are barred from constraint validation, and a read-only text field is.
     fn is_invalid(&self) -> bool {
-        self.required && self.value.is_empty() && !self.disabled && !self.read_only
+        if self.disabled {
+            return false;
+        }
+        match self.kind {
+            Kind::Text => self.required && self.value.is_empty() && !self.read_only,
+            Kind::Hidden => false,
+            Kind::Checkbox { checked } => self.required && !checked,
+            Kind::Radio { group_checked, .. } => self.required && !group_checked,
+        }
     }
 
-    /// `[name, value]`, for a control that has a name and is not disabled.
+    /// `[name, value]`, for a control that has a name and is not disabled. A checkbox or a radio
+    /// has one only while it is checked.
     fn entry(&self) -> Option<Vec<String>> {
         let name = self.name.as_ref().filter(|name| !name.is_empty())?;
-        (!self.disabled).then(|| vec![name.clone(), self.value.clone()])
+        let submits = match self.kind {
+            Kind::Text | Kind::Hidden => true,
+            Kind::Checkbox { checked } | Kind::Radio { checked, .. } => checked,
+        };
+        (!self.disabled && submits).then(|| vec![name.clone(), self.value.clone()])
     }
 }
 
@@ -118,11 +144,22 @@ impl GpuixView {
                 .into_iter()
                 .filter_map(|id| {
                     let element = tree.elements.get(&id)?;
+                    let kind = match input_choice::choice_of(element) {
+                        Some(Choice::Checkbox) => Kind::Checkbox { checked: tree.is_checked(id) },
+                        Some(Choice::Radio) => {
+                            Kind::Radio { checked: tree.is_checked(id), group_checked: tree.radio_group_has_checked(id) }
+                        }
+                        None if input_choice::is_hidden(element) => Kind::Hidden,
+                        None => Kind::Text,
+                    };
+                    let own_value = (!matches!(kind, Kind::Text)).then(|| input_choice::value_of(element));
                     Some((
                         id,
                         element.element_type.clone(),
                         element.custom_props().clone(),
                         path_to_root(&tree, id),
+                        kind,
+                        own_value,
                     ))
                 })
                 .collect();
@@ -130,18 +167,22 @@ impl GpuixView {
         };
 
         let mut controls = Vec::with_capacity(members.len());
-        for (id, element_type, props, control_path) in members {
-            let value = self
-                .custom_registry
-                .with_element(id, &element_type, &props, |element| element.text_value(cx))
-                .flatten()
-                .ok_or_else(|| format!("Element {id} has no text value"))?;
+        for (id, element_type, props, control_path, kind, own_value) in members {
+            let value = match own_value {
+                Some(value) => value,
+                None => self
+                    .custom_registry
+                    .with_element(id, &element_type, &props, |element| element.text_value(cx))
+                    .flatten()
+                    .ok_or_else(|| format!("Element {id} has no text value"))?,
+            };
             let flag = |key: &str| props.get(key).and_then(|value| value.as_bool()) == Some(true);
             controls.push(Control {
                 id,
                 path: control_path,
                 name: props.get("name").and_then(|name| name.as_str()).map(str::to_string),
                 value,
+                kind,
                 required: flag("required"),
                 disabled: flag("disabled"),
                 read_only: flag("readOnly"),
@@ -238,14 +279,15 @@ enum ImplicitSubmission {
 /// What Enter in a text field of `form` does, by HTML's implicit submission rule. The first submit
 /// button is the default button: it is clicked, or nothing happens when it is disabled. A form
 /// with none submits only when at most one field blocks implicit submission. Every `<input>`
-/// blocks it, whatever its `type`, `disabled` or `readOnly`; a `<textarea>` does not.
+/// blocks it, whatever its `disabled` or `readOnly`, except a checkbox, a radio and a hidden one; a
+/// `<textarea>` does not.
 fn implicit_submission_of(tree: &RetainedTree, form: u64) -> Option<ImplicitSubmission> {
     if let Some(default_button) = submit_buttons_of(tree, form).first().and_then(|id| tree.elements.get(id)) {
         return (!default_button.is_disabled()).then_some(ImplicitSubmission::Click(default_button.id));
     }
     let blocking = controls_of(tree, form)
         .into_iter()
-        .filter(|id| tree.elements.get(id).is_some_and(|element| element.element_type == "input"))
+        .filter(|id| tree.elements.get(id).is_some_and(input_choice::blocks_implicit_submission))
         .count();
     (blocking <= 1).then_some(ImplicitSubmission::Submit)
 }
@@ -434,10 +476,30 @@ mod tests {
             path: vec![1],
             name: name.map(str::to_string),
             value: value.to_string(),
+            kind: Kind::Text,
             required: false,
             disabled: false,
             read_only: false,
         }
+    }
+
+    #[test]
+    fn a_checkbox_or_radio_makes_an_entry_only_when_checked_and_a_hidden_input_always() {
+        let entry = |kind| Control { kind, ..control(Some("a"), "v") }.entry();
+        assert_eq!(entry(Kind::Checkbox { checked: false }), None);
+        assert_eq!(entry(Kind::Radio { checked: false, group_checked: true }), None);
+        assert_eq!(entry(Kind::Checkbox { checked: true }), Some(vec!["a".to_string(), "v".to_string()]));
+        assert_eq!(entry(Kind::Hidden), Some(vec!["a".to_string(), "v".to_string()]));
+    }
+
+    #[test]
+    fn a_required_choice_needs_to_be_checked_and_a_required_radio_needs_its_group_to_be() {
+        let invalid = |kind| Control { kind, required: true, ..control(None, "") }.is_invalid();
+        assert!(invalid(Kind::Checkbox { checked: false }));
+        assert!(!invalid(Kind::Checkbox { checked: true }));
+        assert!(invalid(Kind::Radio { checked: false, group_checked: false }));
+        assert!(!invalid(Kind::Radio { checked: false, group_checked: true }));
+        assert!(!invalid(Kind::Hidden));
     }
 
     #[test]

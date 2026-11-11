@@ -18,6 +18,7 @@ pub mod code;
 pub mod diff;
 pub mod img;
 pub mod input;
+pub(crate) mod input_choice;
 pub(crate) mod input_rules;
 pub mod markdown;
 pub(crate) mod text_selection;
@@ -118,6 +119,8 @@ pub struct CustomRenderContext<'a> {
     pub lift_absorbed: bool,
     /// What the walks over the retained tree read of this element's final style.
     pub resolved: crate::resolved_style::Resolved,
+    /// The state of a checkbox or a radio, which the tree holds: what assistive technology is told.
+    pub toggled: Option<gpui::accesskit::Toggled>,
 }
 
 impl CustomRenderContext<'_> {
@@ -174,8 +177,17 @@ impl CustomRenderContext<'_> {
 /// the accessibility node off that id, and the pointer dispatcher maps its hit
 /// chain back to elements through it.
 pub(crate) fn custom_surface(
+    el: gpui::Stateful<gpui::Div>,
+    ctx: &CustomRenderContext,
+) -> gpui::Stateful<gpui::Div> {
+    custom_surface_with_role(el, ctx, None)
+}
+
+/// [`custom_surface`] for an element that has a role when its props give none.
+pub(crate) fn custom_surface_with_role(
     mut el: gpui::Stateful<gpui::Div>,
     ctx: &CustomRenderContext,
+    default_role: Option<gpui::Role>,
 ) -> gpui::Stateful<gpui::Div> {
     use gpui::prelude::*;
 
@@ -237,7 +249,7 @@ pub(crate) fn custom_surface(
         ),
     };
     el = crate::layout::stacking::absorb_lift(el, ctx.lift_absorbed);
-    el = crate::accessibility::apply_accessibility(el, ctx.id, ctx.props, None);
+    el = crate::accessibility::apply_accessibility(el, ctx.id, ctx.props, default_role);
     wire_host_events(el, ctx)
 }
 

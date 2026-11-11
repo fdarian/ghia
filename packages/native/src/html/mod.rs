@@ -46,6 +46,22 @@ pub fn ua_style(element_type: &str) -> Option<Arc<StyleDesc>> {
     styles().get(element_type).cloned()
 }
 
+/// The user agent style of `element`: its tag's, and for an `<input>` its `type`'s, since Chrome's `html.css`
+/// has a rule for each (a checkbox and a radio are small `inline-block` boxes with a margin, a hidden input
+/// is not displayed). A text field has none.
+pub fn ua_style_of(element: &crate::retained_tree::RetainedElement) -> Option<Arc<StyleDesc>> {
+    if element.element_type != "input" {
+        return ua_style(&element.element_type);
+    }
+    let name = match crate::custom_elements::input_choice::input_type(element.custom_props()) {
+        crate::custom_elements::input_rules::InputType::Checkbox => "input[type=checkbox]",
+        crate::custom_elements::input_rules::InputType::Radio => "input[type=radio]",
+        crate::custom_elements::input_rules::InputType::Hidden => "input[type=hidden]",
+        _ => return None,
+    };
+    styles().get(name).cloned()
+}
+
 /// The style `element_type` is laid out and read with, given the one its layers add up to. Chrome lays a
 /// `<button>` out as `inline-block` whatever its `display` says: `inline` computes to `inline-block`, so the
 /// button stays an atomic inline, with its box and its accessibility node, and no paragraph runs on in it.

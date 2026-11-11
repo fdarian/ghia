@@ -103,13 +103,19 @@ pub(crate) fn activation_keys(element: &RetainedElement) -> Option<ActivationKey
         "a" if has_href(element) => {
             Some(ActivationKeys { enter: true, space: false, enter_repeats: false, enter_with_modifiers: true })
         }
+        // Space on a checkbox or a radio clicks it, on key up as on a button; Enter does not.
+        "input" if !element.is_disabled() && crate::custom_elements::input_choice::choice_of(element).is_some() => {
+            Some(ActivationKeys { enter: false, space: true, enter_repeats: false, enter_with_modifiers: false })
+        }
         _ => None,
     }
 }
 
 /// Whether an assistive technology can press the element without a listener on it.
 pub(crate) fn is_activatable(element: &RetainedElement) -> bool {
-    element.element_type == "button" || (element.element_type == "a" && has_href(element))
+    element.element_type == "button"
+        || (element.element_type == "a" && has_href(element))
+        || crate::custom_elements::input_choice::choice_of(element).is_some()
 }
 
 /// The element a click on `path` (innermost first) activates: the first on it with an activation

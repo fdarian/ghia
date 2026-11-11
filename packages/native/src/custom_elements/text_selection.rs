@@ -17,6 +17,8 @@ pub struct TextSelection {
     pub end: u32,
     /// `"forward"`, `"backward"` or `"none"`.
     pub direction: String,
+    /// The text of the control, which is its `value`.
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -154,6 +156,7 @@ pub(crate) fn describe(
         start: byte_to_utf16(content, range.start) as u32,
         end: byte_to_utf16(content, range.end) as u32,
         direction: direction.name().to_string(),
+        value: content.to_string(),
     }
 }
 

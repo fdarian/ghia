@@ -301,7 +301,7 @@ impl CustomElementFactory for InputFactory {
     }
 
     fn create(&self, _id: u64) -> Box<dyn CustomElement> {
-        Box::new(TextEditorElement::new(false))
+        Box::new(super::input_choice::InputElement::new())
     }
 }
 
@@ -317,7 +317,7 @@ impl CustomElementFactory for TextareaFactory {
     }
 }
 
-struct TextEditorElement {
+pub(super) struct TextEditorElement {
     multiline: bool,
     value: String,
     placeholder: String,
@@ -345,7 +345,7 @@ struct TextEditorElement {
 }
 
 impl TextEditorElement {
-    fn new(multiline: bool) -> Self {
+    pub(super) fn new(multiline: bool) -> Self {
         Self {
             multiline,
             value: String::new(),

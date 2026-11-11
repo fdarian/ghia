@@ -4421,6 +4421,52 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// `checked`, `defaultChecked`, `indeterminate` and `value` of an `<input>`: its state in the
+    /// tree, which a click or a prop write changes (`custom_elements::input_choice`).
+    #[napi]
+    pub fn get_input_choice(&self, element_id: f64) -> Result<crate::custom_elements::input_choice::InputChoiceState> {
+        let id = to_element_id(element_id)?;
+        crate::custom_elements::input_choice::read(&self.tree.lock().unwrap(), id).map_err(Error::from_reason)
+    }
+
+    /// The toggle of the checkbox or radio that a click an app dispatches at `element_id` is about
+    /// to activate, which has to be made before the click's listeners run so that they see the new
+    /// state. JS calls it before delivering the click; `cancelActivation` or `activateElement`
+    /// follows. Does nothing for another element, a disabled control or one that is inert.
+    #[napi]
+    pub fn pre_activate_element(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |window, cx| {
+            crate::events::activation::pre_activate_element(id, window, cx)
+        })?
+        .map_err(Error::from_reason);
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = id;
+            Err(Error::from_reason("preActivateElement is only implemented on macOS"))
+        }
+    }
+
+    /// A click an app dispatched at `element_id` was canceled: the checkbox or radio that
+    /// `preActivateElement` toggled is put back.
+    #[napi]
+    pub fn cancel_activation(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |window, cx| {
+            crate::events::activation::cancel_element(id, window, cx)
+        })?
+        .map_err(Error::from_reason);
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = id;
+            Err(Error::from_reason("cancelActivation is only implemented on macOS"))
+        }
+    }
+
     /// `form.requestSubmit(submitter)`: validate the form's controls, then emit `submit`.
     /// The events are delivered before this returns. A `submitter` that is not a submit button
     /// refuses with `TypeError: ...`, and one of another form with `NotFoundError: ...`.
@@ -7266,7 +7312,7 @@ impl GpuixView {
             let Some(element) = tree.elements.get(&focused) else {
                 return false;
             };
-            if matches!(element.element_type.as_str(), "input" | "textarea") {
+            if crate::custom_elements::input_choice::is_text_editor(element) {
                 return false;
             }
             if key.activates_controls
@@ -11896,6 +11942,7 @@ fn build_element_unpumped(
                 stacking_root,
                 lift_absorbed,
                 resolved,
+                toggled: crate::custom_elements::input_choice::toggled_of(ctx.tree, element),
             };
             // What an adapter paints is not read by the build: it takes its text colour, and the
             // `currentColor` of its icons, when gpui paints it.

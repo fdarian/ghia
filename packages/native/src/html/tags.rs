@@ -69,6 +69,16 @@ pub(super) const TAGS: &[(&str, &str)] = &[
         "button",
         r##"{"display":"inline-block","boxSizing":"border-box","padding":"1px 6px","borderWidth":2,"borderStyle":"outset","borderColor":"#767676","backgroundColor":"#efefef","color":"#000000","textAlign":"center","cursor":"default","fontFamily":".SystemUIFont","fontSize":"13.3333px","fontWeight":400,"fontStyle":"normal","lineHeight":"normal"}"##,
     ),
+    // Chrome's `input[type=checkbox]` and `input[type=radio]`: the size is the control's default one.
+    (
+        "input[type=checkbox]",
+        r#"{"display":"inline-block","boxSizing":"border-box","width":13,"height":13,"marginTop":3,"marginRight":3,"marginBottom":3,"marginLeft":4}"#,
+    ),
+    (
+        "input[type=radio]",
+        r#"{"display":"inline-block","boxSizing":"border-box","width":13,"height":13,"marginTop":3,"marginRight":3,"marginBottom":0,"marginLeft":5}"#,
+    ),
+    ("input[type=hidden]", r#"{"display":"none"}"#),
     ("table", r#"{"display":"table","borderSpacing":2}"#),
     ("thead", r#"{"display":"table-header-group"}"#),
     ("tbody", r#"{"display":"table-row-group"}"#),

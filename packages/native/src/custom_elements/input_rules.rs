@@ -13,12 +13,18 @@ pub(crate) enum InputType {
     Search,
     Tel,
     Url,
+    Checkbox,
+    Radio,
+    Hidden,
 }
 
 impl InputType {
     /// An unknown token falls back to `text`, as the DOM does.
     pub(crate) fn parse(token: &str) -> Self {
         match token.trim().to_ascii_lowercase().as_str() {
+            "checkbox" => Self::Checkbox,
+            "radio" => Self::Radio,
+            "hidden" => Self::Hidden,
             "password" => Self::Password,
             "number" => Self::Number,
             "email" => Self::Email,
@@ -27,6 +33,13 @@ impl InputType {
             "url" => Self::Url,
             _ => Self::Text,
         }
+    }
+}
+
+impl InputType {
+    /// Whether the control is edited as text, which is what the text editor builds.
+    pub(crate) fn edits_text(self) -> bool {
+        !matches!(self, Self::Checkbox | Self::Radio | Self::Hidden)
     }
 }
 

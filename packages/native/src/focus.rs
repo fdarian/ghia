@@ -363,7 +363,7 @@ impl FocusState {
         let is_text_control = tree
             .elements
             .get(&element)
-            .is_some_and(|element| is_text_control(&element.element_type));
+            .is_some_and(crate::custom_elements::input_choice::is_text_editor);
         is_text_control || !self.modality.0.mouse_focused.get() || self.modality.0.key_down.get()
     }
 
@@ -378,7 +378,7 @@ impl FocusState {
         let is_text_control = tree
             .elements
             .get(&focused)
-            .is_some_and(|element| is_text_control(&element.element_type));
+            .is_some_and(crate::custom_elements::input_choice::is_text_editor);
         let visible = self.is_visible(Some(focused), tree);
         FocusStyles {
             // Typing is keyboard input too, and dimming the window while someone

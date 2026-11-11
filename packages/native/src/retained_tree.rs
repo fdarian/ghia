@@ -231,6 +231,9 @@ impl RetainedElement {
         if crate::custom_elements::is_focusable_by_default(&self.element_type) {
             return true;
         }
+        if crate::custom_elements::input_choice::is_hidden(self) {
+            return false;
+        }
         if crate::focus::is_text_control(&self.element_type) || self.element_type == "button" {
             // `disabled` outranks `tabIndex`: a disabled control cannot be focused at all.
             !self.is_disabled()
@@ -670,6 +673,8 @@ pub struct RetainedTree {
     /// Every form control, which `ControlStyles` walks up from, so a frame does not scan
     /// every element for them.
     control_ids: FxHashSet<u64>,
+    /// The checkedness of every `<input>` and the activations in progress: see `input_choice`.
+    pub(crate) choices: crate::custom_elements::input_choice::Choices,
     /// Elements that `needs_focus`, in id order. Kept as mutations arrive so the
     /// per-frame focus sync visits these few instead of every retained element:
     /// a large tree retains thousands, and nearly none are focusable.
@@ -764,6 +769,7 @@ impl RetainedTree {
             image_ids: FxHashSet::default(),
             motion_value_ids: FxHashSet::default(),
             control_ids: FxHashSet::default(),
+            choices: Default::default(),
             focusable_ids: Default::default(),
             geometry_ids: FxHashSet::default(),
             inert_count: 0,
@@ -962,6 +968,9 @@ impl RetainedTree {
         if is_control_type(&element_type) {
             self.control_ids.insert(id);
         }
+        if element_type == "input" {
+            self.choices.created(id);
+        }
         let revision = self.take_revision_covered();
         self.elements
             .insert(id, RetainedElement::new(id, element_type, revision));
@@ -1112,7 +1121,7 @@ impl RetainedTree {
     /// Invalidate for rendering only. Use for changes that cannot move a glyph
     /// into or out of the searchable text: style, and a native element's own
     /// props, whose text is matched at paint and never enters a `GroupList`.
-    fn mark_render_changed(&mut self, id: u64) {
+    pub(crate) fn mark_render_changed(&mut self, id: u64) {
         self.mark_changed_detail(id, false, Dirty::Layout);
     }
 
@@ -1216,6 +1225,7 @@ impl RetainedTree {
             self.image_ids.remove(&id);
             self.motion_value_ids.remove(&id);
             self.control_ids.remove(&id);
+            self.choices.destroyed(id);
             self.focusable_ids.remove(&id);
             self.geometry_ids.remove(&id);
             self.inert_count -= usize::from(element.has_inert_prop());
@@ -1397,7 +1407,7 @@ impl RetainedTree {
             return StyleChange::default();
         };
         let universal = self.universal.as_ref().filter(|_| element.takes_universal_style());
-        let user_agent = crate::html::ua_style(&element.element_type);
+        let user_agent = crate::html::ua_style_of(element);
         let effective = match (self.styles.layered.base(universal, user_agent.as_ref()), &element.own_style) {
             (Some(base), Some(own)) => Some(self.styles.layered.effective(&base, own)),
             (Some(base), None) => Some(base),
@@ -1565,11 +1575,19 @@ impl RetainedTree {
     /// one exception is `highlight` itself appearing or disappearing, which
     /// changes which subtrees an ancestor skips.
     pub fn set_custom_prop(&mut self, id: u64, key: String, value: serde_json::Value) {
+        let is_input = self.elements.get(&id).is_some_and(|element| element.element_type == "input");
+        // A write to the checkedness is a property assignment: it counts when the prop's value is the
+        // one it already had, as the user may have changed the control since.
+        if is_input && matches!(key.as_str(), "checked" | "defaultChecked" | "indeterminate") {
+            self.input_prop_written(id, &key, &value);
+        }
         let mut changed = false;
+        let is_input_type = is_input && key == "type";
+        let is_input_group = is_input && matches!(key.as_str(), "type" | "name");
         let is_highlight = key == "highlight";
         let is_motion = key == "motion";
         let is_motion_values = key == "motionValues" || key == "layout";
-        let affects_focusability = key == "tabIndex" || key == "disabled" || key == "href";
+        let affects_focusability = key == "tabIndex" || key == "disabled" || key == "href" || key == "type";
         let is_inert = key == "inert";
         let relation_key = RelationRegistry::reads(&key).then(|| key.clone());
         let mut previous_relation = None;
@@ -1642,6 +1660,14 @@ impl RetainedTree {
         }
         if affects_focusability {
             self.track_focusable(id);
+        }
+        if is_input_group {
+            if is_input_type {
+                // The user agent style of an `<input>` is its type's.
+                let change = self.refresh_effective_style(id, false);
+                self.settle_style_change(id, change);
+            }
+            self.input_group_changed(id);
         }
         if is_form_control {
             if self.elements.get(&id).is_some_and(|element| element.control_disabled().is_some()) {

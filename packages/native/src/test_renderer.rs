@@ -2327,6 +2327,31 @@ impl TestGpuixRenderer {
         update_view(|view, _window, cx| view.text_selection(id, cx))?.map_err(Error::from_reason)
     }
 
+    /// `checked`, `defaultChecked`, `indeterminate` and `value` of an `<input>`.
+    #[napi]
+    pub fn get_input_choice(&self, element_id: f64) -> Result<crate::custom_elements::input_choice::InputChoiceState> {
+        let id = to_element_id(element_id)?;
+        crate::custom_elements::input_choice::read(&self.tree.lock().unwrap(), id).map_err(Error::from_reason)
+    }
+
+    /// The toggle of the checkbox or radio that a click an app dispatches at `element_id` is about
+    /// to activate, made before the click's listeners run.
+    #[napi]
+    pub fn pre_activate_element(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        window_call(move |window, cx| crate::events::activation::pre_activate_element(id, window, cx))?
+            .map_err(Error::from_reason)
+    }
+
+    /// A click an app dispatched at `element_id` was canceled: what `preActivateElement` toggled is
+    /// put back.
+    #[napi]
+    pub fn cancel_activation(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        window_call(move |window, cx| crate::events::activation::cancel_element(id, window, cx))?
+            .map_err(Error::from_reason)
+    }
+
     /// `loadURL(url)` (with the URL as `argument`), `reload()`, `stop()`, `goBack()` and
     /// `goForward()` of a `<webview>`.
     #[napi]
