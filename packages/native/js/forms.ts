@@ -15,7 +15,7 @@ const NOT_FOUND_ERROR_PREFIX = "NotFoundError: "
 
 function submitterId(submitter: unknown): number | undefined {
   if (submitter === undefined || submitter === null) return undefined
-  const id = typeof submitter === "object" ? (submitter as { id?: unknown }).id : undefined
+  const id = typeof submitter === "object" ? (submitter as { nativeId?: unknown }).nativeId : undefined
   if (typeof id !== "number") {
     throw new TypeError("Failed to execute 'requestSubmit' on 'HTMLFormElement': parameter 1 is not of type 'HTMLElement'")
   }

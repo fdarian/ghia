@@ -4,6 +4,7 @@
 
 import React from "react"
 import { beforeEach, describe, expect, it } from "vitest"
+import { getComputedStyle } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer, type A11yTreeDump } from "../testing.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -819,5 +820,29 @@ describeNative("form.requestSubmit(submitter)", () => {
     refs.form.requestSubmit(refs.submit)
     expect(invalid).toEqual(["n"])
     expect(submits).toEqual([])
+  })
+})
+
+describeNative("HTML tags as DOM elements", () => {
+  it("are HTMLElements with the DOM's names, attributes and user agent computed style", () => {
+    const refs: Record<string, any> = {}
+    const ref = (name: string) => (instance: unknown) => {
+      refs[name] = instance
+    }
+    const testRoot = createTestRoot({ width: 600, height: 400 })
+    testRoot.render(
+      <div>
+        <a ref={ref("a")} href="/there">link</a>
+        <button ref={ref("button")} type="submit" disabled>go</button>
+        <h1 ref={ref("h1")}>title</h1>
+      </div>,
+    )
+    expect(refs.a).toBeInstanceOf(HTMLElement)
+    expect([refs.a.tagName, refs.a.nodeName, refs.a.localName]).toEqual(["A", "A", "a"])
+    expect(refs.button.tagName).toBe("BUTTON")
+    expect(refs.a.getAttribute("href")).toBe("/there")
+    expect(refs.button.getAttributeNames().sort()).toEqual(["disabled", "type"])
+    expect(getComputedStyle(refs.a).getPropertyValue("display")).toBe("inline")
+    expect(getComputedStyle(refs.h1).getPropertyValue("font-size")).toBe("32px")
   })
 })
