@@ -91,7 +91,7 @@ export function Combobox(props: ComboboxProps): JSX.Element {
     if (previous !== next) props.onOpenChange?.(next)
     if (next) {
       queueMicrotask(() => {
-        if (inputRef.current) renderer.focusElement?.(inputRef.current.id)
+        if (inputRef.current) renderer.focusElement?.(inputRef.current.nativeId)
       })
     }
   }

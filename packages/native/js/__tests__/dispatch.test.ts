@@ -459,7 +459,7 @@ describe("window and document listeners", () => {
     expect(seen[0][1]).toBe(element(LEAF))
     expect(seen[0][2]).toBe(document)
     expect(seen[1][1]).toBe(element(LEAF))
-    expect(seen[1][2]).toBe(window)
+    expect(seen[1][2]).toBe(globalThis)
   })
 
   it("see a null target for an event aimed at the window", () => {
@@ -474,7 +474,7 @@ describe("window and document listeners", () => {
     }
     expect(seen).toHaveLength(1)
     expect(seen[0][0]).toBeNull()
-    expect(seen[0][1]).toBe(window)
+    expect(seen[0][1]).toBe(globalThis)
     expect(seen[0][2]).toEqual([])
   })
 })

@@ -18,7 +18,14 @@ import { scrollKeyName } from "../scroll.js"
 import { moveFocusByTab } from "../focus.js"
 import { isDragEvent } from "./drag.js"
 import { handlerEventType, hasDomListener, isOutsidePress } from "./route.js"
-import { dispatchPropagating, document, isDocumentEvent, window } from "./window-target.js"
+import {
+  dispatchPropagating,
+  dispatchSelectionChange,
+  document,
+  isDocumentEvent,
+  listensForSelectionChange,
+  window,
+} from "./window-target.js"
 
 export interface RootEventContext {
   readonly renderer: NativeRenderer
@@ -54,7 +61,10 @@ export function normalizeEventType(event: EventPayload): EventPayload {
 /** Whether `event` was meant for the live root, and something is there to hear it. */
 export function handlesEvent(root: ActiveRoot, event: EventPayload): boolean {
   if (event.eventType === "selectionChange") {
-    return event.elementId === root.windowSelectionEventId && Boolean(root.handlers.onSelectionChange)
+    return (
+      event.elementId === root.windowSelectionEventId &&
+      (Boolean(root.handlers.onSelectionChange) || listensForSelectionChange())
+    )
   }
   if (event.eventType === "appearanceChange") {
     return event.elementId === root.windowAppearanceEventId && Boolean(root.handlers.onAppearanceChange)
@@ -104,6 +114,7 @@ export function runRootEvent(
 ): DomDispatchResult {
   if (event.eventType === "selectionChange") {
     root.handlers.onSelectionChange?.(windowLevelEvent(root, event), context.renderer)
+    if (listensForSelectionChange()) dispatchSelectionChange(root, event)
     return notHandled
   }
   if (event.eventType === "appearanceChange") {

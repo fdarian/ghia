@@ -124,7 +124,7 @@ describeNative("getBoundingClientRect", () => {
       )
 
       expect(hidden!.getBoundingClientRect()).toEqual(ZERO)
-      expect(renderer.getElementBounds(hidden!.id)).toBeNull()
+      expect(renderer.getElementBounds(hidden!.nativeId)).toBeNull()
     } finally {
       unmount()
     }
@@ -155,7 +155,7 @@ describeNative("getBoundingClientRect", () => {
 
       expect(hidden!.getBoundingClientRect()).toMatchObject({ x: 10, y: 10, width: 50, height: 40 })
       expect(inner!.getBoundingClientRect()).toMatchObject({ x: 15, y: 15, width: 20, height: 10 })
-      expect(renderer.getElementBounds(hidden!.id)).toMatchObject({ width: 50, height: 40 })
+      expect(renderer.getElementBounds(hidden!.nativeId)).toMatchObject({ width: 50, height: 40 })
     } finally {
       unmount()
     }

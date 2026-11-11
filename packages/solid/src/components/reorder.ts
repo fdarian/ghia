@@ -87,7 +87,7 @@ function Item<Value>(props: ReorderItemProps<Value>): JSX.Element {
   createRenderEffect(() => {
     onCleanup(
       controller.register(props.value, {
-        elementId: () => (element?.mounted ? element.id : undefined),
+        elementId: () => (element?.mounted ? element.nativeId : undefined),
         capturePointer: (pointerId) => {
           if (element === undefined) throw new Error("Reorder.Item: the item has no element to capture the pointer on")
           element.setPointerCapture(pointerId)

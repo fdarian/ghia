@@ -42,6 +42,7 @@ const PLAIN_NOTIFICATIONS: ReadonlySet<string> = new Set([
   "load",
   "error",
   "scroll",
+  "selectionchange",
   "did-start-loading",
   "did-stop-loading",
   "did-navigate",
@@ -49,6 +50,7 @@ const PLAIN_NOTIFICATIONS: ReadonlySet<string> = new Set([
   "did-fail-load",
   "attach",
   "detach",
+  "resize",
 ])
 
 /**
@@ -92,6 +94,30 @@ const NON_CANCELABLE_TYPES: ReadonlySet<string> = new Set([
   "pointerlockchange",
   "pointerlockerror",
 ])
+
+const POINTER_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "pointerdown",
+  "pointerup",
+  "pointermove",
+  "pointercancel",
+  "pointerover",
+  "pointerout",
+  "pointerenter",
+  "pointerleave",
+  "gotpointercapture",
+  "lostpointercapture",
+  // Chrome makes these PointerEvents too.
+  "click",
+  "auxclick",
+  "contextmenu",
+])
+
+/** Clicks that a keyboard, an assistive technology or `el.click()` makes have no pointer (`pointerId` -1). */
+const CLICK_TYPES: ReadonlySet<string> = new Set(["click", "auxclick", "contextmenu"])
+
+function isPrimaryPointer(payload: EventPayload, eventType: string): boolean {
+  return !CLICK_TYPES.has(eventType) || payload.pointerId !== -1
+}
 
 export function eventBubbles(eventType: string): boolean {
   return !NON_BUBBLING_TYPES.has(eventType.toLowerCase())
@@ -147,6 +173,10 @@ export interface DomEvent extends RootEvent {
   currentTarget: object | null
   /** The elements on the propagation path, target first, like the DOM's `composedPath()`. */
   composedPath(): object[]
+  /** The event itself, as a synthetic event wrapper's `nativeEvent` is the DOM event under it. */
+  readonly nativeEvent: DomEvent
+  /** Whether a pointer event is from the primary pointer: Ghia has one pointer, so `true` on any event a pointer made and `false` on a click no pointer made. Absent on other events. */
+  readonly isPrimary?: boolean
   eventPhase: number
   readonly bubbles: boolean
   readonly cancelable: boolean
@@ -263,9 +293,15 @@ export function createDomEvent(
     ...(payload.formEntries && formSubmission(root, payload.formEntries, payload.submitterId)),
     // An edit has no data unless it inserted text, and the DOM says so with null.
     ...(payload.eventType === "change" && { data: payload.data ?? null }),
+    ...(POINTER_EVENT_TYPES.has(payload.eventType.toLowerCase()) && {
+      isPrimary: isPrimaryPointer(payload, payload.eventType.toLowerCase()),
+    }),
     type: payload.eventType,
     currentTarget: null,
     composedPath: () => [...path],
+    get nativeEvent() {
+      return event
+    },
     eventPhase: EVENT_PHASE_NONE,
     bubbles: eventBubbles(payload.eventType),
     cancelable,

@@ -35,6 +35,10 @@ export type {
 export * from "./events/listeners.js"
 export * from "./events/element-listeners.js"
 export * from "./dom-members.js"
+export * from "./dom/nodes.js"
+export * from "./dom/mutation-observer.js"
+export * from "./dom/attribute-names.js"
+export * from "./dom/prototype-members.js"
 export * from "./animation-frame.js"
 export * from "./events/types.js"
 export type { AriaProps }
@@ -46,6 +50,7 @@ export {
   GpuixEventTarget,
   installElementSource,
   syncWindowEventListeners,
+  syncWindowSelectionChange,
   window,
   type AddEventListenerOptions,
   type WindowEventListener,
@@ -55,6 +60,7 @@ export { preventEventDefault, type DomEvent, type RootEvent } from "./events/dis
 export * from "./focus.js"
 export * from "./forms.js"
 export * from "./bounds.js"
+export * from "./computed-style.js"
 export * from "./host-runtime.js"
 export * from "./keyframes.js"
 export * from "./layout-animation.js"
@@ -1558,6 +1564,9 @@ export type GroupStateStyleDesc = StateStyleDesc & { group?: string | true }
 // paragraph, see docs/reference.md "Inline text".
 export type ElementType =
   | "div"
+  | "html"
+  | "head"
+  | "body"
   | "span"
   | "img"
   | "svg"
@@ -2826,6 +2835,7 @@ export type NativeRenderer = MutationHost &
       | "exitPointerLock"
       | "pointerLockElement"
       | "getScrollMetrics"
+      | "getComputedStyle"
       | "scrollByKey"
       | "setImage"
       | "setStyleImage"

@@ -124,7 +124,7 @@ function usePoppedChild(props: PresenceChildProps): ReactElement {
     box.current = undefined
   } else if (box.current === undefined && instance.current !== null) {
     if (!gpuix.renderer) throw new Error('AnimatePresence mode="popLayout" needs a GPUIX root')
-    box.current = measurePopLayout(gpuix.renderer, instance.current.id, instance.current.parentId)
+    box.current = measurePopLayout(gpuix.renderer, instance.current.nativeId, instance.current.parentId)
   }
   const style = child.props.style
   return cloneElement(

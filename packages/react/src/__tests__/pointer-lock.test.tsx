@@ -14,7 +14,7 @@ import { createTestRoot, hasNativeTestRenderer } from "../testing"
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 describeNative("pointer lock", () => {
-  type Lockable = { id: number; requestPointerLock(): void }
+  type Lockable = { nativeId: number; requestPointerLock(): void }
 
   let testRoot: ReturnType<typeof createTestRoot>
   /** The lock events at `document`, by type and the element it held then. */
@@ -90,7 +90,7 @@ describeNative("pointer lock", () => {
     first.requestPointerLock()
 
     expect(log).toEqual(["change:first"])
-    expect(testRoot.renderer.pointerLockElement()).toBe(first.id)
+    expect(testRoot.renderer.pointerLockElement()).toBe(first.nativeId)
   })
 
   describe("at document", () => {
@@ -147,7 +147,7 @@ describeNative("pointer lock", () => {
       testRoot.render(<Boxes />)
       const seen: Array<[string, boolean, boolean, number]> = []
       const record = (name: string) => (event: LockEvent) =>
-        seen.push([name, event.target === document, event.currentTarget === (name.startsWith("window") ? window : document), event.eventPhase])
+        seen.push([name, event.target === document, event.currentTarget === (name.startsWith("window") ? globalThis : document), event.eventPhase])
       const listeners: Array<[typeof document | typeof window, string, boolean]> = [
         [window, "window-capture", true],
         [document, "document-capture", true],
@@ -280,7 +280,7 @@ describeNative("pointer lock", () => {
     second.requestPointerLock()
 
     expect(log).toEqual(["change:second"])
-    expect(testRoot.renderer.pointerLockElement()).toBe(second.id)
+    expect(testRoot.renderer.pointerLockElement()).toBe(second.nativeId)
   })
 
   it("removing the locked element exits the lock", () => {
@@ -405,7 +405,7 @@ describeNative("pointer lock", () => {
       testRoot.renderer.nativeSimulateMouseDown(30, 150)
       testRoot.renderer.nativeSimulateMouseMove(60, 40)
 
-      expect(lockInHandler).toBe(second.id)
+      expect(lockInHandler).toBe(second.nativeId)
       expect(log).toEqual(["change:second"])
       expect(seen).toEqual([{ name: "second", type: "pointermove", x: 30, y: 150 }])
     })

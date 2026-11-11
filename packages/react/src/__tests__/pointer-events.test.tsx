@@ -74,7 +74,7 @@ describeNative("pointer events", () => {
 
       expect(seen).toHaveLength(1)
       expect(seen[0].target).toBe(inner)
-      expect(seen[0].path).toEqual([inner, outer])
+      expect(seen[0].path).toEqual([inner, outer, document.body, document.documentElement])
       expect(seen[0].path[0]).toBe(inner)
       expect(seen[0].path[1]).toBe(outer)
     })
@@ -144,7 +144,7 @@ describeNative("pointer events", () => {
 
       expect(seen).toHaveLength(1)
       expect(seen[0].target).toBe(list)
-      expect(seen[0].path).toEqual([list, root])
+      expect(seen[0].path).toEqual([list, root, document.body, document.documentElement])
     })
 
     it("hits an element with no listener and no fill, and bubbles from it", () => {
@@ -243,7 +243,7 @@ describeNative("pointer events", () => {
 
       expect(seen).toHaveLength(1)
       expect(seen[0].target).toBe(content)
-      expect(seen[0].path).toEqual([content, anchored, trigger, root])
+      expect(seen[0].path).toEqual([content, anchored, trigger, root, document.body, document.documentElement])
     })
   })
 

@@ -82,7 +82,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid removal takes a node out of the t
     setKey(2)
     // The DOM answers with the new child only: the old one is out of the document.
     expect(scroller.scrollHeight).toBe(200)
-    expect(app.renderer.getElement(scroller.id)!.children).toHaveLength(1)
+    expect(app.renderer.getElement(scroller.nativeId)!.children).toHaveLength(1)
   })
 
   it("keeps the element and its focus when a node is removed and inserted again in one batch", () => {
@@ -95,7 +95,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid removal takes a node out of the t
         <div style={{ width: 100, height: 20 }} />
       </div>
     ))
-    const id = field.id
+    const id = field.nativeId
     app.renderer.focusElement(id)
     expect(app.renderer.getFocusedElementId()).toBe(id)
 
@@ -103,7 +103,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid removal takes a node out of the t
     insertHostNode(parent, field, null)
     app.root.flush()
 
-    expect(field.id).toBe(id)
+    expect(field.nativeId).toBe(id)
     expect(field.mounted).toBe(true)
     expect(app.renderer.getFocusedElementId()).toBe(id)
     expect(app.renderer.findByTestId("field")?.id).toBe(id)
@@ -125,8 +125,8 @@ describe.skipIf(!hasNativeTestRenderer)("Solid removal takes a node out of the t
       </div>
     ))
     scroller.scrollTop = 120
-    const id = scroller.id
-    const fieldId = field.id
+    const id = scroller.nativeId
+    const fieldId = field.nativeId
     app.renderer.focusElement(fieldId)
 
     removeHostNode(parent, scroller)
@@ -138,8 +138,8 @@ describe.skipIf(!hasNativeTestRenderer)("Solid removal takes a node out of the t
     insertHostNode(parent, scroller, other)
     app.root.flush()
 
-    expect(scroller.id).toBe(id)
-    expect(field.id).toBe(fieldId)
+    expect(scroller.nativeId).toBe(id)
+    expect(field.nativeId).toBe(fieldId)
     expect(app.renderer.getFocusedElementId()).toBe(fieldId)
     expect(scroller.scrollTop).toBe(120)
     expect(other.getBoundingClientRect().y).toBe(100)
@@ -158,18 +158,18 @@ describe.skipIf(!hasNativeTestRenderer)("Solid removal takes a node out of the t
         <div ref={to} style={{ width: 100 }} />
       </div>
     ))
-    const id = moved.id
+    const id = moved.nativeId
     expect(from.getBoundingClientRect().height).toBe(50)
     removeHostNode(from, moved)
     // Auto height: the box of `from` is what is left in it.
     expect(from.getBoundingClientRect().height).toBe(0)
-    expect(app.renderer.getElement(from.id)!.children).not.toContain(id)
+    expect(app.renderer.getElement(from.nativeId)!.children).not.toContain(id)
     insertHostNode(to, moved, null)
     app.root.flush()
-    expect(moved.id).toBe(id)
+    expect(moved.nativeId).toBe(id)
     expect(to.getBoundingClientRect().height).toBe(50)
-    expect(app.renderer.getElement(to.id)!.children).toContain(id)
-    expect(app.renderer.getElement(from.id)!.children).not.toContain(id)
+    expect(app.renderer.getElement(to.nativeId)!.children).toContain(id)
+    expect(app.renderer.getElement(from.nativeId)!.children).not.toContain(id)
   })
 
   it("destroys a removed node that stayed out at the flush", async () => {

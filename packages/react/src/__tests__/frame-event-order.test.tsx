@@ -68,7 +68,7 @@ function run(scenario: "scroll then change" | "write while dirty" = "scroll then
     if (scenario === "scroll then change") {
       // The scroll comes first: a scroll write after a style change forces the layout, and its `onLayout`
       // reports would go out ahead of the frame's scroll event.
-      renderer.scrollTo(refs.get("scroller")!.id, 0, 200)
+      renderer.scrollTo(refs.get("scroller")!.nativeId, 0, 200)
       render(page(true))
     } else {
       // A `scrollTop` write while the style change is pending lays out to clamp, as a browser does; that

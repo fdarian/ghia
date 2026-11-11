@@ -1,0 +1,143 @@
+<!doctype html>
+<!--
+  Oracle for computed-style.test.tsx: what headless Chrome's `getComputedStyle` reports for the properties
+  `@ghia/native`'s `getComputedStyle` answers. A case is a `scene` (a tree of `{ id, style, children }`, `style`
+  being what `element.style[...]` takes) and the `ids` read; the answer is every property of `properties` for each
+  id, and `pseudo` for `::before` and `::after` of the ids named. `detached` is an element that is never attached.
+  Regenerate with `./computed-style-oracle.sh`.
+
+  The scene is 600x400 and `box-sizing: border-box`, as gpuix has it.
+-->
+<html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1280px;font:16px/1 sans-serif;color:rgb(0,0,0)}
+#scene{position:relative;width:600px;height:400px}
+@keyframes spin{from{opacity:1}to{opacity:0.5}}
+</style></head><body>
+<div id="scene"></div>
+<script>
+const properties = [
+  'display','position','visibility','overflow','overflow-x','overflow-y','direction','writing-mode','box-sizing','will-change','contain','scrollbar-gutter','content','z-index','filter','backdrop-filter','transform','transform-origin','translate','rotate','scale','perspective','width','height','min-width','min-height','max-width','max-height',
+  ...['padding','margin','border','scroll-margin','scroll-padding'].flatMap((prefix) => {
+    const suffix = prefix === 'border' ? '-width' : ''
+    return ['top','right','bottom','left','inline-start','inline-end','block-start','block-end'].map((side) => `${prefix}-${side}${suffix}`)
+  }),
+  'transition','transition-property','transition-duration','transition-delay','transition-timing-function','animation-name','animation-duration','font-size','color','opacity','background-color',
+]
+const box = (id, style, children = []) => ({ id, style: { display: 'block', ...style }, children })
+
+const cases = {
+  'static box': {
+    scene: box('root', { position: 'relative', width: '600px', height: '400px' }, [
+      box('a', { position: 'relative', width: '100px', height: '50px', paddingTop: '10px', paddingRight: '20px', paddingBottom: '10px', paddingLeft: '20px',
+        marginTop: '5px', marginLeft: '7px', borderTopWidth: '3px', borderStyle: 'solid', borderLeftWidth: '2px', overflow: 'hidden', zIndex: '5', opacity: '0.5',
+        color: 'rgb(255, 0, 0)', backgroundColor: 'rgb(0, 128, 255)', fontSize: '20px' }),
+    ]),
+    ids: ['a'],
+  },
+  'defaults': {
+    scene: box('root', { position: 'relative', width: '600px', height: '400px' }, [box('a', { })]),
+    ids: ['a', 'root'],
+  },
+  'inherited values': {
+    scene: box('root', { position: 'relative', width: '600px', height: '400px', fontSize: '24px', color: 'rgb(0, 0, 255)', direction: 'rtl', visibility: 'hidden' }, [
+      box('a', { height: '30px', paddingLeft: '4px' }, [box('b', { height: '10px', fontSize: '1.5em' })]),
+      box('c', { height: '30px', visibility: 'visible' }),
+    ]),
+    ids: ['a', 'b', 'c'],
+  },
+  'transform': {
+    scene: box('root', { position: 'relative', width: '600px', height: '400px' }, [
+      box('a', { width: '100px', height: '50px', transform: 'translate(10px, 20px) scale(2)', transformOrigin: '10px 20px' }),
+      box('b', { width: '100px', height: '50px', transform: 'rotate(30deg)' }),
+      box('c', { width: '100px', height: '50px', transform: 'translateX(50%)' }),
+      box('d', { width: '100px', height: '50px', translate: '10px 20px', rotate: '45deg', scale: '2', perspective: '300px' }),
+      box('e', { width: '100px', height: '50px', transform: 'translateZ(0)' }),
+      box('f', { width: '100px', height: '50px', transform: 'translate3d(1px, 2px, 3px)', transformOrigin: 'left top' }),
+    ]),
+    ids: ['a', 'b', 'c', 'd', 'e', 'f'],
+  },
+  'percentages': {
+    scene: box('root', { position: 'relative', width: '400px', height: '300px' }, [
+      box('a', { width: '50%', height: '25px', paddingTop: '10%', marginLeft: '5%', maxHeight: '50%', minWidth: '20px', maxWidth: '300px' }),
+      box('b', { width: 'calc(100% - 20px)', height: '10px', marginLeft: 'auto' }),
+    ]),
+    ids: ['a', 'b'],
+  },
+  'display none': {
+    scene: box('root', { position: 'relative', width: '600px', height: '400px', fontSize: '10px' }, [
+      box('a', { display: 'none', width: '100px', height: '50%', paddingLeft: '5px', transform: 'translateX(10px)', fontSize: '2em' }, [box('b', { })]),
+    ]),
+    ids: ['a', 'b'],
+  },
+  'flex item': {
+    scene: box('root', { position: 'relative', display: 'flex', width: '600px', height: '400px' }, [
+      box('a', { display: 'inline-block', width: '100px', zIndex: '3' }),
+      box('b', { position: 'absolute', display: 'inline-block', width: '100px', zIndex: '3' }),
+    ]),
+    ids: ['a', 'b'],
+  },
+  'transitions and animations': {
+    scene: box('root', { position: 'relative', width: '600px', height: '400px' }, [
+      box('a', { width: '100px', height: '50px', transition: 'opacity 0.3s ease-in 0.1s, transform 500ms' }),
+      box('b', { width: '100px', height: '50px', transitionProperty: 'width', transitionDuration: '2s', transitionTimingFunction: 'cubic-bezier(0.4,0,0.2,1)' }),
+      box('c', { width: '100px', height: '50px', animation: 'spin 2s linear infinite' }),
+    ]),
+    ids: ['a', 'b', 'c'],
+  },
+  'custom properties': {
+    scene: box('root', { position: 'relative', width: '600px', height: '400px', '--gap': '12px' }, [box('a', { })]),
+    ids: ['a'],
+    custom: ['--gap', '--missing'],
+  },
+  'overflow': {
+    scene: box('root', { position: 'relative', width: '600px', height: '400px' }, [
+      box('a', { overflowX: 'hidden' }),
+      box('b', { overflowY: 'scroll', overflowX: 'visible' }),
+      box('c', { overflow: 'auto' }),
+    ]),
+    ids: ['a', 'b', 'c'],
+  },
+  'pseudo': {
+    scene: box('root', { position: 'relative', width: '600px', height: '400px', fontSize: '18px', color: 'rgb(10, 20, 30)' }, [box('a', { width: '100px', height: '50px', padding: '4px' })]),
+    ids: [],
+    pseudo: ['a'],
+  },
+}
+
+const build = (node, parent) => {
+  const element = document.createElement('div')
+  for (const [key, value] of Object.entries(node.style)) {
+    if (key.startsWith('--')) element.style.setProperty(key, value)
+    else element.style[key] = value
+  }
+  element.dataset.id = node.id
+  parent.appendChild(element)
+  for (const child of node.children) build(child, element)
+}
+const read = (element, pseudo, custom) => {
+  const style = getComputedStyle(element, pseudo)
+  const values = {}
+  for (const name of properties) values[name] = style.getPropertyValue(name)
+  for (const name of custom ?? []) values[name] = style.getPropertyValue(name)
+  return values
+}
+
+const out = { cases: {}, properties }
+for (const [name, scenario] of Object.entries(cases)) {
+  const scene = document.getElementById('scene')
+  scene.replaceChildren()
+  build(scenario.scene, scene)
+  const result = { scene: scenario.scene, values: {}, pseudo: {}, custom: scenario.custom ?? [] }
+  for (const id of scenario.ids) result.values[id] = read(scene.querySelector(`[data-id="${id}"]`), null, scenario.custom)
+  for (const id of scenario.pseudo ?? []) {
+    const element = scene.querySelector(`[data-id="${id}"]`)
+    result.pseudo[id] = { '::before': read(element, '::before'), '::after': read(element, '::after') }
+  }
+  out.cases[name] = result
+}
+const detached = document.createElement('div')
+detached.style.width = '10px'
+out.cases.detached = { values: { a: read(detached, null) }, scene: null, pseudo: {}, custom: [] }
+document.body.setAttribute('data-oracle', JSON.stringify(out))
+</script></body></html>

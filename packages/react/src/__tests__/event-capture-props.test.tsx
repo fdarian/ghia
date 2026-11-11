@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { hostConfig } from "../reconciler/host-config.js"
+import { hostConfig, installDocumentElements } from "../reconciler/host-config.js"
 import type { Container, HostContext, MutationRenderer, Props } from "../types/host.js"
 
 function setup() {
@@ -22,7 +22,7 @@ function setup() {
     requestFlush() {},
     flushMutations() {},
   }
-  const container: Container = {
+  const container: Container = installDocumentElements({
     nativeRenderer: {},
     renderer,
     ids: { nextElementId: 0 },
@@ -33,7 +33,7 @@ function setup() {
     motionBindings: new Map(),
     motionReleases: [],
     instances: new Map(),
-  }
+  })
   const create = (props: Props) => {
     const instance = hostConfig.createInstance(
       "div",
@@ -56,17 +56,17 @@ describe("React host event listeners", () => {
     const { container, listeners, create } = setup()
     const instance = create({ onPointerDown: handler, onClickCapture: handler })
     expect(listeners).toEqual([
-      [instance.id, "pointerdown", true],
-      [instance.id, "click", true],
+      [instance.nativeId, "pointerdown", true],
+      [instance.nativeId, "click", true],
     ])
-    const handlers = container.eventHandlers.get(instance.id)
+    const handlers = container.eventHandlers.get(instance.nativeId)
     expect([...(handlers?.keys() ?? [])]).toEqual(["pointerdown", "clickCapture"])
   })
 
   it("asks native for a type once while both phases are present", () => {
     const { listeners, create } = setup()
     const instance = create({ onClick: handler, onClickCapture: handler })
-    expect(listeners).toEqual([[instance.id, "click", true]])
+    expect(listeners).toEqual([[instance.nativeId, "click", true]])
   })
 
   it("keeps the native listener until both phases are gone", () => {
@@ -75,9 +75,9 @@ describe("React host event listeners", () => {
     const instance = create(both)
     const captureOnly: Props = { onDropCapture: handler }
     update(instance, both, captureOnly)
-    expect(listeners).toEqual([[instance.id, "drop", true]])
+    expect(listeners).toEqual([[instance.nativeId, "drop", true]])
     update(instance, captureOnly, {})
-    expect(listeners).toEqual([[instance.id, "drop", true], [instance.id, "drop", false]])
+    expect(listeners).toEqual([[instance.nativeId, "drop", true], [instance.nativeId, "drop", false]])
   })
 
   it("adds a capture handler to an element that already bubbles", () => {
@@ -85,7 +85,7 @@ describe("React host event listeners", () => {
     const before: Props = { onMouseMove: handler }
     const instance = create(before)
     update(instance, before, { onMouseMove: handler, onMouseMoveCapture: handler })
-    expect(listeners).toEqual([[instance.id, "mousemove", true]])
+    expect(listeners).toEqual([[instance.nativeId, "mousemove", true]])
   })
 
   it("swaps a handler without telling native", () => {
@@ -95,12 +95,12 @@ describe("React host event listeners", () => {
     const next = () => {}
     update(instance, before, { onContextMenu: next })
     expect(listeners).toHaveLength(1)
-    expect(container.eventHandlers.get(instance.id)?.get("contextmenu")).toBe(next)
+    expect(container.eventHandlers.get(instance.nativeId)?.get("contextmenu")).toBe(next)
   })
 
   it("keeps onMouseDownOutside as the gpuix type", () => {
     const { listeners, create } = setup()
     const instance = create({ onMouseDownOutside: handler })
-    expect(listeners).toEqual([[instance.id, "mousedownoutside", true]])
+    expect(listeners).toEqual([[instance.nativeId, "mousedownoutside", true]])
   })
 })

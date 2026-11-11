@@ -7,6 +7,7 @@ import {
   createMutationQueue,
   installElementSource,
   syncWindowEventListeners,
+  syncWindowSelectionChange,
 } from "@ghia/native/host"
 import { GpuixContext, type GpuixContextValue } from "../hooks/use-gpuix.js"
 import type {
@@ -21,7 +22,12 @@ import {
   idAllocatorFor,
   unregisterEventHandlers,
 } from "./event-registry.js"
-import { hostConfig, publicInstanceById } from "./host-config.js"
+import {
+  destroyDocumentElements,
+  hostConfig,
+  installDocumentElements,
+  publicInstanceById,
+} from "./host-config.js"
 import { releaseMotionBindings } from "./motion-bindings.js"
 
 // Cast to any because @types/react-reconciler is out of date with react-reconciler 0.31.0
@@ -86,7 +92,7 @@ export function createRoot(
     }
     releaseMotionBindings(gpuixContainer, destroyedIds)
   })
-  gpuixContainer = {
+  gpuixContainer = installDocumentElements({
     nativeRenderer: renderer,
     renderer: batchedRenderer,
     ids,
@@ -100,7 +106,7 @@ export function createRoot(
     windowAppearanceEventId: 0,
     onEvent: rootEventHandlers.onEvent,
     onUncaughtError,
-  }
+  })
   // The flush stands in for the microtask checkpoint a browser runs before it renders.
   attachRoot(renderer, gpuixContainer, (run) => flushSync(run))
   // Sent on every root, so a remount without the option restores the default.
@@ -109,6 +115,7 @@ export function createRoot(
   const windowSelectionEventId = gpuixContainer.windowSelectionEventId
   const windowAppearanceEventId = gpuixContainer.windowAppearanceEventId
   let stopWindowEventListeners: (() => void) | undefined
+  let stopSelectionChange: (() => void) | undefined
   let stopElementSource: (() => void) | undefined
   try {
     renderer.setWindowKeyEvents?.(
@@ -118,17 +125,20 @@ export function createRoot(
       true,
       windowKeyEventId
     )
-    renderer.setWindowSelectionChange?.(
-      Boolean(rootEventHandlers.onSelectionChange),
-      windowSelectionEventId
-    )
+    stopSelectionChange = syncWindowSelectionChange(
+      renderer,
+      windowSelectionEventId,
+      () => Boolean(rootEventHandlers.onSelectionChange)
+    ).stop
     renderer.setWindowAppearanceChange?.(
       Boolean(rootEventHandlers.onAppearanceChange),
       windowAppearanceEventId
     )
     stopWindowEventListeners = syncWindowEventListeners(renderer)
-    stopElementSource = installElementSource(renderer, (id) =>
-      publicInstanceById(gpuixContainer, id)
+    stopElementSource = installElementSource(
+      renderer,
+      (id) => publicInstanceById(gpuixContainer, id),
+      () => ({ html: gpuixContainer.html, head: gpuixContainer.head, body: gpuixContainer.body })
     )
   } catch (error) {
     detachRoot(renderer, gpuixContainer)
@@ -143,11 +153,12 @@ export function createRoot(
       })
       container = null
     }
+    destroyDocumentElements(gpuixContainer)
     if (detachRoot(renderer, gpuixContainer)) {
       renderer.setWindowKeyEvents?.(false, false, windowKeyEventId)
       stopWindowEventListeners?.()
       stopElementSource?.()
-      renderer.setWindowSelectionChange?.(false, windowSelectionEventId)
+      stopSelectionChange?.()
       renderer.setWindowAppearanceChange?.(false, windowAppearanceEventId)
     }
   }

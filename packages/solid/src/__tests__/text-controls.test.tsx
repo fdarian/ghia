@@ -33,7 +33,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid text controls", () => {
       "backward",
     ])
 
-    app.renderer.nativeSimulateKeystrokes(field.id, "Shift+J")
+    app.renderer.nativeSimulateKeystrokes(field.nativeId, "Shift+J")
     expect(text()).toBe("hJo")
   })
 
@@ -48,7 +48,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid text controls", () => {
         onFocus={() => field.select()}
       />
     ))
-    app.renderer.focusElement(field.id)
+    app.renderer.focusElement(field.nativeId)
     expect([field.selectionStart, field.selectionEnd]).toEqual([0, 5])
   })
 
@@ -73,14 +73,14 @@ describe.skipIf(!hasNativeTestRenderer)("Solid text controls", () => {
         onChange={(event) => setText(event.value ?? "")}
       />
     ))
-    app.renderer.focusElement(field.id)
+    app.renderer.focusElement(field.nativeId)
     expect(app.renderer.getFocusedElementId()).toBeNull()
     app.renderer.simulateKeystrokes("x")
     expect(text()).toBe("locked")
 
     app.flushSync(() => setDisabled(false))
-    app.renderer.focusElement(field.id)
-    expect(app.renderer.getFocusedElementId()).toBe(field.id)
+    app.renderer.focusElement(field.nativeId)
+    expect(app.renderer.getFocusedElementId()).toBe(field.nativeId)
     app.renderer.simulateKeystrokes("x")
     expect(text()).toBe("lockedx")
   })
@@ -99,7 +99,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid text controls", () => {
         onChange={(event) => setText(event.value ?? "")}
       />
     ))
-    app.renderer.nativeSimulateKeystrokes(field.id, "ArrowUp ArrowUp")
+    app.renderer.nativeSimulateKeystrokes(field.nativeId, "ArrowUp ArrowUp")
     expect(text()).toBe("2")
   })
 })

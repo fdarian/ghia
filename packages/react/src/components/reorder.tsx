@@ -96,7 +96,7 @@ function Item<Value>(props: ReorderItemProps<Value>): ReactElement {
   useLayoutEffect(
     () =>
       controller.register(value, {
-        elementId: () => instance.current?.id,
+        elementId: () => instance.current?.nativeId,
         capturePointer: (pointerId) => {
           if (instance.current?.setPointerCapture === undefined) {
             throw new Error("Reorder.Item: the item has no element to capture the pointer on")

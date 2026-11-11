@@ -6,6 +6,7 @@ import {
   installElementSource,
   runMotionReleases,
   syncWindowEventListeners,
+  syncWindowSelectionChange,
   unregisterEventHandlers,
 } from "@ghia/native/host"
 import { toAppearance } from "@ghia/native/host"
@@ -83,6 +84,7 @@ export function createRoot(
   })
   let binding: RendererRootBinding | undefined
   let stopWindowEventListeners: (() => void) | undefined
+  let selectionChange: ReturnType<typeof syncWindowSelectionChange> | undefined
   let stopElementSource: (() => void) | undefined
   let dispose: (() => void) | undefined
   const selectionListeners = new Set<(text: string | null) => void>()
@@ -90,13 +92,7 @@ export function createRoot(
     rootHandlers.onSelectionChange?.(event, currentRenderer)
     for (const listener of selectionListeners) listener(event.value ?? null)
   }
-  const syncSelection = () => {
-    if (!binding) return
-    renderer.setWindowSelectionChange?.(
-      Boolean(rootHandlers.onSelectionChange) || selectionListeners.size > 0,
-      binding.windowSelectionEventId
-    )
-  }
+  const syncSelection = () => selectionChange?.resync()
 
   const appearanceListeners = new Set<(appearance: Appearance) => void>()
   const onAppearanceChange = (event: RootEvent, currentRenderer: NativeRenderer) => {
@@ -138,10 +134,18 @@ export function createRoot(
       binding.windowKeyEventId
     )
     stopWindowEventListeners = syncWindowEventListeners(renderer)
-    stopElementSource = installElementSource(renderer, (id) => container.elements.get(id))
+    stopElementSource = installElementSource(
+      renderer,
+      (id) => container.elements.get(id),
+      () => ({ html: container.html, head: container.head, body: container.body })
+    )
     // Sent on every attach, so a remount without the option restores the default.
     mutations.setKeyboardFocusDim(rootHandlers.keyboardFocusDim !== false)
-    syncSelection()
+    selectionChange = syncWindowSelectionChange(
+      renderer,
+      binding.windowSelectionEventId,
+      () => Boolean(rootHandlers.onSelectionChange) || selectionListeners.size > 0
+    )
     syncAppearance()
   }
 
@@ -152,7 +156,8 @@ export function createRoot(
     stopWindowEventListeners = undefined
     stopElementSource?.()
     stopElementSource = undefined
-    renderer.setWindowSelectionChange?.(false, binding.windowSelectionEventId)
+    selectionChange?.stop()
+    selectionChange = undefined
     renderer.setWindowAppearanceChange?.(false, binding.windowAppearanceEventId)
     binding = undefined
   }
@@ -167,7 +172,8 @@ export function createRoot(
     dispose = undefined
     // A component can render several top-level nodes (a Dialog is its trigger and its
     // portal's layer), and removing one leaves the others in the native tree.
-    for (const mounted of [...container.children]) removeHostNode(container, mounted)
+    for (const mounted of [...container.childList]) removeHostNode(container, mounted)
+    container.destroyDocumentElements()
     flush()
     eventHandlers.clear()
   }
@@ -179,6 +185,7 @@ export function createRoot(
         detach()
         attach()
       }
+      container.ensureDocumentElements()
       dispose = universalRender(
         () => createComponent(GpuixContext.Provider, {
           value: {
@@ -206,7 +213,7 @@ export function createRoot(
             return code()
           },
         }),
-        container
+        container.body
       )
       flush()
     },

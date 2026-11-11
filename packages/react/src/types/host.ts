@@ -13,6 +13,7 @@ import type {
   FormProps as NativeFormProps,
   HostBinding,
   HostProps,
+  HTMLElement,
   ImagePixelsOptions,
   InputProps as NativeInputProps,
   LabelProps as NativeLabelProps,
@@ -76,6 +77,7 @@ import type {
   MutationRenderer,
   NativeRenderer,
   RootEventHandlers,
+  Text,
   TextControlSelection,
   ScrollableElement,
   WindowKeyEventHandlers,
@@ -235,6 +237,12 @@ export interface Container {
   motionReleases: Array<() => void>
   /** Mounted host elements by id, for `document.activeElement`. A portal container shares its root's. */
   instances: Map<number, Instance>
+  /** The window's `<html>`: its native root. A portal container shares its root's. */
+  html: Instance
+  /** The `<head>` in `html`, before `body`. */
+  head: Instance
+  /** The `<body>` in `html`, where the app's top-level nodes are. */
+  body: Instance
   windowKeyEventHandlers: WindowKeyEventHandlers
   windowKeyEventId: number
   windowSelectionEventId: number
@@ -244,16 +252,21 @@ export interface Container {
   onUncaughtError: (error: Error, errorInfo: { componentStack?: string }) => void
   /**
    * Set on a portal's container. Its children mount under this element instead
-   * of becoming the window's root. The container inherits everything else from
+   * of under `body`. The container inherits everything else from
    * the root container it was made from, so both share one mutation queue and
    * one event map.
    */
   portalTarget?: Instance
 }
 
-/** Host methods are attached when React hands out a ref, not per instance. */
-export interface Instance extends Partial<FocusableElement> {
-  id: number
+/**
+ * A host element: an `HTMLElement` or an `SVGElement`, whose members sit on the class. The
+ * members of its type (`<input>`'s selection, `<form>`'s `requestSubmit`) are attached when
+ * React hands out a ref.
+ */
+export interface Instance extends Partial<FocusableElement>, HTMLElement {
+  /** The handle the native renderer knows the element by; `id` is the DOM's. */
+  nativeId: number
   type: ElementType
   props: Props
   /** The element this one is placed in; absent at the root of a window. */
@@ -304,8 +317,8 @@ export interface FormInstance extends PublicInstance, FormMethods {
   type: "form"
 }
 
-export interface TextInstance {
-  id: number
+export interface TextInstance extends Text {
+  nativeId: number
   text: string
   parentId: number | null
 }

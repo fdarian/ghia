@@ -1595,7 +1595,7 @@ function Composer({
   const composerRef = useRef<PublicInstance | null>(null)
   const { renderer } = useGpuix()
   useEffect(() => {
-    const id = composerRef.current?.id
+    const id = composerRef.current?.nativeId
     if (id == null) return
     renderer?.focusElement?.(id)
   }, [focusTick, renderer])
@@ -2269,7 +2269,7 @@ export function ChatApp({
 
   useEffect(() => {
     if (tailTick === 0) return
-    const id = listRef.current?.id
+    const id = listRef.current?.nativeId
     if (id == null || !renderer?.scrollToItem) return
     renderer.scrollToItem(id, Math.max(0, rowCount - 1))
   }, [renderer, rowCount, tailTick])

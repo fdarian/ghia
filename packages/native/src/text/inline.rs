@@ -52,7 +52,7 @@ pub const TEXT_NODE: &str = "#text";
 /// tree's own `div` rules. Paint dispatches on this and search collects by it, so
 /// the two cannot disagree about which elements lay out a paragraph.
 pub fn is_host_type(element_type: &str) -> bool {
-    matches!(element_type, TEXT_NODE | "div" | "label" | "form" | "span" | "nativeview") || crate::html::is_tag(element_type)
+    matches!(element_type, TEXT_NODE | "div" | "label" | "form" | "span" | "nativeview" | "html" | "head" | "body") || crate::html::is_tag(element_type)
 }
 
 pub fn is_host_container(element: &RetainedElement) -> bool {
@@ -1233,7 +1233,7 @@ mod tests {
 
     #[test]
     fn label_and_form_are_host_containers_and_never_inline_boxes() {
-        for kind in ["div", "#text", "span", "label", "form", "p", "a", "table", "button"] {
+        for kind in ["div", "#text", "span", "label", "form", "html", "head", "body", "p", "a", "table", "button"] {
             assert!(is_host_type(kind), "{kind}");
         }
         for kind in ["img", "svg", "input", "virtual-list", "markdown"] {

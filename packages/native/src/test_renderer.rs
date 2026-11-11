@@ -2618,6 +2618,18 @@ impl TestGpuixRenderer {
         })?
     }
 
+    /// The values `getComputedStyle` reads of an element, as `[name, value, name, value, ...]`, or
+    /// null while the element is not in the document. See `GpuixRenderer::get_computed_style`.
+    #[napi]
+    pub fn get_computed_style(&self, element_id: f64, pseudo_element: bool) -> Result<Option<Vec<String>>> {
+        let id = to_element_id(element_id)?;
+        let unflushed = take_unflushed();
+        if unflushed != Dirty::Clean {
+            self.flush_for(unflushed)?;
+        }
+        window_call(|window, cx| crate::css::computed_style::read_in_window(&self.tree, id, pseudo_element, window, cx))?
+    }
+
     /// The DOM scroll position of a scrollable element, `[scrollLeft, scrollTop]` (zero or
     /// more), or null if it is not a scroll container or a `<virtual-list>`.
     #[napi]

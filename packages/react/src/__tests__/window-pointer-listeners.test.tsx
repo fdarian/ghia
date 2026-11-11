@@ -1,9 +1,8 @@
 /**
  * A `window` or `document` listener hears every event that reaches the top of
  * the tree, so native must produce it even when nothing on the path listens.
- * The pointer over bare background targets the root element, and a move inside
- * the window but outside the root's box has no target at all: it is aimed at
- * the window, as a key with nothing focused is.
+ * The pointer over bare background targets the app's element, and a move inside
+ * the window but outside its box targets `body`, which fills the window.
  */
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -57,12 +56,14 @@ describeNative("window and document pointer listeners", () => {
     expect(seen).toHaveLength(2)
   })
 
-  it("hear a move inside the window but outside the root, with no target", () => {
+  it("hear a move inside the window but outside the app's top element, aimed at body", () => {
     const seen: Array<{ type: string; target: unknown; path: unknown }> = []
     const listener = (event) => seen.push({ type: event.type, target: event.target, path: event.composedPath() })
     window.addEventListener("pointermove", listener)
     outsideRoot()
-    expect(seen).toEqual([{ type: "pointermove", target: null, path: [] }])
+    expect(seen).toEqual([
+      { type: "pointermove", target: document.body, path: [document.body, document.documentElement] },
+    ])
     expect(rootMoves).toEqual([])
 
     window.removeEventListener("pointermove", listener)
@@ -70,12 +71,12 @@ describeNative("window and document pointer listeners", () => {
     expect(seen).toHaveLength(1)
   })
 
-  it("hear a document mousemove outside the root, and the root hears nothing", () => {
-    const seen: string[] = []
-    const listener = (event) => seen.push(`${event.type}:${event.target}`)
+  it("hear a document mousemove outside the app's top element, and it hears nothing", () => {
+    const seen: unknown[] = []
+    const listener = (event) => seen.push([event.type, event.target])
     document.addEventListener("mousemove", listener)
     outsideRoot()
-    expect(seen).toEqual(["mousemove:null"])
+    expect(seen).toEqual([["mousemove", document.body]])
     expect(rootMoves).toEqual([])
     document.removeEventListener("mousemove", listener)
   })
