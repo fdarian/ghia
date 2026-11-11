@@ -127,7 +127,7 @@ describe("host config hideInstance", () => {
     expect(renderer.styles).toHaveLength(0)
 
     materialize(instance)
-    expect(renderer.styles[0]).toEqual({ width: 80, visibility: "hidden" })
+    expect(renderer.styles[0]).toEqual({ width: 80, display: "none !important" })
   })
 
   it("does not resend an unchanged style while hidden", () => {
