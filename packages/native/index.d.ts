@@ -285,6 +285,15 @@ export declare class GpuixRenderer {
    */
   getAnimations(elementId: number): Array<WebAnimationInfo>
   /**
+   * `element.animate(keyframes, options)`: starts an animation of the element that no style
+   * owns and returns it as `getAnimations()` lists it. `keyframesJson` is a JSON array of
+   * `{ offset, easing?, <property>: value }` with every offset set, JS having normalised both
+   * forms of the DOM's keyframes; `timing` is what `options` set, a member left out at its
+   * default. Throws `TypeError: ...` for an offset or an easing that is wrong, and for an
+   * element that is not in the tree.
+   */
+  animateElement(elementId: number, keyframesJson: string, timing: WebAnimationTimingUpdate): WebAnimationInfo
+  /**
    * `getAnimations({ subtree: true })` of an element: the CSS transitions, then the CSS
    * animations, of the element and the elements below it, each in document order of the
    * elements, with the element each is of. Throws for an element id that is not valid; an
@@ -1438,6 +1447,8 @@ export declare class TestGpuixRenderer {
    * running, paused or in effect through a fill. See `GpuixRenderer.getAnimations`.
    */
   getAnimations(elementId: number): Array<WebAnimationInfo>
+  /** `element.animate(keyframes, options)`. See `GpuixRenderer.animateElement`. */
+  animateElement(elementId: number, keyframesJson: string, timing: WebAnimationTimingUpdate): WebAnimationInfo
   /** `getAnimations({ subtree: true })` of an element. See `GpuixRenderer.getSubtreeAnimations`. */
   getSubtreeAnimations(elementId: number): Array<ElementWebAnimationInfo>
   /** `document.getAnimations()` of this renderer. See `GpuixRenderer.getDocumentAnimations`. */

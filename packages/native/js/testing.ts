@@ -388,6 +388,7 @@ interface NativeTestRendererApi
   hasPointerCapture(elementId: number, pointerId: number): boolean
   clickElement(elementId: number): void
   getAnimations(elementId: number): WebAnimationInfo[]
+  animateElement(elementId: number, keyframesJson: string, timing: WebAnimationTimingUpdate): WebAnimationInfo
   getSubtreeAnimations(elementId: number): ElementWebAnimationInfo[]
   getDocumentAnimations(): ElementWebAnimationInfo[]
   getSvgMarkup(elementId: number): string | null
@@ -1707,6 +1708,10 @@ export class TestRenderer implements NativeRenderer {
 
   getAnimations(elementId: number): WebAnimationInfo[] {
     return this.native.getAnimations(elementId)
+  }
+
+  animateElement(elementId: number, keyframesJson: string, timing: WebAnimationTimingUpdate): WebAnimationInfo {
+    return this.native.animateElement(elementId, keyframesJson, timing)
   }
 
   getSubtreeAnimations(elementId: number): ElementWebAnimationInfo[] {
