@@ -84,14 +84,24 @@ pub(crate) fn is_focusable_by_default(element: &RetainedElement) -> bool {
 pub(crate) struct ActivationKeys {
     pub enter: bool,
     pub space: bool,
+    /// Whether a held Enter clicks again with every repeat of its key down.
+    pub enter_repeats: bool,
+    /// Whether Enter clicks with Ctrl, Alt or Cmd held, the click carrying them.
+    pub enter_with_modifiers: bool,
 }
 
-/// What a key activates on the element: a `button` takes Enter on key down and Space on key up, an
-/// `a` with an `href` takes Enter. A disabled button takes none.
+/// What a key activates on the element: a `button` takes Enter on key down, repeating while it is
+/// held and with no Ctrl, Alt or Cmd, and Space on key up. An `a` with an `href` takes Enter on key
+/// down once per press (Blink's `IsEnterKeyKeydownEvent` needs a key down that is not a repeat), with
+/// any modifier. A disabled button takes none.
 pub(crate) fn activation_keys(element: &RetainedElement) -> Option<ActivationKeys> {
     match element.element_type.as_str() {
-        "button" if !element.is_disabled() => Some(ActivationKeys { enter: true, space: true }),
-        "a" if has_href(element) => Some(ActivationKeys { enter: true, space: false }),
+        "button" if !element.is_disabled() => {
+            Some(ActivationKeys { enter: true, space: true, enter_repeats: true, enter_with_modifiers: false })
+        }
+        "a" if has_href(element) => {
+            Some(ActivationKeys { enter: true, space: false, enter_repeats: false, enter_with_modifiers: true })
+        }
         _ => None,
     }
 }
@@ -181,9 +191,11 @@ mod tests {
                 ["createElement",5,"a"],["appendChild",1,5]]"#,
         );
         let keys = |id: u64| activation_keys(&tree.elements[&id]);
-        assert_eq!(keys(2), Some(ActivationKeys { enter: true, space: true }));
+        let button = ActivationKeys { enter: true, space: true, enter_repeats: true, enter_with_modifiers: false };
+        let link = ActivationKeys { enter: true, space: false, enter_repeats: false, enter_with_modifiers: true };
+        assert_eq!(keys(2), Some(button));
         assert_eq!(keys(3), None);
-        assert_eq!(keys(4), Some(ActivationKeys { enter: true, space: false }));
+        assert_eq!(keys(4), Some(link));
         assert_eq!(keys(5), None);
         assert!(tree.elements[&2].needs_focus() && tree.elements[&4].needs_focus());
         assert!(!tree.elements[&3].needs_focus() && !tree.elements[&5].needs_focus());

@@ -80,6 +80,10 @@ impl InputRouting {
         self.0.armed_space.take()
     }
 
+    pub(crate) fn armed_space(&self) -> Option<u64> {
+        self.0.armed_space.get()
+    }
+
     pub(super) fn focused_element(&self, window: &Window, cx: &App) -> Option<u64> {
         let focused = window.focused(cx)?;
         self.0
@@ -209,7 +213,12 @@ pub(crate) fn install_key_down(
     let ime_routing = routing.clone();
     let ime_tree = tree.clone();
     let ime_callback = callback.clone();
-    let activation = Activation { tree: tree.clone(), callback: callback.clone(), routing: routing.clone() };
+    let activation = Activation {
+        tree: tree.clone(),
+        callback: callback.clone(),
+        routing: routing.clone(),
+        pointer: pointer.clone(),
+    };
     let interception = cx.intercept_keystrokes(move |event, window, cx| {
         if window.window_handle().window_id() != window_id {
             return;
@@ -243,9 +252,7 @@ pub(crate) fn install_key_down(
         if prevented || tab_default_runs {
             cx.stop_propagation();
         }
-        if !prevented {
-            key_activation::key_down(&activation, &event.keystroke, window, cx);
-        }
+        key_activation::key_down(&activation, &event.keystroke, event.is_held, prevented, window, cx);
     });
     let ime_keys = cx.observe_ime_keystrokes(move |event, window, cx| {
         if window.window_handle().window_id() != window_id {
@@ -292,10 +299,10 @@ pub(crate) fn note_modifiers(
     }
 }
 
-/// A key can make the focused element match `:focus-visible` with no focus change, and the frame
-/// that shows it has to be asked for. gpui's own modality refresh does not cover a second key
+/// A key can make the focused element match `:focus-visible` with no focus change, or `:active` (a
+/// held Space), and the frame that shows it has to be asked for. gpui's own modality refresh does not cover a second key
 /// after a Ctrl chord, and the test renderer draws only a dirty view.
-fn redraw_for_focus_visible(window: &Window, cx: &mut App) {
+pub(super) fn redraw_for_focus_visible(window: &Window, cx: &mut App) {
     match sync_dispatch::root_view(window) {
         Ok(view) => cx.notify(view.entity_id()),
         Err(error) => sync_dispatch::report_deferred_error(error),
@@ -310,6 +317,7 @@ pub(crate) fn window_input_listeners(
     tree: Arc<Mutex<RetainedTree>>,
     callback: Option<EventCallback>,
     routing: InputRouting,
+    pointer: Rc<RefCell<PointerState>>,
 ) -> impl gpui::IntoElement {
     use gpui::prelude::*;
 
@@ -319,7 +327,12 @@ pub(crate) fn window_input_listeners(
             let key_up_routing = routing.clone();
             let key_up_tree = tree.clone();
             let callback = callback.clone();
-            let activation = Activation { tree: tree.clone(), callback: callback.clone(), routing: routing.clone() };
+            let activation = Activation {
+                tree: tree.clone(),
+                callback: callback.clone(),
+                routing: routing.clone(),
+                pointer: pointer.clone(),
+            };
             window.on_root_key_event(move |event: &gpui::KeyUpEvent, phase, window, cx| {
                 if phase != gpui::DispatchPhase::Capture {
                     return;

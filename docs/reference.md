@@ -6371,7 +6371,7 @@ A `<button>` paints Chrome's default button look: a `2px` outset border, `#efefe
 ```
 
 - **A tab stop.** An enabled `<button>` is focusable and in the Tab order without a `tabIndex`; `tabIndex` still orders it, and `-1` takes it out. A disabled button is not focusable, whatever its `tabIndex`.
-- **Keys.** Enter clicks a focused button on key down (repeating while held), and Space on key up if the button still has focus. A `keydown` or `keyup` a handler cancelled does nothing; a key with Ctrl, Alt or Cmd is no activation. Space on a button does not scroll the page. The click is the [non-pointer one](#click-without-a-pointer) (`detail` 0).
+- **Keys.** Enter clicks a focused button on key down (repeating while held), and Space on key up if the button still has focus. A `keydown` or `keyup` a handler cancelled does nothing; a key with Ctrl, Alt or Cmd is no activation for a button (a link takes Enter with any modifier, see [the `<a>` tag](#the-a-tag)). Space on a button does not scroll the page. The button matches `:active` while Space is held, until the key up or until it loses focus. The click is the [non-pointer one](#click-without-a-pointer) (`detail` 0).
 - **`disabled`.** No click from the pointer, a key, `click()` or the VoiceOver Press, and the button matches `:disabled` (see [Form control state](#form-control-state-disabled-enabled)).
 - **Name.** A button is named by `aria-labelledby`, then `aria-label`, then its `<label>`s' text, then its own content. A label with no text leaves the content as the name.
 - **`<label>`.** A button is labelable: `<label htmlFor="save">` clicking activates it, and a click on the button's label submits its form as a click on the button does (see [`<label>`](#label)).
@@ -6381,7 +6381,7 @@ A `<button>` paints Chrome's default button look: a `2px` outset border, `#efefe
 
 ### The `<a>` tag
 
-An `<a>` with an `href` has the `link` role and is a tab stop; Enter clicks it. An `<a>` without one is neither. Ghia has no navigation, so an `<a href>` fires `click` and stops: it is not underlined or blue, and it opens nothing. Handle the click, and style the link yourself. An inline `<a>` has no accessibility node (no inline box has one), and only an `<a>` with `display: block` or `inline-block` is a `link` in the accessibility tree.
+An `<a>` with an `href` has the `link` role and is a tab stop; Enter clicks it once per press (a held key does not repeat the click), and with Shift, Ctrl, Alt or Cmd held the click carries them in `event.modifiers`, as in Chrome. An `<a>` without one is neither. Ghia has no navigation, so an `<a href>` fires `click` and stops: it is not underlined or blue, and it opens nothing. Handle the click, and style the link yourself. An inline `<a>` has no accessibility node (no inline box has one), and only an `<a>` with `display: block` or `inline-block` is a `link` in the accessibility tree.
 
 ### HTML tag deviations
 

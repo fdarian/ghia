@@ -9699,6 +9699,7 @@ impl GpuixView {
             tree: self.tree.clone(),
             callback: self.event_callback.clone(),
             routing: self.routing.clone(),
+            pointer: self.pointer.clone(),
         }
     }
 }
@@ -10372,6 +10373,7 @@ impl gpui::Render for GpuixView {
                     tree_arc.clone(),
                     callback.clone(),
                     self.routing.clone(),
+                    self.pointer.clone(),
                 ))
                 .child(selection_frame_reset(
                     self.selection.clone(),

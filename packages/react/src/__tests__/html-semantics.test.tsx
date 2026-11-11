@@ -405,6 +405,101 @@ describeNative("HTML tag activation", () => {
     expect(testRoot.renderer.getFocusedElementId()).not.toBe(idOf("bare"))
   })
 
+  it("clicks a link once per Enter press and a button for every repeat of it", () => {
+    testRoot.render(
+      <div>
+        <a testId="link" href="/there" onClick={click}>link</a>
+        <button testId="button" onClick={click}>Go</button>
+      </div>,
+    )
+    down("link", "Enter")
+    down("link", "Enter", true)
+    down("link", "Enter", true)
+    expect(log).toEqual(["click:link:0"])
+    down("button", "Enter")
+    down("button", "Enter", true)
+    down("button", "Enter", true)
+    expect(log).toEqual(["click:link:0", "click:button:0", "click:button:0", "click:button:0"])
+  })
+
+  it("clicks a link on Enter with any modifier, the click carrying it, and a button on none of Ctrl, Alt, Cmd", () => {
+    const modifiers: string[] = []
+    const flags = (event) =>
+      ["shift", "ctrl", "alt", "cmd"].filter((name) => event.modifiers?.[name]).join("+") || "none"
+    testRoot.render(
+      <div>
+        <a testId="link" href="/there" onClick={(event) => modifiers.push(flags(event))}>link</a>
+        <button testId="button" onClick={click}>Go</button>
+      </div>,
+    )
+    for (const press of ["Enter", "Shift+Enter", "Control+Enter", "Alt+Enter", "Meta+Enter"]) keys("link", press)
+    expect(modifiers).toEqual(["none", "shift", "ctrl", "alt", "cmd"])
+    keys("button", "Control+Enter")
+    keys("button", "Alt+Enter")
+    keys("button", "Meta+Enter")
+    expect(log).toEqual([])
+  })
+
+  describe("a Space press on a button", () => {
+    let button
+    let cancelKeyDown: boolean
+    beforeEach(() => {
+      cancelKeyDown = false
+      testRoot.render(
+        <div>
+          <button
+            testId="button"
+            ref={(node) => (button = node)}
+            onClick={click}
+            onKeyDown={(event) => cancelKeyDown && event.preventDefault()}
+          >
+            Go
+          </button>
+          <button testId="other" onClick={click}>Other</button>
+        </div>,
+      )
+    })
+
+    it("is :active from the key down until the key up, which clicks", () => {
+      expect(button.matches(":active")).toBe(false)
+      down("button", "Space")
+      expect(button.matches(":active")).toBe(true)
+      down("button", "Space", true)
+      expect(button.matches(":active")).toBe(true)
+      expect(log).toEqual([])
+      up("button", "Space")
+      expect(button.matches(":active")).toBe(false)
+      expect(log).toEqual(["click:button:0"])
+    })
+
+    it("is over when a later Space key down is cancelled: its key up clicks nothing", () => {
+      down("button", "Space")
+      cancelKeyDown = true
+      down("button", "Space")
+      expect(button.matches(":active")).toBe(false)
+      cancelKeyDown = false
+      up("button", "Space")
+      expect(log).toEqual([])
+    })
+
+    it("is over when the button loses focus, even if it has focus again at the key up", () => {
+      down("button", "Space")
+      testRoot.renderer.focusElement(idOf("other"))
+      expect(button.matches(":active")).toBe(false)
+      up("button", "Space")
+      expect(log).toEqual([])
+    })
+
+    it("is not :active for a key down a handler cancelled", () => {
+      cancelKeyDown = true
+      down("button", "Space")
+      expect(button.matches(":active")).toBe(false)
+      cancelKeyDown = false
+      up("button", "Space")
+      expect(log).toEqual([])
+    })
+  })
+
   it("gives a disabled button no click from the pointer, the keyboard or click()", () => {
     testRoot.render(
       <div>
