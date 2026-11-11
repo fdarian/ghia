@@ -297,13 +297,14 @@ impl<'a> Emitter<'a> {
         });
     }
 
-    /// A `click`, which also has to reach a label with no listener, and a submit button: whether
-    /// they activate something is decided after the event ran.
+    /// A `click`, which also has to reach a label with no listener, a submit button and a checkbox
+    /// or radio: whether they activate something is decided after the event ran.
     fn emit_click(&mut self, target: u64, fields: Fields) {
         let activates = || {
             let path = event_path(self.tree, target);
             crate::accessibility::label::activated_control(self.tree, &path).is_some()
                 || crate::forms::submission_by_click(self.tree, &path).is_some()
+                || crate::custom_elements::input_choice::is_activated_by(self.tree, &path)
         };
         if path_listens(self.tree, target, "click")
             || self.requests.window_listens("click")

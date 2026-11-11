@@ -53,6 +53,15 @@ pub(crate) fn choice_of(element: &RetainedElement) -> Option<Choice> {
     }
 }
 
+/// Whether a click on `path` (innermost first) activates an enabled checkbox or radio: its activation
+/// target is one. The click has to be delivered for it even with no listener, since the toggle is
+/// made before the listeners and what follows it after.
+pub(crate) fn is_activated_by(tree: &RetainedTree, path: &[u64]) -> bool {
+    crate::html::activation_target(tree, path).is_some_and(|target| {
+        tree.elements.get(&target).and_then(choice_of).is_some() && !tree.in_disabled_form_control(target) && !tree.is_inert(target)
+    })
+}
+
 /// An `<input type="hidden">`: it builds no box and cannot be focused.
 pub(crate) fn is_hidden(element: &RetainedElement) -> bool {
     element.element_type == "input" && input_type(element.custom_props()) == InputType::Hidden
