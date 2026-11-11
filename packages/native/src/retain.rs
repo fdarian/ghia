@@ -697,7 +697,7 @@ struct Node {
     /// The element is a candidate box root, see [`Entry::box_root`], and nothing above it is one.
     box_root: bool,
     /// Its style and its parent's make it a box root candidate (`Entry::box_root`) and it is built where one is made
-    /// (`Retain::fits_box_root`): all that `box_root` asks but a record of its last build.
+    /// (`Retain::fits_box_root`): all that `box_root` asks but a record of its last build and that this frame records.
     box_candidate: bool,
     /// Only with `verify`: a hash of what the build made of the element itself.
     digest: u64,
@@ -2447,13 +2447,15 @@ impl Retain {
     /// recordable, not lifted and small enough. Nothing else is known before the build: `to_record` judges that one.
     fn may_be_box_root(&self, node: &Node) -> bool {
         self.fits_box_root(node)
+            && node.records
             && self.records.get(&node.id).is_some_and(|record| record.eligible && !record.lifts && record.size <= UNIT_MAX_ELEMENTS)
     }
 
-    /// What `may_be_box_root` asks of where the element is built, which is all that is known of a box that has no record
-    /// yet: such a box is a candidate (`Retain::box_candidates`) for the root a frame after this one makes.
+    /// What `may_be_box_root` asks of where the element is built, but for whether this frame records it (a build that is
+    /// deferred or in a relocatable scroller does not, and a frame that does makes the root): all that is known of a
+    /// box that has no record yet, which is a candidate (`Retain::box_candidates`) for the root a frame after this one makes.
     fn fits_box_root(&self, node: &Node) -> bool {
-        self.makes_box_roots && node.records && !self.layout_only && !self.row && self.box_open.is_none()
+        self.makes_box_roots && !self.layout_only && !self.row && self.box_open.is_none()
     }
 
     /// The element just entered is a box root if the build leaves it recorded (`Recording::box_root`): the key it was
@@ -3167,7 +3169,7 @@ impl Retain {
     }
 
     /// [`Self::to_record`] for the box root that `box_root` says it is. With `candidate` it is what the frame would record if
-    /// it could judge the box by a record of it (`Retain::box_candidates`), and a scroller that moved it is no reason.
+    /// it could judge the box by a record of it (`Retain::box_candidates`), whether or not this frame records, and a scroller that moved it is no reason.
     fn recording_as(&self, at: usize, box_root: bool, candidate: bool) -> Option<Recording> {
         let node = &self.nodes[at];
         let own = &self.below[at];
@@ -3175,7 +3177,7 @@ impl Retain {
         // frame after a patch of a row builds it (the record the patch kept is of the build before the edit), and it has
         // to be a recorded root again for the next edit of the row to be a patch.
         let moved = node.moved && !(box_root && (candidate || self.relocates(node, self.records.get(&node.id))));
-        if !node.records || node.absent || moved || own.dynamic || node.vol.dynamic != 0 {
+        if !(node.records || candidate) || node.absent || moved || own.dynamic || node.vol.dynamic != 0 {
             return None;
         }
         if crate::background_images::still_loading() != node.loading {
