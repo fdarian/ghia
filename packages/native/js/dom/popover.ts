@@ -189,6 +189,8 @@ function hideAutoPopoversAfter(renderer: NativeRenderer, until: Showing | undefi
 
 /** `attributeChanged`: the `popover` attribute was just changed, so a record whose attribute is gone is the one being hidden, not a stale one. */
 function hide(record: Showing, fireEvents: boolean, attributeChanged = false): void {
+  // Without this, `hideAutoPopoversAfter` would read a forgotten record as "before everything" and hide every popover.
+  if (!open.includes(record)) return
   const isOpen = () => (attributeChanged ? showing.get(record.element) === record : current(record.element) === record)
   if (record.kind === "auto") hideAutoPopoversAfter(record.renderer, record)
   if (!isOpen()) return
@@ -225,7 +227,7 @@ export function showPopover(element: Element, probe: PopoverProbe): void {
   queueToggle(record, element, "closed", "open")
 }
 
-/** Hides `element` if it is showing; never throws, so a layer or a light dismiss can call it for an element whose attribute or place changed under it. */
+/** Hides `element` if it is showing; never throws, so the Escape layer can call it for an element whose attribute or place changed under it. */
 function hideShowing(element: Element): void {
   const record = current(element)
   if (record !== undefined) hide(record, true)
@@ -259,7 +261,8 @@ export function togglePopover(element: Element, probe: PopoverProbe, force?: boo
 export function writePopoverAttribute(element: Element, write: () => void): void {
   const record = current(element)
   write()
-  if (record === undefined || kindOf(element) === record.kind) return
+  // A nested write (a framework wrapping the setter's own) has already hidden it, and forgotten its record.
+  if (record === undefined || showing.get(element) !== record || kindOf(element) === record.kind) return
   hide(record, true, true)
 }
 

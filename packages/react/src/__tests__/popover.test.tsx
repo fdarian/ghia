@@ -460,6 +460,38 @@ describeNative("popover in React", () => {
     expect(seen).toEqual(["before closed", "toggle closed"])
   })
 
+  it("closes only the popover whose popover property changed, not the auto popovers it is nested in", async () => {
+    const found = mount((grab) => (
+      <div>
+        <div ref={grab("parent")} popover="auto">
+          <div ref={grab("child")} popover="auto">
+            <div style={popoverStyle} />
+          </div>
+        </div>
+      </div>
+    ))
+    const seen: string[] = []
+    for (const name of ["parent", "child"]) {
+      found[name].addEventListener("beforetoggle", (event) => seen.push(`${name} before ${(event as unknown as ToggleEvent).newState}`))
+      found[name].addEventListener("toggle", (event) => seen.push(`${name} toggle ${(event as unknown as ToggleEvent).newState}`))
+    }
+    for (const next of ["manual", null] as const) {
+      found.child.popover = "auto"
+      found.parent.showPopover()
+      found.child.showPopover()
+      await nextTask()
+      seen.length = 0
+      found.child.popover = next
+      await nextTask()
+      expect(seen).toEqual(["child before closed", "child toggle closed"])
+      expect(found.parent.offsetWidth, "the parent stays open").toBeGreaterThan(0)
+      expect(getComputedStyle(found.child).position, "not in the top layer").not.toBe("fixed")
+      found.parent.hidePopover()
+      await nextTask()
+      seen.length = 0
+    }
+  })
+
   it("runs the events of a hide caused by the popover property after the attribute changed, so a listener reads the new value", async () => {
     const found = mount((grab) => (
       <div>
