@@ -17,8 +17,8 @@ import {
   ROOT_ELEMENT_TYPES,
   sameMutationValue,
   serializeCustomProp,
-  attributeNameOfProp,
-  attributeValue,
+  attributesOfProps,
+  isSvgType,
   forwardsCustomProp,
   hasMutationObservers,
   queueCharacterDataMutation,
@@ -278,12 +278,9 @@ function syncCustomProps(
 }
 
 function syncAttributes(renderer: MutationRenderer, id: number, type: string, props: Props): void {
-  const record = props as Record<string, unknown>
-  for (const key in record) {
-    const name = attributeNameOfProp(type, key)
-    if (name === undefined) continue
-    const text = attributeValue(name, record[key])
-    if (text !== null) renderer.setAttribute(id, name, text)
+  if (!renderer.forwardsAttributes) return
+  for (const [name, text] of attributesOfProps(Object.entries(props), isSvgType(type))) {
+    renderer.setAttribute(id, name, text)
   }
 }
 
@@ -294,28 +291,16 @@ function diffAttributes(
   oldProps: Props,
   newProps: Props
 ): void {
-  const previous = oldProps as Record<string, unknown>
-  const next = newProps as Record<string, unknown>
-  for (const key in next) {
-    const name = attributeNameOfProp(type, key)
-    if (name === undefined || name === "class") continue
-    const text = attributeValue(name, next[key])
-    const before = key in previous ? attributeValue(name, previous[key]) : null
-    if (text !== before) renderer.setAttribute(id, name, text)
+  if (!renderer.forwardsAttributes) return
+  const svg = isSvgType(type)
+  const previous = attributesOfProps(Object.entries(oldProps), svg)
+  const next = attributesOfProps(Object.entries(newProps), svg)
+  for (const [name, text] of next) {
+    if (previous.get(name) !== text) renderer.setAttribute(id, name, text)
   }
-  for (const key in previous) {
-    if (key in next) continue
-    const name = attributeNameOfProp(type, key)
-    if (name === undefined || name === "class") continue
-    if (attributeValue(name, previous[key]) !== null) renderer.setAttribute(id, name, null)
+  for (const name of previous.keys()) {
+    if (!next.has(name)) renderer.setAttribute(id, name, null)
   }
-  // `class` and `className` are one attribute: a prop that moves from one to the other keeps its value.
-  const classText = classAttribute(next)
-  if (classText !== classAttribute(previous)) renderer.setAttribute(id, "class", classText)
-}
-
-function classAttribute(props: Record<string, unknown>): string | null {
-  return attributeValue("class", props.class ?? props.className)
 }
 
 /**

@@ -2897,11 +2897,13 @@ export interface MutationRenderer {
   setUniversalStyle(style: StyleDesc | null): void
   setCustomProp(id: number, key: string, value: object | string | number | boolean | null): void
   /**
-   * A DOM attribute (`class`, `data-*`, a primitive-valued prop), kept on the native element for
+   * A DOM attribute, named as the DOM names it (`attributeNameOf`), kept on the native element for
    * selector matching. `null` removes it. A queue drops it until a sheet can apply to its renderer, and then sends the
    * attributes of the elements it holds (`css/attribute-gate.ts`).
    */
   setAttribute(id: number, name: string, value: string | null): void
+  /** Whether `setAttribute` sends: an adapter that can rebuild its attributes later skips the work while it is false. */
+  readonly forwardsAttributes: boolean
   /**
    * A constructed stylesheet: its text, or `null` to delete it. Sheet ids are their own namespace,
    * not element ids. It applies once `setAdoptedStyleSheets` lists it.

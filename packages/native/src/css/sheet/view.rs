@@ -8,6 +8,7 @@ use crate::retained_tree::{RetainedElement, RetainedTree};
 
 use super::atoms::Atom;
 use super::matching::{AttrValue, ElementView};
+use super::selector::AttrName;
 
 // Children scanned and siblings stepped over by the matcher, which the tests read to check that
 // sibling combinators cost work in proportion to the siblings and not their square.
@@ -93,15 +94,16 @@ impl ElementView for TreeView<'_> {
         self.element().css().is_some_and(|css| css.classes.contains(&class))
     }
 
-    fn attr(&self, name: Atom) -> Option<AttrValue<'_>> {
+    fn attr(&self, name: AttrName) -> Option<AttrValue<'_>> {
         let sheets = &self.tree.sheets;
+        let element = self.element();
+        let name = if crate::custom_elements::svg_tree::is_svg_tag(&element.element_type) { name.written } else { name.lower };
         if name == sheets.style {
-            let element = self.element();
             let own = element.own_style()?;
             let raw = self.tree.styles.raw_of(own).expect("an own style comes from StyleTable::intern");
             return Some(AttrValue::Shared(sheets.style_text(own, &raw)));
         }
-        self.element().attribute(sheets.atoms.name(name)).map(AttrValue::Text)
+        element.attribute(sheets.atoms.name(name)).map(AttrValue::Text)
     }
 
     fn parent(&self) -> Option<Self> {

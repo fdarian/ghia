@@ -49,6 +49,12 @@ pub(crate) fn is_svg_child_type(tag: &str) -> bool {
     svg_names::is_tag(tag)
 }
 
+/// Whether an element of this type is an SVG element wherever it is put: `<svg>`, a tag only an
+/// `<svg>` holds, and `<text>`, which is a host element only inside an `<svg>`.
+pub(crate) fn is_svg_tag(tag: &str) -> bool {
+    tag == "svg" || tag == "text" || is_svg_child_type(tag)
+}
+
 /// Whether `element` is drawn by an `<svg>` instead of laid out: an SVG-only tag,
 /// or a `<text>` inside an SVG. A string (`#text`) is character data, not an element.
 pub(crate) fn is_svg_element(tree: &RetainedTree, element: &crate::retained_tree::RetainedElement) -> bool {

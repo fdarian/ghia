@@ -1,11 +1,15 @@
 //! DOM attributes on the native tree: what JS sets with `setAttribute`, kept so a selector
 //! matcher reads them without a round trip to JS.
 //!
+//! The store holds exactly the DOM attributes of the element, named as the DOM names them
+//! (`packages/native/js/dom/attribute-names.ts`): JS sends every prop `element.attributes` lists.
+//!
 //! Setting one is not a build input: it moves no revision and marks nothing dirty. The style
 //! cascade that reads attributes decides what to invalidate when it exists.
 
 use std::borrow::Cow;
 
+use crate::custom_elements::svg_tree::is_svg_tag;
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
 /// The attributes of one element. Most elements have none to three, so a list of pairs is
@@ -23,7 +27,7 @@ impl AttributeStore {
     pub(crate) fn get(&self, name: &str) -> Option<&str> {
         self.pairs
             .iter()
-            .find(|(stored, _)| stored.eq_ignore_ascii_case(name))
+            .find(|(stored, _)| &**stored == name)
             .map(|(_, value)| &**value)
     }
 
@@ -36,7 +40,7 @@ impl AttributeStore {
         let position = self
             .pairs
             .iter()
-            .position(|(stored, _)| stored.eq_ignore_ascii_case(name));
+            .position(|(stored, _)| &**stored == name);
         match (position, value) {
             (Some(position), Some(value)) => {
                 if *self.pairs[position].1 == *value {
@@ -53,10 +57,7 @@ impl AttributeStore {
                 true
             }
             (None, Some(value)) => {
-                self.pairs.push((
-                    name.to_ascii_lowercase().into_boxed_str(),
-                    value.into_boxed_str(),
-                ));
+                self.pairs.push((name.into(), value.into_boxed_str()));
                 true
             }
             (None, None) => false,
@@ -64,72 +65,29 @@ impl AttributeStore {
     }
 }
 
-/// The props whose DOM attribute has another name: React and Solid write `tabIndex`, DOM reads
-/// `tabindex`. Props arrive as custom props under the first name; a selector reads the second.
-const PROP_ATTRIBUTES: [(&str, &str); 5] = [
-    ("tabIndex", "tabindex"),
-    ("htmlFor", "for"),
-    ("colSpan", "colspan"),
-    ("rowSpan", "rowspan"),
-    ("autoFocus", "autofocus"),
-];
-
-/// The attribute a custom prop reads as: the DOM name for a prop in the table, else the name.
-pub(crate) fn attribute_name_of_prop(prop: &str) -> &str {
-    PROP_ATTRIBUTES
-        .iter()
-        .find(|(known, _)| *known == prop)
-        .map_or(prop, |(_, attribute)| attribute)
-}
-
-/// The custom prop that backs the attribute `name`, when its prop is named otherwise.
-fn prop_name_of_attribute(name: &str) -> Option<&'static str> {
-    PROP_ATTRIBUTES
-        .iter()
-        .find(|(_, attribute)| attribute.eq_ignore_ascii_case(name))
-        .map(|(prop, _)| *prop)
-}
-
-/// Whether the DOM prints a boolean for this attribute as its text: React and Solid stringify
-/// `data-*` and `aria-*`, where every other attribute is present (empty) or absent.
-fn stringifies_booleans(name: &str) -> bool {
-    name.starts_with("data-") || name.starts_with("aria-")
-}
-
-/// The text of a custom prop read as the attribute `name`: `id`, `role` and `aria-*` arrive as
-/// props, not through `setAttribute`.
-fn attribute_text<'a>(name: &str, value: &'a serde_json::Value) -> Option<Cow<'a, str>> {
-    match value {
-        serde_json::Value::String(text) => Some(Cow::Borrowed(text)),
-        serde_json::Value::Number(number) => Some(Cow::Owned(number.to_string())),
-        serde_json::Value::Bool(flag) if stringifies_booleans(name) => {
-            Some(Cow::Borrowed(if *flag { "true" } else { "false" }))
-        }
-        serde_json::Value::Bool(true) => Some(Cow::Borrowed("")),
-        serde_json::Value::Bool(false) | serde_json::Value::Null => None,
-        serde_json::Value::Array(_) | serde_json::Value::Object(_) => None,
+/// The name an element of this type stores and reads an attribute under: HTML names are
+/// case-insensitive and kept lower-cased, SVG names (`viewBox`) are case-sensitive.
+pub(crate) fn stored_name<'a>(element_type: &str, name: &'a str) -> Cow<'a, str> {
+    if is_svg_tag(element_type) || !name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        Cow::Borrowed(name)
+    } else {
+        Cow::Owned(name.to_ascii_lowercase())
     }
 }
 
 impl RetainedElement {
-    /// The attribute `name`: what `set_attribute` stored, else the custom prop of the same name
-    /// read as DOM would print it.
+    /// The attribute `name` JS stored with `set_attribute`, by the DOM's rule for the case of the
+    /// name: ignored on an HTML element, kept on an SVG one.
     pub fn attribute(&self, name: &str) -> Option<Cow<'_, str>> {
-        if let Some(value) = self.attribute_store().and_then(|store| store.get(name)) {
-            return Some(Cow::Borrowed(value));
-        }
-        let props = self.custom_props();
-        let value = match prop_name_of_attribute(name) {
-            Some(prop) => props.get(prop)?,
-            None => props.get(name)?,
-        };
-        attribute_text(name, value)
+        let name = stored_name(&self.element_type, name);
+        self.attribute_store()?.get(&name).map(Cow::Borrowed)
     }
 }
 
 impl RetainedTree {
-    /// Sets (`Some`) or removes (`None`) an attribute; `name` is lower-cased. Returns whether
-    /// it changed. An element that does not exist changes nothing.
+    /// Sets (`Some`) or removes (`None`) an attribute. The case of `name` counts on an SVG element
+    /// and not on an HTML one (see `RetainedElement::attribute`). Returns whether it changed. An
+    /// element that does not exist changes nothing.
     pub fn set_attribute(&mut self, id: u64, name: &str, value: Option<String>) -> bool {
         let changed = match self.elements.get_mut(&id) {
             Some(element) => element.set_attribute(name, value),
@@ -141,29 +99,18 @@ impl RetainedTree {
         changed
     }
 
-    /// The attribute `name` of the element: what `set_attribute` stored, else the custom prop
-    /// of the same name read as DOM would print it.
+    /// The attribute `name` of the element: what `set_attribute` stored.
     pub fn attribute(&self, id: u64, name: &str) -> Option<Cow<'_, str>> {
         self.elements.get(&id)?.attribute(name)
     }
 
-    /// The names the element has an attribute under: the stored ones, then the custom props
-    /// that read as an attribute and are not stored.
+    /// The names the element has an attribute under.
     pub fn attribute_names(&self, id: u64) -> Vec<String> {
-        let Some(element) = self.elements.get(&id) else {
-            return Vec::new();
-        };
-        let mut names: Vec<String> = element
-            .attribute_store()
+        self.elements
+            .get(&id)
+            .and_then(RetainedElement::attribute_store)
             .map(|store| store.names().map(str::to_owned).collect())
-            .unwrap_or_default();
-        for (prop, value) in element.custom_props() {
-            let name = attribute_name_of_prop(prop);
-            if attribute_text(name, value).is_some() && !names.iter().any(|stored| stored == name) {
-                names.push(name.to_owned());
-            }
-        }
-        names
+            .unwrap_or_default()
     }
 }
 
@@ -240,34 +187,36 @@ mod tests {
     }
 
     #[test]
-    fn custom_props_answer_where_the_store_has_nothing() {
+    fn an_html_element_ignores_the_case_of_a_name() {
+        let mut tree = tree();
+        assert!(tree.set_attribute(1, "tabIndex", Some("3".into())));
+        assert_eq!(tree.attribute(1, "tabindex").as_deref(), Some("3"));
+        assert_eq!(tree.attribute(1, "TABINDEX").as_deref(), Some("3"));
+        assert_eq!(tree.attribute_names(1), ["tabindex"]);
+        assert!(!tree.set_attribute(1, "tabindex", Some("3".into())));
+        assert!(tree.set_attribute(1, "TabIndex", None));
+        assert!(tree.attribute_names(1).is_empty());
+    }
+
+    #[test]
+    fn an_svg_element_keeps_the_case_of_a_name() {
+        let mut tree = RetainedTree::new();
+        for (id, tag) in [(1, "svg"), (2, "path"), (3, "text")] {
+            tree.create_element(id, tag.into());
+            assert!(tree.set_attribute(id, "viewBox", Some("0 0 1 1".into())));
+            assert_eq!(tree.attribute(id, "viewBox").as_deref(), Some("0 0 1 1"), "{tag}");
+            assert_eq!(tree.attribute(id, "viewbox"), None, "{tag}");
+            assert_eq!(tree.attribute_names(id), ["viewBox"], "{tag}");
+        }
+    }
+
+    #[test]
+    fn a_custom_prop_is_not_an_attribute() {
         let mut tree = tree();
         tree.set_custom_prop(1, "id".into(), serde_json::json!("root"));
         tree.set_custom_prop(1, "tabIndex".into(), serde_json::json!(3));
-        tree.set_custom_prop(1, "aria-hidden".into(), serde_json::json!(true));
-        tree.set_custom_prop(1, "aria-busy".into(), serde_json::json!(false));
-        tree.set_custom_prop(1, "data-obj".into(), serde_json::json!({ "a": 1 }));
-        assert_eq!(tree.attribute(1, "id").as_deref(), Some("root"));
-        assert_eq!(tree.attribute(1, "tabindex").as_deref(), Some("3"));
-        assert_eq!(tree.attribute(1, "aria-hidden").as_deref(), Some("true"));
-        assert_eq!(tree.attribute(1, "aria-busy").as_deref(), Some("false"));
-        tree.set_custom_prop(1, "hidden".into(), serde_json::json!(true));
-        tree.set_custom_prop(1, "disabled".into(), serde_json::json!(false));
-        assert_eq!(tree.attribute(1, "hidden").as_deref(), Some(""));
-        assert_eq!(tree.attribute(1, "disabled"), None);
-        tree.set_custom_prop(1, "hidden".into(), serde_json::Value::Null);
-        assert_eq!(tree.attribute(1, "data-obj"), None);
-
-        let mut names = tree.attribute_names(1);
-        names.sort();
-        assert_eq!(names, ["aria-busy", "aria-hidden", "id", "tabindex"]);
-
-        tree.set_attribute(1, "id", Some("stored".into()));
-        assert_eq!(
-            tree.attribute(1, "id").as_deref(),
-            Some("stored"),
-            "the store wins over the prop"
-        );
-        assert_eq!(tree.attribute_names(1).iter().filter(|name| *name == "id").count(), 1);
+        assert_eq!(tree.attribute(1, "id"), None);
+        assert_eq!(tree.attribute(1, "tabindex"), None);
+        assert!(tree.attribute_names(1).is_empty());
     }
 }

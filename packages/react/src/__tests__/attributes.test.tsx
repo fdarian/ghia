@@ -4,6 +4,7 @@
  */
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { getComputedStyle } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
 
 describe.skipIf(!hasNativeTestRenderer)("attributes on native in React", () => {
@@ -84,5 +85,40 @@ describe.skipIf(!hasNativeTestRenderer)("attributes on native in React", () => {
       </>
     )
     for (const name of ["style", "onclick", "onClick", "extra"]) expect(read(name)).toBeNull()
+  })
+
+  it("names a prop as the DOM names its attribute, so a selector matches what React was given", () => {
+    const refs: Record<string, any> = {}
+    const ref = (name: string) => (element: unknown) => {
+      refs[name] = element
+    }
+    const view = (tabIndex: number) => (
+      <>
+        <style>{`
+          [tabindex="0"] { opacity: 0.25 }
+          [data-rowid="7"] { padding-top: 3px }
+          .x { padding-left: 5px }
+          [for] { padding-right: 6px }
+          svg[viewBox] { opacity: 0.5 }
+          svg[viewbox] { padding-top: 9px }
+        `}</style>
+        <div ref={ref("div")} tabIndex={tabIndex} {...{ "data-rowId": "7" }} className="x" />
+        <label ref={ref("label")} htmlFor="a" />
+        <svg ref={ref("svg")} viewBox="0 0 1 1" />
+      </>
+    )
+    app.render(view(0))
+    const div = getComputedStyle(refs.div)
+    expect([div.opacity, div.paddingTop, div.paddingLeft]).toEqual(["0.25", "3px", "5px"])
+    expect(getComputedStyle(refs.label).paddingRight).toBe("6px")
+    expect(app.renderer.getAttribute(refs.svg.nativeId, "viewBox")).toBe("0 0 1 1")
+    expect(app.renderer.getAttribute(refs.svg.nativeId, "viewbox")).toBeNull()
+    expect(getComputedStyle(refs.svg).opacity).toBe("0.5")
+    expect(getComputedStyle(refs.svg).paddingTop).toBe("0px")
+
+    app.render(view(-1))
+    expect(getComputedStyle(refs.div).opacity).toBe("1")
+    app.render(view(0))
+    expect(getComputedStyle(refs.div).opacity).toBe("0.25")
   })
 })

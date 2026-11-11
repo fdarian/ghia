@@ -367,6 +367,7 @@ impl RetainedElement {
 
     /// Returns whether the attribute changed.
     pub(crate) fn set_attribute(&mut self, name: &str, value: Option<String>) -> bool {
+        let name = &*crate::attributes::stored_name(&self.element_type, name);
         if value.is_none() && self.attribute_store().is_none_or(|store| store.get(name).is_none()) {
             return false;
         }
@@ -1735,7 +1736,6 @@ impl RetainedTree {
         let affects_focusability = key == "tabIndex" || key == "disabled";
         let is_inert = key == "inert";
         let relation_key = RelationRegistry::reads(&key).then(|| key.clone());
-        let sheet_key = self.sheets.enabled.then(|| key.clone());
         let mut previous_relation = None;
         let is_form_control = key == FORM_CONTROL_PROP;
         let was_inert = self
@@ -1793,9 +1793,6 @@ impl RetainedTree {
         }
         if !changed {
             return;
-        }
-        if let Some(sheet_key) = sheet_key {
-            self.sheets_prop_changed(id, &sheet_key);
         }
         if let Some(relation_key) = &relation_key {
             if let Some(element) = self.elements.get(&id) {

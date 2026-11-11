@@ -6,7 +6,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use super::atoms::Atom;
-use super::selector::{AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, Simple};
+use super::selector::{AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, Simple};
 
 /// An attribute's text: borrowed from the element, or shared with a cache that made it (the
 /// `style` attribute, which is not stored anywhere as text).
@@ -35,7 +35,7 @@ pub trait ElementView: Sized {
     fn has_class(&self, class: Atom) -> bool;
     /// The value of the attribute, which includes `id` and `class` when a selector asks for them
     /// by attribute.
-    fn attr(&self, name: Atom) -> Option<AttrValue<'_>>;
+    fn attr(&self, name: AttrName) -> Option<AttrValue<'_>>;
     fn parent(&self) -> Option<Self>;
     /// The closest preceding sibling that is an element.
     fn prev_sibling(&self) -> Option<Self>;

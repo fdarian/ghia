@@ -4923,16 +4923,15 @@ A host element (a React ref, a Solid `HostElement`) has the members a library wr
 | `offsetWidth`, `offsetHeight` | The border box's layout size, rounded half up, before any `transform` (a `scale(2)` element has the offset size it had without it; `getBoundingClientRect()` is the transformed box). The read lays out first, as `getBoundingClientRect` does. `0` for an element that is not mounted or has no box. `renderer.getElementBounds(id)` carries the unrounded size as `layoutWidth` and `layoutHeight`. |
 
 **Attributes on native.** The adapters also send the DOM attributes an element has to native (`MutationRenderer.setAttribute`,
-wire op 13), so the Rust side reads them without a call into JS. They are `class` (from `class` or `className`; a value that
-is not a string goes through `String()`), every `data-*`, and any other prop that holds a string, a number or a boolean
-and that is not `style`, `children`, `key`, `ref`, an event handler or already sent as a prop of the element (`id`, `role`,
-`aria-*`, `tabIndex` and the other props of a `div`, `text`, `label`, `form` or `span` that native reads). A string is the
-value as it is, a number its text, `true` the empty string; `false`, `null` and `undefined` remove the attribute. On `data-*` and
-`aria-*`, as in React and Solid, a boolean is its text: `true` is `"true"` and `false` is `"false"`. Names are
-compared ASCII case-insensitively. Native reads an attribute from what was sent, else from the prop of the same name
-(`true` is `""`, `false` and `null` are absent; on `aria-*` the booleans are `"true"` and `"false"`), and a prop whose DOM
-attribute is named otherwise under that name: `tabIndex` is `tabindex`, `htmlFor` is `for`, `colSpan` is `colspan`, `rowSpan`
-is `rowspan` and `autoFocus` is `autofocus`. A renderer sends none of them until a sheet can apply to it (a `<style>` element is created or a
+wire op 13), so the Rust side reads them without a call into JS. They are exactly what `getAttributeNames()` lists: every prop
+that is not `style`, `children`, `key` or `ref`, whose value is not a function or an object, named by `attributeNameOf(prop, svg)`
+and valued as `getAttribute` reads it (a string as it is, a number its text, `true` the empty string; `false`, `null` and
+`undefined` remove the attribute; on `data-*` and `aria-*` a boolean is its text, `"true"` or `"false"`). A prop native also
+reads (`id`, `tabIndex`, `role`, `aria-*`) is sent both ways. An HTML element's names are lower case (`tabIndex` is `tabindex`,
+`data-rowId` is `data-rowid`, `className` is `class`, `htmlFor` is `for`), and a selector's attribute name is compared lower-cased, so
+`[tabindex="0"]` and `[tabIndex="0"]` both match `tabIndex={0}`. An SVG element keeps the case of its names and a selector is
+compared exactly: `svg[viewBox]` matches and `svg[viewbox]` does not, as in Chrome. Native reads an attribute from what was sent
+and from nothing else. A renderer sends none of them until a sheet can apply to it (a `<style>` element is created or a
 constructed sheet is adopted), and then sends those of the elements already mounted, so an app with no sheet pays nothing for them
 ([the attribute gate](fork/stylesheets.md#the-attribute-gate)). Setting an attribute changes nothing drawn by itself. `className` is no longer
 a prop of the native element on any element type: `class` is its attribute.
@@ -9504,7 +9503,7 @@ An observable array of `CSSStyleSheet`: assigning the property, assigning an ind
 
 Anything else makes the selector invalid and drops its rule (a list is all or nothing, except inside `:is()` and `:where()`): `:hover`, `:focus`, `:first-child`, `:nth-child()`, `:has()`, `:checked` and the other pseudo-classes. At-rules that are skipped with their block: `@media`, `@keyframes`, `@container`, `@supports`, `@font-face`, `@import`, `@namespace`, `@property`, and any at-rule inside a style rule. A declaration the style parser rejects is dropped alone, as CSS drops it. Each skipped rule is logged once. The full list of differences is in [deviations](./fork/deviations.md#stylesheets).
 
-**Attributes.** A selector reads the attributes an element has on native: `class` (from `class` or `className`), every `data-*` and every other string, number or boolean attribute the adapters send (`setAttribute`, wire op 13), plus the props native reads under their attribute names (`id`, `role`, `aria-*`, `tabIndex` as `tabindex`, `htmlFor` as `for`, `colSpan`, `rowSpan`, `autoFocus`). A `data-*` or `aria-*` boolean matches as `"true"` or `"false"`, so `[aria-expanded="false"]` matches `aria-expanded={false}`. Names compare ASCII case-insensitively, values case-sensitively unless the selector says `i`. `[style*="--x"]` reads the element's `style` prop as `kebab-case: value;` text. See [Listeners and DOM members](#listeners-and-dom-members-on-an-element) for what is sent.
+**Attributes.** A selector reads the attributes `element.attributes` lists, as the DOM names them (`setAttribute`, wire op 13): `class` (from `class` or `className`), `tabindex` (from `tabIndex`), `for` (from `htmlFor`), `data-*`, `id`, `role`, `aria-*` and every other prop that holds a string, a number or a boolean. A `data-*` or `aria-*` boolean matches as `"true"` or `"false"`, so `[aria-expanded="false"]` matches `aria-expanded={false}`. On an HTML element a selector's attribute name compares without regard to case (`[tabindex]`, `[tabIndex]` and `[data-rowid]` match `tabIndex={0}` and `data-rowId="7"`); on an SVG element it compares exactly (`svg[viewBox]` matches, `svg[viewbox]` does not). Values compare case-sensitively unless the selector says `i`. `[style*="--x"]` reads the element's `style` prop as `kebab-case: value;` text. See [Listeners and DOM members](#listeners-and-dom-members-on-an-element) for what is sent.
 
 **The cascade.** The normal declarations of the matching rules apply first, ordered by layer (layers in the order first declared, unlayered rules last and so strongest), then specificity, then source order across the sheets. Then the element's `style` prop, so an inline value beats a normal rule of any specificity. Then the `!important` declarations of the rules, with the layers the other way round (the first layer wins, unlayered rules lose). A later declaration of a property replaces an earlier one, and a shorthand replaces the longhands before it, as written order does in the `style` prop. A CSS-wide keyword (`unset`, `initial`, `inherit`, `revert`, `revert-layer`) takes back what an earlier declaration of its property, and of the longhands it covers, set, and sets nothing. In the dnd-kit sheet that is `right: unset !important` removing an inline `right`; with the item dropped, the inline value is back.
 

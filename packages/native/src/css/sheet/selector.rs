@@ -47,9 +47,17 @@ pub enum Simple {
     PseudoElement,
 }
 
+/// The name a selector writes for an attribute. An HTML element holds lower-cased names and
+/// compares `lower`; an SVG element holds the name as written (`viewBox`) and compares `written`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct AttrName {
+    pub lower: Atom,
+    pub written: Atom,
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub struct AttrSelector {
-    pub name: Atom,
+    pub name: AttrName,
     pub matcher: Option<AttrMatcher>,
 }
 

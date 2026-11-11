@@ -14,7 +14,7 @@ use super::atoms::Atom;
 use super::invalidation::Invalidation;
 use super::layers::LayerOrder;
 use super::matching::{matches, ElementView};
-use super::selector::{ComplexSelector, Simple, Specificity};
+use super::selector::{AttrName, ComplexSelector, Simple, Specificity};
 use super::StyleSheet;
 
 pub struct IndexedRule {
@@ -36,7 +36,7 @@ pub struct RuleIndex {
     pub rules: Vec<IndexedRule>,
     by_id: FxHashMap<Atom, Vec<Entry>>,
     by_class: FxHashMap<Atom, Vec<Entry>>,
-    by_attribute: FxHashMap<Atom, Vec<Entry>>,
+    by_attribute: FxHashMap<AttrName, Vec<Entry>>,
     by_tag: FxHashMap<Atom, Vec<Entry>>,
     universal: Vec<Entry>,
     unlayered_rank: u32,

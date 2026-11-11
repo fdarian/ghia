@@ -44,7 +44,7 @@ pub use layers::{LayerId, LayerOrder, Layers};
 pub use matching::{matches, AttrValue, ElementView};
 pub use parser::parse_sheet;
 pub use selector::{
-    AttrMatcher, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, Simple, Specificity,
+    AttrMatcher, AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, Simple, Specificity,
 };
 
 use crate::css::lenient::Declaration;

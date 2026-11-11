@@ -8,7 +8,6 @@ import {
   document,
   DOM_BINDING,
   HTMLElement,
-  SVG_CHILD_TYPES,
   SVGElement,
   Text,
   defineScrollMembers,
@@ -18,8 +17,10 @@ import {
   eventTypesWithOverrides,
   focusHostElement,
   hostElementMatches,
-  attributeNameOfProp,
-  attributeValue,
+  attributeNameOf,
+  attributeText,
+  isSvgType,
+  NOT_ATTRIBUTES,
   forwardsCustomProp,
   isNativeviewHandlerProp,
   HOST_BINDING,
@@ -568,7 +569,7 @@ class TextDomBinding implements TextBinding {
 
 export function createHostElement(type: string): HostElement {
   if (!isElementType(type)) throw new Error(`Unsupported GPUIX element <${type}>`)
-  if (type === "svg" || SVG_CHILD_TYPES.has(type)) {
+  if (isSvgType(type)) {
     return Reflect.construct(HostElement, [type], SvgHostElement) as HostElement
   }
   return new HostElement(type)
@@ -716,9 +717,9 @@ export function setHostProperty(
 }
 
 function syncAttribute(root: HostRoot, node: HostElement, prop: string, value: HostPropertyValue): void {
-  const attribute = attributeNameOfProp(node.type, prop)
-  if (attribute === undefined) return
-  const text = attributeValue(attribute, value)
+  if (NOT_ATTRIBUTES.has(prop)) return
+  const attribute = attributeNameOf(prop, isSvgType(node.type))
+  const text = attributeText(attribute, value)
   if (node.sent.writesAttribute(attribute, text)) root.mutations.setAttribute(node.nativeId, attribute, text)
 }
 

@@ -99,9 +99,9 @@ impl ElementView for View<'_> {
     fn has_class(&self, class: Atom) -> bool {
         self.tree.nodes[self.index].classes.contains(&class)
     }
-    fn attr(&self, name: Atom) -> Option<super::matching::AttrValue<'_>> {
+    fn attr(&self, name: super::selector::AttrName) -> Option<super::matching::AttrValue<'_>> {
         let node = &self.tree.nodes[self.index];
-        node.attrs.iter().find(|(key, _)| *key == name).map(|(_, value)| super::matching::AttrValue::Text(value.as_str().into()))
+        node.attrs.iter().find(|(key, _)| *key == name.lower).map(|(_, value)| super::matching::AttrValue::Text(value.as_str().into()))
     }
     fn parent(&self) -> Option<Self> {
         self.tree.nodes[self.index].parent.map(|index| View { tree: self.tree, index })

@@ -7,6 +7,8 @@ import {
   registerSheetSink,
   type AttributeGateMember,
 } from "./css/index.js"
+import { attributesOfProps } from "./dom/attribute-names.js"
+import { isSvgType } from "./svg.js"
 import { createBlobImageLoader, type BlobImageHost } from "./blob-images.js"
 import type { MutationHost, MutationRenderer } from "./host.js"
 import { createStyleImageLoader, type StyleImageHost } from "./style-images.js"
@@ -137,6 +139,9 @@ export function createMutationQueue(
       writer.setCustomProp(id, key, value)
       requestFlush()
     },
+    get forwardsAttributes() {
+      return forwardsAttributes
+    },
     setAttribute(id, name, value) {
       if (!forwardsAttributes) return
       writer.setAttribute(id, name, value)
@@ -158,12 +163,7 @@ export function createMutationQueue(
     backfillAttributes() {
       forwardsAttributes = true
       elementSource?.forEachElement((id, type, props) => {
-        for (const [prop, value] of props) {
-          const name = attributeNameOfProp(type, prop)
-          if (name === undefined) continue
-          const text = attributeValue(name, value)
-          if (text !== null) mutations.setAttribute(id, name, text)
-        }
+        for (const [name, text] of attributesOfProps(props, isSvgType(type))) mutations.setAttribute(id, name, text)
       })
     },
     requestFlush,
@@ -331,42 +331,6 @@ export function forwardsCustomProp(type: string, name: string): boolean {
   // each as a custom prop would cost a second op per element for a value the attribute store already holds.
   if (name === "class" || name === "className" || name.startsWith("data-")) return false
   return !BUILT_IN_TYPES.has(type) || isUniversalProp(name)
-}
-
-/**
- * The attribute a prop of an element of this type sets, or `undefined` when it is not one: `class`
- * (also from `className`), every `data-*`, and any prop that is not reserved, not an event and not
- * already forwarded as a custom prop. Whether the value is one is `attributeValue`'s answer.
- */
-export function attributeNameOfProp(type: string, name: string): string | undefined {
-  if (name === "class" || name === "className") return "class"
-  if (name.startsWith("data-")) return name
-  if (isReservedProp(name) || forwardsCustomProp(type, name)) return undefined
-  return name
-}
-
-/**
- * What the attribute `name` holds for a prop value, `null` for none. A string is itself, a number
- * its text and `true` the empty string, as the DOM prints a boolean attribute; `false`, `null` and
- * `undefined` remove it, except on `data-*` and `aria-*`, where React and Solid print `"true"` and
- * `"false"`, and so does an object or a function, which no attribute holds. `class`
- * converts whatever else it is with `String`.
- */
-export function attributeValue(name: string, value: unknown): string | null {
-  switch (typeof value) {
-    case "string":
-      return value
-    case "number":
-      return String(value)
-    case "boolean":
-      if (name.startsWith("data-") || name.startsWith("aria-")) return String(value)
-      return value ? "" : null
-    case "undefined":
-      return null
-    default:
-      if (value === null) return null
-      return name === "class" ? String(value) : null
-  }
 }
 
 export function isReservedProp(name: string): boolean {

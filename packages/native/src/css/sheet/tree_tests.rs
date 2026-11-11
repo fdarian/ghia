@@ -118,17 +118,29 @@ fn tag_class_id_and_attribute_selectors_apply() {
 }
 
 #[test]
-fn an_id_that_arrives_as_a_prop_matches() {
+fn an_id_that_arrives_as_an_attribute_matches() {
     let mut doc = Doc::new();
     let div = doc.element("div", ROOT);
-    doc.tree.set_custom_prop(div, "id".into(), serde_json::json!("x"));
+    doc.tree.set_attribute(div, "id", Some("x".into()));
     doc.style_element(ROOT, "#x { color: red }");
     doc.flush();
     assert_eq!(doc.color(div), Some("red"));
 
-    doc.tree.set_custom_prop(div, "id".into(), serde_json::json!("y"));
+    doc.tree.set_attribute(div, "id", Some("y".into()));
     doc.flush();
     assert_eq!(doc.color(div), None);
+}
+
+#[test]
+fn a_custom_prop_is_not_an_attribute_to_a_selector() {
+    let mut doc = Doc::new();
+    let div = doc.element("div", ROOT);
+    doc.tree.set_custom_prop(div, "id".into(), serde_json::json!("x"));
+    doc.tree.set_custom_prop(div, "tabIndex".into(), serde_json::json!(0));
+    doc.style_element(ROOT, "#x { color: red } [tabindex] { background-color: blue }");
+    doc.flush();
+    assert_eq!(doc.color(div), None);
+    assert_eq!(doc.background(div), None);
 }
 
 #[test]
@@ -136,33 +148,43 @@ fn data_and_aria_booleans_match_as_true_and_false() {
     let mut doc = Doc::new();
     let div = doc.element("div", ROOT);
     doc.tree.set_attribute(div, "data-open", Some("true".into()));
-    doc.tree.set_custom_prop(div, "aria-expanded".into(), serde_json::json!(false));
+    doc.tree.set_attribute(div, "aria-expanded", Some("false".into()));
     doc.style_element(ROOT, "[data-open=\"true\"] { color: red } [aria-expanded=\"false\"] { background-color: blue }");
     doc.flush();
     assert_eq!(doc.color(div), Some("red"));
     assert_eq!(doc.background(div), Some("blue"));
 
-    doc.tree.set_custom_prop(div, "aria-expanded".into(), serde_json::json!(true));
+    doc.tree.set_attribute(div, "aria-expanded", Some("true".into()));
     doc.flush();
     assert_eq!(doc.background(div), None);
 }
 
 #[test]
-fn a_camel_case_prop_matches_and_restyles_under_its_dom_attribute_name() {
+fn an_html_attribute_name_matches_without_regard_to_case_and_an_svg_one_with_it() {
     let mut doc = Doc::new();
     let div = doc.element("div", ROOT);
     let label = doc.element("label", ROOT);
-    doc.tree.set_custom_prop(div, "tabIndex".into(), serde_json::json!(0));
-    doc.tree.set_custom_prop(label, "htmlFor".into(), serde_json::json!("x"));
-    doc.style_element(ROOT, "[tabindex=\"0\"] { color: red } [for=x] { background-color: blue }");
+    let svg = doc.element("svg", ROOT);
+    let path = doc.element("path", svg);
+    doc.tree.set_attribute(div, "tabindex", Some("0".into()));
+    doc.tree.set_attribute(label, "for", Some("x".into()));
+    doc.tree.set_attribute(svg, "viewBox", Some("0 0 1 1".into()));
+    doc.tree.set_attribute(path, "pathLength", Some("1".into()));
+    doc.style_element(
+        ROOT,
+        "[tabIndex=\"0\"] { color: red } [for=x] { background-color: blue } \
+         svg[viewBox] { opacity: 0.5 } path[pathlength] { padding-top: 1px }",
+    );
     doc.flush();
-    assert_eq!(doc.color(div), Some("red"));
+    assert_eq!(doc.color(div), Some("red"), "[tabIndex] reads tabindex on an HTML element");
     assert_eq!(doc.background(label), Some("blue"));
+    assert_eq!(doc.style(svg).and_then(|style| style.opacity), Some(0.5), "[viewBox] reads viewBox");
+    assert!(doc.style(path).is_none_or(|style| style.padding_top.is_none()), "[pathlength] is not pathLength");
 
-    doc.tree.set_custom_prop(div, "tabIndex".into(), serde_json::json!(-1));
+    doc.tree.set_attribute(div, "tabindex", Some("-1".into()));
     doc.flush();
     assert_eq!(doc.color(div), None);
-    doc.tree.set_custom_prop(div, "tabIndex".into(), serde_json::json!(0));
+    doc.tree.set_attribute(div, "tabindex", Some("0".into()));
     doc.flush();
     assert_eq!(doc.color(div), Some("red"));
 }
@@ -1098,12 +1120,12 @@ fn an_attribute_that_is_set_or_removed_marks_what_a_selector_reads_it_for() {
 }
 
 #[test]
-fn an_attribute_prop_marks_like_an_attribute() {
+fn an_aria_attribute_marks_like_any_attribute() {
     let mut list = Vec::new();
     let mut doc = Doc::settled("[aria-busy=true] { color: red }", |doc| list = doc.run(10, "div", ROOT, "x"));
-    assert_eq!(doc.rematched(|doc| doc.tree.set_custom_prop(list[4], "aria-busy".into(), serde_json::json!("true"))), 1);
+    assert_eq!(doc.rematched(|doc| drop(doc.tree.set_attribute(list[4], "aria-busy", Some("true".into())))), 1);
     assert_eq!(doc.color(list[4]), Some("red"));
-    assert_eq!(doc.rematched(|doc| doc.tree.set_custom_prop(list[4], "aria-label".into(), serde_json::json!("x"))), 0);
+    assert_eq!(doc.rematched(|doc| drop(doc.tree.set_attribute(list[4], "aria-label", Some("x".into())))), 0);
 }
 
 #[test]

@@ -50,6 +50,11 @@ export const SVG_CHILD_TYPES: ReadonlySet<string> = new Set([
   "feTurbulence",
 ])
 
+/** Whether an element of this type is an SVG element: its attribute names keep their case. */
+export function isSvgType(type: string): boolean {
+  return type === "svg" || SVG_CHILD_TYPES.has(type)
+}
+
 /**
  * Throws when `child` is an SVG element placed anywhere but directly in an
  * `<svg>` or in another SVG element (`<g>`, `<defs>`, `<linearGradient>`, ...).

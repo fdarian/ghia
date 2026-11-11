@@ -15,8 +15,8 @@
  */
 
 import { reportUncaught } from "../events/dispatch.js"
-import { attributeNameOf } from "./attribute-names.js"
-import { NOT_ATTRIBUTES, Node, SVGElement, type Element } from "./nodes.js"
+import { NOT_ATTRIBUTES, attributeNameOf } from "./attribute-names.js"
+import { Node, SVGElement, type Element } from "./nodes.js"
 
 export type MutationObserverInit = {
   childList?: boolean

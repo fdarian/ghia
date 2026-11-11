@@ -18,7 +18,7 @@ import {
   hasMutationObservers,
   queueChildListMutation,
   readBoundingClientRect,
-  SVG_CHILD_TYPES,
+  isSvgType,
   SVGElement,
   Text,
 } from "@ghia/native/host"
@@ -268,7 +268,7 @@ export function createHostElement(
   container: Container
 ): Instance {
   const instance =
-    type === "svg" || SVG_CHILD_TYPES.has(type)
+    isSvgType(type)
       ? (Reflect.construct(ReactHostElement, [id, type, props], ReactSvgElement) as ReactHostElement)
       : new ReactHostElement(id, type, props)
   hostNodeStates.set(instance, createState(container))

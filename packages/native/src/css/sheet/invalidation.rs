@@ -148,7 +148,7 @@ impl Invalidation {
                 match simple {
                     Simple::Class(class) => *self.classes.entry(*class).or_default() |= reach,
                     Simple::Id(id) => *self.ids.entry(*id).or_default() |= reach,
-                    Simple::Attr(attr) => *self.attributes.entry(attr.name).or_default() |= reach,
+                    Simple::Attr(attr) => *self.attributes.entry(attr.name.lower).or_default() |= reach,
                     Simple::Is(list) | Simple::Where(list) | Simple::Not(list) => {
                         for inner in list {
                             self.read_through(inner, &chain);

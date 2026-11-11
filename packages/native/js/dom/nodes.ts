@@ -9,7 +9,7 @@
  */
 
 import type { ElementType } from "../host.js"
-import { attributeNameOf } from "./attribute-names.js"
+import { NOT_ATTRIBUTES, attributeNameOf } from "./attribute-names.js"
 
 /** Where `[DOM_BINDING]()` is read, so two copies of this package find each other's nodes. */
 export const DOM_BINDING: unique symbol = Symbol.for("@ghia/native/dom-binding")
@@ -294,8 +294,6 @@ abstract class TextClass extends CharacterDataClass {
 
 /** The `data-*` props are the attributes `dataset` reads, with the name in camel case. */
 const DATA_ATTRIBUTE = /^data-(.+)$/
-/** Props that are not attributes: `getAttributeNames` skips them. */
-export const NOT_ATTRIBUTES: ReadonlySet<string> = new Set(["children", "key", "ref", "style"])
 
 function camelCase(dashed: string): string {
   return dashed.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase())

@@ -4,7 +4,7 @@
 
 use super::atoms::Atoms;
 use super::selector::{
-    AttrMatcher, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, Simple, Specificity,
+    AttrMatcher, AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, Simple, Specificity,
 };
 use super::tokenizer::{find_close, trim, Kind, Token};
 
@@ -288,11 +288,11 @@ impl Parser<'_, '_> {
         let mut index = 0;
         skip_whitespace(tokens, &mut index);
         let name = match tokens.get(index).map(|token| &token.kind) {
-            Some(Kind::Ident(name)) => name.to_ascii_lowercase(),
+            Some(Kind::Ident(name)) => name.clone(),
             _ => return Err(InvalidSelector),
         };
         index += 1;
-        let name = self.atoms.intern(&name);
+        let name = AttrName { lower: self.atoms.intern(&name.to_ascii_lowercase()), written: self.atoms.intern(&name) };
         skip_whitespace(tokens, &mut index);
         if index == tokens.len() {
             return Ok(AttrSelector { name, matcher: None });
