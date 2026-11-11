@@ -50,6 +50,7 @@ const PLAIN_NOTIFICATIONS: ReadonlySet<string> = new Set([
   "did-fail-load",
   "attach",
   "detach",
+  "resize",
 ])
 
 /**
@@ -111,6 +112,13 @@ const POINTER_EVENT_TYPES: ReadonlySet<string> = new Set([
   "contextmenu",
 ])
 
+/** Clicks that a keyboard, an assistive technology or `el.click()` makes have no pointer (`pointerId` -1). */
+const CLICK_TYPES: ReadonlySet<string> = new Set(["click", "auxclick", "contextmenu"])
+
+function isPrimaryPointer(payload: EventPayload, eventType: string): boolean {
+  return !CLICK_TYPES.has(eventType) || payload.pointerId !== -1
+}
+
 export function eventBubbles(eventType: string): boolean {
   return !NON_BUBBLING_TYPES.has(eventType.toLowerCase())
 }
@@ -168,7 +176,7 @@ export interface DomEvent extends RootEvent {
   /** The event itself, as a synthetic event wrapper's `nativeEvent` is the DOM event under it. */
   readonly nativeEvent: DomEvent
   /** `true` on a pointer event: Ghia has one pointer, so it is always the primary one. Absent on other events. */
-  readonly isPrimary?: true
+  readonly isPrimary?: boolean
   eventPhase: number
   readonly bubbles: boolean
   readonly cancelable: boolean
@@ -280,7 +288,9 @@ export function createDomEvent(
     ...(payload.formEntries && formSubmission(payload.formEntries)),
     // An edit has no data unless it inserted text, and the DOM says so with null.
     ...(payload.eventType === "change" && { data: payload.data ?? null }),
-    ...(POINTER_EVENT_TYPES.has(payload.eventType.toLowerCase()) && { isPrimary: true as const }),
+    ...(POINTER_EVENT_TYPES.has(payload.eventType.toLowerCase()) && {
+      isPrimary: isPrimaryPointer(payload, payload.eventType.toLowerCase()),
+    }),
     type: payload.eventType,
     currentTarget: null,
     composedPath: () => [...path],
