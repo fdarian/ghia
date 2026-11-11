@@ -8,6 +8,7 @@ import {
   type HostBinding,
   type ObservableElement,
 } from "./bounds.js"
+import { Document } from "./dom/nodes.js"
 
 /**
  * `ResizeObserver` and `IntersectionObserver` for host elements.
@@ -428,8 +429,11 @@ export class ResizeObserver {
 // ── IntersectionObserver ─────────────────────────────────────────────
 
 export interface IntersectionObserverInit {
-  /** The element whose box targets are tested against. `null` is the window. */
-  root?: ObservableElement | null
+  /**
+   * The element whose box targets are tested against. `null` and a `Document`
+   * are the window, as in the DOM; `rootMargin` applies to it either way.
+   */
+  root?: ObservableElement | Document | null
   /** Grows or shrinks the root before testing: 1 to 4 lengths in `px` or `%`. */
   rootMargin?: string
   threshold?: number | number[]
@@ -556,10 +560,12 @@ function asBoundingClientRect(rect: Rect): BoundingClientRect {
 }
 
 export class IntersectionObserver {
-  readonly root: ObservableElement | null
+  readonly root: ObservableElement | Document | null
   readonly rootMargin: string
   readonly thresholds: readonly number[]
   readonly #callback: IntersectionObserverCallback
+  /** The root's element; `null` when the root is the window (`null` or a `Document`). */
+  readonly #rootElement: ObservableElement | null
   readonly #margin: ReturnType<typeof parseRootMargin>
   readonly #records = new Map<ObservableElement, IntersectionRecord>()
   #queue: IntersectionObserverEntry[] = []
@@ -579,7 +585,15 @@ export class IntersectionObserver {
       throw new TypeError("IntersectionObserver: the callback is not a function")
     }
     this.#callback = callback
-    this.root = options.root ?? null
+    const root = options.root ?? null
+    if (root instanceof Document || root === null) {
+      this.#rootElement = null
+    } else if (typeof (root as Partial<ObservableElement>)[HOST_BINDING] === "function") {
+      this.#rootElement = root
+    } else {
+      throw new TypeError("IntersectionObserver: the root is not an Element or a Document")
+    }
+    this.root = root
     this.#margin = parseRootMargin(options.rootMargin ?? "0px")
     this.rootMargin = this.#margin
       .map((length) => `${length.value}${length.percent ? "%" : "px"}`)
@@ -606,10 +620,10 @@ export class IntersectionObserver {
       stop: () => {},
     }
     this.#records.set(target, record)
-    if (this.root && !this.#stopWatchingRoot) {
+    if (this.#rootElement && !this.#stopWatchingRoot) {
       // The root moving or resizing changes what the targets intersect, and
       // nothing else tells us: a target that does not move reports nothing.
-      this.#stopWatchingRoot = listen(INTERSECT_OBSERVE_EVENT, this.root, {
+      this.#stopWatchingRoot = listen(INTERSECT_OBSERVE_EVENT, this.#rootElement, {
         receive: (event) => {
           const observation = event.observation!
           this.#rootBox = observation.present
@@ -716,8 +730,8 @@ export class IntersectionObserver {
 
   #rootRect(sample: IntersectionSample): Rect {
     let base: Rect
-    if (this.root) {
-      base = this.root[HOST_BINDING]() ? this.#rootBox! : NO_BOX
+    if (this.#rootElement) {
+      base = this.#rootElement[HOST_BINDING]() ? this.#rootBox! : NO_BOX
     } else {
       base = { x: 0, y: 0, width: sample.viewport.width, height: sample.viewport.height }
     }
@@ -735,7 +749,7 @@ export class IntersectionObserver {
   #evaluate(record: IntersectionRecord): void {
     const sample = record.sample!
     // The root's report re-evaluates every record.
-    if (sample.present && this.root && this.root[HOST_BINDING]() && !this.#rootBox) return
+    if (sample.present && this.#rootElement && this.#rootElement[HOST_BINDING]() && !this.#rootBox) return
     // A target with no box (in skipped content, removed) has no root bounds either.
     const rootBounds = sample.present ? this.#rootRect(sample) : NO_BOX
     let intersection = NO_BOX
@@ -746,7 +760,7 @@ export class IntersectionObserver {
       // Ancestors above the root, and the window edge, do not clip.
       let clipped = border
       for (const clip of sample.clips) {
-        if (this.root && clip.id === this.root.nativeId) break
+        if (this.#rootElement && clip.id === this.#rootElement.nativeId) break
         clipped = overlap(clipped, clip.rect)
       }
       intersection = overlap(clipped, rootBounds)

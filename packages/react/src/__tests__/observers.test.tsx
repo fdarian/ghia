@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from "react"
+import { document, window } from "@ghia/native/host"
 import { describe, expect, it } from "vitest"
 import type {
   IntersectionObserverEntry,
@@ -1066,6 +1067,71 @@ describeNative("IntersectionObserver", () => {
     } finally {
       unmount()
     }
+  })
+
+  describe("a Document root, as floating-ui's autoUpdate passes it", () => {
+    it("is the window: observe, entries with rootMargin, disconnect", () => {
+      const { render, renderer, ref, element, unmount } = setup()
+      try {
+        const { entries, callback } = collect()
+        render(
+          <div style={{ flexDirection: "column" }}>
+            <div ref={ref("a")} style={{ position: "absolute", top: 10, left: -150, width: 100, height: 20 }} />
+          </div>
+        )
+        const target = element("a")
+        const root = target.ownerDocument as unknown as Document
+        const observer = new IntersectionObserver(callback, {
+          root,
+          rootMargin: "200px",
+          threshold: [0, 0.5, 1],
+        })
+        expect(observer.root).toBe(root)
+        observer.observe(target)
+        renderer.dispatchNativeEvents()
+
+        expect(entries).toHaveLength(1)
+        expect(entries[0]).toMatchObject({ isIntersecting: true, intersectionRatio: 1, target })
+        expect(entries[0]!.rootBounds.left).toBe(-200)
+
+        observer.disconnect()
+        render(
+          <div style={{ flexDirection: "column" }}>
+            <div ref={ref("a")} style={{ position: "absolute", top: 5000, left: 0, width: 100, height: 20 }} />
+          </div>
+        )
+        renderer.dispatchNativeEvents()
+        expect(entries, "disconnected").toHaveLength(1)
+      } finally {
+        unmount()
+      }
+    })
+
+    it("reports the same as a null root", () => {
+      const { render, renderer, ref, element, unmount } = setup()
+      try {
+        const viaDocument = collect()
+        const viaNull = collect()
+        render(
+          <div style={{ flexDirection: "column" }}>
+            <div ref={ref("a")} style={{ position: "absolute", top: 5000, left: 0, width: 50, height: 30 }} />
+          </div>
+        )
+        const target = element("a")
+        new IntersectionObserver(viaDocument.callback, { root: document }).observe(target)
+        new IntersectionObserver(viaNull.callback, { root: null }).observe(target)
+        renderer.dispatchNativeEvents()
+        expect(viaDocument.entries.map((entry) => entry.isIntersecting)).toEqual([false])
+        expect(viaDocument.entries[0]!.rootBounds).toEqual(viaNull.entries[0]!.rootBounds)
+      } finally {
+        unmount()
+      }
+    })
+
+    it("throws a TypeError for a root that is neither an Element nor a Document", () => {
+      expect(() => new IntersectionObserver(() => {}, { root: {} as never })).toThrow(TypeError)
+      expect(() => new IntersectionObserver(() => {}, { root: window as never })).toThrow(TypeError)
+    })
   })
 
   it("rejects thresholds and margins that are not valid", () => {

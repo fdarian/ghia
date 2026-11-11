@@ -166,4 +166,34 @@ describe.skipIf(!hasNativeTestRenderer)("observers on elements that come and go"
       [0, 0],
     ])
   })
+
+  it("takes a Document root as the window, as floating-ui's autoUpdate does", () => {
+    let target!: HostElement
+    const entries: IntersectionObserverEntry[] = []
+    const app = createTestRoot()
+    app.render(() => (
+      <div style={{ flexDirection: "column" }}>
+        <div
+          ref={(host) => (target = host)}
+          style={{ position: "absolute", top: 10, left: -150, width: 100, height: 20 }}
+        />
+      </div>
+    ))
+    const root = target.ownerDocument as unknown as Document
+    const observer = new IntersectionObserver((batch) => entries.push(...batch), {
+      root,
+      rootMargin: "200px",
+      threshold: [0, 1],
+    })
+    expect(observer.root).toBe(root)
+    observer.observe(target)
+    app.renderer.dispatchNativeEvents()
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({ isIntersecting: true, intersectionRatio: 1, target })
+    expect(entries[0]!.rootBounds.left).toBe(-200)
+
+    observer.disconnect()
+    expect(() => new IntersectionObserver(() => {}, { root: {} as never })).toThrow(TypeError)
+  })
 })

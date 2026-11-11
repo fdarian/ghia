@@ -5713,7 +5713,9 @@ report too. An element that has no box
 `device-pixel-content-box` throws a `TypeError`.
 
 `IntersectionObserver` takes `{ root, rootMargin, threshold }`. `root` is a host
-element or `null` for the window. Entries have `isIntersecting`,
+element, or `null` or a `Document` (`document`, `element.ownerDocument`) for the
+window; `observer.root` returns what was passed, and anything else throws a
+`TypeError`. Entries have `isIntersecting`,
 `intersectionRatio`, `boundingClientRect`, `intersectionRect`, `rootBounds`,
 `time` and `target`. Each target gets an entry after `observe()` (an element
 that never paints reports not intersecting) and then one per threshold crossing
