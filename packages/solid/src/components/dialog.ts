@@ -179,9 +179,9 @@ export function DialogPopup(allProps: DialogPopupProps): JSX.Element {
     get children() {
       return createComponent(DismissableLayer, {
         onEscapeKeyDown: () => state.setOpen(false),
-        initialFocus: () => resolveFocusTarget(focus.initialFocus, () => popup?.id ?? null),
+        initialFocus: () => resolveFocusTarget(focus.initialFocus, () => popup?.nativeId ?? null),
         finalFocus: (previous) =>
-          resolveFocusTarget(focus.finalFocus, () => state.trigger.current?.id ?? previous),
+          resolveFocusTarget(focus.finalFocus, () => state.trigger.current?.nativeId ?? previous),
         get children() {
           return jsx("div", overrideProps(props, {
             ref(element: HostElement) {
@@ -202,8 +202,8 @@ export function DialogPopup(allProps: DialogPopupProps): JSX.Element {
               props.onKeyDown?.(event)
               if (!state.modal() || event.key !== "Tab" || event.defaultPrevented || !popup) return
               event.preventDefault()
-              if (event.modifiers?.shift) renderer.focusPreviousWithin?.(popup.id)
-              else renderer.focusNextWithin?.(popup.id)
+              if (event.modifiers?.shift) renderer.focusPreviousWithin?.(popup.nativeId)
+              else renderer.focusNextWithin?.(popup.nativeId)
             },
           }))
         },

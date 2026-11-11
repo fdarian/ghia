@@ -129,7 +129,7 @@ describeNative("a fractional scroll offset against Chrome", () => {
               run(list, step.op)
               mounted.root.renderer.dispatchNativeEvents()
               expect([list.scrollLeft, list.scrollTop], `scrollLeft and scrollTop after ${label}`).toEqual([step.scrollLeft, step.scrollTop])
-              expect(mounted.root.renderer.getScrollOffset(list.id), `getScrollOffset after ${label}`).toEqual([step.scrollLeft, step.scrollTop])
+              expect(mounted.root.renderer.getScrollOffset(list.nativeId), `getScrollOffset after ${label}`).toEqual([step.scrollLeft, step.scrollTop])
               for (const index of inView(scene, step, kind, scale)) {
                 expect(rectOf(mounted.rows[index]!), `row ${index} after ${label}`).toEqual(step.rows[index])
               }

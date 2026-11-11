@@ -42,10 +42,10 @@ describe("Solid host event listeners", () => {
     setHostProperty(element, "onClickCapture", handler)
     insertHostNode(root, element)
     expect(listeners).toEqual([
-      [element.id, "pointerdown", true],
-      [element.id, "click", true],
+      [element.nativeId, "pointerdown", true],
+      [element.nativeId, "click", true],
     ])
-    expect([...(root.eventHandlers.get(element.id)?.keys() ?? [])]).toEqual([
+    expect([...(root.eventHandlers.get(element.nativeId)?.keys() ?? [])]).toEqual([
       "pointerdown",
       "clickCapture",
     ])
@@ -56,11 +56,11 @@ describe("Solid host event listeners", () => {
     insertHostNode(root, element)
     setHostProperty(element, "onDrop", handler)
     setHostProperty(element, "onDropCapture", handler)
-    expect(listeners).toEqual([[element.id, "drop", true]])
+    expect(listeners).toEqual([[element.nativeId, "drop", true]])
     setHostProperty(element, "onDrop", undefined, handler)
     expect(listeners).toHaveLength(1)
     setHostProperty(element, "onDropCapture", undefined, handler)
-    expect(listeners).toEqual([[element.id, "drop", true], [element.id, "drop", false]])
+    expect(listeners).toEqual([[element.nativeId, "drop", true], [element.nativeId, "drop", false]])
   })
 
   it("swaps a handler without telling native", () => {
@@ -70,13 +70,13 @@ describe("Solid host event listeners", () => {
     setHostProperty(element, "onContextMenu", handler)
     setHostProperty(element, "onContextMenu", next, handler)
     expect(listeners).toHaveLength(1)
-    expect(root.eventHandlers.get(element.id)?.get("contextmenu")).toBe(next)
+    expect(root.eventHandlers.get(element.nativeId)?.get("contextmenu")).toBe(next)
   })
 
   it("keeps onMouseDownOutside as the gpuix type", () => {
     const { root, element, listeners } = setup()
     insertHostNode(root, element)
     setHostProperty(element, "onMouseDownOutside", handler)
-    expect(listeners).toEqual([[element.id, "mousedownoutside", true]])
+    expect(listeners).toEqual([[element.nativeId, "mousedownoutside", true]])
   })
 })

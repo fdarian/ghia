@@ -298,7 +298,7 @@ function pixelOf(renderer: ReturnType<typeof createTestRoot>["renderer"], elemen
   renderer.captureScreenshot(file)
   const pixels = readLogicalPixels(file, renderer)
   fs.unlinkSync(file)
-  const bounds = renderer.getElementBounds(element.id)!
+  const bounds = renderer.getElementBounds(element.nativeId)!
   return pixels.at(Math.round(bounds.x + bounds.width / 2), Math.round(bounds.y + bounds.height / 2)).slice(0, 3) as Pixel
 }
 
@@ -487,7 +487,7 @@ async function replay(scenario: Case): Promise<void> {
             // A later call is a render with the new props over the same element; a call to unmount is the element going.
             root.render(call.kind === "unmount" ? createElement("div") : wrap(elementFor(scenario, call, ref, box, onComplete)))
             // Chrome styles the element when it is asked for its animations; a read of its box is how gpuix is made to.
-            if (call.kind !== "unmount" && holder.current) root.renderer.getElementBounds(holder.current.id)
+            if (call.kind !== "unmount" && holder.current) root.renderer.getElementBounds(holder.current.nativeId)
         }
       }
     }

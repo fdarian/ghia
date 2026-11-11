@@ -216,8 +216,13 @@ describeNative("zIndex across stacking contexts", () => {
   it("puts a negative zIndex above the background of its context and below its in-flow content", () => {
     const { render, renderer, on, agree, hitsAt, painted, unmount } = setup()
     try {
+      // The app's top element is not a context of its own (`<html>` is), so it is made one here, as a page's root is in a browser.
       render(
-        <div testId="root" onClick={on("root")} style={{ width: 400, height: 400, backgroundColor: "#202020" }}>
+        <div
+          testId="root"
+          onClick={on("root")}
+          style={{ position: "relative", zIndex: 0, width: 400, height: 400, backgroundColor: "#202020" }}
+        >
           {box(on, "flow", { backgroundColor: "#ff0000" })}
           {box(on, "behind", at(50, 50, { zIndex: -1 }))}
         </div>

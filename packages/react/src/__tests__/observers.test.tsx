@@ -232,7 +232,7 @@ describeNative("ResizeObserver", () => {
     )
 
     const pointerOver = (renderer: ReturnType<typeof setup>["renderer"], element: PublicInstance) => {
-      const bounds = renderer.getElementBounds(element.id)
+      const bounds = renderer.getElementBounds(element.nativeId)
       return {
         enter: () => renderer.nativeSimulateMouseMove(bounds.x + 2, bounds.y + 2),
         leave: () => renderer.nativeSimulateMouseMove(bounds.x + 500, bounds.y + 300),
@@ -306,11 +306,11 @@ describeNative("ResizeObserver", () => {
       const { render, renderer, ref, element, unmount } = setup()
       try {
         render(hovered(ref, { borderWidth: 1, borderStyle: "solid", borderColor: "#fff" }, { borderWidth: 5 }))
-        expect(renderer.getElementBounds(element("box").id).clientLeft).toBe(1)
+        expect(renderer.getElementBounds(element("box").nativeId).clientLeft).toBe(1)
 
         pointerOver(renderer, element("box")).enter()
         renderer.flush()
-        expect(renderer.getElementBounds(element("box").id).clientLeft).toBe(5)
+        expect(renderer.getElementBounds(element("box").nativeId).clientLeft).toBe(5)
       } finally {
         unmount()
       }

@@ -6,6 +6,8 @@ import {
 import { readLayoutSize } from "./bounds.js"
 import type { NativeRenderer } from "./host.js"
 import { document, type GpuixDocument } from "./events/window-target.js"
+import { attributeLookupName, attributeNameOf } from "./dom/attribute-names.js"
+import { SVGElement } from "./dom/nodes.js"
 
 /** The DOM members every host element has beside the scroll ones. */
 export interface DomElement {
@@ -44,13 +46,15 @@ export interface DomElementBinding {
   propNames(): Iterable<string>
 }
 
-/** The prop an attribute name stands for: HTML attribute names are case-insensitive, props are not. */
-function propForAttribute(bound: DomElementBinding, name: string): unknown {
-  const exact = bound.prop(name)
-  if (exact !== undefined) return exact
-  const lower = name.toLowerCase()
+/** The prop an attribute name stands for: `attributeNameOf` is the name a prop has as an attribute. */
+function propForAttribute(bound: DomElementBinding, name: string, svg: boolean): unknown {
+  const wanted = attributeLookupName(name, svg)
+  const exact = bound.prop(wanted)
+  if (exact !== undefined && attributeNameOf(wanted, svg) === wanted) return exact
   for (const key of bound.propNames()) {
-    if (key.toLowerCase() === lower) return bound.prop(key)
+    if (attributeNameOf(key, svg) !== wanted) continue
+    const value = bound.prop(key)
+    if (value !== undefined) return value
   }
   return undefined
 }
@@ -91,12 +95,7 @@ export function defineDomMembers<This extends object>(
       configurable: true,
       writable: true,
       value(this: This, name: string) {
-        const bound = bind(this)
-        const value = propForAttribute(bound, name)
-        return attributeOf(
-          name,
-          name.toLowerCase() === "class" && value === undefined ? propForAttribute(bound, "className") : value
-        )
+        return attributeOf(name, propForAttribute(bind(this), name, this instanceof SVGElement))
       },
     },
     offsetWidth: {

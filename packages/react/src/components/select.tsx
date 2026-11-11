@@ -116,7 +116,7 @@ export function Select({
   const setOpen = (nextOpen: boolean, restoreFocus = true) => {
     setOpenState(nextOpen)
     if (!nextOpen && restoreFocus && triggerRef.current) {
-      renderer?.focusElement?.(triggerRef.current.id)
+      renderer?.focusElement?.(triggerRef.current.nativeId)
     }
   }
 

@@ -9,21 +9,19 @@ import { DefaultEventPriority } from "react-reconciler/constants.js"
 import type { HostEventHandler } from "@ghia/native/host"
 import {
   assertSvgPlacement,
-  createElementMethods,
-  defineDomMembers,
-  defineScrollMembers,
-  blurHostElement,
   createWebviewMethods,
   eventTypesWithOverrides,
-  focusHostElement,
-  HOST_BINDING,
-  hostElementMatches,
   isReservedProp,
-  readBoundingClientRect,
+  ROOT_ELEMENT_STYLE,
+  ROOT_HEAD_STYLE,
+  ROOT_ELEMENT_TYPES,
   sameMutationValue,
   serializeCustomProp,
   forwardsCustomProp,
+  hasMutationObservers,
+  queueCharacterDataMutation,
   readTextControlSelection,
+  recordAttributeChanges,
   requestFormSubmit,
   selectTextControl,
   setTextControlSelectionRange,
@@ -62,65 +60,36 @@ import type {
 } from "../types/host.js"
 import { syncMotionBindings } from "./motion-bindings.js"
 import { listenersOf, unregisterEventHandlers } from "./event-registry.js"
+import {
+  containerFor,
+  createHostElement,
+  createHostText,
+  linkChild,
+  stateFor,
+  unlinkChild,
+  type HostNode,
+} from "./host-nodes.js"
 
 let currentUpdatePriority = NoEventPriority
 
-type HostNode = Instance | TextInstance
-
-interface HostNodeState {
-  container: Container
-  initialChildren?: HostNode[]
-  mounted: boolean
-  /**
-   * React hid this element (Suspense, Activity). Its native style carries
-   * `visibility: hidden`, so a style update must keep that rather than
-   * overwrite it with the visible one.
-   */
-  hidden: boolean
-}
-
-const hostNodeStates = new WeakMap<HostNode, HostNodeState>()
-
-function isPublicInstance(instance: Instance): instance is PublicInstance {
-  return Boolean(instance.focus && instance.blur && instance.matches)
-}
-
+/** The members every instance has sit on its prototype; the ones of its type are attached when its ref is handed out. */
 function attachHostMethods(instance: Instance): PublicInstance {
-  if (isPublicInstance(instance)) return instance
-  const state = hostNodeStates.get(instance)
-  if (!state) {
-    throw new Error(`Host element ${instance.id} was handed out before it was mounted.`)
+  const state = stateFor(instance)
+  if (!state.typeMembersAttached) {
+    attachTypeMembers(instance, state.container)
+    state.typeMembersAttached = true
   }
-  const container = state.container
-  defineScrollMembers(instance, () => ({
-    renderer: container.nativeRenderer,
-    id: instance.id,
-  }))
-  defineDomMembers(instance, () => ({
-    listeners: listenersOf(instance),
-    connected: container.instances.get(instance.id) === instance,
-    layout: state.mounted ? { renderer: container.nativeRenderer, id: instance.id } : undefined,
-    prop: (name) => (instance.props as Record<string, unknown>)[name],
-    propNames: () => Object.keys(instance.props),
-  }))
-  Object.assign(instance, createElementMethods(container.nativeRenderer, instance.id))
-  instance.focus = (options) => focusHostElement(container.nativeRenderer, instance.id, options)
-  instance.blur = () => blurHostElement(container.nativeRenderer, instance.id)
-  instance.matches = (selector) =>
-    hostElementMatches(container.nativeRenderer, instance.id, selector)
-  instance.getBoundingClientRect = () =>
-    readBoundingClientRect(container.nativeRenderer, instance.id)
-  instance[HOST_BINDING] = () =>
-    state.mounted
-      ? { renderer: container.nativeRenderer, mutations: container.renderer }
-      : undefined
+  return instance as PublicInstance
+}
+
+function attachTypeMembers(instance: Instance, container: Container): void {
   if (instance.type === "input" || instance.type === "textarea") {
     attachTextControlMethods(instance as TextControlInstance, container)
   } else if (instance.type === "form") {
     const form = instance as FormInstance
     form.requestSubmit = () =>
       requestFormSubmit({
-        id: form.id,
+        id: form.nativeId,
         nativeRenderer: container.nativeRenderer,
         flushMutations: () => container.renderer.flushMutations(),
       })
@@ -128,7 +97,7 @@ function attachHostMethods(instance: Instance): PublicInstance {
     Object.assign(
       instance as WebviewInstance,
       createWebviewMethods({
-        id: instance.id,
+        id: instance.nativeId,
         nativeRenderer: container.nativeRenderer,
         flushMutations: () => container.renderer.flushMutations(),
       }),
@@ -136,11 +105,11 @@ function attachHostMethods(instance: Instance): PublicInstance {
   } else if (instance.type === "img") {
     const img = instance as ImgInstance
     img.setImage = (bytes) => {
-      container.nativeRenderer.setImage?.(img.id, bytes as Buffer)
+      container.nativeRenderer.setImage?.(img.nativeId, bytes as Buffer)
     }
     img.setImagePixels = (width, height, pixels, options) => {
       container.nativeRenderer.setImagePixels?.(
-        img.id,
+        img.nativeId,
         width,
         height,
         pixels as Buffer,
@@ -148,15 +117,11 @@ function attachHostMethods(instance: Instance): PublicInstance {
       )
     }
   }
-  if (!isPublicInstance(instance)) {
-    throw new Error(`Host element ${instance.id} is missing its focus methods.`)
-  }
-  return instance
 }
 
 function attachTextControlMethods(control: TextControlInstance, container: Container): void {
   const host = {
-    id: control.id,
+    id: control.nativeId,
     nativeRenderer: container.nativeRenderer,
     flushMutations: () => container.renderer.flushMutations(),
   }
@@ -172,20 +137,8 @@ function attachTextControlMethods(control: TextControlInstance, container: Conta
 
 function adopt(parent: Instance | undefined, child: Instance | TextInstance): void {
   if (!("type" in child)) return
-  if (parent) child.parentId = parent.id
+  if (parent) child.parentId = parent.nativeId
   else delete child.parentId
-}
-
-function stateFor(node: HostNode): HostNodeState {
-  const state = hostNodeStates.get(node)
-  if (!state) {
-    throw new Error(`GPUIX host node ${node.id} does not belong to a root`)
-  }
-  return state
-}
-
-function containerFor(node: HostNode): Container {
-  return stateFor(node).container
 }
 
 function rendererFor(node: HostNode): MutationRenderer {
@@ -208,9 +161,9 @@ function syncEventListeners(container: Container, instance: Instance): void {
   listeners.attach({
     eventHandlers: container.eventHandlers,
     renderer: container.renderer,
-    elementId: instance.id,
+    elementId: instance.nativeId,
   })
-  if (instance.type === "nativeview") syncNativeviewProps(container, instance.id, instance.props as Record<string, unknown>)
+  if (instance.type === "nativeview") syncNativeviewProps(container, instance.nativeId, instance.props as Record<string, unknown>)
   const record = instance.props as Record<string, unknown>
   for (const propName in record) {
     const eventType = EVENT_TYPE_BY_PROP.get(propName)
@@ -370,29 +323,29 @@ function diffCustomProps(
  * the commit phase. Abandoned concurrent renders stay as collectable JS
  * objects and never enter the native mutation queue.
  */
-function materialize(node: HostNode): HostNodeState {
+function materialize(node: HostNode): ReturnType<typeof stateFor> {
   const state = stateFor(node)
   if (state.mounted) return state
 
   const renderer = state.container.renderer
   if ("type" in node) {
-    renderer.createElement(node.id, node.type)
-    state.container.instances.set(node.id, node)
-    if (state.hidden) renderer.setStyle(node.id, hiddenStyle(node.props.style))
-    else sendStyle(renderer, node.id, node.props)
-    syncMotionBindings(state.container, node.id, node.props.style, node.type)
+    renderer.createElement(node.nativeId, node.type)
+    state.container.instances.set(node.nativeId, node)
+    if (state.hidden) renderer.setStyle(node.nativeId, hiddenStyle(node.props.style))
+    else sendStyle(renderer, node.nativeId, node.props)
+    syncMotionBindings(state.container, node.nativeId, node.props.style, node.type)
     syncEventListeners(state.container, node)
-    syncCustomProps(renderer, node.id, node.type, node.props)
+    syncCustomProps(renderer, node.nativeId, node.type, node.props)
   } else {
-    renderer.createElement(node.id, "#text")
-    renderer.setText(node.id, node.text)
+    renderer.createElement(node.nativeId, "#text")
+    renderer.setText(node.nativeId, node.text)
   }
   state.mounted = true
 
   if (state.initialChildren) {
     for (const child of state.initialChildren) {
       materialize(child)
-      renderer.appendChild(node.id, child.id)
+      renderer.appendChild(node.nativeId, child.nativeId)
     }
     state.initialChildren = undefined
   }
@@ -403,6 +356,55 @@ function materialize(node: HostNode): HostNodeState {
 export function publicInstanceById(container: Container, id: number): PublicInstance | undefined {
   const instance = container.instances.get(id)
   return instance && attachHostMethods(instance)
+}
+
+/**
+ * Makes the window's `<html>`, `<head>` and `<body>` as React makes an element and mounts them as the
+ * native root, so a root's content and a portal into `document.body` go through the same
+ * `body`. `base` is the container before it has them.
+ */
+export function installDocumentElements(base: Omit<Container, "html" | "head" | "body">): Container {
+  // `html`, `head` and `body` are assigned below, before anything reads them.
+  const container = base as Container
+  const html = createHostElement(
+    nextId(container),
+    ROOT_ELEMENT_TYPES.html,
+    { style: { ...ROOT_ELEMENT_STYLE } },
+    container
+  )
+  const head = createHostElement(
+    nextId(container),
+    ROOT_ELEMENT_TYPES.head,
+    { style: { ...ROOT_HEAD_STYLE } },
+    container
+  )
+  const body = createHostElement(
+    nextId(container),
+    ROOT_ELEMENT_TYPES.body,
+    { style: { ...ROOT_ELEMENT_STYLE } },
+    container
+  )
+  container.html = html
+  container.head = head
+  container.body = body
+  for (const child of [head, body]) {
+    adopt(html, child)
+    linkChild(html, child)
+  }
+  materialize(html)
+  materialize(head)
+  materialize(body)
+  container.renderer.appendChild(html.nativeId, head.nativeId)
+  container.renderer.appendChild(html.nativeId, body.nativeId)
+  container.renderer.setRoot(html.nativeId)
+  return container
+}
+
+/** Destroys `<html>` and, with it, `<head>` and `<body>`, once the app's nodes are out of them. */
+export function destroyDocumentElements(container: Container): void {
+  if (container.instances.get(container.html.nativeId) !== container.html) return
+  container.renderer.destroyElement(container.html.nativeId)
+  container.renderer.flushMutations()
 }
 
 const portalContainers = new WeakMap<Instance, Container>()
@@ -441,17 +443,7 @@ export const hostConfig = {
     rootContainerInstance: Container,
     _hostContext: HostContext
   ): Instance {
-    const instance: Instance = {
-      id: nextId(rootContainerInstance),
-      type,
-      props,
-    }
-    hostNodeStates.set(instance, {
-      container: rootContainerInstance,
-      mounted: false,
-      hidden: false,
-    })
-    return instance
+    return createHostElement(nextId(rootContainerInstance), type, props, rootContainerInstance)
   },
 
   appendChild(parent: Instance, child: Instance | TextInstance): void {
@@ -459,7 +451,8 @@ export const hostConfig = {
     const parentState = materialize(parent)
     materialize(child)
     adopt(parent, child)
-    parentState.container.renderer.appendChild(parent.id, child.id)
+    linkChild(parent, child)
+    parentState.container.renderer.appendChild(parent.nativeId, child.nativeId)
   },
 
   // React only calls this from the deletion path, never to move a node, so the
@@ -468,7 +461,8 @@ export const hostConfig = {
   // only, so nothing else would ever destroy a `HostText`.
   removeChild(parent: Instance, child: Instance | TextInstance): void {
     const container = containerFor(parent)
-    const destroyed = container.renderer.destroyElement(child.id)
+    unlinkChild(child)
+    const destroyed = container.renderer.destroyElement(child.nativeId)
     for (const id of destroyed) {
       unregisterEventHandlers(container.eventHandlers, id)
     }
@@ -483,27 +477,29 @@ export const hostConfig = {
     const parentState = materialize(parent)
     materialize(child)
     adopt(parent, child)
-    parentState.container.renderer.insertBefore(parent.id, child.id, beforeChild.id)
+    linkChild(parent, child, beforeChild)
+    parentState.container.renderer.insertBefore(parent.nativeId, child.nativeId, beforeChild.nativeId)
   },
 
-  // A window's root has one child, so there is nothing to order. A portal's
-  // children share their target with whatever else it holds, and React places
-  // one before another whenever their keys reorder.
+  // The children of a window's root and of a portal share their target, `body` or the
+  // portal's, with whatever else it holds, and React places one before another whenever
+  // their keys reorder.
   insertInContainerBefore(
     container: Container,
     child: Instance,
     beforeChild: Instance
   ): void {
-    const target = container.portalTarget
-    if (!target) return
+    const target = container.portalTarget ?? container.body
     assertPlacement(target, child)
     materialize(child)
     adopt(target, child)
-    container.renderer.insertBefore(target.id, child.id, beforeChild.id)
+    linkChild(target, child, beforeChild)
+    container.renderer.insertBefore(target.nativeId, child.nativeId, beforeChild.nativeId)
   },
 
   removeChildFromContainer(parent: Container, child: Instance): void {
-    const destroyed = parent.renderer.destroyElement(child.id)
+    unlinkChild(child)
+    const destroyed = parent.renderer.destroyElement(child.nativeId)
     for (const id of destroyed) {
       unregisterEventHandlers(parent.eventHandlers, id)
     }
@@ -549,17 +545,7 @@ export const hostConfig = {
     rootContainerInstance: Container,
     _hostContext: HostContext
   ): TextInstance {
-    const instance: TextInstance = {
-      id: nextId(rootContainerInstance),
-      text,
-      parentId: null,
-    }
-    hostNodeStates.set(instance, {
-      container: rootContainerInstance,
-      mounted: false,
-      hidden: false,
-    })
-    return instance
+    return createHostText(nextId(rootContainerInstance), text, rootContainerInstance)
   },
 
   scheduleTimeout: setTimeout,
@@ -601,18 +587,24 @@ export const hostConfig = {
     // their style, so send it only when it did.
     if (!sameStyle(oldProps.style, newProps.style)) {
       container.renderer.setStyle(
-        instance.id,
+        instance.nativeId,
         state.hidden ? hiddenStyle(newProps.style) : (splitMotionStyle(newProps.style).style ?? {})
       )
-      syncMotionBindings(container, instance.id, newProps.style, instance.type)
+      syncMotionBindings(container, instance.nativeId, newProps.style, instance.type)
     }
     diffEventListeners(instance, oldProps, newProps)
     if (instance.type === "nativeview") {
-      diffNativeviewProps(container, instance.id, oldProps, newProps)
+      diffNativeviewProps(container, instance.nativeId, oldProps, newProps)
     }
     // Custom prop diff (for non-div/text elements)
-    diffCustomProps(container.renderer, instance.id, instance.type, oldProps, newProps)
-    instance.props = newProps
+    diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
+    if (hasMutationObservers()) {
+      recordAttributeChanges(instance, new Set([...Object.keys(oldProps), ...Object.keys(newProps)]), () => {
+        instance.props = newProps
+      })
+    } else {
+      instance.props = newProps
+    }
   },
 
   commitTextUpdate(
@@ -620,26 +612,26 @@ export const hostConfig = {
     _oldText: string,
     newText: string
   ): void {
-    rendererFor(textInstance).setText(textInstance.id, newText)
+    rendererFor(textInstance).setText(textInstance.nativeId, newText)
+    const oldValue = textInstance.text
     textInstance.text = newText
+    queueCharacterDataMutation(textInstance, oldValue)
   },
 
   appendChildToContainer(container: Container, child: Instance): void {
-    const target = container.portalTarget
+    const target = container.portalTarget ?? container.body
     assertPlacement(target, child)
     materialize(child)
     adopt(target, child)
-    if (target) {
-      materialize(target)
-      container.renderer.appendChild(target.id, child.id)
-    } else {
-      container.renderer.setRoot(child.id)
-    }
+    materialize(target)
+    linkChild(target, child)
+    container.renderer.appendChild(target.nativeId, child.nativeId)
   },
 
   appendInitialChild(parent: Instance, child: Instance | TextInstance): void {
     assertPlacement(parent, child)
     adopt(parent, child)
+    linkChild(parent, child)
     const state = stateFor(parent)
     state.initialChildren ??= []
     state.initialChildren.push(child)
@@ -650,12 +642,12 @@ export const hostConfig = {
     // keeps the layout box, so replacing the whole style here would collapse
     // the box and lose every other style on the element.
     stateFor(instance).hidden = true
-    rendererFor(instance).setStyle(instance.id, hiddenStyle(instance.props.style))
+    rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(instance.props.style))
   },
 
   unhideInstance(instance: Instance, props: Props): void {
     stateFor(instance).hidden = false
-    rendererFor(instance).setStyle(instance.id, splitMotionStyle(props.style).style ?? {})
+    rendererFor(instance).setStyle(instance.nativeId, splitMotionStyle(props.style).style ?? {})
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},
@@ -707,7 +699,7 @@ export const hostConfig = {
 
   detachDeletedInstance(instance: Instance): void {
     const container = containerFor(instance)
-    const destroyed = container.renderer.destroyElement(instance.id)
+    const destroyed = container.renderer.destroyElement(instance.nativeId)
     for (const id of destroyed) {
       unregisterEventHandlers(container.eventHandlers, id)
     }

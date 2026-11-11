@@ -60,6 +60,7 @@ export {
 } from "./cpu-throttle.js"
 export type { MacCpuThrottle } from "./cpu-throttle.js"
 
+export { getComputedStyle, type ComputedStyle } from "./computed-style.js"
 export { decodeWireBatchForTest, encodeWireBatchForTest, type DecodedOp } from "./wire-testing.js"
 
 /**
@@ -414,6 +415,7 @@ interface NativeTestRendererApi
   simulatePointerLockLost(): void
   takeSimulatedWindowActions(): string[]
   getScrollMetrics(elementId: number): number[] | null
+  getComputedStyle(elementId: number, pseudoElement: boolean): string[] | null
   scrollByKey(key: string, shift: boolean): void
   setImage(elementId: number, bytes: Buffer | Uint8Array): void
   /** Encoded bytes for the `blob:` URL a `url()` background names. */
@@ -1178,11 +1180,17 @@ export class TestRenderer implements NativeRenderer {
     return map
   }
 
-  /** Get the root element. */
+  /** Get the root element of the app: the last top-level node, which is in `<body>` in `<html>`,
+   *  the native root. */
   getRoot(): TestElement | undefined {
     const rootId = this.native.getRootId()
     if (rootId == null) return undefined
-    return this.buildElementMap().get(rootId)
+    const elements = this.buildElementMap()
+    const html = elements.get(rootId)
+    if (html?.type !== "html") return html
+    const body = html.children.map((id) => elements.get(id)).find((child) => child?.type === "body")
+    const top = body?.children.at(-1)
+    return top === undefined ? undefined : elements.get(top)
   }
 
   /** Get an element by ID. */
@@ -1835,6 +1843,12 @@ export class TestRenderer implements NativeRenderer {
    *  null for an element that has not been painted. */
   getScrollMetrics(elementId: number): number[] | null {
     return this.native.getScrollMetrics(elementId)
+  }
+
+  /** `[name, value, name, value, ...]` of the computed style of an element, or null while it is not in
+   *  the document. See `getComputedStyle`. */
+  getComputedStyle(elementId: number, pseudoElement: boolean): string[] | null {
+    return this.native.getComputedStyle(elementId, pseudoElement)
   }
 
   setImage(elementId: number, bytes: Buffer | Uint8Array): void {

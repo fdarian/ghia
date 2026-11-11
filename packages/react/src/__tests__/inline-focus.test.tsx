@@ -3,7 +3,7 @@
 /// handle, and a press on its glyphs focuses it.
 
 import React from "react"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import { document, window, type DomEvent } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
 
@@ -45,9 +45,22 @@ function cell(testRoot: TestRoot, testId: string, column: number, line = 0) {
 }
 
 describeNative("focus on inline boxes", () => {
+  // A root that is not unmounted keeps its `window` subscriptions after the next test renderer
+  // disposes its renderer, and the next `window.addEventListener` then resyncs a disposed one.
+  const mounted = new Set<TestRoot>()
+  afterEach(() => {
+    for (const testRoot of [...mounted]) testRoot.unmount()
+  })
+
   function setup(node: React.ReactNode) {
     columnWidth()
     const testRoot = createTestRoot({ width: 400, height: 300 })
+    mounted.add(testRoot)
+    const unmount = testRoot.unmount
+    testRoot.unmount = () => {
+      mounted.delete(testRoot)
+      unmount()
+    }
     testRoot.render(node)
     const focused = () =>
       testRoot.renderer.getElement(testRoot.renderer.getFocusedElementId())?.testId ?? null

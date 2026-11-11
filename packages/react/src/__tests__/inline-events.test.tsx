@@ -260,18 +260,18 @@ describeNative("events on inline boxes", () => {
 
   it("clicks a span by element, with the span as the target and the text in the path", () => {
     const seen: Array<[string, unknown]> = []
-    let span: { id: number } | undefined
+    let span: { nativeId: number } | undefined
     const testRoot = setup(
       <div style={{ width: 400 }}>
         <div testId="p" style={TEXT} onClick={(event) => seen.push(["text", event.target])}>
           Hello{" "}
-          <span ref={(element) => (span = element as unknown as { id: number })} onClick={() => seen.push(["span", null])}>
+          <span ref={(element) => (span = element as unknown as { nativeId: number })} onClick={() => seen.push(["span", null])}>
             world
           </span>
         </div>
       </div>
     )
-    testRoot.renderer.clickElement(span!.id)
+    testRoot.renderer.clickElement(span!.nativeId)
     expect(seen.map(([name]) => name)).toEqual(["span", "text"])
     expect(seen[1][1]).toBe(span)
   })

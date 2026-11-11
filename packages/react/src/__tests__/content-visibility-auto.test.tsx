@@ -2083,9 +2083,16 @@ describeNative("content a read forced keeps its layout across the draws that ski
     if (verifying) expect(renderer.getRetainedCounters().mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
   }
 
+  /** `<html>` and `<body>` are on the spine of every build. */
+  const WINDOW_ROOTS = 2
+
   /** What a read costs at most when only the host and the spine are built: the page, the boxes beside the host and the host. A
    *  verified pass builds the page a second time to compare it, which is not the cost being measured. */
-  const BUILT_AT_MOST: Record<string, number> = { firstReadKeptInside: 4, firstReadKeptNested: 9, firstReadKeptShown: 4 }
+  const BUILT_AT_MOST: Record<string, number> = {
+    firstReadKeptInside: 4 + WINDOW_ROOTS,
+    firstReadKeptNested: 9 + WINDOW_ROOTS,
+    firstReadKeptShown: 4 + WINDOW_ROOTS,
+  }
   const SKIPS_AT_LEAST: Record<string, number> = { firstReadKeptInside: 8, firstReadKeptNested: 2, firstReadKeptShown: 8 }
 
   for (const name of ["firstReadKeptInside", "firstReadKeptNested", "firstReadKeptShown"]) {
@@ -2165,7 +2172,7 @@ describeNative("content a read forced keeps its layout across the draws that ski
       const changed = cost(renderer, idsOf(renderer), names)
       sameRects("recoloured", changed.rects, FIRST_READS.firstReadKeptInside![2]!.rects!)
       if (!verifying) {
-        expect(changed.built, "the card with the line, the host and the page").toBeLessThanOrEqual(8)
+        expect(changed.built, "the card with the line, the host and the page").toBeLessThanOrEqual(8 + WINDOW_ROOTS)
         expect(changed.skips, "the other cards").toBeGreaterThanOrEqual(7)
       }
       noMismatches(renderer)
@@ -2194,7 +2201,7 @@ describeNative("content a read forced keeps its layout across the draws that ski
       const moved = cost(renderer, idsOf(renderer), names)
       sameRects("a line grew", moved.rects, FIRST_READS.firstReadKeptInside![1]!.rects!)
       if (!verifying) {
-        expect(moved.built, "the card with the line, the host and the page: the cards after it are not built").toBeLessThanOrEqual(8)
+        expect(moved.built, "the card with the line, the host and the page: the cards after it are not built").toBeLessThanOrEqual(8 + WINDOW_ROOTS)
         expect(moved.skips, "and the other seven cards are skipped, the five that moved included").toBeGreaterThanOrEqual(7)
       }
       noMismatches(renderer)
@@ -2262,7 +2269,7 @@ describeNative("content a read forced keeps its layout across the draws that ski
         // The draw before the first move found the scrollers new, at their origin: that is not a change, so the records of the
         // cards around them stay and every move, the first included, skips the cards where they are, scrollers and text and all
         // (the first built 21 elements and skipped 6 when a new handle was a change).
-        if (!verifying) expect(now.built, `at ${above}: the page and the host, not the cards that only moved`).toBeLessThanOrEqual(4)
+        if (!verifying) expect(now.built, `at ${above}: the page and the host, not the cards that only moved`).toBeLessThanOrEqual(4 + WINDOW_ROOTS)
         if (!verifying) expect(now.skips, `at ${above}: the cards are skipped`).toBeGreaterThanOrEqual(6)
         frames(root.renderer)
       })
@@ -2337,7 +2344,7 @@ describeNative("content a read forced keeps its layout across the draws that ski
         // times. The sixth reaches the edge of the viewport before or after the move, and is built. Moved back to where it was
         // recorded (step 2) the cards are where their records are, and none is moved.
         expect(steps.map((now) => now.translations), "cards put where they are now").toEqual([0, 7, 0, 7, 7])
-        steps.slice(1).forEach((now, step) => expect(now.built, `step ${step + 1}: the sixth card, the page and the viewport`).toBeLessThanOrEqual(8))
+        steps.slice(1).forEach((now, step) => expect(now.built, `step ${step + 1}: the sixth card, the page and the viewport`).toBeLessThanOrEqual(8 + WINDOW_ROOTS))
       }
       noMismatches(root.renderer)
     } finally {
@@ -2382,7 +2389,7 @@ describeNative("content a read forced keeps its layout across the draws that ski
       const second = cost(renderer, ids, expected.names!)
       sameRects("after a layout invalidation and a draw", second.rects, expected.rects!)
       if (!verifying) {
-        expect(second.built).toBeLessThanOrEqual(4)
+        expect(second.built).toBeLessThanOrEqual(4 + WINDOW_ROOTS)
         expect(second.skips).toBeGreaterThanOrEqual(8)
       }
       noMismatches(renderer)

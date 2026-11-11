@@ -432,6 +432,12 @@ export declare class GpuixRenderer {
    * if it has not been painted.
    */
   getScrollMetrics(elementId: number): Array<number> | null
+  /**
+   * The values `getComputedStyle` reads of an element, as `[name, value, name, value, ...]`, or
+   * null while the element is not in the document. `pseudo_element` asks for a `::before` or
+   * `::after` the element does not have. Laid out as `getBoundingClientRect` is, never stale.
+   */
+  getComputedStyle(elementId: number, pseudoElement: boolean): Array<string> | null
   /** The event types `window` or `document` listens for. Replaces the set. */
   setWindowEventListeners(types: Array<string>): void
   /**
@@ -1259,6 +1265,11 @@ export declare class TestGpuixRenderer {
    * if it has not been painted.
    */
   getScrollMetrics(elementId: number): Array<number> | null
+  /**
+   * The values `getComputedStyle` reads of an element, as `[name, value, name, value, ...]`, or
+   * null while the element is not in the document. See `GpuixRenderer::get_computed_style`.
+   */
+  getComputedStyle(elementId: number, pseudoElement: boolean): Array<string> | null
   /**
    * The DOM scroll position of a scrollable element, `[scrollLeft, scrollTop]` (zero or
    * more), or null if it is not a scroll container or a `<virtual-list>`.

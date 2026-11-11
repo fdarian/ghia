@@ -259,7 +259,7 @@ async function replay(scenario: Case): Promise<Snapshot[]> {
     const read = (): Omit<Snapshot, "step"> => {
       frame()
       const mounted = element.current !== null
-      const bounds = mounted ? renderer.getElementBounds(element.current!.id) : null
+      const bounds = mounted ? renderer.getElementBounds(element.current!.nativeId) : null
       return {
         width: bounds ? bounds.width : null,
         height: bounds ? bounds.height : null,
@@ -441,7 +441,7 @@ async function replayApi(scenario: ApiCase): Promise<ApiSnapshot[]> {
   /** A read of the page that forces the style and layout. */
   const layout = (): { width: number; height: number } | null => {
     const mounted = element.current
-    return mounted ? renderer.getElementBounds(mounted.id) : null
+    return mounted ? renderer.getElementBounds(mounted.nativeId) : null
   }
   const tracked: Animation[] = []
   const finishedSeen: Promise<Animation>[][] = []
@@ -711,7 +711,7 @@ async function replayTree(scenario: TreeCase): Promise<TreeSnapshot[]> {
   )
   const show = () => {
     render(view(root))
-    renderer.getElementBounds(instances.get(root.id)!.id)
+    renderer.getElementBounds(instances.get(root.id)!.nativeId)
   }
   const parentOf = (id: string): Node => {
     for (const node of nodes.values()) if (node.children.some((child) => child.id === id)) return node
@@ -954,7 +954,7 @@ describeNative("Web animations beyond what Chrome can pin on a paused page", () 
     it("answers idle for a run cancelled in the task of the frame that cancelled it, which native keeps until the app lets go", async () => {
       const { render, renderer, element, target, transition: listed, unmount } = setup()
       const transition = listed()
-      const id = renderer.getAnimations(element.current!.id)[0].id
+      const id = renderer.getAnimations(element.current!.nativeId)[0].id
       // A cancel rejects the promise held when it comes, and leaves a new pending one.
       const held = transition.finished
       renderer.clockFastForward(300)
@@ -979,7 +979,7 @@ describeNative("Web animations beyond what Chrome can pin on a paused page", () 
     it("releases the run of an event no animation object was made for", () => {
       const { render, renderer, element, target, unmount } = setup()
       // Native only: `element.getAnimations()` is what makes the object.
-      const id = renderer.getAnimations(element.current!.id)[0].id
+      const id = renderer.getAnimations(element.current!.nativeId)[0].id
       renderer.clockFastForward(300)
       render(target(80))
       renderer.clockFastForward(0)
@@ -992,7 +992,7 @@ describeNative("Web animations beyond what Chrome can pin on a paused page", () 
     it("keeps answering for a transition that finished after its event was heard, until the style moves off its end", () => {
       const { render, renderer, element, target, transition: listed, unmount } = setup()
       const transition = listed()
-      const id = renderer.getAnimations(element.current!.id)[0].id
+      const id = renderer.getAnimations(element.current!.nativeId)[0].id
       renderer.clockFastForward(1500)
       renderer.dispatchNativeEvents()
       expect(renderer.getAnimation(id).playState).toBe("finished")
@@ -1183,7 +1183,7 @@ describeNative("What getKeyframes() and getTiming() read, against Chrome", () =>
             try {
               render(element(false))
               renderer.clockFastForward(0)
-              renderer.getElementBounds(target.current!.id)
+              renderer.getElementBounds(target.current!.nativeId)
               render(element(true))
               renderer.clockFastForward(0)
               renderer.dispatchNativeEvents()

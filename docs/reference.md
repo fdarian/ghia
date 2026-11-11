@@ -3177,11 +3177,11 @@ Use a ref to call the same renderer scroll methods as a plain scroll container:
 ```tsx
 function Results({ rows }: { rows: Result[] }) {
   const renderer = useGpuixRequired()
-  const listRef = useRef<{ id: number } | null>(null)
+  const listRef = useRef<{ nativeId: number } | null>(null)
 
   const reveal = (index: number) => {
     if (listRef.current) {
-      renderer.scrollToItem?.(listRef.current.id, index)
+      renderer.scrollToItem?.(listRef.current.nativeId, index)
     }
   }
 
@@ -4908,8 +4908,26 @@ A host element (a React ref, a Solid `HostElement`) has the members a library wr
 | `addEventListener(type, listener, options?)`, `removeEventListener(type, listener, options?)` | For any event type, with the DOM's arguments: `listener` is a function or an object with `handleEvent`, `options` is `{ capture, once, passive, signal }` or the `capture` boolean. The same function in the same phase is added once. `once` removes it before it runs, `passive` makes `event.preventDefault()` do nothing while it runs, and a `signal` removes it when it aborts (an aborted one adds nothing). A listener is called with the element as `this`. A type native never emits (`touchstart`, `touchend`, `touchcancel`) is accepted and never fires. |
 | `ownerDocument` | The `document` object the adapters export. Its `defaultView` is the global `window` (`globalThis`), which has `setTimeout`, `requestAnimationFrame` and `ResizeObserver`, so `element.ownerDocument.defaultView` works as the window of a library that asks for it. |
 | `isConnected` | True while the element is in the tree of a mounted root. |
-| `getAttribute(name)` | The prop of that name as a string (the name is matched without regard to case), or `null` when the element was not given it or its value is a function or an object (`onClick`, `style`). `data-index={5}` reads `"5"`; `false`, `null` and `undefined` read `null` and `true` reads `""`, except for `data-*` and `aria-*`, where `false` reads `"false"` and `true` `"true"`. |
+| `getAttribute(name)` | The prop whose attribute name is `name` as a string (a prop is an attribute under the name the DOM gives it: lowercase on an HTML element, so `tabIndex={0}` is `tabindex` and `getAttribute("tabIndex")` finds it, `className` is `class` and `htmlFor` is `for`; an SVG element keeps the case of its props, `viewBox`, and matches names exactly), or `null` when the element was not given it or its value is a function or an object (`onClick`, `style`). `data-index={5}` reads `"5"`; `false`, `null` and `undefined` read `null` and `true` reads `""`, except for `data-*` and `aria-*`, where `false` reads `"false"` and `true` `"true"`. |
 | `offsetWidth`, `offsetHeight` | The border box's layout size, rounded half up, before any `transform` (a `scale(2)` element has the offset size it had without it; `getBoundingClientRect()` is the transformed box). The read lays out first, as `getBoundingClientRect` does. `0` for an element that is not mounted or has no box. `renderer.getElementBounds(id)` carries the unrounded size as `layoutWidth` and `layoutHeight`. |
+
+### DOM classes and the tree
+
+Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `Element` and `Node` hold for every host element, `SVGElement` replaces `HTMLElement` for an `<svg>` and the shapes in it, and a text child is a `Text` (a `CharacterData`). `Node`, `Element`, `HTMLElement`, `SVGElement`, `Text`, `CharacterData`, `Document`, `DocumentFragment` and `ShadowRoot` are exported by `@ghia/native/host` and installed as globals where the runtime has none (not on the browser build). Two copies of `@ghia/native` share one set of classes. `new HTMLElement()` and the other public classes throw `TypeError: Illegal constructor`. `document` is a `Document`. `DocumentFragment` and `ShadowRoot` are never instantiated, so an `instanceof` check against them is `false`.
+
+| Member | |
+|---|---|
+| `nodeType`, `nodeName` | `1` and the tag name for an element, `3` and `#text` for text, `9` and `#document` for `document`. |
+| `tagName`, `localName` | `localName` is the element type as written. `tagName` is it uppercased for an HTML element (`DIV`, `VIRTUAL-LIST`) and as written for an SVG one (`linearGradient`). |
+| `parentNode`, `parentElement`, `childNodes`, `firstChild`, `lastChild`, `previousSibling`, `nextSibling`, `hasChildNodes()` | The tree as the framework built it, text included. `childNodes` is a copy: an array, not a live `NodeList`. |
+| `children`, `childElementCount`, `firstElementChild`, `lastElementChild`, `previousElementSibling`, `nextElementSibling` | The same, elements only. `children` is an array, not an `HTMLCollection`. |
+| `contains(node)`, `getRootNode()`, `compareDocumentPosition(node)` | `contains` includes the node itself. `getRootNode()` is `document` for a mounted node and the top of its tree otherwise. `compareDocumentPosition` gives the `DOCUMENT_POSITION_*` bits (`DISCONNECTED`, `PRECEDING`, `FOLLOWING`, `CONTAINS`, `CONTAINED_BY`); two trees that are not in one document are `DISCONNECTED` and `IMPLEMENTATION_SPECIFIC` with a stable order. `document.contains(node)` is `node.isConnected`. |
+| `textContent` | The text of the node and its descendants. Read only: there is no setter yet. |
+| `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `className` or `class` prop (`""` without one), an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a frozen read-only snapshot of the `data-*` props with the names in camel case (`data-row-id` is `rowId`). |
+
+Every window root is a real `<html>` with a `<head>` and a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.head` the `<head>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; all four are `null` while no root is mounted, and with several windows they are those of the window that mounted last (the rule `matchMedia` follows). `html.parentNode` is `document`, `head.parentNode` and `body.parentNode` are `html` (`documentElement.children` is `[head, body]`), a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin; they add no accessibility node. `head` is `display: none`: it has no box, and an element appended to it is never drawn, laid out or hit, though it is a real element in the tree (a library that prepends a node to `document.head` finds one).
+
+Nothing here changes the tree: `setAttribute`, `appendChild` and the other writing members are not there. `el.id` is the `id` prop as a string, `""` without one, as in the DOM (read only for now). The number native knows an element by, which the renderer methods take, is `el.nativeId` (`renderer.scrollToItem(ref.nativeId, i)`).
 
 The `on*` prop and the listeners of one type and phase are one list, called in the order the DOM gives: a listener in the order it was added, the prop where it was first set (so before the listeners added after it), and a prop that is set again after it was unset last. A change of the prop replaces its handler in place. At the target the capture listeners run first, then the bubble ones, as in current browsers.
 
@@ -4955,7 +4973,44 @@ own target, so `error`, `unhandledrejection` and `message` listeners keep
 working. `scrollTo`, `scroll` and `scrollBy` exist and do nothing: an app window
 has no document to scroll, as with a page that does not overflow. Libraries that
 check `typeof window` for a browser, such as TanStack Query, see a client.
-Nothing else is installed: `location`, `localStorage`, `innerWidth` and the rest
+`getComputedStyle`, `matchMedia` and `IntersectionObserver` are globals too, and
+so is a handful of members of `window`: `innerWidth` and `innerHeight` (the window's
+content size in CSS pixels, read live from the window that mounted last, and an
+error before any root is mounted, as for `matchMedia`), `visualViewport`,
+`frameElement` (`null`) and `parent`, `top` and `self` (the global object, unless the
+runtime defines them). `visualViewport` has `width` and `height` equal to the inner size,
+`offsetLeft`, `offsetTop`, `pageLeft` and `pageTop` of 0 (the document cannot scroll),
+`scale` of 1, and `addEventListener` and `removeEventListener` for `resize` (a listener
+added before any root is mounted is accepted, though `width` and `height` throw until one is). `window` gets
+a `resize` event too: both are sent when the size of the window that mounted last changes
+(not for a change of OS preference), `visualViewport` first, from one subscription that
+exists only while either has a listener, and a listener added before any root is mounted
+starts to hear the first one that is. The event's `target` and `currentTarget` are the
+global `window`, and `visualViewport` for its own. It neither bubbles nor can be cancelled, as in Chrome.
+`MutationObserver` and `MutationRecord` are globals too, with the standard's semantics.
+`observe(node, { childList, attributes, characterData, subtree, attributeOldValue,
+characterDataOldValue, attributeFilter })` throws a `TypeError` for the option sets the standard
+rejects (none of the three kinds, `attributeOldValue` or `attributeFilter` with `attributes: false`),
+and observing the same node again replaces its options. Records go to the observer in one
+microtask per batch, in the order the observers were made, with `type`, `target`, `addedNodes`,
+`removedNodes`, `previousSibling`, `nextSibling`, `attributeName`, `attributeNamespace` (`null`)
+and `oldValue`; `takeRecords()` empties the queue and `disconnect()` drops it. An observer does not
+keep the nodes it observes alive, as in the standard: an unmounted node nothing else refers to is
+collected with its registration. A callback that captures the node keeps it alive for as long as
+the observer is reachable, and both are collected once the observer is dropped too. The adapters report
+the changes they make to their tree: a node placed or removed (a move is a removal, then an
+insertion), a text change (`characterData`) and a prop change. An attribute is what `getAttribute`
+reads, so a record is made only when that string changed, with the old string as `oldValue`, and
+`attributeName` is the attribute's name (`tabindex` for a `tabIndex` prop, so an `attributeFilter`
+of `["tabindex"]` matches): `className` is the `class` attribute, and a handler, an object, `style` and `children` are no
+attribute and make no record. `html`, `head` and `body` are in the tree, so
+`observe(document.body, { childList: true, subtree: true })` sees the app's nodes. A subtree
+observer keeps hearing of changes inside a node that was removed from the subtree until its next
+delivery, as in the standard. With no observer alive each hook is one integer check and no node
+gets a field. Code that changes a host tree itself calls `queueChildListMutation`,
+`queueAttributeMutation` or `queueCharacterDataMutation` from `@ghia/native/host`
+([deviations](fork/deviations.md#observers-and-content-visibility) for what is not reported).
+Nothing else is installed: `location`, `localStorage` and the rest
 are missing, so reading them throws a `ReferenceError` or gives `undefined`. The browser (wasm) build runs in a real page and installs nothing.
 Installing twice is harmless. `isWebBuild`, exported by the adapters and
 `@ghia/native/host`, is `true` on the browser build and `false` on the native
@@ -4984,11 +5039,8 @@ There is one list for the whole app, not one per window
 A `window` or `document` listener hears every event that bubbles to the top of
 the tree (pointer, mouse, click, wheel), whether or not any element on the path
 listens. `window.addEventListener('pointermove', fn)` fires while the pointer is
-over bare background, where the event's `target` is the root element. A
-`pointermove` or `mousemove` inside the window but outside the root element's box
-has no element under it: it is aimed at the window, like a key with nothing
-focused, so `event.target` is `null` and only the `window` and `document`
-listeners run (no element handler, the root's included). Nothing fires while the
+over bare background, where the event's `target` is the element under it, `body`
+at the least (it fills the window). Nothing fires while the
 pointer is outside the window or over an `appRegion` drag area. Native produces
 only the types that have a listener on `window`, `document` or an element on the
 path, so adding the first listener of a type is what turns it on.
@@ -4998,6 +5050,45 @@ path, so adding the first listener of a type is what turns it on.
 It is current inside a `mousedown` handler, where it is still the element the
 press is about to take focus from. With several windows (one root each), it is
 the focused element of the window that heard a focus event last.
+
+`document.elementFromPoint(x, y)` and `document.elementsFromPoint(x, y)` take client
+coordinates in CSS pixels from the top left of the window that mounted last, and answer
+as [`getElementsAt`](#find-what-is-under-a-point) does, with the elements a `ref` gives:
+`elementsFromPoint` lists them topmost first and ends with `body` then `html`, and
+`elementFromPoint` is its first, or `null` for a point outside the window (the list is
+empty there). They are forced reads: the pending mutations are flushed and the window is
+laid out first, so an element mounted in the same turn is found, and an element with
+`pointer-events: none`, `visibility: hidden` or `display: none` is left out. A coordinate
+that is not finite throws a `TypeError`, and both throw before a root is mounted.
+
+`document.getSelection()` and `window.getSelection()` give the one `Selection` of the app
+(`Selection` is a global, and its constructor throws `Illegal constructor`). It is
+the [text selection](#text-selection) of the window that mounted last: `rangeCount` is 1
+while text is selected and 0 otherwise, `isCollapsed` is the opposite of that, `type` is
+`"Range"` or `"None"` (never `"Caret"`), `toString()` is the selected text (`""` for none),
+and `removeAllRanges()` and `empty()` clear it. Every member needs a mounted root. The rest
+of the DOM `Selection` (`getRangeAt`, `addRange`, `anchorNode`, ...) does not exist, because
+a selection here is a set of spans over painted text and not a range of nodes
+([deviations](fork/deviations.md#events-and-input)).
+
+`document` hears `selectionchange` when the selected text changes, by a drag, a
+clear, `removeAllRanges()` or `renderer.clearSelection()`. Like the event of `onSelectionChange`
+(`event.value` is the selected text, absent after a clear) it comes from the frame that
+changed the selection, and it is the one native signal: a `selectionchange` listener on
+`document` or `window` turns it on, as a root's `onSelectionChange` does. It does not bubble, so
+`window` hears it in the capture phase only, and `target` is `document`.
+
+### `getComputedStyle(element, pseudoElt?)`
+
+A read-only `CSSStyleDeclaration` of Chrome's resolved values, with camelCase members and
+`getPropertyValue`, `length`, `item` and iteration, and `--custom` properties; a write throws a
+`NoModificationAllowedError`. It is a forced read (the pending mutations are flushed and the
+window is laid out first, see [deviations](fork/deviations.md#forced-reads)) and reads the
+transitions and animations at the instant of the read. The properties are those a library reads
+(`COMPUTED_STYLE_PROPERTIES`, 82 of them); any other reads `""`. Lengths are px (the used value
+for `width`, `height`, `padding`, `margin` and the border widths), `transform` is `none` or a
+`matrix()`, colours are `rgb()` or `rgba()`, durations are in seconds. An element that is not in
+the document reads `""`. `::before` and `::after` read as a pseudo-element the element does not have.
 
 ### Tab and Escape are defaults
 
@@ -5798,8 +5889,8 @@ then wrap inside it with `focusNextWithin` / `focusPreviousWithin`.
 function onKeyDown(event: KeyEvent) {
   if (event.key !== 'Tab' || !panel) return
   event.preventDefault()
-  if (event.modifiers?.shift) renderer.focusPreviousWithin?.(panel.id)
-  else renderer.focusNextWithin?.(panel.id)
+  if (event.modifiers?.shift) renderer.focusPreviousWithin?.(panel.nativeId)
+  else renderer.focusNextWithin?.(panel.nativeId)
 }
 
 <div ref={setPanel} onKeyDown={onKeyDown}>
@@ -6819,11 +6910,10 @@ event: the same object a `ref` gives in that adapter (React's host instance,
 Solid's element), so they compare with `===` and a handler can call
 `event.target.getBoundingClientRect()`. During the `window` and `document`
 phases `currentTarget` is that object. `target` is `null` only for an event
-aimed at the window (a key with nothing focused, a pointer move outside the
-root), and `relatedTarget` is `null` when there is no other element. A native
+aimed at the window (a key with nothing focused), and `relatedTarget` is `null` when there is no other element. A native
 element id is still there as `event.elementId`, for the renderer methods that
 take one (`renderer.scrollTo(elementId, ...)`). `composedPath()` lists the
-elements the event travels through, target first and the root last, without
+elements the event travels through, target first and `html` last, without
 `window` and `document`.
 `x`/`y` are the same as `clientX`/`clientY`. `offsetX`/`offsetY` are relative
 to the target's padding edge, read from its laid-out border. Native only produces an event type when the
@@ -6985,7 +7075,13 @@ ancestors' `onClick`. A host ref has the same `click()`, and
 `select` that is `disabled`, or on an element inside one, as in HTML. A disabled
 `Button` or `SelectTrigger` is one too (see [Form control state](#form-control-state-disabled-enabled)).
 Every mouse and pointer event type has `pointerId` and `pointerType` as required
-fields: `1` and `"mouse"` for the mouse.
+fields: `1` and `"mouse"` for the mouse. A pointer event (`pointerdown`, `pointermove`,
+`pointerup`, `pointercancel`, `pointerover`, `pointerout`, `pointerenter`, `pointerleave`,
+`gotpointercapture`, `lostpointercapture`, and `click`, `auxclick` and `contextmenu`, which are
+PointerEvents in Chrome) also has `isPrimary`: `true`, because Ghia has one pointer, except on a
+`click`, `auxclick` or `contextmenu` that no pointer made (`pointerId` `-1`: Enter or Space on a
+button, the VoiceOver Press, `el.click()`), where it is `false`. Every event has `nativeEvent`, the event itself, which is what a library that wraps
+events reads the DOM event from (a React synthetic event has the same member).
 
 ### Pointer capture
 

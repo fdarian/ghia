@@ -63,7 +63,7 @@ describe.skipIf(!hasNativeTestRenderer)("getBoundingClientRect", () => {
     expect(late).toBeUndefined()
 
     setShown(true)
-    expect(app.renderer.getElementBounds(late!.id)).toMatchObject({ width: 70, height: 10 })
+    expect(app.renderer.getElementBounds(late!.nativeId)).toMatchObject({ width: 70, height: 10 })
   })
 
   it("is the border box, for an input as for a div", () => {
@@ -90,7 +90,7 @@ describe.skipIf(!hasNativeTestRenderer)("getBoundingClientRect", () => {
       </div>
     ))
     expect(hidden.getBoundingClientRect()).toMatchObject({ x: 10, y: 10, width: 50, height: 40 })
-    expect(app.renderer.getElementBounds(hidden.id)).toMatchObject({ width: 50, height: 40 })
+    expect(app.renderer.getElementBounds(hidden.nativeId)).toMatchObject({ width: 50, height: 40 })
   })
 
   it("reports a zero rect for an element without a box", () => {
@@ -109,6 +109,6 @@ describe.skipIf(!hasNativeTestRenderer)("getBoundingClientRect", () => {
       right: 0,
       bottom: 0,
     })
-    expect(app.renderer.getElementBounds(hidden.id)).toBeNull()
+    expect(app.renderer.getElementBounds(hidden.nativeId)).toBeNull()
   })
 })

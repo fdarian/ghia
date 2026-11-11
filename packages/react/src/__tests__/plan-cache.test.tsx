@@ -357,7 +357,8 @@ describeNative("the children plan cache", { timeout: 120_000 }, () => {
         renderer.dispatchNativeEvents()
         renderer.flush()
         renderer.drawFrame()
-        const page = renderer.toJSON()
+        // html, then head and body, then the page
+        const page = renderer.toJSON().children[1].children[0]
         const normal = page.children[0].id
         const pre = page.children[1].id
         const placeholder = page.children[1].children[0].id

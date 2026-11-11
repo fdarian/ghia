@@ -188,9 +188,9 @@ export const DialogPopup = forwardRef<PublicInstance, DialogPopupProps>(
     return (
       <DismissableLayer
         onEscapeKeyDown={() => context.setOpen(false)}
-        initialFocus={() => resolveFocusTarget(initialFocus, () => popupRef.current?.id ?? null)}
+        initialFocus={() => resolveFocusTarget(initialFocus, () => popupRef.current?.nativeId ?? null)}
         finalFocus={(previous) =>
-          resolveFocusTarget(finalFocus, () => context.triggerRef.current?.id ?? previous)
+          resolveFocusTarget(finalFocus, () => context.triggerRef.current?.nativeId ?? previous)
         }
       >
         <div
@@ -213,8 +213,8 @@ export const DialogPopup = forwardRef<PublicInstance, DialogPopupProps>(
             const popup = popupRef.current
             if (!popup) return
             event.preventDefault()
-            if (event.modifiers?.shift) renderer?.focusPreviousWithin?.(popup.id)
-            else renderer?.focusNextWithin?.(popup.id)
+            if (event.modifiers?.shift) renderer?.focusPreviousWithin?.(popup.nativeId)
+            else renderer?.focusNextWithin?.(popup.nativeId)
           }}
         />
       </DismissableLayer>

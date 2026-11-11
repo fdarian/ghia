@@ -153,7 +153,7 @@ export function Combobox({
     setOpenState(nextOpen)
     if (nextOpen) {
       queueMicrotask(() => {
-        if (inputRef.current) renderer?.focusElement?.(inputRef.current.id)
+        if (inputRef.current) renderer?.focusElement?.(inputRef.current.nativeId)
       })
     }
   }

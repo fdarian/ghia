@@ -2662,43 +2662,72 @@ describeNative("events", () => {
         {
           "children": [
             {
-              "children": [
-                {
-                  "id": 1,
-                  "text": "Hello",
-                  "type": "#text",
-                },
-              ],
               "id": 2,
-              "type": "div",
+              "style": {
+                "display": "none",
+              },
+              "type": "head",
             },
             {
               "children": [
                 {
                   "children": [
                     {
-                      "id": 3,
-                      "text": "Click me",
-                      "type": "#text",
+                      "children": [
+                        {
+                          "id": 4,
+                          "text": "Hello",
+                          "type": "#text",
+                        },
+                      ],
+                      "id": 5,
+                      "type": "div",
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "id": 6,
+                              "text": "Click me",
+                              "type": "#text",
+                            },
+                          ],
+                          "id": 7,
+                          "type": "div",
+                        },
+                      ],
+                      "events": [
+                        "click",
+                      ],
+                      "id": 8,
+                      "type": "div",
                     },
                   ],
-                  "id": 4,
+                  "id": 9,
+                  "style": {
+                    "display": "flex",
+                    "gap": 8,
+                  },
                   "type": "div",
                 },
               ],
-              "events": [
-                "click",
-              ],
-              "id": 5,
-              "type": "div",
+              "id": 3,
+              "style": {
+                "display": "block",
+                "height": "100%",
+                "width": "100%",
+              },
+              "type": "body",
             },
           ],
-          "id": 6,
+          "id": 1,
           "style": {
-            "display": "flex",
-            "gap": 8,
+            "display": "block",
+            "height": "100%",
+            "width": "100%",
           },
-          "type": "div",
+          "type": "html",
         }
       `)
     })
@@ -3198,11 +3227,11 @@ describeNative("events", () => {
       // ref.current should be the Instance with a numeric id
       expect(capturedRef).not.toBeNull()
       expect(capturedRef.current).not.toBeNull()
-      expect(typeof capturedRef.current.id).toBe("number")
-      expect(capturedRef.current.id).toBeGreaterThan(0)
+      expect(typeof capturedRef.current.nativeId).toBe("number")
+      expect(capturedRef.current.nativeId).toBeGreaterThan(0)
 
       // Use the ref's id with the scroll API
-      const elementId = capturedRef.current.id
+      const elementId = capturedRef.current.nativeId
 
       // Initially at 0,0
       expect(testRoot.renderer.getScrollOffset(elementId)).toEqual([0, 0])
