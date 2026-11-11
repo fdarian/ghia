@@ -30,7 +30,7 @@ export const nativeLoaderPlugin: Bun.BunPlugin = {
 }
 
 export interface CompileOptions {
-  /** Absolute paths: the UI bundle first, then the server bundle when the app has one, then the Worker files the build emitted. */
+  /** Absolute paths: the UI bundle first, then the server bundle when the app has one, each followed by the Worker files that bundle emitted. */
   readonly entrypoints: readonly string[]
   readonly outfile: string
 }
@@ -39,8 +39,8 @@ export interface CompileOptions {
 export async function compile(options: CompileOptions): Promise<void> {
   const result = await Bun.build({
     entrypoints: [...options.entrypoints],
-    // A shipped binary must not read a bunfig.toml (a test preload, say) from whichever directory it is launched in.
-    compile: { outfile: options.outfile, autoloadBunfig: false },
+    // A shipped binary must not read a bunfig.toml (a test preload, say) or a .env from whichever directory it is launched in.
+    compile: { outfile: options.outfile, autoloadBunfig: false, autoloadDotenv: false },
     format: "esm",
     bytecode: true,
     minify: true,

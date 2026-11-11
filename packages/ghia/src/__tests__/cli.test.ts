@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -459,7 +459,7 @@ export default defineConfig({ plugins: [ghia({ entry: "main.ts", compile: { outf
   )
 })
 
-const UI_WORKER = "hello from the ui worker window=undefined"
+const UI_WORKER = "hello from the ui worker window=undefined shared=undefined"
 const SERVER_WORKER = "hello from the server worker window=undefined"
 
 describe("ghia dev with app Workers", () => {
@@ -505,6 +505,46 @@ describe("ghia build with app Workers", () => {
       await run.waitFor("UI_WORKER")
       expect(lines(run.output(), "UI_WORKER ")).toEqual([UI_WORKER])
       expect(lines(run.output(), "SERVER_WORKER ")).toEqual([SERVER_WORKER])
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "a module that the UI and a UI Worker share loads after dom-globals in the UI and without it in the Worker",
+    async () => {
+      await runToExit(["bun", CLI, "build", "--no-compile"], workersDir)
+      const run = spawn(["bun", join(workersDir, "dist", "main.js")], workersDir)
+      await run.waitFor("UI_WORKER")
+      await run.waitFor("SHARED_MAIN")
+      expect(lines(run.output(), "SHARED_MAIN ")).toEqual(["object"])
+      expect(lines(run.output(), "UI_WORKER ")).toEqual([UI_WORKER])
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "starts a Worker from a lazy chunk under plain bun",
+    async () => {
+      await runToExit(["bun", CLI, "build", "--no-compile"], workersDir)
+      expect(existsSync(join(workersDir, "dist", "assets"))).toBe(false)
+      const run = spawn(["bun", join(workersDir, "dist", "main.js")], workersDir)
+      await run.waitFor("LAZY_WORKER")
+      expect(lines(run.output(), "LAZY_WORKER ")).toEqual(["hello from the lazy chunk"])
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "builds a file that both environments start once for each",
+    async () => {
+      await runToExit(["bun", CLI, "build", "--no-compile"], workersDir)
+      const common = readdirSync(join(workersDir, "dist")).filter((name) => /^common-worker-[0-9a-f]{8}\.worker\.js$/.test(name))
+      expect(common).toHaveLength(2)
+      const run = spawn(["bun", join(workersDir, "dist", "main.js")], workersDir)
+      await run.waitFor("COMMON_UI")
+      await run.waitFor("COMMON_SERVER")
+      expect(lines(run.output(), "COMMON_UI ")).toEqual(["common window=undefined"])
+      expect(lines(run.output(), "COMMON_SERVER ")).toEqual(["common window=undefined"])
     },
     TIMEOUT_MS * 2
   )

@@ -6,7 +6,7 @@ import { createRunnableDevEnvironment, DevEnvironment, type Plugin, type Resolve
 import { SERVER_PORT_SLOT_KEY } from "./protocol.js"
 import { createUiHotChannel, type UiHotChannel } from "./ui-channel.js"
 import { WorkerHotChannel } from "./worker-channel.js"
-import { rewriteWorkerUrls } from "./workers.js"
+import { readWorkerBuild, rewriteWorkerUrls, WorkerBundler, type WorkerBuild } from "./workers.js"
 
 export const ENVIRONMENT_NAME = "ghia"
 export const SERVER_ENVIRONMENT_NAME = "server"
@@ -73,6 +73,8 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
   let entry: string | undefined
   let serverEntry: string | undefined
   let compileOutfile: string | undefined
+  let workerBuild: WorkerBuild | undefined
+  let workerBundler: WorkerBundler | undefined
   const uiChannel = createUiHotChannel()
   const serverChannel = options.server === undefined ? undefined : new WorkerHotChannel()
 
@@ -97,6 +99,8 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
         }
         // `dev()` and `build()` pass an entry from the command line as this very input, in the inline config.
         const input = userConfig.environments?.[ENVIRONMENT_NAME]?.build?.rolldownOptions?.input ?? options.entry
+        // A Worker's own build (see `workers.ts`) bundles the Worker file in the server environment too, not the server entry.
+        const serverInput = readWorkerBuild(userConfig)?.file ?? SERVER_MAIN_MODULE
         return {
           environments: {
             [ENVIRONMENT_NAME]: {
@@ -133,7 +137,7 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
                     build: {
                       // The `ghia` build runs first and empties the output directory.
                       emptyOutDir: false,
-                      rolldownOptions: { input: SERVER_MAIN_MODULE },
+                      rolldownOptions: { input: serverInput },
                     },
                   },
                 }),
@@ -158,15 +162,20 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
         build: {
           target: environment.build?.target ?? "esnext",
           rolldownOptions: {
-            output: { entryFileNames: entryFileName, ...output },
+            // Every chunk beside the entry: a Worker starts `./<name>.worker.js` relative to the chunk that holds the call, and
+            // that chunk may be a lazy one.
+            output: { entryFileNames: entryFileName, chunkFileNames: "[name]-[hash].js", ...output },
           },
         },
       }
     },
 
     configResolved(config) {
+      workerBuild = readWorkerBuild(config.inlineConfig)
+      workerBundler = new WorkerBundler(config, workerBuild?.chain ?? [])
       const input = config.environments[ENVIRONMENT_NAME]?.build.rolldownOptions?.input ?? options.entry
-      if (input !== undefined) {
+      // A Worker is not the app entry: no `dom-globals` import in front of it.
+      if (input !== undefined && workerBuild === undefined) {
         if (typeof input !== "string") throw new Error(`The "${ENVIRONMENT_NAME}" build takes a single entry file, not ${JSON.stringify(input)}`)
         entry = realpathSync(resolve(config.root, input))
       }
@@ -174,6 +183,10 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
         serverEntry = realpathSync(resolve(config.root, options.server))
       }
       if (options.compile?.outfile !== undefined) compileOutfile = resolve(config.root, options.compile.outfile)
+    },
+
+    buildStart() {
+      workerBundler?.reset()
     },
 
     applyToEnvironment(environment) {
@@ -218,17 +231,18 @@ export function ghia(options: GhiaOptions = {}): Plugin<GhiaPluginApi> {
       order: "pre",
       async handler(code, id) {
         const environment = this.environment
+        const bundler = workerBundler
         // Dev runs Worker files from source, where `import.meta.url` is the real file.
         const withWorkers =
-          underVitest || environment.mode !== "build"
+          underVitest || environment.mode !== "build" || bundler === undefined
             ? undefined
             : await rewriteWorkerUrls(
                 {
                   root: environment.config.root,
+                  environmentName: environment.name,
                   resolve: async (specifier, importer) => (await this.resolve(specifier, importer))?.id,
-                  emit: (file, fileName) => {
-                    this.emitFile({ type: "chunk", id: file, fileName })
-                  },
+                  emit: (file, fileName) => bundler.emit(this, environment.name, file, fileName),
+                  warn: (message) => this.warn(message),
                 },
                 code,
                 id
