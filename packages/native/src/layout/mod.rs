@@ -4,6 +4,7 @@
 pub(crate) mod anchor_size;
 pub mod aspect_ratio;
 pub(crate) mod box_generation;
+pub(crate) mod box_root;
 pub(crate) mod container;
 pub(crate) mod collapse;
 pub(crate) mod containing_block;

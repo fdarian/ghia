@@ -331,12 +331,29 @@ pub(crate) fn describe_start_region_apart_from_transform(data: &dyn std::any::An
 
 /// Gives the start region that a patch painted again the matrix it was painted through, which an
 /// animation of a transform changes at every tick without a build.
-pub(crate) fn publish_captured_start_region(data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>) {
+///
+/// `old` is the lists the root wrote into when it was last built whole: what it wrote is where the registry has the entries to
+/// change, and a page of many roots has many more entries than a patch has roots. Without it, or when none of the root's entries
+/// has the key, every entry is asked.
+pub(crate) fn publish_captured_start_region(old: Option<&crate::tape::Roots>, data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>) {
     let (window, id, _, _, to_window) = data.downcast_ref::<StartRegionWrite>().expect("a start region write holds its box");
     let to_window = moved_matrix(*to_window, offset);
     with_frame(*window, |frame| {
-        for region in frame.start_regions_mut().iter_mut().filter(|region| region.id == *id) {
-            region.to_window = to_window;
+        let mut set = 0;
+        if let Some(old) = old {
+            frame.start_regions.for_each_held_mut(old, Kind::StartRegion, start_region, |region| {
+                if region.id == *id {
+                    region.to_window = to_window;
+                    set += 1;
+                }
+            });
+            #[cfg(test)]
+            assert_eq!(set, frame.start_regions_mut().iter().filter(|region| region.id == *id).count(), "the root's own start regions are all there are of the id");
+        }
+        if set == 0 {
+            for region in frame.start_regions_mut().iter_mut().filter(|region| region.id == *id) {
+                region.to_window = to_window;
+            }
         }
     });
 }
@@ -380,12 +397,25 @@ pub(crate) fn describe_text_apart_from_transform(data: &dyn std::any::Any, moved
 
 /// Gives the text that a patch painted again the matrix it was painted through, as for
 /// [`publish_captured_start_region`].
-pub(crate) fn publish_captured_text(data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>) {
+pub(crate) fn publish_captured_text(old: Option<&crate::tape::Roots>, data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>) {
     let (window, painted) = text_write(data);
     let to_window = moved_matrix(painted.to_window, offset);
     with_frame(*window, |frame| {
-        for entry in frame.registry_mut().iter_mut().filter(|entry| entry.key == painted.key) {
-            entry.to_window = to_window;
+        let mut set = 0;
+        if let Some(old) = old {
+            frame.registry.for_each_held_mut(old, Kind::Text, reg_entry, |entry| {
+                if entry.key == painted.key {
+                    entry.to_window = to_window;
+                    set += 1;
+                }
+            });
+            #[cfg(test)]
+            assert_eq!(set, frame.registry_mut().iter().filter(|entry| entry.key == painted.key).count(), "the root's own texts are all there are of the key");
+        }
+        if set == 0 {
+            for entry in frame.registry_mut().iter_mut().filter(|entry| entry.key == painted.key) {
+                entry.to_window = to_window;
+            }
         }
     });
 }

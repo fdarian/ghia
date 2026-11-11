@@ -154,7 +154,10 @@ See [layout.md](layout.md) and [scroll.md](scroll.md).
     still move; if an upstream change makes `mark_dirty` stop without bumping them, retained subtrees and request signatures
     go stale. A boundary whose answer changed must fall back to the chain to the root. `relayout_boundary_tests.rs` (a
     differential fuzz) and the gpui engine fuzz (seeds 1 to 20000, which draws boundaries) are the check; floats are out of
-    the fuzz.
+    the fuzz. The same walk stops at a node that answers every question its parent asked as it did (`soft_stop`,
+    `lay_out_changed_nodes`, `Cache::measured_questions`, `Cache::measure_evicted`): keep the cache key readable back into
+    a `LayoutInput`, keep a parent's other `PerformLayout` calls (baselines, floats) out of what it can stop for, and run
+    it before the layout from the root.
 - **The gpui layout engine** (zed `taffy.rs`) must stay persistent. Requests that have a scope take a node by key and compare
   before they set. `NodeMeta::requested` is the style the element asked for, which every rewriter (`intrinsic.rs`,
   `natural.rs`, `containing_block.rs`, forced and stretched widths) must read and restore. `end_frame` is the only collector
