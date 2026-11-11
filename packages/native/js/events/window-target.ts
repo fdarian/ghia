@@ -1,7 +1,7 @@
 import type { EventPayload } from "../../index.js"
 import type { Animation } from "../web-animations.js"
 import { isElementType, isSvgElementType } from "../dom/element-types.js"
-import { Document, DOM_BINDING, registerDocument, type Node, type NodeBinding, type Text } from "../dom/nodes.js"
+import { Document, DOM_BINDING, registerDocument, type HTMLElement, type Node, type NodeBinding, type Text } from "../dom/nodes.js"
 import { getAdoptedStyleSheets, replaceAdoptedStyleSheets, type CSSStyleSheet } from "../css/index.js"
 import { getSelection, type Selection } from "../dom/selection.js"
 import { mountedRenderer } from "../mounted-renderer.js"
@@ -326,12 +326,12 @@ export class GpuixDocument<Element = unknown> extends Document {
    * not one of the element types throws `NotSupportedError`, where a browser has an unknown
    * element.
    */
-  createElement(tagName: string): Element {
+  createElement(tagName: string): HTMLElement {
     const name = String(tagName)
     assertElementName(name, "createElement")
     const type = name.toLowerCase()
     if (!isElementType(type)) throw unsupportedElement(type, "createElement")
-    return currentNodeFactory("createElement").createElement(type) as Element
+    return currentNodeFactory("createElement").createElement(type) as HTMLElement
   }
 
   /** `createElement` for the SVG namespace (names as written, `linearGradient`) or the HTML one. */

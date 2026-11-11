@@ -556,10 +556,10 @@ function isElement(node: Node): node is Element {
 }
 
 /**
- * The popover members, defined by the adapters' DOM members (`defineDomMembers`). `popover` reads
+ * The popover members, which the DOM has on `HTMLElement` only, defined by the adapters' DOM members (`defineDomMembers`). `popover` reads
  * the attribute limited to its known values and takes any string, `null` or `undefined`.
  */
-interface ElementClass {
+interface HTMLElementClass {
   showPopover(): void
   hidePopover(): void
   togglePopover(force?: boolean): boolean
