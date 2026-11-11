@@ -117,3 +117,64 @@ pub(crate) fn button_type(element: &RetainedElement) -> ButtonType {
         _ => ButtonType::Submit,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tree(batch: &str) -> RetainedTree {
+        let mut tree = RetainedTree::new();
+        crate::batch::test_json::apply(&mut tree, batch).unwrap();
+        tree
+    }
+
+    fn role(tree: &RetainedTree, id: u64) -> Option<Role> {
+        implicit_role(tree, &tree.elements[&id])
+    }
+
+    #[test]
+    fn a_link_needs_an_href_and_a_section_needs_a_name() {
+        let tree = tree(
+            r#"[["createElement",1,"div"],["setRoot",1],
+                ["createElement",2,"a"],["appendChild",1,2],
+                ["createElement",3,"a"],["appendChild",1,3],["setCustomProp",3,"href",""],
+                ["createElement",4,"section"],["appendChild",1,4],
+                ["createElement",5,"section"],["appendChild",1,5],["setCustomProp",5,"aria-label","Notes"]]"#,
+        );
+        assert_eq!(role(&tree, 2), None);
+        assert_eq!(role(&tree, 3), Some(Role::Link));
+        assert_eq!(role(&tree, 4), None);
+        assert_eq!(role(&tree, 5), Some(Role::Region));
+    }
+
+    #[test]
+    fn a_header_is_the_banner_only_outside_sectioning_content() {
+        let tree = tree(
+            r#"[["createElement",1,"div"],["setRoot",1],
+                ["createElement",2,"header"],["appendChild",1,2],
+                ["createElement",3,"article"],["appendChild",1,3],
+                ["createElement",4,"div"],["appendChild",3,4],
+                ["createElement",5,"footer"],["appendChild",4,5]]"#,
+        );
+        assert_eq!(role(&tree, 2), Some(Role::Banner));
+        assert_eq!(role(&tree, 5), None);
+    }
+
+    #[test]
+    fn a_button_and_a_link_take_keys_and_a_disabled_button_does_not() {
+        let tree = tree(
+            r#"[["createElement",1,"div"],["setRoot",1],
+                ["createElement",2,"button"],["appendChild",1,2],
+                ["createElement",3,"button"],["appendChild",1,3],["setCustomProp",3,"disabled",true],
+                ["createElement",4,"a"],["appendChild",1,4],["setCustomProp",4,"href","/x"],
+                ["createElement",5,"a"],["appendChild",1,5]]"#,
+        );
+        let keys = |id: u64| activation_keys(&tree.elements[&id]);
+        assert_eq!(keys(2), Some(ActivationKeys { enter: true, space: true }));
+        assert_eq!(keys(3), None);
+        assert_eq!(keys(4), Some(ActivationKeys { enter: true, space: false }));
+        assert_eq!(keys(5), None);
+        assert!(tree.elements[&2].needs_focus() && tree.elements[&4].needs_focus());
+        assert!(!tree.elements[&3].needs_focus() && !tree.elements[&5].needs_focus());
+    }
+}

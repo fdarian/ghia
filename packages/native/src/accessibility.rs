@@ -492,7 +492,7 @@ mod tests {
         let host = &tree.elements[&1];
         let text = super::read_text_unplanned(&tree, host);
         assert_eq!(text.as_deref(), Some("Hello"));
-        assert_eq!(super::role_without_props(host, text.as_deref()), Some(Role::Label));
+        assert_eq!(super::role_without_props(&tree, host, text.as_deref()), Some(Role::Label));
         let mut form = container(&[("#text", "Hello")]);
         form.create_element(9, "form".to_string());
         form.append_child(1, 9);
@@ -502,7 +502,7 @@ mod tests {
         let host = &form.elements[&9];
         let text = super::read_text_unplanned(&form, host);
         assert_eq!(text.as_deref(), Some("Hi"));
-        assert_eq!(super::role_without_props(host, text.as_deref()), Some(Role::Form));
+        assert_eq!(super::role_without_props(&form, host, text.as_deref()), Some(Role::Form));
         let blank = container(&[("#text", "  ")]);
         assert_eq!(super::read_text_unplanned(&blank, &blank.elements[&1]), None);
         let beside_block = container(&[("#text", "Before"), ("div", "")]);
