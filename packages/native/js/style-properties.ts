@@ -30,8 +30,6 @@ export const STYLE_PROPERTIES = {
   justifySelf: true,
   gridTemplateColumns: true,
   gridTemplateRows: true,
-  gridColumnMin: true,
-  gridRowMin: true,
   gridAutoColumns: true,
   gridAutoRows: true,
   gridAutoFlow: true,
@@ -226,6 +224,8 @@ export const STYLE_PROPERTIES = {
 type NotStyleProperty =
   | `--${string}`
   | "@container"
+  | "gridColumnMin"
+  | "gridRowMin"
   | "hover"
   | "group"
   | "groupHover"

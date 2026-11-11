@@ -251,7 +251,7 @@ function sendStyle(renderer: MutationRenderer, id: number, style: StyleDesc | un
   renderer.setStyle(id, style)
 }
 
-/** Sends the live style of a mounted element, under `visibility: hidden` while React hides it. */
+/** Sends the live style of a mounted element, as `display: none !important` while React hides it. */
 export function sendLiveStyle(instance: Instance, state: HostNodeState): void {
   const style = liveStyleOf(instance)
   state.container.renderer.setStyle(instance.nativeId, state.hidden ? hiddenStyle(style) : style)
@@ -291,12 +291,12 @@ function syncCustomProps(
   renderer: MutationRenderer,
   id: number,
   type: string,
-  props: Props
+  props: Iterable<readonly [string, unknown]>
 ): void {
-  for (const [key, value] of Object.entries(props)) {
+  for (const [key, value] of props) {
     if (isReservedProp(key)) continue
     if (!forwardsCustomProp(type, key)) continue
-    renderer.setCustomProp(id, key, serializeCustomProp(value))
+    renderer.setCustomProp(id, key, serializeCustomProp(value as Parameters<typeof serializeCustomProp>[0]))
   }
 }
 
@@ -414,13 +414,9 @@ export function materialize(node: HostNode): ReturnType<typeof stateFor> {
     else sendStyle(renderer, node.nativeId, style)
     syncMotionBindings(state.container, node.nativeId, node.props.style, node.type)
     syncEventListeners(state.container, node)
-    syncCustomProps(renderer, node.nativeId, node.type, node.props)
-    if (state.propOverrides !== undefined) {
-      for (const [name, value] of state.propOverrides) {
-        if (forwardsCustomProp(node.type, name)) renderer.setCustomProp(node.nativeId, name, serializeCustomProp(value as Parameters<typeof serializeCustomProp>[0]))
-      }
-    }
-    syncAttributes(renderer, node.nativeId, node.type, livePropEntries(node))
+    const liveProps = livePropEntries(node)
+    syncCustomProps(renderer, node.nativeId, node.type, liveProps)
+    syncAttributes(renderer, node.nativeId, node.type, liveProps)
   } else {
     renderer.createElement(node.nativeId, "#text")
     renderer.setText(node.nativeId, node.text)
@@ -752,18 +748,17 @@ export const hostConfig = {
   },
 
   hideInstance(instance: Instance): void {
-    // Keep the element's own style. `visibility: hidden` skips the paint and
-    // keeps the layout box, so replacing the whole style here would collapse
-    // the box and lose every other style on the element.
+    // Keep the element's own style under `display: none !important`, so a sheet
+    // rule cannot show what Suspense hides and unhiding restores it as it was.
     const state = stateFor(instance)
     state.hidden = true
     if (state.mounted) rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(liveStyleOf(instance)))
   },
 
-  unhideInstance(instance: Instance, props: Props): void {
+  unhideInstance(instance: Instance, _props: Props): void {
     const state = stateFor(instance)
     state.hidden = false
-    if (state.mounted) rendererFor(instance).setStyle(instance.nativeId, state.codeStyle ?? splitMotionStyle(props.style).style ?? {})
+    if (state.mounted) sendLiveStyle(instance, state)
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},

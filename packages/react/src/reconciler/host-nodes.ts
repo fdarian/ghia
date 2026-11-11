@@ -208,7 +208,9 @@ defineScrollMembers(ReactHostElement.prototype, (instance: ReactHostElement) => 
 }))
 defineDomMembers(ReactHostElement.prototype, (instance: ReactHostElement) => ({
   listeners: listenersOf(instance),
-  connected: isConnected(instance),
+  get connected() {
+    return isConnected(instance)
+  },
   layout: stateFor(instance).mounted
     ? { renderer: containerFor(instance).nativeRenderer, id: instance.nativeId }
     : undefined,

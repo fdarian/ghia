@@ -1216,7 +1216,7 @@ function holdWeakly(state: State, animation: Animation): void {
 function releaseFinishedScript(renderer: NativeRenderer, state: State, animation: Animation): void {
   if (state.last.kind !== "script" || state.mode !== "live") return
   if (readLive(state).playState !== "finished") return
-  const listed = renderer.getAnimations?.(state.elementId) ?? []
+  const listed = hostOf(renderer).getAnimations(state.elementId)
   if (listed.some((info) => info.id === state.id)) return
   holdWeakly(state, animation)
 }

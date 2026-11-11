@@ -11,10 +11,10 @@
 import type { ElementType } from "../host.js"
 import { cloneNode } from "./clone.js"
 import * as tree from "./tree-mutation.js"
-
-export { crossRootError } from "./tree-mutation.js"
 import { serializeStyle, styleDeclarationFor, type CSSStyleDeclaration, type StyleBinding } from "./css-style-declaration.js"
 import { attributeNameOf, isNotAttribute } from "./attribute-names.js"
+
+export { crossRootError } from "./tree-mutation.js"
 
 /** Where `[DOM_BINDING]()` is read, so two copies of this package find each other's nodes. */
 export const DOM_BINDING: unique symbol = Symbol.for("@ghia/native/dom-binding")
