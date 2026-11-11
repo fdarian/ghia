@@ -1,7 +1,7 @@
 import { Suspense } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { handleGpuixEvent } from "../reconciler/event-registry.js"
-import { hostConfig } from "../reconciler/host-config.js"
+import { hostConfig, materialize } from "../reconciler/host-config.js"
 import { createRoot, flushSync } from "../reconciler/reconciler.js"
 import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing.js"
 import type {
@@ -66,6 +66,7 @@ describe("host config hideInstance", () => {
       container,
       null as unknown as HostContext
     )
+    materialize(instance)
 
     hostConfig.hideInstance(instance)
     expect(renderer.styles.at(-1)).toEqual({
@@ -79,7 +80,7 @@ describe("host config hideInstance", () => {
     expect(renderer.styles.at(-1)).toEqual(props.style)
   })
 
-  function hiddenFixture(props: Props) {
+  function hiddenFixture(props: Props, mounted = true) {
     const renderer = recordingRenderer()
     const container: Container = {
       nativeRenderer: {},
@@ -99,6 +100,7 @@ describe("host config hideInstance", () => {
       container,
       null as unknown as HostContext
     )
+    if (mounted) materialize(instance)
     return { renderer, instance }
   }
 
@@ -113,6 +115,16 @@ describe("host config hideInstance", () => {
 
     hostConfig.unhideInstance(instance, after)
     expect(renderer.styles.at(-1)).toEqual(after.style)
+  })
+
+  it("sends the hidden style first when an unmaterialized element is hidden and then materialized", () => {
+    const { renderer, instance } = hiddenFixture({ style: { width: 80, hover: { backgroundColor: "#a6e3a1" } } }, false)
+
+    hostConfig.hideInstance(instance)
+    expect(renderer.styles).toHaveLength(0)
+
+    materialize(instance)
+    expect(renderer.styles[0]).toEqual({ width: 80, visibility: "hidden" })
   })
 
   it("does not resend an unchanged style while hidden", () => {
