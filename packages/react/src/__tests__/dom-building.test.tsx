@@ -209,8 +209,14 @@ describeNative("DOM building from code in React", () => {
 
   it("only links what React places in an element code removed and native released", async () => {
     let box: PublicInstance | null = null
+    let mutations: ReturnType<typeof useGpuix>["mutations"] | undefined
+    function Probe() {
+      mutations = useGpuix().mutations
+      return null
+    }
     const tree = (withChild: boolean) => (
       <div ref={(instance) => (box = instance)} style={{ width: 30, height: 10 }}>
+        <Probe />
         {withChild ? <span>late</span> : null}
       </div>
     )
@@ -218,13 +224,11 @@ describeNative("DOM building from code in React", () => {
     const element = box as unknown as HTMLElement
     element.remove()
     await settle()
-    expect(testRoot.renderer.getElement((element as unknown as Handle).nativeId)).toBeUndefined()
+    const created = vi.spyOn(mutations!, "createElement")
     testRoot.render(tree(true))
     await settle()
-    const child = element.firstElementChild!
-    expect(child.textContent).toBe("late")
-    expect(testRoot.renderer.getElement((element as unknown as Handle).nativeId), "no native orphan").toBeUndefined()
-    expect(testRoot.renderer.getElement((child as unknown as Handle).nativeId)).toBeUndefined()
+    expect(element.firstElementChild?.textContent).toBe("late")
+    expect(created, "no native element for the released parent or its new child").not.toHaveBeenCalled()
     document.body!.appendChild(element)
     await settle()
     expect(testRoot.renderer.findByText("late")).toBeDefined()

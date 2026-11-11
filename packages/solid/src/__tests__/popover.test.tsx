@@ -348,7 +348,7 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
     expect(seen).toEqual(["before open", "toggle open"])
   })
 
-  it("lets Escape reach the layer below when an auto popover is unmounted while it shows", () => {
+  it("lets Escape reach the layer below when an auto popover is unmounted while it shows", async () => {
     const below = vi.fn()
     const remove = pushDismissLayer(app.renderer, { onEscapeKeyDown: below })
     const [present, setPresent] = createSignal(true)
@@ -362,6 +362,8 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
     ))
     found.box.showPopover()
     setPresent(false)
+    await Promise.resolve()
+    await Promise.resolve()
     app.renderer.flush()
     app.renderer.simulateKeystrokes("Escape")
     expect(below).toHaveBeenCalledTimes(1)
