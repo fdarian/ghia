@@ -1403,7 +1403,7 @@ impl RetainedTree {
             (Some(base), None) => Some(base),
             (None, own) => own.clone(),
         };
-        self.assign_style(id, effective, classify)
+        self.assign_style(id, crate::html::used_style(&element.element_type, effective), classify)
     }
 
     /// The one place `RetainedElement::style` is written, and the bookkeeping
@@ -3446,6 +3446,17 @@ mod tests {
 
         apply(&mut tree, r##"[["setUniversalStyle",null]]"##);
         assert_eq!(style_of(&tree, 21).unwrap().display.as_deref(), Some("block"));
+    }
+
+    #[test]
+    fn a_button_that_says_inline_is_inline_block_as_in_chrome() {
+        let mut tree = layered_tree();
+        apply(&mut tree, r##"[["createElement",20,"button"],["createElement",21,"a"],["createElement",22,"button"]]"##);
+        apply(&mut tree, r##"[["setStyle",20,{"display":"inline"}],["setStyle",21,{"display":"inline"}],["setStyle",22,{"display":"block"}]]"##);
+        assert_eq!(style_of(&tree, 20).unwrap().display.as_deref(), Some("inline-block"));
+        assert_eq!(style_of(&tree, 21).unwrap().display.as_deref(), Some("inline"), "only a button");
+        assert_eq!(style_of(&tree, 22).unwrap().display.as_deref(), Some("block"));
+        assert!(style_of(&tree, 20).unwrap().padding.is_some(), "the rest of its style is kept");
     }
 
     #[test]

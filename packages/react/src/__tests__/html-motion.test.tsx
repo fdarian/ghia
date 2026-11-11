@@ -1,12 +1,13 @@
 /// Whether an element is an inline box is up to its effective `display`, never its tag, and Chrome's own rules
 /// hold: an `<a>` with `display: block` takes a transform and a motion value in `style.x`, a `<div>` with
-/// `display: inline` does not.
+/// `display: inline` does not, and a `<button>` is an atomic inline whatever its `display` says.
 // @ts-nocheck
 
 import React from "react"
 import { describe, expect, it } from "vitest"
+import { getComputedStyle } from "@ghia/native/host"
 import { motionValue } from "../index.js"
-import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
+import { createTestRoot, hasNativeTestRenderer, type A11yTreeDump } from "../testing.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -70,5 +71,41 @@ describeNative("motion and display", () => {
   it("a motion value in style.x does not throw on a <div> with no display or on a <button>", () => {
     expect(errorsOf(<div style={{ x: motionValue(12) }}>text</div>)).toEqual([])
     expect(errorsOf(<button style={{ display: "inline", x: motionValue(12) }}>text</button>)).toEqual([])
+  })
+})
+
+describeNative("a button that says display: inline", () => {
+  const hasNode = (tree: A11yTreeDump, authorId: string) =>
+    Object.values(tree.nodes ?? {}).some((node) => node.aria?.author_id === authorId && node.aria.role === "Button")
+
+  const lay = (style: object) => {
+    let button: Element
+    const { render, renderer, unmount } = createTestRoot({ width: 800, height: 600 })
+    try {
+      render(
+        <p style={{ width: 400, margin: 0, fontSize: 16, lineHeight: "20px", fontFamily: "Menlo" }}>
+          before <button id="button" testId="button" style={style} ref={(element) => (button = element)}>Go</button> after
+        </p>
+      )
+      return {
+        box: renderer.getElementBounds(renderer.findByTestId("button").id),
+        node: hasNode(renderer.getA11yTree(), "button"),
+        display: getComputedStyle(button).display,
+      }
+    } finally {
+      unmount()
+    }
+  }
+
+  it("is laid out and exposed as the inline-block Chrome makes of it", () => {
+    const plain = lay({})
+    const inline = lay({ display: "inline" })
+    expect(plain.node).toBe(true)
+    expect(inline.node).toBe(true)
+    expect(inline.box.x).toBeGreaterThan(0)
+    expect(inline.box.width).toBeLessThan(100)
+    expect(inline.box).toEqual(plain.box)
+    expect(plain.display).toBe("inline-block")
+    expect(inline.display).toBe("inline-block")
   })
 })

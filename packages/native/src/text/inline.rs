@@ -1248,6 +1248,20 @@ mod tests {
     }
 
     #[test]
+    fn a_button_that_says_display_inline_stays_an_atomic_inline() {
+        let mut f = Fixture::new();
+        f.text(1, 2, "a ");
+        f.add(1, 3, "button").styled(3, serde_json::json!({"display": "inline"}));
+        f.text(3, 4, "b");
+        f.text(1, 5, " c");
+        let plan = f.plan(1);
+        assert_eq!(plan.len(), 1, "one paragraph: {plan:?}");
+        assert_eq!(paragraphs(&plan)[0].atomics().map(|(id, _)| id).collect::<Vec<_>>(), vec![3]);
+        assert!(is_atomic(&f.tree.elements[&3]));
+        assert!(!is_inline_wrapper(&f.tree.elements[&3]));
+    }
+
+    #[test]
     fn the_display_of_an_element_and_not_its_tag_decides_whether_it_is_an_inline_wrapper() {
         let mut f = Fixture::new();
         f.add(1, 2, "a").styled(2, serde_json::json!({"display": "block"}));

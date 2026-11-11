@@ -46,6 +46,20 @@ pub fn ua_style(element_type: &str) -> Option<Arc<StyleDesc>> {
     styles().get(element_type).cloned()
 }
 
+/// The style `element_type` is laid out and read with, given the one its layers add up to. Chrome lays a
+/// `<button>` out as `inline-block` whatever its `display` says: `inline` computes to `inline-block`, so the
+/// button stays an atomic inline, with its box and its accessibility node, and no paragraph runs on in it.
+pub(crate) fn used_style(element_type: &str, style: Option<Arc<StyleDesc>>) -> Option<Arc<StyleDesc>> {
+    if element_type != "button" || style.as_deref().and_then(|style| style.display.as_deref()) != Some("inline") {
+        return style;
+    }
+    style.map(|style| {
+        let mut used = (*style).clone();
+        used.display = Some("inline-block".to_string());
+        Arc::new(used)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
