@@ -328,6 +328,25 @@ describe("ParentNode", () => {
     expect(shape(parent)).toBe("<div><i></i></div>")
   })
 
+  it("append, prepend, before, after and replaceWith validate every node before moving one", () => {
+    const writers: Array<[string, (target: FakeEl, nodes: FakeEl[]) => void]> = [
+      ["append", (target, nodes) => target.append(...nodes)],
+      ["prepend", (target, nodes) => target.prepend(...nodes)],
+      ["before", (target, nodes) => target.before(...nodes)],
+      ["after", (target, nodes) => target.after(...nodes)],
+      ["replaceWith", (target, nodes) => target.replaceWith(...nodes)],
+    ]
+    for (const [name, write] of writers) {
+      const moved = el("m")
+      const holder = el("h", moved)
+      const target = el("t")
+      const grand = el("g", el("p", target))
+      expect(code(() => write(target, [moved, grand])), name).toBe("HierarchyRequestError")
+      expect(shape(holder), name).toBe("<h><m></m></h>")
+      expect(shape(grand), name).toBe("<g><p><t></t></p></g>")
+    }
+  })
+
   it("insertAdjacentElement uses the four positions, in any letter case, and returns the element", () => {
     const target = el("t", el("c"))
     const parent = el("div", target)
