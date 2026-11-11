@@ -11,6 +11,7 @@ const RULE_TYPES: Readonly<Record<string, number>> = {
 
 const SHEET_OF = Symbol("@ghia/native/css/rule-sheet")
 const RULES = Symbol("@ghia/native/css/rule-list")
+const DEFINED = Symbol("@ghia/native/css/rule-list-defined")
 
 function atRuleName(prelude: string): string {
   const match = /^@[^\s{(;"']*/.exec(prelude)
@@ -55,7 +56,9 @@ export class CSSStyleRule extends CSSRule {
 /** The live, read-only list `cssRules` is: array-like and iterable. */
 export class CSSRuleList {
   readonly [index: number]: CSSRule;
-  [RULES]: readonly CSSRule[] = []
+  [RULES]: readonly CSSRule[] = [];
+  /** How many index accessors the list has defined. */
+  [DEFINED] = 0
 
   get length(): number {
     return this[RULES].length
@@ -70,13 +73,18 @@ export class CSSRuleList {
   }
 }
 
-function fillRuleList(list: CSSRuleList, rules: readonly CSSRule[]): void {
-  const previous = list[RULES].length
+/**
+ * Makes `list` show `rules`, an array the sheet may later splice in place. Each index is an accessor
+ * that reads the array, so it is defined once and keeps answering as rules move: an insert or delete
+ * only adds or drops the last index.
+ */
+function showRules(list: CSSRuleList, rules: readonly CSSRule[]): void {
   list[RULES] = rules
-  for (let index = rules.length; index < previous; index++) Reflect.deleteProperty(list, index)
-  rules.forEach((rule, index) => {
-    Object.defineProperty(list, index, { value: rule, enumerable: true, configurable: true })
-  })
+  for (let index = list[DEFINED]; index < rules.length; index++) {
+    Object.defineProperty(list, index, { get: () => list[RULES][index], enumerable: true, configurable: true })
+  }
+  for (let index = rules.length; index < list[DEFINED]; index++) Reflect.deleteProperty(list, index)
+  list[DEFINED] = rules.length
 }
 
 export interface CSSStyleSheetInit {
@@ -154,9 +162,9 @@ export class CSSStyleSheet implements SyncedSheet {
     if (atRuleName(inserted.prelude) === "@import") {
       throw syntaxError("Failed to execute 'insertRule' on 'CSSStyleSheet': Can't insert @import rules into a constructed stylesheet.")
     }
-    const rules = [...this.rules]
-    rules.splice(position, 0, this.makeRule(inserted))
-    this.setRules(rules)
+    this.rules.splice(position, 0, this.makeRule(inserted))
+    showRules(this.cssRules, this.rules)
+    sheetChanged(this)
     return position
   }
 
@@ -168,9 +176,10 @@ export class CSSStyleSheet implements SyncedSheet {
         "IndexSizeError"
       )
     }
-    const rules = [...this.rules]
-    rules.splice(position, 1)
-    this.setRules(rules)
+    const [removed] = this.rules.splice(position, 1)
+    removed![SHEET_OF] = null
+    showRules(this.cssRules, this.rules)
+    sheetChanged(this)
   }
 
   sheetText(): string {
@@ -182,9 +191,9 @@ export class CSSStyleSheet implements SyncedSheet {
   }
 
   private setRules(rules: CSSRule[]): void {
-    for (const old of this.rules) if (!rules.includes(old)) old[SHEET_OF] = null
+    for (const old of this.rules) old[SHEET_OF] = null
     this.rules = rules
-    fillRuleList(this.cssRules, rules)
+    showRules(this.cssRules, rules)
     sheetChanged(this)
   }
 }

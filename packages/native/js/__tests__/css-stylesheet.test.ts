@@ -200,6 +200,43 @@ describe("CSSStyleSheet", () => {
     expect(errorName(() => sheet.deleteRule(-1))).toBe("IndexSizeError")
   })
 
+  it("keeps cssRules correct through interleaved inserts and deletes, the same list object", () => {
+    const sheet = new CSSStyleSheet()
+    const list = sheet.cssRules
+    const selectors = () => Array.from({ length: list.length }, (_, index) => (list[index] as CSSStyleRule).selectorText)
+    sheet.insertRule(".a { top: 0 }")
+    sheet.insertRule(".b { top: 0 }", 1)
+    sheet.insertRule(".c { top: 0 }", 0)
+    expect(selectors()).toEqual([".c", ".a", ".b"])
+    const first = list[0]!
+    sheet.deleteRule(1)
+    expect(selectors()).toEqual([".c", ".b"])
+    expect(list[2]).toBeUndefined()
+    expect(Object.keys(list)).toEqual(["0", "1"])
+    expect(list[0]).toBe(first)
+    expect(first.parentStyleSheet).toBe(sheet)
+    sheet.insertRule(".d { top: 0 }", 1)
+    expect([...list].map((rule) => (rule as CSSStyleRule).selectorText)).toEqual([".c", ".d", ".b"])
+    expect(list.item(1)).toBe(list[1])
+    sheet.replaceSync(".x { top: 0 }")
+    expect(list).toBe(sheet.cssRules)
+    expect(selectors()).toEqual([".x"])
+    expect(first.parentStyleSheet).toBeNull()
+    expect(sheet.sheetText()).toBe(".x { top: 0 }")
+  })
+
+  it("inserts at the front of a long sheet in linear time per call", () => {
+    const sheet = new CSSStyleSheet()
+    const start = performance.now()
+    for (let count = 0; count < 4000; count++) sheet.insertRule(`.r${count} { top: 0 }`)
+    expect(sheet.cssRules.length).toBe(4000)
+    expect((sheet.cssRules[0] as CSSStyleRule).selectorText).toBe(".r3999")
+    expect((sheet.cssRules[3999] as CSSStyleRule).selectorText).toBe(".r0")
+    for (let count = 0; count < 4000; count++) sheet.deleteRule(0)
+    expect(sheet.cssRules.length).toBe(0)
+    expect(performance.now() - start).toBeLessThan(200)
+  })
+
   it("gives every sheet its own numeric id", () => {
     const first = new CSSStyleSheet()
     const second = new CSSStyleSheet({ disabled: true })
