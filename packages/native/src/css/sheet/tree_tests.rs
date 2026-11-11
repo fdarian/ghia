@@ -1567,31 +1567,6 @@ fn an_element_does_not_transition_into_the_style_a_sheet_gives_it_on_mount() {
     );
 }
 
-#[test]
-fn a_keyword_initial_value_takes_back_an_earlier_rules_value_in_a_sheet_and_inline() {
-    let mut doc = Doc::new();
-    let wide = doc.classed("div", ROOT, "a wide");
-    let tall = doc.classed("div", ROOT, "a");
-    let gapped = doc.classed("div", ROOT, "g normal");
-    let rowed = doc.classed("div", ROOT, "g r");
-    doc.style_element(
-        ROOT,
-        ".a { max-width: 300px; max-height: 40px } .a.wide { max-width: none } \
-         .g { gap: 5px; column-gap: 7px } .normal { gap: normal } .r { row-gap: normal }",
-    );
-    doc.inline(tall, r#"{"maxWidth":"none","maxHeight":"none"}"#);
-    doc.flush();
-    assert_eq!(doc.style(wide).and_then(|style| style.max_width.clone()), None);
-    assert!(doc.style(wide).is_some_and(|style| style.max_height.is_some()));
-    assert_eq!(doc.style(tall).and_then(|style| style.max_width.clone()), None, "inline over a sheet value");
-    assert_eq!(doc.style(tall).and_then(|style| style.max_height.clone()), None);
-    let gap_of = |id| doc.style(id).map(|style| (style.gap.is_some(), style.row_gap.clone(), style.column_gap.is_some()));
-    assert!(gap_of(gapped).is_none_or(|gap| gap == (false, None, false)), "gap: normal takes back the shorthand and the longhand");
-    let rowed = gap_of(rowed).expect("the shorthand still gives a gap");
-    assert!(rowed.0 && rowed.2, "row-gap: normal leaves the rest of the gap");
-    assert!(rowed.1.is_some(), "and is the initial row gap over the shorthand");
-}
-
 const TRANSITIONING: &str = ".btn { background-color: blue; transition: background-color .3s } .off { background-color: red }";
 
 fn transitions_from(doc: &Doc, id: u64) -> Option<String> {
@@ -1671,6 +1646,31 @@ fn an_element_removed_and_inserted_again_in_a_later_batch_does_not_transition() 
 }
 
 #[test]
+fn a_keyword_initial_value_takes_back_an_earlier_rules_value_in_a_sheet_and_inline() {
+    let mut doc = Doc::new();
+    let wide = doc.classed("div", ROOT, "a wide");
+    let tall = doc.classed("div", ROOT, "a");
+    let gapped = doc.classed("div", ROOT, "g normal");
+    let rowed = doc.classed("div", ROOT, "g r");
+    doc.style_element(
+        ROOT,
+        ".a { max-width: 300px; max-height: 40px } .a.wide { max-width: none } \
+         .g { gap: 5px; column-gap: 7px } .normal { gap: normal } .r { row-gap: normal }",
+    );
+    doc.inline(tall, r#"{"maxWidth":"none","maxHeight":"none"}"#);
+    doc.flush();
+    assert_eq!(doc.style(wide).and_then(|style| style.max_width.clone()), None);
+    assert!(doc.style(wide).is_some_and(|style| style.max_height.is_some()));
+    assert_eq!(doc.style(tall).and_then(|style| style.max_width.clone()), None, "inline over a sheet value");
+    assert_eq!(doc.style(tall).and_then(|style| style.max_height.clone()), None);
+    let gap_of = |id| doc.style(id).map(|style| (style.gap.is_some(), style.row_gap.clone(), style.column_gap.is_some()));
+    assert!(gap_of(gapped).is_none_or(|gap| gap == (false, None, false)), "gap: normal takes back the shorthand and the longhand");
+    let rowed = gap_of(rowed).expect("the shorthand still gives a gap");
+    assert!(rowed.0 && rowed.2, "row-gap: normal leaves the rest of the gap");
+    assert!(rowed.1.is_some(), "and is the initial row gap over the shorthand");
+}
+
+#[test]
 fn an_inline_value_that_gains_or_loses_important_restyles() {
     let mut doc = Doc::new();
     let div = doc.classed("div", ROOT, "x");
@@ -1731,6 +1731,11 @@ fn full_matches() -> usize {
 fn reset_full_matches() {
     super::share::FULL_MATCHES.with(|count| count.set(0));
     super::share::INSERTS.with(|count| count.set(0));
+    super::share::KEY_BUILDS.with(|count| count.set(0));
+}
+
+fn key_builds() -> usize {
+    super::share::KEY_BUILDS.with(|count| count.get())
 }
 
 fn memo_inserts() -> usize {
@@ -1777,6 +1782,58 @@ fn a_flush_of_elements_that_all_differ_stops_using_the_memo_after_the_trial() {
         assert_eq!(doc.color(*id), value.starts_with("v1").then_some("red"), "{value}");
         assert_eq!(doc.style(*id).and_then(|style| style.opacity), Some(0.5));
     }
+}
+
+#[test]
+fn a_flush_that_opens_with_chrome_that_differs_still_shares_the_list_after_it() {
+    let mut doc = Doc::new();
+    for at in 0..100 {
+        let id = doc.classed("div", ROOT, "row");
+        doc.tree.set_attribute(id, "data-k", Some(format!("chrome{at}").into()));
+    }
+    let list: Vec<u64> = (0..1000)
+        .map(|_| {
+            let id = doc.classed("div", ROOT, "row");
+            doc.tree.set_attribute(id, "data-k", Some("same".into()));
+            id
+        })
+        .collect();
+    doc.style_element(ROOT, ".row { opacity: 0.5 } [data-k=same] { color: red }");
+    reset_full_matches();
+    doc.flush();
+    // The trial of the chrome, the pause after it, and the first row of the window that follows.
+    assert!(full_matches() < 64 + 256 + 16, "{} full matches for 1100 elements", full_matches());
+    assert!(list.iter().all(|id| doc.color(*id) == Some("red") && doc.style(*id).and_then(|style| style.opacity) == Some(0.5)));
+}
+
+#[test]
+fn a_flush_of_unique_values_keeps_the_memo_bounded_across_windows() {
+    let mut doc = Doc::new();
+    let rows: Vec<u64> = (0..1500)
+        .map(|at| {
+            let id = doc.classed("div", ROOT, "row");
+            doc.tree.set_attribute(id, "data-k", Some(format!("v{at}").into()));
+            id
+        })
+        .collect();
+    doc.style_element(ROOT, ".row { opacity: 0.5 } [data-k^=v1] { color: red }");
+    reset_full_matches();
+    doc.flush();
+    // One window of 64 per 320 elements.
+    assert!(memo_inserts() <= 64 * (1502 / 320 + 1), "the memo took {} keys", memo_inserts());
+    assert!(rows.iter().enumerate().all(|(at, id)| doc.color(*id) == format!("v{at}").starts_with("v1").then_some("red")));
+}
+
+#[test]
+fn a_flush_of_unshareable_keys_stops_building_keys_while_the_memo_is_paused() {
+    let mut doc = Doc::new();
+    let list = doc.classed("div", ROOT, "list");
+    let rows: Vec<u64> = (0..1000).map(|_| doc.classed("div", list, "row")).collect();
+    doc.style_element(ROOT, ".row { color: red } .list .row { background-color: blue }");
+    reset_full_matches();
+    doc.flush();
+    assert!(key_builds() < 1002 / 2, "{} keys built for 1000 rows", key_builds());
+    assert!(rows.iter().all(|id| (doc.color(*id), doc.background(*id)) == (Some("red"), Some("blue"))));
 }
 
 #[test]

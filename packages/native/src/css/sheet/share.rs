@@ -7,9 +7,12 @@
 //! (a combinator, `:root`, `[style]`) is matched in full, and the memo remembers that for its key.
 //!
 //! The memo lives for one flush: the tree does not change while it matches, and a sheet reload
-//! comes before it. A flush whose elements mostly differ (a unique attribute value on each) would
-//! pay a key and a map entry per element for nothing, so the memo stops after its first
-//! [`TRIAL`] lookups if fewer than one in [`MIN_HIT_RATE`] hit.
+//! comes before it. Elements that mostly differ (a unique attribute value on each) would pay a key
+//! and a map entry each for nothing, so the memo is judged in windows: after [`TRIAL`] lookups of
+//! shareable keys (or of unshareable ones) it is paused for the next [`PAUSE`] elements unless at
+//! least one in [`MIN_HIT_RATE`] of the window hit, and then a new window starts. The elements
+//! that open a flush are often app chrome with nothing in common with the list after it, so one
+//! window at the start of the flush is not allowed to decide for all of it.
 
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -31,12 +34,16 @@ thread_local! {
     pub(super) static FULL_MATCHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Keys the memo inserted, which stops growing once a flush gives the memo up.
     pub(super) static INSERTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Keys the memo built, which stops growing while it is paused.
+    pub(super) static KEY_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// Lookups a flush makes before it judges whether the memo pays.
+/// Lookups of one kind (shareable, or unshareable) a window holds before it is judged.
 const TRIAL: usize = 64;
-/// The memo is kept when at least one lookup in this many of the trial hit.
+/// The memo is kept when at least one lookup in this many of a window hit.
 const MIN_HIT_RATE: usize = 4;
+/// Elements matched directly, with no key, after a window that did not pay.
+const PAUSE: usize = 256;
 
 pub(super) fn count_full_match() {
     #[cfg(test)]
@@ -68,11 +75,14 @@ pub(super) struct StyleSharing {
     /// One list per distinct key that was matched in full and shared.
     pub(super) lists: Vec<MatchedList>,
     key: Vec<u8>,
-    lookups: usize,
+    /// What the window being judged has seen. A lookup of an unshareable key never hits, and is
+    /// not counted among the shareable ones, which are what a hit rate is a rate of: but a window
+    /// of nothing else must end too, or every element of it would pay a key for nothing.
+    shareable: usize,
+    unshareable: usize,
     hits: usize,
-    /// Set when the trial found that elements rarely share a key: the rest of the flush is matched
-    /// directly.
-    given_up: bool,
+    /// Elements still to be matched directly.
+    paused: usize,
 }
 
 impl StyleSharing {
@@ -81,6 +91,21 @@ impl StyleSharing {
             Found::Shared(list) => self.lists[*list].is_empty(),
             Found::Own(list) => list.is_empty(),
         }
+    }
+
+    /// Ends the window when it is full: the memo is paused unless it paid. Whether it did.
+    fn judged(&mut self) -> bool {
+        if self.shareable < TRIAL && self.unshareable < TRIAL {
+            return true;
+        }
+        let pays = self.hits * MIN_HIT_RATE >= TRIAL;
+        self.shareable = 0;
+        self.unshareable = 0;
+        self.hits = 0;
+        if !pays {
+            self.paused = PAUSE;
+        }
+        pays
     }
 
     /// The rules `element` matches. `id` and `classes` are the element's atoms.
@@ -93,29 +118,41 @@ impl StyleSharing {
         classes: &[Atom],
     ) -> Found {
         let index = &sheets.index;
-        if !index.shares() || self.given_up {
+        if !index.shares() {
+            return Found::Own(index.matching(view, id, classes));
+        }
+        if self.paused > 0 {
+            self.paused -= 1;
             return Found::Own(index.matching(view, id, classes));
         }
         self.build_key(sheets, element, view, id, classes);
-        self.lookups += 1;
-        let slot = self.slots.get(self.key.as_slice());
-        self.hits += usize::from(slot.is_some());
-        if self.lookups == TRIAL && self.hits * MIN_HIT_RATE < TRIAL {
-            self.given_up = true;
-        }
-        match slot {
-            Some(Slot::Shared(list)) => return Found::Shared(*list),
-            Some(Slot::Unshareable) => return Found::Own(index.matching(view, id, classes)),
+        match self.slots.get(self.key.as_slice()) {
+            Some(Slot::Shared(list)) => {
+                let list = *list;
+                self.shareable += 1;
+                self.hits += 1;
+                self.judged();
+                return Found::Shared(list);
+            }
+            Some(Slot::Unshareable) => {
+                self.unshareable += 1;
+                self.judged();
+                return Found::Own(index.matching(view, id, classes));
+            }
             None => {}
-        }
-        // A flush that has just given up has no use for this key either.
-        if self.given_up {
-            return Found::Own(index.matching(view, id, classes));
         }
         let (matched, shareable) = index.matching_in_full(view, id, classes);
         if !shareable {
-            count_insert();
-            self.slots.insert(self.key.as_slice().into(), Slot::Unshareable);
+            self.unshareable += 1;
+            // A window that has just paused the memo has no use for this key either.
+            if self.judged() {
+                count_insert();
+                self.slots.insert(self.key.as_slice().into(), Slot::Unshareable);
+            }
+            return Found::Own(matched);
+        }
+        self.shareable += 1;
+        if !self.judged() {
             return Found::Own(matched);
         }
         self.lists.push(matched);
@@ -129,6 +166,8 @@ impl StyleSharing {
     /// are candidates: the type, the id, the class set, and for each attribute name any selector
     /// mentions its value (presence only for `style`, which only an unshareable rule reads).
     fn build_key(&mut self, sheets: &StyleSheets, element: &RetainedElement, view: &TreeView<'_>, id: Option<Atom>, classes: &[Atom]) {
+        #[cfg(test)]
+        KEY_BUILDS.with(|count| count.set(count.get() + 1));
         let key = &mut self.key;
         key.clear();
         let is_svg = element.is_svg();
