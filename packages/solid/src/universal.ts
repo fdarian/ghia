@@ -12,6 +12,7 @@ import {
   removeHostNode,
   replaceHostText,
   setHostProperty,
+  type HostElement,
   type HostNode,
   type HostParent,
 } from "./host.js"
@@ -57,9 +58,11 @@ const runtime = createRenderer<HostNode | HostParent>({
   },
 })
 
-export function universalRender(code: () => JSX.Element, root: HostParent): () => void {
+// `body` is the parent, not the HostRoot: Solid's `cleanChildren` removes a node only when
+// `getParentNode(node)` is the parent it was inserted into, and a top-level node's parent is `body`.
+export function universalRender(code: () => JSX.Element, body: HostElement): () => void {
   return createSolidRoot((dispose) => {
-    runtime.insert(root, code())
+    runtime.insert(body, code())
     return dispose
   })
 }

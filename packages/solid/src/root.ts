@@ -213,7 +213,7 @@ export function createRoot(
             return code()
           },
         }),
-        container
+        container.body
       )
       flush()
     },
