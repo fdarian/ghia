@@ -146,13 +146,12 @@ impl GpuixView {
                     return false;
                 }
             };
-            let rewritten_before = window.patch_counters().rewritten_recordings;
             let done = if finishing { window.finish_prepared_patch(app, accepted) } else { window.repaint_in_place(units, app, accepted) };
             let Ok(outcome) = done else {
                 return false;
             };
             window.repaint_scroll_thumbs(thumbs, app);
-            let rewritten = window.patch_counters().rewritten_recordings - rewritten_before >= anchors.len() as u64;
+            let rewritten: Vec<u64> = anchors.iter().copied().filter(|id| outcome.rewritten.contains(&crate::renderer::retained_id(*id))).collect();
             // An anchor laid out again wrote other boxes, texts and paragraphs than the frame did: they
             // take the place of the ones it wrote. A row repainted wrote the same, but its text layouts are the
             // new ones, which gpui moves with the recording it rewrote and the frames that move the row move.
@@ -180,10 +179,13 @@ impl GpuixView {
             // which is not where the frame shows a row that a scroll moved.
             for (id, tape) in captured.iter().filter(|(id, _)| !anchors.contains(id) && !rows.contains(id)) {
                 let moved = view.read(app).moved_since_built(*id);
+                let old = tapes.roots_of(*id);
                 let tape = tape.borrow();
                 tape.each(crate::tape::Kind::Bounds, &mut |data, offset| crate::automation::publish_captured_bounds(data, offset + moved));
-                tape.each(crate::tape::Kind::Text, &mut |data, offset| crate::text::publish_captured_text(data, offset + moved));
-                tape.each(crate::tape::Kind::StartRegion, &mut |data, offset| crate::text::publish_captured_start_region(data, offset + moved));
+                tape.each(crate::tape::Kind::Text, &mut |data, offset| crate::text::publish_captured_text(old.as_ref(), data, offset + moved));
+                tape.each(crate::tape::Kind::StartRegion, &mut |data, offset| {
+                    crate::text::publish_captured_start_region(old.as_ref(), data, offset + moved)
+                });
             }
             let (tree, callback) = {
                 let view = view.read(app);
@@ -208,7 +210,7 @@ impl GpuixView {
                 let (handle, viewport, tree) = (window.window_handle(), window.viewport_size(), tree.clone());
                 app.defer(move |cx| crate::observers::sweep_after_translate(handle, viewport, &reports, &tree, &callback, cx));
             }
-            view.update(app, |view, cx| view.continue_after_patch(window, &built.stepped, &anchors, rewritten, cx));
+            view.update(app, |view, cx| view.continue_after_patch(window, &built.stepped, &anchors, &rewritten, cx));
             true
         };
         window.set_frame_patcher(Some(Rc::new(patcher)));
@@ -267,10 +269,12 @@ impl GpuixView {
             }
         };
         let by_commit = !self.tree.lock().unwrap().pending_restyles().is_empty();
-        for &id in ids.iter().filter(|id| self.retain.is_patch_root(**id) || self.retain.is_anchor(**id)) {
+        for &id in ids.iter().filter(|id| self.retain.is_patch_root(**id) || self.retain.is_anchor(**id) || self.retain.is_box_root(**id)) {
             if let Some(blocker) = window.patch_blocker(&crate::renderer::retained_id(id)) {
                 let by = if self.retain.is_anchor(id) {
                     "Anchor"
+                } else if self.retain.is_box_root(id) && self.relays_out(id) {
+                    "Box"
                 } else if by_commit {
                     "Commit"
                 } else {
@@ -285,7 +289,7 @@ impl GpuixView {
 
     /// Builds `ids`, which [`Self::plan_patch`] chose, at `now`.
     fn build_units(&mut self, ids: Vec<u64>, now: web_time::Instant, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Option<Built> {
-        let anchors: Vec<u64> = ids.iter().copied().filter(|id| self.retain.is_anchor(*id)).collect();
+        let anchors: Vec<u64> = ids.iter().copied().filter(|id| self.relays_out(*id)).collect();
         if !anchors.is_empty() && !self.focus_follows_tree() {
             // What a frame built whole does before it builds: an anchor is built without the pass that gives
             // the elements that came their focus handles, and takes the ones that went.
@@ -380,6 +384,12 @@ impl GpuixView {
         gpui::Point::default()
     }
 
+    /// Whether the patch of the commit's changes lays the root `id` out again: an anchor or a box root that holds one.
+    fn relays_out(&self, id: u64) -> bool {
+        let tree = self.tree.lock().unwrap();
+        self.retain.is_relaid(&tree, id)
+    }
+
     /// Whether the focus handles are the ones a build of the tree would use. An anchor is built without the
     /// pass that makes them (`sync_focus_handles`), so when a focusable element came, went or changed it is run first.
     fn focus_follows_tree(&self) -> bool {
@@ -427,7 +437,7 @@ impl GpuixView {
     }
 
     /// Asks for the frames that what still runs after a patch needs, as the end of a frame does.
-    fn continue_after_patch(&mut self, window: &mut gpui::Window, stepped: &Stepped, anchors: &[u64], rewritten: bool, cx: &mut gpui::Context<Self>) {
+    fn continue_after_patch(&mut self, window: &mut gpui::Window, stepped: &Stepped, anchors: &[u64], rewritten: &[u64], cx: &mut gpui::Context<Self>) {
         // The elements a hover restyled by paint are drawn: the roots that hold them are older than
         // what is shown, and the frame built whole after the patches builds them again.
         let hovered = self.pointer.borrow().take_paint_pending();
@@ -440,7 +450,7 @@ impl GpuixView {
             tree.take_structure();
             self.retain.note_patched(tree.root_revision());
             for &anchor in anchors {
-                self.retain.anchor_repainted(&tree, anchor, rewritten);
+                self.retain.anchor_repainted(&tree, anchor, rewritten.contains(&anchor));
             }
         }
         crate::renderer::layout_is_drawn(cx.entity_id());
