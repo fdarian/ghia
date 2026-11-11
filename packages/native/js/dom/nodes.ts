@@ -21,12 +21,6 @@ export const ROOT_ELEMENT_TYPES = {
   body: "body",
 } as const satisfies Record<string, ElementType>
 
-/** Both fill the window: the box above the root is the window, and the app's top element sizes against it. */
-export const ROOT_ELEMENT_STYLE = { display: "block", width: "100%", height: "100%" } as const
-
-/** `head` has no box and its children are never drawn: it holds what the page loads, not what it shows. */
-export const ROOT_HEAD_STYLE = { display: "none" } as const
-
 /** What an adapter tells the DOM members about one of its nodes. */
 export type NodeBinding = {
   /** The node it is in, or `null` at the top of a tree. */

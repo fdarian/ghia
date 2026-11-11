@@ -12,8 +12,6 @@ import {
   createWebviewMethods,
   eventTypesWithOverrides,
   isReservedProp,
-  ROOT_ELEMENT_STYLE,
-  ROOT_HEAD_STYLE,
   ROOT_ELEMENT_TYPES,
   sameMutationValue,
   serializeCustomProp,
@@ -400,24 +398,9 @@ export function publicInstanceById(container: Container, id: number): PublicInst
 export function installDocumentElements(base: Omit<Container, "html" | "head" | "body">): Container {
   // `html`, `head` and `body` are assigned below, before anything reads them.
   const container = base as Container
-  const html = createHostElement(
-    nextId(container),
-    ROOT_ELEMENT_TYPES.html,
-    { style: { ...ROOT_ELEMENT_STYLE } },
-    container
-  )
-  const head = createHostElement(
-    nextId(container),
-    ROOT_ELEMENT_TYPES.head,
-    { style: { ...ROOT_HEAD_STYLE } },
-    container
-  )
-  const body = createHostElement(
-    nextId(container),
-    ROOT_ELEMENT_TYPES.body,
-    { style: { ...ROOT_ELEMENT_STYLE } },
-    container
-  )
+  const html = createHostElement(nextId(container), ROOT_ELEMENT_TYPES.html, {}, container)
+  const head = createHostElement(nextId(container), ROOT_ELEMENT_TYPES.head, {}, container)
+  const body = createHostElement(nextId(container), ROOT_ELEMENT_TYPES.body, {}, container)
   container.html = html
   container.head = head
   container.body = body

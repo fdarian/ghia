@@ -2,6 +2,7 @@
  *  Chrome's user agent stylesheet: `packages/native/src/html/tags.rs` is the one table of those styles, and this
  *  list is the same set. `code` and `select` are not here: Ghia has elements of those names. */
 export const HTML_TAGS = [
+  "html", "head", "body",
   "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "dl", "dt", "dd",
   "section", "nav", "header", "footer", "main", "article", "aside",
   "figure", "figcaption", "blockquote", "pre", "fieldset", "legend", "address", "hr", "details", "summary", "dialog",

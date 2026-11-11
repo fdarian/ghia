@@ -31,8 +31,6 @@ import {
   queueCharacterDataMutation,
   queueChildListMutation,
   recordAttributeChanges,
-  ROOT_ELEMENT_STYLE,
-  ROOT_HEAD_STYLE,
   ROOT_ELEMENT_TYPES,
   readBoundingClientRect,
   toBoundingClientRect,
@@ -173,9 +171,6 @@ export class HostRoot implements MotionBindingHost {
     const html = createHostElement(ROOT_ELEMENT_TYPES.html)
     const head = createHostElement(ROOT_ELEMENT_TYPES.head)
     const body = createHostElement(ROOT_ELEMENT_TYPES.body)
-    html.style = { ...ROOT_ELEMENT_STYLE }
-    head.style = { ...ROOT_HEAD_STYLE }
-    body.style = { ...ROOT_ELEMENT_STYLE }
     html.parent = this
     for (const child of [head, body]) {
       html.childList.push(child)
