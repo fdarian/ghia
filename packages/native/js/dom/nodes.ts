@@ -327,10 +327,10 @@ abstract class ElementClass extends NodeClass {
     return value === null ? "" : value
   }
 
+  /** The `class` attribute, which is what `getAttribute` and the attributes sent to native read: `class` wins over `className`. */
   get className(): string {
-    const binding = this[DOM_BINDING]()
-    const value = binding.prop("className") ?? binding.prop("class")
-    return typeof value === "string" ? value : ""
+    const value = this.getAttribute("class")
+    return value === null ? "" : value
   }
 
   get children(): readonly Element[] {
