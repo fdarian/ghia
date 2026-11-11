@@ -137,6 +137,11 @@ executable that carries Bun and the renderer (about 128 MB), so it runs with no
 Bun and no Node install. `ghia build --no-compile` writes only `dist/main.js`,
 which runs with plain `bun`.
 
+A Worker the app starts with `new Worker(new URL('./raster.ts', import.meta.url))`
+(a relative string literal, in the UI or the server code) is bundled into
+`dist/raster.worker.js` and carried by the binary; see
+[App Workers](solid.md#app-workers).
+
 For a smaller ship set, run the same React app on
 [hermes-node](../hermes/README.md) instead of Bun. That path is
 **12 MB** plus a **22 MB** native sidecar. The steps are in that guide.

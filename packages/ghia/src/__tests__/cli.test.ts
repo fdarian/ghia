@@ -19,6 +19,7 @@ interface Run {
 const running: Bun.Subprocess[] = []
 let appDir: string
 let serverDir: string
+let workersDir: string
 let emptyDir: string
 
 function spawn(command: string[], cwd: string, env: Record<string, string | undefined> = process.env): Run {
@@ -107,6 +108,7 @@ function copyFixture(name: string): string {
 beforeEach(() => {
   appDir = copyFixture("app")
   serverDir = copyFixture("server")
+  workersDir = copyFixture("workers")
   emptyDir = mkdtempSync(join(tmpdir(), "ghia-empty-"))
 })
 
@@ -117,6 +119,7 @@ afterEach(async () => {
   }
   rmSync(appDir, { recursive: true, force: true })
   rmSync(serverDir, { recursive: true, force: true })
+  rmSync(workersDir, { recursive: true, force: true })
   rmSync(emptyDir, { recursive: true, force: true })
 })
 
@@ -453,6 +456,84 @@ export default defineConfig({ plugins: [ghia({ entry: "main.ts", compile: { outf
       expect(existsSync(join(serverDir, "dist", "app"))).toBe(false)
     },
     TIMEOUT_MS * 2
+  )
+})
+
+const UI_WORKER = "hello from the ui worker window=undefined"
+const SERVER_WORKER = "hello from the server worker window=undefined"
+
+describe("ghia dev with app Workers", () => {
+  test(
+    "runs the UI's and the server's Workers from their source files",
+    async () => {
+      const run = spawn(["bun", CLI, "dev"], workersDir)
+      await run.waitFor("SERVER_WORKER")
+      await run.waitFor("UI_WORKER")
+      expect(lines(run.output(), "UI_WORKER ")).toEqual([UI_WORKER])
+      expect(lines(run.output(), "SERVER_WORKER ")).toEqual([SERVER_WORKER])
+      expect(existsSync(join(workersDir, "dist"))).toBe(false)
+    },
+    TIMEOUT_MS * 2
+  )
+})
+
+describe("ghia build with app Workers", () => {
+  test(
+    "emits each Worker next to its entry and points the URL at it",
+    async () => {
+      await runToExit(["bun", CLI, "build", "--no-compile"], workersDir)
+      const dist = join(workersDir, "dist")
+      expect(existsSync(join(dist, "ui-worker.worker.js"))).toBe(true)
+      expect(existsSync(join(dist, "server-worker.worker.js"))).toBe(true)
+      expect(readFileSync(join(dist, "main.js"), "utf8")).toContain('new URL("./ui-worker.worker.js", import.meta.url)')
+      expect(readFileSync(join(dist, "server.js"), "utf8")).toContain('new URL("./server-worker.worker.js", import.meta.url)')
+      // The server bundle's own Worker, started from the UI bundle, is not an app Worker.
+      expect(readFileSync(join(dist, "main.js"), "utf8")).toContain('new URL("./server.js", import.meta.url)')
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "runs both Workers under plain bun",
+    async () => {
+      await runToExit(["bun", CLI, "build", "--no-compile"], workersDir)
+      const run = spawn(["bun", join(workersDir, "dist", "main.js")], workersDir)
+      await run.waitFor("SERVER_WORKER")
+      await run.waitFor("UI_WORKER")
+      expect(lines(run.output(), "UI_WORKER ")).toEqual([UI_WORKER])
+      expect(lines(run.output(), "SERVER_WORKER ")).toEqual([SERVER_WORKER])
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "a compiled binary runs both Workers alone",
+    async () => {
+      await runToExit(["bun", CLI, "build"], workersDir)
+      const copy = join(emptyDir, "app")
+      cpSync(join(workersDir, "dist", "app"), copy)
+      const run = spawn([copy], emptyDir)
+      await run.waitFor("SERVER_WORKER")
+      await run.waitFor("UI_WORKER")
+      expect(lines(run.output(), "UI_WORKER ")).toEqual([UI_WORKER])
+      expect(lines(run.output(), "SERVER_WORKER ")).toEqual([SERVER_WORKER])
+    },
+    COMPILE_TIMEOUT_MS
+  )
+
+  test(
+    "a compiled binary ignores a bunfig.toml in the directory it runs in",
+    async () => {
+      await runToExit(["bun", CLI, "build"], workersDir)
+      const copy = join(emptyDir, "app")
+      cpSync(join(workersDir, "dist", "app"), copy)
+      writeFileSync(join(emptyDir, "preload.ts"), 'console.log("PRELOADED")\n')
+      writeFileSync(join(emptyDir, "bunfig.toml"), 'preload = ["./preload.ts"]\n')
+      const run = spawn([copy], emptyDir)
+      await run.waitFor("UI_WORKER")
+      expect(run.output()).not.toContain("PRELOADED")
+    },
+    COMPILE_TIMEOUT_MS
   )
 })
 

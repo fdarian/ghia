@@ -155,6 +155,14 @@ ghia build
 - `ghia({ entry, compile: { outfile: 'out/tool' } })` moves the binary. The path is relative to the project root, and the default is `app` inside the build's output directory.
 - `build({ compile: false })` is the programmatic form of `--no-compile`.
 
+The binary ignores a `bunfig.toml` (a test preload, say) in whichever directory it is launched from.
+
+#### App Workers
+
+A Worker your app starts with `new Worker(new URL('./raster.ts', import.meta.url))` works in the built app and the compiled binary with no configuration. The build finds that pattern, in the UI code and in the server code, when the URL is a relative string literal. Each Worker file becomes an entry of its own, bundled with what it imports and written next to `main.js` as `dist/raster.worker.js`; the URL in the output points at it, and the compile carries the file. Two different files with the same name get `raster-2.worker.js`. The options argument (`{ type: 'module' }`) is left as written. A URL that is not a relative literal (a variable, a template with `${}`, a package specifier) is not found, and the Worker is not in the binary.
+
+`ghia dev` needs none of this: the server code runs through Vite's module runner, whose `import.meta.url` is the real file, so Bun starts the Worker from the `.ts` source. Vite does not transform that file, and editing it does not reload the server; restart `ghia dev` to pick the edit up.
+
 The compile rewrites `@ghia/native`'s loader on the fly, because Bun's bundler embeds an addon only for a plain `require('./x.node')` and the generated loader gets its `require` from `createRequire`. It fails the build with a clear error if that loader changes shape.
 
 ### Gotchas
@@ -282,7 +290,7 @@ Import the router into the UI as a type only. A value import would pull the serv
 
 `ghia dev` runs the server entry in the Worker through Vite's module runner. When you edit a module the server imports, the Worker calls the function `serve` returned, imports the entry again and calls `serve(port)` on the **same port**. The UI keeps `serverPort` and its client. Module state on the server starts over: `count` above returns to 0.
 
-`ghia build` writes `dist/main.js` and `dist/server.js`. The built UI creates its Worker with `new Worker(new URL('./server.js', import.meta.url))`, so the two files stay together. `bun dist/main.js` starts both. The compiled `dist/app` carries both, and a Worker that fails to start ends the app with the Worker's error instead of leaving the UI waiting.
+`ghia build` writes `dist/main.js` and `dist/server.js` (and a `dist/<name>.worker.js` for each [app Worker](#app-workers)). The built UI creates its Worker with `new Worker(new URL('./server.js', import.meta.url))`, so the two files stay together. `bun dist/main.js` starts both. The compiled `dist/app` carries both, and a Worker that fails to start ends the app with the Worker's error instead of leaving the UI waiting.
 
 ### What dev does not cover
 

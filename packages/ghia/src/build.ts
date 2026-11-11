@@ -26,8 +26,11 @@ export async function build(options: BuildOptions = {}): Promise<void> {
   if (options.compile === false) return
   const outDir = resolve(builder.config.root, environment.config.build.outDir)
   const entrypoints = [join(outDir, ENTRY_FILE_NAMES[ENVIRONMENT_NAME])]
+  const workerFiles = api.workerFiles(ENVIRONMENT_NAME).map((name) => join(outDir, name))
   if (serverEnvironment !== undefined) {
-    entrypoints.push(join(resolve(builder.config.root, serverEnvironment.config.build.outDir), ENTRY_FILE_NAMES[SERVER_ENVIRONMENT_NAME]))
+    const serverOutDir = resolve(builder.config.root, serverEnvironment.config.build.outDir)
+    entrypoints.push(join(serverOutDir, ENTRY_FILE_NAMES[SERVER_ENVIRONMENT_NAME]))
+    workerFiles.push(...api.workerFiles(SERVER_ENVIRONMENT_NAME).map((name) => join(serverOutDir, name)))
   }
-  await compile({ entrypoints, outfile: api.compileOutfile ?? join(outDir, "app") })
+  await compile({ entrypoints: [...entrypoints, ...workerFiles], outfile: api.compileOutfile ?? join(outDir, "app") })
 }
