@@ -16,11 +16,13 @@ function required<Method>(method: Method | undefined, name: string): Method {
   return method
 }
 
+/** `renderer` is `undefined` for an element that is not in a mounted root, whose `focus()` does nothing as in the DOM. */
 export function focusHostElement(
-  renderer: NativeRenderer,
+  renderer: NativeRenderer | undefined,
   id: number,
   options?: FocusOptions
 ): void {
+  if (renderer === undefined) return
   required(renderer.focusElement, "focus()").call(renderer, id)
   if (!options?.preventScroll) scrollFocusIntoView(renderer, id)
 }
@@ -36,7 +38,8 @@ function scrollFocusIntoView(renderer: NativeRenderer, id: number): void {
   renderer.scrollIntoView?.(id, "nearest", "nearest")
 }
 
-export function blurHostElement(renderer: NativeRenderer, id: number): void {
+export function blurHostElement(renderer: NativeRenderer | undefined, id: number): void {
+  if (renderer === undefined) return
   required(renderer.blurElement, "blur()").call(renderer, id)
 }
 

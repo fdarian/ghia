@@ -864,6 +864,20 @@ id, and one event map, so `createRoot()` throws if that renderer already has a
 mounted root. Call `unmount()` on the first root before you create another;
 `render()` already does that for you.
 
+**An element outlives its window.** A library keeps elements past the unmount of
+their root and reaches them from a timer or a microtask: Base UI returns focus,
+floating-ui measures. Once the window is gone (the test renderer after
+`dispose()` or after the next test renderer replaced it, a live renderer after
+its last window closed) the members an element reaches answer as a node that is not in
+a document does in a browser, instead of throwing: `getBoundingClientRect()` is a zero
+rect, `getComputedStyle` reads `""`, `focus()`, `blur()`, `scrollIntoView()` and the
+pointer-capture calls do nothing, `matches(":focus")` is `false`, `style`, attribute and
+listener changes only change the node, and observers observe nothing. A renderer method
+an element cannot reach (the test renderer's `simulate*`, `drawFrame`, `captureScreenshot`)
+keeps throwing. Not covered: `document.documentElement` is `null` while no root is mounted, so
+a read through `element.ownerDocument.documentElement` after the unmount still fails
+([deviations](fork/deviations.md#dom-building-from-code)).
+
 ### Background launch
 
 `focus: false` opens the window **without taking focus**. The app you were
@@ -10264,7 +10278,7 @@ handler it runs can read and write the renderer: `getFocusedElementId()`,
 current values inside an `onMouseDown`, and a `DismissableLayer` (Dialog,
 Popover) can open from one. Only another `nativeSimulate*` call, `advanceTime` or
 `captureScreenshot` throws there. The test window is one per thread: making a
-`TestRenderer` tears down the previous one. Call `renderer.dispose()` when a test is done with its renderer (`createTestRoot().unmount()` does, after unmounting the root); native calls that need the window throw afterwards. A renderer nobody disposes is leaked when the thread exits, which is safe but keeps the window until then.
+`TestRenderer` tears down the previous one. Call `renderer.dispose()` when a test is done with its renderer (`createTestRoot().unmount()` does, after unmounting the root); native calls that need the window throw afterwards, except the ones an element reaches, which answer as for a node that is not in a document (see "An element outlives its window" under the renderer and root notes near the top). A renderer nobody disposes is leaked when the thread exits, which is safe but keeps the window until then.
 
 ### Simulating keys
 

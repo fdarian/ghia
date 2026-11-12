@@ -327,11 +327,11 @@ export class HostElement extends HTMLElement {
   }
 
   focus(options?: FocusOptions): void {
-    focusHostElement(this.mountedRenderer("focus"), this.nativeId, options)
+    focusHostElement(this.mountedRenderer(), this.nativeId, options)
   }
 
   blur(): void {
-    blurHostElement(this.mountedRenderer("blur"), this.nativeId)
+    blurHostElement(this.mountedRenderer(), this.nativeId)
   }
 
   private methods(): ElementMethods {
@@ -339,11 +339,8 @@ export class HostElement extends HTMLElement {
     return createElementMethods(this.root.nativeRenderer, this.nativeId)
   }
 
-  private mountedRenderer(method: string): NativeRenderer {
-    if (!this.root || !this.mounted) {
-      throw new Error(`Cannot call ${method}() on an element that is not mounted`)
-    }
-    return this.root.nativeRenderer
+  private mountedRenderer(): NativeRenderer | undefined {
+    return this.root && this.mounted ? this.root.nativeRenderer : undefined
   }
 
   /** `<input>` and `<textarea>` only: select all of the text. */
