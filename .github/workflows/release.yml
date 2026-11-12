@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths: ['.changeset/**']
+  # Retries a publish that the check job blocked, once the fix is on main, without a new changeset.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -11,7 +13,34 @@ permissions:
   id-token: write
 
 jobs:
+  # changesets/action only publishes (and so builds) when no changeset is pending;
+  # otherwise it just updates the version PR, which needs neither the checks nor zed and Rust.
+  mode:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.mode.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: mode
+        run: |
+          if [ -n "$(find .changeset -maxdepth 1 -name '*.md' ! -name README.md -print -quit)" ]; then
+            echo publish=false >> "$GITHUB_OUTPUT"
+          else
+            echo publish=true >> "$GITHUB_OUTPUT"
+          fi
+
+  # A failed check blocks the publish. The Version Packages merge is already on main,
+  # so fix forward and re-run Release by dispatch.
+  check:
+    needs: mode
+    if: needs.mode.outputs.publish == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   release:
+    needs: [mode, check]
+    if: ${{ !cancelled() && needs.mode.result == 'success' && (needs.check.result == 'success' || needs.check.result == 'skipped') }}
     # ci:release builds the macOS addon, so the publish runs on this machine.
     runs-on: macos-latest
     timeout-minutes: 180
@@ -23,25 +52,16 @@ jobs:
       - uses: ./.github/actions/setup
         with: { registry-url: 'https://registry.npmjs.org' }
 
-      # changesets/action only publishes (and so builds) when no changeset is pending;
-      # otherwise it just updates the version PR, which needs neither zed nor Rust.
-      - id: mode
-        run: |
-          if [ -n "$(find .changeset -maxdepth 1 -name '*.md' ! -name README.md -print -quit)" ]; then
-            echo publish=false >> "$GITHUB_OUTPUT"
-          else
-            echo publish=true >> "$GITHUB_OUTPUT"
-          fi
-      - if: steps.mode.outputs.publish == 'true'
+      - if: needs.mode.outputs.publish == 'true'
         run: git submodule update --init --recursive
 
-      - if: steps.mode.outputs.publish == 'true'
+      - if: needs.mode.outputs.publish == 'true'
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: aarch64-apple-darwin
           cache: false
           rustflags: ''
-      - if: steps.mode.outputs.publish == 'true'
+      - if: needs.mode.outputs.publish == 'true'
         run: xcodebuild -downloadComponent MetalToolchain
 
       - id: changesets

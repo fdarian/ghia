@@ -1,35 +1,15 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - LICENSE
-      - NOTICE
-      - '.changeset/**'
-  pull_request:
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - LICENSE
-      - NOTICE
-      - '.changeset/**'
-  # Runs the React tests, which push and pull_request leave out (see react-tests).
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  # release.yml runs this before it publishes.
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
   check:
-    # Version Packages PRs only change versions and changelogs.
-    if: github.head_ref != 'changeset-release/main'
     runs-on: macos-latest
     timeout-minutes: 180
     outputs:
@@ -69,8 +49,7 @@ jobs:
         working-directory: packages/react
 
       # react-tests runs on other runners and needs what the builds generated.
-      - if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7
         with:
           name: build
           path: |
@@ -99,11 +78,11 @@ jobs:
         run: bun run test
         working-directory: examples
 
-  # The React suite is too slow for every push, so it runs on demand only.
+  # The React suite is the slowest part, so it gets its own runners.
   # A runner has 3 vCPUs and fits two test files at a time; three shards split the suite across runners.
   # It runs even when a check suite failed, as long as the builds it needs succeeded.
   react-tests:
-    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.check.outputs.build-react == 'success' }}
+    if: ${{ !cancelled() && needs.check.outputs.build-react == 'success' }}
     needs: check
     runs-on: macos-latest
     strategy:

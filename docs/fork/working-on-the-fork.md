@@ -414,18 +414,20 @@ keeps its own build script for them.
 
 ## CI and releases
 
-`ci.yml` runs on pushes to `main` and on pull requests (not for changes that only touch Markdown, `docs/`, `LICENSE`, `NOTICE` or
-`.changeset/`, and not for the `Version Packages` PR, which only changes versions and changelogs) as one `check` job on
-`macos-latest`: the native build, the `ghia`, Solid and React builds, then `bun run test` in `packages/native`, `packages/ghia`,
-`packages/solid` and `examples`. A failing suite does not skip the ones after it. The React suite is not part of that run. Start it on a branch with
-`gh workflow run ci.yml -R fdarian/ghia --ref <branch>`: `check` runs as above and uploads the build output, and the
-`react-tests` job then runs the suite on three runners, a third of the files each, even if a `check` suite failed. Running the
-React suite locally is still the bar before landing ([testing.md](testing.md#test-commands)). The `*.perf.test.tsx` files and the e2e apps are not run.
+`ci.yml` does not run on pushes or pull requests. It runs before a release publishes and gates it (`release.yml` calls it as its `check`
+job when no changeset is pending), and on demand: `gh workflow run ci.yml -R fdarian/ghia --ref <branch>`. A run is the full bar. The
+`check` job on `macos-latest` does the native build, the `ghia`, Solid and React builds, then `bun run test` in `packages/native`,
+`packages/ghia`, `packages/solid` and `examples`; a failing suite does not skip the ones after it. It uploads the build output, and
+the `react-tests` job then runs the React suite on three runners, a third of the files each, even if a `check` suite failed. A failed
+check blocks the publish. The `Version Packages` merge is already on `main`, so fix forward and re-run `Release` by dispatch.
+Because nothing runs on a PR, the local full suites, React included, are the bar before landing ([testing.md](testing.md#test-commands)).
+The `*.perf.test.tsx` files and the e2e apps are not run.
 There is no format job and no Turbo: a format commit over upstream-derived code would conflict with every pick.
 
 A user-visible change adds a changeset with `pnpm changeset`. Pushing it to `main` runs `release.yml`, where the changesets
-action opens or updates the `Version Packages` PR. `@ghia/native`, `ghia`, `@ghia/solid` and `@ghia/react` are `fixed`: they share a
-version. Merging that PR runs the action again: `bun run ci:release` builds the addon, `ghia` and both adapters on the runner and
+action opens or updates the `Version Packages` PR (no check runs for that). `@ghia/native`, `ghia`, `@ghia/solid` and `@ghia/react` are `fixed`: they share a
+version. Merging that PR runs `release.yml` again: the CI `check` job runs first, and when it passes the action runs `bun run ci:release`,
+which builds the addon, `ghia` and both adapters on the runner and
 `changeset publish` publishes the four packages with provenance, through npm trusted publishing (OIDC, no token). Each
 package's `prepublishOnly` refuses to run without `CI`, so nothing is published from a laptop by accident.
 
