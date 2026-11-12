@@ -115,6 +115,8 @@ export function releaseDetachedNodes(container: Container): void {
   runAll(nodes, (node) => {
     const state = stateFor(node)
     if (!state.mounted || isInTree(node)) return
+    // If markUnmounted throws partway, the descendants it did not reach keep `mounted = true` while
+    // their native element is destroyed: accepted, the alternative is leaking the native tree.
     try {
       markUnmounted(node)
     } finally {

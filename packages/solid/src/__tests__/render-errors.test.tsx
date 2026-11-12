@@ -1,5 +1,6 @@
-import { ErrorBoundary, For, Show, Switch, Match, createMemo, createSignal } from "solid-js"
+import { ErrorBoundary, For, Show, Switch, Match, createMemo, createSignal, onCleanup } from "solid-js"
 import type { JSX } from "solid-js"
+import { ElementListeners } from "@ghia/native/host"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { HostRoot } from "../host.js"
 import { createRoot } from "../root.js"
@@ -42,12 +43,14 @@ async function settle(): Promise<void> {
 
 describe.skipIf(!hasNativeTestRenderer)("Solid renders a value that is not a host node", () => {
   let warn: ReturnType<typeof vi.spyOn>
+  let error: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-    vi.spyOn(console, "error").mockImplementation(() => {})
+    error = vi.spyOn(console, "error").mockImplementation(() => {})
   })
   afterEach(() => {
+    expect(error).not.toHaveBeenCalled()
     vi.restoreAllMocks()
   })
 
@@ -110,6 +113,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renders a value that is not a hos
         </Show>
       </div>
     ))
+    expect(warn).toHaveBeenCalledWith(WARNING, { name: "[solid-refresh]Bomb" })
     expect(app.renderer.findByTestId("fallback")).toBeDefined()
     expect(shown(app.renderer)).toEqual(["boom"])
 
@@ -121,6 +125,36 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renders a value that is not a hos
     setPage("bomb")
     await settle()
     expect(shown(app.renderer)).toEqual(["boom"])
+  })
+
+  it("keeps an object shown in two roots as one node in each", async () => {
+    const shared = { name: "shared" }
+    const [on, setOn] = createSignal(true)
+    const view = () => (
+      <div>
+        <Show when={on()}>{shared as unknown as JSX.Element}</Show>
+      </div>
+    )
+    const bare = createTestRoot()
+    bare.render(() => <div />)
+    const first = createTestRoot()
+    first.render(view)
+    const second = createTestRoot()
+    second.render(view)
+    const withPlaceholder = bare.renderer.getRetainedElementCount() + 1
+    expect(first.renderer.getRetainedElementCount()).toBe(withPlaceholder)
+    expect(second.renderer.getRetainedElementCount()).toBe(withPlaceholder)
+
+    setOn(false)
+    await settle()
+    expect(first.renderer.getRetainedElementCount()).toBe(withPlaceholder - 1)
+    expect(second.renderer.getRetainedElementCount()).toBe(withPlaceholder - 1)
+    setOn(true)
+    await settle()
+    expect(first.renderer.getRetainedElementCount()).toBe(withPlaceholder)
+    expect(second.renderer.getRetainedElementCount()).toBe(withPlaceholder)
+    first.unmount()
+    second.unmount()
   })
 
   it("renders nothing for a value with `kind: \"text\"` that is not a host node", async () => {
@@ -378,5 +412,85 @@ describe.skipIf(!hasNativeTestRenderer)("Solid reports an error thrown while a f
     expect(() => app.unmount()).toThrow(boom)
     app.renderer.flush()
     expect(app.renderer.getRetainedElementCount()).toBe(0)
+  })
+})
+
+describe.skipIf(!hasNativeTestRenderer)("Solid keeps tearing down after a throw", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("renders the next tree when an onCleanup threw while the previous one was disposed", () => {
+    const app = createTestRoot()
+    const boom = new Error("cleanup failed")
+    app.render(() => {
+      onCleanup(() => {
+        throw boom
+      })
+      return <div>old</div>
+    })
+    expect(() => app.render(() => <div>new</div>)).toThrow(boom)
+
+    app.render(() => <div>new</div>)
+    expect(shown(app.renderer)).toEqual(["new"])
+    app.unmount()
+  })
+
+  it("throws an AggregateError from flushSync when both the function and the flush throw", async () => {
+    const app = createTestRoot()
+    app.render(() => <div>content</div>)
+    await tick()
+    const inFunction = new Error("in function")
+    const inFlush = new Error("in flush")
+    vi.spyOn(HostRoot.prototype, "finishRemovals").mockImplementationOnce(() => {
+      throw inFlush
+    })
+    let caught: unknown
+    try {
+      app.root.flushSync(() => {
+        throw inFunction
+      })
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(AggregateError)
+    expect((caught as AggregateError).errors).toEqual([inFunction, inFlush])
+    app.unmount()
+  })
+
+  it("destroys a removed subtree's elements although marking it unmounted threw", async () => {
+    const boom = new Error("detach failed")
+    const [on, setOn] = createSignal(true)
+    const onUncaughtError = vi.fn()
+    const renderer = new TestRenderer({})
+    const root = createRoot(renderer, { onUncaughtError })
+    const bare = createTestRoot()
+    bare.render(() => <div />)
+    root.render(() => (
+      <div>
+        <Show when={on()}>
+          <div>
+            <div>inner</div>
+          </div>
+        </Show>
+      </div>
+    ))
+    await tick()
+    renderer.flush()
+    vi.spyOn(ElementListeners.prototype, "detach").mockImplementationOnce(() => {
+      throw boom
+    })
+
+    setOn(false)
+    await tick()
+    renderer.flush()
+    expect(onUncaughtError.mock.calls[0]?.[0]).toBe(boom)
+    expect(renderer.getRetainedElementCount()).toBe(bare.renderer.getRetainedElementCount())
+    root.unmount()
+    renderer.dispose()
+    bare.unmount()
   })
 })

@@ -35,6 +35,7 @@ import {
   recordAttributeChanges,
   ROOT_ELEMENT_TYPES,
   runAll,
+  runSteps,
   readBoundingClientRect,
   toBoundingClientRect,
   retireMotionBindings,
@@ -166,14 +167,16 @@ export class HostRoot implements MotionBindingHost {
 
   /** Destroys `<html>` and, with it, `<head>` and `<body>`, once the app's nodes are out of them. Releases both even when one throws. */
   destroyDocumentElements(): void {
-    runAll([
+    runSteps([
       () => this.finishRemovals(),
       () => this.destroyHtml(),
-    ], (step) => step(), "Tearing down the document failed")
+    ], "Tearing down the document failed")
   }
 
   private destroyHtml(): void {
     if (!this.html.mounted) return
+    // If markUnmounted throws partway, the descendants it did not reach keep `mounted = true` while
+    // their native elements are destroyed: accepted, the alternative is leaking the native tree.
     try {
       markUnmounted(this.html)
     } finally {
@@ -188,7 +191,8 @@ export class HostRoot implements MotionBindingHost {
     this.removals.clear()
     runAll(removed, (node) => {
       if (!node.mounted || isConnected(node)) return
-      // A throw while marking a subtree unmounted must not keep its native elements alive.
+      // A throw while marking a subtree unmounted must not keep its native elements alive. The
+      // descendants it did not reach keep `mounted = true` while their native element is destroyed: accepted.
       try {
         markUnmounted(node)
       } finally {
@@ -1029,11 +1033,8 @@ export function isHostText(node: HostNode | HostParent): node is HostText {
   return node.kind === "text"
 }
 
-/** Structural, not `instanceof`: a JSX file compiled against the published
- *  package and a component from source build nodes from two class copies. */
 export function isHostElement(value: unknown): value is HostElement {
-  return typeof value === "object" && value !== null &&
-    (value as { kind?: unknown }).kind === "element"
+  return isHostNode(value) && value.kind === "element"
 }
 
 /** A host element or text node, as opposed to any other value a component can render, an app's own `{ kind: "text" }` among them. */

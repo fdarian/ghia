@@ -5,6 +5,8 @@ import {
   createRendererState,
   installElementSource,
   runAll,
+  runSteps,
+  runThenAlways,
   runMotionReleases,
   syncWindowEventListeners,
   syncWindowSelectionChange,
@@ -130,13 +132,7 @@ export function createRoot(
       tabNavigation: rootHandlers.tabNavigation,
       onEvent: rootHandlers.onEvent,
       // The flush stands in for the microtask checkpoint a browser runs before it renders.
-      schedule: (run) => {
-        try {
-          run()
-        } finally {
-          flush()
-        }
-      },
+      schedule: (run) => runThenAlways(run, flush, "Running scheduled work failed"),
     })
     renderer.setWindowKeyEvents?.(
       // Always on: the Tab and Escape defaults run on the key event, and
@@ -178,17 +174,19 @@ export function createRoot(
   attach()
   // The release and the batch are separate steps: a throw in the first must not skip the second.
   const flush = () => {
-    runAll([
+    runSteps([
       () => container.finishRemovals(),
       () => mutations.flushMutations(),
-    ], (step) => step(), "Flushing failed")
+    ], "Flushing failed")
   }
   // Every step runs even when one throws, so a failed teardown still releases `<html>` and the handlers.
   const clear = () => {
-    runAll([
+    runSteps([
       () => {
-        dispose?.()
+        // Cleared first: a throwing `onCleanup` must not leave the tree to be disposed, and throw, again.
+        const disposeTree = dispose
         dispose = undefined
+        disposeTree?.()
       },
       // A component can render several top-level nodes (a Dialog is its trigger and its
       // portal's layer), and removing one leaves the others in the native tree.
@@ -196,12 +194,12 @@ export function createRoot(
       () => container.destroyDocumentElements(),
       flush,
       () => eventHandlers.clear(),
-    ], (step) => step(), "Clearing the root failed")
+    ], "Clearing the root failed")
   }
 
   return {
     render(code) {
-      if (dispose) runAll([clear, detach, attach], (step) => step(), "Rendering again failed")
+      if (dispose) runSteps([clear, detach, attach], "Rendering again failed")
       container.ensureDocumentElements()
       dispose = universalRender(
         () => createComponent(GpuixContext.Provider, {
@@ -236,21 +234,13 @@ export function createRoot(
     },
     flush,
     flushSync(fn) {
-      try {
-        return fn()
-      } finally {
-        flush()
-      }
+      return runThenAlways(fn, flush, "flushSync failed")
     },
     dispatch(event) {
-      try {
-        return state.dispatch(event)
-      } finally {
-        flush()
-      }
+      return runThenAlways(() => state.dispatch(event), flush, "Dispatching the event failed")
     },
     unmount() {
-      runAll([clear, detach], (step) => step(), "Unmounting failed")
+      runSteps([clear, detach], "Unmounting failed")
     },
   }
 }

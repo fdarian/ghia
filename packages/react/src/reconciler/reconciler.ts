@@ -6,6 +6,7 @@ import { ConcurrentRoot } from "react-reconciler/constants.js"
 import {
   createMutationQueue,
   installElementSource,
+  runSteps,
   syncWindowEventListeners,
   syncWindowSelectionChange,
 } from "@ghia/native/host"
@@ -171,22 +172,30 @@ export function createRoot(
     throw error
   }
 
+  // Every step runs even when one throws: a failed unmount must still release `<html>`, the root and the listeners.
   const cleanup = (): void => {
-    if (container) {
-      // Must be sync. A late unmount destroy()s remounted ids and the window goes black.
-      flushSync(() => {
-        reconciler.updateContainer(null, container, null, () => {})
-      })
-      container = null
-    }
-    destroyDocumentElements(gpuixContainer)
-    if (detachRoot(renderer, gpuixContainer)) {
-      renderer.setWindowKeyEvents?.(false, false, windowKeyEventId)
-      stopWindowEventListeners?.()
-      stopElementSource?.()
-      stopSelectionChange?.()
-      renderer.setWindowAppearanceChange?.(false, windowAppearanceEventId)
-    }
+    runSteps([
+      () => {
+        const activeContainer = container
+        if (!activeContainer) return
+        container = null
+        // Must be sync. A late unmount destroy()s remounted ids and the window goes black.
+        flushSync(() => {
+          reconciler.updateContainer(null, activeContainer, null, () => {})
+        })
+      },
+      () => destroyDocumentElements(gpuixContainer),
+      () => {
+        if (!detachRoot(renderer, gpuixContainer)) return
+        runSteps([
+          () => renderer.setWindowKeyEvents?.(false, false, windowKeyEventId),
+          () => stopWindowEventListeners?.(),
+          () => stopElementSource?.(),
+          () => stopSelectionChange?.(),
+          () => renderer.setWindowAppearanceChange?.(false, windowAppearanceEventId),
+        ], "Releasing the window listeners failed")
+      },
+    ], "Unmounting failed")
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
