@@ -285,7 +285,7 @@ impl StyleDesc {
     /// is the only property of a style that an item of a flex or grid container reads differently.
     pub(crate) fn declares_z_index(&self) -> bool {
         self.z_index.is_some()
-            || [&self.focus_within, &self.has_focus_visible, &self.focus_visible]
+            || [&self.focus, &self.focus_within, &self.has_focus_visible, &self.focus_visible]
                 .into_iter()
                 .any(|variant| variant.as_deref().is_some_and(|variant| variant.z_index.is_some()))
     }
@@ -1223,6 +1223,8 @@ pub struct StyleDesc {
     // Uses Box to avoid infinite-size struct (StyleDesc contains StyleDesc).
     pub hover: Option<Box<StyleDesc>>,
     pub active: Option<Box<StyleDesc>>,
+    /// While this element is the focused one, like CSS `:focus`. Weaker than `focusWithin`.
+    pub focus: Option<Box<StyleDesc>>,
     /// While focused after keyboard input, like CSS `:focus-visible`.
     pub focus_visible: Option<Box<StyleDesc>>,
     /// While this element or a descendant is focused, like CSS `:focus-within`.
@@ -1291,8 +1293,17 @@ pub struct StyleDesc {
     /// value of its own, and they take back what the layers under it (the user agent style, the
     /// universal style) set. Set when the style is interned (`css::sheet::wide_keyword`), never by
     /// JS, and consumed by `overlay`.
+    ///
+    /// In the block of a state (`hover`) the list is what the block resets in the style it is folded
+    /// over while the state applies (`.a:hover { color: initial }`).
     #[serde(skip)]
     pub reset: Option<std::sync::Arc<[String]>>,
+    /// The properties a state block gave `revert`, which are also in [`reset`](Self::reset): the
+    /// layer that lies under the style (the universal style, or the user agent style of the tag)
+    /// writes the value it has for them into the block (`universal_style::layer_under`), so they
+    /// take that value while the state applies. `None` everywhere else.
+    #[serde(skip)]
+    pub revert: Option<std::sync::Arc<[String]>>,
     /// Counts the clones of this struct for the test renderer. Carries no data.
     #[serde(skip)]
     pub clone_probe: crate::perf_counters::CloneProbe<{ crate::perf_counters::STYLE_DESC }>,
@@ -1361,7 +1372,7 @@ impl StyleDesc {
             ($($field:ident),+ $(,)?) => {
                 $(
                     let paints = match (&painted.$field, &other.$field) {
-                        (Some(before), Some(after)) => before.differs_only_in_paint(after),
+                        (Some(before), Some(after)) => before.differs_only_in_paint_as_state(after),
                         _ => false,
                     };
                     if paints {
@@ -1371,11 +1382,12 @@ impl StyleDesc {
             };
         }
         paint_states!(
-            hover, active, focus_visible, focus_within, group_hover, group_active, group_focus_within,
+            hover, active, focus, focus_visible, focus_within, group_hover, group_active, group_focus_within,
             has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
         );
         // What a style reset below it is already in the style it was laid over: no box reads it.
         painted.reset = other.reset.clone();
+        painted.revert = other.revert.clone();
         painted.opacity = other.opacity;
         painted.box_shadow = other.box_shadow.clone();
         painted.color = other.color.clone();
@@ -1461,9 +1473,15 @@ impl StyleDesc {
             };
         }
         touches!(
-            hover, active, focus_visible, focus_within, group_hover, group_active, group_focus_within,
+            hover, active, focus, focus_visible, focus_within, group_hover, group_active, group_focus_within,
             has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
         )
+    }
+
+    /// [`Self::differs_only_in_paint`] for the block of a state. What a block resets is taken from the
+    /// style it is folded over, so a block that resets other properties is layout whatever they are.
+    pub(crate) fn differs_only_in_paint_as_state(&self, other: &Self) -> bool {
+        self.reset == other.reset && self.revert == other.revert && self.differs_only_in_paint(other)
     }
 
     /// [`Self::differs_only_in_paint`] that also lets the custom properties differ. They are read
@@ -1490,7 +1508,7 @@ impl StyleDesc {
         }
         self.var_declarations.is_some()
             || any_state!(
-                hover, active, focus_visible, focus_within, group_hover, group_active, group_focus_within,
+                hover, active, focus, focus_visible, focus_within, group_hover, group_active, group_focus_within,
                 has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
             )
             || self.container_rules.as_ref().is_some_and(|rules| rules.any_style(Self::holds_var_declarations))
@@ -1925,6 +1943,19 @@ mod tests {
         let mut wider = style(r##"{"width":2}"##);
         wider.reset = unset.reset.clone();
         assert!(!unset.differs_only_in_paint(&wider));
+    }
+
+    #[test]
+    fn a_state_block_that_resets_is_layout_though_a_reset_style_is_not() {
+        let with_hover = |reset: Option<&str>| {
+            let mut hover = style(r##"{"color":"red"}"##);
+            hover.reset = reset.map(|name| [name.to_owned()].into());
+            StyleDesc { hover: Some(Box::new(hover)), ..Default::default() }
+        };
+        assert!(with_hover(None).differs_only_in_paint(&with_hover(None)));
+        assert!(!with_hover(Some("width")).differs_only_in_paint(&with_hover(None)));
+        assert!(!with_hover(Some("width")).differs_only_in_paint(&with_hover(Some("margin"))));
+        assert!(with_hover(Some("width")).differs_only_in_paint(&with_hover(Some("width"))));
     }
 
     #[test]

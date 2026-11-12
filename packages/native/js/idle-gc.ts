@@ -1,4 +1,4 @@
-import { appliedBatchCount } from "./mutations.js"
+import { appliedBatchCount } from "./batch-count.js"
 
 export interface IdleGcOptions {
   /**

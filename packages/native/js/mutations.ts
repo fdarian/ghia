@@ -18,19 +18,9 @@ import { createStyleImageLoader, type StyleImageHost } from "./style-images.js"
 import { HTML_TAGS, HTML_TAG_PROPS, isHtmlTag } from "./html-tags.js"
 import { WIRE_OPCODE, WireWriter } from "./wire.js"
 import { cancelAnimationsOfElements } from "./web-animations.js"
+import { noteBatchApplied } from "./batch-count.js"
 
 export type MutationValue = number | string | boolean | object | null
-
-let appliedBatches = 0
-
-/**
- * How many batches of mutations have reached a renderer, across every queue.
- * It moves whenever the tree changes, which makes it the signal that an app is
- * still working: `collectGarbageWhenIdle` waits for it to hold still.
- */
-export function appliedBatchCount(): number {
-  return appliedBatches
-}
 
 /** Atomic mutation queue shared by all framework adapters. */
 export interface MutationQueue extends MutationRenderer, AttributeGateMember, Pick<SheetSink, "sheetsDirty"> {
@@ -190,7 +180,7 @@ export function createMutationQueue(
         flushDirtySheets(renderer, mutations)
       }
       if (writer.opCount === 0) return
-      appliedBatches++
+      noteBatchApplied()
       // Taken before the call: applying a batch can run JS (the focus events of
       // an `autoFocus` element), and what that enqueues belongs to the next batch,
       // which the writer builds in another buffer.

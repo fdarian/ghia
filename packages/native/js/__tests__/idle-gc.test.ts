@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { collectGarbageWhenIdle } from "../idle-gc.js"
-import { appliedBatchCount, createMutationQueue } from "../host.js"
+import { appliedBatchCount } from "../batch-count.js"
+import { createMutationQueue } from "../host.js"
 
 describe("collectGarbageWhenIdle", () => {
   beforeEach(() => {

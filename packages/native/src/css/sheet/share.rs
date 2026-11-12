@@ -22,10 +22,10 @@ use crate::retained_tree::RetainedElement;
 use super::atoms::Atom;
 use super::document::StyleSheets;
 use super::matching::ElementView;
-use super::selector::Specificity;
+use super::states::RuleMatch;
 use super::view::TreeView;
 
-pub(super) type MatchedList = Vec<(u32, Specificity)>;
+pub(super) type MatchedList = Vec<RuleMatch>;
 
 #[cfg(test)]
 thread_local! {
