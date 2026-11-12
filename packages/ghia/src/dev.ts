@@ -3,6 +3,7 @@ import { ENVIRONMENT_NAME, type GhiaPluginApi } from "./plugin.js"
 import { clearVitestMarker, entryEnvironments, findPluginApi, requireEntry } from "./plugin-api.js"
 import type { RunOptions } from "./options.js"
 import { createFullReload, createSerialQueue } from "./reload.js"
+import { unmountAllRoots } from "@ghia/native/roots"
 import { SERVER_PORT_SLOT, type WorkerInit } from "./protocol.js"
 
 export interface DevHandle {
@@ -44,6 +45,7 @@ export async function dev(options: RunOptions = {}): Promise<DevHandle> {
     api.uiChannel.onFullReload = createFullReload({
       enqueue: createSerialQueue(),
       runner: () => environment.runner,
+      stop: unmountAllRoots,
       start: () => environment.runner.import(entry).then(() => undefined),
     })
     await environment.runner.import(entry)

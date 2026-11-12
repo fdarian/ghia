@@ -1527,7 +1527,11 @@ and the state of every component around them**; the entry does not run again.
 An edit to a module that is not a boundary (the entry, a file that also exports
 a constant or a function) goes up to the modules that import it, and an edit
 nothing accepts is a full reload: the entry runs again, `render()` remounts
-React on the same window, and `useState` resets. Hot updates keep working after
+React on the same window, and `useState` resets. The reload unmounts the old
+tree before the entry runs, as a page reload does, so what the entry writes to
+`document` before `render()` (a class on `document.documentElement`, a listener
+on `document.body`) reaches the new tree's elements once
+([stand-in document](#dom-classes-and-the-tree)). Hot updates keep working after
 a full reload.
 
 **Stays:** window, GPU device, native `.node` addon, GPUI scroll physics, and on

@@ -62,6 +62,7 @@ export {
   type DomNodeFactory,
   type WindowEventListener,
 } from "./events/window-target.js"
+export { registerRoot } from "./roots.js"
 export { isWebBuild } from "./web-build.js"
 export { preventEventDefault, type DomEvent, type RootEvent } from "./events/dispatch.js"
 export * from "./focus.js"

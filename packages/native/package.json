@@ -49,6 +49,11 @@
       "import": "./dist/idle-gc.js",
       "default": "./dist/idle-gc.js"
     },
+    "./roots": {
+      "types": "./dist/roots.d.ts",
+      "import": "./dist/roots.js",
+      "default": "./dist/roots.js"
+    },
     "./runtime": {
       "types": "./dist/runtime.d.ts",
       "import": "./dist/runtime.js",

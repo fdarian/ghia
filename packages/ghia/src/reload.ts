@@ -14,7 +14,10 @@ export function createSerialQueue(): (step: () => Promise<void>) => void {
 export interface FullReloadOptions {
   enqueue: (step: () => Promise<void>) => void
   runner: () => ModuleRunner
-  /** Runs before the runner's caches are cleared, with the modules of the old run still loaded. */
+  /**
+   * Runs before the runner's caches are cleared, with the modules of the old run still loaded. A
+   * throw is logged and the reload goes on: an app whose teardown fails still has to be able to reload.
+   */
   stop?: () => void
   /** Evaluates the entry again. */
   start: () => Promise<void>
@@ -34,7 +37,11 @@ export function createFullReload(options: FullReloadOptions): (payload: FullRelo
       const runner = options.runner()
       if (payload.triggeredBy && !runner.evaluatedModules.getModulesByFile(payload.triggeredBy.replaceAll("\\", "/"))?.size) return
       await runner.hmrClient?.notifyListeners("vite:beforeFullReload", payload)
-      options.stop?.()
+      try {
+        options.stop?.()
+      } catch (error) {
+        console.error(error)
+      }
       runner.clearCache()
       await options.start()
     })

@@ -6,6 +6,7 @@ import { ConcurrentRoot } from "react-reconciler/constants.js"
 import {
   createMutationQueue,
   installElementSource,
+  registerRoot,
   runSteps,
   syncWindowEventListeners,
   syncWindowSelectionChange,
@@ -178,8 +179,11 @@ export function createRoot(
     throw error
   }
 
+  const unregister = registerRoot(() => cleanup())
+
   // Every step runs even when one throws: a failed unmount must still release `<html>`, the root and the listeners.
   const cleanup = (): void => {
+    unregister()
     runSteps([
       () => {
         const activeContainer = container
