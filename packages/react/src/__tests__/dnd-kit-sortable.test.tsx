@@ -157,7 +157,8 @@ describe.skipIf(!hasNativeTestRenderer)("@dnd-kit/react sortable on Ghia", () =>
     expect(texts(list)).toEqual(["b", "c", "a", "a", "d", "e"])
     expect(a.nextElementSibling).toBe(placeholder)
     app.renderer.nativeSimulateMouseUp(GRAB_X, pointerY)
-    await frame(16)
+    // dnd-kit starts the drop in a transition commit, which React may time-slice (5 ms of real time).
+    for (let tick = 0; tick < 4 && a.getAttribute("data-dnd-dropping") === null; tick++) await frame(16)
     // The drop animation runs: the element is still the popover, marked as dropping.
     expect(a.getAttribute("data-dnd-dropping")).not.toBeNull()
     expect(a.getAnimations()).toHaveLength(1)
@@ -173,8 +174,9 @@ describe.skipIf(!hasNativeTestRenderer)("@dnd-kit/react sortable on Ghia", () =>
   })
 
   // dnd-kit's sheet gives the popover `left: var(--dnd-left) !important; right: unset !important` and
-  // `width: var(--dnd-width)`: with the list at an offset, a sheet that did nothing leaves the box at the window's
-  // origin, as the user agent style centres a `position: fixed` popover, and as wide as its text.
+  // `width: var(--dnd-width)`: with the list at an offset, a sheet that left the variables unset would put the box at
+  // the window's origin (the `var(--dnd-left, 0px)` fallback), and as wide as its text. With no stylesheet at all,
+  // the user agent style would centre the `position: fixed` popover.
   it("keeps the dragged item at its own x and width", async () => {
     mount()
     await frame(0)
@@ -182,7 +184,8 @@ describe.skipIf(!hasNativeTestRenderer)("@dnd-kit/react sortable on Ghia", () =>
     await grabFirstItem()
     await moveTo(GRAB_Y + 50)
     expect(rect(a)).toEqual({ x: PADDING_LEFT, y: PADDING_TOP + 50, width: LIST_WIDTH, height: ITEM_HEIGHT })
-    // The test ends with the drop animation running: its unmount cancels it.
+    // The test ends with the drop animation running. Removal does not cancel an `element.animate()` animation: closing
+    // the window leaves its `finished` pending, which is why unmounting mid-drop is safe.
     app.renderer.nativeSimulateMouseUp(GRAB_X, pointerY)
     await frame(16)
   })
@@ -210,7 +213,7 @@ describe.skipIf(!hasNativeTestRenderer)("@dnd-kit/react sortable on Ghia", () =>
     expect(items()).toEqual(["b", "c", "a", "d", "e"])
     expect(texts(list)).toEqual(["b", "c", "a", "d", "e"])
     expect(dndMarks(a)).toEqual([])
-    // dnd-kit hands focus back to the dragged item.
+    // The dragged item is focused after the drop.
     expect(document.activeElement).toBe(a)
   })
 })
