@@ -81,7 +81,7 @@ describe.skipIf(!hasNativeTestRenderer)("reads inside a press or release handler
 })
 
 describe.skipIf(!hasNativeTestRenderer)("document.activeElement", () => {
-  it("is the object a ref gives, follows focus() and blur(), and is null with nothing focused", () => {
+  it("is the object a ref gives, follows focus() and blur(), and is body with nothing focused", () => {
     const app = createTestRoot()
     try {
       let a!: HostElement
@@ -92,26 +92,26 @@ describe.skipIf(!hasNativeTestRenderer)("document.activeElement", () => {
           <div ref={b} tabIndex={0} style={{ width: 50, height: 20 }} />
         </div>
       ))
-      expect(document.activeElement).toBeNull()
+      expect(document.activeElement).toBe(document.body)
       a.focus()
       expect(document.activeElement).toBe(a)
       b.focus()
       expect(document.activeElement).toBe(b)
       b.blur()
-      expect(document.activeElement).toBeNull()
+      expect(document.activeElement).toBe(document.body)
     } finally {
       app.unmount()
     }
   })
 
-  it("is null once the root is unmounted", () => {
+  it("is body once the root is unmounted", () => {
     const app = createTestRoot()
     let ref!: HostElement
     app.render(() => <div ref={ref} tabIndex={0} style={{ width: 50, height: 20 }} />)
     ref.focus()
     expect(document.activeElement).toBe(ref)
     app.unmount()
-    expect(document.activeElement).toBeNull()
+    expect(document.activeElement).toBe(document.body)
   })
 })
 

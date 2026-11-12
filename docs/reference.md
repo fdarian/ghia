@@ -5386,8 +5386,8 @@ only the types that have a listener on `window`, `document` or an element on the
 path, so adding the first listener of a type is what turns it on.
 
 `document.activeElement` is the focused element, the same object a `ref` gives
-(a React instance, a Solid `HostElement`), and `null` when nothing is focused.
-It is current inside a `mousedown` handler, where it is still the element the
+(a React instance, a Solid `HostElement`), and `document.body` when nothing is focused,
+as in a browser. It is current inside a `mousedown` handler, where it is still the element the
 press is about to take focus from. With several windows (one root each), it is
 the focused element of the window that heard a focus event last.
 

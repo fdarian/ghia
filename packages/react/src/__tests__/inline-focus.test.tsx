@@ -175,7 +175,7 @@ describeNative("focus on inline boxes", () => {
           </span>
         </div>
       )
-      expect(document.activeElement).toBeNull()
+      expect(document.activeElement).toBe(document.body)
       refs.one.focus()
       expect(focused()).toBe("one")
       expect(document.activeElement).toBe(refs.one)
@@ -185,7 +185,7 @@ describeNative("focus on inline boxes", () => {
       refs.one.blur()
       expect(document.activeElement).toBe(refs.two)
       refs.two.blur()
-      expect(document.activeElement).toBeNull()
+      expect(document.activeElement).toBe(document.body)
       testRoot.unmount()
     })
 
@@ -227,7 +227,7 @@ describeNative("focus on inline boxes", () => {
       )
       refs.span.focus()
       expect(focused()).toBeNull()
-      expect(document.activeElement).toBeNull()
+      expect(document.activeElement).toBe(document.body)
     })
 
     it("scrolls a focused span into view, with the span's own box", () => {
@@ -623,7 +623,7 @@ describeNative("focus on inline boxes", () => {
       testRoot.render(scene(undefined))
       testRoot.renderer.flush()
       expect(focused()).toBeNull()
-      expect(document.activeElement).toBeNull()
+      expect(document.activeElement).toBe(document.body)
       testRoot.unmount()
     })
 

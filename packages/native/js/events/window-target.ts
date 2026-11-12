@@ -459,12 +459,13 @@ export class GpuixDocument<Element = unknown> extends Document {
   }
 
   /**
-   * The focused element, the same object a `ref` gives, or `null` when nothing
-   * is focused. With several windows (one root each), the window that holds
-   * focus decides: of the roots that have a focused element, the one that heard
-   * a focus event last.
+   * The focused element, the same object a `ref` gives, or `body` when nothing
+   * is focused, as in a browser (floating-ui's focus management compares the active
+   * element with `document.body` to tell "focus was lost" from "focus went elsewhere").
+   * With several windows (one root each), the window that holds focus decides: of the
+   * roots that have a focused element, the one that heard a focus event last.
    */
-  get activeElement(): Element | null {
+  get activeElement(): Element {
     let chosen: { entry: ElementSourceEntry; id: number } | undefined
     for (const entry of elementSources.values()) {
       if (entry.windowGone) continue
@@ -472,7 +473,7 @@ export class GpuixDocument<Element = unknown> extends Document {
       if (id === null) continue
       if (!chosen || entry.focusedAt > chosen.entry.focusedAt) chosen = { entry, id }
     }
-    if (!chosen) return null
+    if (!chosen) return this.body
     const element = chosen.entry.source.elementById(chosen.id)
     if (element === undefined) {
       throw new Error(`Element ${chosen.id} holds focus but its root has no element for it`)
