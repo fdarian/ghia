@@ -46,6 +46,50 @@ describe.skipIf(!hasNativeTestRenderer)("Solid constraint validation", () => {
     app.unmount()
   })
 
+  it("makes a required radio that is not in the document missing, with the radios of its own tree", () => {
+    const app = createTestRoot()
+    app.render(() => <div style={{ width: 100, height: 100 }} />)
+    const make = (name: string | null, required: boolean) => {
+      const radio = document.createElement("input")
+      radio.setAttribute("type", "radio")
+      if (name !== null) radio.name = name
+      radio.required = required
+      return radio
+    }
+    const lone = make(null, true)
+    const first = make("g", true)
+    const second = make("g", false)
+    document.createElement("div").append(first, second)
+    expect(lone.validity.valueMissing).toBe(true)
+    expect(first.validity.valueMissing).toBe(true)
+    expect(second.validity.valueMissing).toBe(true)
+    second.setAttribute("checked", "")
+    expect(first.validity.valueMissing).toBe(false)
+    expect(lone.validity.valueMissing).toBe(true)
+    app.unmount()
+  })
+
+  it("groups radios across a form attribute, whichever of them is required", () => {
+    const controls = {} as Record<string, HostElement>
+    const app = createTestRoot()
+    app.render(() => (
+      <div style={{ width: 400, height: 300 }}>
+        <input ref={(el) => (controls.elsewhere = el)} form="f" type="radio" name="g" required style={{ width: 20, height: 20 }} />
+        <form id="f" style={{ width: 200, height: 40 }}>
+          <input ref={(el) => (controls.member = el)} type="radio" name="g" style={{ width: 20, height: 20 }} />
+        </form>
+        <input ref={(el) => (controls.free = el)} type="radio" name="g" style={{ width: 20, height: 20 }} />
+      </div>
+    ))
+    const input = (name: string) => controls[name] as unknown as HTMLInputElement
+    expect(input("member").validity.valueMissing).toBe(true)
+    expect(input("elsewhere").validity.valueMissing).toBe(true)
+    expect(input("free").validity.valueMissing).toBe(false)
+    input("member").checked = true
+    expect(input("elsewhere").validity.valueMissing).toBe(false)
+    app.unmount()
+  })
+
   it("follows the form attribute for the form owner and for radio groups", () => {
     const controls = {} as Record<string, HostElement>
     const app = createTestRoot()

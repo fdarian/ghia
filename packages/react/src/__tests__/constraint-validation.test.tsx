@@ -135,6 +135,48 @@ describeNative("constraint validation", () => {
     root.unmount()
   })
 
+  it("makes a required radio that is not in the document missing, with its group: the radios of its own tree", () => {
+    const root = mount(<div style={{ width: 100, height: 100 }} />)
+    const detached = document.createElement("div")
+    const make = (name, required) => {
+      const radio = document.createElement("input")
+      radio.setAttribute("type", "radio")
+      if (name !== null) radio.name = name
+      radio.required = required
+      return radio
+    }
+    const lone = make(null, true)
+    const first = make("g", true)
+    const second = make("g", false)
+    detached.append(first, second)
+    expect(lone.validity.valueMissing).toBe(true)
+    expect(first.validity.valueMissing).toBe(true)
+    expect(second.validity.valueMissing).toBe(true)
+    second.setAttribute("checked", "")
+    expect(first.validity.valueMissing).toBe(false)
+    expect(lone.validity.valueMissing).toBe(true)
+    root.unmount()
+  })
+
+  it("groups radios across a form attribute, whichever of them is required", () => {
+    const controls = {}
+    const root = mount(
+      <div style={{ width: 400, height: 300 }}>
+        <input ref={(el) => (controls.elsewhere = el ?? controls.elsewhere)} form="f" type="radio" name="g" required style={{ width: 20, height: 20 }} />
+        <form id="f" style={{ width: 200, height: 40 }}>
+          <input ref={(el) => (controls.member = el ?? controls.member)} type="radio" name="g" style={{ width: 20, height: 20 }} />
+        </form>
+        <input ref={(el) => (controls.free = el ?? controls.free)} type="radio" name="g" style={{ width: 20, height: 20 }} />
+      </div>
+    )
+    expect(controls.member.validity.valueMissing).toBe(true)
+    expect(controls.elsewhere.validity.valueMissing).toBe(true)
+    expect(controls.free.validity.valueMissing).toBe(false)
+    controls.member.checked = true
+    expect(controls.elsewhere.validity.valueMissing).toBe(false)
+    root.unmount()
+  })
+
   it("follows the form attribute for the form owner and for radio groups", () => {
     const controls = {}
     const root = mount(

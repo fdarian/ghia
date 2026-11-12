@@ -4864,8 +4864,9 @@ submission while the control is empty.
   and `reportValidity()`. `validity.valueMissing` is the condition the form check above
   uses (a text control with no text, a checkbox that is not checked, and every radio of a
   group with a `required` radio while none is checked; a radio group is the radios with
-  one `name` in one form, or in no form, and a `form` attribute puts a radio in the form it
-  names), `validity.customError` is a non-empty `setCustomValidity()` message, and
+  one `name` in one form, or in no form, of one tree (a window, or a detached tree: a
+  detached `required` radio is missing too), and a `form` attribute puts a radio in the form it
+  names; a radio with no `name` is its own group), `validity.customError` is a non-empty `setCustomValidity()` message, and
   `valid` is neither. `checkValidity()` and `reportValidity()` return `valid`, firing the
   cancelable, non-bubbling `invalid` event first when it is `false`. `reportValidity()`
   then focuses the control (and scrolls it into view) unless a listener canceled the

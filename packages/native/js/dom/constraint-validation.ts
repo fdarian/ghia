@@ -18,6 +18,7 @@ import { onTags } from "./tag-members.js"
 const CONTROL_TAGS: ReadonlySet<string> = new Set(["input", "textarea"])
 const NAMED_TAGS: ReadonlySet<string> = new Set(["button", "fieldset", "form", "input", "select", "textarea"])
 const REQUIRABLE_TAGS: ReadonlySet<string> = new Set(["input", "select", "textarea"])
+const DOCUMENT_NODE = 9
 const CONSTRUCT: unique symbol = Symbol("ValidityState")
 
 /** The input types that are never validated: they hold no value the user enters. */
@@ -48,31 +49,39 @@ function isBarred(control: Element): boolean {
   return control.matches(":disabled")
 }
 
+/** The top of the tree `node` is in, stopping below the document: a window's `<html>`, or the top of a detached tree. */
+function treeTop(node: Element): Element {
+  let top = node
+  for (let parent = top.parentNode; parent !== null && parent.nodeType !== DOCUMENT_NODE; parent = top.parentNode) {
+    top = parent as Element
+  }
+  return top
+}
+
 /**
- * The radios that share `radio`'s group, itself included: those with its name and its form owner
- * (the same tree, for radios with none). A radio with no name is alone. This is native's rule for
- * checking one radio and unchecking the others (`radio_group`), except that a `form` attribute is
- * honoured here and not there.
+ * The radios that share `radio`'s group, itself included: those of its tree (its window, or its
+ * detached tree) with its name and its form owner. Only called for a radio with a name, since one
+ * without is a group of its own. This is native's rule for checking one radio and unchecking the
+ * others (`radio_group`), except that a `form` attribute is honoured here and not there.
  */
-function radioGroupOf(radio: Element): Element[] {
-  const name = radio.getAttribute("name")
-  const document = radio.ownerDocument
-  if (name === null || name === "" || document === null) return [radio]
+function namedRadioGroupOf(radio: Element, name: string): Element[] {
   const form = formOf(radio)
-  const root = radio.getRootNode()
-  return Array.from(document.querySelectorAll("input")).filter(
+  const top = treeTop(radio)
+  const candidates = top.localName === "input" ? [top] : []
+  candidates.push(...Array.from(top.querySelectorAll("input")))
+  return candidates.filter(
     (other) =>
       other === radio ||
-      (typeOf(other) === "radio" &&
-        other.getAttribute("name") === name &&
-        formOf(other) === form &&
-        other.getRootNode() === root)
+      (typeOf(other) === "radio" && other.getAttribute("name") === name && formOf(other) === form)
   )
 }
 
 /** A radio group is required when any of its radios is, and then it is missing while none is checked. */
 function radioGroupIsMissing(radio: Element): boolean {
-  const group = radioGroupOf(radio)
+  if (Reflect.get(radio, "checked") === true) return false
+  const name = radio.getAttribute("name")
+  if (name === null || name === "") return radio.hasAttribute("required")
+  const group = namedRadioGroupOf(radio, name)
   return group.some((member) => member.hasAttribute("required")) && !group.some((member) => Reflect.get(member, "checked") === true)
 }
 
