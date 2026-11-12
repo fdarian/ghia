@@ -24,6 +24,7 @@ import { EVENT_CLASSES } from "./events/classes.js"
 import { document, window } from "./events/window-target.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
 import { isWebBuild } from "./web-build.js"
+import { Animation, CSSAnimation, CSSTransition, DocumentTimeline, KeyframeEffect } from "./web-animations.js"
 import { installWindowMembers } from "./window-members.js"
 
 type AddListener = (
@@ -60,6 +61,11 @@ const DOM_CLASSES = {
   DOMRect,
   DOMRectReadOnly,
   ToggleEvent,
+  KeyframeEffect,
+  Animation,
+  CSSAnimation,
+  CSSTransition,
+  DocumentTimeline,
   ...EVENT_CLASSES,
 }
 
