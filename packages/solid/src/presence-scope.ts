@@ -141,15 +141,6 @@ export function registerPresence(waits: boolean): PresenceRegistration | undefin
   return found?.scope ? found.group.register(found.scope, waits) : undefined
 }
 
-export function isHostNode(value: unknown): value is HostNode {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "kind" in value &&
-    (value.kind === "element" || value.kind === "text")
-  )
-}
-
 export function isWithin(node: HostNode, ancestor: HostNode): boolean {
   let current: HostNode | HostParent | null = node
   while (current) {
