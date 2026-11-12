@@ -60,13 +60,14 @@ pub fn layer_under(universal: &StyleDesc, own: &StyleDesc) -> StyleDesc {
 /// layer here has seen.
 fn refine(below: &StyleDesc, universal: Option<&StyleDesc>, own: Option<&StyleDesc>) -> Option<Box<StyleDesc>> {
     let own = own.map(|own| reverted(own, below));
-    match (universal, own.as_deref()) {
+    match (universal, own) {
         (Some(universal), Some(own)) => {
-            let mut merged = overlay(universal, own);
+            let mut merged = overlay(universal, &own);
             merged.reset = union(universal.reset.as_ref(), own.reset.as_ref());
             Some(Box::new(merged))
         }
-        (Some(only), None) | (None, Some(only)) => Some(Box::new(only.clone())),
+        (Some(only), None) => Some(Box::new(only.clone())),
+        (None, Some(only)) => Some(Box::new(only.into_owned())),
         (None, None) => None,
     }
 }

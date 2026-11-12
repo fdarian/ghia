@@ -101,6 +101,28 @@ impl FocusStyles {
         folded
     }
 
+    /// `style` with the focus variants that apply laid over it and removed from it, when one of
+    /// them resets a property (`.a:focus { width: initial }`, `revert` included); `None` otherwise.
+    ///
+    /// The builders apply a focus variant as a GPUI refinement over the base, which writes only
+    /// the fields the variant sets, so a reset would leave the base value painted and laid out. A
+    /// style folded here has the reset taken out of the base (`overlay`), as it does for an element
+    /// with a transition (`motion::fold_state_styles`), and no variant left for the builders to
+    /// apply a second time.
+    pub fn folded_for_resets(&self, id: u64, style: &StyleDesc, focusable: bool) -> Option<StyleDesc> {
+        if !self.applying(id, style, focusable).any(|declared| declared.reset.is_some()) {
+            return None;
+        }
+        let FocusFolded::Owned(mut folded) = self.folded(id, style, focusable) else {
+            return None;
+        };
+        folded.focus = None;
+        folded.focus_within = None;
+        folded.has_focus_visible = None;
+        folded.focus_visible = None;
+        Some(*folded)
+    }
+
     /// The custom properties element `id` computes to below `parent`: the ones `style` declares
     /// with those of the focus variants that apply laid over them, the later variant winning. A
     /// custom property a variant sets is the element's, as in CSS, so its base, its other

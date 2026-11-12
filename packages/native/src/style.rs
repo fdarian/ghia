@@ -1299,9 +1299,9 @@ pub struct StyleDesc {
     #[serde(skip)]
     pub reset: Option<std::sync::Arc<[String]>>,
     /// The properties a state block gave `revert`, which are also in [`reset`](Self::reset): the
-    /// layer that lies under the style writes the value it has for them into the block
-    /// (`universal_style::layer_under`), so they take the user agent value while the state applies.
-    /// Empty everywhere else.
+    /// layer that lies under the style (the universal style, or the user agent style of the tag)
+    /// writes the value it has for them into the block (`universal_style::layer_under`), so they
+    /// take that value while the state applies. `None` everywhere else.
     #[serde(skip)]
     pub revert: Option<std::sync::Arc<[String]>>,
     /// Counts the clones of this struct for the test renderer. Carries no data.

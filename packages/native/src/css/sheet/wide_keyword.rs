@@ -113,14 +113,31 @@ struct Lists {
     revert: Vec<String>,
 }
 
+/// [`Lists`] sorted and shared, `None` for an empty one.
+struct Arcs {
+    reset: Option<Arc<[String]>>,
+    revert: Option<Arc<[String]>>,
+}
+
 impl Lists {
-    fn arcs(mut self) -> (Option<Arc<[String]>>, Option<Arc<[String]>>) {
+    fn arcs(mut self) -> Arcs {
         let finish = |list: &mut Vec<String>| {
             list.sort();
             list.dedup();
             (!list.is_empty()).then(|| Arc::from(std::mem::take(list)))
         };
-        (finish(&mut self.reset), finish(&mut self.revert))
+        Arcs { reset: finish(&mut self.reset), revert: finish(&mut self.revert) }
+    }
+
+    /// A declaration of `key` written after a `revert` gives the property, and what it covers, a
+    /// value of its own, which the user agent value would otherwise be written over.
+    fn forget_revert(&mut self, key: &str) {
+        let covered: Vec<String> = covers::key_id(key)
+            .map_or(&[][..], covers::covered_by)
+            .iter()
+            .map(|target| covers::name_of(*target))
+            .collect();
+        self.revert.retain(|name| name != key && !covered.contains(name));
     }
 }
 
@@ -176,41 +193,47 @@ pub(crate) fn resolve(raw: &[u8]) -> Option<Resolved> {
         return None;
     }
     let declarations = serde_json::from_slice::<Declarations>(raw).ok()?.0;
-    if !has_keyword(&declarations) && !declarations.iter().any(|declaration| block_with_keyword(declaration).is_some()) {
+    let blocks: Vec<Option<Vec<Declaration>>> = declarations.iter().map(block_with_keyword).collect();
+    if !has_keyword(&declarations) && blocks.iter().all(Option::is_none) {
         return None;
     }
-    let mut blocks = Vec::new();
+    let mut resolved = Vec::new();
     let mut lists = Lists::default();
-    let list = rewrite(declarations, &mut lists, Some(&mut blocks));
-    let (reset, _) = lists.arcs();
-    Some(Resolved { text: object_text(&list), reset, blocks })
+    let mut list: Vec<Declaration> = Vec::with_capacity(declarations.len());
+    for (declaration, block) in declarations.into_iter().zip(blocks) {
+        list.retain(|earlier| earlier.key != declaration.key);
+        // A block written again replaces the earlier one, and what that one reset with it.
+        resolved.retain(|earlier: &ResolvedBlock| earlier.key != declaration.key);
+        match block {
+            Some(block) => {
+                let mut inner = Lists::default();
+                let rewritten = rewrite_block(block, &mut inner);
+                let arcs = inner.arcs();
+                resolved.push(ResolvedBlock { key: declaration.key.clone(), reset: arcs.reset, revert: arcs.revert });
+                list.push(Declaration { key: declaration.key, value: object_text(&rewritten) });
+            }
+            None => rewrite_declaration(&mut list, &mut lists, declaration, false),
+        }
+    }
+    Some(Resolved { text: object_text(&list), reset: lists.arcs().reset, blocks: resolved })
 }
 
-/// `declarations` with their keywords resolved. `blocks` is `Some` for the declarations of a style,
-/// whose state blocks are resolved on their own and listed there, and `None` inside one.
-fn rewrite(declarations: Vec<Declaration>, lists: &mut Lists, mut blocks: Option<&mut Vec<ResolvedBlock>>) -> Vec<Declaration> {
-    let in_block = blocks.is_none();
+/// The declarations of a state block with their keywords resolved.
+fn rewrite_block(declarations: Vec<Declaration>, lists: &mut Lists) -> Vec<Declaration> {
     let mut list: Vec<Declaration> = Vec::with_capacity(declarations.len());
     for declaration in declarations {
         list.retain(|earlier| earlier.key != declaration.key);
-        if let Some(blocks) = blocks.as_deref_mut() {
-            // A block written again replaces the earlier one, and what that one reset with it.
-            blocks.retain(|earlier| earlier.key != declaration.key);
-            if let Some(block) = block_with_keyword(&declaration) {
-                let mut inner = Lists::default();
-                let rewritten = rewrite(block, &mut inner, None);
-                let (reset, revert) = inner.arcs();
-                blocks.push(ResolvedBlock { key: declaration.key.clone(), reset, revert });
-                list.push(Declaration { key: declaration.key, value: object_text(&rewritten) });
-                continue;
-            }
-        }
-        match keyword_of_declaration(&declaration) {
-            Some(keyword) if !declaration.key.starts_with("--") => apply(&mut list, lists, &declaration.key, keyword, in_block),
-            _ => list.push(declaration),
-        }
+        lists.forget_revert(&declaration.key);
+        rewrite_declaration(&mut list, lists, declaration, true);
     }
     list
+}
+
+fn rewrite_declaration(list: &mut Vec<Declaration>, lists: &mut Lists, declaration: Declaration, in_block: bool) {
+    match keyword_of_declaration(&declaration) {
+        Some(keyword) if !declaration.key.starts_with("--") => apply(list, lists, &declaration.key, keyword, in_block),
+        _ => list.push(declaration),
+    }
 }
 
 /// `in_block`: the keyword is in the block of a state, where `revert` has to take back what the

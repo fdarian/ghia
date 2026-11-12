@@ -4,10 +4,16 @@
  * state holds and goes with it. `:popover-open` is tree state and applies while the popover is open.
  * Each state sets `width`, which the box reports.
  */
+import fs from "fs"
+import os from "os"
+import path from "path"
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { getComputedStyle } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
+import { readLogicalPixels } from "./test-utils.js"
+
+const shots = fs.mkdtempSync(path.join(os.tmpdir(), "gpuix-react-stylesheet-states-"))
 
 describe.skipIf(!hasNativeTestRenderer)("state pseudo-classes in a stylesheet in React", () => {
   let app: TestRoot
@@ -319,5 +325,39 @@ describe.skipIf(!hasNativeTestRenderer)("state pseudo-classes in a stylesheet in
     const hovered = topOf("a")
     expect(hovered).toBeGreaterThan(0)
     expect(hovered).toBeLessThan(40)
+  })
+
+  it("takes the base value back under a keyword in a :focus rule, on a focusable element with no transition", () => {
+    app.render(
+      <div>
+        <style>{`.field { width: 100px; height: 30px } .field:focus { width: initial }`}</style>
+        <div testId="field" className="field" tabIndex={0} />
+      </div>
+    )
+    expect(widthOf("field")).toBe(100)
+    app.renderer.focusElement(idOf("field"))
+    expect(widthOf("field"), "initial is auto, which fills the parent").toBeGreaterThan(100)
+    app.renderer.blurElement(idOf("field"))
+    expect(widthOf("field")).toBe(100)
+  })
+
+  it("paints no background under background-color: unset in a :focus-visible rule", () => {
+    app.render(
+      <div style={{ width: 400, height: 300, backgroundColor: "#ffffff" }}>
+        <style>{`.btn { width: 100px; height: 30px } button:focus-visible { background-color: unset }`}</style>
+        <button testId="btn" className="btn" tabIndex={0} />
+      </div>
+    )
+    const redAt = (name: string): number => {
+      app.renderer.dispatchNativeEvents()
+      const file = path.join(shots, `${name}.png`)
+      app.renderer.captureScreenshot(file)
+      return readLogicalPixels(file, app.renderer).at(...centre("btn"))[0]
+    }
+    expect(redAt("rest"), "the user agent background").toBe(0xef)
+    app.renderer.simulateKeystrokes("Tab")
+    expect(redAt("focused"), "the page shows through").toBe(0xff)
+    app.renderer.blurElement(idOf("btn"))
+    expect(redAt("blurred")).toBe(0xef)
   })
 })

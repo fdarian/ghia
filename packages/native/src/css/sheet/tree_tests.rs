@@ -2797,6 +2797,67 @@ mod states {
         assert!(hovered(&doc, div).margin.is_none());
     }
 
+    fn paragraph_hovered(css: &str) -> (StyleDesc, StyleDesc) {
+        let mut doc = Doc::new();
+        let paragraph = doc.classed("p", ROOT, "a");
+        doc.tree.set_attribute(paragraph, "id", Some("x".into()));
+        let plain = doc.classed("p", ROOT, "plain");
+        doc.style_element(ROOT, css);
+        doc.flush();
+        (hovered(&doc, paragraph), doc.style(plain).expect("a paragraph has a style").clone())
+    }
+
+    #[test]
+    fn a_declaration_after_a_state_revert_keeps_its_value() {
+        use crate::style::DimensionValue::Pixels;
+        let (hovered, plain) = paragraph_hovered("p.a:hover { margin: revert; margin-top: 5px }");
+        assert_eq!(hovered.margin_top, Some(Pixels(5.0)));
+        assert_eq!(hovered.margin_bottom, plain.margin_bottom, "the rest is the user agent's");
+
+        let (hovered, plain) = paragraph_hovered(".a:hover { margin: revert } #x { margin-top: 5px }");
+        assert_eq!(hovered.margin_top, Some(Pixels(5.0)), "the higher unconditional value is kept over the revert");
+        assert_eq!(hovered.margin_bottom, plain.margin_bottom);
+
+        let (hovered, _) = paragraph_hovered("p.a:hover { margin-top: revert; margin: 5px }");
+        assert_eq!(hovered.margin_top, None, "the shorthand after it covers the side");
+        assert_eq!(hovered.margin.map(|margin| margin.top), Some(Pixels(5.0)));
+
+        let (hovered, plain) = paragraph_hovered("p.a:hover { margin: revert; margin-top: unset }");
+        assert_eq!(hovered.margin_top, None, "the keyword after it is the initial value");
+        assert_eq!(hovered.margin_bottom, plain.margin_bottom);
+    }
+
+    fn hovered_tag(tag: &str, css: &str) -> (StyleDesc, StyleDesc) {
+        let mut doc = Doc::new();
+        let element = doc.classed(tag, ROOT, "a");
+        let plain = doc.classed(tag, ROOT, "plain");
+        doc.style_element(ROOT, css);
+        doc.flush();
+        (hovered(&doc, element), doc.style(plain).expect("the tag has a style").clone())
+    }
+
+    #[test]
+    fn a_state_revert_of_a_longhand_takes_its_part_of_the_user_agent_shorthand() {
+        use crate::css::length::LinearLength;
+        let (hovered, _) = hovered_tag("button", ".a { padding-left: 20px } .a:hover { padding-left: revert }");
+        assert_eq!(hovered.padding_left, Some(LinearLength::px(6.0)), "`padding: 1px 6px`");
+
+        let (hovered, _) = hovered_tag("ul", ".a { padding-left: 5px } .a:hover { padding-left: revert }");
+        assert_eq!(hovered.padding_left, Some(LinearLength::px(40.0)), "`padding-inline: 40px 0`");
+
+        let (hovered, plain) = hovered_tag("button", ".a { border-top-color: red } .a:hover { border-top-color: revert }");
+        assert_eq!(hovered.border_top_color.as_deref(), Some("#767676"), "`border-color`");
+        assert_eq!(hovered.border_top_color, plain.border_color);
+    }
+
+    #[test]
+    fn a_state_revert_of_a_longhand_leaves_the_other_sides_of_the_base() {
+        use crate::css::length::LinearLength;
+        let (hovered, _) = hovered_tag("button", ".a { padding-left: 20px; padding-right: 9px } .a:hover { padding-left: revert }");
+        assert_eq!(hovered.padding_left, Some(LinearLength::px(6.0)));
+        assert_eq!(hovered.padding_right, Some(LinearLength::px(9.0)));
+    }
+
     #[test]
     fn a_state_inherit_takes_the_parents_value_for_an_inherited_property_and_is_dropped_for_the_rest() {
         let (doc, div) = with(".a { color: red; margin: 4px } .a:hover { color: inherit; margin: inherit }", None);
