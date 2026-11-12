@@ -139,10 +139,10 @@ interface State {
   ready: Deferred
   /** `Element.animate()` made the animation, which its element's removal leaves running. */
   readonly madeByScript: boolean
-  /** The element was removed while the animation ran, and no listing has found the element in the tree since. */
-  orphaned: boolean
   /** `cancel()` calls whose `cancel` event native has not delivered yet. */
   cancelEvents: number
+  /** A read saw the animation finished and its `finish` event has not been delivered yet. */
+  finishOwed: boolean
   /** `finished` was renewed because the animation went idle, which its cancel event then finds done. */
   renewedForCancel: boolean
   /**
@@ -238,7 +238,12 @@ function readLive(state: State): WebAnimationInfo {
     if (info.playState === "idle" && state.last.playState !== "idle" && state.cancelEvents === 0) {
       state.cancelNoticed = { pending: state.last.pending }
     }
-    if (info.playState !== "finished") state.holdFinished = false
+    if (info.playState !== "finished") {
+      state.holdFinished = false
+      state.finishOwed = false
+    } else if (state.last.playState !== "finished") {
+      state.finishOwed = true
+    }
     state.last = info
   } catch (error) {
     if (!isUnknownAnimation(error)) throw error
@@ -278,10 +283,10 @@ function command(animation: Animation, action: string, send: (state: State) => v
   } catch (error) {
     throw isUnknownAnimation(error) ? cancelled() : refusal(error)
   }
-  // A command can bring back an animation that was idle and only weakly held: it plays now, and events are owed to it.
-  if (state.orphaned) holdOrphan(state, animation)
-  else register(state.registry, state.elementId, state.id, animation)
   settle(animation, state, before)
+  // A command can bring back an animation that was idle and only weakly held: it plays now, and events are owed to it.
+  if (state.madeByScript) settleHold(animation)
+  else register(state.registry, state.elementId, state.id, animation)
 }
 
 /** What the state native is in says about the promises, after a command. */
@@ -633,8 +638,8 @@ export class Animation extends GpuixEventTarget {
       finished: deferred(),
       ready: deferred(),
       madeByScript: init.madeByScript,
-      orphaned: false,
       cancelEvents: 0,
+      finishOwed: init.madeByScript && init.info.playState === "finished",
       renewedForCancel: false,
       cancelNoticed: undefined,
       holdFinished: false,
@@ -840,6 +845,7 @@ export class Animation extends GpuixEventTarget {
     state.cancelEvents++
     abort(state, before.pending)
     readLive(state)
+    if (state.madeByScript) settleHold(this)
   }
 
   /**
@@ -932,9 +938,10 @@ interface Registry {
   readonly byElement: Map<number, Set<Animation>>
   readonly weak: Map<number, WeakRef<Animation>>
   /**
-   * The finished and cancelled animations of removed elements, held as long as their element lives: Chrome keeps
+   * The finished animations with a fill of removed elements, held as long as their element lives: Chrome keeps
    * a finished animation with a fill on the element, and a reinserted element lists it again. Native drops the run
-   * (`finalizer`) when both the element and the animation are gone.
+   * (`finalizer`) when both the element and the animation are gone. `settleHold` keeps this to the animations that
+   * belong in it.
    */
   readonly heldByElement: WeakMap<object, Set<Animation>>
   readonly finalizer: FinalizationRegistry<number>
@@ -1008,6 +1015,7 @@ function isUnknownAnimation(error: unknown): boolean {
 }
 
 function unregister(registry: Registry, state: State, animation: Animation): void {
+  registry.heldByElement.get(effectOf(state.keyframeEffect).target)?.delete(animation)
   registry.byId.delete(state.id)
   if (registry.weak.delete(state.id)) registry.finalizer.unregister(animation)
   const siblings = registry.byElement.get(state.elementId)
@@ -1021,6 +1029,12 @@ function register(registry: Registry, elementId: number, id: number, animation: 
   const siblings = registry.byElement.get(elementId) ?? new Set()
   siblings.add(animation)
   registry.byElement.set(elementId, siblings)
+}
+
+/** A listing found an animation this registry knows: a script's is held by what it does now, the others while they are listed. */
+function keepListed(registry: Registry, elementId: number, id: number, animation: Animation): void {
+  if (stateOf(animation).madeByScript) settleHold(animation)
+  else register(registry, elementId, id, animation)
 }
 
 /** The class of the animation of a run: the DOM makes an `Animation` for a script and a subclass for CSS. */
@@ -1046,8 +1060,7 @@ function adopt(
 ): Animation {
   const known = lookup(registry, info.id)
   if (known) {
-    register(registry, elementId, info.id, known)
-    stateOf(known).orphaned = false
+    keepListed(registry, elementId, info.id, known)
     return known
   }
   const init = { host, registry, timeline, target, elementId, info, madeByScript }
@@ -1149,8 +1162,7 @@ function adoptListed(
 ): Animation {
   const known = lookup(registry, listed.info.id)
   if (known) {
-    register(registry, listed.elementId, listed.info.id, known)
-    stateOf(known).orphaned = false
+    keepListed(registry, listed.elementId, listed.info.id, known)
     return known
   }
   const target = listed.elementId === readOn ? readOnTarget : elementOf(renderer, listed.elementId)
@@ -1213,7 +1225,8 @@ function detach(animation: Animation): void {
   const now = readLive(state)
   // A command can have played it again since the cancel, which the event only now tells of.
   if (now.playState === "finished") state.holdFinished = true
-  if (now.playState !== "idle") return
+  // A script animation's hold is `settleHold`'s.
+  if (now.playState !== "idle" || state.madeByScript) return
   holdWeakly(state, animation)
 }
 
@@ -1230,35 +1243,48 @@ function holdWeakly(state: State, animation: Animation): void {
 }
 
 /**
- * An animation a script made that finished and no longer shows (no fill holds its effect) is nothing
- * `getAnimations()` lists, so the registry stops holding it: an app that lets go of it lets native drop
- * the run. A command that plays it again holds it again. An animation of a removed element is held by its
- * element if a fill keeps its effect, which an element made again lists.
+ * Where a script animation is held, decided here and nowhere else, from what is true now: every transition that can change
+ * it (a command, a finish or cancel event, a removal, a listing that finds it again) calls this and nothing remembers the last
+ * answer. Chrome's rule: the timeline keeps an animation alive while it runs or is paused, or has an event to tell; a finished
+ * one that fills is reachable through its element; anything else only JS references keep, so an app that lets go of it lets
+ * native drop the run (`forgetAnimation`, from `finalizer`).
  */
-function releaseFinishedScript(renderer: NativeRenderer, state: State, animation: Animation): void {
-  if (state.last.kind !== "script" || state.mode !== "live") return
-  if (readLive(state).playState !== "finished") return
-  if (state.orphaned) {
-    holdOrphan(state, animation)
+function settleHold(animation: Animation): void {
+  const state = stateOf(animation)
+  const registry = state.registry
+  const info = readLive(state)
+  if (isGone(state)) {
+    unregister(registry, state, animation)
     return
   }
-  const listed = hostOf(renderer).getAnimations(state.elementId)
-  if (listed.some((info) => info.id === state.id)) return
-  holdWeakly(state, animation)
-}
-
-/**
- * Holds an animation of a removed element that is over (finished, or cancelled) for as long as the element
- * lives, and by a weak reference after that, so native drops the run once the element and the animation are
- * both gone.
- */
-function holdWithElement(state: State, animation: Animation): void {
-  const registry = state.registry
   const target = effectOf(state.keyframeEffect).target
-  const held = registry.heldByElement.get(target) ?? new Set()
-  held.add(animation)
-  registry.heldByElement.set(target, held)
-  holdWeakly(state, animation)
+  const hold = ((): "strong" | "element" | "weak" => {
+    if (state.cancelEvents > 0 || state.finishOwed) return "strong"
+    switch (info.playState) {
+      case "idle":
+        return "weak"
+      case "finished":
+        if (typeof readEffect(state).progress !== "number") return "weak"
+        return info.orphaned ? "element" : "strong"
+      default:
+        return "strong"
+    }
+  })()
+  if (hold !== "element") registry.heldByElement.get(target)?.delete(animation)
+  switch (hold) {
+    case "strong":
+      register(registry, state.elementId, state.id, animation)
+      return
+    case "element": {
+      const held = registry.heldByElement.get(target) ?? new Set()
+      held.add(animation)
+      registry.heldByElement.set(target, held)
+      holdWeakly(state, animation)
+      return
+    }
+    case "weak":
+      holdWeakly(state, animation)
+  }
 }
 
 function dispatchPlaybackEvent(
@@ -1341,13 +1367,13 @@ export function deliverWebAnimationEvent(renderer: NativeRenderer, event: EventP
         } else if (state.finished.settled === "pending" && readLive(state).playState === "finished") {
           state.finished.resolve(animation)
         }
+        state.finishOwed = false
         dispatchPlaybackEvent(animation, "finish", event.currentTime ?? null, timelineTime)
-        releaseFinishedScript(renderer, state, animation)
+        if (state.madeByScript) settleHold(animation)
         return
       default:
         if (state.cancelEvents > 0) {
           state.cancelEvents--
-          if (state.madeByScript) holdScriptAfterCancel(state, animation)
         } else {
           renderer.releaseAnimation?.(event.animationId)
           released = true
@@ -1356,6 +1382,7 @@ export function deliverWebAnimationEvent(renderer: NativeRenderer, event: EventP
         }
         if (state.mode === "gone") unregister(registry, state, animation)
         dispatchPlaybackEvent(animation, "cancel", null, timelineTime)
+        if (state.madeByScript) settleHold(animation)
     }
   } finally {
     if (event.eventType !== READY_EVENT && !released) {
@@ -1385,8 +1412,8 @@ function keptByNative(renderer: NativeRenderer, state: State): boolean {
  * `Element.animate()` is left alone, cancelled or not, as the DOM leaves it on the disconnected
  * element (`play()` after `cancel()` works there): native keeps its run and goes on with the clock,
  * so `finished` resolves on time and the run shows again if the element is made again under the same
- * id. The registry holds it while it runs (`finished` is pending); one that is over is held by its
- * element, and native drops the run when JS forgets it.
+ * id. What holds it is `settleHold`'s: it is called here because the removal changes what the animation
+ * is reachable from.
  */
 export function cancelAnimationsOfElements(renderer: object, elementIds: readonly number[]): void {
   const registry = registryOf(renderer)
@@ -1399,8 +1426,7 @@ export function cancelAnimationsOfElements(renderer: object, elementIds: readonl
       if (state.madeByScript && state.mode === "live") {
         readLive(state)
         if (!isGone(state)) {
-          state.orphaned = true
-          holdOrphan(state, animation)
+          settleHold(animation)
           continue
         }
       }
@@ -1417,32 +1443,4 @@ export function cancelAnimationsOfElements(renderer: object, elementIds: readonl
       registry.cancelTasks.add(task)
     }
   }
-}
-
-/**
- * How a script animation of a removed element is held, by what it is doing now: the registry while it runs or is paused (the
- * timeline holds it, as in Chrome), its element if it is finished with a fill, nothing but a weak reference if it is idle.
- * Everything that can change the play state of an orphan calls this, since a command or a cancel event can undo the last hold.
- */
-function holdOrphan(state: State, animation: Animation): void {
-  const playState = readLive(state).playState
-  if (isGone(state)) return
-  if (playState === "finished") holdFinishedOrphan(state, animation)
-  else if (playState === "idle") holdWeakly(state, animation)
-  else register(state.registry, state.elementId, state.id, animation)
-}
-
-/** A script animation's `cancel` event came: an idle one is held weakly, as the DOM lists nothing that is idle. */
-function holdScriptAfterCancel(state: State, animation: Animation): void {
-  if (state.orphaned) {
-    holdOrphan(state, animation)
-    return
-  }
-  if (readLive(state).playState === "idle" && !isGone(state)) holdWeakly(state, animation)
-}
-
-/** The animation was over when its element was removed: held by the element if a fill keeps its effect. */
-function holdFinishedOrphan(state: State, animation: Animation): void {
-  if (typeof readEffect(state).progress === "number") holdWithElement(state, animation)
-  else holdWeakly(state, animation)
 }

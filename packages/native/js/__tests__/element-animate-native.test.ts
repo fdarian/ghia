@@ -419,4 +419,121 @@ describeNative("element.animate() on an element that is removed", () => {
     await collectUntil(() => !known(id))
     expect(known(id)).toBe(false)
   })
+
+  describe("what holds an animation the app dropped", () => {
+    const settle = async () => {
+      for (let round = 0; round < 3; round++) {
+        collect()
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+    }
+
+    it("tells the onfinish of an animation that finished after its element was removed", async () => {
+      const fired: string[] = []
+      ;(() => {
+        const animation = methods().animate.call({}, { opacity: [0, 1] }, 1000)
+        frame(0)
+        animation.onfinish = () => fired.push("finish")
+        remove()
+        animation.finish()
+      })()
+      await settle()
+      frame(16)
+      expect(fired).toEqual(["finish"])
+    })
+
+    it("tells the oncancel of an animation cancelled after its element was removed and given a timing", async () => {
+      const fired: string[] = []
+      ;(() => {
+        const animation = methods().animate.call({}, { opacity: [0, 1] }, 1000)
+        frame(0)
+        animation.oncancel = () => fired.push("cancel")
+        remove()
+        animation.cancel()
+        animation.effect.updateTiming({ delay: 10 })
+      })()
+      await settle()
+      frame(16)
+      expect(fired).toEqual(["cancel"])
+    })
+
+    it("tells the oncancel of an animation cancelled and removed in one flush", async () => {
+      const fired: string[] = []
+      ;(() => {
+        const animation = methods().animate.call({}, { opacity: [0, 1] }, 1000)
+        frame(0)
+        animation.oncancel = () => fired.push("cancel")
+        animation.cancel()
+        remove(false)
+      })()
+      await settle()
+      frame(16)
+      expect(fired).toEqual(["cancel"])
+    })
+
+    it("lists an animation that was cancelled, removed, played and finished with a fill when the element is back", async () => {
+      const target = {}
+      ;(() => {
+        const animation = methods().animate.call(target, { opacity: [0, 1] }, { duration: 100, fill: "both" })
+        frame(0)
+        animation.cancel()
+        frame(16)
+        remove()
+        animation.play()
+        frame(16)
+        frame(200)
+      })()
+      await settle()
+      insertAgain()
+      expect(methods().getAnimations.call(target).map((listed) => listed.playState)).toEqual(["finished"])
+    })
+
+    it("lets native drop the run of an orphan that was cancelled, given a timing and let go of", async () => {
+      const id = (() => {
+        const animation = methods().animate.call({}, { opacity: [0, 1] }, 1000)
+        frame(0)
+        const made = renderer.getAnimations(BOX)[0].id
+        animation.cancel()
+        frame(16)
+        remove()
+        animation.effect.updateTiming({ delay: 10 })
+        return made
+      })()
+      await collectUntil(() => !known(id))
+      expect(known(id)).toBe(false)
+    })
+
+    it("lets native drop the run of an animation cancelled on a connected element and then given a timing and a rate", async () => {
+      const id = (() => {
+        const animation = methods().animate.call({}, { opacity: [0, 1] }, 1000)
+        frame(0)
+        const made = renderer.getAnimations(BOX)[0].id
+        animation.cancel()
+        frame(16)
+        animation.effect.updateTiming({ delay: 10 })
+        animation.playbackRate = 2
+        return made
+      })()
+      await collectUntil(() => !known(id))
+      expect(known(id)).toBe(false)
+    })
+
+    it("lets native drop the run of an orphan held by its element that was played and cancelled, while the element lives", async () => {
+      const target = {}
+      const id = (() => {
+        const animation = methods().animate.call(target, { opacity: [0, 1] }, { duration: 100, fill: "both" })
+        frame(0)
+        const made = renderer.getAnimations(BOX)[0].id
+        remove()
+        frame(200)
+        animation.play()
+        animation.cancel()
+        frame(16)
+        return made
+      })()
+      await collectUntil(() => !known(id))
+      expect(known(id)).toBe(false)
+      expect(target).toBeDefined()
+    })
+  })
 })

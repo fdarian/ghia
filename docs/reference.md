@@ -9601,8 +9601,11 @@ await animation.finished
   again as finished if a `fill` holds its effect. As in Chrome, where the timeline holds a
   running or paused animation, an infinite or paused `element.animate()` on a removed
   element keeps running and keeps its element and its native state until it is
-  cancelled: cancel it when you drop the element. A finished or cancelled one is held
-  only while JS holds it. Its CSS animations and transitions do end
+  cancelled: cancel it when you drop the element. One that is finished with a `fill`
+  is held by its element, so an element inserted again lists it; a finished one with no
+  `fill` and a cancelled one are held only while JS holds them, and until
+  the `finish` or `cancel` event they owe is told, which an app that dropped the
+  animation still gets. Its CSS animations and transitions do end
   with the removal, as in CSS. `element.animate()` on an element that is not in the
   tree throws, where Chrome animates it ([deviations](fork/deviations.md#motion)).
 - **`getKeyframes()`** answers at once, before any frame. `offset` is `null` for a

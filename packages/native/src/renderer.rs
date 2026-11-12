@@ -6921,8 +6921,16 @@ impl GpuixView {
                     .or_else(|| self.script_state(id).and_then(|(_, state)| state.script_info(id, now)))
             })
             .or_else(|| self.retired_animations.get(id).cloned())
-            .map(|info| WebAnimationInfo::at(info, &self.clock))
+            .map(|info| WebAnimationInfo { orphaned: self.web_animation_orphaned(id), ..WebAnimationInfo::at(info, &self.clock) })
             .ok_or_else(|| unknown_web_animation(id))
+    }
+
+    /// Whether the element of the run `id` has left the tree, which is true from the batch that destroyed it and until
+    /// the batch that makes it again, unlike `is_orphaned_run`, which the frame that sweeps and the one that builds move.
+    fn web_animation_orphaned(&self, id: u64) -> bool {
+        self.css_animations
+            .element_of(id)
+            .is_some_and(|element| !self.tree.lock().unwrap().elements.contains_key(&element))
     }
 
     /// The timing and computed timing of the run `id`, as of the last frame.
@@ -14390,6 +14398,10 @@ pub struct WebAnimationInfo {
     /// The `startTime`: milliseconds on the renderer's clock since its origin, as the timeline
     /// of the animations reads (`getAnimationTimelineTime`). `null` while it has none.
     pub start_time: Option<f64>,
+    /// The run is a script's on an element that is not in the tree: it runs on with the clock and shows again if the
+    /// element is made again. Read from the tree when asked, so a removal or an insertion not yet swept by a frame is
+    /// seen. Only `getAnimation` says; a listing is of elements in the tree.
+    pub orphaned: bool,
 }
 
 /// What `getTiming()` and `getComputedTiming()` read of a CSS animation or transition, in
@@ -14576,6 +14588,7 @@ impl WebAnimationInfo {
             play_state: info.status.name().to_string(),
             pending: info.pending,
             start_time: info.start_offset.map(|offset| timeline_time + offset),
+            orphaned: false,
         }
     }
 }
