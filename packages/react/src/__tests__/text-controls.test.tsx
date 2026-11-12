@@ -44,6 +44,19 @@ describeNative("text control selection", () => {
     }
   })
 
+  it("select() on email and number selects all the text although they have no selectionStart", () => {
+    for (const [type, typed, expected] of [["email", "x", "x"], ["number", "7", "7"]]) {
+      let input
+      const root = createTestRoot()
+      root.render(<input type={type} defaultValue="123" ref={(el) => (input = el)} style={{ width: 100, height: 20 }} />)
+      input.select()
+      expect([input.selectionStart, input.selectionEnd]).toEqual([null, null])
+      root.renderer.nativeSimulateKeystrokes(root.renderer.findByType("input")[0].id, typed)
+      expect([type, input.value]).toEqual([type, expected])
+      root.unmount()
+    }
+  })
+
   it("has a selection on text, search, url, tel and password, however the type is spelled, and on an unknown type", () => {
     for (const type of ["text", "search", "url", "tel", "password", " Search ", "TEXT", "nonsense", undefined]) {
       let input

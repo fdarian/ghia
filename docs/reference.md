@@ -4443,7 +4443,10 @@ Select-on-focus works with `onFocus`, for keyboard focus and for a click.
 
 An `<input>` whose type the selection API does not apply to (anything but `text`, `search`, `url`, `tel` and `password`, so `email` and `number` too) has no
 selection, as in the DOM (the `type` is read trimmed and lowercased, and an unknown keyword is `text`): `selectionStart`, `selectionEnd` and `selectionDirection` are
-`null`, `select()` does nothing, and `setSelectionRange()` throws `InvalidStateError`. A
+`null` and `setSelectionRange()` throws `InvalidStateError`. `select()` is a separate
+question, as in the DOM: it selects all the text of every type but `hidden`, `checkbox`, `radio`, `range` and the buttons
+(`button`, `submit`, `reset`, `image`), so `<input type="number" onFocus={(e) => e.currentTarget.select()}>` works
+although it has no `selectionStart`. A
 library that asks whether an element is a native text input by `selectionStart != null`
 (Base UI's composite lists do, on every item that takes focus) gets `false` for a radio.
 

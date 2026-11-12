@@ -49,6 +49,19 @@ describe.skipIf(!hasNativeTestRenderer)("Solid text controls", () => {
     }
   })
 
+  it("select() on email and number selects all the text although they have no selectionStart", () => {
+    for (const [type, typed, expected] of [["email", "x", "x"], ["number", "7", "7"]] as const) {
+      let field!: HostElement
+      const app = createTestRoot()
+      app.render(() => <input type={type} value="123" ref={field} style={{ width: 100, height: 20 }} />)
+      field.select()
+      expect([field.selectionStart, field.selectionEnd]).toEqual([null, null])
+      app.renderer.nativeSimulateKeystrokes(field.nativeId, typed)
+      expect([type, field.value]).toEqual([type, expected])
+      app.unmount()
+    }
+  })
+
   it("has a selection on text, search, url, tel and password, however the type is spelled, and on an unknown type", () => {
     for (const type of ["text", "search", "url", "tel", "password", " Search ", "TEXT", "nonsense", undefined]) {
       let field!: HostElement

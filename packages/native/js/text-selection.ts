@@ -10,7 +10,7 @@ export type SelectionDirection = "forward" | "backward" | "none"
  * the DOM. Offsets are UTF-16 code units. The getters are synchronous.
  */
 export interface TextControlSelection {
-  /** Select all of the text. Does not move focus. */
+  /** Select all of the text. Does not move focus. Does nothing for the types HTML does not apply it to (`checkbox`, `radio`, `range`, `hidden` and the buttons). */
   select(): void
   /**
    * Select `start` to `end`. Both clamp to the text, and an `end` at or before
@@ -36,6 +36,11 @@ export interface TextControlHost {
 /** The input types HTML says the selection API applies to; every other type reads `null` and cannot be set. */
 const TYPES_WITH_TEXT_SELECTION: ReadonlySet<string> = new Set(["text", "search", "url", "tel", "password"])
 
+/** The types `select()` does not apply to in HTML; every other type, `email` and `number` included, selects all. */
+const TYPES_WITHOUT_SELECT: ReadonlySet<string> = new Set([
+  "hidden", "checkbox", "radio", "range", "button", "submit", "image", "reset",
+])
+
 function hasTextSelection(host: TextControlHost): boolean {
   return TYPES_WITH_TEXT_SELECTION.has(normalizedInputType(host.inputType()))
 }
@@ -53,9 +58,12 @@ function native(host: TextControlHost): SelectionNative {
   return renderer as SelectionNative
 }
 
-/** Does nothing for a type the selection API does not apply to, as `select()` does in the DOM. */
+/**
+ * Selects all the text of every type HTML applies `select()` to, `email` and `number` included
+ * though they have no `selectionStart`, and does nothing for the rest.
+ */
 export function selectTextControl(host: TextControlHost): void {
-  if (!hasTextSelection(host)) return
+  if (TYPES_WITHOUT_SELECT.has(normalizedInputType(host.inputType()))) return
   native(host).selectText(host.id)
 }
 
