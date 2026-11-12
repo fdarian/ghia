@@ -3,6 +3,7 @@
 
 import React from "react"
 import { describe, expect, it } from "vitest"
+import { document } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -108,6 +109,90 @@ describeNative("constraint validation", () => {
     expect(controls.inside.form).toBe(controls.form)
     expect(controls.outside.form).toBeNull()
     expect(controls.form.name).toBe("")
+    root.unmount()
+  })
+
+  it("makes every radio of a group missing while none is checked when any of them is required", () => {
+    const radios = {}
+    const root = mount(
+      <div style={{ width: 400, height: 200 }}>
+        <form style={{ width: 300, height: 100 }}>
+          <input ref={(el) => (radios.a = el ?? radios.a)} type="radio" name="g" style={{ width: 20, height: 20 }} />
+          <input ref={(el) => (radios.b = el ?? radios.b)} type="radio" name="g" required style={{ width: 20, height: 20 }} />
+          <input ref={(el) => (radios.alone = el ?? radios.alone)} type="radio" style={{ width: 20, height: 20 }} />
+        </form>
+        <input ref={(el) => (radios.outside = el ?? radios.outside)} type="radio" name="g" style={{ width: 20, height: 20 }} />
+      </div>
+    )
+    expect(radios.a.validity.valueMissing).toBe(true)
+    expect(radios.b.validity.valueMissing).toBe(true)
+    expect(radios.a.validationMessage).toBe("Please select one of these options.")
+    expect(radios.alone.validity.valueMissing).toBe(false)
+    expect(radios.outside.validity.valueMissing).toBe(false)
+    radios.a.checked = true
+    expect(radios.a.validity.valid).toBe(true)
+    expect(radios.b.validity.valid).toBe(true)
+    root.unmount()
+  })
+
+  it("follows the form attribute for the form owner and for radio groups", () => {
+    const controls = {}
+    const root = mount(
+      <div style={{ width: 400, height: 300 }}>
+        <form id="f" ref={(el) => (controls.form = el ?? controls.form)} style={{ width: 200, height: 40 }}>
+          <input ref={(el) => (controls.member = el ?? controls.member)} type="radio" name="g" required style={{ width: 20, height: 20 }} />
+        </form>
+        <input ref={(el) => (controls.elsewhere = el ?? controls.elsewhere)} form="f" type="radio" name="g" style={{ width: 20, height: 20 }} />
+        <input ref={(el) => (controls.free = el ?? controls.free)} type="radio" name="g" style={{ width: 20, height: 20 }} />
+        <input ref={(el) => (controls.unknown = el ?? controls.unknown)} form="missing" style={{ width: 20, height: 20 }} />
+        <input ref={(el) => (controls.notForm = el ?? controls.notForm)} form="plain" style={{ width: 20, height: 20 }} />
+        <div id="plain" />
+      </div>
+    )
+    expect(controls.elsewhere.form).toBe(controls.form)
+    expect(controls.unknown.form).toBeNull()
+    expect(controls.notForm.form).toBeNull()
+    expect(controls.elsewhere.validity.valueMissing).toBe(true)
+    expect(controls.free.validity.valueMissing).toBe(false)
+    controls.elsewhere.checked = true
+    expect(controls.member.validity.valid).toBe(true)
+    root.unmount()
+  })
+
+  it("lets reportValidity() fire invalid and focus the control unless a listener canceled it", () => {
+    let input
+    const root = mount(<input ref={(el) => (input = el ?? input)} required defaultValue="" style={{ width: 100, height: 20 }} />)
+    const seen = []
+    let cancel = true
+    input.addEventListener("invalid", (event) => {
+      seen.push(event.type)
+      if (cancel) event.preventDefault()
+    })
+    expect(input.reportValidity()).toBe(false)
+    expect(seen).toEqual(["invalid"])
+    expect(document.activeElement).not.toBe(input)
+
+    cancel = false
+    expect(input.reportValidity()).toBe(false)
+    expect(seen).toEqual(["invalid", "invalid"])
+    expect(document.activeElement).toBe(input)
+
+    input.setCustomValidity("")
+    input.value = "x"
+    expect(input.reportValidity()).toBe(true)
+    expect(seen).toHaveLength(2)
+    root.unmount()
+  })
+
+  it("lists the ValidityState attributes in a for-in, as WebIDL attributes are", () => {
+    let input
+    const root = mount(<input ref={(el) => (input = el ?? input)} style={{ width: 100, height: 20 }} />)
+    const keys = []
+    for (const key in input.validity) keys.push(key)
+    expect(keys).toEqual([
+      "valueMissing", "typeMismatch", "patternMismatch", "tooLong", "tooShort", "rangeUnderflow",
+      "rangeOverflow", "stepMismatch", "badInput", "customError", "valid",
+    ])
     root.unmount()
   })
 

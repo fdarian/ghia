@@ -4845,18 +4845,25 @@ submission while the control is empty.
   `preventDefault()` stops it. A `<textarea>` does not count, and Enter in it
   always inserts a newline.
 - **Validation.** Each `required` control with an empty value gets a
-  non-bubbling, cancelable `invalid` event (`onInvalid`). The first one whose
-  handlers did not call `preventDefault()` takes focus, and the form is not
-  submitted. A `disabled` or `readOnly` control is not validated.
+  non-bubbling, cancelable `invalid` event (`onInvalid`), and so does every
+  radio of a group in which any radio is `required` while none is checked. The
+  first one whose handlers did not call `preventDefault()` takes focus, and the form
+  is not submitted. A `disabled` or `readOnly` control is not validated.
 - **Constraint validation API.** An `<input>` and a `<textarea>` have `required`, `name`
-  and `form` (the `<form>` it is in, or `null`), `willValidate` (`false` while disabled,
+  and `form` (the `<form>` named by its `form` attribute, if there is one with that `id`,
+  else the `<form>` it is in, or `null`), `willValidate` (`false` while disabled,
   read-only or of a type that holds no value: `hidden`, `button`, `submit`, `reset`,
   `image`), `validity`, `validationMessage`, `setCustomValidity(message)`, `checkValidity()`
   and `reportValidity()`. `validity.valueMissing` is the condition the form check above
-  uses (a text control with no text, a checkbox that is not checked, a radio group with
-  none checked), `validity.customError` is a non-empty `setCustomValidity()` message, and
+  uses (a text control with no text, a checkbox that is not checked, and every radio of a
+  group with a `required` radio while none is checked; a radio group is the radios with
+  one `name` in one form, or in no form, and a `form` attribute puts a radio in the form it
+  names), `validity.customError` is a non-empty `setCustomValidity()` message, and
   `valid` is neither. `checkValidity()` and `reportValidity()` return `valid`, firing the
-  cancelable, non-bubbling `invalid` event first when it is `false`; neither shows a bubble.
+  cancelable, non-bubbling `invalid` event first when it is `false`. `reportValidity()`
+  then focuses the control (and scrolls it into view) unless a listener canceled the
+  event, as Chrome does; neither shows a message bubble. The `ValidityState` attributes
+  are enumerable, so `for (key in input.validity)` lists them.
   `validationMessage` is the custom message, or an English text for `valueMissing`
   (`"Please fill out this field."`). The other conditions (`typeMismatch`,
   `patternMismatch`, `tooLong`, `tooShort`, `rangeUnderflow`, `rangeOverflow`,

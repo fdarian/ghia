@@ -12,6 +12,7 @@
 
 import { normalizedInputType } from "./input-type.js"
 import type { Element } from "./nodes.js"
+import { elementById } from "./selectors.js"
 import { onTags } from "./tag-members.js"
 
 const CONTROL_TAGS: ReadonlySet<string> = new Set(["input", "textarea"])
@@ -32,8 +33,12 @@ function typeOf(control: Element): string {
   return normalizedInputType(control.getAttribute("type"))
 }
 
+/** The form owner: the `<form>` the `form` attribute names, if it is one in the same tree; else the nearest ancestor `<form>`. */
 function formOf(control: Element): Element | null {
-  return control.closest("form")
+  const id = control.getAttribute("form")
+  if (id === null) return control.closest("form")
+  const named = elementById(control.getRootNode(), id)
+  return named !== null && named.localName === "form" ? named : null
 }
 
 function isBarred(control: Element): boolean {
@@ -43,27 +48,39 @@ function isBarred(control: Element): boolean {
   return control.matches(":disabled")
 }
 
-/** A radio is a group with the radios of its form (or of the tree, with none) that have its name. */
-function radioGroupHasChecked(radio: Element): boolean {
+/**
+ * The radios that share `radio`'s group, itself included: those with its name and its form owner
+ * (the same tree, for radios with none). A radio with no name is alone. This is native's rule for
+ * checking one radio and unchecking the others (`radio_group`), except that a `form` attribute is
+ * honoured here and not there.
+ */
+function radioGroupOf(radio: Element): Element[] {
   const name = radio.getAttribute("name")
-  if (name === null || name === "") return Reflect.get(radio, "checked") === true
+  const document = radio.ownerDocument
+  if (name === null || name === "" || document === null) return [radio]
   const form = formOf(radio)
-  const scope = form ?? radio.ownerDocument
-  if (scope === null) return Reflect.get(radio, "checked") === true
-  return Array.from(scope.querySelectorAll("input[type='radio']")).some(
+  const root = radio.getRootNode()
+  return Array.from(document.querySelectorAll("input")).filter(
     (other) =>
-      other.getAttribute("name") === name &&
-      formOf(other) === form &&
-      other.getRootNode() === radio.getRootNode() &&
-      Reflect.get(other, "checked") === true
+      other === radio ||
+      (typeOf(other) === "radio" &&
+        other.getAttribute("name") === name &&
+        formOf(other) === form &&
+        other.getRootNode() === root)
   )
 }
 
+/** A radio group is required when any of its radios is, and then it is missing while none is checked. */
+function radioGroupIsMissing(radio: Element): boolean {
+  const group = radioGroupOf(radio)
+  return group.some((member) => member.hasAttribute("required")) && !group.some((member) => Reflect.get(member, "checked") === true)
+}
+
 function isValueMissing(control: Element): boolean {
-  if (!control.hasAttribute("required")) return false
   const type = typeOf(control)
+  if (type === "radio") return radioGroupIsMissing(control)
+  if (!control.hasAttribute("required")) return false
   if (type === "checkbox") return Reflect.get(control, "checked") !== true
-  if (type === "radio") return !radioGroupHasChecked(control)
   if (type === "range" || type === "color") return false
   return Reflect.get(control, "value") === ""
 }
@@ -79,10 +96,6 @@ export class ValidityState {
 
   get valueMissing(): boolean {
     return !isBarred(this.#control) && isValueMissing(this.#control)
-  }
-
-  get customError(): boolean {
-    return (customMessages.get(this.#control) ?? "") !== ""
   }
 
   get typeMismatch(): boolean {
@@ -117,9 +130,18 @@ export class ValidityState {
     return false
   }
 
+  get customError(): boolean {
+    return (customMessages.get(this.#control) ?? "") !== ""
+  }
+
   get valid(): boolean {
     return !this.valueMissing && !this.customError
   }
+}
+
+// WebIDL attributes are enumerable, where a class getter is not: `for (key in input.validity)` lists them.
+for (const name of Object.getOwnPropertyNames(ValidityState.prototype)) {
+  if (name !== "constructor") Object.defineProperty(ValidityState.prototype, name, { enumerable: true })
 }
 
 const validityStates = new WeakMap<object, ValidityState>()
@@ -146,15 +168,29 @@ function validationMessageOf(control: Element): string {
   return validityOf(control).valueMissing ? missingMessage(control) : ""
 }
 
-/** Fires the cancelable `invalid` event at a control whose check failed, as `checkValidity()` does. */
-function reportInvalid(control: Element): void {
-  control.dispatchEvent(new Event("invalid", { cancelable: true }))
+/** Fires the cancelable `invalid` event at a control whose check failed; false when a listener canceled it. */
+function reportInvalid(control: Element): boolean {
+  return control.dispatchEvent(new Event("invalid", { cancelable: true }))
 }
 
 function checkValidity(control: Element): boolean {
   if (isBarred(control)) return true
   if (validityOf(control).valid) return true
   reportInvalid(control)
+  return false
+}
+
+function focusControl(control: Element): void {
+  const focus = Reflect.get(control, "focus")
+  if (typeof focus !== "function") throw new Error("reportValidity() needs an element that can take focus")
+  focus.call(control)
+}
+
+/** `checkValidity()`, then, if no `invalid` listener canceled the event, focuses the control, which scrolls it into view. No message is shown. */
+function reportValidity(control: Element): boolean {
+  if (isBarred(control)) return true
+  if (validityOf(control).valid) return true
+  if (reportInvalid(control)) focusControl(control)
   return false
 }
 
@@ -201,6 +237,6 @@ export function defineConstraintValidation(target: object): void {
       customMessages.set(element, String(message))
     }),
     checkValidity: method("checkValidity", (element) => checkValidity(element)),
-    reportValidity: method("reportValidity", (element) => checkValidity(element)),
+    reportValidity: method("reportValidity", (element) => reportValidity(element)),
   })
 }
