@@ -8,7 +8,7 @@ export type KeyframeObject = Record<string, unknown>
 export type KeyframesInput = readonly KeyframeObject[] | KeyframeObject | null | undefined
 
 /** A keyframe as native takes it: every offset set, each property a string. */
-type NativeKeyframe = Record<string, string | number>
+type NativeKeyframe = Record<string, string | number | boolean>
 
 /** What native does not read as a property of a keyframe. */
 const KEYFRAME_MEMBERS = new Set(["offset", "easing", "composite"])
@@ -121,36 +121,31 @@ function distribute(frames: Parsed[]): number[] {
   return offsets as number[]
 }
 
-/** What `Element.animate()` sends native, and the offsets of the keyframes the author gave one. */
+/** What `Element.animate()` sends native. */
 export interface PreparedKeyframes {
   /**
-   * The JSON native takes for the keyframes of `Element.animate()`: an array of `{ offset, easing,
-   * <property>: value }` in ascending offset order, every offset set and every value a string. A
-   * property name is passed on as written and native leaves out what it does not animate, as the
+   * The JSON native takes for the keyframes of `Element.animate()`: an array of `{ offset, offsetWritten,
+   * easing, <property>: value }` in ascending offset order, every offset set (`offsetWritten` says whether
+   * the author gave it, which `getKeyframes()` reports as `offset` and `null` for the others) and every value
+   * a string. A property name is passed on as written and native leaves out what it does not animate, as the
    * browser leaves out what it cannot read. `composite` is not carried: only `replace` is built.
    */
   json: string
-  /** The offsets given, which `getKeyframes()` reports as `offset` where the others are `null`. */
-  written: readonly number[]
 }
 
 export function prepareKeyframes(input: KeyframesInput): PreparedKeyframes {
-  if (input === null || input === undefined) return { json: "[]", written: [] }
+  if (input === null || input === undefined) return { json: "[]" }
   if (typeof input !== "object") throw typeError("keyframes must be an array or an object")
   const frames = isIterable(input) ? fromList([...input]) : fromProperties(input as KeyframeObject)
   const offsets = distribute(frames)
   const native: NativeKeyframe[] = frames.map((frame, index) => {
-    const keyframe: NativeKeyframe = { offset: offsets[index], easing: frame.easing }
+    const keyframe: NativeKeyframe = {}
     for (const [name, value] of frame.properties) keyframe[name] = value
+    // After the properties, so that a property named like one of these cannot replace it.
+    keyframe.offset = offsets[index]
+    keyframe.offsetWritten = frame.written
+    keyframe.easing = frame.easing
     return keyframe
   })
-  return {
-    json: JSON.stringify(native),
-    written: frames.flatMap((frame, index) => (frame.written ? [offsets[index]] : [])),
-  }
-}
-
-/** The JSON of [`prepareKeyframes`]. */
-export function normalizeKeyframes(input: KeyframesInput): string {
-  return prepareKeyframes(input).json
+  return { json: JSON.stringify(native) }
 }

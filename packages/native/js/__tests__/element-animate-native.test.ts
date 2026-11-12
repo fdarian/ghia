@@ -3,14 +3,19 @@
  * makes of keyframes and options, the engine that samples them, and the promises and events of the
  * `Animation` it returns, as `@dnd-kit/dom` uses them.
  */
+import v8 from "node:v8"
+import vm from "node:vm"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { EventPayload } from "../../index.js"
 import { createElementMethods } from "../host-runtime.js"
 import { TestRenderer, encodeWireBatchForTest, hasNativeTestRenderer } from "../testing.js"
-import { deliverWebAnimationEvent, isWebAnimationEvent, type Animation } from "../web-animations.js"
+import { cancelAnimationsOfElements, deliverWebAnimationEvent, isWebAnimationEvent, type Animation } from "../web-animations.js"
 import type { NativeRenderer } from "../host.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
+
+v8.setFlagsFromString("--expose-gc")
+const collect = vm.runInNewContext("gc") as () => void
 
 const BOX = 2
 
@@ -169,5 +174,161 @@ describeNative("element.animate()", () => {
     const animation = animate({ nonsense: ["a", "b"], opacity: [0, 1] }, 100)
     frame(0)
     expect(animation.effect.getKeyframes().every((keyframe) => !("nonsense" in keyframe))).toBe(true)
+  })
+})
+
+describeNative("element.animate() on an element that is removed", () => {
+  let renderer: TestRenderer
+
+  const host = () => renderer as unknown as NativeRenderer
+  const methods = () => createElementMethods(host(), BOX)
+
+  const frame = (milliseconds: number) => {
+    renderer.clockFastForward(milliseconds)
+    renderer.drawFrame()
+    renderer.dispatchNativeEvents()
+  }
+
+  /** What the mutation queue does with a batch that removes the box: native destroys it, JS is told which. */
+  const remove = () => {
+    const destroyed = renderer.applyBatch(
+      encodeWireBatchForTest([
+        ["detachChild", 1, BOX],
+        ["destroyElement", BOX],
+      ])
+    )
+    cancelAnimationsOfElements(host(), destroyed)
+    renderer.flush()
+    frame(0)
+  }
+
+  const insertAgain = () => {
+    renderer.applyBatch(
+      encodeWireBatchForTest([
+        ["createElement", BOX, "div"],
+        ["appendChild", 1, BOX],
+        ["setStyle", BOX, { width: 40, height: 40 }],
+      ])
+    )
+    renderer.flush()
+    frame(0)
+  }
+
+  const known = (id: number) => {
+    try {
+      renderer.getAnimation(id)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const collectUntil = async (done: () => boolean) => {
+    for (let round = 0; round < 20 && !done(); round++) {
+      collect()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+  }
+
+  beforeEach(() => {
+    renderer = new TestRenderer({
+      width: 200,
+      height: 200,
+      dispatchEvent: (event: EventPayload) => {
+        if (isWebAnimationEvent(event.eventType)) deliverWebAnimationEvent(host(), event)
+      },
+    })
+    renderer.clockPause()
+    renderer.applyBatch(
+      encodeWireBatchForTest([
+        ["createElement", 1, "div"],
+        ["setRoot", 1],
+        ["setStyle", 1, { width: 100, height: 100 }],
+        ["createElement", BOX, "div"],
+        ["appendChild", 1, BOX],
+        ["setStyle", BOX, { width: 40, height: 40 }],
+      ])
+    )
+    renderer.flush()
+    renderer.setInlineDraws(false)
+    renderer.drawFrame()
+  })
+
+  afterEach(() => {
+    renderer.dispose()
+  })
+
+  it("lists nothing while it is out of the tree, and lists a finished animation that fills again when it is back", async () => {
+    const target = {}
+    const animation = methods().animate.call(target, { opacity: [0, 1] }, { duration: 200, fill: "forwards" })
+    frame(0)
+    frame(100)
+    remove()
+    expect(methods().getAnimations.call(target)).toEqual([])
+    frame(300)
+    await expect(animation.finished).resolves.toBe(animation)
+    insertAgain()
+    expect(methods().getAnimations.call(target)).toEqual([animation])
+  })
+
+  it("plays an animation again that was cancelled after the element was removed", async () => {
+    const target = {}
+    const animation = methods().animate.call(target, { opacity: [0, 1] }, 1000)
+    frame(0)
+    frame(100)
+    remove()
+    animation.cancel()
+    frame(16)
+    expect(animation.playState).toBe("idle")
+    animation.play()
+    frame(16)
+    expect(animation.playState).toBe("running")
+    frame(1100)
+    await expect(animation.finished).resolves.toBe(animation)
+  })
+
+  it("keeps a running animation and its run when the app lets go of everything", async () => {
+    const run = () => {
+      methods().animate.call({}, { opacity: [0, 1] }, 1000)
+      frame(0)
+      return renderer.getAnimations(BOX)[0].id
+    }
+    const id = run()
+    remove()
+    await collectUntil(() => !known(id))
+    expect(known(id)).toBe(true)
+    frame(1100)
+    expect(renderer.getAnimation(id).playState).toBe("finished")
+  })
+
+  it("lets native drop the run of a finished animation that fills once the element and the animation are gone", async () => {
+    const run = () => {
+      methods().animate.call({}, { opacity: [0, 1] }, { duration: 100, fill: "both" })
+      frame(0)
+      const id = renderer.getAnimations(BOX)[0].id
+      remove()
+      frame(200)
+      return id
+    }
+    const id = run()
+    await collectUntil(() => !known(id))
+    expect(known(id)).toBe(false)
+  })
+
+  it("keeps the run of a finished animation that fills as long as the element is held", async () => {
+    const target = {}
+    const id = (() => {
+      methods().animate.call(target, { opacity: [0, 1] }, { duration: 100, fill: "both" })
+      frame(0)
+      const made = renderer.getAnimations(BOX)[0].id
+      remove()
+      frame(200)
+      return made
+    })()
+    await collectUntil(() => !known(id))
+    expect(known(id)).toBe(true)
+    insertAgain()
+    expect(methods().getAnimations.call(target).map((animation) => animation.playState)).toEqual(["finished"])
+    expect(target).toBeDefined()
   })
 })

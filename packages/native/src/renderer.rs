@@ -827,6 +827,9 @@ pub(crate) enum Repaint {
     /// A write to this motion value, which leaves the boxes alone when nothing that can move
     /// one is driven by it (`MotionValueStore::writes_paint_only`).
     MotionWrite(f64),
+    /// A command or a timing write of the Web Animation run `id`: a layout one, unless the run is one a script left
+    /// running on an element that is not in the tree, which nothing builds and only a dormant tick brings up to date.
+    WebAnimation(u64),
 }
 
 impl Repaint {
@@ -834,13 +837,17 @@ impl Repaint {
     /// classification fails is a layout one.
     pub(crate) fn invalidate(
         self,
-        view: &GpuixView,
+        view: &mut GpuixView,
         window: &mut gpui::Window,
-        cx: &mut gpui::App,
+        cx: &mut gpui::Context<GpuixView>,
         entity: gpui::EntityId,
     ) {
         match self {
             Self::None => {}
+            Self::WebAnimation(id) if view.css_animations.is_orphaned_run(id) => {
+                view.wake_dormant(crate::dormant_wake::Wake::NextFrame, window, cx);
+            }
+            Self::WebAnimation(_) => invalidate_after_commit(cx, entity),
             Self::MotionWrite(id) if matches!(view.motion_values.writes_paint_only(id), Ok(true)) => {
                 if !matches!(view.motion_values.writes_no_transform(id), Ok(true)) {
                     view.tree.lock().unwrap().relevance.note_transform_write_anywhere();
@@ -3677,7 +3684,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn update_animation_timing(&self, animation_id: f64, timing: WebAnimationTimingUpdate) -> Result<()> {
         let id = to_element_id(animation_id)?;
-        self.with_motion_state(Repaint::Layout, move |view, now| view.update_web_animation_timing(id, timing, now))
+        self.with_motion_state(Repaint::WebAnimation(id), move |view, now| view.update_web_animation_timing(id, timing, now))
     }
 
     /// JS consumed one `webanimationfinish` or `webanimationcancel` event of the
@@ -3772,7 +3779,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn set_animation_start_time(&self, animation_id: f64, start_time: Option<f64>) -> Result<()> {
         let id = to_element_id(animation_id)?;
-        self.with_motion_state(Repaint::Layout, move |view, now| {
+        self.with_motion_state(Repaint::WebAnimation(id), move |view, now| {
             view.set_web_animation_start_time(id, start_time, now)
         })
     }
@@ -3791,7 +3798,7 @@ impl GpuixRenderer {
         command: crate::motion::web_animation::Command,
     ) -> Result<()> {
         let id = to_element_id(animation_id)?;
-        self.with_motion_state(Repaint::Layout, move |view, now| view.command_web_animation(id, command, now))
+        self.with_motion_state(Repaint::WebAnimation(id), move |view, now| view.command_web_animation(id, command, now))
     }
 
     // ── Selection API ────────────────────────────────────────────────
@@ -6817,19 +6824,18 @@ impl GpuixView {
     /// The Web Animations of `element`: its CSS transitions, then its CSS animations, each in composite order, then the
     /// animations of the motion engine in the order they were made, as of the last frame.
     pub(crate) fn web_animations(&self, element: u64, now: web_time::Instant) -> Vec<WebAnimationInfo> {
+        // An element that is not in the tree has none, as Chrome's `getAnimations()` of a disconnected element is empty:
+        // the animations a script left running on it (`CssAnimations::retain`) go on without being listed, and what
+        // a state still holds until the next frame is not its either.
+        if !self.tree.lock().unwrap().elements.contains_key(&element) {
+            return Vec::new();
+        }
         let Some(now) = self.api_instant(Some(element), now) else {
             return Vec::new();
         };
         let transitions = self.css_transitions.list(element, now);
         let animations = self.css_animations.list(element, now);
-        // An element that is gone has no animations, whatever its motion state still holds until the next frame.
-        let gone = !self.tree.lock().unwrap().elements.contains_key(&element);
-        let scripts = self
-            .motion_states
-            .get(&element)
-            .filter(|_| !gone)
-            .map(|state| state.script_list(now))
-            .unwrap_or_default();
+        let scripts = self.motion_states.get(&element).map(|state| state.script_list(now)).unwrap_or_default();
         // What the style let go of has no owner any more, which puts it among the animations of a script.
         let mut others: Vec<_> = self
             .css_transitions

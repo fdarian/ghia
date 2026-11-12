@@ -9594,10 +9594,13 @@ await animation.finished
   frame (`pending` until then) and no style owns it: a change of `animation` or
   `transition` leaves it alone, and neither `display: none` nor removing the element
   cancels it. A removed element's animation goes on with the clock against the
-  element, `finished` resolves on time (never with an `AbortError`), `getAnimations()`
-  of the element lists it, and if the element is inserted again it is still
-  animating, where the clock took it. Its CSS animations and transitions do end with
-  the removal, as in CSS.
+  element, and `finished` resolves on time (never with an `AbortError`). As in
+  Chrome, the element lists nothing while it is out of the tree (`getAnimations()`
+  is `[]`, and `document.getAnimations()` does not have it either), and if it is
+  inserted again the animation is still animating, where the clock took it, or lists
+  again as finished if a `fill` holds its effect. Its CSS animations and transitions do end
+  with the removal, as in CSS. `element.animate()` on an element that is not in the
+  tree throws, where Chrome animates it ([deviations](fork/deviations.md#motion)).
 - **`getKeyframes()`** answers at once, before any frame. `offset` is `null` for a
   keyframe that was given none (`computedOffset` is its place), values are written
   as `getKeyframes()` writes a CSS animation's: a `translate` of `0px 0px` is `0px`

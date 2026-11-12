@@ -137,6 +137,10 @@ interface State {
   readonly keyframeEffect: KeyframeEffect
   finished: Deferred
   ready: Deferred
+  /** `Element.animate()` made the animation, which its element's removal leaves running. */
+  readonly madeByScript: boolean
+  /** The element was removed while the animation ran, and no listing has found the element in the tree since. */
+  orphaned: boolean
   /** `cancel()` calls whose `cancel` event native has not delivered yet. */
   cancelEvents: number
   /** `finished` was renewed because the animation went idle, which its cancel event then finds done. */
@@ -174,6 +178,8 @@ export interface AnimationInit {
   target: object
   elementId: number
   info: WebAnimationInfo
+  /** `Element.animate()` made it: left running when the element is removed. */
+  madeByScript: boolean
 }
 
 function invalidState(message: string): DOMException {
@@ -503,10 +509,9 @@ export class KeyframeEffect {
         if (!isUnknownAnimation(error)) throw error
       }
     }
-    const written = writtenOffsets.get(effectOf(this).animation)
     return unwrap(state.keyframes).map((frame) => {
       const keyframe: ComputedKeyframe = {
-        offset: written && !written.includes(frame.computedOffset) ? null : (frame.offset ?? null),
+        offset: frame.offset ?? null,
         easing: frame.easing,
         composite: frame.composite as ComputedKeyframe["composite"],
         computedOffset: frame.computedOffset,
@@ -626,6 +631,8 @@ export class Animation extends GpuixEventTarget {
       keyframeEffect: new KeyframeEffect({ animation: this, target: init.target }),
       finished: deferred(),
       ready: deferred(),
+      madeByScript: init.madeByScript,
+      orphaned: false,
       cancelEvents: 0,
       renewedForCancel: false,
       cancelNoticed: undefined,
@@ -923,6 +930,12 @@ interface Registry {
   readonly byId: Map<number, Animation>
   readonly byElement: Map<number, Set<Animation>>
   readonly weak: Map<number, WeakRef<Animation>>
+  /**
+   * The finished and cancelled animations of removed elements, held as long as their element lives: Chrome keeps
+   * a finished animation with a fill on the element, and a reinserted element lists it again. Native drops the run
+   * (`finalizer`) when both the element and the animation are gone.
+   */
+  readonly heldByElement: WeakMap<object, Set<Animation>>
   readonly finalizer: FinalizationRegistry<number>
   /** The window is gone: there is nothing left to forget, and no event is left to tell. */
   closed: boolean
@@ -955,6 +968,7 @@ function registryOf(renderer: object): Registry {
       byId: new Map(),
       byElement: new Map(),
       weak,
+      heldByElement: new WeakMap(),
       closed: false,
       cancelTasks: new Set(),
       finalizer: new FinalizationRegistry((id) => {
@@ -1026,14 +1040,16 @@ function adopt(
   timeline: DocumentTimeline,
   target: object,
   elementId: number,
-  info: WebAnimationInfo
+  info: WebAnimationInfo,
+  madeByScript = false
 ): Animation {
   const known = lookup(registry, info.id)
   if (known) {
     register(registry, elementId, info.id, known)
+    stateOf(known).orphaned = false
     return known
   }
-  const init = { host, registry, timeline, target, elementId, info }
+  const init = { host, registry, timeline, target, elementId, info, madeByScript }
   const animation = animationOf(info.kind, init)
   register(registry, elementId, info.id, animation)
   return animation
@@ -1071,12 +1087,6 @@ export function getElementAnimations(
     .map((listed) => adoptListed(registry, host, timeline, renderer, listed, elementId, target))
 }
 
-/** The animations `Element.animate()` made, which an element's removal leaves running. */
-const madeByScript = new WeakSet<Animation>()
-
-/** The offsets an `Element.animate()` call gave its keyframes: `getKeyframes()` reports the others as `null`, as the DOM does. */
-const writtenOffsets = new WeakMap<Animation, readonly number[]>()
-
 /** What `Element.animate()` takes beside the timing. */
 export interface AnimateOptions extends OptionalEffectTiming {
   /** The `id` of the animation. */
@@ -1100,20 +1110,18 @@ export function animateElement(
   const host = hostOf(renderer)
   const animate = (renderer as Partial<Pick<GpuixRenderer, "animateElement">>).animateElement
   if (!animate) throw new Error("This renderer does not support animateElement")
-  const prepared = prepareKeyframes(keyframes)
+  const json = prepareKeyframes(keyframes).json
   const timing = typeof options === "number" ? timingUpdate({ duration: options }, ANIMATE) : timingUpdate(options, ANIMATE)
   flushPendingMutations(renderer)
   let info: WebAnimationInfo
   try {
-    info = animate.call(renderer, elementId, prepared.json, timing)
+    info = animate.call(renderer, elementId, json, timing)
   } catch (error) {
     throw refusal(error)
   }
   const registry = registryOf(renderer)
   const timeline = (registry.timeline ??= new DocumentTimeline(host))
-  const animation = adopt(registry, host, timeline, target, elementId, info)
-  madeByScript.add(animation)
-  writtenOffsets.set(animation, prepared.written)
+  const animation = adopt(registry, host, timeline, target, elementId, info, true)
   if (typeof options === "object" && options !== null && options.id !== undefined) animation.id = String(options.id)
   return animation
 }
@@ -1141,6 +1149,7 @@ function adoptListed(
   const known = lookup(registry, listed.info.id)
   if (known) {
     register(registry, listed.elementId, listed.info.id, known)
+    stateOf(known).orphaned = false
     return known
   }
   const target = listed.elementId === readOn ? readOnTarget : elementOf(renderer, listed.elementId)
@@ -1222,13 +1231,32 @@ function holdWeakly(state: State, animation: Animation): void {
 /**
  * An animation a script made that finished and no longer shows (no fill holds its effect) is nothing
  * `getAnimations()` lists, so the registry stops holding it: an app that lets go of it lets native drop
- * the run. A command that plays it again holds it again.
+ * the run. A command that plays it again holds it again. An animation of a removed element is held by its
+ * element if a fill keeps its effect, which an element made again lists.
  */
 function releaseFinishedScript(renderer: NativeRenderer, state: State, animation: Animation): void {
   if (state.last.kind !== "script" || state.mode !== "live") return
   if (readLive(state).playState !== "finished") return
+  if (state.orphaned) {
+    holdFinishedOrphan(state, animation)
+    return
+  }
   const listed = hostOf(renderer).getAnimations(state.elementId)
   if (listed.some((info) => info.id === state.id)) return
+  holdWeakly(state, animation)
+}
+
+/**
+ * Holds an animation of a removed element that is over (finished, or cancelled) for as long as the element
+ * lives, and by a weak reference after that, so native drops the run once the element and the animation are
+ * both gone.
+ */
+function holdWithElement(state: State, animation: Animation): void {
+  const registry = state.registry
+  const target = effectOf(state.keyframeEffect).target
+  const held = registry.heldByElement.get(target) ?? new Set()
+  held.add(animation)
+  registry.heldByElement.set(target, held)
   holdWeakly(state, animation)
 }
 
@@ -1318,6 +1346,7 @@ export function deliverWebAnimationEvent(renderer: NativeRenderer, event: EventP
       default:
         if (state.cancelEvents > 0) {
           state.cancelEvents--
+          if (state.orphaned && state.mode === "live") holdWithElement(state, animation)
         } else {
           renderer.releaseAnimation?.(event.animationId)
           released = true
@@ -1352,9 +1381,10 @@ function keptByNative(renderer: NativeRenderer, state: State): boolean {
  * A removed element's CSS animations and transitions are cancelled, as the DOM does: native sends
  * nothing when an element goes, so the ids the mutation queue was told are destroyed end here. The
  * `cancel` event comes in a task, as the DOM's comes at its next frame. An animation of
- * `Element.animate()` is left alone, as the DOM leaves it running on the disconnected element: native
- * keeps its run and goes on with the clock, so `finished` resolves on time and the run shows again
- * if the element is made again under the same id.
+ * `Element.animate()` that was not cancelled is left alone, as the DOM leaves it running on the
+ * disconnected element: native keeps its run and goes on with the clock, so `finished` resolves on
+ * time and the run shows again if the element is made again under the same id. The registry holds it
+ * while it runs (`finished` is pending); one that is over is held by its element.
  */
 export function cancelAnimationsOfElements(renderer: object, elementIds: readonly number[]): void {
   const registry = registryOf(renderer)
@@ -1364,8 +1394,12 @@ export function cancelAnimationsOfElements(renderer: object, elementIds: readonl
     // Chrome cancels the last of an element's animations first.
     for (const animation of [...running].reverse()) {
       const state = stateOf(animation)
+      if (state.madeByScript && state.mode === "live" && readLive(state).playState !== "idle") {
+        state.orphaned = true
+        if (state.last.playState === "finished") holdFinishedOrphan(state, animation)
+        continue
+      }
       const wasIdle = state.mode === "gone" || state.last.playState === "idle"
-      if (!wasIdle && madeByScript.has(animation)) continue
       lose(animation)
       unregister(registry, state, animation)
       if (wasIdle) continue
@@ -1378,4 +1412,10 @@ export function cancelAnimationsOfElements(renderer: object, elementIds: readonl
       registry.cancelTasks.add(task)
     }
   }
+}
+
+/** The animation was over when its element was removed: held by the element if a fill keeps its effect. */
+function holdFinishedOrphan(state: State, animation: Animation): void {
+  if (typeof readEffect(state).progress === "number") holdWithElement(state, animation)
+  else holdWeakly(state, animation)
 }
