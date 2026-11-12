@@ -3870,13 +3870,14 @@ A `<span>` with a `tabIndex` is focusable like any element, and stays inline:
   has no size, so a screen reader finds it at the top-left of the paragraph, not
   over its glyphs.
 - A span with no text left, or with `display: none`, has no box and no tab stop.
-  Like a `display: none` element, it still takes `focus()`, and its `focusVisible`
+  Like a `display: none` element, it still takes `focus()`, and its `focus`, `focusVisible`
   and `focusWithin` styles are not painted.
 
-**Focus styles on a span.** `focusVisible` (while the span matches
-`:focus-visible`) and `focusWithin` (while it or a span inside it has focus) are
-style variants of a span like of any element, and `focusVisible` wins over
-`focusWithin`, which wins over `hover` and `active`. The properties an inline box
+**Focus styles on a span.** `focus` (while the span is the focused one),
+`focusVisible` (while the span matches `:focus-visible`) and `focusWithin` (while
+it or a span inside it has focus) are style variants of a span like of any element,
+and `focusVisible` wins over `focusWithin`, which wins over `focus`, which wins over
+`hover` and `active`. The properties an inline box
 can set change its run, and `outline` (or `outlineWidth`, `outlineStyle`,
 `outlineColor` and `outlineOffset`) draws a focus ring. The base style, `hover` and
 `active` can declare an outline too:
@@ -5331,8 +5332,10 @@ matching, so a script-focused button on a fresh window has the ring, as in Chrom
 After a click on a button, `focus()` on another shows none, even if the click
 landed on a text field in between.
 
-The same holds on an element with a `transition`: `focusVisible`, `hasFocusVisible`
-and the pointer states match exactly as without one, and the style transitions in.
+The same holds on an element with a `transition` or an `animation`: `focus`, `focusWithin`,
+`hasFocusVisible`, `focusVisible` and the pointer states match exactly as without one and
+fold in the same order (the pointer states, then `focus`, `focusWithin`, `hasFocusVisible`,
+`focusVisible`), and the style transitions in, one declared in a focus style included.
 
 ## Headless controls
 
@@ -7549,7 +7552,7 @@ What a unit is relative to:
   the nearest ancestor [query container](#container-queries), and follow it when it
   resizes. With no such container they are the window's size, like `vw` and `vh`.
 - A `hover`, `active` or group `fontSize` changes the element's own `em`, and so
-  its `em` lengths. A `focusVisible` or `focusWithin` `fontSize` changes the
+  its `em` lengths. A `focus`, `focusVisible` or `focusWithin` `fontSize` changes the
   element's own text only and not the `em` of its children, the same as `color`.
 - Two nested `display: contents` ancestors that set `fontSize` in `em` do not
   compound.
@@ -8768,7 +8771,7 @@ nothing inside it can be hovered, pressed or focused.
 They fold in with the element's own states. An element's own state beats what
 its descendants cause, and that beats a group. Later wins: base, `groupHover`,
 `hasHover`, `hover`, `groupActive`, `hasActive`, `active`, `groupFocusWithin`,
-`hasFocus`, `focusWithin`, `hasFocusVisible`, `focusVisible`; `hasEnabled`,
+`hasFocus`, `focus`, `focusWithin`, `hasFocusVisible`, `focusVisible`; `hasEnabled`,
 `hasDisabled`, `enabled` and `disabled` come after `active`, before the focus
 ones. The ancestor restyles in the same frame the pointer or focus moves, or a
 control is enabled or disabled. Everything a state style
@@ -9043,10 +9046,10 @@ A key that starts with `--` is a CSS custom property, in a style, a state style 
   base `borderWidth: 'var(--w)'` on its side only. Only a string is substituted: a number is not a `var()`. What it
   substitutes to is a number only for a property whose value is a `<number>` (`opacity`, `zIndex`, `flexGrow`, `order`);
   `padding: 'var(--n)'` with `--n: 8` is dropped, as `padding: '8'` is.
-  A custom property set in a focus style that applies (`focusVisible`, `focusWithin`, `hasFocusVisible`) is the
+  A custom property set in a focus style that applies (`focus`, `focusWithin`, `hasFocusVisible`, `focusVisible`) is the
   element's, as for `:focus-visible { --ring: ... }` in CSS: the element's own `var(--ring)`, in its base style and
   in the other focus styles that apply with it, and its descendants read it while it applies, and the value it
-  covers is back after a blur. An element with a `transition` or an `animation` reads the same set. Where two focus styles that apply set one, the later of `focusWithin`,
+  covers is back after a blur. An element with a `transition` or an `animation` reads the same set. Where two focus styles that apply set one, the later of `focus`, `focusWithin`,
   `hasFocusVisible`, `focusVisible` wins.
 - **A normal property in `style()`** (`style(color: red)`, `style(display: block)`) is
   unknown, as in Chrome, which supports custom properties only.
@@ -9749,7 +9752,7 @@ An observable array of `CSSStyleSheet`: assigning the property, assigning an ind
 
 Anything else makes the selector invalid and drops its rule (a list is all or nothing, except inside `:is()` and `:where()`): `:first-child`, `:nth-child()`, `:has()`, `:checked` and the other pseudo-classes, and the uses of the state pseudo-classes listed below. At-rules that are skipped with their block: `@media`, `@keyframes`, `@container`, `@supports`, `@font-face`, `@import`, `@namespace`, `@property`, and any at-rule inside a style rule. A declaration the style parser rejects (a value Ghia cannot represent, or one CSS would also ignore) is dropped alone and cannot take back an earlier rule's value; the exception is a property's initial value written as a keyword, which acts as `initial` (`z-index: auto`). Each skipped rule is logged once, and the values that are dropped where CSS would keep them are listed in [deviations](./fork/deviations.md#stylesheets). The full list of differences is in [deviations](./fork/deviations.md#stylesheets).
 
-**State pseudo-classes.** `:hover`, `:active`, `:focus`, `:focus-visible` and `:focus-within` in the subject compound (the one the rule styles) do not read the pointer or the focus. The rule applies under that state: what it declares is merged into the `hover`, `active`, `focus`, `focusVisible` or `focusWithin` block of the element, the one a `style` prop writes, so it folds, paints and animates as that block does, and the match does not change when the pointer moves. `.btn:hover { background: red }` is `style={{ hover: { background: 'red' } }}` on every `.btn`. Per property, the cascade decides which side a declaration is on: the highest-precedence declarations of a property that are under a state are that state's, down to the first with no state, which is the base value, and anything of the property below it is shadowed. So an inline `color: blue` beats `.btn:hover { color: red }` (the element stays blue hovered), `#x { color: blue }` beats `.btn:hover { color: red }`, and `.btn:hover { color: red }` beats `.btn { color: blue }`. An inline `hover` block counts at the inline style's place in that order, property by property, and `!important` works inside a state. `.a, .b:hover { }` applies `.a` always and `.b` under `:hover`. A state is not supported in a compound that is not the subject (`.card:hover .title`), twice in one compound (`:hover:focus`), inside `:not()`, or in `:is()` and `:where()` arguments that are not all under the same state: that selector is invalid, which drops the rule, or only the argument inside `:is()` and `:where()`. Where two states set one property and the cascade would pick the lower state, the fixed fold order wins ([deviations](./fork/deviations.md#stylesheets)).
+**State pseudo-classes.** `:hover`, `:active`, `:focus`, `:focus-visible` and `:focus-within` in the subject compound (the one the rule styles) do not read the pointer or the focus. The rule applies under that state: what it declares is merged into the `hover`, `active`, `focus`, `focusVisible` or `focusWithin` block of the element, the one a `style` prop writes, so it folds, paints and animates as that block does, and the match does not change when the pointer moves. `.btn:hover { background: red }` is `style={{ hover: { background: 'red' } }}` on every `.btn`. Per property, the cascade decides which side a declaration is on: the highest-precedence declarations of a property that are under a state are that state's, down to the first with no state, which is the base value, and anything of the property below it is shadowed. So an inline `color: blue` beats `.btn:hover { color: red }` (the element stays blue hovered), `#x { color: blue }` beats `.btn:hover { color: red }`, and `.btn:hover { color: red }` beats `.btn { color: blue }`. An inline `hover` block counts at the inline style's place in that order, property by property, and `!important` works inside a state. `.a, .b:hover { }` applies `.a` always and `.b` under `:hover`. A state is not supported in a compound that is not the subject (`.card:hover .title`), twice in one compound (`:hover:focus`), inside `:not()`, or in `:is()` and `:where()` arguments that are not all under the same state: that selector is invalid, which drops the rule, or only the argument inside `:is()` and `:where()`. Where two states set one property and the cascade would pick the lower state, the fixed fold order wins ([deviations](./fork/deviations.md#stylesheets)). The values a `:focus`, `:focus-visible` or `:focus-within` rule sets do not reach the element's children, as with `focus`, `focusVisible` and `focusWithin` blocks (an inherited `color` or `font-size` is the element's own only, [Lengths](./fork/deviations.md#layout)), where `:hover` and `:active` ones do.
 
 **`:popover-open`.** Matches an element with the `popover` attribute while `showPopover()` has it open, in any compound (`[popover]:popover-open`, `:not(:popover-open)`, `:popover-open .child`). It is tree state: `showPopover()` and `hidePopover()` match the affected elements again.
 

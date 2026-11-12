@@ -1392,7 +1392,7 @@ export interface StyleDesc {
    *  `active`, below `hasDisabled`. */
   hasEnabled?: StateStyleDesc
   /** While the element is the focused one, like CSS `:focus`: by the keyboard, a
-   *  mouse press or script. Below `focusWithin`. Needs a focusable element. */
+   *  mouse press or script. Below `focusWithin`. */
   focus?: StateStyleDesc
   /** While the element matches `:focus-visible`: focused by the keyboard (Tab),
    *  or a text control, or focus moved there by script from an element that

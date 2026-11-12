@@ -105,9 +105,15 @@ fn is_shadowed(list: &[Declaration], longhand: KeyId) -> bool {
 
 /// The merged declarations of the matched rules and the element's own, as the style prop's JSON.
 /// `own_important` are the own declarations that were written `!important`.
-pub fn merge(index: &RuleIndex, matched: &MatchedRules, own: &[Declaration], own_important: &[Declaration]) -> String {
-    if matched.conditional {
-        return states::merge(index, matched, own, own_important);
+pub(super) fn merge(
+    index: &RuleIndex,
+    matched: &MatchedRules,
+    own: &[Declaration],
+    own_important: &[Declaration],
+    logged: &mut states::LoggedFolds,
+) -> String {
+    if matched.conditional || own.iter().any(|declaration| states::is_state_block(&declaration.key)) {
+        return states::merge(index, matched, own, own_important, logged);
     }
     let mut list: Vec<Declaration> = Vec::new();
     for applies in &matched.normal {

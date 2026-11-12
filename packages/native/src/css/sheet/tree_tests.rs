@@ -2119,6 +2119,62 @@ mod states {
     }
 
     #[test]
+    fn a_surviving_state_shorthand_does_not_overwrite_a_longhand_the_inline_style_sets_above_it() {
+        let (doc, div) = with(".a:hover { background: blue }", Some(r#"{"backgroundColor":"red"}"#));
+        assert_eq!(doc.background(div), Some("red"));
+        let hover = block(&doc, div, "hover").expect("a hover block");
+        assert!(hover.background.is_some(), "the shorthand still gives the rest of the background");
+        assert_eq!(hover.background_color.as_deref(), Some("red"), "the longhand's own value is declared after it");
+
+        let (doc, div) = with(".a:hover { background: blue } div.a.a { background-color: red }", None);
+        assert_eq!(block(&doc, div, "hover").and_then(|hover| hover.background_color.as_deref()), Some("red"));
+        let (doc, div) = with(".a { background-color: red } .a:hover { background: blue }", None);
+        assert!(block(&doc, div, "hover").is_some_and(|hover| hover.background_color.is_none()), "a lower longhand is the shorthand's to reset");
+    }
+
+    #[test]
+    fn an_inline_state_block_splits_when_the_element_matches_a_sheet_whatever_the_rules_are_under() {
+        // No rule is under a state, and the important sheet value still shadows the inline hover value.
+        let (doc, div) = with(".a { color: green !important }", Some(r#"{"hover":{"color":"blue","opacity":0.5}}"#));
+        let hover = block(&doc, div, "hover").expect("a hover block");
+        assert_eq!(hover.color, None, "`!important` beats a normal declaration in an inline state block");
+        assert_eq!(hover.opacity, Some(0.5));
+
+        // Under another state, as before.
+        let (doc, div) = with(".a:focus { opacity: 0.1 } .a { color: green !important }", Some(r#"{"hover":{"color":"blue"}}"#));
+        assert!(block(&doc, div, "hover").is_none_or(|hover| hover.color.is_none()));
+    }
+
+    #[test]
+    fn a_null_state_block_is_no_block_and_another_value_is_left_to_the_parse() {
+        let (doc, div) = with(".a:hover { color: red }", Some(r#"{"hover":null}"#));
+        assert_eq!(block(&doc, div, "hover").and_then(|hover| hover.color.as_deref()), Some("red"));
+        let (doc, div) = with(".a:focus { color: red }", Some(r#"{"hover":null,"opacity":0.5}"#));
+        assert!(block(&doc, div, "hover").is_none());
+        assert_eq!(doc.style(div).and_then(|style| style.opacity), Some(0.5));
+    }
+
+    #[test]
+    fn a_fold_order_disagreement_is_logged_once_and_not_for_equal_values() {
+        let mut doc = Doc::new();
+        let elements: Vec<u64> = (0..4).map(|_| doc.classed("div", ROOT, "a")).collect();
+        for (index, id) in elements.iter().enumerate() {
+            doc.inline(*id, &format!(r#"{{"opacity":0.{}}}"#, index + 1));
+        }
+        // `:hover` has the higher precedence and `:active` folds later.
+        doc.style_element(ROOT, ".a:active { color: blue } .a:hover { color: red }");
+        doc.flush();
+        assert_eq!(doc.tree.sheets.logged_folds.warnings, 1, "four elements, one message");
+
+        let mut doc = Doc::new();
+        let div = doc.classed("div", ROOT, "a");
+        doc.style_element(ROOT, ".a:active { color: red } .a:hover { color: red }");
+        doc.flush();
+        assert!(doc.style(div).is_some());
+        assert_eq!(doc.tree.sheets.logged_folds.warnings, 0, "equal values fold the same in either order");
+    }
+
+    #[test]
     fn a_rule_with_a_state_and_a_plain_selector_applies_both_ways() {
         let (doc, div) = with(".a, .b:hover { color: red }", None);
         assert_eq!(doc.color(div), Some("red"));
@@ -2265,5 +2321,34 @@ mod states {
         doc.tree.set_custom_prop(popover, OPEN_PROP.into(), json!(1));
         doc.flush();
         assert_eq!(counts().elements_rematched, before);
+    }
+
+    #[test]
+    fn popover_open_reaches_the_siblings_a_combinator_names() {
+        use crate::html::popover::OPEN_PROP;
+        let mut doc = Doc::new();
+        let popover = doc.element("div", ROOT);
+        doc.tree.set_custom_prop(popover, "popover".into(), json!("manual"));
+        let next = doc.classed("span", ROOT, "x");
+        let later = doc.classed("span", ROOT, "x");
+        let before = doc.classed("span", ROOT, "x");
+        doc.tree.insert_before(ROOT, before, popover);
+        doc.style_element(ROOT, ":popover-open + .x { color: red } :popover-open ~ .x { opacity: 0.5 }");
+        doc.flush();
+        for id in [before, next, later] {
+            assert_eq!((doc.color(id), doc.style(id).and_then(|style| style.opacity)), (None, None));
+        }
+
+        doc.tree.set_custom_prop(popover, OPEN_PROP.into(), json!(1));
+        doc.flush();
+        assert_eq!(doc.color(next), Some("red"), "the next sibling");
+        assert_eq!(doc.color(later), None, "`+` is the next sibling only");
+        assert_eq!(doc.style(later).and_then(|style| style.opacity), Some(0.5), "`~` is every later sibling");
+        assert_eq!(doc.style(before).and_then(|style| style.opacity), None, "not an earlier one");
+
+        doc.tree.set_custom_prop(popover, OPEN_PROP.into(), serde_json::Value::Null);
+        doc.flush();
+        assert_eq!(doc.color(next), None);
+        assert_eq!(doc.style(later).and_then(|style| style.opacity), None);
     }
 }

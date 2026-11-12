@@ -20,6 +20,7 @@ use super::index::RuleIndex;
 use super::invalidation::Reach;
 use super::layers::Layers;
 use super::parser::parse_sheet;
+use super::states::LoggedFolds;
 use super::validate::Validator;
 use crate::css::lenient::number_text;
 
@@ -68,6 +69,8 @@ pub struct StyleSheets {
     /// The skipped rules already logged, kept across reloads (every sheet is parsed again when
     /// one changes) so each is logged once.
     logged_skips: FxHashSet<String>,
+    /// The fold-order disagreements already logged since the sheets last loaded.
+    pub(crate) logged_folds: LoggedFolds,
     /// Whether the summary warning for the skips past `SKIP_LOG_LIMIT` was logged.
     skip_log_capped: bool,
     /// How many warnings `logged_skips` let through, for the tests.
@@ -100,6 +103,7 @@ impl Default for StyleSheets {
             validator: Validator::default(),
             logged_skips: FxHashSet::default(),
             skip_log_capped: false,
+            logged_folds: LoggedFolds::default(),
             #[cfg(test)]
             skip_warnings: 0,
             style_texts: RefCell::default(),
@@ -187,6 +191,7 @@ impl StyleSheets {
             sheets.push(sheet);
         }
         self.index = RuleIndex::build(sheets, &layers.order(), self.style);
+        self.logged_folds.clear();
         self.interner = MatchedInterner::default();
         self.loaded = texts;
     }
@@ -241,7 +246,7 @@ impl StyleSheets {
             }
             None => (Vec::new(), Vec::new()),
         };
-        let text = merge(&self.index, matched, &declarations, &important);
+        let text = merge(&self.index, matched, &declarations, &important, &mut self.logged_folds);
         let style = match styles.intern(text.as_bytes()) {
             Ok(style) => Some(style.into_arc()),
             Err(error) => {
@@ -271,6 +276,7 @@ impl StyleSheets {
         self.atoms_fresh = false;
         self.loaded.clear();
         self.logged_skips.clear();
+        self.logged_folds.clear();
         self.skip_log_capped = false;
         self.index = Default::default();
         self.interner = Default::default();

@@ -175,7 +175,7 @@ The hit registry and the painted text, start regions, highlights and match ordin
 
 - `cursor` is a hitbox per fragment (`inline_cursor.rs`).
 - `tabIndex` is a zero-size anchor div under the span's host id that tracks its focus handle (`inline_focus.rs`).
-- `focusVisible` and `focusWithin` fold into the run and ring the fragments with `outline*` (`inline_decoration.rs`).
+- `focus`, `focusVisible` and `focusWithin` fold into the run and ring the fragments with `outline*` (`inline_decoration.rs`).
 
 Span layout, bounds and decorations are in [text.md](text.md).
 

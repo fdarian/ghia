@@ -15,7 +15,7 @@
  */
 
 import { flushPendingMutations } from "../bounds.js"
-import { noteBatchApplied } from "../mutations.js"
+import { noteBatchApplied } from "../batch-count.js"
 import { dispatchAtElement, type DomEvent, type DomEventRoot } from "../events/dispatch.js"
 import { document, elementOf } from "../events/window-target.js"
 import type { DomElementBinding } from "../dom-members.js"
