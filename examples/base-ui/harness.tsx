@@ -49,13 +49,20 @@ export function exists(selector: string): boolean {
   return document.querySelector(selector) !== null
 }
 
-/** The element whose text content is `text`, searching `selector` (every element by default). */
+/** Whether something matching `selector` is in the document and takes up room, which a `hidden` element does not. */
+export function isShown(selector: string): boolean {
+  const element = document.querySelector(selector)
+  if (element === null) return false
+  const rect = element.getBoundingClientRect()
+  return rect.width > 0 && rect.height > 0
+}
+
+/** The deepest element of `selector` (every element by default) whose text content is `text`. */
 export function byText(text: string, selector = '*'): HTMLElement {
-  const found = queryAll(selector).find(
-    (element) => element.children.length === 0 && element.textContent === text,
-  )
-  if (found === undefined) throw new Error(`No ${selector} has the text "${text}"`)
-  return found
+  const matching = queryAll(selector).filter((element) => element.textContent === text)
+  const deepest = matching.find((element) => !matching.some((other) => other !== element && element.contains(other)))
+  if (deepest === undefined) throw new Error(`No ${selector} has the text "${text}"`)
+  return deepest
 }
 
 export function center(element: Element): { x: number; y: number } {
