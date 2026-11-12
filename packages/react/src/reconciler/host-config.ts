@@ -75,6 +75,7 @@ import {
   linkChild,
   livePropEntries,
   liveStyleOf,
+  propOf,
   stateFor,
   unlinkChild,
   type HostNode,
@@ -138,6 +139,7 @@ function attachTextControlMethods(control: TextControlInstance, container: Conta
     id: control.nativeId,
     nativeRenderer: container.nativeRenderer,
     flushMutations: () => container.renderer.flushMutations(),
+    inputType: () => propOf(control, "type"),
   }
   control.select = () => selectTextControl(host)
   control.setSelectionRange = (start, end, direction) =>

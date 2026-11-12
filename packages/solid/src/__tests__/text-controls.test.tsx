@@ -37,6 +37,18 @@ describe.skipIf(!hasNativeTestRenderer)("Solid text controls", () => {
     expect(text()).toBe("hJo")
   })
 
+  it("has no selection on an input that draws no text: null reads, select() does nothing, setSelectionRange() throws", () => {
+    for (const type of ["checkbox", "radio", "range", "hidden"] as const) {
+      let field!: HostElement
+      const app = createTestRoot()
+      app.render(() => <input type={type} ref={field} style={{ width: 20, height: 20 }} />)
+      expect([field.selectionStart, field.selectionEnd, field.selectionDirection]).toEqual([null, null, null])
+      field.select()
+      expect(() => field.setSelectionRange(0, 1)).toThrow(expect.objectContaining({ name: "InvalidStateError" }))
+      app.unmount()
+    }
+  })
+
   it("selects on focus", () => {
     let field!: HostElement
     const app = createTestRoot()

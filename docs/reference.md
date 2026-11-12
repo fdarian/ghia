@@ -4441,6 +4441,12 @@ ends to the text; an `end` at or before `start` collapses the selection to
 controlled `value` update sees the new value, even before the next frame.
 Select-on-focus works with `onFocus`, for keyboard focus and for a click.
 
+An `<input>` that draws no text (`type` `checkbox`, `radio`, `range` or `hidden`) has no
+selection, as in the DOM: `selectionStart`, `selectionEnd` and `selectionDirection` are
+`null`, `select()` does nothing, and `setSelectionRange()` throws `InvalidStateError`. A
+library that asks whether an element is a native text input by `selectionStart != null`
+(Base UI's composite lists do, on every item that takes focus) gets `false` for a radio.
+
 `disabled` works like the DOM. The control is not focusable and not a tab stop,
 a click does not focus it, and focus leaves it when it becomes disabled. It
 shows no caret, takes no editing, and gets no `click` or `keydown` events. Its

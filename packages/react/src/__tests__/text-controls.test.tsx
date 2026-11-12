@@ -32,6 +32,18 @@ describeNative("text control selection", () => {
     )
   }
 
+  it("has no selection on an input that draws no text: null reads, select() does nothing, setSelectionRange() throws", () => {
+    for (const type of ["checkbox", "radio", "range", "hidden"]) {
+      let input
+      const root = createTestRoot()
+      root.render(<input type={type} ref={(el) => (input = el)} style={{ width: 20, height: 20 }} />)
+      expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([null, null, null])
+      input.select()
+      expect(() => input.setSelectionRange(0, 1)).toThrow(expect.objectContaining({ name: "InvalidStateError" }))
+      root.unmount()
+    }
+  })
+
   it("select() selects everything and reports no direction", () => {
     let input
     testRoot.render(<Field initial="hello" onRef={(el) => (input = el)} />)

@@ -354,17 +354,17 @@ export class HostElement extends HTMLElement {
   }
 
   /** `<input>` and `<textarea>` only. */
-  get selectionStart(): number {
+  get selectionStart(): number | null {
     return readTextControlSelection(this.textControl("selectionStart")).start
   }
 
   /** `<input>` and `<textarea>` only. */
-  get selectionEnd(): number {
+  get selectionEnd(): number | null {
     return readTextControlSelection(this.textControl("selectionEnd")).end
   }
 
   /** `<input>` and `<textarea>` only. */
-  get selectionDirection(): SelectionDirection {
+  get selectionDirection(): SelectionDirection | null {
     return readTextControlSelection(this.textControl("selectionDirection")).direction
   }
 
@@ -458,6 +458,7 @@ export class HostElement extends HTMLElement {
       id: this.nativeId,
       nativeRenderer: root.nativeRenderer,
       flushMutations: () => root.mutations.flushMutations(),
+      inputType: () => this.props.get("type"),
     }
   }
 
