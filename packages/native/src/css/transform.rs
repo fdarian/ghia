@@ -148,7 +148,7 @@ pub(crate) fn reads_vars(style: &StyleDesc) -> bool {
     ]
     .into_iter()
         .any(|text| text.as_deref().is_some_and(custom_properties::has_var))
-        || [&style.focus_visible, &style.focus_within].into_iter().flatten().any(|state| reads_vars(state))
+        || [&style.focus, &style.focus_visible, &style.focus_within].into_iter().flatten().any(|state| reads_vars(state))
 }
 
 /// The properties of a style that make the transform, each `None` where it is unset or invalid.
@@ -707,7 +707,7 @@ pub(crate) fn computed_text(property: Property, value: &str, lengths: &LengthCon
                     }
                 })
                 .collect::<Option<Vec<_>>>()?;
-            Some(texts.join(" "))
+            Some(translate_serialization(texts))
         }
         Property::Rotate => {
             let angle = match tokens.as_slice() {
@@ -729,16 +729,33 @@ pub(crate) fn computed_text(property: Property, value: &str, lengths: &LengthCon
                 [x, y, z] => (*x, *y, *z),
                 _ => return None,
             };
-            let mut texts = vec![six_digits(x)];
-            if y != x || z != 1.0 {
-                texts.push(six_digits(y));
-            }
-            if z != 1.0 {
-                texts.push(six_digits(z));
-            }
-            Some(texts.join(" "))
+            Some(scale_serialization(x, y, z))
         }
     }
+}
+
+/// A `scale` as CSS serializes it: `y` is left out where it equals `x` and `z` is `1`, and `z` where it is `1`.
+fn scale_serialization(x: f64, y: f64, z: f64) -> String {
+    let mut texts = vec![six_digits(x)];
+    if y != x || z != 1.0 {
+        texts.push(six_digits(y));
+    }
+    if z != 1.0 {
+        texts.push(six_digits(z));
+    }
+    texts.join(" ")
+}
+
+/// A `translate` as CSS serializes it: a depth of `0px` is left out, and so is a vertical offset of `0px` with it.
+fn translate_serialization(mut texts: Vec<String>) -> String {
+    const ZERO: &str = "0px";
+    if texts.len() == 3 && texts[2] == ZERO {
+        texts.pop();
+    }
+    if texts.len() == 2 && texts[1] == ZERO {
+        texts.pop();
+    }
+    texts.join(" ")
 }
 
 /// The text of a value made of functions, for one that was never written (a transition that starts
@@ -749,7 +766,14 @@ pub(crate) fn functions_text(property: Property, functions: &[TransformFunction]
         .iter()
         .map(|function| {
             Some(match (property, function) {
-                (Property::Translate, TransformFunction::Translate(x, y)) => format!("{} {}", length_text(x), length_text(y)),
+                (Property::Translate, TransformFunction::Translate(x, y)) => {
+                    translate_serialization(vec![length_text(x), length_text(y)])
+                }
+                (Property::Translate, TransformFunction::Translate3d(x, y, z)) => translate_serialization(vec![
+                    length_text(x),
+                    length_text(y),
+                    length_text(&TransformLength::pixels(*z)),
+                ]),
                 (Property::Rotate, TransformFunction::Rotate(angle)) => degrees(angle),
                 (Property::Rotate, TransformFunction::Rotate3d(x, y, z, angle)) => match (*x, *y, *z) {
                     (1.0, 0.0, 0.0) => format!("x {}", degrees(angle)),
@@ -762,8 +786,33 @@ pub(crate) fn functions_text(property: Property, functions: &[TransformFunction]
                         degrees(angle)
                     ),
                 },
-                (Property::Scale, TransformFunction::Scale(x, y)) => format!("{} {}", six_digits(f64::from(*x)), six_digits(f64::from(*y))),
+                (Property::Scale, TransformFunction::Scale(x, y)) => scale_serialization(f64::from(*x), f64::from(*y), 1.0),
+                (Property::Scale, TransformFunction::Scale3d(x, y, z)) => scale_serialization(f64::from(*x), f64::from(*y), f64::from(*z)),
                 (Property::Transform, TransformFunction::Translate(x, y)) => format!("translate({}, {})", length_text(x), length_text(y)),
+                (Property::Transform, TransformFunction::Translate3d(x, y, z)) => {
+                    format!("translate3d({}, {}, {})", length_text(x), length_text(y), length_text(&TransformLength::pixels(*z)))
+                }
+                (Property::Transform, TransformFunction::Scale3d(x, y, z)) => format!(
+                    "scale3d({}, {}, {})",
+                    six_digits(f64::from(*x)),
+                    six_digits(f64::from(*y)),
+                    six_digits(f64::from(*z))
+                ),
+                (Property::Transform, TransformFunction::Rotate3d(x, y, z, angle)) => format!(
+                    "rotate3d({}, {}, {}, {})",
+                    six_digits(f64::from(*x)),
+                    six_digits(f64::from(*y)),
+                    six_digits(f64::from(*z)),
+                    degrees(angle)
+                ),
+                (Property::Transform, TransformFunction::Perspective(distance)) => match distance {
+                    Some(distance) => format!("perspective({}px)", six_digits(f64::from(*distance))),
+                    None => "perspective(none)".to_string(),
+                },
+                (Property::Transform, TransformFunction::Matrix3d(values)) => format!(
+                    "matrix3d({})",
+                    values.iter().map(|value| six_digits(f64::from(*value))).collect::<Vec<_>>().join(", ")
+                ),
                 (Property::Transform, TransformFunction::Scale(x, y)) => {
                     format!("scale({}, {})", six_digits(f64::from(*x)), six_digits(f64::from(*y)))
                 }
@@ -931,6 +980,14 @@ mod tests {
         let functions = [TransformFunction::Translate(px(10.0), fraction(0.5)), TransformFunction::Rotate(std::f32::consts::FRAC_PI_2)];
         assert_eq!(functions_text(Property::Transform, &functions).unwrap(), "translate(10px, 50%) rotate(90deg)");
         assert_eq!(functions_text(Property::Transform, &[]).unwrap(), "none");
+    }
+
+    #[test]
+    fn a_scale_is_written_as_the_shortest_text_that_reads_back_the_same_for_a_value_and_for_functions() {
+        assert_eq!(functions_text(Property::Scale, &[TransformFunction::Scale(2.0, 2.0)]).unwrap(), "2");
+        assert_eq!(functions_text(Property::Scale, &[TransformFunction::Scale3d(2.0, 2.0, 1.0)]).unwrap(), "2");
+        assert_eq!(functions_text(Property::Scale, &[TransformFunction::Scale3d(2.0, 3.0, 1.0)]).unwrap(), "2 3");
+        assert_eq!(functions_text(Property::Scale, &[TransformFunction::Scale3d(2.0, 2.0, 4.0)]).unwrap(), "2 2 4");
     }
     use super::*;
 

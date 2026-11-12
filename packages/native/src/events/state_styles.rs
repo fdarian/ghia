@@ -35,6 +35,7 @@ macro_rules! overlay_fields {
             container_unit_axes: $base.container_unit_axes.union($over.container_unit_axes),
             // Applied to the base before the layers merge; the result is a style no layer lies under.
             reset: None,
+            revert: None,
             custom_properties: crate::css::custom_properties::CustomProperties::layered(
                 $base.custom_properties.as_ref(),
                 $over.custom_properties.as_ref(),
@@ -96,7 +97,7 @@ macro_rules! overlaid_fields {
         animation, animation_name, animation_duration, animation_timing_function,
         animation_delay, animation_iteration_count, animation_direction, animation_fill_mode,
         animation_play_state,
-        focus_visible, focus_within, has_focus_visible, keyboard_focus_dim, group,
+        focus, focus_visible, focus_within, has_focus_visible, keyboard_focus_dim, group,
         container_type, container_name, container, content_visibility, contain_intrinsic_size,
         contain_intrinsic_width, contain_intrinsic_height, contain_intrinsic_inline_size,
         contain_intrinsic_block_size,
@@ -128,6 +129,138 @@ macro_rules! property_clearers {
         )),+]
     };
 }
+
+/// The copies of the properties `overlay` takes, by the key a style object writes them under.
+macro_rules! property_copiers {
+    (; $($field:ident),+ $(,)?) => {
+        vec![$((
+            crate::css::covers::style_key(stringify!($field)),
+            (|to: &mut StyleDesc, from: &StyleDesc| to.$field = from.$field.clone()) as fn(&mut StyleDesc, &StyleDesc),
+        )),+]
+    };
+}
+
+/// The side longhands a lower layer can give through a shorthand it sets, by the key a style
+/// object writes them under, each with the copy of what the layer has for it: the longhand
+/// itself, else the logical pair that covers it (`padding-inline`), else the all-sides shorthand
+/// (`padding`), the order the cascade ranks them in.
+///
+/// A logical pair is read as left to right: `padding-left` is the start of `padding-inline`, also
+/// for an `rtl` element, which mirrors the pairs only when it builds.
+static SHORTHAND_PARTS: LazyLock<FxHashMap<String, fn(&mut StyleDesc, &StyleDesc)>> = LazyLock::new(|| {
+    macro_rules! part {
+        ($longhand:ident, |$from:ident| $fallback:expr) => {
+            (
+                crate::css::covers::style_key(stringify!($longhand)),
+                (|to: &mut StyleDesc, $from: &StyleDesc| {
+                    if let Some(value) = $from.$longhand.clone().or_else(|| $fallback) {
+                        to.$longhand = Some(value);
+                    }
+                }) as fn(&mut StyleDesc, &StyleDesc),
+            )
+        };
+    }
+    macro_rules! width {
+        ($longhand:ident, $side:ident) => {
+            part!($longhand, |from| from.border_width.as_ref().map(|all| all.$side.clone()))
+        };
+    }
+    macro_rules! listed {
+        ($longhand:ident, $all:ident, $parse:path, $index:literal) => {
+            part!($longhand, |from| from
+                .$all
+                .as_deref()
+                .and_then($parse)
+                .map(|sides| sides[$index].to_owned()))
+        };
+    }
+    macro_rules! corner {
+        ($longhand:ident, $corner:ident) => {
+            part!($longhand, |from| from.border_radius.as_ref().map(|radius| radius.0.$corner.clone()))
+        };
+    }
+    vec![
+        part!(padding_top, |from| from.padding_below_longhands().top),
+        part!(padding_bottom, |from| from.padding_below_longhands().bottom),
+        part!(padding_left, |from| from.padding_below_longhands().left),
+        part!(padding_right, |from| from.padding_below_longhands().right),
+        part!(margin_top, |from| from.margin_below_longhands().top),
+        part!(margin_bottom, |from| from.margin_below_longhands().bottom),
+        part!(margin_left, |from| from.margin_below_longhands().left),
+        part!(margin_right, |from| from.margin_below_longhands().right),
+        part!(top, |from| from.inset_below_longhands().top),
+        part!(bottom, |from| from.inset_below_longhands().bottom),
+        part!(left, |from| from.inset_below_longhands().left),
+        part!(right, |from| from.inset_below_longhands().right),
+        width!(border_top_width, top),
+        width!(border_right_width, right),
+        width!(border_bottom_width, bottom),
+        width!(border_left_width, left),
+        listed!(border_top_color, border_color, parse_color_sides, 0),
+        listed!(border_right_color, border_color, parse_color_sides, 1),
+        listed!(border_bottom_color, border_color, parse_color_sides, 2),
+        listed!(border_left_color, border_color, parse_color_sides, 3),
+        listed!(border_top_style, border_style, parse_style_sides, 0),
+        listed!(border_right_style, border_style, parse_style_sides, 1),
+        listed!(border_bottom_style, border_style, parse_style_sides, 2),
+        listed!(border_left_style, border_style, parse_style_sides, 3),
+        corner!(border_top_left_radius, top_left),
+        corner!(border_top_right_radius, top_right),
+        corner!(border_bottom_left_radius, bottom_left),
+        corner!(border_bottom_right_radius, bottom_right),
+        part!(overflow_x, |from| from.overflow.as_deref().and_then(|both| both.split_whitespace().next()).map(str::to_owned)),
+        part!(overflow_y, |from| from.overflow.as_deref().and_then(|both| {
+            let mut axes = both.split_whitespace();
+            let first = axes.next()?;
+            Some(axes.next().unwrap_or(first).to_owned())
+        })),
+    ]
+    .into_iter()
+    .collect()
+});
+
+/// The block of a state with `revert` resolved against `below`, the layers under the style the
+/// block is in (the user agent style, the universal style): the block gets the value `below` has for
+/// each property it reverts, and its reset clears the author's value of it from the style the state
+/// is folded over. A property `below` does not set has nothing to write, so it is only reset.
+///
+/// A side longhand (`padding-left`) takes its part of a shorthand `below` sets
+/// ([`SHORTHAND_PARTS`]), unless a shorthand that covers it is reverted too and `below` sets that
+/// one (`padding: revert`): the shorthand is copied whole then, a logical pair mirrored for an
+/// `rtl` element as it is at the build, which a physical longhand written here would beat. Only the
+/// top-level values of `below` are read: a state block of it, and a value it holds for a `var()`,
+/// are not rolled back to.
+pub(crate) fn reverted<'a>(block: &'a StyleDesc, below: &StyleDesc) -> Cow<'a, StyleDesc> {
+    let Some(names) = block.revert.as_deref() else {
+        return Cow::Borrowed(block);
+    };
+    let mut resolved = block.clone();
+    resolved.revert = None;
+    for name in names {
+        let part = SHORTHAND_PARTS.get(name.as_str()).filter(|_| !given_by_reverted_shorthand(below, names, name));
+        if let Some(copy) = part {
+            copy(&mut resolved, below);
+        } else if let Some(copy) = PROPERTY_COPIERS.get(name.as_str()).filter(|_| sets_property(below, name)) {
+            copy(&mut resolved, below);
+        }
+    }
+    Cow::Owned(resolved)
+}
+
+/// Whether `below` sets a shorthand in `names` that covers `longhand`, which copies the longhand
+/// along with it.
+fn given_by_reverted_shorthand(below: &StyleDesc, names: &[String], longhand: &str) -> bool {
+    let Some(longhand) = crate::css::covers::key_id(longhand) else {
+        return false;
+    };
+    names.iter().any(|name| {
+        crate::css::covers::key_id(name).is_some_and(|key| crate::css::covers::covered_by(key).contains(&longhand))
+            && sets_property(below, name)
+    })
+}
+
+static PROPERTY_COPIERS: LazyLock<FxHashMap<String, fn(&mut StyleDesc, &StyleDesc)>> =
+    LazyLock::new(|| overlaid_fields!(property_copiers,).into_iter().collect());
 
 static PROPERTY_CLEARERS: LazyLock<FxHashMap<String, fn(&mut StyleDesc)>> =
     LazyLock::new(|| overlaid_fields!(property_clearers,).into_iter().collect());
@@ -210,7 +343,7 @@ pub(crate) fn is_no_layer(layer: &StyleDesc) -> bool {
 /// `has_disabled` and `has_enabled` that a strict descendant is: `:disabled`, `:enabled`,
 /// `:has(:disabled)`, `:has(:enabled)`.
 ///
-/// `focus_within`, `has_focus_visible` and `focus_visible` are set only for an
+/// `focused`, `focus_within`, `has_focus_visible` and `focus_visible` are set only for an
 /// inline box. Any other element applies those focus styles where it tracks focus
 /// ([`crate::focus::apply_focus_styles`]), which an inline box has no element for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -227,6 +360,7 @@ pub struct PointerStates {
     pub enabled: bool,
     pub has_disabled: bool,
     pub has_enabled: bool,
+    pub focused: bool,
     pub focus_within: bool,
     pub has_focus_visible: bool,
     pub focus_visible: bool,
@@ -246,6 +380,7 @@ impl PointerStates {
             || self.enabled
             || self.has_disabled
             || self.has_enabled
+            || self.focused
             || self.focus_within
             || self.has_focus_visible
             || self.focus_visible
@@ -304,7 +439,7 @@ pub(crate) fn is_overlay_fixed_point(style: &StyleDesc) -> bool {
 /// `style` with the refinements of `states` folded in and every state style
 /// cleared. Later wins: `groupHover`, `hasHover`, `hover`, `groupActive`,
 /// `hasActive`, `active`, `hasEnabled`, `hasDisabled`, `enabled`, `disabled`,
-/// `groupFocusWithin`, `hasFocus`, `focusWithin`, `hasFocusVisible`, `focusVisible`. A group
+/// `groupFocusWithin`, `hasFocus`, `focus`, `focusWithin`, `hasFocusVisible`, `focusVisible`. A group
 /// refinement is one more variant of the element, so the element's own `hover` beats a `groupHover` that sets the
 /// same field (as in Tailwind). A relational refinement sits between the two: an
 /// element's own state beats what its descendants cause, and that beats a group.
@@ -313,8 +448,8 @@ pub(crate) fn is_overlay_fixed_point(style: &StyleDesc) -> bool {
 /// its disabled look while hovered or pressed.
 ///
 /// Focus styles sit above the pointer ones, so `groupFocusWithin` comes after
-/// them, and `focusWithin`, `hasFocusVisible` and `focusVisible` after that. The
-/// last three are in the fold only for an inline box; an element with a focus
+/// them, and `focus`, `focusWithin`, `hasFocusVisible` and `focusVisible` after that. The
+/// last four are in the fold only for an inline box; an element with a focus
 /// handle applies them after it, so they beat every layer here either way.
 pub fn resolve_pointer_states(style: &StyleDesc, states: PointerStates) -> StyleDesc {
     let mut resolved = overlay(style, &NO_LAYER);
@@ -336,6 +471,7 @@ pub fn resolve_pointer_states(style: &StyleDesc, states: PointerStates) -> Style
             true,
         ),
         (states.has_focused, style.has_focus.as_deref(), false),
+        (states.focused, style.focus.as_deref(), false),
         (states.focus_within, style.focus_within.as_deref(), false),
         (states.has_focus_visible, style.has_focus_visible.as_deref(), false),
         (states.focus_visible, style.focus_visible.as_deref(), false),

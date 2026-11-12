@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest"
-import { normalizeKeyframes } from "../animate-keyframes.js"
+import { prepareKeyframes } from "../animate-keyframes.js"
 
-const parse = (input: Parameters<typeof normalizeKeyframes>[0]) => JSON.parse(normalizeKeyframes(input)) as Record<string, unknown>[]
+const parse = (input: Parameters<typeof prepareKeyframes>[0]) =>
+  (JSON.parse(prepareKeyframes(input).json) as Record<string, unknown>[]).map((frame) =>
+    Object.fromEntries(Object.entries(frame).filter((entry) => entry[0] !== "offsetWritten"))
+  )
+const written = (input: Parameters<typeof prepareKeyframes>[0]) =>
+  (JSON.parse(prepareKeyframes(input).json) as Record<string, unknown>[]).map((frame) => frame.offsetWritten)
 
-describe("normalizeKeyframes", () => {
+describe("prepareKeyframes", () => {
   it("makes keyframes of a property-indexed object, a property with n values at i / (n - 1)", () => {
     expect(parse({ translate: ["0px 0px", "100px 0px"] })).toEqual([
       { offset: 0, easing: "linear", translate: "0px 0px" },
@@ -43,16 +48,22 @@ describe("normalizeKeyframes", () => {
   })
 
   it("takes nothing as no keyframes", () => {
-    expect(normalizeKeyframes(null)).toBe("[]")
-    expect(normalizeKeyframes(undefined)).toBe("[]")
+    expect(prepareKeyframes(null).json).toBe("[]")
+    expect(prepareKeyframes(undefined).json).toBe("[]")
     expect(parse([])).toEqual([])
   })
 
   it("throws a TypeError for an offset out of range or order, and for what is no keyframe", () => {
-    expect(() => normalizeKeyframes([{ offset: 1.5 }])).toThrow(TypeError)
-    expect(() => normalizeKeyframes([{ offset: 0.5 }, { offset: 0.2 }])).toThrow(TypeError)
-    expect(() => normalizeKeyframes([{ offset: Number.NaN }])).toThrow(TypeError)
-    expect(() => normalizeKeyframes([3 as never])).toThrow(TypeError)
-    expect(() => normalizeKeyframes("opacity" as never)).toThrow(TypeError)
+    expect(() => prepareKeyframes([{ offset: 1.5 }])).toThrow(TypeError)
+    expect(() => prepareKeyframes([{ offset: 0.5 }, { offset: 0.2 }])).toThrow(TypeError)
+    expect(() => prepareKeyframes([{ offset: Number.NaN }])).toThrow(TypeError)
+    expect(() => prepareKeyframes([3 as never])).toThrow(TypeError)
+    expect(() => prepareKeyframes("opacity" as never)).toThrow(TypeError)
+  })
+
+  it("tells the offsets the author gave from the ones it spread", () => {
+    expect(written([{ opacity: 0 }, { opacity: 0.2 }, { offset: 0.8, opacity: 0.8 }, { opacity: 1 }])).toEqual([false, false, true, false])
+    expect(written({ opacity: [0, 1, 0], offset: [0, 0.2] })).toEqual([true, true, false])
+    expect(written({ opacity: [0, 1] })).toEqual([false, false])
   })
 })

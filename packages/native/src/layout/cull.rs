@@ -87,6 +87,7 @@ fn variants(style: &StyleDesc) -> impl Iterator<Item = &StyleDesc> {
     [
         &style.hover,
         &style.active,
+        &style.focus,
         &style.focus_visible,
         &style.focus_within,
         &style.group_hover,

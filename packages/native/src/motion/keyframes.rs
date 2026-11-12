@@ -38,10 +38,16 @@ use super::PropKey;
 
 const TIMING_FUNCTION: &str = "animationTimingFunction";
 
+/// The member `Element.animate()` sets on a keyframe that the author gave an offset, beside the offset JS spread to the others.
+const OFFSET_WRITTEN: &str = "offsetWritten";
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Keyframe {
     /// 0 to 1.
     pub offset: f64,
+    /// The author gave the keyframe its offset: `getKeyframes()` reports it as `offset` and not `null`. A rule's keyframes
+    /// always have one; those of a script have it where it wrote `offset` or `times`.
+    pub offset_written: bool,
     /// Longhands only, each at most once, as written. They were parsed once when
     /// the keyframes were defined, to reject a bad one where it is written.
     pub values: Vec<(PropKey, Value)>,
@@ -95,6 +101,7 @@ impl Keyframes {
                     Some(frame) => frame.merge(&block),
                     None => frames.push(Keyframe {
                         offset,
+                        offset_written: true,
                         values: block.values.clone(),
                         timing: block.timing.clone(),
                     }),
@@ -116,10 +123,14 @@ impl Keyframes {
         let mut frames: Vec<Keyframe> = Vec::new();
         for Blocks(entries) in list {
             let mut offset = None;
-            let mut frame = Keyframe { offset: 0.0, values: Vec::new(), timing: None };
+            let mut frame = Keyframe { offset: 0.0, offset_written: false, values: Vec::new(), timing: None };
             for (name, value) in entries {
                 match name.as_str() {
                     "offset" => offset = value.as_f64(),
+                    OFFSET_WRITTEN => {
+                        frame.offset_written =
+                            value.as_bool().ok_or_else(|| type_error(format!("{OFFSET_WRITTEN} must be a boolean")))?;
+                    }
                     "easing" => {
                         let text = value.as_str().ok_or_else(|| type_error("easing must be a string".to_string()))?;
                         frame.timing = Some(
@@ -222,6 +233,7 @@ impl Keyframe {
     }
 
     fn merge(&mut self, later: &Keyframe) {
+        self.offset_written |= later.offset_written;
         for (key, value) in &later.values {
             self.set(*key, value.clone());
         }
@@ -275,7 +287,7 @@ fn parse_block(block: &Value) -> Result<Keyframe, String> {
     let block = block
         .as_object()
         .ok_or_else(|| "a keyframe must be an object of style properties".to_string())?;
-    let mut keyframe = Keyframe { offset: 0.0, values: Vec::new(), timing: None };
+    let mut keyframe = Keyframe { offset: 0.0, offset_written: false, values: Vec::new(), timing: None };
     for (name, value) in block {
         if name == TIMING_FUNCTION {
             let text = value
@@ -388,6 +400,17 @@ mod tests {
             AnimValue::Number(number) => Some(number),
             _ => None,
         }
+    }
+
+    #[test]
+    fn a_script_keyframe_has_the_offset_it_was_given_and_a_rule_keyframe_always_has_one() {
+        let script = Keyframes::parse_script(
+            r#"[{ "offset": 0, "offsetWritten": false, "opacity": 0 }, { "offset": 0.5, "offsetWritten": true, "opacity": 1 }, { "offset": 1, "opacity": 0 }]"#,
+        )
+        .unwrap();
+        assert_eq!(script.frames.iter().map(|frame| frame.offset_written).collect::<Vec<_>>(), [false, true, false]);
+        assert!(Keyframes::parse_script(r#"[{ "offset": 0, "offsetWritten": "yes" }]"#).is_err());
+        assert!(parse(r#"{ "from": { "opacity": 0 }, "50%": { "opacity": 1 } }"#).frames.iter().all(|frame| frame.offset_written));
     }
 
     #[test]

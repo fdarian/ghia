@@ -202,6 +202,7 @@ fn declared_states(old: &StyleDesc, new: &StyleDesc) -> Vec<PointerStates> {
         enabled => enabled,
         has_disabled => has_disabled,
         has_enabled => has_enabled,
+        focus => focused,
         focus_within => focus_within,
         has_focus_visible => has_focus_visible,
         focus_visible => focus_visible,

@@ -5,7 +5,8 @@
 //! no sheet reads it as the plain value. `StyleTable` keeps the payload as it came, and the
 //! cascade of an element that sheets matched reads the declarations that had the suffix from it:
 //! they apply after the `!important` declarations of the sheets, as an inline `!important` beats an
-//! author one.
+//! author one. A style with a state block of its own (`hover`) and an `!important` value has
+//! that cascade whether or not a sheet matches it, so the value beats the block's.
 
 use std::borrow::Cow;
 
@@ -40,6 +41,15 @@ pub(crate) fn strip_payload(raw: &[u8]) -> Cow<'_, [u8]> {
     let Ok(declarations) = serde_json::from_slice::<Declarations>(raw) else {
         return Cow::Borrowed(raw);
     };
+    // An inline `!important` beats the style's own state block of the property, as it does when a
+    // sheet matches the element (`css::sheet::states`): the cascade of that style settles it.
+    if declarations.0.iter().any(|declaration| crate::css::sheet::is_state_block(&declaration.key)) {
+        let (normal, important) = split(declarations.0);
+        if important.is_empty() {
+            return Cow::Borrowed(raw);
+        }
+        return Cow::Owned(crate::css::sheet::merge_own(normal, important).into_bytes());
+    }
     let mut changed = false;
     let stripped: Vec<Declaration> = declarations
         .0

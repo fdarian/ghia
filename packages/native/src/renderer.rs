@@ -827,6 +827,9 @@ pub(crate) enum Repaint {
     /// A write to this motion value, which leaves the boxes alone when nothing that can move
     /// one is driven by it (`MotionValueStore::writes_paint_only`).
     MotionWrite(f64),
+    /// A command or a timing write of the Web Animation run `id`: a layout one, unless the run is one a script left
+    /// running on an element that is not in the tree, which nothing builds and only a dormant tick brings up to date.
+    WebAnimation(u64),
 }
 
 impl Repaint {
@@ -834,13 +837,17 @@ impl Repaint {
     /// classification fails is a layout one.
     pub(crate) fn invalidate(
         self,
-        view: &GpuixView,
+        view: &mut GpuixView,
         window: &mut gpui::Window,
-        cx: &mut gpui::App,
+        cx: &mut gpui::Context<GpuixView>,
         entity: gpui::EntityId,
     ) {
         match self {
             Self::None => {}
+            Self::WebAnimation(id) if view.css_animations.is_orphaned_run(id) => {
+                view.wake_dormant(crate::dormant_wake::Wake::NextFrame, window, cx);
+            }
+            Self::WebAnimation(_) => invalidate_after_commit(cx, entity),
             Self::MotionWrite(id) if matches!(view.motion_values.writes_paint_only(id), Ok(true)) => {
                 if !matches!(view.motion_values.writes_no_transform(id), Ok(true)) {
                     view.tree.lock().unwrap().relevance.note_transform_write_anywhere();
@@ -3686,7 +3693,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn update_animation_timing(&self, animation_id: f64, timing: WebAnimationTimingUpdate) -> Result<()> {
         let id = to_element_id(animation_id)?;
-        self.with_motion_state(Repaint::Layout, move |view, now| view.update_web_animation_timing(id, timing, now))
+        self.with_motion_state(Repaint::WebAnimation(id), move |view, now| view.update_web_animation_timing(id, timing, now))
     }
 
     /// JS consumed one `webanimationfinish` or `webanimationcancel` event of the
@@ -3781,7 +3788,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn set_animation_start_time(&self, animation_id: f64, start_time: Option<f64>) -> Result<()> {
         let id = to_element_id(animation_id)?;
-        self.with_motion_state(Repaint::Layout, move |view, now| {
+        self.with_motion_state(Repaint::WebAnimation(id), move |view, now| {
             view.set_web_animation_start_time(id, start_time, now)
         })
     }
@@ -3800,7 +3807,7 @@ impl GpuixRenderer {
         command: crate::motion::web_animation::Command,
     ) -> Result<()> {
         let id = to_element_id(animation_id)?;
-        self.with_motion_state(Repaint::Layout, move |view, now| view.command_web_animation(id, command, now))
+        self.with_motion_state(Repaint::WebAnimation(id), move |view, now| view.command_web_animation(id, command, now))
     }
 
     // ── Selection API ────────────────────────────────────────────────
@@ -6990,19 +6997,18 @@ impl GpuixView {
     /// The Web Animations of `element`: its CSS transitions, then its CSS animations, each in composite order, then the
     /// animations of the motion engine in the order they were made, as of the last frame.
     pub(crate) fn web_animations(&self, element: u64, now: web_time::Instant) -> Vec<WebAnimationInfo> {
+        // An element that is not in the tree has none, as Chrome's `getAnimations()` of a disconnected element is empty:
+        // the animations a script left running on it (`CssAnimations::retain`) go on without being listed, and what
+        // a state still holds until the next frame is not its either.
+        if !self.tree.lock().unwrap().elements.contains_key(&element) {
+            return Vec::new();
+        }
         let Some(now) = self.api_instant(Some(element), now) else {
             return Vec::new();
         };
         let transitions = self.css_transitions.list(element, now);
         let animations = self.css_animations.list(element, now);
-        // An element that is gone has no animations, whatever its motion state still holds until the next frame.
-        let gone = !self.tree.lock().unwrap().elements.contains_key(&element);
-        let scripts = self
-            .motion_states
-            .get(&element)
-            .filter(|_| !gone)
-            .map(|state| state.script_list(now))
-            .unwrap_or_default();
+        let scripts = self.motion_states.get(&element).map(|state| state.script_list(now)).unwrap_or_default();
         // What the style let go of has no owner any more, which puts it among the animations of a script.
         let mut others: Vec<_> = self
             .css_transitions
@@ -7088,8 +7094,16 @@ impl GpuixView {
                     .or_else(|| self.script_state(id).and_then(|(_, state)| state.script_info(id, now)))
             })
             .or_else(|| self.retired_animations.get(id).cloned())
-            .map(|info| WebAnimationInfo::at(info, &self.clock))
+            .map(|info| WebAnimationInfo { orphaned: self.web_animation_orphaned(id), ..WebAnimationInfo::at(info, &self.clock) })
             .ok_or_else(|| unknown_web_animation(id))
+    }
+
+    /// Whether the element of the run `id` has left the tree, which is true from the batch that destroyed it and until
+    /// the batch that makes it again, unlike `is_orphaned_run`, which the frame that sweeps and the one that builds move.
+    fn web_animation_orphaned(&self, id: u64) -> bool {
+        self.css_animations
+            .element_of(id)
+            .is_some_and(|element| !self.tree.lock().unwrap().elements.contains_key(&element))
     }
 
     /// The timing and computed timing of the run `id`, as of the last frame.
@@ -11309,10 +11323,7 @@ pub(crate) fn animate_style_at(
         dynamic |= Dynamic::MotionValues as u8;
     }
     let transitioned = (transitions_wanted || animations_wanted).then(|| {
-        let focus_visible = crate::motion::FocusVisible {
-            own: ctx.focus_handles.contains_key(&id) && ctx.focus_styles.is_focus_visible(id),
-            descendant: ctx.focus_styles.has_focus_visible(id),
-        };
+        let focus = ctx.focus_styles.layers(id, ctx.focus_handles.contains_key(&id));
         Box::new(crate::motion::resolve_declared_style(
             transitions_wanted.then_some(&mut *ctx.css_transitions),
             animations_wanted.then_some((&mut *ctx.css_animations, ctx.keyframes)),
@@ -11327,8 +11338,7 @@ pub(crate) fn animate_style_at(
             input
                 .shared
                 .map_or_else(|| input.declared.unwrap_or(&EMPTY_STYLE).into(), crate::motion::StyleRef::from),
-            focus_visible,
-            Some(&ctx.focus_styles),
+            focus,
             measurement.as_ref(),
             ctx.inherited.interpolate_size,
             crate::motion::Scope::Element,
@@ -11753,7 +11763,13 @@ fn build_element_unpumped(
     }
     let measured = animated.measured;
     let declared_style = animated.declared(base_style);
-    let current_style = animated.current(base_style);
+    // A focus variant that resets a property is folded in here, where a variant that only sets
+    // fields is laid over the element by the builders (`focus::apply_focus_styles`): over what motion
+    // moved, as the builders lay it.
+    let focus_reset_style = animated
+        .current(base_style)
+        .and_then(|style| ctx.focus_styles.folded_for_resets(id, style, ctx.focus_handles.contains_key(&id)));
+    let current_style = focus_reset_style.as_deref().or(animated.current(base_style));
     let overlaid_style = contents_overlay
         .map(|overlay| current_style.unwrap_or(&EMPTY_STYLE).with_inherited_overlay(&overlay));
     let style = overlaid_style.as_deref().or(current_style);
@@ -11813,7 +11829,14 @@ fn build_element_unpumped(
         style.is_none_or(|style| style.var_declarations.is_none()),
         "a held var() declaration reached the build unresolved"
     );
-    let descended = ctx.inherited.clone().descend_with_custom(style, element.has_inert_prop(), own_custom);
+    // Children inherit what the element computes to with its focus variants laid over it, which
+    // is the style a transitioning element already has (motion folds them), so with or without a
+    // transition `.card:focus-within { color: red }` reaches the text below.
+    let descend_style = style.map(|style| ctx.focus_styles.folded(id, style, ctx.focus_handles.contains_key(&id)));
+    let descended = ctx
+        .inherited
+        .clone()
+        .descend_with_custom(descend_style.as_deref(), element.has_inert_prop(), own_custom);
     let parent_inherited = std::mem::replace(&mut ctx.inherited, descended);
     crate::layout::table::enter(&mut ctx.inherited.table_row, &mut ctx.inherited.table_cell, element);
     // The start of a logical inline pair is the right side in an rtl element.
@@ -14562,6 +14585,10 @@ pub struct WebAnimationInfo {
     /// The `startTime`: milliseconds on the renderer's clock since its origin, as the timeline
     /// of the animations reads (`getAnimationTimelineTime`). `null` while it has none.
     pub start_time: Option<f64>,
+    /// The run is a script's on an element that is not in the tree: it runs on with the clock and shows again if the
+    /// element is made again. Read from the tree when asked, so a removal or an insertion not yet swept by a frame is
+    /// seen. Only `getAnimation` says; a listing is of elements in the tree.
+    pub orphaned: bool,
 }
 
 /// What `getTiming()` and `getComputedTiming()` read of a CSS animation or transition, in
@@ -14748,6 +14775,7 @@ impl WebAnimationInfo {
             play_state: info.status.name().to_string(),
             pending: info.pending,
             start_time: info.start_offset.map(|offset| timeline_time + offset),
+            orphaned: false,
         }
     }
 }

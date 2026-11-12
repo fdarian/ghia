@@ -105,7 +105,7 @@ fn parse_object(text: &str) -> Result<StyleDesc, String> {
             continue;
         }
         if declaration.value.starts_with('{') && mentions_var(declaration.value.as_bytes()) {
-            if state_slot(&mut StyleDesc::default(), &declaration.key).is_some() {
+            if is_state_key(&declaration.key) {
                 states.push((declaration.key, parse_object(&declaration.value)?));
                 continue;
             }
@@ -216,25 +216,50 @@ fn parse_blocks(text: &str) -> crate::layout::container::ContainerRules {
     }))
 }
 
-fn state_slot<'a>(style: &'a mut StyleDesc, key: &str) -> Option<&'a mut Option<Box<StyleDesc>>> {
-    Some(match key {
-        "hover" => &mut style.hover,
-        "active" => &mut style.active,
-        "focusVisible" => &mut style.focus_visible,
-        "focusWithin" => &mut style.focus_within,
-        "groupHover" => &mut style.group_hover,
-        "groupActive" => &mut style.group_active,
-        "groupFocusWithin" => &mut style.group_focus_within,
-        "hasHover" => &mut style.has_hover,
-        "hasActive" => &mut style.has_active,
-        "hasFocus" => &mut style.has_focus,
-        "hasFocusVisible" => &mut style.has_focus_visible,
-        "disabled" => &mut style.disabled,
-        "enabled" => &mut style.enabled,
-        "hasDisabled" => &mut style.has_disabled,
-        "hasEnabled" => &mut style.has_enabled,
-        _ => return None,
-    })
+/// The state blocks of a style: the key a style object writes each under, and the field that holds
+/// it. One list for [`STATE_KEYS`] and [`state_slot`].
+macro_rules! state_slots {
+    ($($key:literal => $field:ident),+ $(,)?) => {
+        /// The keys of the state blocks of a style.
+        const STATE_KEYS: &[&str] = &[$($key),+];
+
+        pub(crate) fn state_slot<'a>(style: &'a mut StyleDesc, key: &str) -> Option<&'a mut Option<Box<StyleDesc>>> {
+            Some(match key {
+                $($key => &mut style.$field,)+
+                _ => return None,
+            })
+        }
+
+        /// The blocks of the states of `style`, each by its key (the name a validation error gives it), in
+        /// the order of [`STATE_KEYS`]. A transition or animation declared in any of them has to take
+        /// part, or it never runs.
+        pub(crate) fn state_blocks(style: &StyleDesc) -> [(&'static str, Option<&StyleDesc>); STATE_KEYS.len()] {
+            [$(($key, style.$field.as_deref())),+]
+        }
+    };
+}
+
+state_slots! {
+    "hover" => hover,
+    "active" => active,
+    "focus" => focus,
+    "focusVisible" => focus_visible,
+    "focusWithin" => focus_within,
+    "groupHover" => group_hover,
+    "groupActive" => group_active,
+    "groupFocusWithin" => group_focus_within,
+    "hasHover" => has_hover,
+    "hasActive" => has_active,
+    "hasFocus" => has_focus,
+    "hasFocusVisible" => has_focus_visible,
+    "disabled" => disabled,
+    "enabled" => enabled,
+    "hasDisabled" => has_disabled,
+    "hasEnabled" => has_enabled,
+}
+
+pub(crate) fn is_state_key(key: &str) -> bool {
+    STATE_KEYS.contains(&key)
 }
 
 /// The held declarations of `base` that survive `over` laid on it, then those of `over`. A plain
@@ -492,6 +517,15 @@ fn parse_declaration(key: &str, text: &str) -> Option<Arc<StyleDesc>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_state_key_has_a_slot_and_no_other_key_has() {
+        let mut style = StyleDesc::default();
+        for key in STATE_KEYS {
+            assert!(state_slot(&mut style, key).is_some(), "{key}");
+        }
+        assert!(state_slot(&mut style, "color").is_none());
+    }
 
     fn style(json: &str) -> StyleDesc {
         parse(json.as_bytes()).unwrap_or_else(|error| panic!("{json}: {error}"))

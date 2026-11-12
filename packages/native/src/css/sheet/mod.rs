@@ -26,6 +26,7 @@ mod parser;
 mod selector;
 mod selector_parse;
 mod share;
+mod states;
 mod tokenizer;
 mod tree;
 mod validate;
@@ -45,6 +46,8 @@ pub use invalidation::{Invalidation, Reach};
 pub use layers::{LayerId, LayerOrder, Layers};
 pub use matching::{matches, AttrValue, ElementView, SiblingTest};
 pub use parser::parse_sheet;
+pub use states::State;
+pub(crate) use states::{is_state_block, merge_own};
 pub(crate) use initial::style_of as initial_style_of;
 pub(crate) use wide_keyword::resolve as resolve_wide_keywords;
 pub use selector::{
