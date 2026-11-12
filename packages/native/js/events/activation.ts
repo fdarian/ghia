@@ -1,23 +1,15 @@
 import { flushPendingMutations } from "../bounds.js"
 import type { NativeRenderer } from "../host.js"
+import { requiredMethod } from "../dom/renderer-method.js"
 import { MouseEvent } from "./classes.js"
+
+const NO_ACTIVATION = "a dispatched click has no activation behaviour"
 
 type ClickTarget = { renderer: NativeRenderer; id: number } | undefined
 
 /** A `click` that is a `MouseEvent`, one an app built included, has the activation behaviour of the DOM. */
 function activates(target: ClickTarget, event: Event): target is NonNullable<ClickTarget> {
   return target !== undefined && event.type === "click" && isMouseEvent(event)
-}
-
-function required<Name extends "preActivateElement" | "cancelActivation" | "activateElement">(
-  renderer: NativeRenderer,
-  name: Name
-): NonNullable<NativeRenderer[Name]> {
-  const method = renderer[name]
-  if (typeof method !== "function") {
-    throw new Error(`This renderer does not support ${name}, so a dispatched click has no activation behaviour`)
-  }
-  return method.bind(renderer) as NonNullable<NativeRenderer[Name]>
 }
 
 /**
@@ -27,7 +19,7 @@ function required<Name extends "preActivateElement" | "cancelActivation" | "acti
  */
 export function preActivateClick(target: ClickTarget, event: Event): void {
   if (!activates(target, event)) return
-  const preActivate = required(target.renderer, "preActivateElement")
+  const preActivate = requiredMethod(target.renderer, "preActivateElement", NO_ACTIVATION)
   flushPendingMutations(target.renderer)
   preActivate(target.id)
 }
@@ -41,8 +33,8 @@ export function preActivateClick(target: ClickTarget, event: Event): void {
  */
 export function activateAfterClick(target: ClickTarget, event: Event): void {
   if (!activates(target, event)) return
-  if (event.defaultPrevented) required(target.renderer, "cancelActivation")(target.id)
-  else required(target.renderer, "activateElement")(target.id)
+  if (event.defaultPrevented) requiredMethod(target.renderer, "cancelActivation", NO_ACTIVATION)(target.id)
+  else requiredMethod(target.renderer, "activateElement", NO_ACTIVATION)(target.id)
 }
 
 function isMouseEvent(event: Event): boolean {

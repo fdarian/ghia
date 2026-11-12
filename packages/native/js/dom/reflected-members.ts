@@ -6,6 +6,7 @@
  */
 
 import type { Element } from "./nodes.js"
+import { onTags } from "./tag-members.js"
 
 /** The tags whose `tabIndex` is 0 without an attribute, from the HTML standard. Ghia's own `select` is one. */
 const FOCUSABLE_TAGS: ReadonlySet<string> = new Set([
@@ -22,23 +23,6 @@ const FOCUSABLE_TAGS: ReadonlySet<string> = new Set([
 
 /** The tags with a `disabled` attribute (the HTML standard's form controls, `fieldset`, `optgroup` and `option`). */
 const DISABLEABLE_TAGS: ReadonlySet<string> = new Set(["button", "fieldset", "input", "optgroup", "option", "select", "textarea"])
-
-/**
- * A member that only some tags have: on the others it is as it was before these accessors, nothing
- * until an assignment, which makes a plain property, so no other element changes.
- */
-function onTags(name: string, tags: ReadonlySet<string>, read: (element: Element) => unknown, write: (element: Element, value: unknown) => void) {
-  return {
-    configurable: true,
-    get(this: Element) {
-      return tags.has(this.localName) ? read(this) : undefined
-    },
-    set(this: Element, value: unknown) {
-      if (tags.has(this.localName)) write(this, value)
-      else Object.defineProperty(this, name, { value, writable: true, configurable: true, enumerable: true })
-    },
-  }
-}
 
 const LABEL_TAG: ReadonlySet<string> = new Set(["label"])
 
@@ -107,13 +91,13 @@ export function defineReflectedMembers(target: object): void {
         this.setAttribute("tabindex", String(Number.isFinite(number) ? number : 0))
       },
     },
-    disabled: onTags(
+    disabled: onTags<Element>(
       "disabled",
       DISABLEABLE_TAGS,
       (element) => element.getAttribute("disabled") !== null,
       (element, value) => (value ? element.setAttribute("disabled", "") : element.removeAttribute("disabled"))
     ),
-    htmlFor: onTags(
+    htmlFor: onTags<Element>(
       "htmlFor",
       LABEL_TAG,
       (element) => element.getAttribute("for") ?? "",

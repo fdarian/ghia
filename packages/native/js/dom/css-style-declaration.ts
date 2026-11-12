@@ -25,11 +25,16 @@ type StyleRecord = Record<string, unknown>
  * Where a style keeps what code wrote that Ghia has no style key for (`touch-action`): CSS names to
  * texts, with the `!important` suffix. It is a non-enumerable symbol key, so it is not in what
  * native is sent, in a walk of the style's properties or in a comparison of two styles. A spread
- * does not carry it either: `applyStyleChange` and `cloneNode` copy it with `withUnsupported`. A style that
- * has the key at all is a style code has written to: the `style` attribute is there, `""` when
- * nothing is left in it.
+ * does not carry it either: `applyStyleChange` and `cloneNode` copy it with `carryStyleMarks`.
  */
 const UNSUPPORTED = Symbol.for("@ghia/native/style-unsupported")
+
+/**
+ * Set on a style code has written to: the `style` attribute is there, `""` when nothing is left in
+ * it. Carried the same way as `UNSUPPORTED`, which it is separate from because a style can be
+ * written to and hold nothing Ghia has no key for.
+ */
+const WRITTEN = Symbol.for("@ghia/native/style-written")
 
 type Unsupported = Readonly<Record<string, string>>
 
@@ -37,15 +42,20 @@ function unsupportedOf(style: StyleDesc): Unsupported | undefined {
   return (style as unknown as { [UNSUPPORTED]?: Unsupported })[UNSUPPORTED]
 }
 
-/** `style` with `unsupported` set on it (a style that has none gets none), and the style itself. */
-export function withUnsupported(style: StyleRecord, unsupported: Unsupported | undefined): StyleDesc {
+function isWritten(style: StyleDesc): boolean {
+  return (style as unknown as { [WRITTEN]?: true })[WRITTEN] === true
+}
+
+/** `style` with the marks set on it (one that has none gets none), and the style itself. */
+function withStyleMarks(style: StyleRecord, unsupported: Unsupported | undefined, written: boolean): StyleDesc {
   if (unsupported !== undefined) Object.defineProperty(style, UNSUPPORTED, { value: unsupported, configurable: true })
+  if (written) Object.defineProperty(style, WRITTEN, { value: true, configurable: true })
   return style as StyleDesc
 }
 
 /** What `applyStyleChange` and a clone copy of a style that a spread leaves behind. */
-export function carryUnsupported(from: StyleDesc, to: StyleRecord): StyleDesc {
-  return withUnsupported(to, unsupportedOf(from))
+export function carryStyleMarks(from: StyleDesc, to: StyleRecord): StyleDesc {
+  return withStyleMarks(to, unsupportedOf(from), isWritten(from))
 }
 
 /** The properties whose `StyleDesc` value is a number when the text is one; other text (`50%`, `auto`, `none`, `inherit`) goes to native as it is. */
@@ -67,22 +77,20 @@ const UNITLESS_NUMBER: ReadonlySet<string> = new Set([
 /** The properties whose bare number is degrees, as `StyleDesc` reads it (`DEGREES` in `css/lenient.rs`). */
 const DEGREES: ReadonlySet<string> = new Set(["rotate", "motionRotate", "rotateX", "rotateY", "rotateZ", "skew", "skewX", "skewY"])
 
-const IMPORTANT = /!\s*important\s*$/i
-
 /**
  * A property written with `important` is held as its value and this suffix, the form a framework
  * writes one in (`display: "none !important"`) and the one native's cascade reads
  * (`css/inline_important.rs`). Every read takes it off again.
  */
 const IMPORTANT_SUFFIX = " !important"
-const IMPORTANT_TAIL = /\s*!\s*important\s*$/i
+const IMPORTANT = /\s*!\s*important\s*$/i
 
 function plainText(text: string): string {
-  return text.replace(IMPORTANT_TAIL, "")
+  return text.replace(IMPORTANT, "")
 }
 
 function priorityOf(text: string): string {
-  return IMPORTANT_TAIL.test(text) ? "important" : ""
+  return IMPORTANT.test(text) ? "important" : ""
 }
 
 function kebabOf(property: string): string {
@@ -156,7 +164,7 @@ export function serializeStyle(style: StyleDesc): string {
 /** What `getAttribute("style")` gives: the text, `""` for a style code emptied, `null` for an element no style was ever written to. */
 export function styleAttributeText(style: StyleDesc): string | null {
   const text = serializeStyle(style)
-  return text === "" && unsupportedOf(style) === undefined ? null : text
+  return text === "" && !isWritten(style) ? null : text
 }
 
 const NUMERIC_TEXT = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i
@@ -273,7 +281,7 @@ export function applyStyleChange(live: StyleDesc, previous: StyleDesc, next: Sty
     else declare(result, key, value)
   }
   for (const key of Object.keys(before)) if (!(key in after)) delete result[key]
-  return carryUnsupported(live, result)
+  return carryStyleMarks(live, result)
 }
 
 function illegalConstructor(): never {
@@ -311,7 +319,7 @@ export function writeStyleText(binding: StyleBinding, text: string | null): void
     delete unsupported[unsupportedName]
     unsupported[unsupportedName] = stored ?? value
   }
-  binding.setStyle(withUnsupported({ ...kept, ...declared }, unsupported))
+  binding.setStyle(withStyleMarks({ ...kept, ...declared }, unsupported, true))
 }
 
 class CSSStyleDeclarationClass {
@@ -425,8 +433,8 @@ class CSSStyleDeclarationClass {
   }
 
   /** Hands `next` over as the live style; a write from code leaves the `style` attribute there, even when nothing is left in it. */
-  #commit(next: StyleRecord, unsupported: Unsupported = unsupportedOf(this.#binding.style) ?? {}): void {
-    this.#binding.setStyle(withUnsupported(next, unsupported))
+  #commit(next: StyleRecord, unsupported: Unsupported | undefined = unsupportedOf(this.#binding.style)): void {
+    this.#binding.setStyle(withStyleMarks(next, unsupported, true))
   }
 }
 

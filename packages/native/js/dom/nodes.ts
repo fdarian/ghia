@@ -11,7 +11,7 @@
 import type { ElementType, NativeRenderer } from "../host.js"
 import { attributeNameOf, isNotAttribute, storedAttributeNames } from "./attribute-names.js"
 import { cloneNode } from "./clone.js"
-import { serializeStyle, styleDeclarationFor, type CSSStyleDeclaration, type StyleBinding } from "./css-style-declaration.js"
+import { styleDeclarationFor, type CSSStyleDeclaration, type StyleBinding } from "./css-style-declaration.js"
 import { datasetOf } from "./dataset.js"
 import type { DOMRectList } from "./dom-rect.js"
 import { defineReflectedMembers, type ReflectedMembers } from "./reflected-members.js"

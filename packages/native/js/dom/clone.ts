@@ -6,7 +6,7 @@
  */
 
 import { isNotAttribute } from "./attribute-names.js"
-import { carryUnsupported, styleAttributeText } from "./css-style-declaration.js"
+import { carryStyleMarks, styleAttributeText } from "./css-style-declaration.js"
 import { DOM_BINDING, type Element, type ElementBinding, type Node, type TextBinding } from "./nodes.js"
 
 const ELEMENT_NODE = 1
@@ -29,7 +29,7 @@ function cloneElement(source: Element, deep: boolean): Element {
     const value = binding.prop(name)
     if (isPrimitiveProp(value)) cloneBinding.setProp(name, value)
   }
-  if (Object.keys(binding.style).length > 0 || styleAttributeText(binding.style) !== null) cloneBinding.setStyle(carryUnsupported(binding.style, { ...binding.style }))
+  if (Object.keys(binding.style).length > 0 || styleAttributeText(binding.style) !== null) cloneBinding.setStyle(carryStyleMarks(binding.style, { ...binding.style }))
   if (deep) {
     for (const child of binding.children) cloneBinding.insertBefore(cloneNode(child, true), null)
   }

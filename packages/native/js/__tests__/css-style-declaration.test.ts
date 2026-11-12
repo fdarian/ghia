@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { applyStyleChange, carryUnsupported, CSSStyleDeclaration, serializeStyle, styleAttributeText, styleDeclarationFor, writeStyleText } from "../dom/css-style-declaration.js"
+import { applyStyleChange, carryStyleMarks, CSSStyleDeclaration, serializeStyle, styleAttributeText, styleDeclarationFor, writeStyleText } from "../dom/css-style-declaration.js"
 import type { StyleDesc } from "../host.js"
 import { STYLE_PROPERTIES } from "../style-properties.js"
 import "../dom-globals.js"
@@ -97,7 +97,7 @@ describe("CSSStyleDeclaration", () => {
     it("is a declaration of a style that is copied, as a clone copies it", () => {
       const subject = declare()
       subject.style.setProperty("touch-action", "none")
-      expect(styleAttributeText(carryUnsupported(subject.owner.style, { ...subject.owner.style }))).toBe("touch-action: none;")
+      expect(styleAttributeText(carryStyleMarks(subject.owner.style, { ...subject.owner.style }))).toBe("touch-action: none;")
       expect(styleAttributeText({ ...subject.owner.style }), "a spread leaves it behind").toBeNull()
     })
 

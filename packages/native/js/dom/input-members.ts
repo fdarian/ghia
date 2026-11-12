@@ -2,6 +2,8 @@ import { flushPendingMutations, HOST_BINDING, type HostBinding } from "../bounds
 import type { NativeRenderer } from "../host.js"
 import type { InputChoiceState } from "../../index.js"
 import { namedError } from "../named-error.js"
+import { requiredMethod } from "./renderer-method.js"
+import { onTags } from "./tag-members.js"
 
 /** `checked`, `defaultChecked`, `indeterminate` and `value` of an `<input>`, which native holds. */
 export interface InputMembers {
@@ -34,12 +36,11 @@ export interface InputBinding {
 
 type Layout = NonNullable<InputBinding["layout"]>
 
-function isInput(self: object): boolean {
-  return Reflect.get(self, "localName") === "input"
-}
+const INPUT_TAG: ReadonlySet<string> = new Set(["input"])
+const VALUE_TAGS: ReadonlySet<string> = new Set(["input", "textarea"])
 
-function hasValue(self: object): boolean {
-  return isInput(self) || Reflect.get(self, "localName") === "textarea"
+function isInput(self: object): boolean {
+  return INPUT_TAG.has(Reflect.get(self, "localName") as string)
 }
 
 /** The state native holds for the `<input>` at `layout`, after the pending mutations are sent. */
@@ -50,25 +51,19 @@ export function readInputChoice(layout: Layout): InputChoiceState {
   return read.call(layout.renderer, layout.id)
 }
 
-function required<Name extends "writeInputFlag" | "writeRangeValue">(layout: Layout, name: Name, member: string): NonNullable<NativeRenderer[Name]> {
-  const method = layout.renderer[name]
-  if (typeof method !== "function") throw new Error(`This renderer does not support ${name}, so ${member} cannot be assigned`)
-  return method.bind(layout.renderer) as NonNullable<NativeRenderer[Name]>
-}
-
 /**
  * A property assignment is not an attribute and not a prop: it changes the control's own state, and
  * the framework's props, which a controlled control is restored to, stay as they were committed.
  * The state is native's, so the call is made once the pending mutations are sent.
  */
 function writeFlag(layout: Layout, name: "checked" | "defaultChecked" | "indeterminate", value: boolean): void {
-  const write = required(layout, "writeInputFlag", name)
+  const write = requiredMethod(layout.renderer, "writeInputFlag", `${name} cannot be assigned`)
   flushPendingMutations(layout.renderer)
   write(layout.id, name, value)
 }
 
 function writeRangeValue(layout: Layout, text: string): void {
-  const write = required(layout, "writeRangeValue", "the value of a range")
+  const write = requiredMethod(layout.renderer, "writeRangeValue", "the value of a range cannot be assigned")
   flushPendingMutations(layout.renderer)
   write(layout.id, text)
 }
@@ -100,59 +95,49 @@ function stepBy<This extends object>(self: This, bind: (self: This) => InputBind
   writeRangeValue(layout, String(Number(state.value) + direction * count * state.step))
 }
 
-/** A member of an element that is not an `<input>` is a plain property, as it is before these accessors exist. */
-function plain(self: object, name: string, value: unknown): void {
-  Object.defineProperty(self, name, { value, writable: true, configurable: true, enumerable: true })
-}
-
 /**
  * Defines `checked`, `defaultChecked`, `indeterminate` and `value` on `target`, which is the
  * prototype of an adapter's host elements. On anything but an `<input>` (`<textarea>` for `value`) they
  * read `undefined` and an assignment makes an own property, so no other element changes.
  */
 export function defineInputMembers<This extends object>(target: object, bind: (self: This) => InputBinding): void {
-  const flag = (name: "checked" | "defaultChecked" | "indeterminate", prop: (binding: InputBinding) => boolean) => ({
-    configurable: true,
-    get(this: This): boolean | undefined {
-      if (!isInput(this)) return undefined
-      const binding = bind(this)
-      return binding.layout === undefined ? prop(binding) : readInputChoice(binding.layout)[name]
-    },
-    set(this: This, value: unknown) {
-      if (!isInput(this)) return plain(this, name, value)
-      const layout = bind(this).layout
-      if (layout === undefined) throw new Error(`Setting ${name} needs a mounted element`)
-      writeFlag(layout, name, Boolean(value))
-    },
-  })
-  const attribute = (name: "min" | "max" | "step") => ({
-    configurable: true,
-    get(this: This): string | undefined {
-      return isInput(this) ? propText(bind(this).prop(name)) : undefined
-    },
-    set(this: This, value: unknown) {
-      if (!isInput(this)) return plain(this, name, value)
-      bind(this).setProp(name, String(value))
-    },
-  })
+  const onInput = (name: string, read: (self: This) => unknown, write: (self: This, value: unknown) => void) =>
+    onTags<This>(name, INPUT_TAG, read, write)
+  const flag = (name: "checked" | "defaultChecked" | "indeterminate", prop: (binding: InputBinding) => boolean) =>
+    onInput(
+      name,
+      (self) => {
+        const binding = bind(self)
+        return binding.layout === undefined ? prop(binding) : readInputChoice(binding.layout)[name]
+      },
+      (self, value) => {
+        const layout = bind(self).layout
+        if (layout === undefined) throw new Error(`Setting ${name} needs a mounted element`)
+        writeFlag(layout, name, Boolean(value))
+      }
+    )
+  const attribute = (name: "min" | "max" | "step") =>
+    onInput(
+      name,
+      (self) => propText(bind(self).prop(name)),
+      (self, value) => bind(self).setProp(name, String(value))
+    )
   Object.defineProperties(target, {
     min: attribute("min"),
     max: attribute("max"),
     step: attribute("step"),
-    valueAsNumber: {
-      configurable: true,
-      get(this: This): number | undefined {
-        if (!isInput(this)) return undefined
-        const type = bind(this).prop("type")
+    valueAsNumber: onInput(
+      "valueAsNumber",
+      (self) => {
+        const type = bind(self).prop("type")
         if (type !== "range" && type !== "number") return Number.NaN
-        const text = Reflect.get(this, "value") as string
+        const text = Reflect.get(self, "value") as string
         return text === "" ? Number.NaN : Number(text)
       },
-      set(this: This, value: unknown) {
-        if (!isInput(this)) return plain(this, "valueAsNumber", value)
-        Reflect.set(this, "value", String(Number(value)))
-      },
-    },
+      (self, value) => {
+        Reflect.set(self, "value", String(Number(value)))
+      }
+    ),
     stepUp: {
       configurable: true,
       writable: true,
@@ -170,14 +155,14 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
     checked: flag("checked", (binding) => Boolean(binding.prop("checked") ?? binding.prop("defaultChecked"))),
     defaultChecked: flag("defaultChecked", (binding) => Boolean(binding.prop("defaultChecked"))),
     indeterminate: flag("indeterminate", () => false),
-    value: {
-      configurable: true,
-      get(this: This): string | undefined {
-        if (!hasValue(this)) return undefined
-        const binding = bind(this)
+    value: onTags<This>(
+      "value",
+      VALUE_TAGS,
+      (self) => {
+        const binding = bind(self)
         const layout = binding.layout
         if (layout === undefined) return propText(binding.prop("value") ?? binding.prop("defaultValue"))
-        if (Reflect.get(this, "localName") === "input") {
+        if (isInput(self)) {
           const state = readInputChoice(layout)
           if (state.kind !== "text") return state.value
         }
@@ -185,14 +170,13 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
         if (typeof read !== "function") throw new Error("This renderer does not support getTextValue, so a text input has no value to read")
         return read.call(layout.renderer, layout.id)
       },
-      set(this: This, value: unknown) {
-        if (!hasValue(this)) return plain(this, "value", value)
-        const layout = bind(this).layout
+      (self, value) => {
+        const layout = bind(self).layout
         if (layout === undefined) throw new Error("Setting value needs a mounted element")
         const text = propText(value)
-        if (isInput(this) && readInputChoice(layout).kind === "range") writeRangeValue(layout, text)
-        else writeValueProp(this, layout, text)
-      },
-    },
+        if (isInput(self) && readInputChoice(layout).kind === "range") writeRangeValue(layout, text)
+        else writeValueProp(self, layout, text)
+      }
+    ),
   })
 }
