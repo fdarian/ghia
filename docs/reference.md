@@ -1549,6 +1549,14 @@ installs `uncaughtException` / `unhandledRejection` listeners so bun stays alive
 The window shows the stack and a **Reload** button that remounts the last
 `render()` tree. A full reload under `ghia dev` also remounts. The process does not exit.
 
+An error thrown while a frame's changes are flushed (releasing removed nodes, or applying
+the batch to native) goes to the root's `onUncaughtError`, and to `console.error` when
+the root has none. The flush it belonged to is not lost and the next change schedules
+another, so later updates keep reaching the window. The Solid adapter also skips a
+component's value that is not a node (an object, as solid-refresh renders for a component
+that threw on mount in dev) with `console.warn("Unrecognized value. Skipped inserting", value)`,
+as `solid-js/web` does, instead of mounting it.
+
 An error thrown by an **event handler** (an element's, or a `window` or `document`
 listener's) does not stop the dispatch: the remaining handlers still run. The error
 goes to the renderer's `onError` option when there is one, and otherwise is reported

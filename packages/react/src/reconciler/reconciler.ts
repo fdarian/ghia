@@ -97,8 +97,13 @@ export function createRoot(
     // Code that changes the tree outside a React commit (`document.createElement`, `appendChild`)
     // has no commit to flush it.
     queueMicrotask(() => {
+      // Apart, so a throw while releasing detached nodes never skips the flush.
       try {
         releaseDetachedNodes(gpuixContainer)
+      } catch (error) {
+        onUncaughtError(error instanceof Error ? error : new Error(String(error)), {})
+      }
+      try {
         flush()
       } catch (error) {
         onUncaughtError(error instanceof Error ? error : new Error(String(error)), {})

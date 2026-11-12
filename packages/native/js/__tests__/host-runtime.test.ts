@@ -119,6 +119,23 @@ describe("shared host runtime", () => {
     ])
   })
 
+  it("schedules the next flush after a scheduled flush whose apply threw", () => {
+    const renderer = new RecordingRenderer()
+    const scheduled: (() => void)[] = []
+    const mutations = createMutationQueue(renderer, undefined, (flush) => scheduled.push(flush))
+
+    mutations.createElement(1, "div")
+    expect(scheduled).toHaveLength(1)
+    renderer.fail = true
+    expect(() => scheduled[0]!()).toThrow("native failure")
+
+    renderer.fail = false
+    mutations.setText(1, "later")
+    expect(scheduled, "the failed flush must not leave the queue believing one is pending").toHaveLength(2)
+    scheduled[1]!()
+    expect(renderer.batches).toEqual([[["createElement", 1, "div"], ["setText", 1, "later"]]])
+  })
+
   it("retains failed mutations and cleans handlers after success", () => {
     const renderer = new RecordingRenderer()
     const removed: number[] = []

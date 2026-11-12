@@ -172,15 +172,22 @@ export class HostRoot implements MotionBindingHost {
     this.mutations.destroyElement(this.html.nativeId)
   }
 
-  /** Destroys the removed nodes that stayed out of the tree. Call before each flush. */
+  /** Destroys the removed nodes that stayed out of the tree, each one even when another throws. Call before each flush. */
   finishRemovals(): void {
     const removed = [...this.removals]
     this.removals.clear()
+    const failures: unknown[] = []
     for (const node of removed) {
-      if (!node.mounted || isConnected(node)) continue
-      markUnmounted(node)
-      this.mutations.destroyElement(node.nativeId)
+      try {
+        if (!node.mounted || isConnected(node)) continue
+        markUnmounted(node)
+        this.mutations.destroyElement(node.nativeId)
+      } catch (error) {
+        failures.push(error)
+      }
     }
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) throw new AggregateError(failures, "Releasing removed nodes failed")
   }
 
   /** Built through the host machinery an app's elements go through, then mounted as the window's root. */

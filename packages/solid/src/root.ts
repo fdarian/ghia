@@ -20,6 +20,7 @@ import type {
 } from "@ghia/native/host"
 import { createHostElement, createHostText, HostRoot, removeHostNode } from "./host.js"
 import { universalRender } from "./universal.js"
+import { reportUncaughtError } from "./uncaught-error.js"
 
 export interface GpuixContextValue {
   renderer: NativeRenderer
@@ -65,14 +66,16 @@ export function createRoot(
     runMotionReleases(container)
   }, (flush) => {
     queueMicrotask(() => {
+      // Apart, so a throw while releasing removed nodes never skips the flush, and a failed flush is reported too.
       try {
         container.finishRemovals()
+      } catch (error) {
+        reportUncaughtError(rootHandlers, error)
+      }
+      try {
         flush()
       } catch (error) {
-        rootHandlers.onUncaughtError?.(
-          error instanceof Error ? error : new Error(String(error)),
-          {}
-        )
+        reportUncaughtError(rootHandlers, error)
       }
     })
   })
@@ -173,8 +176,11 @@ export function createRoot(
 
   attach()
   const flush = () => {
-    container.finishRemovals()
-    mutations.flushMutations()
+    try {
+      container.finishRemovals()
+    } finally {
+      mutations.flushMutations()
+    }
   }
   const clear = () => {
     dispose?.()

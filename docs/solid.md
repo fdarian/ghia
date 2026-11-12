@@ -358,7 +358,7 @@ interface RenderOptions extends WindowOptions, RootEventHandlers {
 | `onKeyDown` / `onKeyUp`           | Window-level keys                                          |
 | `onSelectionChange`               | Window-level selection                                     |
 | `onAppearanceChange`              | Window-level light or dark change                          |
-| `onUncaughtError`                 | Native and flush errors                                    |
+| `onUncaughtError`                 | Native and flush errors. Default `console.error`           |
 
 ```tsx
 render(() => <App />, {

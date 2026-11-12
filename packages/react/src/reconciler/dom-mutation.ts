@@ -105,18 +105,25 @@ function retire(node: HostNode): void {
   container.renderer.requestFlush()
 }
 
-/** Releases the native elements of the nodes code took out of the document and did not put back. */
+/** Releases the native elements of the nodes code took out of the document and did not put back, each one even when another throws. */
 export function releaseDetachedNodes(container: Container): void {
   const detached = detachedByWindow.get(container.html)
   if (detached === undefined || detached.size === 0) return
   const nodes = [...detached]
   detached.clear()
+  const failures: unknown[] = []
   for (const node of nodes) {
-    const state = stateFor(node)
-    if (!state.mounted || isInTree(node)) continue
-    markUnmounted(node)
-    state.container.renderer.destroyElement(node.nativeId)
+    try {
+      const state = stateFor(node)
+      if (!state.mounted || isInTree(node)) continue
+      markUnmounted(node)
+      state.container.renderer.destroyElement(node.nativeId)
+    } catch (error) {
+      failures.push(error)
+    }
   }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1) throw new AggregateError(failures, "Releasing detached nodes failed")
 }
 
 export function setDomTextData(text: TextInstance, data: string): void {

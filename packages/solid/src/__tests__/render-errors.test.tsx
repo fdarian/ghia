@@ -1,8 +1,9 @@
 import { ErrorBoundary, Show, Switch, Match, createSignal } from "solid-js"
 import type { JSX } from "solid-js"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
-import type { TestRenderer } from "../testing.js"
+import { HostRoot } from "../host.js"
+import { createRoot } from "../root.js"
+import { TestRenderer, createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 function tick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
@@ -148,5 +149,65 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renders a value that is not a hos
     await tick()
     expect(app.renderer.findByTestId("fallback")).toBeUndefined()
     expect(texts(app.renderer)).toContain("Text page")
+  })
+})
+
+describe.skipIf(!hasNativeTestRenderer)("Solid reports an error thrown while a frame's changes are flushed", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  // Armed once the mount's own flush has run, so it is the next microtask flush that throws.
+  async function mountedWithThrowingRemoval(
+    root: { render(code: () => JSX.Element): void; renderer: TestRenderer },
+    boom: Error
+  ) {
+    const [text, setText] = createSignal("first")
+    root.render(() => <div>{text()}</div>)
+    await tick()
+    vi.spyOn(HostRoot.prototype, "finishRemovals").mockImplementationOnce(() => {
+      throw boom
+    })
+    return setText
+  }
+
+  it("gives the error to onUncaughtError and still shows later updates", async () => {
+    const renderer = new TestRenderer({})
+    const onUncaughtError = vi.fn()
+    const root = createRoot(renderer, { onUncaughtError })
+    const boom = new Error("removal failed")
+    const setText = await mountedWithThrowingRemoval(
+      { render: (code) => root.render(code), renderer },
+      boom
+    )
+
+    setText("second")
+    await tick()
+    expect(onUncaughtError).toHaveBeenCalledTimes(1)
+    expect(onUncaughtError.mock.calls[0]?.[0]).toBe(boom)
+    renderer.flush()
+    expect(texts(renderer)).toContain("second")
+
+    setText("third")
+    await tick()
+    renderer.flush()
+    expect(texts(renderer)).toContain("third")
+    root.unmount()
+    renderer.flush()
+    renderer.dispose()
+  })
+
+  it("logs the error with console.error when the root has no onUncaughtError", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const app = createTestRoot()
+    const boom = new Error("removal failed")
+    const setText = await mountedWithThrowingRemoval(app, boom)
+
+    setText("second")
+    await tick()
+    expect(error).toHaveBeenCalledWith(boom)
+    app.renderer.flush()
+    expect(texts(app.renderer)).toContain("second")
+    app.unmount()
   })
 })
