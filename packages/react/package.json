@@ -109,6 +109,7 @@
     "vite": "^8.0.0"
   },
   "devDependencies": {
+    "@dnd-kit/react": "0.5.3",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^25.3.3",
     "@types/react": "^19.2.0",

@@ -20,7 +20,8 @@ globalThis.$RefreshReg$ = () => {}
 globalThis.$RefreshSig$ = () => (type) => type
 `
 
-const REACT_DOM_SHIM = fileURLToPath(new URL("./react-dom.js", import.meta.url))
+/** `@dnd-kit/react` and the like import `flushSync` and `createPortal` from `react-dom`, which has to be the shim that flushes Ghia's reconciler. */
+export const REACT_DOM_ALIAS = { find: /^react-dom$/, replacement: fileURLToPath(new URL("./react-dom.js", import.meta.url)) }
 
 const CJS_PACKAGES = ["react", "react-reconciler"]
 
@@ -64,7 +65,7 @@ export function react(options: ReactOptions = {}): Plugin[] {
       // A Ghia app has no `react-dom`, and the web libraries it runs import it for `createPortal` and `flushSync`.
       // Exact match: `react-dom/client` and `react-dom/server` have no counterpart and fail to resolve.
       config() {
-        return { resolve: { alias: [{ find: /^react-dom$/, replacement: REACT_DOM_SHIM }] } }
+        return { resolve: { alias: [REACT_DOM_ALIAS] } }
       },
       // `ghia()` inlines every dependency of its environment, and Vite's module runner cannot run
       // CommonJS, which React and its reconciler are. Bun loads them natively; `ghia build` bundles them.

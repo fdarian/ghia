@@ -71,6 +71,8 @@ const HOST_METHODS = [
   "updateAnimationTiming",
 ] as const
 
+/** The classes are not constructible by an app: only this module holds the token their constructors ask for. */
+const CREATE: unique symbol = Symbol("create web animation")
 const FINISH_EVENT = "webanimationfinish"
 const CANCEL_EVENT = "webanimationcancel"
 const READY_EVENT = "webanimationready"
@@ -218,7 +220,8 @@ export class DocumentTimeline {
   readonly #host: WebAnimationHost
 
   /** Not for apps: the timeline of an animation is `animation.timeline`. */
-  constructor(host: WebAnimationHost) {
+  constructor(token: typeof CREATE, host: WebAnimationHost) {
+    if (token !== CREATE) throw new TypeError("Illegal constructor")
     this.#host = host
   }
 
@@ -491,7 +494,8 @@ function updateGone(state: State, update: WebAnimationTimingUpdate): void {
  */
 export class KeyframeEffect {
   /** Not for apps: the effect of an animation is `animation.effect`. */
-  constructor(init: EffectInit) {
+  constructor(token: typeof CREATE, init: EffectInit) {
+    if (token !== CREATE) throw new TypeError("Illegal constructor")
     effects.set(this, init)
   }
 
@@ -622,7 +626,8 @@ export class Animation extends GpuixEventTarget {
   /** The `id` option of `element.animate()`; empty for the animations of CSS and of Motion. */
   id = ""
 
-  constructor(init: AnimationInit) {
+  constructor(token: typeof CREATE, init: AnimationInit) {
+    if (token !== CREATE) throw new TypeError("Illegal constructor")
     super()
     const state: State = {
       host: init.host,
@@ -634,7 +639,7 @@ export class Animation extends GpuixEventTarget {
       last: init.info,
       effect: snapshot(() => init.host.getAnimationEffect(init.info.id)),
       keyframes: snapshot(() => init.host.getAnimationKeyframes(init.info.id)),
-      keyframeEffect: new KeyframeEffect({ animation: this, target: init.target }),
+      keyframeEffect: new KeyframeEffect(CREATE, { animation: this, target: init.target }),
       finished: deferred(),
       ready: deferred(),
       madeByScript: init.madeByScript,
@@ -903,8 +908,8 @@ export interface Animation {
 export class CSSAnimation extends Animation {
   readonly animationName: string
 
-  constructor(init: AnimationInit) {
-    super(init)
+  constructor(token: typeof CREATE, init: AnimationInit) {
+    super(token, init)
     if (init.info.animationName === undefined) {
       throw new TypeError(`Animation ${init.info.id} is not a CSS animation`)
     }
@@ -917,8 +922,8 @@ export class CSSTransition extends Animation {
   /** The CSS name of the property, `background-color`. */
   readonly transitionProperty: string
 
-  constructor(init: AnimationInit) {
-    super(init)
+  constructor(token: typeof CREATE, init: AnimationInit) {
+    super(token, init)
     if (init.info.transitionProperty === undefined) {
       throw new TypeError(`Animation ${init.info.id} is not a CSS transition`)
     }
@@ -1041,11 +1046,11 @@ function keepListed(registry: Registry, elementId: number, id: number, animation
 function animationOf(kind: string, init: AnimationInit): Animation {
   switch (kind) {
     case "transition":
-      return new CSSTransition(init)
+      return new CSSTransition(CREATE, init)
     case "script":
-      return new Animation(init)
+      return new Animation(CREATE, init)
     default:
-      return new CSSAnimation(init)
+      return new CSSAnimation(CREATE, init)
   }
 }
 
@@ -1092,7 +1097,7 @@ export function getElementAnimations(
   if (registry.closed) return []
   const host = hostOf(renderer)
   flushPendingMutations(renderer)
-  const timeline = (registry.timeline ??= new DocumentTimeline(host))
+  const timeline = (registry.timeline ??= new DocumentTimeline(CREATE, host))
   if (!options?.subtree) {
     return host.getAnimations(elementId).map((info) => adopt(registry, host, timeline, target, elementId, info))
   }
@@ -1134,7 +1139,7 @@ export function animateElement(
     throw refusal(error)
   }
   const registry = registryOf(renderer)
-  const timeline = (registry.timeline ??= new DocumentTimeline(host))
+  const timeline = (registry.timeline ??= new DocumentTimeline(CREATE, host))
   const animation = adopt(registry, host, timeline, target, elementId, info, true)
   if (typeof options === "object" && options !== null && options.id !== undefined) animation.id = String(options.id)
   return animation
@@ -1145,7 +1150,7 @@ function getRendererAnimations(renderer: NativeRenderer): Animation[] {
   const host = hostOf(renderer)
   flushPendingMutations(renderer)
   const registry = registryOf(renderer)
-  const timeline = (registry.timeline ??= new DocumentTimeline(host))
+  const timeline = (registry.timeline ??= new DocumentTimeline(CREATE, host))
   return host
     .getDocumentAnimations()
     .map((listed) => adoptListed(registry, host, timeline, renderer, listed, undefined, undefined))

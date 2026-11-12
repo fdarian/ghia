@@ -9750,10 +9750,13 @@ await animation.finished // resolves with the animation
   the elements. `document` comes from `@ghia/react` or `@ghia/solid`
   ([`window` and `document`](#window-and-document))
 - **Classes.** `Animation`, `CSSAnimation`, `CSSTransition`, `KeyframeEffect` and
-  `DocumentTimeline` are exported from `@ghia/react` and `@ghia/solid`; they
-  cannot be constructed by an app. `replaceState`, `persist()`, `commitStyles()`
-  and `onremove` do not exist, and `animation-composition` is not supported
-  ([deviations](./fork/deviations.md#motion))
+  `DocumentTimeline` are exported from `@ghia/react` and `@ghia/solid`, and are
+  globals where the runtime has none (not on the browser build, which has the
+  browser's), so `effect instanceof KeyframeEffect`, which `@dnd-kit/dom` asks of
+  every animation of the dragged element, holds. `new` on any of them throws
+  `TypeError: Illegal constructor`. `replaceState`, `persist()`,
+  `commitStyles()` and `onremove` do not exist, and `animation-composition` is
+  not supported ([deviations](./fork/deviations.md#motion))
 
 ##### `element.animate()`
 

@@ -745,6 +745,10 @@ interface TestRoot {
 
 The subpath re-exports **`@ghia/native/testing`**, including `TestRenderer` and `hasNativeTestRenderer`.
 
+## Drag and drop with `@dnd-kit`
+
+`@dnd-kit/dom`'s sortable runs on Ghia unchanged: `DragDropProvider` and `useSortable` from `@dnd-kit/solid`, with the default feedback (the dragged item is a popover, its placeholder a hidden clone, the drop is an animation), the pointer sensor and the keyboard sensor. Nothing is stubbed and no Ghia API is involved. `packages/solid/src/__tests__/dnd-kit-sortable.test.tsx` drags an item over others with the pointer, reorders with Space and the arrow keys, and checks the placeholder, the popover's position and the drop animation; `packages/react/src/__tests__/dnd-kit-sortable.test.tsx` does the same for `@dnd-kit/react`. Both are pinned to 0.5.3, and the DOM they need is listed in [reference.md](./reference.md#building-and-moving-nodes-from-code).
+
 ## Automation
 
 ```ts

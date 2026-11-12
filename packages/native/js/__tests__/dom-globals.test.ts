@@ -5,6 +5,7 @@ import "../dom-globals.js"
 import { getComputedStyle } from "../computed-style.js"
 import { matchMedia } from "../match-media.js"
 import { IntersectionObserver } from "../observers.js"
+import { Animation, CSSAnimation, CSSTransition, DocumentTimeline, KeyframeEffect } from "../web-animations.js"
 import { createRendererState } from "../renderer-state.js"
 import type { NativeRenderer } from "../host.js"
 import { isWebBuild } from "../web-build.js"
@@ -59,6 +60,20 @@ describe("dom globals of the native build", () => {
     expect(globalThis.getComputedStyle).toBe(getComputedStyle)
     expect(globalThis.matchMedia).toBe(matchMedia)
     expect(globalThis.IntersectionObserver).toBe(IntersectionObserver)
+  })
+
+  it("has the Web Animations classes as globals, so a library's `instanceof KeyframeEffect` works", () => {
+    expect(globalThis.KeyframeEffect).toBe(KeyframeEffect)
+    expect(globalThis.Animation).toBe(Animation)
+    expect(globalThis.CSSAnimation).toBe(CSSAnimation)
+    expect(globalThis.CSSTransition).toBe(CSSTransition)
+    expect(globalThis.DocumentTimeline).toBe(DocumentTimeline)
+  })
+
+  it("throws Illegal constructor when an app constructs a Web Animations class", () => {
+    for (const Class of [KeyframeEffect, Animation, CSSAnimation, CSSTransition, DocumentTimeline]) {
+      expect(() => Reflect.construct(Class, [])).toThrow(new TypeError("Illegal constructor"))
+    }
   })
 
   it("keeps a global a runtime already has", async () => {
