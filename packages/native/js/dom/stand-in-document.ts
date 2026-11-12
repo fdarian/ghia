@@ -5,29 +5,34 @@
  * `null` there is read as a match).
  *
  * They belong to no window and no adapter: JS-only elements that answer like the elements of a
- * window that is gone (`detached-renderer.ts`), and the document stops listing them as soon as a
- * root mounts and brings its own. Nothing can be inserted into or removed from them, since there
- * is no window to draw the change in.
+ * window that is gone (`detached-renderer.ts`). Nothing can be inserted into or removed from them,
+ * since there is no window to draw the change in. When the first root mounts, what code wrote to
+ * them (attributes, style, listeners) is written again to that root's elements, and they become
+ * nodes in no document; the document returns fresh ones after the last root unmounts.
  */
 
 import { createElementMethods } from "../host-runtime.js"
 import { readBoundingClientRect } from "../bounds.js"
 import { createDetachedRenderer } from "../detached-renderer.js"
-import { defineDomMembers } from "../dom-members.js"
+import { defineDomMembers, type DomElement } from "../dom-members.js"
 import { ElementListeners } from "../events/element-listeners.js"
 import { defineScrollMembers } from "../scroll.js"
 import type { StyleDesc } from "../host.js"
 import { DOM_BINDING, HTMLElement, ROOT_ELEMENT_TYPES, type ElementBinding, type Node } from "./nodes.js"
 import type { DocumentElements } from "../events/window-target.js"
 
-let created: DocumentElements | undefined
+type StandIns = { html: StandInElement; head: StandInElement; body: StandInElement }
+
+let created: StandIns | undefined
 
 /** The detached renderer every stand-in element measures and focuses through. */
 let gone: ReturnType<typeof createDetachedRenderer> | undefined
 
-function noWindow(what: string): never {
+function noWindow(element: StandInElement, what: string): never {
   throw new DOMException(
-    `The document has no root mounted, so ${what} of its <html>, <head> and <body> cannot change: render() first.`,
+    element.replaced
+      ? `This <${element.type}> was the document's before a root mounted and is in no document now, so ${what} of it cannot change.`
+      : `The document has no root mounted, so ${what} of its <html>, <head> and <body> cannot change: render() first.`,
     "NoModificationAllowedError"
   )
 }
@@ -38,6 +43,8 @@ class StandInElement extends HTMLElement {
   readonly props = new Map<string, unknown>()
   readonly listeners = new ElementListeners()
   liveStyle: StyleDesc = {}
+  /** A root mounted and its elements took this one's place in the document. */
+  replaced = false
   private binding: ElementBinding | undefined
 
   constructor(readonly type: string) {
@@ -66,7 +73,9 @@ class StandInBinding implements ElementBinding {
   get children(): readonly Node[] {
     return this.element.kids
   }
-  readonly connected = true
+  get connected(): boolean {
+    return !this.element.replaced
+  }
   readonly root = null
   get type(): string {
     return this.element.type
@@ -88,19 +97,19 @@ class StandInBinding implements ElementBinding {
     else this.element.props.set(name, value)
   }
   assertSameWindow(): void {
-    noWindow("the children")
+    noWindow(this.element, "the children")
   }
   insertBefore(): void {
-    noWindow("the children")
+    noWindow(this.element, "the children")
   }
   removeChild(): void {
-    noWindow("the children")
+    noWindow(this.element, "the children")
   }
   createText(): never {
-    return noWindow("the text")
+    return noWindow(this.element, "the text")
   }
   createElement(): never {
-    return noWindow("the elements")
+    return noWindow(this.element, "the elements")
   }
 }
 
@@ -110,10 +119,12 @@ function detachedRenderer(): ReturnType<typeof createDetachedRenderer> {
 }
 
 /** Members are defined on first use: this module is loaded by the document's own, which `dom-members` loads too. */
-function create(document: Node): DocumentElements {
+function create(document: Node): StandIns {
   defineDomMembers(StandInElement.prototype, (element: StandInElement) => ({
     listeners: element.listeners,
-    connected: true,
+    get connected() {
+      return !element.replaced
+    },
     layout: undefined,
     prop: (name) => element.props.get(name),
     propNames: () => element.props.keys(),
@@ -142,4 +153,27 @@ function create(document: Node): DocumentElements {
 export function standInDocumentElements(document: Node): DocumentElements {
   created ??= create(document)
   return created
+}
+
+/**
+ * The first root mounted. What was written to the stand-ins goes through the ordinary paths of the
+ * elements of that root (so a stylesheet and a `MutationObserver` see it), and the stand-ins are
+ * then nodes in no document. A stand-in nobody read has nothing to give.
+ */
+export function replaceStandInDocumentElements(mounted: DocumentElements): void {
+  const standIns = created
+  if (standIns === undefined) return
+  created = undefined
+  for (const part of ["html", "head", "body"] as const) {
+    const from = standIns[part]
+    const to = mounted[part] as DomElement
+    for (const name of from.getAttributeNames()) {
+      const text = from.getAttribute(name)
+      if (text === null) throw new Error(`The stand-in <${from.type}> lists the attribute "${name}" and has no text for it`)
+      to.setAttribute(name, text)
+    }
+    for (const added of from.listeners.addedListeners()) to.addEventListener(added.type, added.listener, added.options)
+    from.replaced = true
+  }
+  standIns.html.parent = null
 }

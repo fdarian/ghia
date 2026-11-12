@@ -372,14 +372,14 @@ describe("document", () => {
     expect(() => document.body.appendChild(new FakeHtml("div"))).toThrow(/no root mounted/)
   })
 
-  it("answers with the window's elements once a root mounts, and with the stand-in again after", () => {
+  it("answers with the window's elements once a root mounts, and with fresh stand-ins after", () => {
     const standIn = document.documentElement
     const window = mountWindow()
     expect(document.documentElement).toBe(window.html)
     expect(document.childNodes).toEqual([window.html])
-    expect(standIn.isConnected).toBe(true)
     window.unmount()
-    expect(document.documentElement).toBe(standIn)
+    expect(document.documentElement).not.toBe(standIn)
+    expect(document.documentElement.parentNode).toBe(document)
   })
 
   /** A window whose root is `html` > `head` + `body`, the most recently mounted. */

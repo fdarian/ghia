@@ -22,7 +22,7 @@ import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
 import { ToggleEvent } from "./dom/toggle-event.js"
 import { Selection } from "./dom/selection.js"
 import { EVENT_CLASSES } from "./events/classes.js"
-import { standInDocumentElements } from "./dom/stand-in-document.js"
+import { replaceStandInDocumentElements, standInDocumentElements } from "./dom/stand-in-document.js"
 import { document, installStandInDocument, window } from "./events/window-target.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
 import { isWebBuild } from "./web-build.js"
@@ -72,7 +72,10 @@ const DOM_CLASSES = {
   ...EVENT_CLASSES,
 }
 
-installStandInDocument(() => standInDocumentElements(document))
+installStandInDocument({
+  elements: () => standInDocumentElements(document),
+  replace: replaceStandInDocumentElements,
+})
 
 const getSelection = () => document.getSelection()
 

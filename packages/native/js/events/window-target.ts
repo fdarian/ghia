@@ -219,22 +219,32 @@ const DOCUMENT_BINDING: NodeBinding = {
   root: null,
 }
 
-let standInProvider: (() => DocumentElements) | undefined
+type StandInDocument = {
+  /** The `<html>`, `<head>` and `<body>` `document` answers with while no root is mounted. */
+  elements: () => DocumentElements
+  /** The first root mounted: the stand-ins give what was written to them to its elements and stop being the document's. */
+  replace: (mounted: DocumentElements) => void
+}
+
+let standInDocument: StandInDocument | undefined
 
 /**
- * Registers the `<html>`, `<head>` and `<body>` `document` answers with while no root is mounted.
- * They are built from the element classes, which load this module, so `dom-globals.ts` hands them
- * over instead of this module importing them.
+ * Registers the stand-in `<html>`, `<head>` and `<body>`. They are built from the element classes,
+ * which load this module, so `dom-globals.ts` hands them over instead of this module importing them.
  */
-export function installStandInDocument(provider: () => DocumentElements): void {
-  standInProvider = provider
+export function installStandInDocument(stand: StandInDocument): void {
+  standInDocument = stand
 }
 
 function standInDocumentElements(): DocumentElements {
-  if (standInProvider === undefined) {
+  return installedStandIn().elements()
+}
+
+function installedStandIn(): StandInDocument {
+  if (standInDocument === undefined) {
     throw new Error("The stand-in document is not installed: import @ghia/native/host before reading document.documentElement")
   }
-  return standInProvider()
+  return standInDocument
 }
 
 /** The way the window `document` stands for makes nodes; throws while nothing is mounted. */
@@ -565,7 +575,13 @@ export function installElementSource(
     windowGone: false,
     focusedAt: 0,
   }
+  const firstRoot = elementSources.size === 0
   elementSources.set(renderer, entry)
+  if (firstRoot) {
+    const mounted = entry.source.documentElements()
+    // Not installed: nothing could have read a stand-in, which throws.
+    if (mounted !== null) standInDocument?.replace(mounted)
+  }
   return () => {
     if (elementSources.get(renderer) === entry) elementSources.delete(renderer)
   }

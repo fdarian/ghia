@@ -38,10 +38,12 @@ type Entry =
   | { readonly kind: "prop"; readonly handler: HostEventHandler }
   | {
       readonly kind: "listener"
+      readonly type: string
       readonly listener: ElementEventListener
       readonly capture: boolean
       readonly once: boolean
       readonly passive: boolean
+      readonly signal: AbortSignal | undefined
       stopWatching: (() => void) | undefined
     }
 
@@ -104,6 +106,23 @@ export class ElementListeners {
     return slot === undefined ? undefined : this.#handlerOf(key, slot)
   }
 
+  /** The listeners `addEventListener` added, in the order they were added per type and phase, as the arguments to add them to another element. */
+  addedListeners(): Array<{ type: string; listener: ElementEventListener; options: ElementListenerOptions }> {
+    const added: Array<{ type: string; listener: ElementEventListener; options: ElementListenerOptions }> = []
+    for (const slot of this.#slots.values()) {
+      if (typeof slot === "function") continue
+      for (const entry of slot.entries) {
+        if (entry.kind !== "listener") continue
+        added.push({
+          type: entry.type,
+          listener: entry.listener,
+          options: { capture: entry.capture, once: entry.once, passive: entry.passive, signal: entry.signal },
+        })
+      }
+    }
+    return added
+  }
+
   /** Sets the `on*` prop that is stored under `key`, or unsets it with `undefined`. */
   setProp(key: string, handler: HostEventHandler | undefined): void {
     const slot = this.#slots.get(key)
@@ -145,7 +164,7 @@ export class ElementListeners {
       this.#slots.set(key, slot)
     }
     if (slot.entries.some((entry) => same(entry, listener))) return
-    const entry: Entry = { kind: "listener", listener, capture, once, passive, stopWatching: undefined }
+    const entry: Entry = { kind: "listener", type, listener, capture, once, passive, signal, stopWatching: undefined }
     slot.entries.push(entry)
     if (signal) {
       const abort = () => this.removeEventListener(type, listener, capture)
