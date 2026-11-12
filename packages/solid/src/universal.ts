@@ -29,13 +29,11 @@ function describe(value: unknown): string {
   return typeof value === "object" && value !== null ? `object ${JSON.stringify(Object.keys(value))}` : String(value)
 }
 
-/**
- * A component can render any object: solid-refresh passes `{ name }` as a memo's initial value in
- * dev, so a component that threw on mount renders that object. `solid-js/universal` keeps what it
- * was given in `current` and later reads it back as a position (`getNextSibling(current[i])`, an
- * anchor, the node `replaceNode` swaps out), so the object has to be a node to the tree. Each one
- * stands for an empty text node that is never visible, and the object itself is never mounted.
- */
+// A component can render any object: solid-refresh passes `{ name }` as a memo's initial value in
+// dev, so a component that threw on mount renders that object. `solid-js/universal` keeps what it
+// was given in `current` and later reads it back as a position (`getNextSibling(current[i])`, an
+// anchor, the node `replaceNode` swaps out), so the object has to be a node to the tree. Each one
+// stands for an empty text node that is never visible, and the object itself is never mounted.
 const placeholders = new WeakMap<object, HostText>()
 
 function hostNodeFor(value: unknown): HostNode {
