@@ -23,7 +23,7 @@ describe.skipIf(!hasNativeTestRenderer)("stand-in document elements, carried ont
   }
 
   it("keeps a class set on <html> before render", () => {
-    document.documentElement.setAttribute("class", "dark")
+    document.documentElement.classList.add("dark")
     mount()
     expect(document.documentElement.hasAttribute("class")).toBe(true)
     expect(document.documentElement.getAttribute("class")).toBe("dark")
@@ -48,7 +48,7 @@ describe.skipIf(!hasNativeTestRenderer)("stand-in document elements, carried ont
   })
 
   it("lets a class on <html> drive a rule of a <style> in the app", () => {
-    document.documentElement.setAttribute("class", "dark")
+    document.documentElement.classList.add("dark")
     mount(() => (
       <div>
         <style>{"html.dark body { opacity: 0.25 }"}</style>
@@ -87,12 +87,12 @@ describe.skipIf(!hasNativeTestRenderer)("stand-in document elements, carried ont
   })
 
   it("is seen by a MutationObserver as the carried write, through the attribute path of the mounted element", async () => {
-    document.documentElement.setAttribute("class", "dark")
+    document.documentElement.classList.add("dark")
     mount()
     const records: string[] = []
     const observer = new MutationObserver((list) => list.forEach((record) => records.push(String(record.attributeName))))
     observer.observe(document.documentElement, { attributes: true })
-    document.documentElement.setAttribute("class", "dark wide")
+    document.documentElement.classList.add("wide")
     await Promise.resolve()
     expect(document.documentElement.getAttribute("class")).toBe("dark wide")
     expect(records).toEqual(["class"])
@@ -103,7 +103,7 @@ describe.skipIf(!hasNativeTestRenderer)("stand-in document elements, carried ont
     const html = document.documentElement
     const head = document.head
     const body = document.body
-    html.setAttribute("class", "dark")
+    html.classList.add("dark")
     mount()
     expect(document.documentElement).not.toBe(html)
     for (const standIn of [html, head, body]) expect(standIn.isConnected).toBe(false)
@@ -123,7 +123,7 @@ describe.skipIf(!hasNativeTestRenderer)("stand-in document elements, carried ont
 
   it("answers with fresh stand-ins once the last root unmounts, with nothing carried a second time", () => {
     const first = document.documentElement
-    first.setAttribute("class", "dark")
+    first.classList.add("dark")
     mount()
     const mounted = document.documentElement
     app!.unmount()
@@ -134,7 +134,7 @@ describe.skipIf(!hasNativeTestRenderer)("stand-in document elements, carried ont
     expect(second.isConnected).toBe(true)
     expect(second.parentNode).toBe(document)
     expect(second.hasAttribute("class")).toBe(false)
-    second.setAttribute("class", "light")
+    second.classList.add("light")
     mount()
     expect(document.documentElement.getAttribute("class")).toBe("light")
   })

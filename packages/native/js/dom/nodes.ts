@@ -12,6 +12,7 @@ import type { ElementType, NativeRenderer } from "../host.js"
 import { attributeNameOf, isNotAttribute, storedAttributeNames } from "./attribute-names.js"
 import { cloneNode } from "./clone.js"
 import { styleDeclarationFor, type CSSStyleDeclaration, type StyleBinding } from "./css-style-declaration.js"
+import { classListOf, type DOMTokenList } from "./class-list.js"
 import { datasetOf } from "./dataset.js"
 import type { DOMRectList } from "./dom-rect.js"
 import { defineConstraintValidation } from "./constraint-validation.js"
@@ -463,6 +464,15 @@ abstract class ElementClass extends NodeClass {
   get className(): string {
     const value = this.getAttribute("class")
     return value === null ? "" : value
+  }
+
+  /** The tokens of the `class` attribute as a live `DOMTokenList`, one object per element: see `classListOf`. */
+  get classList(): DOMTokenList {
+    return classListOf(this as unknown as Element)
+  }
+
+  set classList(value: string) {
+    this.classList.value = value
   }
 
   get children(): readonly Element[] {

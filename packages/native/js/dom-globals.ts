@@ -14,6 +14,7 @@ import {
   SVGElement,
   Text,
 } from "./dom/nodes.js"
+import { DOMTokenList } from "./dom/class-list.js"
 import { ValidityState } from "./dom/constraint-validation.js"
 import { CSSStyleDeclaration } from "./dom/css-style-declaration.js"
 import { DOMRect, DOMRectReadOnly } from "./dom/dom-rect.js"
@@ -53,6 +54,7 @@ const DOM_CLASSES = {
   DocumentFragment,
   ShadowRoot,
   ValidityState,
+  DOMTokenList,
   CSSStyleDeclaration,
   CSSStyleSheet,
   CSSRule,
