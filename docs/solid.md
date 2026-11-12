@@ -138,6 +138,8 @@ Not covered by reload:
 - `vite.config`. Restart `ghia dev`.
 - Anything under `node_modules`: solid-refresh only wraps your own files.
 
+A component that renders an object that is not a node, as solid-refresh makes one that threw on mount do in dev (`{ name: "[solid-refresh]Name" }`), is skipped with `console.warn("Unrecognized value. Skipped inserting", value)`, as `solid-js/web` does.
+
 React runs under the same command, with React Fast Refresh in place of solid-refresh ([reference.md](reference.md#hot-reload)).
 
 ### Production build

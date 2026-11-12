@@ -7,6 +7,7 @@ import {
   getNextSibling,
   getParentNode,
   insertHostNode,
+  isHostNode,
   isHostText,
   isHostPropertyValue,
   removeHostNode,
@@ -15,8 +16,17 @@ import {
   type HostElement,
   type HostNode,
   type HostParent,
+  type HostRoot,
 } from "./host.js"
 import { notePresenceHost, runInPresenceScope } from "./presence-scope.js"
+
+function isHostRoot(value: unknown): value is HostRoot {
+  return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "root"
+}
+
+function describe(value: unknown): string {
+  return typeof value === "object" && value !== null ? `object ${JSON.stringify(Object.keys(value))}` : String(value)
+}
 
 const runtime = createRenderer<HostNode | HostParent>({
   createElement: createHostElement,
@@ -35,26 +45,38 @@ const runtime = createRenderer<HostNode | HostParent>({
     }
   },
   insertNode(parent, node, anchor) {
-    if (parent.kind === "text" || node.kind === "root" || anchor?.kind === "root") {
-      throw new TypeError("Expected GPUIX host nodes")
+    // Like solid-js/web, which skips an object that is not a DOM node: a component can render any
+    // object (solid-refresh passes `{ name }` as a memo's initial value, so a component that
+    // throws on mount renders that). Mounting it would leave a half-mounted node in the tree.
+    if (!isHostNode(node)) {
+      console.warn("Unrecognized value. Skipped inserting", node)
+      return
+    }
+    if (parent.kind === "text") throw new TypeError("Expected GPUIX host nodes")
+    // Universal passes `null` as the anchor to append (`cleanChildren(parent, current, null, node)`).
+    if (anchor !== undefined && anchor !== null && !isHostNode(anchor)) {
+      throw new TypeError(`Expected a GPUIX host node as the insertion anchor, got ${describe(anchor)}`)
     }
     insertHostNode(parent, node, anchor)
   },
-  isTextNode: isHostText,
+  isTextNode(node) {
+    return isHostNode(node) && isHostText(node)
+  },
   removeNode(parent, node) {
-    if (parent.kind === "text" || node.kind === "root") {
-      throw new TypeError("Expected GPUIX host nodes")
-    }
+    // A skipped value was never inserted.
+    if (!isHostNode(node)) return
+    if (parent.kind === "text") throw new TypeError("Expected GPUIX host nodes")
     removeHostNode(parent, node)
   },
   getParentNode(node) {
-    return node.kind === "root" ? undefined : getParentNode(node)
+    return isHostNode(node) ? getParentNode(node) : undefined
   },
   getFirstChild(node) {
-    return node.kind === "text" ? undefined : getFirstChild(node)
+    if (isHostRoot(node)) return getFirstChild(node)
+    return isHostNode(node) && node.kind === "element" ? getFirstChild(node) : undefined
   },
   getNextSibling(node) {
-    return node.kind === "root" ? undefined : getNextSibling(node)
+    return isHostNode(node) ? getNextSibling(node) : undefined
   },
 })
 

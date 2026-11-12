@@ -1017,6 +1017,13 @@ export function isHostElement(value: unknown): value is HostElement {
     (value as { kind?: unknown }).kind === "element"
 }
 
+/** A host element or text node, as opposed to any other value a component can render. */
+export function isHostNode(value: unknown): value is HostNode {
+  if (typeof value !== "object" || value === null) return false
+  const kind = (value as { kind?: unknown }).kind
+  return kind === "element" || kind === "text"
+}
+
 function isEventHandler(
   value: HostPropertyValue
 ): value is (event: DomEvent) => void {
