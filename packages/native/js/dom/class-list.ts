@@ -162,7 +162,10 @@ export class DOMTokenList {
 }
 
 function indexOf(key: string | symbol): number | undefined {
-  if (typeof key !== "string" || !/^(0|[1-9][0-9]*)$/.test(key)) return undefined
+  if (typeof key !== "string") return undefined
+  // Nearly every key is a method or a property name, so the pattern runs only for one that starts with a digit.
+  const first = key.charCodeAt(0)
+  if (first < 48 || first > 57 || !/^(0|[1-9][0-9]*)$/.test(key)) return undefined
   return Number(key)
 }
 
