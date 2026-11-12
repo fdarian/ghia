@@ -15,8 +15,8 @@ use crate::events::state_styles::without_invalid_values;
 use crate::retained_tree::parse_style;
 use crate::style::StyleDesc;
 
-use super::cascade::is_css_wide;
 use super::initial;
+use super::wide_keyword::is_css_wide;
 use super::Rule;
 
 /// How many verdicts are remembered before the memory starts over.

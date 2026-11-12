@@ -619,14 +619,17 @@ impl StyleTable {
         }
         // The payload is kept as it came: the cascade reads which values were `!important` from it.
         let parsed = crate::css::inline_important::strip_payload(raw);
-        let style = if crate::css::var_substitution::mentions_var(&parsed) {
-            crate::css::var_substitution::parse(&parsed)?
+        let resolved = crate::css::sheet::resolve_wide_keywords(&parsed);
+        let parsed = resolved.as_ref().map_or(&*parsed, |resolved| resolved.text.as_bytes());
+        let mut style = if crate::css::var_substitution::mentions_var(parsed) {
+            crate::css::var_substitution::parse(parsed)?
         } else {
-            match parse_style(&parsed) {
+            match parse_style(parsed) {
                 Ok(style) => style,
-                Err(error) => crate::css::lenient::recover(&parsed, error)?,
+                Err(error) => crate::css::lenient::recover(parsed, error)?,
             }
         };
+        style.reset = resolved.and_then(|resolved| resolved.reset);
         let shared = Arc::new(style);
         let raw: Arc<[u8]> = raw.into();
         self.raws.insert(Arc::as_ptr(&shared) as usize, raw.clone());
@@ -3374,9 +3377,11 @@ mod tests {
             (7, (0.0, 0.0, 100.0, 100.0)),
             (8, (45.0, 45.0, 20.0, 20.0)),
         ];
-        // Closed: a popover is `display: none` and nothing of it is painted.
+        // Closed: a popover is `display: none` and has no box, though its user agent style is the
+        // fixed box that makes it escape the clip of its parent.
         tree.set_custom_prop(3, "popover".to_string(), serde_json::json!("manual"));
-        assert!(!tree.elements_at(55.0, 55.0, &boxed(&boxes)).contains(&3));
+        let closed_boxes: Vec<_> = boxes.iter().copied().filter(|(id, _)| *id != 3).collect();
+        assert!(!tree.elements_at(55.0, 55.0, &boxed(&closed_boxes)).contains(&3));
 
         open_popover(&mut tree, 3, 1);
         let hits = tree.elements_at(55.0, 55.0, &boxed(&boxes));
@@ -3392,7 +3397,7 @@ mod tests {
         assert_eq!(&tree.elements_at(55.0, 55.0, &boxed(&boxes))[..3], &[4, 3, 8]);
 
         tree.set_custom_prop(3, "popoverOpen".to_string(), serde_json::Value::Null);
-        assert!(!tree.elements_at(55.0, 55.0, &boxed(&boxes)).contains(&3));
+        assert!(!tree.elements_at(55.0, 55.0, &boxed(&closed_boxes)).contains(&3));
     }
 
     /// A tree from `(id, parent, type, style)`, the first node being the root. Every box is the

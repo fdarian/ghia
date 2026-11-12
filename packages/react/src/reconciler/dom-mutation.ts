@@ -10,6 +10,7 @@ import {
   hasMutationObservers,
   queueCharacterDataMutation,
   recordAttributeChanges,
+  runAll,
   serializeCustomProp,
 } from "@ghia/native/host"
 import type { DomNodeFactory, StyleDesc, Text } from "@ghia/native/host"
@@ -104,18 +105,23 @@ function retire(node: HostNode): void {
   container.renderer.requestFlush()
 }
 
-/** Releases the native elements of the nodes code took out of the document and did not put back. */
+/** Releases the native elements of the nodes code took out of the document and did not put back, each one even when another throws. */
 export function releaseDetachedNodes(container: Container): void {
   const detached = detachedByWindow.get(container.html)
   if (detached === undefined || detached.size === 0) return
   const nodes = [...detached]
   detached.clear()
-  for (const node of nodes) {
+  runAll(nodes, (node) => {
     const state = stateFor(node)
-    if (!state.mounted || isInTree(node)) continue
-    markUnmounted(node)
-    state.container.renderer.destroyElement(node.nativeId)
-  }
+    if (!state.mounted || isInTree(node)) return
+    // If markUnmounted throws partway, the descendants it did not reach keep `mounted = true` while
+    // their native element is destroyed: accepted, the alternative is leaking the native tree.
+    try {
+      markUnmounted(node)
+    } finally {
+      state.container.renderer.destroyElement(node.nativeId)
+    }
+  }, "Releasing detached nodes failed")
 }
 
 export function setDomTextData(text: TextInstance, data: string): void {

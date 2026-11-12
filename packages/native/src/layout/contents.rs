@@ -166,6 +166,8 @@ macro_rules! inheritable_fields {
     };
 }
 
+pub(crate) use inheritable_fields;
+
 /// What a `display: contents` ancestor passes to the children spliced out of it that is not a
 /// field of the style: the query container it declares, which has no box, and the custom
 /// properties it sets, which a `style()` query of the child reads before the child's own build

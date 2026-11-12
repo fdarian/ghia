@@ -14,12 +14,11 @@ import {
 import type { DomEvent } from "@ghia/native/host"
 import { measurePopLayout } from "@ghia/native/host"
 import type { MotionProps, PresenceMode } from "@ghia/native/host"
-import { isHostElement, setHostProperty, type HostElement, type HostNode } from "../host.js"
+import { isHostElement, isHostNode, setHostProperty, type HostElement, type HostNode } from "../host.js"
 import {
   anchorHost,
   disposePresenceScope,
   enterPresenceGroup,
-  isHostNode,
   isWithin,
   madeUnder,
   ownPresenceGroup,

@@ -31,7 +31,7 @@ pub(crate) const OPEN_PROP: &str = "popoverOpen";
 /// Above the priority of every `anchored` layer (a `Dialog` is 0, a `Select` or a `Tooltip` 1).
 const TOP_LAYER_PRIORITY: usize = 1 << 20;
 
-/// Chrome's `[popover]` rules for an open popover. `Canvas` and `CanvasText` follow the
+/// Chrome's `[popover]` rules, which apply whether the popover is open or not. `Canvas` and `CanvasText` follow the
 /// `color-scheme` of the element, as they do there: `light-dark()` is the same lookup.
 ///
 /// Not what Chrome has in two places, because two things lay out differently here. `width:
@@ -40,10 +40,17 @@ const TOP_LAYER_PRIORITY: usize = 1 << 20;
 /// fit-content` is `auto`, which a fixed box with both `top` and `bottom` stretches to the window, so
 /// `inset: 0` is `bottom: auto` here and a popover with no declared `top` is at the top of the
 /// window, centred across.
-const OPEN_STYLE: &str = r##"{"position":"fixed","top":0,"right":0,"bottom":"auto","left":0,"width":"max-content","maxWidth":"100%","height":"fit-content","margin":"auto","borderWidth":3,"borderStyle":"solid","borderColor":"currentColor","padding":"0.25em","overflow":"auto","color":"light-dark(#000000, #ffffff)","backgroundColor":"light-dark(#ffffff, #121212)"}"##;
+macro_rules! rules {
+    () => {
+        r##""position":"fixed","top":0,"right":0,"bottom":"auto","left":0,"width":"max-content","maxWidth":"100%","height":"fit-content","margin":"auto","borderWidth":3,"borderStyle":"solid","borderColor":"currentColor","padding":"0.25em","overflow":"auto","color":"light-dark(#000000, #ffffff)","backgroundColor":"light-dark(#ffffff, #121212)""##
+    };
+}
 
-/// Chrome's `[popover]:not(:popover-open) { display: none }`.
-const CLOSED_STYLE: &str = r#"{"display":"none"}"#;
+const OPEN_STYLE: &str = concat!("{", rules!(), "}");
+
+/// Chrome's `[popover]:not(:popover-open) { display: none }` only adds to the rules above: a closed
+/// popover that an author style shows (`display: block`) is still the fixed, bordered box.
+const CLOSED_STYLE: &str = concat!(r#"{"display":"none","#, rules!(), "}");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -249,6 +256,20 @@ mod tests {
         let mut tree = tree_with(Some(json!("manual")));
         tree.set_style_arc(1, Arc::new(StyleDesc { display: Some("block".to_string()), ..Default::default() }));
         assert_eq!(style_of(&tree).unwrap().display.as_deref(), Some("block"));
+    }
+
+    #[test]
+    fn a_closed_popover_that_an_author_shows_keeps_the_user_agent_box() {
+        let mut tree = tree_with(Some(json!("manual")));
+        tree.set_style_arc(1, Arc::new(StyleDesc { display: Some("block".to_string()), ..Default::default() }));
+        let style = style_of(&tree).unwrap();
+        assert_eq!(style.display.as_deref(), Some("block"));
+        assert_eq!(style.position.as_deref(), Some("fixed"));
+        assert!(style.top.is_some() && style.left.is_some() && style.margin.is_some());
+        assert!(style.border_width.is_some() || style.border_top_width.is_some());
+        assert!(style.padding.is_some() || style.padding_top.is_some());
+        assert_eq!(style.overflow.as_deref(), Some("auto"));
+        assert!(style.background_color.is_some() && style.color.is_some());
     }
 
     #[test]

@@ -4,6 +4,9 @@ import {
   createMutationQueue,
   createRendererState,
   installElementSource,
+  runAll,
+  runSteps,
+  runThenAlways,
   runMotionReleases,
   syncWindowEventListeners,
   syncWindowSelectionChange,
@@ -20,6 +23,7 @@ import type {
 } from "@ghia/native/host"
 import { createHostElement, createHostText, HostRoot, removeHostNode } from "./host.js"
 import { universalRender } from "./universal.js"
+import { reportUncaughtError } from "./uncaught-error.js"
 
 export interface GpuixContextValue {
   renderer: NativeRenderer
@@ -65,14 +69,16 @@ export function createRoot(
     runMotionReleases(container)
   }, (flush) => {
     queueMicrotask(() => {
+      // Apart, so a throw while releasing removed nodes never skips the flush, and a failed flush is reported too.
       try {
         container.finishRemovals()
+      } catch (error) {
+        reportUncaughtError(rootHandlers, error)
+      }
+      try {
         flush()
       } catch (error) {
-        rootHandlers.onUncaughtError?.(
-          error instanceof Error ? error : new Error(String(error)),
-          {}
-        )
+        reportUncaughtError(rootHandlers, error)
       }
     })
   })
@@ -126,13 +132,7 @@ export function createRoot(
       tabNavigation: rootHandlers.tabNavigation,
       onEvent: rootHandlers.onEvent,
       // The flush stands in for the microtask checkpoint a browser runs before it renders.
-      schedule: (run) => {
-        try {
-          run()
-        } finally {
-          flush()
-        }
-      },
+      schedule: (run) => runThenAlways(run, flush, "Running scheduled work failed"),
     })
     renderer.setWindowKeyEvents?.(
       // Always on: the Tab and Escape defaults run on the key event, and
@@ -172,28 +172,34 @@ export function createRoot(
   }
 
   attach()
+  // The release and the batch are separate steps: a throw in the first must not skip the second.
   const flush = () => {
-    container.finishRemovals()
-    mutations.flushMutations()
+    runSteps([
+      () => container.finishRemovals(),
+      () => mutations.flushMutations(),
+    ], "Flushing failed")
   }
+  // Every step runs even when one throws, so a failed teardown still releases `<html>` and the handlers.
   const clear = () => {
-    dispose?.()
-    dispose = undefined
-    // A component can render several top-level nodes (a Dialog is its trigger and its
-    // portal's layer), and removing one leaves the others in the native tree.
-    for (const mounted of [...container.childList]) removeHostNode(container, mounted)
-    container.destroyDocumentElements()
-    flush()
-    eventHandlers.clear()
+    runSteps([
+      () => {
+        // Cleared first: a throwing `onCleanup` must not leave the tree to be disposed, and throw, again.
+        const disposeTree = dispose
+        dispose = undefined
+        disposeTree?.()
+      },
+      // A component can render several top-level nodes (a Dialog is its trigger and its
+      // portal's layer), and removing one leaves the others in the native tree.
+      () => runAll([...container.childList], (mounted) => removeHostNode(container, mounted), "Removing nodes failed"),
+      () => container.destroyDocumentElements(),
+      flush,
+      () => eventHandlers.clear(),
+    ], "Clearing the root failed")
   }
 
   return {
     render(code) {
-      if (dispose) {
-        clear()
-        detach()
-        attach()
-      }
+      if (dispose) runSteps([clear, detach, attach], "Rendering again failed")
       container.ensureDocumentElements()
       dispose = universalRender(
         () => createComponent(GpuixContext.Provider, {
@@ -228,22 +234,13 @@ export function createRoot(
     },
     flush,
     flushSync(fn) {
-      try {
-        return fn()
-      } finally {
-        flush()
-      }
+      return runThenAlways(fn, flush, "flushSync failed")
     },
     dispatch(event) {
-      try {
-        return state.dispatch(event)
-      } finally {
-        flush()
-      }
+      return runThenAlways(() => state.dispatch(event), flush, "Dispatching the event failed")
     },
     unmount() {
-      clear()
-      detach()
+      runSteps([clear, detach], "Unmounting failed")
     },
   }
 }

@@ -95,6 +95,26 @@ describe.skipIf(!hasNativeTestRenderer).each<Loading>(["style elements", "adopte
       expect(effective(scene.nodes.item)).not.toHaveProperty("bottom")
     })
 
+    it("puts a dragged popover at its left, not centred by the user agent's right and margin", () => {
+      let popover: any
+      app.render(() => (
+        <div style={{ width: 400, height: 300 }}>
+          {loading === "style elements" && SHEET_TEXTS.map((text) => <style>{text}</style>)}
+          <div
+            ref={(element: unknown) => (popover = element)}
+            popover="manual"
+            data-dnd-dragging=""
+            style={{ "--dnd-top": "30px", "--dnd-left": "40px", "--dnd-width": "120px", "--dnd-height": "60px" }}
+          />
+        </div>
+      ))
+      popover.showPopover()
+      const style = effective(popover)
+      expect(style).not.toHaveProperty("right")
+      expect(style).not.toHaveProperty("margin")
+      expect(app.renderer.getElementBounds(popover.nativeId)).toMatchObject({ x: 40, y: 30, width: 120, height: 60 })
+    })
+
     it("scales the item that has the scale variable in its inline style", () => {
       const scene = renderScene()
       expect(getComputedStyle(scene.nodes.scaled).scale).toBe("1.5")
