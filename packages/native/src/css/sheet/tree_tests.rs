@@ -2910,6 +2910,16 @@ mod states {
     }
 
     #[test]
+    fn a_state_revert_of_an_overflow_axis_takes_its_part_of_the_user_agent_overflow() {
+        let mut doc = Doc::new();
+        let open = popover(&mut doc, "a");
+        doc.style_element(ROOT, ".a { overflow: hidden } .a:hover { overflow-y: revert }");
+        doc.flush();
+        let hovered = hovered(&doc, open);
+        assert_eq!(hovered.overflow_y.as_deref(), Some("auto"));
+    }
+
+    #[test]
     fn a_keyword_after_a_state_revert_of_a_shorthand_is_the_initial_value_and_not_the_user_agents() {
         use crate::css::length::LinearLength;
         use crate::style::DimensionValue::Pixels;
