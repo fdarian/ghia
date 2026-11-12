@@ -15,6 +15,7 @@ use super::invalidation::Invalidation;
 use super::layers::LayerOrder;
 use super::matching::{matches, ElementView};
 use super::selector::{AttrName, ComplexSelector, Simple, Specificity};
+use super::states::{Applies, RuleMatch};
 use super::StyleSheet;
 
 pub struct IndexedRule {
@@ -148,7 +149,7 @@ impl RuleIndex {
         element: &E,
         id: Option<Atom>,
         classes: &[Atom],
-    ) -> Vec<(u32, Specificity)> {
+    ) -> Vec<RuleMatch> {
         self.matching_in_full(element, id, classes).0
     }
 
@@ -159,9 +160,9 @@ impl RuleIndex {
         element: &E,
         id: Option<Atom>,
         classes: &[Atom],
-    ) -> (Vec<(u32, Specificity)>, bool) {
+    ) -> (Vec<RuleMatch>, bool) {
         super::share::count_full_match();
-        let mut found: Vec<(u32, Specificity)> = Vec::new();
+        let mut found: Vec<RuleMatch> = Vec::new();
         let mut self_contained = true;
         let mut visit = |bucket: &[Entry]| {
             for entry in bucket {
@@ -170,9 +171,10 @@ impl RuleIndex {
                 if !matches(selector, element) {
                     continue;
                 }
-                match found.iter_mut().find(|(rule, _)| *rule == entry.rule) {
-                    Some(existing) => existing.1 = existing.1.max(*specificity),
-                    None => found.push((entry.rule, *specificity)),
+                let condition = selector.condition;
+                match found.iter_mut().find(|known| known.rule == entry.rule && known.condition == condition) {
+                    Some(existing) => existing.specificity = existing.specificity.max(*specificity),
+                    None => found.push(RuleMatch { rule: entry.rule, specificity: *specificity, condition }),
                 }
             }
         };
@@ -195,22 +197,24 @@ impl RuleIndex {
             }
         }
         visit(&self.universal);
-        found.sort_by_key(|(rule, specificity)| (self.rules[*rule as usize].layer_rank, *specificity, *rule));
+        found.sort_by_key(|found| {
+            (self.rules[found.rule as usize].layer_rank, found.specificity, found.rule, found.condition)
+        });
         (found, self_contained)
     }
 
     /// The rules among `rules` that have `!important` declarations, in the order those apply:
     /// layers compare the other way round, so the first layer wins and unlayered styles lose.
-    pub fn important_order(&self, rules: &[(u32, Specificity)]) -> Vec<u32> {
-        let mut important: Vec<(u32, Specificity)> = rules
+    pub fn important_order(&self, rules: &[RuleMatch]) -> Vec<Applies> {
+        let mut important: Vec<RuleMatch> = rules
             .iter()
             .copied()
-            .filter(|(rule, _)| !self.rules[*rule as usize].important.is_empty())
+            .filter(|found| !self.rules[found.rule as usize].important.is_empty())
             .collect();
-        important.sort_by_key(|(rule, specificity)| {
-            (self.unlayered_rank - self.rules[*rule as usize].layer_rank, *specificity, *rule)
+        important.sort_by_key(|found| {
+            (self.unlayered_rank - self.rules[found.rule as usize].layer_rank, found.specificity, found.rule, found.condition)
         });
-        important.into_iter().map(|(rule, _)| rule).collect()
+        important.into_iter().map(|found| Applies { rule: found.rule, condition: found.condition }).collect()
     }
 }
 
@@ -220,9 +224,9 @@ impl RuleIndex {
 fn is_self_contained(selector: &ComplexSelector, style: Atom, lists: &mut FxHashMap<usize, bool>) -> bool {
     selector.compounds.len() == 1
         && selector.compounds[0].simples.iter().all(|simple| match simple {
-            Simple::Tag(_) | Simple::Class(_) | Simple::Id(_) | Simple::Host | Simple::PseudoElement => true,
+            Simple::Tag(_) | Simple::Class(_) | Simple::Id(_) | Simple::Host | Simple::PseudoElement | Simple::State(_) => true,
             Simple::Attr(attr) => attr.name.lower != style && attr.name.written != style,
-            Simple::Root => false,
+            Simple::Root | Simple::PopoverOpen => false,
             Simple::Is(list) => {
                 let key = list.as_ptr() as usize;
                 if let Some(known) = lists.get(&key) {
@@ -265,7 +269,14 @@ impl Attributes {
                             self.read(inner);
                         }
                     }
-                    Simple::Tag(_) | Simple::Class(_) | Simple::Id(_) | Simple::Root | Simple::Host | Simple::PseudoElement => {}
+                    Simple::Tag(_)
+                    | Simple::Class(_)
+                    | Simple::Id(_)
+                    | Simple::Root
+                    | Simple::Host
+                    | Simple::PseudoElement
+                    | Simple::State(_)
+                    | Simple::PopoverOpen => {}
                 }
             }
         }

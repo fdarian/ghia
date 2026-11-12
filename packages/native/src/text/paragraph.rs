@@ -178,7 +178,7 @@ pub struct BoxStyle {
 ///
 /// `colors`, `lengths`, `font_state` and `underline_offset` are the container's, as its
 /// children inherit them. `states` says which states apply to a box, so that its `hover`, `active`,
-/// `focusWithin` and `focusVisible` styles are folded into the run it paints.
+/// `focus`, `focusWithin` and `focusVisible` styles are folded into the run it paints.
 /// `motion` holds the boxes whose colours a transition or an animation moves.
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn run_styles(

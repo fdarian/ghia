@@ -54,6 +54,7 @@ pub(crate) fn may_escape(element: &RetainedElement) -> bool {
         || [
             &style.hover,
             &style.active,
+            &style.focus,
             &style.focus_visible,
             &style.focus_within,
             &style.group_hover,

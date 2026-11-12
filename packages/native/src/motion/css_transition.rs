@@ -521,7 +521,7 @@ pub(crate) fn validate_transitions(style: &StyleDesc) -> Result<(), String> {
     if let Some(text) = style.interpolate_size.as_deref() {
         InterpolateSize::parse(text)?;
     }
-    for (name, state) in super::state_styles(style) {
+    for (name, state) in crate::css::var_substitution::state_blocks(style) {
         if let Some(state) = state {
             TransitionList::parse(state).map_err(|error| format!("{name}.{error}"))?;
             if let Some(text) = state.interpolate_size.as_deref() {
@@ -535,7 +535,7 @@ pub(crate) fn validate_transitions(style: &StyleDesc) -> Result<(), String> {
 /// Whether `style`, or a state style in it, declares a transition.
 pub(crate) fn declares_transitions(style: &StyleDesc) -> bool {
     declares_transition(style)
-        || super::state_styles(style)
+        || crate::css::var_substitution::state_blocks(style)
             .into_iter()
             .any(|(_, state)| state.is_some_and(declares_transition))
 }
@@ -555,8 +555,7 @@ pub(crate) fn leaves_box_size(style: &StyleDesc) -> bool {
             })
     };
     leaves(style)
-        && style.focus_within.as_deref().is_none_or(leaves)
-        && super::state_styles(style).into_iter().all(|(_, state)| state.is_none_or(leaves))
+        && crate::css::var_substitution::state_blocks(style).into_iter().all(|(_, state)| state.is_none_or(leaves))
 }
 
 /// Whether `style` sets a `transition*` field that is more than `none`, or holds a `transition*`
@@ -2401,7 +2400,7 @@ mod tests {
             .unwrap_err();
         assert!(error.starts_with("hover.transitionDelay"), "{error}");
         assert!(validate_transitions(&style(r#"{ "transition": "width bogus" }"#)).is_err());
-        for name in ["groupHover", "groupActive", "groupFocusWithin", "hasHover", "hasActive", "hasFocus", "hasFocusVisible", "disabled", "enabled", "hasDisabled", "hasEnabled"] {
+        for name in ["groupHover", "groupActive", "groupFocusWithin", "focus", "focusWithin", "hasHover", "hasActive", "hasFocus", "hasFocusVisible", "disabled", "enabled", "hasDisabled", "hasEnabled"] {
             let error = validate_transitions(&style(&format!(r#"{{ "{name}": {{ "transitionDelay": "soon" }} }}"#)))
                 .unwrap_err();
             assert!(error.starts_with(&format!("{name}.transitionDelay")), "{error}");
@@ -3241,7 +3240,7 @@ mod tests {
         assert!(clock.wants(1, Some(&style(r#"{ "groupHover": { "transition": "all 1s" } }"#))));
         assert!(clock.wants(1, Some(&style(r#"{ "groupActive": { "transitionDuration": "1s" } }"#))));
         assert!(clock.wants(1, Some(&style(r#"{ "groupFocusWithin": { "transition": "all 1s" } }"#))));
-        for name in ["hasHover", "hasActive", "hasFocus", "hasFocusVisible", "disabled", "enabled", "hasDisabled", "hasEnabled"] {
+        for name in ["focus", "focusWithin", "hasHover", "hasActive", "hasFocus", "hasFocusVisible", "disabled", "enabled", "hasDisabled", "hasEnabled"] {
             assert!(clock.wants(1, Some(&style(&format!(r#"{{ "{name}": {{ "transition": "all 1s" }} }}"#)))), "{name}");
         }
     }

@@ -135,6 +135,8 @@ pub struct Invalidation {
     /// What an element appearing or disappearing among its siblings can reach: the places
     /// that sibling combinators look at it from.
     pub structure: Reach,
+    /// Where `:popover-open` is read: an element opening or closing as a popover marks these.
+    pub popover_open: Reach,
     /// The `&` lists already read, with what the chain they were read through does to a reach
     /// (`Reach::image`). A nested rule shares its parent's list, so without this each level would
     /// read every level above it again. Keyed by the image, not the chain: chains that differ in
@@ -180,7 +182,8 @@ impl Invalidation {
                             self.read_through(inner, &chain);
                         }
                     }
-                    Simple::Tag(_) | Simple::Root | Simple::Host | Simple::PseudoElement => {}
+                    Simple::PopoverOpen => self.popover_open |= reach,
+                    Simple::Tag(_) | Simple::Root | Simple::Host | Simple::PseudoElement | Simple::State(_) => {}
                 }
             }
         }

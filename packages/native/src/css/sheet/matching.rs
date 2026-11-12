@@ -42,6 +42,8 @@ pub trait ElementView: Sized {
     /// The closest preceding sibling that is an element.
     fn prev_sibling(&self) -> Option<Self>;
     fn is_root(&self) -> bool;
+    /// Whether the element is a `popover` that `showPopover()` has opened.
+    fn is_popover_open(&self) -> bool;
 
     /// Whether `satisfies` holds for some sibling before this one. `key` names `satisfies` (it is
     /// the same for every element it is asked of, and its answer for a sibling does not depend on
@@ -115,6 +117,8 @@ fn simple_matches<E: ElementView>(simple: &Simple, element: &E) -> bool {
         Simple::Where(list) => list.iter().any(|selector| matches(selector, element)),
         Simple::Not(list) => !list.iter().any(|selector| matches(selector, element)),
         Simple::Root => element.is_root(),
+        Simple::State(_) => true,
+        Simple::PopoverOpen => element.is_popover_open(),
         Simple::Host | Simple::PseudoElement => false,
     }
 }

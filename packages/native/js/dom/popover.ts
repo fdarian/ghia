@@ -15,6 +15,7 @@
  */
 
 import { flushPendingMutations } from "../bounds.js"
+import { noteBatchApplied } from "../batch-count.js"
 import { dispatchAtElement, type DomEvent, type DomEventRoot } from "../events/dispatch.js"
 import { document, elementOf } from "../events/window-target.js"
 import type { DomElementBinding } from "../dom-members.js"
@@ -103,6 +104,8 @@ function sendOpen(renderer: NativeRenderer, id: number, order: number | null): v
   writer.setCustomProp(id, POPOVER_OPEN_PROP, order)
   const batch = writer.finish()
   renderer.applyBatch(batch.wire)
+  // A computed style read before this one is stale: the batch can restyle (`:popover-open`).
+  noteBatchApplied()
   writer.release(batch)
 }
 

@@ -147,6 +147,15 @@ impl RetainedTree {
         }
     }
 
+    /// An element became or stopped being a popover, or `showPopover()` or `hidePopover()` ran on
+    /// it: only a `:popover-open` selector can tell.
+    pub(crate) fn sheets_popover_changed(&mut self, id: u64) {
+        let reach = self.sheets.index.invalidation.popover_open;
+        if self.sheets.atoms_fresh && !reach.is_empty() {
+            self.sheets.mark(id, reach);
+        }
+    }
+
     /// The own style of an element changed: only a `[style]` selector can tell.
     pub(crate) fn sheets_style_changed(&mut self, id: u64) {
         if self.sheets.atoms_fresh {

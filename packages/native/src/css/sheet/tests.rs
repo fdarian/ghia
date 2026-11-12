@@ -115,6 +115,9 @@ impl ElementView for View<'_> {
     fn is_root(&self) -> bool {
         self.tree.nodes[self.index].parent.is_none()
     }
+    fn is_popover_open(&self) -> bool {
+        self.tree.nodes[self.index].attrs.iter().any(|(_, value)| value == "popover-open")
+    }
 }
 
 const HTML: usize = 0;
@@ -275,10 +278,10 @@ fn unknown_at_rules_are_skipped_whole_and_recorded() {
 
 #[test]
 fn an_invalid_selector_drops_the_rule_and_is_recorded() {
-    let sheet = Doc::new().parse("a, b:hover { color: red } c { top: 1px } d:nth-child(2n) { x: y } ,a { x: y }");
+    let sheet = Doc::new().parse("a, b:checked { color: red } c { top: 1px } d:nth-child(2n) { x: y } ,a { x: y }");
     assert_eq!(sheet.rules.len(), 1);
     assert_eq!(pairs(&sheet.rules[0].normal), [("top", r#""1px""#)]);
-    assert_eq!(sheet.unsupported, ["a, b:hover", "d:nth-child(2n)", ",a"]);
+    assert_eq!(sheet.unsupported, ["a, b:checked", "d:nth-child(2n)", ",a"]);
 }
 
 #[test]
@@ -483,10 +486,10 @@ fn hostile_nesting_is_cut_off_instead_of_overflowing_the_stack() {
 
 #[test]
 fn an_invalid_nested_selector_drops_only_that_rule() {
-    let sheet = Doc::new().parse("a { top: 1px; &:hover { top: 2px } b { top: 3px } }");
+    let sheet = Doc::new().parse("a { top: 1px; &:checked { top: 2px } b { top: 3px } }");
     let tops: Vec<_> = sheet.rules.iter().map(|rule| pairs(&rule.normal)[0].1.to_owned()).collect();
     assert_eq!(tops, [r#""1px""#, r#""3px""#]);
-    assert_eq!(sheet.unsupported, ["&:hover"]);
+    assert_eq!(sheet.unsupported, ["&:checked"]);
 }
 
 #[test]
@@ -611,12 +614,12 @@ fn is_where_and_not() {
 
 #[test]
 fn is_and_where_drop_invalid_arguments() {
-    assert_eq!(selected(":is(.first, :hover, p)"), [FIRST, PARA]);
-    assert_eq!(selected(":where(:hover, .first, 5)"), [FIRST]);
-    assert_eq!(selected(":is(:hover)"), Vec::<usize>::new());
+    assert_eq!(selected(":is(.first, :checked, p)"), [FIRST, PARA]);
+    assert_eq!(selected(":where(:checked, .first, 5)"), [FIRST]);
+    assert_eq!(selected(":is(:checked)"), Vec::<usize>::new());
     assert_eq!(selected(":is(, .first,)"), [FIRST]);
     assert_eq!(selected(":is(::before, .first)"), [FIRST]);
-    assert!(!is_valid(":not(:hover)"));
+    assert!(!is_valid(":not(:checked)"));
     assert!(!is_valid(":not()"));
     assert!(!is_valid(":not(.a,)"));
     assert!(!is_valid(":not(::before)"));
@@ -649,11 +652,94 @@ fn pseudo_elements_parse_and_never_match() {
 #[test]
 fn other_pseudo_classes_and_syntax_are_invalid() {
     for selector in [
-        ":hover", "a:focus", ":first-child", ":nth-child(2)", ":has(a)", ":matches(a)", ":scope", "a|b", "*|*",
+        ":checked", "a:visited", ":first-child", ":nth-child(2)", ":has(a)", ":matches(a)", ":scope", "a|b", "*|*",
         "a >", "> a", "a > > b", "a,", ",a", "a, , b", ".", "#1", "a$", "a b!", "&&&:x", ":", "a:", "::",
     ] {
         assert!(!is_valid(selector), "{selector}");
     }
+}
+
+#[test]
+fn state_pseudo_classes_parse_into_a_condition_of_the_selector() {
+    use super::State::{Active, Focus, FocusVisible, FocusWithin, Hover};
+    let mut doc = Doc::new();
+    for (selector, condition) in [
+        (".a:hover", Some(Hover)),
+        ("a:ACTIVE", Some(Active)),
+        (".a:focus", Some(Focus)),
+        (".a:focus-visible", Some(FocusVisible)),
+        (".a:focus-within", Some(FocusWithin)),
+        (".a:hover:hover", Some(Hover)),
+        (".x .a:hover", Some(Hover)),
+        (".x :is(.a:hover)", Some(Hover)),
+        (":is(.a:hover, .b:hover)", Some(Hover)),
+        (":where(.a:focus)", Some(Focus)),
+        ("[popover]:popover-open", None),
+        (".a:not(:popover-open)", None),
+        (".a", None),
+    ] {
+        assert_eq!(doc.selector(selector).condition, condition, "{selector}");
+    }
+}
+
+#[test]
+fn a_state_a_selector_cannot_compile_into_a_style_block_is_invalid() {
+    for selector in [
+        ".card:hover .title",
+        ".card:hover > .title",
+        ".a:hover + .b",
+        ".a:hover:focus",
+        ".a:focus-visible:focus-within",
+        ".a:not(:hover)",
+        ":not(.a:focus)",
+        ":is(.a:hover, .b)",
+        ":is(.a:hover, .b:active)",
+        ":is(.a:hover) .b",
+    ] {
+        assert!(!is_valid(selector), "{selector}");
+    }
+}
+
+#[test]
+fn a_state_in_a_nested_rule_follows_the_same_rules() {
+    let sheet = Doc::new().parse(".btn { color: red; &:hover { color: blue } &:hover .icon { top: 1px } .x { top: 2px } }");
+    assert_eq!(sheet.rules.len(), 3, "the rule, &:hover, and .x");
+    assert_eq!(sheet.rules[1].selectors[0].0.condition, Some(super::State::Hover));
+    assert_eq!(sheet.unsupported, ["&:hover .icon"]);
+    let under = Doc::new().parse(".btn:hover { color: red; .x { top: 2px } }");
+    assert_eq!(under.rules.len(), 1, "`.x` is `:is(.btn:hover) .x`, a state outside the subject");
+}
+
+#[test]
+fn an_invalid_argument_does_not_drop_the_siblings_of_a_forgiving_list() {
+    let mut doc = Doc::new();
+    let sheet = doc.parse(":is(.first, .card:hover .title, p) { color: red }");
+    assert_eq!(sheet.rules.len(), 1);
+    let selector = &sheet.rules[0].selectors[0].0;
+    let tree = fixture(&mut doc.atoms);
+    let matched: Vec<usize> = (0..tree.nodes.len()).filter(|index| matches(selector, &tree.view(*index))).collect();
+    assert_eq!(matched, [FIRST, PARA]);
+}
+
+#[test]
+fn a_state_selector_matches_like_the_selector_without_it() {
+    assert_eq!(selected(".first:hover"), [FIRST]);
+    assert_eq!(selected("span:focus-within"), [FIRST, SECOND]);
+    assert_eq!(selected(".box :is(.first:focus, p:focus)"), [FIRST, PARA]);
+    assert_eq!(selected(".nothing:active"), Vec::<usize>::new());
+}
+
+#[test]
+fn popover_open_is_read_from_the_element() {
+    assert_eq!(selected("div:popover-open"), Vec::<usize>::new());
+    let mut doc = Doc::new();
+    let mut tree = fixture(&mut doc.atoms);
+    tree.nodes[FIRST].attrs.push((doc.atoms.intern("open"), "popover-open".into()));
+    let selector = doc.selector("span:popover-open");
+    let matched: Vec<usize> = (0..tree.nodes.len()).filter(|index| matches(&selector, &tree.view(*index))).collect();
+    assert_eq!(matched, [FIRST]);
+    let not_open = doc.selector("span:not(:popover-open)");
+    assert!(!matches(&not_open, &tree.view(FIRST)) && matches(&not_open, &tree.view(SECOND)));
 }
 
 #[test]
@@ -675,6 +761,11 @@ fn specificity_follows_the_spec() {
     assert_eq!(specificity(":not(.a, div p)"), (0, 1, 0));
     assert_eq!(specificity(":is()"), (0, 0, 0));
     assert_eq!(specificity(":is(:root, :host) [a]"), (0, 2, 0));
+    for state in [":hover", ":active", ":focus", ":focus-visible", ":focus-within", ":popover-open"] {
+        assert_eq!(specificity(&format!("a{state}")), (0, 1, 1), "{state}");
+        assert_eq!(specificity(&format!(".b{state}")), (0, 2, 0), "{state}");
+    }
+    assert_eq!(specificity(":is(.a:hover, #b:hover)"), (1, 1, 0));
 }
 
 #[test]

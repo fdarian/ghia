@@ -16,6 +16,7 @@ const info = (id: number, name: string): WebAnimationInfo => ({
   playState: "running",
   pending: false,
   startTime: 0,
+  orphaned: false,
 })
 
 /** A renderer that answers the reads `getAnimations` makes, with the animations it is given. */
