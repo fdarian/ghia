@@ -160,7 +160,7 @@ fn paints_in_every_state(style: &StyleDesc) -> bool {
         &style.has_enabled,
     ]
     .into_iter()
-    .all(|state| state.as_deref().is_none_or(|state| nothing.differs_only_in_paint(state)))
+    .all(|state| state.as_deref().is_none_or(|state| nothing.differs_only_in_paint_as_state(state)))
 }
 
 /// What the callback of one list reads: the rows of its window and the scale of the window.

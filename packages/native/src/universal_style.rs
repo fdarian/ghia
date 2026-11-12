@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use crate::events::state_styles::overlay;
+use crate::events::state_styles::{overlay, reverted};
 use crate::style::StyleDesc;
 
 /// `own` over `universal`. Shorthands and longhands interplay exactly as they do
@@ -21,28 +21,30 @@ use crate::style::StyleDesc;
 /// present on a single side is used as it is.
 pub fn layer_under(universal: &StyleDesc, own: &StyleDesc) -> StyleDesc {
     let mut layered = overlay(universal, own);
-    layered.hover = refine(universal.hover.as_deref(), own.hover.as_deref());
-    layered.active = refine(universal.active.as_deref(), own.active.as_deref());
-    layered.focus = refine(universal.focus.as_deref(), own.focus.as_deref());
-    layered.focus_visible = refine(universal.focus_visible.as_deref(), own.focus_visible.as_deref());
-    layered.focus_within = refine(universal.focus_within.as_deref(), own.focus_within.as_deref());
-    layered.group_hover = refine(universal.group_hover.as_deref(), own.group_hover.as_deref());
-    layered.group_active = refine(universal.group_active.as_deref(), own.group_active.as_deref());
+    layered.hover = refine(universal, universal.hover.as_deref(), own.hover.as_deref());
+    layered.active = refine(universal, universal.active.as_deref(), own.active.as_deref());
+    layered.focus = refine(universal, universal.focus.as_deref(), own.focus.as_deref());
+    layered.focus_visible = refine(universal, universal.focus_visible.as_deref(), own.focus_visible.as_deref());
+    layered.focus_within = refine(universal, universal.focus_within.as_deref(), own.focus_within.as_deref());
+    layered.group_hover = refine(universal, universal.group_hover.as_deref(), own.group_hover.as_deref());
+    layered.group_active = refine(universal, universal.group_active.as_deref(), own.group_active.as_deref());
     layered.group_focus_within = refine(
+        universal,
         universal.group_focus_within.as_deref(),
         own.group_focus_within.as_deref(),
     );
-    layered.has_hover = refine(universal.has_hover.as_deref(), own.has_hover.as_deref());
-    layered.has_active = refine(universal.has_active.as_deref(), own.has_active.as_deref());
-    layered.has_focus = refine(universal.has_focus.as_deref(), own.has_focus.as_deref());
+    layered.has_hover = refine(universal, universal.has_hover.as_deref(), own.has_hover.as_deref());
+    layered.has_active = refine(universal, universal.has_active.as_deref(), own.has_active.as_deref());
+    layered.has_focus = refine(universal, universal.has_focus.as_deref(), own.has_focus.as_deref());
     layered.has_focus_visible = refine(
+        universal,
         universal.has_focus_visible.as_deref(),
         own.has_focus_visible.as_deref(),
     );
-    layered.disabled = refine(universal.disabled.as_deref(), own.disabled.as_deref());
-    layered.enabled = refine(universal.enabled.as_deref(), own.enabled.as_deref());
-    layered.has_disabled = refine(universal.has_disabled.as_deref(), own.has_disabled.as_deref());
-    layered.has_enabled = refine(universal.has_enabled.as_deref(), own.has_enabled.as_deref());
+    layered.disabled = refine(universal, universal.disabled.as_deref(), own.disabled.as_deref());
+    layered.enabled = refine(universal, universal.enabled.as_deref(), own.enabled.as_deref());
+    layered.has_disabled = refine(universal, universal.has_disabled.as_deref(), own.has_disabled.as_deref());
+    layered.has_enabled = refine(universal, universal.has_enabled.as_deref(), own.has_enabled.as_deref());
     // The universal blocks come first, so the element's own win when both match.
     layered.container_rules = crate::layout::container::ContainerRules::concat(
         universal.container_rules.as_ref(),
@@ -51,10 +53,33 @@ pub fn layer_under(universal: &StyleDesc, own: &StyleDesc) -> StyleDesc {
     layered
 }
 
-fn refine(universal: Option<&StyleDesc>, own: Option<&StyleDesc>) -> Option<Box<StyleDesc>> {
-    match (universal, own) {
-        (Some(universal), Some(own)) => Some(Box::new(overlay(universal, own))),
+/// The block of a state of `universal` under the one of `own`, both of the same state. `own` can
+/// revert properties to what the layer under it has, which is `universal` as a whole.
+///
+/// What either block resets is reset in the merged one, which is folded over a style that no
+/// layer here has seen.
+fn refine(below: &StyleDesc, universal: Option<&StyleDesc>, own: Option<&StyleDesc>) -> Option<Box<StyleDesc>> {
+    let own = own.map(|own| reverted(own, below));
+    match (universal, own.as_deref()) {
+        (Some(universal), Some(own)) => {
+            let mut merged = overlay(universal, own);
+            merged.reset = union(universal.reset.as_ref(), own.reset.as_ref());
+            Some(Box::new(merged))
+        }
         (Some(only), None) | (None, Some(only)) => Some(Box::new(only.clone())),
+        (None, None) => None,
+    }
+}
+
+fn union(first: Option<&Arc<[String]>>, second: Option<&Arc<[String]>>) -> Option<Arc<[String]>> {
+    match (first, second) {
+        (Some(first), Some(second)) => {
+            let mut names: Vec<String> = first.iter().chain(second.iter()).cloned().collect();
+            names.sort();
+            names.dedup();
+            Some(names.into())
+        }
+        (Some(only), None) | (None, Some(only)) => Some(only.clone()),
         (None, None) => None,
     }
 }

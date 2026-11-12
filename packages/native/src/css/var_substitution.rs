@@ -216,7 +216,17 @@ fn parse_blocks(text: &str) -> crate::layout::container::ContainerRules {
     }))
 }
 
-fn state_slot<'a>(style: &'a mut StyleDesc, key: &str) -> Option<&'a mut Option<Box<StyleDesc>>> {
+/// The keys of the state blocks of a style, which [`state_slot`] has a field for.
+const STATE_KEYS: [&str; 16] = [
+    "hover", "active", "focus", "focusVisible", "focusWithin", "groupHover", "groupActive", "groupFocusWithin",
+    "hasHover", "hasActive", "hasFocus", "hasFocusVisible", "disabled", "enabled", "hasDisabled", "hasEnabled",
+];
+
+pub(crate) fn is_state_key(key: &str) -> bool {
+    STATE_KEYS.contains(&key)
+}
+
+pub(crate) fn state_slot<'a>(style: &'a mut StyleDesc, key: &str) -> Option<&'a mut Option<Box<StyleDesc>>> {
     Some(match key {
         "hover" => &mut style.hover,
         "active" => &mut style.active,
@@ -492,6 +502,15 @@ fn parse_declaration(key: &str, text: &str) -> Option<Arc<StyleDesc>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_state_key_has_a_slot_and_no_other_key_has() {
+        let mut style = StyleDesc::default();
+        for key in STATE_KEYS {
+            assert!(state_slot(&mut style, key).is_some(), "{key}");
+        }
+        assert!(state_slot(&mut style, "color").is_none());
+    }
+
     use super::*;
 
     fn style(json: &str) -> StyleDesc {

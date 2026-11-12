@@ -277,4 +277,47 @@ describe.skipIf(!hasNativeTestRenderer)("state pseudo-classes in a stylesheet in
     expect(getComputedStyle(box!).opacity).toBe("1")
     expect(getComputedStyle(box!).paddingTop).toBe("4px")
   })
+
+  it("takes the base value back under a CSS-wide keyword in a state rule", () => {
+    app.render(
+      <div>
+        <style>{`.btn { width: 100px; height: 30px } .btn:hover { width: initial }`}</style>
+        <div testId="btn" className="btn" />
+      </div>
+    )
+    expect(widthOf("btn")).toBe(100)
+    app.renderer.nativeSimulateMouseMove(...centre("btn"))
+    expect(widthOf("btn")).toBeGreaterThan(100)
+    app.renderer.nativeSimulateMouseMove(390, 290)
+    expect(widthOf("btn")).toBe(100)
+  })
+
+  it("takes the base value back under a keyword in an inline state block", () => {
+    app.render(
+      <div>
+        <div testId="btn" style={{ width: 100, height: 30, hover: { width: "unset" } }} />
+      </div>
+    )
+    expect(widthOf("btn")).toBe(100)
+    app.renderer.nativeSimulateMouseMove(...centre("btn"))
+    expect(widthOf("btn")).toBeGreaterThan(100)
+  })
+
+  it("rolls a state back to the user agent margin under revert", () => {
+    const topOf = (testId: string): number => {
+      app.renderer.dispatchNativeEvents()
+      return app.renderer.getElementBounds(idOf(testId))!.y
+    }
+    app.render(
+      <div>
+        <style>{`.a { margin: 40px 0; width: 100px; height: 100px } .a:hover { margin: revert }`}</style>
+        <p testId="a" className="a" />
+      </div>
+    )
+    expect(topOf("a")).toBe(40)
+    app.renderer.nativeSimulateMouseMove(...centre("a"))
+    const hovered = topOf("a")
+    expect(hovered).toBeGreaterThan(0)
+    expect(hovered).toBeLessThan(40)
+  })
 })

@@ -7502,9 +7502,12 @@ still drops the longhands written before it.
   what the layers under the element's own style set, as an author declaration beats the user agent style in CSS:
   `margin: 'unset'` on a `<p>` or an open `popover` has no margin, `right: 'unset'` has no `right`, `display: 'unset'` (or `'initial'`) is `inline` on any element, a `<div>` included, and `fontWeight: 'inherit'`
   on an `<h1>` is not bold. It also beats the universal style. `revert` and `revert-layer` take back the element's own earlier
-  declaration of the property and leave the layers under it (the user agent style). A state style (`hover`, ...) or an
-  `@container` block drops a keyword, so the value below it stays: `hover: { width: 'unset' }` over `width: 50` keeps 50,
-  where CSS gives `auto`. `inherit` on a property that does not inherit (`margin`, `width`) is dropped. See
+  declaration of the property and leave the layers under it (the user agent style). In a state style (`hover`, `focus`, `focusVisible`, ..., and a
+  rule under `:hover`, `:active`, `:focus`, `:focus-visible` or `:focus-within`) a keyword takes back the base value while
+  the state applies: `hover: { width: 'unset' }` over `width: 50` is `auto` while hovered, `hover: { color: 'initial' }`
+  drops the element's own colour (it follows the parent's, as `color` inherits), and `hover: { margin: 'revert' }` on a
+  `<p>` has the user agent margin while hovered. An `@container` block drops a keyword, so the value below it stays.
+  `inherit` on a property that does not inherit (`margin`, `width`) is dropped, in a state style too. See
   [deviations](fork/deviations.md#layout).
 - A state style (`hover`, ...) and an `@container` block are recovered the same way inside, one declaration at a time.
 - A dropped declaration is silent, as in a browser. `RUST_LOG=warn` lists each one, once, by its property and value.

@@ -21,8 +21,13 @@
 //! - `revert` and `revert-layer` take back the author's earlier declarations of the property and
 //!   leave the layers under it.
 //!
-//! Only the style's own declarations are read: a keyword inside a state style or an `@container`
-//! block is still dropped (`css::lenient`).
+//! The blocks of the states (`hover`, `focusVisible`, ...) are resolved the same way, each on its own
+//! declarations, and what they reset is the block's: `overlay` clears those properties from the
+//! style the state is folded over while the state applies, so `.a { color: red } .a:hover { color:
+//! initial }` loses the red on hover. `revert` in a block also lists the properties in
+//! [`revert`](crate::style::StyleDesc::revert), for the layer that knows the user agent value to
+//! write into the block (`universal_style::layer_under`). A keyword inside an `@container` block is
+//! still dropped (`css::lenient`).
 
 use std::sync::Arc;
 
@@ -76,6 +81,47 @@ const INHERITED: &[&str] = &[
 pub(crate) struct Resolved {
     pub(crate) text: String,
     pub(crate) reset: Option<Arc<[String]>>,
+    /// The state blocks that had a keyword, which the parsed style takes the lists of.
+    pub(crate) blocks: Vec<ResolvedBlock>,
+}
+
+/// What the keywords of one state block reset.
+pub(crate) struct ResolvedBlock {
+    /// The key of the block in the style (`hover`).
+    pub(crate) key: String,
+    pub(crate) reset: Option<Arc<[String]>>,
+    pub(crate) revert: Option<Arc<[String]>>,
+}
+
+impl Resolved {
+    /// Sets the lists of the blocks on the style the text parsed into, and the style's own.
+    pub(crate) fn apply_to(self, style: &mut crate::style::StyleDesc) {
+        style.reset = self.reset;
+        for block in self.blocks {
+            let Some(Some(parsed)) = crate::css::var_substitution::state_slot(style, &block.key) else {
+                continue;
+            };
+            parsed.reset = block.reset;
+            parsed.revert = block.revert;
+        }
+    }
+}
+
+#[derive(Default)]
+struct Lists {
+    reset: Vec<String>,
+    revert: Vec<String>,
+}
+
+impl Lists {
+    fn arcs(mut self) -> (Option<Arc<[String]>>, Option<Arc<[String]>>) {
+        let finish = |list: &mut Vec<String>| {
+            list.sort();
+            list.dedup();
+            (!list.is_empty()).then(|| Arc::from(std::mem::take(list)))
+        };
+        (finish(&mut self.reset), finish(&mut self.revert))
+    }
 }
 
 /// A search of the bytes for a keyword, or for a property of [`initial::UNREPRESENTABLE`] followed
@@ -111,30 +157,66 @@ fn keyword_of_declaration(declaration: &Declaration) -> Option<Keyword> {
     keyword_of(&declaration.value).or_else(|| initial::is_unrepresentable_initial(declaration).then_some(Keyword::Initial))
 }
 
-/// `raw` with the keywords of its top-level declarations resolved, or `None` when it has none.
+fn has_keyword(declarations: &[Declaration]) -> bool {
+    declarations.iter().any(|declaration| !declaration.key.starts_with("--") && keyword_of_declaration(declaration).is_some())
+}
+
+/// The block a declaration holds when its key is a state's and its value an object, with the
+/// keywords it has.
+fn block_with_keyword(declaration: &Declaration) -> Option<Vec<Declaration>> {
+    crate::css::var_substitution::is_state_key(&declaration.key).then_some(())?;
+    let block = serde_json::from_str::<Declarations>(&declaration.value).ok()?.0;
+    has_keyword(&block).then_some(block)
+}
+
+/// `raw` with the keywords of its declarations and of its state blocks resolved, or `None` when it
+/// has none.
 pub(crate) fn resolve(raw: &[u8]) -> Option<Resolved> {
     if !mentions_keyword(raw) {
         return None;
     }
     let declarations = serde_json::from_slice::<Declarations>(raw).ok()?.0;
-    if !declarations.iter().any(|declaration| !declaration.key.starts_with("--") && keyword_of_declaration(declaration).is_some()) {
+    if !has_keyword(&declarations) && !declarations.iter().any(|declaration| block_with_keyword(declaration).is_some()) {
         return None;
     }
+    let mut blocks = Vec::new();
+    let mut lists = Lists::default();
+    let list = rewrite(declarations, &mut lists, Some(&mut blocks));
+    let (reset, _) = lists.arcs();
+    Some(Resolved { text: object_text(&list), reset, blocks })
+}
+
+/// `declarations` with their keywords resolved. `blocks` is `Some` for the declarations of a style,
+/// whose state blocks are resolved on their own and listed there, and `None` inside one.
+fn rewrite(declarations: Vec<Declaration>, lists: &mut Lists, mut blocks: Option<&mut Vec<ResolvedBlock>>) -> Vec<Declaration> {
+    let in_block = blocks.is_none();
     let mut list: Vec<Declaration> = Vec::with_capacity(declarations.len());
-    let mut reset: Vec<String> = Vec::new();
     for declaration in declarations {
         list.retain(|earlier| earlier.key != declaration.key);
+        if let Some(blocks) = blocks.as_deref_mut() {
+            // A block written again replaces the earlier one, and what that one reset with it.
+            blocks.retain(|earlier| earlier.key != declaration.key);
+            if let Some(block) = block_with_keyword(&declaration) {
+                let mut inner = Lists::default();
+                let rewritten = rewrite(block, &mut inner, None);
+                let (reset, revert) = inner.arcs();
+                blocks.push(ResolvedBlock { key: declaration.key.clone(), reset, revert });
+                list.push(Declaration { key: declaration.key, value: object_text(&rewritten) });
+                continue;
+            }
+        }
         match keyword_of_declaration(&declaration) {
-            Some(keyword) if !declaration.key.starts_with("--") => apply(&mut list, &mut reset, &declaration.key, keyword),
+            Some(keyword) if !declaration.key.starts_with("--") => apply(&mut list, lists, &declaration.key, keyword, in_block),
             _ => list.push(declaration),
         }
     }
-    reset.sort();
-    reset.dedup();
-    Some(Resolved { text: object_text(&list), reset: (!reset.is_empty()).then(|| reset.into()) })
+    list
 }
 
-fn apply(list: &mut Vec<Declaration>, reset: &mut Vec<String>, key: &str, keyword: Keyword) {
+/// `in_block`: the keyword is in the block of a state, where `revert` has to take back what the
+/// style under the block sets while the state applies. At the top level it only takes back the
+/// author's earlier declarations, and the layers under the style show.
+fn apply(list: &mut Vec<Declaration>, lists: &mut Lists, key: &str, keyword: Keyword, in_block: bool) {
     let id = covers::key_id(key);
     let covered: &[KeyId] = id.map_or(&[], covers::covered_by);
     list.retain(|earlier| covers::key_id(&earlier.key).is_none_or(|earlier| !covered.contains(&earlier)));
@@ -157,8 +239,12 @@ fn apply(list: &mut Vec<Declaration>, reset: &mut Vec<String>, key: &str, keywor
     }
     let named = || std::iter::once(key.to_owned()).chain(covered.iter().map(|target| covers::name_of(*target)));
     match keyword {
-        Keyword::Initial | Keyword::Unset => reset.extend(named()),
-        Keyword::Inherit => reset.extend(named().filter(|name| INHERITED.contains(&name.as_str()))),
+        Keyword::Initial | Keyword::Unset => lists.reset.extend(named()),
+        Keyword::Inherit => lists.reset.extend(named().filter(|name| INHERITED.contains(&name.as_str()))),
+        Keyword::Revert | Keyword::RevertLayer if in_block => {
+            lists.reset.extend(named());
+            lists.revert.extend(named());
+        }
         Keyword::Revert | Keyword::RevertLayer => {}
     }
 }
@@ -191,7 +277,9 @@ mod tests {
         for json in [
             r#"{"color":"red","right":0}"#,
             r#"{"content":"an unset value"}"#,
-            r#"{"hover":{"width":"unset"}}"#,
+            r#"{"hover":{"width":"1px"}}"#,
+            r#"{"hover":{"content":"an unset value"}}"#,
+            r#"{"@container":{"width":"unset"}}"#,
             r#"{"--x":"initial"}"#,
             "[1]",
             "5",
@@ -221,6 +309,51 @@ mod tests {
         let (text, reset) = resolved(r#"{"color":"unset","width":"INITIAL"}"#);
         assert_eq!(text, serde_json::json!({}));
         assert_eq!(reset, ["color", "width"]);
+    }
+
+    fn resolved_block(json: &str, key: &str) -> (serde_json::Value, Vec<String>, Vec<String>) {
+        let resolved = resolve(json.as_bytes()).expect("the style has a keyword");
+        let block = resolved.blocks.iter().find(|block| block.key == key).expect("the block had a keyword");
+        let text: serde_json::Value = serde_json::from_str(&resolved.text).expect("the text is JSON");
+        (
+            text[key].clone(),
+            block.reset.as_deref().map(<[String]>::to_vec).unwrap_or_default(),
+            block.revert.as_deref().map(<[String]>::to_vec).unwrap_or_default(),
+        )
+    }
+
+    #[test]
+    fn a_keyword_in_a_state_block_resets_what_it_names_in_the_block_and_not_in_the_style() {
+        let (text, reset, revert) = resolved_block(r#"{"color":"red","hover":{"color":"initial","opacity":0.5}}"#, "hover");
+        assert_eq!(text, serde_json::json!({"opacity": 0.5}));
+        assert_eq!(reset, ["color"]);
+        assert!(revert.is_empty());
+        let resolved = resolve(br#"{"color":"red","hover":{"color":"initial"}}"#).expect("a keyword");
+        assert!(resolved.reset.is_none(), "the style's own list is its own declarations'");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&resolved.text).expect("JSON")["color"], "red");
+    }
+
+    #[test]
+    fn revert_in_a_state_block_resets_and_lists_what_it_names_and_inherit_follows_the_property() {
+        let (text, reset, revert) = resolved_block(
+            r#"{"focusVisible":{"margin":"revert","fontWeight":"inherit","width":"inherit","display":"unset"}}"#,
+            "focusVisible",
+        );
+        assert_eq!(text, serde_json::json!({"display": "inline"}));
+        assert!(revert.contains(&"margin".to_owned()) && revert.contains(&"marginTop".to_owned()));
+        assert!(!revert.contains(&"fontWeight".to_owned()));
+        for name in ["margin", "marginTop", "fontWeight", "display"] {
+            assert!(reset.contains(&name.to_owned()), "{name}");
+        }
+        assert!(!reset.contains(&"width".to_owned()), "inherit on a property that does not inherit is dropped");
+    }
+
+    #[test]
+    fn a_state_block_without_a_keyword_is_left_as_it_is() {
+        let resolved = resolve(br#"{"hover":{"color":"red"},"hasHover":{"width":"unset"},"width":5}"#).expect("one has a keyword");
+        assert_eq!(resolved.blocks.len(), 1);
+        assert_eq!(resolved.blocks[0].key, "hasHover");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&resolved.text).expect("JSON")["hover"], serde_json::json!({"color": "red"}));
     }
 
     #[test]

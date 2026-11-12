@@ -35,6 +35,7 @@ macro_rules! overlay_fields {
             container_unit_axes: $base.container_unit_axes.union($over.container_unit_axes),
             // Applied to the base before the layers merge; the result is a style no layer lies under.
             reset: None,
+            revert: None,
             custom_properties: crate::css::custom_properties::CustomProperties::layered(
                 $base.custom_properties.as_ref(),
                 $over.custom_properties.as_ref(),
@@ -127,6 +128,37 @@ macro_rules! property_clearers {
             (|style: &mut StyleDesc| style.$field = None) as fn(&mut StyleDesc),
         )),+]
     };
+}
+
+/// The copies of the properties `overlay` takes, by the key a style object writes them under.
+macro_rules! property_copiers {
+    (; $($field:ident),+ $(,)?) => {
+        vec![$((
+            crate::css::covers::style_key(stringify!($field)),
+            (|to: &mut StyleDesc, from: &StyleDesc| to.$field = from.$field.clone()) as fn(&mut StyleDesc, &StyleDesc),
+        )),+]
+    };
+}
+
+static PROPERTY_COPIERS: LazyLock<FxHashMap<String, fn(&mut StyleDesc, &StyleDesc)>> =
+    LazyLock::new(|| overlaid_fields!(property_copiers,).into_iter().collect());
+
+/// The block of a state with `revert` resolved against `below`, the layers under the style the
+/// block is in (the user agent style, the universal style): the block gets the value `below` has for
+/// each property it reverts, and its reset clears the author's value of it from the style the state
+/// is folded over. A property `below` does not set has nothing to write, so it is only reset.
+pub(crate) fn reverted<'a>(block: &'a StyleDesc, below: &StyleDesc) -> Cow<'a, StyleDesc> {
+    let Some(names) = block.revert.as_deref() else {
+        return Cow::Borrowed(block);
+    };
+    let mut resolved = block.clone();
+    resolved.revert = None;
+    for name in names {
+        if let Some(copy) = PROPERTY_COPIERS.get(name.as_str()).filter(|_| sets_property(below, name)) {
+            copy(&mut resolved, below);
+        }
+    }
+    Cow::Owned(resolved)
 }
 
 static PROPERTY_CLEARERS: LazyLock<FxHashMap<String, fn(&mut StyleDesc)>> =

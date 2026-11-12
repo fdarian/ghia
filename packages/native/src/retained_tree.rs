@@ -626,7 +626,9 @@ impl StyleTable {
                 Err(error) => crate::css::lenient::recover(parsed, error)?,
             }
         };
-        style.reset = resolved.and_then(|resolved| resolved.reset);
+        if let Some(resolved) = resolved {
+            resolved.apply_to(&mut style);
+        }
         let shared = Arc::new(style);
         let raw: Arc<[u8]> = raw.into();
         self.raws.insert(Arc::as_ptr(&shared) as usize, raw.clone());
