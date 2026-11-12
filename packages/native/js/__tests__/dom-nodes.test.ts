@@ -344,11 +344,42 @@ describe("document", () => {
     expect(document.parentNode).toBeNull()
     expect(document.ownerDocument).toBeNull()
     expect(document.textContent).toBeNull()
-    expect(document.childNodes).toEqual([])
-    expect(document.documentElement).toBeNull()
-    expect(document.head).toBeNull()
-    expect(document.body).toBeNull()
-    expect(document.scrollingElement).toBeNull()
+    expect(document.childNodes).toEqual([document.documentElement])
+  })
+
+  it("has a stand-in html, head and body while no root is mounted", () => {
+    const html = document.documentElement
+    expect(html).toBeInstanceOf(HTMLElement)
+    expect(html.tagName).toBe("HTML")
+    expect(html.parentNode).toBe(document)
+    expect(html.isConnected).toBe(true)
+    expect([...html.children]).toEqual([document.head, document.body])
+    expect(document.head.tagName).toBe("HEAD")
+    expect(document.body.tagName).toBe("BODY")
+    expect(document.body.parentNode).toBe(html)
+    expect(document.scrollingElement).toBe(html)
+    expect(document.documentElement).toBe(html)
+    expect(html.ownerDocument).toBe(document)
+    expect(html.getRootNode()).toBe(document)
+    expect(document.contains(document.body)).toBe(true)
+    expect(html.getBoundingClientRect().width).toBe(0)
+    expect(html.offsetParent).toBeNull()
+    expect(html.scrollTop).toBe(0)
+    document.body.setAttribute("data-x", "1")
+    expect(document.body.getAttribute("data-x")).toBe("1")
+    document.body.removeAttribute("data-x")
+    expect(document.body.hasAttribute("data-x")).toBe(false)
+    expect(() => document.body.appendChild(new FakeHtml("div"))).toThrow(/no root mounted/)
+  })
+
+  it("answers with the window's elements once a root mounts, and with the stand-in again after", () => {
+    const standIn = document.documentElement
+    const window = mountWindow()
+    expect(document.documentElement).toBe(window.html)
+    expect(document.childNodes).toEqual([window.html])
+    expect(standIn.isConnected).toBe(true)
+    window.unmount()
+    expect(document.documentElement).toBe(standIn)
   })
 
   /** A window whose root is `html` > `head` + `body`, the most recently mounted. */
@@ -385,9 +416,8 @@ describe("document", () => {
     second.unmount()
     expect(document.documentElement).toBe(first.html)
     first.unmount()
-    expect(document.documentElement).toBeNull()
-    expect(document.head).toBeNull()
-    expect(document.body).toBeNull()
+    expect(document.documentElement).not.toBe(first.html)
+    expect(document.documentElement.parentNode).toBe(document)
   })
 
   it("contains a mounted node, and compares against it", () => {

@@ -14,6 +14,8 @@
  * calls it is a test or an app that holds the renderer itself.
  */
 
+import type { NativeRenderer } from "./host.js"
+
 type Method = (...args: never[]) => unknown
 
 const noop = (): void => {}
@@ -115,6 +117,14 @@ const DETACHED: Readonly<Record<string, Method>> = {
 }
 
 const detached = new WeakSet<object>()
+
+/** A renderer that never had a window: every element-facing method answers as `detachRenderer` makes them. */
+export function createDetachedRenderer(): NativeRenderer {
+  const renderer = {}
+  for (const name of Object.keys(DETACHED)) Reflect.set(renderer, name, DETACHED[name])
+  detached.add(renderer)
+  return renderer as NativeRenderer
+}
 
 export function isRendererDetached(renderer: object): boolean {
   return detached.has(renderer)

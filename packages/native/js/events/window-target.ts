@@ -203,18 +203,38 @@ let focusClock = 0
 
 /**
  * The document is the top of every mounted tree. It lists the `<html>` of each window, the
- * most recent of which is `document.documentElement`: one document spans every window.
+ * most recent of which is `document.documentElement`: one document spans every window. With no
+ * window it lists the stand-in `<html>` (`dom/stand-in-document.ts`), as a browser's document always has one.
  */
 const DOCUMENT_BINDING: NodeBinding = {
   parent: null,
   get children(): readonly Node[] {
-    return [...elementSources.values()].flatMap((entry) => {
+    const windows = [...elementSources.values()].flatMap((entry) => {
       const elements = entry.source.documentElements()
       return elements === null ? [] : [elements.html as Node]
     })
+    return windows.length > 0 ? windows : [standInDocumentElements().html as Node]
   },
   connected: true,
   root: null,
+}
+
+let standInProvider: (() => DocumentElements) | undefined
+
+/**
+ * Registers the `<html>`, `<head>` and `<body>` `document` answers with while no root is mounted.
+ * They are built from the element classes, which load this module, so `dom-globals.ts` hands them
+ * over instead of this module importing them.
+ */
+export function installStandInDocument(provider: () => DocumentElements): void {
+  standInProvider = provider
+}
+
+function standInDocumentElements(): DocumentElements {
+  if (standInProvider === undefined) {
+    throw new Error("The stand-in document is not installed: import @ghia/native/host before reading document.documentElement")
+  }
+  return standInProvider()
 }
 
 /** The way the window `document` stands for makes nodes; throws while nothing is mounted. */
@@ -244,11 +264,11 @@ function unsupportedElement(name: string, method: string): DOMException {
   return new DOMException(`Failed to execute '${method}' on 'Document': <${name}> is not an element Ghia draws.`, "NotSupportedError")
 }
 
-/** The elements of the window `document` stands for: the most recently mounted root's. */
-function currentDocumentElements(): DocumentElements | null {
+/** The elements of the window `document` stands for: the most recently mounted root's, or the stand-in's while none is mounted. */
+function currentDocumentElements(): DocumentElements {
   const renderer = mountedRenderer()
-  if (renderer === undefined) return null
-  return elementSources.get(renderer)?.source.documentElements() ?? null
+  const mounted = renderer === undefined ? null : elementSources.get(renderer)?.source.documentElements() ?? null
+  return mounted ?? standInDocumentElements()
 }
 
 function finiteCoordinate(value: number, name: string): number {
@@ -370,19 +390,19 @@ export class GpuixDocument<Element = unknown> extends Document {
     return currentNodeFactory("createTextNode").createTextNode(String(data))
   }
 
-  /** The `<html>` element of the window that mounted last, or `null` while nothing is mounted. */
-  get documentElement(): Element | null {
-    return (currentDocumentElements()?.html as Element | undefined) ?? null
+  /** The `<html>` element of the window that mounted last, or the stand-in `<html>` while nothing is mounted: never `null`. */
+  get documentElement(): Element {
+    return currentDocumentElements().html as Element
   }
 
   /** The `<head>` element of the window that mounted last, before `body` in `documentElement`. */
-  get head(): Element | null {
-    return (currentDocumentElements()?.head as Element | undefined) ?? null
+  get head(): Element {
+    return currentDocumentElements().head as Element
   }
 
   /** The `<body>` element of the window that mounted last: where the app's top-level nodes are. */
-  get body(): Element | null {
-    return (currentDocumentElements()?.body as Element | undefined) ?? null
+  get body(): Element {
+    return currentDocumentElements().body as Element
   }
 
   /** `"CSS1Compat"`: the document is laid out as a standards-mode page, which is what a library that tests for quirks mode expects. */
@@ -391,7 +411,7 @@ export class GpuixDocument<Element = unknown> extends Document {
   }
 
   /** The element that scrolls the document, which is `documentElement` as in standards mode. */
-  get scrollingElement(): Element | null {
+  get scrollingElement(): Element {
     return this.documentElement
   }
 
