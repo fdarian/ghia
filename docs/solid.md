@@ -138,7 +138,7 @@ Not covered by reload:
 - `vite.config`. Restart `ghia dev`.
 - Anything under `node_modules`: solid-refresh only wraps your own files.
 
-A component that throws on mount renders an object, not a node, in dev: solid-refresh passes `{ name: "[solid-refresh]Name" }` as the memo's initial value, and a memo whose function threw keeps it. The component returns that object only when an `ErrorBoundary` or `catchError` caught the throw (the fallback shows too); Ghia renders nothing in its place and warns once with `console.warn("Unrecognized value. Rendered nothing in its place", value)`.
+A component that throws on mount renders an object, not a node, in dev: solid-refresh passes `{ name: "[solid-refresh]Name" }` as the memo's initial value, and a memo whose function threw keeps it. The component returns that object only when an `ErrorBoundary` or `catchError` caught the throw (for an `ErrorBoundary` the fallback shows too); Ghia renders nothing in its place and warns once with `console.warn("Unrecognized value. Rendered nothing in its place", value)`.
 
 React runs under the same command, with React Fast Refresh in place of solid-refresh ([reference.md](reference.md#hot-reload)).
 

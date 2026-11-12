@@ -350,6 +350,10 @@ A native view from another library between the GPUI layers ([nativeview.md](nati
 - **Nested native views are not supported**; each `<nativeview>` is its own container in the window (what would change is in [nativeview.md](nativeview.md#several-native-views-and-nesting)).
 - **Other platforms**: an empty box that warns once, like `<webview>`.
 
+## Solid adapter
+
+- **A rendered object that is not a node renders nothing, once-warned.** A component that renders an object (a plain value, an AST node, solid-refresh's `{ name: "[solid-refresh]Name" }` after a throw on mount) gets an empty text node in its place and one `console.warn("Unrecognized value. Rendered nothing in its place", value)` for that object. `solid-js/web` keeps the previous content for a lone object and renders `[object Object]` inside an array; the nodes of Ghia's tree are host nodes only, and `solid-js/universal` reads the rendered value back as a position (a sibling, an anchor), so the object needs a node to stand for it. The same object rendered in two places of one root acts as one node, so it moves from the first place to the second; in two roots it is one node each.
+
 ## Base UI
 
 - **`initialFocus` defaults to the popup, not the first tabbable element.** Base UI picks the first tabbable element. GPUI's tab order exists only after the popup has painted, so the popup is focused and the first Tab walks that order.

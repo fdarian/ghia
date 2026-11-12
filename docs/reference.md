@@ -1554,16 +1554,21 @@ the batch to native) does not stop the flushes after it. Releasing the removed n
 sending the batch run apart, so a throw in the first never skips the second, and every
 removed node is released even when another throws. When the flush was scheduled by a
 change, the error goes to the root's `onUncaughtError`, and to `console.error` when the
-root has none. When code asked for it (`root.render()`, `root.flush()`, `root.flushSync()`,
-`root.unmount()`), it is thrown to that caller after the work finished: the one error, or an
-`AggregateError` when the release and the batch both threw.
+root has none. In the Solid adapter, when code asked for the work (`root.render()`,
+`root.flush()`, `root.flushSync()`, `root.dispatch()`, `root.unmount()`), the error is
+thrown to that caller once all of it ran: the one error as it was, or an `AggregateError`
+when several steps threw (its `errors` can hold further `AggregateError`s). `flushSync(fn)`
+and `dispatch` run the flush even when `fn` throws, and throw both errors when both did.
+React's root has `render()` and `unmount()` only: `unmount()` releases every step (the
+tree, `<html>`, the listeners) and throws what failed the same way.
 
 The Solid adapter treats a component's value that is an object but not a node as nothing:
 it renders no content in its place (an empty text node holds the position) and calls
 `console.warn("Unrecognized value. Rendered nothing in its place", value)` once for that
 object. solid-refresh in dev makes a component that threw on mount render such an object
 (`{ name: "[solid-refresh]Name" }`), which `solid-js/web` does not handle either way
-(it leaves the previous content, and stringifies the object inside an array).
+(it leaves the previous content, and stringifies the object inside an array); see
+[deviations.md](./fork/deviations.md#solid-adapter).
 
 An error thrown by an **event handler** (an element's, or a `window` or `document`
 listener's) does not stop the dispatch: the remaining handlers still run. The error
