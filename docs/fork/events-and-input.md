@@ -159,7 +159,7 @@ State styles read the trackers above; they do not probe the tree themselves.
 
 ### Layer order
 
-State layers fold in the order base, `groupHover`, `hasHover`, `hover`, `groupActive`, `hasActive`, `active`, `hasEnabled`, `hasDisabled`, `enabled`, `disabled`, `groupFocusWithin`, `hasFocus`. `focus`, `focusWithin`, `hasFocusVisible` and `focusVisible` are applied to the element after that fold, so focus layers beat the pointer ones, `groupFocusWithin` included. An element's own state beats what its descendants cause, and that beats a group. The four disabled layers sit after `active` and before the focus ones, ordered as Tailwind orders its variants, so `disabled` wins a field over `hover`/`active` while the control still matches them, as in CSS.
+State layers fold in the order base, `groupHover`, `hasHover`, `hover`, `groupActive`, `hasActive`, `active`, `hasEnabled`, `hasDisabled`, `enabled`, `disabled`, `groupFocusWithin`, `hasFocus`. `focus`, `focusWithin`, `hasFocusVisible` and `focusVisible` are applied to the element after that fold, so focus layers beat the pointer ones, `groupFocusWithin` included. The children inherit from the element with them folded in (`descend_style` in `build_element`, which is what a transitioning element's motion fold already gives), so `.card:focus-within { color: red }` recolours the text below it. An element's own state beats what its descendants cause, and that beats a group. The four disabled layers sit after `active` and before the focus ones, ordered as Tailwind orders its variants, so `disabled` wins a field over `hover`/`active` while the control still matches them, as in CSS.
 
 A state style's shorthand resets the longhands it covers; that rule is in [paint-and-transforms.md](paint-and-transforms.md).
 

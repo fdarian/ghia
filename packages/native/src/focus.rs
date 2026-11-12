@@ -127,20 +127,12 @@ impl FocusStyles {
 
     /// The focus variants of `style` that apply to element `id`, weakest first.
     fn applying<'a>(&self, id: u64, style: &'a StyleDesc, focusable: bool) -> impl Iterator<Item = &'a StyleDesc> {
-        let layers = self.layers(id, focusable);
-        [
-            (style.focus.as_deref(), layers.focused),
-            (style.focus_within.as_deref(), layers.within),
-            (style.has_focus_visible.as_deref(), layers.has_visible),
-            (style.focus_visible.as_deref(), layers.visible),
-        ]
-        .into_iter()
-        .filter_map(|(declared, applies)| declared.filter(|_| applies))
+        self.layers(id, focusable).over(style)
     }
 
     /// Which focus variants apply to element `id`. `focusVisible` needs a `focusable` element.
-    pub fn layers(&self, id: u64, focusable: bool) -> crate::motion::FocusLayers {
-        crate::motion::FocusLayers {
+    pub fn layers(&self, id: u64, focusable: bool) -> FocusLayers {
+        FocusLayers {
             focused: self.is_focused(id),
             within: self.within.contains(&id),
             has_visible: self.has_focus_visible(id),
@@ -172,13 +164,59 @@ impl FocusStyles {
     /// `states` with the focus variants of `style` that apply to element `id`.
     /// For an inline box, which has no element to apply them to.
     pub fn states_of(&self, id: u64, style: &StyleDesc, states: PointerStates) -> PointerStates {
+        let declared = FocusLayers {
+            visible: self.is_focus_visible(id),
+            ..self.layers(id, false)
+        }
+        .declared_by(style);
         PointerStates {
-            focused: style.focus.is_some() && self.is_focused(id),
-            focus_within: style.focus_within.is_some() && self.within.contains(&id),
-            has_focus_visible: style.has_focus_visible.is_some() && self.has_focus_visible(id),
-            focus_visible: style.focus_visible.is_some() && self.visible == Some(id),
+            focused: declared.focused,
+            focus_within: declared.within,
+            has_focus_visible: declared.has_visible,
+            focus_visible: declared.visible,
             ..states
         }
+    }
+}
+
+/// Which focus variants of an element apply to it: the ones it applies where it tracks focus (an
+/// inline box has them in its `PointerStates` instead). The one place the order they are laid over
+/// the element in is written.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct FocusLayers {
+    /// The element is focused: `focus`.
+    pub focused: bool,
+    /// The element or a descendant is focused: `focusWithin`.
+    pub within: bool,
+    /// A strict descendant matches `:focus-visible`: `hasFocusVisible`.
+    pub has_visible: bool,
+    /// The element itself matches `:focus-visible`: `focusVisible`.
+    pub visible: bool,
+}
+
+impl FocusLayers {
+    /// The variants `style` declares, each with whether it applies, weakest first.
+    fn declared<'a>(self, style: &'a StyleDesc) -> [(Option<&'a StyleDesc>, bool); 4] {
+        [
+            (style.focus.as_deref(), self.focused),
+            (style.focus_within.as_deref(), self.within),
+            (style.has_focus_visible.as_deref(), self.has_visible),
+            (style.focus_visible.as_deref(), self.visible),
+        ]
+    }
+
+    /// The focus variants of `style` that apply, weakest first: `focus`, `focusWithin`,
+    /// `hasFocusVisible`, `focusVisible`.
+    pub fn over<'a>(self, style: &'a StyleDesc) -> impl Iterator<Item = &'a StyleDesc> {
+        self.declared(style)
+            .into_iter()
+            .filter_map(|(declared, applies)| declared.filter(|_| applies))
+    }
+
+    /// The layers that apply and that `style` declares a variant for.
+    pub fn declared_by(self, style: &StyleDesc) -> FocusLayers {
+        let [focused, within, has_visible, visible] = self.declared(style).map(|(declared, applies)| declared.is_some() && applies);
+        FocusLayers { focused, within, has_visible, visible }
     }
 }
 

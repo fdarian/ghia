@@ -11149,7 +11149,6 @@ pub(crate) fn animate_style_at(
                 .shared
                 .map_or_else(|| input.declared.unwrap_or(&EMPTY_STYLE).into(), crate::motion::StyleRef::from),
             focus,
-            Some(&ctx.focus_styles),
             measurement.as_ref(),
             ctx.inherited.interpolate_size,
             crate::motion::Scope::Element,
@@ -11634,7 +11633,14 @@ fn build_element_unpumped(
         style.is_none_or(|style| style.var_declarations.is_none()),
         "a held var() declaration reached the build unresolved"
     );
-    let descended = ctx.inherited.clone().descend_with_custom(style, element.has_inert_prop(), own_custom);
+    // Children inherit what the element computes to with its focus variants laid over it, which
+    // is the style a transitioning element already has (motion folds them), so with or without a
+    // transition `.card:focus-within { color: red }` reaches the text below.
+    let descend_style = style.map(|style| ctx.focus_styles.folded(id, style, ctx.focus_handles.contains_key(&id)));
+    let descended = ctx
+        .inherited
+        .clone()
+        .descend_with_custom(descend_style.as_deref(), element.has_inert_prop(), own_custom);
     let parent_inherited = std::mem::replace(&mut ctx.inherited, descended);
     crate::layout::table::enter(&mut ctx.inherited.table_row, &mut ctx.inherited.table_cell, element);
     // The start of a logical inline pair is the right side in an rtl element.

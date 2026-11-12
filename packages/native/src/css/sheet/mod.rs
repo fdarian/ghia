@@ -46,6 +46,7 @@ pub use layers::{LayerId, LayerOrder, Layers};
 pub use matching::{matches, AttrValue, ElementView, SiblingTest};
 pub use parser::parse_sheet;
 pub use states::State;
+pub(crate) use states::{is_state_block, merge_own};
 pub use selector::{
     AttrMatcher, AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, SelectorList, Simple, Specificity, TypeName,
 };

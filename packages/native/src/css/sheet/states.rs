@@ -20,6 +20,7 @@ use crate::css::lenient::{Declaration, Declarations};
 
 use super::cascade::{apply, MatchedRules};
 use super::declarations::render_declarations;
+use super::document::SKIP_LOG_LIMIT;
 use super::index::RuleIndex;
 use super::selector::{Compound, Simple, Specificity};
 
@@ -173,44 +174,84 @@ impl Gathered {
         })
     }
 
-    /// The base values of the longhands that `conditional`, a shorthand, covers and an unconditional
-    /// declaration above it sets. In CSS that longhand keeps the higher declaration's value while
-    /// the shorthand gives the others theirs; the block that holds the shorthand would overwrite
-    /// it, so the value is written again after it.
-    fn longhands_kept_over(&self, conditional: &Conditional) -> Vec<Declaration> {
-        let Some(shorthand) = covers::key_id(&conditional.declaration.key) else {
+    /// The base values of the properties an unconditional declaration above `conditional` sets that
+    /// `conditional` overlaps: the longhands it covers as a shorthand, the sides of an all-sides
+    /// border value a border side shorthand splits, and a side shorthand that an all-sides value
+    /// writes over. In CSS the higher declaration keeps its value there while `conditional` gives
+    /// the rest theirs; the block that holds it would overwrite it, so the value is written again
+    /// after it.
+    fn kept_over(&self, conditional: &Conditional) -> Vec<Declaration> {
+        let Some(conditional_key) = covers::key_id(&conditional.declaration.key) else {
             return Vec::new();
         };
-        let covered = covers::covered_by(shorthand);
         self.unconditional
             .iter()
             .filter(|above| above.position > conditional.position)
-            .filter(|above| covers::key_id(&above.key).is_some_and(|longhand| covered.contains(&longhand)))
+            .filter(|above| {
+                covers::key_id(&above.key).is_some_and(|key| key != conditional_key && covers::overlaps(conditional_key, key))
+            })
             .filter_map(|above| self.base.iter().find(|declaration| declaration.key == above.key))
             .cloned()
             .collect()
     }
 }
 
-/// The fold-order disagreements already logged for the sheets as they are loaded, each by the
-/// property and the two states, so a document with thousands of matching elements logs it once.
+/// The fold-order disagreements already logged, each by the property and the two states, so a
+/// document with thousands of matching elements logs it once. Kept across reloads of the sheets
+/// (every sheet is parsed again when one changes), as the skipped rules are, and capped like them.
 #[derive(Default)]
 pub(crate) struct LoggedFolds {
     logged: FxHashSet<(String, State, State)>,
+    /// Whether the summary warning for the disagreements past `SKIP_LOG_LIMIT` was logged.
+    capped: bool,
     /// How many warnings were logged, for the tests.
     #[cfg(test)]
     pub(crate) warnings: usize,
 }
 
 impl LoggedFolds {
-    /// Called when the sheets load again: the rules that disagree may be other ones.
+    /// Whether the disagreement is new and may be logged. Past the cap it logs one summary, once.
+    fn admit(&mut self, property: &str, earlier: State, later: State) -> bool {
+        if self.logged.contains(&(property.to_owned(), earlier, later)) {
+            return false;
+        }
+        // CSS-in-JS writes a new class per component, so the set would grow for as long as the app runs.
+        if self.logged.len() >= SKIP_LOG_LIMIT {
+            if !self.capped {
+                self.capped = true;
+                log::warn!("Stylesheet: further fold-order disagreements not logged");
+                self.count_warning();
+            }
+            return false;
+        }
+        self.logged.insert((property.to_owned(), earlier, later));
+        self.count_warning();
+        true
+    }
+
+    #[cfg(test)]
+    fn count_warning(&mut self) {
+        self.warnings += 1;
+    }
+
+    #[cfg(not(test))]
+    fn count_warning(&mut self) {}
+
+    /// Called when the sheets are wound down: the next ones start with a clean log.
     pub(crate) fn clear(&mut self) {
         self.logged.clear();
+        self.capped = false;
     }
 }
 
+/// [`merge`] for a style that no sheet matched, whose `!important` declarations still beat its own
+/// state blocks (`inline_important::strip_payload` calls it for a style that has both).
+pub(crate) fn merge_own(own: Vec<Declaration>, own_important: Vec<Declaration>) -> String {
+    merge(&RuleIndex::default(), &MatchedRules::default(), &own, &own_important, &mut LoggedFolds::default())
+}
+
 /// Whether `key` is the block of one of the states.
-pub(super) fn is_state_block(key: &str) -> bool {
+pub(crate) fn is_state_block(key: &str) -> bool {
     State::of_block_key(key).is_some()
 }
 
@@ -276,7 +317,7 @@ pub(super) fn merge(
         };
         let block = &mut blocks[slot];
         apply(&mut block.declarations, &conditional.declaration);
-        for kept in gathered.longhands_kept_over(conditional) {
+        for kept in gathered.kept_over(conditional) {
             apply(&mut block.declarations, &kept);
         }
         block.won.retain(|won| won.key != conditional.declaration.key);
@@ -324,12 +365,8 @@ fn warn_when_fold_disagrees(blocks: &[Block], logged: &mut LoggedFolds) {
                 if !overruled || block.value_of(&won.key) == later.value_of(&won.key) {
                     continue;
                 }
-                if !logged.logged.insert((won.key.clone(), block.state, later.state)) {
+                if !logged.admit(&won.key, block.state, later.state) {
                     continue;
-                }
-                #[cfg(test)]
-                {
-                    logged.warnings += 1;
                 }
                 log::warn!(
                     "Stylesheet: `{}` is set under {} and {}, and while both apply {} wins, not the rule with the higher precedence",

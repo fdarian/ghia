@@ -25,7 +25,7 @@ use super::validate::Validator;
 use crate::css::lenient::number_text;
 
 /// How many distinct skipped rules are logged before the rest are summed up in one warning.
-const SKIP_LOG_LIMIT: usize = 1024;
+pub(super) const SKIP_LOG_LIMIT: usize = 1024;
 
 /// The class atoms of one element: a few sit inline.
 pub type ClassAtoms = smallvec::SmallVec<[Atom; 4]>;
@@ -69,8 +69,8 @@ pub struct StyleSheets {
     /// The skipped rules already logged, kept across reloads (every sheet is parsed again when
     /// one changes) so each is logged once.
     logged_skips: FxHashSet<String>,
-    /// The fold-order disagreements already logged since the sheets last loaded.
-    pub(crate) logged_folds: LoggedFolds,
+    /// The fold-order disagreements already logged, kept across reloads like `logged_skips`.
+    logged_folds: LoggedFolds,
     /// Whether the summary warning for the skips past `SKIP_LOG_LIMIT` was logged.
     skip_log_capped: bool,
     /// How many warnings `logged_skips` let through, for the tests.
@@ -191,7 +191,6 @@ impl StyleSheets {
             sheets.push(sheet);
         }
         self.index = RuleIndex::build(sheets, &layers.order(), self.style);
-        self.logged_folds.clear();
         self.interner = MatchedInterner::default();
         self.loaded = texts;
     }
@@ -283,6 +282,11 @@ impl StyleSheets {
         self.atoms = Atoms::default();
         self.style = self.atoms.intern("style");
         self.style_texts.get_mut().clear();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fold_warnings(&self) -> usize {
+        self.logged_folds.warnings
     }
 
     #[cfg(test)]

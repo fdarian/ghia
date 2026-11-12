@@ -2133,6 +2133,40 @@ mod states {
     }
 
     #[test]
+    fn a_surviving_state_shorthand_does_not_overwrite_what_an_overlapping_inline_declaration_sets_above_it() {
+        // The inline `border-top` is above the rule's `border-color` and only overlaps it: the
+        // rule still gives the other sides their colour, and the top keeps what the inline style says.
+        let (doc, div) = with(".a:hover { border-color: blue }", Some(r#"{"borderTop":"1px solid red"}"#));
+        let hover = block(&doc, div, "hover").expect("a hover block");
+        assert_eq!(hover.border_right_color.as_deref(), Some("blue"), "the other sides");
+        assert_eq!(hover.border_top.as_deref(), Some("1px solid red"), "declared after the colour, which is the top's too");
+
+        // The other way round: the inline `border-color` beats the top colour of the rule's `border-top`.
+        let (doc, div) = with(".a:hover { border-top: 2px solid blue }", Some(r#"{"borderColor":"red"}"#));
+        let hover = block(&doc, div, "hover").expect("a hover block");
+        assert_eq!(hover.border_top.as_deref(), Some("2px solid blue"), "the width and the style");
+        assert_eq!(hover.border_color.as_deref(), Some("red"), "declared after the side, so the top colour is red");
+    }
+
+    #[test]
+    fn an_important_inline_value_beats_the_inline_state_block_with_or_without_a_sheet() {
+        let inline = r#"{"color":"red !important","hover":{"color":"blue","opacity":0.5}}"#;
+        let (doc, div) = with(".a { top: 1px }", Some(inline));
+        let hover = block(&doc, div, "hover").expect("a hover block");
+        assert_eq!(hover.color, None, "with a sheet matching");
+        assert_eq!(hover.opacity, Some(0.5));
+
+        let mut doc = Doc::new();
+        let div = doc.classed("div", ROOT, "a");
+        doc.inline(div, inline);
+        doc.flush();
+        assert_eq!(doc.color(div), Some("red"));
+        let hover = block(&doc, div, "hover").expect("a hover block");
+        assert_eq!(hover.color, None, "with no sheet at all");
+        assert_eq!(hover.opacity, Some(0.5));
+    }
+
+    #[test]
     fn an_inline_state_block_splits_when_the_element_matches_a_sheet_whatever_the_rules_are_under() {
         // No rule is under a state, and the important sheet value still shadows the inline hover value.
         let (doc, div) = with(".a { color: green !important }", Some(r#"{"hover":{"color":"blue","opacity":0.5}}"#));
@@ -2164,14 +2198,46 @@ mod states {
         // `:hover` has the higher precedence and `:active` folds later.
         doc.style_element(ROOT, ".a:active { color: blue } .a:hover { color: red }");
         doc.flush();
-        assert_eq!(doc.tree.sheets.logged_folds.warnings, 1, "four elements, one message");
+        assert_eq!(doc.tree.sheets.fold_warnings(), 1, "four elements, one message");
 
         let mut doc = Doc::new();
         let div = doc.classed("div", ROOT, "a");
         doc.style_element(ROOT, ".a:active { color: red } .a:hover { color: red }");
         doc.flush();
         assert!(doc.style(div).is_some());
-        assert_eq!(doc.tree.sheets.logged_folds.warnings, 0, "equal values fold the same in either order");
+        assert_eq!(doc.tree.sheets.fold_warnings(), 0, "equal values fold the same in either order");
+    }
+
+    #[test]
+    fn a_reload_does_not_log_a_fold_disagreement_again() {
+        let mut doc = Doc::new();
+        doc.classed("div", ROOT, "a");
+        let (_, text) = doc.style_element(ROOT, ".a:active { color: blue } .a:hover { color: red }");
+        doc.flush();
+        assert_eq!(doc.tree.sheets.fold_warnings(), 1);
+
+        doc.tree.set_text(text, ".a:active { color: blue } .a:hover { color: red } .b { top: 1px }".to_owned());
+        doc.flush();
+        assert_eq!(doc.tree.sheets.fold_warnings(), 1, "the same pair after a reload");
+    }
+
+    #[test]
+    fn fold_disagreements_are_logged_up_to_a_cap_and_then_summed_up_once() {
+        let mut doc = Doc::new();
+        let limit = 1024;
+        doc.classed("div", ROOT, "a");
+        let rules = |count: usize| {
+            (0..count)
+                .map(|n| format!(".a:active {{ --p{n}: 1 }} .a:hover {{ --p{n}: 2 }} "))
+                .collect::<String>()
+        };
+        let (_, text) = doc.style_element(ROOT, &rules(limit));
+        doc.flush();
+        assert_eq!(doc.tree.sheets.fold_warnings(), limit);
+
+        doc.tree.set_text(text, rules(limit + 5));
+        doc.flush();
+        assert_eq!(doc.tree.sheets.fold_warnings(), limit + 1, "one summary, for the five past the cap");
     }
 
     #[test]

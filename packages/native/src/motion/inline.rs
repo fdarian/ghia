@@ -144,7 +144,7 @@ impl InlineStyles {
                     (Some(shown), _) => Cow::Borrowed(shown),
                     (None, Some(base)) => {
                         let folded = folded(base, states(*id, base));
-                        match super::resolve_vars(&folded, *id, &font, None) {
+                        match super::resolve_vars(&folded, &font) {
                             Some(resolved) => Cow::Borrowed(&*substituted.entry(*id).or_insert(resolved)),
                             None => folded,
                         }
@@ -173,7 +173,7 @@ fn is_moving(
         return true;
     };
     let at_rest = folded(style, states(id, style));
-    let at_rest = match super::resolve_vars(&at_rest, id, font, None) {
+    let at_rest = match super::resolve_vars(&at_rest, font) {
         Some(substituted) => Cow::Owned(substituted),
         None => at_rest,
     };
@@ -209,7 +209,6 @@ fn step(
         id,
         style,
         super::FocusLayers::default(),
-        None,
         None,
         InterpolateSize::default(),
         Scope::InlineBox,

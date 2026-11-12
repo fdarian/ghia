@@ -36,6 +36,7 @@ use serde_json::{Map, Value};
 use web_time::Instant;
 
 use crate::dormant_wake::Wake;
+use crate::focus::FocusLayers;
 use crate::style::StyleDesc;
 pub(crate) use curve::cubic_bezier;
 pub(crate) use inline::{InlineStyles, Timeline};
@@ -1356,20 +1357,6 @@ pub(super) fn state_styles(style: &StyleDesc) -> [(&'static str, Option<&StyleDe
     ]
 }
 
-/// Which focus refinements of an element apply, for the ones an element applies where it tracks
-/// focus. An inline box has them in its `PointerStates` instead.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct FocusLayers {
-    /// The element is focused: `focus`.
-    pub focused: bool,
-    /// The element or a descendant is focused: `focusWithin`.
-    pub within: bool,
-    /// A strict descendant matches `:focus-visible`: `hasFocusVisible`.
-    pub has_visible: bool,
-    /// The element itself matches `:focus-visible`: `focusVisible`.
-    pub visible: bool,
-}
-
 /// The style `style` has after the state styles that currently apply (the pointer and control
 /// ones, then the focus ones, in the order the build applies them), with the CSS transitions
 /// running on it laid on top (`transitions` is `None` for an element that
@@ -1396,7 +1383,6 @@ pub(crate) fn resolve_declared_style<'a>(
     id: u64,
     style: impl Into<StyleRef<'a>>,
     focus: FocusLayers,
-    focus_styles: Option<&crate::focus::FocusStyles>,
     measurement: Option<&Measurement>,
     interpolate_size: InterpolateSize,
     scope: Scope,
@@ -1408,22 +1394,17 @@ pub(crate) fn resolve_declared_style<'a>(
         // source then.
         match (before, svg_before) {
             (before, Some(svg_before)) => {
-                let before = with_vars(
-                    fold_state_styles(before.unwrap_or(&StyleDesc::default()), focus, pointer),
-                    id,
-                    parent_font,
-                    focus_styles,
-                );
+                let before = with_vars(fold_state_styles(before.unwrap_or(&StyleDesc::default()), focus, pointer), parent_font);
                 transitions.seed(id, &before, Some(svg_before), parent_colors, parent_font);
             }
             (Some(before), None) => {
-                let before = with_vars(fold_state_styles(before, focus, pointer), id, parent_font, focus_styles);
+                let before = with_vars(fold_state_styles(before, focus, pointer), parent_font);
                 transitions.seed(id, &before, svg, parent_colors, parent_font);
             }
             (None, None) => {}
         }
     }
-    let mut after = with_vars(fold_state_styles(style, focus, pointer), id, parent_font, focus_styles);
+    let mut after = with_vars(fold_state_styles(style, focus, pointer), parent_font);
     let covered = animations
         .map(|(animations, registry)| animations.advance(id, &after, registry, scope, now))
         .unwrap_or_default();
@@ -1459,37 +1440,22 @@ pub(crate) struct DeclaredStyle {
 /// `<svg>`) needs it too. Transitions and animations compare computed values, so a `--p` that
 /// changes is a change of the property, from the value the last style computed to the one this
 /// does.
-fn with_vars(
-    style: Arc<StyleDesc>,
-    id: u64,
-    parent_font: &ParentValues,
-    focus_styles: Option<&crate::focus::FocusStyles>,
-) -> Arc<StyleDesc> {
-    resolve_vars(&style, id, parent_font, focus_styles).map_or(style, Arc::new)
+fn with_vars(style: Arc<StyleDesc>, parent_font: &ParentValues) -> Arc<StyleDesc> {
+    resolve_vars(&style, parent_font).map_or(style, Arc::new)
 }
 
 /// What [`with_vars`] makes of `style`, or `None` when it holds nothing to substitute. A box with
 /// no transition, animation or `motion` that does not go through it calls this itself.
 ///
-/// `focus_styles` is the element's, which adds the custom properties of a `focusWithin` that
-/// applies (`FocusStyles::custom_of`, as the build does); a box has none, its focus variants are
-/// in its `PointerStates`. `focusable` is false there: the focus variants were
-/// folded into `style` and are gone from it.
-fn resolve_vars(
-    style: &StyleDesc,
-    id: u64,
-    parent_font: &ParentValues,
-    focus_styles: Option<&crate::focus::FocusStyles>,
-) -> Option<StyleDesc> {
+/// The custom properties of a focus variant that applies are already `style`'s: the variants are
+/// folded into it (and gone from it) before it gets here, and a box has them in its
+/// `PointerStates`.
+fn resolve_vars(style: &StyleDesc, parent_font: &ParentValues) -> Option<StyleDesc> {
     if !crate::css::var_substitution::reads_vars(style) {
         return None;
     }
     crate::css::custom_properties::reads::note();
-    let custom = match focus_styles {
-        Some(focus_styles) => focus_styles.custom_of(id, style, false, &parent_font.custom),
-        None => parent_font.custom_of(style),
-    };
-    crate::css::var_substitution::resolve(style, &custom)
+    crate::css::var_substitution::resolve(style, &parent_font.custom_of(style))
 }
 
 /// The style as `style` has it after the state styles that apply. Shared with `style` when it
@@ -1497,7 +1463,8 @@ fn resolve_vars(
 /// frame.
 ///
 /// The order is the build's for an element that declares no transition: the pointer and control
-/// layers (`resolve_pointer_states`), then the focus ones as `FocusStyles::applying` has them.
+/// layers (`resolve_pointer_states`), then the focus ones as `FocusLayers::over` has them. A
+/// focus variant that does not apply stays on the shared style, where nothing reads it.
 fn fold_state_styles<'a>(
     style: impl Into<StyleRef<'a>>,
     focus: FocusLayers,
@@ -1506,23 +1473,11 @@ fn fold_state_styles<'a>(
     use crate::events::state_styles::{is_overlay_fixed_point, overlay, resolve_pointer_states};
 
     let style = style.into();
-    if !pointer.any()
-        && is_overlay_fixed_point(&style)
-        && style.focus.is_none()
-        && style.focus_within.is_none()
-        && style.has_focus_visible.is_none()
-        && style.focus_visible.is_none()
-    {
+    if !pointer.any() && is_overlay_fixed_point(&style) && focus.over(&style).next().is_none() {
         return style.share();
     }
-    let layers = [
-        (style.focus.as_deref(), focus.focused),
-        (style.focus_within.as_deref(), focus.within),
-        (style.has_focus_visible.as_deref(), focus.has_visible),
-        (style.focus_visible.as_deref(), focus.visible),
-    ];
     let mut after = resolve_pointer_states(&style, pointer);
-    for declared in layers.into_iter().filter_map(|(declared, applies)| declared.filter(|_| applies)) {
+    for declared in focus.over(&style) {
         after = overlay(&after, declared);
     }
     after.focus = None;
@@ -3736,14 +3691,18 @@ mod tests {
         let plain = Arc::new(serde_json::from_str::<StyleDesc>(r##"{ "color": "#000000", "opacity": 1 }"##).unwrap());
         let rest = fold_state_styles(&plain, FocusLayers::default(), Default::default());
         assert!(Arc::ptr_eq(&rest, &plain));
-        // `focusVisible` is declared but the element is not focus-visible.
+        // A focus variant is declared and no layer applies: nothing to fold, so no copy of the ~13 KB style.
         let focusable = Arc::new(
-            serde_json::from_str::<StyleDesc>(r##"{ "color": "#000000", "focusVisible": { "color": "#111111" } }"##).unwrap(),
+            serde_json::from_str::<StyleDesc>(
+                r##"{ "color": "#000000", "focus": { "color": "#111111" }, "focusWithin": { "color": "#222222" }, "focusVisible": { "color": "#333333" } }"##,
+            )
+            .unwrap(),
         );
         let unfocused = fold_state_styles(&focusable, FocusLayers::default(), Default::default());
-        assert!(!Arc::ptr_eq(&unfocused, &focusable), "the style still holds a state style to clear");
-        assert_eq!(unfocused.focus_visible, None);
-        assert_eq!(unfocused.color.as_deref(), Some("#000000"));
+        assert!(Arc::ptr_eq(&unfocused, &focusable));
+        let focused = fold_state_styles(&focusable, FocusLayers { within: true, ..Default::default() }, Default::default());
+        assert!(!Arc::ptr_eq(&focused, &focusable));
+        assert_eq!((focused.color.as_deref(), focused.focus_within.is_none()), (Some("#222222"), true));
     }
 
     #[test]
@@ -3785,7 +3744,6 @@ mod tests {
             1,
             &plain,
             FocusLayers::default(),
-            None,
             None,
             InterpolateSize::default(),
             Scope::Element,
@@ -6267,7 +6225,6 @@ mod tests {
                 1,
                 style,
                 FocusLayers::default(),
-                None,
                 None,
                 InterpolateSize::default(),
                 Scope::Element,

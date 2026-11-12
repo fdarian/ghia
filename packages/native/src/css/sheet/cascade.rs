@@ -22,6 +22,7 @@ use super::states::{self, Applies, RuleMatch};
 
 /// The rules an element matched. Equal lists share one allocation, so two elements that match
 /// the same rules compare by pointer and share a cascaded style.
+#[derive(Default)]
 pub struct MatchedRules {
     /// The rules in the order their normal declarations apply.
     pub normal: Vec<Applies>,

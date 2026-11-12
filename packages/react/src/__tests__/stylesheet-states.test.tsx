@@ -108,12 +108,60 @@ describe.skipIf(!hasNativeTestRenderer)("state pseudo-classes in a stylesheet in
     app.renderer.clockFastForward(1000)
     expect(widthOf("field"), "focus-visible is above focus, as without a transition").toBe(130)
 
+    app.renderer.blurElement(idOf("field"))
+    app.renderer.clockFastForward(500)
+    expect(widthOf("field"), "back from :focus-visible").toBeGreaterThan(105)
+    expect(widthOf("field")).toBeLessThan(125)
+    app.renderer.clockFastForward(1000)
+    expect(widthOf("field")).toBe(100)
+
     app.renderer.focusElement(idOf("inner"))
     app.renderer.clockFastForward(500)
     expect(widthOf("group")).toBeGreaterThan(125)
     expect(widthOf("group")).toBeLessThan(135)
     app.renderer.clockFastForward(1000)
     expect(widthOf("group")).toBe(160)
+
+    app.renderer.blurElement(idOf("inner"))
+    app.renderer.clockFastForward(500)
+    expect(widthOf("group"), "back from :focus-within").toBeGreaterThan(125)
+    expect(widthOf("group")).toBeLessThan(135)
+    app.renderer.clockFastForward(1000)
+    expect(widthOf("group")).toBe(100)
+  })
+
+  it("hands what :focus-within sets to the children, with a transition on the element and without", () => {
+    app.renderer.clockPause()
+    app.render(
+      <div>
+        <style>{`
+          .card { font-size: 10px; width: 100px; height: 60px }
+          .card:focus-within { font-size: 20px }
+          .moving { transition: width 1s linear }
+        `}</style>
+        <div testId="plain" className="card">
+          <input testId="plain-input" style={{ width: 40, height: 20 }} />
+          <div testId="plain-child" style={{ width: "5em", height: 10 }} />
+        </div>
+        <div testId="moving" className="card moving">
+          <input testId="moving-input" style={{ width: 40, height: 20 }} />
+          <div testId="moving-child" style={{ width: "5em", height: 10 }} />
+        </div>
+      </div>
+    )
+    const childWidth = (testId: string) => {
+      app.renderer.dispatchNativeEvents()
+      return app.renderer.getElementBounds(idOf(testId))!.width
+    }
+    expect([childWidth("plain-child"), childWidth("moving-child")]).toEqual([50, 50])
+    for (const card of ["plain", "moving"]) {
+      app.renderer.focusElement(idOf(`${card}-input`))
+      app.renderer.clockFastForward(16)
+      expect(childWidth(`${card}-child`), card).toBe(100)
+      app.renderer.blurElement(idOf(`${card}-input`))
+      app.renderer.clockFastForward(16)
+      expect(childWidth(`${card}-child`), card).toBe(50)
+    }
   })
 
   it("applies :focus-within to an ancestor of the focused element", () => {
@@ -143,6 +191,43 @@ describe.skipIf(!hasNativeTestRenderer)("state pseudo-classes in a stylesheet in
     app.renderer.nativeSimulateMouseMove(...centre("btn"))
     expect(widthOf("btn")).toBe(100)
     expect(app.renderer.getElementBounds(idOf("btn"))!.height).toBe(40)
+  })
+
+  it("keeps an inline side border over a sheet :hover border-width, and an inline border-width over a :hover side", () => {
+    app.render(
+      <div>
+        <style>{`
+          .sides:hover { border-width: 5px; border-style: solid }
+          .all:hover { border-left: 6px solid blue }
+        `}</style>
+        <div testId="sides" className="sides" style={{ width: 100, height: 30, borderLeft: "2px solid red" }}>
+          <div testId="sides-inner" style={{ width: "100%", height: 10 }} />
+        </div>
+        <div testId="all" className="all" style={{ width: 100, height: 30, borderWidth: 2, borderStyle: "solid" }}>
+          <div testId="all-inner" style={{ width: "100%", height: 10 }} />
+        </div>
+      </div>
+    )
+    // The borders are inside the width, so what they leave is the width of what the box holds.
+    expect([widthOf("sides-inner"), widthOf("all-inner")]).toEqual([98, 96])
+    app.renderer.nativeSimulateMouseMove(...centre("sides"))
+    expect(widthOf("sides-inner"), "the left stays 2, the right is 5").toBe(93)
+    app.renderer.nativeSimulateMouseMove(...centre("all"))
+    expect(widthOf("all-inner"), "the inline border-width beats the left of the rule").toBe(96)
+  })
+
+  it("lets an inline !important value beat the inline hover block, whether or not a sheet matches the element", () => {
+    app.render(
+      <div>
+        <style>{`.matched { height: 30px }`}</style>
+        <div testId="bare" style={{ width: "100px !important", height: 30, hover: { width: 150 } }} />
+        <div testId="matched" className="matched" style={{ width: "100px !important", hover: { width: 150 } }} />
+      </div>
+    )
+    for (const testId of ["bare", "matched"]) {
+      app.renderer.nativeSimulateMouseMove(...centre(testId))
+      expect(widthOf(testId), testId).toBe(100)
+    }
   })
 
   it("lets a more specific base rule beat a :hover rule", () => {
