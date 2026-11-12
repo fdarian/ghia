@@ -39,7 +39,7 @@ describeNative('Base UI Menu', () => {
     expect(trigger().getAttribute('aria-haspopup')).toBe('menu')
 
     await click(app, trigger())
-    await settle(app, 60)
+    await settle(app)
     expect(query('[role="menu"]')).toBe(query('[data-testid="popup"]'))
     expect(queryAll('[role="menuitem"]').map((item) => item.textContent)).toEqual(['Cut', 'Copy', 'Paste', 'Delete'])
     expect(trigger().getAttribute('aria-expanded')).toBe('true')
@@ -54,7 +54,7 @@ describeNative('Base UI Menu', () => {
   it('moves the highlight with the arrow keys and wraps, and a disabled item takes the highlight but not a press', async () => {
     const app = mount(<Single />)
     await click(app, trigger())
-    await settle(app, 60)
+    await settle(app)
     const highlighted = () => queryAll('[role="menuitem"][data-highlighted]').map((item) => item.textContent)
 
     await press(app, 'ArrowDown')
@@ -95,7 +95,7 @@ describeNative('Base UI Menu', () => {
       <Single onAction={(name) => actions.push(name)} onOpenChange={(open, details) => changes.push([open, details.reason])} />,
     )
     await click(app, trigger())
-    await settle(app, 60)
+    await settle(app)
     await press(app, 'ArrowDown')
     await press(app, 'ArrowDown')
     await press(app, 'Enter')
@@ -109,7 +109,7 @@ describeNative('Base UI Menu', () => {
     const actions: string[] = []
     const app = mount(<Single onAction={(name) => actions.push(name)} />)
     await click(app, trigger())
-    await settle(app, 60)
+    await settle(app)
     await click(app, byText('Paste', '[role="menuitem"]'))
     expect(actions).toEqual([])
     expect(exists('[role="menu"]')).toBe(true)
@@ -121,7 +121,7 @@ describeNative('Base UI Menu', () => {
   it('highlights the item whose name is typed', async () => {
     const app = mount(<Single />)
     await click(app, trigger())
-    await settle(app, 60)
+    await settle(app)
     await press(app, 'd')
     expect(queryAll('[role="menuitem"][data-highlighted]').map((item) => item.textContent)).toEqual(['Delete'])
   })
@@ -130,7 +130,7 @@ describeNative('Base UI Menu', () => {
     const changes: Array<[boolean, string]> = []
     const app = mount(<Single onOpenChange={(open, details) => changes.push([open, details.reason])} />)
     await click(app, trigger())
-    await settle(app, 60)
+    await settle(app)
     await click(app, byText('Page text'))
     expect(exists('[role="menu"]')).toBe(false)
     expect(changes[changes.length - 1]).toEqual([false, 'outside-press'])
@@ -203,13 +203,13 @@ describeNative('Base UI Menu with several triggers sharing one popup', () => {
       </div>,
     )
     await click(app, byText('File', 'button'))
-    await settle(app, 60)
+    await settle(app)
     expect(queryAll('[role="menuitem"]').map((item) => item.textContent)).toEqual(['New'])
     await click(app, byText('Edit', 'button'))
-    await settle(app, 100)
+    await settle(app)
     expect(exists('[role="menu"]')).toBe(false)
     await click(app, byText('Edit', 'button'))
-    await settle(app, 60)
+    await settle(app)
     expect(queryAll('[role="menuitem"]').map((item) => item.textContent)).toEqual(['Undo'])
   })
 
@@ -220,7 +220,7 @@ describeNative('Base UI Menu with several triggers sharing one popup', () => {
     const edit = byText('Edit', 'button')
 
     await click(app, file)
-    await settle(app, 60)
+    await settle(app)
     expect(queryAll('[role="menuitem"]').map((item) => item.textContent)).toEqual(['New', 'Open'])
     expect(file.getAttribute('aria-expanded')).toBe('true')
     const first = box(query('[data-testid="popup"]'))
@@ -228,7 +228,7 @@ describeNative('Base UI Menu with several triggers sharing one popup', () => {
 
     await click(app, edit)
     expect(query('[data-testid="viewport"]').getAttribute('data-activation-direction')).toContain('right')
-    await settle(app, 400)
+    await settle(app)
     expect(queryAll('[data-testid="popup"]').length).toBe(1)
     expect(queryAll('[role="menuitem"]').map((item) => item.textContent)).toEqual(['Undo', 'Redo', 'Cut'])
     expect(edit.getAttribute('aria-expanded')).toBe('true')

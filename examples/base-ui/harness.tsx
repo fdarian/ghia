@@ -22,15 +22,25 @@ export function mount(ui: ReactNode, size = { width: 640, height: 480 }): App {
   return app
 }
 
-/** Lets timers, animation frames and the reconciler's follow-up renders run, as a user's pause does. */
-export async function settle(app: App, milliseconds = 30): Promise<void> {
-  for (let elapsed = 0; elapsed <= milliseconds; elapsed += 10) {
+/**
+ * One turn of the event loop and one frame: the timers and promise chains that were due run, native hands JS the
+ * events it queued meanwhile (a focus that a microtask moved), and the display link steps once. No wall-clock time
+ * passes, so a commit that only lands after `settle` is asynchronous in an app too.
+ */
+export async function settle(app: App): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  app.renderer.dispatchNativeEvents()
+  app.renderer.advanceTime(10)
+  app.renderer.drawFrame()
+  app.renderer.flush()
+}
+
+/** Real time passing, as a delay in the library under test does (a tooltip's open delay is a JS timer), a frame at a time. */
+export async function wait(app: App, milliseconds: number): Promise<void> {
+  const end = performance.now() + milliseconds
+  while (performance.now() < end) {
     await new Promise((resolve) => setTimeout(resolve, 10))
-    // Hands JS the events native queued meanwhile (a focus that a microtask moved).
-    app.renderer.dispatchNativeEvents()
-    app.renderer.advanceTime(10)
-    app.renderer.drawFrame()
-    app.renderer.flush()
+    await settle(app)
   }
 }
 
@@ -74,12 +84,12 @@ export function center(element: Element): { x: number; y: number } {
 }
 
 /**
- * A real click: the pointer goes down, stays a moment (a person's press lasts far longer than the
- * zero-delay timers libraries use to tell one press from the next), and comes up, over the point.
+ * A real click: the pointer goes down, stays for a frame (libraries tell one press from the next with zero-delay
+ * timers, and a person's press lasts longer than a turn of the event loop), and comes up, over the point.
  */
 export async function clickAt(app: App, x: number, y: number): Promise<void> {
   app.renderer.nativeSimulateMouseDown(x, y)
-  await settle(app, 20)
+  await settle(app)
   app.renderer.nativeSimulateMouseUp(x, y)
   await settle(app)
 }
@@ -108,9 +118,8 @@ export async function hoverNothing(app: App): Promise<void> {
 export async function press(app: App, keys: string): Promise<void> {
   for (const key of keys.split(' ')) {
     app.renderer.simulateKeystrokes(key)
-    await settle(app, 10)
+    await settle(app)
   }
-  await settle(app)
 }
 
 export async function focus(app: App, element: HTMLElement): Promise<void> {
