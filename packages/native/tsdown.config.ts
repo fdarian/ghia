@@ -11,5 +11,6 @@ export default defineConfig({
 	fixedExtension: false,
 	outDir: "dist",
 	tsconfig: "tsconfig.json",
-	external: ["@ghia/native"],
+	// `../index.js` is the napi loader beside the .node; bundling a copy into dist/ breaks its relative .node lookup.
+	external: ["@ghia/native", /^\.\.\/index\.js$/],
 });
