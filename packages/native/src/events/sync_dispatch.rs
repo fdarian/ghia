@@ -630,6 +630,27 @@ mod tests {
         assert!(!in_sync_call());
     }
 
+    /// Enters `depth` more nested sync calls, then runs `at_depth`.
+    fn nested<R>(depth: usize, at_depth: impl FnOnce() -> R) -> R {
+        if depth == 0 {
+            return at_depth();
+        }
+        run_without_window(|| nested(depth - 1, at_depth))
+    }
+
+    #[test]
+    fn the_seventeenth_nested_sync_call_is_refused_and_the_depth_resets_after_unwinding() {
+        assert_eq!(nesting_overflow(), None);
+        // Sixteen calls are in flight when the seventeenth asks, which is refused.
+        assert_eq!(nested(MAX_SYNC_DEPTH - 1, nesting_overflow), None, "the sixteenth is allowed");
+        let refused = nested(MAX_SYNC_DEPTH, nesting_overflow).expect("the seventeenth is refused");
+        assert!(refused.starts_with("Maximum call stack size exceeded"), "{refused}");
+        assert!(refused.contains(&format!("nested {MAX_SYNC_DEPTH} deep")), "{refused}");
+        assert!(!in_sync_call(), "every guard released its level");
+        assert_eq!(nesting_overflow(), None);
+        assert_eq!(nested(MAX_SYNC_DEPTH - 1, nesting_overflow), None, "the full depth is available again");
+    }
+
     #[test]
     fn each_drop_effect_is_its_operation() {
         assert_eq!(drag_operation("none"), Ok(DragOperation::None));
