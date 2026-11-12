@@ -9620,7 +9620,29 @@ await animation.finished
   `ready`, `finished`, `onfinish`, `oncancel`, `effect.getKeyframes()`,
   `getTiming()` and `updateTiming()`. `id` is the `id` option. It plays from the next
   frame (`pending` until then) and no style owns it: a change of `animation` or
-  `transition` leaves it alone, and `display: none` does not cancel it.
+  `transition` leaves it alone, and neither `display: none` nor removing the element
+  cancels it. A removed element's animation goes on with the clock against the
+  element, and `finished` resolves on time (never with an `AbortError`). As in
+  Chrome, the element lists nothing while it is out of the tree (`getAnimations()`
+  is `[]`, and `document.getAnimations()` does not have it either), and if it is
+  inserted again the animation is still animating, where the clock took it, or lists
+  again as finished if a `fill` holds its effect. As in Chrome, where the timeline holds a
+  running or paused animation, an infinite or paused `element.animate()` on a removed
+  element keeps running and keeps its element and its native state until it is
+  cancelled: cancel it when you drop the element. One that is finished with a `fill`
+  is held by its element, so an element inserted again lists it; a finished one with no
+  `fill` and a cancelled one are held only while JS holds them, and until
+  the `finish` or `cancel` event they owe is told, which an app that dropped the
+  animation still gets. Its CSS animations and transitions do end
+  with the removal, as in CSS. `element.animate()` on an element that is not in the
+  tree throws, where Chrome animates it ([deviations](fork/deviations.md#motion)).
+- **`getKeyframes()`** answers at once, before any frame. `offset` is `null` for a
+  keyframe that was given none (`computedOffset` is its place), values are written
+  as `getKeyframes()` writes a CSS animation's: a `translate` of `0px 0px` is `0px`
+  and its `0px` depth is left out, as CSS serializes it. A transition that was
+  retargeted while it ran (the `translate` dnd-kit moves a sortable item with)
+  gives the value it was at as its start, in `translate3d()`, `scale3d()` and
+  the other 3D functions as it needs.
 - **How it shows.** Sampled and interpolated as `@keyframes` are, by the same
   engine: the property table of CSS animations, the same easing parser, the same
   timing model. The animations of scripts play above the CSS animations of the

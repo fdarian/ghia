@@ -2758,6 +2758,12 @@ export interface WebAnimationInfo {
    * of the animations reads (`getAnimationTimelineTime`). `null` while it has none.
    */
   startTime?: number
+  /**
+   * The run is a script's on an element that is not in the tree: it runs on with the clock and shows again if the
+   * element is made again. Read from the tree when asked, so a removal or an insertion not yet swept by a frame is
+   * seen. Only `getAnimation` says; a listing is of elements in the tree.
+   */
+  orphaned: boolean
 }
 
 /** One keyframe of a CSS animation or transition, as `getKeyframes()` has it. */

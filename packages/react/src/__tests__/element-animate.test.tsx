@@ -2,7 +2,7 @@
  * `element.animate()` on elements React renders, as `@dnd-kit/dom` uses it: cancel what runs, animate
  * `translate` with a duration and an easing, await `finished`, pause and finish.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { getComputedStyle } from "@ghia/native/host"
 import { Animation } from "../index"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
@@ -29,6 +29,17 @@ describeNative("element.animate() in React", () => {
     return box as unknown as HTMLElement
   }
 
+  /** A box that transitions `translate`, which `setTranslate` changes as a re-render does. */
+  function mountTransitioning(): { box: HTMLElement; setTranslate: (value: string) => void } {
+    let box: PublicInstance | null = null
+    const element = (translate: string) => (
+      <div ref={(instance) => (box = instance ?? box)} style={{ width: 40, height: 40, transition: "translate 1s linear", translate }} />
+    )
+    testRoot.render(element("none"))
+    testRoot.renderer.clockFastForward(0)
+    return { box: box as unknown as HTMLElement, setTranslate: (value) => testRoot.render(element(value)) }
+  }
+
   const translate = (box: HTMLElement) => getComputedStyle(box).getPropertyValue("translate")
   const frame = (milliseconds: number) => {
     testRoot.renderer.clockFastForward(milliseconds)
@@ -42,11 +53,11 @@ describeNative("element.animate() in React", () => {
     expect(animation.effect?.target).toBe(box)
     frame(0)
     frame(500)
-    expect(translate(box)).toBe("50px 0px")
+    expect(translate(box)).toBe("50px")
     expect(animation.playState).toBe("running")
     expect(box.getAnimations()).toEqual([animation])
     frame(250)
-    expect(translate(box)).toBe("75px 0px")
+    expect(translate(box)).toBe("75px")
   })
 
   it("takes the array form with offsets and a number as the duration", () => {
@@ -76,7 +87,7 @@ describeNative("element.animate() in React", () => {
     frame(0)
     frame(500)
     await animation.finished
-    expect(translate(box)).toBe("100px 0px")
+    expect(translate(box)).toBe("100px")
     expect(box.getAnimations()).toEqual([animation])
   })
 
@@ -88,7 +99,7 @@ describeNative("element.animate() in React", () => {
     animation.finish()
     frame(16)
     await expect(animation.finished).resolves.toBe(animation)
-    expect(translate(box)).toBe("100px 0px")
+    expect(translate(box)).toBe("100px")
   })
 
   it("pause() holds the value while time passes", () => {
@@ -100,7 +111,7 @@ describeNative("element.animate() in React", () => {
     frame(16)
     frame(5000)
     expect(animation.playState).toBe("paused")
-    expect(translate(box)).toBe("25px 0px")
+    expect(translate(box)).toBe("25px")
   })
 
   it("cancel() rejects finished with an AbortError and removes the effect", async () => {
@@ -129,7 +140,7 @@ describeNative("element.animate() in React", () => {
     const animation = box.animate({ translate: ["0px 0px", "60px 0px"] }, { duration: 200, easing: "linear" })
     frame(0)
     frame(100)
-    expect(translate(box)).toBe("30px 0px")
+    expect(translate(box)).toBe("30px")
     frame(200)
     await animation.finished
     expect(box.getAnimations()).toEqual([])
@@ -151,5 +162,131 @@ describeNative("element.animate() in React", () => {
     expect(() => box.animate([{ opacity: 0, easing: "wobble" }, { opacity: 1 }], 100)).toThrow(TypeError)
     const animation = box.animate({ nonsense: ["a", "b"], opacity: [0, 1] }, 100)
     expect(animation.effect?.getKeyframes().every((keyframe) => !("nonsense" in keyframe))).toBe(true)
+  })
+
+
+  it("answers getKeyframes() of a script animation at once, as the DOM does", () => {
+    const box = mount()
+    const animation = box.animate([{ translate: "0px 0px" }, { translate: "10px 20px" }], 200)
+    expect(animation.effect?.getKeyframes()).toEqual([
+      { offset: null, computedOffset: 0, easing: "linear", composite: "auto", translate: "0px" },
+      { offset: null, computedOffset: 1, easing: "linear", composite: "auto", translate: "10px 20px" },
+    ])
+    const given = box.animate({ translate: ["1px 2px 0", "3px 4px 5px"], offset: [0, 1] }, 200)
+    expect(given.effect?.getKeyframes().map((keyframe) => [keyframe.offset, keyframe.computedOffset, keyframe.translate])).toEqual([
+      [0, 0, "1px 2px"],
+      [1, 1, "3px 4px 5px"],
+    ])
+  })
+
+  it("answers getKeyframes() of a translate transition that was retargeted while it ran", () => {
+    const { box, setTranslate } = mountTransitioning()
+    setTranslate("10px 20px 0")
+    frame(0)
+    frame(100)
+    setTranslate("50px 60px 0")
+    frame(0)
+    frame(100)
+    const [transition] = box.getAnimations()
+    expect(transition?.effect?.getKeyframes().map((keyframe) => keyframe.translate)).toEqual(["1px 2px", "50px 60px"])
+  })
+
+  async function settle(): Promise<void> {
+    await Promise.resolve()
+    await Promise.resolve()
+    testRoot.renderer.flush()
+  }
+
+  it("leaves a script animation running when its element is removed, and finished resolves on time", async () => {
+    const box = mount()
+    const animation = box.animate({ translate: ["0px 0px", "100px 0px"] }, { duration: 1000, easing: "linear" })
+    const rejected = vi.fn()
+    animation.finished.catch(rejected)
+    frame(0)
+    frame(250)
+    box.remove()
+    await settle()
+    frame(0)
+    frame(250)
+    expect(animation.playState).toBe("running")
+    expect(animation.currentTime).toBe(500)
+    // As in Chrome, a disconnected element lists nothing, though its animation goes on.
+    expect(box.getAnimations()).toEqual([])
+    expect(document.getAnimations()).not.toContain(animation)
+    frame(600)
+    await expect(animation.finished).resolves.toBe(animation)
+    expect(animation.playState).toBe("finished")
+    expect(rejected).not.toHaveBeenCalled()
+  })
+
+  it("shows a script animation of an element that is inserted again where the clock took it", async () => {
+    const box = mount()
+    const animation = box.animate({ translate: ["0px 0px", "100px 0px"] }, { duration: 1000, easing: "linear" })
+    frame(0)
+    frame(250)
+    box.remove()
+    await settle()
+    frame(0)
+    frame(250)
+    expect(box.getAnimations()).toEqual([])
+    document.body!.appendChild(box)
+    await settle()
+    frame(0)
+    expect(animation.playState).toBe("running")
+    expect(translate(box)).toBe("50px")
+    frame(250)
+    expect(translate(box)).toBe("75px")
+    expect(box.getAnimations()).toEqual([animation])
+    frame(500)
+    await expect(animation.finished).resolves.toBe(animation)
+  })
+
+  it("lets a script animation cancelled after its element was removed play again", async () => {
+    const box = mount()
+    const animation = box.animate({ translate: ["0px 0px", "100px 0px"] }, { duration: 1000, easing: "linear" })
+    frame(0)
+    frame(250)
+    box.remove()
+    await settle()
+    frame(0)
+    animation.cancel()
+    frame(16)
+    expect(animation.playState).toBe("idle")
+    animation.play()
+    frame(16)
+    expect(animation.playState).toBe("running")
+    frame(1100)
+    await expect(animation.finished).resolves.toBe(animation)
+  })
+
+  it("lists a finished script animation that fills again when its element is inserted again", async () => {
+    const box = mount()
+    const animation = box.animate({ translate: ["0px 0px", "100px 0px"] }, { duration: 200, fill: "forwards" })
+    frame(0)
+    frame(100)
+    box.remove()
+    await settle()
+    frame(0)
+    frame(300)
+    await animation.finished
+    expect(box.getAnimations()).toEqual([])
+    document.body!.appendChild(box)
+    await settle()
+    frame(0)
+    expect(box.getAnimations()).toEqual([animation])
+    expect(translate(box)).toBe("100px")
+  })
+
+  it("still cancels the CSS animations of an element that is removed", async () => {
+    const { box, setTranslate } = mountTransitioning()
+    setTranslate("100px 20px 0")
+    frame(0)
+    frame(100)
+    const [transition] = box.getAnimations()
+    expect(transition?.playState).toBe("running")
+    box.remove()
+    await settle()
+    frame(0)
+    expect(transition?.playState).toBe("idle")
   })
 })

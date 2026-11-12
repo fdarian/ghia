@@ -3209,7 +3209,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn update_animation_timing(&self, animation_id: f64, timing: crate::renderer::WebAnimationTimingUpdate) -> Result<()> {
         let id = to_element_id(animation_id)?;
-        self.with_motion_state(Repaint::Layout, move |view, now| view.update_web_animation_timing(id, timing, now))
+        self.with_motion_state(Repaint::WebAnimation(id), move |view, now| view.update_web_animation_timing(id, timing, now))
     }
 
     /// See the renderer's `releaseAnimation`.
@@ -3300,7 +3300,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn set_animation_start_time(&self, animation_id: f64, start_time: Option<f64>) -> Result<()> {
         let id = to_element_id(animation_id)?;
-        self.with_motion_state(Repaint::Layout, move |view, now| {
+        self.with_motion_state(Repaint::WebAnimation(id), move |view, now| {
             view.set_web_animation_start_time(id, start_time, now)
         })
     }
@@ -3319,7 +3319,7 @@ impl TestGpuixRenderer {
         command: crate::motion::web_animation::Command,
     ) -> Result<()> {
         let id = to_element_id(animation_id)?;
-        self.with_motion_state(Repaint::Layout, move |view, now| view.command_web_animation(id, command, now))
+        self.with_motion_state(Repaint::WebAnimation(id), move |view, now| view.command_web_animation(id, command, now))
     }
 
     /// Runs `run` against the window's motion values at the window clock's
