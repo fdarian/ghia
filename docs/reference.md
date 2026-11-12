@@ -5488,7 +5488,9 @@ Key and focus handlers run in the middle of a native call, and may still use the
 renderer: `focusElement`, `scrollTo`, `getScrollOffset`, the clipboard,
 `promptForPaths`, `getWindowSize`, `getA11yTree` and the `setWindow*` calls all
 run against the window being dispatched. A handler that throws is reported like
-any other event error and the next handler still runs.
+any other event error and the next handler still runs. Handlers that trigger each
+other (a `focus` handler that moves focus to an element whose `focus` handler moves
+it back) stop at 16 nested calls: [deviations](./fork/deviations.md#events-and-input).
 
 `mousedown`, `pointerdown`, `mouseup`, `pointerup`, `click` and `wheel` handlers
 run the same way on macOS and in the test renderer. The input does not hold the
