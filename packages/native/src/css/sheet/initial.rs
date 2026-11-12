@@ -148,21 +148,30 @@ const UNREPRESENTABLE: [(&str, &str); 7] = [
     ("lineClamp", "none"),
 ];
 
-/// Whether `declaration` is its property's initial value written as a keyword, which the cascade
-/// then reads as `initial`. A value the style parser has no form for (`z-index: auto`,
-/// `max-width: none`) could not otherwise take back an earlier rule's value.
-pub(super) fn is_initial_keyword(declaration: &Declaration) -> bool {
+/// Whether `declaration` is the initial value of a property in [`UNREPRESENTABLE`] written as its
+/// keyword (`max-width: none`).
+pub(super) fn is_unrepresentable_initial(declaration: &Declaration) -> bool {
     let Ok(written) = serde_json::from_str::<String>(&declaration.value) else {
         return false;
     };
     let written = written.trim();
-    if UNREPRESENTABLE.iter().any(|(key, keyword)| *key == declaration.key && written.eq_ignore_ascii_case(keyword)) {
+    UNREPRESENTABLE.iter().any(|(key, keyword)| *key == declaration.key && written.eq_ignore_ascii_case(keyword))
+}
+
+/// Whether `declaration` is its property's initial value written as a keyword, which the cascade
+/// then reads as `initial`. A value the style parser has no form for (`z-index: auto`,
+/// `max-width: none`) could not otherwise take back an earlier rule's value.
+pub(super) fn is_initial_keyword(declaration: &Declaration) -> bool {
+    if is_unrepresentable_initial(declaration) {
         return true;
     }
+    let Ok(written) = serde_json::from_str::<String>(&declaration.value) else {
+        return false;
+    };
     covers::key_id(&declaration.key)
         .and_then(of)
         .and_then(|initial| serde_json::from_str::<String>(&initial.value).ok())
-        .is_some_and(|keyword| written.eq_ignore_ascii_case(&keyword))
+        .is_some_and(|keyword| written.trim().eq_ignore_ascii_case(&keyword))
 }
 
 #[cfg(test)]

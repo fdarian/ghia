@@ -1292,7 +1292,7 @@ pub struct StyleDesc {
     /// universal style) set. Set when the style is interned (`css::sheet::wide_keyword`), never by
     /// JS, and consumed by `overlay`.
     #[serde(skip)]
-    pub reset: Option<std::sync::Arc<Vec<String>>>,
+    pub reset: Option<std::sync::Arc<[String]>>,
     /// Counts the clones of this struct for the test renderer. Carries no data.
     #[serde(skip)]
     pub clone_probe: crate::perf_counters::CloneProbe<{ crate::perf_counters::STYLE_DESC }>,
@@ -1374,6 +1374,8 @@ impl StyleDesc {
             hover, active, focus_visible, focus_within, group_hover, group_active, group_focus_within,
             has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
         );
+        // What a style reset below it is already in the style it was laid over: no box reads it.
+        painted.reset = other.reset.clone();
         painted.opacity = other.opacity;
         painted.box_shadow = other.box_shadow.clone();
         painted.color = other.color.clone();
@@ -1911,6 +1913,18 @@ mod tests {
 
     fn style(json: &str) -> StyleDesc {
         serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn a_reset_list_is_no_layout_change() {
+        let mut unset = style(r##"{"width":1}"##);
+        unset.reset = Some(["color".to_owned()].into());
+        let red = style(r##"{"width":1,"color":"red"}"##);
+        assert!(unset.differs_only_in_paint(&red));
+        assert!(red.differs_only_in_paint(&unset));
+        let mut wider = style(r##"{"width":2}"##);
+        wider.reset = unset.reset.clone();
+        assert!(!unset.differs_only_in_paint(&wider));
     }
 
     #[test]

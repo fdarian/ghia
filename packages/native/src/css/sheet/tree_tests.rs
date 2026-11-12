@@ -562,6 +562,87 @@ fn an_inline_keyword_beats_what_a_sheet_declared() {
 }
 
 #[test]
+fn a_reset_takes_back_a_var_value_of_a_layer_under_it() {
+    let mut doc = Doc::new();
+    let reset = doc.classed("div", ROOT, "a");
+    let shorthand = doc.classed("div", ROOT, "b");
+    let longhand = doc.classed("div", ROOT, "c");
+    let plain = doc.classed("div", ROOT, "d");
+    let layer = doc.tree.styles.intern(br#"{"borderColor":"var(--border)","opacity":0.5}"#).unwrap();
+    doc.tree.set_universal_style(Some(layer.into_arc()));
+    doc.style_element(ROOT, ".a { border-color: unset } .b { border: initial } .c { border-top-color: initial }");
+    doc.flush();
+    let held = |doc: &Doc, id: u64| doc.style(id).is_some_and(|style| style.var_declarations.is_some());
+    assert!(!held(&doc, reset), "the `var()` of the universal style is taken back");
+    assert!(!held(&doc, shorthand), "so is one a shorthand of the keyword covers");
+    assert!(held(&doc, longhand), "a longhand keyword leaves the shorthand's `var()` to the other sides");
+    assert!(held(&doc, plain));
+    assert_eq!(doc.style(reset).and_then(|style| style.opacity), Some(0.5));
+}
+
+#[test]
+fn an_initial_value_written_as_a_keyword_the_parser_has_no_form_for_beats_the_user_agent_style() {
+    let mut doc = Doc::new();
+    let bare = popover(&mut doc, "a");
+    let ruled = popover(&mut doc, "b");
+    let plain = popover(&mut doc, "c");
+    doc.inline(bare, r#"{"maxWidth":"none"}"#);
+    doc.inline(ruled, r#"{"maxWidth":"none","color":"red"}"#);
+    doc.style_element(ROOT, ".b { margin: 1px }");
+    doc.flush();
+    assert_eq!(doc.style(bare).and_then(|style| style.max_width.clone()), None, "no rule matches it");
+    assert_eq!(doc.style(ruled).and_then(|style| style.max_width.clone()), None, "a rule matches it");
+    assert!(doc.style(plain).is_some_and(|style| style.max_width.is_some()), "the user agent's 100% stays");
+}
+
+#[test]
+fn a_keyword_on_webkit_font_smoothing_is_read_as_the_key_is_written() {
+    let mut doc = Doc::new();
+    let inline = doc.classed("div", ROOT, "a");
+    let ruled = doc.classed("div", ROOT, "b");
+    let plain = doc.classed("div", ROOT, "c");
+    let layer = doc.tree.styles.intern(br#"{"WebkitFontSmoothing":"antialiased"}"#).unwrap();
+    doc.tree.set_universal_style(Some(layer.into_arc()));
+    doc.inline(inline, r#"{"WebkitFontSmoothing":"unset"}"#);
+    doc.style_element(ROOT, ".b { -webkit-font-smoothing: initial }");
+    doc.flush();
+    assert_eq!(doc.style(inline).and_then(|style| style.webkit_font_smoothing.clone()), None);
+    assert_eq!(doc.style(ruled).and_then(|style| style.webkit_font_smoothing.clone()), None);
+    assert!(doc.style(plain).is_some_and(|style| style.webkit_font_smoothing.is_some()));
+}
+
+#[test]
+fn display_reset_over_an_inline_tag_is_inline() {
+    let mut doc = Doc::new();
+    let tags: Vec<(u64, &str)> = ["a", "strong", "em", "button"]
+        .into_iter()
+        .map(|tag| (doc.classed(tag, ROOT, "x"), tag))
+        .collect();
+    let inline = doc.element("em", ROOT);
+    doc.inline(inline, r#"{"display":"initial"}"#);
+    doc.style_element(ROOT, ".x { display: unset }");
+    doc.flush();
+    for (id, tag) in tags {
+        let want = if tag == "button" { "inline-block" } else { "inline" };
+        assert_eq!(doc.style(id).and_then(|style| style.display.as_deref()), Some(want), "<{tag}>");
+    }
+    assert_eq!(doc.style(inline).and_then(|style| style.display.as_deref()), Some("inline"));
+}
+
+#[test]
+fn revert_on_a_custom_property_is_not_a_value() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.inline(div, r#"{"--x":"red"}"#);
+    doc.style_element(ROOT, ".a { --x: revert; --y: revert-layer }");
+    doc.flush();
+    let custom = doc.style(div).and_then(|style| style.custom_properties.clone()).expect("custom properties");
+    let computed = crate::css::custom_properties::CustomProperties::default().descend(&custom);
+    assert_eq!(computed.get("--y"), None);
+    assert_eq!(crate::css::custom_properties::substitute("var(--y, fb)", &computed).as_deref().map(str::trim), Some("fb"));
+}
+
+#[test]
 fn a_style_without_a_keyword_has_no_reset() {
     let mut doc = Doc::new();
     let div = popover(&mut doc, "a");
@@ -569,7 +650,7 @@ fn a_style_without_a_keyword_has_no_reset() {
     doc.style_element(ROOT, ".a { margin-top: 1px; color: green !important }");
     doc.flush();
     assert!(doc.style(div).is_some_and(|style| style.reset.is_none()));
-    assert!(crate::css::sheet::resolve(br#"{"color":"red","content":"a unitless value"}"#).is_none());
+    assert!(crate::css::sheet::resolve_wide_keywords(br#"{"color":"red","content":"a unitless value"}"#).is_none());
 }
 
 #[test]

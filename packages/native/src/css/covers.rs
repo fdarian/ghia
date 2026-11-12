@@ -145,6 +145,15 @@ struct Covers {
 
 static COVERS: LazyLock<Covers> = LazyLock::new(Covers::build);
 
+/// The key a style object writes the `StyleDesc` field `field` (snake case) under: camel case, but
+/// for the field whose serde name is not (`style.rs` renames it).
+pub(crate) fn style_key(field: &str) -> String {
+    match field {
+        "webkit_font_smoothing" => "WebkitFontSmoothing".to_owned(),
+        _ => camel_case(field),
+    }
+}
+
 pub(crate) fn camel_case(snake: &str) -> String {
     let mut camel = String::with_capacity(snake.len());
     let mut upper = false;

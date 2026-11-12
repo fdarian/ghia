@@ -108,22 +108,22 @@ macro_rules! overlaid_fields {
     };
 }
 
-/// The properties `overlay` takes, by the name a style object writes them (camel case), each with
+/// The properties `overlay` takes, by the key a style object writes them under, each with
 /// the read of whether a style sets it.
 macro_rules! property_readers {
     (; $($field:ident),+ $(,)?) => {
         vec![$((
-            crate::css::covers::camel_case(stringify!($field)),
+            crate::css::covers::style_key(stringify!($field)),
             (|style: &StyleDesc| style.$field.is_some()) as fn(&StyleDesc) -> bool,
         )),+]
     };
 }
 
-/// The clears of the properties `overlay` takes, by the name a style object writes them.
+/// The clears of the properties `overlay` takes, by the key a style object writes them under.
 macro_rules! property_clearers {
     (; $($field:ident),+ $(,)?) => {
         vec![$((
-            crate::css::covers::camel_case(stringify!($field)),
+            crate::css::covers::style_key(stringify!($field)),
             (|style: &mut StyleDesc| style.$field = None) as fn(&mut StyleDesc),
         )),+]
     };
@@ -138,11 +138,30 @@ static PROPERTY_CLEARERS: LazyLock<FxHashMap<String, fn(&mut StyleDesc)>> =
 /// A longhand that a shorthand of `base` still covers (`padding-left` reset over `padding: 1px 6px`)
 /// is put at its initial value, because the shorthand would go on giving it its own.
 fn clear_properties(base: &mut Cow<'_, StyleDesc>, names: &[String]) {
+    // The layers under set `display` for a tag whose initial value is not what it renders as (the
+    // user agent style of `a`, `strong`, `td`), and no value is a block here, so a reset to the
+    // initial value `inline` has to be written.
+    let resets_display = names.iter().any(|name| name == "display") && base.display.is_some();
     for name in names {
         if sets_property(base, name) {
             if let Some(clear) = PROPERTY_CLEARERS.get(name.as_str()) {
                 clear(base.to_mut());
             }
+        }
+    }
+    if resets_display {
+        base.to_mut().display = Some("inline".to_owned());
+    }
+    // A `var()` value is no field of the style until it is built: `merge` keeps a held declaration
+    // of the base unless the layer above sets the property, and a reset sets nothing.
+    if base.var_declarations.is_some() {
+        let reset_ids: Vec<_> = names.iter().filter_map(|name| crate::css::covers::key_id(name)).collect();
+        let reset = |key: &str| {
+            names.iter().any(|name| name == key)
+                || crate::css::covers::key_id(key).is_some_and(|id| reset_ids.iter().any(|shorthand| crate::css::covers::covered_by(*shorthand).contains(&id)))
+        };
+        if let Some(kept) = crate::css::var_substitution::without_reset(base.var_declarations.as_deref(), reset) {
+            base.to_mut().var_declarations = kept;
         }
     }
     for name in names {
@@ -258,6 +277,8 @@ pub fn resolve_state_styles(style: &StyleDesc, hovered: bool, active: bool) -> S
 
 /// Whether `resolve_pointer_states` with no state applying would return `style` as it is:
 /// it holds nothing that `overlay` clears. Keep in step with the fields `overlay_fields!` resets.
+/// `reset` is not one: it only acts on a layer under the style, and an effective style that still
+/// carries it (no layer lay under it) is as good as one that does not.
 pub(crate) fn is_overlay_fixed_point(style: &StyleDesc) -> bool {
     style.hover.is_none()
         && style.active.is_none()
@@ -275,7 +296,6 @@ pub(crate) fn is_overlay_fixed_point(style: &StyleDesc) -> bool {
         && style.contents_levels.is_none()
         && !style.measure_natural_width
         && !style.atomic_inline
-        && style.reset.is_none()
 }
 
 /// `style` with the refinements of `states` folded in and every state style
@@ -1834,5 +1854,9 @@ mod tests {
             assert!(!is_overlay_fixed_point(&held), "{json}");
             assert_ne!(overlay(&held, &StyleDesc::default()), held, "{json}");
         }
+        let mut reset = plain.clone();
+        reset.reset = Some(["color".to_owned()].into());
+        assert!(is_overlay_fixed_point(&reset), "a reset list acts on a layer under the style, not on the style");
+        assert_eq!(overlay(&reset, &StyleDesc::default()), plain);
     }
 }

@@ -7497,7 +7497,7 @@ still drops the longhands written before it.
   `border: 0` is `border: "0"`. A number that is still invalid is dropped.
 - A CSS-wide keyword at the top level of a style (`initial`, `unset`, and `inherit` on a property that inherits) takes back
   what the layers under the element's own style set, as an author declaration beats the user agent style in CSS:
-  `margin: 'unset'` on a `<p>` or an open `popover` has no margin, `right: 'unset'` has no `right`, and `fontWeight: 'inherit'`
+  `margin: 'unset'` on a `<p>` or an open `popover` has no margin, `right: 'unset'` has no `right`, `display: 'unset'` on an `<a>` or `<strong>` is `inline`, and `fontWeight: 'inherit'`
   on an `<h1>` is not bold. It also beats the universal style. `revert` and `revert-layer` take back the element's own earlier
   declaration of the property and leave the layers under it (the user agent style). A state style (`hover`, ...) or an
   `@container` block drops a keyword, so the value below it stays: `hover: { width: 'unset' }` over `width: 50` keeps 50,

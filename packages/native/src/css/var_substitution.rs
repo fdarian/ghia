@@ -284,6 +284,20 @@ pub(crate) fn merge(base: &StyleDesc, over: &StyleDesc) -> Option<Arc<[VarDeclar
     (!merged.is_empty()).then(|| merged.into())
 }
 
+/// The held declarations without those of the properties `is_reset` says a CSS-wide keyword reset,
+/// or `None` when it holds none of them.
+pub(crate) fn without_reset(
+    held: Option<&[VarDeclaration]>,
+    is_reset: impl Fn(&str) -> bool,
+) -> Option<Option<Arc<[VarDeclaration]>>> {
+    let held = held?;
+    if !held.iter().any(|declaration| is_reset(&declaration.key)) {
+        return None;
+    }
+    let kept: Vec<VarDeclaration> = held.iter().filter(|declaration| !is_reset(&declaration.key)).cloned().collect();
+    Some((!kept.is_empty()).then(|| kept.into()))
+}
+
 /// Whether `style` has a `var()` that the custom properties of its element substitute, in a
 /// transform text or a held declaration, or in a focus style, which is laid over it when it is built.
 pub(crate) fn reads_vars(style: &StyleDesc) -> bool {

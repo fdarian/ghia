@@ -616,7 +616,7 @@ impl StyleTable {
         }
         // The payload is kept as it came: the cascade reads which values were `!important` from it.
         let parsed = crate::css::inline_important::strip_payload(raw);
-        let resolved = crate::css::sheet::resolve(&parsed);
+        let resolved = crate::css::sheet::resolve_wide_keywords(&parsed);
         let parsed = resolved.as_ref().map_or(&*parsed, |resolved| resolved.text.as_bytes());
         let mut style = if crate::css::var_substitution::mentions_var(parsed) {
             crate::css::var_substitution::parse(parsed)?

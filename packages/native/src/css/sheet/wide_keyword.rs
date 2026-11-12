@@ -32,7 +32,7 @@ use crate::css::lenient::{object_text, Declaration, Declarations};
 use super::initial;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Keyword {
+enum Keyword {
     Initial,
     Unset,
     Inherit,
@@ -40,10 +40,11 @@ pub(super) enum Keyword {
     RevertLayer,
 }
 
-pub(super) fn keyword_of(value: &str) -> Option<Keyword> {
+fn keyword_of(value: &str) -> Option<Keyword> {
     if !value.starts_with('"') {
         return None;
     }
+    // A string value that is not valid JSON text is not one a style object holds, so it is no keyword.
     let text = serde_json::from_str::<String>(value).ok()?;
     let text = text.trim();
     [
@@ -67,28 +68,40 @@ pub(super) fn is_css_wide(value: &str) -> bool {
 /// on one of these takes the parent's value, which is what a reset leaves.
 const INHERITED: &[&str] = &[
     "visibility", "color", "colorScheme", "fontStyle", "fontSize", "fontFamily", "fontWeight",
-    "fontVariantNumeric", "fontFeatureSettings", "fontVariationSettings", "webkitFontSmoothing",
+    "fontVariantNumeric", "fontFeatureSettings", "fontVariationSettings", "WebkitFontSmoothing",
     "textAlign", "direction", "lineHeight", "whiteSpace", "tabSize", "wordBreak", "overflowWrap",
     "textWrap", "textWrapMode", "textWrapStyle", "textUnderlineOffset", "borderSpacing",
     "borderCollapse", "captionSide", "emptyCells", "cursor", "pointerEvents", "userSelect",
-    "scrollbarColor", "interpolateSize", "appRegion",
+    "scrollbarColor", "interpolateSize", "appRegion", "textBoxEdge", "selectionColor",
 ];
 
 /// A style text with its keywords rewritten, and what they reset.
 pub(crate) struct Resolved {
     pub(crate) text: String,
-    pub(crate) reset: Option<Arc<Vec<String>>>,
+    pub(crate) reset: Option<Arc<[String]>>,
 }
 
-/// A search of the bytes for a keyword, which a payload that has none pays for and nothing else.
+/// A search of the bytes for a keyword, or for the name of a property whose initial value is a
+/// keyword the style parser has no form for (`maxWidth: "none"`), which a payload that has neither
+/// pays for and nothing else.
 fn mentions_keyword(raw: &[u8]) -> bool {
     let starts = |at: usize, word: &[u8]| raw.get(at..at + word.len()).is_some_and(|slice| slice.eq_ignore_ascii_case(word));
     (0..raw.len()).any(|at| match raw[at].to_ascii_lowercase() {
         b'u' => starts(at, b"unset"),
         b'i' => starts(at, b"initial") || starts(at, b"inherit"),
         b'r' => starts(at, b"revert"),
+        b'z' => starts(at, b"zIndex"),
+        b'm' => starts(at, b"maxWidth") || starts(at, b"maxHeight"),
+        b'g' => starts(at, b"gap"),
+        b'l' => starts(at, b"lineClamp"),
         _ => false,
     })
+}
+
+/// The keyword a declaration is: a CSS-wide keyword, or the initial value of a property written as
+/// the keyword the style parser has no form for, which is `initial` here.
+fn keyword_of_declaration(declaration: &Declaration) -> Option<Keyword> {
+    keyword_of(&declaration.value).or_else(|| initial::is_unrepresentable_initial(declaration).then_some(Keyword::Initial))
 }
 
 /// `raw` with the keywords of its top-level declarations resolved, or `None` when it has none.
@@ -97,21 +110,21 @@ pub(crate) fn resolve(raw: &[u8]) -> Option<Resolved> {
         return None;
     }
     let declarations = serde_json::from_slice::<Declarations>(raw).ok()?.0;
-    if !declarations.iter().any(|declaration| !declaration.key.starts_with("--") && is_css_wide(&declaration.value)) {
+    if !declarations.iter().any(|declaration| !declaration.key.starts_with("--") && keyword_of_declaration(declaration).is_some()) {
         return None;
     }
     let mut list: Vec<Declaration> = Vec::with_capacity(declarations.len());
     let mut reset: Vec<String> = Vec::new();
     for declaration in declarations {
         list.retain(|earlier| earlier.key != declaration.key);
-        match keyword_of(&declaration.value) {
+        match keyword_of_declaration(&declaration) {
             Some(keyword) if !declaration.key.starts_with("--") => apply(&mut list, &mut reset, &declaration.key, keyword),
             _ => list.push(declaration),
         }
     }
     reset.sort();
     reset.dedup();
-    Some(Resolved { text: object_text(&list), reset: (!reset.is_empty()).then(|| Arc::new(reset)) })
+    Some(Resolved { text: object_text(&list), reset: (!reset.is_empty()).then(|| reset.into()) })
 }
 
 fn apply(list: &mut Vec<Declaration>, reset: &mut Vec<String>, key: &str, keyword: Keyword) {
@@ -208,6 +221,28 @@ mod tests {
         for keyword in ["revert", "unset", "inherit"] {
             let (text, _) = resolved(&format!(r#"{{"inset":0,"right":"{keyword}"}}"#));
             assert_eq!(text, serde_json::json!({"inset": 0, "right": "auto"}), "{keyword}");
+        }
+    }
+
+    #[test]
+    fn a_property_whose_initial_value_the_parser_has_no_form_for_is_reset_by_its_keyword() {
+        let (text, reset) = resolved(r#"{"maxWidth":"none","gap":"Normal","zIndex":"auto","lineClamp":"none","color":"red"}"#);
+        assert_eq!(text, serde_json::json!({"color": "red"}));
+        for name in ["maxWidth", "gap", "rowGap", "columnGap", "zIndex", "lineClamp"] {
+            assert!(reset.contains(&name.to_owned()), "{name}");
+        }
+        assert!(resolve(br#"{"maxWidth":"10px","zIndex":3,"gap":1}"#).is_none());
+    }
+
+    #[test]
+    fn every_inherited_name_the_contents_hand_down_is_inherited_here() {
+        macro_rules! names {
+            ($($field:ident),*) => { [$(crate::css::covers::style_key(stringify!($field))),*] };
+        }
+        let mut handed_down = crate::layout::contents::inheritable_fields!(names).to_vec();
+        handed_down.push("textBoxEdge".to_owned());
+        for name in handed_down {
+            assert!(INHERITED.contains(&name.as_str()), "{name}");
         }
     }
 

@@ -46,7 +46,7 @@ pub use layers::{LayerId, LayerOrder, Layers};
 pub use matching::{matches, AttrValue, ElementView, SiblingTest};
 pub use parser::parse_sheet;
 pub(crate) use initial::style_of as initial_style_of;
-pub(crate) use wide_keyword::resolve;
+pub(crate) use wide_keyword::resolve as resolve_wide_keywords;
 pub use selector::{
     AttrMatcher, AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, SelectorList, Simple, Specificity, TypeName,
 };
