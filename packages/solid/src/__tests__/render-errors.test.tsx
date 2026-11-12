@@ -437,8 +437,6 @@ describe.skipIf(!hasNativeTestRenderer)("Solid keeps tearing down after a throw"
     const onUncaughtError = vi.fn()
     const renderer = new TestRenderer({})
     const root = createRoot(renderer, { onUncaughtError })
-    const bare = createTestRoot()
-    bare.render(() => <div />)
     root.render(() => (
       <div>
         <Show when={on()}>
@@ -458,9 +456,9 @@ describe.skipIf(!hasNativeTestRenderer)("Solid keeps tearing down after a throw"
     await tick()
     renderer.flush()
     expect(onUncaughtError.mock.calls[0]?.[0]).toBe(boom)
-    expect(renderer.getRetainedElementCount()).toBe(bare.renderer.getRetainedElementCount())
+    // html, head, body and the outer div: the removed subtree is gone.
+    expect(renderer.getRetainedElementCount()).toBe(4)
     root.unmount()
     renderer.dispose()
-    bare.unmount()
   })
 })
