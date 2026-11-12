@@ -2,19 +2,22 @@ import { flushPendingMutations, HOST_BINDING, type HostBinding } from "../bounds
 import type { NativeRenderer } from "../host.js"
 import type { InputChoiceState } from "../../index.js"
 import { namedError } from "../named-error.js"
+import { attributeText, inputAttributeValue } from "./attribute-names.js"
 import { requiredMethod } from "./renderer-method.js"
 import { onTags } from "./tag-members.js"
 
-/** `checked`, `defaultChecked`, `indeterminate` and `value` of an `<input>`, which native holds. */
+/** `checked`, `defaultChecked`, `indeterminate`, `value` and `defaultValue` of an `<input>`, which native holds. */
 export interface InputMembers {
   /** The checkedness of a checkbox or radio. Setting it stops `defaultChecked` from deciding it, and a radio unchecks its group. */
   checked: boolean
-  /** The `defaultChecked` prop: what `checked` is until it is set or the user toggles the control. */
+  /** The `checked` attribute: what `checked` is until it is set or the user toggles the control. Assigning writes the attribute, as `setAttribute("checked", "")` does. */
   defaultChecked: boolean
   /** A property only, with no attribute. A user's toggle of a checkbox clears it. */
   indeterminate: boolean
   /** A text field's text; the `value` of a checkbox, radio or hidden input, `"on"` by default for the first two; a range's sanitized value. */
   value: string
+  /** The `value` attribute of an `<input>`, `""` without one: what `value` is until it is set or the user edits the control. A `<textarea>`'s is its default text. Assigning writes the attribute. */
+  defaultValue: string
   /** `type="number"` and `"range"`: `value` as a number, `NaN` for text that is none or another type. Assigning writes `value`. */
   valueAsNumber: number
   /** The `min`, `max` and `step` attributes as text, `""` when absent. A range sanitizes its value against them. */
@@ -56,7 +59,7 @@ export function readInputChoice(layout: Layout): InputChoiceState {
  * the framework's props, which a controlled control is restored to, stay as they were committed.
  * The state is native's, so the call is made once the pending mutations are sent.
  */
-function writeFlag(layout: Layout, name: "checked" | "defaultChecked" | "indeterminate", value: boolean): void {
+function writeFlag(layout: Layout, name: "checked" | "indeterminate", value: boolean): void {
   const write = requiredMethod(layout.renderer, "writeInputFlag", `${name} cannot be assigned`)
   flushPendingMutations(layout.renderer)
   write(layout.id, name, value)
@@ -96,14 +99,14 @@ function stepBy<This extends object>(self: This, bind: (self: This) => InputBind
 }
 
 /**
- * Defines `checked`, `defaultChecked`, `indeterminate` and `value` on `target`, which is the
+ * Defines `checked`, `defaultChecked`, `indeterminate`, `value` and `defaultValue` on `target`, which is the
  * prototype of an adapter's host elements. On anything but an `<input>` (`<textarea>` for `value`) they
  * read `undefined` and an assignment makes an own property, so no other element changes.
  */
 export function defineInputMembers<This extends object>(target: object, bind: (self: This) => InputBinding): void {
   const onInput = (name: string, read: (self: This) => unknown, write: (self: This, value: unknown) => void) =>
     onTags<This>(name, INPUT_TAG, read, write)
-  const flag = (name: "checked" | "defaultChecked" | "indeterminate", prop: (binding: InputBinding) => boolean) =>
+  const flag = (name: "checked" | "indeterminate", prop: (binding: InputBinding) => boolean) =>
     onInput(
       name,
       (self) => {
@@ -153,8 +156,30 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
       },
     },
     checked: flag("checked", (binding) => Boolean(binding.prop("checked") ?? binding.prop("defaultChecked"))),
-    defaultChecked: flag("defaultChecked", (binding) => Boolean(binding.prop("defaultChecked"))),
+    // The `checked` attribute: the same write as `setAttribute("checked", "")`, so it is seen by `getAttribute`, a selector and observers.
+    defaultChecked: onInput(
+      "defaultChecked",
+      (self) => {
+        const binding = bind(self)
+        return binding.layout === undefined ? Boolean(binding.prop("defaultChecked")) : readInputChoice(binding.layout).defaultChecked
+      },
+      (self, value) => bind(self).setProp("defaultChecked", value ? true : undefined)
+    ),
     indeterminate: flag("indeterminate", () => false),
+    defaultValue: onTags<This>(
+      "defaultValue",
+      VALUE_TAGS,
+      (self) => {
+        const binding = bind(self)
+        if (!isInput(self)) return propText(binding.prop("defaultValue"))
+        return attributeText("value", inputAttributeValue("value", (name) => binding.prop(name), binding.prop("type"))) ?? ""
+      },
+      (self, value) => {
+        const text = String(value)
+        if (isInput(self)) Reflect.apply(Reflect.get(self, "setAttribute") as (name: string, value: string) => void, self, ["value", text])
+        else bind(self).setProp("defaultValue", text)
+      }
+    ),
     value: onTags<This>(
       "value",
       VALUE_TAGS,

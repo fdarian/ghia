@@ -18,8 +18,8 @@ import {
   blurHostElement,
   eventTypesWithOverrides,
   focusHostElement,
-  attributeNameOf,
   attributeText,
+  attributesWritten,
   isSvgType,
   isNotNativeAttribute,
   forwardsCustomProp,
@@ -825,9 +825,9 @@ function tokensOf(text: string): string[] {
 function syncAttribute(root: HostRoot, node: HostElement, prop: string, value: HostPropertyValue): void {
   // The record of what was sent is filled when the gate opens (`ElementSource.rememberAttributes`).
   if (!root.mutations.forwardsAttributes || isNotNativeAttribute(prop)) return
-  const attribute = attributeNameOf(prop, node instanceof SVGElement)
-  const text = attributeText(attribute, value)
-  if (node.sent.writesAttribute(attribute, text)) root.mutations.setAttribute(node.nativeId, attribute, text)
+  for (const [attribute, text] of attributesWritten(node.type, prop, value, (name) => node.props.get(name))) {
+    if (node.sent.writesAttribute(attribute, text)) root.mutations.setAttribute(node.nativeId, attribute, text)
+  }
 }
 
 function storeHostProp(node: HostElement, name: string, value: HostPropertyValue): void {

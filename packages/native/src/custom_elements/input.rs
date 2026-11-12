@@ -397,8 +397,6 @@ impl TextEditorElement {
         })
     }
 
-    /// Push a changed `value` prop into the editor now, rather than at the next
-    /// frame, so an imperative call right after a controlled update sees it.
     /// What the DOM's value is for a control whose `value` was never set or edited: its default.
     fn settle_default_value(&mut self) {
         if !self.value_given && !self.edited.get() {
@@ -406,6 +404,8 @@ impl TextEditorElement {
         }
     }
 
+    /// Push a changed `value` prop into the editor now, rather than at the next
+    /// frame, so an imperative call right after a controlled update sees it.
     fn apply_value(&mut self, cx: &mut App) {
         let Some(state) = self.state.clone() else {
             return;
@@ -416,6 +416,17 @@ impl TextEditorElement {
         let value = self.value.clone();
         state.update(cx, |state, cx| state.sync_prop_value(value, cx));
         self.last_prop_value = Some(self.value.clone());
+    }
+}
+
+/// A `value` or `defaultValue` prop as React DOM turns it into the control's text (`"" + value`):
+/// a number or a boolean is its JavaScript text, `null` and anything that is no text are none.
+fn prop_text(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Number(number) => number.to_string(),
+        serde_json::Value::Bool(flag) => flag.to_string(),
+        _ => String::new(),
     }
 }
 
@@ -666,11 +677,11 @@ impl CustomElement for TextEditorElement {
         match key {
             "value" => {
                 self.value_given = !value.is_null();
-                self.value = value.as_str().unwrap_or_default().to_string();
+                self.value = prop_text(&value);
                 self.settle_default_value();
             }
             "defaultValue" => {
-                self.default_value = value.as_str().unwrap_or_default().to_string();
+                self.default_value = prop_text(&value);
                 self.settle_default_value();
             }
             "placeholder" => self.placeholder = value.as_str().unwrap_or_default().to_string(),
@@ -2623,6 +2634,19 @@ mod tests {
         dirty.edited.set(true);
         dirty.set_prop("defaultValue", serde_json::json!("b"));
         assert_eq!(dirty.value, "a", "an edited control keeps its text");
+    }
+
+    #[test]
+    fn a_number_is_the_text_of_a_value_and_a_default_value() {
+        let mut element = TextEditorElement::new(false);
+        element.set_prop("defaultValue", serde_json::json!(5));
+        assert_eq!(element.value, "5");
+        element.set_prop("defaultValue", serde_json::json!(1.5));
+        assert_eq!(element.value, "1.5");
+        element.set_prop("value", serde_json::json!(0));
+        assert_eq!(element.value, "0", "a value of zero is given, so the default no longer decides");
+        element.set_prop("value", serde_json::Value::Null);
+        assert_eq!(element.value, "1.5");
     }
 
     fn has_binding(bindings: &[KeyBinding], keystroke: &str, action: &dyn gpui::Action) -> bool {

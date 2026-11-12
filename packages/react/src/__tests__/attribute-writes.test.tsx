@@ -1,7 +1,7 @@
 /** `setAttribute`, `removeAttribute` and `toggleAttribute` on a React host instance: the write has the effect of the prop. */
 import { useState } from "react"
 import { afterEach, describe, expect, it } from "vitest"
-import { getComputedStyle } from "@ghia/native/host"
+import { document, getComputedStyle } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer, type A11yTreeDump } from "../testing.js"
 import type { PublicInstance } from "../types/host.js"
 
@@ -398,5 +398,91 @@ describeNative("attribute writes on a React host instance", () => {
 
     area.setAttribute("value", "t")
     expect([area.value, area.getAttribute("value")]).toEqual(["", "t"])
+  })
+  it("assigns the `checked` attribute through defaultChecked: getAttribute, selectors and observers see it, and an unmounted input takes it", () => {
+    let element: any = null
+    setup(<input ref={(instance) => (element = instance)} type="checkbox" style={box} />)
+    const observer = new MutationObserver(() => {})
+    observer.observe(element, { attributes: true, attributeOldValue: true })
+    observers.push(observer)
+    element.defaultChecked = true
+    expect([element.checked, element.getAttribute("checked"), element.matches("[checked]")]).toEqual([true, "", true])
+    element.defaultChecked = false
+    expect([element.checked, element.getAttribute("checked"), element.matches("[checked]")]).toEqual([false, null, false])
+    expect(observer.takeRecords().map((record) => [record.attributeName, record.oldValue])).toEqual([
+      ["checked", null],
+      ["checked", ""],
+    ])
+
+    const created: any = document.createElement("input")
+    created.defaultChecked = true
+    expect([created.defaultChecked, created.getAttribute("checked")]).toEqual([true, ""])
+  })
+
+  it("has one answer for the checked attribute: the default, then the checked prop, in getAttribute and in a sheet", () => {
+    let element: any = null
+    const view = (checked: boolean) => (
+      <div>
+        <style>{"[checked] { opacity: 0.25 }"}</style>
+        <input ref={(instance) => (element = instance)} type="checkbox" checked={checked} onChange={() => {}} style={box} />
+      </div>
+    )
+    const { root } = setup(view(false))
+    const target = element
+    expect([target.getAttribute("checked"), getComputedStyle(target).opacity]).toEqual([null, "1"])
+    target.setAttribute("checked", "")
+    expect([target.getAttribute("checked"), getComputedStyle(target).opacity]).toEqual(["", "0.25"])
+    root.render(view(true))
+    root.render(view(false))
+    expect(element).toBe(target)
+    expect([target.getAttribute("checked"), getComputedStyle(target).opacity]).toEqual(["", "0.25"])
+    target.removeAttribute("checked")
+    expect([target.getAttribute("checked"), getComputedStyle(target).opacity]).toEqual([null, "1"])
+    root.render(view(true))
+    expect([target.getAttribute("checked"), getComputedStyle(target).opacity]).toEqual(["", "0.25"])
+  })
+
+  it("has one answer for the value attribute of a controlled text input, which a script's write to the attribute wins", () => {
+    let element: any = null
+    const view = (value: string) => (
+      <div>
+        <style>{'[value="y"] { opacity: 0.25 } [value="z"] { opacity: 0.5 }'}</style>
+        <input ref={(instance) => (element = instance)} type="text" value={value} onChange={() => {}} style={{ width: 80, height: 20 }} />
+      </div>
+    )
+    const { root } = setup(view("x"))
+    const target = element
+    expect(target.getAttribute("value")).toBe("x")
+    target.setAttribute("value", "y")
+    expect([target.getAttribute("value"), target.defaultValue, getComputedStyle(target).opacity]).toEqual(["y", "y", "0.25"])
+    root.render(view("z"))
+    expect([target.value, target.getAttribute("value"), getComputedStyle(target).opacity]).toEqual(["z", "y", "0.25"])
+    target.removeAttribute("value")
+    expect([target.getAttribute("value"), getComputedStyle(target).opacity]).toEqual(["z", "0.5"])
+  })
+
+  it("has a defaultValue member that is the value attribute of an input and the default text of a textarea, and a number is its text", () => {
+    const nodes: Record<string, any> = {}
+    const ref = (name: string) => (instance: unknown) => {
+      if (instance) nodes[name] = instance
+    }
+    setup(
+      <div>
+        <input ref={ref("text")} type="text" defaultValue={5} style={{ width: 80, height: 20 }} />
+        <input ref={ref("plain")} type="text" style={{ width: 80, height: 20 }} />
+        <textarea ref={ref("area")} style={{ width: 80, height: 40 }} />
+        <div ref={ref("div")} />
+      </div>
+    )
+    expect([nodes.text.value, nodes.text.defaultValue, nodes.text.getAttribute("value")]).toEqual(["5", "5", "5"])
+    expect([nodes.plain.defaultValue, nodes.plain.getAttribute("value")]).toEqual(["", null])
+    nodes.plain.defaultValue = 7
+    expect([nodes.plain.value, nodes.plain.defaultValue, nodes.plain.getAttribute("value")]).toEqual(["7", "7", "7"])
+    nodes.area.defaultValue = "t"
+    expect([nodes.area.value, nodes.area.defaultValue]).toEqual(["t", "t"])
+    expect(nodes.div.defaultValue).toBeUndefined()
+    const created: any = document.createElement("input")
+    created.defaultValue = "c"
+    expect([created.defaultValue, created.getAttribute("value")]).toEqual(["c", "c"])
   })
 })

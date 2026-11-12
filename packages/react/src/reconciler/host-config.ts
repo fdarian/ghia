@@ -17,7 +17,6 @@ import {
   sameMutationValue,
   serializeCustomProp,
   attributesOfProps,
-  isSvgType,
   forwardsCustomProp,
   hasMutationObservers,
   queueCharacterDataMutation,
@@ -310,7 +309,7 @@ function syncAttributes(
   props: Iterable<readonly [string, unknown]>
 ): void {
   if (!renderer.forwardsAttributes) return
-  for (const [name, text] of attributesOfProps(props, isSvgType(type))) {
+  for (const [name, text] of attributesOfProps(props, type)) {
     renderer.setAttribute(id, name, text)
   }
 }
@@ -457,6 +456,7 @@ function adoptProps(
   instance.props = newProps
 }
 
+  const overridesBefore = state.propOverrides === undefined ? undefined : new Map(state.propOverrides)
 function applyUpdate(instance: Instance, oldProps: Props, newProps: Props): void {
   const state = stateFor(instance)
   const container = state.container
@@ -488,7 +488,18 @@ function applyUpdate(instance: Instance, oldProps: Props, newProps: Props): void
   }
   // Custom prop diff (for non-div/text elements)
   diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
-  diffAttributes(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
+  // What code wrote is an attribute too (a script's `defaultValue` answers the `value` attribute over a controlled `value`).
+  diffAttributes(
+    container.renderer,
+    instance.nativeId,
+    instance.type,
+    withOverrides(oldProps, overridesBefore),
+    withOverrides(newProps, state.propOverrides)
+  )
+}
+
+function withOverrides(props: Props, overrides: ReadonlyMap<string, unknown> | undefined): Props {
+  return overrides === undefined ? props : ({ ...props, ...Object.fromEntries(overrides) } as Props)
 }
 
 // ── Host config ──────────────────────────────────────────────────────

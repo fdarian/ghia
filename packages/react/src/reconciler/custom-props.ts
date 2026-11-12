@@ -2,7 +2,6 @@ import {
   attributesOfProps,
   forwardsCustomProp,
   isNotNativeAttribute,
-  isSvgType,
   isReservedProp,
   sameMutationValue,
   serializeCustomProp,
@@ -82,9 +81,8 @@ export function diffAttributes(
   newProps: Props
 ): void {
   if (!renderer.forwardsAttributes || !attributePropsDiffer(oldProps, newProps)) return
-  const svg = isSvgType(type)
-  const previous = attributesOfProps(Object.entries(oldProps), svg)
-  const next = attributesOfProps(Object.entries(newProps), svg)
+  const previous = attributesOfProps(Object.entries(oldProps), type)
+  const next = attributesOfProps(Object.entries(newProps), type)
   for (const [name, text] of next) {
     if (previous.get(name) !== text) renderer.setAttribute(id, name, text)
   }

@@ -11,7 +11,6 @@ import {
 } from "./css/index.js"
 import { attributesOfProps } from "./dom/attribute-names.js"
 import { popoversDestroyed } from "./dom/popover.js"
-import { isSvgType } from "./svg.js"
 import { createBlobImageLoader, type BlobImageHost } from "./blob-images.js"
 import type { MutationHost, MutationRenderer } from "./host.js"
 import { createStyleImageLoader, type StyleImageHost } from "./style-images.js"
@@ -178,7 +177,7 @@ export function createMutationQueue(
     backfillAttributes() {
       forwardsAttributes = true
       elementSource?.forEachElement((id, type, props) => {
-        const attributes = attributesOfProps(props, isSvgType(type))
+        const attributes = attributesOfProps(props, type)
         for (const [name, text] of attributes) mutations.setAttribute(id, name, text)
         elementSource?.rememberAttributes?.(id, attributes)
       })

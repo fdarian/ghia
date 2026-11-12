@@ -4,6 +4,8 @@
  * attributes (`tabindex`, `class`), so every place that turns one into the other goes through here.
  */
 
+import { isSvgType } from "../svg.js"
+
 /** HTML names are lowercase in the DOM; SVG names keep their case (`viewBox`), as in Chrome. */
 export function attributeNameOf(prop: string, svg: boolean): string {
   if (prop === "className") return "class"
@@ -29,6 +31,51 @@ export function inputDefaultProp(attribute: string, inputType: unknown): "defaul
   if (attribute !== "value") return undefined
   return VALUE_IS_ATTRIBUTE.has(String(inputType).toLowerCase()) ? undefined : "defaultValue"
 }
+
+/**
+ * The value of an `<input>`'s `checked` or `value` attribute, from the props it has: the one rule
+ * for what answers it, so `getAttribute` and the attribute store a stylesheet reads agree.
+ *
+ * The attribute is the default (`defaultChecked`, `defaultValue`), as the DOM has it. Where the
+ * element was given no default, the `checked` or `value` prop answers: React DOM's own `checked`
+ * and `value` are put in the attribute too (`node.defaultChecked`, `setDefaultValue`), and a prop
+ * that is none of those is a property assignment that leaves the attribute as it was. A
+ * checkbox's `value` is the attribute itself, so `value` leads there.
+ */
+export function inputAttributeValue(attribute: "checked" | "value", prop: (name: string) => unknown, inputType: unknown): unknown {
+  if (attribute === "checked") return prop("defaultChecked") ?? prop("checked")
+  return VALUE_IS_ATTRIBUTE.has(String(inputType).toLowerCase())
+    ? (prop("value") ?? prop("defaultValue"))
+    : (prop("defaultValue") ?? prop("value"))
+}
+
+/**
+ * The attributes that a write of `prop` to an element of `type` changes, as names and texts (`null`
+ * for none): the attribute the prop names, and for an input's `type` the `value` it decides the
+ * source of. `readProp` gives the element's props as they are once the write is stored.
+ */
+export function attributesWritten(
+  type: string,
+  prop: string,
+  value: unknown,
+  readProp: (name: string) => unknown
+): Array<[string, string | null]> {
+  const name = attributeNameOf(prop, isSvgType(type))
+  if (type !== "input") return [[name, attributeText(name, value)]]
+  const names = prop === "type" ? [name, "value"] : [name]
+  return names.map((attribute): [string, string | null] => [
+    attribute,
+    attributeText(
+      attribute,
+      attribute === "checked" || attribute === "value"
+        ? inputAttributeValue(attribute, readProp, readProp("type"))
+        : value
+    ),
+  ])
+}
+
+/** The props `inputAttributeValue` reads, and the `type` it needs. */
+const INPUT_ATTRIBUTE_PROPS: ReadonlySet<string> = new Set(["checked", "defaultChecked", "value", "defaultValue", "type"])
 
 /** `toLowerCase` that allocates only for a name with a capital: an adapter asks for every prop of every element. */
 function lowerCased(prop: string): string {
@@ -182,12 +229,20 @@ function holdsBooleanText(name: string): boolean {
  * The attributes an element given `props` has, by name. Two props can name one attribute
  * (`class` and `className`): the one written as the attribute wins, else the first.
  */
-export function attributesOfProps(props: Iterable<readonly [string, unknown]>, svg: boolean): Map<string, string> {
+export function attributesOfProps(props: Iterable<readonly [string, unknown]>, type: string): Map<string, string> {
+  const svg = isSvgType(type)
   const values = new Map<string, unknown>()
+  const inputProps = type === "input" ? new Map<string, unknown>() : undefined
   for (const [prop, value] of props) {
+    if (inputProps !== undefined && INPUT_ATTRIBUTE_PROPS.has(prop)) inputProps.set(prop, value)
     if (isNotNativeAttribute(prop) || value === undefined) continue
     const name = attributeNameOf(prop, svg)
     if (!values.has(name) || prop === name) values.set(name, value)
+  }
+  if (inputProps !== undefined) {
+    for (const attribute of ["checked", "value"] as const) {
+      if (values.has(attribute)) values.set(attribute, inputAttributeValue(attribute, (name) => inputProps.get(name), inputProps.get("type")))
+    }
   }
   const attributes = new Map<string, string>()
   for (const [name, value] of values) {

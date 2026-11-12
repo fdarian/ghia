@@ -14,6 +14,7 @@ import {
   attributeLookupName,
   attributeNameOf,
   attributeText,
+  inputAttributeValue,
   inputDefaultProp,
   isStoredAttribute,
   propWrittenBy,
@@ -229,9 +230,11 @@ export function defineDomMembers<This extends object>(
         const stored = storedAttribute(this, attributeLookupName(name, svg))
         if (stored !== undefined) return stored
         const bound = bind(this)
-        const defaultProp = defaultPropOf(this as unknown as Element, bound, attributeLookupName(name, svg))
-        const written = defaultProp === undefined ? undefined : bound.prop(defaultProp)
-        return attributeText(name, written ?? propForAttribute(bound, name, svg))
+        const lookup = attributeLookupName(name, svg)
+        if ((this as unknown as Element).localName === "input" && (lookup === "checked" || lookup === "value")) {
+          return attributeText(lookup, inputAttributeValue(lookup, (prop) => bound.prop(prop), bound.prop("type")))
+        }
+        return attributeText(name, propForAttribute(bound, name, svg))
       },
     },
     showPopover: {
