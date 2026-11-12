@@ -24,6 +24,7 @@ import { createRendererState, pushDismissLayer } from "../renderer-state.js"
 import { WireWriter } from "../wire.js"
 import type { Element, Node } from "./nodes.js"
 import { popoverKind, type PopoverKind } from "./popover-attribute.js"
+import { setPopoverOpenProbe } from "./selectors.js"
 import { ToggleEvent } from "./toggle-event.js"
 
 /** What these functions read of an element, taken fresh each time: an adapter's binding is a view. */
@@ -202,6 +203,13 @@ function hide(record: Showing, fireEvents: boolean, attributeChanged = false): v
   forget(record, true)
   if (fireEvents) queueToggle(record, record.element, "open", "closed")
 }
+
+/** Whether `element` is a popover that is showing: what `:popover-open` matches. */
+export function isOpen(element: Element): boolean {
+  return current(element) !== undefined
+}
+
+setPopoverOpenProbe(isOpen)
 
 export function showPopover(element: Element, probe: PopoverProbe): void {
   const kind = requirePopover(element, "showPopover")

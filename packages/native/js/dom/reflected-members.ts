@@ -1,6 +1,6 @@
 /**
  * The members of an element that are its attributes under another name or a fixed answer:
- * `hidden`, `tabIndex`, `isContentEditable`, `shadowRoot` and `assignedSlot`. They read and write
+ * `hidden`, `tabIndex`, `disabled`, `htmlFor`, `isContentEditable`, `shadowRoot` and `assignedSlot`. They read and write
  * through `getAttribute` and `setAttribute`, so they follow a prop a framework committed and
  * a write reaches native as the attribute would.
  */
@@ -19,6 +19,28 @@ const FOCUSABLE_TAGS: ReadonlySet<string> = new Set([
   "select",
   "textarea",
 ])
+
+/** The tags with a `disabled` attribute (the HTML standard's form controls, `fieldset`, `optgroup` and `option`). */
+const DISABLEABLE_TAGS: ReadonlySet<string> = new Set(["button", "fieldset", "input", "optgroup", "option", "select", "textarea"])
+
+/**
+ * A member that only some tags have: on the others it is as it was before these accessors, nothing
+ * until an assignment, which makes a plain property, so no other element changes.
+ */
+function onTags(name: string, tags: ReadonlySet<string>, read: (element: Element) => unknown, write: (element: Element, value: unknown) => void) {
+  return {
+    configurable: true,
+    get(this: Element) {
+      return tags.has(this.localName) ? read(this) : undefined
+    },
+    set(this: Element, value: unknown) {
+      if (tags.has(this.localName)) write(this, value)
+      else Object.defineProperty(this, name, { value, writable: true, configurable: true, enumerable: true })
+    },
+  }
+}
+
+const LABEL_TAG: ReadonlySet<string> = new Set(["label"])
 
 /** The DOM's "rules for parsing integers": leading white space, a sign, digits, and anything after them ignored. */
 const LEADING_INTEGER = /^[ \t\n\f\r]*([+-]?\d+)/
@@ -42,6 +64,10 @@ export interface ReflectedMembers {
   hidden: boolean | "until-found"
   /** The `tabindex` attribute as an integer, or the tag's default: 0 for a control, a link and the like, -1 for the rest. */
   tabIndex: number
+  /** The `disabled` attribute of a button, input, select, textarea, fieldset, optgroup or option; `undefined` on any other element. */
+  disabled: boolean
+  /** The `for` attribute of a `<label>`, `""` without one; `undefined` on any other element. */
+  htmlFor: string
   /** Always `false`: Ghia has no `contenteditable`. */
   readonly isContentEditable: boolean
   /** Always `null`: there is no shadow DOM. */
@@ -81,6 +107,18 @@ export function defineReflectedMembers(target: object): void {
         this.setAttribute("tabindex", String(Number.isFinite(number) ? number : 0))
       },
     },
+    disabled: onTags(
+      "disabled",
+      DISABLEABLE_TAGS,
+      (element) => element.getAttribute("disabled") !== null,
+      (element, value) => (value ? element.setAttribute("disabled", "") : element.removeAttribute("disabled"))
+    ),
+    htmlFor: onTags(
+      "htmlFor",
+      LABEL_TAG,
+      (element) => element.getAttribute("for") ?? "",
+      (element, value) => element.setAttribute("for", String(value))
+    ),
     isContentEditable: { configurable: true, get: () => false },
     shadowRoot: { configurable: true, get: () => null },
     assignedSlot: { configurable: true, get: () => null },

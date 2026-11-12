@@ -385,6 +385,11 @@ export class GpuixDocument<Element = unknown> extends Document {
     return (currentDocumentElements()?.body as Element | undefined) ?? null
   }
 
+  /** `"CSS1Compat"`: the document is laid out as a standards-mode page, which is what a library that tests for quirks mode expects. */
+  get compatMode(): "CSS1Compat" {
+    return "CSS1Compat"
+  }
+
   /** The element that scrolls the document, which is `documentElement` as in standards mode. */
   get scrollingElement(): Element | null {
     return this.documentElement

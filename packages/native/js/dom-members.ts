@@ -191,8 +191,13 @@ function writeAttribute(element: Element, bound: DomElementBinding, name: string
     }
     return
   }
-  const write = propWrittenBy(attribute, text, propKeyForAttribute(bound, attribute, svg))
-  bound.setProp(write.prop, write.value)
+  const writeProp = () => {
+    const write = propWrittenBy(attribute, text, propKeyForAttribute(bound, attribute, svg))
+    bound.setProp(write.prop, write.value)
+  }
+  // A showing popover whose kind the write changes is hidden, as the `popover` property's write does.
+  if (attribute === "popover") writePopoverAttribute(element, writeProp)
+  else writeProp()
 }
 
 /**

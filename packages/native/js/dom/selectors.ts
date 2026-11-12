@@ -6,7 +6,8 @@
  * every focus change (a focus trap's list of tabbable elements) pays the parse once. The tree is
  * walked in JavaScript; only `:focus`, `:focus-visible`, `:focus-within`, `:hover` and `:active`
  * ask the native renderer, because focus and pointer state live there, and `:checked` and `:indeterminate`,
- * because so does the state of a checkbox or radio.
+ * because so does the state of a checkbox or radio. `:popover-open` is answered from the popover
+ * records (`popover.ts`).
  */
 
 import { _compileUnsafe, type Options } from "css-select"
@@ -89,6 +90,17 @@ const adapter: NonNullable<Options<Node, Element>["adapter"]> = {
   },
 }
 
+/**
+ * What `:popover-open` asks. `popover.ts` gives it `isOpen` when it loads: it is not imported here,
+ * because it reaches the window and the renderer state, which load this module first. Until it has
+ * loaded no popover can be showing.
+ */
+let popoverIsOpen: (element: Element) => boolean = () => false
+
+export function setPopoverOpenProbe(probe: (element: Element) => boolean): void {
+  popoverIsOpen = probe
+}
+
 /** The element `:scope` stands for while a query runs, or `null` for a query on the document. */
 const scoping: { root: Element | null } = { root: null }
 
@@ -162,6 +174,7 @@ const OPTIONS: Options<Node, Element> = {
     "focus-within": nativeState(":focus-within"),
     hover: nativeState(":hover"),
     active: nativeState(":active"),
+    "popover-open": (element) => popoverIsOpen(element),
   },
 }
 
