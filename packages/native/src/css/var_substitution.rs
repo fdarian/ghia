@@ -284,6 +284,53 @@ pub(crate) fn merge(base: &StyleDesc, over: &StyleDesc) -> Option<Arc<[VarDeclar
     (!merged.is_empty()).then(|| merged.into())
 }
 
+/// The held declarations without those of the properties `is_reset` says a CSS-wide keyword reset,
+/// or `None` when it holds none of them.
+pub(crate) fn without_reset(
+    held: Option<&[VarDeclaration]>,
+    is_reset: impl Fn(&str) -> bool,
+) -> Option<Option<Arc<[VarDeclaration]>>> {
+    let held = held?;
+    if !held.iter().any(|declaration| is_reset(&declaration.key)) {
+        return None;
+    }
+    let kept: Vec<VarDeclaration> = held.iter().filter(|declaration| !is_reset(&declaration.key)).cloned().collect();
+    Some((!kept.is_empty()).then(|| kept.into()))
+}
+
+/// The keys of `keys` that overlap (`covers::overlapping`) a held declaration.
+pub(crate) fn overlapped(held: &[VarDeclaration], keys: &[KeyId]) -> Vec<KeyId> {
+    keys.iter()
+        .copied()
+        .filter(|key| held.iter().any(|declaration| overlapped_by(declaration, *key)))
+        .collect()
+}
+
+fn overlapped_by(declaration: &VarDeclaration, key: KeyId) -> bool {
+    covers::key_id(&declaration.key).is_some_and(|id| covers::overlapping(id).contains(&key))
+}
+
+/// The held declarations with `keys`, longhands a CSS-wide keyword reset in the layer above, kept
+/// from the declarations they overlap, or `None` when that changes none: the value of a longhand
+/// the layer above wrote (at its initial value) beats a held shorthand that covers it, as what a
+/// layer sets does in [`merge`].
+pub(crate) fn keeping(held: &[VarDeclaration], keys: &[KeyId]) -> Option<Arc<[VarDeclaration]>> {
+    let mut changed = false;
+    let kept: Vec<VarDeclaration> = held
+        .iter()
+        .map(|declaration| {
+            let newly_kept: Vec<KeyId> =
+                keys.iter().copied().filter(|key| overlapped_by(declaration, *key) && !declaration.kept.contains(key)).collect();
+            if newly_kept.is_empty() {
+                return declaration.clone();
+            }
+            changed = true;
+            VarDeclaration { kept: declaration.kept.iter().copied().chain(newly_kept).collect(), ..declaration.clone() }
+        })
+        .collect();
+    changed.then(|| kept.into())
+}
+
 /// Whether `style` has a `var()` that the custom properties of its element substitute, in a
 /// transform text or a held declaration, or in a focus style, which is laid over it when it is built.
 pub(crate) fn reads_vars(style: &StyleDesc) -> bool {

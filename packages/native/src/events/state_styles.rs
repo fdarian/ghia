@@ -33,6 +33,8 @@ macro_rules! overlay_fields {
             has_enabled: None,
             container_rules: None,
             container_unit_axes: $base.container_unit_axes.union($over.container_unit_axes),
+            // Applied to the base before the layers merge; the result is a style no layer lies under.
+            reset: None,
             custom_properties: crate::css::custom_properties::CustomProperties::layered(
                 $base.custom_properties.as_ref(),
                 $over.custom_properties.as_ref(),
@@ -106,15 +108,73 @@ macro_rules! overlaid_fields {
     };
 }
 
-/// The properties `overlay` takes, by the name a style object writes them (camel case), each with
+/// The properties `overlay` takes, by the key a style object writes them under, each with
 /// the read of whether a style sets it.
 macro_rules! property_readers {
     (; $($field:ident),+ $(,)?) => {
         vec![$((
-            crate::css::covers::camel_case(stringify!($field)),
+            crate::css::covers::style_key(stringify!($field)),
             (|style: &StyleDesc| style.$field.is_some()) as fn(&StyleDesc) -> bool,
         )),+]
     };
+}
+
+/// The clears of the properties `overlay` takes, by the key a style object writes them under.
+macro_rules! property_clearers {
+    (; $($field:ident),+ $(,)?) => {
+        vec![$((
+            crate::css::covers::style_key(stringify!($field)),
+            (|style: &mut StyleDesc| style.$field = None) as fn(&mut StyleDesc),
+        )),+]
+    };
+}
+
+static PROPERTY_CLEARERS: LazyLock<FxHashMap<String, fn(&mut StyleDesc)>> =
+    LazyLock::new(|| overlaid_fields!(property_clearers,).into_iter().collect());
+
+/// `base` without the properties named in `names` (camel case), which a layer above reset with a
+/// CSS-wide keyword. A name that is not a property of the style is skipped.
+///
+/// A longhand that a shorthand of `base` still covers (`padding-left` reset over `padding: 1px 6px`)
+/// is put at its initial value, because the shorthand would go on giving it its own.
+fn clear_properties(base: &mut Cow<'_, StyleDesc>, names: &[String]) {
+    for name in names {
+        if sets_property(base, name) {
+            if let Some(clear) = PROPERTY_CLEARERS.get(name.as_str()) {
+                clear(base.to_mut());
+            }
+        }
+    }
+    // A `var()` value is no field of the style until it is built: `merge` keeps a held declaration
+    // of the base unless the layer above sets the property, and a reset sets nothing.
+    if base.var_declarations.is_some() {
+        if let Some(kept) = crate::css::var_substitution::without_reset(base.var_declarations.as_deref(), |key| {
+            names.iter().any(|name| name == key)
+        }) {
+            base.to_mut().var_declarations = kept;
+        }
+    }
+    let longhands: Vec<_> = names
+        .iter()
+        .filter_map(|name| crate::css::covers::key_id(name))
+        .filter_map(|key| Some((key, crate::css::sheet::initial_style_of(key)?)))
+        .collect();
+    // What is left of a held declaration still lays what the reset took back (`border-top-color:
+    // initial` over a held `border-color`): the longhand's initial value is written and the
+    // declaration laid under it, as `merge` does for what a layer above sets.
+    let mut overlapped = Vec::new();
+    if let Some(held) = base.var_declarations.clone() {
+        let keys: Vec<_> = longhands.iter().map(|(key, _)| *key).collect();
+        overlapped = crate::css::var_substitution::overlapped(&held, &keys);
+        if let Some(kept) = crate::css::var_substitution::keeping(&held, &overlapped) {
+            base.to_mut().var_declarations = Some(kept);
+        }
+    }
+    for (key, initial) in longhands {
+        if overlapped.contains(&key) || crate::css::covers::is_covered_in(base, key) {
+            crate::css::covers::restore(base.to_mut(), initial, &[key]);
+        }
+    }
 }
 
 static PROPERTY_READERS: LazyLock<FxHashMap<String, fn(&StyleDesc) -> bool>> =
@@ -124,6 +184,11 @@ static PROPERTY_READERS: LazyLock<FxHashMap<String, fn(&StyleDesc) -> bool>> =
 /// name that is not a property.
 pub(crate) fn sets_property(style: &StyleDesc, name: &str) -> bool {
     PROPERTY_READERS.get(name).is_some_and(|reads| reads(style))
+}
+
+#[cfg(test)]
+pub(crate) fn is_property(name: &str) -> bool {
+    PROPERTY_READERS.contains_key(name)
 }
 
 /// The layer that sets nothing, for a fold that applies no state: [`overlay`] over it is a copy.
@@ -215,6 +280,8 @@ pub fn resolve_state_styles(style: &StyleDesc, hovered: bool, active: bool) -> S
 
 /// Whether `resolve_pointer_states` with no state applying would return `style` as it is:
 /// it holds nothing that `overlay` clears. Keep in step with the fields `overlay_fields!` resets.
+/// `reset` is not one: it only acts on a layer under the style, and an effective style that still
+/// carries it (no layer lay under it) is as good as one that does not.
 pub(crate) fn is_overlay_fixed_point(style: &StyleDesc) -> bool {
     style.hover.is_none()
         && style.active.is_none()
@@ -310,6 +377,7 @@ pub(crate) fn laid_over(base: &StyleDesc, over: &StyleDesc) -> StyleDesc {
         contents_levels: base.contents_levels.clone(),
         measure_natural_width: base.measure_natural_width,
         atomic_inline: base.atomic_inline,
+        reset: base.reset.clone(),
         ..overlay(base, over)
     }
 }
@@ -319,6 +387,9 @@ pub(crate) fn overlay(base: &StyleDesc, over: &StyleDesc) -> StyleDesc {
     let over = without_invalid_values(over);
     let over = over.as_ref();
     let mut base = Cow::Borrowed(base);
+    if let Some(reset) = over.reset.as_deref() {
+        clear_properties(&mut base, reset);
+    }
     drop_shadowed_longhands(&mut base, over);
     overlaid_fields!(overlay_fields, base, over)
 }
@@ -1786,5 +1857,9 @@ mod tests {
             assert!(!is_overlay_fixed_point(&held), "{json}");
             assert_ne!(overlay(&held, &StyleDesc::default()), held, "{json}");
         }
+        let mut reset = plain.clone();
+        reset.reset = Some(["color".to_owned()].into());
+        assert!(is_overlay_fixed_point(&reset), "a reset list acts on a layer under the style, not on the style");
+        assert_eq!(overlay(&reset, &StyleDesc::default()), plain);
     }
 }

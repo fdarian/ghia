@@ -145,6 +145,15 @@ struct Covers {
 
 static COVERS: LazyLock<Covers> = LazyLock::new(Covers::build);
 
+/// The key a style object writes the `StyleDesc` field `field` (snake case) under: camel case, but
+/// for the field whose serde name is not (`style.rs` renames it).
+pub(crate) fn style_key(field: &str) -> String {
+    match field {
+        "webkit_font_smoothing" => "WebkitFontSmoothing".to_owned(),
+        _ => camel_case(field),
+    }
+}
+
 pub(crate) fn camel_case(snake: &str) -> String {
     let mut camel = String::with_capacity(snake.len());
     let mut upper = false;
@@ -317,6 +326,11 @@ pub(crate) fn shadow(base: &mut Cow<'_, StyleDesc>, over: &StyleDesc) {
 /// or covered by one.
 pub(crate) fn key_id(name: &str) -> Option<KeyId> {
     COVERS.ids.get(name).copied()
+}
+
+/// The name of `key` as a style object writes it (camel case).
+pub(crate) fn name_of(key: KeyId) -> String {
+    camel_case(COVERS.keys[key].name)
 }
 
 /// What `key` covers, through the shorthands it covers as well. Empty for a longhand.
