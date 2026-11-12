@@ -1333,30 +1333,6 @@ pub(crate) fn wants_natural_width(
         && (transitions_width(declared) || animates_width(declared, keyframes))
 }
 
-/// The state styles `fold_state_styles` can lay over `style`, by the name a
-/// validation error gives them. A transition or animation declared in any of
-/// them has to take part, or it never runs.
-pub(super) fn state_styles(style: &StyleDesc) -> [(&'static str, Option<&StyleDesc>); 16] {
-    [
-        ("hover", style.hover.as_deref()),
-        ("active", style.active.as_deref()),
-        ("focus", style.focus.as_deref()),
-        ("focusWithin", style.focus_within.as_deref()),
-        ("focusVisible", style.focus_visible.as_deref()),
-        ("groupHover", style.group_hover.as_deref()),
-        ("groupActive", style.group_active.as_deref()),
-        ("groupFocusWithin", style.group_focus_within.as_deref()),
-        ("hasHover", style.has_hover.as_deref()),
-        ("hasActive", style.has_active.as_deref()),
-        ("hasFocus", style.has_focus.as_deref()),
-        ("hasFocusVisible", style.has_focus_visible.as_deref()),
-        ("disabled", style.disabled.as_deref()),
-        ("enabled", style.enabled.as_deref()),
-        ("hasDisabled", style.has_disabled.as_deref()),
-        ("hasEnabled", style.has_enabled.as_deref()),
-    ]
-}
-
 /// The style `style` has after the state styles that currently apply (the pointer and control
 /// ones, then the focus ones, in the order the build applies them), with the CSS transitions
 /// running on it laid on top (`transitions` is `None` for an element that
@@ -1480,10 +1456,7 @@ fn fold_state_styles<'a>(
     for declared in focus.over(&style) {
         after = overlay(&after, declared);
     }
-    after.focus = None;
-    after.focus_within = None;
-    after.has_focus_visible = None;
-    after.focus_visible = None;
+    crate::focus::clear_focus_variants(&mut after);
     Arc::new(after)
 }
 

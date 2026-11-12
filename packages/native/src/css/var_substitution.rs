@@ -229,6 +229,13 @@ macro_rules! state_slots {
                 _ => return None,
             })
         }
+
+        /// The blocks of the states of `style`, each by its key (the name a validation error gives it), in
+        /// the order of [`STATE_KEYS`]. A transition or animation declared in any of them has to take
+        /// part, or it never runs.
+        pub(crate) fn state_blocks(style: &StyleDesc) -> [(&'static str, Option<&StyleDesc>); STATE_KEYS.len()] {
+            [$(($key, style.$field.as_deref())),+]
+        }
     };
 }
 

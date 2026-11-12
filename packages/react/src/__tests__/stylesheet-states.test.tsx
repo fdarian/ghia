@@ -10,6 +10,7 @@ import path from "path"
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { getComputedStyle } from "@ghia/native/host"
+import { motionValue } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
 import { readLogicalPixels } from "./test-utils.js"
 
@@ -359,5 +360,52 @@ describe.skipIf(!hasNativeTestRenderer)("state pseudo-classes in a stylesheet in
     expect(redAt("focused"), "the page shows through").toBe(0xff)
     app.renderer.blurElement(idOf("btn"))
     expect(redAt("blurred")).toBe(0xef)
+  })
+
+  it("keeps a list's user agent inline padding on the right under padding: revert in an rtl element", () => {
+    app.render(
+      <div>
+        <style>{`.a { direction: rtl; width: 200px; padding: 3px } .a:hover { padding: revert }`}</style>
+        <ul testId="a" className="a">
+          <li testId="item" style={{ height: 10 }} />
+        </ul>
+      </div>
+    )
+    const item = () => {
+      app.renderer.dispatchNativeEvents()
+      const list = app.renderer.getElementBounds(idOf("a"))!
+      const bounds = app.renderer.getElementBounds(idOf("item"))!
+      return { left: bounds.x - list.x, width: bounds.width }
+    }
+    expect(item()).toEqual({ left: 3, width: 194 })
+    app.renderer.nativeSimulateMouseMove(...centre("a"))
+    expect(item(), "the 40px of `padding-inline: 40px 0` is the start, which is the right").toEqual({ left: 0, width: 160 })
+  })
+
+  it("lays a focus rule over a motion value, as the box is built", () => {
+    const opacity = motionValue(0.5)
+    let box: HTMLElement | null = null
+    app.render(
+      <div style={{ width: 400, height: 300, backgroundColor: "#ffffff" }}>
+        <style>{`.a:focus { opacity: 1; width: initial }`}</style>
+        <div
+          ref={(element: unknown) => (box = element as HTMLElement)}
+          testId="a"
+          className="a"
+          tabIndex={0}
+          style={{ width: 100, height: 30, backgroundColor: "#000000", opacity }}
+        />
+      </div>
+    )
+    const redAt = (name: string): number => {
+      app.renderer.dispatchNativeEvents()
+      const file = path.join(shots, `${name}.png`)
+      app.renderer.captureScreenshot(file)
+      return readLogicalPixels(file, app.renderer).at(...centre("a"))[0]
+    }
+    expect(redAt("motion-rest")).toBeGreaterThan(0x60)
+    app.renderer.focusElement(idOf("a"))
+    expect(getComputedStyle(box!).opacity).toBe("1")
+    expect(redAt("motion-focused"), "opaque black").toBe(0)
   })
 })

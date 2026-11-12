@@ -11523,11 +11523,6 @@ fn build_element_unpumped(
         crate::css::custom_properties::reads::note();
     }
     let base_style = var_style.as_ref().or(base_style);
-    // A focus variant that resets a property is folded in here, where a variant that only sets
-    // fields is laid over the element by the builders (`focus::apply_focus_styles`).
-    let focus_reset_style = base_style
-        .and_then(|style| ctx.focus_styles.folded_for_resets(id, style, ctx.focus_handles.contains_key(&id)));
-    let base_style = focus_reset_style.as_ref().or(base_style);
     ctx.retain.pointer(pointer_states);
     ctx.retain.focus(&ctx.focus_styles, id, ctx.focus_handles.contains_key(&id));
     if let Some(links) = crate::accessibility::links_key(id) {
@@ -11578,7 +11573,13 @@ fn build_element_unpumped(
     }
     let measured = animated.measured;
     let declared_style = animated.declared(base_style);
-    let current_style = animated.current(base_style);
+    // A focus variant that resets a property is folded in here, where a variant that only sets
+    // fields is laid over the element by the builders (`focus::apply_focus_styles`): over what motion
+    // moved, as the builders lay it.
+    let focus_reset_style = animated
+        .current(base_style)
+        .and_then(|style| ctx.focus_styles.folded_for_resets(id, style, ctx.focus_handles.contains_key(&id)));
+    let current_style = focus_reset_style.as_deref().or(animated.current(base_style));
     let overlaid_style = contents_overlay
         .map(|overlay| current_style.unwrap_or(&EMPTY_STYLE).with_inherited_overlay(&overlay));
     let style = overlaid_style.as_deref().or(current_style);

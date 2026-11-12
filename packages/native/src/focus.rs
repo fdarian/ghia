@@ -58,6 +58,14 @@ macro_rules! focus_variant_fields {
 }
 pub(crate) use focus_variant_fields;
 
+/// Drops the focus variants of a style they were folded into.
+pub(crate) fn clear_focus_variants(style: &mut StyleDesc) {
+    macro_rules! clear {
+        ($($field:ident),+) => { $(style.$field = None;)+ };
+    }
+    focus_variant_fields!(clear);
+}
+
 /// A style with the focus variants laid over it, or the style itself when none applies. Not a
 /// `Cow<StyleDesc>`: that is a `StyleDesc` wide (~13 KB) even when borrowed, and moves as one.
 pub(crate) enum FocusFolded<'a> {
@@ -109,18 +117,22 @@ impl FocusStyles {
     /// style folded here has the reset taken out of the base (`overlay`), as it does for an element
     /// with a transition (`motion::fold_state_styles`), and no variant left for the builders to
     /// apply a second time.
-    pub fn folded_for_resets(&self, id: u64, style: &StyleDesc, focusable: bool) -> Option<StyleDesc> {
-        if !self.applying(id, style, focusable).any(|declared| declared.reset.is_some()) {
+    pub fn folded_for_resets(&self, id: u64, style: &StyleDesc, focusable: bool) -> Option<Box<StyleDesc>> {
+        macro_rules! declares_reset {
+            ($($field:ident),+) => { false $(|| style.$field.as_deref().is_some_and(|variant| variant.reset.is_some()))+ };
+        }
+        if !focus_variant_fields!(declares_reset)
+            || !self.applying(id, style, focusable).any(|declared| declared.reset.is_some())
+        {
             return None;
         }
-        let FocusFolded::Owned(mut folded) = self.folded(id, style, focusable) else {
-            return None;
-        };
-        folded.focus = None;
-        folded.focus_within = None;
-        folded.has_focus_visible = None;
-        folded.focus_visible = None;
-        Some(*folded)
+        let mut folded: Option<Box<StyleDesc>> = None;
+        for declared in self.applying(id, style, focusable) {
+            folded = Some(Box::new(crate::events::state_styles::overlay(folded.as_deref().unwrap_or(style), declared)));
+        }
+        let mut folded = folded.expect("a variant that resets applies");
+        clear_focus_variants(&mut folded);
+        Some(folded)
     }
 
     /// The custom properties element `id` computes to below `parent`: the ones `style` declares

@@ -404,7 +404,7 @@ pub(super) fn check_keyframes_name(name: &str) -> Result<(), String> {
 /// not parse.
 pub(crate) fn validate_animations(style: &StyleDesc) -> Result<(), String> {
     AnimationList::parse(style)?;
-    for (name, state) in super::state_styles(style) {
+    for (name, state) in crate::css::var_substitution::state_blocks(style) {
         if let Some(state) = state {
             AnimationList::parse(state).map_err(|error| format!("{name}.{error}"))?;
         }
@@ -1909,7 +1909,7 @@ impl CssAnimations {
     pub(crate) fn declares(style: Option<&StyleDesc>) -> bool {
         style.is_some_and(|style| {
             declares_animation(style)
-                || super::state_styles(style)
+                || crate::css::var_substitution::state_blocks(style)
                     .into_iter()
                     .any(|(_, state)| state.is_some_and(declares_animation))
         })
