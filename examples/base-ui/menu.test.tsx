@@ -157,7 +157,7 @@ function Shared(props: { onAction?: (name: string) => void }) {
           <Menu.Portal>
             <Menu.Positioner side="bottom" align="start" sideOffset={4}>
               <Menu.Popup data-testid="popup" style={{ display: 'block', width: 120 }}>
-                <Menu.Viewport>
+                <Menu.Viewport data-testid="viewport">
                   {(root.payload?.items ?? []).map((name) => (
                     <Menu.Item key={name} style={{ display: 'block', width: 110, height: 24 }} onClick={() => props.onAction?.(name)}>
                       {name}
@@ -227,6 +227,7 @@ describeNative('Base UI Menu with several triggers sharing one popup', () => {
     expect(first.x).toBeCloseTo(box(file).x, 0)
 
     await click(app, edit)
+    expect(query('[data-testid="viewport"]').getAttribute('data-activation-direction')).toContain('right')
     await settle(app, 400)
     expect(queryAll('[data-testid="popup"]').length).toBe(1)
     expect(queryAll('[role="menuitem"]').map((item) => item.textContent)).toEqual(['Undo', 'Redo', 'Cut'])

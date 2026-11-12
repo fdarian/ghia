@@ -129,7 +129,7 @@ function Shared() {
           <Popover.Portal>
             <Popover.Positioner side="bottom" align="start" sideOffset={6}>
               <Popover.Popup data-testid="popup" style={{ display: 'block' }}>
-                <Popover.Viewport>
+                <Popover.Viewport data-testid="viewport">
                   {root.payload === undefined ? null : (
                     <div data-testid="panel">
                       <strong>{root.payload.label}</strong>
@@ -164,6 +164,8 @@ describeNative('Base UI Popover with several triggers sharing one popup', () => 
     expect(first.x).toBeCloseTo(box(alpha).x, 0)
 
     await click(app, beta)
+    // The viewport swaps the content through a node it clones and appends (usePopupViewport).
+    expect(query('[data-testid="viewport"]').getAttribute('data-activation-direction')).toContain('right')
     await settle(app, 400)
     expect(queryAll('[data-testid="popup"]').length).toBe(1)
     expect(app.renderer.findByText('three')).toBeDefined()
