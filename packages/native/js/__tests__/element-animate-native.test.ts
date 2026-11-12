@@ -190,7 +190,7 @@ describeNative("element.animate() on an element that is removed", () => {
   }
 
   /** What the mutation queue does with a batch that removes the box: native destroys it, JS is told which. */
-  const remove = () => {
+  const remove = (sweep = true) => {
     const destroyed = renderer.applyBatch(
       encodeWireBatchForTest([
         ["detachChild", 1, BOX],
@@ -199,7 +199,7 @@ describeNative("element.animate() on an element that is removed", () => {
     )
     cancelAnimationsOfElements(host(), destroyed)
     renderer.flush()
-    frame(0)
+    if (sweep) frame(0)
   }
 
   const insertAgain = () => {
@@ -285,6 +285,34 @@ describeNative("element.animate() on an element that is removed", () => {
     expect(animation.playState).toBe("running")
     frame(1100)
     await expect(animation.finished).resolves.toBe(animation)
+  })
+
+  it("plays an animation again that was cancelled before the frame that sweeps its removed element", async () => {
+    const target = {}
+    const animation = methods().animate.call(target, { opacity: [0, 1] }, 1000)
+    frame(0)
+    frame(100)
+    remove(false)
+    animation.cancel()
+    frame(16)
+    expect(animation.playState).toBe("idle")
+    animation.play()
+    frame(16)
+    expect(animation.playState).toBe("running")
+    frame(1100)
+    await expect(animation.finished).resolves.toBe(animation)
+  })
+
+  it("plays an animation again that was cancelled before its element was removed", () => {
+    const target = {}
+    const animation = methods().animate.call(target, { opacity: [0, 1] }, 1000)
+    frame(0)
+    animation.cancel()
+    frame(16)
+    remove()
+    animation.play()
+    frame(16)
+    expect(animation.playState).toBe("running")
   })
 
   it("keeps a running animation and its run when the app lets go of everything", async () => {

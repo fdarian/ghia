@@ -1633,14 +1633,15 @@ impl ElementState {
         self.every_run().any(|run| run.wants_frame(now))
     }
 
-    /// The element left the tree: what the style owned ends with it, and so does a run that is not a
-    /// script's or was cancelled. Chrome leaves the animations of `Element.animate()` that are not
-    /// cancelled running on the disconnected element. Whether any run is left.
+    /// The element left the tree: what the style owned ends with it, and so does a run a command
+    /// brought back for a CSS animation. Chrome leaves the animations of `Element.animate()` on the
+    /// disconnected element, cancelled ones too (`cancel()` then `play()` works there), so those stay
+    /// until JS lets go of them (`CssAnimations::forget`). Whether any run is left.
     fn leave_tree(&mut self) -> bool {
         self.runs.clear();
         self.list = AnimationList::default();
         self.config = Default::default();
-        self.disowned.retain(|run| run.script && !run.clock.is_idle());
+        self.disowned.retain(|run| run.script);
         !self.disowned.is_empty()
     }
 
@@ -2330,7 +2331,7 @@ impl CssAnimations {
         }
     }
 
-    /// Drops what elements that left the tree held. A script animation that is not cancelled stays:
+    /// Drops what elements that left the tree held. A script animation stays, cancelled or not:
     /// Chrome does not cancel those when the element is removed, so the run goes on with the clock
     /// and finishes on time, and shows again if the element comes back (`orphans`). What else the
     /// element held ends with it, and an orphan ends with its last run (`forget`).
@@ -5688,14 +5689,20 @@ mod tests {
     }
 
     #[test]
-    fn a_cancelled_script_animation_and_a_css_animation_end_with_their_element() {
+    fn a_css_animation_ends_with_its_element_and_a_cancelled_script_animation_stays_idle_for_play() {
         let mut frames = Frames::new();
         frames.define("fade", FADE);
         let id = animate(&mut frames, 0, RAMP, timing(1000.0, |_| {}));
         frames.frame(0, &fading("fade 1s linear"));
         frames.animations.command(id, Command::Cancel, frames.at(10)).unwrap().unwrap();
         frames.animations.retain(|_| false);
-        assert!(!frames.animations.wants(1, None));
+        assert!(frames.animations.info(id, frames.at(10)).is_some(), "Chrome plays a cancelled animation of a removed element again");
+        frames.animations.advance_dormant(frames.at(20));
+        assert_eq!(
+            frames.animations.dormant_wake(0, &|_| false),
+            crate::dormant_wake::Wake::Never,
+            "a run that is idle asks for no tick"
+        );
 
         let mut frames = Frames::new();
         frames.define("fade", FADE);
@@ -5736,6 +5743,21 @@ mod tests {
         assert_eq!(frames.animations.info(held, frames.at(500)).unwrap().status, Status::Running);
         frames.animations.forget(held);
         assert!(!frames.animations.is_dormant(1), "the last run is gone, and the element with it");
+    }
+
+    #[test]
+    fn a_script_animation_cancelled_before_the_sweep_of_its_removed_element_plays_again() {
+        let mut frames = Frames::new();
+        let id = animate(&mut frames, 0, RAMP, timing(1000.0, |_| {}));
+        frames.frame(0, &bare());
+        // The batch destroyed the element and JS cancels before the frame that sweeps it.
+        frames.animations.command(id, Command::Cancel, frames.at(100)).unwrap().unwrap();
+        frames.animations.retain(|_| false);
+        frames.animations.command(id, Command::Play, frames.at(100)).unwrap().unwrap();
+        frames.animations.advance_dormant(frames.at(116));
+        assert_eq!(frames.animations.info(id, frames.at(300)).unwrap().status, Status::Running);
+        frames.animations.advance_dormant(frames.at(2000));
+        assert_eq!(api_events(&mut frames).last(), Some(&(ApiEventKind::Finish, id)));
     }
 
     #[test]

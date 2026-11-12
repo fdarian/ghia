@@ -1381,10 +1381,11 @@ function keptByNative(renderer: NativeRenderer, state: State): boolean {
  * A removed element's CSS animations and transitions are cancelled, as the DOM does: native sends
  * nothing when an element goes, so the ids the mutation queue was told are destroyed end here. The
  * `cancel` event comes in a task, as the DOM's comes at its next frame. An animation of
- * `Element.animate()` that was not cancelled is left alone, as the DOM leaves it running on the
- * disconnected element: native keeps its run and goes on with the clock, so `finished` resolves on
- * time and the run shows again if the element is made again under the same id. The registry holds it
- * while it runs (`finished` is pending); one that is over is held by its element.
+ * `Element.animate()` is left alone, cancelled or not, as the DOM leaves it on the disconnected
+ * element (`play()` after `cancel()` works there): native keeps its run and goes on with the clock,
+ * so `finished` resolves on time and the run shows again if the element is made again under the same
+ * id. The registry holds it while it runs (`finished` is pending); one that is over is held by its
+ * element, and native drops the run when JS forgets it.
  */
 export function cancelAnimationsOfElements(renderer: object, elementIds: readonly number[]): void {
   const registry = registryOf(renderer)
@@ -1394,10 +1395,14 @@ export function cancelAnimationsOfElements(renderer: object, elementIds: readonl
     // Chrome cancels the last of an element's animations first.
     for (const animation of [...running].reverse()) {
       const state = stateOf(animation)
-      if (state.madeByScript && state.mode === "live" && readLive(state).playState !== "idle") {
-        state.orphaned = true
-        if (state.last.playState === "finished") holdFinishedOrphan(state, animation)
-        continue
+      if (state.madeByScript && state.mode === "live") {
+        const playState = readLive(state).playState
+        if (state.mode === "live") {
+          state.orphaned = true
+          if (playState === "finished") holdFinishedOrphan(state, animation)
+          else if (playState === "idle") holdWithElement(state, animation)
+          continue
+        }
       }
       const wasIdle = state.mode === "gone" || state.last.playState === "idle"
       lose(animation)
