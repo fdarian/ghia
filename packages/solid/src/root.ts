@@ -4,6 +4,7 @@ import {
   createMutationQueue,
   createRendererState,
   installElementSource,
+  runAll,
   runMotionReleases,
   syncWindowEventListeners,
   syncWindowSelectionChange,
@@ -175,31 +176,32 @@ export function createRoot(
   }
 
   attach()
+  // The release and the batch are separate steps: a throw in the first must not skip the second.
   const flush = () => {
-    try {
-      container.finishRemovals()
-    } finally {
-      mutations.flushMutations()
-    }
+    runAll([
+      () => container.finishRemovals(),
+      () => mutations.flushMutations(),
+    ], (step) => step(), "Flushing failed")
   }
+  // Every step runs even when one throws, so a failed teardown still releases `<html>` and the handlers.
   const clear = () => {
-    dispose?.()
-    dispose = undefined
-    // A component can render several top-level nodes (a Dialog is its trigger and its
-    // portal's layer), and removing one leaves the others in the native tree.
-    for (const mounted of [...container.childList]) removeHostNode(container, mounted)
-    container.destroyDocumentElements()
-    flush()
-    eventHandlers.clear()
+    runAll([
+      () => {
+        dispose?.()
+        dispose = undefined
+      },
+      // A component can render several top-level nodes (a Dialog is its trigger and its
+      // portal's layer), and removing one leaves the others in the native tree.
+      () => runAll([...container.childList], (mounted) => removeHostNode(container, mounted), "Removing nodes failed"),
+      () => container.destroyDocumentElements(),
+      flush,
+      () => eventHandlers.clear(),
+    ], (step) => step(), "Clearing the root failed")
   }
 
   return {
     render(code) {
-      if (dispose) {
-        clear()
-        detach()
-        attach()
-      }
+      if (dispose) runAll([clear, detach, attach], (step) => step(), "Rendering again failed")
       container.ensureDocumentElements()
       dispose = universalRender(
         () => createComponent(GpuixContext.Provider, {
@@ -248,8 +250,7 @@ export function createRoot(
       }
     },
     unmount() {
-      clear()
-      detach()
+      runAll([clear, detach], (step) => step(), "Unmounting failed")
     },
   }
 }

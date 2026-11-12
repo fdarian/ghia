@@ -17,6 +17,7 @@ import {
   type HostNode,
   type HostParent,
   type HostRoot,
+  type HostText,
 } from "./host.js"
 import { notePresenceHost, runInPresenceScope } from "./presence-scope.js"
 
@@ -26,6 +27,35 @@ function isHostRoot(value: unknown): value is HostRoot {
 
 function describe(value: unknown): string {
   return typeof value === "object" && value !== null ? `object ${JSON.stringify(Object.keys(value))}` : String(value)
+}
+
+/**
+ * A component can render any object: solid-refresh passes `{ name }` as a memo's initial value in
+ * dev, so a component that threw on mount renders that object. `solid-js/universal` keeps what it
+ * was given in `current` and later reads it back as a position (`getNextSibling(current[i])`, an
+ * anchor, the node `replaceNode` swaps out), so the object has to be a node to the tree. Each one
+ * stands for an empty text node that is never visible, and the object itself is never mounted.
+ */
+const placeholders = new WeakMap<object, HostText>()
+
+function hostNodeFor(value: unknown): HostNode {
+  if (isHostNode(value)) return value
+  if (typeof value !== "object" || value === null || isHostRoot(value)) {
+    throw new TypeError(`Expected a GPUIX host node, got ${describe(value)}`)
+  }
+  const existing = placeholders.get(value)
+  if (existing) return existing
+  console.warn("Unrecognized value. Rendered nothing in its place", value)
+  const placeholder = createHostText("")
+  placeholders.set(value, placeholder)
+  return placeholder
+}
+
+/** What a node read (`getParentNode`, `getNextSibling`) is asked about: an object that was never inserted has no neighbours. */
+function insertedNodeFor(value: HostNode | HostParent): HostNode | undefined {
+  if (isHostNode(value)) return value
+  if (isHostRoot(value)) return undefined
+  return placeholders.get(value)
 }
 
 const runtime = createRenderer<HostNode | HostParent>({
@@ -45,38 +75,29 @@ const runtime = createRenderer<HostNode | HostParent>({
     }
   },
   insertNode(parent, node, anchor) {
-    // Like solid-js/web, which skips an object that is not a DOM node: a component can render any
-    // object (solid-refresh passes `{ name }` as a memo's initial value, so a component that
-    // throws on mount renders that). Mounting it would leave a half-mounted node in the tree.
-    if (!isHostNode(node)) {
-      console.warn("Unrecognized value. Skipped inserting", node)
-      return
-    }
     if (parent.kind === "text") throw new TypeError("Expected GPUIX host nodes")
     // Universal passes `null` as the anchor to append (`cleanChildren(parent, current, null, node)`).
-    if (anchor !== undefined && anchor !== null && !isHostNode(anchor)) {
-      throw new TypeError(`Expected a GPUIX host node as the insertion anchor, got ${describe(anchor)}`)
-    }
-    insertHostNode(parent, node, anchor)
+    insertHostNode(parent, hostNodeFor(node), anchor === undefined || anchor === null ? anchor : hostNodeFor(anchor))
   },
   isTextNode(node) {
     return isHostNode(node) && isHostText(node)
   },
   removeNode(parent, node) {
-    // A skipped value was never inserted.
-    if (!isHostNode(node)) return
     if (parent.kind === "text") throw new TypeError("Expected GPUIX host nodes")
-    removeHostNode(parent, node)
+    const known = insertedNodeFor(node)
+    if (known) removeHostNode(parent, known)
   },
   getParentNode(node) {
-    return isHostNode(node) ? getParentNode(node) : undefined
+    const known = insertedNodeFor(node)
+    return known ? getParentNode(known) : undefined
   },
   getFirstChild(node) {
     if (isHostRoot(node)) return getFirstChild(node)
     return isHostNode(node) && node.kind === "element" ? getFirstChild(node) : undefined
   },
   getNextSibling(node) {
-    return isHostNode(node) ? getNextSibling(node) : undefined
+    const known = insertedNodeFor(node)
+    return known ? getNextSibling(known) : undefined
   },
 })
 

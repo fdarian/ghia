@@ -34,6 +34,7 @@ import {
   queueChildListMutation,
   recordAttributeChanges,
   ROOT_ELEMENT_TYPES,
+  runAll,
   readBoundingClientRect,
   toBoundingClientRect,
   retireMotionBindings,
@@ -163,31 +164,37 @@ export class HostRoot implements MotionBindingHost {
     this.body = elements.body
   }
 
-  /** Destroys `<html>` and, with it, `<head>` and `<body>`, once the app's nodes are out of them. */
+  /** Destroys `<html>` and, with it, `<head>` and `<body>`, once the app's nodes are out of them. Releases both even when one throws. */
   destroyDocumentElements(): void {
-    this.finishRemovals()
+    runAll([
+      () => this.finishRemovals(),
+      () => this.destroyHtml(),
+    ], (step) => step(), "Tearing down the document failed")
+  }
+
+  private destroyHtml(): void {
     if (!this.html.mounted) return
-    markUnmounted(this.html)
-    this.html.parent = null
-    this.mutations.destroyElement(this.html.nativeId)
+    try {
+      markUnmounted(this.html)
+    } finally {
+      this.html.parent = null
+      this.mutations.destroyElement(this.html.nativeId)
+    }
   }
 
   /** Destroys the removed nodes that stayed out of the tree, each one even when another throws. Call before each flush. */
   finishRemovals(): void {
     const removed = [...this.removals]
     this.removals.clear()
-    const failures: unknown[] = []
-    for (const node of removed) {
+    runAll(removed, (node) => {
+      if (!node.mounted || isConnected(node)) return
+      // A throw while marking a subtree unmounted must not keep its native elements alive.
       try {
-        if (!node.mounted || isConnected(node)) continue
         markUnmounted(node)
+      } finally {
         this.mutations.destroyElement(node.nativeId)
-      } catch (error) {
-        failures.push(error)
       }
-    }
-    if (failures.length === 1) throw failures[0]
-    if (failures.length > 1) throw new AggregateError(failures, "Releasing removed nodes failed")
+    }, "Releasing removed nodes failed")
   }
 
   /** Built through the host machinery an app's elements go through, then mounted as the window's root. */
@@ -206,8 +213,12 @@ export class HostRoot implements MotionBindingHost {
   }
 }
 
+/** `Symbol.for`, so a node built by a second copy of this module is still one. */
+const HOST_NODE = Symbol.for("@ghia/solid/host-node")
+
 export class HostElement extends HTMLElement {
   readonly kind = "element" as const
+  readonly [HOST_NODE] = true
   /**
    * The nodes inside it, in order. Not `children`, which is the DOM's: the elements only.
    * Not `childNodes` either, which hands out a copy that cannot corrupt this one.
@@ -543,6 +554,7 @@ function isConnected(node: HostNode): boolean {
 
 export class HostText extends Text {
   readonly kind = "text" as const
+  readonly [HOST_NODE] = true
   readonly childList: HostNode[] = []
   parent: HostParent | null = null
   root: HostRoot | null = null
@@ -1024,11 +1036,9 @@ export function isHostElement(value: unknown): value is HostElement {
     (value as { kind?: unknown }).kind === "element"
 }
 
-/** A host element or text node, as opposed to any other value a component can render. */
+/** A host element or text node, as opposed to any other value a component can render, an app's own `{ kind: "text" }` among them. */
 export function isHostNode(value: unknown): value is HostNode {
-  if (typeof value !== "object" || value === null) return false
-  const kind = (value as { kind?: unknown }).kind
-  return kind === "element" || kind === "text"
+  return typeof value === "object" && value !== null && HOST_NODE in value
 }
 
 function isEventHandler(

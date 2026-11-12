@@ -12,6 +12,7 @@ import {
   isSvgType,
   queueCharacterDataMutation,
   recordAttributeChanges,
+  runAll,
   serializeCustomProp,
 } from "@ghia/native/host"
 import type { DomNodeFactory, StyleDesc, Text } from "@ghia/native/host"
@@ -111,19 +112,15 @@ export function releaseDetachedNodes(container: Container): void {
   if (detached === undefined || detached.size === 0) return
   const nodes = [...detached]
   detached.clear()
-  const failures: unknown[] = []
-  for (const node of nodes) {
+  runAll(nodes, (node) => {
+    const state = stateFor(node)
+    if (!state.mounted || isInTree(node)) return
     try {
-      const state = stateFor(node)
-      if (!state.mounted || isInTree(node)) continue
       markUnmounted(node)
+    } finally {
       state.container.renderer.destroyElement(node.nativeId)
-    } catch (error) {
-      failures.push(error)
     }
-  }
-  if (failures.length === 1) throw failures[0]
-  if (failures.length > 1) throw new AggregateError(failures, "Releasing detached nodes failed")
+  }, "Releasing detached nodes failed")
 }
 
 export function setDomTextData(text: TextInstance, data: string): void {

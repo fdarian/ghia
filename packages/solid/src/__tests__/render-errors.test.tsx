@@ -1,4 +1,4 @@
-import { ErrorBoundary, Show, Switch, Match, createSignal } from "solid-js"
+import { ErrorBoundary, For, Show, Switch, Match, createMemo, createSignal } from "solid-js"
 import type { JSX } from "solid-js"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { HostRoot } from "../host.js"
@@ -9,10 +9,21 @@ function tick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
-const WARNING = "Unrecognized value. Skipped inserting"
+const WARNING = "Unrecognized value. Rendered nothing in its place"
 
-// What a Solid component renders after it threw on mount in dev: solid-refresh 0.6.3 passes
-// `{ name }` as the memo's initial value, and the memo never computed.
+// What a Solid component renders after it threw on mount in dev. solid-refresh 0.6.3 calls
+// `createMemo(fn, { name })`, and solid-js 1.9 takes the second argument as the memo's initial
+// value, so a memo whose `fn` throws on its first run keeps `{ name }` as its value.
+function RefreshBomb(): JSX.Element {
+  return createMemo(
+    () => {
+      throw new Error("boom")
+    },
+    { name: "[solid-refresh]Bomb" } as never
+  )
+}
+
+// The same object, handed over directly.
 function Bomb(): JSX.Element {
   return { name: "[solid-refresh]Bomb" } as unknown as JSX.Element
 }
@@ -22,18 +33,25 @@ function Thrower(): JSX.Element {
 }
 
 const texts = (renderer: TestRenderer) => renderer.getAllText()
+const shown = (renderer: TestRenderer) => texts(renderer).filter((text) => text !== "")
+
+async function settle(): Promise<void> {
+  await tick()
+  await tick()
+}
 
 describe.skipIf(!hasNativeTestRenderer)("Solid renders a value that is not a host node", () => {
   let warn: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    vi.spyOn(console, "error").mockImplementation(() => {})
   })
   afterEach(() => {
-    warn.mockRestore()
+    vi.restoreAllMocks()
   })
 
-  it("skips it with a warning, and a later page shows", async () => {
+  it("renders nothing in its place and warns once, and a later page shows", async () => {
     const [page, setPage] = createSignal<"bomb" | "text">("bomb")
     const app = createTestRoot()
     app.render(() => (
@@ -43,28 +61,105 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renders a value that is not a hos
         </Show>
       </div>
     ))
+    expect(warn).toHaveBeenCalledTimes(1)
     expect(warn).toHaveBeenCalledWith(WARNING, { name: "[solid-refresh]Bomb" })
-    const withBomb = app.renderer.getRetainedElementCount()
+    expect(shown(app.renderer)).toEqual([])
     setPage("text")
-    await tick()
-    await tick()
-    expect(texts(app.renderer)).toContain("Text page")
+    await settle()
+    expect(shown(app.renderer)).toEqual(["Text page"])
     expect(app.renderer.findByTestId("text-page")).toBeDefined()
 
-    // The skipped value left no element behind: the counts are those of the same pages built directly.
-    const controlBomb = createTestRoot()
-    controlBomb.render(() => <div />)
-    expect(withBomb).toBe(controlBomb.renderer.getRetainedElementCount())
-    const controlText = createTestRoot()
-    controlText.render(() => (
+    // The placeholder is released with the page: the same count as the page built directly.
+    const control = createTestRoot()
+    control.render(() => (
       <div>
         <div testId="text-page">Text page</div>
       </div>
     ))
-    expect(app.renderer.getRetainedElementCount()).toBe(controlText.renderer.getRetainedElementCount())
+    expect(app.renderer.getRetainedElementCount()).toBe(control.renderer.getRetainedElementCount())
   })
 
-  it("skips it in a Switch that a signal moves on to another view", async () => {
+  it("holds one empty text node for the object while it is shown", () => {
+    const app = createTestRoot()
+    app.render(() => <div />)
+    const bare = app.renderer.getRetainedElementCount()
+    const withBomb = createTestRoot()
+    withBomb.render(() => (
+      <div>
+        <Bomb />
+      </div>
+    ))
+    expect(withBomb.renderer.getRetainedElementCount()).toBe(bare + 1)
+  })
+
+  it("does the same for a component that throws on mount the way solid-refresh makes it, inside an ErrorBoundary", async () => {
+    const [page, setPage] = createSignal<"bomb" | "text">("bomb")
+    const app = createTestRoot()
+    app.render(() => (
+      <div>
+        <Show when={page()} keyed>
+          {(current) =>
+            current === "bomb" ? (
+              <ErrorBoundary fallback={(error) => <div testId="fallback">{String(error.message)}</div>}>
+                <RefreshBomb />
+              </ErrorBoundary>
+            ) : (
+              <div testId="text-page">Text page</div>
+            )
+          }
+        </Show>
+      </div>
+    ))
+    expect(app.renderer.findByTestId("fallback")).toBeDefined()
+    expect(shown(app.renderer)).toEqual(["boom"])
+
+    setPage("text")
+    await settle()
+    expect(app.renderer.findByTestId("fallback")).toBeUndefined()
+    expect(shown(app.renderer)).toEqual(["Text page"])
+
+    setPage("bomb")
+    await settle()
+    expect(shown(app.renderer)).toEqual(["boom"])
+  })
+
+  it("renders nothing for a value with `kind: \"text\"` that is not a host node", async () => {
+    const [view, setView] = createSignal<"ast" | "node">("ast")
+    const ast = { kind: "text", value: "hello" }
+    const app = createTestRoot()
+    app.render(() => (
+      <div>
+        <div>first</div>
+        <Show when={view() === "ast"} fallback={<div>node</div>}>
+          {ast as unknown as JSX.Element}
+        </Show>
+        <div>marker</div>
+      </div>
+    ))
+    expect(warn).toHaveBeenCalledWith(WARNING, ast)
+    expect(shown(app.renderer)).toEqual(["first", "marker"])
+    setView("node")
+    await settle()
+    expect(shown(app.renderer)).toEqual(["first", "node", "marker"])
+  })
+
+  it("warns once for an object however often it is shown again", async () => {
+    const [on, setOn] = createSignal(true)
+    const object = { name: "again" }
+    const app = createTestRoot()
+    app.render(() => (
+      <div>
+        <Show when={on()}>{object as unknown as JSX.Element}</Show>
+      </div>
+    ))
+    setOn(false)
+    await settle()
+    setOn(true)
+    await settle()
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it("renders nothing in a Switch that a signal moves on to another view", async () => {
     const [page, setPage] = createSignal(0)
     const app = createTestRoot()
     app.render(() => (
@@ -79,12 +174,10 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renders a value that is not a hos
     ))
     expect(warn).toHaveBeenCalledWith(WARNING, { name: "[solid-refresh]Bomb" })
     setPage(1)
-    await tick()
-    await tick()
+    await settle()
     expect(app.renderer.findByTestId("text-page")).toBeDefined()
     setPage(2)
-    await tick()
-    await tick()
+    await settle()
     expect(app.renderer.findByTestId("text-page")).toBeUndefined()
   })
 
@@ -100,27 +193,78 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renders a value that is not a hos
         <div>marker</div>
       </div>
     ))
-    const children = () => app.renderer.getAllText().filter((text) => text !== "")
-    expect(children()).toEqual(["first", "marker"])
+    expect(shown(app.renderer)).toEqual(["first", "marker"])
 
     setView("node")
-    await tick()
-    await tick()
-    expect(children()).toEqual(["first", "middle", "marker"])
+    await settle()
+    expect(shown(app.renderer)).toEqual(["first", "middle", "marker"])
 
     setView("none")
-    await tick()
-    await tick()
-    expect(children()).toEqual(["first", "marker"])
+    await settle()
+    expect(shown(app.renderer)).toEqual(["first", "marker"])
 
     setView("bomb")
-    await tick()
-    await tick()
-    expect(children()).toEqual(["first", "marker"])
+    await settle()
+    expect(shown(app.renderer)).toEqual(["first", "marker"])
     setView("node")
-    await tick()
-    await tick()
-    expect(children()).toEqual(["first", "middle", "marker"])
+    await settle()
+    expect(shown(app.renderer)).toEqual(["first", "middle", "marker"])
+  })
+
+  it("puts a fragment that replaces it before the nodes after it", async () => {
+    const [bomb, setBomb] = createSignal(true)
+    const app = createTestRoot()
+    app.render(() => (
+      <div>
+        <div>first</div>
+        <Show when>
+          {bomb() ? (
+            <Bomb />
+          ) : (
+            <>
+              <div>a</div>
+              <div>b</div>
+            </>
+          )}
+        </Show>
+        <div>marker</div>
+      </div>
+    ))
+    expect(shown(app.renderer)).toEqual(["first", "marker"])
+    setBomb(false)
+    await settle()
+    expect(shown(app.renderer)).toEqual(["first", "a", "b", "marker"])
+    setBomb(true)
+    await settle()
+    expect(shown(app.renderer)).toEqual(["first", "marker"])
+  })
+
+  it("keeps the rows of a list around it in order when rows are added", async () => {
+    const [items, setItems] = createSignal(["x", "bomb", "y"])
+    const app = createTestRoot()
+    app.render(() => (
+      <div>
+        <For each={items()}>{(item) => (item === "bomb" ? <Bomb /> : <div>{item}</div>)}</For>
+        <div>footer</div>
+      </div>
+    ))
+    expect(shown(app.renderer)).toEqual(["x", "y", "footer"])
+
+    setItems(["p", "x", "bomb", "y"])
+    await settle()
+    expect(shown(app.renderer)).toEqual(["p", "x", "y", "footer"])
+
+    setItems(["p", "x", "bomb", "y", "z"])
+    await settle()
+    expect(shown(app.renderer)).toEqual(["p", "x", "y", "z", "footer"])
+
+    setItems(["p", "x", "y", "z"])
+    await settle()
+    expect(shown(app.renderer)).toEqual(["p", "x", "y", "z", "footer"])
+
+    setItems(["bomb", "p", "x", "y", "z"])
+    await settle()
+    expect(shown(app.renderer)).toEqual(["p", "x", "y", "z", "footer"])
   })
 
   it("shows the fallback of an ErrorBoundary around a component that throws on mount, then the next page", async () => {
@@ -145,8 +289,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renders a value that is not a hos
     expect(texts(app.renderer)).toContain("boom")
 
     setPage("text")
-    await tick()
-    await tick()
+    await settle()
     expect(app.renderer.findByTestId("fallback")).toBeUndefined()
     expect(texts(app.renderer)).toContain("Text page")
   })
@@ -209,5 +352,31 @@ describe.skipIf(!hasNativeTestRenderer)("Solid reports an error thrown while a f
     app.renderer.flush()
     expect(texts(app.renderer)).toContain("second")
     app.unmount()
+  })
+
+  it("rethrows a release error from a synchronous flush after the batch was still flushed", async () => {
+    const app = createTestRoot()
+    const boom = new Error("removal failed")
+    const setText = await mountedWithThrowingRemoval(app, boom)
+
+    setText("second")
+    expect(() => app.root.flush()).toThrow(boom)
+    app.renderer.flush()
+    expect(texts(app.renderer)).toContain("second")
+    app.unmount()
+  })
+
+  it("finishes tearing down before it rethrows the error of an unmount", async () => {
+    const app = createTestRoot()
+    const boom = new Error("removal failed")
+    app.render(() => <div>content</div>)
+    await tick()
+    vi.spyOn(HostRoot.prototype, "finishRemovals").mockImplementationOnce(() => {
+      throw boom
+    })
+
+    expect(() => app.unmount()).toThrow(boom)
+    app.renderer.flush()
+    expect(app.renderer.getRetainedElementCount()).toBe(0)
   })
 })
