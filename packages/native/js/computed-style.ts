@@ -1,6 +1,6 @@
 import { HOST_BINDING, flushPendingMutations, type ObservableElement } from "./bounds.js"
 import type { NativeRenderer } from "./host.js"
-import { appliedBatchCount } from "./mutations.js"
+import { appliedBatchCount } from "./batch-count.js"
 
 /**
  * The properties `getComputedStyle` answers, in kebab case: the ones that web libraries read (drag and

@@ -3,6 +3,7 @@
 //! `:is()` and `:where()` forgive, by dropping the argument.
 
 use super::atoms::Atoms;
+use super::states::{self, State};
 use super::selector::{
     AttrMatcher, AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, SelectorList, Simple, Specificity, TypeName,
 };
@@ -130,7 +131,8 @@ impl Parser<'_, '_> {
             compounds.push(compound);
             links.extend(link);
         }
-        Ok(ComplexSelector { compounds, links })
+        let condition = states::condition_of(&compounds).map_err(|_| InvalidSelector)?;
+        Ok(ComplexSelector { compounds, links, condition })
     }
 
     /// The compounds left to right, each with the combinator to the next.
@@ -264,6 +266,12 @@ impl Parser<'_, '_> {
                 match name.as_str() {
                     "root" => Ok(Simple::Root),
                     "host" => Ok(Simple::Host),
+                    "hover" => Ok(Simple::State(State::Hover)),
+                    "active" => Ok(Simple::State(State::Active)),
+                    "focus" => Ok(Simple::State(State::Focus)),
+                    "focus-visible" => Ok(Simple::State(State::FocusVisible)),
+                    "focus-within" => Ok(Simple::State(State::FocusWithin)),
+                    "popover-open" => Ok(Simple::PopoverOpen),
                     _ => Err(InvalidSelector),
                 }
             }

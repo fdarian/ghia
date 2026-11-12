@@ -3949,6 +3949,7 @@ fn pointer_bits(states: crate::events::state_styles::PointerStates) -> u16 {
         states.enabled,
         states.has_disabled,
         states.has_enabled,
+        states.focused,
         states.focus_within,
         states.has_focus_visible,
         states.focus_visible,
@@ -3967,6 +3968,7 @@ fn focus_bits(focus: &crate::focus::FocusStyles, id: u64, has_handle: bool) -> u
     bits |= u16::from(focus.visible == Some(id)) << 2;
     bits |= u16::from(focus.has_focus(id)) << 3;
     bits |= u16::from(focus.has_focus_visible(id)) << 4;
+    bits |= u16::from(focus.is_focused(id)) << 6;
     bits |= u16::from(has_handle && focus.dim_path.as_deref().is_some_and(|path| !path.contains(&id))) << 5;
     bits
 }
@@ -3992,7 +3994,7 @@ mod tests {
     fn every_pointer_state_has_a_bit_of_its_own() {
         use crate::events::state_styles::PointerStates;
         // A state added to `PointerStates` changes this size, and `pointer_bits` has to learn it.
-        assert_eq!(std::mem::size_of::<PointerStates>(), 15);
+        assert_eq!(std::mem::size_of::<PointerStates>(), 16);
         let each = [
             PointerStates { hovered: true, ..Default::default() },
             PointerStates { active: true, ..Default::default() },
@@ -4006,6 +4008,7 @@ mod tests {
             PointerStates { enabled: true, ..Default::default() },
             PointerStates { has_disabled: true, ..Default::default() },
             PointerStates { has_enabled: true, ..Default::default() },
+            PointerStates { focused: true, ..Default::default() },
             PointerStates { focus_within: true, ..Default::default() },
             PointerStates { has_focus_visible: true, ..Default::default() },
             PointerStates { focus_visible: true, ..Default::default() },

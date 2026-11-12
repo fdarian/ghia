@@ -148,7 +148,7 @@ pub(crate) fn reads_vars(style: &StyleDesc) -> bool {
     ]
     .into_iter()
         .any(|text| text.as_deref().is_some_and(custom_properties::has_var))
-        || [&style.focus_visible, &style.focus_within].into_iter().flatten().any(|state| reads_vars(state))
+        || [&style.focus, &style.focus_visible, &style.focus_within].into_iter().flatten().any(|state| reads_vars(state))
 }
 
 /// The properties of a style that make the transform, each `None` where it is unset or invalid.

@@ -53,10 +53,18 @@ pub(crate) fn gpui_tab_stop(dom_tab_index: isize) -> (isize, bool) {
 /// substitution of a `var()` in `css::var_substitution`) is written over this list.
 macro_rules! focus_variant_fields {
     ($each:ident) => {
-        $each!(focus_within, has_focus_visible, focus_visible)
+        $each!(focus, focus_within, has_focus_visible, focus_visible)
     };
 }
 pub(crate) use focus_variant_fields;
+
+/// Drops the focus variants of a style they were folded into.
+pub(crate) fn clear_focus_variants(style: &mut StyleDesc) {
+    macro_rules! clear {
+        ($($field:ident),+) => { $(style.$field = None;)+ };
+    }
+    focus_variant_fields!(clear);
+}
 
 /// A style with the focus variants laid over it, or the style itself when none applies. Not a
 /// `Cow<StyleDesc>`: that is a `StyleDesc` wide (~13 KB) even when borrowed, and moves as one.
@@ -90,7 +98,7 @@ pub(crate) struct FocusStyles {
 
 impl FocusStyles {
     /// `style` with the focus variants that apply to element `id` laid over it, as
-    /// `apply_focus_variants` applies them to the element: `focusWithin`, `hasFocusVisible`,
+    /// `apply_focus_variants` applies them to the element: `focus`, `focusWithin`, `hasFocusVisible`,
     /// `focusVisible` (which needs a `focusable` element), weakest first. `style` already has the
     /// pointer states folded in.
     pub fn folded<'a>(&self, id: u64, style: &'a StyleDesc, focusable: bool) -> FocusFolded<'a> {
@@ -99,6 +107,32 @@ impl FocusStyles {
             folded = FocusFolded::Owned(Box::new(crate::events::state_styles::overlay(&folded, declared)));
         }
         folded
+    }
+
+    /// `style` with the focus variants that apply laid over it and removed from it, when one of
+    /// them resets a property (`.a:focus { width: initial }`, `revert` included); `None` otherwise.
+    ///
+    /// The builders apply a focus variant as a GPUI refinement over the base, which writes only
+    /// the fields the variant sets, so a reset would leave the base value painted and laid out. A
+    /// style folded here has the reset taken out of the base (`overlay`), as it does for an element
+    /// with a transition (`motion::fold_state_styles`), and no variant left for the builders to
+    /// apply a second time.
+    pub fn folded_for_resets(&self, id: u64, style: &StyleDesc, focusable: bool) -> Option<Box<StyleDesc>> {
+        macro_rules! declares_reset {
+            ($($field:ident),+) => { false $(|| style.$field.as_deref().is_some_and(|variant| variant.reset.is_some()))+ };
+        }
+        if !focus_variant_fields!(declares_reset)
+            || !self.applying(id, style, focusable).any(|declared| declared.reset.is_some())
+        {
+            return None;
+        }
+        let mut folded: Option<Box<StyleDesc>> = None;
+        for declared in self.applying(id, style, focusable) {
+            folded = Some(Box::new(crate::events::state_styles::overlay(folded.as_deref().unwrap_or(style), declared)));
+        }
+        let mut folded = folded.expect("a variant that resets applies");
+        clear_focus_variants(&mut folded);
+        Some(folded)
     }
 
     /// The custom properties element `id` computes to below `parent`: the ones `style` declares
@@ -127,19 +161,28 @@ impl FocusStyles {
 
     /// The focus variants of `style` that apply to element `id`, weakest first.
     fn applying<'a>(&self, id: u64, style: &'a StyleDesc, focusable: bool) -> impl Iterator<Item = &'a StyleDesc> {
-        [
-            (style.focus_within.as_deref(), self.within.contains(&id)),
-            (style.has_focus_visible.as_deref(), self.has_focus_visible(id)),
-            (style.focus_visible.as_deref(), focusable && self.visible == Some(id)),
-        ]
-        .into_iter()
-        .filter_map(|(declared, applies)| declared.filter(|_| applies))
+        self.layers(id, focusable).over(style)
+    }
+
+    /// Which focus variants apply to element `id`. `focusVisible` needs a `focusable` element.
+    pub fn layers(&self, id: u64, focusable: bool) -> FocusLayers {
+        FocusLayers {
+            focused: self.is_focused(id),
+            within: self.within.contains(&id),
+            has_visible: self.has_focus_visible(id),
+            visible: focusable && self.visible == Some(id),
+        }
     }
 
     /// `:has(:focus)`: a strict descendant of `id` is focused. `within` starts
     /// with the focused element.
     pub fn has_focus(&self, id: u64) -> bool {
         self.within.first().is_some_and(|focused| *focused != id) && self.within.contains(&id)
+    }
+
+    /// Whether `id` is the focused element, which `within` starts with.
+    pub fn is_focused(&self, id: u64) -> bool {
+        self.within.first() == Some(&id)
     }
 
     /// `:has(:focus-visible)`: a strict descendant of `id` matches `:focus-visible`.
@@ -155,12 +198,59 @@ impl FocusStyles {
     /// `states` with the focus variants of `style` that apply to element `id`.
     /// For an inline box, which has no element to apply them to.
     pub fn states_of(&self, id: u64, style: &StyleDesc, states: PointerStates) -> PointerStates {
+        let declared = FocusLayers {
+            visible: self.is_focus_visible(id),
+            ..self.layers(id, false)
+        }
+        .declared_by(style);
         PointerStates {
-            focus_within: style.focus_within.is_some() && self.within.contains(&id),
-            has_focus_visible: style.has_focus_visible.is_some() && self.has_focus_visible(id),
-            focus_visible: style.focus_visible.is_some() && self.visible == Some(id),
+            focused: declared.focused,
+            focus_within: declared.within,
+            has_focus_visible: declared.has_visible,
+            focus_visible: declared.visible,
             ..states
         }
+    }
+}
+
+/// Which focus variants of an element apply to it: the ones it applies where it tracks focus (an
+/// inline box has them in its `PointerStates` instead). The one place the order they are laid over
+/// the element in is written.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct FocusLayers {
+    /// The element is focused: `focus`.
+    pub focused: bool,
+    /// The element or a descendant is focused: `focusWithin`.
+    pub within: bool,
+    /// A strict descendant matches `:focus-visible`: `hasFocusVisible`.
+    pub has_visible: bool,
+    /// The element itself matches `:focus-visible`: `focusVisible`.
+    pub visible: bool,
+}
+
+impl FocusLayers {
+    /// The variants `style` declares, each with whether it applies, weakest first.
+    fn declared<'a>(self, style: &'a StyleDesc) -> [(Option<&'a StyleDesc>, bool); 4] {
+        [
+            (style.focus.as_deref(), self.focused),
+            (style.focus_within.as_deref(), self.within),
+            (style.has_focus_visible.as_deref(), self.has_visible),
+            (style.focus_visible.as_deref(), self.visible),
+        ]
+    }
+
+    /// The focus variants of `style` that apply, weakest first: `focus`, `focusWithin`,
+    /// `hasFocusVisible`, `focusVisible`.
+    pub fn over<'a>(self, style: &'a StyleDesc) -> impl Iterator<Item = &'a StyleDesc> {
+        self.declared(style)
+            .into_iter()
+            .filter_map(|(declared, applies)| declared.filter(|_| applies))
+    }
+
+    /// The layers that apply and that `style` declares a variant for.
+    pub fn declared_by(self, style: &StyleDesc) -> FocusLayers {
+        let [focused, within, has_visible, visible] = self.declared(style).map(|(declared, applies)| declared.is_some() && applies);
+        FocusLayers { focused, within, has_visible, visible }
     }
 }
 
@@ -663,7 +753,7 @@ pub(crate) fn apply_focus_within<E: gpui::Styled>(
     apply_focus_variants(el, id, false, style, colors, lengths, focus)
 }
 
-/// The focus variants of `style` that apply to `id`, weakest first: `focusWithin`,
+/// The focus variants of `style` that apply to `id`, weakest first: `focus`, `focusWithin`,
 /// `hasFocusVisible`, `focusVisible` (which needs a focusable element). Each is
 /// applied over the base with the ones before it, so a border it declared is part
 /// of what the next sits on.
@@ -695,7 +785,7 @@ fn apply_focus_variants<E: gpui::Styled>(
 
 /// Focus look for a focusable element, applied right after `track_focus`.
 ///
-/// `focusWithin`, `hasFocusVisible` and `focusVisible` follow the DOM focus state in
+/// `focus`, `focusWithin`, `hasFocusVisible` and `focusVisible` follow the DOM focus state in
 /// `crate::focus`, not gpui's live input modality: gpui's `.focus_visible()`
 /// would hide the ring on a text field focused by a click. While a control is
 /// focus-visible, every other element dims unless its style sets
@@ -818,7 +908,7 @@ mod tests {
             };
         }
         let states = each_state_alone!(
-            hover, active, focus_visible, focus_within, group_hover, group_active, group_focus_within,
+            hover, active, focus, focus_visible, focus_within, group_hover, group_active, group_focus_within,
             has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
         );
         let mut applied: Vec<&str> = states
@@ -1149,6 +1239,27 @@ mod tests {
 
         let hovered = PointerStates { hovered: true, ..Default::default() };
         assert!(styles.states_of(9, &none, hovered).hovered);
+    }
+
+    #[test]
+    fn focus_applies_to_the_focused_element_whether_or_not_it_is_focus_visible_and_under_focus_within() {
+        let declares = |json: &str| serde_json::from_str::<StyleDesc>(json).unwrap();
+        let style = declares(r#"{"focus":{"color":"red"},"focusWithin":{"opacity":0.5}}"#);
+        // Focused by the mouse: focused, not focus-visible.
+        let clicked = FocusStyles { visible: None, within: Arc::from([3, 2, 1]), ..Default::default() };
+        assert!(clicked.is_focused(3) && !clicked.is_focused(2) && !FocusStyles::default().is_focused(3));
+        let focused = clicked.states_of(3, &style, PointerStates::default());
+        assert!(focused.focused && focused.focus_within && !focused.focus_visible);
+        let ancestor = clicked.states_of(2, &style, PointerStates::default());
+        assert!(!ancestor.focused && ancestor.focus_within, "an ancestor is focus-within, not focused");
+
+        let applied = |id: u64| -> Vec<Option<String>> {
+            clicked.applying(id, &style, true).map(|variant| variant.color.clone()).collect()
+        };
+        assert_eq!(applied(3), [Some("red".to_owned()), None], "focus first, focusWithin over it");
+        assert_eq!(applied(2), [None]);
+        let folded = clicked.folded(3, &style, true);
+        assert_eq!((folded.color.as_deref(), folded.opacity), (Some("red"), Some(0.5)));
     }
 
     #[test]

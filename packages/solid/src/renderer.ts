@@ -10,6 +10,7 @@ import {
   type WindowFontsOption,
 } from "@ghia/native/runtime"
 import { createRoot, type Root } from "./root.js"
+import { reportUncaughtError } from "./uncaught-error.js"
 
 const RENDER_HOST = Symbol.for("@ghia/solid/render-host")
 
@@ -69,10 +70,7 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
   if (!host.renderer) {
     host.renderer = injected ?? createNativeRenderer({
       onError(error) {
-        host.onUncaughtError?.(
-          error instanceof Error ? error : new Error(String(error)),
-          {}
-        )
+        reportUncaughtError(host, error)
       },
     })
     if (!injected && host.renderer instanceof GpuixRenderer) {

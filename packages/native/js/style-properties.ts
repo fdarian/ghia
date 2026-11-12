@@ -240,6 +240,7 @@ type NotStyleProperty =
   | "enabled"
   | "hasDisabled"
   | "hasEnabled"
+  | "focus"
   | "focusVisible"
   | "focusWithin"
   | "keyboardFocusDim"

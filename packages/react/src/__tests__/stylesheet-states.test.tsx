@@ -1,0 +1,418 @@
+/**
+ * `:hover`, `:active`, `:focus`, `:focus-visible` and `:focus-within` in a stylesheet compile into the
+ * state blocks of the element (`hover`, `active`, `focus`, ...), so what they change shows while the
+ * state holds and goes with it. `:popover-open` is tree state and applies while the popover is open.
+ * Each state sets `width`, which the box reports.
+ */
+import fs from "fs"
+import os from "os"
+import path from "path"
+import React from "react"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { getComputedStyle } from "@ghia/native/host"
+import { motion } from "../index.js"
+import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
+import { readLogicalPixels } from "./test-utils.js"
+
+const shots = fs.mkdtempSync(path.join(os.tmpdir(), "gpuix-react-stylesheet-states-"))
+
+describe.skipIf(!hasNativeTestRenderer)("state pseudo-classes in a stylesheet in React", () => {
+  let app: TestRoot
+
+  beforeEach(() => {
+    app = createTestRoot({ width: 400, height: 300 })
+  })
+
+  afterEach(() => {
+    app.unmount()
+  })
+
+  const idOf = (testId: string) => app.renderer.findByTestId(testId)!.id
+  const widthOf = (testId: string): number => {
+    app.renderer.dispatchNativeEvents()
+    return app.renderer.getElementBounds(idOf(testId))!.width
+  }
+  const centre = (testId: string): [number, number] => {
+    const bounds = app.renderer.getElementBounds(idOf(testId))!
+    return [bounds.x + bounds.width / 2, bounds.y + bounds.height / 2]
+  }
+
+  it("applies :hover while the pointer is over the element and goes when it leaves", () => {
+    app.render(
+      <div>
+        <style>{`.btn { width: 100px; height: 30px } .btn:hover { width: 150px }`}</style>
+        <div testId="btn" className="btn" />
+      </div>
+    )
+    expect(widthOf("btn")).toBe(100)
+    app.renderer.nativeSimulateMouseMove(...centre("btn"))
+    expect(widthOf("btn")).toBe(150)
+    app.renderer.nativeSimulateMouseMove(390, 290)
+    expect(widthOf("btn")).toBe(100)
+  })
+
+  it("applies :active while the button is pressed", () => {
+    app.render(
+      <div>
+        <style>{`.btn { width: 100px; height: 30px } .btn:active { width: 120px }`}</style>
+        <div testId="btn" className="btn" />
+      </div>
+    )
+    const [x, y] = centre("btn")
+    app.renderer.nativeSimulateMouseMove(x, y)
+    expect(widthOf("btn")).toBe(100)
+    app.renderer.nativeSimulateMouseDown(x, y)
+    expect(widthOf("btn")).toBe(120)
+    app.renderer.nativeSimulateMouseUp(x, y)
+    expect(widthOf("btn")).toBe(100)
+  })
+
+  it("applies :focus to the focused element and :focus-visible to one focused from the keyboard", () => {
+    app.render(
+      <div>
+        <style>{`
+          .field { width: 100px; height: 30px }
+          .field:focus { width: 110px }
+          .field:focus-visible { width: 130px }
+        `}</style>
+        <div testId="field" className="field" tabIndex={0} />
+        <div testId="other" className="field" tabIndex={0} />
+      </div>
+    )
+    expect([widthOf("field"), widthOf("other")]).toEqual([100, 100])
+
+    // Focused by a press: focused, not focus-visible.
+    app.renderer.nativeSimulateClick(...centre("field"))
+    expect([widthOf("field"), widthOf("other")]).toEqual([110, 100])
+
+    app.renderer.simulateKeystrokes("Tab")
+    expect([widthOf("field"), widthOf("other")]).toEqual([100, 130])
+    app.renderer.blurElement(idOf("other"))
+    expect(widthOf("other")).toBe(100)
+  })
+
+  it("transitions :focus-within, and :focus-visible beats :focus on an element that transitions", () => {
+    app.renderer.clockPause()
+    app.render(
+      <div>
+        <style>{`
+          .field { width: 100px; height: 30px; transition: width 1s linear }
+          .field:focus { width: 110px }
+          .field:focus-visible { width: 130px }
+          .group { width: 100px; height: 60px; transition: width 1s linear }
+          .group:focus-within { width: 160px }
+        `}</style>
+        <div testId="field" className="field" tabIndex={0} />
+        <div testId="group" className="group">
+          <input testId="inner" style={{ width: 40, height: 20 }} />
+        </div>
+      </div>
+    )
+    app.renderer.simulateKeystrokes("Tab")
+    app.renderer.clockFastForward(500)
+    expect(widthOf("field")).toBeGreaterThan(105)
+    expect(widthOf("field")).toBeLessThan(125)
+    app.renderer.clockFastForward(1000)
+    expect(widthOf("field"), "focus-visible is above focus, as without a transition").toBe(130)
+
+    app.renderer.blurElement(idOf("field"))
+    app.renderer.clockFastForward(500)
+    expect(widthOf("field"), "back from :focus-visible").toBeGreaterThan(105)
+    expect(widthOf("field")).toBeLessThan(125)
+    app.renderer.clockFastForward(1000)
+    expect(widthOf("field")).toBe(100)
+
+    app.renderer.focusElement(idOf("inner"))
+    app.renderer.clockFastForward(500)
+    expect(widthOf("group")).toBeGreaterThan(125)
+    expect(widthOf("group")).toBeLessThan(135)
+    app.renderer.clockFastForward(1000)
+    expect(widthOf("group")).toBe(160)
+
+    app.renderer.blurElement(idOf("inner"))
+    app.renderer.clockFastForward(500)
+    expect(widthOf("group"), "back from :focus-within").toBeGreaterThan(125)
+    expect(widthOf("group")).toBeLessThan(135)
+    app.renderer.clockFastForward(1000)
+    expect(widthOf("group")).toBe(100)
+  })
+
+  it("hands what :focus-within sets to the children, with a transition on the element and without", () => {
+    app.renderer.clockPause()
+    app.render(
+      <div>
+        <style>{`
+          .card { font-size: 10px; width: 100px; height: 60px }
+          .card:focus-within { font-size: 20px }
+          .moving { transition: width 1s linear }
+        `}</style>
+        <div testId="plain" className="card">
+          <input testId="plain-input" style={{ width: 40, height: 20 }} />
+          <div testId="plain-child" style={{ width: "5em", height: 10 }} />
+        </div>
+        <div testId="moving" className="card moving">
+          <input testId="moving-input" style={{ width: 40, height: 20 }} />
+          <div testId="moving-child" style={{ width: "5em", height: 10 }} />
+        </div>
+      </div>
+    )
+    const childWidth = (testId: string) => {
+      app.renderer.dispatchNativeEvents()
+      return app.renderer.getElementBounds(idOf(testId))!.width
+    }
+    expect([childWidth("plain-child"), childWidth("moving-child")]).toEqual([50, 50])
+    for (const card of ["plain", "moving"]) {
+      app.renderer.focusElement(idOf(`${card}-input`))
+      app.renderer.clockFastForward(16)
+      expect(childWidth(`${card}-child`), card).toBe(100)
+      app.renderer.blurElement(idOf(`${card}-input`))
+      app.renderer.clockFastForward(16)
+      expect(childWidth(`${card}-child`), card).toBe(50)
+    }
+  })
+
+  it("applies :focus-within to an ancestor of the focused element", () => {
+    app.render(
+      <div>
+        <style>{`.group { width: 100px; height: 60px } .group:focus-within { width: 160px }`}</style>
+        <div testId="group" className="group">
+          <input testId="field" style={{ width: 40, height: 20 }} />
+        </div>
+        <input testId="outside" style={{ width: 40, height: 20 }} />
+      </div>
+    )
+    expect(widthOf("group")).toBe(100)
+    app.renderer.focusElement(idOf("field"))
+    expect(widthOf("group")).toBe(160)
+    app.renderer.focusElement(idOf("outside"))
+    expect(widthOf("group")).toBe(100)
+  })
+
+  it("lets an inline value beat a sheet :hover, and the hover keeps what the inline style leaves alone", () => {
+    app.render(
+      <div>
+        <style>{`.btn { height: 30px } .btn:hover { width: 150px; height: 40px }`}</style>
+        <div testId="btn" className="btn" style={{ width: 100 }} />
+      </div>
+    )
+    app.renderer.nativeSimulateMouseMove(...centre("btn"))
+    expect(widthOf("btn")).toBe(100)
+    expect(app.renderer.getElementBounds(idOf("btn"))!.height).toBe(40)
+  })
+
+  it("keeps an inline side border over a sheet :hover border-width, and an inline border-width over a :hover side", () => {
+    app.render(
+      <div>
+        <style>{`
+          .sides:hover { border-width: 5px; border-style: solid }
+          .all:hover { border-left: 6px solid blue }
+        `}</style>
+        <div testId="sides" className="sides" style={{ width: 100, height: 30, borderLeft: "2px solid red" }}>
+          <div testId="sides-inner" style={{ width: "100%", height: 10 }} />
+        </div>
+        <div testId="all" className="all" style={{ width: 100, height: 30, borderWidth: 2, borderStyle: "solid" }}>
+          <div testId="all-inner" style={{ width: "100%", height: 10 }} />
+        </div>
+      </div>
+    )
+    // The borders are inside the width, so what they leave is the width of what the box holds.
+    expect([widthOf("sides-inner"), widthOf("all-inner")]).toEqual([98, 96])
+    app.renderer.nativeSimulateMouseMove(...centre("sides"))
+    expect(widthOf("sides-inner"), "the left stays 2, the right is 5").toBe(93)
+    app.renderer.nativeSimulateMouseMove(...centre("all"))
+    expect(widthOf("all-inner"), "the inline border-width beats the left of the rule").toBe(96)
+  })
+
+  it("lets an inline !important value beat the inline hover block, whether or not a sheet matches the element", () => {
+    app.render(
+      <div>
+        <style>{`.matched { height: 30px }`}</style>
+        <div testId="bare" style={{ width: "100px !important", height: 30, hover: { width: 150 } }} />
+        <div testId="matched" className="matched" style={{ width: "100px !important", hover: { width: 150 } }} />
+      </div>
+    )
+    for (const testId of ["bare", "matched"]) {
+      app.renderer.nativeSimulateMouseMove(...centre(testId))
+      expect(widthOf(testId), testId).toBe(100)
+    }
+  })
+
+  it("lets a more specific base rule beat a :hover rule", () => {
+    app.render(
+      <div>
+        <style>{`#btn { width: 100px; height: 30px } .btn:hover { width: 150px }`}</style>
+        <div testId="btn" id="btn" className="btn" />
+      </div>
+    )
+    app.renderer.nativeSimulateMouseMove(...centre("btn"))
+    expect(widthOf("btn")).toBe(100)
+  })
+
+  it("drops a rule with a state it cannot compile, and keeps the siblings in an :is() list", () => {
+    let also: HTMLElement | undefined
+    app.render(
+      <div>
+        <style>{`
+          :is(.keep, .card:hover .title) { width: 70px; height: 20px }
+          .also, .card:hover .title { opacity: 0.5 }
+        `}</style>
+        <div testId="keep" className="keep" />
+        <div ref={(element: unknown) => {
+            also = element as HTMLElement
+          }} className="also" />
+      </div>
+    )
+    expect(widthOf("keep")).toBe(70)
+    expect(getComputedStyle(also!).opacity).toBe("1")
+  })
+
+  it("applies :popover-open while a popover is shown", () => {
+    let box: HTMLElement | undefined
+    app.render(
+      <div>
+        <style>{`[popover]:popover-open { opacity: 0.5 } [popover] { padding-top: 4px }`}</style>
+        <div ref={(element: unknown) => {
+            box = element as HTMLElement
+          }} popover="manual" />
+      </div>
+    )
+    expect(getComputedStyle(box!).opacity).toBe("1")
+    expect(getComputedStyle(box!).paddingTop).toBe("4px")
+    box!.showPopover()
+    expect(getComputedStyle(box!).opacity).toBe("0.5")
+    box!.hidePopover()
+    expect(getComputedStyle(box!).opacity).toBe("1")
+    expect(getComputedStyle(box!).paddingTop).toBe("4px")
+  })
+
+  it("takes the base value back under a CSS-wide keyword in a state rule", () => {
+    app.render(
+      <div>
+        <style>{`.btn { width: 100px; height: 30px } .btn:hover { width: initial }`}</style>
+        <div testId="btn" className="btn" />
+      </div>
+    )
+    expect(widthOf("btn")).toBe(100)
+    app.renderer.nativeSimulateMouseMove(...centre("btn"))
+    expect(widthOf("btn")).toBeGreaterThan(100)
+    app.renderer.nativeSimulateMouseMove(390, 290)
+    expect(widthOf("btn")).toBe(100)
+  })
+
+  it("takes the base value back under a keyword in an inline state block", () => {
+    app.render(
+      <div>
+        <div testId="btn" style={{ width: 100, height: 30, hover: { width: "unset" } }} />
+      </div>
+    )
+    expect(widthOf("btn")).toBe(100)
+    app.renderer.nativeSimulateMouseMove(...centre("btn"))
+    expect(widthOf("btn")).toBeGreaterThan(100)
+  })
+
+  it("rolls a state back to the user agent margin under revert", () => {
+    const topOf = (testId: string): number => {
+      app.renderer.dispatchNativeEvents()
+      return app.renderer.getElementBounds(idOf(testId))!.y
+    }
+    app.render(
+      <div>
+        <style>{`.a { margin: 40px 0; width: 100px; height: 100px } .a:hover { margin: revert }`}</style>
+        <p testId="a" className="a" />
+      </div>
+    )
+    expect(topOf("a")).toBe(40)
+    app.renderer.nativeSimulateMouseMove(...centre("a"))
+    const hovered = topOf("a")
+    expect(hovered).toBeGreaterThan(0)
+    expect(hovered).toBeLessThan(40)
+  })
+
+  it("takes the base value back under a keyword in a :focus rule, on a focusable element with no transition", () => {
+    app.render(
+      <div>
+        <style>{`.field { width: 100px; height: 30px } .field:focus { width: initial }`}</style>
+        <div testId="field" className="field" tabIndex={0} />
+      </div>
+    )
+    expect(widthOf("field")).toBe(100)
+    app.renderer.focusElement(idOf("field"))
+    expect(widthOf("field"), "initial is auto, which fills the parent").toBeGreaterThan(100)
+    app.renderer.blurElement(idOf("field"))
+    expect(widthOf("field")).toBe(100)
+  })
+
+  it("paints no background under background-color: unset in a :focus-visible rule", () => {
+    app.render(
+      <div style={{ width: 400, height: 300, backgroundColor: "#ffffff" }}>
+        <style>{`.btn { width: 100px; height: 30px } button:focus-visible { background-color: unset }`}</style>
+        <button testId="btn" className="btn" tabIndex={0} />
+      </div>
+    )
+    const redAt = (name: string): number => {
+      app.renderer.dispatchNativeEvents()
+      const file = path.join(shots, `${name}.png`)
+      app.renderer.captureScreenshot(file)
+      return readLogicalPixels(file, app.renderer).at(...centre("btn"))[0]
+    }
+    expect(redAt("rest"), "the user agent background").toBe(0xef)
+    app.renderer.simulateKeystrokes("Tab")
+    expect(redAt("focused"), "the page shows through").toBe(0xff)
+    app.renderer.blurElement(idOf("btn"))
+    expect(redAt("blurred")).toBe(0xef)
+  })
+
+  it("keeps a list's user agent inline padding on the right under padding: revert in an rtl element", () => {
+    app.render(
+      <div>
+        <style>{`.a { direction: rtl; width: 200px; padding: 3px } .a:hover { padding: revert }`}</style>
+        <ul testId="a" className="a">
+          <li testId="item" style={{ height: 10 }} />
+        </ul>
+      </div>
+    )
+    const item = () => {
+      app.renderer.dispatchNativeEvents()
+      const list = app.renderer.getElementBounds(idOf("a"))!
+      const bounds = app.renderer.getElementBounds(idOf("item"))!
+      return { left: bounds.x - list.x, width: bounds.width }
+    }
+    expect(item()).toEqual({ left: 3, width: 194 })
+    app.renderer.nativeSimulateMouseMove(...centre("a"))
+    expect(item(), "the 40px of `padding-inline: 40px 0` is the start, which is the right").toEqual({ left: 0, width: 160 })
+  })
+
+  it("lays a focus rule over what motion animates, as the box is built", () => {
+    let box: HTMLElement | null = null
+    app.render(
+      <div style={{ width: 400, height: 300, backgroundColor: "#ffffff" }}>
+        <style>{`.a { width: 100px; height: 30px; background-color: #000000 } .a:focus { opacity: 1; width: initial }`}</style>
+        <motion.div
+          ref={(element: unknown) => (box = element as HTMLElement)}
+          testId="a"
+          className="a"
+          tabIndex={0}
+          initial={{ opacity: 0.6 }}
+          animate={{ opacity: 0.2 }}
+          transition={{ duration: 10, ease: "linear" }}
+        />
+      </div>
+    )
+    const redAt = (name: string): number => {
+      app.renderer.dispatchNativeEvents()
+      const file = path.join(shots, `${name}.png`)
+      app.renderer.captureScreenshot(file)
+      return readLogicalPixels(file, app.renderer).at(...centre("a"))[0]
+    }
+    app.renderer.clockPause()
+    app.renderer.clockFastForward(2000)
+    app.renderer.flush()
+    expect(redAt("motion-rest"), "the animated opacity is painted").toBeGreaterThan(0x60)
+    app.renderer.focusElement(idOf("a"))
+    app.renderer.clockFastForward(100)
+    app.renderer.flush()
+    expect(widthOf("a"), "initial is auto, which fills the parent").toBeGreaterThan(100)
+    expect(getComputedStyle(box!).opacity).toBe("1")
+    expect(redAt("motion-focused"), "opaque black").toBe(0)
+  })
+})

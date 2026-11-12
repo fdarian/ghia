@@ -11147,10 +11147,7 @@ pub(crate) fn animate_style_at(
         dynamic |= Dynamic::MotionValues as u8;
     }
     let transitioned = (transitions_wanted || animations_wanted).then(|| {
-        let focus_visible = crate::motion::FocusVisible {
-            own: ctx.focus_handles.contains_key(&id) && ctx.focus_styles.is_focus_visible(id),
-            descendant: ctx.focus_styles.has_focus_visible(id),
-        };
+        let focus = ctx.focus_styles.layers(id, ctx.focus_handles.contains_key(&id));
         Box::new(crate::motion::resolve_declared_style(
             transitions_wanted.then_some(&mut *ctx.css_transitions),
             animations_wanted.then_some((&mut *ctx.css_animations, ctx.keyframes)),
@@ -11165,8 +11162,7 @@ pub(crate) fn animate_style_at(
             input
                 .shared
                 .map_or_else(|| input.declared.unwrap_or(&EMPTY_STYLE).into(), crate::motion::StyleRef::from),
-            focus_visible,
-            Some(&ctx.focus_styles),
+            focus,
             measurement.as_ref(),
             ctx.inherited.interpolate_size,
             crate::motion::Scope::Element,
@@ -11591,7 +11587,13 @@ fn build_element_unpumped(
     }
     let measured = animated.measured;
     let declared_style = animated.declared(base_style);
-    let current_style = animated.current(base_style);
+    // A focus variant that resets a property is folded in here, where a variant that only sets
+    // fields is laid over the element by the builders (`focus::apply_focus_styles`): over what motion
+    // moved, as the builders lay it.
+    let focus_reset_style = animated
+        .current(base_style)
+        .and_then(|style| ctx.focus_styles.folded_for_resets(id, style, ctx.focus_handles.contains_key(&id)));
+    let current_style = focus_reset_style.as_deref().or(animated.current(base_style));
     let overlaid_style = contents_overlay
         .map(|overlay| current_style.unwrap_or(&EMPTY_STYLE).with_inherited_overlay(&overlay));
     let style = overlaid_style.as_deref().or(current_style);
@@ -11651,7 +11653,14 @@ fn build_element_unpumped(
         style.is_none_or(|style| style.var_declarations.is_none()),
         "a held var() declaration reached the build unresolved"
     );
-    let descended = ctx.inherited.clone().descend_with_custom(style, element.has_inert_prop(), own_custom);
+    // Children inherit what the element computes to with its focus variants laid over it, which
+    // is the style a transitioning element already has (motion folds them), so with or without a
+    // transition `.card:focus-within { color: red }` reaches the text below.
+    let descend_style = style.map(|style| ctx.focus_styles.folded(id, style, ctx.focus_handles.contains_key(&id)));
+    let descended = ctx
+        .inherited
+        .clone()
+        .descend_with_custom(descend_style.as_deref(), element.has_inert_prop(), own_custom);
     let parent_inherited = std::mem::replace(&mut ctx.inherited, descended);
     crate::layout::table::enter(&mut ctx.inherited.table_row, &mut ctx.inherited.table_cell, element);
     // The start of a logical inline pair is the right side in an rtl element.

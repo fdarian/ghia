@@ -186,6 +186,10 @@ impl ElementView for TreeView<'_> {
         self.tree.root_id == Some(self.id)
     }
 
+    fn is_popover_open(&self) -> bool {
+        crate::html::popover::is_open(self.element())
+    }
+
     fn any_earlier_sibling(&self, test: SiblingTest, satisfies: impl Fn(&Self) -> bool) -> bool {
         let Some(parent_id) = self.element().parent else {
             return false;
