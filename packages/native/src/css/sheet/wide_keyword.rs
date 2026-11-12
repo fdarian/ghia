@@ -129,15 +129,22 @@ impl Lists {
         Arcs { reset: finish(&mut self.reset), revert: finish(&mut self.revert) }
     }
 
-    /// A declaration of `key` written after a `revert` gives the property, and what it covers, a
-    /// value of its own, which the user agent value would otherwise be written over.
+    /// A declaration of `key` written after a `revert` gives the property, and what it overwrites,
+    /// a value of its own, which the user agent value would otherwise be written over.
     fn forget_revert(&mut self, key: &str) {
-        let covered: Vec<String> = covers::key_id(key)
-            .map_or(&[][..], covers::covered_by)
+        if self.revert.is_empty() {
+            return;
+        }
+        let clobbered = covers::key_id(key).map_or(&[][..], covers::clobbered);
+        self.revert.retain(|name| name != key && covers::key_id(name).is_none_or(|name| !clobbered.contains(&name)));
+    }
+
+    /// Whether a shorthand that is still reverted covers `longhand`, so the user agent value of it
+    /// is written under the longhand, which a declaration of it has to win over.
+    fn reverts_a_cover_of(&self, longhand: KeyId) -> bool {
+        self.revert
             .iter()
-            .map(|target| covers::name_of(*target))
-            .collect();
-        self.revert.retain(|name| name != key && !covered.contains(name));
+            .any(|name| covers::key_id(name).is_some_and(|shorthand| covers::covered_by(shorthand).contains(&longhand)))
     }
 }
 
@@ -250,8 +257,12 @@ fn apply(list: &mut Vec<Declaration>, lists: &mut Lists, key: &str, keyword: Key
     };
     for longhand in longhands {
         // A shorthand written earlier still gives the longhand a value, and the keyword has to take
-        // that back: the initial value written after it wins over it.
-        if let Some(initial) = initial::of(longhand).filter(|_| is_shadowed(list, longhand)) {
+        // that back: the initial value written after it wins over it. A shorthand reverted in the
+        // block gives it the user agent's value, which `reverted` writes into the block. A `revert`
+        // of the longhand takes that value as well, so it has nothing written over it.
+        let reverted_under = !matches!(keyword, Keyword::Revert | Keyword::RevertLayer) && lists.reverts_a_cover_of(longhand);
+        let shadowed = is_shadowed(list, longhand) || reverted_under;
+        if let Some(initial) = initial::of(longhand).filter(|_| shadowed) {
             list.push(initial.clone());
         }
     }

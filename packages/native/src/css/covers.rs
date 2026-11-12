@@ -338,6 +338,12 @@ pub(crate) fn covered_by(key: KeyId) -> &'static [KeyId] {
     &COVERS.covered[key]
 }
 
+/// What laying a declaration of `key` over a style can overwrite: what it covers, and for a border
+/// side shorthand the all-sides border values as well, which it splits down to the other sides.
+pub(crate) fn clobbered(key: KeyId) -> &'static [KeyId] {
+    &COVERS.clobbered[key]
+}
+
 /// Whether the order two declarations are written in decides what they leave: one covers the other,
 /// or one is a border side shorthand and the other an all-sides border value, which it splits.
 pub(crate) fn overlaps(key: KeyId, other: KeyId) -> bool {

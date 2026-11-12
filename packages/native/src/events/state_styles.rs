@@ -160,16 +160,9 @@ static SHORTHAND_PARTS: LazyLock<FxHashMap<String, fn(&mut StyleDesc, &StyleDesc
             )
         };
     }
-    macro_rules! side {
-        ($longhand:ident, $all:ident . $side:ident) => {
-            part!($longhand, |from| from.$all.as_ref().map(|all| all.$side.clone()))
-        };
-        ($longhand:ident, $all:ident . $side:ident, $pair:ident . $end:ident) => {
-            part!($longhand, |from| from
-                .$pair
-                .as_ref()
-                .map(|pair| pair.$end.clone())
-                .or_else(|| from.$all.as_ref().map(|all| all.$side.clone())))
+    macro_rules! width {
+        ($longhand:ident, $side:ident) => {
+            part!($longhand, |from| from.border_width.as_ref().map(|all| all.$side.clone()))
         };
     }
     macro_rules! listed {
@@ -187,22 +180,22 @@ static SHORTHAND_PARTS: LazyLock<FxHashMap<String, fn(&mut StyleDesc, &StyleDesc
         };
     }
     vec![
-        side!(padding_top, padding.top, padding_block.start),
-        side!(padding_bottom, padding.bottom, padding_block.end),
-        side!(padding_left, padding.left, padding_inline.start),
-        side!(padding_right, padding.right, padding_inline.end),
-        side!(margin_top, margin.top, margin_block.start),
-        side!(margin_bottom, margin.bottom, margin_block.end),
-        side!(margin_left, margin.left, margin_inline.start),
-        side!(margin_right, margin.right, margin_inline.end),
-        side!(top, inset.top, inset_block.start),
-        side!(bottom, inset.bottom, inset_block.end),
-        side!(left, inset.left, inset_inline.start),
-        side!(right, inset.right, inset_inline.end),
-        side!(border_top_width, border_width.top),
-        side!(border_right_width, border_width.right),
-        side!(border_bottom_width, border_width.bottom),
-        side!(border_left_width, border_width.left),
+        part!(padding_top, |from| from.padding_below_longhands().top),
+        part!(padding_bottom, |from| from.padding_below_longhands().bottom),
+        part!(padding_left, |from| from.padding_below_longhands().left),
+        part!(padding_right, |from| from.padding_below_longhands().right),
+        part!(margin_top, |from| from.margin_below_longhands().top),
+        part!(margin_bottom, |from| from.margin_below_longhands().bottom),
+        part!(margin_left, |from| from.margin_below_longhands().left),
+        part!(margin_right, |from| from.margin_below_longhands().right),
+        part!(top, |from| from.inset_below_longhands().top),
+        part!(bottom, |from| from.inset_below_longhands().bottom),
+        part!(left, |from| from.inset_below_longhands().left),
+        part!(right, |from| from.inset_below_longhands().right),
+        width!(border_top_width, top),
+        width!(border_right_width, right),
+        width!(border_bottom_width, bottom),
+        width!(border_left_width, left),
         listed!(border_top_color, border_color, parse_color_sides, 0),
         listed!(border_right_color, border_color, parse_color_sides, 1),
         listed!(border_bottom_color, border_color, parse_color_sides, 2),
@@ -215,6 +208,12 @@ static SHORTHAND_PARTS: LazyLock<FxHashMap<String, fn(&mut StyleDesc, &StyleDesc
         corner!(border_top_right_radius, top_right),
         corner!(border_bottom_left_radius, bottom_left),
         corner!(border_bottom_right_radius, bottom_right),
+        part!(overflow_x, |from| from.overflow.as_deref().and_then(|both| both.split_whitespace().next()).map(str::to_owned)),
+        part!(overflow_y, |from| from.overflow.as_deref().and_then(|both| {
+            let mut axes = both.split_whitespace();
+            let first = axes.next()?;
+            Some(axes.next().unwrap_or(first).to_owned())
+        })),
     ]
     .into_iter()
     .collect()
@@ -226,8 +225,11 @@ static SHORTHAND_PARTS: LazyLock<FxHashMap<String, fn(&mut StyleDesc, &StyleDesc
 /// is folded over. A property `below` does not set has nothing to write, so it is only reset.
 ///
 /// A side longhand (`padding-left`) takes its part of a shorthand `below` sets
-/// ([`SHORTHAND_PARTS`]). Only the top-level values of `below` are read: a state block of it, and a
-/// value it holds for a `var()`, are not rolled back to.
+/// ([`SHORTHAND_PARTS`]), unless a shorthand that covers it is reverted too and `below` sets that
+/// one (`padding: revert`): the shorthand is copied whole then, a logical pair mirrored for an
+/// `rtl` element as it is at the build, which a physical longhand written here would beat. Only the
+/// top-level values of `below` are read: a state block of it, and a value it holds for a `var()`,
+/// are not rolled back to.
 pub(crate) fn reverted<'a>(block: &'a StyleDesc, below: &StyleDesc) -> Cow<'a, StyleDesc> {
     let Some(names) = block.revert.as_deref() else {
         return Cow::Borrowed(block);
@@ -235,13 +237,26 @@ pub(crate) fn reverted<'a>(block: &'a StyleDesc, below: &StyleDesc) -> Cow<'a, S
     let mut resolved = block.clone();
     resolved.revert = None;
     for name in names {
-        if let Some(copy) = SHORTHAND_PARTS.get(name.as_str()) {
+        let part = SHORTHAND_PARTS.get(name.as_str()).filter(|_| !given_by_reverted_shorthand(below, names, name));
+        if let Some(copy) = part {
             copy(&mut resolved, below);
         } else if let Some(copy) = PROPERTY_COPIERS.get(name.as_str()).filter(|_| sets_property(below, name)) {
             copy(&mut resolved, below);
         }
     }
     Cow::Owned(resolved)
+}
+
+/// Whether `below` sets a shorthand in `names` that covers `longhand`, which copies the longhand
+/// along with it.
+fn given_by_reverted_shorthand(below: &StyleDesc, names: &[String], longhand: &str) -> bool {
+    let Some(longhand) = crate::css::covers::key_id(longhand) else {
+        return false;
+    };
+    names.iter().any(|name| {
+        crate::css::covers::key_id(name).is_some_and(|key| crate::css::covers::covered_by(key).contains(&longhand))
+            && sets_property(below, name)
+    })
 }
 
 static PROPERTY_COPIERS: LazyLock<FxHashMap<String, fn(&mut StyleDesc, &StyleDesc)>> =

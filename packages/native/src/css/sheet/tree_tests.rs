@@ -2823,7 +2823,7 @@ mod states {
         assert_eq!(hovered.margin.map(|margin| margin.top), Some(Pixels(5.0)));
 
         let (hovered, plain) = paragraph_hovered("p.a:hover { margin: revert; margin-top: unset }");
-        assert_eq!(hovered.margin_top, None, "the keyword after it is the initial value");
+        assert_eq!(hovered.margin_top, Some(Pixels(0.0)), "the keyword after it is the initial value");
         assert_eq!(hovered.margin_bottom, plain.margin_bottom);
     }
 
@@ -2856,6 +2856,106 @@ mod states {
         let (hovered, _) = hovered_tag("button", ".a { padding-left: 20px; padding-right: 9px } .a:hover { padding-left: revert }");
         assert_eq!(hovered.padding_left, Some(LinearLength::px(6.0)));
         assert_eq!(hovered.padding_right, Some(LinearLength::px(9.0)));
+    }
+
+    fn hovered_with_id(tag: &str, css: &str) -> (StyleDesc, StyleDesc) {
+        let mut doc = Doc::new();
+        let element = doc.classed(tag, ROOT, "a");
+        doc.tree.set_attribute(element, "id", Some("x".into()));
+        let plain = doc.classed(tag, ROOT, "plain");
+        doc.style_element(ROOT, css);
+        doc.flush();
+        (hovered(&doc, element), doc.style(plain).expect("the tag has a style").clone())
+    }
+
+    #[test]
+    fn a_state_revert_of_a_shorthand_copies_the_logical_pair_whole() {
+        // A physical side written here would beat the pair, which an `rtl` element mirrors when it builds.
+        let (hovered, plain) = hovered_tag("ul", ".a { padding: 3px } .a:hover { padding: revert }");
+        assert_eq!(hovered.padding_left, None);
+        assert_eq!(hovered.padding_right, None);
+        assert_eq!(hovered.padding_inline, plain.padding_inline);
+        assert!(hovered.padding_inline.is_some() && hovered.padding.is_none());
+
+        let (hovered, plain) = hovered_tag("ul", ".a { padding-inline: 3px } .a:hover { padding-inline: revert }");
+        assert_eq!((hovered.padding_left, hovered.padding_inline), (None, plain.padding_inline));
+
+        let (hovered, plain) = hovered_tag("dd", ".a { margin: 3px } .a:hover { margin: revert }");
+        assert_eq!((hovered.margin_left, hovered.margin_right), (None, None));
+        assert_eq!(hovered.margin_inline, plain.margin_inline);
+
+        let (hovered, plain) = hovered_tag("figure", ".a { margin: 3px } .a:hover { margin: revert }");
+        assert_eq!((hovered.margin_left, hovered.margin_inline), (None, plain.margin_inline));
+        assert_eq!(hovered.margin_top, plain.margin_top);
+    }
+
+    #[test]
+    fn a_state_revert_of_a_pair_over_a_physical_shorthand_takes_the_sides() {
+        use crate::css::length::LinearLength;
+        let (hovered, _) = hovered_tag("button", ".a { padding-inline: 3px } .a:hover { padding-inline: revert }");
+        assert_eq!(hovered.padding_left, Some(LinearLength::px(6.0)));
+        assert_eq!(hovered.padding_right, Some(LinearLength::px(6.0)));
+    }
+
+    #[test]
+    fn a_state_revert_of_margin_block_leaves_the_auto_margin_of_a_popover_inline() {
+        use crate::style::DimensionValue;
+        let mut doc = Doc::new();
+        let open = popover(&mut doc, "a");
+        doc.style_element(ROOT, ".a { margin: 5px } .a:hover { margin-block: revert }");
+        doc.flush();
+        let hovered = hovered(&doc, open);
+        assert_eq!((hovered.margin_top.clone(), hovered.margin_bottom.clone()), (Some(DimensionValue::Auto), Some(DimensionValue::Auto)));
+        assert_eq!(hovered.margin.map(|margin| margin.left), Some(DimensionValue::Pixels(5.0)));
+    }
+
+    #[test]
+    fn a_keyword_after_a_state_revert_of_a_shorthand_is_the_initial_value_and_not_the_user_agents() {
+        use crate::css::length::LinearLength;
+        use crate::style::DimensionValue::Pixels;
+        let (hovered, _) = hovered_tag("button", ".a:hover { padding: revert; padding-left: initial }");
+        assert_eq!(hovered.padding_left, Some(ZERO), "not the `6px` of `padding: 1px 6px`");
+        assert_eq!(hovered.padding.map(|padding| padding.right), Some(LinearLength::px(6.0)));
+
+        let (hovered, plain) = hovered_tag("figure", ".a:hover { margin: revert; margin-left: unset }");
+        assert_eq!(hovered.margin_left, Some(Pixels(0.0)));
+        assert_eq!(hovered.margin_inline, plain.margin_inline);
+
+        let (hovered, _) = hovered_tag("button", ".a:hover { padding: revert; padding-left: revert }");
+        assert_eq!(hovered.padding_left, None, "a revert of the side is the user agent's value");
+        assert!(hovered.padding.is_some());
+    }
+
+    #[test]
+    fn a_keyword_over_a_state_revert_that_a_higher_rule_kept_is_the_initial_value() {
+        use crate::style::DimensionValue::{Auto, Pixels};
+        let mut doc = Doc::new();
+        let open = popover(&mut doc, "a");
+        doc.tree.set_attribute(open, "id", Some("x".into()));
+        doc.style_element(ROOT, ".a:hover { margin: revert } #x { margin-top: unset }");
+        doc.flush();
+        let hovered = hovered(&doc, open);
+        assert_eq!(hovered.margin_top, Some(Pixels(0.0)));
+        assert_eq!(hovered.margin.map(|margin| margin.left), Some(Auto));
+    }
+
+    #[test]
+    fn a_border_side_after_a_state_revert_of_the_borders_wins_on_its_side() {
+        use crate::css::length::LinearLength;
+        let sides_are_the_user_agents = |hovered: &StyleDesc| {
+            // An all-sides value in the block would beat the top shorthand when the border is built.
+            assert!(hovered.border_width.is_none() && hovered.border_color.is_none() && hovered.border_style.is_none());
+            assert_eq!(hovered.border_right_width, Some(LinearLength::px(2.0)));
+            assert_eq!(hovered.border_left_color.as_deref(), Some("#767676"));
+            assert_eq!(hovered.border_bottom_style.as_deref(), Some("outset"));
+        };
+        let (hovered, _) = hovered_tag("button", ".a:hover { border: revert; border-top: 2px solid blue }");
+        assert_eq!(hovered.border_top.as_deref(), Some("2px solid blue"));
+        sides_are_the_user_agents(&hovered);
+
+        let (hovered, _) = hovered_with_id("button", ".a:hover { border-color: revert } #x { border-top: 2px solid blue }");
+        assert_eq!(hovered.border_top.as_deref(), Some("2px solid blue"));
+        sides_are_the_user_agents(&hovered);
     }
 
     #[test]
