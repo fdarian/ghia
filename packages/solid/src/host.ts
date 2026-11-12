@@ -461,7 +461,7 @@ export class HostElement extends HTMLElement {
    * too. See `Animation`.
    */
   getAnimations(options?: GetAnimationsOptions): Animation[] {
-    if (!this.root || !this.mounted) return []
+    if (!this.root || !this.mounted || !isConnected(this)) return []
     return this.methods().getAnimations.call(this, options)
   }
 

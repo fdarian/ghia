@@ -175,7 +175,33 @@ describeNative("element.animate()", () => {
     frame(0)
     expect(animation.effect.getKeyframes().every((keyframe) => !("nonsense" in keyframe))).toBe(true)
   })
+
+  it("lets native drop the run of a script animation that was cancelled on a connected element once the app lets go", async () => {
+    const known = (id: number) => {
+      try {
+        renderer.getAnimation(id)
+        return true
+      } catch {
+        return false
+      }
+    }
+    const run = () => {
+      const animation = animate({ opacity: [0, 1] }, 1000)
+      frame(0)
+      const id = renderer.getAnimations(BOX)[0].id
+      animation.cancel()
+      frame(16)
+      return id
+    }
+    const id = run()
+    for (let round = 0; round < 20 && known(id); round++) {
+      collect()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(known(id)).toBe(false)
+  })
 })
+
 
 describeNative("element.animate() on an element that is removed", () => {
   let renderer: TestRenderer
@@ -358,5 +384,39 @@ describeNative("element.animate() on an element that is removed", () => {
     insertAgain()
     expect(methods().getAnimations.call(target).map((animation) => animation.playState)).toEqual(["finished"])
     expect(target).toBeDefined()
+  })
+
+  it("keeps an orphan that was cancelled and played again before the cancel event arrived", async () => {
+    const run = () => {
+      const animation = methods().animate.call({}, { opacity: [0, 1] }, 1000)
+      frame(0)
+      const id = renderer.getAnimations(BOX)[0].id
+      remove()
+      animation.cancel()
+      animation.play()
+      return { id, finished: animation.finished }
+    }
+    const made = run()
+    frame(16)
+    await collectUntil(() => !known(made.id))
+    expect(known(made.id)).toBe(true)
+    frame(1100)
+    await expect(made.finished).resolves.toBeDefined()
+  })
+
+  it("lets native drop the run of an orphan that a command left idle", async () => {
+    const run = () => {
+      const animation = methods().animate.call({}, { opacity: [0, 1] }, 1000)
+      frame(0)
+      const id = renderer.getAnimations(BOX)[0].id
+      remove()
+      animation.cancel()
+      frame(16)
+      animation.effect?.updateTiming({ delay: 10 })
+      return id
+    }
+    const id = run()
+    await collectUntil(() => !known(id))
+    expect(known(id)).toBe(false)
   })
 })

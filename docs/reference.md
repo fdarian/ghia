@@ -9598,7 +9598,11 @@ await animation.finished
   Chrome, the element lists nothing while it is out of the tree (`getAnimations()`
   is `[]`, and `document.getAnimations()` does not have it either), and if it is
   inserted again the animation is still animating, where the clock took it, or lists
-  again as finished if a `fill` holds its effect. Its CSS animations and transitions do end
+  again as finished if a `fill` holds its effect. As in Chrome, where the timeline holds a
+  running or paused animation, an infinite or paused `element.animate()` on a removed
+  element keeps running and keeps its element and its native state until it is
+  cancelled: cancel it when you drop the element. A finished or cancelled one is held
+  only while JS holds it. Its CSS animations and transitions do end
   with the removal, as in CSS. `element.animate()` on an element that is not in the
   tree throws, where Chrome animates it ([deviations](fork/deviations.md#motion)).
 - **`getKeyframes()`** answers at once, before any frame. `offset` is `null` for a

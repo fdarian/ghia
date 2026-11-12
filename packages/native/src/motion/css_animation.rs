@@ -2365,6 +2365,7 @@ impl CssAnimations {
         self.states.remove(&id);
         self.orphans.remove(&id);
         self.dormant.remove(&id);
+        self.sleepers.next.remove(&id);
         self.sleepers.forget(id);
     }
 
@@ -2479,7 +2480,7 @@ impl CssAnimations {
 
     /// Whether the run `id` is one a script left running on an element that is not in the tree.
     pub(crate) fn is_orphaned_run(&self, id: u64) -> bool {
-        self.element_of(id).is_some_and(|element| self.orphans.contains(&element))
+        !self.orphans.is_empty() && self.element_of(id).is_some_and(|element| self.orphans.contains(&element))
     }
 
     /// The element the run `id` is of.

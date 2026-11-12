@@ -220,6 +220,15 @@ describe.skipIf(!hasNativeTestRenderer)("element.animate() in Solid", () => {
     expect(rejected).not.toHaveBeenCalled()
   })
 
+  it("lists nothing right after the element is removed, before the removal is flushed", () => {
+    const box = mount()
+    box.animate({ translate: ["0px 0px", "100px 0px"] }, { duration: 1000 })
+    frame(0)
+    expect(box.getAnimations()).toHaveLength(1)
+    box.remove()
+    expect(box.getAnimations()).toEqual([])
+  })
+
   it("shows a script animation of an element that is inserted again where the clock took it", async () => {
     const box = mount()
     const animation = box.animate({ translate: ["0px 0px", "100px 0px"] }, { duration: 1000, easing: "linear" })
