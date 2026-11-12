@@ -18,9 +18,10 @@ describeNative("element.animate() on a culled element that is removed", () => {
   const rows = new Map<number, PublicInstance>()
 
   beforeEach(() => {
-    testRoot = createTestRoot({ width: 300, height: 400 })
+    testRoot = createTestRoot({ width: 900, height: 1022 })
     testRoot.renderer.clockPause()
     testRoot.renderer.setInlineDraws(false)
+    testRoot.renderer.setA11yActive(false)
   })
 
   afterEach(() => {
@@ -30,18 +31,26 @@ describeNative("element.animate() on a culled element that is removed", () => {
 
   function show(count: number): void {
     testRoot.render(
-      <div style={{ width: 300, height: 400, flexDirection: "column" }}>
-        <div testId="scroller" style={{ width: 300, height: SCROLLER, overflow: "hidden", flexDirection: "column" }}>
+      <div style={{ width: 900, height: 1022, flexDirection: "row" }}>
+        <div style={{ width: 200, flexDirection: "column", flexShrink: 0, padding: 4 }}>
+          {Array.from({ length: 60 }, (_, index) => (
+            <div key={index} style={{ height: 16, flexShrink: 0, padding: 1, display: "flex", borderRadius: 4, hover: { backgroundColor: "#e5e5e5" } }}>
+              <div style={{ fontSize: 12, color: "#222222" }}>{`Sidebar item ${index}`}</div>
+            </div>
+          ))}
+        </div>
+        <div testId="scroller" style={{ flex: 1, height: SCROLLER, overflow: "hidden", flexDirection: "column" }}>
           <div style={{ height: BEFORE, flexShrink: 0 }} />
           {Array.from({ length: count }, (_, index) => (
-            <div
-              key={index}
-              testId={`row-${index}`}
-              ref={(instance: PublicInstance | null) => {
-                if (instance) rows.set(index, instance)
-              }}
-              style={{ height: 20, flexShrink: 0 }}
-            />
+            <div key={index} testId={`card-${index}`} style={{ height: 40, flexShrink: 0, padding: 8, backgroundColor: "#f4f4f4" }}>
+              <div
+                testId={`row-${index}`}
+                ref={(instance: PublicInstance | null) => {
+                  if (instance) rows.set(index, instance)
+                }}
+                style={{ height: 20, backgroundColor: "#cccccc" }}
+              />
+            </div>
           ))}
         </div>
       </div>
@@ -49,7 +58,8 @@ describeNative("element.animate() on a culled element that is removed", () => {
   }
 
   const tick = (milliseconds = 16) => {
-    testRoot.renderer.clockFastForward(milliseconds)
+    testRoot.renderer.clockAdvance(milliseconds)
+    testRoot.renderer.advanceTime(milliseconds)
     testRoot.renderer.drawFrame()
     testRoot.renderer.dispatchNativeEvents()
   }
@@ -57,14 +67,15 @@ describeNative("element.animate() on a culled element that is removed", () => {
   it("finishes on time, which a dormant clock the removal did not take away tells", async () => {
     show(8)
     testRoot.renderer.flush()
-    for (let warm = 0; warm < 4; warm++) tick()
+    for (let warm = 0; warm < 12; warm++) tick()
     const row = rows.get(7) as unknown as HTMLElement
     const animation = row.animate({ opacity: [0, 1] }, { duration: 500, easing: "linear", fill: "forwards" })
-    for (let step = 0; step < 6; step++) tick()
-    const before = testRoot.renderer.getFrameWorkCounters().dormantTicks
+    for (let step = 0; step < 12; step++) tick()
+    // Dormant: the frames that carry the clock on build nothing.
+    testRoot.renderer.resetBuildCounters()
     tick()
     tick()
-    expect(testRoot.renderer.getFrameWorkCounters().dormantTicks, "the run is carried on by dormant ticks").toBeGreaterThan(before)
+    expect(testRoot.renderer.getBuildCounters().elementsBuilt, "nothing is built for a culled element's animation").toBe(0)
 
     show(7)
     testRoot.renderer.flush()
