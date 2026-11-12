@@ -126,10 +126,6 @@ export function createDetachedRenderer(): NativeRenderer {
   return renderer as NativeRenderer
 }
 
-export function isRendererDetached(renderer: object): boolean {
-  return detached.has(renderer)
-}
-
 /**
  * Makes the element-facing methods of `renderer` answer as for a node that is not in a document.
  * Methods the renderer does not have stay absent, since callers read "optional method missing" as

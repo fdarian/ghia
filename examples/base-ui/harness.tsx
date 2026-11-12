@@ -135,6 +135,6 @@ export function box(element: Element): DOMRect {
 /** The text of the element that holds focus, or its tag when it has none: what a failed focus assertion should print. */
 export function activeText(): string {
   const active = document.activeElement
-  if (active === null) return 'nothing is focused'
-  return active.textContent === '' ? `<${active.localName}>` : (active.textContent ?? '')
+  if (active === document.body) return 'nothing is focused (<body>)'
+  return active.textContent || `<${active.localName}>`
 }

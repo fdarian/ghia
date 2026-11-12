@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { detachRenderer, isRendererDetached } from "../detached-renderer.js"
+import { detachRenderer } from "../detached-renderer.js"
 
 function liveRenderer() {
   const calls: string[] = []
@@ -26,7 +26,6 @@ describe("detachRenderer", () => {
     const renderer = liveRenderer()
     detachRenderer(renderer)
 
-    expect(isRendererDetached(renderer)).toBe(true)
     expect(renderer.getElementBounds(1)).toBeNull()
     expect(renderer.focusElement(1)).toBeUndefined()
     expect(renderer.applyBatch()).toEqual([])
