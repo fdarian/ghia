@@ -1781,6 +1781,9 @@ export interface HostProps
    *  listener does not make an element focusable: give it a `tabIndex`. */
   onKeyDown?: (event: KeyEvent) => void
   onKeyUp?: (event: KeyEvent) => void
+  /** The capture-phase twins of `onKeyDown` and `onKeyUp`: they run from the root down before the target's. */
+  onKeyDownCapture?: (event: KeyEvent) => void
+  onKeyUpCapture?: (event: KeyEvent) => void
 
   // ── Focus events ───────────────────────────────────────────────
   // Focus changes dispatch in DOM order: blur and focusout on the element
@@ -1801,6 +1804,11 @@ export interface HostProps
   onFocusIn?: (event: DomEvent) => void
   /** `focusout`. Bubbles to ancestors. Solid only. */
   onFocusOut?: (event: DomEvent) => void
+  /** The capture-phase twins of the four above, which run from the root down before the target's. React: `onFocusCapture` and `onBlurCapture` listen to `focusin` and `focusout`. */
+  onFocusCapture?: (event: DomEvent) => void
+  onBlurCapture?: (event: DomEvent) => void
+  onFocusInCapture?: (event: DomEvent) => void
+  onFocusOutCapture?: (event: DomEvent) => void
 
   // ── Scroll events ──────────────────────────────────────────────
   /**

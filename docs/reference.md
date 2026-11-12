@@ -4955,7 +4955,10 @@ The props follow each framework's web behaviour:
 
 React DOM listens to `focusin` and `focusout` for `onFocus` and `onBlur`, so in
 `@ghia/react` those props bubble and there is no `onFocusIn` or `onFocusOut`.
-`@ghia/solid` is plain DOM.
+`@ghia/solid` is plain DOM. Each prop has a capture-phase twin (`onFocusCapture`,
+`onBlurCapture`, and in Solid `onFocusInCapture` and `onFocusOutCapture`) that runs from
+the root down before the target's handler, and in React `onFocusCapture` and
+`onBlurCapture` are the capture phase of `focusin` and `focusout`.
 
 ### Keyboard events
 
@@ -7281,13 +7284,13 @@ The details for a library author, with a minimal addon, are in
 | Drag target | `onDragEnter`, `onDragOver`, `onDragLeave`, `onDrop` | the mouse fields, `dataTransfer` — for files dragged in from the OS and for `draggable` elements; `relatedTarget` on enter and leave. All bubble |
 | Drag source | `onDragStart`, `onDrag`, `onDragEnd` | the mouse fields, `dataTransfer` — on a `draggable` element. All bubble |
 | Click outside | `onMouseDownOutside` | the mouse fields below, `button` — `target` is the pressed element, `currentTarget` the listening one |
-| Key down | `onKeyDown` | `key`, `code`, `keyChar`, `repeat`, `isComposing`, `shiftKey`, `ctrlKey`, `altKey`, `metaKey`, `modifiers` |
-| Key up | `onKeyUp` | `key`, `code`, `keyChar`, `repeat`, `isComposing`, `shiftKey`, `ctrlKey`, `altKey`, `metaKey`, `modifiers` |
+| Key down | `onKeyDown`, `onKeyDownCapture` | `key`, `code`, `keyChar`, `repeat`, `isComposing`, `shiftKey`, `ctrlKey`, `altKey`, `metaKey`, `modifiers` |
+| Key up | `onKeyUp`, `onKeyUpCapture` | `key`, `code`, `keyChar`, `repeat`, `isComposing`, `shiftKey`, `ctrlKey`, `altKey`, `metaKey`, `modifiers` |
 | Composition | `onCompositionStart`, `onCompositionUpdate`, `onCompositionEnd` | `data` — bubble from the `<input>` or `<textarea>` being composed in, not cancelable. See [Input method composition](#input-method-composition) |
-| Focus | `onFocus` | `focusVisible`, `relatedTarget`. See [Focus events](#focus-events) |
-| Blur | `onBlur` | `focusVisible`, `relatedTarget` |
-| Focus in | `onFocusIn` (Solid; React's `onFocus`) | `focusVisible`, `relatedTarget`. Bubbles |
-| Focus out | `onFocusOut` (Solid; React's `onBlur`) | `focusVisible`, `relatedTarget`. Bubbles |
+| Focus | `onFocus`, `onFocusCapture` | `focusVisible`, `relatedTarget`. See [Focus events](#focus-events) |
+| Blur | `onBlur`, `onBlurCapture` | `focusVisible`, `relatedTarget` |
+| Focus in | `onFocusIn`, `onFocusInCapture` (Solid; React's `onFocus`, `onFocusCapture`) | `focusVisible`, `relatedTarget`. Bubbles |
+| Focus out | `onFocusOut`, `onFocusOutCapture` (Solid; React's `onBlur`, `onBlurCapture`) | `focusVisible`, `relatedTarget`. Bubbles |
 | Wheel | `onWheel`, `onWheelCapture` | `deltaX`, `deltaY`, `deltaMode`, `clientX`, `clientY`, `offsetX`, `offsetY`, `buttons`, `precise`, `touchPhase`, `modifiers`. Bubbles, cancelable. See [The wheel](#the-wheel) |
 | Scroll | `onScroll` | `scrollTop`, `scrollLeft` — scroll containers, not `<virtual-list>` |
 | Content visibility | `onContentVisibilityAutoStateChange` | `skipped` — an element with `contentVisibility: "auto"` began or stopped skipping its content. Bubbles, cancelable, has an `…Capture` twin. See [Skipping content with `contentVisibility`](#skipping-content-with-contentvisibility) |

@@ -43,8 +43,8 @@ const POINTER_EVENT_PROPS = [
 ] as const satisfies readonly (readonly [keyof PointerEventHandlerProps, string])[]
 
 /**
- * Keyboard and focus handler props and the lowercase DOM type each listens for.
- * They have no `on…Capture` twins.
+ * Keyboard and focus handler props and the lowercase DOM type each listens for, each with its
+ * capture-phase `on…Capture` twin keyed `captureHandlerKey(type)`.
  */
 export const KEYBOARD_FOCUS_EVENT_PROPS: readonly (readonly [string, string])[] = [
   ["onKeyDown", "keydown"],
@@ -53,7 +53,10 @@ export const KEYBOARD_FOCUS_EVENT_PROPS: readonly (readonly [string, string])[] 
   ["onBlur", "blur"],
   ["onFocusIn", "focusin"],
   ["onFocusOut", "focusout"],
-]
+].flatMap(([propName, eventType]) => [
+  [propName, eventType] as const,
+  [`${propName}Capture`, captureHandlerKey(eventType)] as const,
+])
 
 // Fails to compile when PointerEventHandlerProps declares a prop the table lacks.
 type MissingFromTable = Exclude<
