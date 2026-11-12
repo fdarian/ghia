@@ -66,11 +66,20 @@ export function center(element: Element): { x: number; y: number } {
   return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
 }
 
-/** A real click: the pointer goes down and up over the element's center, through GPUI hit testing. */
+/**
+ * A real click: the pointer goes down, stays a moment (a person's press lasts far longer than the
+ * zero-delay timers libraries use to tell one press from the next), and comes up, over the point.
+ */
+export async function clickAt(app: App, x: number, y: number): Promise<void> {
+  app.renderer.nativeSimulateMouseDown(x, y)
+  await settle(app, 20)
+  app.renderer.nativeSimulateMouseUp(x, y)
+  await settle(app)
+}
+
 export async function click(app: App, element: Element): Promise<void> {
   const point = center(element)
-  app.renderer.nativeSimulateClick(point.x, point.y)
-  await settle(app)
+  await clickAt(app, point.x, point.y)
 }
 
 export async function hover(app: App, element: Element): Promise<void> {
