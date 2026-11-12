@@ -14,6 +14,8 @@ import {
   SVGElement,
   Text,
 } from "./dom/nodes.js"
+import { DOMTokenList } from "./dom/class-list.js"
+import { ValidityState } from "./dom/constraint-validation.js"
 import { CSSStyleDeclaration } from "./dom/css-style-declaration.js"
 import { DOMRect, DOMRectReadOnly } from "./dom/dom-rect.js"
 import { HTMLInputElement, HTMLTextAreaElement } from "./dom/html-element-classes.js"
@@ -21,7 +23,8 @@ import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
 import { ToggleEvent } from "./dom/toggle-event.js"
 import { Selection } from "./dom/selection.js"
 import { EVENT_CLASSES } from "./events/classes.js"
-import { document, window } from "./events/window-target.js"
+import { replaceStandInDocumentElements, standInDocumentElements } from "./dom/stand-in-document.js"
+import { document, installStandInDocument, window } from "./events/window-target.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
 import { isWebBuild } from "./web-build.js"
 import { Animation, CSSAnimation, CSSTransition, DocumentTimeline, KeyframeEffect } from "./web-animations.js"
@@ -50,6 +53,8 @@ const DOM_CLASSES = {
   Document,
   DocumentFragment,
   ShadowRoot,
+  ValidityState,
+  DOMTokenList,
   CSSStyleDeclaration,
   CSSStyleSheet,
   CSSRule,
@@ -68,6 +73,11 @@ const DOM_CLASSES = {
   DocumentTimeline,
   ...EVENT_CLASSES,
 }
+
+installStandInDocument({
+  elements: () => standInDocumentElements(document),
+  replace: replaceStandInDocumentElements,
+})
 
 const getSelection = () => document.getSelection()
 

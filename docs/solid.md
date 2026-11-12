@@ -130,7 +130,7 @@ An edit to a component module is an HMR update (solid-refresh): the edited compo
 
 > **Warning.** Local signal state in the components that update is reset. It is not React Fast Refresh with preserved state: `createSignal` inside an edited component starts again at its initial value.
 
-An edit that no component accepts is a full reload: the runner's module cache and its HMR data are cleared and the entry runs again, so `render()` remounts the tree on the same window and all state is lost. That is the entry itself and any module reached only from the entry. Component edits after a reload are HMR updates again, and `render()` uses the options of its latest call, such as `onUncaughtError`.
+An edit that no component accepts is a full reload: the runner's module cache and its HMR data are cleared and the entry runs again, so `render()` remounts the tree on the same window and all state is lost. The reload unmounts the old tree first, as a page reload does, so what the entry writes to `document` before `render()` (`document.documentElement.classList.add("dark")`, a `document.body.addEventListener(...)`) reaches the new tree's `<html>` and `<body>` once ([stand-in document](reference.md#dom-classes-and-the-tree)). That is the entry itself and any module reached only from the entry. Component edits after a reload are HMR updates again, and `render()` uses the options of its latest call, such as `onUncaughtError`.
 
 Not covered by reload:
 

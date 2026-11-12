@@ -89,8 +89,9 @@ enum Kind {
     /// A range input: it always has a value, and no constraint makes it invalid.
     Range,
     Checkbox { checked: bool },
-    /// `group_checked`: a radio of its group is checked, which is what a `required` radio needs.
-    Radio { checked: bool, group_checked: bool },
+    /// `group_required`: a radio of its group is `required`, which makes the whole group so.
+    /// `group_checked`: a radio of its group is checked, which is what a required group needs.
+    Radio { checked: bool, group_checked: bool, group_required: bool },
 }
 
 struct Control {
@@ -114,7 +115,7 @@ impl Control {
             Kind::Text => self.required && self.value.is_empty() && !self.read_only,
             Kind::Hidden | Kind::Range => false,
             Kind::Checkbox { checked } => self.required && !checked,
-            Kind::Radio { group_checked, .. } => self.required && !group_checked,
+            Kind::Radio { group_checked, group_required, .. } => group_required && !group_checked,
         }
     }
 
@@ -150,7 +151,11 @@ impl GpuixView {
                     let kind = match input_choice::choice_of(element) {
                         Some(Choice::Checkbox) => Kind::Checkbox { checked: tree.is_checked(id) },
                         Some(Choice::Radio) => {
-                            Kind::Radio { checked: tree.is_checked(id), group_checked: tree.radio_group_has_checked(id) }
+                            Kind::Radio {
+                                checked: tree.is_checked(id),
+                                group_checked: tree.radio_group_has_checked(id),
+                                group_required: tree.radio_group_has_required(id),
+                            }
                         }
                         None if input_choice::is_hidden(element) => Kind::Hidden,
                         None if input_range::is_range(element) => Kind::Range,
@@ -495,18 +500,19 @@ mod tests {
     fn a_checkbox_or_radio_makes_an_entry_only_when_checked_and_a_hidden_input_always() {
         let entry = |kind| Control { kind, ..control(Some("a"), "v") }.entry();
         assert_eq!(entry(Kind::Checkbox { checked: false }), None);
-        assert_eq!(entry(Kind::Radio { checked: false, group_checked: true }), None);
+        assert_eq!(entry(Kind::Radio { checked: false, group_checked: true, group_required: false }), None);
         assert_eq!(entry(Kind::Checkbox { checked: true }), Some(vec!["a".to_string(), "v".to_string()]));
         assert_eq!(entry(Kind::Hidden), Some(vec!["a".to_string(), "v".to_string()]));
     }
 
     #[test]
-    fn a_required_choice_needs_to_be_checked_and_a_required_radio_needs_its_group_to_be() {
+    fn a_required_choice_needs_to_be_checked_and_a_required_radio_group_needs_one_checked() {
         let invalid = |kind| Control { kind, required: true, ..control(None, "") }.is_invalid();
         assert!(invalid(Kind::Checkbox { checked: false }));
         assert!(!invalid(Kind::Checkbox { checked: true }));
-        assert!(invalid(Kind::Radio { checked: false, group_checked: false }));
-        assert!(!invalid(Kind::Radio { checked: false, group_checked: true }));
+        assert!(invalid(Kind::Radio { checked: false, group_checked: false, group_required: true }));
+        assert!(!invalid(Kind::Radio { checked: false, group_checked: true, group_required: true }));
+        assert!(!invalid(Kind::Radio { checked: false, group_checked: false, group_required: false }));
         assert!(!invalid(Kind::Hidden));
     }
 

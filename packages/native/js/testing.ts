@@ -40,6 +40,7 @@ import type {
 } from "./host.js"
 import { bindClipboard } from "./clipboard.js"
 import { forgetElementSource, forgetWindowSource } from "./events/window-target.js"
+import { detachRenderer } from "./detached-renderer.js"
 import type { HostDropEffect } from "./events/types.js"
 import { matchableText } from "./text-match.js"
 import { flushPendingMutations } from "./bounds.js"
@@ -737,6 +738,7 @@ export class TestRenderer implements NativeRenderer {
       // earlier renderer is as dead as a disposed one: it would reach the new window's state, and
       // throw once that is disposed.
       forgetWindowSource(latestRenderer)
+      detachRenderer(latestRenderer)
       unregisterKeyframesHost(latestRenderer.native)
       closeWebAnimations(latestRenderer)
     }
@@ -782,8 +784,10 @@ export class TestRenderer implements NativeRenderer {
 
   /** Releases the sync event handler, which captures this renderer, and tears the native
    *  window down. Call it after the root is unmounted. Native calls that need the window
-   *  throw afterwards; the retained tree stays readable. Without it the window is leaked
-   *  when the thread exits. */
+   *  throw afterwards, except the ones an element reaches (`getBoundingClientRect`, `focus()`,
+   *  `getComputedStyle`, style and listener writes), which answer as for a node that is not in
+   *  a document: see `detached-renderer.ts`. The retained tree stays readable. Without it the
+   *  window is leaked when the thread exits. */
   dispose(): void {
     // A run under GPUIX_RETAIN_VERIFY fails at the window that showed a replayed frame that a
     // build would have shown differently, and says which test's window it was.
@@ -792,7 +796,11 @@ export class TestRenderer implements NativeRenderer {
     unregisterKeyframesHost(this.native)
     closeWebAnimations(this)
     this.native.setSyncEventHandler(null)
-    this.native.dispose()
+    try {
+      this.native.dispose()
+    } finally {
+      detachRenderer(this)
+    }
   }
 
   // ── GPUI pipeline methods ───────────────────────────────────────

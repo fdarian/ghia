@@ -227,9 +227,9 @@ describeNative("synchronous key dispatch", () => {
     it("hears a key with nothing focused", () => {
       const keys: string[] = []
       testRoot.render(<Focusable />)
-      listen(window, "keydown", (event) => keys.push(`${event.key}:${event.target}`))
+      listen(window, "keydown", (event) => keys.push(`${event.key}:${event.target === document.body}`))
       testRoot.renderer.simulateKeystrokes("x")
-      expect(keys).toEqual(["x:null"])
+      expect(keys).toEqual(["x:true"])
     })
 
     it("stops at stopPropagation, in capture and on the element", () => {

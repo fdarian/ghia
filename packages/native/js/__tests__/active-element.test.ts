@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import "../dom-globals.js"
 import {
   document,
   elementOf,
@@ -15,10 +16,10 @@ function root(elements: Record<number, object>) {
 }
 
 describe("document.activeElement across roots", () => {
-  it("is null with no root, and with a root that focuses nothing", () => {
-    expect(document.activeElement).toBeNull()
+  it("is body with no root, and with a root that focuses nothing", () => {
+    expect(document.activeElement).toBe(document.body)
     const only = root({ 1: {} })
-    expect(document.activeElement).toBeNull()
+    expect(document.activeElement).toBe(document.body)
     only.remove()
   })
 
@@ -28,7 +29,7 @@ describe("document.activeElement across roots", () => {
     only.state.focused = 1
     expect(document.activeElement).toBe(element)
     only.remove()
-    expect(document.activeElement).toBeNull()
+    expect(document.activeElement).toBe(document.body)
   })
 
   it("is the element of the root that heard a focus event last, among roots that have one", () => {
@@ -58,7 +59,7 @@ describe("document.activeElement across roots", () => {
 
   it("lists no renderer that cannot report focus", () => {
     const remove = installElementSource({}, () => ({}))
-    expect(document.activeElement).toBeNull()
+    expect(document.activeElement).toBe(document.body)
     remove()
   })
 
@@ -67,7 +68,7 @@ describe("document.activeElement across roots", () => {
     const only = root({ 1: element })
     only.state.focused = 1
     forgetWindowSource(only.renderer)
-    expect(document.activeElement).toBeNull()
+    expect(document.activeElement).toBe(document.body)
     expect(elementOf(only.renderer, 1)).toBe(element)
     only.remove()
     expect(() => elementOf(only.renderer, 1)).toThrow("No element source")

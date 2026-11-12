@@ -316,6 +316,19 @@ impl RetainedTree {
         self.is_checked(id) || self.radio_group(id).into_iter().any(|other| self.is_checked(other))
     }
 
+    /// Whether a radio of the group `id` is in, itself included, is `required`: then the whole
+    /// group is, and none of its radios may be missing a check.
+    pub(crate) fn radio_group_has_required(&self, id: u64) -> bool {
+        let required = |id: u64| {
+            self.elements
+                .get(&id)
+                .and_then(|element| element.custom_props().get("required"))
+                .and_then(Value::as_bool)
+                == Some(true)
+        };
+        required(id) || self.radio_group(id).into_iter().any(required)
+    }
+
     /// Legacy-pre-activation of the checkbox or radio `id`, before the click's listeners run: a
     /// checkbox toggles and stops being indeterminate, a radio becomes checked and unchecks its
     /// group. Returns whether the activation began: it does not for another element, a disabled one
@@ -728,6 +741,16 @@ mod tests {
         tree.input_prop_written(2, "checked", &Value::Bool(true));
         tree.input_prop_written(3, "checked", &Value::Bool(true));
         assert!(!tree.is_checked(2) && tree.is_checked(3));
+    }
+
+    #[test]
+    fn a_radio_group_is_required_when_any_radio_in_it_is() {
+        let mut tree = tree(GROUPS);
+        assert!(!tree.radio_group_has_required(3));
+        tree.set_custom_prop(4, "required".to_string(), Value::Bool(true));
+        assert!(tree.radio_group_has_required(3), "a sibling's required makes the group required");
+        assert!(tree.radio_group_has_required(4));
+        assert!(!tree.radio_group_has_required(6), "another group: not in the form");
     }
 
     #[test]

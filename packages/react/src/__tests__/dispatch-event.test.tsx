@@ -128,7 +128,7 @@ describeNative("dispatchEvent in React", () => {
     nodes.inner.dispatchEvent(new globalThis.FocusEvent("focus"))
     expect(calls).toEqual(["inner focus focusin", "outer focus focusin"])
     expect(testRoot.renderer.getFocusedElementId()).toBeNull()
-    expect(document.activeElement).toBeNull()
+    expect(document.activeElement).toBe(document.body)
   })
 
   it("throws an InvalidStateError for an event dispatched from inside its own dispatch", () => {

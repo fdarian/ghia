@@ -355,7 +355,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid focus model", () => {
 
       renderer.native.simulateMouseDown(...center("plain"), 0)
       expect(sync.slice(8)).toEqual(["mousedown:plain", "blur:b", "focusout:b"])
-      expect(document.activeElement).toBeNull()
+      expect(document.activeElement).toBe(document.body)
       expect(queued()).toEqual([])
     })
 

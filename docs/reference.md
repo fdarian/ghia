@@ -864,6 +864,19 @@ id, and one event map, so `createRoot()` throws if that renderer already has a
 mounted root. Call `unmount()` on the first root before you create another;
 `render()` already does that for you.
 
+**An element outlives its window.** A library keeps elements past the unmount of
+their root and reaches them from a timer or a microtask: Base UI returns focus,
+floating-ui measures. Once the window is gone (the test renderer after
+`dispose()` or after the next test renderer replaced it, a live renderer after
+its last window closed) the members an element reaches answer as a node that is not in
+a document does in a browser, instead of throwing: `getBoundingClientRect()` is a zero
+rect, `getComputedStyle` reads `""`, `focus()`, `blur()`, `scrollIntoView()` and the
+pointer-capture calls do nothing, `matches(":focus")` is `false`, `style`, attribute and
+listener changes only change the node, and observers observe nothing. A renderer method
+an element cannot reach (the test renderer's `simulate*`, `drawFrame`, `captureScreenshot`)
+keeps throwing. `element.ownerDocument.documentElement` is the document's stand-in `<html>` after
+the unmount, never `null` ([see the document](#dom-classes-and-the-tree)).
+
 ### Background launch
 
 `focus: false` opens the window **without taking focus**. The app you were
@@ -1514,7 +1527,11 @@ and the state of every component around them**; the entry does not run again.
 An edit to a module that is not a boundary (the entry, a file that also exports
 a constant or a function) goes up to the modules that import it, and an edit
 nothing accepts is a full reload: the entry runs again, `render()` remounts
-React on the same window, and `useState` resets. Hot updates keep working after
+React on the same window, and `useState` resets. The reload unmounts the old
+tree before the entry runs, as a page reload does, so what the entry writes to
+`document` before `render()` (a class on `document.documentElement`, a listener
+on `document.body`) reaches the new tree's elements once
+([stand-in document](#dom-classes-and-the-tree)). Hot updates keep working after
 a full reload.
 
 **Stays:** window, GPU device, native `.node` addon, GPUI scroll physics, and on
@@ -4428,6 +4445,15 @@ ends to the text; an `end` at or before `start` collapses the selection to
 controlled `value` update sees the new value, even before the next frame.
 Select-on-focus works with `onFocus`, for keyboard focus and for a click.
 
+An `<input>` whose type the selection API does not apply to (anything but `text`, `search`, `url`, `tel` and `password`, so `email` and `number` too) has no
+selection, as in the DOM (the `type` is read trimmed and lowercased, and an unknown keyword is `text`): `selectionStart`, `selectionEnd` and `selectionDirection` are
+`null` and `setSelectionRange()` throws `InvalidStateError`. `select()` is a separate
+question, as in the DOM: it selects all the text of every type but `hidden`, `checkbox`, `radio`, `range` and the buttons
+(`button`, `submit`, `reset`, `image`), so `<input type="number" onFocus={(e) => e.currentTarget.select()}>` works
+although it has no `selectionStart`. A
+library that asks whether an element is a native text input by `selectionStart != null`
+(Base UI's composite lists do, on every item that takes focus) gets `false` for a radio.
+
 `disabled` works like the DOM. The control is not focusable and not a tab stop,
 a click does not focus it, and focus leaves it when it becomes disabled. It
 shows no caret, takes no editing, and gets no `click` or `keydown` events. Its
@@ -4826,9 +4852,32 @@ submission while the control is empty.
   `preventDefault()` stops it. A `<textarea>` does not count, and Enter in it
   always inserts a newline.
 - **Validation.** Each `required` control with an empty value gets a
-  non-bubbling, cancelable `invalid` event (`onInvalid`). The first one whose
-  handlers did not call `preventDefault()` takes focus, and the form is not
-  submitted. A `disabled` or `readOnly` control is not validated.
+  non-bubbling, cancelable `invalid` event (`onInvalid`), and so does every
+  radio of a group in which any radio is `required` while none is checked. The
+  first one whose handlers did not call `preventDefault()` takes focus, and the form
+  is not submitted. A `disabled` or `readOnly` control is not validated.
+- **Constraint validation API.** An `<input>` and a `<textarea>` have `required`, `name`
+  and `form` (the `<form>` named by its `form` attribute, if there is one with that `id`,
+  else the `<form>` it is in, or `null`), `willValidate` (`false` while disabled,
+  read-only or of a type that holds no value: `hidden`, `button`, `submit`, `reset`,
+  `image`), `validity`, `validationMessage`, `setCustomValidity(message)`, `checkValidity()`
+  and `reportValidity()`. `validity.valueMissing` is the condition the form check above
+  uses (a text control with no text, a checkbox that is not checked, and every radio of a
+  group with a `required` radio while none is checked; a radio group is the radios with
+  one `name` in one form, or in no form, of one tree (a window, or a detached tree: a
+  detached `required` radio is missing too), and a `form` attribute puts a radio in the form it
+  names; a radio with no `name` is its own group), `validity.customError` is a non-empty `setCustomValidity()` message, and
+  `valid` is neither. `checkValidity()` and `reportValidity()` return `valid`, firing the
+  cancelable, non-bubbling `invalid` event first when it is `false`. `reportValidity()`
+  then focuses the control (and scrolls it into view) unless a listener canceled the
+  event, as Chrome does; neither shows a message bubble. The `ValidityState` attributes
+  are enumerable, so `for (key in input.validity)` lists them.
+  `validationMessage` is the custom message, or an English text for `valueMissing`
+  (`"Please fill out this field."`). The other conditions (`typeMismatch`,
+  `patternMismatch`, `tooLong`, `tooShort`, `rangeUnderflow`, `rangeOverflow`,
+  `stepMismatch`, `badInput`) are always `false`, because nothing evaluates them: see
+  [deviations](./fork/deviations.md#html-tags). A custom message does not stop a form's
+  submission, as `required` does. Base UI's `Field` and `Form` read these members.
 - **`submit`.** Cancelable and bubbling, aimed at the form. `event.formData`
   holds the `name` and `value` of every named, enabled control in document
   order. `event.submitter` is the `<button>` that submitted it (its element, as
@@ -4936,15 +4985,20 @@ The props follow each framework's web behaviour:
 
 React DOM listens to `focusin` and `focusout` for `onFocus` and `onBlur`, so in
 `@ghia/react` those props bubble and there is no `onFocusIn` or `onFocusOut`.
-`@ghia/solid` is plain DOM.
+`@ghia/solid` is plain DOM. Each prop has a capture-phase twin (`onFocusCapture`,
+`onBlurCapture`, and in Solid `onFocusInCapture` and `onFocusOutCapture`) that runs from
+the root down before the target's handler, and in React `onFocusCapture` and
+`onBlurCapture` are the capture phase of `focusin` and `focusout`.
 
 ### Keyboard events
 
 Each keystroke is **one** `keydown`, and one `keyup` on release, like the DOM.
 It targets the focused element, runs capture, target and bubble through its
-ancestors, then reaches `document` and `window`. With nothing focused it goes to
-`window` alone and `event.target` is `null` (Ghia has no `body` or `html`
-element to stand in).
+ancestors, then reaches `document` and `window`. With nothing focused it
+targets `document.body` and runs `window` capture, `document` capture, `html`
+capture, `body`, `html`, `document`, `window`, so `event.target === document.body` and
+`event.target.closest(...)` work, and `preventDefault()` on it cancels the
+default action (Tab's focus move, scrolling keys) as for any element.
 
 Handlers run synchronously, before the editor acts on the key, so
 `preventDefault()` has its DOM meaning:
@@ -5182,13 +5236,13 @@ Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `
 | `contains(node)`, `getRootNode()`, `compareDocumentPosition(node)` | `contains` includes the node itself. `getRootNode()` is `document` for a mounted node and the top of its tree otherwise. `compareDocumentPosition` gives the `DOCUMENT_POSITION_*` bits (`DISCONNECTED`, `PRECEDING`, `FOLLOWING`, `CONTAINS`, `CONTAINED_BY`); two trees that are not in one document are `DISCONNECTED` and `IMPLEMENTATION_SPECIFIC` with a stable order. `document.contains(node)` is `node.isConnected`. |
 | `textContent` | The text of the node and its descendants. Setting it on an element replaces its children with one `Text` (`""` or `null` removes them all); on a `Text` it sets its data. |
 | `matches(selector)`, `closest(selector)` | A real selector, as in the DOM: type, class, id, attribute (`=`, `~=`, `\|=`, `^=`, `$=`, `*=`, with `i` and `s`), the combinators (space, `>`, `+`, `~`), selector lists, and `:not()`, `:is()`, `:where()`, `:has()`, `:root`, `:empty`, `:scope`, `:first-child`, `:last-child`, `:only-child`, `:nth-child()`, `:nth-last-child()` and the `-of-type` forms, `:lang()`, `:disabled`, `:enabled` (read from the attributes), and `:checked` and `:indeterminate` (the live state of a checkbox or radio). `closest` starts at the element itself and walks up through the parents. `:scope` is the element the method is called on. `:focus`, `:focus-visible`, `:focus-within`, `:hover` and `:active` ask the window, so they answer for the focus and pointer as they are at that moment (and are `false` for an element that is not mounted). `:popover-open` matches a [popover](#popover) that is showing. All of them work on an element that is not inserted yet and on a subtree built with `appendChild` before it is inserted. A selector the engine cannot parse, or a pseudo-class or pseudo-element it does not have, throws a `SyntaxError` `DOMException`; see [the deviations](fork/deviations.md#dom-selectors). Tag names are compared without case (`P` matches a `<p>`), as an HTML document does. |
-| `querySelector(selector)`, `querySelectorAll(selector)` | On an element, on `document` and on a `DocumentFragment`. The elements below the node that match, in document order: the node itself is not one, but the whole selector is matched against the tree, so `el.querySelectorAll('main p')` finds a `p` in `el` whose `main` is above it. `querySelectorAll` returns a static list (an `Array` with `item(index)`, `length` and `forEach`) that does not follow later changes to the tree, and `querySelector` the first or `null`. `document.querySelector(…)` searches the `<html>` of every window, so an app's elements and a portal into `document.body` are both found; with nothing mounted it finds nothing. `:scope` in a query on `document` is `<html>`. A selector is compiled once and kept by its text, so asking the same question on every focus change (a focus trap's tabbable list, `a[href], button:not([disabled]), [tabindex]`) walks the tree and parses nothing. |
-| `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `class` attribute (`""` without one; `class` wins over `className`, as `getAttribute("class")` does), an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a live `DOMStringMap` of the `data-*` attributes with the names in camel case (`data-row-id` is `rowId`): a read goes through `getAttribute`, and an assignment or a `delete` through `setAttribute` and `removeAttribute`, so Base UI's `element.dataset.tabindex = ...` works. |
+| `querySelector(selector)`, `querySelectorAll(selector)` | On an element, on `document` and on a `DocumentFragment`. The elements below the node that match, in document order: the node itself is not one, but the whole selector is matched against the tree, so `el.querySelectorAll('main p')` finds a `p` in `el` whose `main` is above it. `querySelectorAll` returns a static list (an `Array` with `item(index)`, `length` and `forEach`) that does not follow later changes to the tree, and `querySelector` the first or `null`. `document.querySelector(…)` searches the `<html>` of every window, so an app's elements and a portal into `document.body` are both found; with nothing mounted it finds the stand-in `<html>`, `<head>` and `<body>` and nothing else. `:scope` in a query on `document` is `<html>`. A selector is compiled once and kept by its text, so asking the same question on every focus change (a focus trap's tabbable list, `a[href], button:not([disabled]), [tabindex]`) walks the tree and parses nothing. |
+| `className`, `classList`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `class` attribute (`""` without one; `class` wins over `className`, as `getAttribute("class")` does), an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a live `DOMStringMap` of the `data-*` attributes with the names in camel case (`data-row-id` is `rowId`): a read goes through `getAttribute`, and an assignment or a `delete` through `setAttribute` and `removeAttribute`, so Base UI's `element.dataset.tabindex = ...` works. `classList` is a live `DOMTokenList` (global `DOMTokenList`) of the `class` attribute, the same object every time: `add`, `remove`, `toggle(token, force?)`, `replace`, `contains`, `item`, `length`, `value` (assignable, as is `element.classList = text`), `toString()`, `forEach`, `keys`, `values`, `entries`, iteration and `list[0]`. A write goes through `setAttribute('class', ...)`, so a stylesheet's `.name` rules, a `MutationObserver` and the framework's `class` handling see it, and it works on elements made by `document.createElement` and on the stand-in `<html>` before the first `render()`. A bad token throws `SyntaxError` (empty) or `InvalidCharacterError` (white space), `supports()` throws `TypeError` as for `classList`, and removing the last token leaves `class=""` while removing from an element with no `class` attribute leaves none. |
 | `hidden`, `tabIndex`, `disabled`, `htmlFor`, `isContentEditable`, `shadowRoot`, `assignedSlot` | `hidden` is the `hidden` attribute: `false` without it, `true` with it, and `"until-found"` when the attribute says that; assigning `true` or a non-empty string sets it, `false` removes it. An element that has it is `display: none` by its user agent style, as in Chrome (`[hidden]:not([hidden=until-found i])`), whatever its tag, so the author's own `display` is over it, and `until-found` keeps its box. `tabIndex` is the `tabindex` attribute as an integer (text that does not start with one reads the default), and without it the default of the tag, as in the HTML standard: 0 for `a`, `area`, `button`, `frame`, `iframe`, `input`, `object`, `select`, `textarea` and the first `summary` of a `details`, -1 for the rest; assigning writes the attribute. `disabled` is the `disabled` attribute as a boolean on `button`, `input`, `select`, `textarea`, `fieldset`, `optgroup` and `option` (assigning `true` sets it empty, `false` removes it), and `htmlFor` is the `for` attribute of a `label`, `""` without one; on any other element neither is there. `isContentEditable` is `false`: Ghia has no `contenteditable`, so nothing in it is an editing host (an element given the attribute is not editable, and Base UI's tabbable walk reads it as not focusable by it). `shadowRoot` and `assignedSlot` are `null`: there is no shadow DOM. |
 | `setAttribute(name, value)`, `removeAttribute(name)`, `toggleAttribute(name, force?)` | Write the prop the attribute stands for through the framework's own prop path, so native applies it as if the app had rendered that prop, at once (the mutations are flushed before the call returns; `setAttribute('style', text)` is the exception, which waits for the next flush as every write of `element.style` does), and `getAttribute` gives it back. This is what `@floating-ui`'s `markOthers` and Base UI's focus manager do: `setAttribute('aria-hidden', 'true')` leaves the element out of the accessibility tree, `setAttribute('inert', '')` makes the subtree inert, `setAttribute('tabindex', '-1')` makes the element focusable and `'0'` a tab stop (`removeAttribute('tabindex')` undoes it), and `setAttribute(name, '')` reads back `""` with `hasAttribute(name)` true. `popover` goes through the same path as the `popover` property and a framework's prop: a showing popover whose kind the write changes, or that loses the attribute, is hidden with its events. Names are lowercased on HTML elements, as in the DOM, and an empty name or one with a space, `/`, `>`, `=` or NUL throws `InvalidCharacterError`. The value is text: `tabindex`, `colspan`, `rowspan`, `span` and `maxlength` hold the integer the text is (text that is no integer is kept as it is, and native ignores it); `inert`, `disabled`, `hidden` (except `until-found`, which is kept as that text), `required`, `readonly`, `autofocus`, `multiple`, `selected` and `open` are on whatever the text is (`""` too), and `draggable` is on for `"true"`. `class` is `className` (or `class`, where the element was given that), `for` is `htmlFor`, and any other name is the prop of that name (`aria-*`, `data-*`). On an `<input>` the `checked` attribute is `defaultChecked` (on whatever its text is) and the `value` attribute is `defaultValue`, as in the DOM: the control's `checked` and `value` follow them only while it is clean (no user toggle or edit, no script write of the property), and `getAttribute` gives the attribute back; a checkbox, radio, hidden, submit, button, reset or image `value` attribute is the control's value itself and writes `value`. A `<textarea>` has no `value` attribute, so it is kept as text only. One rule says which prop answers an `<input>`'s `checked` and `value` attributes, for `getAttribute` and for the attribute a stylesheet's `[checked]` and `[value="…"]` match alike: the default prop (`defaultChecked`, `defaultValue`) when the element has one, else the `checked` or `value` prop, as React DOM puts a controlled value in the attribute too (a checkbox's `value` is the attribute itself, so `value` comes first there). So `setAttribute('checked', '')` on an input a framework renders `checked={false}` stays matched after the framework commits `checked` again, and `setAttribute('value', 'y')` on a controlled text input reads back `"y"` while its text stays the controlled value; `removeAttribute` then falls back to the prop. An element keeps the key its framework used for an attribute. The write goes the way a rendered prop's does to the attribute store native's [stylesheet](#stylesheets) selectors read, so `[data-state="open"]`, `[hidden]` and `.foo` match what `setAttribute`, `toggleAttribute` and `dataset` write, and stop matching when it is removed. Like the DOM, a later commit of the same prop by React or Solid overwrites the attribute, a commit that leaves the prop as it was does not, and an attribute the framework never set stays. `setAttribute('style', text)` sets `style.cssText` (below), and `on*` is kept as text for `getAttribute` and does nothing else: see [deviations](./fork/deviations.md#dom-attributes). `toggleAttribute` follows the DOM and returns whether the attribute is there afterwards. A `MutationObserver` with `attributes` gets a record, with `oldValue` where it asked, for each write that changes what `getAttribute` reads. |
 | `style` | The element's inline style as a `CSSStyleDeclaration`; what it reads and writes, and how a framework's `style` merges with code's, is under [Style and id from code](#style-and-id-from-code). `setAttribute('style', text)` is `style.cssText = text`, and `getAttribute('style')` is the `cssText`. |
 
-Every window root is a real `<html>` with a `<head>` and a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.head` the `<head>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; those four are `null` while no root is mounted, and with several windows they are those of the window that mounted last (the rule `matchMedia` follows). `document.compatMode` is `"CSS1Compat"` always, with or without a root. `html.parentNode` is `document`, `head.parentNode` and `body.parentNode` are `html` (`documentElement.children` is `[head, body]`), a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin (the [user agent style](#html-tags) of those tags, which a stylesheet rule such as `body { display: flex }` overrides, and neither has a `style` attribute); they add no accessibility node. `head` is `display: none`: it has no box, and an element appended to it is never drawn, laid out or hit, though it is a real element in the tree (a library that prepends a node to `document.head` finds one).
+Every window root is a real `<html>` with a `<head>` and a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.head` the `<head>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; with several windows they are those of the window that mounted last (the rule `matchMedia` follows). They are never `null`: while no root is mounted (before the first `render()`, after the last `unmount()`) the document answers with its own stand-in `<html>` holding a `<head>` and a `<body>`, the same object on every read until a root mounts and the first root's elements replace it. The stand-in belongs to no window and has no native element: it answers as an element of a gone window does (a zero `getBoundingClientRect()`, `offsetParent` `null`, an empty computed style, `focus()` and scrolling that do nothing), takes attributes, `style` and listeners, and is `isConnected` with `document` as its `parentNode`; inserting a node into it or removing one throws `NoModificationAllowedError`, and `document.createElement` still throws until a root is mounted. When the first root mounts, what was written to the stand-in `<html>`, `<head>` and `<body>` (attributes including `class` and `data-*`, `style` and listeners added with `addEventListener`) is written again to that root's real elements, through the ordinary attribute, style and listener paths, so `document.documentElement.setAttribute("class", "dark")` before `render()` drives an `html.dark body { ... }` rule and a `keydown` listener added to `body` before `render()` fires after it. The stand-ins are then nodes in no document (`isConnected` `false`, `parentNode` `null` for the `<html>`, not contained by `document`), and an element reference taken before the mount is not the mounted element ([deviations](./fork/deviations.md#dom-building-from-code)). After the last `unmount()` the document answers with fresh stand-ins. A library that reads `element.ownerDocument.documentElement` from an element after its root unmounted (floating-ui's `getOffsetParent`) gets the stand-in, as in a browser. `document.compatMode` is `"CSS1Compat"` always, with or without a root. `html.parentNode` is `document`, `head.parentNode` and `body.parentNode` are `html` (`documentElement.children` is `[head, body]`), a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin (the [user agent style](#html-tags) of those tags, which a stylesheet rule such as `body { display: flex }` overrides, and neither has a `style` attribute); they add no accessibility node. `head` is `display: none`: it has no box, and an element appended to it is never drawn, laid out or hit, though it is a real element in the tree (a library that prepends a node to `document.head` finds one).
 
 `document.getElementById(id)` finds the first element, in document order across every window, whose `id` is `id` (`null` for none and for `""`). `document.createElement(name)` and the other node makers are in [Building and moving nodes from code](#building-and-moving-nodes-from-code).
 
@@ -5349,8 +5403,8 @@ only the types that have a listener on `window`, `document` or an element on the
 path, so adding the first listener of a type is what turns it on.
 
 `document.activeElement` is the focused element, the same object a `ref` gives
-(a React instance, a Solid `HostElement`), and `null` when nothing is focused.
-It is current inside a `mousedown` handler, where it is still the element the
+(a React instance, a Solid `HostElement`), and `document.body` when nothing is focused,
+as in a browser. It is current inside a `mousedown` handler, where it is still the element the
 press is about to take focus from. With several windows (one root each), it is
 the focused element of the window that heard a focus event last.
 
@@ -5451,7 +5505,9 @@ Key and focus handlers run in the middle of a native call, and may still use the
 renderer: `focusElement`, `scrollTo`, `getScrollOffset`, the clipboard,
 `promptForPaths`, `getWindowSize`, `getA11yTree` and the `setWindow*` calls all
 run against the window being dispatched. A handler that throws is reported like
-any other event error and the next handler still runs.
+any other event error and the next handler still runs. Handlers that trigger each
+other (a `focus` handler that moves focus to an element whose `focus` handler moves
+it back) stop at 16 nested calls: [deviations](./fork/deviations.md#events-and-input).
 
 `mousedown`, `pointerdown`, `mouseup`, `pointerup`, `click` and `wheel` handlers
 run the same way on macOS and in the test renderer. The input does not hold the
@@ -7262,13 +7318,13 @@ The details for a library author, with a minimal addon, are in
 | Drag target | `onDragEnter`, `onDragOver`, `onDragLeave`, `onDrop` | the mouse fields, `dataTransfer` — for files dragged in from the OS and for `draggable` elements; `relatedTarget` on enter and leave. All bubble |
 | Drag source | `onDragStart`, `onDrag`, `onDragEnd` | the mouse fields, `dataTransfer` — on a `draggable` element. All bubble |
 | Click outside | `onMouseDownOutside` | the mouse fields below, `button` — `target` is the pressed element, `currentTarget` the listening one |
-| Key down | `onKeyDown` | `key`, `code`, `keyChar`, `repeat`, `isComposing`, `shiftKey`, `ctrlKey`, `altKey`, `metaKey`, `modifiers` |
-| Key up | `onKeyUp` | `key`, `code`, `keyChar`, `repeat`, `isComposing`, `shiftKey`, `ctrlKey`, `altKey`, `metaKey`, `modifiers` |
+| Key down | `onKeyDown`, `onKeyDownCapture` | `key`, `code`, `keyChar`, `repeat`, `isComposing`, `shiftKey`, `ctrlKey`, `altKey`, `metaKey`, `modifiers` |
+| Key up | `onKeyUp`, `onKeyUpCapture` | `key`, `code`, `keyChar`, `repeat`, `isComposing`, `shiftKey`, `ctrlKey`, `altKey`, `metaKey`, `modifiers` |
 | Composition | `onCompositionStart`, `onCompositionUpdate`, `onCompositionEnd` | `data` — bubble from the `<input>` or `<textarea>` being composed in, not cancelable. See [Input method composition](#input-method-composition) |
-| Focus | `onFocus` | `focusVisible`, `relatedTarget`. See [Focus events](#focus-events) |
-| Blur | `onBlur` | `focusVisible`, `relatedTarget` |
-| Focus in | `onFocusIn` (Solid; React's `onFocus`) | `focusVisible`, `relatedTarget`. Bubbles |
-| Focus out | `onFocusOut` (Solid; React's `onBlur`) | `focusVisible`, `relatedTarget`. Bubbles |
+| Focus | `onFocus`, `onFocusCapture` | `focusVisible`, `relatedTarget`. See [Focus events](#focus-events) |
+| Blur | `onBlur`, `onBlurCapture` | `focusVisible`, `relatedTarget` |
+| Focus in | `onFocusIn`, `onFocusInCapture` (Solid; React's `onFocus`, `onFocusCapture`) | `focusVisible`, `relatedTarget`. Bubbles |
+| Focus out | `onFocusOut`, `onFocusOutCapture` (Solid; React's `onBlur`, `onBlurCapture`) | `focusVisible`, `relatedTarget`. Bubbles |
 | Wheel | `onWheel`, `onWheelCapture` | `deltaX`, `deltaY`, `deltaMode`, `clientX`, `clientY`, `offsetX`, `offsetY`, `buttons`, `precise`, `touchPhase`, `modifiers`. Bubbles, cancelable. See [The wheel](#the-wheel) |
 | Scroll | `onScroll` | `scrollTop`, `scrollLeft` — scroll containers, not `<virtual-list>` |
 | Content visibility | `onContentVisibilityAutoStateChange` | `skipped` — an element with `contentVisibility: "auto"` began or stopped skipping its content. Bubbles, cancelable, has an `…Capture` twin. See [Skipping content with `contentVisibility`](#skipping-content-with-contentvisibility) |
@@ -7309,7 +7365,7 @@ event: the same object a `ref` gives in that adapter (React's host instance,
 Solid's element), so they compare with `===` and a handler can call
 `event.target.getBoundingClientRect()`. During the `window` and `document`
 phases `currentTarget` is that object. `target` is `null` only for an event
-aimed at the window (a key with nothing focused), and `relatedTarget` is `null` when there is no other element. A native
+aimed at the window alone (a key sent before the first root has mounted its `body`), and `relatedTarget` is `null` when there is no other element. A native
 element id is still there as `event.elementId`, for the renderer methods that
 take one (`renderer.scrollTo(elementId, ...)`). `composedPath()` lists the
 elements the event travels through, target first and `html` last, without
@@ -10264,7 +10320,7 @@ handler it runs can read and write the renderer: `getFocusedElementId()`,
 current values inside an `onMouseDown`, and a `DismissableLayer` (Dialog,
 Popover) can open from one. Only another `nativeSimulate*` call, `advanceTime` or
 `captureScreenshot` throws there. The test window is one per thread: making a
-`TestRenderer` tears down the previous one. Call `renderer.dispose()` when a test is done with its renderer (`createTestRoot().unmount()` does, after unmounting the root); native calls that need the window throw afterwards. A renderer nobody disposes is leaked when the thread exits, which is safe but keeps the window until then.
+`TestRenderer` tears down the previous one. Call `renderer.dispose()` when a test is done with its renderer (`createTestRoot().unmount()` does, after unmounting the root); native calls that need the window throw afterwards, except the ones an element reaches, which answer as for a node that is not in a document (see "An element outlives its window" under the renderer and root notes near the top). A renderer nobody disposes is leaked when the thread exits, which is safe but keeps the window until then.
 
 ### Simulating keys
 

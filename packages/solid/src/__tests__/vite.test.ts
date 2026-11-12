@@ -16,6 +16,7 @@ interface Run {
 const running: Bun.Subprocess[] = []
 let appDir: string
 let reloadDir: string
+let documentDir: string
 
 function spawn(command: string[], cwd = appDir): Run {
   const child = Bun.spawn(command, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
@@ -102,6 +103,7 @@ function editFile(directory: string, file: string, from: string, to: string): vo
 beforeEach(() => {
   appDir = copyFixture("vite-app")
   reloadDir = copyFixture("reload-app")
+  documentDir = copyFixture("document-app")
 })
 
 afterEach(async () => {
@@ -111,6 +113,7 @@ afterEach(async () => {
   }
   rmSync(appDir, { recursive: true, force: true })
   rmSync(reloadDir, { recursive: true, force: true })
+  rmSync(documentDir, { recursive: true, force: true })
 })
 
 describe("solid() under ghia dev", () => {
@@ -190,6 +193,25 @@ describe("solid() under ghia dev, across full reloads", () => {
       await run.waitFor(`MODULES_ALIVE ${JSON.stringify(alive)}`)
 
       expect(run.output()).not.toContain("multiple instances of Solid")
+    },
+    TIMEOUT_MS * 2
+  )
+})
+
+describe("solid() under ghia dev, what the entry writes to document before render()", () => {
+  test(
+    "reaches the new root once after a full reload, as it does after a page reload",
+    async () => {
+      const run = spawn(["bun", GHIA_CLI, "dev"], documentDir)
+      await run.waitFor("DOCUMENT class=dark pings=1 connected=true")
+      editFile(documentDir, "main.tsx", "document v1", "document v2")
+      await run.waitFor("ENTRY_RUN document v2")
+      await run.waitFor("DOCUMENT", 2)
+
+      expect(lines(run.output(), "DOCUMENT ")).toEqual([
+        "class=dark pings=1 connected=true",
+        "class=dark pings=1 connected=true",
+      ])
     },
     TIMEOUT_MS * 2
   )

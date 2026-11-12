@@ -12,7 +12,7 @@ import {
   syncWindowSelectionChange,
   unregisterEventHandlers,
 } from "@ghia/native/host"
-import { toAppearance } from "@ghia/native/host"
+import { registerRoot, toAppearance } from "@ghia/native/host"
 import type {
   Appearance,
   MutationRenderer,
@@ -172,6 +172,7 @@ export function createRoot(
   }
 
   attach()
+  const unregister = registerRoot(() => root.unmount())
   // The release and the batch are separate steps: a throw in the first must not skip the second.
   const flush = () => {
     runSteps([
@@ -197,7 +198,7 @@ export function createRoot(
     ], "Clearing the root failed")
   }
 
-  return {
+  const root: Root = {
     render(code) {
       if (dispose) runSteps([clear, detach, attach], "Rendering again failed")
       container.ensureDocumentElements()
@@ -240,7 +241,9 @@ export function createRoot(
       return runThenAlways(() => state.dispatch(event), flush, "Dispatching the event failed")
     },
     unmount() {
+      unregister()
       runSteps([clear, detach], "Unmounting failed")
     },
   }
+  return root
 }

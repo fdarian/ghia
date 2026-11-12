@@ -251,10 +251,9 @@ function rejectedStyleIndex(error: unknown): number | undefined {
 
 /**
  * Handler prop to the key its handler is stored under in `EventHandlerMap`.
- * Pointer, mouse, drag, wheel, transition and animation keys are lowercase DOM
- * types, and each has an `on…Capture` twin keyed `captureHandlerKey(type)`. Key
- * and focus keys are lowercase DOM types without a twin. The other keys are
- * native event names. See `nativeEventType` for the type native is asked to emit.
+ * Pointer, mouse, drag, wheel, key, focus, transition and animation keys are
+ * lowercase DOM types, and each has an `on…Capture` twin keyed
+ * `captureHandlerKey(type)`. The other keys are native event names. See `nativeEventType` for the type native is asked to emit.
  */
 export const EVENT_PROPS: readonly (readonly [string, string])[] = [
   ["onToggleFile", "toggleFile"],

@@ -12,8 +12,10 @@ import type { ElementType, NativeRenderer } from "../host.js"
 import { attributeNameOf, isNotAttribute, storedAttributeNames } from "./attribute-names.js"
 import { cloneNode } from "./clone.js"
 import { styleDeclarationFor, type CSSStyleDeclaration, type StyleBinding } from "./css-style-declaration.js"
+import { classListOf, type DOMTokenList } from "./class-list.js"
 import { datasetOf } from "./dataset.js"
 import type { DOMRectList } from "./dom-rect.js"
+import { defineConstraintValidation } from "./constraint-validation.js"
 import { defineReflectedMembers, type ReflectedMembers } from "./reflected-members.js"
 import { closestElement, elementById, matchesSelector, querySelector, querySelectorAll, type ElementList } from "./selectors.js"
 import * as tree from "./tree-mutation.js"
@@ -464,6 +466,15 @@ abstract class ElementClass extends NodeClass {
     return value === null ? "" : value
   }
 
+  /** The tokens of the `class` attribute as a live `DOMTokenList`, one object per element: see `classListOf`. */
+  get classList(): DOMTokenList {
+    return classListOf(this as unknown as Element)
+  }
+
+  set classList(value: string) {
+    this.classList.value = value
+  }
+
   get children(): readonly Element[] {
     return this[DOM_BINDING]().children.filter(isElement)
   }
@@ -607,6 +618,7 @@ abstract class ElementClass extends NodeClass {
 
 interface ElementClass extends ReflectedMembers {}
 defineReflectedMembers(ElementClass.prototype)
+defineConstraintValidation(ElementClass.prototype)
 
 function isElement(node: Node): node is Element {
   return node.nodeType === ELEMENT_NODE

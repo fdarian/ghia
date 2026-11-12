@@ -491,9 +491,9 @@ describe("document and fragment queries", () => {
     window.unmount()
   })
 
-  it("finds nothing while no window is mounted", () => {
+  it("finds only the stand-in html, head and body while no window is mounted", () => {
     expect(document.querySelector("div")).toBeNull()
-    expect(document.querySelectorAll("*").length).toBe(0)
+    expect(Array.from(document.querySelectorAll("*")).map((element) => element.localName)).toEqual(["html", "head", "body"])
   })
 
   it("throws a SyntaxError that names the document", () => {

@@ -58,6 +58,17 @@ The UI thread draws frames, so server work that blocks it stalls the window. The
 - **`react({ include, exclude })`** scopes the plugin to some files, because React and Solid both compile `.tsx` and one Vite config for both has to say which is which; `solid({ include, exclude })` is the same. `examples/vite.config.mts` gives Solid `examples/solid/**` and React the rest. The setup import goes only into an entry the plugin owns.
 - **The server environment gets neither plugin's transforms.**
 
+## A full reload is a page reload
+
+A full reload under `ghia dev` unmounts the roots, keeps the window, and then runs the entry again (`createFullReload`'s `stop`, `unmountAllRoots` from `@ghia/native/roots`). Each adapter's root registers its unmount with `registerRoot` (`packages/native/js/roots.ts`, a set on `globalThis`, like the element sources), and the same unmount `render()` runs before it mounts again runs here, so the window, the renderer and the frame loop stay.
+
+The reason is what the entry writes before `render()`: `document.documentElement.classList.add("dark")`, `document.body.addEventListener(...)`. With the old root still mounted those land on its `<html>` and `<body>`, which `render()` then destroys, and the new root starts empty. After the unmount `document` answers with fresh stand-ins, so the rerun entry writes to them and the first root's mount carries them over, as it does on the first run ([deviations](deviations.md#dom-building-from-code)): the page-reload semantics, where script that runs at the top of the page applies to the new page. A listener added to `body` is on the new `body` once.
+
+- **A component edit never takes this path.** Solid HMR and React Fast Refresh updates do not fire `full-reload`, so they unmount nothing and keep the tree.
+- **A throwing `stop` is logged and the reload goes on,** so an app whose teardown fails can still reload.
+- **An entry that fails to evaluate leaves an empty window,** where the old tree used to stay until the next good save; the error is logged.
+- **`bun --hot` has no such hook.** The entry runs again with the old root mounted, so its writes before `render()` still land on the outgoing `<html>` and `<body>`. `ghia dev` is the supported loop.
+
 ## Not decided
 
 

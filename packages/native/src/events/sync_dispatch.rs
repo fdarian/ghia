@@ -72,6 +72,28 @@ thread_local! {
     static IN_SYNC_CALL: Cell<usize> = const { Cell::new(0) };
 }
 
+/// How many sync handler calls may be nested on one thread: a handler that makes a renderer call
+/// that dispatches input to a handler that makes another one (two focus handlers that each move
+/// focus to the other).
+///
+/// Each level holds a native frame, GPUI's dispatch and the handler's own JS frames, so the loop
+/// runs the thread out of stack in tens of levels, and napi cannot report that: when the JS
+/// stack is exhausted `napi::Error::from(Unknown)` fails to read the thrown error's `cause`, which
+/// fails the same way, and it recurses (`napi-3.12.7/src/error.rs`, `from` -> `extract_error_cause`
+/// -> `check_pending_exception!` -> `from`) until the native stack overflows inside V8 and the
+/// process dies. A browser throws a `RangeError` at this point and goes on; so does this, at a
+/// depth no handler chain reaches on purpose.
+const MAX_SYNC_DEPTH: usize = 16;
+
+fn nesting_overflow() -> Option<String> {
+    if IN_SYNC_CALL.with(|depth| depth.get()) < MAX_SYNC_DEPTH {
+        return None;
+    }
+    Some(format!(
+        "Maximum call stack size exceeded: event handlers called from native are nested {MAX_SYNC_DEPTH} deep (a focus or blur handler that moves focus back, for example)"
+    ))
+}
+
 /// True while a JS handler called through `emit` has not returned.
 pub(crate) fn in_sync_call() -> bool {
     IN_SYNC_CALL.with(|depth| depth.get() > 0)
@@ -143,6 +165,10 @@ pub(crate) fn emit(
 ) -> DispatchOutcome {
     let window_id = window.window_handle().window_id();
     if backend::available(window_id) {
+        if let Some(message) = nesting_overflow() {
+            report_deferred_error(message);
+            return DispatchOutcome::default();
+        }
         let _scope = ScopeGuard::enter(window, app);
         return backend::call(window_id, payload);
     }
@@ -165,6 +191,10 @@ pub(crate) fn emit_without_window(
     payload: EventPayload,
 ) -> DispatchOutcome {
     if backend::available(window) {
+        if let Some(message) = nesting_overflow() {
+            report_deferred_error(message);
+            return DispatchOutcome::default();
+        }
         return run_without_window(|| backend::call(window, payload));
     }
     if let Some(callback) = callback {
@@ -598,6 +628,27 @@ mod tests {
             assert!(in_sync_call());
         });
         assert!(!in_sync_call());
+    }
+
+    /// Enters `depth` more nested sync calls, then runs `at_depth`.
+    fn nested<R>(depth: usize, at_depth: impl FnOnce() -> R) -> R {
+        if depth == 0 {
+            return at_depth();
+        }
+        run_without_window(|| nested(depth - 1, at_depth))
+    }
+
+    #[test]
+    fn the_seventeenth_nested_sync_call_is_refused_and_the_depth_resets_after_unwinding() {
+        assert_eq!(nesting_overflow(), None);
+        // Sixteen calls are in flight when the seventeenth asks, which is refused.
+        assert_eq!(nested(MAX_SYNC_DEPTH - 1, nesting_overflow), None, "the sixteenth is allowed");
+        let refused = nested(MAX_SYNC_DEPTH, nesting_overflow).expect("the seventeenth is refused");
+        assert!(refused.starts_with("Maximum call stack size exceeded"), "{refused}");
+        assert!(refused.contains(&format!("nested {MAX_SYNC_DEPTH} deep")), "{refused}");
+        assert!(!in_sync_call(), "every guard released its level");
+        assert_eq!(nesting_overflow(), None);
+        assert_eq!(nested(MAX_SYNC_DEPTH - 1, nesting_overflow), None, "the full depth is available again");
     }
 
     #[test]

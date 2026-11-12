@@ -127,7 +127,7 @@ describe.skipIf(!hasNativeTestRenderer)("dispatchEvent in Solid", () => {
     nodes.inner.dispatchEvent(new globalThis.FocusEvent("focusin", { bubbles: true }))
     expect(calls).toEqual(["inner focus focus", "outer focusin focusin"])
     expect(app.renderer.getFocusedElementId()).toBeNull()
-    expect(document.activeElement).toBeNull()
+    expect(document.activeElement).toBe(document.body)
   })
 
   it("throws an InvalidStateError for an event dispatched from inside its own dispatch", () => {

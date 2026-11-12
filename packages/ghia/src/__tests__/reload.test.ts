@@ -37,6 +37,33 @@ describe("createFullReload", () => {
     expect(steps).toEqual(["notify vite:beforeFullReload", "stop", "clearCache", "start"])
   })
 
+  test("logs a failing stop and still clears the caches and starts again", async () => {
+    const steps: string[] = []
+    const enqueue = createSerialQueue()
+    const reload = createFullReload({
+      enqueue,
+      runner: () => fakeRunner(steps),
+      stop: () => {
+        throw new Error("the teardown fails")
+      },
+      start: async () => {
+        steps.push("start")
+      },
+    })
+    const error = console.error
+    const logged: unknown[] = []
+    console.error = (value: unknown) => logged.push(value)
+    try {
+      reload(payload)
+      await new Promise<void>((resolve) => enqueue(async () => resolve()))
+    } finally {
+      console.error = error
+    }
+
+    expect(logged).toEqual([new Error("the teardown fails")])
+    expect(steps).toEqual(["notify vite:beforeFullReload", "clearCache", "start"])
+  })
+
   test("skips a payload whose triggeredBy file is not in the runner's module graph", async () => {
     const steps: string[] = []
     const enqueue = createSerialQueue()

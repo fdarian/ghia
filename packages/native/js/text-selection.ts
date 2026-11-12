@@ -1,4 +1,6 @@
 import type { NativeRenderer } from "./host.js"
+import { normalizedInputType } from "./dom/input-type.js"
+import { namedError } from "./named-error.js"
 
 /** `selectionDirection` of an `<input>` or `<textarea>`. */
 export type SelectionDirection = "forward" | "backward" | "none"
@@ -8,16 +10,17 @@ export type SelectionDirection = "forward" | "backward" | "none"
  * the DOM. Offsets are UTF-16 code units. The getters are synchronous.
  */
 export interface TextControlSelection {
-  /** Select all of the text. Does not move focus. */
+  /** Select all of the text. Does not move focus. Does nothing for the types HTML does not apply it to (`checkbox`, `radio`, `range`, `hidden` and the buttons). */
   select(): void
   /**
    * Select `start` to `end`. Both clamp to the text, and an `end` at or before
    * `start` collapses the selection to `end`. `direction` defaults to `"none"`.
    */
   setSelectionRange(start: number, end: number, direction?: SelectionDirection): void
-  readonly selectionStart: number
-  readonly selectionEnd: number
-  readonly selectionDirection: SelectionDirection
+  /** `null` for an `<input>` of a type the selection API does not apply to (anything but `text`, `search`, `url`, `tel` and `password`), as in the DOM. */
+  readonly selectionStart: number | null
+  readonly selectionEnd: number | null
+  readonly selectionDirection: SelectionDirection | null
 }
 
 /** What an adapter hands the helpers below for one text control. */
@@ -26,6 +29,20 @@ export interface TextControlHost {
   nativeRenderer: NativeRenderer
   /** Apply queued mutations, so the element and its latest props exist natively. */
   flushMutations(): void
+  /** The `type` the control has now: `undefined` for a `<textarea>` and for an `<input>` that was given none. */
+  inputType(): unknown
+}
+
+/** The input types HTML says the selection API applies to; every other type reads `null` and cannot be set. */
+const TYPES_WITH_TEXT_SELECTION: ReadonlySet<string> = new Set(["text", "search", "url", "tel", "password"])
+
+/** The types `select()` does not apply to in HTML; every other type, `email` and `number` included, selects all. */
+const TYPES_WITHOUT_SELECT: ReadonlySet<string> = new Set([
+  "hidden", "checkbox", "radio", "range", "button", "submit", "image", "reset",
+])
+
+function hasTextSelection(host: TextControlHost): boolean {
+  return TYPES_WITH_TEXT_SELECTION.has(normalizedInputType(host.inputType()))
 }
 
 type SelectionNative = Required<
@@ -41,7 +58,12 @@ function native(host: TextControlHost): SelectionNative {
   return renderer as SelectionNative
 }
 
+/**
+ * Selects all the text of every type HTML applies `select()` to, `email` and `number` included
+ * though they have no `selectionStart`, and does nothing for the rest.
+ */
 export function selectTextControl(host: TextControlHost): void {
+  if (TYPES_WITHOUT_SELECT.has(normalizedInputType(host.inputType()))) return
   native(host).selectText(host.id)
 }
 
@@ -51,14 +73,18 @@ export function setTextControlSelectionRange(
   end: number,
   direction?: SelectionDirection
 ): void {
+  if (!hasTextSelection(host)) {
+    throw namedError("InvalidStateError", `setSelectionRange() does not apply to <input type="${String(host.inputType())}">`)
+  }
   native(host).setSelectionRange(host.id, start, end, direction)
 }
 
 export function readTextControlSelection(host: TextControlHost): {
-  start: number
-  end: number
-  direction: SelectionDirection
+  start: number | null
+  end: number | null
+  direction: SelectionDirection | null
 } {
+  if (!hasTextSelection(host)) return { start: null, end: null, direction: null }
   const selection = native(host).getTextSelection(host.id)
   return {
     start: selection.start,

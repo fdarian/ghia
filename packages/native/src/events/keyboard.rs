@@ -116,8 +116,19 @@ pub(crate) fn path_to_root(tree: &RetainedTree, element: u64) -> Vec<u64> {
     .collect()
 }
 
-/// A `keydown` or `keyup`, aimed at the focused element, or at the window when
-/// nothing listening is focused.
+/// `body` and `html`, which a key with nothing focused is aimed at. `None` for a tree that has no
+/// `html` root with a `body` in it.
+fn body_path(tree: &RetainedTree) -> Option<Vec<u64>> {
+    let html = tree.elements.get(&tree.root_id?)?;
+    let body = html
+        .children
+        .iter()
+        .find(|id| tree.elements.get(id).is_some_and(|child| child.element_type == "body"))?;
+    Some(path_to_root(tree, *body))
+}
+
+/// A `keydown` or `keyup`, aimed at the focused element, or at `body` when nothing is focused, as
+/// in a browser. A tree with no `body` (no root yet) sends it to the window alone.
 ///
 /// `None` when nobody would hear it: JS did not ask for window keys and no
 /// element on the path listens.
@@ -144,6 +155,7 @@ fn key_payload(
         focused
             .filter(|id| tree.elements.contains_key(id))
             .map(|id| path_to_root(&tree, id))
+            .or_else(|| body_path(&tree))
             .filter(|path| {
                 window_listens
                     || path.iter().any(|id| {
@@ -402,6 +414,63 @@ mod tests {
         }
         cx.simulate_keystrokes(windows[0].into(), "x");
         assert_eq!(*sent.lock().unwrap(), vec![1.0]);
+    }
+
+    /// `(elementId, target, path)` of the `keydown` for "x" in a window whose tree `build` made,
+    /// with nothing focused and `window_keys` as JS's `setWindowKeyEvents` set them.
+    fn aimed_at(
+        cx: &mut gpui::TestAppContext,
+        window_keys: bool,
+        build: impl FnOnce(&mut RetainedTree),
+    ) -> Vec<(f64, Option<f64>, Option<Vec<f64>>)> {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let callback: Option<EventCallback> = Some({
+            let sent = sent.clone();
+            Arc::new(move |payload: EventPayload| {
+                sent.lock().unwrap().push((payload.element_id, payload.target, payload.path));
+            })
+        });
+        let routing = InputRouting::default();
+        routing.set_window_keys(window_keys, false, 99);
+        let mut tree = RetainedTree::new();
+        build(&mut tree);
+        let tree = Arc::new(Mutex::new(tree));
+        let window = cx.add_window(|_, _| Blank);
+        let _keys = cx.update(|cx| install_key_down(cx, window.window_id(), tree, callback, routing, Rc::default()));
+        cx.simulate_keystrokes(window.into(), "x");
+        let sent = sent.lock().unwrap().clone();
+        sent
+    }
+
+    /// `html` (1) with `head` (2) and `body` (3), the root a window mounts.
+    fn document(tree: &mut RetainedTree) {
+        for (id, kind) in [(1, "html"), (2, "head"), (3, "body")] {
+            tree.create_element(id, kind.to_string());
+        }
+        tree.append_child(1, 2);
+        tree.append_child(1, 3);
+        tree.set_root(1);
+    }
+
+    #[gpui::test]
+    fn a_key_with_nothing_focused_is_aimed_at_body_and_climbs_to_html(cx: &mut gpui::TestAppContext) {
+        let sent = aimed_at(cx, true, document);
+        assert_eq!(sent, [(3.0, Some(3.0), Some(vec![3.0, 1.0]))]);
+    }
+
+    #[gpui::test]
+    fn a_listener_on_body_is_enough_with_nothing_focused(cx: &mut gpui::TestAppContext) {
+        let sent = aimed_at(cx, false, |tree| {
+            document(tree);
+            tree.set_event_listener(3, "keydown".to_string(), true);
+        });
+        assert_eq!(sent, [(3.0, Some(3.0), Some(vec![3.0, 1.0]))]);
+        assert_eq!(aimed_at(cx, false, document), []);
+    }
+
+    #[gpui::test]
+    fn a_tree_with_no_body_aims_the_key_at_the_window(cx: &mut gpui::TestAppContext) {
+        assert_eq!(aimed_at(cx, true, |_| {}), [(99.0, None, None)]);
     }
 
     fn typed(

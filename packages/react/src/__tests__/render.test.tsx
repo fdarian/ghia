@@ -15,6 +15,7 @@ import {
   resetRender,
 } from "../reconciler/renderer.js"
 import { handleGpuixEvent } from "../reconciler/event-registry.js"
+import { unmountAllRoots } from "@ghia/native/roots"
 import { SHOTS_DIR } from "./test-utils.js"
 
 const srcDir = fileURLToPath(new URL("..", import.meta.url))
@@ -185,13 +186,34 @@ describeNative("render()", () => {
   })
 
   it("reuses the injected renderer on the second call", () => {
+    // The window is per thread: the renderer made last owns it, and an earlier one reaches nothing.
     const ignored = new TestRenderer()
+    renderer = new TestRenderer()
     render(<div>one</div>, { renderer })
     render(<div>two</div>, { renderer: ignored })
 
     renderer.flush()
     expect(renderer.getAllText()).toEqual(["two"])
-    expect(ignored.getAllText()).toEqual([])
+  })
+
+  it("carries what is written to document after unmountAllRoots, a full reload's stop, to the next render() once", () => {
+    render(<div>one</div>, { renderer })
+    renderer.flush()
+    const outgoing = document.documentElement
+
+    unmountAllRoots()
+    expect(document.documentElement).not.toBe(outgoing)
+    let pings = 0
+    document.documentElement.classList.add("dark")
+    document.body.addEventListener("ping", () => pings++)
+    render(<div>two</div>, { renderer })
+    renderer.flush()
+    document.body.dispatchEvent(new Event("ping"))
+
+    expect(renderer.getAllText()).toEqual(["two"])
+    expect(document.documentElement.className).toBe("dark")
+    expect(document.documentElement.isConnected).toBe(true)
+    expect(pings).toBe(1)
   })
 
   it("resolves null when a path prompt is cancelled", async () => {

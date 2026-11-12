@@ -18,13 +18,24 @@ describe.skipIf(!hasNativeTestRenderer)("document.body in Solid", () => {
     app.unmount()
   })
 
-  it("is null with nothing mounted", () => {
+  it("is a stand-in html, head and body once the root unmounts, never null", () => {
+    let box: HTMLElement | undefined
+    app.render(() => <div ref={(element) => (box = element as unknown as HTMLElement)} style={{ width: 40, height: 20 }} />)
     app.unmount()
-    expect(document.documentElement).toBeNull()
-    expect(document.head).toBeNull()
-    expect(document.body).toBeNull()
-    expect(document.scrollingElement).toBeNull()
+    const standIn = document.documentElement
+    expect(standIn.tagName).toBe("HTML")
+    expect(document.head.tagName).toBe("HEAD")
+    expect(document.body.tagName).toBe("BODY")
+    expect(document.scrollingElement).toBe(standIn)
+    expect([...document.childNodes]).toEqual([standIn])
+    // What floating-ui's getOffsetParent reads from an element after its root unmounted.
+    expect(box!.ownerDocument.documentElement).toBe(standIn)
+    expect(box!.offsetParent).toBeNull()
+    expect(standIn.getBoundingClientRect().height).toBe(0)
     app = createTestRoot()
+    app.render(() => <div style={{ width: 40, height: 20 }} />)
+    expect(document.documentElement).not.toBe(standIn)
+    expect(document.body.children.length).toBe(1)
   })
 
   it("has html, body and the app's top-level element in a parent chain up to the document", () => {

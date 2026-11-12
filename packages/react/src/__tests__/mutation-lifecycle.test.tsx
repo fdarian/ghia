@@ -224,11 +224,14 @@ describeNative("mutation lifecycle", () => {
     }
   })
 
-  it("keeps element ids and click handlers isolated across live roots", () => {
-    const a = createTestRoot()
-    const b = createTestRoot()
+  it("keeps element ids and click handlers isolated across roots", () => {
     const onA = vi.fn()
     const onB = vi.fn()
+    const click = { elementId: 5, eventType: "click" }
+    const a = createTestRoot()
+    // The window is per thread: the second renderer takes it over, so each root is read
+    // before the next one is made.
+    let b: ReturnType<typeof createTestRoot> | undefined
 
     try {
       a.render(
@@ -236,29 +239,31 @@ describeNative("mutation lifecycle", () => {
           a
         </div>
       )
+      // Ids 1, 2 and 3 are the window's html, head and body.
+      expect(a.renderer.findByType("#text")[0]?.id).toBe(4)
+      expect(a.renderer.getRoot()?.id).toBe(5)
+      handleGpuixEvent(click, a.renderer)
+      expect(onA).toHaveBeenCalledTimes(1)
+
+      b = createTestRoot()
       b.render(
         <div style={{ width: 100, height: 100 }} onClick={onB}>
           b
         </div>
       )
-
-      // Ids 1, 2 and 3 are each window's html, head and body.
-      expect(a.renderer.findByType("#text")[0]?.id).toBe(4)
       expect(b.renderer.findByType("#text")[0]?.id).toBe(4)
-      expect(a.renderer.getRoot()?.id).toBe(5)
       expect(b.renderer.getRoot()?.id).toBe(5)
-
-      const click = { elementId: 5, eventType: "click" }
-      handleGpuixEvent(click, a.renderer)
-      expect(onA).toHaveBeenCalledTimes(1)
-      expect(onB).not.toHaveBeenCalled()
 
       handleGpuixEvent(click, b.renderer)
       expect(onA).toHaveBeenCalledTimes(1)
       expect(onB).toHaveBeenCalledTimes(1)
+
+      handleGpuixEvent(click, a.renderer)
+      expect(onA).toHaveBeenCalledTimes(2)
+      expect(onB).toHaveBeenCalledTimes(1)
     } finally {
       a.unmount()
-      b.unmount()
+      b?.unmount()
     }
   })
 

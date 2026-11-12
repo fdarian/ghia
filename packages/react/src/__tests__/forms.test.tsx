@@ -264,6 +264,40 @@ describeNative("form", () => {
       expect(focusedTestId()).toBe("b")
     })
 
+    it("treats a radio group as required when any of its radios is, and as met once one is checked", () => {
+      let first
+      mountForm(
+        <>
+          <input
+            ref={(el) => (first = el ?? first)}
+            testId="r1"
+            type="radio"
+            name="size"
+            style={field}
+            onInvalid={(event) => invalids.push(`r1:${testIdOf(event.target)}`)}
+          />
+          <input
+            testId="r2"
+            type="radio"
+            name="size"
+            required
+            style={field}
+            onInvalid={(event) => invalids.push(`r2:${testIdOf(event.target)}`)}
+          />
+        </>,
+      )
+      formRef.current.requestSubmit()
+      expect(submits).toEqual([])
+      expect(invalids).toEqual(["r1:r1", "r2:r2"])
+      expect(focusedTestId()).toBe("r1")
+
+      invalids.length = 0
+      first.checked = true
+      formRef.current.requestSubmit()
+      expect(invalids).toEqual([])
+      expect(submits).toHaveLength(1)
+    })
+
     it("validates on Enter in the input: invalid at it, focus on it, no submit", () => {
       mountForm(
         <input

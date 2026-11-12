@@ -32,6 +32,48 @@ describeNative("text control selection", () => {
     )
   }
 
+  it("has no selection on an input that draws no text: null reads, select() does nothing, setSelectionRange() throws", () => {
+    for (const type of ["checkbox", "radio", "range", "hidden", "email", "number", "date", "color", "button", "file", " Radio ", "EMAIL"]) {
+      let input
+      const root = createTestRoot()
+      root.render(<input type={type} ref={(el) => (input = el)} style={{ width: 20, height: 20 }} />)
+      expect([type, input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([type, null, null, null])
+      input.select()
+      expect(() => input.setSelectionRange(0, 1)).toThrow(expect.objectContaining({ name: "InvalidStateError" }))
+      root.unmount()
+    }
+  })
+
+  it("select() on email and number selects all the text although they have no selectionStart", () => {
+    for (const [type, typed, expected] of [["email", "x", "x"], ["number", "7", "7"]]) {
+      let input
+      const root = createTestRoot()
+      root.render(<input type={type} defaultValue="123" ref={(el) => (input = el)} style={{ width: 100, height: 20 }} />)
+      input.select()
+      expect([input.selectionStart, input.selectionEnd]).toEqual([null, null])
+      root.renderer.nativeSimulateKeystrokes(root.renderer.findByType("input")[0].id, typed)
+      expect([type, input.value]).toEqual([type, expected])
+      root.unmount()
+    }
+  })
+
+  it("has a selection on text, search, url, tel and password, however the type is spelled, and on an unknown type", () => {
+    for (const type of ["text", "search", "url", "tel", "password", " Search ", "TEXT", "nonsense", undefined]) {
+      let input
+      const root = createTestRoot()
+      root.render(<input type={type} defaultValue="hello" ref={(el) => (input = el)} style={{ width: 100, height: 20 }} />)
+      input.setSelectionRange(1, 3, "backward")
+      expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([1, 3, "backward"])
+      root.unmount()
+    }
+    let area
+    const root = createTestRoot()
+    root.render(<textarea defaultValue="hello" ref={(el) => (area = el)} style={{ width: 100, height: 40 }} />)
+    area.setSelectionRange(1, 3)
+    expect([area.selectionStart, area.selectionEnd]).toEqual([1, 3])
+    root.unmount()
+  })
+
   it("select() selects everything and reports no direction", () => {
     let input
     testRoot.render(<Field initial="hello" onRef={(el) => (input = el)} />)

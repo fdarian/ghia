@@ -93,7 +93,7 @@ export * from "@ghia/native/host"
  * `onFocusIn` and `onFocusOut` do not exist in React, where `onFocus` and `onBlur` bubble. `onChange`
  * is React DOM's: one call per edit of a text control, the DOM `input`, whose event is a `HostInputEvent`.
  */
-type ReactHostProps<Props> = Omit<Props, "onFocusIn" | "onFocusOut" | "onChange"> & {
+type ReactHostProps<Props> = Omit<Props, "onFocusIn" | "onFocusOut" | "onFocusInCapture" | "onFocusOutCapture" | "onChange"> & {
   onChange?: (event: HostInputEvent) => void
 }
 

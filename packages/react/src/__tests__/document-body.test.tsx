@@ -22,15 +22,26 @@ describeNative("document.body in React", () => {
     testRoot.unmount()
   })
 
-  it("is null before anything is mounted and again after the root unmounts", () => {
-    testRoot.render(<div style={{ width: 40, height: 20 }} />)
-    expect(document.body).not.toBeNull()
+  it("is a stand-in html, head and body once the root unmounts, never null", () => {
+    let box: PublicInstance | null = null
+    testRoot.render(<div ref={(instance) => (box = instance ?? box)} style={{ width: 40, height: 20 }} />)
+    const mounted = document.documentElement
     testRoot.unmount()
-    expect(document.documentElement).toBeNull()
-    expect(document.head).toBeNull()
-    expect(document.body).toBeNull()
-    expect(document.scrollingElement).toBeNull()
+    const standIn = document.documentElement
+    expect(standIn).not.toBe(mounted)
+    expect(standIn.tagName).toBe("HTML")
+    expect(document.head.tagName).toBe("HEAD")
+    expect(document.body.tagName).toBe("BODY")
+    expect(document.scrollingElement).toBe(standIn)
+    expect([...document.childNodes]).toEqual([standIn])
+    // What floating-ui's getOffsetParent reads from an element after its root unmounted.
+    expect(box!.ownerDocument.documentElement).toBe(standIn)
+    expect(box!.offsetParent).toBeNull()
+    expect(standIn.getBoundingClientRect().height).toBe(0)
     testRoot = createTestRoot()
+    testRoot.render(<div style={{ width: 40, height: 20 }} />)
+    expect(document.documentElement).not.toBe(standIn)
+    expect(document.body.children.length).toBe(1)
   })
 
   it("takes the destroyed html out of the document", () => {

@@ -96,7 +96,7 @@ describeNative("reads inside a press or release handler", () => {
 })
 
 describeNative("document.activeElement", () => {
-  it("is the object a ref gives, follows focus() and blur(), and is null with nothing focused", () => {
+  it("is the object a ref gives, follows focus() and blur(), and is body with nothing focused", () => {
     const { render, renderer, unmount } = createTestRoot()
     try {
       const refs = { a: null, b: null }
@@ -106,26 +106,40 @@ describeNative("document.activeElement", () => {
           <div ref={(value) => (refs.b = value)} tabIndex={0} style={{ width: 50, height: 20 }} />
         </div>
       )
-      expect(document.activeElement).toBeNull()
+      expect(document.activeElement).toBe(document.body)
       refs.a.focus()
       expect(document.activeElement).toBe(refs.a)
       refs.b.focus()
       expect(document.activeElement).toBe(refs.b)
       refs.b.blur()
-      expect(document.activeElement).toBeNull()
+      expect(document.activeElement).toBe(document.body)
     } finally {
       unmount()
     }
   })
 
-  it("is null once the root is unmounted", () => {
+  it("is body once the focused element is removed from the tree", () => {
+    const { render, unmount } = createTestRoot()
+    let ref = null
+    function App({ show }) {
+      return show ? <div ref={(value) => (ref = value ?? ref)} tabIndex={0} style={{ width: 50, height: 20 }} /> : null
+    }
+    render(<App show />)
+    ref.focus()
+    expect(document.activeElement).toBe(ref)
+    render(<App show={false} />)
+    expect(document.activeElement).toBe(document.body)
+    unmount()
+  })
+
+  it("is body once the root is unmounted", () => {
     const { render, renderer, unmount } = createTestRoot()
     let ref = null
     render(<div ref={(value) => (ref = value)} tabIndex={0} style={{ width: 50, height: 20 }} />)
     ref.focus()
     expect(document.activeElement).toBe(ref)
     unmount()
-    expect(document.activeElement).toBeNull()
+    expect(document.activeElement).toBe(document.body)
   })
 })
 

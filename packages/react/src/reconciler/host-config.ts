@@ -34,7 +34,7 @@ const NoEventPriority = 0
 
 /**
  * React DOM listens to `focusin` and `focusout` for `onFocus` and `onBlur`, so
- * they bubble. React has no `onFocusIn` or `onFocusOut`. `onInput` and `onChange`
+ * they bubble, and so do their `…Capture` twins. React has no `onFocusIn` or `onFocusOut`. `onInput` and `onChange`
  * depend on the element: see `fieldHandlers`.
  */
 const EVENT_TYPE_BY_PROP = eventTypesWithOverrides({
@@ -42,6 +42,10 @@ const EVENT_TYPE_BY_PROP = eventTypesWithOverrides({
   onBlur: "focusout",
   onFocusIn: null,
   onFocusOut: null,
+  onFocusCapture: "focusinCapture",
+  onBlurCapture: "focusoutCapture",
+  onFocusInCapture: null,
+  onFocusOutCapture: null,
   onInput: null,
   onChange: null,
   // A `<nativeview>`'s handlers take the pointer and nothing, not an event: see `syncNativeviewListeners`.
@@ -75,6 +79,7 @@ import {
   linkChild,
   livePropEntries,
   liveStyleOf,
+  propOf,
   stateFor,
   unlinkChild,
   type HostNode,
@@ -138,6 +143,7 @@ function attachTextControlMethods(control: TextControlInstance, container: Conta
     id: control.nativeId,
     nativeRenderer: container.nativeRenderer,
     flushMutations: () => container.renderer.flushMutations(),
+    inputType: () => propOf(control, "type"),
   }
   control.select = () => selectTextControl(host)
   control.setSelectionRange = (start, end, direction) =>
