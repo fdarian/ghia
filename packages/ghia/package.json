@@ -31,7 +31,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsdown",
     "test": "bun run build && bun test",
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish ghia locally. CI is the only release path.'); process.exit(1) }\""
   },

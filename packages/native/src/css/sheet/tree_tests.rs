@@ -425,6 +425,310 @@ fn a_keyword_on_a_shorthand_resets_the_longhands_an_outer_shorthand_gave() {
     assert!(style.padding.is_some());
 }
 
+fn popover(doc: &mut Doc, class: &str) -> u64 {
+    let id = doc.classed("div", ROOT, class);
+    doc.tree.set_custom_prop(id, "popover".into(), serde_json::json!("manual"));
+    doc.tree.set_custom_prop(id, "popoverOpen".into(), serde_json::json!(1));
+    id
+}
+
+const ZERO: crate::css::length::LinearLength = crate::css::length::LinearLength::px(0.0);
+
+#[test]
+fn an_author_unset_beats_the_user_agent_style_of_a_popover() {
+    let mut doc = Doc::new();
+    let div = popover(&mut doc, "a");
+    let untouched = popover(&mut doc, "b");
+    doc.style_element(
+        ROOT,
+        ".a { left: 40px !important; right: unset !important; margin: unset } @layer l { .a { max-width: none } }",
+    );
+    doc.flush();
+    let style = doc.style(div).expect("the element has a style");
+    assert_eq!(style.left, Some(crate::style::DimensionValue::Pixels(40.0)));
+    assert_eq!(style.right.clone(), None, "the user agent's right: 0 is taken back");
+    assert!(style.margin.is_none(), "the user agent's margin: auto is taken back");
+    assert_eq!((style.margin_top.clone(), style.margin_right.clone(), style.margin_bottom.clone(), style.margin_left.clone()), (None, None, None, None));
+    assert_eq!(style.max_width, None, "`none` is the initial value, and the user agent's 100% is taken back");
+    assert_eq!(style.position.as_deref(), Some("fixed"), "what no keyword names stays");
+    assert!(style.background_color.is_some());
+    let other = doc.style(untouched).expect("the element has a style");
+    assert!(other.margin.is_some() && other.max_width.is_some(), "a popover no rule matches keeps the user agent style");
+}
+
+#[test]
+fn an_author_keyword_beats_the_user_agent_style_of_a_tag() {
+    let mut doc = Doc::new();
+    let unset = doc.classed("p", ROOT, "unset");
+    let initial = doc.classed("p", ROOT, "initial");
+    let reverted = doc.classed("p", ROOT, "revert");
+    let plain = doc.classed("p", ROOT, "plain");
+    doc.style_element(
+        ROOT,
+        ".unset { margin: unset } .initial { margin-block: initial } .revert { margin: revert }",
+    );
+    doc.flush();
+    let margins = |doc: &Doc, id: u64| {
+        let style = doc.style(id).expect("the element has a style");
+        (style.margin_top.clone(), style.margin_bottom.clone())
+    };
+    assert!(margins(&doc, plain).0.is_some(), "a paragraph has a margin");
+    assert_eq!(margins(&doc, unset), (None, None));
+    assert_eq!(margins(&doc, initial), (None, None));
+    assert_eq!(margins(&doc, reverted), margins(&doc, plain), "revert rolls back to the user agent style");
+}
+
+#[test]
+fn inherit_and_initial_on_an_inherited_property_beat_the_user_agent_style() {
+    let mut doc = Doc::new();
+    let inherit = doc.classed("h1", ROOT, "inherit");
+    let initial = doc.classed("h1", ROOT, "initial");
+    let reverted = doc.classed("h1", ROOT, "revert");
+    let size = doc.classed("h1", ROOT, "size");
+    doc.style_element(
+        ROOT,
+        ".inherit { font-weight: inherit } .initial { font-weight: initial } .revert { font-weight: revert } \
+         .size { font-size: unset }",
+    );
+    doc.flush();
+    assert_eq!(doc.style(inherit).and_then(|style| style.font_weight.clone()), None);
+    assert_eq!(doc.style(initial).and_then(|style| style.font_weight.clone()), None);
+    assert!(doc.style(reverted).and_then(|style| style.font_weight.clone()).is_some(), "revert keeps the h1 weight");
+    let style = doc.style(size).expect("the element has a style");
+    assert_eq!(style.font_size, None);
+    assert!(style.font_weight.is_some(), "only the named property is taken back");
+}
+
+#[test]
+fn inherit_on_a_property_that_does_not_inherit_is_dropped() {
+    let mut doc = Doc::new();
+    let div = doc.classed("p", ROOT, "a");
+    let plain = doc.classed("p", ROOT, "b");
+    doc.style_element(ROOT, ".a { margin: inherit }");
+    doc.flush();
+    assert_eq!(doc.style(div).map(|style| style.margin_top.clone()), doc.style(plain).map(|style| style.margin_top.clone()));
+}
+
+#[test]
+fn an_author_keyword_beats_the_universal_style() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    let plain = doc.classed("div", ROOT, "b");
+    let layer = doc.tree.styles.intern(br##"{"color":"#336699","paddingTop":4,"opacity":0.5}"##).unwrap();
+    doc.tree.set_universal_style(Some(layer.into_arc()));
+    doc.style_element(ROOT, ".a { color: unset; padding-top: initial }");
+    doc.flush();
+    let style = doc.style(div).expect("the element has a style");
+    assert_eq!((style.color.as_deref(), style.padding_top.clone(), style.opacity), (None, None, Some(0.5)));
+    assert_eq!(doc.color(plain), Some("#336699"));
+}
+
+#[test]
+fn a_keyword_on_a_longhand_leaves_the_sides_a_user_agent_shorthand_gave() {
+    let mut doc = Doc::new();
+    let button = doc.classed("button", ROOT, "a");
+    doc.style_element(ROOT, ".a { padding-block: unset }");
+    doc.flush();
+    let style = doc.style(button).expect("the element has a style");
+    assert_eq!((style.padding_top.clone(), style.padding_bottom.clone()), (Some(ZERO), Some(ZERO)));
+    assert!(style.padding.is_some(), "the shorthand still gives the left and the right");
+}
+
+#[test]
+fn an_inline_keyword_beats_the_user_agent_style_too() {
+    let mut doc = Doc::new();
+    let div = popover(&mut doc, "a");
+    let paragraph = doc.element("p", ROOT);
+    doc.inline(div, r#"{"margin":"unset","color":"inherit","right":"initial"}"#);
+    doc.inline(paragraph, r#"{"marginTop":"unset","marginBottom":"revert"}"#);
+    let style = doc.style(div).expect("the element has a style");
+    assert!(style.margin.is_none() && style.color.is_none());
+    assert_eq!((style.margin_left.clone(), style.right.clone()), (None, None));
+    let style = doc.style(paragraph).expect("the element has a style");
+    assert_eq!(style.margin_top.clone(), None);
+    assert!(style.margin_bottom.is_some(), "revert keeps the user agent's margin");
+}
+
+#[test]
+fn an_inline_keyword_beats_what_a_sheet_declared() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.inline(div, r#"{"color":"unset","inset":0,"right":"unset"}"#);
+    doc.style_element(ROOT, ".a { color: red }");
+    doc.flush();
+    let style = doc.style(div).expect("the element has a style");
+    assert_eq!(style.color, None);
+    assert_eq!(style.right.clone(), Some(crate::style::DimensionValue::Auto), "the shorthand no longer gives right 0");
+}
+
+#[test]
+fn a_reset_takes_back_a_var_value_of_a_layer_under_it() {
+    let mut doc = Doc::new();
+    let reset = doc.classed("div", ROOT, "a");
+    let shorthand = doc.classed("div", ROOT, "b");
+    let longhand = doc.classed("div", ROOT, "c");
+    let plain = doc.classed("div", ROOT, "d");
+    let layer = doc.tree.styles.intern(br#"{"borderColor":"var(--border)","opacity":0.5}"#).unwrap();
+    doc.tree.set_universal_style(Some(layer.into_arc()));
+    doc.style_element(ROOT, ".a { border-color: unset } .b { border: initial } .c { border-top-color: initial }");
+    doc.flush();
+    let held = |doc: &Doc, id: u64| doc.style(id).is_some_and(|style| style.var_declarations.is_some());
+    assert!(!held(&doc, reset), "the `var()` of the universal style is taken back");
+    assert!(!held(&doc, shorthand), "so is one a shorthand of the keyword covers");
+    assert!(held(&doc, longhand), "a longhand keyword leaves the shorthand's `var()` to the other sides");
+    assert!(held(&doc, plain));
+    assert_eq!(doc.style(reset).and_then(|style| style.opacity), Some(0.5));
+}
+
+#[test]
+fn a_longhand_reset_lays_its_initial_value_over_a_held_shorthand_of_a_layer_under_it() {
+    use crate::css::custom_properties::CustomProperties;
+    let mut doc = Doc::new();
+    let color = doc.classed("div", ROOT, "a");
+    let side = doc.classed("div", ROOT, "b");
+    let plain = doc.classed("div", ROOT, "c");
+    let layer = doc.tree.styles.intern(br#"{"borderColor":"var(--c)"}"#).unwrap();
+    doc.tree.set_universal_style(Some(layer.into_arc()));
+    doc.style_element(ROOT, ".a { border-top-color: initial } .b { border-right-color: unset }");
+    doc.flush();
+    let custom = CustomProperties::declared([("--c".to_owned(), "red".to_owned())]).expect("custom properties");
+    let built = |doc: &Doc, id: u64| {
+        let style = doc.style(id).expect("the element has a style");
+        crate::css::var_substitution::resolve(&style, &custom).expect("a held declaration")
+    };
+    let top = built(&doc, color);
+    assert_eq!(top.border_top_color.as_deref(), Some("currentColor"), "the reset side is at its initial value");
+    assert_eq!(top.border_color.as_deref(), Some("red"), "the other sides keep the shorthand");
+    let right = built(&doc, side);
+    assert_eq!(right.border_right_color.as_deref(), Some("currentColor"));
+    assert_eq!(right.border_color.as_deref(), Some("red"));
+    assert_eq!(built(&doc, plain).border_top_color, None);
+    assert_eq!(built(&doc, plain).border_color.as_deref(), Some("red"));
+}
+
+#[test]
+fn a_side_shorthand_reset_takes_its_longhands_back_from_a_held_border() {
+    use crate::css::custom_properties::CustomProperties;
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    let layer = doc.tree.styles.intern(br#"{"border":"1px solid var(--c)"}"#).unwrap();
+    doc.tree.set_universal_style(Some(layer.into_arc()));
+    doc.style_element(ROOT, ".a { border-top: unset }");
+    doc.flush();
+    let custom = CustomProperties::declared([("--c".to_owned(), "red".to_owned())]).expect("custom properties");
+    let style = doc.style(div).expect("the element has a style");
+    let built = crate::css::var_substitution::resolve(&style, &custom).expect("a held declaration");
+    assert_eq!(built.border_top_color.as_deref(), Some("currentColor"));
+    assert_eq!(built.border_top_style.as_deref(), Some("none"));
+    assert_eq!(built.border.as_deref().map(|border| border.split_whitespace().collect::<Vec<_>>()), Some(vec!["1px", "solid", "red"]), "the other sides keep the border");
+}
+
+#[test]
+fn an_initial_value_written_as_a_keyword_the_parser_has_no_form_for_beats_the_user_agent_style() {
+    let mut doc = Doc::new();
+    let bare = popover(&mut doc, "a");
+    let ruled = popover(&mut doc, "b");
+    let plain = popover(&mut doc, "c");
+    doc.inline(bare, r#"{"maxWidth":"none"}"#);
+    doc.inline(ruled, r#"{"maxWidth":"none","color":"red"}"#);
+    doc.style_element(ROOT, ".b { margin: 1px }");
+    doc.flush();
+    assert_eq!(doc.style(bare).and_then(|style| style.max_width.clone()), None, "no rule matches it");
+    assert_eq!(doc.style(ruled).and_then(|style| style.max_width.clone()), None, "a rule matches it");
+    assert!(doc.style(plain).is_some_and(|style| style.max_width.is_some()), "the user agent's 100% stays");
+}
+
+#[test]
+fn a_keyword_on_webkit_font_smoothing_is_read_as_the_key_is_written() {
+    let mut doc = Doc::new();
+    let inline = doc.classed("div", ROOT, "a");
+    let ruled = doc.classed("div", ROOT, "b");
+    let plain = doc.classed("div", ROOT, "c");
+    let layer = doc.tree.styles.intern(br#"{"WebkitFontSmoothing":"antialiased"}"#).unwrap();
+    doc.tree.set_universal_style(Some(layer.into_arc()));
+    doc.inline(inline, r#"{"WebkitFontSmoothing":"unset"}"#);
+    doc.style_element(ROOT, ".b { -webkit-font-smoothing: initial }");
+    doc.flush();
+    assert_eq!(doc.style(inline).and_then(|style| style.webkit_font_smoothing.clone()), None);
+    assert_eq!(doc.style(ruled).and_then(|style| style.webkit_font_smoothing.clone()), None);
+    assert!(doc.style(plain).is_some_and(|style| style.webkit_font_smoothing.is_some()));
+}
+
+#[test]
+fn display_reset_over_an_inline_tag_is_inline() {
+    let mut doc = Doc::new();
+    let tags: Vec<(u64, &str)> = ["a", "strong", "em", "button"]
+        .into_iter()
+        .map(|tag| (doc.classed(tag, ROOT, "x"), tag))
+        .collect();
+    let inline = doc.element("em", ROOT);
+    doc.inline(inline, r#"{"display":"initial"}"#);
+    doc.style_element(ROOT, ".x { display: unset }");
+    doc.flush();
+    for (id, tag) in tags {
+        let want = if tag == "button" { "inline-block" } else { "inline" };
+        assert_eq!(doc.style(id).and_then(|style| style.display.as_deref()), Some(want), "<{tag}>");
+    }
+    assert_eq!(doc.style(inline).and_then(|style| style.display.as_deref()), Some("inline"));
+}
+
+#[test]
+fn a_closed_popover_a_sheet_shows_is_the_user_agent_box() {
+    let mut doc = Doc::new();
+    let closed = doc.classed("div", ROOT, "x");
+    doc.tree.set_custom_prop(closed, "popover".into(), serde_json::json!("manual"));
+    doc.style_element(ROOT, ".x { display: block }");
+    doc.flush();
+    let style = doc.style(closed).expect("style");
+    assert_eq!(style.display.as_deref(), Some("block"));
+    assert_eq!(style.position.as_deref(), Some("fixed"));
+    assert!(style.margin.is_some() && style.border_width.is_some() && style.padding.is_some());
+}
+
+#[test]
+fn display_reset_over_no_display_is_inline() {
+    let mut doc = Doc::new();
+    let ruled = doc.classed("div", ROOT, "x");
+    let inline = doc.element("div", ROOT);
+    let plain = doc.element("div", ROOT);
+    let closed = doc.classed("div", ROOT, "y");
+    doc.tree.set_custom_prop(closed, "popover".into(), serde_json::json!("manual"));
+    let open = popover(&mut doc, "z");
+    doc.inline(inline, r#"{"display":"unset"}"#);
+    doc.style_element(ROOT, ".x { display: initial } .y { display: unset } .z { display: unset }");
+    doc.flush();
+    let display = |id: u64| doc.style(id).and_then(|style| style.display.clone());
+    assert_eq!(display(ruled).as_deref(), Some("inline"));
+    assert_eq!(display(inline).as_deref(), Some("inline"));
+    assert_eq!(display(plain), None, "a div that no one resets is a block");
+    assert_eq!(display(closed).as_deref(), Some("inline"), "the closed popover's `display: none` is taken back; the user agent box under it stays");
+    assert_eq!(display(open).as_deref(), Some("inline"));
+}
+
+#[test]
+fn revert_on_a_custom_property_is_not_a_value() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.inline(div, r#"{"--x":"red"}"#);
+    doc.style_element(ROOT, ".a { --x: revert; --y: revert-layer }");
+    doc.flush();
+    let custom = doc.style(div).and_then(|style| style.custom_properties.clone()).expect("custom properties");
+    let computed = crate::css::custom_properties::CustomProperties::default().descend(&custom);
+    assert_eq!(computed.get("--y"), None);
+    assert_eq!(crate::css::custom_properties::substitute("var(--y, fb)", &computed).as_deref().map(str::trim), Some("fb"));
+}
+
+#[test]
+fn a_style_without_a_keyword_has_no_reset() {
+    let mut doc = Doc::new();
+    let div = popover(&mut doc, "a");
+    doc.inline(div, r#"{"color":"red"}"#);
+    doc.style_element(ROOT, ".a { margin-top: 1px; color: green !important }");
+    doc.flush();
+    assert!(doc.style(div).is_some_and(|style| style.reset.is_none()));
+    assert!(crate::css::sheet::resolve_wide_keywords(br#"{"color":"red","content":"a unitless value"}"#).is_none());
+}
+
 #[test]
 fn nested_rules_apply() {
     let mut doc = Doc::new();

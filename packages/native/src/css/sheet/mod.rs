@@ -31,6 +31,7 @@ mod tokenizer;
 mod tree;
 mod validate;
 mod view;
+mod wide_keyword;
 
 #[cfg(test)]
 mod tests;
@@ -47,6 +48,8 @@ pub use matching::{matches, AttrValue, ElementView, SiblingTest};
 pub use parser::parse_sheet;
 pub use states::State;
 pub(crate) use states::{is_state_block, merge_own};
+pub(crate) use initial::style_of as initial_style_of;
+pub(crate) use wide_keyword::resolve as resolve_wide_keywords;
 pub use selector::{
     AttrMatcher, AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, SelectorList, Simple, Specificity, TypeName,
 };

@@ -87,7 +87,7 @@
   },
   "scripts": {
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @ghia/react locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\"",
-    "build": "tsc",
+    "build": "tsdown",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "dev": "tsc --watch",
     "test": "vitest run",
