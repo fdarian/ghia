@@ -581,6 +581,49 @@ fn a_reset_takes_back_a_var_value_of_a_layer_under_it() {
 }
 
 #[test]
+fn a_longhand_reset_lays_its_initial_value_over_a_held_shorthand_of_a_layer_under_it() {
+    use crate::css::custom_properties::CustomProperties;
+    let mut doc = Doc::new();
+    let color = doc.classed("div", ROOT, "a");
+    let side = doc.classed("div", ROOT, "b");
+    let plain = doc.classed("div", ROOT, "c");
+    let layer = doc.tree.styles.intern(br#"{"borderColor":"var(--c)"}"#).unwrap();
+    doc.tree.set_universal_style(Some(layer.into_arc()));
+    doc.style_element(ROOT, ".a { border-top-color: initial } .b { border-right-color: unset }");
+    doc.flush();
+    let custom = CustomProperties::declared([("--c".to_owned(), "red".to_owned())]).expect("custom properties");
+    let built = |doc: &Doc, id: u64| {
+        let style = doc.style(id).expect("the element has a style");
+        crate::css::var_substitution::resolve(&style, &custom).expect("a held declaration")
+    };
+    let top = built(&doc, color);
+    assert_eq!(top.border_top_color.as_deref(), Some("currentColor"), "the reset side is at its initial value");
+    assert_eq!(top.border_color.as_deref(), Some("red"), "the other sides keep the shorthand");
+    let right = built(&doc, side);
+    assert_eq!(right.border_right_color.as_deref(), Some("currentColor"));
+    assert_eq!(right.border_color.as_deref(), Some("red"));
+    assert_eq!(built(&doc, plain).border_top_color, None);
+    assert_eq!(built(&doc, plain).border_color.as_deref(), Some("red"));
+}
+
+#[test]
+fn a_side_shorthand_reset_takes_its_longhands_back_from_a_held_border() {
+    use crate::css::custom_properties::CustomProperties;
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    let layer = doc.tree.styles.intern(br#"{"border":"1px solid var(--c)"}"#).unwrap();
+    doc.tree.set_universal_style(Some(layer.into_arc()));
+    doc.style_element(ROOT, ".a { border-top: unset }");
+    doc.flush();
+    let custom = CustomProperties::declared([("--c".to_owned(), "red".to_owned())]).expect("custom properties");
+    let style = doc.style(div).expect("the element has a style");
+    let built = crate::css::var_substitution::resolve(&style, &custom).expect("a held declaration");
+    assert_eq!(built.border_top_color.as_deref(), Some("currentColor"));
+    assert_eq!(built.border_top_style.as_deref(), Some("none"));
+    assert_eq!(built.border.as_deref().map(|border| border.split_whitespace().collect::<Vec<_>>()), Some(vec!["1px", "solid", "red"]), "the other sides keep the border");
+}
+
+#[test]
 fn an_initial_value_written_as_a_keyword_the_parser_has_no_form_for_beats_the_user_agent_style() {
     let mut doc = Doc::new();
     let bare = popover(&mut doc, "a");
@@ -627,6 +670,26 @@ fn display_reset_over_an_inline_tag_is_inline() {
         assert_eq!(doc.style(id).and_then(|style| style.display.as_deref()), Some(want), "<{tag}>");
     }
     assert_eq!(doc.style(inline).and_then(|style| style.display.as_deref()), Some("inline"));
+}
+
+#[test]
+fn display_reset_over_no_display_is_inline() {
+    let mut doc = Doc::new();
+    let ruled = doc.classed("div", ROOT, "x");
+    let inline = doc.element("div", ROOT);
+    let plain = doc.element("div", ROOT);
+    let closed = doc.classed("div", ROOT, "y");
+    doc.tree.set_custom_prop(closed, "popover".into(), serde_json::json!("manual"));
+    let open = popover(&mut doc, "z");
+    doc.inline(inline, r#"{"display":"unset"}"#);
+    doc.style_element(ROOT, ".x { display: initial } .y { display: unset } .z { display: unset }");
+    doc.flush();
+    let display = |id: u64| doc.style(id).and_then(|style| style.display.clone());
+    assert_eq!(display(ruled).as_deref(), Some("inline"));
+    assert_eq!(display(inline).as_deref(), Some("inline"));
+    assert_eq!(display(plain), None, "a div that no one resets is a block");
+    assert_eq!(display(closed).as_deref(), Some("inline"), "the closed popover's `display: none` is taken back");
+    assert_eq!(display(open).as_deref(), Some("inline"));
 }
 
 #[test]

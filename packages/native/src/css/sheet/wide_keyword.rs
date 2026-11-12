@@ -41,11 +41,8 @@ enum Keyword {
 }
 
 fn keyword_of(value: &str) -> Option<Keyword> {
-    if !value.starts_with('"') {
-        return None;
-    }
     // A string value that is not valid JSON text is not one a style object holds, so it is no keyword.
-    let text = serde_json::from_str::<String>(value).ok()?;
+    let text = initial::string_value(value)?;
     let text = text.trim();
     [
         ("initial", Keyword::Initial),
@@ -81,19 +78,27 @@ pub(crate) struct Resolved {
     pub(crate) reset: Option<Arc<[String]>>,
 }
 
-/// A search of the bytes for a keyword, or for the name of a property whose initial value is a
-/// keyword the style parser has no form for (`maxWidth: "none"`), which a payload that has neither
-/// pays for and nothing else.
+/// A search of the bytes for a keyword, or for a property of [`initial::UNREPRESENTABLE`] followed
+/// by its own keyword as a value (`"maxWidth":"none"`), which a payload that has neither pays for
+/// and nothing else. A payload that writes `gap: 8` or `zIndex: 3` does not pass: `resolve` would
+/// parse it for nothing.
 fn mentions_keyword(raw: &[u8]) -> bool {
     let starts = |at: usize, word: &[u8]| raw.get(at..at + word.len()).is_some_and(|slice| slice.eq_ignore_ascii_case(word));
+    let has_value = |at: usize, key: &str, keyword: &str| {
+        let Some(after) = raw.get(at + key.len()..).filter(|_| starts(at, key.as_bytes())) else {
+            return false;
+        };
+        let Some(value) = after.strip_prefix(b"\":\"") else {
+            return false;
+        };
+        let value = value.trim_ascii_start();
+        value.len() >= keyword.len() && value[..keyword.len()].eq_ignore_ascii_case(keyword.as_bytes())
+    };
     (0..raw.len()).any(|at| match raw[at].to_ascii_lowercase() {
         b'u' => starts(at, b"unset"),
         b'i' => starts(at, b"initial") || starts(at, b"inherit"),
         b'r' => starts(at, b"revert"),
-        b'z' => starts(at, b"zIndex"),
-        b'm' => starts(at, b"maxWidth") || starts(at, b"maxHeight"),
-        b'g' => starts(at, b"gap"),
-        b'l' => starts(at, b"lineClamp"),
+        b'z' | b'm' | b'g' | b'l' => initial::UNREPRESENTABLE.iter().any(|(key, keyword)| has_value(at, key, keyword)),
         _ => false,
     })
 }
@@ -142,6 +147,11 @@ fn apply(list: &mut Vec<Declaration>, reset: &mut Vec<String>, key: &str, keywor
         if let Some(initial) = initial::of(longhand).filter(|_| is_shadowed(list, longhand)) {
             list.push(initial.clone());
         }
+    }
+    // `display` is no value of the style when it is a block, so a reset would leave the layers under
+    // it showing (`a` is `inline` there, `div` a block): the initial value has to be written.
+    if key == "display" && matches!(keyword, Keyword::Initial | Keyword::Unset) {
+        list.push(Declaration { key: key.to_owned(), value: r#""inline""#.to_owned() });
     }
     let named = || std::iter::once(key.to_owned()).chain(covered.iter().map(|target| covers::name_of(*target)));
     match keyword {
@@ -232,6 +242,23 @@ mod tests {
             assert!(reset.contains(&name.to_owned()), "{name}");
         }
         assert!(resolve(br#"{"maxWidth":"10px","zIndex":3,"gap":1}"#).is_none());
+    }
+
+    #[test]
+    fn a_style_that_writes_a_value_for_a_property_with_a_keyword_initial_is_not_searched() {
+        for json in [
+            r#"{"gap":8,"zIndex":3,"rowGap":"8px","columnGap":"1rem","maxWidth":"10px","maxHeight":0,"lineClamp":2}"#,
+            r#"{"gap":"1px","zIndex":"3","gapless":"normal","content":"gap normal"}"#,
+        ] {
+            assert!(!mentions_keyword(json.as_bytes()), "{json}");
+        }
+        for json in [
+            r#"{"gap":"normal"}"#,
+            r#"{"color":"red","zINDEX":"AUTO"}"#,
+            r#"{"rowGap":"Normal"}"#,
+        ] {
+            assert!(mentions_keyword(json.as_bytes()), "{json}");
+        }
     }
 
     #[test]

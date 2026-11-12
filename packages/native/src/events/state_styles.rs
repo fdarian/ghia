@@ -138,10 +138,6 @@ static PROPERTY_CLEARERS: LazyLock<FxHashMap<String, fn(&mut StyleDesc)>> =
 /// A longhand that a shorthand of `base` still covers (`padding-left` reset over `padding: 1px 6px`)
 /// is put at its initial value, because the shorthand would go on giving it its own.
 fn clear_properties(base: &mut Cow<'_, StyleDesc>, names: &[String]) {
-    // The layers under set `display` for a tag whose initial value is not what it renders as (the
-    // user agent style of `a`, `strong`, `td`), and no value is a block here, so a reset to the
-    // initial value `inline` has to be written.
-    let resets_display = names.iter().any(|name| name == "display") && base.display.is_some();
     for name in names {
         if sets_property(base, name) {
             if let Some(clear) = PROPERTY_CLEARERS.get(name.as_str()) {
@@ -149,26 +145,31 @@ fn clear_properties(base: &mut Cow<'_, StyleDesc>, names: &[String]) {
             }
         }
     }
-    if resets_display {
-        base.to_mut().display = Some("inline".to_owned());
-    }
     // A `var()` value is no field of the style until it is built: `merge` keeps a held declaration
     // of the base unless the layer above sets the property, and a reset sets nothing.
     if base.var_declarations.is_some() {
-        let reset_ids: Vec<_> = names.iter().filter_map(|name| crate::css::covers::key_id(name)).collect();
-        let reset = |key: &str| {
+        if let Some(kept) = crate::css::var_substitution::without_reset(base.var_declarations.as_deref(), |key| {
             names.iter().any(|name| name == key)
-                || crate::css::covers::key_id(key).is_some_and(|id| reset_ids.iter().any(|shorthand| crate::css::covers::covered_by(*shorthand).contains(&id)))
-        };
-        if let Some(kept) = crate::css::var_substitution::without_reset(base.var_declarations.as_deref(), reset) {
+        }) {
             base.to_mut().var_declarations = kept;
         }
     }
-    for name in names {
-        let Some(key) = crate::css::covers::key_id(name) else {
-            continue;
-        };
-        if let Some(initial) = crate::css::sheet::initial_style_of(key).filter(|_| crate::css::covers::is_covered_in(base, key)) {
+    let longhands: Vec<_> = names
+        .iter()
+        .filter_map(|name| crate::css::covers::key_id(name))
+        .filter(|key| crate::css::sheet::initial_style_of(*key).is_some())
+        .collect();
+    // What is left of a held declaration still lays what the reset took back (`border-top-color:
+    // initial` over a held `border-color`): the longhand's initial value is written and the
+    // declaration laid under it, as `merge` does for what a layer above sets.
+    let held = base.var_declarations.clone().unwrap_or_default();
+    let overlapped = crate::css::var_substitution::overlapped(&held, &longhands);
+    if let Some(kept) = crate::css::var_substitution::keeping(&held, &overlapped) {
+        base.to_mut().var_declarations = Some(kept);
+    }
+    for key in longhands {
+        if overlapped.contains(&key) || crate::css::covers::is_covered_in(base, key) {
+            let initial = crate::css::sheet::initial_style_of(key).expect("filtered for a style");
             crate::css::covers::restore(base.to_mut(), initial, &[key]);
         }
     }

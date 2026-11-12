@@ -9,6 +9,7 @@
 //! Only longhands with a plain initial value are here. The rest keep the keyword's old meaning,
 //! which is to remove the earlier declarations of the key, and are listed in the deviations.
 
+use std::borrow::Cow;
 use std::sync::LazyLock;
 
 use rustc_hash::FxHashMap;
@@ -138,7 +139,7 @@ pub(crate) fn style_of(key: KeyId) -> Option<&'static StyleDesc> {
 /// keyword is `initial` for the cascade: it takes back an earlier rule's value, and the property
 /// is left unset, which is its initial value. The table holds the properties, whether a longhand
 /// or a shorthand, whose CSS initial value is such a keyword.
-const UNREPRESENTABLE: [(&str, &str); 7] = [
+pub(super) const UNREPRESENTABLE: [(&str, &str); 7] = [
     ("zIndex", "auto"),
     ("maxWidth", "none"),
     ("maxHeight", "none"),
@@ -148,30 +149,45 @@ const UNREPRESENTABLE: [(&str, &str); 7] = [
     ("lineClamp", "none"),
 ];
 
+/// The text of a value that is a JSON string, or `None` for any other value. Borrowed unless the
+/// string has an escape, so reading the string values of a style allocates nothing.
+pub(super) fn string_value(json: &str) -> Option<Cow<'_, str>> {
+    if !json.starts_with('"') {
+        return None;
+    }
+    match json.strip_suffix('"').filter(|inner| inner.len() > 1 && !inner.contains('\\')) {
+        Some(inner) => Some(Cow::Borrowed(&inner[1..])),
+        None => serde_json::from_str::<String>(json).ok().map(Cow::Owned),
+    }
+}
+
 /// Whether `declaration` is the initial value of a property in [`UNREPRESENTABLE`] written as its
 /// keyword (`max-width: none`).
 pub(super) fn is_unrepresentable_initial(declaration: &Declaration) -> bool {
-    let Ok(written) = serde_json::from_str::<String>(&declaration.value) else {
-        return false;
-    };
-    let written = written.trim();
-    UNREPRESENTABLE.iter().any(|(key, keyword)| *key == declaration.key && written.eq_ignore_ascii_case(keyword))
+    // The key first: most declarations are not one of these, and the value is only read for those.
+    UNREPRESENTABLE.iter().any(|(key, _)| *key == declaration.key)
+        && string_value(&declaration.value).is_some_and(|written| is_unrepresentable(&declaration.key, written.trim()))
+}
+
+fn is_unrepresentable(key: &str, written: &str) -> bool {
+    UNREPRESENTABLE.iter().any(|(name, keyword)| *name == key && written.eq_ignore_ascii_case(keyword))
 }
 
 /// Whether `declaration` is its property's initial value written as a keyword, which the cascade
 /// then reads as `initial`. A value the style parser has no form for (`z-index: auto`,
 /// `max-width: none`) could not otherwise take back an earlier rule's value.
 pub(super) fn is_initial_keyword(declaration: &Declaration) -> bool {
-    if is_unrepresentable_initial(declaration) {
-        return true;
-    }
-    let Ok(written) = serde_json::from_str::<String>(&declaration.value) else {
+    let Some(written) = string_value(&declaration.value) else {
         return false;
     };
+    let written = written.trim();
+    if is_unrepresentable(&declaration.key, written) {
+        return true;
+    }
     covers::key_id(&declaration.key)
         .and_then(of)
-        .and_then(|initial| serde_json::from_str::<String>(&initial.value).ok())
-        .is_some_and(|keyword| written.trim().eq_ignore_ascii_case(&keyword))
+        .and_then(|initial| string_value(&initial.value))
+        .is_some_and(|keyword| written.eq_ignore_ascii_case(&keyword))
 }
 
 #[cfg(test)]
