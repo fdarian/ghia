@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url"
 import { configDefaults, defineConfig } from "vitest/config"
 
 // Their references were captured on the author's machine (its fonts, its wall-clock times); a shared CI runner's pixels differ.
@@ -16,9 +17,11 @@ const realTime = [
 ]
 
 export default defineConfig({
-  test: process.env.CI
-    ? {
-        exclude: [...configDefaults.exclude, ...referencedToThisMachine, ...realTime],
-      }
-    : {},
+  // The alias `react()` gives an app: `@dnd-kit/react` imports `flushSync` from `react-dom`, which has to be the
+  // one that flushes Ghia's reconciler. It is inlined so Vite, not Node, resolves its imports.
+  resolve: { alias: [{ find: /^react-dom$/, replacement: fileURLToPath(new URL("./src/react-dom.ts", import.meta.url)) }] },
+  test: {
+    server: { deps: { inline: [/@dnd-kit\/react/] } },
+    ...(process.env.CI ? { exclude: [...configDefaults.exclude, ...referencedToThisMachine, ...realTime] } : {}),
+  },
 })

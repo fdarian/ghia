@@ -11,7 +11,11 @@ import { getComputedStyle } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 const ITEM_HEIGHT = 40
-const ITEM_WIDTH = 200
+const LIST_WIDTH = 400
+const GRAB_X = 40
+const PADDING_TOP = 30
+const PADDING_LEFT = 24
+const GRAB_Y = PADDING_TOP + ITEM_HEIGHT / 2
 
 const nodes = new Map<string, HTMLElement>()
 
@@ -23,8 +27,7 @@ function Item(props: { id: string; index: number }) {
         if (element !== null) nodes.set(props.id, element as unknown as HTMLElement)
         sortable.ref(element)
       }}
-      testId={props.id}
-      style={{ height: ITEM_HEIGHT, width: ITEM_WIDTH }}
+      style={{ height: ITEM_HEIGHT }}
     >
       {props.id}
     </div>
@@ -81,10 +84,12 @@ describe.skipIf(!hasNativeTestRenderer)("@dnd-kit/react sortable on Ghia", () =>
             })
           }}
         >
-          <div style={{ width: 400, height: 400 }}>
-            {items.map((id, index) => (
-              <Item key={id} id={id} index={index} />
-            ))}
+          <div style={{ paddingTop: PADDING_TOP, paddingLeft: PADDING_LEFT }}>
+            <div style={{ width: LIST_WIDTH }}>
+              {items.map((id, index) => (
+                <Item key={id} id={id} index={index} />
+              ))}
+            </div>
           </div>
         </DragDropProvider>
       )
@@ -93,17 +98,25 @@ describe.skipIf(!hasNativeTestRenderer)("@dnd-kit/react sortable on Ghia", () =>
     return () => order.current
   }
 
-  /** Mouse down on the first item, then move to `y` in steps of 10 with a frame between. */
-  async function dragFirstItemTo(y: number) {
-    app.renderer.nativeSimulateMouseDown(20, 20)
+  let pointerY = GRAB_Y
+
+  async function grabFirstItem() {
+    pointerY = GRAB_Y
+    app.renderer.nativeSimulateMouseDown(GRAB_X, pointerY)
     await frame(16)
-    for (let at = 30; at <= y; at += 10) {
-      app.renderer.nativeSimulateMouseMove(20, at)
+  }
+
+  /** Move the pointer down to `y` in steps of 10 with a frame between. */
+  async function moveTo(y: number) {
+    while (pointerY < y) {
+      pointerY += 10
+      app.renderer.nativeSimulateMouseMove(GRAB_X, pointerY)
       await frame(16)
     }
   }
 
-  const rowsOf = () => [...nodes.values()].map((el) => `${el.textContent}:${Math.round(el.getBoundingClientRect().top)}`)
+  const dndMarks = (el: HTMLElement) => el.getAttributeNames().filter((name) => name.startsWith("data-dnd-") || name === "popover")
+  const texts = (list: HTMLElement) => Array.from(list.children, (child) => child.textContent)
   const rect = (el: HTMLElement) => {
     const box = el.getBoundingClientRect()
     return { x: box.x, y: box.y, width: box.width, height: box.height }
@@ -114,31 +127,37 @@ describe.skipIf(!hasNativeTestRenderer)("@dnd-kit/react sortable on Ghia", () =>
     await frame(0)
     const a = nodes.get("a")!
     const list = a.parentElement!
-    expect(list.children.map((child) => child.textContent)).toEqual(["a", "b", "c", "d", "e"])
+    expect(texts(list)).toEqual(["a", "b", "c", "d", "e"])
 
-    await dragFirstItemTo(70)
+    await grabFirstItem()
+    await moveTo(GRAB_Y + 50)
 
     // The dragged element is the one in the document, marked, and shown as a popover in the top layer.
     expect(a.getAttribute("data-dnd-dragging")).not.toBeNull()
     expect(a.getAttribute("popover")).toBe("manual")
+    expect(a.matches(":popover-open")).toBe(true)
     expect(getComputedStyle(a).position).toBe("fixed")
     expect(getComputedStyle(a).display).not.toBe("none")
-    expect(rect(a)).toMatchObject({ y: 50, width: ITEM_WIDTH, height: ITEM_HEIGHT })
+    // `getComputedStyle` has no `pointer-events`: the style the cascade made reads it.
+    expect(app.renderer.getElement((a as unknown as { nativeId: number }).nativeId)?.style.pointerEvents).toBe("none")
+    // At its own place, moved by the pointer: dnd-kit's sheet sets `left`, `top` and `width` from the item's box.
+    expect(rect(a)).toEqual({ x: PADDING_LEFT, y: PADDING_TOP + 50, width: LIST_WIDTH, height: ITEM_HEIGHT })
     // Its placeholder: a clone right after it, hidden and out of the accessibility tree, holding its place.
     const placeholder = a.nextElementSibling as HTMLElement
     expect(placeholder.getAttribute("data-dnd-placeholder")).toBe("hidden")
-    // A boolean attribute reads back as present, not as the text written (docs/fork/deviations.md).
-    expect(placeholder.getAttribute("inert")).not.toBeNull()
+    expect(placeholder.hasAttribute("inert")).toBe(true)
     expect(placeholder.getAttribute("aria-hidden")).toBe("true")
     expect(placeholder.textContent).toBe("a")
     expect(getComputedStyle(placeholder).visibility).toBe("hidden")
-    expect(rect(placeholder)).toMatchObject({ width: ITEM_WIDTH, height: ITEM_HEIGHT })
+    expect(rect(placeholder)).toMatchObject({ x: PADDING_LEFT, width: LIST_WIDTH, height: ITEM_HEIGHT })
     expect(list.children).toHaveLength(6)
 
-    await dragFirstItemTo(110)
-    app.renderer.nativeSimulateMouseUp(20, 110)
-    // The drop animation starts once React has rendered the new order, a frame or two after the pointer is up.
-    for (let tick = 0; tick < 6 && a.getAttribute("data-dnd-dropping") === null; tick++) await frame(16)
+    await moveTo(GRAB_Y + 90)
+    // dnd-kit moved the dragged element and its placeholder, together, below c.
+    expect(texts(list)).toEqual(["b", "c", "a", "a", "d", "e"])
+    expect(a.nextElementSibling).toBe(placeholder)
+    app.renderer.nativeSimulateMouseUp(GRAB_X, pointerY)
+    await frame(16)
     // The drop animation runs: the element is still the popover, marked as dropping.
     expect(a.getAttribute("data-dnd-dropping")).not.toBeNull()
     expect(a.getAnimations()).toHaveLength(1)
@@ -147,42 +166,51 @@ describe.skipIf(!hasNativeTestRenderer)("@dnd-kit/react sortable on Ghia", () =>
     expect(ends).toEqual([{ canceled: false, from: 0, to: 2 }])
     expect(items()).toEqual(["b", "c", "a", "d", "e"])
     // After the drop animation: the marks and the popover are gone, and so is the placeholder.
-    expect(a.getAttributeNames().filter((name) => name.startsWith("data-dnd-") || name === "popover")).toEqual([])
+    expect(dndMarks(a)).toEqual([])
     expect(a.getAnimations()).toEqual([])
-    expect(list.children.map((child) => child.textContent)).toEqual(["b", "c", "a", "d", "e"])
-    expect(rowsOf().sort()).toEqual(["a:80", "b:0", "c:40", "d:120", "e:160"])
+    expect(texts(list)).toEqual(["b", "c", "a", "d", "e"])
+    expect(["a", "b", "c", "d", "e"].map((id) => rect(nodes.get(id)!).y)).toEqual([110, 30, 70, 150, 190])
   })
 
-  // dnd-kit's sheet gives the popover `left: var(--dnd-left) !important; right: unset !important`, which puts the
-  // box at its own x, not centred across the window by the user agent style.
-  it("keeps the dragged item at its own x", async () => {
+  // dnd-kit's sheet gives the popover `left: var(--dnd-left) !important; right: unset !important` and
+  // `width: var(--dnd-width)`: with the list at an offset, a sheet that did nothing leaves the box at the window's
+  // origin, as the user agent style centres a `position: fixed` popover, and as wide as its text.
+  it("keeps the dragged item at its own x and width", async () => {
     mount()
     await frame(0)
     const a = nodes.get("a")!
-    await dragFirstItemTo(70)
-    const x = rect(a).x
-    // Let the drop animation finish: an unmount that cancels it is an unhandled AbortError (see the notes).
-    app.renderer.nativeSimulateMouseUp(20, 70)
-    for (let tick = 0; tick < 8; tick++) await frame(100)
-    expect(x).toBe(0)
+    await grabFirstItem()
+    await moveTo(GRAB_Y + 50)
+    expect(rect(a)).toEqual({ x: PADDING_LEFT, y: PADDING_TOP + 50, width: LIST_WIDTH, height: ITEM_HEIGHT })
+    // The test ends with the drop animation running: its unmount cancels it.
+    app.renderer.nativeSimulateMouseUp(GRAB_X, pointerY)
+    await frame(16)
   })
 
   it("reorders with the keyboard: Space, ArrowDown twice, Space", async () => {
     const items = mount()
     await frame(0)
     const a = nodes.get("a")!
-    const id = (a as unknown as { nativeId: number }).nativeId
+    const list = a.parentElement!
     // The accessibility plugin made the item focusable and a button.
     await frame(16)
     expect(a.getAttribute("tabindex")).toBe("0")
     expect(a.getAttribute("role")).toBe("button")
-    for (const key of ["Space", "ArrowDown", "ArrowDown", "Space"]) {
-      app.renderer.nativeSimulateKeyDown(id, key)
+
+    app.renderer.nativeSimulateKeystrokes((a as unknown as { nativeId: number }).nativeId, "Space")
+    await frame(16)
+    expect(a.getAttribute("data-dnd-dragging")).not.toBeNull()
+    for (const key of ["ArrowDown", "ArrowDown", "Space"]) {
+      app.renderer.simulateKeystrokes(key)
       await frame(16)
     }
     for (let tick = 0; tick < 6; tick++) await frame(100)
+
     expect(ends).toEqual([{ canceled: false, from: 0, to: 2 }])
     expect(items()).toEqual(["b", "c", "a", "d", "e"])
-    expect(a.getAttributeNames().filter((name) => name.startsWith("data-dnd-") || name === "popover")).toEqual([])
+    expect(texts(list)).toEqual(["b", "c", "a", "d", "e"])
+    expect(dndMarks(a)).toEqual([])
+    // dnd-kit hands focus back to the dragged item.
+    expect(document.activeElement).toBe(a)
   })
 })
