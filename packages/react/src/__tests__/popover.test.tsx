@@ -55,6 +55,24 @@ describeNative("popover in React", () => {
     expect(getComputedStyle(found.box).display).toBe("none")
   })
 
+  it("keeps the user agent box while it is closed and an author sheet shows it", () => {
+    const found = mount((grab) => (
+      <div>
+        <style>{`[popover].shown { display: block }`}</style>
+        <div ref={grab("box")} popover="manual" className="shown">
+          <div style={popoverStyle} />
+        </div>
+      </div>
+    ))
+    const computed = getComputedStyle(found.box)
+    expect(computed.display).toBe("block")
+    expect(computed.position).toBe("fixed")
+    const rect = found.box.getBoundingClientRect()
+    // 100x50 content, 0.25em (4px) of padding and a 3px border on each side, centred across.
+    expect([rect.width, rect.height]).toEqual([114, 64])
+    expect(rect.left).toBeCloseTo((WINDOW.width - 114) / 2, 0)
+  })
+
   it("gets a box in the top layer with the user agent style when it is shown", () => {
     const found = mount((grab) => (
       <div>

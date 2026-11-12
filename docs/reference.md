@@ -4973,7 +4973,7 @@ a prop of the native element on any element type: `class` is its attribute. In S
 A `<style>` element and `CSSStyleSheet` add CSS rules that read these attributes: see [Stylesheets](#stylesheets).
 ### Popovers
 
-`popover` on a `div`, a `span` or an HTML tag makes the element a popover, as in the DOM: `"auto"` (also `""` and `"hint"`) or `"manual"` (any other value). It is an attribute (`getAttribute("popover")`, and `el.popover` reads it limited to `"auto"`, `"manual"`, `"hint"` or `null`; writing it goes through the same path as `el.id`, and `null` or `undefined` takes the attribute away). A closed popover has no box: the user agent style is `display: none`, and an author `display` shows it, as in Chrome. `showPopover()` opens it, and while it is open:
+`popover` on a `div`, a `span` or an HTML tag makes the element a popover, as in the DOM: `"auto"` (also `""` and `"hint"`) or `"manual"` (any other value). It is an attribute (`getAttribute("popover")`, and `el.popover` reads it limited to `"auto"`, `"manual"`, `"hint"` or `null`; writing it goes through the same path as `el.id`, and `null` or `undefined` takes the attribute away). A closed popover has no box: its user agent style is the open rules below plus `display: none`, so an author `display` shows it as that fixed, bordered box, as in Chrome. `showPopover()` opens it, and while it is open:
 
 - it is a `position: fixed` box against the window with Chrome's popover style (`top: 0; right: 0; left: 0; width: max-content; max-width: 100%; margin: auto; border: 3px solid; padding: 0.25em; overflow: auto`, centred across the window and at the top of it, `color` and `background-color` as `CanvasText` and `Canvas`, which follow `color-scheme`: `#000000` on `#ffffff`, `#ffffff` on `#121212` when dark). The style is a user agent layer, between the style of the tag and the universal style, so every declared style overrides it, and its `position` is `fixed` whatever is declared;
 - it is drawn in the top layer: above its siblings whatever their `z-index`, above every `<anchored>` layer, and not clipped by any ancestor. Of two open popovers the one shown last is on top. Hit testing and pointer events follow (`document.elementFromPoint`), and its box takes no part in the layout of its parent;
@@ -7497,7 +7497,7 @@ still drops the longhands written before it.
   `border: 0` is `border: "0"`. A number that is still invalid is dropped.
 - A CSS-wide keyword at the top level of a style (`initial`, `unset`, and `inherit` on a property that inherits) takes back
   what the layers under the element's own style set, as an author declaration beats the user agent style in CSS:
-  `margin: 'unset'` on a `<p>` or an open `popover` has no margin, `right: 'unset'` has no `right`, `display: 'unset'` on an `<a>` or `<strong>` is `inline`, and `fontWeight: 'inherit'`
+  `margin: 'unset'` on a `<p>` or an open `popover` has no margin, `right: 'unset'` has no `right`, `display: 'unset'` (or `'initial'`) is `inline` on any element, a `<div>` included, and `fontWeight: 'inherit'`
   on an `<h1>` is not bold. It also beats the universal style. `revert` and `revert-layer` take back the element's own earlier
   declaration of the property and leave the layers under it (the user agent style). A state style (`hover`, ...) or an
   `@container` block drops a keyword, so the value below it stays: `hover: { width: 'unset' }` over `width: 50` keeps 50,

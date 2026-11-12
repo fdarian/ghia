@@ -673,6 +673,19 @@ fn display_reset_over_an_inline_tag_is_inline() {
 }
 
 #[test]
+fn a_closed_popover_a_sheet_shows_is_the_user_agent_box() {
+    let mut doc = Doc::new();
+    let closed = doc.classed("div", ROOT, "x");
+    doc.tree.set_custom_prop(closed, "popover".into(), serde_json::json!("manual"));
+    doc.style_element(ROOT, ".x { display: block }");
+    doc.flush();
+    let style = doc.style(closed).expect("style");
+    assert_eq!(style.display.as_deref(), Some("block"));
+    assert_eq!(style.position.as_deref(), Some("fixed"));
+    assert!(style.margin.is_some() && style.border_width.is_some() && style.padding.is_some());
+}
+
+#[test]
 fn display_reset_over_no_display_is_inline() {
     let mut doc = Doc::new();
     let ruled = doc.classed("div", ROOT, "x");
@@ -688,7 +701,7 @@ fn display_reset_over_no_display_is_inline() {
     assert_eq!(display(ruled).as_deref(), Some("inline"));
     assert_eq!(display(inline).as_deref(), Some("inline"));
     assert_eq!(display(plain), None, "a div that no one resets is a block");
-    assert_eq!(display(closed).as_deref(), Some("inline"), "the closed popover's `display: none` is taken back");
+    assert_eq!(display(closed).as_deref(), Some("inline"), "the closed popover's `display: none` is taken back; the user agent box under it stays");
     assert_eq!(display(open).as_deref(), Some("inline"));
 }
 

@@ -157,19 +157,21 @@ fn clear_properties(base: &mut Cow<'_, StyleDesc>, names: &[String]) {
     let longhands: Vec<_> = names
         .iter()
         .filter_map(|name| crate::css::covers::key_id(name))
-        .filter(|key| crate::css::sheet::initial_style_of(*key).is_some())
+        .filter_map(|key| Some((key, crate::css::sheet::initial_style_of(key)?)))
         .collect();
     // What is left of a held declaration still lays what the reset took back (`border-top-color:
     // initial` over a held `border-color`): the longhand's initial value is written and the
     // declaration laid under it, as `merge` does for what a layer above sets.
-    let held = base.var_declarations.clone().unwrap_or_default();
-    let overlapped = crate::css::var_substitution::overlapped(&held, &longhands);
-    if let Some(kept) = crate::css::var_substitution::keeping(&held, &overlapped) {
-        base.to_mut().var_declarations = Some(kept);
+    let mut overlapped = Vec::new();
+    if let Some(held) = base.var_declarations.clone() {
+        let keys: Vec<_> = longhands.iter().map(|(key, _)| *key).collect();
+        overlapped = crate::css::var_substitution::overlapped(&held, &keys);
+        if let Some(kept) = crate::css::var_substitution::keeping(&held, &overlapped) {
+            base.to_mut().var_declarations = Some(kept);
+        }
     }
-    for key in longhands {
+    for (key, initial) in longhands {
         if overlapped.contains(&key) || crate::css::covers::is_covered_in(base, key) {
-            let initial = crate::css::sheet::initial_style_of(key).expect("filtered for a style");
             crate::css::covers::restore(base.to_mut(), initial, &[key]);
         }
     }

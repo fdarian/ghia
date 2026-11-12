@@ -80,7 +80,9 @@ pub(crate) struct Resolved {
 
 /// A search of the bytes for a keyword, or for a property of [`initial::UNREPRESENTABLE`] followed
 /// by its own keyword as a value (`"maxWidth":"none"`), which a payload that has neither pays for
-/// and nothing else. A payload that writes `gap: 8` or `zIndex: 3` does not pass: `resolve` would
+/// and nothing else. The payload is compact JSON, as `JSON.stringify` writes it (the sheets rewrite
+/// these keywords to `"initial"` in `validate::judge`), so the search expects `"key":"value"`
+/// with no whitespace around the colon. A payload that writes `gap: 8` or `zIndex: 3` does not pass: `resolve` would
 /// parse it for nothing.
 fn mentions_keyword(raw: &[u8]) -> bool {
     let starts = |at: usize, word: &[u8]| raw.get(at..at + word.len()).is_some_and(|slice| slice.eq_ignore_ascii_case(word));
@@ -174,6 +176,14 @@ mod tests {
         let resolved = resolve(json.as_bytes()).expect("the style has a keyword");
         let text = serde_json::from_str(&resolved.text).expect("the text is JSON");
         (text, resolved.reset.map(|reset| reset.to_vec()).unwrap_or_default())
+    }
+
+    #[test]
+    fn the_prefilter_finds_every_unrepresentable_initial() {
+        for (key, keyword) in initial::UNREPRESENTABLE {
+            let payload = format!(r#"{{"{key}":"{keyword}"}}"#);
+            assert!(mentions_keyword(payload.as_bytes()), "{payload}");
+        }
     }
 
     #[test]
