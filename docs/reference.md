@@ -5198,8 +5198,6 @@ Every window root is a real `<html>` with a `<head>` and a `<body>` in it, and t
 
 Code that is not the framework (a library such as `@dnd-kit/dom`) changes the tree as it would in a browser, mixed with the nodes the framework made. The framework's own next update keeps working on the tree the code left, and a node the framework made can be moved, removed or put back by code.
 
-`@dnd-kit/dom` 0.5.3 is the test of this section: its sortable (default feedback, the pointer and keyboard sensors, `@dnd-kit/solid` and `@dnd-kit/react`) runs on Ghia with nothing stubbed. It clones the item into a placeholder, shows the item as a popover, animates it with `element.animate()` and drops it, through the members documented here and below.
-
 | Member | |
 |---|---|
 | `document.createElement(tagName)`, `document.createElementNS(ns, name)`, `document.createTextNode(data)` | New nodes of the window that mounted last, in no tree: a node is drawn once it is inserted under a node that is in the document (`document.body`, `document.head` and `document.documentElement` work). `createElement` lowercases the name; `createElementNS` takes the HTML or the SVG namespace, and the SVG names keep their case (`linearGradient`). Before a root is mounted they throw. A `<style>` element is one of the element types, and a [stylesheet](#stylesheets) once it is in the document. A name that is not one of the element types (`marquee`) throws `NotSupportedError`, where a browser makes an unknown element; a name that is not an XML name throws `InvalidCharacterError`. |
@@ -9755,9 +9753,10 @@ await animation.finished // resolves with the animation
   `DocumentTimeline` are exported from `@ghia/react` and `@ghia/solid`, and are
   globals where the runtime has none (not on the browser build, which has the
   browser's), so `effect instanceof KeyframeEffect`, which `@dnd-kit/dom` asks of
-  every animation of the dragged element, holds; they cannot be constructed by an app. `replaceState`, `persist()`, `commitStyles()`
-  and `onremove` do not exist, and `animation-composition` is not supported
-  ([deviations](./fork/deviations.md#motion))
+  every animation of the dragged element, holds. `new` on any of them throws
+  `TypeError: Illegal constructor`. `replaceState`, `persist()`,
+  `commitStyles()` and `onremove` do not exist, and `animation-composition` is
+  not supported ([deviations](./fork/deviations.md#motion))
 
 ##### `element.animate()`
 

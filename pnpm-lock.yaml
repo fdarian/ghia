@@ -336,9 +336,6 @@ importers:
         specifier: ^0.33.0
         version: 0.33.0(react@19.3.1)
     devDependencies:
-      '@dnd-kit/dom':
-        specifier: 0.5.3
-        version: 0.5.3
       '@dnd-kit/react':
         specifier: 0.5.3
         version: 0.5.3(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -382,9 +379,6 @@ importers:
         specifier: ^2.11.15
         version: 2.11.15(solid-js@1.9.15)(vite@8.3.5(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))
     devDependencies:
-      '@dnd-kit/dom':
-        specifier: 0.5.3
-        version: 0.5.3
       '@dnd-kit/solid':
         specifier: 0.5.3
         version: 0.5.3(solid-js@1.9.15)

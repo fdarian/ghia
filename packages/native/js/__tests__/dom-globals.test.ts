@@ -70,6 +70,12 @@ describe("dom globals of the native build", () => {
     expect(globalThis.DocumentTimeline).toBe(DocumentTimeline)
   })
 
+  it("throws Illegal constructor when an app constructs a Web Animations class", () => {
+    for (const Class of [KeyframeEffect, Animation, CSSAnimation, CSSTransition, DocumentTimeline]) {
+      expect(() => Reflect.construct(Class, [])).toThrow(new TypeError("Illegal constructor"))
+    }
+  })
+
   it("keeps a global a runtime already has", async () => {
     const own = () => {}
     const before = Reflect.get(globalThis, "matchMedia")

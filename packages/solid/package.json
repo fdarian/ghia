@@ -102,7 +102,6 @@
     }
   },
   "devDependencies": {
-    "@dnd-kit/dom": "0.5.3",
     "@dnd-kit/solid": "0.5.3",
     "ghia": "workspace:^",
     "@types/bun": "^1.4.0",
