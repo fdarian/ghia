@@ -1,6 +1,7 @@
 /** `element.style` on a React host instance: the patterns Base UI writes and reads, and how a re-render treats what was written. */
 import { afterEach, describe, expect, it } from "vitest"
-import { appliedBatchCount, getComputedStyle } from "@ghia/native/host"
+import { getComputedStyle } from "@ghia/native/host"
+import { appliedBatchCount } from "@ghia/native/testing"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import type { PublicInstance } from "../types/host.js"
 

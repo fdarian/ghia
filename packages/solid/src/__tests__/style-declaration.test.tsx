@@ -1,7 +1,8 @@
 /** `element.style` on a Solid element: the patterns Base UI writes and reads, and how a re-render treats what was written. */
 import { createSignal } from "solid-js"
 import { afterEach, describe, expect, it } from "vitest"
-import { appliedBatchCount, getComputedStyle } from "@ghia/native/host"
+import { getComputedStyle } from "@ghia/native/host"
+import { appliedBatchCount } from "@ghia/native/testing"
 import type { HostElement } from "../host.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 

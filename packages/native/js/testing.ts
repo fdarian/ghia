@@ -64,6 +64,7 @@ export type { MacCpuThrottle } from "./cpu-throttle.js"
 
 export { getComputedStyle, type ComputedStyle } from "./computed-style.js"
 export { decodeWireBatchForTest, encodeWireBatchForTest, type DecodedOp } from "./wire-testing.js"
+export { appliedBatchCount } from "./batch-count.js"
 
 /**
  * One JSON array per op that native's binary decoder reads from `bytes`, for the
