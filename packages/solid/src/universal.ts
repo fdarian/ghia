@@ -1,4 +1,4 @@
-import { createRoot as createSolidRoot, getOwner, type JSX, type Owner } from "solid-js"
+import { createRoot as createSolidRoot, type JSX } from "solid-js"
 import { createRenderer } from "solid-js/universal"
 import {
   createHostElement,
@@ -34,40 +34,17 @@ function describe(value: unknown): string {
 // was given in `current` and later reads it back as a position (`getNextSibling(current[i])`, an
 // anchor, the node `replaceNode` swaps out), so the object has to be a node to the tree. Each one
 // stands for an empty text node that is never visible, and the object itself is never mounted.
-// The same object in two places of one root is one node; in two roots it is one node each.
+// The same object in two places is one node: it moves within a root and cannot be rendered in two roots.
 const placeholders = new WeakMap<object, HostText>()
 
-const RENDER_ROOTS = Symbol.for("@ghia/solid/render-roots")
-
-/** On `globalThis`, like the presence scopes: the JSX runtime can load a second copy of this module. */
-function renderRoots(): WeakMap<Owner, HostRoot> {
-  const slot = globalThis as typeof globalThis & { [RENDER_ROOTS]?: WeakMap<Owner, HostRoot> }
-  slot[RENDER_ROOTS] ??= new WeakMap()
-  return slot[RENDER_ROOTS]
-}
-
-/**
- * The root the render runs in: a node built under a parent that is not mounted yet (a fresh
- * subtree is built before it is inserted) cannot tell its root from the parent.
- */
-function targetRootOf(parent: HostParent): HostRoot | null {
-  const roots = renderRoots()
-  for (let owner = getOwner(); owner; owner = owner.owner) {
-    const rendering = roots.get(owner)
-    if (rendering) return rendering
-  }
-  return isHostRoot(parent) ? parent : parent.root
-}
-
-function hostNodeFor(value: unknown, parent: HostParent): HostNode {
+function hostNodeFor(value: unknown): HostNode {
   if (isHostNode(value)) return value
   if (typeof value !== "object" || value === null || isHostRoot(value)) {
     throw new TypeError(`Expected a GPUIX host node, got ${describe(value)}`)
   }
   const existing = placeholders.get(value)
-  const targetRoot = targetRootOf(parent)
-  if (existing && (existing.root === null || targetRoot === null || existing.root === targetRoot)) return existing
-  if (!existing) console.warn("Unrecognized value. Rendered nothing in its place", value)
+  if (existing) return existing
+  console.warn("Unrecognized value. Rendered nothing in its place", value)
   const placeholder = createHostText("")
   placeholders.set(value, placeholder)
   return placeholder
@@ -106,7 +83,7 @@ const runtime = createRenderer<HostNode | HostParent>({
   insertNode(parent, node, anchor) {
     if (parent.kind === "text") throw new TypeError("Expected GPUIX host nodes")
     // Universal passes `null` as the anchor to append (`cleanChildren(parent, current, null, node)`).
-    insertHostNode(parent, hostNodeFor(node, parent), anchor === undefined || anchor === null ? anchor : anchorNodeFor(anchor))
+    insertHostNode(parent, hostNodeFor(node), anchor === undefined || anchor === null ? anchor : anchorNodeFor(anchor))
   },
   isTextNode(node) {
     return isHostNode(node) && isHostText(node)
@@ -134,8 +111,6 @@ const runtime = createRenderer<HostNode | HostParent>({
 // `getParentNode(node)` is the parent it was inserted into, and a top-level node's parent is `body`.
 export function universalRender(code: () => JSX.Element, body: HostElement): () => void {
   return createSolidRoot((dispose) => {
-    const owner = getOwner()
-    if (owner && body.root) renderRoots().set(owner, body.root)
     runtime.insert(body, code())
     return dispose
   })

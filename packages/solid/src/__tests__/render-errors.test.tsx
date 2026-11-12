@@ -127,36 +127,6 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renders a value that is not a hos
     expect(shown(app.renderer)).toEqual(["boom"])
   })
 
-  it("keeps an object shown in two roots as one node in each", async () => {
-    const shared = { name: "shared" }
-    const [on, setOn] = createSignal(true)
-    const view = () => (
-      <div>
-        <Show when={on()}>{shared as unknown as JSX.Element}</Show>
-      </div>
-    )
-    const bare = createTestRoot()
-    bare.render(() => <div />)
-    const first = createTestRoot()
-    first.render(view)
-    const second = createTestRoot()
-    second.render(view)
-    const withPlaceholder = bare.renderer.getRetainedElementCount() + 1
-    expect(first.renderer.getRetainedElementCount()).toBe(withPlaceholder)
-    expect(second.renderer.getRetainedElementCount()).toBe(withPlaceholder)
-
-    setOn(false)
-    await settle()
-    expect(first.renderer.getRetainedElementCount()).toBe(withPlaceholder - 1)
-    expect(second.renderer.getRetainedElementCount()).toBe(withPlaceholder - 1)
-    setOn(true)
-    await settle()
-    expect(first.renderer.getRetainedElementCount()).toBe(withPlaceholder)
-    expect(second.renderer.getRetainedElementCount()).toBe(withPlaceholder)
-    first.unmount()
-    second.unmount()
-  })
-
   it("renders nothing for a value with `kind: \"text\"` that is not a host node", async () => {
     const [view, setView] = createSignal<"ast" | "node">("ast")
     const ast = { kind: "text", value: "hello" }
