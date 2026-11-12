@@ -14,6 +14,7 @@ import { cloneNode } from "./clone.js"
 import { styleDeclarationFor, type CSSStyleDeclaration, type StyleBinding } from "./css-style-declaration.js"
 import { datasetOf } from "./dataset.js"
 import type { DOMRectList } from "./dom-rect.js"
+import { defineConstraintValidation } from "./constraint-validation.js"
 import { defineReflectedMembers, type ReflectedMembers } from "./reflected-members.js"
 import { closestElement, elementById, matchesSelector, querySelector, querySelectorAll, type ElementList } from "./selectors.js"
 import * as tree from "./tree-mutation.js"
@@ -607,6 +608,7 @@ abstract class ElementClass extends NodeClass {
 
 interface ElementClass extends ReflectedMembers {}
 defineReflectedMembers(ElementClass.prototype)
+defineConstraintValidation(ElementClass.prototype)
 
 function isElement(node: Node): node is Element {
   return node.nodeType === ELEMENT_NODE

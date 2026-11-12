@@ -4848,6 +4848,21 @@ submission while the control is empty.
   non-bubbling, cancelable `invalid` event (`onInvalid`). The first one whose
   handlers did not call `preventDefault()` takes focus, and the form is not
   submitted. A `disabled` or `readOnly` control is not validated.
+- **Constraint validation API.** An `<input>` and a `<textarea>` have `required`, `name`
+  and `form` (the `<form>` it is in, or `null`), `willValidate` (`false` while disabled,
+  read-only or of a type that holds no value: `hidden`, `button`, `submit`, `reset`,
+  `image`), `validity`, `validationMessage`, `setCustomValidity(message)`, `checkValidity()`
+  and `reportValidity()`. `validity.valueMissing` is the condition the form check above
+  uses (a text control with no text, a checkbox that is not checked, a radio group with
+  none checked), `validity.customError` is a non-empty `setCustomValidity()` message, and
+  `valid` is neither. `checkValidity()` and `reportValidity()` return `valid`, firing the
+  cancelable, non-bubbling `invalid` event first when it is `false`; neither shows a bubble.
+  `validationMessage` is the custom message, or an English text for `valueMissing`
+  (`"Please fill out this field."`). The other conditions (`typeMismatch`,
+  `patternMismatch`, `tooLong`, `tooShort`, `rangeUnderflow`, `rangeOverflow`,
+  `stepMismatch`, `badInput`) are always `false`, because nothing evaluates them: see
+  [deviations](./fork/deviations.md#html-tags). A custom message does not stop a form's
+  submission, as `required` does. Base UI's `Field` and `Form` read these members.
 - **`submit`.** Cancelable and bubbling, aimed at the form. `event.formData`
   holds the `name` and `value` of every named, enabled control in document
   order. `event.submitter` is the `<button>` that submitted it (its element, as
