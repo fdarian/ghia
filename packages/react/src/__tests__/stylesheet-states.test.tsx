@@ -10,7 +10,7 @@ import path from "path"
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { getComputedStyle } from "@ghia/native/host"
-import { motionValue } from "../index.js"
+import { motion } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
 import { readLogicalPixels } from "./test-utils.js"
 
@@ -382,18 +382,19 @@ describe.skipIf(!hasNativeTestRenderer)("state pseudo-classes in a stylesheet in
     expect(item(), "the 40px of `padding-inline: 40px 0` is the start, which is the right").toEqual({ left: 0, width: 160 })
   })
 
-  it("lays a focus rule over a motion value, as the box is built", () => {
-    const opacity = motionValue(0.5)
+  it("lays a focus rule over what motion animates, as the box is built", () => {
     let box: HTMLElement | null = null
     app.render(
       <div style={{ width: 400, height: 300, backgroundColor: "#ffffff" }}>
-        <style>{`.a:focus { opacity: 1; width: initial }`}</style>
-        <div
+        <style>{`.a { width: 100px; height: 30px; background-color: #000000 } .a:focus { opacity: 1; width: initial }`}</style>
+        <motion.div
           ref={(element: unknown) => (box = element as HTMLElement)}
           testId="a"
           className="a"
           tabIndex={0}
-          style={{ width: 100, height: 30, backgroundColor: "#000000", opacity }}
+          initial={{ opacity: 0.6 }}
+          animate={{ opacity: 0.2 }}
+          transition={{ duration: 10, ease: "linear" }}
         />
       </div>
     )
@@ -403,8 +404,14 @@ describe.skipIf(!hasNativeTestRenderer)("state pseudo-classes in a stylesheet in
       app.renderer.captureScreenshot(file)
       return readLogicalPixels(file, app.renderer).at(...centre("a"))[0]
     }
-    expect(redAt("motion-rest")).toBeGreaterThan(0x60)
+    app.renderer.clockPause()
+    app.renderer.clockFastForward(2000)
+    app.renderer.flush()
+    expect(redAt("motion-rest"), "the animated opacity is painted").toBeGreaterThan(0x60)
     app.renderer.focusElement(idOf("a"))
+    app.renderer.clockFastForward(100)
+    app.renderer.flush()
+    expect(widthOf("a"), "initial is auto, which fills the parent").toBeGreaterThan(100)
     expect(getComputedStyle(box!).opacity).toBe("1")
     expect(redAt("motion-focused"), "opaque black").toBe(0)
   })
