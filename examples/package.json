@@ -54,6 +54,7 @@
     "string-dedent": "^3.0.2"
   },
   "devDependencies": {
+    "@base-ui/react": "1.9.0",
     "@tanstack/solid-virtual": "3.13.53",
     "@types/mdast": "^4.0.4",
     "@types/react": "^19.2.0",
