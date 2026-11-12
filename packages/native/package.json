@@ -74,7 +74,7 @@
     "build": "napi build --platform --esm --js index.js --release --features test-support && napi build --platform --js index.cjs --release --features test-support && bun run build:js && bun run check:test-support",
     "build:release": "napi build --platform --esm --js index.js --release --no-default-features && napi build --platform --js index.cjs --release --no-default-features && bun run build:js",
     "build:debug": "napi build --platform --esm --js index.js --features test-support && napi build --platform --js index.cjs --features test-support && bun run build:js && bun run check:test-support",
-    "build:js": "tsc",
+    "build:js": "tsdown",
     "generate:css-property-names": "node scripts/generate-css-property-names.mjs",
     "check:test-support": "tsc -p tsconfig.test-support.json",
     "build:web": "bun ../../scripts/web.ts --build-only",
