@@ -122,15 +122,41 @@ describeNative("event targets are elements", () => {
     expect(typeof seen?.elementId).toBe("number")
   })
 
-  it("has a null target for a key with nothing focused", () => {
-    testRoot.render(<div style={{ width: 100, height: 100 }} />)
+  it("targets body for a key with nothing focused and walks body, html, document, window", () => {
+    testRoot.render(<div className="page" style={{ width: 100, height: 100 }} />)
+    const log: string[] = []
     const seen: Array<[unknown, unknown]> = []
-    listen(window, "keydown", (event) => seen.push([event.target, event.currentTarget]))
+    listen(window, "keydown", (event) => log.push("window capture"), { capture: true })
+    listen(document, "keydown", () => log.push("document capture"), { capture: true })
+    listen(document.documentElement as never, "keydown", () => log.push("html"))
+    listen(document.body as never, "keydown", (event) => log.push(`body ${event.eventPhase}`))
+    listen(document, "keydown", () => log.push("document"))
+    listen(window, "keydown", (event) => {
+      log.push("window")
+      seen.push([event.target, event.currentTarget])
+    })
 
     testRoot.renderer.simulateKeystrokes("x")
 
-    expect(seen).toHaveLength(1)
-    expect(seen[0][0]).toBeNull()
-    expect(seen[0][1]).toBe(globalThis)
+    expect(log).toEqual(["window capture", "document capture", "body 2", "html", "document", "window"])
+    expect(seen).toEqual([[document.body, globalThis]])
+  })
+
+  it("lets a key with nothing focused be matched with closest, and a body handler cancel its default", () => {
+    testRoot.render(<div tabIndex={0} style={{ width: 100, height: 100 }} />)
+    const closest: unknown[] = []
+    let cancel = true
+    listen(document.body as never, "keydown", (event) => {
+      closest.push((event.target as unknown as Element).closest("body"))
+      if (cancel) event.preventDefault()
+    })
+
+    testRoot.renderer.simulateKeystrokes("Tab")
+    expect(closest).toEqual([document.body])
+    expect(document.activeElement).toBe(document.body)
+
+    cancel = false
+    testRoot.renderer.simulateKeystrokes("Tab")
+    expect(document.activeElement).not.toBe(document.body)
   })
 })

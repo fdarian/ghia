@@ -14,9 +14,9 @@ describe.skipIf(!hasNativeTestRenderer)("Solid event targets are elements", () =
     for (const cleanup of cleanups.splice(0)) cleanup()
   })
 
-  function listen(target: typeof window, type: string, listener: (event: DomEvent) => void) {
-    target.addEventListener(type, listener)
-    cleanups.push(() => target.removeEventListener(type, listener))
+  function listen(target: typeof window, type: string, listener: (event: DomEvent) => void, options?: { capture: boolean }) {
+    target.addEventListener(type, listener, options)
+    cleanups.push(() => target.removeEventListener(type, listener, options))
   }
 
   const box = { width: 40, height: 20 }
@@ -145,17 +145,45 @@ describe.skipIf(!hasNativeTestRenderer)("Solid event targets are elements", () =
     app.unmount()
   })
 
-  it("has a null target for a key with nothing focused", () => {
+  it("targets body for a key with nothing focused and walks body, html, document, window", () => {
     const app = createTestRoot()
-    app.render(() => <div style={{ width: 100, height: 100 }} />)
+    app.render(() => <div class="page" style={{ width: 100, height: 100 }} />)
+    const log: string[] = []
     const seen: Array<[unknown, unknown]> = []
-    listen(window, "keydown", (event) => seen.push([event.target, event.currentTarget]))
+    listen(window, "keydown", () => log.push("window capture"), { capture: true })
+    listen(document, "keydown", () => log.push("document capture"), { capture: true })
+    listen(document.documentElement as never, "keydown", () => log.push("html"))
+    listen(document.body as never, "keydown", (event) => log.push(`body ${event.eventPhase}`))
+    listen(document, "keydown", () => log.push("document"))
+    listen(window, "keydown", (event) => {
+      log.push("window")
+      seen.push([event.target, event.currentTarget])
+    })
 
     app.renderer.simulateKeystrokes("x")
 
-    expect(seen).toHaveLength(1)
-    expect(seen[0]![0]).toBeNull()
-    expect(seen[0]![1]).toBe(globalThis)
+    expect(log).toEqual(["window capture", "document capture", "body 2", "html", "document", "window"])
+    expect(seen).toEqual([[document.body, globalThis]])
+    app.unmount()
+  })
+
+  it("lets a key with nothing focused be matched with closest, and a body handler cancel its default", () => {
+    const app = createTestRoot()
+    app.render(() => <div tabIndex={0} style={{ width: 100, height: 100 }} />)
+    const closest: unknown[] = []
+    let cancel = true
+    listen(document.body as never, "keydown", (event) => {
+      closest.push((event.target as unknown as Element).closest("body"))
+      if (cancel) event.preventDefault()
+    })
+
+    app.renderer.simulateKeystrokes("Tab")
+    expect(closest).toEqual([document.body])
+    expect(document.activeElement).toBe(document.body)
+
+    cancel = false
+    app.renderer.simulateKeystrokes("Tab")
+    expect(document.activeElement).not.toBe(document.body)
     app.unmount()
   })
 })

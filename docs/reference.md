@@ -4979,9 +4979,11 @@ the root down before the target's handler, and in React `onFocusCapture` and
 
 Each keystroke is **one** `keydown`, and one `keyup` on release, like the DOM.
 It targets the focused element, runs capture, target and bubble through its
-ancestors, then reaches `document` and `window`. With nothing focused it goes to
-`window` alone and `event.target` is `null` (Ghia has no `body` or `html`
-element to stand in).
+ancestors, then reaches `document` and `window`. With nothing focused it
+targets `document.body` and runs `window` capture, `document` capture, `body`,
+`html`, `document`, `window`, so `event.target === document.body` and
+`event.target.closest(...)` work, and `preventDefault()` on it cancels the
+default action (Tab's focus move, scrolling keys) as for any element.
 
 Handlers run synchronously, before the editor acts on the key, so
 `preventDefault()` has its DOM meaning:
@@ -7348,7 +7350,7 @@ event: the same object a `ref` gives in that adapter (React's host instance,
 Solid's element), so they compare with `===` and a handler can call
 `event.target.getBoundingClientRect()`. During the `window` and `document`
 phases `currentTarget` is that object. `target` is `null` only for an event
-aimed at the window (a key with nothing focused), and `relatedTarget` is `null` when there is no other element. A native
+aimed at the window alone (a key sent before the first root has mounted its `body`), and `relatedTarget` is `null` when there is no other element. A native
 element id is still there as `event.elementId`, for the renderer methods that
 take one (`renderer.scrollTo(elementId, ...)`). `composedPath()` lists the
 elements the event travels through, target first and `html` last, without
