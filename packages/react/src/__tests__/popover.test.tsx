@@ -14,6 +14,12 @@ const WINDOW = { width: 800, height: 600 }
 
 type Popover = HTMLElement
 
+/** A closed popover keeps the `position: fixed` of its user agent style under `display: none`. */
+const inTopLayer = (element: HTMLElement) => {
+  const computed = getComputedStyle(element)
+  return computed.position === "fixed" && computed.display !== "none"
+}
+
 const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 5))
 
 describeNative("popover in React", () => {
@@ -422,7 +428,7 @@ describeNative("popover in React", () => {
       seen.length = 0
       change(found)
       await nextTask()
-      expect(getComputedStyle(found.box).position, "not in the top layer").not.toBe("fixed")
+      expect(inTopLayer(found.box), "not in the top layer").toBe(false)
       expect(() => app.renderer.simulateKeystrokes("Escape")).not.toThrow()
       expect(below, "Escape reaches the layer below").toHaveBeenCalledTimes(1)
       remove()
@@ -517,7 +523,7 @@ describeNative("popover in React", () => {
       await nextTask()
       expect(seen).toEqual(["child before closed", "child toggle closed"])
       expect(found.parent.offsetWidth, "the parent stays open").toBeGreaterThan(0)
-      expect(getComputedStyle(found.child).position, "not in the top layer").not.toBe("fixed")
+      expect(inTopLayer(found.child), "not in the top layer").toBe(false)
       found.parent.hidePopover()
       await nextTask()
       seen.length = 0
