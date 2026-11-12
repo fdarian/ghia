@@ -11133,10 +11133,7 @@ pub(crate) fn animate_style_at(
         dynamic |= Dynamic::MotionValues as u8;
     }
     let transitioned = (transitions_wanted || animations_wanted).then(|| {
-        let focus_visible = crate::motion::FocusVisible {
-            own: ctx.focus_handles.contains_key(&id) && ctx.focus_styles.is_focus_visible(id),
-            descendant: ctx.focus_styles.has_focus_visible(id),
-        };
+        let focus = ctx.focus_styles.layers(id, ctx.focus_handles.contains_key(&id));
         Box::new(crate::motion::resolve_declared_style(
             transitions_wanted.then_some(&mut *ctx.css_transitions),
             animations_wanted.then_some((&mut *ctx.css_animations, ctx.keyframes)),
@@ -11151,7 +11148,7 @@ pub(crate) fn animate_style_at(
             input
                 .shared
                 .map_or_else(|| input.declared.unwrap_or(&EMPTY_STYLE).into(), crate::motion::StyleRef::from),
-            focus_visible,
+            focus,
             Some(&ctx.focus_styles),
             measurement.as_ref(),
             ctx.inherited.interpolate_size,

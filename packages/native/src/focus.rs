@@ -127,14 +127,25 @@ impl FocusStyles {
 
     /// The focus variants of `style` that apply to element `id`, weakest first.
     fn applying<'a>(&self, id: u64, style: &'a StyleDesc, focusable: bool) -> impl Iterator<Item = &'a StyleDesc> {
+        let layers = self.layers(id, focusable);
         [
-            (style.focus.as_deref(), self.is_focused(id)),
-            (style.focus_within.as_deref(), self.within.contains(&id)),
-            (style.has_focus_visible.as_deref(), self.has_focus_visible(id)),
-            (style.focus_visible.as_deref(), focusable && self.visible == Some(id)),
+            (style.focus.as_deref(), layers.focused),
+            (style.focus_within.as_deref(), layers.within),
+            (style.has_focus_visible.as_deref(), layers.has_visible),
+            (style.focus_visible.as_deref(), layers.visible),
         ]
         .into_iter()
         .filter_map(|(declared, applies)| declared.filter(|_| applies))
+    }
+
+    /// Which focus variants apply to element `id`. `focusVisible` needs a `focusable` element.
+    pub fn layers(&self, id: u64, focusable: bool) -> crate::motion::FocusLayers {
+        crate::motion::FocusLayers {
+            focused: self.is_focused(id),
+            within: self.within.contains(&id),
+            has_visible: self.has_focus_visible(id),
+            visible: focusable && self.visible == Some(id),
+        }
     }
 
     /// `:has(:focus)`: a strict descendant of `id` is focused. `within` starts

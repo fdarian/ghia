@@ -338,7 +338,7 @@ mod tests {
                 None,
                 id,
                 style,
-                crate::motion::FocusVisible::default(),
+                crate::motion::FocusLayers::default(),
                 None,
                 None,
                 crate::motion::InterpolateSize::default(),

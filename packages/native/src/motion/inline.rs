@@ -208,7 +208,7 @@ fn step(
         motion,
         id,
         style,
-        super::FocusVisible::default(),
+        super::FocusLayers::default(),
         None,
         None,
         InterpolateSize::default(),

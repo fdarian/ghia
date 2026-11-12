@@ -84,6 +84,38 @@ describe.skipIf(!hasNativeTestRenderer)("state pseudo-classes in a stylesheet in
     expect(widthOf("other")).toBe(100)
   })
 
+  it("transitions :focus-within, and :focus-visible beats :focus on an element that transitions", () => {
+    app.renderer.clockPause()
+    app.render(
+      <div>
+        <style>{`
+          .field { width: 100px; height: 30px; transition: width 1s linear }
+          .field:focus { width: 110px }
+          .field:focus-visible { width: 130px }
+          .group { width: 100px; height: 60px; transition: width 1s linear }
+          .group:focus-within { width: 160px }
+        `}</style>
+        <div testId="field" className="field" tabIndex={0} />
+        <div testId="group" className="group">
+          <input testId="inner" style={{ width: 40, height: 20 }} />
+        </div>
+      </div>
+    )
+    app.renderer.simulateKeystrokes("Tab")
+    app.renderer.clockFastForward(500)
+    expect(widthOf("field")).toBeGreaterThan(105)
+    expect(widthOf("field")).toBeLessThan(125)
+    app.renderer.clockFastForward(1000)
+    expect(widthOf("field"), "focus-visible is above focus, as without a transition").toBe(130)
+
+    app.renderer.focusElement(idOf("inner"))
+    app.renderer.clockFastForward(500)
+    expect(widthOf("group")).toBeGreaterThan(125)
+    expect(widthOf("group")).toBeLessThan(135)
+    app.renderer.clockFastForward(1000)
+    expect(widthOf("group")).toBe(160)
+  })
+
   it("applies :focus-within to an ancestor of the focused element", () => {
     app.render(
       <div>
