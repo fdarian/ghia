@@ -93,6 +93,9 @@ describe.skipIf(!hasNativeTestRenderer)("element.style on a Solid element", () =
     style.opacity = "0.5"
     style.top = "3px"
     style.paddingBottom = "2px"
+    style.scrollSnapType = "none"
+    style.scrollPaddingBottom = "4px"
+    style.overflowAnchor = "none"
     expect([style.height, style.transform, style.transition, style.pointerEvents, style.opacity, style.top]).toEqual([
       "50px",
       "translateY(10px)",
@@ -101,9 +104,15 @@ describe.skipIf(!hasNativeTestRenderer)("element.style on a Solid element", () =
       "0.5",
       "3px",
     ])
-    expect(style.paddingBottom).toBe("2px")
+    expect([style.paddingBottom, style.scrollSnapType, style.scrollPaddingBottom, style.overflowAnchor]).toEqual([
+      "2px",
+      "none",
+      "4px",
+      "none",
+    ])
     style.height = ""
     expect(style.height).toBe("")
+    expect(style.cssFloat).toBe("")
   })
 
   it("lays out and paints what was written, before any frame", () => {
@@ -135,16 +144,42 @@ describe.skipIf(!hasNativeTestRenderer)("element.style on a Solid element", () =
     expect(target.getBoundingClientRect().width).toBe(90)
   })
 
-  // Chrome stores a property it knows that Ghia has no style key for (touch-action); main ignores it. Pending a decision.
-  it.skip("stores a property Ghia has no style key for and applies nothing for it", () => {
+  it("stores a property a browser knows and Ghia has no style key for, and sends nothing to native for it", async () => {
     let target!: HostElement
-    setup(() => <div ref={target} style={{ width: 40, height: 20 }} />)
-    target.style.setProperty("some-unknown-thing", "5", "important")
-    target.style.setProperty("scroll-snap-type", "x mandatory")
-    expect(target.style.getPropertyValue("some-unknown-thing")).toBe("5")
-    expect(target.style.getPropertyPriority("some-unknown-thing")).toBe("important")
-    expect(target.style.scrollSnapType).toBe("x mandatory")
+    const app = setup(() => <div ref={target} style={{ width: 40, height: 20 }} />)
+    const style = target.style
+    style.setProperty("touch-action", "none")
+    style.scrollSnapType = "x mandatory"
+    style.setProperty("will-change", "transform", "important")
+    style.setProperty("foo-bar", "5")
+    style.fooBar = "5"
+    for (const [read, expected] of [
+      [style.getPropertyValue("touch-action"), "none"],
+      [style.touchAction, "none"],
+      [style.getPropertyValue("scroll-snap-type"), "x mandatory"],
+      [style.scrollSnapType, "x mandatory"],
+      [style.getPropertyValue("will-change"), "transform"],
+      [style.getPropertyPriority("will-change"), "important"],
+      [style.getPropertyValue("foo-bar"), ""],
+    ]) {
+      expect(read).toBe(expected)
+    }
+    const text = "width: 40px; height: 20px; touch-action: none; scroll-snap-type: x mandatory; will-change: transform !important;"
+    expect(style.cssText).toBe(text)
+    expect(target.getAttribute("style")).toBe(text)
     expect(height(target)).toBe(20)
+
+    await Promise.resolve()
+    await Promise.resolve()
+    app.renderer.flush()
+    const sent = app.renderer.getElement((target as unknown as { nativeId: number }).nativeId)!.style as Record<string, unknown>
+    expect(sent.width).toBe(40)
+    expect(Object.keys(sent).filter((key) => /touch|scroll|will|foo/i.test(key))).toEqual([])
+
+    expect(style.removeProperty("touch-action")).toBe("none")
+    style.cssText = "touch-action: pan-x; foo-bar: 1"
+    expect(style.cssText).toBe("touch-action: pan-x;")
+    expect(style.width).toBe("")
   })
 
   it("lets a re-render overwrite only the properties it changed", () => {
@@ -226,6 +261,33 @@ describe.skipIf(!hasNativeTestRenderer)("element.style on a Solid element", () =
     expect(target.getAttribute("style")).toBeNull()
     expect(target.getAttributeNames()).not.toContain("style")
     expect(target.hasAttribute("style")).toBe(false)
+  })
+
+  it("reads the style attribute as \"\" once it was set and emptied, and as null only when never set or removed", () => {
+    let target!: HostElement
+    setup(() => <div ref={target} />)
+    expect(target.getAttribute("style")).toBeNull()
+    target.style.removeProperty("width")
+    expect(target.getAttribute("style")).toBeNull()
+    target.setAttribute("style", "")
+    expect(target.getAttribute("style")).toBe("")
+    expect(target.hasAttribute("style")).toBe(true)
+    expect(target.getAttributeNames()).toContain("style")
+    target.style.cssText = "height: 7px"
+    target.style.cssText = ""
+    expect(target.getAttribute("style")).toBe("")
+    target.style.width = "5px"
+    target.style.removeProperty("width")
+    expect(target.getAttribute("style")).toBe("")
+    target.style.setProperty("touch-action", "none")
+    target.style.removeProperty("touch-action")
+    expect(target.getAttribute("style")).toBe("")
+    target.removeAttribute("style")
+    expect(target.getAttribute("style")).toBeNull()
+    expect(target.hasAttribute("style")).toBe(false)
+    target.style.width = "5px"
+    target.style.width = ""
+    expect(target.getAttribute("style")).toBe("")
   })
 
   it("records one style attribute mutation per write, with the cssText before as oldValue", () => {

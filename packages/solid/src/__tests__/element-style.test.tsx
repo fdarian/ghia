@@ -114,12 +114,15 @@ describe.skipIf(!hasNativeTestRenderer)("element.style and element.id in Solid",
     expect(await nativeStyle(box)).toMatchObject({ width: 31, height: 5, "--x": "2" })
   })
 
-  it("gives getAttribute('style') as the text of the style, and null when it is empty", async () => {
+  it("gives getAttribute('style') as the text of the style, and \"\" once code emptied it", async () => {
     const box = mount(() => ({ width: 30, opacity: 0.5 }))
     expect(box.getAttribute("style")).toBe("width: 30px; opacity: 0.5;")
     expect(box.hasAttribute("style")).toBe(true)
     expect(box.getAttributeNames()).toContain("style")
     box.style.cssText = ""
+    expect(box.getAttribute("style")).toBe("")
+    expect(box.getAttributeNames()).toContain("style")
+    box.removeAttribute("style")
     expect(box.getAttribute("style")).toBeNull()
     expect(box.getAttributeNames()).not.toContain("style")
     box.style.setProperty("--a", "1")

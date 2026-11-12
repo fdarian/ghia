@@ -95,6 +95,9 @@ describeNative("element.style on a React host instance", () => {
     style.opacity = "0.5"
     style.top = "3px"
     style.paddingBottom = "2px"
+    style.scrollSnapType = "none"
+    style.scrollPaddingBottom = "4px"
+    style.overflowAnchor = "none"
     expect([style.height, style.transform, style.transition, style.pointerEvents, style.opacity, style.top]).toEqual([
       "50px",
       "translateY(10px)",
@@ -103,11 +106,17 @@ describeNative("element.style on a React host instance", () => {
       "0.5",
       "3px",
     ])
-    expect(style.paddingBottom).toBe("2px")
+    expect([style.paddingBottom, style.scrollSnapType, style.scrollPaddingBottom, style.overflowAnchor]).toEqual([
+      "2px",
+      "none",
+      "4px",
+      "none",
+    ])
     style.height = ""
     expect(style.height).toBe("")
     style.top = null as unknown as string
     expect(style.top).toBe("")
+    expect(style.cssFloat).toBe("")
   })
 
   it("lays out and paints what was written, before any frame", () => {
@@ -139,16 +148,42 @@ describeNative("element.style on a React host instance", () => {
     expect(element!.getBoundingClientRect().width).toBe(90)
   })
 
-  // Chrome stores a property it knows that Ghia has no style key for (touch-action); main ignores it. Pending a decision.
-  it.skip("stores a property Ghia has no style key for and applies nothing for it", () => {
+  it("stores a property a browser knows and Ghia has no style key for, and sends nothing to native for it", async () => {
     let element: PublicInstance | null = null
-    setup(<div ref={(instance) => (element = instance)} style={{ width: 40, height: 20 }} />)
-    element!.style.setProperty("some-unknown-thing", "5", "important")
-    element!.style.setProperty("scroll-snap-type", "x mandatory")
-    expect(element!.style.getPropertyValue("some-unknown-thing")).toBe("5")
-    expect(element!.style.getPropertyPriority("some-unknown-thing")).toBe("important")
-    expect(element!.style.scrollSnapType).toBe("x mandatory")
+    const root = setup(<div ref={(instance) => (element = instance)} style={{ width: 40, height: 20 }} />)
+    const style = element!.style
+    style.setProperty("touch-action", "none")
+    style.scrollSnapType = "x mandatory"
+    style.setProperty("will-change", "transform", "important")
+    style.setProperty("foo-bar", "5")
+    style.fooBar = "5"
+    for (const [read, expected] of [
+      [style.getPropertyValue("touch-action"), "none"],
+      [style.touchAction, "none"],
+      [style.getPropertyValue("scroll-snap-type"), "x mandatory"],
+      [style.scrollSnapType, "x mandatory"],
+      [style.getPropertyValue("will-change"), "transform"],
+      [style.getPropertyPriority("will-change"), "important"],
+      [style.getPropertyValue("foo-bar"), ""],
+    ]) {
+      expect(read).toBe(expected)
+    }
+    const text = "width: 40px; height: 20px; touch-action: none; scroll-snap-type: x mandatory; will-change: transform !important;"
+    expect(style.cssText).toBe(text)
+    expect(element!.getAttribute("style")).toBe(text)
     expect(height(element!)).toBe(20)
+
+    await Promise.resolve()
+    await Promise.resolve()
+    root.renderer.flush()
+    const sent = root.renderer.getElement((element as unknown as { nativeId: number }).nativeId)!.style as Record<string, unknown>
+    expect(sent.width).toBe(40)
+    expect(Object.keys(sent).filter((key) => /touch|scroll|will|foo/i.test(key))).toEqual([])
+
+    expect(style.removeProperty("touch-action")).toBe("none")
+    style.cssText = "touch-action: pan-x; foo-bar: 1"
+    expect(style.cssText).toBe("touch-action: pan-x;")
+    expect(style.width).toBe("")
   })
 
   it("lets a re-render overwrite only the properties it changed", () => {
@@ -230,6 +265,33 @@ describeNative("element.style on a React host instance", () => {
     expect(element!.getAttribute("style")).toBeNull()
     expect(element!.getAttributeNames()).not.toContain("style")
     expect(element!.hasAttribute("style")).toBe(false)
+  })
+
+  it("reads the style attribute as \"\" once it was set and emptied, and as null only when never set or removed", () => {
+    let element: PublicInstance | null = null
+    setup(<div ref={(instance) => (element = instance)} />)
+    expect(element!.getAttribute("style")).toBeNull()
+    element!.style.removeProperty("width")
+    expect(element!.getAttribute("style")).toBeNull()
+    element!.setAttribute("style", "")
+    expect(element!.getAttribute("style")).toBe("")
+    expect(element!.hasAttribute("style")).toBe(true)
+    expect(element!.getAttributeNames()).toContain("style")
+    element!.style.cssText = "height: 7px"
+    element!.style.cssText = ""
+    expect(element!.getAttribute("style")).toBe("")
+    element!.style.width = "5px"
+    element!.style.removeProperty("width")
+    expect(element!.getAttribute("style")).toBe("")
+    element!.style.setProperty("touch-action", "none")
+    element!.style.removeProperty("touch-action")
+    expect(element!.getAttribute("style")).toBe("")
+    element!.removeAttribute("style")
+    expect(element!.getAttribute("style")).toBeNull()
+    expect(element!.hasAttribute("style")).toBe(false)
+    element!.style.width = "5px"
+    element!.style.width = ""
+    expect(element!.getAttribute("style")).toBe("")
   })
 
   it("records one style attribute mutation per write, with the cssText before as oldValue", () => {

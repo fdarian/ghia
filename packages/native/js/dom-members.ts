@@ -21,7 +21,7 @@ import {
   storedAttribute,
 } from "./dom/attribute-names.js"
 import { hasMutationObservers, queueAttributeMutation } from "./dom/mutation-observer.js"
-import { serializeStyle } from "./dom/css-style-declaration.js"
+import { styleAttributeText, writeStyleText } from "./dom/css-style-declaration.js"
 import { DOM_BINDING, Element, SVGElement, type Node } from "./dom/nodes.js"
 import { popoverProperty } from "./dom/popover-attribute.js"
 import { hidePopover, showPopover, togglePopover, writePopoverAttribute } from "./dom/popover.js"
@@ -174,7 +174,7 @@ function writeAttribute(element: Element, bound: DomElementBinding, name: string
   }
   const attribute = attributeLookupName(requested, svg)
   if (attribute === "style") {
-    element.style.cssText = text ?? ""
+    writeStyleText(element[DOM_BINDING](), text)
     return
   }
   const defaultProp = defaultPropOf(element, bound, attribute)
@@ -224,8 +224,7 @@ export function defineDomMembers<This extends object>(
       value(this: This, name: string) {
         const svg = this instanceof SVGElement
         if (attributeLookupName(name, svg) === "style") {
-          const text = serializeStyle(bind(this).style)
-          return text === "" ? null : text
+          return styleAttributeText(bind(this).style)
         }
         const stored = storedAttribute(this, attributeLookupName(name, svg))
         if (stored !== undefined) return stored

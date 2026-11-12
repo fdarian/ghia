@@ -140,12 +140,15 @@ describeNative("element.style and element.id in React", () => {
     expect(await nativeStyle(box)).toMatchObject({ width: 30, "--a": "1" })
   })
 
-  it("gives getAttribute('style') as the text of the style, and null when it is empty", () => {
+  it("gives getAttribute('style') as the text of the style, and \"\" once code emptied it", () => {
     const { box } = mount({ style: { width: 30, opacity: 0.5 } })
     expect(box.getAttribute("style")).toBe("width: 30px; opacity: 0.5;")
     expect(box.hasAttribute("style")).toBe(true)
     expect(box.getAttributeNames()).toContain("style")
     box.style.cssText = ""
+    expect(box.getAttribute("style")).toBe("")
+    expect(box.getAttributeNames()).toContain("style")
+    box.removeAttribute("style")
     expect(box.getAttribute("style")).toBeNull()
     expect(box.getAttributeNames()).not.toContain("style")
     box.style.setProperty("--a", "1")
