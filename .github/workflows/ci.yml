@@ -1,15 +1,23 @@
 name: CI
 
 on:
+  # No paths-ignore: a required check has to report on every PR, docs-only ones included.
+  pull_request:
   workflow_dispatch:
-  # release.yml runs this before it publishes.
-  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   check:
+    # Ordinary PRs are checked locally (docs/fork/testing.md) and get a skipped, green ci-passed.
+    # The Version Packages PR is opened by github-actions[bot], so its pull_request run waits for
+    # "Approve and run", which is one of the two manual ways to start it (the other is a /ci comment).
+    if: github.event_name != 'pull_request' || github.head_ref == 'changeset-release/main'
     runs-on: macos-latest
     timeout-minutes: 180
     outputs:
@@ -104,3 +112,12 @@ jobs:
       - run: bun run test -- --shard=${{ matrix.shard }}/3
         working-directory: packages/react
         timeout-minutes: 30
+
+  # The one status the ruleset on main requires. Skipped needs pass, so ordinary PRs are not blocked.
+  ci-passed:
+    if: always()
+    needs: [check, react-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

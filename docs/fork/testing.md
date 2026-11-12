@@ -23,7 +23,7 @@ cd packages/native/examples/webview-e2e && bun run e2e         # <webview> on re
 - Tests that need the native addon are `describe.skip` when it is missing (`hasNativeTestRenderer`), so a green run without the addon proves little.
 - Almost none of the tests needs a real window: the test renderer (`createTestRoot`) draws offscreen. The macOS-only pieces (pointer lock, Metal effects, the OS reduced-motion read, the real window drag) were therefore checked against a simulated platform, not a live one. The exceptions open a real window: zed's `native_surface` test and the `<webview>` e2e below.
 
-CI (`.github/workflows/ci.yml`, GitHub's shared `macos-latest` runner) does not run on pushes or pull requests. It runs before a release publishes, where it gates the publish, and on demand. A run builds the four packages, runs the native, Vite, Solid and examples suites, and runs the React suite split over three runners (`--shard=1/3` to `3/3`):
+CI (`.github/workflows/ci.yml`, GitHub's shared `macos-latest` runner) does not check ordinary pull requests or pushes. The `Version Packages` PR needs its `ci-passed` status green before it merges (a ruleset on `main`), and any branch can be checked on demand. A run builds the four packages, runs the native, Vite, Solid and examples suites, and runs the React suite split over three runners (`--shard=1/3` to `3/3`). Start it by commenting `/ci` on the PR, with "Approve and run" on the PR's pending run, or from the command line, for any branch:
 
 ```bash
 gh workflow run ci.yml -R fdarian/ghia --ref <branch>
