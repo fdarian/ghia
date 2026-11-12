@@ -13,12 +13,20 @@ pub(crate) enum InputType {
     Search,
     Tel,
     Url,
+    Checkbox,
+    Radio,
+    Hidden,
+    Range,
 }
 
 impl InputType {
     /// An unknown token falls back to `text`, as the DOM does.
     pub(crate) fn parse(token: &str) -> Self {
         match token.trim().to_ascii_lowercase().as_str() {
+            "checkbox" => Self::Checkbox,
+            "radio" => Self::Radio,
+            "hidden" => Self::Hidden,
+            "range" => Self::Range,
             "password" => Self::Password,
             "number" => Self::Number,
             "email" => Self::Email,
@@ -27,6 +35,13 @@ impl InputType {
             "url" => Self::Url,
             _ => Self::Text,
         }
+    }
+}
+
+impl InputType {
+    /// Whether the control is edited as text, which is what the text editor builds.
+    pub(crate) fn edits_text(self) -> bool {
+        !matches!(self, Self::Checkbox | Self::Radio | Self::Hidden | Self::Range)
     }
 }
 
@@ -93,7 +108,7 @@ pub(crate) fn step_from_json(value: Option<&serde_json::Value>) -> f64 {
         .unwrap_or(1.0)
 }
 
-fn decimals(value: f64) -> usize {
+pub(crate) fn decimals(value: f64) -> usize {
     format!("{value}")
         .split_once('.')
         .map(|(_, fraction)| fraction.len())

@@ -34,6 +34,11 @@ export interface RendererRootHandlers {
    * `dispatch` before it returns.
    */
   schedule?: (dispatch: () => void) => void
+  /**
+   * Called after each event's handlers ran and `schedule` returned, whether or not anything listened,
+   * for a framework that settles state after an event (React DOM's `restoreControlledState`).
+   */
+  afterEvent?: (event: EventPayload) => void
 }
 
 export interface RendererRootBinding {
@@ -221,6 +226,14 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
   const mediaListeners = new Set<() => void>()
   const motionValueSinks = new Map<number, MotionValueSink>()
 
+  const settleAfter = (root: ActiveRoot, event: EventPayload) => {
+    try {
+      root.handlers.afterEvent?.(event)
+    } catch (error) {
+      state.reportError(error)
+    }
+  }
+
   /** The callbacks run as a handler does, so the framework flushes what they changed before the frame builds. */
   const runFrameCallbacks = (event: EventPayload) => {
     if (event.timelineTime === undefined) {
@@ -245,11 +258,11 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       const scoped = new GpuixEventTarget()
       if (handlers.onWindowKeyDown) {
         const onKeyDown = handlers.onWindowKeyDown
-        scoped.addEventListener("keydown", (event) => onKeyDown(event, renderer))
+        scoped.addEventListener("keydown", (event) => onKeyDown(event as KeyEvent, renderer))
       }
       if (handlers.onWindowKeyUp) {
         const onKeyUp = handlers.onWindowKeyUp
-        scoped.addEventListener("keyup", (event) => onKeyUp(event, renderer))
+        scoped.addEventListener("keyup", (event) => onKeyUp(event as KeyEvent, renderer))
       }
       const binding: ActiveRoot = {
         ids,
@@ -317,13 +330,17 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       if (received.eventType === "focusin") noteFocusEvent(renderer)
       const event = shapeScrollEvent(normalizeEventType(received))
       if (deliverObservation(renderer, event)) return true
-      if (!handlesEvent(root, event)) return false
+      if (!handlesEvent(root, event)) {
+        settleAfter(root, event)
+        return false
+      }
       const run = () => {
         runEvent(root, event)
         root.handlers.onEvent?.(received)
       }
       if (root.handlers.schedule) root.handlers.schedule(run)
       else run()
+      settleAfter(root, event)
       return true
     },
     dispatchSync(received) {
@@ -335,6 +352,7 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       if (received.eventType === "focusin") noteFocusEvent(renderer)
       const event = shapeScrollEvent(normalizeEventType(received))
       if (!root || !handlesEvent(root, event)) {
+        if (root) settleAfter(root, event)
         // Nobody can accept a drop here, and native would otherwise leave the OS its default.
         return event.eventType === "dragover"
           ? { defaultPrevented: false, propagationStopped: false, dropEffect: "none" }
@@ -354,6 +372,7 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
           "The schedule handler did not run the dispatch before returning. A synchronous event needs its outcome now, so schedule must call it synchronously."
         )
       }
+      settleAfter(root, event)
       return result
     },
     reportError: (error) => (onError ?? reportUncaught)(error),

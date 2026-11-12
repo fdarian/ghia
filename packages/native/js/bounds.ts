@@ -92,6 +92,18 @@ export function readBoundingClientRect(renderer: NativeRenderer, id: number): Bo
 }
 
 /**
+ * What native knows of the box of the element with this id, read the way `readBoundingClientRect`
+ * reads, or `null` for an element with no box (not mounted, not painted, `display: none`).
+ */
+export function readElementBounds(renderer: NativeRenderer, id: number): ElementBounds | null {
+  if (!renderer.getElementBounds) {
+    throw new Error("This renderer cannot measure elements: it has no getElementBounds")
+  }
+  flushPendingMutations(renderer)
+  return renderer.getElementBounds(id)
+}
+
+/**
  * The border box's size before any transform, which `offsetWidth` and `offsetHeight` round. Read
  * the way `readBoundingClientRect` reads. An element with no box is 0 by 0.
  */

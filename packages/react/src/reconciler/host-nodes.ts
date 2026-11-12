@@ -9,11 +9,11 @@ import {
   defineDomMembers,
   copyPrototypeMembers,
   defineScrollMembers,
+  SentWrites,
   document,
   DOM_BINDING,
   focusHostElement,
   HOST_BINDING,
-  hostElementMatches,
   HTMLElement,
   hasMutationObservers,
   queueChildListMutation,
@@ -47,12 +47,8 @@ export type HostNode = Instance | TextInstance
 export interface HostNodeState {
   container: Container
   mounted: boolean
-  /**
-   * React hid this element (Suspense, Activity). Its native style carries
-   * `display: none !important`, so a style update must keep that rather than
-   * overwrite it with the visible one.
-   */
-  hidden: boolean
+  /** The style native holds for the element, so a write of the same live style queues nothing. Reset when the native element is made. */
+  readonly sent: SentWrites
   /** The node it is placed in, or `null` at the top of a window or before it is placed. */
   parent: HostNode | null
   /** The nodes placed in it, in order. */
@@ -91,7 +87,7 @@ function createState(container: Container): HostNodeState {
   return {
     container,
     mounted: false,
-    hidden: false,
+    sent: new SentWrites(),
     parent: null,
     children: [],
     typeMembersAttached: false,
@@ -186,10 +182,6 @@ class ReactHostElement extends HTMLElement implements Instance {
     blurHostElement(containerFor(this).nativeRenderer, this.nativeId)
   }
 
-  matches(selector: string): boolean {
-    return hostElementMatches(containerFor(this).nativeRenderer, this.nativeId, selector)
-  }
-
   getBoundingClientRect(): BoundingClientRect {
     return readBoundingClientRect(containerFor(this).nativeRenderer, this.nativeId)
   }
@@ -216,6 +208,7 @@ defineDomMembers(ReactHostElement.prototype, (instance: ReactHostElement) => ({
     : undefined,
   prop: (name) => propOf(instance, name),
   propNames: () => propNamesOf(instance),
+  setProp: (name, value) => setDomProp(instance, name, value),
   get style() {
     return liveStyleOf(instance)
   },
@@ -327,6 +320,12 @@ class ElementDomBinding implements ElementBinding {
 
   createElement(type: string): Element {
     return createDomElement(this.state.container, type) as unknown as Element
+  }
+
+  get native(): ElementBinding["native"] {
+    return this.state.mounted
+      ? { renderer: this.state.container.nativeRenderer, id: this.instance.nativeId }
+      : undefined
   }
 }
 

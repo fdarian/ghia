@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { applyStyleChange, CSSStyleDeclaration, serializeStyle, styleDeclarationFor } from "../dom/css-style-declaration.js"
+import { applyStyleChange, carryStyleMarks, CSSStyleDeclaration, serializeStyle, styleAttributeText, styleDeclarationFor, writeStyleText } from "../dom/css-style-declaration.js"
 import type { StyleDesc } from "../host.js"
 import { STYLE_PROPERTIES } from "../style-properties.js"
 import "../dom-globals.js"
@@ -16,7 +16,7 @@ function declare(initial: StyleDesc = {}) {
       owner.writes += 1
     },
   }
-  return { owner, style: styleDeclarationFor(owner, binding) }
+  return { owner, binding, style: styleDeclarationFor(owner, binding) }
 }
 
 describe("CSSStyleDeclaration", () => {
@@ -31,6 +31,117 @@ describe("CSSStyleDeclaration", () => {
     const owner = { style: {} as StyleDesc }
     const binding = { style: owner.style, setStyle: () => {} }
     expect(styleDeclarationFor(owner, binding)).toBe(styleDeclarationFor(owner, binding))
+  })
+
+  describe("a property a browser has and Ghia has no style key for", () => {
+    it("is stored by setProperty, the camelCase member and cssText, and reads back every way", () => {
+      const subject = declare({ width: 40 })
+      subject.style.setProperty("touch-action", "none")
+      subject.style.scrollSnapType = "x mandatory"
+      subject.style.setProperty("will-change", "transform", "important")
+      expect(subject.style.getPropertyValue("touch-action")).toBe("none")
+      expect(subject.style.touchAction).toBe("none")
+      expect(subject.style.getPropertyValue("scroll-snap-type")).toBe("x mandatory")
+      expect(subject.style.willChange).toBe("transform")
+      expect(subject.style.getPropertyPriority("will-change")).toBe("important")
+      expect(subject.style.cssText).toBe("width: 40px; touch-action: none; scroll-snap-type: x mandatory; will-change: transform !important;")
+      expect(styleAttributeText(subject.owner.style)).toBe(subject.style.cssText)
+      expect(subject.style.length).toBe(4)
+      expect([...subject.style]).toEqual(["width", "touch-action", "scroll-snap-type", "will-change"])
+      expect(subject.style.item(1)).toBe("touch-action")
+    })
+
+    it("is never in the style native is sent", () => {
+      const subject = declare({ width: 40 })
+      subject.style.setProperty("touch-action", "none")
+      subject.style.willChange = "none"
+      expect(JSON.parse(JSON.stringify(subject.owner.style))).toEqual({ width: 40 })
+      expect(Object.keys(subject.owner.style)).toEqual(["width"])
+    })
+
+    it("is removed by removeProperty, an empty value and cssText, and keeps the attribute", () => {
+      const subject = declare()
+      subject.style.setProperty("touch-action", "none")
+      expect(subject.style.removeProperty("touch-action")).toBe("none")
+      expect(subject.style.removeProperty("touch-action")).toBe("")
+      expect(subject.style.getPropertyValue("touch-action")).toBe("")
+      expect(styleAttributeText(subject.owner.style)).toBe("")
+      subject.style.willChange = "none"
+      subject.style.willChange = ""
+      expect(subject.style.willChange).toBe("")
+      subject.style.cssText = "will-change: none; touch-action: pan-x"
+      expect(subject.style.cssText).toBe("will-change: none; touch-action: pan-x;")
+      subject.style.cssText = "width: 3px"
+      expect(subject.style.touchAction).toBe("")
+      expect(subject.style.cssText).toBe("width: 3px;")
+    })
+
+    it("keeps its place when written again, and a write of the same text is no write", () => {
+      const subject = declare()
+      subject.style.setProperty("touch-action", "none")
+      subject.style.setProperty("will-change", "none")
+      subject.style.setProperty("touch-action", "pan-x")
+      expect(subject.style.cssText).toBe("touch-action: pan-x; will-change: none;")
+      const writes = subject.owner.writes
+      subject.style.setProperty("touch-action", "pan-x")
+      expect(subject.owner.writes).toBe(writes)
+    })
+
+    it("survives a framework's change of another property, and a framework's change of the style itself", () => {
+      const subject = declare({ width: 40 })
+      subject.style.setProperty("touch-action", "none")
+      const live = applyStyleChange(subject.owner.style, { width: 40 }, { width: 50 })
+      expect(serializeStyle(live)).toBe("width: 50px; touch-action: none;")
+    })
+
+    it("is a declaration of a style that is copied, as a clone copies it", () => {
+      const subject = declare()
+      subject.style.setProperty("touch-action", "none")
+      expect(styleAttributeText(carryStyleMarks(subject.owner.style, { ...subject.owner.style }))).toBe("touch-action: none;")
+      expect(styleAttributeText({ ...subject.owner.style }), "a spread leaves it behind").toBeNull()
+    })
+
+    it("is ignored for a name that is no CSS property, and for a value with its own !important", () => {
+      const subject = declare({ width: 40 })
+      subject.style.setProperty("foo-bar", "1")
+      subject.style.setProperty("some-unknown-thing", "5", "important")
+      subject.style.cssText = "foo-bar: 1; width: 4px"
+      expect(subject.style.getPropertyValue("foo-bar")).toBe("")
+      expect(subject.style.cssText).toBe("width: 4px;")
+      subject.style.setProperty("touch-action", "none !important")
+      expect(subject.style.touchAction).toBe("")
+    })
+  })
+
+  describe("the style attribute", () => {
+    it("is null until something is written, then the text, and \"\" once it is emptied", () => {
+      const subject = declare()
+      expect(styleAttributeText(subject.owner.style)).toBeNull()
+      subject.style.removeProperty("width")
+      expect(styleAttributeText(subject.owner.style)).toBeNull()
+      subject.style.width = "4px"
+      expect(styleAttributeText(subject.owner.style)).toBe("width: 4px;")
+      subject.style.removeProperty("width")
+      expect(styleAttributeText(subject.owner.style)).toBe("")
+    })
+
+    it("is \"\" after cssText is emptied, even on a style that had nothing", () => {
+      const subject = declare()
+      subject.style.cssText = ""
+      expect(styleAttributeText(subject.owner.style)).toBe("")
+      const framework = declare({ width: 40 })
+      framework.style.cssText = ""
+      expect(styleAttributeText(framework.owner.style)).toBe("")
+    })
+
+    it("is null again after the attribute is removed, and keeps the state blocks", () => {
+      const subject = declare({ width: 40, hover: { opacity: 0.5 } } as StyleDesc)
+      writeStyleText(subject.binding, "")
+      expect(styleAttributeText(subject.owner.style)).toBe("")
+      writeStyleText(subject.binding, null)
+      expect(styleAttributeText(subject.owner.style)).toBeNull()
+      expect(subject.owner.style).toEqual({ hover: { opacity: 0.5 } })
+    })
   })
 
   it("writes kebab-case names to the StyleDesc keys", () => {
@@ -97,17 +208,24 @@ describe("CSSStyleDeclaration", () => {
     subject.style.setProperty("height", null)
     expect(subject.owner.style).toEqual({})
     const writes = subject.owner.writes
-    subject.style.setProperty("touch-action", "none")
+    subject.style.setProperty("some-unknown-thing", "none")
     subject.style.setProperty("width", "10px !important")
     subject.style.setProperty("width", "1px", "bogus")
     expect(subject.owner.writes).toBe(writes)
   })
 
-  it("accepts priority important and ignores it", () => {
+  it("holds priority important as the value's !important suffix, and reads the plain value", () => {
     const subject = declare()
     subject.style.setProperty("top", "1px", "important")
-    expect(subject.owner.style).toEqual({ top: "1px" })
+    expect(subject.owner.style).toEqual({ top: "1px !important" })
+    expect(subject.style.getPropertyPriority("top")).toBe("important")
+    expect(subject.style.getPropertyValue("top")).toBe("1px")
+    expect(subject.style.top).toBe("1px")
+    expect(subject.style.cssText).toBe("top: 1px !important;")
+    subject.style.setProperty("top", "2px")
     expect(subject.style.getPropertyPriority("top")).toBe("")
+    subject.style.setProperty("top", "3px", "important")
+    expect(subject.style.removeProperty("top")).toBe("3px")
   })
 
   it("returns the old value from removeProperty, empty when there was none", () => {
@@ -184,7 +302,7 @@ describe("CSSStyleDeclaration", () => {
   it("round-trips cssText through the setter", () => {
     const subject = declare({ hover: { opacity: 0.5 }, color: "red" })
     subject.style.cssText = "width: 10px; --a: url(a;b) 'x;y'; OPACITY: .5 !important; bogus: 1; : 2; color"
-    expect(subject.owner.style).toEqual({ hover: { opacity: 0.5 }, width: "10px", "--a": "url(a;b) 'x;y'", opacity: 0.5 })
+    expect(subject.owner.style).toEqual({ hover: { opacity: 0.5 }, width: "10px", "--a": "url(a;b) 'x;y'", opacity: ".5 !important" })
     const text = subject.style.cssText
     subject.style.cssText = ""
     subject.style.cssText = text

@@ -1025,6 +1025,10 @@ enum UiCommand {
             std::result::Result<crate::custom_elements::text_selection::TextSelection, String>,
         >,
     },
+    GetTextValue {
+        id: u64,
+        response: SyncSender<std::result::Result<String, String>>,
+    },
     RequestSubmit {
         id: u64,
         submitter: Option<u64>,
@@ -1303,6 +1307,11 @@ async fn run_ui_commands(
             UiCommand::GetTextSelection { id, response } => {
                 window.update(cx, move |view, _window, cx| {
                     response.send(view.text_selection(id, cx)).ok();
+                })
+            }
+            UiCommand::GetTextValue { id, response } => {
+                window.update(cx, move |view, _window, cx| {
+                    response.send(view.text_control_value(id, cx)).ok();
                 })
             }
             UiCommand::RequestSubmit { id, submitter, response } => gpui::AnyWindowHandle::from(window)
@@ -4246,6 +4255,26 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Run the activation behaviour of the element `element_id` (a label focuses its control, a
+    /// submit button submits its form) for a `click` an app dispatched at it with `dispatchEvent`,
+    /// which JS has delivered already and no listener cancelled. Delivers no click of its own.
+    /// A disabled form control has none.
+    #[napi]
+    pub fn activate_element(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |window, cx| {
+            crate::events::activation::activate_element(id, window, cx)
+        })?
+        .map_err(Error::from_reason);
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = id;
+            Err(Error::from_reason("activateElement is only implemented on macOS"))
+        }
+    }
+
     /// Paint packed pixels onto an `<img>` host node. `format` is `"rgba"`
     /// (default) or `"bgra"`; BGRA skips the per-pixel swizzle.
     #[napi]
@@ -4425,6 +4454,143 @@ impl GpuixRenderer {
             target_os = "freebsd"
         )))]
         Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// The text of an `<input>` or `<textarea>`, which is its `value`. A separate read from
+    /// `getTextSelection` so that reading a selection does not copy the text.
+    #[napi]
+    pub fn get_text_value(&self, element_id: f64) -> Result<String> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, _window, cx| view.text_control_value(id, cx))?
+            .map_err(Error::from_reason);
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetTextValue { id, response })?;
+            return recv_ui_response(receiver, "the text value query")?
+                .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// `checked`, `defaultChecked`, `indeterminate` and `value` of an `<input>`: its state in the
+    /// tree, which a click or a prop write changes (`custom_elements::input_choice`).
+    #[napi]
+    pub fn get_input_choice(&self, element_id: f64) -> Result<crate::custom_elements::input_choice::InputChoiceState> {
+        let id = to_element_id(element_id)?;
+        crate::custom_elements::input_choice::read(&self.tree.lock().unwrap(), id).map_err(Error::from_reason)
+    }
+
+    /// The toggle of the checkbox or radio that a click an app dispatches at `element_id` is about
+    /// to activate, which has to be made before the click's listeners run so that they see the new
+    /// state. JS calls it before delivering the click; `cancelActivation` or `activateElement`
+    /// follows. Does nothing for another element, a disabled control or one that is inert.
+    #[napi]
+    pub fn pre_activate_element(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |window, cx| {
+            crate::events::activation::pre_activate_element(id, window, cx)
+        })?
+        .map_err(Error::from_reason);
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = id;
+            Err(Error::from_reason("preActivateElement is only implemented on macOS"))
+        }
+    }
+
+    /// A click an app dispatched at `element_id` was canceled: the checkbox or radio that
+    /// `preActivateElement` toggled is put back.
+    #[napi]
+    pub fn cancel_activation(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |window, cx| {
+            crate::events::activation::cancel_element(id, window, cx)
+        })?
+        .map_err(Error::from_reason);
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = id;
+            Err(Error::from_reason("cancelActivation is only implemented on macOS"))
+        }
+    }
+
+    /// `input.checked = flag`, and `defaultChecked` and `indeterminate`, the writes of code: the
+    /// state of the `<input>` changes and no prop does, so the framework's committed props stay what
+    /// `restoreControlledState` goes back to. `name` is one of those three.
+    #[napi]
+    pub fn write_input_flag(&self, element_id: f64, name: String, value: bool) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        {
+            let tree = self.tree.clone();
+            return update_window_without_view(move |window, cx| {
+                crate::events::input_state::write_flag(&tree, id, &name, value, window, cx)
+            })?
+            .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (id, name, value);
+            Err(Error::from_reason("writeInputFlag is only implemented on macOS"))
+        }
+    }
+
+    /// `input.value = text` on a range (and so `valueAsNumber`, `stepUp` and `stepDown`): native
+    /// sanitizes the value, and no prop changes.
+    #[napi]
+    pub fn write_range_value(&self, element_id: f64, value: String) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        {
+            let tree = self.tree.clone();
+            return update_window_without_view(move |window, cx| {
+                crate::events::input_state::write_range_value(&tree, id, &value, window, cx)
+            })?
+            .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (id, value);
+            Err(Error::from_reason("writeRangeValue is only implemented on macOS"))
+        }
+    }
+
+    /// React DOM's `restoreControlledState` for `element_id`: a checkbox or radio (and the radios of
+    /// its group) with a `checked` prop and a range with a `value` prop show the prop. Native never
+    /// does this on its own: the React adapter calls it after an event's handlers ran.
+    #[napi]
+    pub fn restore_controlled_state(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        {
+            let tree = self.tree.clone();
+            return update_window_without_view(move |window, cx| {
+                crate::events::input_state::restore_controlled(&tree, id, window, cx)
+            })?
+            .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = id;
+            Err(Error::from_reason("restoreControlledState is only implemented on macOS"))
+        }
     }
 
     /// `form.requestSubmit(submitter)`: validate the form's controls, then emit `submit`.
@@ -5744,6 +5910,13 @@ impl WebGpuixRenderer {
             js_sys::Reflect::set(&object, &wasm_bindgen::JsValue::from_str(key), &value)?;
         }
         Ok(object.into())
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getTextValue)]
+    pub fn get_text_value(&self, element_id: f64) -> Result<String, wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        update_web_window(move |view, _window, cx| view.text_control_value(id, cx))?
+            .map_err(|error| wasm_bindgen::JsValue::from_str(&error))
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = requestSubmit)]
@@ -7287,6 +7460,7 @@ impl GpuixView {
 
     /// Scrolls for a key nothing consumed. See `GpuixRenderer::scroll_by_key`.
     pub(crate) fn scroll_by_key(&self, key: &str, shift: bool, window: &gpui::Window) -> bool {
+        let key_name = key;
         let Some(key) = crate::scroll::KeyScroll::parse(key, shift) else {
             return false;
         };
@@ -7296,7 +7470,9 @@ impl GpuixView {
             let Some(element) = tree.elements.get(&focused) else {
                 return false;
             };
-            if matches!(element.element_type.as_str(), "input" | "textarea") {
+            if crate::custom_elements::input_choice::is_text_editor(element)
+                || crate::custom_elements::input_range::takes_key(element, key_name)
+            {
                 return false;
             }
             if key.activates_controls
@@ -11941,6 +12117,8 @@ fn build_element_unpumped(
                 stacking_root,
                 lift_absorbed,
                 resolved,
+                toggled: crate::custom_elements::input_choice::toggled_of(ctx.tree, element),
+                range: crate::custom_elements::input_range::reading_of(ctx.tree, element),
             };
             // What an adapter paints is not read by the build: it takes its text colour, and the
             // `currentColor` of its icons, when gpui paints it.

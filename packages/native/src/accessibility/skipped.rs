@@ -141,8 +141,20 @@ fn node_of(tree: &RetainedTree, element: &RetainedElement) -> Option<(gpui::acce
     if element.element_type == "label" {
         probe = super::label::describe(probe, element.id);
     }
-    if matches!(element.element_type.as_str(), "input" | "textarea") {
+    if crate::custom_elements::input_choice::is_text_editor(element) {
         probe = describe_field(probe, element);
+    }
+    if let Some(toggled) = crate::custom_elements::input_choice::toggled_of(tree, element) {
+        probe = probe.aria_toggled(toggled);
+    }
+    if let Some(range) = crate::custom_elements::input_range::reading_of(tree, element) {
+        probe = probe
+            .aria_numeric_value(range.value)
+            .aria_min_numeric_value(range.rules.min)
+            .aria_max_numeric_value(range.rules.max);
+        if let Some(step) = range.rules.step {
+            probe = probe.aria_numeric_value_step(step);
+        }
     }
     let role = probe.a11y_role()?;
     let mut node = gpui::accesskit::Node::new(role);

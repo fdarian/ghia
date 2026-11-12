@@ -74,6 +74,7 @@ import type {
   MarkdownProps as NativeMarkdownProps,
   AnchoredProps as NativeAnchoredProps,
   DomElement,
+  HostInputEvent,
   MotionBinding,
   MotionValueStyle,
   MutationRenderer,
@@ -81,14 +82,20 @@ import type {
   RootEventHandlers,
   Text,
   TextControlSelection,
+  InputMembers,
   ScrollableElement,
   WindowKeyEventHandlers,
 } from "@ghia/native/host"
 
 export * from "@ghia/native/host"
 
-/** `onFocusIn` and `onFocusOut` do not exist in React, where `onFocus` and `onBlur` bubble. */
-type ReactHostProps<Props> = Omit<Props, "onFocusIn" | "onFocusOut">
+/**
+ * `onFocusIn` and `onFocusOut` do not exist in React, where `onFocus` and `onBlur` bubble. `onChange`
+ * is React DOM's: one call per edit of a text control, the DOM `input`, whose event is a `HostInputEvent`.
+ */
+type ReactHostProps<Props> = Omit<Props, "onFocusIn" | "onFocusOut" | "onChange"> & {
+  onChange?: (event: HostInputEvent) => void
+}
 
 export interface Props extends Omit<ReactHostProps<HostProps>, "style"> {
   style?: MotionValueStyle
@@ -311,7 +318,7 @@ export interface WebviewInstance extends PublicInstance, WebviewMethods {
 }
 
 /** The ref of an `<input>` or `<textarea>`: the DOM selection API. */
-export interface TextControlInstance extends PublicInstance, TextControlSelection {
+export interface TextControlInstance extends PublicInstance, TextControlSelection, Partial<InputMembers> {
   type: "input" | "textarea"
 }
 

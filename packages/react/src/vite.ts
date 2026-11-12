@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url"
 import viteReact from "@vitejs/plugin-react"
 import { ENVIRONMENT_NAME, SERVER_ENVIRONMENT_NAME, findPluginApi } from "ghia"
 import { createFilter, transformWithOxc, type Plugin, type ResolvedConfig } from "vite"
@@ -18,6 +19,8 @@ injectIntoGlobalHook(globalThis)
 globalThis.$RefreshReg$ = () => {}
 globalThis.$RefreshSig$ = () => (type) => type
 `
+
+const REACT_DOM_SHIM = fileURLToPath(new URL("./react-dom.js", import.meta.url))
 
 const CJS_PACKAGES = ["react", "react-reconciler"]
 
@@ -58,6 +61,11 @@ export function react(options: ReactOptions = {}): Plugin[] {
     }).map((plugin) => skipServerEnvironment(withoutOptimizeDeps(plugin))),
     {
       name: "ghia:react",
+      // A Ghia app has no `react-dom`, and the web libraries it runs import it for `createPortal` and `flushSync`.
+      // Exact match: `react-dom/client` and `react-dom/server` have no counterpart and fail to resolve.
+      config() {
+        return { resolve: { alias: [{ find: /^react-dom$/, replacement: REACT_DOM_SHIM }] } }
+      },
       // `ghia()` inlines every dependency of its environment, and Vite's module runner cannot run
       // CommonJS, which React and its reconciler are. Bun loads them natively; `ghia build` bundles them.
       configEnvironment(name, _environment, context) {

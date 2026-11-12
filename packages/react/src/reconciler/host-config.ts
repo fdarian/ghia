@@ -17,8 +17,6 @@ import {
   sameMutationValue,
   serializeCustomProp,
   attributesOfProps,
-  isNotAttribute,
-  isSvgType,
   forwardsCustomProp,
   hasMutationObservers,
   queueCharacterDataMutation,
@@ -36,17 +34,22 @@ const NoEventPriority = 0
 
 /**
  * React DOM listens to `focusin` and `focusout` for `onFocus` and `onBlur`, so
- * they bubble. React has no `onFocusIn` or `onFocusOut`.
+ * they bubble. React has no `onFocusIn` or `onFocusOut`. `onInput` and `onChange`
+ * depend on the element: see `fieldHandlers`.
  */
 const EVENT_TYPE_BY_PROP = eventTypesWithOverrides({
   onFocus: "focusin",
   onBlur: "focusout",
   onFocusIn: null,
   onFocusOut: null,
+  onInput: null,
+  onChange: null,
   // A `<nativeview>`'s handlers take the pointer and nothing, not an event: see `syncNativeviewListeners`.
   onAttach: null,
   onDetach: null,
 })
+import { diffAttributes, diffCustomProps } from "./custom-props.js"
+import { fieldHandlers } from "./field-events.js"
 import type {
   Container,
   ElementType,
@@ -189,6 +192,9 @@ function syncEventListeners(container: Container, instance: Instance): void {
     const handler = record[propName]
     if (eventType && handler) listeners.setProp(eventType, handler as HostEventHandler)
   }
+  const fields = fieldHandlers(instance.type, instance.props)
+  if (fields.input) listeners.setProp("input", fields.input)
+  if (fields.change) listeners.setProp("change", fields.change)
 }
 
 function syncNativeviewProps(
@@ -241,21 +247,21 @@ function diffEventListeners(instance: Instance, oldProps: Props, newProps: Props
     const eventType = EVENT_TYPE_BY_PROP.get(propName)
     if (eventType && previous[propName]) listeners.setProp(eventType, undefined)
   }
+  if (previous.onInput === next.onInput && previous.onChange === next.onChange && previous.type === next.type) return
+  const before = fieldHandlers(instance.type, oldProps)
+  const after = fieldHandlers(instance.type, newProps)
+  if (before.input !== after.input) listeners.setProp("input", after.input)
+  if (before.change !== after.change) listeners.setProp("change", after.change)
 }
 
 // ── Style helper ─────────────────────────────────────────────────────
 
 const NO_STYLE = {}
 
-function sendStyle(renderer: MutationRenderer, id: number, style: StyleDesc | undefined): void {
-  if (style == null || Object.keys(style).length === 0) return
-  renderer.setStyle(id, style)
-}
-
-/** Sends the live style of a mounted element, as `display: none !important` while React hides it. */
+/** Sends the live style of an element that has a native element, unless native has it already. */
 export function sendLiveStyle(instance: Instance, state: HostNodeState): void {
   const style = liveStyleOf(instance)
-  state.container.renderer.setStyle(instance.nativeId, state.hidden ? hiddenStyle(style) : style)
+  if (state.sent.writesStyle(style)) state.container.renderer.setStyle(instance.nativeId, style, state.sent.styleJson)
 }
 
 /**
@@ -271,17 +277,6 @@ export function sendLiveStyle(instance: Instance, state: HostNodeState): void {
  */
 function sameStyle(left: Props["style"], right: Props["style"]): boolean {
   return left === right || sameMutationValue(left ?? NO_STYLE, right ?? NO_STYLE)
-}
-
-/**
- * The style a hidden element keeps: its own, minus the states, plus `display: none !important`,
- * which is what React DOM writes, so a sheet rule cannot show what Suspense hides.
- */
-function hiddenStyle(style: Props["style"]) {
-  // Hover and active go, because a hidden element must stay hidden. A hover
-  // style that sets `display` would otherwise show an element React asked to hide.
-  const { hover: _hover, active: _active, ...base } = splitMotionStyle(style).style ?? {}
-  return { ...base, display: "none !important" }
 }
 
 // ── Custom prop forwarding ───────────────────────────────────────────
@@ -308,92 +303,8 @@ function syncAttributes(
   props: Iterable<readonly [string, unknown]>
 ): void {
   if (!renderer.forwardsAttributes) return
-  for (const [name, text] of attributesOfProps(props, isSvgType(type))) {
+  for (const [name, text] of attributesOfProps(props, type)) {
     renderer.setAttribute(id, name, text)
-  }
-}
-
-/** A handler or an object is no attribute, so one is as good as another: an inline handler is new on every render. */
-function isNoAttributeValue(value: unknown): boolean {
-  return typeof value === "function" || (typeof value === "object" && value !== null)
-}
-
-function sameAttributeProp(previous: unknown, next: unknown): boolean {
-  return previous === next || (isNoAttributeValue(previous) && isNoAttributeValue(next))
-}
-
-/** Whether a prop that can be an attribute differs, compared in place: most commits change none, and this allocates nothing. */
-function attributePropsDiffer(oldProps: Props, newProps: Props): boolean {
-  const previous = oldProps as unknown as Record<string, unknown>
-  const next = newProps as unknown as Record<string, unknown>
-  for (const key in next) {
-    if (!isNotAttribute(key) && !sameAttributeProp(previous[key], next[key])) return true
-  }
-  for (const key in previous) {
-    if (!(key in next) && !isNotAttribute(key) && !sameAttributeProp(previous[key], undefined)) return true
-  }
-  return false
-}
-
-function diffAttributes(
-  renderer: MutationRenderer,
-  id: number,
-  type: string,
-  oldProps: Props,
-  newProps: Props
-): void {
-  if (!renderer.forwardsAttributes || !attributePropsDiffer(oldProps, newProps)) return
-  const svg = isSvgType(type)
-  const previous = attributesOfProps(Object.entries(oldProps), svg)
-  const next = attributesOfProps(Object.entries(newProps), svg)
-  for (const [name, text] of next) {
-    if (previous.get(name) !== text) renderer.setAttribute(id, name, text)
-  }
-  for (const name of previous.keys()) {
-    if (!next.has(name)) renderer.setAttribute(id, name, null)
-  }
-}
-
-/**
- * Diff and send changed custom props to Rust.
- *
- * Compared by value after serialization: a handler or an inline object is new on
- * every render, and a function serializes to `null` either way, so resending it
- * would only make Rust parse and discard the same value again.
- */
-function diffCustomProps(
-  renderer: MutationRenderer,
-  id: number,
-  type: string,
-  oldProps: Props,
-  newProps: Props
-): void {
-  const previous = oldProps as Record<string, unknown>
-  const next = newProps as Record<string, unknown>
-  // Updated or added props
-  for (const key in next) {
-    if (isReservedProp(key)) continue
-    if (!forwardsCustomProp(type, key)) continue
-    const value = next[key]
-    const oldValue = previous[key]
-    if (value === oldValue) continue
-    const serialized = serializeCustomProp(value as Parameters<typeof serializeCustomProp>[0])
-    if (
-      key in previous &&
-      sameMutationValue(
-        serializeCustomProp(oldValue as Parameters<typeof serializeCustomProp>[0]),
-        serialized
-      )
-    ) {
-      continue
-    }
-    renderer.setCustomProp(id, key, serialized)
-  }
-  // Removed props
-  for (const key in previous) {
-    if (isReservedProp(key)) continue
-    if (!forwardsCustomProp(type, key)) continue
-    if (!(key in next)) renderer.setCustomProp(id, key, null)
   }
 }
 
@@ -410,9 +321,8 @@ export function materialize(node: HostNode): ReturnType<typeof stateFor> {
   if ("type" in node) {
     renderer.createElement(node.nativeId, node.type)
     state.container.instances.set(node.nativeId, node)
-    const style = state.codeStyle ?? splitMotionStyle(node.props.style).style
-    if (state.hidden) renderer.setStyle(node.nativeId, hiddenStyle(style))
-    else sendStyle(renderer, node.nativeId, style)
+    state.sent.reset()
+    sendLiveStyle(node, state)
     syncMotionBindings(state.container, node.nativeId, node.props.style, node.type)
     syncEventListeners(state.container, node)
     const liveProps = livePropEntries(node)
@@ -546,6 +456,7 @@ function applyUpdate(instance: Instance, oldProps: Props, newProps: Props): void
   // which is every element a parent re-rendered. Most of those did not change
   // their style, so send it only when it did.
   const styleChanged = !sameStyle(oldProps.style, newProps.style)
+  const overridesBefore = state.propOverrides === undefined ? undefined : new Map(state.propOverrides)
   if (hasMutationObservers()) {
     recordAttributeChanges(instance, new Set([...Object.keys(oldProps), ...Object.keys(newProps)]), () => {
       adoptProps(instance, state, oldProps, newProps, styleChanged)
@@ -570,7 +481,18 @@ function applyUpdate(instance: Instance, oldProps: Props, newProps: Props): void
   }
   // Custom prop diff (for non-div/text elements)
   diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
-  diffAttributes(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
+  // What code wrote is an attribute too (a script's `defaultValue` answers the `value` attribute over a controlled `value`).
+  diffAttributes(
+    container.renderer,
+    instance.nativeId,
+    instance.type,
+    withOverrides(oldProps, overridesBefore),
+    withOverrides(newProps, state.propOverrides)
+  )
+}
+
+function withOverrides(props: Props, overrides: ReadonlyMap<string, unknown> | undefined): Props {
+  return overrides === undefined ? props : ({ ...props, ...Object.fromEntries(overrides) } as Props)
 }
 
 // ── Host config ──────────────────────────────────────────────────────
@@ -758,22 +680,26 @@ export const hostConfig = {
     linkChild(parent, child)
   },
 
+  // Through the live style, as React DOM does through `style`: the hidden element reads
+  // `display: none` with priority important, and a sheet rule cannot show what Suspense hides.
   hideInstance(instance: Instance): void {
-    // Keep the element's own style under `display: none !important`, so a sheet
-    // rule cannot show what Suspense hides and unhiding restores it as it was.
-    const state = stateFor(instance)
-    state.hidden = true
-    if (state.mounted) rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(liveStyleOf(instance)))
+    instance.style.setProperty("display", "none", "important")
   },
 
-  unhideInstance(instance: Instance, _props: Props): void {
-    const state = stateFor(instance)
-    state.hidden = false
-    if (state.mounted) sendLiveStyle(instance, state)
+  // The display the props give it, else none: a `display` that code wrote while it was hidden is
+  // dropped, as it is in React DOM.
+  unhideInstance(instance: Instance, props: Props): void {
+    const display: unknown = props.style?.display
+    instance.style.display = display == null || typeof display === "boolean" ? "" : `${display}`.trim()
   },
 
-  hideTextInstance(_textInstance: TextInstance): void {},
-  unhideTextInstance(_textInstance: TextInstance, _text: string): void {},
+  hideTextInstance(textInstance: TextInstance): void {
+    textInstance.nodeValue = ""
+  },
+
+  unhideTextInstance(textInstance: TextInstance, text: string): void {
+    textInstance.nodeValue = text
+  },
 
   clearContainer(_container: Container): void {},
 

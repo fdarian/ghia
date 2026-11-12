@@ -9,6 +9,7 @@
 import type { StyleDesc } from "../host.js"
 import { overlaps } from "../style-covers.js"
 import { STYLE_PROPERTIES, type StyleProperty } from "../style-properties.js"
+import { CSS_PROPERTY_NAMES } from "./css-property-names.js"
 
 /** What an adapter gives the declaration of one of its elements. */
 export type StyleBinding = {
@@ -19,6 +20,43 @@ export type StyleBinding = {
 }
 
 type StyleRecord = Record<string, unknown>
+
+/**
+ * Where a style keeps what code wrote that Ghia has no style key for (`touch-action`): CSS names to
+ * texts, with the `!important` suffix. It is a non-enumerable symbol key, so it is not in what
+ * native is sent, in a walk of the style's properties or in a comparison of two styles. A spread
+ * does not carry it either: `applyStyleChange` and `cloneNode` copy it with `carryStyleMarks`.
+ */
+const UNSUPPORTED = Symbol.for("@ghia/native/style-unsupported")
+
+/**
+ * Set on a style code has written to: the `style` attribute is there, `""` when nothing is left in
+ * it. Carried the same way as `UNSUPPORTED`, which it is separate from because a style can be
+ * written to and hold nothing Ghia has no key for.
+ */
+const WRITTEN = Symbol.for("@ghia/native/style-written")
+
+type Unsupported = Readonly<Record<string, string>>
+
+function unsupportedOf(style: StyleDesc): Unsupported | undefined {
+  return (style as unknown as { [UNSUPPORTED]?: Unsupported })[UNSUPPORTED]
+}
+
+function isWritten(style: StyleDesc): boolean {
+  return (style as unknown as { [WRITTEN]?: true })[WRITTEN] === true
+}
+
+/** `style` with the marks set on it (one that has none gets none), and the style itself. */
+function withStyleMarks(style: StyleRecord, unsupported: Unsupported | undefined, written: boolean): StyleDesc {
+  if (unsupported !== undefined) Object.defineProperty(style, UNSUPPORTED, { value: unsupported, configurable: true })
+  if (written) Object.defineProperty(style, WRITTEN, { value: true, configurable: true })
+  return style as StyleDesc
+}
+
+/** What `applyStyleChange` and a clone copy of a style that a spread leaves behind. */
+export function carryStyleMarks(from: StyleDesc, to: StyleRecord): StyleDesc {
+  return withStyleMarks(to, unsupportedOf(from), isWritten(from))
+}
 
 /** The properties whose `StyleDesc` value is a number when the text is one; other text (`50%`, `auto`, `none`, `inherit`) goes to native as it is. */
 const NUMBER_ONLY: ReadonlySet<string> = new Set(["flexGrow", "flexShrink", "order", "zIndex", "opacity", "lineClamp"])
@@ -39,7 +77,21 @@ const UNITLESS_NUMBER: ReadonlySet<string> = new Set([
 /** The properties whose bare number is degrees, as `StyleDesc` reads it (`DEGREES` in `css/lenient.rs`). */
 const DEGREES: ReadonlySet<string> = new Set(["rotate", "motionRotate", "rotateX", "rotateY", "rotateZ", "skew", "skewX", "skewY"])
 
-const IMPORTANT = /!\s*important\s*$/i
+/**
+ * A property written with `important` is held as its value and this suffix, the form a framework
+ * writes one in (`display: "none !important"`) and the one native's cascade reads
+ * (`css/inline_important.rs`). Every read takes it off again.
+ */
+const IMPORTANT_SUFFIX = " !important"
+const IMPORTANT = /\s*!\s*important\s*$/i
+
+function plainText(text: string): string {
+  return text.replace(IMPORTANT, "")
+}
+
+function priorityOf(text: string): string {
+  return IMPORTANT.test(text) ? "important" : ""
+}
 
 function kebabOf(property: string): string {
   return property.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
@@ -62,6 +114,12 @@ function keyOf(name: string): string | undefined {
   const text = String(name)
   if (isCustom(text)) return text
   return PROPERTY_BY_NAME.get(text.toLowerCase())
+}
+
+/** The lower-case name of a CSS property a browser has and Ghia has no style key for, or `undefined` for a name that is none. */
+function unsupportedNameOf(name: string): string | undefined {
+  const lower = String(name).toLowerCase()
+  return !isCustom(lower) && !PROPERTY_BY_NAME.has(lower) && CSS_PROPERTY_NAMES.has(lower) ? lower : undefined
 }
 
 /** The CSS name of a `StyleDesc` key, or `undefined` for a key that is not one declaration. */
@@ -89,14 +147,24 @@ function declarationsOf(style: StyleDesc): Array<[string, string]> {
     const text = valueText(key, record[key])
     if (text !== undefined) declarations.push([name, text])
   }
+  const unsupported = unsupportedOf(style)
+  if (unsupported !== undefined) declarations.push(...Object.entries(unsupported))
   return declarations
 }
 
 /** `a: b; --c: d;`, as Chrome writes `cssText`. Empty for a style with no declaration. */
 export function serializeStyle(style: StyleDesc): string {
   let text = ""
-  for (const [name, value] of declarationsOf(style)) text += `${text === "" ? "" : " "}${name}: ${value};`
+  for (const [name, value] of declarationsOf(style)) {
+    text += `${text === "" ? "" : " "}${name}: ${plainText(value)}${priorityOf(value) === "" ? "" : IMPORTANT_SUFFIX};`
+  }
   return text
+}
+
+/** What `getAttribute("style")` gives: the text, `""` for a style code emptied, `null` for an element no style was ever written to. */
+export function styleAttributeText(style: StyleDesc): string | null {
+  const text = serializeStyle(style)
+  return text === "" && !isWritten(style) ? null : text
 }
 
 const NUMERIC_TEXT = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i
@@ -107,8 +175,8 @@ function storedValue(key: string, text: string): string | number {
   return text
 }
 
-/** The `name: value` pairs of a declaration list; a part that is no declaration is dropped, as CSS does. */
-function parseDeclarations(cssText: string): Array<[string, string]> {
+/** The `name`, `value` and importance of each declaration of a declaration list; a part that is no declaration is dropped, as CSS does. */
+function parseDeclarations(cssText: string): Array<[string, string, boolean]> {
   const parts: string[] = []
   let part = ""
   let depth = 0
@@ -140,14 +208,15 @@ function parseDeclarations(cssText: string): Array<[string, string]> {
   }
   parts.push(part)
 
-  const declarations: Array<[string, string]> = []
+  const declarations: Array<[string, string, boolean]> = []
   for (const declaration of parts) {
     const colon = findColon(declaration)
     if (colon < 0) continue
     const name = declaration.slice(0, colon).trim()
-    const value = declaration.slice(colon + 1).replace(IMPORTANT, "").trim()
+    const rawValue = declaration.slice(colon + 1)
+    const value = rawValue.replace(IMPORTANT, "").trim()
     if (name === "" || value === "") continue
-    declarations.push([name, value])
+    declarations.push([name, value, IMPORTANT.test(rawValue)])
   }
   return declarations
 }
@@ -212,7 +281,7 @@ export function applyStyleChange(live: StyleDesc, previous: StyleDesc, next: Sty
     else declare(result, key, value)
   }
   for (const key of Object.keys(before)) if (!(key in after)) delete result[key]
-  return result as StyleDesc
+  return carryStyleMarks(live, result)
 }
 
 function illegalConstructor(): never {
@@ -225,6 +294,33 @@ type StyleDeclarationSet = {
 }
 
 const CONSTRUCT = Symbol("construct")
+
+/** Replaces every declaration with those of `text`, or with none and no `style` attribute for `null`; the state blocks and queries a style holds are not CSS text and stay. */
+export function writeStyleText(binding: StyleBinding, text: string | null): void {
+  const kept: StyleRecord = {}
+  const live = binding.style as StyleRecord
+  for (const key of Object.keys(live)) if (nameOf(key) === undefined) kept[key] = live[key]
+  if (text === null) {
+    binding.setStyle(kept as StyleDesc)
+    return
+  }
+  const declared: StyleRecord = {}
+  const unsupported: Record<string, string> = {}
+  for (const [name, value, important] of parseDeclarations(text)) {
+    const key = keyOf(name)
+    const stored = important ? `${value}${IMPORTANT_SUFFIX}` : undefined
+    if (key !== undefined) {
+      delete declared[key]
+      declared[key] = stored ?? storedValue(key, value)
+      continue
+    }
+    const unsupportedName = unsupportedNameOf(name)
+    if (unsupportedName === undefined) continue
+    delete unsupported[unsupportedName]
+    unsupported[unsupportedName] = stored ?? value
+  }
+  binding.setStyle(withStyleMarks({ ...kept, ...declared }, unsupported, true))
+}
 
 class CSSStyleDeclarationClass {
   readonly #binding: StyleBinding
@@ -242,12 +338,8 @@ class CSSStyleDeclarationClass {
     return serializeStyle(this.#binding.style)
   }
 
-  /** Replaces every declaration; the state blocks and queries a style holds are not CSS text and stay. */
   set cssText(text: string) {
-    const kept: StyleRecord = {}
-    const live = this.#binding.style as StyleRecord
-    for (const key of Object.keys(live)) if (nameOf(key) === undefined) kept[key] = live[key]
-    this.#binding.setStyle({ ...kept, ...this.#declared(String(text)) } as StyleDesc)
+    writeStyleText(this.#binding, String(text))
   }
 
   get parentRule(): null {
@@ -255,47 +347,57 @@ class CSSStyleDeclarationClass {
   }
 
   getPropertyValue(name: string): string {
-    const key = keyOf(name)
-    if (key === undefined) return ""
-    return valueText(key, (this.#binding.style as StyleRecord)[key]) ?? ""
+    return plainText(this.#textOf(name))
   }
 
-  /** Always `""`: a style has no per-property priority here (deviations.md). */
-  getPropertyPriority(_name: string): string {
-    return ""
+  /** `"important"` for a property written with that priority, else `""`. */
+  getPropertyPriority(name: string): string {
+    return priorityOf(this.#textOf(name))
   }
 
   /**
-   * Sets the property, or removes it for `""` and `null`. A property Ghia has no style for and a
-   * value with `!important` change nothing, as in a browser; `priority` is accepted and ignored. A
-   * value that is not valid CSS is stored as text, and native drops it when it reads the style.
+   * Sets the property, or removes it for `""` and `null`. A name that is no CSS property and a
+   * value with `!important` change nothing, as in a browser; `priority` `"important"` stores the
+   * value with the `!important` suffix. A property a browser has and Ghia has no style key for
+   * (`touch-action`) is kept and read back and reaches nothing. A value that is not valid CSS is
+   * stored as text, and native drops it when it reads the style.
    */
   setProperty(name: string, value: string | null, priority?: string): void {
     const key = keyOf(name)
-    if (key === undefined) return
+    const unsupported = key === undefined ? unsupportedNameOf(name) : undefined
+    if (key === undefined && unsupported === undefined) return
     const text = value === null || value === undefined ? "" : String(value).trim()
     if (text === "") {
       this.removeProperty(name)
       return
     }
     if (IMPORTANT.test(text)) return
-    if (priority !== undefined && priority !== "" && String(priority).toLowerCase() !== "important") return
-    const stored = storedValue(key, text)
+    const important = priority !== undefined && String(priority).toLowerCase() === "important"
+    if (priority !== undefined && priority !== "" && !important) return
+    const withPriority = important ? `${text}${IMPORTANT_SUFFIX}` : text
+    if (key === undefined) {
+      this.#declareUnsupported(unsupported as string, withPriority)
+      return
+    }
+    const stored = important ? withPriority : storedValue(key, text)
     const next = { ...this.#binding.style } as StyleRecord
-    if (declare(next, key, stored)) this.#binding.setStyle(next as StyleDesc)
+    // The same text is no change even where the framework wrote it as a number (`width: 40` and `"40px"`).
+    const held = next[key]
+    const unchanged = held !== undefined && valueText(key, held) === valueText(key, stored)
+    if (declare(next, key, unchanged ? held : stored)) this.#commit(next)
   }
 
   /** The value the property had, `""` when it had none. */
   removeProperty(name: string): string {
     const key = keyOf(name)
-    if (key === undefined) return ""
     const live = this.#binding.style as StyleRecord
+    if (key === undefined) return this.#removeUnsupported(name)
     const old = valueText(key, live[key])
     if (old === undefined) return ""
     const next = { ...live }
     delete next[key]
-    this.#binding.setStyle(next as StyleDesc)
-    return old
+    this.#commit(next)
+    return plainText(old)
   }
 
   item(index: number): string {
@@ -306,21 +408,39 @@ class CSSStyleDeclarationClass {
     for (const declaration of declarationsOf(this.#binding.style)) yield declaration[0]
   }
 
-  #declared(text: string): StyleRecord {
-    const declared: StyleRecord = {}
-    for (const [name, value] of parseDeclarations(text)) {
-      const key = keyOf(name)
-      if (key === undefined) continue
-      delete declared[key]
-      declared[key] = storedValue(key, value)
-    }
-    return declared
+  #textOf(name: string): string {
+    const key = keyOf(name)
+    if (key !== undefined) return valueText(key, (this.#binding.style as StyleRecord)[key]) ?? ""
+    const unsupported = unsupportedNameOf(name)
+    return unsupported === undefined ? "" : (unsupportedOf(this.#binding.style)?.[unsupported] ?? "")
+  }
+
+  #declareUnsupported(name: string, stored: string): void {
+    const held = unsupportedOf(this.#binding.style)
+    if (held?.[name] === stored) return
+    this.#commit({ ...this.#binding.style } as StyleRecord, { ...held, [name]: stored })
+  }
+
+  #removeUnsupported(name: string): string {
+    const unsupported = unsupportedNameOf(name)
+    const held = unsupportedOf(this.#binding.style)
+    const old = unsupported === undefined ? undefined : held?.[unsupported]
+    if (unsupported === undefined || old === undefined) return ""
+    const rest = { ...held }
+    delete rest[unsupported]
+    this.#commit({ ...this.#binding.style } as StyleRecord, rest)
+    return plainText(old)
+  }
+
+  /** Hands `next` over as the live style; a write from code leaves the `style` attribute there, even when nothing is left in it. */
+  #commit(next: StyleRecord, unsupported: Unsupported | undefined = unsupportedOf(this.#binding.style)): void {
+    this.#binding.setStyle(withStyleMarks(next, unsupported, true))
   }
 }
 
-for (const property of Object.keys(STYLE_PROPERTIES)) {
-  const name = kebabOf(property)
-  Object.defineProperty(CSSStyleDeclarationClass.prototype, property, {
+function defineAccessor(member: string, name: string): void {
+  if (Object.hasOwn(CSSStyleDeclarationClass.prototype, member)) return
+  Object.defineProperty(CSSStyleDeclarationClass.prototype, member, {
     enumerable: true,
     configurable: true,
     get(this: CSSStyleDeclarationClass) {
@@ -332,7 +452,20 @@ for (const property of Object.keys(STYLE_PROPERTIES)) {
   })
 }
 
-export type CSSStyleDeclaration = CSSStyleDeclarationClass & { [Property in StyleProperty]: string }
+function camelCaseOf(name: string): string {
+  return name.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase())
+}
+
+for (const property of Object.keys(STYLE_PROPERTIES)) defineAccessor(property, kebabOf(property))
+for (const name of CSS_PROPERTY_NAMES) {
+  const member = camelCaseOf(name)
+  defineAccessor(member, name)
+  // Chrome names a vendor-prefixed property `webkitX` as well as `WebkitX`.
+  if (member.startsWith("Webkit")) defineAccessor(`webkit${member.slice("Webkit".length)}`, name)
+}
+defineAccessor("cssFloat", "float")
+
+export type CSSStyleDeclaration = CSSStyleDeclarationClass & { [Property in StyleProperty | "cssFloat"]: string }
 
 const STYLE_DECLARATION_KEY = Symbol.for("@ghia/native/css-style-declaration")
 

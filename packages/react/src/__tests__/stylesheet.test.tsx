@@ -127,6 +127,80 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in React", () => {
     expect(getComputedStyle(refs.box).opacity).toBe("1")
   })
 
+  it("makes an inline `!important` written through element.style win over a sheet's, on every write path", () => {
+    const refs: Record<string, any> = {}
+    app.render(
+      <div>
+        <style>{`.x { display: block !important }`}</style>
+        <div
+          ref={(element: unknown) => {
+            refs.box = element
+          }}
+          className="x"
+        />
+      </div>
+    )
+    const style = refs.box.style
+    expect(getComputedStyle(refs.box).display).toBe("block")
+
+    style.setProperty("display", "none", "important")
+    expect(getComputedStyle(refs.box).display).toBe("none")
+    expect(style.display).toBe("none")
+    expect(style.getPropertyValue("display")).toBe("none")
+    expect(style.getPropertyPriority("display")).toBe("important")
+    expect(style.cssText).toBe("display: none !important;")
+    expect(refs.box.getAttribute("style")).toBe("display: none !important;")
+
+    style.setProperty("display", "none")
+    expect(getComputedStyle(refs.box).display).toBe("block")
+    expect(style.getPropertyPriority("display")).toBe("")
+
+    style.cssText = "display: none !important"
+    expect(getComputedStyle(refs.box).display).toBe("none")
+    style.cssText = ""
+    expect(getComputedStyle(refs.box).display).toBe("block")
+
+    refs.box.setAttribute("style", "display:none !important")
+    expect(getComputedStyle(refs.box).display).toBe("none")
+    expect(style.getPropertyPriority("display")).toBe("important")
+    refs.box.removeAttribute("style")
+    expect(getComputedStyle(refs.box).display).toBe("block")
+
+    style.setProperty("display", "none", "important")
+    expect(style.removeProperty("display")).toBe("none")
+    expect(getComputedStyle(refs.box).display).toBe("block")
+  })
+
+  it("reads a framework's `x !important` value as the value with the priority, and round-trips cssText", () => {
+    const refs: Record<string, any> = {}
+    app.render(
+      <div>
+        <style>{`.x { display: block !important }`}</style>
+        <div
+          ref={(element: unknown) => {
+            refs.box = element
+          }}
+          className="x"
+          style={{ display: "none !important", width: 30 }}
+        />
+      </div>
+    )
+    const style = refs.box.style
+    expect(getComputedStyle(refs.box).display).toBe("none")
+    expect(style.display).toBe("none")
+    expect(style.getPropertyValue("display")).toBe("none")
+    expect(style.getPropertyPriority("display")).toBe("important")
+    expect(style.getPropertyPriority("width")).toBe("")
+    expect(style.cssText).toBe("display: none !important; width: 30px;")
+
+    const text = style.cssText
+    style.cssText = text
+    expect(style.cssText).toBe(text)
+    expect(getComputedStyle(refs.box).display).toBe("none")
+    expect(style.removeProperty("display")).toBe("none")
+    expect(getComputedStyle(refs.box).display).toBe("block")
+  })
+
   it("lets an author keyword beat the user agent style: unset, initial and inherit win, revert gives it back", () => {
     const nodes: Record<string, any> = {}
     const ref = (name: string) => (element: unknown) => {

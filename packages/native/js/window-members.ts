@@ -156,6 +156,9 @@ export function installWindowMembers(): void {
       configurable: true,
       get: () => currentWindowSize("innerHeight").height,
     },
+    // The document cannot scroll (Ghia has no scrolling element for the viewport), so the window is always at its origin.
+    scrollX: { value: 0, configurable: true, writable: true },
+    scrollY: { value: 0, configurable: true, writable: true },
     visualViewport: { value: visualViewport, configurable: true, writable: true },
     frameElement: { value: null, configurable: true, writable: true },
   })

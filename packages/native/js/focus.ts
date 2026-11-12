@@ -9,8 +9,6 @@ export interface FocusOptions {
 export interface FocusableElement {
   focus(options?: FocusOptions): void
   blur(): void
-  /** Only `:focus`, `:focus-visible`, `:focus-within`, `:hover` and `:active`; any other selector throws. */
-  matches(selector: string): boolean
 }
 
 function required<Method>(method: Method | undefined, name: string): Method {
@@ -42,6 +40,11 @@ export function blurHostElement(renderer: NativeRenderer, id: number): void {
   required(renderer.blurElement, "blur()").call(renderer, id)
 }
 
+/**
+ * Whether the element is in the state one of `:focus`, `:focus-visible`, `:focus-within`, `:hover` and
+ * `:active` names. Native answers those five and throws for any other selector, so only the
+ * selector engine (`dom/selectors.ts`) calls this, with exactly those.
+ */
 export function hostElementMatches(renderer: NativeRenderer, id: number, selector: string): boolean {
-  return required(renderer.matchesFocus, "matches()").call(renderer, id, selector)
+  return required(renderer.matchesFocus, "the :focus and :hover selectors").call(renderer, id, selector)
 }

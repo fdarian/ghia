@@ -456,8 +456,8 @@ export function queueCharacterDataMutation(target: Node, oldValue: string): void
 /**
  * Runs `apply`, which changes the props `propNames` of `element`, and queues a record for each
  * attribute `getAttribute` reads differently afterwards, with the value it read before. A
- * prop that is no attribute (a handler, an object, `style`, `children`) reads `null` on both
- * sides and produces nothing. Only call it while `hasMutationObservers()`.
+ * prop that is no attribute (a handler, an object, `children`) reads `null` on both
+ * sides and produces nothing. `style` is an attribute: its text is the `cssText`, so a framework's commit of it produces a record. Only call it while `hasMutationObservers()`.
  */
 export function recordAttributeChanges(element: Element, propNames: Iterable<string>, apply: () => void): void {
   const names: string[] = []

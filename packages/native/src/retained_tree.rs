@@ -259,6 +259,9 @@ impl RetainedElement {
         if crate::custom_elements::is_focusable_by_default(&self.element_type) {
             return true;
         }
+        if crate::custom_elements::input_choice::is_hidden(self) {
+            return false;
+        }
         if crate::focus::is_text_control(&self.element_type) || self.element_type == "button" {
             // `disabled` outranks `tabIndex`: a disabled control cannot be focused at all.
             !self.is_disabled()
@@ -863,6 +866,10 @@ pub struct RetainedTree {
     /// Every form control, which `ControlStyles` walks up from, so a frame does not scan
     /// every element for them.
     control_ids: FxHashSet<u64>,
+    /// The checkedness of every `<input>` and the activations in progress: see `input_choice`.
+    pub(crate) choices: crate::custom_elements::input_choice::Choices,
+    /// What was written to every range input's value: see `input_range`.
+    pub(crate) ranges: crate::custom_elements::input_range::Ranges,
     /// Elements that `needs_focus`, in id order. Kept as mutations arrive so the
     /// per-frame focus sync visits these few instead of every retained element:
     /// a large tree retains thousands, and nearly none are focusable.
@@ -975,6 +982,8 @@ impl RetainedTree {
             image_ids: FxHashSet::default(),
             motion_value_ids: FxHashSet::default(),
             control_ids: FxHashSet::default(),
+            choices: Default::default(),
+            ranges: Default::default(),
             focusable_ids: Default::default(),
             geometry_ids: FxHashSet::default(),
             inert_count: 0,
@@ -1197,6 +1206,9 @@ impl RetainedTree {
         if is_control_type(&element_type) {
             self.control_ids.insert(id);
         }
+        if element_type == "input" {
+            self.choices.created(id);
+        }
         let revision = self.take_revision_covered();
         self.fresh.get_mut().insert(id);
         self.elements
@@ -1351,7 +1363,7 @@ impl RetainedTree {
     /// Invalidate for rendering only. Use for changes that cannot move a glyph
     /// into or out of the searchable text: style, and a native element's own
     /// props, whose text is matched at paint and never enters a `GroupList`.
-    fn mark_render_changed(&mut self, id: u64) {
+    pub(crate) fn mark_render_changed(&mut self, id: u64) {
         self.mark_changed_detail(id, false, Dirty::Layout);
     }
 
@@ -1458,6 +1470,8 @@ impl RetainedTree {
             self.image_ids.remove(&id);
             self.motion_value_ids.remove(&id);
             self.control_ids.remove(&id);
+            self.choices.destroyed(id);
+            self.ranges.destroyed(id);
             self.focusable_ids.remove(&id);
             self.geometry_ids.remove(&id);
             self.inert_count -= usize::from(element.has_inert_prop());
@@ -1739,7 +1753,7 @@ impl RetainedTree {
             None => element.own_style.clone().map(InternedStyle::into_arc),
         };
         let universal = self.universal.as_ref().filter(|_| element.takes_universal_style());
-        let tag_style = crate::html::ua_style(&element.element_type);
+        let tag_style = crate::html::ua_style_of(element);
         let user_agent = crate::html::popover::user_agent(element, tag_style.as_ref()).or(tag_style);
         let effective = match (self.styles.layered.base(universal, user_agent.as_ref()), declared) {
             (Some(base), Some(declared)) => Some(self.styles.layered.effective(&base, &declared)),
@@ -1922,11 +1936,23 @@ impl RetainedTree {
     /// one exception is `highlight` itself appearing or disappearing, which
     /// changes which subtrees an ancestor skips.
     pub fn set_custom_prop(&mut self, id: u64, key: String, value: serde_json::Value) {
+        let is_input = self.elements.get(&id).is_some_and(|element| element.element_type == "input");
+        // A write to the checkedness is a property assignment: it counts when the prop's value is the
+        // one it already had, as the user may have changed the control since.
+        if is_input && matches!(key.as_str(), "checked" | "defaultChecked" | "indeterminate") {
+            self.input_prop_written(id, &key, &value);
+        }
+        if is_input && key == "value" {
+            self.range_value_written(id, &value);
+        }
         let mut changed = false;
+        let is_input_type = is_input && key == "type";
+        let is_hidden_attribute = key == "hidden";
+        let is_input_group = is_input && matches!(key.as_str(), "type" | "name");
         let is_highlight = key == "highlight";
         let is_motion = key == "motion";
         let is_motion_values = key == "motionValues" || key == "layout";
-        let affects_focusability = key == "tabIndex" || key == "disabled" || key == "href";
+        let affects_focusability = key == "tabIndex" || key == "disabled" || key == "href" || key == "type";
         let is_inert = key == "inert";
         let is_popover = crate::html::popover::is_popover_prop(&key);
         let relation_key = RelationRegistry::reads(&key).then(|| key.clone());
@@ -2000,6 +2026,22 @@ impl RetainedTree {
         }
         if affects_focusability {
             self.track_focusable(id);
+        }
+        if is_hidden_attribute {
+            // The user agent style of any element is `display: none` while it is `hidden`.
+            let change = self.refresh_effective_style(id, false);
+            self.settle_style_change(id, change);
+        }
+        if is_input_group {
+            if is_input_type {
+                // The user agent style of an `<input>` is its type's.
+                let change = self.refresh_effective_style(id, false);
+                self.settle_style_change(id, change);
+            }
+            self.input_group_changed(id);
+            if is_input_type {
+                self.range_type_changed(id);
+            }
         }
         if is_form_control {
             if self.elements.get(&id).is_some_and(|element| element.control_disabled().is_some()) {
@@ -3905,6 +3947,26 @@ mod tests {
 
         apply(&mut tree, r##"[["setUniversalStyle",null]]"##);
         assert_eq!(style_of(&tree, 21).unwrap().display.as_deref(), Some("block"));
+    }
+
+    #[test]
+    fn the_hidden_attribute_is_display_none_under_the_elements_own_style() {
+        let mut tree = layered_tree();
+        apply(&mut tree, r##"[["createElement",20,"div"],["createElement",21,"h1"],["createElement",22,"div"]]"##);
+        apply(&mut tree, r##"[["setCustomProp",20,"hidden",true],["setCustomProp",21,"hidden",""],["setCustomProp",22,"hidden","until-found"]]"##);
+        assert_eq!(style_of(&tree, 20).unwrap().display.as_deref(), Some("none"), "a div has no user agent style of its own");
+        let h1 = style_of(&tree, 21).unwrap();
+        assert_eq!(h1.display.as_deref(), Some("none"));
+        assert!(h1.font_size.is_some(), "the rest of the tag's style stays under it");
+        assert!(style_of(&tree, 22).is_none(), "until-found keeps its box");
+        assert!(Arc::ptr_eq(style_of_arc(&tree, 20), style_of_arc(&tree, 20)));
+
+        apply(&mut tree, r##"[["setStyle",20,{"display":"block"}]]"##);
+        assert_eq!(style_of(&tree, 20).unwrap().display.as_deref(), Some("block"), "the author's display is over the user agent's");
+        apply(&mut tree, r##"[["setStyle",20,{}],["setCustomProp",20,"hidden",false]]"##);
+        assert!(style_of(&tree, 20).is_none_or(|style| style.display.is_none()), "hidden off, and nothing sets a display");
+        apply(&mut tree, r##"[["setCustomProp",21,"hidden",null]]"##);
+        assert_eq!(style_of(&tree, 21).unwrap().display.as_deref(), Some("block"), "the tag's display is back");
     }
 
     #[test]

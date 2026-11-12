@@ -19,14 +19,14 @@ describe("a prop that reaches native as an attribute", () => {
       ["htmlFor", "a"],
       ["viewBox", "0 0 1 1"],
     ] as const
-    expect([...attributesOfProps(props, false)]).toEqual([
+    expect([...attributesOfProps(props, "div")]).toEqual([
       ["tabindex", "0"],
       ["data-rowid", "7"],
       ["class", "x"],
       ["for", "a"],
       ["viewbox", "0 0 1 1"],
     ])
-    expect([...attributesOfProps([["className", "x"], ["viewBox", "0 0 1 1"]], true)]).toEqual([
+    expect([...attributesOfProps([["className", "x"], ["viewBox", "0 0 1 1"]], "svg")]).toEqual([
       ["class", "x"],
       ["viewBox", "0 0 1 1"],
     ])
@@ -49,7 +49,7 @@ describe("a prop that reaches native as an attribute", () => {
         ["ref", () => {}],
         ["title", undefined],
       ],
-      false
+      "div"
     )
     expect([...attributes]).toEqual([
       ["width", "4"],
@@ -63,8 +63,8 @@ describe("a prop that reaches native as an attribute", () => {
   })
 
   it("is the prop written as the attribute when two props name it, else the first", () => {
-    expect(attributesOfProps([["className", "a"], ["class", "b"]], false).get("class")).toBe("b")
-    expect(attributesOfProps([["class", "b"], ["className", "a"]], false).get("class")).toBe("b")
-    expect(attributesOfProps([["tabIndex", 1], ["TABINDEX", 2]], false).get("tabindex")).toBe("1")
+    expect(attributesOfProps([["className", "a"], ["class", "b"]], "div").get("class")).toBe("b")
+    expect(attributesOfProps([["class", "b"], ["className", "a"]], "div").get("class")).toBe("b")
+    expect(attributesOfProps([["tabIndex", 1], ["TABINDEX", 2]], "div").get("tabindex")).toBe("1")
   })
 })

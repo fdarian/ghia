@@ -18,11 +18,10 @@ import {
   blurHostElement,
   eventTypesWithOverrides,
   focusHostElement,
-  hostElementMatches,
-  attributeNameOf,
   attributeText,
+  attributesWritten,
   isSvgType,
-  isNotAttribute,
+  isNotNativeAttribute,
   forwardsCustomProp,
   isElementType,
   isNativeviewHandlerProp,
@@ -56,6 +55,7 @@ import type {
   Animation,
   Document,
   DomElement,
+  InputMembers,
   Element as DomNodeElement,
   ElementBinding,
   ElementMethods,
@@ -289,7 +289,9 @@ export class HostElement extends HTMLElement {
   setCodeStyle(next: StyleDesc): void {
     this.frameworkStyle ??= this.liveStyle
     this.liveStyle = next
-    this.writeStyle()
+    // A burst of writes (a drag writing the transform on every pointer move) is one `setStyle` for the next flush.
+    if (this.root) this.root.mutations.deferWrite(this, () => this.writeStyle())
+    else this.writeStyle()
   }
 
   setPin(pin: StyleDesc | undefined): void {
@@ -330,10 +332,6 @@ export class HostElement extends HTMLElement {
 
   blur(): void {
     blurHostElement(this.mountedRenderer("blur"), this.nativeId)
-  }
-
-  matches(selector: string): boolean {
-    return hostElementMatches(this.mountedRenderer("matches"), this.nativeId, selector)
   }
 
   private methods(): ElementMethods {
@@ -522,7 +520,7 @@ export class HostElement extends HTMLElement {
 }
 
 /** The DOM scroll members: `scrollTop`, `scrollTo`, `scrollIntoView` and the rest. */
-export interface HostElement extends ScrollableElement, Omit<DomElement, "ownerDocument"> {
+export interface HostElement extends ScrollableElement, Omit<DomElement, "ownerDocument">, Partial<InputMembers> {
   /** Narrower than `Node.ownerDocument`: the app's `document`, whose `defaultView` is the window. */
   readonly ownerDocument: DomElement["ownerDocument"]
 }
@@ -534,6 +532,10 @@ defineDomMembers(HostElement.prototype, (element: HostElement) => ({
   layout: element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.nativeId } : undefined,
   prop: (name) => element.props.get(name),
   propNames: () => element.props.keys(),
+  setProp: (name, value) => {
+    setHostProperty(element, name, value)
+    if (element.root && element.mounted) element.root.mutations.flushMutations()
+  },
   get style() {
     return element.liveStyle
   },
@@ -625,6 +627,11 @@ class ElementDomBinding implements ElementBinding {
 
   setProp(name: string, value: string): void {
     setHostProperty(this.element, name, value)
+  }
+
+  get native(): ElementBinding["native"] {
+    const element = this.element
+    return element.root && element.mounted ? { renderer: element.root.nativeRenderer, id: element.nativeId } : undefined
   }
 
   assertSameWindow(child: Node): void {
@@ -840,10 +847,10 @@ function tokensOf(text: string): string[] {
 
 function syncAttribute(root: HostRoot, node: HostElement, prop: string, value: HostPropertyValue): void {
   // The record of what was sent is filled when the gate opens (`ElementSource.rememberAttributes`).
-  if (!root.mutations.forwardsAttributes || isNotAttribute(prop)) return
-  const attribute = attributeNameOf(prop, node instanceof SVGElement)
-  const text = attributeText(attribute, value)
-  if (node.sent.writesAttribute(attribute, text)) root.mutations.setAttribute(node.nativeId, attribute, text)
+  if (!root.mutations.forwardsAttributes || isNotNativeAttribute(prop)) return
+  for (const [attribute, text] of attributesWritten(node.type, prop, value, (name) => node.props.get(name))) {
+    if (node.sent.writesAttribute(attribute, text)) root.mutations.setAttribute(node.nativeId, attribute, text)
+  }
 }
 
 function storeHostProp(node: HostElement, name: string, value: HostPropertyValue): void {

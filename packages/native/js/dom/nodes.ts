@@ -8,11 +8,15 @@
  * class implements. The members on the prototypes read only that.
  */
 
-import type { ElementType } from "../host.js"
+import type { ElementType, NativeRenderer } from "../host.js"
+import { attributeNameOf, isNotAttribute, storedAttributeNames } from "./attribute-names.js"
 import { cloneNode } from "./clone.js"
+import { styleDeclarationFor, type CSSStyleDeclaration, type StyleBinding } from "./css-style-declaration.js"
+import { datasetOf } from "./dataset.js"
+import type { DOMRectList } from "./dom-rect.js"
+import { defineReflectedMembers, type ReflectedMembers } from "./reflected-members.js"
+import { closestElement, elementById, matchesSelector, querySelector, querySelectorAll, type ElementList } from "./selectors.js"
 import * as tree from "./tree-mutation.js"
-import { serializeStyle, styleDeclarationFor, type CSSStyleDeclaration, type StyleBinding } from "./css-style-declaration.js"
-import { attributeNameOf, isNotAttribute } from "./attribute-names.js"
 
 export { crossRootError } from "./tree-mutation.js"
 
@@ -64,6 +68,8 @@ export type ElementBinding = ParentBinding & StyleBinding & {
   prop(name: string): unknown
   /** The names of the props it was given. */
   propNames(): Iterable<string>
+  /** The renderer and id the element is known by while it is mounted: where `:focus` and `:hover` are answered. */
+  readonly native?: { readonly renderer: NativeRenderer; readonly id: number } | undefined
   /**
    * Gives the prop a value, through the adapter's own path for a prop it renders: native, the
    * adapter's record of the props and the `MutationObserver` records. Code's write, which the
@@ -374,13 +380,6 @@ abstract class TextClass extends CharacterDataClass {
   }
 }
 
-/** The `data-*` props are the attributes `dataset` reads, with the name in camel case. */
-const DATA_ATTRIBUTE = /^data-(.+)$/
-
-function camelCase(dashed: string): string {
-  return dashed.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase())
-}
-
 abstract class ElementClass extends NodeClass {
   constructor() {
     super()
@@ -394,6 +393,32 @@ abstract class ElementClass extends NodeClass {
    * (`defineDomMembers`) define it on their prototypes.
    */
   declare getAttribute: (name: string) => string | null
+
+  /**
+   * Writes the prop the attribute stands for, as if the app had rendered it. The adapters' DOM
+   * members (`defineDomMembers`) define it on their prototypes.
+   */
+  declare setAttribute: (name: string, value: string) => void
+
+  declare removeAttribute: (name: string) => void
+
+  /** Dispatches an event an app built at the element. The adapters' DOM members (`defineDomMembers`) define it on their prototypes. */
+  declare dispatchEvent: (event: Event) => boolean
+
+  /**
+   * Where the box is, read from native's layout. The adapters' DOM members (`defineDomMembers`) define
+   * them on their prototypes; `defineBoxMembers` documents each.
+   */
+  declare readonly offsetParent: Element | null
+  declare readonly offsetLeft: number
+  declare readonly offsetTop: number
+  declare readonly clientLeft: number
+  declare readonly clientTop: number
+  declare getClientRects: () => DOMRectList
+
+  /** The scroll offsets, defined with the scroll members (`defineScrollMembers`). */
+  declare scrollLeft: number
+  declare scrollTop: number
 
   abstract get tagName(): string
 
@@ -534,22 +559,54 @@ abstract class ElementClass extends NodeClass {
       const name = attributeNameOf(prop, svg)
       if (this.getAttribute(name) !== null && !names.includes(name)) names.push(name)
     }
-    if (!names.includes("style") && serializeStyle(this[DOM_BINDING]().style) !== "") names.push("style")
+    if (this.getAttribute("style") !== null && !names.includes("style")) names.push("style")
+    for (const name of storedAttributeNames(this)) if (!names.includes(name)) names.push(name)
     return names
   }
 
-  /** A read-only view of the `data-*` attributes, with the names in camel case. */
-  get dataset(): Readonly<Record<string, string>> {
-    const view: Record<string, string> = {}
-    for (const name of this.getAttributeNames()) {
-      const match = DATA_ATTRIBUTE.exec(name)
-      if (match === null) continue
-      const value = this.getAttribute(name)
-      if (value !== null) view[camelCase(match[1])] = value
+  /** Adds the attribute, empty, or removes it. Gives whether it is there afterwards. */
+  toggleAttribute(name: string, force?: boolean): boolean {
+    if (this.hasAttribute(name)) {
+      if (force === undefined || force === false) {
+        this.removeAttribute(name)
+        return false
+      }
+      return true
     }
-    return Object.freeze(view)
+    if (force === undefined || force === true) {
+      this.setAttribute(name, "")
+      return true
+    }
+    return false
+  }
+
+  matches(selector: string): boolean {
+    return matchesSelector(this as unknown as Element, selector)
+  }
+
+  /** This element or its nearest ancestor that `selector` matches, or `null`. */
+  closest(selector: string): Element | null {
+    return closestElement(this as unknown as Element, selector)
+  }
+
+  /** The first descendant `selector` matches, in document order. `:scope` is this element. */
+  querySelector(selector: string): Element | null {
+    return querySelector(this as unknown as Element, selector, "Element")
+  }
+
+  /** The descendants `selector` matches, as a list that does not change with the tree. */
+  querySelectorAll(selector: string): ElementList {
+    return querySelectorAll(this as unknown as Element, selector, "Element")
+  }
+
+  /** The `data-*` attributes as a live map, with the names in camel case: see `datasetOf`. */
+  get dataset(): DOMStringMap {
+    return datasetOf(this as unknown as Element)
   }
 }
+
+interface ElementClass extends ReflectedMembers {}
+defineReflectedMembers(ElementClass.prototype)
 
 function isElement(node: Node): node is Element {
   return node.nodeType === ELEMENT_NODE
@@ -610,6 +667,19 @@ abstract class DocumentClass extends NodeClass {
   set textContent(_value: string | null) {}
 
   declare readonly ownerDocument: null
+
+  querySelector(selector: string): Element | null {
+    return querySelector(this as unknown as Node, selector, "Document")
+  }
+
+  querySelectorAll(selector: string): ElementList {
+    return querySelectorAll(this as unknown as Node, selector, "Document")
+  }
+
+  /** The first element of any window's tree, in document order, with that `id`; `null` for none. */
+  getElementById(id: string): Element | null {
+    return elementById(this as unknown as Node, String(id))
+  }
 }
 
 Object.defineProperty(DocumentClass.prototype, "ownerDocument", { configurable: true, get: () => null })
@@ -633,6 +703,14 @@ abstract class DocumentFragmentClass extends NodeClass {
     let text = ""
     for (const child of this[DOM_BINDING]().children) text += child.textContent ?? ""
     return text
+  }
+
+  querySelector(selector: string): Element | null {
+    return querySelector(this as unknown as Node, selector, "DocumentFragment")
+  }
+
+  querySelectorAll(selector: string): ElementList {
+    return querySelectorAll(this as unknown as Node, selector, "DocumentFragment")
   }
 
   set textContent(_value: string | null) {}

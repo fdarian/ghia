@@ -82,7 +82,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid synchronous key dispatch", () => 
         onKeyDown={(event) => {
           if (prevent) event.preventDefault()
         }}
-        onChange={(event) => setText(event.value ?? "")}
+        onInput={(event) => setText(event.value ?? "")}
       />
     ))
     const field = app.renderer.findByTestId("field")!
@@ -105,7 +105,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid synchronous key dispatch", () => 
         testId="field"
         value={text()}
         style={{ width: 300, height: 40 }}
-        onChange={(event) => setText(event.value ?? "")}
+        onInput={(event) => setText(event.value ?? "")}
       />
     ))
     listen(window, "keydown", (event) => event.preventDefault())

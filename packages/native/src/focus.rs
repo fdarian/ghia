@@ -363,6 +363,10 @@ impl FocusState {
         self.outbox.pop_front()
     }
 
+    fn push_event(&mut self, payload: EventPayload) {
+        self.outbox.push_back(payload);
+    }
+
     #[cfg(not(target_family = "wasm"))]
     fn push_page_moves(&mut self, tree: &RetainedTree, change: &FocusChange) {
         let is_webview = |id: &u64| tree.elements.get(id).is_some_and(|element| element.element_type == "webview");
@@ -453,7 +457,7 @@ impl FocusState {
         let is_text_control = tree
             .elements
             .get(&element)
-            .is_some_and(|element| is_text_control(&element.element_type));
+            .is_some_and(crate::custom_elements::input_choice::is_text_editor);
         is_text_control || !self.modality.0.mouse_focused.get() || self.modality.0.key_down.get()
     }
 
@@ -468,7 +472,7 @@ impl FocusState {
         let is_text_control = tree
             .elements
             .get(&focused)
-            .is_some_and(|element| is_text_control(&element.element_type));
+            .is_some_and(crate::custom_elements::input_choice::is_text_editor);
         let visible = self.is_visible(Some(focused), tree);
         FocusStyles {
             // Typing is keyboard input too, and dimming the window while someone
@@ -479,7 +483,8 @@ impl FocusState {
         }
     }
 
-    /// `element.matches(selector)` for the focus pseudo-classes.
+    /// The focus half of `element.matches(selector)`. The JS selector engine (`js/dom/selectors.ts`) calls it for exactly
+    /// these pseudo-classes, so the `Err` is only for a caller that skips the engine.
     pub fn matches(&self, tree: &RetainedTree, id: u64, selector: &str) -> Result<bool, String> {
         match selector.trim() {
             ":focus" => Ok(self.focused == Some(id)),
@@ -868,6 +873,13 @@ impl GpuixView {
         ) {
             if let Some(from) = change.from {
                 crate::events::key_activation::blurred(&self.routing, &self.pointer, tree, from);
+            }
+            // The value the user left in a text control is committed before `blur`, as in Chrome.
+            let committed = change.from.and_then(|from| Some((from, self.routing.text_commits().commit(from)?)));
+            if let Some((from, value)) = committed {
+                if let Some(payload) = crate::events::text_commit::change_payload(tree, from, value) {
+                    self.focus.push_event(payload);
+                }
             }
             self.focus.push_change(tree, &change);
             #[cfg(not(target_family = "wasm"))]

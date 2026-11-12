@@ -2234,6 +2234,16 @@ impl TestGpuixRenderer {
             .map_err(Error::from_reason)
     }
 
+    /// The activation behaviour of the element `element_id` for a `click` an app dispatched at it
+    /// with `dispatchEvent`, which JS has delivered already: a label focuses its control, a submit
+    /// button submits its form. Delivers no click of its own.
+    #[napi]
+    pub fn activate_element(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        window_call(move |window, cx| crate::events::activation::activate_element(id, window, cx))?
+            .map_err(Error::from_reason)
+    }
+
     /// Packed `"rgba"` (default) or `"bgra"` pixels onto an `<img>` host node.
     #[napi]
     pub fn set_image_pixels(
@@ -2329,6 +2339,70 @@ impl TestGpuixRenderer {
     ) -> Result<crate::custom_elements::text_selection::TextSelection> {
         let id = to_element_id(element_id)?;
         update_view(|view, _window, cx| view.text_selection(id, cx))?.map_err(Error::from_reason)
+    }
+
+    /// The text of an `<input>` or `<textarea>`, which is its `value`.
+    #[napi]
+    pub fn get_text_value(&self, element_id: f64) -> Result<String> {
+        let id = to_element_id(element_id)?;
+        update_view(|view, _window, cx| view.text_control_value(id, cx))?.map_err(Error::from_reason)
+    }
+
+    /// `checked`, `defaultChecked`, `indeterminate` and `value` of an `<input>`.
+    #[napi]
+    pub fn get_input_choice(&self, element_id: f64) -> Result<crate::custom_elements::input_choice::InputChoiceState> {
+        let id = to_element_id(element_id)?;
+        crate::custom_elements::input_choice::read(&self.tree.lock().unwrap(), id).map_err(Error::from_reason)
+    }
+
+    /// The toggle of the checkbox or radio that a click an app dispatches at `element_id` is about
+    /// to activate, made before the click's listeners run.
+    #[napi]
+    pub fn pre_activate_element(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        window_call(move |window, cx| crate::events::activation::pre_activate_element(id, window, cx))?
+            .map_err(Error::from_reason)
+    }
+
+    /// A click an app dispatched at `element_id` was canceled: what `preActivateElement` toggled is
+    /// put back.
+    #[napi]
+    pub fn cancel_activation(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        window_call(move |window, cx| crate::events::activation::cancel_element(id, window, cx))?
+            .map_err(Error::from_reason)
+    }
+
+    /// `input.checked = flag`, and `defaultChecked` and `indeterminate`, the writes of code: the
+    /// state of the `<input>` changes and no prop does, so the framework's committed props stay what
+    /// `restoreControlledState` goes back to. `name` is one of those three.
+    #[napi]
+    pub fn write_input_flag(&self, element_id: f64, name: String, value: bool) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        let tree = self.tree.clone();
+        window_call(move |window, cx| crate::events::input_state::write_flag(&tree, id, &name, value, window, cx))?
+        .map_err(Error::from_reason)
+    }
+
+    /// `input.value = text` on a range (and so `valueAsNumber`, `stepUp` and `stepDown`): native
+    /// sanitizes the value, and no prop changes.
+    #[napi]
+    pub fn write_range_value(&self, element_id: f64, value: String) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        let tree = self.tree.clone();
+        window_call(move |window, cx| crate::events::input_state::write_range_value(&tree, id, &value, window, cx))?
+        .map_err(Error::from_reason)
+    }
+
+    /// React DOM's `restoreControlledState` for `element_id`: a checkbox or radio (and the radios of
+    /// its group) with a `checked` prop and a range with a `value` prop show the prop. Native never
+    /// does this on its own: the React adapter calls it after an event's handlers ran.
+    #[napi]
+    pub fn restore_controlled_state(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        let tree = self.tree.clone();
+        window_call(move |window, cx| crate::events::input_state::restore_controlled(&tree, id, window, cx))?
+        .map_err(Error::from_reason)
     }
 
     /// `loadURL(url)` (with the URL as `argument`), `reload()`, `stop()`, `goBack()` and

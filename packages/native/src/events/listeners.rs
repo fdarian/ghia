@@ -352,10 +352,10 @@ impl PointerDispatch {
         let output = dispatch_sample(&self.pointer, &self.activation.tree, &sample);
         restyled(view, &output, window, cx);
         for payload in output.into_payloads() {
-            let click = (payload.event_type == "click").then(|| payload.clone());
-            let outcome = sync_dispatch::emit(window, cx, &self.activation.callback, payload);
-            if let Some(click) = click.filter(|_| !outcome.default_prevented) {
-                self.activation.activate(&click, window, cx);
+            if payload.event_type == "click" {
+                self.activation.deliver_click(payload, window, cx);
+            } else {
+                sync_dispatch::emit(window, cx, &self.activation.callback, payload);
             }
         }
     }

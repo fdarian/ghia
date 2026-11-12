@@ -15,6 +15,7 @@ import type {
   AnimationEventProps,
   CompositionEventProps,
   ContentVisibilityEventProps,
+  HostChangeEvent,
   HostInputEvent,
   PointerEventProps,
 } from "./events/types.js"
@@ -36,6 +37,8 @@ export * from "./events/listeners.js"
 export * from "./events/element-listeners.js"
 export * from "./dom-members.js"
 export * from "./dom/nodes.js"
+export * from "./dom/html-element-classes.js"
+export * from "./dom/dom-rect.js"
 export * from "./dom/css-style-declaration.js"
 export * from "./style-properties.js"
 export * from "./dom/element-types.js"
@@ -83,6 +86,7 @@ export * from "./observers.js"
 export * from "./presence.js"
 export * from "./renderer-state.js"
 export * from "./text-selection.js"
+export type { InputMembers } from "./dom/input-members.js"
 export * from "./nativeview.js"
 export * from "./webview.js"
 export * from "./scroll.js"
@@ -1828,8 +1832,15 @@ export interface HostProps
   // `onCompositionStart`, `onCompositionUpdate` and `onCompositionEnd`, with
   // `on…Capture` twins: see CompositionEventProps. They bubble from the
   // `<input>` or `<textarea>` being composed in.
-  /** One edit of the text, the DOM `input`: see `HostInputEvent`. */
-  onChange?: (event: HostInputEvent) => void
+  /** The DOM `change` event: the user committed the value of a text control, on blur or on Enter in an
+   *  `<input>`, and it differs from the value the control had at the last commit (see
+   *  `HostChangeEvent`). It is the toggle of a checkbox or radio that a click, Space, `click()` or a
+   *  dispatched click made, once, after `input`. A script's write to `value` fires none. React's
+   *  `onChange` on a text control is the per-edit `onInput` instead, as in React DOM. */
+  onChange?: (event: HostChangeEvent) => void
+  /** The DOM `input` event: one edit of a text control's text, or the toggle of a checkbox or radio
+   *  (before its `change`). It bubbles and cannot be canceled: see `HostInputEvent`. */
+  onInput?: (event: HostInputEvent) => void
   /** The DOM `submit` event of a descendant `<form>`, bubbling: see
    *  `FormProps.onSubmit`. Not available on `<input>` or `<textarea>`: handle
    *  Enter in `onKeyDown` and call `preventDefault()` to keep it from submitting
@@ -1946,8 +1957,8 @@ export interface HostProps
 
 // Props shared by the native text editor elements.
 export interface TextControlProps extends Omit<HostProps, "onSubmit"> {
-  /** External editor value. Native edits apply immediately and report through onChange. */
-  value?: string
+  /** External editor value. Native edits apply immediately and report through `onInput` (`onChange` in React). A number is for `type="range"`. */
+  value?: string | number
   placeholder?: string
   readOnly?: boolean
   /**
@@ -1972,7 +1983,7 @@ export interface TextControlProps extends Omit<HostProps, "onSubmit"> {
 }
 
 /** Values of `<input type>`. */
-export type InputType = "text" | "password" | "number" | "email" | "search" | "tel" | "url"
+export type InputType = "text" | "password" | "number" | "email" | "search" | "tel" | "url" | "checkbox" | "radio" | "hidden" | "range"
 
 export interface InputProps extends TextControlProps {
   /**
@@ -1980,18 +1991,42 @@ export interface InputProps extends TextControlProps {
    *
    * - `"password"` paints one bullet per character and disables copy and cut.
    * - `"number"` makes ArrowUp and ArrowDown step the value by `step`, within
-   *   `min` and `max`, and report it through `onChange`. Typing is not
-   *   restricted: `onChange` reports exactly the text, even when it is not a
-   *   number. There is no spinner.
+   *   `min` and `max`, and report it through `onInput` and `onChange` (a step is
+   *   one committed edit). Typing is not restricted: `onInput` reports exactly
+   *   the text, even when it is not a number. There is no spinner.
    * - `"search"` is exposed to assistive technology as a search field.
    * - `"email"`, `"tel"` and `"url"` behave as `"text"`.
+   * - `"checkbox"` and `"radio"` are a 13 by 13 box with nothing painted in it (style it, or hide it
+   *   and draw your own), a tab stop that a click or Space toggles, with `onInput` then `onChange`
+   *   after a toggle. They submit `name=value` (`value` defaults to `"on"`) only while checked.
+   * - `"hidden"` builds no box, takes no focus and submits its `value`.
+   * - `"range"` is a 129 by 16 focusable box with the slider role and nothing painted in it (draw your own track
+   *   and thumb, and handle the pointer). It holds a `value` between `min` (0) and `max` (100), snapped to `step`
+   *   (1, or `"any"`), the midpoint by default. When focused, the arrow keys, Page Up and Down, Home and End
+   *   change it unless `keydown` was canceled, each firing `onInput` then `onChange` (`onChange` alone in
+   *   React, as it is the `input` event there). A `value` written from code fires nothing. It submits
+   *   `name=value`.
    */
   type?: InputType
-  /** `type="number"` only. A number or numeric string. */
+  /**
+   * `type="checkbox"` and `"radio"`: the checkedness, set as React DOM sets the property, each time
+   * the prop changes (and so dirty: `defaultChecked` no longer decides it). A user's toggle changes
+   * it natively. In React it then goes back to this prop after the change handlers, as React DOM
+   * restores a controlled input; in Solid it does not, as on the web.
+   */
+  checked?: boolean
+  /** `type="checkbox"` and `"radio"`: the checkedness until a user or a `checked` write sets it. */
+  defaultChecked?: boolean
+  /**
+   * The `value` attribute: the text of a text control until `value` is given or the user edits it, and a range's value
+   * until `value` is written (and again if `value` is removed).
+   */
+  defaultValue?: string | number
+  /** `type="number"` and `"range"`. A number or numeric string. Defaults to 0 for a range. */
   min?: number | string
-  /** `type="number"` only. A number or numeric string. */
+  /** `type="number"` and `"range"`. A number or numeric string. Defaults to 100 for a range. */
   max?: number | string
-  /** `type="number"` only: the ArrowUp and ArrowDown step. Defaults to 1. */
+  /** `type="number"`: the ArrowUp and ArrowDown step. `type="range"`: the step the value snaps to and the keys move by, or `"any"`. Defaults to 1. */
   step?: number | string
 }
 
@@ -2831,6 +2866,13 @@ export type NativeRenderer = MutationHost &
       | "releasePointerCapture"
       | "hasPointerCapture"
       | "clickElement"
+      | "activateElement"
+      | "preActivateElement"
+      | "cancelActivation"
+      | "getInputChoice"
+      | "writeInputFlag"
+      | "writeRangeValue"
+      | "restoreControlledState"
       | "getAnimations"
       | "getSubtreeAnimations"
       | "getDocumentAnimations"
@@ -2864,6 +2906,7 @@ export type NativeRenderer = MutationHost &
       | "selectText"
       | "setSelectionRange"
       | "getTextSelection"
+      | "getTextValue"
       | "webviewCommand"
       | "webviewState"
       | "webviewExecuteJavascript"
@@ -2943,6 +2986,13 @@ export interface MutationRenderer {
    * scheduler leaves the flush to the caller.
    */
   requestFlush(): void
+  /**
+   * Runs `write`, which queues ops, at the start of the next flush instead of now; a second call
+   * with the same `key` before then replaces the first. A write that comes many times before a
+   * frame (`element.style.setProperty` on every pointer move) costs one op for the frame. Every
+   * read that flushes, and the flush the queue schedules, runs it.
+   */
+  deferWrite(key: object, write: () => void): void
   flushMutations(): void
 }
 
@@ -2986,6 +3036,8 @@ export interface KeyEvent extends DomEvent {
   /** Skip the handlers further along the path, up to and including `window`.
    *  The default action still runs, like the DOM. */
   stopPropagation(): void
+  /** Whether a modifier is held: `"Shift"`, `"Control"`, `"Alt"` or `"Meta"`. The others (`"CapsLock"`) are never held. */
+  getModifierState(key: string): boolean
 }
 
 export type WindowKeyEventHandler = (

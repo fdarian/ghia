@@ -553,7 +553,7 @@ function FindBar() {
     <div {...search.props} style={{ height: '100%' }}>
       <input
         value={query()}
-        onChange={(event) => setQuery(event.value ?? '')}
+        onInput={(event) => setQuery(event.value ?? '')}
       />
       <div style={{ color: '#e2e2e2' }}>
         {search.active + 1} / {search.total}

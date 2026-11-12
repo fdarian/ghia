@@ -75,6 +75,17 @@ single `Plugin`.
 
 Use `vite.config.mts` when your `package.json` has no `"type": "module"`.
 
+`react()` also makes the bare `react-dom` import resolve to `@ghia/react/react-dom`,
+for your modules and for packages in `node_modules` (Base UI imports it in many
+modules), under `ghia dev`, `ghia build` and vitest. That module exports what web
+libraries use of `react-dom`: `createPortal(children, container, key?)` (the
+`@ghia/react` one, so `document.body` and mounted elements are containers),
+`flushSync` (the `@ghia/react` one) and `version` (React's), and a default export
+object with the same three. Every other `react-dom` export is absent, so a library
+that needs `render`, `findDOMNode` or `unstable_batchedUpdates` fails at build
+instead of getting a stub. Only the exact `react-dom` is aliased: `react-dom/client`
+and `react-dom/server` do not resolve.
+
 ### 3. Write the entry file
 
 End the entry file with `render()`. That call creates the window, mounts React, and
@@ -4350,7 +4361,8 @@ grapheme-safe deletion and mouse positioning.
 in `onKeyDown` and call `preventDefault()`, as above. Enter in an `<input>`
 submits its [form](#forms), if it has one and no other `<input>` shares it. There is no `onSubmit` on `<input>`
 or `<textarea>`. The editor updates natively first, then
-reports the complete value to React.
+reports the complete value through `input` (React's `onChange`, Solid's `onInput`); `change` is the commit, on blur
+and on Enter in an `<input>` (see [The input and change events](#the-input-and-change-events)).
 `value` changes can replace the native content, but keeping the same prop value
 does not reject an edit like a browser-controlled input.
 
@@ -4424,25 +4436,123 @@ reported as disabled to assistive technology. The `disabled` and `enabled`
 [state styles](#form-control-state-disabled-enabled) follow it.
 
 `type` on an `<input>` is `'text'` (the default), `'password'`, `'number'`,
-`'email'`, `'search'`, `'tel'` or `'url'`. `type` on a `<textarea>` is ignored.
+`'email'`, `'search'`, `'tel'`, `'url'`, `'checkbox'`, `'radio'`, `'hidden'` or `'range'`
+(see [Checkbox, radio and hidden inputs](#checkbox-radio-and-hidden-inputs) and
+[Range inputs](#range-inputs)); an
+unknown value is `'text'`. `type` on a `<textarea>` is ignored.
 
-- `'password'` paints one bullet per character. `onChange` and `value` carry
+- `'password'` paints one bullet per character. `input` and `value` carry
   the real text. Copy and cut do nothing, double click selects all, and the
   value is not exposed to assistive technology (the role is `PasswordInput`).
 - `'number'` makes `ArrowUp` and `ArrowDown` step the value by `step` (default
-  1), clamped to `min` and `max`, and report it through `onChange`. Text that
-  is not a number steps from 0. Typing is not restricted and `onChange`
-  reports the raw text, so `'1e'` stays `'1e'`. There is no spinner. `min`,
+  1), clamped to `min` and `max`, and report it through `input` and then `change`
+  (a step commits itself, as in Chrome). Text that is not a number steps from 0.
+  Typing is not restricted and `input` reports the raw text, so `'1e'` stays `'1e'`. There is no spinner. `min`,
   `max` and `step` are ignored for other types. It is exposed to assistive
   technology as a spin button with its numeric value, `min`, `max` and `step`.
 - `'search'` is exposed to assistive technology as a search field.
 - `'email'`, `'tel'` and `'url'` behave as `'text'`.
+
+`defaultValue` (and the `value` attribute, `setAttribute('value', text)`) is the text of a text control that was never given a `value` and has not been edited by the user: it
+follows the default while the control is clean and stops at the first user edit or `value` write, as the DOM's dirty value flag does. A number is its JavaScript text, as in React DOM: `defaultValue={5}` and `value={5}` are `"5"`. `input.defaultValue` and `textarea.defaultValue` read and write that default: for an `<input>` it is the `value` attribute (`""` without one) and an assignment is `setAttribute('value', text)`, so `getAttribute`, a `[value]` selector and a `MutationObserver` see it; for a `<textarea>` it is its default text. Another element has no `defaultValue`.
 
 `maxLength` cuts what the user types or pastes so the text stays within that
 many UTF-16 code units. A `value` set from code is kept whole even when it is
 longer; the user can then only delete. An edit with no room for what it inserts
 is rejected whole, so typing over a selection in a value that is already too
 long leaves the text and the selection as they were.
+
+### Checkbox, radio and hidden inputs
+
+`<input type="checkbox">`, `<input type="radio">` and `<input type="hidden">` work as in HTML, so
+`@base-ui/react`'s Checkbox, Switch and Radio, which render a `<span role="checkbox">` beside a visually
+hidden `<input>` and click it, run unchanged. A change of `type` builds the other control and keeps the props.
+
+- **A checkbox and a radio are a box with nothing painted in it:** `display: inline-block`, 13 by 13 px, with
+  the margin Chrome gives them (`3px 3px 3px 4px`, a radio `3px 3px 0 5px`). Style it, or hide it and draw
+  your own, as Base UI does. See [deviations](./fork/deviations.md#checkbox-radio-and-hidden-inputs).
+- **State.** `checked` sets the checkedness each time its value is written (as React DOM sets the property),
+  and makes it dirty. `defaultChecked` sets it only while it is not dirty: a write to `checked` or a user's
+  toggle makes it dirty. `defaultChecked` is the `checked` attribute, and assigning it is `setAttribute('checked', '')`
+  (`removeAttribute('checked')` for a falsy value): `getAttribute('checked')`, a `[checked]` selector and a
+  `MutationObserver` see it, and it works on an element that is not mounted. `indeterminate` is a property only (no attribute); a user's toggle clears it.
+  `value` is the form value and defaults to `"on"`. A ref to the element has them as properties:
+
+  ```tsx
+  ref.current.checked           // live: a click, a prop or an assignment changed it
+  ref.current.defaultChecked
+  ref.current.indeterminate = true
+  ref.current.value             // "on"; for a text input, its text
+  ```
+
+  Reading `checked` and writing any of them send the pending changes to native first, so they are never stale.
+  Another element has none of these properties, and an assignment makes an own property, as in the DOM.
+- **Activation.** A click, Space on the focused control (on key up, like a button), `element.click()` and a
+  `click` an app dispatches at the element (`new PointerEvent('click', …)`) activate it, and a click on its
+  `<label>` does once. A disabled or `inert` control does nothing. Before the click's listeners run the control
+  is toggled (a radio becomes checked and unchecks its group), so a click handler reads the new `checked`.
+  If a listener cancels the click, the control is put back. Otherwise `input` and then `change` fire,
+  bubbling and not cancelable, after the click. A radio that was checked fires nothing. A radio's group is the radios
+  with the same non-empty `name` in the same form, or in the same tree when they have no form.
+  Arrow keys do not move between the radios of a group.
+- **Events.** `onInput` (or `addEventListener('input')`) and `onChange` (`'change'`) each fire once per toggle, `input`
+  first. In React `onChange` of a checkbox or radio is its `change`, as in React DOM, where a text control's is its
+  `input`: see [The input and change events](#the-input-and-change-events).
+- **Controlled.** In React a control with a `checked` prop goes back to that prop after the `change` handlers have
+  run and their update was flushed, as React DOM restores a controlled input (`restoreControlledState`), so a handler
+  that does not take the new value leaves the control as it was, and so does one that is not there. **In Solid it
+  does not**: a `checked` prop is written when the signal changes and never again, so the user's click stays, as it
+  does in Solid on the web. A write from code (`ref.current.checked = true`) is the control's own state and no prop,
+  so it is not what a controlled control goes back to, and a click toggles it from there.
+- **Forms.** A checkbox or radio is in `formData` under its `name` and `value` only while it is checked; a
+  `required` checkbox must be checked, and a `required` radio needs one of its group checked. A hidden input
+  submits its `value`, which is how Base UI submits the unchecked value of a checkbox. Neither blocks implicit
+  submission. `formData` is in document order.
+- **Hidden** builds no box (`display: none`) and takes no focus, and it has no accessibility node.
+- **Accessibility, focus and selectors.** The role is `checkbox` or `radio`, with the toggled state (`mixed` for an
+  indeterminate checkbox; an explicit `aria-checked` wins). Both are tab stops unless disabled, and a click
+  focuses them without `:focus-visible`. `:checked` and `:indeterminate` read the live state.
+
+### Range inputs
+
+`<input type="range">` is a slider control with the DOM's value rules and keys, so `@base-ui/react`'s Slider, whose
+thumb renders one, runs unchanged. It is a focusable box (`display: inline-block`, 129 by 16 px, `2px` margin, as in
+Chrome) with the `slider` role and **nothing painted in it, and no pointer dragging**: a Slider draws its own track
+and thumb and moves its value from the pointer events it hears itself. See
+[deviations](./fork/deviations.md#range-inputs).
+
+- **Value.** `min`, `max` and `step` default to 0, 100 and 1; `step="any"` does not snap. A `max` below `min` is
+  `min`. The value is clamped to `[min, max]` and snapped to the nearest step counted from `min` (not past `max`),
+  and when there is none, or it is not a number, it is the midpoint. It is sanitized when read, so a new limit
+  sanitizes it again. `value` (a number or a numeric string) sets it each time the prop is written, `defaultValue`
+  is what it is while `value` was never written.
+- **Properties.** An `<input>` ref has `value` (the sanitized text, `"50"`), `valueAsNumber` (for `number` as well; `NaN`
+  for another type), `min`, `max` and `step` (the props as text, `""` when absent), and `stepUp(count = 1)` and
+  `stepDown(count = 1)`, which clamp and snap and throw an `InvalidStateError` for `step="any"`. Writing any of them
+  fires no event.
+
+  ```tsx
+  ref.current.value = "70"        // sanitized; no event
+  ref.current.valueAsNumber       // 70
+  ref.current.stepUp(2)           // 72 for step 1
+  ```
+- **Keys.** While it has focus and a `keydown` was not canceled, `ArrowRight` and `ArrowUp` add a `step`,
+  `ArrowLeft` and `ArrowDown` take one, `PageUp` and `PageDown` move by the larger of a step and a tenth of
+  the range, `Home` goes to `min` and `End` to `max`. With `step="any"` a step is a hundredth of the range. Each
+  key that moves the value fires `input` and then `change` (bubbling, not cancelable, `value` set), as Chrome does for the keyboard; a key
+  that leaves the value where it was fires nothing. With Ctrl, Alt or Cmd held, or when disabled, the key does nothing. The keys do not scroll
+  a scroller around the control.
+- **Events.** In React `onChange` is the `input` event, once per step, as it is for a text control, and
+  `event.currentTarget.valueAsNumber` reads the new value. In Solid `onInput` is `input` and `onChange` is `change`.
+- **Controlled.** In React a control with a `value` prop goes back to that prop after the `input` handlers have run and
+  their update was flushed, as React DOM restores a controlled input. In Solid it does not, as on the web. A write from
+  code (`value`, `valueAsNumber`, `stepUp()`, `stepDown()`) is the control's own value and no prop, so the keys move it
+  on from there and a restore does not go back to it.
+- **Forms.** A range is in `formData` under its `name` and its sanitized value (not when disabled or nameless), and does
+  not block implicit submission.
+- **Accessibility and focus.** The role is `slider`, with the value, `min`, `max` and `step` as the numeric value, minimum,
+  maximum and step (an explicit `aria-valuenow`, `aria-valuemin` or `aria-valuemax` wins). It is a tab stop unless disabled.
+  `:in-range` and `:out-of-range` are not supported.
 
 ### Scrollbars
 
@@ -4730,6 +4840,9 @@ submission while the control is empty.
   `submitter` becomes `event.submitter`. As in the DOM it throws a `TypeError`
   when it is not a submit `<button>` and a `NotFoundError` `DOMException` when it
   belongs to another form; a disabled submit button is accepted.
+- **Checkbox, radio and hidden inputs.** A checked checkbox or radio is submitted
+  under its `value` (`"on"` by default), an unchecked one is not, and a hidden
+  input always is: see [Checkbox, radio and hidden inputs](#checkbox-radio-and-hidden-inputs).
 - **What is not there.** A `<button>` is not submitted with a `name` and `value`
   (`formData` holds `<input>` and `<textarea>` controls), and there is no form
   reset. See [deviations](./fork/deviations.md#html-tags).
@@ -4923,7 +5036,7 @@ an `<input>` or `<textarea>`, and the events follow Chrome's:
   `""`), then `compositionupdate` (`data` is the composition's current text) for
   every change, then `compositionend` (`data` is the final text, `""` when the
   composition was cancelled) on commit. `compositionstart` and `compositionupdate`
-  come before the `change` of their edit, `compositionend` after the `change` of
+  come before the `input` of their edit, `compositionend` after the `input` of
   the final one, as in Chrome. They are aimed at the input, bubble, and cannot be
   cancelled. `onCompositionStart`, `onCompositionUpdate` and `onCompositionEnd`
   have `…Capture` twins.
@@ -4932,23 +5045,26 @@ an `<input>` or `<textarea>`, and the events follow Chrome's:
 
 Windows and Linux report `isComposing` false and fire no composition events.
 A value an app sets while a composition is open ends it without a
-`compositionend`. The `change` of a composition's edits has `inputType`
+`compositionend`. The `input` of a composition's edits has `inputType`
 `insertCompositionText` and `isComposing` true, see
-[The change event](#the-change-event).
+[The input and change events](#the-input-and-change-events).
 In the test renderer, [`simulateComposition`](#simulating-keys) runs the
 sequence.
 
-### The change event
+### The input and change events
 
-`onChange` fires once per edit of the text of an `<input>` or `<textarea>`, which is
-what the DOM calls `input` (there is no `onInput`, and no `beforeinput`). Besides
-`value` it carries the fields of a DOM `InputEvent`, filled as Chrome fills them:
+Text controls fire the DOM's two events, at the DOM's times.
+
+`input` fires once per edit of the text of an `<input>` or `<textarea>`: a typed character, a paste, a cut, a deletion,
+an input method's commit, an undo or redo and a number input's arrow step. It is an `InputEvent`, bubbles and cannot be
+canceled, and is delivered after the edit (there is no `beforeinput`). Besides `value` it carries the fields of a DOM
+`InputEvent`, filled as Chrome fills them:
 
 | Edit | `inputType` | `data` |
 |---|---|---|
 | A typed character, or text from an input method that is not composing | `insertText` | the text |
 | Paste | `insertFromPaste` | the pasted text |
-| Enter in a `<textarea>` (an `<input>` fires nothing) | `insertLineBreak` | `null` |
+| Enter in a `<textarea>` (an `<input>` fires no `input`) | `insertLineBreak` | `null` |
 | Each change of a composition, and its commit | `insertCompositionText` | the composition's text |
 | A composition cancelled | `deleteCompositionText` | `null` |
 | Backspace, Delete | `deleteContentBackward`, `deleteContentForward` | `null` |
@@ -4961,8 +5077,29 @@ what the DOM calls `input` (there is no `onInput`, and no `beforeinput`). Beside
 Typing over a selection is `insertText` and deleting a selection is the delete type
 of its key. `data` is the text that fit under `maxLength`. `isComposing` is true for
 every edit of a composition, the commit included: it comes before `compositionend`.
-Setting `value` from code fires nothing. `data` is `null` rather than absent when
-the edit inserted no text. The handler's event is typed `HostInputEvent`.
+`data` is `null` rather than absent when the edit inserted no text. The handler's event is typed `HostInputEvent`.
+A checkbox or radio fires `input` too, once per toggle, before its `change`, and a range once per key that moved it ([Range inputs](#range-inputs)).
+
+`change` fires when the user commits a value the control did not have at the last commit: on blur (before `blur`
+and `focusout`, also when focus moves to another control or the window loses it) when the value differs from the value
+the control had at focus, and on Enter in a single-line `<input>` (before the form is submitted by the same Enter). Its
+event is a plain `Event` that bubbles and cannot be canceled, with `value` set to the committed text; the number
+stepper commits each step as `input` then `change`, as Chrome does. A `<textarea>` commits on blur only, since Enter
+there inserts a newline. Nothing fires `change` for an edit that was undone, a blur with no edit, or a write to
+`value` from code, which also drops an edit that was not yet committed.
+
+Setting `value` from code fires neither event.
+
+| | `input` per edit | `change` on commit |
+|---|---|---|
+| React | `onInput`, and `onChange` of a text control (React DOM's) | `addEventListener('change')`; `onChange` of a checkbox or radio |
+| Solid | `onInput` | `onChange` |
+
+React's `onChange` is React DOM's: on an `<input>` or `<textarea>` (not a checkbox or radio) it is the `input` event, so
+an app written for React DOM sees one call per edit, `onInput` runs before it when an element has both, and an
+`onChange` on a `<form>` or a `<div>` hears the edits of the text controls under it and the toggles of the checkboxes
+and radios under it, once each. Solid's `onChange` is the DOM's: it fires on commit only, and the text of `onInput` is
+`event.value`.
 
 ### Listeners and DOM members on an element
 
@@ -4971,10 +5108,29 @@ A host element (a React ref, a Solid `HostElement`) has the members a library wr
 | Member | |
 |---|---|
 | `addEventListener(type, listener, options?)`, `removeEventListener(type, listener, options?)` | For any event type, with the DOM's arguments: `listener` is a function or an object with `handleEvent`, `options` is `{ capture, once, passive, signal }` or the `capture` boolean. The same function in the same phase is added once. `once` removes it before it runs, `passive` makes `event.preventDefault()` do nothing while it runs, and a `signal` removes it when it aborts (an aborted one adds nothing). A listener is called with the element as `this`. A type native never emits (`touchstart`, `touchend`, `touchcancel`) is accepted and never fires. |
+| `dispatchEvent(event)` | Dispatches an event the app built (`new Event`, `new CustomEvent`, one of the [event classes](#event-classes)) at the element and returns `false` when a listener called `preventDefault()` on a cancelable event. The event walks the path the element has in the tree: `window` and `document` capture, the ancestors' capture handlers from the top down, the target, then the bubble phase if `bubbles` is true (an event that does not bubble reaches the capturers and the target only), then `document` and `window`. `onClick`-style props, Solid handlers and `addEventListener` listeners hear it in the order a delivered event gives, with `target`, `currentTarget`, `eventPhase`, `composedPath()` and `isTrusted` (`false`) set, and `stopPropagation()`, `stopImmediatePropagation()` and `cancelBubble = true` end it. It keys handlers by `event.type` as native does, so a dispatched `focusin` reaches React's `onFocus` and a dispatched `focus` Solid's. A dispatched `focus` or `blur` does not move focus. It throws a `TypeError` for something that is not an event and an `InvalidStateError` `DOMException` for an event that is being dispatched (a listener passing it on), before anything else happens, so a rejected `click` toggles no checkbox; once the dispatch ends the event can be dispatched again, and `currentTarget` is `null`, `eventPhase` 0 and `target` stays. A listener that throws is reported to `onError` and the rest run. An element that is not connected is heard by its own path alone, not by `document` and `window`. An uncanceled `click` that is a `MouseEvent` then runs the element's activation behaviour, see below. |
 | `ownerDocument` | The `document` object the adapters export. Its `defaultView` is the global `window` (`globalThis`), which has `setTimeout`, `requestAnimationFrame` and `ResizeObserver`, so `element.ownerDocument.defaultView` works as the window of a library that asks for it. |
 | `isConnected` | True while the element is in the tree of a mounted root. |
-| `getAttribute(name)` | The prop whose attribute name is `name` as a string (a prop is an attribute under the name the DOM gives it: lowercase on an HTML element, so `tabIndex={0}` is `tabindex` and `getAttribute("tabIndex")` finds it, `className` is `class` and `htmlFor` is `for`; an SVG element keeps the case of its props, `viewBox`, and matches names exactly), or `null` when the element was not given it or its value is a function or an object (`onClick`). `getAttribute("style")` is the text of the element's live style, `width: 10px; --dnd-top: 4px;` as Chrome writes `cssText` and as a `[style]` selector reads it (a `null` or empty value is no declaration, a number on a property that is not unitless and not zero has `px`), and `null` while it has no declaration ([Style from code](#style-and-id-from-code)). `data-index={5}` reads `"5"`; `false`, `null` and `undefined` read `null` and `true` reads `""`, except for `data-*` and `aria-*`, where `false` reads `"false"` and `true` `"true"`. |
+| `getAttribute(name)` | The prop whose attribute name is `name` as a string (a prop is an attribute under the name the DOM gives it: lowercase on an HTML element, so `tabIndex={0}` is `tabindex` and `getAttribute("tabIndex")` finds it, `className` is `class` and `htmlFor` is `for`; an SVG element keeps the case of its props, `viewBox`, and matches names exactly), or `null` when the element was not given it or its value is a function or an object (`onClick`). `getAttribute("style")` is the text of the element's live style, `width: 10px; --dnd-top: 4px;` as Chrome writes `cssText` and as a `[style]` selector reads it (a `null` or empty value is no declaration, a number on a property that is not unitless and not zero has `px`), `""` once code has written the style and left nothing in it (`cssText = ""`, `setAttribute('style', '')`, removing the last property), and `null` while it has no declaration and after `removeAttribute('style')` ([Style from code](#style-and-id-from-code)). `data-index={5}` reads `"5"`; `false`, `null` and `undefined` read `null` and `true` reads `""`, except for `data-*` and `aria-*`, where `false` reads `"false"` and `true` `"true"`. |
 | `offsetWidth`, `offsetHeight` | The border box's layout size, rounded half up, before any `transform` (a `scale(2)` element has the offset size it had without it; `getBoundingClientRect()` is the transformed box). The read lays out first, as `getBoundingClientRect` does. `0` for an element that is not mounted or has no box. `renderer.getElementBounds(id)` carries the unrounded size as `layoutWidth` and `layoutHeight`. |
+| `offsetParent` | The nearest ancestor that is positioned (`position` is not `static`), or a `table`, `td` or `th` for an element that is `static` itself, ending at `body`: what `offsetLeft` and `offsetTop` are measured from. `null` for an element with no box (not mounted, or `display: none` itself or above), for `html` and `body`, and for a `position: fixed` element. A transform on an ancestor does not make it the offset parent (see [deviations](./fork/deviations.md#dom-box-members)). The read lays out first, as `getBoundingClientRect` does. |
+| `offsetLeft`, `offsetTop` | The distance from the padding edge of `offsetParent` to the element's border edge, rounded half up, as laid out: the scroll offsets of the ancestors up to the offset parent are not in it, and a transform on the element or an ancestor is (they read the boxes, which are transformed: see [deviations](./fork/deviations.md#dom-box-members)). With no offset parent it is the distance from the window's origin. 0 for an element with no box. A library that adds them up through `offsetParent` (Base UI's tab indicator, its composite lists) gets the position of the element in the layout. |
+| `clientLeft`, `clientTop` | The widths of the left and top borders, whole numbers (`getElementBounds` carries them too). 0 for an element with no box. |
+| `getClientRects()` | A `DOMRectList` (an `Array` of `DOMRect` with `item(index)`): one rect, the element's border box in window coordinates as `getBoundingClientRect()` gives it, or an empty list for an element with no box. An inline box that wraps over several lines is still one rect, the box around its lines. `@floating-ui`'s `inline()` and Base UI's inline-reference popups read it and, finding fewer than two rects, leave the reference alone. |
+
+#### `dispatchEvent` at `document`
+
+`document.dispatchEvent(event)` takes the same events and sends them to `window` (capture), `document` (its listeners of both phases, with `eventPhase` 2 and `target` `document`) and, if the event bubbles, `window` (bubble). `window.dispatchEvent` is the runtime's own and does not reach Ghia's `window` listeners.
+
+#### Activation of a dispatched click
+
+As in the DOM, a `click` that is a `MouseEvent` (a `PointerEvent` too) and was not canceled runs the activation behaviour of the first element on its path that has one, once the dispatch is over, whether or not it bubbles and though it is not trusted. In Ghia that is native's own behaviour, the one a real click runs: a `<label>` focuses its control and dispatches a click on it, and a submit `<button>` in a `<form>` submits it with the button as `event.submitter`; an `<a href>` does nothing, as with a real click. A disabled control, a click a listener canceled, another event type and a click that is a plain `Event` run nothing. The activation click on a label's control is a native one (`detail` 0, no position). A checkbox or radio is toggled before the dispatched click's listeners run and put back when one cancels it, and fires `input` and `change` after it: see [Checkbox, radio and hidden inputs](#checkbox-radio-and-hidden-inputs). `input.checked`, `defaultChecked`, `indeterminate` and `value` are members of an `<input>` element.
+
+```tsx
+// What Base UI's checkbox does to toggle its input with the modifiers of the click it heard:
+const PointerEvent = input.ownerDocument.defaultView.PointerEvent
+input.dispatchEvent(new PointerEvent('click', { bubbles: true, cancelable: true, shiftKey: event.shiftKey }))
+```
 
 **Attributes on native.** The adapters also send the DOM attributes an element has to native (`MutationRenderer.setAttribute`,
 wire op 13), so the Rust side reads them without a call into JS. They are exactly what `getAttributeNames()` lists: every prop
@@ -5011,11 +5167,11 @@ A `<style>` element and `CSSStyleSheet` add CSS rules that read these attributes
 
 An `auto` popover is light dismissed: Escape closes the topmost one (it joins the layer stack of [Escape closes the top layer](#escape-closes-the-top-layer), so a Dialog above it closes first), and a press outside closes every open `auto` popover but the one the press is in and the ones that hold it. Showing an `auto` popover closes the other open `auto` popovers that do not hold it (a popover is held by its DOM ancestors). A `manual` popover is closed by `hidePopover()` alone, and neither of these touches it. Focus is not moved when a popover opens or closes.
 
-A popover that leaves the document while open closes with no event, when native lets its element go (the next flush) or the next call that looks at it (`showPopover()`, `hidePopover()`, a press) finds it closed. `getAttributeNames()` and `cloneNode()` never see whether it is open, and a clone is closed. Not built: `::backdrop`, `popovertarget` and `popovertargetaction`, the `:popover-open` pseudo-class (there is no selector engine, so `matches(":popover-open")` is not there), and anchor positioning. The deviations are in [deviations.md](fork/deviations.md#popovers).
+A popover that leaves the document while open closes with no event, when native lets its element go (the next flush) or the next call that looks at it (`showPopover()`, `hidePopover()`, a press) finds it closed. `getAttributeNames()` and `cloneNode()` never see whether it is open, and a clone is closed. Not built: `::backdrop`, `popovertarget` and `popovertargetaction`, and anchor positioning (`:popover-open` is a selector, see [DOM classes and the tree](#dom-classes-and-the-tree)). The deviations are in [deviations.md](fork/deviations.md#popovers).
 
 ### DOM classes and the tree
 
-Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `Element` and `Node` hold for every host element, `SVGElement` replaces `HTMLElement` for an `<svg>` and the shapes in it, and a text child is a `Text` (a `CharacterData`). `Node`, `Element`, `HTMLElement`, `SVGElement`, `Text`, `CharacterData`, `Document`, `DocumentFragment` and `ShadowRoot` are exported by `@ghia/native/host` and installed as globals where the runtime has none (not on the browser build). Two copies of `@ghia/native` share one set of classes. `new HTMLElement()` and the other public classes throw `TypeError: Illegal constructor`. `document` is a `Document`. `DocumentFragment` and `ShadowRoot` are never instantiated, so an `instanceof` check against them is `false`.
+Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `Element` and `Node` hold for every host element, `SVGElement` replaces `HTMLElement` for an `<svg>` and the shapes in it, and a text child is a `Text` (a `CharacterData`). `Node`, `Element`, `HTMLElement`, `SVGElement`, `Text`, `CharacterData`, `Document`, `DocumentFragment` and `ShadowRoot` are exported by `@ghia/native/host` and installed as globals where the runtime has none (not on the browser build). Two copies of `@ghia/native` share one set of classes. `new HTMLElement()` and the other public classes throw `TypeError: Illegal constructor`. `document` is a `Document`. `DocumentFragment` and `ShadowRoot` are never instantiated, so an `instanceof` check against them is `false`. `HTMLInputElement` and `HTMLTextAreaElement` are globals too (and exported), where a library reads `win.HTMLInputElement` to tell a text control: an element is one by its tag (`el instanceof HTMLInputElement` holds for an `<input>` and no other), and they cannot be constructed. `DOMRect` and `DOMRectReadOnly` are globals as well, with `fromRect`, the edges `left`, `right`, `top` and `bottom` (the lesser and the greater of the two edges for a negative size) and `toJSON()`; `DOMRect`'s `x`, `y`, `width` and `height` can be set. The other `HTML*Element` classes are not there.
 
 | Member | |
 |---|---|
@@ -5025,11 +5181,18 @@ Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `
 | `children`, `childElementCount`, `firstElementChild`, `lastElementChild`, `previousElementSibling`, `nextElementSibling` | The same, elements only. `children` is an array, not an `HTMLCollection`. |
 | `contains(node)`, `getRootNode()`, `compareDocumentPosition(node)` | `contains` includes the node itself. `getRootNode()` is `document` for a mounted node and the top of its tree otherwise. `compareDocumentPosition` gives the `DOCUMENT_POSITION_*` bits (`DISCONNECTED`, `PRECEDING`, `FOLLOWING`, `CONTAINS`, `CONTAINED_BY`); two trees that are not in one document are `DISCONNECTED` and `IMPLEMENTATION_SPECIFIC` with a stable order. `document.contains(node)` is `node.isConnected`. |
 | `textContent` | The text of the node and its descendants. Setting it on an element replaces its children with one `Text` (`""` or `null` removes them all); on a `Text` it sets its data. |
-| `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `class` attribute (`""` without one; `class` wins over `className`, as `getAttribute("class")` does), an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG; `style` while the style has a declaration). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a frozen read-only snapshot of the `data-*` props with the names in camel case (`data-row-id` is `rowId`). |
+| `matches(selector)`, `closest(selector)` | A real selector, as in the DOM: type, class, id, attribute (`=`, `~=`, `\|=`, `^=`, `$=`, `*=`, with `i` and `s`), the combinators (space, `>`, `+`, `~`), selector lists, and `:not()`, `:is()`, `:where()`, `:has()`, `:root`, `:empty`, `:scope`, `:first-child`, `:last-child`, `:only-child`, `:nth-child()`, `:nth-last-child()` and the `-of-type` forms, `:lang()`, `:disabled`, `:enabled` (read from the attributes), and `:checked` and `:indeterminate` (the live state of a checkbox or radio). `closest` starts at the element itself and walks up through the parents. `:scope` is the element the method is called on. `:focus`, `:focus-visible`, `:focus-within`, `:hover` and `:active` ask the window, so they answer for the focus and pointer as they are at that moment (and are `false` for an element that is not mounted). `:popover-open` matches a [popover](#popover) that is showing. All of them work on an element that is not inserted yet and on a subtree built with `appendChild` before it is inserted. A selector the engine cannot parse, or a pseudo-class or pseudo-element it does not have, throws a `SyntaxError` `DOMException`; see [the deviations](fork/deviations.md#dom-selectors). Tag names are compared without case (`P` matches a `<p>`), as an HTML document does. |
+| `querySelector(selector)`, `querySelectorAll(selector)` | On an element, on `document` and on a `DocumentFragment`. The elements below the node that match, in document order: the node itself is not one, but the whole selector is matched against the tree, so `el.querySelectorAll('main p')` finds a `p` in `el` whose `main` is above it. `querySelectorAll` returns a static list (an `Array` with `item(index)`, `length` and `forEach`) that does not follow later changes to the tree, and `querySelector` the first or `null`. `document.querySelector(…)` searches the `<html>` of every window, so an app's elements and a portal into `document.body` are both found; with nothing mounted it finds nothing. `:scope` in a query on `document` is `<html>`. A selector is compiled once and kept by its text, so asking the same question on every focus change (a focus trap's tabbable list, `a[href], button:not([disabled]), [tabindex]`) walks the tree and parses nothing. |
+| `className`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `class` attribute (`""` without one; `class` wins over `className`, as `getAttribute("class")` does), an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a live `DOMStringMap` of the `data-*` attributes with the names in camel case (`data-row-id` is `rowId`): a read goes through `getAttribute`, and an assignment or a `delete` through `setAttribute` and `removeAttribute`, so Base UI's `element.dataset.tabindex = ...` works. |
+| `hidden`, `tabIndex`, `disabled`, `htmlFor`, `isContentEditable`, `shadowRoot`, `assignedSlot` | `hidden` is the `hidden` attribute: `false` without it, `true` with it, and `"until-found"` when the attribute says that; assigning `true` or a non-empty string sets it, `false` removes it. An element that has it is `display: none` by its user agent style, as in Chrome (`[hidden]:not([hidden=until-found i])`), whatever its tag, so the author's own `display` is over it, and `until-found` keeps its box. `tabIndex` is the `tabindex` attribute as an integer (text that does not start with one reads the default), and without it the default of the tag, as in the HTML standard: 0 for `a`, `area`, `button`, `frame`, `iframe`, `input`, `object`, `select`, `textarea` and the first `summary` of a `details`, -1 for the rest; assigning writes the attribute. `disabled` is the `disabled` attribute as a boolean on `button`, `input`, `select`, `textarea`, `fieldset`, `optgroup` and `option` (assigning `true` sets it empty, `false` removes it), and `htmlFor` is the `for` attribute of a `label`, `""` without one; on any other element neither is there. `isContentEditable` is `false`: Ghia has no `contenteditable`, so nothing in it is an editing host (an element given the attribute is not editable, and Base UI's tabbable walk reads it as not focusable by it). `shadowRoot` and `assignedSlot` are `null`: there is no shadow DOM. |
+| `setAttribute(name, value)`, `removeAttribute(name)`, `toggleAttribute(name, force?)` | Write the prop the attribute stands for through the framework's own prop path, so native applies it as if the app had rendered that prop, at once (the mutations are flushed before the call returns; `setAttribute('style', text)` is the exception, which waits for the next flush as every write of `element.style` does), and `getAttribute` gives it back. This is what `@floating-ui`'s `markOthers` and Base UI's focus manager do: `setAttribute('aria-hidden', 'true')` leaves the element out of the accessibility tree, `setAttribute('inert', '')` makes the subtree inert, `setAttribute('tabindex', '-1')` makes the element focusable and `'0'` a tab stop (`removeAttribute('tabindex')` undoes it), and `setAttribute(name, '')` reads back `""` with `hasAttribute(name)` true. `popover` goes through the same path as the `popover` property and a framework's prop: a showing popover whose kind the write changes, or that loses the attribute, is hidden with its events. Names are lowercased on HTML elements, as in the DOM, and an empty name or one with a space, `/`, `>`, `=` or NUL throws `InvalidCharacterError`. The value is text: `tabindex`, `colspan`, `rowspan`, `span` and `maxlength` hold the integer the text is (text that is no integer is kept as it is, and native ignores it); `inert`, `disabled`, `hidden` (except `until-found`, which is kept as that text), `required`, `readonly`, `autofocus`, `multiple`, `selected` and `open` are on whatever the text is (`""` too), and `draggable` is on for `"true"`. `class` is `className` (or `class`, where the element was given that), `for` is `htmlFor`, and any other name is the prop of that name (`aria-*`, `data-*`). On an `<input>` the `checked` attribute is `defaultChecked` (on whatever its text is) and the `value` attribute is `defaultValue`, as in the DOM: the control's `checked` and `value` follow them only while it is clean (no user toggle or edit, no script write of the property), and `getAttribute` gives the attribute back; a checkbox, radio, hidden, submit, button, reset or image `value` attribute is the control's value itself and writes `value`. A `<textarea>` has no `value` attribute, so it is kept as text only. One rule says which prop answers an `<input>`'s `checked` and `value` attributes, for `getAttribute` and for the attribute a stylesheet's `[checked]` and `[value="…"]` match alike: the default prop (`defaultChecked`, `defaultValue`) when the element has one, else the `checked` or `value` prop, as React DOM puts a controlled value in the attribute too (a checkbox's `value` is the attribute itself, so `value` comes first there). So `setAttribute('checked', '')` on an input a framework renders `checked={false}` stays matched after the framework commits `checked` again, and `setAttribute('value', 'y')` on a controlled text input reads back `"y"` while its text stays the controlled value; `removeAttribute` then falls back to the prop. An element keeps the key its framework used for an attribute. The write goes the way a rendered prop's does to the attribute store native's [stylesheet](#stylesheets) selectors read, so `[data-state="open"]`, `[hidden]` and `.foo` match what `setAttribute`, `toggleAttribute` and `dataset` write, and stop matching when it is removed. Like the DOM, a later commit of the same prop by React or Solid overwrites the attribute, a commit that leaves the prop as it was does not, and an attribute the framework never set stays. `setAttribute('style', text)` sets `style.cssText` (below), and `on*` is kept as text for `getAttribute` and does nothing else: see [deviations](./fork/deviations.md#dom-attributes). `toggleAttribute` follows the DOM and returns whether the attribute is there afterwards. A `MutationObserver` with `attributes` gets a record, with `oldValue` where it asked, for each write that changes what `getAttribute` reads. |
+| `style` | The element's inline style as a `CSSStyleDeclaration`; what it reads and writes, and how a framework's `style` merges with code's, is under [Style and id from code](#style-and-id-from-code). `setAttribute('style', text)` is `style.cssText = text`, and `getAttribute('style')` is the `cssText`. |
 
-Every window root is a real `<html>` with a `<head>` and a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.head` the `<head>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; all four are `null` while no root is mounted, and with several windows they are those of the window that mounted last (the rule `matchMedia` follows). `html.parentNode` is `document`, `head.parentNode` and `body.parentNode` are `html` (`documentElement.children` is `[head, body]`), a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin (the [user agent style](#html-tags) of those tags, which a stylesheet rule such as `body { display: flex }` overrides, and neither has a `style` attribute); they add no accessibility node. `head` is `display: none`: it has no box, and an element appended to it is never drawn, laid out or hit, though it is a real element in the tree (a library that prepends a node to `document.head` finds one).
+Every window root is a real `<html>` with a `<head>` and a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.head` the `<head>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; those four are `null` while no root is mounted, and with several windows they are those of the window that mounted last (the rule `matchMedia` follows). `document.compatMode` is `"CSS1Compat"` always, with or without a root. `html.parentNode` is `document`, `head.parentNode` and `body.parentNode` are `html` (`documentElement.children` is `[head, body]`), a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin (the [user agent style](#html-tags) of those tags, which a stylesheet rule such as `body { display: flex }` overrides, and neither has a `style` attribute); they add no accessibility node. `head` is `display: none`: it has no box, and an element appended to it is never drawn, laid out or hit, though it is a real element in the tree (a library that prepends a node to `document.head` finds one).
 
-`setAttribute` and the other attribute writers are not there. `el.id` is the `id` prop as a string, `""` without one, as in the DOM, and `el.id = "x"` sets it ([below](#style-and-id-from-code)). The number native knows an element by, which the renderer methods take, is `el.nativeId` (`renderer.scrollToItem(ref.nativeId, i)`).
+`document.getElementById(id)` finds the first element, in document order across every window, whose `id` is `id` (`null` for none and for `""`). `document.createElement(name)` and the other node makers are in [Building and moving nodes from code](#building-and-moving-nodes-from-code).
+
+`el.id` is the `id` prop as a string, `""` without one, as in the DOM, and `el.id = "x"` sets it ([below](#style-and-id-from-code)). The number native knows an element by, which the renderer methods take, is `el.nativeId` (`renderer.scrollToItem(ref.nativeId, i)`).
 
 #### Building and moving nodes from code
 
@@ -5059,10 +5222,10 @@ el.style.removeProperty("--dnd-top")        // returns the old value, "" when th
 
 | Member | |
 |---|---|
-| `setProperty(name, value, priority?)`, `removeProperty(name)`, `getPropertyValue(name)`, `getPropertyPriority(name)` | `name` is the CSS name (`background-color`, `-webkit-font-smoothing`, `--x`) in any case, except that a custom property keeps its case. `""` or `null` removes the property. A property Ghia has no style for (`touch-action`, `will-change`) and a value ending in `!important` change nothing. A value is not checked against the property: an invalid one is stored and native's lenient parser drops it ([deviations](fork/deviations.md#dom-building-from-code)). A number property takes numeric text as a number (`"10"` is `10`) and any other text (`"auto"`, `"50%"`, `"none"`, a CSS-wide keyword) as written. `priority` `"important"` is accepted and ignored ([deviations](fork/deviations.md#dom-building-from-code)). |
-| `cssText` | The declarations as `a: b; --c: d;`, and `""` for none. Setting it replaces every declaration (the state blocks and queries of the framework's style stay: they are no CSS text). |
-| `length`, `item(index)`, `[Symbol.iterator]`, `parentRule` | The declarations' names in written order; `parentRule` is `null`. |
-| `el.style.backgroundColor`, `el.style.translate`, ... | A camelCase member to read and to write for every property of `StyleDesc`, which is the list `STYLE_PROPERTIES` in `@ghia/native/host`. A number is read as CSS has it: `10px` for a length, a plain number for `opacity`, `zIndex`, `flex`, `scale` and the like, `45deg` for `rotate`. |
+| `setProperty(name, value, priority?)`, `removeProperty(name)`, `getPropertyValue(name)`, `getPropertyPriority(name)` | `name` is the CSS name (`background-color`, `-webkit-font-smoothing`, `--x`) in any case, except that a custom property keeps its case. `""` or `null` removes the property. A property a browser has and Ghia has no style key for (`touch-action`, `will-change`, `scroll-snap-type`) is kept: `getPropertyValue`, the accessor, `cssText` and `getAttribute("style")` read it back, it is listed by `length`, `item` and iteration after the declarations that have a key, and it is never sent to native; the names are those of `mdn-data`'s CSS property index ([deviations](fork/deviations.md#dom-building-from-code)). A name that is no CSS property (`foo-bar`) and a value ending in `!important` change nothing. A value is not checked against the property: an invalid one is stored and native's lenient parser drops it ([deviations](fork/deviations.md#dom-building-from-code)). A number property takes numeric text as a number (`"10"` is `10`) and any other text (`"auto"`, `"50%"`, `"none"`, a CSS-wide keyword) as written. `priority` `"important"` stores the value with the `!important` suffix a framework writes one in (`display: "none !important"`), which native ranks above a stylesheet's `!important` rule as Chrome does; `getPropertyPriority(name)` reports `"important"`, `getPropertyValue`, the accessors and `removeProperty` give the plain value, and `cssText` prints `top: 1px !important;` ([deviations](fork/deviations.md#dom-building-from-code)). |
+| `cssText` | The declarations as `a: b; --c: d;` (a priority as `a: b !important;`), and `""` for none. Setting it replaces every declaration and reads `!important` as the priority (the state blocks and queries of the framework's style stay: they are no CSS text). |
+| `length`, `item(index)`, `[Symbol.iterator]`, `parentRule` | The declarations' names in written order, those of properties Ghia has no style key for (`touch-action`) after the others; `parentRule` is `null`. |
+| `el.style.backgroundColor`, `el.style.translate`, ... | A camelCase member to read and to write for every CSS property in `mdn-data`'s index, which is every property of `StyleDesc` (the list `STYLE_PROPERTIES` in `@ghia/native/host`) and those Ghia has no style key for (`el.style.touchAction`), with the vendor-prefixed names in both spellings (`webkitMaskImage` and `WebkitMaskImage`) and `cssFloat`. A number is read as CSS has it: `10px` for a length, a plain number for `opacity`, `zIndex`, `flex`, `scale` and the like, `45deg` for `rotate`. |
 
 A write from code makes the whole new style the element's and sends it as the framework's own style change is sent; the framework's next change of `style` is applied **property by property** onto it: a property the framework sets or changes overwrites code's, a property it had and no longer has is removed, and every other property keeps what code wrote. So a re-render that leaves `--dnd-top` alone keeps it, and one that sets `width` replaces a `width` code set. A property written by code replaces its declaration where it stands. An unchanged value is no change (nothing is sent and no `MutationObserver` record is made) unless a later declaration overlaps it, and then it moves last, as CSS has it: of two overlapping declarations the later one wins. Two declarations overlap when one covers the other (a shorthand and a longhand it covers) and when two shorthands share a longhand (`borderTop` and `borderWidth`). `el.style = "..."` sets `cssText`.
 
@@ -5109,7 +5272,7 @@ so code written for the web runs unchanged: `window` is the global object,
 `globalThis.addEventListener`. A listener added there is registered with Ghia's
 `window` (so `keydown`, pointer and focus events reach it) and with the runtime's
 own target, so `error`, `unhandledrejection` and `message` listeners keep
-working. `scrollTo`, `scroll` and `scrollBy` exist and do nothing: an app window
+working. `scrollTo`, `scroll` and `scrollBy` exist and do nothing, and `scrollX` and `scrollY` are 0: an app window
 has no document to scroll, as with a page that does not overflow. Libraries that
 check `typeof window` for a browser, such as TanStack Query, see a client.
 `getComputedStyle`, `matchMedia` and `IntersectionObserver` are globals too, and
@@ -5341,8 +5504,9 @@ buttonRef.current.matches(':focus-visible')
 <div ref={buttonRef} tabIndex={-1}>Focused on demand</div>
 ```
 
-`matches()` supports `:focus`, `:focus-visible`, `:focus-within`, `:hover` and
-`:active`; any other selector throws. Removing `tabIndex` removes the element from the focus order and
+`matches()` is the DOM's, so any selector works (see [DOM classes and the tree](#dom-classes-and-the-tree)),
+and `:focus`, `:focus-visible`, `:focus-within`, `:hover` and `:active` read the focus and pointer
+state of the window. Removing `tabIndex` removes the element from the focus order and
 blurs it if it was focused.
 
 `:focus-visible` follows Chrome's heuristic (see [Focus styles](#focus-styles)).
@@ -5813,7 +5977,9 @@ report too. An element that has no box
 `device-pixel-content-box` throws a `TypeError`.
 
 `IntersectionObserver` takes `{ root, rootMargin, threshold }`. `root` is a host
-element or `null` for the window. Entries have `isIntersecting`,
+element, or `null` or a `Document` (`document`, `element.ownerDocument`) for the
+window; `observer.root` returns what was passed, and anything else throws a
+`TypeError`. Entries have `isIntersecting`,
 `intersectionRatio`, `boundingClientRect`, `intersectionRect`, `rootBounds`,
 `time` and `target`. Each target gets an entry after `observe()` (an element
 that never paints reports not intersecting) and then one per threshold crossing
@@ -7107,7 +7273,8 @@ The details for a library author, with a minimal addon, are in
 | Scroll | `onScroll` | `scrollTop`, `scrollLeft` — scroll containers, not `<virtual-list>` |
 | Content visibility | `onContentVisibilityAutoStateChange` | `skipped` — an element with `contentVisibility: "auto"` began or stopped skipping its content. Bubbles, cancelable, has an `…Capture` twin. See [Skipping content with `contentVisibility`](#skipping-content-with-contentvisibility) |
 | Layout | `onLayout` | `width`, `height`, `x`, `y` — any element a `ResizeObserver` works on (`<div>`, `<span>`, `<input>`, `<img>`, `<svg>` and the other built-in elements). See also `ResizeObserver` and `IntersectionObserver` under [Measure an element](#measure-an-element) |
-| Change | `onChange` | `value`, `inputType`, `data`, `isComposing` — `<input>` and `<textarea>` only, once per edit like the DOM `input`. See [The change event](#the-change-event) |
+| Input | `onInput` (React: also `onChange` of a text control) | `value`, `inputType`, `data`, `isComposing` — once per edit of an `<input>` or `<textarea>`, once per toggle of a checkbox or radio, and once per key that moves a range. Bubbles, not cancelable. See [The input and change events](#the-input-and-change-events) |
+| Change | `onChange` (React: of a checkbox or radio) | `value` — an `<input>` or `<textarea>` whose value the user committed on blur or Enter, a checkbox or radio that was toggled, or a range a key moved. Bubbles, not cancelable. See [The input and change events](#the-input-and-change-events) |
 | Submit | `onSubmit` | `formData`, `submitter` — `<form>`, bubbling. See [Forms](#forms) |
 | Webview | `onDidStartLoading`, `onDidStopLoading`, `onDidNavigate`, `onPageTitleUpdated`, `onDidFailLoad` | `url`, `title`, `explicitSet`, `errorCode`, `errorDescription`, `validatedUrl` — `<webview>` only, at the element, not bubbling. See [`<webview>`](#webview) |
 | Native view | `onAttach`, `onDetach` | `nativeHandle` (decimal digits) — `<nativeview>` only, at the element, not bubbling; the handlers get the `bigint` and no event. See [`<nativeview>`](#nativeview) |
@@ -7314,6 +7481,14 @@ PointerEvents in Chrome) also has `isPrimary`: `true`, because Ghia has one poin
 `click`, `auxclick` or `contextmenu` that no pointer made (`pointerId` `-1`: Enter or Space on a
 button, the VoiceOver Press, `el.click()`), where it is `false`. Every event has `nativeEvent`, the event itself, which is what a library that wraps
 events reads the DOM event from (a React synthetic event has the same member).
+
+### Event classes
+
+Every event Ghia delivers is an instance of the DOM class of its type, and of `Event`: a `click`, `auxclick`, `contextmenu` and every `pointer*` type is a `PointerEvent`; the other mouse types a `MouseEvent`; `wheel` a `WheelEvent`; the drag types a `DragEvent`; `keydown` and `keyup` a `KeyboardEvent`; `focus`, `blur`, `focusin` and `focusout` a `FocusEvent`; `input` an `InputEvent`; the composition types a `CompositionEvent`; the transition types a `TransitionEvent` and the animation types an `AnimationEvent`. Any other type is a plain `Event`. The classes are exported by `@ghia/native/host` and installed as globals where the runtime has none (`UIEvent`, `MouseEvent`, `PointerEvent`, `WheelEvent`, `DragEvent`, `KeyboardEvent`, `FocusEvent`, `InputEvent`, `CompositionEvent`, `TransitionEvent`, `AnimationEvent`), so `event instanceof PointerEvent` and `new (element.ownerDocument.defaultView.PointerEvent)('click', { bubbles: true, shiftKey: true })` work as they do in a browser. Each takes the DOM's constructor arguments (the type and an init dictionary with the DOM's defaults: `new MouseEvent('click')` has `clientX` 0 and `relatedTarget` `null`), and is a subclass of the runtime's own `Event`, so `Event`, `CustomEvent` and `EventTarget` are untouched. Pass one to [`dispatchEvent`](#listeners-and-dom-members-on-an-element) to send it through the tree.
+
+`getModifierState(key)` is on `MouseEvent` (so on pointer, wheel and drag events) and `KeyboardEvent`: `"Shift"`, `"Control"`, `"Alt"` and `"Meta"` read the four modifier fields (`shiftKey`, `ctrlKey`, `altKey`, `metaKey`, which every mouse and key event has), and any other key (`"CapsLock"`, `"NumLock"`) is `false` on a delivered event, since no platform reports them to Ghia. A constructed event answers for the `modifier*` members of its init (`new KeyboardEvent('keydown', { modifierCapsLock: true })`).
+
+`isTrusted` is `true` on an event Ghia delivered from input and `false` on one an app dispatched. `returnValue` and `cancelBubble` read and write the same flags as `defaultPrevented` and `stopPropagation()`, and `srcElement` is `target`. A delivered event is built from the prototype of its class and not with the runtime's constructor, which is why it is cheap; [what that costs](fork/deviations.md#events-and-input) is that its inherited native methods (`initEvent`) throw, and that it cannot be given to a runtime `EventTarget`'s `dispatchEvent`.
 
 ### Pointer capture
 
@@ -8854,11 +9029,11 @@ ancestors that declare `hasDisabled` or `hasEnabled` in the same frame.
 [Transitions](#css-transitions), [animations](#css-animations) and
 [`<UniversalStyle>`](#universal-style) refinements work in them as in `hover`.
 
-**`:checked` is not available.** It needs a checkable element, and Ghia has none:
-every `<input type>` is text-like, and there is no checkbox, radio or `<option>`
-to be checked or selected. So there is no `checked` or `hasChecked` key; derive the
-state in your component and pass the style, as for a custom checkbox built from a
-`div`. It can be added together with a native checkbox control.
+**`:checked` is not a state style.** A checkbox and a radio have a checkedness now
+([Checkbox, radio and hidden inputs](#checkbox-radio-and-hidden-inputs)) and
+`matches(':checked')` reads it, but there is no `checked` or `hasChecked` key in a
+style: derive the state in your component and pass the style, as for a custom
+checkbox built from a `div`.
 
 ### Container queries
 
@@ -9806,7 +9981,7 @@ Anything else makes the selector invalid and drops its rule (a list is all or no
 
 **Attributes.** A selector reads the attributes `element.attributes` lists, as the DOM names them (`setAttribute`, wire op 13): `class` (from `class` or `className`), `tabindex` (from `tabIndex`), `for` (from `htmlFor`), `data-*`, `id`, `role`, `aria-*` and every other prop that holds a string, a number or a boolean. A `data-*` or `aria-*` boolean matches as `"true"` or `"false"`, so `[aria-expanded="false"]` matches `aria-expanded={false}`. On an HTML element a selector's attribute name compares without regard to case (`[tabindex]`, `[tabIndex]` and `[data-rowid]` match `tabIndex={0}` and `data-rowId="7"`); on an SVG element it compares exactly (`svg[viewBox]` matches, `svg[viewbox]` does not). Values compare case-sensitively unless the selector says `i`. `[style*="--x"]` reads the element's `style` prop as `kebab-case: value;` text. See [Listeners and DOM members](#listeners-and-dom-members-on-an-element) for what is sent.
 
-**The cascade.** The normal declarations of the matching rules apply first, ordered by layer (layers in the order first declared, unlayered rules last and so strongest), then specificity, then source order across the sheets. Then the element's `style` prop, so an inline value beats a normal rule of any specificity. Then the `!important` declarations of the rules, with the layers the other way round (the first layer wins, unlayered rules lose). Last, the inline values written with an `!important` suffix (`style={{ display: 'none !important' }}`), which beat an `!important` rule as inline `!important` does in CSS; with no rule matching, the suffix is dropped and the value is plain. The suffix is a Ghia extension: in a browser a suffix in a style object is invalid, and React DOM sets priority with `style.setProperty(name, value, 'important')`, which a style object cannot express ([deviations](./fork/deviations.md#stylesheets)). A later declaration of a property replaces an earlier one, and a shorthand replaces the longhands before it, as written order does in the `style` prop. A CSS-wide keyword (`unset`, `initial`, `inherit`, `revert`, `revert-layer`) takes back what an earlier declaration of its property, and of the longhands it covers, set. `unset` and `initial` (and `inherit` on a property that inherits) also take back what the layers under the author's style set, the universal style and the user agent style of the tag and of a popover, as author declarations beat the user agent origin in CSS; `revert` and `revert-layer` leave those layers. In the dnd-kit sheet that is `right: unset !important` removing an inline `right` and the `right: 0` of an open popover, and `margin: unset` removing its `margin: auto`, so a dragged popover sits at its `left`; with the item dropped, the inline value is back. `inherit` on a property that does not inherit, and `revert-layer` as a roll-back to the previous `@layer`, are not read as CSS does ([deviations](./fork/deviations.md#stylesheets)).
+**The cascade.** The normal declarations of the matching rules apply first, ordered by layer (layers in the order first declared, unlayered rules last and so strongest), then specificity, then source order across the sheets. Then the element's `style` prop, so an inline value beats a normal rule of any specificity. Then the `!important` declarations of the rules, with the layers the other way round (the first layer wins, unlayered rules lose). Last, the inline values written with an `!important` suffix (`style={{ display: 'none !important' }}`), which beat an `!important` rule as inline `!important` does in CSS; with no rule matching, the suffix is dropped and the value is plain. The suffix is how a style object expresses a priority: in a browser a suffix in a style object is invalid, and React DOM sets one with `style.setProperty(name, value, 'important')`, which `element.style` writes as that suffix, so both reach the same cascade ([deviations](./fork/deviations.md#stylesheets)). A later declaration of a property replaces an earlier one, and a shorthand replaces the longhands before it, as written order does in the `style` prop. A CSS-wide keyword (`unset`, `initial`, `inherit`, `revert`, `revert-layer`) takes back what an earlier declaration of its property, and of the longhands it covers, set. `unset` and `initial` (and `inherit` on a property that inherits) also take back what the layers under the author's style set, the universal style and the user agent style of the tag and of a popover, as author declarations beat the user agent origin in CSS; `revert` and `revert-layer` leave those layers. In the dnd-kit sheet that is `right: unset !important` removing an inline `right` and the `right: 0` of an open popover, and `margin: unset` removing its `margin: auto`, so a dragged popover sits at its `left`; with the item dropped, the inline value is back. `inherit` on a property that does not inherit, and `revert-layer` as a roll-back to the previous `@layer`, are not read as CSS does ([deviations](./fork/deviations.md#stylesheets)).
 
 **Restyling.** An element is matched again when a class, its `id`, an attribute a selector names, its place among its siblings or the text of a `<style>` element changes, and only the elements a selector can reach from the change (a descendant rule reaches the subtree, a sibling rule the following siblings). The work happens once at the end of the batch that made the changes, so toggling a class on one of fifty items matches that one. Elements that match the same rules and have the same `style` share one cascade. A document with no sheet matches nothing: native returns at one flag in every hook (5000 items cost 14.7 Minstr of native work in the batch with a class and two `data-*` attributes each and no sheet, against 14.6 without them), and what the app pays is the JS side's props (see [attributes on native](#listeners-and-dom-members-on-an-element)). `renderer.getBuildCounters()` has `elementsRematched` and `cascadesComputed` for tests.
 

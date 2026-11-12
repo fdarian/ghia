@@ -997,8 +997,9 @@ describeNative("focus model", () => {
       expect(focused()).toBe(null)
       expect(node.matches(":focus")).toBe(false)
       expect(log).toEqual(["focus", "blur"])
-      expect(() => node.matches(":visited")).toThrow(/:focus/)
-      expect(() => node.matches("div")).toThrow()
+      expect(node.matches(":visited")).toBe(false)
+      expect(node.matches("[tabindex='0']")).toBe(true)
+      expect(() => node.matches("[")).toThrow(expect.objectContaining({ name: "SyntaxError" }))
     })
 
     it("blur() is a no-op on an element that is not focused", () => {

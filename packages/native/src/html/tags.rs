@@ -74,6 +74,21 @@ pub(super) const TAGS: &[(&str, &str)] = &[
         "button",
         r##"{"display":"inline-block","boxSizing":"border-box","padding":"1px 6px","borderWidth":2,"borderStyle":"outset","borderColor":"#767676","backgroundColor":"#efefef","color":"#000000","textAlign":"center","cursor":"default","fontFamily":".SystemUIFont","fontSize":"13.3333px","fontWeight":400,"fontStyle":"normal","lineHeight":"normal"}"##,
     ),
+    // Chrome's `input[type=checkbox]` and `input[type=radio]`: the size is the control's default one.
+    (
+        "input[type=checkbox]",
+        r#"{"display":"inline-block","boxSizing":"border-box","width":13,"height":13,"marginTop":3,"marginRight":3,"marginBottom":3,"marginLeft":4}"#,
+    ),
+    (
+        "input[type=radio]",
+        r#"{"display":"inline-block","boxSizing":"border-box","width":13,"height":13,"marginTop":3,"marginRight":3,"marginBottom":0,"marginLeft":5}"#,
+    ),
+    ("input[type=hidden]", r#"{"display":"none"}"#),
+    // Chrome's slider: 129 by 16 with a 2px margin. The track and thumb are not painted (see `input_range`).
+    (
+        "input[type=range]",
+        r#"{"display":"inline-block","width":129,"height":16,"marginTop":2,"marginRight":2,"marginBottom":2,"marginLeft":2}"#,
+    ),
     ("table", r#"{"display":"table","borderSpacing":2}"#),
     ("thead", r#"{"display":"table-header-group"}"#),
     ("tbody", r#"{"display":"table-row-group"}"#),

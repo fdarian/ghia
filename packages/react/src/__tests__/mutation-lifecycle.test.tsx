@@ -1,7 +1,7 @@
 import { Suspense } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { handleGpuixEvent } from "../reconciler/event-registry.js"
-import { hostConfig, materialize } from "../reconciler/host-config.js"
+import { hostConfig, markUnmounted, materialize } from "../reconciler/host-config.js"
 import { createRoot, flushSync } from "../reconciler/reconciler.js"
 import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing.js"
 import type {
@@ -15,6 +15,7 @@ const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 function recordingRenderer(): MutationRenderer & { styles: object[] } {
   const styles: object[] = []
+  const deferred = new Map<object, () => void>()
   return {
     styles,
     createElement() {},
@@ -35,26 +36,39 @@ function recordingRenderer(): MutationRenderer & { styles: object[] } {
     setStyleSheet() {},
     setAdoptedStyleSheets() {},
     requestFlush() {},
-    flushMutations() {},
+    deferWrite(key, write) {
+      deferred.set(key, write)
+    },
+    flushMutations() {
+      const writes = [...deferred.values()]
+      deferred.clear()
+      for (const write of writes) write()
+    },
   }
 }
 
+function hiddenFixture(props: Props, mounted = true) {
+  const renderer = recordingRenderer()
+  const container: Container = {
+    nativeRenderer: {},
+    renderer,
+    ids: { nextElementId: 0 },
+    eventHandlers: new Map(),
+    motionBindings: new Map(),
+    motionReleases: [],
+    instances: new Map(),
+    windowKeyEventHandlers: {},
+    windowKeyEventId: 0,
+    windowSelectionEventId: 0,
+    onUncaughtError: () => {},
+  }
+  const instance = hostConfig.createInstance("div", props, container, null as unknown as HostContext)
+  if (mounted) materialize(instance)
+  return { renderer, instance }
+}
+
 describe("host config hideInstance", () => {
-  it("keeps the element style when React hides the element", () => {
-    const renderer = recordingRenderer()
-    const container: Container = {
-      nativeRenderer: {},
-      renderer,
-      ids: { nextElementId: 0 },
-      eventHandlers: new Map(),
-      motionBindings: new Map(),
-      motionReleases: [],
-      instances: new Map(),
-      windowKeyEventHandlers: {},
-      windowKeyEventId: 0,
-      windowSelectionEventId: 0,
-      onUncaughtError: () => {},
-    }
+  it("hides through the live style, so the element reads display none with priority important", () => {
     const props: Props = {
       style: {
         width: 80,
@@ -63,49 +77,19 @@ describe("host config hideInstance", () => {
         hover: { backgroundColor: "#a6e3a1" },
       },
     }
-    const instance = hostConfig.createInstance(
-      "div",
-      props,
-      container,
-      null as unknown as HostContext
-    )
-    materialize(instance)
+    const { renderer, instance } = hiddenFixture(props)
 
     hostConfig.hideInstance(instance)
-    expect(renderer.styles.at(-1)).toEqual({
-      width: 80,
-      height: 40,
-      backgroundColor: "#f38ba8",
-      display: "none !important",
-    })
+    renderer.flushMutations()
+    expect(renderer.styles.at(-1)).toEqual({ ...props.style, display: "none !important" })
+    expect([instance.style.display, instance.style.getPropertyPriority("display")]).toEqual(["none", "important"])
+    expect(instance.getAttribute("style")).toBe("width: 80px; height: 40px; background-color: #f38ba8; display: none !important;")
 
     hostConfig.unhideInstance(instance, props)
+    renderer.flushMutations()
     expect(renderer.styles.at(-1)).toEqual(props.style)
+    expect(instance.style.display).toBe("")
   })
-
-  function hiddenFixture(props: Props, mounted = true) {
-    const renderer = recordingRenderer()
-    const container: Container = {
-      nativeRenderer: {},
-      renderer,
-      ids: { nextElementId: 0 },
-      eventHandlers: new Map(),
-      motionBindings: new Map(),
-      motionReleases: [],
-      instances: new Map(),
-      windowKeyEventHandlers: {},
-      windowKeyEventId: 0,
-      windowSelectionEventId: 0,
-    }
-    const instance = hostConfig.createInstance(
-      "div",
-      props,
-      container,
-      null as unknown as HostContext
-    )
-    if (mounted) materialize(instance)
-    return { renderer, instance }
-  }
 
   it("keeps an element hidden when its style changes", () => {
     const before: Props = { style: { width: 80, hover: { backgroundColor: "#a6e3a1" } } }
@@ -113,10 +97,12 @@ describe("host config hideInstance", () => {
     const { renderer, instance } = hiddenFixture(before)
 
     hostConfig.hideInstance(instance)
+    renderer.flushMutations()
     hostConfig.commitUpdate(instance, "div", before, after, null)
-    expect(renderer.styles.at(-1)).toEqual({ width: 120, display: "none !important" })
+    expect(renderer.styles.at(-1)).toEqual({ ...after.style, display: "none !important" })
 
     hostConfig.unhideInstance(instance, after)
+    renderer.flushMutations()
     expect(renderer.styles.at(-1)).toEqual(after.style)
   })
 
@@ -124,15 +110,17 @@ describe("host config hideInstance", () => {
     const { renderer, instance } = hiddenFixture({ style: { width: 80, hover: { backgroundColor: "#a6e3a1" } } }, false)
 
     hostConfig.hideInstance(instance)
+    renderer.flushMutations()
     expect(renderer.styles).toHaveLength(0)
 
     materialize(instance)
-    expect(renderer.styles[0]).toEqual({ width: 80, display: "none !important" })
+    expect(renderer.styles[0]).toEqual({ width: 80, hover: { backgroundColor: "#a6e3a1" }, display: "none !important" })
   })
 
   it("does not resend an unchanged style while hidden", () => {
     const { renderer, instance } = hiddenFixture({ style: { width: 80 } })
     hostConfig.hideInstance(instance)
+    renderer.flushMutations()
     const sent = renderer.styles.length
 
     hostConfig.commitUpdate(
@@ -142,7 +130,50 @@ describe("host config hideInstance", () => {
       { style: { width: 80 } },
       null
     )
+    renderer.flushMutations()
 
+    expect(renderer.styles).toHaveLength(sent)
+  })
+
+  it("unhides to the display the props give, and drops one that code wrote while it was hidden", () => {
+    const { renderer, instance } = hiddenFixture({ style: { width: 80 } })
+    hostConfig.hideInstance(instance)
+    instance.style.display = "flex"
+    hostConfig.unhideInstance(instance, { style: { width: 80 } })
+    renderer.flushMutations()
+    expect(renderer.styles.at(-1)).toEqual({ width: 80 })
+    expect(instance.style.display).toBe("")
+
+    hostConfig.hideInstance(instance)
+    hostConfig.unhideInstance(instance, { style: { width: 80, display: " grid " } })
+    renderer.flushMutations()
+    expect(renderer.styles.at(-1)).toEqual({ width: 80, display: "grid" })
+  })
+})
+
+describe("the deferred style write of code", () => {
+  it("is dropped when a React commit sent the same live style before the flush", () => {
+    const before: Props = { style: { width: 80 } }
+    const after: Props = { style: { width: 80, opacity: 0.5 } }
+    const { renderer, instance } = hiddenFixture(before)
+    renderer.flushMutations()
+    const sent = renderer.styles.length
+
+    instance.style.opacity = "0.5"
+    hostConfig.commitUpdate(instance, "div", before, after, null)
+    expect(renderer.styles).toHaveLength(sent + 1)
+    renderer.flushMutations()
+    expect(renderer.styles).toHaveLength(sent + 1)
+  })
+
+  it("is dropped when the element was released before the flush", () => {
+    const { renderer, instance } = hiddenFixture({ style: { width: 80 } })
+    renderer.flushMutations()
+    const sent = renderer.styles.length
+
+    instance.style.height = "10px"
+    markUnmounted(instance)
+    renderer.flushMutations()
     expect(renderer.styles).toHaveLength(sent)
   })
 })

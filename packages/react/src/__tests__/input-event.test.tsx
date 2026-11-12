@@ -1,4 +1,4 @@
-/** The `inputType`, `data` and `isComposing` of the per-edit `onChange` event of <input> and <textarea>. */
+/** The `inputType`, `data` and `isComposing` of the per-edit `onChange` (the DOM `input`) event of <input> and <textarea>. */
 // @ts-nocheck
 
 import React, { useState } from "react"
@@ -196,8 +196,8 @@ describeNative("input event", () => {
         { key: "Enter", action: "commit", text: "あ" }
       )
       expect(order).toEqual([
-        "change insertCompositionText true",
-        "change insertCompositionText true",
+        "input insertCompositionText true",
+        "input insertCompositionText true",
         'compositionend "あ"',
       ])
       expect(events[1].data).toBe("あ")
@@ -216,8 +216,8 @@ describeNative("input event", () => {
         { key: "Escape", action: "mark", text: "" }
       )
       expect(order).toEqual([
-        "change insertCompositionText あ true",
-        "change deleteCompositionText null true",
+        "input insertCompositionText あ true",
+        "input deleteCompositionText null true",
         "compositionend",
       ])
     })

@@ -77,6 +77,7 @@ function elementBinding(element: FakeHtml | FakeSvg): ElementBinding {
 
 defineDomMembers(FakeHtml.prototype, (element: FakeHtml) => ({
   listeners: undefined as never,
+  style: {},
   connected: element.connected,
   prop: (name) => element.props[name],
   propNames: () => Object.keys(element.props),
@@ -84,6 +85,7 @@ defineDomMembers(FakeHtml.prototype, (element: FakeHtml) => ({
 }))
 defineDomMembers(FakeSvg.prototype, (element: FakeSvg) => ({
   listeners: undefined as never,
+  style: {},
   connected: element.connected,
   prop: (name) => element.props[name],
   propNames: () => Object.keys(element.props),
@@ -327,7 +329,7 @@ describe("element members", () => {
     expect(el.hasAttribute("disabled")).toBe(false)
     expect(el.hasAttribute("missing")).toBe(false)
     expect(el.dataset).toEqual({ index: "7", rowId: "r1" })
-    expect(Object.isFrozen(el.dataset)).toBe(true)
+    expect(el.dataset).toBe(el.dataset)
   })
 })
 

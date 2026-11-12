@@ -1392,7 +1392,7 @@ function Composer(props: {
             paddingLeft: 10,
             paddingRight: 10,
           }}
-          onChange={(event) => props.onChange(event.value ?? "")}
+          onInput={(event) => props.onChange(event.value ?? "")}
           onKeyDown={(event) => {
             if (event.key !== "Enter" || event.modifiers?.shift) return
             event.preventDefault()
@@ -1842,7 +1842,7 @@ export function ChatApp(propsIn: { turnCount?: number } = {}) {
             paddingLeft: 10,
             paddingRight: 10,
           }}
-          onChange={(event) => setQuery(event.value ?? "")}
+          onInput={(event) => setQuery(event.value ?? "")}
         />
         <div style={{ flexGrow: 1, minHeight: 0, overflowY: "scroll" }}>
           <For each={searchHits()}>

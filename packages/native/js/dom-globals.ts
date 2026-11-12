@@ -15,9 +15,12 @@ import {
   Text,
 } from "./dom/nodes.js"
 import { CSSStyleDeclaration } from "./dom/css-style-declaration.js"
+import { DOMRect, DOMRectReadOnly } from "./dom/dom-rect.js"
+import { HTMLInputElement, HTMLTextAreaElement } from "./dom/html-element-classes.js"
 import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
 import { ToggleEvent } from "./dom/toggle-event.js"
 import { Selection } from "./dom/selection.js"
+import { EVENT_CLASSES } from "./events/classes.js"
 import { document, window } from "./events/window-target.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
 import { isWebBuild } from "./web-build.js"
@@ -40,6 +43,8 @@ const DOM_CLASSES = {
   Text,
   Element,
   HTMLElement,
+  HTMLInputElement,
+  HTMLTextAreaElement,
   SVGElement,
   Document,
   DocumentFragment,
@@ -52,7 +57,10 @@ const DOM_CLASSES = {
   Selection,
   MutationObserver,
   MutationRecord,
+  DOMRect,
+  DOMRectReadOnly,
   ToggleEvent,
+  ...EVENT_CLASSES,
 }
 
 const getSelection = () => document.getSelection()

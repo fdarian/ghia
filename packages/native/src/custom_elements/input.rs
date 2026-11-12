@@ -35,7 +35,8 @@ use super::text_selection::{
     describe, resolve, utf16_len, SelectionRequest, TextSelection,
 };
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
-use crate::renderer::{emit_bubbling_event, emit_event_full, EventCallback, GpuixView};
+use crate::events::keyboard::InputRouting;
+use crate::renderer::{emit_bubbling_event, EventCallback, GpuixView};
 use crate::retained_tree::RetainedTree;
 use crate::theme::Theme;
 
@@ -301,7 +302,7 @@ impl CustomElementFactory for InputFactory {
     }
 
     fn create(&self, _id: u64) -> Box<dyn CustomElement> {
-        Box::new(TextEditorElement::new(false))
+        Box::new(super::input_choice::InputElement::new())
     }
 }
 
@@ -317,9 +318,16 @@ impl CustomElementFactory for TextareaFactory {
     }
 }
 
-struct TextEditorElement {
+pub(super) struct TextEditorElement {
     multiline: bool,
+    /// The text the props ask for: the `value` prop, else `default_value` while the control is clean.
     value: String,
+    /// The `defaultValue` prop, which the `value` attribute is: the text until a `value` is given
+    /// or the user edits the control (the DOM's dirty value flag).
+    default_value: String,
+    value_given: bool,
+    /// Set by the editor at the first edit a user makes, and so shared with it.
+    edited: Rc<Cell<bool>>,
     placeholder: String,
     read_only: bool,
     disabled: bool,
@@ -345,10 +353,13 @@ struct TextEditorElement {
 }
 
 impl TextEditorElement {
-    fn new(multiline: bool) -> Self {
+    pub(super) fn new(multiline: bool) -> Self {
         Self {
             multiline,
             value: String::new(),
+            default_value: String::new(),
+            value_given: false,
+            edited: Rc::new(Cell::new(false)),
             placeholder: String::new(),
             read_only: false,
             disabled: false,
@@ -386,6 +397,13 @@ impl TextEditorElement {
         })
     }
 
+    /// What the DOM's value is for a control whose `value` was never set or edited: its default.
+    fn settle_default_value(&mut self) {
+        if !self.value_given && !self.edited.get() {
+            self.value = self.default_value.clone();
+        }
+    }
+
     /// Push a changed `value` prop into the editor now, rather than at the next
     /// frame, so an imperative call right after a controlled update sees it.
     fn apply_value(&mut self, cx: &mut App) {
@@ -398,6 +416,17 @@ impl TextEditorElement {
         let value = self.value.clone();
         state.update(cx, |state, cx| state.sync_prop_value(value, cx));
         self.last_prop_value = Some(self.value.clone());
+    }
+}
+
+/// A `value` or `defaultValue` prop as React DOM turns it into the control's text (`"" + value`):
+/// a number or a boolean is its JavaScript text, `null` and anything that is no text are none.
+fn prop_text(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Number(number) => number.to_string(),
+        serde_json::Value::Bool(flag) => flag.to_string(),
+        _ => String::new(),
     }
 }
 
@@ -434,9 +463,9 @@ impl CustomElement for TextEditorElement {
                 .cloned()
                 .unwrap_or_else(|| cx.focus_handle())
         };
-        let emits_change = ctx.events.contains("change");
         let callback = ctx.event_callback.clone();
         let tree = ctx.activation.tree.clone();
+        let routing = ctx.activation.routing.clone();
         let view = cx.weak_entity();
 
         let state = self
@@ -460,6 +489,7 @@ impl CustomElement for TextEditorElement {
                 let tree = tree.clone();
                 let view = view.clone();
                 let id = ctx.id;
+                routing.text_commits().written(id, &value);
                 let cursor = value.len();
                 let (selected_range, selection_reversed, directionless_range) =
                     match initial_selection {
@@ -473,13 +503,14 @@ impl CustomElement for TextEditorElement {
                 let state_focus_handle = focus_handle.clone();
                 let paint_epoch = self.paint_epoch.clone();
                 let caret_due = self.caret_due.clone();
+                let edited = self.edited.clone();
                 cx.new(move |cx| TextEditorState {
                     entity_id: cx.entity_id(),
                     element_id: id,
                     view,
                     callback,
                     tree,
-                    emits_change,
+                    routing,
                     focus_handle: state_focus_handle,
                     content: value,
                     placeholder: placeholder.into(),
@@ -514,6 +545,7 @@ impl CustomElement for TextEditorElement {
                     caret_color,
                     paint_epoch,
                     caret_due,
+                    edited,
                     blink_anchor: cx.background_executor().now(),
                     caret_was_shown: false,
                     blink_armed: false,
@@ -542,7 +574,6 @@ impl CustomElement for TextEditorElement {
             state.number_rules = number_rules;
             state.muted_color = self.theme.text_muted;
             state.callback = callback;
-            state.emits_change = emits_change;
             state.placeholder = self.placeholder.clone().into();
             state.read_only = self.read_only;
             state.min_rows = self.min_rows.max(1);
@@ -644,7 +675,15 @@ impl CustomElement for TextEditorElement {
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
         match key {
-            "value" => self.value = value.as_str().unwrap_or_default().to_string(),
+            "value" => {
+                self.value_given = !value.is_null();
+                self.value = prop_text(&value);
+                self.settle_default_value();
+            }
+            "defaultValue" => {
+                self.default_value = prop_text(&value);
+                self.settle_default_value();
+            }
             "placeholder" => self.placeholder = value.as_str().unwrap_or_default().to_string(),
             "readOnly" => self.read_only = value.as_bool().unwrap_or(false),
             "disabled" => self.disabled = value.as_bool().unwrap_or(false),
@@ -670,6 +709,7 @@ impl CustomElement for TextEditorElement {
     fn supported_props(&self) -> &'static [&'static str] {
         &[
             "value",
+            "defaultValue",
             "placeholder",
             "readOnly",
             "disabled",
@@ -686,7 +726,7 @@ impl CustomElement for TextEditorElement {
 
     fn supported_events(&self) -> &'static [&'static str] {
         &[
-            "change", "keydown", "keyup", "focus", "blur",
+            "input", "change", "keydown", "keyup", "focus", "blur",
         ]
     }
 
@@ -917,7 +957,8 @@ struct TextEditorState {
     /// For the propagation path of a composition event. Never locked from the
     /// code that builds the frame, which holds it: only input handlers emit.
     tree: Arc<Mutex<RetainedTree>>,
-    emits_change: bool,
+    /// What `change` commits, see `text_commit`.
+    routing: InputRouting,
     focus_handle: FocusHandle,
     content: String,
     placeholder: SharedString,
@@ -956,6 +997,8 @@ struct TextEditorState {
     paint_epoch: Rc<Cell<u64>>,
     /// The caret changed phase after it was painted last: only a paint of the editor clears it.
     caret_due: Rc<Cell<bool>>,
+    /// A user edited the text: see `TextEditorElement::edited`.
+    edited: Rc<Cell<bool>>,
     blink_anchor: Instant,
     /// Whether the last render found the caret shown, to start its phase over when focus comes.
     caret_was_shown: bool,
@@ -966,6 +1009,12 @@ struct TextEditorState {
     undo_stack: VecDeque<EditSnapshot>,
     redo_stack: Vec<EditSnapshot>,
     last_edit: Option<LastEdit>,
+}
+
+impl Drop for TextEditorState {
+    fn drop(&mut self) {
+        self.routing.text_commits().forget(self.element_id);
+    }
 }
 
 impl TextEditorState {
@@ -1134,6 +1183,7 @@ impl TextEditorState {
             return;
         }
         self.content = value;
+        self.routing.text_commits().written(self.element_id, &self.content);
         let end = self.content.len();
         self.selected_range = end..end;
         self.selection_reversed = false;
@@ -1173,19 +1223,35 @@ impl TextEditorState {
         });
     }
 
-    fn emit_change(&mut self, kind: InputKind, inserted: &str, is_composing: bool) {
-        if self.emits_change {
-            self.pending_values.push_back(self.content.clone());
-            while self.pending_values.len() > 32 {
-                self.pending_values.pop_front();
-            }
-            emit_event_full(&self.callback, self.element_id, "change", |payload| {
-                payload.value = Some(self.content.clone());
-                payload.input_type = Some(kind.input_type().to_string());
-                payload.data = kind.carries_text().then(|| inserted.to_string());
-                payload.is_composing = Some(is_composing);
-            });
+    /// The DOM `input` event of one edit, which bubbles and cannot be canceled.
+    fn emit_input(&mut self, kind: InputKind, inserted: &str, is_composing: bool) {
+        self.edited.set(true);
+        self.routing.text_commits().edited(self.element_id, &self.content);
+        let tree = self.tree.lock().unwrap();
+        if !crate::events::path::path_listens(&tree, self.element_id, "input") {
+            return;
         }
+        self.pending_values.push_back(self.content.clone());
+        while self.pending_values.len() > 32 {
+            self.pending_values.pop_front();
+        }
+        emit_bubbling_event(&self.callback, &tree, self.element_id, "input", |payload| {
+            payload.value = Some(self.content.clone());
+            payload.input_type = Some(kind.input_type().to_string());
+            payload.data = kind.carries_text().then(|| inserted.to_string());
+            payload.is_composing = Some(is_composing);
+        });
+    }
+
+    /// The DOM `change` event for an edit that commits itself, as the number stepper's does.
+    fn emit_change(&self) {
+        let Some(value) = self.routing.text_commits().commit(self.element_id) else {
+            return;
+        };
+        let tree = self.tree.lock().unwrap();
+        emit_bubbling_event(&self.callback, &tree, self.element_id, "change", |payload| {
+            payload.value = Some(value);
+        });
     }
 
     fn restore(&mut self, snapshot: EditSnapshot, kind: InputKind, cx: &mut Context<Self>) {
@@ -1196,7 +1262,7 @@ impl TextEditorState {
         self.follow_cursor = true;
         self.last_edit = None;
         self.reset_blink(cx);
-        self.emit_change(kind, "", false);
+        self.emit_input(kind, "", false);
         self.changed(cx);
     }
 
@@ -1569,8 +1635,15 @@ impl TextEditorState {
         }
     }
 
+    /// Enter commits the value (Chrome fires `change` before the form is submitted), then submits.
+    /// Both wait until the key's dispatch is over, so a handler of `change` may read this editor.
     fn submit(&mut self, _: &Submit, window: &mut Window, cx: &mut Context<Self>) {
-        crate::forms::implicit_submission(self.view.clone(), self.element_id, window, cx);
+        let (view, id) = (self.view.clone(), self.element_id);
+        let (routing, tree, callback) = (self.routing.clone(), self.tree.clone(), self.callback.clone());
+        window.defer(cx, move |window, cx| {
+            crate::events::text_commit::deliver_commit(&routing, &tree, &callback, id, window, cx);
+            crate::forms::implicit_submission(view, id, window, cx);
+        });
     }
 
     /// Replace `range` and put the caret after the new text. `user_input`
@@ -1609,11 +1682,14 @@ impl TextEditorState {
         self.follow_cursor = true;
         self.reset_blink(cx);
         // The input event is still part of the composition, so it comes first, as in Chrome.
-        self.emit_change(
+        self.emit_input(
             kind.for_outcome(ends_composition, &replacement),
             &replacement,
             ends_composition,
         );
+        if kind == InputKind::Stepped {
+            self.emit_change();
+        }
         if ends_composition {
             self.emit_composition("compositionend", &replacement);
         }
@@ -2175,7 +2251,7 @@ impl EntityInputHandler for TextEditorState {
             (true, true) => self.emit_composition("compositionupdate", &replacement),
             _ => {}
         }
-        self.emit_change(
+        self.emit_input(
             InputKind::InsertCompositionText.for_outcome(was_composing, &replacement),
             &replacement,
             was_composing || is_composing,
@@ -2539,6 +2615,39 @@ impl gpui::IntoElement for EditorTextElement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_default_value_is_the_text_until_a_value_is_given_or_the_user_edits() {
+        let mut clean = TextEditorElement::new(false);
+        clean.set_prop("defaultValue", serde_json::json!("a"));
+        assert_eq!(clean.value, "a");
+        clean.set_prop("defaultValue", serde_json::json!("b"));
+        assert_eq!(clean.value, "b");
+        clean.set_prop("value", serde_json::json!("v"));
+        clean.set_prop("defaultValue", serde_json::json!("c"));
+        assert_eq!(clean.value, "v", "a value is given, so the default no longer decides");
+        clean.set_prop("value", serde_json::Value::Null);
+        assert_eq!(clean.value, "c", "without a value the default is the text again");
+
+        let mut dirty = TextEditorElement::new(false);
+        dirty.set_prop("defaultValue", serde_json::json!("a"));
+        dirty.edited.set(true);
+        dirty.set_prop("defaultValue", serde_json::json!("b"));
+        assert_eq!(dirty.value, "a", "an edited control keeps its text");
+    }
+
+    #[test]
+    fn a_number_is_the_text_of_a_value_and_a_default_value() {
+        let mut element = TextEditorElement::new(false);
+        element.set_prop("defaultValue", serde_json::json!(5));
+        assert_eq!(element.value, "5");
+        element.set_prop("defaultValue", serde_json::json!(1.5));
+        assert_eq!(element.value, "1.5");
+        element.set_prop("value", serde_json::json!(0));
+        assert_eq!(element.value, "0", "a value of zero is given, so the default no longer decides");
+        element.set_prop("value", serde_json::Value::Null);
+        assert_eq!(element.value, "1.5");
+    }
 
     fn has_binding(bindings: &[KeyBinding], keystroke: &str, action: &dyn gpui::Action) -> bool {
         let keystroke = gpui::Keystroke::parse(keystroke).unwrap();

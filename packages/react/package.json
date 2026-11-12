@@ -26,6 +26,11 @@
       "import": "./dist/vite.js",
       "default": "./dist/vite.js"
     },
+    "./react-dom": {
+      "types": "./dist/react-dom.d.ts",
+      "import": "./dist/react-dom.js",
+      "default": "./dist/react-dom.js"
+    },
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js",

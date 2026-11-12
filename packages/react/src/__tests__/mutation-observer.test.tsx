@@ -116,6 +116,18 @@ describeNative("MutationObserver in React", () => {
     expect(observer.takeRecords()).toHaveLength(0)
   })
 
+  it("records a style change as a style attribute with the old cssText", () => {
+    let box: PublicInstance | null = null
+    const setColor = stateful("red", (color) => (
+      <div ref={(instance) => (box = instance)} style={{ background: color }} />
+    ))
+    const observer = observe(box!, { attributes: true, attributeOldValue: true })
+    setColor("blue")
+    expect(observer.takeRecords().map((record) => [record.attributeName, record.oldValue])).toEqual([
+      ["style", "background: red;"],
+    ])
+  })
+
   it("reports a text change as characterData with the old text", () => {
     const setText = stateful("one", (text) => <div>{text}</div>)
     const node = document.body!.firstElementChild!.firstChild!

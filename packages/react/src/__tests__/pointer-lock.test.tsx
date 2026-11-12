@@ -109,7 +109,14 @@ describeNative("pointer lock", () => {
     function listen(target: typeof document | typeof window, type: string, name: string) {
       const listener = (event: LockEvent) => {
         heard.push(name)
-        events.push({ ...event })
+        events.push({
+          type: event.type,
+          target: event.target,
+          bubbles: event.bubbles,
+          cancelable: event.cancelable,
+          eventPhase: event.eventPhase,
+          currentTarget: event.currentTarget,
+        })
       }
       target.addEventListener(type, listener as never)
       stop.push(() => target.removeEventListener(type, listener as never))

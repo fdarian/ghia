@@ -4,12 +4,10 @@
 /// placements, so a node React made and a node code made sit in one tree.
 
 import {
-  attributeNameOf,
-  attributeText,
+  attributesWritten,
   crossRootError,
   forwardsCustomProp,
   hasMutationObservers,
-  isSvgType,
   queueCharacterDataMutation,
   recordAttributeChanges,
   runAll,
@@ -24,6 +22,7 @@ import {
   createHostText,
   isInTree,
   linkChild,
+  propOf,
   stateFor,
   unlinkChild,
   type HostNode,
@@ -145,11 +144,17 @@ export function setDomStyle(instance: Instance, next: StyleDesc): void {
   }
   if (hasMutationObservers()) recordAttributeChanges(instance, ["style"], apply)
   else apply()
-  if (state.mounted) sendLiveStyle(instance, state)
+  // A burst of writes (a drag writing the transform on every pointer move) is one `setStyle` for the next flush.
+  // The element may have been released, or React may have sent this style, by the time the flush runs it.
+  if (state.mounted) {
+    state.container.renderer.deferWrite(instance, () => {
+      if (state.mounted) sendLiveStyle(instance, state)
+    })
+  }
 }
 
 /** Code's write of one prop (`el.id = ...`): React's next render of the same prop overwrites it. */
-export function setDomProp(instance: Instance, name: string, value: string | number | boolean): void {
+export function setDomProp(instance: Instance, name: string, value: string | number | boolean | undefined): void {
   const state = stateFor(instance)
   const apply = () => {
     state.propOverrides ??= new Map()
@@ -162,10 +167,11 @@ export function setDomProp(instance: Instance, name: string, value: string | num
   }
   if (state.mounted) {
     // The attribute store natively reads is the one a framework prop writes, so a code write goes there too.
-    state.container.renderer.setAttribute(
-      instance.nativeId,
-      attributeNameOf(name, isSvgType(instance.type)),
-      attributeText(name, value)
-    )
+    for (const [attribute, text] of attributesWritten(instance.type, name, value, (prop) => propOf(instance, prop))) {
+      state.container.renderer.setAttribute(instance.nativeId, attribute, text)
+    }
   }
+  // A write from code is applied before the call returns: `setAttribute` reads the element's state at once.
+  if (state.mounted) state.container.renderer.flushMutations()
 }
+

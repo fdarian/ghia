@@ -366,7 +366,7 @@ export function App(props: { messages: Message[] }) {
             autoFocus
             value={text()}
             placeholder="Search mail"
-            onChange={(event) => filter(event.value ?? '')}
+            onInput={(event) => filter(event.value ?? '')}
             onKeyDown={onKeyDown}
             style={{
               width: 396,

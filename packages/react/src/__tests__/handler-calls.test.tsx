@@ -73,11 +73,13 @@ const NOT_CALLABLE_FROM_A_HANDLER = new Set([
 
 function calls(r, ids) {
   return {
+    activateElement: () => r.activateElement(ids.check),
     animateElement: () => r.animateElement(ids.box, JSON.stringify([{ offset: 0, easing: "linear", width: "50px" }, { offset: 1, easing: "linear", width: "80px" }]), { duration: 100 }),
     animateMotionValue: () => r.animateMotionValue(910, 5),
     applyBatch: () => r.applyBatch(encodeWireBatchForTest([])),
     blurElement: () => r.blurElement(ids.field),
     buildElementMap: () => r.buildElementMap?.(),
+    cancelActivation: () => r.cancelActivation(ids.check),
     cancelDrag: () => r.cancelDrag(),
     clearSelection: () => r.clearSelection(),
     clickElement: () => r.clickElement(ids.box),
@@ -110,6 +112,7 @@ function calls(r, ids) {
     getA11yTree: () => r.getA11yTree(),
     getAttribute: () => r.getAttribute(ids.box, "id"),
     getAllText: () => r.getAllText(),
+    getInputChoice: () => r.getInputChoice(ids.check),
     getAnimation: () => r.getAnimation(r.getAnimations(ids.box)[0].id),
     getAnimations: () => r.getAnimations(ids.box),
     getSubtreeAnimations: () => r.getSubtreeAnimations(ids.box),
@@ -156,6 +159,7 @@ function calls(r, ids) {
     getSvgMarkup: () => r.getSvgMarkup(ids.box),
     getSyntaxCacheStats: () => r.getSyntaxCacheStats(),
     getTextSelection: () => r.getTextSelection(ids.field),
+    getTextValue: () => r.getTextValue(ids.field),
     getCompositionLayers: () => r.getCompositionLayers(),
     getWebviewCommands: () => r.getWebviewCommands(ids.webview),
     getWebviewNativeView: () => r.getWebviewNativeView(ids.webview),
@@ -189,6 +193,8 @@ function calls(r, ids) {
     requiresTick: () => r.requiresTick(),
     resetBuildCounters: () => r.resetBuildCounters(),
     resetDebugFrameOverlayStats: () => r.resetDebugFrameOverlayStats(),
+    preActivateElement: () => r.preActivateElement(ids.check),
+    restoreControlledState: () => r.restoreControlledState(ids.check),
     scrollByKey: () => r.scrollByKey("down", false),
     scrollIntoView: () => r.scrollIntoView(ids.box),
     scrollTo: () => r.scrollTo(ids.scroller, 0, 10),
@@ -242,6 +248,8 @@ function calls(r, ids) {
     takeSimulatedWindowActions: () => r.takeSimulatedWindowActions(),
     toJSON: () => r.toJSON(),
     writeClipboardText: () => r.writeClipboardText("x"),
+    writeInputFlag: () => r.writeInputFlag(ids.check, "indeterminate", true),
+    writeRangeValue: () => r.writeRangeValue(ids.range, "5"),
     // Last: a cancelled animation is not listed, which the calls above read.
     cancelAnimation: () => r.cancelAnimation(r.getAnimations(ids.box)[0].id),
   }
@@ -270,6 +278,8 @@ describeNative("renderer calls from a sync handler", () => {
             box: renderer.findByTestId("box").id,
             scroller: renderer.findByTestId("scroller").id,
             form: renderer.findByTestId("form").id,
+            check: renderer.findByTestId("check").id,
+            range: renderer.findByTestId("range").id,
             img: renderer.findByTestId("img").id,
             webview: renderer.findByTestId("webview").id,
             nativeview: renderer.findByTestId("nativeview").id,
@@ -292,6 +302,8 @@ describeNative("renderer calls from a sync handler", () => {
             <form testId="form">
               <input testId="field" defaultValue="hi" style={{ width: 100, height: 20 }} onKeyDown={on === "keydown" ? run : undefined} />
             </form>
+            <input testId="check" type="checkbox" />
+            <input testId="range" type="range" />
             <img testId="img" style={{ width: 10, height: 10 }} />
             <webview testId="webview" style={{ width: 10, height: 10 }} />
             <nativeview testId="nativeview" style={{ width: 10, height: 10 }} />

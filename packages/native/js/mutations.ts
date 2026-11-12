@@ -11,7 +11,6 @@ import {
 } from "./css/index.js"
 import { attributesOfProps } from "./dom/attribute-names.js"
 import { popoversDestroyed } from "./dom/popover.js"
-import { isSvgType } from "./svg.js"
 import { createBlobImageLoader, type BlobImageHost } from "./blob-images.js"
 import type { MutationHost, MutationRenderer } from "./host.js"
 import { createStyleImageLoader, type StyleImageHost } from "./style-images.js"
@@ -50,6 +49,7 @@ export function createMutationQueue(
 ): MutationQueue {
   const writer = new WireWriter()
   let flushScheduled = false
+  const deferred = new Map<object, () => void>()
 
   const requestFlush = () => {
     if (!scheduleFlush || flushScheduled) return
@@ -167,14 +167,25 @@ export function createMutationQueue(
     backfillAttributes() {
       forwardsAttributes = true
       elementSource?.forEachElement((id, type, props) => {
-        const attributes = attributesOfProps(props, isSvgType(type))
+        const attributes = attributesOfProps(props, type)
         for (const [name, text] of attributes) mutations.setAttribute(id, name, text)
         elementSource?.rememberAttributes?.(id, attributes)
       })
     },
     requestFlush,
+    deferWrite(key, write) {
+      deferred.set(key, write)
+      requestFlush()
+    },
     flushMutations() {
       flushScheduled = false
+      if (deferred.size > 0) {
+        // A write may queue ops, but not defer another one: a task that did would run in the next flush.
+        const writes = [...deferred.values()]
+        deferred.clear()
+        for (const write of writes) write()
+        flushScheduled = false
+      }
       if (sheetsPending) {
         sheetsPending = false
         flushDirtySheets(renderer, mutations)
@@ -257,6 +268,7 @@ export const EVENT_PROPS: readonly (readonly [string, string])[] = [
   ["onLayoutAnimationStart", "layoutAnimationStart"],
   ["onLayoutAnimationComplete", "layoutAnimationComplete"],
   ["onChange", "change"],
+  ["onInput", "input"],
   ["onSubmit", "submit"],
   ["onInvalid", "invalid"],
   ...DOM_DISPATCHED_HANDLER_PROPS,
@@ -318,6 +330,7 @@ const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "tabIndex",
   "draggable",
   "inert",
+  "hidden",
   "colSpan",
   "rowSpan",
   "span",

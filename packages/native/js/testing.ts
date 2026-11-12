@@ -17,6 +17,7 @@ import {
   validateKeyframes,
   type ElementWebAnimationInfo,
   type EventPayload,
+  type InputChoiceState,
   type MediaFeatures,
   type MotionValuePlayback,
   type PatchCounters,
@@ -390,6 +391,13 @@ interface NativeTestRendererApi
   releasePointerCapture(elementId: number, pointerId: number): void
   hasPointerCapture(elementId: number, pointerId: number): boolean
   clickElement(elementId: number): void
+  activateElement(elementId: number): void
+  preActivateElement(elementId: number): void
+  cancelActivation(elementId: number): void
+  getInputChoice(elementId: number): InputChoiceState
+  writeInputFlag(elementId: number, name: string, value: boolean): void
+  writeRangeValue(elementId: number, value: string): void
+  restoreControlledState(elementId: number): void
   getAnimations(elementId: number): WebAnimationInfo[]
   animateElement(elementId: number, keyframesJson: string, timing: WebAnimationTimingUpdate): WebAnimationInfo
   getSubtreeAnimations(elementId: number): ElementWebAnimationInfo[]
@@ -429,6 +437,7 @@ interface NativeTestRendererApi
   selectText(elementId: number): void
   setSelectionRange(elementId: number, start: number, end: number, direction?: string): void
   getTextSelection(elementId: number): { start: number; end: number; direction: string }
+  getTextValue(elementId: number): string
   requestSubmit(elementId: number, submitterId?: number): void
   webviewCommand(elementId: number, command: string, argument?: string): void
   webviewState(elementId: number): {
@@ -1717,6 +1726,34 @@ export class TestRenderer implements NativeRenderer {
     this.native.clickElement(elementId)
   }
 
+  activateElement(elementId: number): void {
+    this.native.activateElement(elementId)
+  }
+
+  preActivateElement(elementId: number): void {
+    this.native.preActivateElement(elementId)
+  }
+
+  cancelActivation(elementId: number): void {
+    this.native.cancelActivation(elementId)
+  }
+
+  getInputChoice(elementId: number): InputChoiceState {
+    return this.native.getInputChoice(elementId)
+  }
+
+  writeInputFlag(elementId: number, name: string, value: boolean): void {
+    this.native.writeInputFlag(elementId, name, value)
+  }
+
+  writeRangeValue(elementId: number, value: string): void {
+    this.native.writeRangeValue(elementId, value)
+  }
+
+  restoreControlledState(elementId: number): void {
+    this.native.restoreControlledState(elementId)
+  }
+
   getAnimations(elementId: number): WebAnimationInfo[] {
     return this.native.getAnimations(elementId)
   }
@@ -1911,6 +1948,11 @@ export class TestRenderer implements NativeRenderer {
   getTextSelection(elementId: number): { start: number; end: number; direction: string } {
     this.native.flush()
     return this.native.getTextSelection(elementId)
+  }
+
+  getTextValue(elementId: number): string {
+    this.native.flush()
+    return this.native.getTextValue(elementId)
   }
 
   requestSubmit(elementId: number, submitterId?: number): void {

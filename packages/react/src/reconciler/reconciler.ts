@@ -31,6 +31,7 @@ import {
   installDocumentElements,
   publicInstanceById,
 } from "./host-config.js"
+import { restoreControlledState } from "./controlled-state.js"
 import { releaseMotionBindings } from "./motion-bindings.js"
 
 // Cast to any because @types/react-reconciler is out of date with react-reconciler 0.31.0
@@ -134,7 +135,12 @@ export function createRoot(
     },
   })
   // The flush stands in for the microtask checkpoint a browser runs before it renders.
-  attachRoot(renderer, gpuixContainer, (run) => flushSync(run))
+  attachRoot(
+    renderer,
+    gpuixContainer,
+    (run) => flushSync(run),
+    (event) => restoreControlledState(gpuixContainer, event)
+  )
   // Sent on every root, so a remount without the option restores the default.
   batchedRenderer.setKeyboardFocusDim(rootEventHandlers.keyboardFocusDim !== false)
   const windowKeyEventId = gpuixContainer.windowKeyEventId

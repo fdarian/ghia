@@ -67,6 +67,8 @@ export interface HostDomEvent extends RootEvent {
   readonly bubbles: boolean
   readonly cancelable: boolean
   readonly timeStamp: number
+  /** `true` for an event Ghia delivered from native input, `false` for one an app dispatched with `dispatchEvent`. */
+  readonly isTrusted: boolean
   readonly defaultPrevented: boolean
   stopPropagation(): void
   stopImmediatePropagation(): void
@@ -102,6 +104,12 @@ export interface HostMouseEvent extends HostDomEvent {
   pointerId: number
   /** `""` for a click no pointer made. */
   pointerType: "mouse" | "pen" | "touch" | ""
+  readonly shiftKey: boolean
+  readonly ctrlKey: boolean
+  readonly altKey: boolean
+  readonly metaKey: boolean
+  /** Whether a modifier is held: `"Shift"`, `"Control"`, `"Alt"` or `"Meta"`. The others (`"CapsLock"`) are never held. */
+  getModifierState(key: string): boolean
 }
 
 export interface HostPointerEvent extends HostMouseEvent {
@@ -257,8 +265,8 @@ export interface HostCompositionEvent extends HostDomEvent {
 }
 
 /**
- * The `onChange` event of an `<input>` or `<textarea>`: one edit of its text,
- * which is what the DOM calls `input`. `inputType` and `data` are those of an
+ * The `input` event of an `<input>` or `<textarea>` (`onInput`, and React's `onChange`): one edit of
+ * its text, which bubbles and cannot be canceled. `inputType` and `data` are those of an
  * `InputEvent` as Chrome fills them: `insertText`, `insertFromPaste` and
  * `insertCompositionText` carry the inserted text in `data`; `insertLineBreak`,
  * the `delete…` types (`deleteContentBackward`, `deleteContentForward`,
@@ -277,12 +285,21 @@ export interface HostInputEvent extends Omit<HostDomEvent, "data"> {
   readonly isComposing: boolean
 }
 
+/**
+ * The `change` event (`onChange` in Solid): the user committed a text control's value, on blur or on
+ * Enter in an `<input>`, and it is not the value the control had before. `value` is the committed text;
+ * a checkbox or radio's `change` has none. It bubbles and cannot be canceled.
+ */
+export interface HostChangeEvent extends HostDomEvent {
+  readonly value?: string
+}
+
 export interface CompositionEventHandlerProps {
   /** A composition began. Fires before its first `compositionupdate`. */
   onCompositionStart?: (event: HostCompositionEvent) => void
-  /** The composition's text changed. Fires before the `onChange` of that edit. */
+  /** The composition's text changed. Fires before the `input` of that edit. */
   onCompositionUpdate?: (event: HostCompositionEvent) => void
-  /** The composition ended, committed or cancelled. Fires after the `onChange` of its final edit. */
+  /** The composition ended, committed or cancelled. Fires after the `input` of its final edit. */
   onCompositionEnd?: (event: HostCompositionEvent) => void
 }
 

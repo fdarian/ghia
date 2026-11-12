@@ -4,13 +4,78 @@
  * attributes (`tabindex`, `class`), so every place that turns one into the other goes through here.
  */
 
+import { isSvgType } from "../svg.js"
+
 /** HTML names are lowercase in the DOM; SVG names keep their case (`viewBox`), as in Chrome. */
 export function attributeNameOf(prop: string, svg: boolean): string {
   if (prop === "className") return "class"
   if (svg) return prop
   if (prop === "htmlFor") return "for"
+  // The `checked` and `value` attributes of an `<input>` are its defaults: the properties are `checked` and `value`.
+  if (prop === "defaultChecked") return "checked"
+  if (prop === "defaultValue") return "value"
   return lowerCased(prop)
 }
+
+/** The input types whose `value` attribute is the value itself (the HTML spec's "default" and "default/on" value modes). */
+const VALUE_IS_ATTRIBUTE = new Set(["checkbox", "radio", "hidden", "submit", "button", "reset", "image"])
+
+/**
+ * The prop that holds an `<input>`'s `checked` or `value` attribute, where it is not the prop of that
+ * name: the attribute is `defaultChecked`, and for the types with the "value" value mode (text,
+ * range, number, ...) `defaultValue`, which is the value only while the control is clean. The `value`
+ * of a checkbox, radio or hidden input is its attribute, so it has none.
+ */
+export function inputDefaultProp(attribute: string, inputType: unknown): "defaultChecked" | "defaultValue" | undefined {
+  if (attribute === "checked") return "defaultChecked"
+  if (attribute !== "value") return undefined
+  return VALUE_IS_ATTRIBUTE.has(String(inputType).toLowerCase()) ? undefined : "defaultValue"
+}
+
+/**
+ * The value of an `<input>`'s `checked` or `value` attribute, from the props it has: the one rule
+ * for what answers it, so `getAttribute` and the attribute store a stylesheet reads agree.
+ *
+ * The attribute is the default (`defaultChecked`, `defaultValue`), as the DOM has it. Where the
+ * element was given no default, the `checked` or `value` prop answers: React DOM's own `checked`
+ * and `value` are put in the attribute too (`node.defaultChecked`, `setDefaultValue`), and a prop
+ * that is none of those is a property assignment that leaves the attribute as it was. A
+ * checkbox's `value` is the attribute itself, so `value` leads there.
+ */
+export function inputAttributeValue(attribute: "checked" | "value", prop: (name: string) => unknown, inputType: unknown): unknown {
+  if (attribute === "checked") return prop("defaultChecked") ?? prop("checked")
+  return VALUE_IS_ATTRIBUTE.has(String(inputType).toLowerCase())
+    ? (prop("value") ?? prop("defaultValue"))
+    : (prop("defaultValue") ?? prop("value"))
+}
+
+/**
+ * The attributes that a write of `prop` to an element of `type` changes, as names and texts (`null`
+ * for none): the attribute the prop names, and for an input's `type` the `value` it decides the
+ * source of. `readProp` gives the element's props as they are once the write is stored.
+ */
+export function attributesWritten(
+  type: string,
+  prop: string,
+  value: unknown,
+  readProp: (name: string) => unknown
+): Array<[string, string | null]> {
+  const name = attributeNameOf(prop, isSvgType(type))
+  if (type !== "input") return [[name, attributeText(name, value)]]
+  const names = prop === "type" ? [name, "value"] : [name]
+  return names.map((attribute): [string, string | null] => [
+    attribute,
+    attributeText(
+      attribute,
+      attribute === "checked" || attribute === "value"
+        ? inputAttributeValue(attribute, readProp, readProp("type"))
+        : value
+    ),
+  ])
+}
+
+/** The props `inputAttributeValue` reads, and the `type` it needs. */
+const INPUT_ATTRIBUTE_PROPS: ReadonlySet<string> = new Set(["checked", "defaultChecked", "value", "defaultValue", "type"])
 
 /** `toLowerCase` that allocates only for a name with a capital: an adapter asks for every prop of every element. */
 function lowerCased(prop: string): string {
@@ -26,17 +91,109 @@ export function attributeLookupName(name: string, svg: boolean): string {
   return svg ? name : name.toLowerCase()
 }
 
-/** Whether a prop is not an attribute: `element.attributes` skips it, and so does what is sent to native. */
+/** Whether a prop is not an attribute: `getAttributeNames` skips it. `style` is one: its text is `element.style.cssText`. */
 export function isNotAttribute(prop: string): boolean {
-  switch (prop) {
-    case "children":
-    case "key":
-    case "ref":
-    case "style":
-      return true
+  return prop === "children" || prop === "key" || prop === "ref"
+}
+
+/**
+ * How `setAttribute` turns the text of an attribute into the prop it stands for, as the browser's
+ * reflection does: a number attribute is the integer it holds, a boolean attribute is on when it
+ * is present whatever its value, and `draggable`, which is enumerated, is on for "true".
+ */
+type AttributeKind = "number" | "presence" | "true-text" | "until-found"
+
+const WRITTEN_AS_PROP: Readonly<Record<string, { prop: string; kind?: AttributeKind }>> = {
+  class: { prop: "className" },
+  for: { prop: "htmlFor" },
+  tabindex: { prop: "tabIndex", kind: "number" },
+  colspan: { prop: "colSpan", kind: "number" },
+  rowspan: { prop: "rowSpan", kind: "number" },
+  span: { prop: "span", kind: "number" },
+  maxlength: { prop: "maxLength", kind: "number" },
+  autofocus: { prop: "autoFocus", kind: "presence" },
+  readonly: { prop: "readOnly", kind: "presence" },
+  inert: { prop: "inert", kind: "presence" },
+  disabled: { prop: "disabled", kind: "presence" },
+  hidden: { prop: "hidden", kind: "until-found" },
+  required: { prop: "required", kind: "presence" },
+  checked: { prop: "checked", kind: "presence" },
+  multiple: { prop: "multiple", kind: "presence" },
+  selected: { prop: "selected", kind: "presence" },
+  open: { prop: "open", kind: "presence" },
+  draggable: { prop: "draggable", kind: "true-text" },
+}
+
+const INTEGER = /^\s*[+-]?\d+\s*$/
+
+/**
+ * Attributes with no prop behind them: the ones `getAttributeNames` skips, and `on*`. (`style` is the declaration's.) A write is
+ * kept for `getAttribute` and reaches nothing else.
+ */
+export function isStoredAttribute(attribute: string): boolean {
+  return isNotAttribute(attribute) || attribute.startsWith("on")
+}
+
+/**
+ * The prop that `setAttribute(attribute, text)` writes and the value it gives it; `undefined` is
+ * `removeAttribute`. `existingProp` is the key the element already holds for that attribute, which
+ * keeps the name the framework used (`class` in Solid, `className` in React).
+ */
+export function propWrittenBy(
+  attribute: string,
+  text: string | null,
+  existingProp: string | undefined
+): { prop: string; value: string | number | boolean | undefined } {
+  const entry = WRITTEN_AS_PROP[attribute]
+  const prop = existingProp ?? entry?.prop ?? attribute
+  if (text === null) return { prop, value: undefined }
+  switch (entry?.kind) {
+    case "number":
+      // A text that is no integer stays as it is: `getAttribute` gives it back and native ignores it.
+      return { prop, value: INTEGER.test(text) ? Number(text) : text }
+    case "presence":
+      return { prop, value: true }
+    case "until-found":
+      // `hidden="until-found"` is its own state: it keeps its box, so it is the text and not a presence.
+      return { prop, value: text.toLowerCase() === "until-found" ? "until-found" : true }
+    case "true-text":
+      return { prop, value: text === "true" }
     default:
-      return false
+      return { prop, value: text }
   }
+}
+
+/** Attributes written to elements that have no prop for them (`style`, `onclick`), by element. */
+const storedAttributes = new WeakMap<object, Map<string, string>>()
+
+export function storedAttribute(element: object, attribute: string): string | undefined {
+  return storedAttributes.get(element)?.get(attribute)
+}
+
+export function storedAttributeNames(element: object): string[] {
+  const stored = storedAttributes.get(element)
+  return stored === undefined ? [] : [...stored.keys()]
+}
+
+/** `null` removes it. Gives what it held before. */
+export function storeAttribute(element: object, attribute: string, text: string | null): string | undefined {
+  let stored = storedAttributes.get(element)
+  const before = stored?.get(attribute)
+  if (text === null) {
+    stored?.delete(attribute)
+  } else {
+    if (stored === undefined) {
+      stored = new Map()
+      storedAttributes.set(element, stored)
+    }
+    stored.set(attribute, text)
+  }
+  return before
+}
+
+/** Whether a prop is not sent to native as an attribute: native builds the `[style]` text from the element's own style declarations. */
+export function isNotNativeAttribute(prop: string): boolean {
+  return prop === "style" || isNotAttribute(prop)
 }
 
 /**
@@ -72,12 +229,20 @@ function holdsBooleanText(name: string): boolean {
  * The attributes an element given `props` has, by name. Two props can name one attribute
  * (`class` and `className`): the one written as the attribute wins, else the first.
  */
-export function attributesOfProps(props: Iterable<readonly [string, unknown]>, svg: boolean): Map<string, string> {
+export function attributesOfProps(props: Iterable<readonly [string, unknown]>, type: string): Map<string, string> {
+  const svg = isSvgType(type)
   const values = new Map<string, unknown>()
+  const inputProps = type === "input" ? new Map<string, unknown>() : undefined
   for (const [prop, value] of props) {
-    if (isNotAttribute(prop) || value === undefined) continue
+    if (inputProps !== undefined && INPUT_ATTRIBUTE_PROPS.has(prop)) inputProps.set(prop, value)
+    if (isNotNativeAttribute(prop) || value === undefined) continue
     const name = attributeNameOf(prop, svg)
     if (!values.has(name) || prop === name) values.set(name, value)
+  }
+  if (inputProps !== undefined) {
+    for (const attribute of ["checked", "value"] as const) {
+      if (values.has(attribute)) values.set(attribute, inputAttributeValue(attribute, (name) => inputProps.get(name), inputProps.get("type")))
+    }
   }
   const attributes = new Map<string, string>()
   for (const [name, value] of values) {

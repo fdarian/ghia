@@ -154,15 +154,16 @@ pub(crate) fn default_role(
         "label" => Some(Role::Label),
         "img" => Some(Role::Image),
         "input" | "textarea" => {
-            let input_type = element
-                .custom_props()
-                .get("type")
-                .and_then(|value| value.as_str())
-                .unwrap_or_default();
-            Some(crate::custom_elements::input::default_role(
-                crate::custom_elements::input_rules::InputType::parse(input_type),
-                element.element_type == "textarea",
-            ))
+            use crate::custom_elements::input_rules::InputType;
+            let input_type = crate::custom_elements::input_choice::input_type(element.custom_props());
+            match input_type {
+                InputType::Checkbox if element.element_type == "input" => Some(Role::CheckBox),
+                InputType::Radio if element.element_type == "input" => Some(Role::RadioButton),
+                // A hidden input has no node.
+                InputType::Range if element.element_type == "input" => Some(Role::Slider),
+                InputType::Hidden if element.element_type == "input" => None,
+                _ => Some(crate::custom_elements::input::default_role(input_type, element.element_type == "textarea")),
+            }
         }
         _ => crate::html::implicit_role(tree, element),
     }
