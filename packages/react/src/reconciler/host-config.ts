@@ -50,7 +50,6 @@ const EVENT_TYPE_BY_PROP = eventTypesWithOverrides({
 })
 import { diffAttributes, diffCustomProps } from "./custom-props.js"
 import { fieldHandlers } from "./field-events.js"
-import { hiddenStyle } from "./native-style.js"
 import type {
   Container,
   ElementType,
@@ -259,15 +258,10 @@ function diffEventListeners(instance: Instance, oldProps: Props, newProps: Props
 
 const NO_STYLE = {}
 
-function sendStyle(renderer: MutationRenderer, id: number, style: StyleDesc | undefined): void {
-  if (style == null || Object.keys(style).length === 0) return
-  renderer.setStyle(id, style)
-}
-
-/** Sends the live style of a mounted element, as `display: none !important` while React hides it. */
+/** Sends the live style of an element that has a native element, unless native has it already. */
 export function sendLiveStyle(instance: Instance, state: HostNodeState): void {
   const style = liveStyleOf(instance)
-  state.container.renderer.setStyle(instance.nativeId, state.hidden ? hiddenStyle(style) : style)
+  if (state.sent.writesStyle(style)) state.container.renderer.setStyle(instance.nativeId, style, state.sent.styleJson)
 }
 
 /**
@@ -327,9 +321,8 @@ export function materialize(node: HostNode): ReturnType<typeof stateFor> {
   if ("type" in node) {
     renderer.createElement(node.nativeId, node.type)
     state.container.instances.set(node.nativeId, node)
-    const style = state.codeStyle ?? splitMotionStyle(node.props.style).style
-    if (state.hidden) renderer.setStyle(node.nativeId, hiddenStyle(style))
-    else sendStyle(renderer, node.nativeId, style)
+    state.sent.reset()
+    sendLiveStyle(node, state)
     syncMotionBindings(state.container, node.nativeId, node.props.style, node.type)
     syncEventListeners(state.container, node)
     const liveProps = livePropEntries(node)
@@ -456,7 +449,6 @@ function adoptProps(
   instance.props = newProps
 }
 
-  const overridesBefore = state.propOverrides === undefined ? undefined : new Map(state.propOverrides)
 function applyUpdate(instance: Instance, oldProps: Props, newProps: Props): void {
   const state = stateFor(instance)
   const container = state.container
@@ -464,6 +456,7 @@ function applyUpdate(instance: Instance, oldProps: Props, newProps: Props): void
   // which is every element a parent re-rendered. Most of those did not change
   // their style, so send it only when it did.
   const styleChanged = !sameStyle(oldProps.style, newProps.style)
+  const overridesBefore = state.propOverrides === undefined ? undefined : new Map(state.propOverrides)
   if (hasMutationObservers()) {
     recordAttributeChanges(instance, new Set([...Object.keys(oldProps), ...Object.keys(newProps)]), () => {
       adoptProps(instance, state, oldProps, newProps, styleChanged)
@@ -687,22 +680,26 @@ export const hostConfig = {
     linkChild(parent, child)
   },
 
+  // Through the live style, as React DOM does through `style`: the hidden element reads
+  // `display: none` with priority important, and a sheet rule cannot show what Suspense hides.
   hideInstance(instance: Instance): void {
-    // Keep the element's own style under `display: none !important`, so a sheet
-    // rule cannot show what Suspense hides and unhiding restores it as it was.
-    const state = stateFor(instance)
-    state.hidden = true
-    if (state.mounted) rendererFor(instance).setStyle(instance.nativeId, hiddenStyle(liveStyleOf(instance)))
+    instance.style.setProperty("display", "none", "important")
   },
 
-  unhideInstance(instance: Instance, _props: Props): void {
-    const state = stateFor(instance)
-    state.hidden = false
-    if (state.mounted) sendLiveStyle(instance, state)
+  // The display the props give it, else none: a `display` that code wrote while it was hidden is
+  // dropped, as it is in React DOM.
+  unhideInstance(instance: Instance, props: Props): void {
+    const display: unknown = props.style?.display
+    instance.style.display = display == null || typeof display === "boolean" ? "" : `${display}`.trim()
   },
 
-  hideTextInstance(_textInstance: TextInstance): void {},
-  unhideTextInstance(_textInstance: TextInstance, _text: string): void {},
+  hideTextInstance(textInstance: TextInstance): void {
+    textInstance.nodeValue = ""
+  },
+
+  unhideTextInstance(textInstance: TextInstance, text: string): void {
+    textInstance.nodeValue = text
+  },
 
   clearContainer(_container: Container): void {},
 

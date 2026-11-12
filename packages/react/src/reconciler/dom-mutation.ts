@@ -139,7 +139,12 @@ export function setDomStyle(instance: Instance, next: StyleDesc): void {
   if (hasMutationObservers()) recordAttributeChanges(instance, ["style"], apply)
   else apply()
   // A burst of writes (a drag writing the transform on every pointer move) is one `setStyle` for the next flush.
-  if (state.mounted) state.container.renderer.deferWrite(instance, () => sendLiveStyle(instance, state))
+  // The element may have been released, or React may have sent this style, by the time the flush runs it.
+  if (state.mounted) {
+    state.container.renderer.deferWrite(instance, () => {
+      if (state.mounted) sendLiveStyle(instance, state)
+    })
+  }
 }
 
 /** Code's write of one prop (`el.id = ...`): React's next render of the same prop overwrites it. */

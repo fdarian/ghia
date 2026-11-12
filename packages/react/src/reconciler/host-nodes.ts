@@ -9,6 +9,7 @@ import {
   defineDomMembers,
   copyPrototypeMembers,
   defineScrollMembers,
+  SentWrites,
   document,
   DOM_BINDING,
   focusHostElement,
@@ -46,12 +47,8 @@ export type HostNode = Instance | TextInstance
 export interface HostNodeState {
   container: Container
   mounted: boolean
-  /**
-   * React hid this element (Suspense, Activity). Its native style carries
-   * `display: none !important`, so a style update must keep that rather than
-   * overwrite it with the visible one.
-   */
-  hidden: boolean
+  /** The style native holds for the element, so a write of the same live style queues nothing. Reset when the native element is made. */
+  readonly sent: SentWrites
   /** The node it is placed in, or `null` at the top of a window or before it is placed. */
   parent: HostNode | null
   /** The nodes placed in it, in order. */
@@ -90,7 +87,7 @@ function createState(container: Container): HostNodeState {
   return {
     container,
     mounted: false,
-    hidden: false,
+    sent: new SentWrites(),
     parent: null,
     children: [],
     typeMembersAttached: false,
