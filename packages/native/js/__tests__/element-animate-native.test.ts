@@ -67,12 +67,12 @@ describeNative("element.animate()", () => {
     expect(animation.effect.target).toBe(target)
     frame(0)
     frame(500)
-    expect(computed("translate")).toBe("50px 0px")
+    expect(computed("translate")).toBe("50px")
     expect(animation.playState).toBe("running")
     expect(getAnimations()).toEqual([animation])
     expect(getAnimations()[0]).toBe(animation)
     frame(250)
-    expect(computed("translate")).toBe("75px 0px")
+    expect(computed("translate")).toBe("75px")
   })
 
   it("takes the array form and a number as the duration", () => {
@@ -99,7 +99,7 @@ describeNative("element.animate()", () => {
     frame(0)
     frame(500)
     await animation.finished
-    expect(computed("translate")).toBe("100px 0px")
+    expect(computed("translate")).toBe("100px")
     expect(getAnimations()).toEqual([animation])
   })
 
@@ -110,7 +110,7 @@ describeNative("element.animate()", () => {
     animation.finish()
     frame(16)
     await expect(animation.finished).resolves.toBe(animation)
-    expect(computed("translate")).toBe("100px 0px")
+    expect(computed("translate")).toBe("100px")
   })
 
   it("pause() holds the value while time passes", () => {
@@ -121,7 +121,7 @@ describeNative("element.animate()", () => {
     frame(16)
     frame(5000)
     expect(animation.playState).toBe("paused")
-    expect(computed("translate")).toBe("25px 0px")
+    expect(computed("translate")).toBe("25px")
   })
 
   it("cancel() rejects finished with an AbortError and removes the effect", async () => {
@@ -148,7 +148,7 @@ describeNative("element.animate()", () => {
     const animation = animate({ translate: ["0px 0px", "60px 0px"] }, { duration: 200, easing: "linear" })
     frame(0)
     frame(100)
-    expect(computed("translate")).toBe("30px 0px")
+    expect(computed("translate")).toBe("30px")
     frame(200)
     await animation.finished
     expect(getAnimations()).toEqual([])

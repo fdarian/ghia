@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { normalizeKeyframes } from "../animate-keyframes.js"
+import { normalizeKeyframes, prepareKeyframes } from "../animate-keyframes.js"
 
 const parse = (input: Parameters<typeof normalizeKeyframes>[0]) => JSON.parse(normalizeKeyframes(input)) as Record<string, unknown>[]
 
@@ -54,5 +54,11 @@ describe("normalizeKeyframes", () => {
     expect(() => normalizeKeyframes([{ offset: Number.NaN }])).toThrow(TypeError)
     expect(() => normalizeKeyframes([3 as never])).toThrow(TypeError)
     expect(() => normalizeKeyframes("opacity" as never)).toThrow(TypeError)
+  })
+
+  it("tells the offsets the author gave from the ones it spread", () => {
+    expect(prepareKeyframes([{ opacity: 0 }, { opacity: 0.2 }, { offset: 0.8, opacity: 0.8 }, { opacity: 1 }]).written).toEqual([0.8])
+    expect(prepareKeyframes({ opacity: [0, 1, 0], offset: [0, 0.2] }).written).toEqual([0, 0.2])
+    expect(prepareKeyframes({ opacity: [0, 1] }).written).toEqual([])
   })
 })

@@ -45,6 +45,8 @@ function propertiesOf(source: KeyframeObject): [string, string][] {
 
 interface Parsed {
   offset: number | null
+  /** The author gave this keyframe its `offset`, which `getKeyframes()` then reports (and `null` otherwise). */
+  written: boolean
   easing: string
   properties: [string, string][]
 }
@@ -53,8 +55,10 @@ function fromList(list: readonly unknown[]): Parsed[] {
   return list.map((item) => {
     if (typeof item !== "object" || item === null) throw typeError("keyframes must be objects")
     const source = item as KeyframeObject
+    const offset = offsetOf(source.offset)
     return {
-      offset: offsetOf(source.offset),
+      offset,
+      written: offset !== null,
       easing: source.easing === undefined ? "linear" : String(source.easing),
       properties: propertiesOf(source),
     }
@@ -87,6 +91,7 @@ function fromProperties(source: KeyframeObject): Parsed[] {
   return ordered.map(([offset, properties], index) => ({
     // An offset given for the keyframe replaces the one the number of values made.
     offset: offsets.length > index ? offsetOf(offsets[index]) ?? offset : offset,
+    written: offsets.length > index && offsetOf(offsets[index]) !== null,
     easing: easings.length > 0 ? easings[index % easings.length] : "linear",
     properties,
   }))
@@ -116,14 +121,21 @@ function distribute(frames: Parsed[]): number[] {
   return offsets as number[]
 }
 
-/**
- * The JSON native takes for the keyframes of `Element.animate()`: an array of `{ offset, easing,
- * <property>: value }` in ascending offset order, every offset set and every value a string. A
- * property name is passed on as written and native leaves out what it does not animate, as the
- * browser leaves out what it cannot read. `composite` is not carried: only `replace` is built.
- */
-export function normalizeKeyframes(input: KeyframesInput): string {
-  if (input === null || input === undefined) return "[]"
+/** What `Element.animate()` sends native, and the offsets of the keyframes the author gave one. */
+export interface PreparedKeyframes {
+  /**
+   * The JSON native takes for the keyframes of `Element.animate()`: an array of `{ offset, easing,
+   * <property>: value }` in ascending offset order, every offset set and every value a string. A
+   * property name is passed on as written and native leaves out what it does not animate, as the
+   * browser leaves out what it cannot read. `composite` is not carried: only `replace` is built.
+   */
+  json: string
+  /** The offsets given, which `getKeyframes()` reports as `offset` where the others are `null`. */
+  written: readonly number[]
+}
+
+export function prepareKeyframes(input: KeyframesInput): PreparedKeyframes {
+  if (input === null || input === undefined) return { json: "[]", written: [] }
   if (typeof input !== "object") throw typeError("keyframes must be an array or an object")
   const frames = isIterable(input) ? fromList([...input]) : fromProperties(input as KeyframeObject)
   const offsets = distribute(frames)
@@ -132,5 +144,13 @@ export function normalizeKeyframes(input: KeyframesInput): string {
     for (const [name, value] of frame.properties) keyframe[name] = value
     return keyframe
   })
-  return JSON.stringify(native)
+  return {
+    json: JSON.stringify(native),
+    written: frames.flatMap((frame, index) => (frame.written ? [offsets[index]] : [])),
+  }
+}
+
+/** The JSON of [`prepareKeyframes`]. */
+export function normalizeKeyframes(input: KeyframesInput): string {
+  return prepareKeyframes(input).json
 }

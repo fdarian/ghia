@@ -7,7 +7,7 @@ import type {
   WebAnimationKeyframeInfo,
   WebAnimationTimingUpdate,
 } from "../index.js"
-import { normalizeKeyframes, type KeyframesInput } from "./animate-keyframes.js"
+import { prepareKeyframes, type KeyframesInput } from "./animate-keyframes.js"
 import { flushPendingMutations } from "./bounds.js"
 import { EVENT_PHASE_AT_TARGET, EVENT_PHASE_NONE, reportUncaught, type DomEvent } from "./events/dispatch.js"
 import {
@@ -503,9 +503,10 @@ export class KeyframeEffect {
         if (!isUnknownAnimation(error)) throw error
       }
     }
+    const written = writtenOffsets.get(effectOf(this).animation)
     return unwrap(state.keyframes).map((frame) => {
       const keyframe: ComputedKeyframe = {
-        offset: frame.offset ?? null,
+        offset: written && !written.includes(frame.computedOffset) ? null : (frame.offset ?? null),
         easing: frame.easing,
         composite: frame.composite as ComputedKeyframe["composite"],
         computedOffset: frame.computedOffset,
@@ -1056,9 +1057,11 @@ export function getElementAnimations(
   target: object,
   options?: GetAnimationsOptions
 ): Animation[] {
+  const registry = registryOf(renderer)
+  // A window that closed took every animation with it.
+  if (registry.closed) return []
   const host = hostOf(renderer)
   flushPendingMutations(renderer)
-  const registry = registryOf(renderer)
   const timeline = (registry.timeline ??= new DocumentTimeline(host))
   if (!options?.subtree) {
     return host.getAnimations(elementId).map((info) => adopt(registry, host, timeline, target, elementId, info))
@@ -1067,6 +1070,12 @@ export function getElementAnimations(
     .getSubtreeAnimations(elementId)
     .map((listed) => adoptListed(registry, host, timeline, renderer, listed, elementId, target))
 }
+
+/** The animations `Element.animate()` made, which an element's removal leaves running. */
+const madeByScript = new WeakSet<Animation>()
+
+/** The offsets an `Element.animate()` call gave its keyframes: `getKeyframes()` reports the others as `null`, as the DOM does. */
+const writtenOffsets = new WeakMap<Animation, readonly number[]>()
 
 /** What `Element.animate()` takes beside the timing. */
 export interface AnimateOptions extends OptionalEffectTiming {
@@ -1091,18 +1100,20 @@ export function animateElement(
   const host = hostOf(renderer)
   const animate = (renderer as Partial<Pick<GpuixRenderer, "animateElement">>).animateElement
   if (!animate) throw new Error("This renderer does not support animateElement")
-  const json = normalizeKeyframes(keyframes)
+  const prepared = prepareKeyframes(keyframes)
   const timing = typeof options === "number" ? timingUpdate({ duration: options }, ANIMATE) : timingUpdate(options, ANIMATE)
   flushPendingMutations(renderer)
   let info: WebAnimationInfo
   try {
-    info = animate.call(renderer, elementId, json, timing)
+    info = animate.call(renderer, elementId, prepared.json, timing)
   } catch (error) {
     throw refusal(error)
   }
   const registry = registryOf(renderer)
   const timeline = (registry.timeline ??= new DocumentTimeline(host))
   const animation = adopt(registry, host, timeline, target, elementId, info)
+  madeByScript.add(animation)
+  writtenOffsets.set(animation, prepared.written)
   if (typeof options === "object" && options !== null && options.id !== undefined) animation.id = String(options.id)
   return animation
 }
@@ -1338,10 +1349,12 @@ function keptByNative(renderer: NativeRenderer, state: State): boolean {
 }
 
 /**
- * A removed element's animations are cancelled, as the DOM does: native sends
- * nothing when an element goes, so the ids the mutation queue was told are
- * destroyed end here. The `cancel` event comes in a task, as the DOM's comes at
- * its next frame.
+ * A removed element's CSS animations and transitions are cancelled, as the DOM does: native sends
+ * nothing when an element goes, so the ids the mutation queue was told are destroyed end here. The
+ * `cancel` event comes in a task, as the DOM's comes at its next frame. An animation of
+ * `Element.animate()` is left alone, as the DOM leaves it running on the disconnected element: native
+ * keeps its run and goes on with the clock, so `finished` resolves on time and the run shows again
+ * if the element is made again under the same id.
  */
 export function cancelAnimationsOfElements(renderer: object, elementIds: readonly number[]): void {
   const registry = registryOf(renderer)
@@ -1352,6 +1365,7 @@ export function cancelAnimationsOfElements(renderer: object, elementIds: readonl
     for (const animation of [...running].reverse()) {
       const state = stateOf(animation)
       const wasIdle = state.mode === "gone" || state.last.playState === "idle"
+      if (!wasIdle && madeByScript.has(animation)) continue
       lose(animation)
       unregister(registry, state, animation)
       if (wasIdle) continue

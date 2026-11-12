@@ -9592,7 +9592,19 @@ await animation.finished
   `ready`, `finished`, `onfinish`, `oncancel`, `effect.getKeyframes()`,
   `getTiming()` and `updateTiming()`. `id` is the `id` option. It plays from the next
   frame (`pending` until then) and no style owns it: a change of `animation` or
-  `transition` leaves it alone, and `display: none` does not cancel it.
+  `transition` leaves it alone, and neither `display: none` nor removing the element
+  cancels it. A removed element's animation goes on with the clock against the
+  element, `finished` resolves on time (never with an `AbortError`), `getAnimations()`
+  of the element lists it, and if the element is inserted again it is still
+  animating, where the clock took it. Its CSS animations and transitions do end with
+  the removal, as in CSS.
+- **`getKeyframes()`** answers at once, before any frame. `offset` is `null` for a
+  keyframe that was given none (`computedOffset` is its place), values are written
+  as `getKeyframes()` writes a CSS animation's: a `translate` of `0px 0px` is `0px`
+  and its `0px` depth is left out, as CSS serializes it. A transition that was
+  retargeted while it ran (the `translate` dnd-kit moves a sortable item with)
+  gives the value it was at as its start, in `translate3d()`, `scale3d()` and
+  the other 3D functions as it needs.
 - **How it shows.** Sampled and interpolated as `@keyframes` are, by the same
   engine: the property table of CSS animations, the same easing parser, the same
   timing model. The animations of scripts play above the CSS animations of the

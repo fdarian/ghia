@@ -1629,6 +1629,12 @@ impl ElementState {
         self.every_run().any(|run| run.wants_frame(now))
     }
 
+    /// Whether a script animation of the element has not been cancelled, which is what keeps the
+    /// state of an element that left the tree.
+    fn has_live_script(&self) -> bool {
+        self.disowned.iter().any(|run| run.script && !run.clock.is_idle())
+    }
+
     /// Every run of the element: the ones the style owns, then the ones it let go of.
     fn every_run(&self) -> impl Iterator<Item = &Run> {
         self.runs.iter().chain(&self.disowned)
@@ -1789,6 +1795,10 @@ pub(crate) struct CssAnimations {
     sleepers: Sleepers,
     /// The roots `display: none` has cancelled for, until they render again.
     hidden: HashSet<u64>,
+    /// Elements that left the tree while a script animation of theirs was still in effect: the run
+    /// goes on with the clock, as a script animation of a disconnected element does in Chrome, and
+    /// is theirs again if the element is made again under the same id (all of them are in `dormant`).
+    orphans: HashSet<u64>,
 }
 
 /// When the clocks of the dormant elements have something due, so that a tick looks at those and
@@ -1930,6 +1940,9 @@ impl CssAnimations {
         scope: Scope,
         now: Instant,
     ) -> Vec<PropKey> {
+        if self.orphans.remove(&id) {
+            self.leave_dormant(id);
+        }
         let state = self.states.entry(id).or_insert_with(|| Box::new(ElementState::new()));
         state.sync_config(id, declared);
         state.reconcile(id, registry, now, &mut self.events, &mut self.api_events);
@@ -2305,8 +2318,30 @@ impl CssAnimations {
         }
     }
 
+    /// Drops what elements that left the tree held. A script animation that is not cancelled stays:
+    /// Chrome does not cancel those when the element is removed, so the run goes on with the clock
+    /// and finishes on time, and shows again if the element comes back (`orphans`). The CSS
+    /// animations the style owned end with the element.
     pub(crate) fn retain(&mut self, mut keep: impl FnMut(u64) -> bool) {
-        self.states.retain(|id, _| keep(*id));
+        let mut left = Vec::new();
+        self.states.retain(|id, state| {
+            if keep(*id) {
+                return true;
+            }
+            if !state.has_live_script() {
+                return false;
+            }
+            state.runs.clear();
+            state.list = AnimationList::default();
+            state.config = Default::default();
+            left.push(*id);
+            true
+        });
+        self.orphans.retain(|id| self.states.contains_key(id));
+        for id in left {
+            self.orphans.insert(id);
+            self.enter_dormant(id);
+        }
         self.hidden.retain(|id| keep(*id));
         self.held.retain(|id| keep(*id));
         shrink_if_sparse(&mut self.states);
@@ -2393,7 +2428,7 @@ impl CssAnimations {
             .flat_map(|(element, state)| state.every_run_mut().map(move |run| (*element, run)))
             .find(|(_, run)| run.clock.id() == id)?;
         run.update_timing(element, update, now, &mut self.api_events);
-        self.commanded.push(element);
+        self.note_commanded(element);
         if self.dormant.contains(&element) {
             self.sleepers.next.insert(element);
         }
@@ -2409,7 +2444,7 @@ impl CssAnimations {
             .flat_map(|(element, state)| state.every_run_mut().map(move |run| (*element, run)))
             .find(|(_, run)| run.clock.id() == id)?;
         let outcome = run.command(element, command, now, &mut self.events, &mut self.api_events);
-        self.commanded.push(element);
+        self.note_commanded(element);
         if self.dormant.contains(&element) {
             self.sleepers.next.insert(element);
         }
@@ -2437,6 +2472,26 @@ impl CssAnimations {
     pub(crate) fn forget(&mut self, id: u64) {
         for state in self.states.values_mut() {
             state.disowned.retain(|run| run.clock.id() != id);
+        }
+        let gone: Vec<u64> = self
+            .orphans
+            .iter()
+            .copied()
+            .filter(|element| self.states.get(element).is_none_or(|state| !state.has_live_script()))
+            .collect();
+        for element in gone {
+            self.states.remove(&element);
+            self.orphans.remove(&element);
+            self.dormant.remove(&element);
+            self.sleepers.forget(element);
+        }
+    }
+
+    /// A command reached `element`, which the next frame has to build again unless it is not in the
+    /// tree: a tick of its clock tells JS what the command did.
+    fn note_commanded(&mut self, element: u64) {
+        if !self.orphans.contains(&element) {
+            self.commanded.push(element);
         }
     }
 
@@ -5570,6 +5625,53 @@ mod tests {
         frames.frame(200, &bare());
         assert!(frames.animations.take_events().is_empty());
         assert_eq!(api_events(&mut frames), [(ApiEventKind::Finish, id)]);
+    }
+
+    #[test]
+    fn a_script_animation_goes_on_after_its_element_leaves_the_tree_and_finishes_on_time() {
+        let mut frames = Frames::new();
+        let id = animate(&mut frames, 0, RAMP, timing(100.0, |_| {}));
+        frames.frame(0, &bare());
+        frames.animations.retain(|_| false);
+        assert_eq!(frames.animations.info(id, frames.at(50)).unwrap().status, Status::Running);
+        frames.animations.advance_dormant(frames.at(50));
+        assert!(api_events(&mut frames).is_empty());
+        frames.animations.advance_dormant(frames.at(200));
+        assert_eq!(api_events(&mut frames), [(ApiEventKind::Finish, id)]);
+        assert_eq!(frames.animations.info(id, frames.at(200)).unwrap().status, Status::Finished);
+        frames.animations.forget(id);
+        assert!(frames.animations.info(id, frames.at(200)).is_none());
+        assert!(!frames.animations.wants(1, None), "the state of an element that is gone goes with its last run");
+    }
+
+    #[test]
+    fn a_script_animation_of_an_element_that_returns_shows_where_the_clock_took_it() {
+        let mut frames = Frames::new();
+        animate(&mut frames, 0, RAMP, timing(1000.0, |_| {}));
+        frames.frame(0, &bare());
+        frames.animations.retain(|_| false);
+        frames.animations.advance_dormant(frames.at(300));
+        near(opacity(&frames.frame(600, &bare())), 0.6);
+        assert!(!frames.animations.is_dormant(1), "a built element asks for frames again");
+    }
+
+    #[test]
+    fn a_cancelled_script_animation_and_a_css_animation_end_with_their_element() {
+        let mut frames = Frames::new();
+        frames.define("fade", FADE);
+        let id = animate(&mut frames, 0, RAMP, timing(1000.0, |_| {}));
+        frames.frame(0, &fading("fade 1s linear"));
+        frames.animations.command(id, Command::Cancel, frames.at(10)).unwrap().unwrap();
+        frames.animations.retain(|_| false);
+        assert!(!frames.animations.wants(1, None));
+
+        let mut frames = Frames::new();
+        frames.define("fade", FADE);
+        frames.frame(0, &fading("fade 1s linear"));
+        animate(&mut frames, 0, RAMP, timing(1000.0, |_| {}));
+        frames.animations.retain(|_| false);
+        assert!(frames.animations.list(1, frames.at(100)).is_empty(), "the style's animation went with the element");
+        assert_eq!(scripts(&frames, 100).len(), 1);
     }
 
     #[test]

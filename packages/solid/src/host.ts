@@ -457,11 +457,12 @@ export class HostElement extends HTMLElement {
   /**
    * The CSS transitions, then the CSS animations, that are running, paused or
    * in effect through a fill, as `Animation` objects. An element that is not
-   * mounted has none. With `{ subtree: true }` the elements below are listed
-   * too. See `Animation`.
+   * mounted has only the animations `animate()` made before it was released, which
+   * keep running (none of its CSS animations and transitions). With
+   * `{ subtree: true }` the elements below are listed too. See `Animation`.
    */
   getAnimations(options?: GetAnimationsOptions): Animation[] {
-    if (!this.root || !this.mounted) return []
+    if (!this.root || (!this.mounted && options?.subtree)) return []
     return this.methods().getAnimations.call(this, options)
   }
 
