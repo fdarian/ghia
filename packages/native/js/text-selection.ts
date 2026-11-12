@@ -1,4 +1,5 @@
 import type { NativeRenderer } from "./host.js"
+import { normalizedInputType } from "./dom/input-type.js"
 import { namedError } from "./named-error.js"
 
 /** `selectionDirection` of an `<input>` or `<textarea>`. */
@@ -16,7 +17,7 @@ export interface TextControlSelection {
    * `start` collapses the selection to `end`. `direction` defaults to `"none"`.
    */
   setSelectionRange(start: number, end: number, direction?: SelectionDirection): void
-  /** `null` for an `<input>` whose type has no text to select (`checkbox`, `radio`, `range`, `hidden`), as in the DOM. */
+  /** `null` for an `<input>` of a type the selection API does not apply to (anything but `text`, `search`, `url`, `tel` and `password`), as in the DOM. */
   readonly selectionStart: number | null
   readonly selectionEnd: number | null
   readonly selectionDirection: SelectionDirection | null
@@ -32,11 +33,11 @@ export interface TextControlHost {
   inputType(): unknown
 }
 
-/** The input types that draw no text: native has no selection for them, and the DOM's `selectionStart` is `null`. */
-const TYPES_WITHOUT_TEXT_SELECTION: ReadonlySet<unknown> = new Set(["checkbox", "radio", "range", "hidden"])
+/** The input types HTML says the selection API applies to; every other type reads `null` and cannot be set. */
+const TYPES_WITH_TEXT_SELECTION: ReadonlySet<string> = new Set(["text", "search", "url", "tel", "password"])
 
 function hasTextSelection(host: TextControlHost): boolean {
-  return !TYPES_WITHOUT_TEXT_SELECTION.has(host.inputType())
+  return TYPES_WITH_TEXT_SELECTION.has(normalizedInputType(host.inputType()))
 }
 
 type SelectionNative = Required<
@@ -52,7 +53,7 @@ function native(host: TextControlHost): SelectionNative {
   return renderer as SelectionNative
 }
 
-/** Does nothing for a type with no text to select, as `select()` does in the DOM. */
+/** Does nothing for a type the selection API does not apply to, as `select()` does in the DOM. */
 export function selectTextControl(host: TextControlHost): void {
   if (!hasTextSelection(host)) return
   native(host).selectText(host.id)

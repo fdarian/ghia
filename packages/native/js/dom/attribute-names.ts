@@ -5,6 +5,7 @@
  */
 
 import { isSvgType } from "../svg.js"
+import { normalizedInputType } from "./input-type.js"
 
 /** HTML names are lowercase in the DOM; SVG names keep their case (`viewBox`), as in Chrome. */
 export function attributeNameOf(prop: string, svg: boolean): string {
@@ -29,7 +30,7 @@ const VALUE_IS_ATTRIBUTE = new Set(["checkbox", "radio", "hidden", "submit", "bu
 export function inputDefaultProp(attribute: string, inputType: unknown): "defaultChecked" | "defaultValue" | undefined {
   if (attribute === "checked") return "defaultChecked"
   if (attribute !== "value") return undefined
-  return VALUE_IS_ATTRIBUTE.has(String(inputType).toLowerCase()) ? undefined : "defaultValue"
+  return VALUE_IS_ATTRIBUTE.has(normalizedInputType(inputType)) ? undefined : "defaultValue"
 }
 
 /**
@@ -44,7 +45,7 @@ export function inputDefaultProp(attribute: string, inputType: unknown): "defaul
  */
 export function inputAttributeValue(attribute: "checked" | "value", prop: (name: string) => unknown, inputType: unknown): unknown {
   if (attribute === "checked") return prop("defaultChecked") ?? prop("checked")
-  return VALUE_IS_ATTRIBUTE.has(String(inputType).toLowerCase())
+  return VALUE_IS_ATTRIBUTE.has(normalizedInputType(inputType))
     ? (prop("value") ?? prop("defaultValue"))
     : (prop("defaultValue") ?? prop("value"))
 }

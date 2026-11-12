@@ -4441,8 +4441,8 @@ ends to the text; an `end` at or before `start` collapses the selection to
 controlled `value` update sees the new value, even before the next frame.
 Select-on-focus works with `onFocus`, for keyboard focus and for a click.
 
-An `<input>` that draws no text (`type` `checkbox`, `radio`, `range` or `hidden`) has no
-selection, as in the DOM: `selectionStart`, `selectionEnd` and `selectionDirection` are
+An `<input>` whose type the selection API does not apply to (anything but `text`, `search`, `url`, `tel` and `password`, so `email` and `number` too) has no
+selection, as in the DOM (the `type` is read trimmed and lowercased, and an unknown keyword is `text`): `selectionStart`, `selectionEnd` and `selectionDirection` are
 `null`, `select()` does nothing, and `setSelectionRange()` throws `InvalidStateError`. A
 library that asks whether an element is a native text input by `selectionStart != null`
 (Base UI's composite lists do, on every item that takes focus) gets `false` for a radio.

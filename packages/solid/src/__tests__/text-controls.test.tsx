@@ -38,7 +38,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid text controls", () => {
   })
 
   it("has no selection on an input that draws no text: null reads, select() does nothing, setSelectionRange() throws", () => {
-    for (const type of ["checkbox", "radio", "range", "hidden"] as const) {
+    for (const type of ["checkbox", "radio", "range", "hidden", "email", "number", "date", "color", "button", "file", " Radio ", "EMAIL"] as const) {
       let field!: HostElement
       const app = createTestRoot()
       app.render(() => <input type={type} ref={field} style={{ width: 20, height: 20 }} />)
@@ -47,6 +47,23 @@ describe.skipIf(!hasNativeTestRenderer)("Solid text controls", () => {
       expect(() => field.setSelectionRange(0, 1)).toThrow(expect.objectContaining({ name: "InvalidStateError" }))
       app.unmount()
     }
+  })
+
+  it("has a selection on text, search, url, tel and password, however the type is spelled, and on an unknown type", () => {
+    for (const type of ["text", "search", "url", "tel", "password", " Search ", "TEXT", "nonsense", undefined]) {
+      let field!: HostElement
+      const app = createTestRoot()
+      app.render(() => <input type={type} value="hello" ref={field} style={{ width: 100, height: 20 }} />)
+      field.setSelectionRange(1, 3, "backward")
+      expect([field.selectionStart, field.selectionEnd, field.selectionDirection]).toEqual([1, 3, "backward"])
+      app.unmount()
+    }
+    let area!: HostElement
+    const app = createTestRoot()
+    app.render(() => <textarea value="hello" ref={area} style={{ width: 100, height: 40 }} />)
+    area.setSelectionRange(1, 3)
+    expect([area.selectionStart, area.selectionEnd]).toEqual([1, 3])
+    app.unmount()
   })
 
   it("selects on focus", () => {

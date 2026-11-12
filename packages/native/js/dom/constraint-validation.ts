@@ -10,6 +10,7 @@
  * docs/fork/deviations.md.
  */
 
+import { normalizedInputType } from "./input-type.js"
 import type { Element } from "./nodes.js"
 import { onTags } from "./tag-members.js"
 
@@ -28,7 +29,7 @@ const customMessages = new WeakMap<object, string>()
 
 function typeOf(control: Element): string {
   if (control.localName === "textarea") return "textarea"
-  return (control.getAttribute("type") ?? "text").toLowerCase()
+  return normalizedInputType(control.getAttribute("type"))
 }
 
 function formOf(control: Element): Element | null {
