@@ -57,8 +57,10 @@ pub(crate) fn is_initial(value: &str) -> bool {
     value.eq_ignore_ascii_case("initial")
 }
 
+/// `revert` and `revert-layer` count: the user agent style has no value for a custom property, so
+/// a custom property rolled back is not set, which is what `unset` leaves of one that inherits.
 fn is_inherit(value: &str) -> bool {
-    ["inherit", "unset"].iter().any(|keyword| value.eq_ignore_ascii_case(keyword))
+    ["inherit", "unset", "revert", "revert-layer"].iter().any(|keyword| value.eq_ignore_ascii_case(keyword))
 }
 
 /// Which retained elements read the custom properties they inherit (see `retain::Record::reads_custom`):
@@ -355,6 +357,17 @@ mod tests {
         let child = parent.descend(&declared(&[("--a", "inherit"), ("--b", "initial")]));
         assert_eq!((child.get("--a"), child.get("--b")), (Some("1"), None));
         assert_eq!(parent.descend(&declared(&[("--a", "UNSET")])).get("--a"), Some("1"));
+    }
+
+    #[test]
+    fn revert_and_revert_layer_keep_what_is_inherited_and_a_var_reads_its_fallback_otherwise() {
+        let parent = computed(&[("--a", "1")]);
+        for keyword in ["revert", "REVERT-LAYER"] {
+            let child = parent.descend(&declared(&[("--a", keyword), ("--b", keyword)]));
+            assert_eq!(child.get("--a"), Some("1"), "{keyword}");
+            assert_eq!(substitute("var(--a, fb)", &child).as_deref().map(str::trim), Some("1"), "{keyword}");
+            assert_eq!(substitute("var(--b, fb)", &child).as_deref().map(str::trim), Some("fb"), "{keyword}");
+        }
     }
 
     #[test]

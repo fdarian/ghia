@@ -5,20 +5,21 @@
 //! then the important declarations of the matched rules, then the element's own inline declarations
 //! that were written `!important`, which beat an author `!important` as in CSS. A key declared again replaces the
 //! earlier one and moves to the end, which is where `css::covers` reads written order from when
-//! the merged text is interned.
+//! the merged text is interned. A CSS-wide keyword stays in the merged text, where `wide_keyword`
+//! resolves it.
 
 use std::sync::{Arc, Weak};
 
 use rustc_hash::FxHashMap;
 
-use crate::css::covers::{self, KeyId};
+use crate::css::covers;
 use crate::css::lenient::Declaration;
 use crate::style::StyleDesc;
 
 use super::declarations::render_declarations;
 use super::index::RuleIndex;
-use super::initial;
 use super::selector::Specificity;
+use super::wide_keyword::is_css_wide;
 
 /// The rules an element matched. Equal lists share one allocation, so two elements that match
 /// the same rules compare by pointer and share a cascaded style.
@@ -56,48 +57,19 @@ impl MatchedInterner {
     }
 }
 
-/// Whether the JSON text of a value is a CSS-wide keyword string. Such a declaration takes back
-/// what earlier declarations of its property set and gives nothing in return.
-pub(super) fn is_css_wide(value: &str) -> bool {
-    if !value.starts_with('"') {
-        return false;
-    }
-    let Ok(text) = serde_json::from_str::<String>(value) else {
-        return false;
-    };
-    ["unset", "initial", "inherit", "revert", "revert-layer"]
-        .iter()
-        .any(|keyword| text.trim().eq_ignore_ascii_case(keyword))
-}
-
+/// `declaration` over the list: it replaces an earlier one of its key, and a CSS-wide keyword also
+/// takes back the earlier declarations of the longhands it covers. The keyword stays in the list
+/// and is resolved where the merged text is interned (`wide_keyword::resolve`), which has to see it
+/// to reset what the layers under the style set.
 fn apply(list: &mut Vec<Declaration>, declaration: &Declaration) {
     list.retain(|earlier| earlier.key != declaration.key);
-    if !is_css_wide(&declaration.value) {
-        list.push(declaration.clone());
-        return;
-    }
-    let Some(key) = covers::key_id(&declaration.key) else {
-        return;
-    };
-    let covered = covers::covered_by(key);
-    let longhands: Vec<KeyId> = if covered.is_empty() {
-        vec![key]
-    } else {
-        list.retain(|earlier| covers::key_id(&earlier.key).is_none_or(|earlier| !covered.contains(&earlier)));
-        covered.iter().copied().filter(|target| covers::covered_by(*target).is_empty()).collect()
-    };
-    // A shorthand written earlier still gives the longhand a value, and the keyword has to take
-    // that back: the initial value written after it wins over it.
-    for longhand in longhands {
-        if let Some(initial) = initial::of(longhand).filter(|_| is_shadowed(list, longhand)) {
-            list.push(initial.clone());
+    if is_css_wide(&declaration.value) {
+        if let Some(key) = covers::key_id(&declaration.key) {
+            let covered = covers::covered_by(key);
+            list.retain(|earlier| covers::key_id(&earlier.key).is_none_or(|earlier| !covered.contains(&earlier)));
         }
     }
-}
-
-fn is_shadowed(list: &[Declaration], longhand: KeyId) -> bool {
-    list.iter()
-        .any(|earlier| covers::key_id(&earlier.key).is_some_and(|shorthand| covers::covered_by(shorthand).contains(&longhand)))
+    list.push(declaration.clone());
 }
 
 /// The merged declarations of the matched rules and the element's own, as the style prop's JSON.

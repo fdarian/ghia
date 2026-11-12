@@ -1,19 +1,23 @@
 //! The initial value of the longhands a shorthand covers.
 //!
 //! A CSS-wide keyword on a longhand takes back what the cascade gave it, including the part a
-//! shorthand declared earlier gave it. The cascade works on declarations, and a longhand cannot be
-//! removed from a shorthand's value, so the keyword is turned into the longhand's initial value
-//! written after the shorthand, which `css::covers` ranks above it.
+//! shorthand declared earlier gave it, in the same declarations or in a layer under them. A
+//! longhand cannot be removed from a shorthand's value, so the keyword is turned into the
+//! longhand's initial value written after the shorthand, which `css::covers` ranks above it
+//! (`wide_keyword`, and `overlay` for a layer under).
 //!
 //! Only longhands with a plain initial value are here. The rest keep the keyword's old meaning,
 //! which is to remove the earlier declarations of the key, and are listed in the deviations.
 
+use std::borrow::Cow;
 use std::sync::LazyLock;
 
 use rustc_hash::FxHashMap;
 
 use crate::css::covers::{self, KeyId};
-use crate::css::lenient::Declaration;
+use crate::css::lenient::{object_text, Declaration};
+use crate::retained_tree::parse_style;
+use crate::style::StyleDesc;
 
 const SIDES: [&str; 4] = ["Top", "Right", "Bottom", "Left"];
 const CORNERS: [&str; 4] = ["TopLeft", "TopRight", "BottomLeft", "BottomRight"];
@@ -115,11 +119,27 @@ pub(super) fn of(key: KeyId) -> Option<&'static Declaration> {
     INITIAL.get(&key)
 }
 
+static INITIAL_STYLES: LazyLock<FxHashMap<KeyId, StyleDesc>> = LazyLock::new(|| {
+    INITIAL
+        .iter()
+        .map(|(key, declaration)| {
+            let style = parse_style(object_text(std::slice::from_ref(declaration)).as_bytes())
+                .unwrap_or_else(|error| panic!("the initial value of {} is a style: {error}", declaration.key));
+            (*key, style)
+        })
+        .collect()
+});
+
+/// A style that sets `key` to its initial value and nothing else, for a longhand that has one here.
+pub(crate) fn style_of(key: KeyId) -> Option<&'static StyleDesc> {
+    INITIAL_STYLES.get(&key)
+}
+
 /// The initial value of a property written as a keyword the style parser has no form for, so the
 /// keyword is `initial` for the cascade: it takes back an earlier rule's value, and the property
 /// is left unset, which is its initial value. The table holds the properties, whether a longhand
 /// or a shorthand, whose CSS initial value is such a keyword.
-const UNREPRESENTABLE: [(&str, &str); 7] = [
+pub(super) const UNREPRESENTABLE: [(&str, &str); 7] = [
     ("zIndex", "auto"),
     ("maxWidth", "none"),
     ("maxHeight", "none"),
@@ -129,20 +149,44 @@ const UNREPRESENTABLE: [(&str, &str); 7] = [
     ("lineClamp", "none"),
 ];
 
+/// The text of a value that is a JSON string, or `None` for any other value. Borrowed unless the
+/// string has an escape, so reading the string values of a style allocates nothing.
+pub(super) fn string_value(json: &str) -> Option<Cow<'_, str>> {
+    if !json.starts_with('"') {
+        return None;
+    }
+    match json.strip_suffix('"').filter(|inner| inner.len() > 1 && !inner.contains('\\')) {
+        Some(inner) => Some(Cow::Borrowed(&inner[1..])),
+        None => serde_json::from_str::<String>(json).ok().map(Cow::Owned),
+    }
+}
+
+/// Whether `declaration` is the initial value of a property in [`UNREPRESENTABLE`] written as its
+/// keyword (`max-width: none`).
+pub(super) fn is_unrepresentable_initial(declaration: &Declaration) -> bool {
+    // The key first: most declarations are not one of these, and the value is only read for those.
+    UNREPRESENTABLE.iter().any(|(key, _)| *key == declaration.key)
+        && string_value(&declaration.value).is_some_and(|written| is_unrepresentable(&declaration.key, written.trim()))
+}
+
+fn is_unrepresentable(key: &str, written: &str) -> bool {
+    UNREPRESENTABLE.iter().any(|(name, keyword)| *name == key && written.eq_ignore_ascii_case(keyword))
+}
+
 /// Whether `declaration` is its property's initial value written as a keyword, which the cascade
 /// then reads as `initial`. A value the style parser has no form for (`z-index: auto`,
 /// `max-width: none`) could not otherwise take back an earlier rule's value.
 pub(super) fn is_initial_keyword(declaration: &Declaration) -> bool {
-    let Ok(written) = serde_json::from_str::<String>(&declaration.value) else {
+    let Some(written) = string_value(&declaration.value) else {
         return false;
     };
     let written = written.trim();
-    if UNREPRESENTABLE.iter().any(|(key, keyword)| *key == declaration.key && written.eq_ignore_ascii_case(keyword)) {
+    if is_unrepresentable(&declaration.key, written) {
         return true;
     }
     covers::key_id(&declaration.key)
         .and_then(of)
-        .and_then(|initial| serde_json::from_str::<String>(&initial.value).ok())
+        .and_then(|initial| string_value(&initial.value))
         .is_some_and(|keyword| written.eq_ignore_ascii_case(&keyword))
 }
 

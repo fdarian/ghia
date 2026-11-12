@@ -13,6 +13,12 @@ const WINDOW = { width: 800, height: 600 }
 
 type Popover = HTMLElement
 
+/** A closed popover keeps the `position: fixed` of its user agent style under `display: none`. */
+const inTopLayer = (element: HTMLElement) => {
+  const computed = getComputedStyle(element)
+  return computed.position === "fixed" && computed.display !== "none"
+}
+
 const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 5))
 
 describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
@@ -54,6 +60,24 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
     expect(getComputedStyle(found.box).display).toBe("none")
   })
 
+  it("keeps the user agent box while it is closed and an author sheet shows it", () => {
+    const found = mount((grab) => (
+      <div>
+        <style>{`[popover].shown { display: block }`}</style>
+        <div ref={grab("box")} popover="manual" class="shown">
+          <div style={popoverStyle} />
+        </div>
+      </div>
+    ))
+    const computed = getComputedStyle(found.box)
+    expect(computed.display).toBe("block")
+    expect(computed.position).toBe("fixed")
+    const rect = found.box.getBoundingClientRect()
+    // 100x50 content, 0.25em (4px) of padding and a 3px border on each side, centred across.
+    expect([rect.width, rect.height]).toEqual([114, 64])
+    expect(rect.left).toBeCloseTo((WINDOW.width - 114) / 2, 0)
+  })
+
   it("gets a box in the top layer with the user agent style when it is shown", () => {
     const found = mount((grab) => (
       <div>
@@ -80,6 +104,20 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
     const rect = found.box.getBoundingClientRect()
     expect(rect.left + rect.width / 2).toBeCloseTo(WINDOW.width / 2, 0)
     expect(rect.top + rect.height / 2).toBeCloseTo(WINDOW.height / 2, 0)
+  })
+
+  it("is not centred when an author sheet unsets the user agent's right and margin", () => {
+    const found = mount((grab) => (
+      <div>
+        <style>{`[popover].moved { left: 40px !important; right: unset !important; margin: unset }`}</style>
+        <div ref={grab("box")} popover="manual" class="moved" style={{ width: 100, height: 50 }} />
+        <div ref={grab("centred")} popover="manual" style={{ width: 100, height: 50 }} />
+      </div>
+    ))
+    found.box.showPopover()
+    found.centred.showPopover()
+    expect(found.box.getBoundingClientRect().left).toBe(40)
+    expect(found.centred.getBoundingClientRect().left, "a popover no rule matches is still centred").toBeGreaterThan(40)
   })
 
   it("is above a later sibling with a z-index, an anchored layer, and escapes a clipping ancestor", () => {
@@ -394,7 +432,7 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
       seen.length = 0
       change(setPopover)
       await nextTask()
-      expect(getComputedStyle(found.box).position, "not in the top layer").not.toBe("fixed")
+      expect(inTopLayer(found.box), "not in the top layer").toBe(false)
       expect(() => app.renderer.simulateKeystrokes("Escape")).not.toThrow()
       expect(below, "Escape reaches the layer below").toHaveBeenCalledTimes(1)
       remove()
@@ -489,7 +527,7 @@ describe.skipIf(!hasNativeTestRenderer)("popover in Solid", () => {
       await nextTask()
       expect(seen).toEqual(["child before closed", "child toggle closed"])
       expect(found.parent.offsetWidth, "the parent stays open").toBeGreaterThan(0)
-      expect(getComputedStyle(found.child).position, "not in the top layer").not.toBe("fixed")
+      expect(inTopLayer(found.child), "not in the top layer").toBe(false)
       found.parent.hidePopover()
       await nextTask()
       seen.length = 0
