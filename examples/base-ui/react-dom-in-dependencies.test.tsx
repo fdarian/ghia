@@ -45,9 +45,11 @@ describeNative('react-dom inside a dependency', () => {
     expect(flushed.calls).toBeGreaterThan(0)
   })
 
+  // `importActual` skips the mock above, so the file `react-dom` resolves to is compared with `@ghia/react`'s: the
+  // same module only while the plugin aliases it, where a mocked `react-dom` and `@ghia/react/react-dom` always match.
   it('is what a test file gets too', async () => {
-    const reactDom = await import('react-dom')
-    expect(reactDom.createPortal).toBe(ghiaReactDom.createPortal)
-    expect(reactDom.version).toBe(ghiaReactDom.version)
+    const resolved = await vi.importActual<typeof import('react-dom')>('react-dom')
+    expect(resolved.createPortal).toBe(ghiaReactDom.createPortal)
+    expect(resolved.version).toBe(ghiaReactDom.version)
   })
 })
