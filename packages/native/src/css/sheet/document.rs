@@ -62,8 +62,6 @@ pub struct StyleSheets {
     pub(crate) style_elements: FxHashSet<u64>,
     pub(crate) constructed: FxHashMap<u64, String>,
     pub(crate) adopted: Vec<u64>,
-    /// The texts the index was built from, in cascade order.
-    pub(crate) loaded: Vec<String>,
     pub(crate) index: RuleIndex,
     /// The top-level rules `index` was built from, when every source was cut into them.
     loaded_units: Option<Vec<Arc<ParsedRule>>>,
@@ -101,7 +99,6 @@ impl Default for StyleSheets {
             style_elements: FxHashSet::default(),
             constructed: FxHashMap::default(),
             adopted: Vec::new(),
-            loaded: Vec::new(),
             index: RuleIndex::default(),
             loaded_units: None,
             interner: MatchedInterner::default(),
@@ -118,6 +115,11 @@ impl Default for StyleSheets {
 }
 
 impl StyleSheets {
+    /// The texts the index was built from, in cascade order.
+    pub(crate) fn loaded(&self) -> &[String] {
+        self.parse_cache.texts()
+    }
+
     pub(crate) fn has_work(&self) -> bool {
         self.enabled && (self.sources_dirty || self.mark_all || !self.atoms_fresh || !self.pending.is_empty())
     }
@@ -190,16 +192,15 @@ impl StyleSheets {
     /// What the elements hold (`matched`, the interner) is numbered by the index just replaced, and
     /// is the caller's to bring to the new one: by the returned [`Reload`] when it can, else by
     /// matching every element again.
-    pub(super) fn load(&mut self, texts: Vec<String>) -> Option<Reload> {
+    pub(super) fn load(&mut self, texts: &[String]) -> Option<Reload> {
         let mut layers = Layers::default();
-        let assembled = self.parse_cache.parse(&self.loaded, &texts, &mut self.atoms, &mut layers, &mut self.validator);
+        let assembled = self.parse_cache.parse(texts, &mut self.atoms, &mut layers, &mut self.validator);
         for skipped in assembled.unsupported {
             self.warn_skipped(skipped);
         }
         let index = RuleIndex::build(&assembled.rules, &layers.order(), self.style);
         let old_units = std::mem::replace(&mut self.loaded_units, assembled.units);
         let old_index = std::mem::replace(&mut self.index, index);
-        self.loaded = texts;
         match (old_units, &self.loaded_units) {
             (Some(old), Some(new)) => Reload::between(&old, new, &old_index, &self.index),
             _ => None,
@@ -284,7 +285,6 @@ impl StyleSheets {
     pub(crate) fn wind_down(&mut self) {
         self.enabled = false;
         self.atoms_fresh = false;
-        self.loaded.clear();
         self.loaded_units = None;
         // Its rules hold atoms of the interner replaced below.
         self.parse_cache.clear();

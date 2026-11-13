@@ -16,18 +16,29 @@ use rustc_hash::FxHashMap;
 
 use super::atoms::Atoms;
 use super::index::{DocRule, RuleBody};
-use super::layers::Layers;
+use super::layers::{LayerId, Layers};
 use super::parser::parse_sheet;
 use super::validate::Validator;
 use super::Rule;
 
+/// A layer of the tree a rule was parsed against, which is not the document's: only
+/// [`Layers::replay_into`]'s answer turns it into one.
+#[derive(Clone, Copy)]
+struct LocalLayer(LayerId);
+
+/// A [`DocRule`] whose layer is not yet one of the document's.
+#[derive(Clone)]
+struct LocalRule {
+    body: Arc<RuleBody>,
+    layer: Option<LocalLayer>,
+}
+
 /// What one top-level rule parsed to, with its declarations already judged by the validator.
 pub(super) struct ParsedRule {
-    /// In the order of the cascade, and without the rules no selector can match. A layer is an id
-    /// into `layers`, not into the document's.
-    rules: Vec<DocRule>,
+    /// In the order of the cascade, and without the rules no selector can match.
+    rules: Vec<LocalRule>,
     unsupported: Vec<String>,
-    /// The layers the rule declares, ids in `rules` index into it.
+    /// The layers the rule declares, which `rules` are in.
     layers: Layers,
 }
 
@@ -61,20 +72,27 @@ pub(super) struct ParseCache {
     /// source whose text is the one of the last load is not cut and its rules are not looked up
     /// again, so a change to one `<style>` does not pay for a large one that did not change.
     cut: Vec<Option<Vec<Arc<Cached>>>>,
+    /// The texts of the last load, which `cut` is of.
+    texts: Vec<String>,
 }
 
 impl ParseCache {
     pub(super) fn clear(&mut self) {
         self.rules.clear();
         self.cut.clear();
+        self.texts.clear();
+    }
+
+    /// The texts of the last load.
+    pub(super) fn texts(&self) -> &[String] {
+        &self.texts
     }
 
     /// The sheets of `texts`, parsed as `parse_sheet` would parse them in turn with `layers`,
-    /// then filtered by `validator`. `previous` are the texts of the last call. Rules the cache
-    /// does not hold are parsed; the cache keeps only the rules of `texts`.
+    /// then filtered by `validator`. Rules the cache does not hold are parsed; the cache keeps
+    /// only the rules of `texts`.
     pub(super) fn parse(
         &mut self,
-        previous: &[String],
         texts: &[String],
         atoms: &mut Atoms,
         layers: &mut Layers,
@@ -91,7 +109,7 @@ impl ParseCache {
             }
         };
         for (position, text) in texts.iter().enumerate() {
-            let unchanged = previous.get(position).is_some_and(|before| before == text);
+            let unchanged = self.texts.get(position).is_some_and(|before| before == text);
             let cached_rules = match self.cut.get_mut(position).filter(|_| unchanged) {
                 Some(memo) => memo.take(),
                 None => split_rules(text).map(|ranges| {
@@ -122,9 +140,10 @@ impl ParseCache {
                 touch(cached);
                 let parsed = &cached.parsed;
                 let mapped = parsed.layers.replay_into(layers);
-                assembled
-                    .rules
-                    .extend(parsed.rules.iter().map(|rule| DocRule { layer: rule.layer.map(|layer| mapped[layer.index()]), ..rule.clone() }));
+                assembled.rules.extend(parsed.rules.iter().map(|rule| DocRule {
+                    body: rule.body.clone(),
+                    layer: rule.layer.map(|layer| mapped[layer.0.index()]),
+                }));
                 assembled.unsupported.extend(parsed.unsupported.iter().cloned());
                 if let Some(units) = &mut assembled.units {
                     units.push(parsed.clone());
@@ -136,6 +155,7 @@ impl ParseCache {
             self.rules.retain(|_, cached| cached.used_in.load(Ordering::Relaxed) == load);
         }
         self.cut = cut;
+        self.texts = texts.to_vec();
         assembled
     }
 }
@@ -156,7 +176,11 @@ fn parse_rule(text: &str, atoms: &mut Atoms, validator: &mut Validator) -> Parse
     let mut layers = Layers::default();
     let mut sheet = parse_sheet(text, atoms, &mut layers);
     validator.filter(&mut sheet.rules);
-    ParsedRule { rules: doc_rules(sheet.rules), unsupported: sheet.unsupported, layers }
+    let rules = doc_rules(sheet.rules)
+        .into_iter()
+        .map(|rule| LocalRule { body: rule.body, layer: rule.layer.map(LocalLayer) })
+        .collect();
+    ParsedRule { rules, unsupported: sheet.unsupported, layers }
 }
 
 /// `rules` in cascade order, without the selectors that name a pseudo-element and the rules that
@@ -202,7 +226,7 @@ pub(super) fn split_rules(text: &str) -> Option<Vec<Range<usize>>> {
 fn skip_trivia(bytes: &[u8], mut at: usize) -> Option<usize> {
     loop {
         match bytes.get(at) {
-            Some(b' ' | b'\t' | b'\n' | b'\r' | b'\x0c') => at += 1,
+            Some(byte) if is_space_byte(*byte) => at += 1,
             Some(b'/') if bytes.get(at + 1) == Some(&b'*') => at = skip_comment(bytes, at)?,
             _ => return Some(at),
         }
@@ -237,23 +261,34 @@ fn is_space_byte(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | b'\x0c')
 }
 
+/// Whether the byte at `at` is escaped: it follows an odd number of backslashes.
+fn is_escaped(bytes: &[u8], at: usize) -> bool {
+    bytes[..at].iter().rev().take_while(|byte| **byte == b'\\').count() % 2 == 1
+}
+
 /// For the `(` at `open`: the index after the `)` of an unquoted `url(`, which the tokenizer
-/// reads as one token whatever it holds; `Some(None)` for any other parenthesis. `None` when an
-/// escape stands in the run of name characters and spaces before the parenthesis: `\75 rl(` and
-/// `ur\6c(` are `url(` to the tokenizer, and a hex escape ends in a space that is part of it.
+/// reads as one token whatever it holds; `Some(None)` for any other parenthesis. The tokenizer
+/// reads `url(` when the ident that ends at the parenthesis is exactly `url`, so `myurl(`,
+/// `-url(`, `#url(` (a hash) and `@url(` (an at-keyword) are plain parentheses.
+///
+/// `None` when an escape could change which ident that is: one in the run of name characters and
+/// spaces before the parenthesis (`\75 rl(` and `ur\6c(` are `url(` to the tokenizer, and a hex
+/// escape ends in a space that is part of it), or one that escapes the byte that stops the run
+/// (`\)url(` is the ident `)url`).
 fn skip_url(bytes: &[u8], open: usize) -> Option<Option<usize>> {
     let mut run_start = open;
     while run_start > 0 && (is_name_byte(bytes[run_start - 1]) || is_space_byte(bytes[run_start - 1]) || bytes[run_start - 1] == b'\\') {
         run_start -= 1;
     }
-    if bytes[run_start..open].contains(&b'\\') {
+    if bytes[run_start..open].contains(&b'\\') || (run_start > 0 && is_escaped(bytes, run_start - 1)) {
         return None;
     }
     let mut name_start = open;
     while name_start > 0 && is_name_byte(bytes[name_start - 1]) {
         name_start -= 1;
     }
-    if !bytes[name_start..open].eq_ignore_ascii_case(b"url") {
+    let starts_hash_or_at_keyword = name_start > 0 && matches!(bytes[name_start - 1], b'#' | b'@');
+    if starts_hash_or_at_keyword || !bytes[name_start..open].eq_ignore_ascii_case(b"url") {
         return Some(None);
     }
     let mut index = open + 1;
@@ -395,9 +430,65 @@ mod tests {
             ".a { background: \\75\nrl(x) } .b { top: 0 }",
             ".a { background: \\000075 rl(a')') } .c { top: 0 }",
             ".a { background: ur\\6c(x) } .b { top: 0 }",
+            ".a{b:\\)url(x{)} .c{top:0}",
+            ".a{b:#url(x{)} .c{top:0}",
+            ".a{b:@url(x{)} .c{top:0}",
+            ".a{b:myurl(x{)} .c{top:0}",
+            ".a{b:-url(x{)} .c{top:0}",
         ] {
             assert!(split(text).is_none(), "{text:?}");
         }
+    }
+
+    #[test]
+    fn only_an_ident_that_is_url_opens_a_url_token() {
+        for (text, rules) in [
+            (".a{b:url(x{)} .c{top:0}", [".a{b:url(x{)}", ".c{top:0}"]),
+            (".a{b:URL( x{ )} .c{top:0}", [".a{b:URL( x{ )}", ".c{top:0}"]),
+            (".a{b:#url(x)} .c{top:0}", [".a{b:#url(x)}", ".c{top:0}"]),
+            (".a{b:@url(x)} .c{top:0}", [".a{b:@url(x)}", ".c{top:0}"]),
+            (".a{b:myurl(x)} .c{top:0}", [".a{b:myurl(x)}", ".c{top:0}"]),
+            (".a{b:-url(x)} .c{top:0}", [".a{b:-url(x)}", ".c{top:0}"]),
+            (".a{b:.url(x{)} .c{top:0}", [".a{b:.url(x{)}", ".c{top:0}"]),
+        ] {
+            assert_eq!(split(text).unwrap(), rules, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn what_the_tokenizer_reads_differently_from_a_url_is_parsed_as_it_reads_it() {
+        for text in [
+            ".a{b:\\)url(x{)} .c{top:0}",
+            ".a{b:#url(x{)} .c{top:0}",
+            ".a{b:@url(x{)} .c{top:0}",
+            ".a{b:myurl(x{)} .c{top:0}",
+            ".a{b:#url(x)} .c{top:0}",
+            ".a{b:@url(x)} .c{top:0}",
+            ".a{b:myurl(x)} .c{top:0}",
+        ] {
+            let texts = [text.to_string()];
+            let mut atoms = Atoms::default();
+            let mut cache = ParseCache::default();
+            let lines = cached(&mut cache, &mut atoms, &texts);
+            assert_eq!(lines, whole(&texts, &mut Atoms::default()), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_tailwind_sheet_with_escaped_class_names_is_cut() {
+        let text = r".md\:flex{display:flex}
+.w-1\/2{width:50%}
+.w-\[calc\(100\%-1rem\)\]{width:calc(100% - 1rem)}
+.hover\:bg-\[url\(x\)\]:hover{background-image:url(x)}
+.group-hover\:flex:is(.a,.b){display:flex}
+@media (min-width:640px){.sm\:w-1\/2{width:50%}}"
+            .to_string();
+        assert_eq!(split(&text).unwrap().len(), 6);
+        let mut cache = ParseCache::default();
+        let mut atoms = Atoms::default();
+        let (lines, assembled) = assemble(&mut cache, &mut atoms, std::slice::from_ref(&text));
+        assert_eq!(assembled.units.expect("cut, not parsed whole").len(), 6);
+        assert_eq!(lines, whole(&[text], &mut Atoms::default()));
     }
 
     const SHEETS: [&str; 3] = [
@@ -455,14 +546,14 @@ mod tests {
         whole(texts, &mut Atoms::default())
     }
 
-    fn assemble(cache: &mut ParseCache, atoms: &mut Atoms, previous: &[String], texts: &[String]) -> (Vec<String>, Assembled) {
+    fn assemble(cache: &mut ParseCache, atoms: &mut Atoms, texts: &[String]) -> (Vec<String>, Assembled) {
         let (mut layers, mut validator) = (Layers::default(), Validator::default());
-        let assembled = cache.parse(previous, texts, atoms, &mut layers, &mut validator);
+        let assembled = cache.parse(texts, atoms, &mut layers, &mut validator);
         (describe(&assembled, &layers), assembled)
     }
 
     fn cached(cache: &mut ParseCache, atoms: &mut Atoms, texts: &[String]) -> Vec<String> {
-        assemble(cache, atoms, &[], texts).0
+        assemble(cache, atoms, texts).0
     }
 
     #[test]
@@ -484,23 +575,21 @@ mod tests {
         let mut atoms = Atoms::default();
         let mut cache = ParseCache::default();
         let mut texts: Vec<String> = SHEETS[..2].iter().map(|text| text.to_string()).collect();
-        let (_, first) = assemble(&mut cache, &mut atoms, &[], &texts);
+        let (_, first) = assemble(&mut cache, &mut atoms, &texts);
         let held = cache.rules.len();
         let units_before = first.units.expect("both sources were cut");
 
-        let previous = texts.clone();
         texts[1].push_str("\n@layer late { .late { top: 11 } }\n.a { top: 12 }");
-        let (lines, second) = assemble(&mut cache, &mut atoms, &previous, &texts);
+        let (lines, second) = assemble(&mut cache, &mut atoms, &texts);
         assert_eq!(lines, uncached(&texts));
         assert_eq!(cache.rules.len(), held + 2);
         // The untouched rules are the same allocations.
         let units_after = second.units.expect("both sources were cut");
-        let unchanged = units_before.iter().zip(&units_after).take_while(|(old, new)| Arc::ptr_eq(old, new)).count();
-        assert!(unchanged > 0 && units_after.len() == units_before.len() + 2);
+        assert_eq!(units_after.len(), units_before.len() + 2);
+        assert!(units_before.iter().zip(&units_after).all(|(old, new)| Arc::ptr_eq(old, new)));
 
-        let previous = texts.clone();
         texts.truncate(1);
-        assert_eq!(assemble(&mut cache, &mut atoms, &previous, &texts).0, uncached(&texts));
+        assert_eq!(assemble(&mut cache, &mut atoms, &texts).0, uncached(&texts));
         assert!(cache.rules.len() < held);
     }
 
@@ -509,13 +598,12 @@ mod tests {
         let mut atoms = Atoms::default();
         let mut cache = ParseCache::default();
         let mut texts: Vec<String> = SHEETS[..2].iter().map(|text| text.to_string()).collect();
-        let (_, first) = assemble(&mut cache, &mut atoms, &[], &texts);
+        let (_, first) = assemble(&mut cache, &mut atoms, &texts);
         let before = first.units.unwrap();
-        let previous = texts.clone();
         texts[1].push_str("\n.late { top: 11 }");
         // Only the memo can find the rules of the first source now.
         cache.rules.clear();
-        let (lines, second) = assemble(&mut cache, &mut atoms, &previous, &texts);
+        let (lines, second) = assemble(&mut cache, &mut atoms, &texts);
         assert_eq!(lines, uncached(&texts));
         let after = second.units.unwrap();
         let in_first = split_rules(&texts[0]).unwrap().len();
@@ -527,7 +615,7 @@ mod tests {
         let text = [r".a { background: \75 rl(a')') } .c { top: 0 }".to_string()];
         let mut atoms = Atoms::default();
         let mut cache = ParseCache::default();
-        let (lines, assembled) = assemble(&mut cache, &mut atoms, &[], &text);
+        let (lines, assembled) = assemble(&mut cache, &mut atoms, &text);
         assert!(assembled.units.is_none());
         assert_eq!(lines, whole(&text, &mut Atoms::default()));
     }

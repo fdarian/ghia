@@ -34,13 +34,13 @@ fn lowercase(name: &str) -> Cow<'_, str> {
 
 /// A class or id no sheet names cannot match a selector, so it has no atom and an element keeps
 /// nothing of it: the interner holds the names of the sheets, not of every element ever seen.
-pub(super) fn class_atoms(atoms: &Atoms, value: Option<Cow<'_, str>>) -> ClassAtoms {
+fn class_atoms(atoms: &Atoms, value: Option<Cow<'_, str>>) -> ClassAtoms {
     value
         .map(|value| value.split_ascii_whitespace().filter_map(|class| atoms.get(class)).collect())
         .unwrap_or_default()
 }
 
-pub(super) fn id_atom(atoms: &Atoms, value: Option<Cow<'_, str>>) -> Option<Atom> {
+fn id_atom(atoms: &Atoms, value: Option<Cow<'_, str>>) -> Option<Atom> {
     value.and_then(|value| atoms.get(&value))
 }
 
@@ -312,11 +312,11 @@ impl RetainedTree {
             .collect();
         connected.sort();
         let texts = self.sheets.texts_with(connected.iter().map(|(_, id)| self.text_content(*id)).collect());
-        if texts == self.sheets.loaded {
+        if texts == self.sheets.loaded() {
             return;
         }
         let names = self.sheets.atoms.len();
-        let reload = self.sheets.load(texts);
+        let reload = self.sheets.load(&texts);
         // Elements keep atoms only for the names a sheet had when they were read, so a name the
         // new sheets bring has to be looked for in every element's class and id again, whatever
         // else the load changed. Until then a rule added later cannot find the elements it names.

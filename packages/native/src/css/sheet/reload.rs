@@ -17,6 +17,7 @@
 //! Anything this cannot tell is a full reload (`RetainedTree::reload_sheets` matches everything): a
 //! source parsed whole, a layer that moved, an added rule with no feature to look for.
 
+use std::cell::OnceCell;
 use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -24,6 +25,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
 use super::atoms::Atom;
+use super::cascade::Renumbering;
 use super::document::StyleSheets;
 use super::index::{bucket_simple, IndexedRule, RuleIndex};
 use super::invalidation::Reach;
@@ -128,8 +130,14 @@ enum Feature {
 struct Read<'a> {
     sheets: &'a StyleSheets,
     element: &'a RetainedElement,
-    /// Only read when some feature asks for a tag.
-    tag: Option<Atom>,
+    tag: OnceCell<Option<Atom>>,
+}
+
+impl Read<'_> {
+    /// The atom of the element's tag, `None` when no sheet names it. Read when a feature asks.
+    fn tag(&self) -> Option<Atom> {
+        *self.tag.get_or_init(|| tag_of(&self.sheets.atoms, self.element))
+    }
 }
 
 impl Feature {
@@ -148,7 +156,7 @@ impl Feature {
             Feature::Id(id) => read.element.css().is_some_and(|css| css.id == Some(*id)),
             Feature::Class(class) => read.element.css().is_some_and(|css| css.classes.contains(class)),
             Feature::Attribute(name) => has_attr(read.sheets, read.element, *name),
-            Feature::Tag(name) => read.tag == Some(name.for_element(read.element.is_svg())),
+            Feature::Tag(name) => read.tag() == Some(name.for_element(read.element.is_svg())),
         }
     }
 }
@@ -179,7 +187,6 @@ struct Features {
     attributes: FxHashMap<AttrName, Vec<Others>>,
     /// Under the lower-cased and the written atom of the tag, as the index files it.
     tags: FxHashMap<Atom, Vec<Others>>,
-    reads_tags: bool,
     /// The `:is()` and `:where()` lists already added, which nested rules share.
     lists: FxHashSet<usize>,
 }
@@ -213,7 +220,6 @@ impl Features {
             return list.iter().try_for_each(|inner| self.add(inner));
         };
         let others: Others = subject.iter().filter(|simple| !std::ptr::eq(*simple, key)).filter_map(Feature::of).collect();
-        self.reads_tags |= matches!(key, Simple::Tag(_)) || others.iter().any(|feature| matches!(feature, Feature::Tag(_)));
         match key {
             Simple::Id(id) => push_option(self.ids.entry(*id).or_default(), others),
             Simple::Class(class) => push_option(self.classes.entry(*class).or_default(), others),
@@ -235,8 +241,7 @@ impl Features {
 
     /// Whether `element` has the features of some added selector, from the atoms stored on it.
     fn reach(&self, sheets: &StyleSheets, element: &RetainedElement) -> bool {
-        let tag = if self.reads_tags { tag_of(&sheets.atoms, element) } else { None };
-        let read = Read { sheets, element, tag };
+        let read = Read { sheets, element, tag: OnceCell::new() };
         let any_held = |options: &Vec<Others>| options.iter().any(|others| others.iter().all(|feature| feature.held_by(&read)));
         if let Some(css) = element.css() {
             if css.id.and_then(|id| self.ids.get(&id)).is_some_and(any_held) {
@@ -249,15 +254,19 @@ impl Features {
         if self.attributes.iter().any(|(name, options)| has_attr(sheets, element, *name) && any_held(options)) {
             return true;
         }
-        tag.and_then(|tag| self.tags.get(&tag)).is_some_and(any_held)
+        !self.tags.is_empty() && read.tag().and_then(|tag| self.tags.get(&tag)).is_some_and(any_held)
     }
 }
 
 /// What a scoped reload will do, decided before anything is changed.
 pub(super) struct Plan {
     reload: Reload,
+    /// The matched lists the new numbering changes.
+    renumbering: Vec<Renumbering>,
     /// The elements to match again.
     reached: Vec<u64>,
+    /// The elements that hold a list that is replaced by another.
+    holders: Vec<u64>,
 }
 
 impl RetainedTree {
@@ -265,17 +274,23 @@ impl RetainedTree {
     /// reached and the caller matches every element, as it does for a change `reload` cannot take.
     /// Reads the elements' atoms, which have to be those of the names the sheets hold now.
     pub(super) fn plan_reload(&self, reload: Reload) -> Option<Plan> {
-        let gone = if reload.removes() {
-            self.sheets.interner.reading(|rule| reload.renumber(rule).is_none())
+        let renumbering = if reload.removes() || reload.shifts() {
+            self.sheets.interner.renumbering(|rule| reload.renumber(rule))
         } else {
-            FxHashSet::default()
+            Vec::new()
         };
         let mut reached: Vec<u64> = Vec::new();
-        if !reload.features.is_empty() || !gone.is_empty() {
+        let mut holders: Vec<u64> = Vec::new();
+        if !reload.features.is_empty() || !renumbering.is_empty() {
+            // Whether the list is gone, by address.
+            let changed: FxHashMap<usize, bool> = renumbering.iter().map(|change| (change.address(), change.is_gone())).collect();
             let total = self.elements.len();
             for (id, element) in &self.elements {
-                let read_removed = !gone.is_empty()
-                    && element.css().and_then(|css| css.matched.as_ref()).is_some_and(|matched| gone.contains(&(Arc::as_ptr(matched) as usize)));
+                let fate = element.css().and_then(|css| css.matched.as_ref()).and_then(|matched| changed.get(&(Arc::as_ptr(matched) as usize)));
+                if fate == Some(&false) {
+                    holders.push(*id);
+                }
+                let read_removed = fate == Some(&true);
                 if read_removed || (element.is_matchable() && !reload.features.is_empty() && reload.features.reach(&self.sheets, element)) {
                     reached.push(*id);
                     if reached.len() * 2 > total {
@@ -284,29 +299,26 @@ impl RetainedTree {
                 }
             }
         }
-        Some(Plan { reload, reached })
+        Some(Plan { reload, renumbering, reached, holders })
     }
 
     /// Brings the elements to the sheets just loaded: renumbers what they matched, and marks the
     /// elements the plan reached for the flush.
     pub(super) fn apply_reload(&mut self, plan: Plan) {
-        let reload = plan.reload;
-        if reload.removes() || reload.shifts() {
-            let replaced = self.sheets.interner.renumbered(&self.sheets.index, |rule| reload.renumber(rule));
-            if !replaced.is_empty() {
-                for element in self.elements.values_mut() {
-                    let moved = element
-                        .css()
-                        .and_then(|css| css.matched.as_ref())
-                        .and_then(|matched| replaced.get(&(Arc::as_ptr(matched) as usize)))
-                        .and_then(Option::as_ref)
-                        .cloned();
-                    if moved.is_some() {
-                        element.set_matched(moved);
-                    }
-                }
-                self.styles.cascaded.replaced(&replaced);
+        if !plan.renumbering.is_empty() {
+            let replaced = self.sheets.interner.replace(&self.sheets.index, &plan.renumbering);
+            for id in &plan.holders {
+                let element = self.elements.get_mut(id).expect("the plan found the element in this tree");
+                let moved = element
+                    .css()
+                    .and_then(|css| css.matched.as_ref())
+                    .and_then(|matched| replaced.get(&(Arc::as_ptr(matched) as usize)))
+                    .and_then(Option::as_ref)
+                    .expect("a holder holds a list that is replaced by another")
+                    .clone();
+                element.set_matched(Some(moved));
             }
+            self.styles.cascaded.replaced(&replaced);
         }
         for id in plan.reached {
             self.sheets.mark(id, Reach::SELF);

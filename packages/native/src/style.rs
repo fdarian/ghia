@@ -1364,10 +1364,7 @@ impl StyleDesc {
     /// element paints in that state and moves no box. One that is declared by only one of them is
     /// layout, as it can change what the element is.
     ///
-    /// Every other field, a custom property included, is compared whole. The lists in
-    /// `css::paint_diff::paint_only_difference` name every field of the struct, so a field that is added fails to
-    /// compile there until it is put in one of them, and `layout` is where it goes unless it is one of
-    /// the keys above.
+    /// Every other field is compared whole; where a new field goes: `css::paint_diff::paint_only_difference`.
     pub(crate) fn differs_only_in_paint(&self, other: &Self) -> bool {
         crate::css::paint_diff::paint_only_difference(self, other, false)
     }

@@ -10,7 +10,7 @@
 
 use std::sync::{Arc, Weak};
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::css::covers;
 use crate::css::lenient::Declaration;
@@ -60,47 +60,63 @@ impl MatchedInterner {
         list
     }
 
-    /// The addresses of the live lists that read a rule `is_gone` says is gone.
-    pub(super) fn reading(&self, is_gone: impl Fn(u32) -> bool) -> FxHashSet<usize> {
-        self.lists
-            .iter()
-            .filter_map(|(key, weak)| {
-                let list = weak.upgrade()?;
-                key.iter().any(|found| is_gone(found.rule)).then(|| Arc::as_ptr(&list) as usize)
-            })
-            .collect()
-    }
-
-    /// Renumbers the rules of every list by `renumber` (`None` for a rule that is gone), and returns
-    /// the lists whose allocation did not survive: each is `None` when it read a rule that is gone,
-    /// or the list that replaces it. A list that read only rules that kept their number is kept as it
-    /// is, without a copy of its key, and is not returned.
+    /// The live lists that read a rule `renumber` moves or removes (`None` for a rule that is gone).
+    /// Reads only: [`Self::replace`] makes the change.
     ///
     /// `renumber` must keep the order of the rules it keeps, which keeps every list sorted as the
     /// index sorts it.
-    pub(super) fn renumbered(
-        &mut self,
-        index: &RuleIndex,
-        renumber: impl Fn(u32) -> Option<u32>,
-    ) -> FxHashMap<usize, Option<Arc<MatchedRules>>> {
-        let mut changed: Vec<(usize, Option<Key>)> = Vec::new();
-        self.lists.retain(|key, weak| {
+    pub(super) fn renumbering(&self, renumber: impl Fn(u32) -> Option<u32>) -> Vec<Renumbering> {
+        let mut changes = Vec::new();
+        for (key, weak) in &self.lists {
             let Some(list) = weak.upgrade() else {
-                return false;
+                continue;
             };
             if key.iter().all(|found| renumber(found.rule) == Some(found.rule)) {
-                return true;
+                continue;
             }
             let renumbered = key.iter().map(|found| renumber(found.rule).map(|rule| RuleMatch { rule, ..*found })).collect();
-            changed.push((Arc::as_ptr(&list) as usize, renumbered));
-            false
-        });
+            changes.push(Renumbering { list, key: key.clone(), renumbered });
+        }
+        changes
+    }
+
+    /// Makes the changes [`Self::renumbering`] found, and returns where each list went: `None` for
+    /// one that read a rule that is gone, else the list that replaces it. A list that read only rules
+    /// that kept their number is kept as it is.
+    pub(super) fn replace(
+        &mut self,
+        index: &RuleIndex,
+        changes: &[Renumbering],
+    ) -> FxHashMap<usize, Option<Arc<MatchedRules>>> {
+        for change in changes {
+            self.lists.remove(&change.key);
+        }
         let mut replaced = FxHashMap::default();
-        replaced.reserve(changed.len());
-        for (address, renumbered) in changed {
-            replaced.insert(address, renumbered.map(|key| self.intern(index, key)));
+        replaced.reserve(changes.len());
+        for change in changes {
+            let replacement = change.renumbered.as_ref().map(|key| self.intern(index, key.clone()));
+            replaced.insert(change.address(), replacement);
         }
         replaced
+    }
+}
+
+/// A list of matched rules that a renumbering of the rules changes.
+pub(super) struct Renumbering {
+    /// Held so that its address stays its own until the change is made.
+    list: Arc<MatchedRules>,
+    key: Key,
+    /// What the list is after the change, `None` when it read a rule that is gone.
+    renumbered: Option<Key>,
+}
+
+impl Renumbering {
+    pub(super) fn address(&self) -> usize {
+        Arc::as_ptr(&self.list) as usize
+    }
+
+    pub(super) fn is_gone(&self) -> bool {
+        self.renumbered.is_none()
     }
 }
 
@@ -194,7 +210,7 @@ impl CascadeCache {
         self.entries.clear();
     }
 
-    /// Moves the entries of lists that were replaced to their replacement (`MatchedInterner::renumbered`),
+    /// Moves the entries of lists that were replaced to their replacement (`MatchedInterner::replace`),
     /// and drops the ones of lists that are gone: the same rules apply in the same order, so the
     /// cascaded style is the same.
     pub(super) fn replaced(&mut self, replaced: &FxHashMap<usize, Option<Arc<MatchedRules>>>) {
