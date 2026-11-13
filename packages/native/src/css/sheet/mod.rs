@@ -65,7 +65,6 @@ pub struct StyleSheet {
     pub unsupported: Vec<String>,
 }
 
-#[derive(Clone)]
 pub struct Rule {
     /// The rule applies when any of them matches; each carries its own specificity.
     pub selectors: Vec<(ComplexSelector, Specificity)>,
