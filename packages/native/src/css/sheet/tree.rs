@@ -34,13 +34,13 @@ fn lowercase(name: &str) -> Cow<'_, str> {
 
 /// A class or id no sheet names cannot match a selector, so it has no atom and an element keeps
 /// nothing of it: the interner holds the names of the sheets, not of every element ever seen.
-fn class_atoms(atoms: &Atoms, value: Option<Cow<'_, str>>) -> ClassAtoms {
+pub(super) fn class_atoms(atoms: &Atoms, value: Option<Cow<'_, str>>) -> ClassAtoms {
     value
         .map(|value| value.split_ascii_whitespace().filter_map(|class| atoms.get(class)).collect())
         .unwrap_or_default()
 }
 
-fn id_atom(atoms: &Atoms, value: Option<Cow<'_, str>>) -> Option<Atom> {
+pub(super) fn id_atom(atoms: &Atoms, value: Option<Cow<'_, str>>) -> Option<Atom> {
     value.and_then(|value| atoms.get(&value))
 }
 
@@ -316,12 +316,20 @@ impl RetainedTree {
             return;
         }
         let names = self.sheets.atoms.len();
-        self.sheets.load(texts);
+        let reload = self.sheets.load(texts);
+        let scoped = self.sheets.atoms_fresh
+            && !self.sheets.mark_all
+            && reload.is_some_and(|reload| self.reload_scoped(&reload, names));
+        if scoped {
+            super::reload::count_scoped();
+            return;
+        }
         // Elements keep atoms only for the names a sheet had when they were read, so a name the
         // new sheets bring has to be looked for in every element's class and id again.
         if self.sheets.atoms.len() != names {
             self.sheets.atoms_fresh = false;
         }
+        self.sheets.interner = Default::default();
         self.styles.cascaded.clear();
         self.sheets.mark_all = true;
     }

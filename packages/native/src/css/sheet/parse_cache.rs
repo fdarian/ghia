@@ -14,19 +14,35 @@ use std::sync::Arc;
 use rustc_hash::FxHashMap;
 
 use super::atoms::Atoms;
-use super::layers::Layers;
+use super::index::{DocRule, RuleBody};
+use super::layers::{LayerId, Layers};
 use super::parser::parse_sheet;
 use super::validate::Validator;
-use super::{Rule, StyleSheet};
+use super::Rule;
 
 /// What one top-level rule parsed to, with its declarations already judged by the validator.
-struct ParsedRule {
-    rules: Vec<Rule>,
-    /// How many rules the text had before the validator dropped any: `order` counts those.
-    parsed_count: u32,
+pub(super) struct ParsedRule {
+    /// In the order of the cascade, and without the rules no selector can match.
+    rules: Vec<(Arc<RuleBody>, Option<LayerId>)>,
     unsupported: Vec<String>,
     /// The layers the rule declares, ids in `rules` index into it.
     layers: Layers,
+}
+
+impl ParsedRule {
+    pub(super) fn len(&self) -> usize {
+        self.rules.len()
+    }
+}
+
+/// The rules of every source of a load, in cascade order.
+pub(super) struct Assembled {
+    pub(super) rules: Vec<DocRule>,
+    /// The name of each skipped at-rule and the text of each invalid selector list, in source order.
+    pub(super) unsupported: Vec<String>,
+    /// The top-level rules the rules came from, in order, to tell what a change touched. `None`
+    /// when a source was parsed whole.
+    pub(super) units: Option<Vec<Arc<ParsedRule>>>,
 }
 
 #[derive(Default)]
@@ -58,59 +74,84 @@ impl ParseCache {
         atoms: &mut Atoms,
         layers: &mut Layers,
         validator: &mut Validator,
-    ) -> Vec<StyleSheet> {
+    ) -> Assembled {
         let mut seen: FxHashMap<Arc<str>, Arc<ParsedRule>> = FxHashMap::default();
         let mut sources = Vec::with_capacity(texts.len());
-        let mut sheets = Vec::with_capacity(texts.len());
+        let mut assembled = Assembled { rules: Vec::new(), unsupported: Vec::new(), units: Some(Vec::new()) };
         for text in texts {
             let Some(ranges) = split_rules(text) else {
-                let mut sheet = parse_sheet(text, atoms, layers);
-                validator.filter(&mut sheet.rules);
-                sheets.push(sheet);
+                let (rules, unsupported) = parse_whole(text, atoms, layers, validator);
+                assembled.rules.extend(rules);
+                assembled.unsupported.extend(unsupported);
+                assembled.units = None;
                 sources.push(None);
                 continue;
             };
-            let mut sheet = StyleSheet { rules: Vec::new(), unsupported: Vec::new() };
             let mut rule_texts = Vec::with_capacity(ranges.len());
-            let mut order_base = 0u32;
             for range in ranges {
                 let rule_text = &text[range];
                 let (key, parsed) = match seen.get_key_value(rule_text).or_else(|| self.rules.get_key_value(rule_text)) {
                     Some((key, parsed)) => (key.clone(), parsed.clone()),
                     None => (Arc::<str>::from(rule_text), Arc::new(parse_rule(rule_text, atoms, validator))),
                 };
-                order_base = append(&mut sheet, &parsed, layers, order_base);
+                let mapped = parsed.layers.replay_into(layers);
+                assembled.rules.extend(parsed.rules.iter().map(|(body, layer)| DocRule {
+                    body: body.clone(),
+                    layer: layer.map(|layer| mapped[layer.index()]),
+                }));
+                assembled.unsupported.extend(parsed.unsupported.iter().cloned());
+                if let Some(units) = &mut assembled.units {
+                    units.push(parsed.clone());
+                }
                 seen.insert(key.clone(), parsed);
                 rule_texts.push(key);
             }
-            sheets.push(sheet);
             sources.push(Some(rule_texts));
         }
         self.rules = seen;
         self.sources = sources;
-        sheets
+        assembled
     }
+}
+
+/// A source parsed as one sheet, in its own order.
+fn parse_whole(
+    text: &str,
+    atoms: &mut Atoms,
+    layers: &mut Layers,
+    validator: &mut Validator,
+) -> (Vec<DocRule>, Vec<String>) {
+    let mut sheet = parse_sheet(text, atoms, layers);
+    validator.filter(&mut sheet.rules);
+    (doc_rules(sheet.rules), sheet.unsupported)
 }
 
 fn parse_rule(text: &str, atoms: &mut Atoms, validator: &mut Validator) -> ParsedRule {
     let mut layers = Layers::default();
     let mut sheet = parse_sheet(text, atoms, &mut layers);
-    let parsed_count = u32::try_from(sheet.rules.len()).expect("fewer than 2^32 rules");
     validator.filter(&mut sheet.rules);
-    ParsedRule { rules: sheet.rules, parsed_count, unsupported: sheet.unsupported, layers }
+    let rules = doc_rules(sheet.rules).into_iter().map(|rule| (rule.body, rule.layer)).collect();
+    ParsedRule { rules, unsupported: sheet.unsupported, layers }
 }
 
-/// Adds `parsed` to the end of `sheet` and returns the order its successor starts from.
-fn append(sheet: &mut StyleSheet, parsed: &ParsedRule, layers: &mut Layers, order_base: u32) -> u32 {
-    let mapped = parsed.layers.replay_into(layers);
-    sheet.rules.extend(parsed.rules.iter().map(|rule| {
-        let mut rule = rule.clone();
-        rule.layer = rule.layer.map(|layer| mapped[layer.index()]);
-        rule.order += order_base;
-        rule
-    }));
-    sheet.unsupported.extend(parsed.unsupported.iter().cloned());
-    order_base + parsed.parsed_count
+/// `rules` in cascade order, without the selectors that name a pseudo-element and the rules that
+/// are left with none.
+fn doc_rules(mut rules: Vec<Rule>) -> Vec<DocRule> {
+    rules.sort_by_key(|rule| rule.order);
+    rules
+        .into_iter()
+        .filter_map(|rule| {
+            let selectors: Vec<_> =
+                rule.selectors.into_iter().filter(|(selector, _)| !selector.has_pseudo_element()).collect();
+            if selectors.is_empty() {
+                return None;
+            }
+            Some(DocRule {
+                body: Arc::new(RuleBody { selectors, normal: rule.normal, important: rule.important }),
+                layer: rule.layer,
+            })
+        })
+        .collect()
 }
 
 /// The byte range of each top-level rule of `text`: a qualified rule up to the `}` of its block,
@@ -343,42 +384,44 @@ mod tests {
         ".broken { top: 9 } .open { top: 10 ",
     ];
 
-    fn describe(sheets: &[StyleSheet], layers: &Layers) -> Vec<String> {
+    fn describe(assembled: &Assembled, layers: &Layers) -> Vec<String> {
         let order = layers.order();
-        let mut lines = Vec::new();
-        for (number, sheet) in sheets.iter().enumerate() {
-            for rule in &sheet.rules {
-                lines.push(format!(
-                    "{number} #{} rank {} {:?} {:?} {:?}",
-                    rule.order,
+        let mut lines: Vec<String> = assembled
+            .rules
+            .iter()
+            .map(|rule| {
+                format!(
+                    "rank {} {:?} {:?} {:?}",
                     order.rank(rule.layer),
-                    rule.selectors,
-                    rule.normal,
-                    rule.important
-                ));
-            }
-            lines.push(format!("{number} unsupported {:?}", sheet.unsupported));
-        }
+                    rule.body.selectors,
+                    rule.body.normal,
+                    rule.body.important
+                )
+            })
+            .collect();
+        lines.push(format!("unsupported {:?}", assembled.unsupported));
         lines
     }
 
+    fn whole(texts: &[String], atoms: &mut Atoms) -> Vec<String> {
+        let (mut layers, mut validator) = (Layers::default(), Validator::default());
+        let mut assembled = Assembled { rules: Vec::new(), unsupported: Vec::new(), units: None };
+        for text in texts {
+            let (rules, unsupported) = parse_whole(text, atoms, &mut layers, &mut validator);
+            assembled.rules.extend(rules);
+            assembled.unsupported.extend(unsupported);
+        }
+        describe(&assembled, &layers)
+    }
+
     fn uncached(texts: &[String]) -> Vec<String> {
-        let (mut atoms, mut layers, mut validator) = (Atoms::default(), Layers::default(), Validator::default());
-        let sheets: Vec<StyleSheet> = texts
-            .iter()
-            .map(|text| {
-                let mut sheet = parse_sheet(text, &mut atoms, &mut layers);
-                validator.filter(&mut sheet.rules);
-                sheet
-            })
-            .collect();
-        describe(&sheets, &layers)
+        whole(texts, &mut Atoms::default())
     }
 
     fn cached(cache: &mut ParseCache, atoms: &mut Atoms, texts: &[String]) -> Vec<String> {
         let (mut layers, mut validator) = (Layers::default(), Validator::default());
-        let sheets = cache.parse(texts, atoms, &mut layers, &mut validator);
-        describe(&sheets, &layers)
+        let assembled = cache.parse(texts, atoms, &mut layers, &mut validator);
+        describe(&assembled, &layers)
     }
 
     #[test]
@@ -391,16 +434,7 @@ mod tests {
         let again = cached(&mut cache, &mut atoms, &texts);
         assert_eq!(first, again);
         assert!(first.len() > 15);
-        let (mut plain_atoms, mut layers, mut validator) = (Atoms::default(), Layers::default(), Validator::default());
-        let whole: Vec<StyleSheet> = texts
-            .iter()
-            .map(|text| {
-                let mut sheet = parse_sheet(text, &mut plain_atoms, &mut layers);
-                validator.filter(&mut sheet.rules);
-                sheet
-            })
-            .collect();
-        assert_eq!(first, describe(&whole, &layers));
+        assert_eq!(first, whole(&texts, &mut Atoms::default()));
         assert_eq!(first, uncached(&texts));
     }
 

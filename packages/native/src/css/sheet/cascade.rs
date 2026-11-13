@@ -59,6 +59,45 @@ impl MatchedInterner {
         self.lists.insert(matched, Arc::downgrade(&list));
         list
     }
+
+    /// The interner after the rules were renumbered by `renumber` (`None` for a rule that is gone),
+    /// and the lists whose allocation did not survive: each is `None` when it read a rule that is
+    /// gone, or the list that replaces it. A list that read only rules that kept their number is
+    /// kept as it is, and is not in the second.
+    ///
+    /// `renumber` must keep the order of the rules it keeps, which keeps every list sorted as the
+    /// index sorts it.
+    pub(super) fn renumbered(
+        &mut self,
+        index: &RuleIndex,
+        renumber: impl Fn(u32) -> Option<u32>,
+    ) -> (MatchedInterner, FxHashMap<usize, Option<Arc<MatchedRules>>>) {
+        let mut next = MatchedInterner { lists: FxHashMap::default(), pruned_at: self.pruned_at };
+        next.lists.reserve(self.lists.len());
+        let mut replaced = FxHashMap::default();
+        for (key, weak) in self.lists.drain() {
+            let Some(list) = weak.upgrade() else {
+                continue;
+            };
+            let address = Arc::as_ptr(&list) as usize;
+            let renumbered: Option<Key> = key
+                .iter()
+                .map(|found| renumber(found.rule).map(|rule| RuleMatch { rule, ..*found }))
+                .collect();
+            match renumbered {
+                None => {
+                    replaced.insert(address, None);
+                }
+                Some(renumbered) if renumbered == key => {
+                    next.lists.insert(key, weak);
+                }
+                Some(renumbered) => {
+                    replaced.insert(address, Some(next.intern(index, renumbered)));
+                }
+            }
+        }
+        (next, replaced)
+    }
 }
 
 /// `declaration` over the list: it replaces an earlier one of its key, and a CSS-wide keyword also
@@ -149,6 +188,25 @@ impl CascadeCache {
 
     pub fn clear(&mut self) {
         self.entries.clear();
+    }
+
+    /// Moves the entries of lists that were replaced to their replacement (`MatchedInterner::renumbered`),
+    /// and drops the ones of lists that are gone: the same rules apply in the same order, so the
+    /// cascaded style is the same.
+    pub(super) fn replaced(&mut self, replaced: &FxHashMap<usize, Option<Arc<MatchedRules>>>) {
+        let entries = std::mem::take(&mut self.entries);
+        self.entries.reserve(entries.len());
+        for ((matched, own), entry) in entries {
+            match replaced.get(&matched) {
+                None => {
+                    self.entries.insert((matched, own), entry);
+                }
+                Some(None) => {}
+                Some(Some(list)) => {
+                    self.entries.insert((Arc::as_ptr(list) as usize, own), Cascaded { matched: Arc::downgrade(list), ..entry });
+                }
+            }
+        }
     }
 
     /// Forget the entries no element can look up again. An entry is looked up by the rules and the

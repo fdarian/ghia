@@ -19,7 +19,8 @@ use super::cascade::{merge, MatchedInterner, MatchedRules};
 use super::index::RuleIndex;
 use super::invalidation::Reach;
 use super::layers::Layers;
-use super::parse_cache::ParseCache;
+use super::parse_cache::{ParseCache, ParsedRule};
+use super::reload::Reload;
 use super::states::LoggedFolds;
 use super::validate::Validator;
 use crate::css::lenient::number_text;
@@ -64,6 +65,8 @@ pub struct StyleSheets {
     /// The texts the index was built from, in cascade order.
     pub(crate) loaded: Vec<String>,
     pub(crate) index: RuleIndex,
+    /// The top-level rules `index` was built from, when every source was cut into them.
+    loaded_units: Option<Vec<Arc<ParsedRule>>>,
     pub(crate) interner: MatchedInterner,
     validator: Validator,
     parse_cache: ParseCache,
@@ -100,6 +103,7 @@ impl Default for StyleSheets {
             adopted: Vec::new(),
             loaded: Vec::new(),
             index: RuleIndex::default(),
+            loaded_units: None,
             interner: MatchedInterner::default(),
             validator: Validator::default(),
             parse_cache: ParseCache::default(),
@@ -182,17 +186,24 @@ impl StyleSheets {
     /// Parses `texts` as the document's sheets and indexes their rules. Layers are declared in
     /// parse order across the whole document, so every sheet is assembled again when any
     /// changes; the rules whose text is unchanged come from the parse cache.
-    pub(crate) fn load(&mut self, texts: Vec<String>) {
+    ///
+    /// What the elements hold (`matched`, the interner) is numbered by the index just replaced, and
+    /// is the caller's to bring to the new one: by the returned [`Reload`] when it can, else by
+    /// matching every element again.
+    pub(super) fn load(&mut self, texts: Vec<String>) -> Option<Reload> {
         let mut layers = Layers::default();
-        let mut sheets = self.parse_cache.parse(&texts, &mut self.atoms, &mut layers, &mut self.validator);
-        for sheet in &mut sheets {
-            for skipped in sheet.unsupported.drain(..) {
-                self.warn_skipped(skipped);
-            }
+        let assembled = self.parse_cache.parse(&texts, &mut self.atoms, &mut layers, &mut self.validator);
+        for skipped in assembled.unsupported {
+            self.warn_skipped(skipped);
         }
-        self.index = RuleIndex::build(sheets, &layers.order(), self.style);
-        self.interner = MatchedInterner::default();
+        let index = RuleIndex::build(&assembled.rules, &layers.order(), self.style);
+        let old_units = std::mem::replace(&mut self.loaded_units, assembled.units);
+        let old_index = std::mem::replace(&mut self.index, index);
         self.loaded = texts;
+        match (old_units, &self.loaded_units) {
+            (Some(old), Some(new)) => Reload::between(&old, new, &old_index, &self.index),
+            _ => None,
+        }
     }
 
     fn warn_skipped(&mut self, skipped: String) {
@@ -274,6 +285,7 @@ impl StyleSheets {
         self.enabled = false;
         self.atoms_fresh = false;
         self.loaded.clear();
+        self.loaded_units = None;
         // Its rules hold atoms of the interner replaced below.
         self.parse_cache.clear();
         self.logged_skips.clear();

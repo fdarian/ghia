@@ -6,24 +6,54 @@
 //! every attribute name a selector reads, plus the universal list. Matching then runs the whole
 //! selector on each candidate.
 
+use std::ops::Deref;
+use std::sync::Arc;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::css::lenient::Declaration;
 
 use super::atoms::Atom;
 use super::invalidation::Invalidation;
-use super::layers::LayerOrder;
+use super::layers::{LayerId, LayerOrder};
 use super::matching::{matches, ElementView};
 use super::selector::{AttrName, ComplexSelector, Simple, Specificity};
 use super::states::{Applies, RuleMatch};
-use super::StyleSheet;
 
-pub struct IndexedRule {
+/// What a rule says, which does not depend on where it stands in a document: shared by the parse
+/// cache and every index built from it.
+pub struct RuleBody {
+    /// Without the selectors that name a pseudo-element, and never empty.
     pub selectors: Vec<(ComplexSelector, Specificity)>,
     pub normal: Vec<Declaration>,
     pub important: Vec<Declaration>,
+}
+
+/// A rule in the order of a document's cascade, with the layer it was written in.
+#[derive(Clone)]
+pub struct DocRule {
+    pub body: Arc<RuleBody>,
+    pub layer: Option<LayerId>,
+}
+
+pub struct IndexedRule {
+    body: Arc<RuleBody>,
     /// Where the rule's layer ranks for normal declarations: higher wins.
     layer_rank: u32,
+}
+
+impl IndexedRule {
+    pub(super) fn layer_rank(&self) -> u32 {
+        self.layer_rank
+    }
+}
+
+impl Deref for IndexedRule {
+    type Target = RuleBody;
+
+    fn deref(&self) -> &RuleBody {
+        &self.body
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -57,41 +87,33 @@ pub struct RuleIndex {
 }
 
 impl RuleIndex {
-    /// Rules are numbered in cascade source order: sheet by sheet, each in its own order.
-    pub fn build(sheets: Vec<StyleSheet>, layers: &LayerOrder, style: Atom) -> RuleIndex {
+    /// Rules are numbered in cascade source order.
+    pub fn build(rules: &[DocRule], layers: &LayerOrder, style: Atom) -> RuleIndex {
         let mut index = RuleIndex { unlayered_rank: layers.unlayered(), ..RuleIndex::default() };
+        index.rules.reserve(rules.len());
         let mut self_contained_lists: FxHashMap<usize, bool> = FxHashMap::default();
         let mut attributes = Attributes::default();
-        for mut sheet in sheets {
-            sheet.rules.sort_by_key(|rule| rule.order);
-            for rule in sheet.rules {
-                let selectors: Vec<_> =
-                    rule.selectors.into_iter().filter(|(selector, _)| !selector.has_pseudo_element()).collect();
-                if selectors.is_empty() {
-                    continue;
-                }
-                let number = u32::try_from(index.rules.len()).expect("fewer than 2^32 rules");
-                for (position, (selector, _)) in selectors.iter().enumerate() {
-                    index.invalidation.read(selector);
-                    attributes.read(selector);
-                    let self_contained = is_self_contained(selector, style, &mut self_contained_lists);
-                    index.shares |= self_contained;
-                    let entry = Entry { rule: number, selector: position as u32, self_contained };
-                    index.bucket(selector, entry);
-                }
-                index.rules.push(IndexedRule {
-                    selectors,
-                    normal: rule.normal,
-                    important: rule.important,
-                    layer_rank: layers.rank(rule.layer),
-                });
+        for rule in rules {
+            let number = u32::try_from(index.rules.len()).expect("fewer than 2^32 rules");
+            for (position, (selector, _)) in rule.body.selectors.iter().enumerate() {
+                index.invalidation.read(selector);
+                attributes.read(selector);
+                let self_contained = is_self_contained(selector, style, &mut self_contained_lists);
+                index.shares |= self_contained;
+                let entry = Entry { rule: number, selector: position as u32, self_contained };
+                index.bucket(selector, entry);
             }
+            index.rules.push(IndexedRule { body: rule.body.clone(), layer_rank: layers.rank(rule.layer) });
         }
         index.html_attributes = attributes.html.into_iter().collect();
         index.svg_attributes = attributes.svg.into_iter().collect();
         index.html_attributes.sort();
         index.svg_attributes.sort();
         index
+    }
+
+    pub(super) fn unlayered_rank(&self) -> u32 {
+        self.unlayered_rank
     }
 
     pub(super) fn shares(&self) -> bool {

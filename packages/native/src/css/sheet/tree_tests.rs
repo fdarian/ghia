@@ -2248,7 +2248,7 @@ fn an_element_a_combinator_rule_could_match_is_matched_in_full() {
     doc.style_element(ROOT, ".cell { opacity: 0.5 }");
     reset_full_matches();
     doc.flush();
-    assert_eq!(full_matches(), 6 + 1 + 1, "the rows and the list again, one cell");
+    assert_eq!(full_matches(), 1, "the cells are the elements the new rule reaches, and they share one match");
     assert!(plain.iter().all(|id| doc.style(*id).and_then(|style| style.opacity) == Some(0.5)));
 }
 
@@ -3025,3 +3025,5 @@ mod states {
         assert_eq!((pressed.color.as_deref(), pressed.opacity), (Some("red"), None));
     }
 }
+
+mod reload;
