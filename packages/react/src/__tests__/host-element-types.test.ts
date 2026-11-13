@@ -16,7 +16,8 @@ const tscTimeout = 60_000
 const tsc = join(root, "node_modules/typescript/bin/tsc")
 
 const withDom = `import { useRef, type ForwardedRef, type Ref } from "react"
-import type { ImgInstance, PublicInstance, TextControlInstance } from "@ghia/react"
+import { motion, type ImgInstance, type PublicInstance, type TextControlInstance } from "@ghia/react"
+import type { JSX } from "@ghia/react/jsx-runtime"
 
 // Typed as the libraries type them: TanStack Virtual's measureElement and StyleX's props().
 declare const virtualizer: { measureElement: (node: Element | null) => void }
@@ -40,6 +41,11 @@ export function App(props: { divRef: Ref<HTMLDivElement>; inputRef: ForwardedRef
   return (
     <div ref={list} {...styleProps()} className="app">
       <style ref={sheet}>{".app { color: red }"}</style>
+      <span ref={span} className="label" />
+      <motion.div ref={list} {...styleProps()} />
+      <motion.div ref={virtualizer.measureElement} />
+      <motion.div ref={ghia} />
+      <motion.path ref={path} d="M0 0" />
       <div ref={virtualizer.measureElement} data-index={0} />
       <div ref={ghia} />
       <div ref={props.divRef} />
@@ -78,32 +84,46 @@ export function App(props: { divRef: Ref<HTMLDivElement>; inputRef: ForwardedRef
     </div>
   )
 }
+
+// A tag's props, ref included, pass on to the element and to the motion component of that tag.
+export const Box = (props: JSX.IntrinsicElements["div"]) => <div {...props} />
+export const MotionBox = (props: JSX.IntrinsicElements["div"]) => <motion.div {...props} />
 `
 
-// Without the DOM lib there is no HTMLDivElement to name: a ref is Ghia's own type, and the rest still holds.
+// Without the DOM lib there is no HTMLDivElement to name: a ref is Ghia's own type alone, and the rest still holds.
 const withoutDom = `import { useRef } from "react"
 import type { PublicInstance } from "@ghia/react"
 
 export function App() {
   const ghia = useRef<PublicInstance>(null)
+  const count = useRef(0)
   return (
     <div ref={ghia} className="app">
       <style>{".app { color: red }"}</style>
       <span ref={(element) => { element?.nativeId; element?.scrollTop }} />
+      {/* @ts-expect-error a ref object holds an element */}
+      <div ref={count} />
     </div>
   )
 }
 `
 
-function check(name: string, source: string, lib: string[], jsx: "react-jsx" | "react-jsxdev") {
+interface Options {
+  lib: string[]
+  jsx?: "react-jsx" | "react-jsxdev"
+  /** `bundler` is what a Vite app uses; `nodenext` resolves `@ghia/react`'s exports with Node's rules. */
+  resolution?: "bundler" | "nodenext"
+}
+
+function check(name: string, source: string, { lib, jsx = "react-jsx", resolution = "bundler" }: Options) {
   const directory = join(temp, name)
   mkdirSync(directory)
   writeFileSync(join(directory, "main.tsx"), source)
   writeFileSync(join(directory, "tsconfig.json"), JSON.stringify({
     compilerOptions: {
       target: "ES2022",
-      module: "ESNext",
-      moduleResolution: "bundler",
+      module: resolution === "bundler" ? "ESNext" : "NodeNext",
+      moduleResolution: resolution,
       jsx,
       jsxImportSource: "@ghia/react",
       strict: true,
@@ -120,17 +140,24 @@ function check(name: string, source: string, lib: string[], jsx: "react-jsx" | "
 
 describe("host element types", () => {
   it("take className, <style>, and refs typed as the DOM element or as Ghia's instance", () => {
-    const result = check("dom", withDom, ["ES2022", "DOM"], "react-jsx")
+    const result = check("dom", withDom, { lib: ["ES2022", "DOM"] })
     expect(result.status, result.stdout).toBe(0)
   }, tscTimeout)
 
   it("are the same in the development runtime", () => {
-    const result = check("dom-dev", withDom, ["ES2022", "DOM"], "react-jsxdev")
+    const result = check("dom-dev", withDom, { lib: ["ES2022", "DOM"], jsx: "react-jsxdev" })
     expect(result.status, result.stdout).toBe(0)
   }, tscTimeout)
 
-  it("hold without the DOM lib", () => {
-    const result = check("no-dom", withoutDom, ["ES2022"], "react-jsx")
+  it("are the same under Node's module resolution, in both runtimes", () => {
+    for (const jsx of ["react-jsx", "react-jsxdev"] as const) {
+      const result = check(`dom-nodenext-${jsx}`, withDom, { lib: ["ES2022", "DOM"], jsx, resolution: "nodenext" })
+      expect(result.status, result.stdout).toBe(0)
+    }
+  }, tscTimeout * 2)
+
+  it("hold without the DOM lib, where a ref is Ghia's instance type", () => {
+    const result = check("no-dom", withoutDom, { lib: ["ES2022"] })
     expect(result.status, result.stdout).toBe(0)
   }, tscTimeout)
 })

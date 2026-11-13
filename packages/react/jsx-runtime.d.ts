@@ -72,7 +72,7 @@ import type {
   TextControlInstance,
   VirtualListProps,
   WebviewInstance,
-} from "./dist/types/host"
+} from "./dist/types/host.js"
 
 export { jsx, jsxs, Fragment } from "react/jsx-runtime"
 

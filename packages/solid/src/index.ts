@@ -138,7 +138,7 @@ export { screen } from "@ghia/native/screen"
 export type { Display, Rectangle, Size } from "@ghia/native/screen"
 export { GpuixRenderer } from "@ghia/native"
 export type { EventModifiers, EventPayload, WindowOptions } from "@ghia/native"
-export type { JSX, SolidHostProps } from "./jsx-runtime.js"
+export type { JSX, SolidHostProps, SolidHostRef } from "./jsx-runtime.js"
 export type { MotionDivProps, MotionShapeProps, MotionSpanProps } from "./components/motion.js"
 export type {
   SelectContentProps,

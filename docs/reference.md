@@ -67,10 +67,16 @@ code and libraries typed for React DOM check unchanged:
   the element as both, so a callback typed for either fits: TanStack Virtual's
   `measureElement`, typed `(node: Element | null) => void`, is a ref as it is.
   As in React DOM, a ref object of a wider DOM type (`RefObject<HTMLElement>`
-  on a `<div>`) does not fit. `HostRef<Instance, Tag>` is that type. The DOM
-  interface names every member lib.dom declares; the ones Ghia has are listed
-  under [Listeners and DOM members](#listeners-and-dom-members-on-an-element).
+  on a `<div>`) does not fit. `HostRef<Instance, Tag>` is that type, and
+  `motion.*` components take the `ref` of the tag they render. The DOM
+  interface names every member lib.dom declares, so a DOM-typed ref and an
+  untyped callback ref also offer members Ghia does not have (a `<dialog>`'s
+  `showModal`); the ones it has are listed under
+  [Listeners and DOM members](#listeners-and-dom-members-on-an-element).
   Without `"DOM"` in `lib` a ref is Ghia's instance type alone.
+- Ghia's own components (`Button`, `Select`, `Dialog` and the rest) still take
+  `Ref<PublicInstance>`, so a tag's props with a DOM-typed ref
+  (`JSX.IntrinsicElements["div"]`) do not spread onto them.
 
 ### 2. Add a Vite config
 
@@ -678,8 +684,11 @@ Host elements take `class` and `classList`, the `class` attribute that
 [stylesheet](#stylesheets) rules match, as solid-js does on the web. A `ref`
 variable can be typed with the tag's DOM interface (`let list!: HTMLDivElement`)
 or as a `HostElement`, and a callback ref is given the element as both, so
-TanStack Virtual's `measureElement` is a ref as it is. The DOM types are the
-ones described under [Point TypeScript at the Ghia JSX types](#1-point-typescript-at-the-ghia-jsx-types).
+TanStack Virtual's `measureElement` is a ref as it is; `motion.*` components
+take the `ref` of the tag they render (`SolidHostRef<Tag>`). `SolidHostProps`
+without a tag keeps a `HostElement` ref, which fits every element, so props of
+that type spread onto any of them. The DOM types are the ones described under
+[Point TypeScript at the Ghia JSX types](#1-point-typescript-at-the-ghia-jsx-types).
 
 ```ts
 // vite.config.mts

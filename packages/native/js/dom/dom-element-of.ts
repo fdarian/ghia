@@ -5,18 +5,26 @@
  * `Element` (`@tanstack/react-virtual`'s `measureElement`) takes the element a ref gives.
  *
  * A tag lib.dom does not know (`webview`, `virtual-list`, `anchored`) is an `HTMLElement`, and so is `canvas`, which
- * has no drawing context here. The maps come from lib.dom: in a program without the DOM lib they are the empty
- * interfaces declared below, and every tag is `HTMLElement`, which is then empty too, so a ref is Ghia's own type.
+ * has no drawing context here. In a program without the DOM lib there is no DOM interface to name, and every tag is
+ * `never`: the adapters then type a ref with Ghia's own type alone (see `RefElementOf`).
  */
-export type DomElementOf<Tag extends string> = Tag extends "canvas"
-  ? HTMLElement
-  : Tag extends keyof HTMLElementTagNameMap
-    ? HTMLElementTagNameMap[Tag]
-    : Tag extends keyof SVGElementTagNameMap
-      ? SVGElementTagNameMap[Tag]
-      : HTMLElement
+export type DomElementOf<Tag extends string> = HasDomLib extends false
+  ? never
+  : Tag extends "canvas"
+    ? HTMLElement
+    : Tag extends keyof HTMLElementTagNameMap
+      ? HTMLElementTagNameMap[Tag]
+      : Tag extends keyof SVGElementTagNameMap
+        ? SVGElementTagNameMap[Tag]
+        : HTMLElement
 
-// Empty, so they merge with lib.dom's where the program has it and stand in for them where it does not.
+/** What a callback ref is given beside Ghia's own type: the tag's DOM interface, or nothing more without the DOM lib. */
+export type RefElementOf<Tag extends string> = [DomElementOf<Tag>] extends [never] ? unknown : DomElementOf<Tag>
+
+/** Whether the program has lib.dom: its tag map is the empty stand-in below otherwise (`@types/react` declares none). */
+type HasDomLib = "div" extends keyof HTMLElementTagNameMap ? true : false
+
+// Empty, so they merge with lib.dom's where the program has it and stand in for them, empty, where it does not.
 declare global {
   interface HTMLElement {}
   interface HTMLElementTagNameMap {}

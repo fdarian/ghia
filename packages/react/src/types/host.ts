@@ -7,6 +7,7 @@ import type {
   BoundingClientRect,
   DomElementOf,
   ElementIdAllocator,
+  RefElementOf,
   ElementType,
   EventHandlerMap,
   FocusableElement,
@@ -228,7 +229,9 @@ export interface MarkdownProps extends ReactHostProps<NativeMarkdownProps> {
   ref?: Ref<PublicInstance>
 }
 
-export interface AnchoredProps extends ReactHostProps<NativeAnchoredProps> {
+/** `style` takes motion values, as a `div`'s does: the reconciler binds them on any host element. */
+export interface AnchoredProps extends Omit<ReactHostProps<NativeAnchoredProps>, "style"> {
+  style?: MotionValueStyle
   key?: Key | null
   children?: ReactNode
   ref?: Ref<PublicInstance>
@@ -352,10 +355,10 @@ export type PublicInstance = Instance &
  * `TextControlInstance`) or the tag's DOM interface (`HTMLDivElement`, `HTMLInputElement`), so a ref written for React
  * DOM fits as it is; a callback ref is given the element as both, and one typed for either (`measureElement`'s
  * `(node: Element | null) => void`) fits. As in React DOM, a ref object of a wider DOM type (`RefObject<HTMLElement>`
- * on a `div`) does not.
+ * on a `div`) does not. Without the DOM lib it is `Ref<Instance>`.
  */
 export type HostRef<Instance, Tag extends string> =
-  | RefCallback<Instance & DomElementOf<Tag>>
+  | RefCallback<Instance & RefElementOf<Tag>>
   | RefObject<Instance | null>
   | RefObject<DomElementOf<Tag> | null>
   | null

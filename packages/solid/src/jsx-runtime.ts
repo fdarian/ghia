@@ -16,6 +16,7 @@ import type {
   MotionProps,
   MotionValueStyle,
   NativeviewProps,
+  RefElementOf,
   SvgMotionProps,
   SvgCircleProps,
   SvgClipPathProps,
@@ -69,10 +70,16 @@ import { createComponent, createElement, spread } from "./universal.js"
 import type { HostElement } from "./host.js"
 
 /**
- * A host element's props in Solid JSX. `Tag` gives the `ref` its DOM interface: a variable typed with Ghia's
- * `HostElement` or with the tag's DOM interface (`let el!: HTMLDivElement`) takes the element, and a callback is
- * given it as both, so a callback typed for either (`measureElement`'s `(node: Element) => void`) fits.
+ * The `ref` of a host element of tag `Tag`: a variable typed with Ghia's `HostElement` or with the tag's DOM interface
+ * (`let el!: HTMLDivElement`) takes the element, and a callback is given it as both, so a callback typed for either
+ * (`measureElement`'s `(node: Element) => void`) fits. Without a tag (`string`) it is a `HostElement`, which fits the
+ * `ref` of every tag, so props of that type can be spread on any element; without the DOM lib it is that too.
  */
+export type SolidHostRef<Tag extends string> = string extends Tag
+  ? HostElement | ((element: HostElement) => void)
+  : HostElement | DomElementOf<Tag> | ((element: HostElement & RefElementOf<Tag>) => void)
+
+/** A host element's props in Solid JSX, with the `ref` of `Tag` (see `SolidHostRef`). */
 export type SolidHostProps<Props = HostProps, Tag extends string = string> = Omit<Props, "style"> & {
   style?: MotionValueStyle
   children?: SolidJSX.Element
@@ -80,7 +87,7 @@ export type SolidHostProps<Props = HostProps, Tag extends string = string> = Omi
   class?: string
   /** Adds each key whose value is truthy to the `class` attribute, and takes away one that is no longer. */
   classList?: { [name: string]: boolean | undefined }
-  ref?: HostElement | DomElementOf<Tag> | ((element: HostElement & DomElementOf<Tag>) => void)
+  ref?: SolidHostRef<Tag>
 }
 
 type Component = (props: Record<string, unknown>) => unknown

@@ -15,7 +15,7 @@ afterAll(() => rmSync(temp, { recursive: true, force: true }))
 const tscTimeout = 60_000
 const tsc = join(root, "node_modules/typescript/bin/tsc")
 
-const withDom = `import type { HostElement } from "@ghia/solid"
+const withDom = `import { motion, type HostElement, type JSX, type SolidHostProps } from "@ghia/solid"
 
 // Typed as TanStack Virtual types it.
 declare const virtualizer: { measureElement: (node: Element | null | undefined) => void }
@@ -30,6 +30,9 @@ export function App() {
     <div ref={list} class="app" classList={{ active: true, idle: false }}>
       <style>{".app { color: red }"}</style>
       <div ref={virtualizer.measureElement} data-index={0} />
+      <motion.div ref={list} class="box" />
+      <motion.div ref={(element: HTMLDivElement) => element.align} />
+      <motion.path ref={(element) => { element.getTotalLength(); element.nativeId }} d="M0 0" />
       <div ref={host} />
       <div ref={(element) => { element.nativeId; element.align; element.scrollTop }} />
       <div ref={(element: HostElement) => element.nativeId} />
@@ -52,9 +55,13 @@ export function App() {
     </div>
   )
 }
+
+// Props without a tag fit every element; a tag's props fit that element and its motion component.
+export const Box = (props: SolidHostProps) => <><div {...props} /><button {...props} /><motion.div {...props} /></>
+export const Div = (props: JSX.IntrinsicElements["div"]) => <><div {...props} /><motion.div {...props} /></>
 `
 
-// Without the DOM lib a ref is Ghia's own type, and the rest still holds.
+// Without the DOM lib a ref is Ghia's own type alone, and the rest still holds.
 const withoutDom = `import type { HostElement } from "@ghia/solid"
 
 export function App() {
@@ -63,6 +70,8 @@ export function App() {
     <div ref={host} class="app">
       <style>{".app { color: red }"}</style>
       <span ref={(element) => { element.nativeId; element.scrollTop }} />
+      {/* @ts-expect-error a ref is an element */}
+      <div ref={5} />
     </div>
   )
 }
@@ -98,7 +107,7 @@ describe("host element types", () => {
     expect(result.status, result.stdout).toBe(0)
   }, tscTimeout)
 
-  it("hold without the DOM lib", () => {
+  it("hold without the DOM lib, where a ref is a HostElement", () => {
     const result = check("no-dom", withoutDom, ["ES2022"])
     expect(result.status, result.stdout).toBe(0)
   }, tscTimeout)

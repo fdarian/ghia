@@ -6,4 +6,4 @@
 export { jsxDEV, jsxDEV as jsx, jsxDEV as jsxs, Fragment } from "react/jsx-dev-runtime"
 
 /** The same JSX types as `jsx-runtime`. */
-export type { JSX } from "./jsx-runtime"
+export type { JSX } from "./jsx-runtime.js"
