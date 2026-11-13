@@ -27,7 +27,7 @@ use super::atoms::{Atom, Atoms};
 use super::index::{IndexedRule, RuleIndex};
 use super::invalidation::Reach;
 use super::parse_cache::ParsedRule;
-use super::selector::{AttrName, Simple, TypeName};
+use super::selector::{AttrName, ComplexSelector, Simple, TypeName};
 use super::tree::{class_atoms, id_atom};
 
 #[cfg(test)]
@@ -161,30 +161,45 @@ struct Features {
 }
 
 impl Features {
-    /// `None` when the subject of a selector requires none of them (`*`, `:root`, `:not(.a)`,
-    /// `:is(.a, .b)`), so any element could be matched.
+    /// `None` when the subject of a selector requires none of them (`*`, `:root`, `:not(.a)`), so any
+    /// element could be matched.
     fn of(added: &[IndexedRule]) -> Option<Features> {
         let mut features = Features::default();
         for rule in added {
             for (selector, _) in &rule.selectors {
-                let mut all: Vec<Feature> = selector.compounds[0].simples.iter().filter_map(Feature::of).collect();
-                // Keyed as the index keys a selector, by what is likely to be the rarest.
-                let first = all
-                    .iter()
-                    .position(|feature| matches!(feature, Feature::Id(_)))
-                    .or_else(|| all.iter().position(|feature| matches!(feature, Feature::Class(_))))
-                    .or_else(|| all.iter().position(|feature| matches!(feature, Feature::Attribute(_))))
-                    .or_else(|| all.iter().position(|feature| matches!(feature, Feature::Tag(_))))?;
-                let key = all.remove(first);
-                match key {
-                    Feature::Id(id) => features.ids.entry(id).or_default().push(all),
-                    Feature::Class(class) => features.classes.entry(class).or_default().push(all),
-                    Feature::Attribute(name) => features.attributes.push((name, all)),
-                    Feature::Tag(tag) => features.tags.push((tag, all)),
-                }
+                features.add(selector)?;
             }
         }
         Some(features)
+    }
+
+    fn add(&mut self, selector: &ComplexSelector) -> Option<()> {
+        let subject = &selector.compounds[0].simples;
+        let mut all: Vec<Feature> = subject.iter().filter_map(Feature::of).collect();
+        // Keyed as the index keys a selector, by what is likely to be the rarest.
+        let first = all
+            .iter()
+            .position(|feature| matches!(feature, Feature::Id(_)))
+            .or_else(|| all.iter().position(|feature| matches!(feature, Feature::Class(_))))
+            .or_else(|| all.iter().position(|feature| matches!(feature, Feature::Attribute(_))))
+            .or_else(|| all.iter().position(|feature| matches!(feature, Feature::Tag(_))));
+        let Some(first) = first else {
+            // `&:hover` nested in `.a` is `:is(.a):hover`: an element has to match one of the
+            // selectors of the list, and what the rest of the compound requires is left out.
+            let list = subject.iter().find_map(|simple| match simple {
+                Simple::Is(list) => Some(&list[..]),
+                Simple::Where(list) => Some(&list[..]),
+                _ => None,
+            })?;
+            return list.iter().try_for_each(|inner| self.add(inner));
+        };
+        match all.remove(first) {
+            Feature::Id(id) => self.ids.entry(id).or_default().push(all),
+            Feature::Class(class) => self.classes.entry(class).or_default().push(all),
+            Feature::Attribute(name) => self.attributes.push((name, all)),
+            Feature::Tag(tag) => self.tags.push((tag, all)),
+        }
+        Some(())
     }
 
     fn is_empty(&self) -> bool {

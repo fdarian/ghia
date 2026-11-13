@@ -188,6 +188,15 @@ fn a_change_the_scoped_path_cannot_tell_matches_every_element_again() {
     let (_, _, scoped) = page.change(BASE);
     assert_eq!(scoped, false);
     assert!(page.doc.style(page.items[10]).is_some_and(|style| style.top.is_none()));
+    // An `:is()` subject takes the features of its arguments, unless one has none.
+    let (rematched, _, scoped) = page.change(&format!("{BASE}\n:is(.mark, .other) {{ top: 5px }}"));
+    assert_eq!((rematched, scoped), (5, true));
+    let (rematched, _, scoped) = page.change(&format!("{BASE}\n.mark {{ &:hover {{ top: 5px }} }}"));
+    assert_eq!((rematched, scoped), (5, true), "the five the rule deleted was for, three of which the nested rule reaches too");
+    let (_, _, scoped) = page.change(&format!("{BASE}\n:is(.mark, :not(.other)) {{ top: 5px }}"));
+    assert_eq!(scoped, false);
+    let (rematched, _, scoped) = page.change(BASE);
+    assert!(rematched >= 60 && !scoped, "a rule that more than half of the elements matched");
     // A source the splitter cannot cut.
     let (rematched, _, scoped) = page.change(&format!("{BASE}\n.broken {{ top: 1px"));
     assert_eq!(scoped, false);
