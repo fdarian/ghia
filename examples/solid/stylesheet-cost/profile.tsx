@@ -317,7 +317,11 @@ function Items(props: { count: number; mode: string; control: Control; items: bo
   props.control.setSecondText = setSecondText
   const sheetText =
     props.mode === "sheet" ? SHEET : props.mode === "inline+sheet" ? UNRELATED_SHEET : props.mode === "atomic" ? ATOMIC_SHEET : null
-  const atomicItems = props.atomicItems ?? []
+  const atomicItem = (index: number): AtomicItem => {
+    const item = props.atomicItems?.[index]
+    if (item === undefined) throw new Error(`mode ${props.mode} needs an atomic item at ${index}`)
+    return item
+  }
   return (
     <div style={{ display: "flex", flexDirection: "column", width: WIDTH }}>
       {sheetText === null || !showStyle() ? null : <style>{sheetText}</style>}
@@ -346,12 +350,12 @@ function Items(props: { count: number; mode: string; control: Control; items: bo
             ) : props.mode === "atomic" ? (
               <div
                 ref={(element: unknown) => (props.control.items[index] = element)}
-                class={isClass(index) || all() ? atomicItems[index]?.classesB : atomicItems[index]?.classesA}
+                class={isClass(index) || all() ? atomicItem(index).classesB : atomicItem(index).classesA}
               />
             ) : props.mode === "atomic-inline" ? (
               <div
                 ref={(element: unknown) => (props.control.items[index] = element)}
-                style={isClass(index) || all() ? atomicItems[index]?.styleB : atomicItems[index]?.styleA}
+                style={isClass(index) || all() ? atomicItem(index).styleB : atomicItem(index).styleA}
               />
             ) : props.mode === "sheet" ? (
               <div
