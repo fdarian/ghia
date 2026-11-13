@@ -19,7 +19,7 @@ use super::cascade::{merge, MatchedInterner, MatchedRules};
 use super::index::RuleIndex;
 use super::invalidation::Reach;
 use super::layers::Layers;
-use super::parser::parse_sheet;
+use super::parse_cache::ParseCache;
 use super::states::LoggedFolds;
 use super::validate::Validator;
 use crate::css::lenient::number_text;
@@ -66,6 +66,7 @@ pub struct StyleSheets {
     pub(crate) index: RuleIndex,
     pub(crate) interner: MatchedInterner,
     validator: Validator,
+    parse_cache: ParseCache,
     /// The skipped rules already logged, kept across reloads (every sheet is parsed again when
     /// one changes) so each is logged once.
     logged_skips: FxHashSet<String>,
@@ -101,6 +102,7 @@ impl Default for StyleSheets {
             index: RuleIndex::default(),
             interner: MatchedInterner::default(),
             validator: Validator::default(),
+            parse_cache: ParseCache::default(),
             logged_skips: FxHashSet::default(),
             skip_log_capped: false,
             logged_folds: LoggedFolds::default(),
@@ -178,17 +180,15 @@ impl StyleSheets {
     }
 
     /// Parses `texts` as the document's sheets and indexes their rules. Layers are declared in
-    /// parse order across the whole document, so every sheet is parsed again when any changes.
+    /// parse order across the whole document, so every sheet is assembled again when any
+    /// changes; the rules whose text is unchanged come from the parse cache.
     pub(crate) fn load(&mut self, texts: Vec<String>) {
         let mut layers = Layers::default();
-        let mut sheets = Vec::with_capacity(texts.len());
-        for text in &texts {
-            let mut sheet = parse_sheet(text, &mut self.atoms, &mut layers);
-            self.validator.filter(&mut sheet.rules);
+        let mut sheets = self.parse_cache.parse(&texts, &mut self.atoms, &mut layers, &mut self.validator);
+        for sheet in &mut sheets {
             for skipped in sheet.unsupported.drain(..) {
                 self.warn_skipped(skipped);
             }
-            sheets.push(sheet);
         }
         self.index = RuleIndex::build(sheets, &layers.order(), self.style);
         self.interner = MatchedInterner::default();
@@ -274,6 +274,8 @@ impl StyleSheets {
         self.enabled = false;
         self.atoms_fresh = false;
         self.loaded.clear();
+        // Its rules hold atoms of the interner replaced below.
+        self.parse_cache.clear();
         self.logged_skips.clear();
         self.logged_folds.clear();
         self.skip_log_capped = false;

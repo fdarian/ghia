@@ -22,6 +22,7 @@ mod initial;
 mod invalidation;
 mod layers;
 mod matching;
+mod parse_cache;
 mod parser;
 mod selector;
 mod selector_parse;
@@ -63,6 +64,7 @@ pub struct StyleSheet {
     pub unsupported: Vec<String>,
 }
 
+#[derive(Clone)]
 pub struct Rule {
     /// The rule applies when any of them matches; each carries its own specificity.
     pub selectors: Vec<(ComplexSelector, Specificity)>,
