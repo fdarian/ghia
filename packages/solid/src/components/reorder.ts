@@ -115,7 +115,8 @@ function Item<Value>(props: ReorderItemProps<Value>): JSX.Element {
       layoutDrag: drag,
       ref(node: HostElement) {
         element = node
-        if (typeof own.ref === "function") own.ref(node)
+        // The host element is the item's DOM element, which is what the ref's type says it is given.
+        if (typeof own.ref === "function") own.ref(node as Parameters<typeof own.ref>[0])
       },
       onPointerDown(event: HostPointerEvent) {
         own.onPointerDown?.(event)

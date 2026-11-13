@@ -3,6 +3,7 @@ import type {
   AnchoredProps,
   CodeProps,
   DiffProps,
+  DomElementOf,
   FormProps,
   HostProps,
   HtmlAnchorProps,
@@ -67,10 +68,19 @@ import type {
 import { createComponent, createElement, spread } from "./universal.js"
 import type { HostElement } from "./host.js"
 
-export type SolidHostProps<Props = HostProps> = Omit<Props, "style"> & {
+/**
+ * A host element's props in Solid JSX. `Tag` gives the `ref` its DOM interface: a variable typed with Ghia's
+ * `HostElement` or with the tag's DOM interface (`let el!: HTMLDivElement`) takes the element, and a callback is
+ * given it as both, so a callback typed for either (`measureElement`'s `(node: Element) => void`) fits.
+ */
+export type SolidHostProps<Props = HostProps, Tag extends string = string> = Omit<Props, "style"> & {
   style?: MotionValueStyle
   children?: SolidJSX.Element
-  ref?: ((element: HostElement) => void) | HostElement
+  /** The `class` attribute, which stylesheet rules (`.name`) match. */
+  class?: string
+  /** Adds each key whose value is truthy to the `class` attribute, and takes away one that is no longer. */
+  classList?: { [name: string]: boolean | undefined }
+  ref?: HostElement | DomElementOf<Tag> | ((element: HostElement & DomElementOf<Tag>) => void)
 }
 
 type Component = (props: Record<string, unknown>) => unknown
@@ -100,78 +110,81 @@ export function Fragment(props: { children?: unknown }): SolidJSX.Element {
   return (props.children ?? null) as SolidJSX.Element
 }
 
+/** The HTML tags that lay out as a `div` or a `span`, each with its own DOM interface for `ref`. */
+type HtmlTagElements = { [Tag in HtmlTag]: SolidHostProps<HostProps, Tag> }
+
 export namespace JSX {
   export type Element = SolidJSX.Element
   export interface ElementChildrenAttribute { children: {} }
-  export interface IntrinsicElements extends Record<HtmlTag, SolidHostProps> {
-    a: SolidHostProps<HostProps & HtmlAnchorProps>
-    button: SolidHostProps<HostProps & HtmlButtonProps>
-    div: SolidHostProps
-    text: SolidHostProps<SvgTextProps>
-    span: SolidHostProps
-    img: SolidHostProps<ImgProps>
-    webview: SolidHostProps<WebviewProps>
-    nativeview: SolidHostProps<NativeviewProps>
-    svg: SolidHostProps<SvgProps>
-    path: SolidHostProps<SvgPathProps>
-    circle: SolidHostProps<SvgCircleProps>
-    ellipse: SolidHostProps<SvgEllipseProps>
-    rect: SolidHostProps<SvgRectProps>
-    line: SolidHostProps<SvgLineProps>
-    polyline: SolidHostProps<SvgPolyProps>
-    polygon: SolidHostProps<SvgPolyProps>
-    g: SolidHostProps<SvgGroupProps>
-    defs: SolidHostProps<SvgDefsProps>
-    linearGradient: SolidHostProps<SvgGradientProps>
-    radialGradient: SolidHostProps<SvgGradientProps>
-    stop: SolidHostProps<SvgStopProps>
-    clipPath: SolidHostProps<SvgClipPathProps>
-    mask: SolidHostProps<SvgMaskProps>
-    use: SolidHostProps<SvgUseProps>
-    symbol: SolidHostProps<SvgSymbolProps>
-    pattern: SolidHostProps<SvgPatternProps>
-    marker: SolidHostProps<SvgMarkerProps>
-    image: SolidHostProps<SvgImageProps>
-    tspan: SolidHostProps<SvgTspanProps>
-    textPath: SolidHostProps<SvgTextPathProps>
-    filter: SolidHostProps<SvgFilterProps>
-    feBlend: SolidHostProps<SvgFeBlendProps>
-    feColorMatrix: SolidHostProps<SvgFeColorMatrixProps>
-    feComponentTransfer: SolidHostProps<SvgFeComponentTransferProps>
-    feFuncR: SolidHostProps<SvgFeFuncProps>
-    feFuncG: SolidHostProps<SvgFeFuncProps>
-    feFuncB: SolidHostProps<SvgFeFuncProps>
-    feFuncA: SolidHostProps<SvgFeFuncProps>
-    feComposite: SolidHostProps<SvgFeCompositeProps>
-    feConvolveMatrix: SolidHostProps<SvgFeConvolveMatrixProps>
-    feDiffuseLighting: SolidHostProps<SvgFeDiffuseLightingProps>
-    feDisplacementMap: SolidHostProps<SvgFeDisplacementMapProps>
-    feDistantLight: SolidHostProps<SvgFeDistantLightProps>
-    feDropShadow: SolidHostProps<SvgFeDropShadowProps>
-    feFlood: SolidHostProps<SvgFeFloodProps>
-    feGaussianBlur: SolidHostProps<SvgFeGaussianBlurProps>
-    feImage: SolidHostProps<SvgFeImageProps>
-    feMerge: SolidHostProps<SvgFeMergeProps>
-    feMergeNode: SolidHostProps<SvgFeMergeNodeProps>
-    feMorphology: SolidHostProps<SvgFeMorphologyProps>
-    feOffset: SolidHostProps<SvgFeOffsetProps>
-    fePointLight: SolidHostProps<SvgFePointLightProps>
-    feSpecularLighting: SolidHostProps<SvgFeSpecularLightingProps>
-    feSpotLight: SolidHostProps<SvgFeSpotLightProps>
-    feTile: SolidHostProps<SvgFeTileProps>
-    feTurbulence: SolidHostProps<SvgFeTurbulenceProps>
-    canvas: SolidHostProps
+  export interface IntrinsicElements extends HtmlTagElements {
+    a: SolidHostProps<HostProps & HtmlAnchorProps, "a">
+    button: SolidHostProps<HostProps & HtmlButtonProps, "button">
+    div: SolidHostProps<HostProps, "div">
+    text: SolidHostProps<SvgTextProps, "text">
+    span: SolidHostProps<HostProps, "span">
+    img: SolidHostProps<ImgProps, "img">
+    webview: SolidHostProps<WebviewProps, "webview">
+    nativeview: SolidHostProps<NativeviewProps, "nativeview">
+    svg: SolidHostProps<SvgProps, "svg">
+    path: SolidHostProps<SvgPathProps, "path">
+    circle: SolidHostProps<SvgCircleProps, "circle">
+    ellipse: SolidHostProps<SvgEllipseProps, "ellipse">
+    rect: SolidHostProps<SvgRectProps, "rect">
+    line: SolidHostProps<SvgLineProps, "line">
+    polyline: SolidHostProps<SvgPolyProps, "polyline">
+    polygon: SolidHostProps<SvgPolyProps, "polygon">
+    g: SolidHostProps<SvgGroupProps, "g">
+    defs: SolidHostProps<SvgDefsProps, "defs">
+    linearGradient: SolidHostProps<SvgGradientProps, "linearGradient">
+    radialGradient: SolidHostProps<SvgGradientProps, "radialGradient">
+    stop: SolidHostProps<SvgStopProps, "stop">
+    clipPath: SolidHostProps<SvgClipPathProps, "clipPath">
+    mask: SolidHostProps<SvgMaskProps, "mask">
+    use: SolidHostProps<SvgUseProps, "use">
+    symbol: SolidHostProps<SvgSymbolProps, "symbol">
+    pattern: SolidHostProps<SvgPatternProps, "pattern">
+    marker: SolidHostProps<SvgMarkerProps, "marker">
+    image: SolidHostProps<SvgImageProps, "image">
+    tspan: SolidHostProps<SvgTspanProps, "tspan">
+    textPath: SolidHostProps<SvgTextPathProps, "textPath">
+    filter: SolidHostProps<SvgFilterProps, "filter">
+    feBlend: SolidHostProps<SvgFeBlendProps, "feBlend">
+    feColorMatrix: SolidHostProps<SvgFeColorMatrixProps, "feColorMatrix">
+    feComponentTransfer: SolidHostProps<SvgFeComponentTransferProps, "feComponentTransfer">
+    feFuncR: SolidHostProps<SvgFeFuncProps, "feFuncR">
+    feFuncG: SolidHostProps<SvgFeFuncProps, "feFuncG">
+    feFuncB: SolidHostProps<SvgFeFuncProps, "feFuncB">
+    feFuncA: SolidHostProps<SvgFeFuncProps, "feFuncA">
+    feComposite: SolidHostProps<SvgFeCompositeProps, "feComposite">
+    feConvolveMatrix: SolidHostProps<SvgFeConvolveMatrixProps, "feConvolveMatrix">
+    feDiffuseLighting: SolidHostProps<SvgFeDiffuseLightingProps, "feDiffuseLighting">
+    feDisplacementMap: SolidHostProps<SvgFeDisplacementMapProps, "feDisplacementMap">
+    feDistantLight: SolidHostProps<SvgFeDistantLightProps, "feDistantLight">
+    feDropShadow: SolidHostProps<SvgFeDropShadowProps, "feDropShadow">
+    feFlood: SolidHostProps<SvgFeFloodProps, "feFlood">
+    feGaussianBlur: SolidHostProps<SvgFeGaussianBlurProps, "feGaussianBlur">
+    feImage: SolidHostProps<SvgFeImageProps, "feImage">
+    feMerge: SolidHostProps<SvgFeMergeProps, "feMerge">
+    feMergeNode: SolidHostProps<SvgFeMergeNodeProps, "feMergeNode">
+    feMorphology: SolidHostProps<SvgFeMorphologyProps, "feMorphology">
+    feOffset: SolidHostProps<SvgFeOffsetProps, "feOffset">
+    fePointLight: SolidHostProps<SvgFePointLightProps, "fePointLight">
+    feSpecularLighting: SolidHostProps<SvgFeSpecularLightingProps, "feSpecularLighting">
+    feSpotLight: SolidHostProps<SvgFeSpotLightProps, "feSpotLight">
+    feTile: SolidHostProps<SvgFeTileProps, "feTile">
+    feTurbulence: SolidHostProps<SvgFeTurbulenceProps, "feTurbulence">
+    canvas: SolidHostProps<HostProps, "canvas">
     /** A stylesheet: its text children are the CSS. It is never drawn. */
-    style: SolidHostProps
-    input: SolidHostProps<InputProps>
-    textarea: SolidHostProps<TextareaProps>
-    label: SolidHostProps<LabelProps>
-    form: SolidHostProps<FormProps>
-    anchored: SolidHostProps<AnchoredProps>
-    code: SolidHostProps<CodeProps>
-    diff: SolidHostProps<DiffProps>
-    markdown: SolidHostProps<MarkdownProps>
-    "virtual-list": SolidHostProps<VirtualListProps>
+    style: SolidHostProps<HostProps, "style">
+    input: SolidHostProps<InputProps, "input">
+    textarea: SolidHostProps<TextareaProps, "textarea">
+    label: SolidHostProps<LabelProps, "label">
+    form: SolidHostProps<FormProps, "form">
+    anchored: SolidHostProps<AnchoredProps, "anchored">
+    code: SolidHostProps<CodeProps, "code">
+    diff: SolidHostProps<DiffProps, "diff">
+    markdown: SolidHostProps<MarkdownProps, "markdown">
+    "virtual-list": SolidHostProps<VirtualListProps, "virtual-list">
   }
 }
 

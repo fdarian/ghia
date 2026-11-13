@@ -52,6 +52,26 @@ typecheck.
 }
 ```
 
+The host element types follow React DOM where Ghia behaves as the DOM does, so
+code and libraries typed for React DOM check unchanged:
+
+- `className` is the `class` attribute that [stylesheet](#stylesheets) rules
+  match, on every host element, so `{...stylex.props(...)}` spreads as it does
+  in React DOM. `<style>{css}</style>` is a stylesheet.
+- A host `ref` takes a ref object of the tag's DOM interface
+  (`useRef<HTMLDivElement>` on a `<div>`, `HTMLInputElement` on an `<input>`,
+  `SVGPathElement` on a `<path>`, `HTMLElement` on a tag the DOM does not have,
+  such as `<virtual-list>`, and on `<canvas>`, which has no drawing context) or
+  of Ghia's instance type (`PublicInstance`, `TextControlInstance`,
+  `ImgInstance`, `WebviewInstance`, `FormInstance`). A callback ref is given
+  the element as both, so a callback typed for either fits: TanStack Virtual's
+  `measureElement`, typed `(node: Element | null) => void`, is a ref as it is.
+  As in React DOM, a ref object of a wider DOM type (`RefObject<HTMLElement>`
+  on a `<div>`) does not fit. `HostRef<Instance, Tag>` is that type. The DOM
+  interface names every member lib.dom declares; the ones Ghia has are listed
+  under [Listeners and DOM members](#listeners-and-dom-members-on-an-element).
+  Without `"DOM"` in `lib` a ref is Ghia's instance type alone.
+
 ### 2. Add a Vite config
 
 `ghia` is the `ghia dev` and `ghia build` command and the `ghia()` Vite plugin;
@@ -653,6 +673,13 @@ files for Solid's universal renderer and selects the reactive client runtime.
   }
 }
 ```
+
+Host elements take `class` and `classList`, the `class` attribute that
+[stylesheet](#stylesheets) rules match, as solid-js does on the web. A `ref`
+variable can be typed with the tag's DOM interface (`let list!: HTMLDivElement`)
+or as a `HostElement`, and a callback ref is given the element as both, so
+TanStack Virtual's `measureElement` is a ref as it is. The DOM types are the
+ones described under [Point TypeScript at the Ghia JSX types](#1-point-typescript-at-the-ghia-jsx-types).
 
 ```ts
 // vite.config.mts
