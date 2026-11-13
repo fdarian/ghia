@@ -15,7 +15,7 @@ afterAll(() => rmSync(temp, { recursive: true, force: true }))
 const tscTimeout = 60_000
 const tsc = join(root, "node_modules/typescript/bin/tsc")
 
-const withDom = `import { useRef, type ForwardedRef, type Ref } from "react"
+const withDom = `import { forwardRef, useRef, type ComponentPropsWithoutRef, type ComponentRef, type ForwardedRef, type Ref } from "react"
 import { motion, type ImgInstance, type PublicInstance, type TextControlInstance } from "@ghia/react"
 import type { JSX } from "@ghia/react/jsx-runtime"
 
@@ -88,6 +88,11 @@ export function App(props: { divRef: Ref<HTMLDivElement>; inputRef: ForwardedRef
 // A tag's props, ref included, pass on to the element and to the motion component of that tag.
 export const Box = (props: JSX.IntrinsicElements["div"]) => <div {...props} />
 export const MotionBox = (props: JSX.IntrinsicElements["div"]) => <motion.div {...props} />
+
+// The wrapper a component library writes around one.
+export const Card = forwardRef<ComponentRef<typeof motion.div>, ComponentPropsWithoutRef<typeof motion.div>>(
+  (props, ref) => <motion.div ref={ref} {...props} />
+)
 `
 
 // Without the DOM lib there is no HTMLDivElement to name: a ref is Ghia's own type alone, and the rest still holds.

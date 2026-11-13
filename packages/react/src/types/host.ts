@@ -359,8 +359,8 @@ export type PublicInstance = Instance &
  */
 export type HostRef<Instance, Tag extends string> =
   | RefCallback<Instance & RefElementOf<Tag>>
-  | RefObject<Instance | null>
-  | RefObject<DomElementOf<Tag> | null>
+  // One arm for both, so `ComponentRef<typeof motion.div>` (their union) fits too.
+  | RefObject<Instance | DomElementOf<Tag> | null>
   | null
 
 /** The reconciler keeps no context per host parent. */
