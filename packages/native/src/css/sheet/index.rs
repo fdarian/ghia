@@ -130,27 +130,18 @@ impl RuleIndex {
     }
 
     fn bucket(&mut self, selector: &ComplexSelector, entry: Entry) {
-        let subject = &selector.compounds[0].simples;
-        if let Some(id) = subject.iter().find_map(|simple| if let Simple::Id(id) = simple { Some(*id) } else { None }) {
-            self.by_id.entry(id).or_default().push(entry);
-        } else if let Some(class) =
-            subject.iter().find_map(|simple| if let Simple::Class(class) = simple { Some(*class) } else { None })
-        {
-            self.by_class.entry(class).or_default().push(entry);
-        } else if let Some(attribute) =
-            subject.iter().find_map(|simple| if let Simple::Attr(attr) = simple { Some(attr.name) } else { None })
-        {
-            self.by_attribute.entry(attribute).or_default().push(entry);
-        } else if let Some(tag) =
-            subject.iter().find_map(|simple| if let Simple::Tag(tag) = simple { Some(*tag) } else { None })
-        {
-            // An HTML element looks its tag up lower-cased and an SVG one as given.
-            self.by_tag.entry(tag.lower).or_default().push(entry);
-            if tag.written != tag.lower {
-                self.by_tag.entry(tag.written).or_default().push(entry);
+        match bucket_simple(&selector.compounds[0].simples) {
+            Some(Simple::Id(id)) => self.by_id.entry(*id).or_default().push(entry),
+            Some(Simple::Class(class)) => self.by_class.entry(*class).or_default().push(entry),
+            Some(Simple::Attr(attr)) => self.by_attribute.entry(attr.name).or_default().push(entry),
+            Some(Simple::Tag(tag)) => {
+                // An HTML element looks its tag up lower-cased and an SVG one as given.
+                self.by_tag.entry(tag.lower).or_default().push(entry);
+                if tag.written != tag.lower {
+                    self.by_tag.entry(tag.written).or_default().push(entry);
+                }
             }
-        } else {
-            self.universal.push(entry);
+            _ => self.universal.push(entry),
         }
     }
 
@@ -238,6 +229,16 @@ impl RuleIndex {
         });
         important.into_iter().map(|found| Applies { rule: found.rule, condition: found.condition }).collect()
     }
+}
+
+/// The simple selector of a subject compound that a rule is filed under, by what is likely to be the
+/// rarest: an id, a class, an attribute, a tag. `None` for a subject that has none of them.
+pub(super) fn bucket_simple(subject: &[Simple]) -> Option<&Simple> {
+    let first = |is: fn(&Simple) -> bool| subject.iter().find(|simple| is(simple));
+    first(|simple| matches!(simple, Simple::Id(_)))
+        .or_else(|| first(|simple| matches!(simple, Simple::Class(_))))
+        .or_else(|| first(|simple| matches!(simple, Simple::Attr(_))))
+        .or_else(|| first(|simple| matches!(simple, Simple::Tag(_))))
 }
 
 /// Whether `selector` reads nothing of an element but its type, id, classes and attributes other

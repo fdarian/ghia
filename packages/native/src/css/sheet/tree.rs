@@ -317,17 +317,20 @@ impl RetainedTree {
         }
         let names = self.sheets.atoms.len();
         let reload = self.sheets.load(texts);
-        let scoped = self.sheets.atoms_fresh
-            && !self.sheets.mark_all
-            && reload.is_some_and(|reload| self.reload_scoped(&reload, names));
-        if scoped {
+        // Elements keep atoms only for the names a sheet had when they were read, so a name the
+        // new sheets bring has to be looked for in every element's class and id again, whatever
+        // else the load changed. Until then a rule added later cannot find the elements it names.
+        if self.sheets.atoms_fresh && self.sheets.atoms.len() != names {
+            self.init_all_css();
+        }
+        let plan = match reload {
+            Some(reload) if self.sheets.atoms_fresh && !self.sheets.mark_all => self.plan_reload(reload),
+            _ => None,
+        };
+        if let Some(plan) = plan {
+            self.apply_reload(plan);
             super::reload::count_scoped();
             return;
-        }
-        // Elements keep atoms only for the names a sheet had when they were read, so a name the
-        // new sheets bring has to be looked for in every element's class and id again.
-        if self.sheets.atoms.len() != names {
-            self.sheets.atoms_fresh = false;
         }
         self.sheets.interner = Default::default();
         self.styles.cascaded.clear();

@@ -19,16 +19,17 @@
 
 use std::sync::Arc;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
-use super::atoms::{Atom, Atoms};
-use super::index::{IndexedRule, RuleIndex};
+use super::atoms::Atom;
+use super::document::StyleSheets;
+use super::index::{bucket_simple, IndexedRule, RuleIndex};
 use super::invalidation::Reach;
 use super::parse_cache::ParsedRule;
 use super::selector::{AttrName, ComplexSelector, Simple, TypeName};
-use super::tree::{class_atoms, id_atom};
+use super::view::{has_attr, tag_of};
 
 #[cfg(test)]
 thread_local! {
@@ -49,6 +50,8 @@ pub(super) struct Reload {
     old_suffix: u32,
     /// The new rules from `prefix` to here are added.
     new_suffix: u32,
+    /// How many rules the two loads share at the end.
+    kept_after: u32,
     features: Features,
 }
 
@@ -85,6 +88,7 @@ impl Reload {
             prefix: u32::try_from(prefix).expect("fewer than 2^32 rules"),
             old_suffix: u32::try_from(old_suffix).expect("fewer than 2^32 rules"),
             new_suffix: u32::try_from(new_suffix).expect("fewer than 2^32 rules"),
+            kept_after: u32::try_from(suffix).expect("fewer than 2^32 rules"),
             features,
         })
     }
@@ -101,17 +105,31 @@ impl Reload {
         }
     }
 
-    fn is_noop(&self) -> bool {
-        self.old_suffix == self.prefix && self.new_suffix == self.prefix
+    fn removes(&self) -> bool {
+        self.old_suffix != self.prefix
+    }
+
+    /// Whether a rule that is kept gets a new number.
+    fn shifts(&self) -> bool {
+        self.kept_after != 0 && self.new_suffix != self.old_suffix
     }
 }
 
 /// One thing an element has, which a subject compound requires of the elements it matches.
+#[derive(Clone, Copy, PartialEq)]
 enum Feature {
     Id(Atom),
     Class(Atom),
     Attribute(AttrName),
     Tag(TypeName),
+}
+
+/// An element as the matcher reads it, once for the pass.
+struct Read<'a> {
+    sheets: &'a StyleSheets,
+    element: &'a RetainedElement,
+    /// Only read when some feature asks for a tag.
+    tag: Option<Atom>,
 }
 
 impl Feature {
@@ -125,23 +143,12 @@ impl Feature {
         }
     }
 
-    fn held_by(&self, element: &RetainedElement, atoms: &Atoms, style: Atom) -> bool {
-        let is_svg = element.is_svg();
+    fn held_by(&self, read: &Read) -> bool {
         match self {
-            Feature::Id(id) => element.css().is_some_and(|css| css.id == Some(*id)),
-            Feature::Class(class) => element.css().is_some_and(|css| css.classes.contains(class)),
-            Feature::Attribute(name) => {
-                let name = if is_svg { name.written } else { name.lower };
-                if name == style {
-                    element.own_style().is_some()
-                } else {
-                    element.attribute(atoms.name(name)).is_some()
-                }
-            }
-            Feature::Tag(name) => {
-                let tag = if is_svg { atoms.get(&element.element_type) } else { atoms.tag(&element.element_type) };
-                tag == Some(name.for_element(is_svg))
-            }
+            Feature::Id(id) => read.element.css().is_some_and(|css| css.id == Some(*id)),
+            Feature::Class(class) => read.element.css().is_some_and(|css| css.classes.contains(class)),
+            Feature::Attribute(name) => has_attr(read.sheets, read.element, *name),
+            Feature::Tag(name) => read.tag == Some(name.for_element(read.element.is_svg())),
         }
     }
 }
@@ -150,14 +157,31 @@ impl Feature {
 /// that it requires too, in a list that is empty for the many selectors with one.
 type Others = Vec<Feature>;
 
+/// Adds the requirements of one selector under a feature that already has some. An element that
+/// holds a feature and nothing else is reached whatever the rest requires, so a list with an empty
+/// `Others` holds no other.
+fn push_option(options: &mut Vec<Others>, others: Others) {
+    if options.iter().any(|held| held.is_empty() || *held == others) {
+        return;
+    }
+    if others.is_empty() {
+        options.clear();
+    }
+    options.push(others);
+}
+
 /// The elements an added rule can match, as what they have: for each selector of an added rule,
 /// the features its subject compound requires. An element that has them all may be matched by it.
 #[derive(Default)]
 struct Features {
     ids: FxHashMap<Atom, Vec<Others>>,
     classes: FxHashMap<Atom, Vec<Others>>,
-    attributes: Vec<(AttrName, Others)>,
-    tags: Vec<(TypeName, Others)>,
+    attributes: FxHashMap<AttrName, Vec<Others>>,
+    /// Under the lower-cased and the written atom of the tag, as the index files it.
+    tags: FxHashMap<Atom, Vec<Others>>,
+    reads_tags: bool,
+    /// The `:is()` and `:where()` lists already added, which nested rules share.
+    lists: FxHashSet<usize>,
 }
 
 impl Features {
@@ -175,15 +199,7 @@ impl Features {
 
     fn add(&mut self, selector: &ComplexSelector) -> Option<()> {
         let subject = &selector.compounds[0].simples;
-        let mut all: Vec<Feature> = subject.iter().filter_map(Feature::of).collect();
-        // Keyed as the index keys a selector, by what is likely to be the rarest.
-        let first = all
-            .iter()
-            .position(|feature| matches!(feature, Feature::Id(_)))
-            .or_else(|| all.iter().position(|feature| matches!(feature, Feature::Class(_))))
-            .or_else(|| all.iter().position(|feature| matches!(feature, Feature::Attribute(_))))
-            .or_else(|| all.iter().position(|feature| matches!(feature, Feature::Tag(_))));
-        let Some(first) = first else {
+        let Some(key) = bucket_simple(subject) else {
             // `&:hover` nested in `.a` is `:is(.a):hover`: an element has to match one of the
             // selectors of the list, and what the rest of the compound requires is left out.
             let list = subject.iter().find_map(|simple| match simple {
@@ -191,13 +207,24 @@ impl Features {
                 Simple::Where(list) => Some(&list[..]),
                 _ => None,
             })?;
+            if !self.lists.insert(list.as_ptr() as usize) {
+                return Some(());
+            }
             return list.iter().try_for_each(|inner| self.add(inner));
         };
-        match all.remove(first) {
-            Feature::Id(id) => self.ids.entry(id).or_default().push(all),
-            Feature::Class(class) => self.classes.entry(class).or_default().push(all),
-            Feature::Attribute(name) => self.attributes.push((name, all)),
-            Feature::Tag(tag) => self.tags.push((tag, all)),
+        let others: Others = subject.iter().filter(|simple| !std::ptr::eq(*simple, key)).filter_map(Feature::of).collect();
+        self.reads_tags |= matches!(key, Simple::Tag(_)) || others.iter().any(|feature| matches!(feature, Feature::Tag(_)));
+        match key {
+            Simple::Id(id) => push_option(self.ids.entry(*id).or_default(), others),
+            Simple::Class(class) => push_option(self.classes.entry(*class).or_default(), others),
+            Simple::Attr(attr) => push_option(self.attributes.entry(attr.name).or_default(), others),
+            Simple::Tag(tag) => {
+                if tag.written != tag.lower {
+                    push_option(self.tags.entry(tag.written).or_default(), others.clone());
+                }
+                push_option(self.tags.entry(tag.lower).or_default(), others);
+            }
+            _ => unreachable!("an index key is an id, a class, an attribute or a tag"),
         }
         Some(())
     }
@@ -207,84 +234,82 @@ impl Features {
     }
 
     /// Whether `element` has the features of some added selector, from the atoms stored on it.
-    fn reach(&self, element: &RetainedElement, atoms: &Atoms, style: Atom) -> bool {
-        let others_held = |others: &Others| others.iter().all(|feature| feature.held_by(element, atoms, style));
+    fn reach(&self, sheets: &StyleSheets, element: &RetainedElement) -> bool {
+        let tag = if self.reads_tags { tag_of(&sheets.atoms, element) } else { None };
+        let read = Read { sheets, element, tag };
+        let any_held = |options: &Vec<Others>| options.iter().any(|others| others.iter().all(|feature| feature.held_by(&read)));
         if let Some(css) = element.css() {
-            if css.id.and_then(|id| self.ids.get(&id)).is_some_and(|options| options.iter().any(others_held)) {
+            if css.id.and_then(|id| self.ids.get(&id)).is_some_and(any_held) {
                 return true;
             }
-            if !self.classes.is_empty()
-                && css.classes.iter().any(|class| self.classes.get(class).is_some_and(|options| options.iter().any(others_held)))
-            {
+            if !self.classes.is_empty() && css.classes.iter().any(|class| self.classes.get(class).is_some_and(any_held)) {
                 return true;
             }
         }
-        let by_attribute = self
-            .attributes
-            .iter()
-            .any(|(name, others)| Feature::Attribute(*name).held_by(element, atoms, style) && others_held(others));
-        by_attribute
-            || self.tags.iter().any(|(tag, others)| Feature::Tag(*tag).held_by(element, atoms, style) && others_held(others))
+        if self.attributes.iter().any(|(name, options)| has_attr(sheets, element, *name) && any_held(options)) {
+            return true;
+        }
+        tag.and_then(|tag| self.tags.get(&tag)).is_some_and(any_held)
     }
 }
 
+/// What a scoped reload will do, decided before anything is changed.
+pub(super) struct Plan {
+    reload: Reload,
+    /// The elements to match again.
+    reached: Vec<u64>,
+}
+
 impl RetainedTree {
-    /// Brings the elements to the sheets just loaded by matching again only the ones `reload`
-    /// reaches, which are marked for the flush. `names_before` is how many names the atoms held
-    /// before the load. `false` when most elements are reached, and nothing is then to be relied on:
-    /// the caller matches every element, as it does for a change this cannot take.
-    pub(super) fn reload_scoped(&mut self, reload: &Reload, names_before: usize) -> bool {
-        if reload.is_noop() {
-            return true;
-        }
-        let (interner, replaced) = self.sheets.interner.renumbered(&self.sheets.index, |rule| reload.renumber(rule));
-        self.sheets.interner = interner;
-        // Elements keep atoms only for the names a sheet had when they were read.
-        let names_grew = self.sheets.atoms.len() != names_before;
-        if reload.features.is_empty() && replaced.is_empty() && !names_grew {
-            return true;
-        }
-        let atoms = &self.sheets.atoms;
-        let style = self.sheets.style;
-        let total = self.elements.len();
+    /// What reloading only the elements `reload` reaches comes to, or `None` when most elements are
+    /// reached and the caller matches every element, as it does for a change `reload` cannot take.
+    /// Reads the elements' atoms, which have to be those of the names the sheets hold now.
+    pub(super) fn plan_reload(&self, reload: Reload) -> Option<Plan> {
+        let gone = if reload.removes() {
+            self.sheets.interner.reading(|rule| reload.renumber(rule).is_none())
+        } else {
+            FxHashSet::default()
+        };
         let mut reached: Vec<u64> = Vec::new();
-        let mut moved: Vec<(u64, Arc<super::cascade::MatchedRules>)> = Vec::new();
-        for (id, element) in self.elements.iter_mut() {
-            let matchable = element.is_matchable();
-            if names_grew && matchable {
-                let element_id = id_atom(atoms, element.attribute("id"));
-                let classes = class_atoms(atoms, element.attribute("class"));
-                element.set_css_atoms(element_id, classes);
-            }
-            let mut is_reached = false;
-            if !replaced.is_empty() {
-                if let Some(matched) = element.css().and_then(|css| css.matched.as_ref()) {
-                    match replaced.get(&(Arc::as_ptr(matched) as usize)) {
-                        Some(Some(list)) => moved.push((*id, list.clone())),
-                        Some(None) => is_reached = true,
-                        None => {}
+        if !reload.features.is_empty() || !gone.is_empty() {
+            let total = self.elements.len();
+            for (id, element) in &self.elements {
+                let read_removed = !gone.is_empty()
+                    && element.css().and_then(|css| css.matched.as_ref()).is_some_and(|matched| gone.contains(&(Arc::as_ptr(matched) as usize)));
+                if read_removed || (element.is_matchable() && !reload.features.is_empty() && reload.features.reach(&self.sheets, element)) {
+                    reached.push(*id);
+                    if reached.len() * 2 > total {
+                        return None;
                     }
                 }
             }
-            if !is_reached && matchable && !reload.features.is_empty() && reload.features.reach(element, atoms, style) {
-                is_reached = true;
-            }
-            if is_reached {
-                reached.push(*id);
-                if reached.len() * 2 > total {
-                    return false;
+        }
+        Some(Plan { reload, reached })
+    }
+
+    /// Brings the elements to the sheets just loaded: renumbers what they matched, and marks the
+    /// elements the plan reached for the flush.
+    pub(super) fn apply_reload(&mut self, plan: Plan) {
+        let reload = plan.reload;
+        if reload.removes() || reload.shifts() {
+            let replaced = self.sheets.interner.renumbered(&self.sheets.index, |rule| reload.renumber(rule));
+            if !replaced.is_empty() {
+                for element in self.elements.values_mut() {
+                    let moved = element
+                        .css()
+                        .and_then(|css| css.matched.as_ref())
+                        .and_then(|matched| replaced.get(&(Arc::as_ptr(matched) as usize)))
+                        .and_then(Option::as_ref)
+                        .cloned();
+                    if moved.is_some() {
+                        element.set_matched(moved);
+                    }
                 }
+                self.styles.cascaded.replaced(&replaced);
             }
         }
-        for (id, list) in moved {
-            if let Some(element) = self.elements.get_mut(&id) {
-                element.set_matched(Some(list));
-            }
-        }
-        self.styles.cascaded.replaced(&replaced);
-        for id in reached {
+        for id in plan.reached {
             self.sheets.mark(id, Reach::SELF);
         }
-        true
     }
 }

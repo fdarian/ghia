@@ -10,7 +10,7 @@
 
 use std::sync::{Arc, Weak};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::css::covers;
 use crate::css::lenient::Declaration;
@@ -60,10 +60,21 @@ impl MatchedInterner {
         list
     }
 
-    /// The interner after the rules were renumbered by `renumber` (`None` for a rule that is gone),
-    /// and the lists whose allocation did not survive: each is `None` when it read a rule that is
-    /// gone, or the list that replaces it. A list that read only rules that kept their number is
-    /// kept as it is, and is not in the second.
+    /// The addresses of the live lists that read a rule `is_gone` says is gone.
+    pub(super) fn reading(&self, is_gone: impl Fn(u32) -> bool) -> FxHashSet<usize> {
+        self.lists
+            .iter()
+            .filter_map(|(key, weak)| {
+                let list = weak.upgrade()?;
+                key.iter().any(|found| is_gone(found.rule)).then(|| Arc::as_ptr(&list) as usize)
+            })
+            .collect()
+    }
+
+    /// Renumbers the rules of every list by `renumber` (`None` for a rule that is gone), and returns
+    /// the lists whose allocation did not survive: each is `None` when it read a rule that is gone,
+    /// or the list that replaces it. A list that read only rules that kept their number is kept as it
+    /// is, without a copy of its key, and is not returned.
     ///
     /// `renumber` must keep the order of the rules it keeps, which keeps every list sorted as the
     /// index sorts it.
@@ -71,32 +82,25 @@ impl MatchedInterner {
         &mut self,
         index: &RuleIndex,
         renumber: impl Fn(u32) -> Option<u32>,
-    ) -> (MatchedInterner, FxHashMap<usize, Option<Arc<MatchedRules>>>) {
-        let mut next = MatchedInterner { lists: FxHashMap::default(), pruned_at: self.pruned_at };
-        next.lists.reserve(self.lists.len());
-        let mut replaced = FxHashMap::default();
-        for (key, weak) in self.lists.drain() {
+    ) -> FxHashMap<usize, Option<Arc<MatchedRules>>> {
+        let mut changed: Vec<(usize, Option<Key>)> = Vec::new();
+        self.lists.retain(|key, weak| {
             let Some(list) = weak.upgrade() else {
-                continue;
+                return false;
             };
-            let address = Arc::as_ptr(&list) as usize;
-            let renumbered: Option<Key> = key
-                .iter()
-                .map(|found| renumber(found.rule).map(|rule| RuleMatch { rule, ..*found }))
-                .collect();
-            match renumbered {
-                None => {
-                    replaced.insert(address, None);
-                }
-                Some(renumbered) if renumbered == key => {
-                    next.lists.insert(key, weak);
-                }
-                Some(renumbered) => {
-                    replaced.insert(address, Some(next.intern(index, renumbered)));
-                }
+            if key.iter().all(|found| renumber(found.rule) == Some(found.rule)) {
+                return true;
             }
+            let renumbered = key.iter().map(|found| renumber(found.rule).map(|rule| RuleMatch { rule, ..*found })).collect();
+            changed.push((Arc::as_ptr(&list) as usize, renumbered));
+            false
+        });
+        let mut replaced = FxHashMap::default();
+        replaced.reserve(changed.len());
+        for (address, renumbered) in changed {
+            replaced.insert(address, renumbered.map(|key| self.intern(index, key)));
         }
-        (next, replaced)
+        replaced
     }
 }
 

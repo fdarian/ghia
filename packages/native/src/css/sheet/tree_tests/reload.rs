@@ -207,6 +207,26 @@ fn a_change_the_scoped_path_cannot_tell_matches_every_element_again() {
     assert_eq!(scoped, true, "and this one is cut");
 }
 
+/// A load that names a class and adds no rule to the index still gives the elements the atom of the
+/// name, so a rule for the class that comes later reaches them.
+#[test]
+fn a_name_a_load_interned_without_a_rule_is_found_on_the_elements_by_the_next_rule() {
+    for first in [".card::before { top: 1px }", ".card { }", ".card { colr: red }", ".card { top: }"] {
+        let mut page = Page::new(BASE);
+        for index in 5..8 {
+            page.doc.class(page.items[index], "item card");
+        }
+        page.doc.flush();
+        page.change(&format!("{BASE}\n{first}"));
+        let (rematched, _, scoped) = page.change(&format!("{BASE}\n{first}\n.card {{ padding-top: 3px }}"));
+        assert_eq!((rematched, scoped), (3, true), "{first}");
+        for index in 5..8 {
+            assert!(page.doc.style(page.items[index]).is_some_and(|style| style.padding_top.is_some()), "{first}: item {index}");
+        }
+        assert!(page.doc.style(page.items[10]).is_some_and(|style| style.padding_top.is_none()), "{first}");
+    }
+}
+
 // Equivalence: after every step the document is what a fresh load of the same sheets makes.
 
 const STYLE_ZERO: &str = "
