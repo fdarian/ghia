@@ -383,7 +383,7 @@ pub(crate) fn substitute_for_element(
     id: u64,
     style: Option<&StyleDesc>,
     parent: &CustomProperties,
-) -> (Option<StyleDesc>, CustomProperties) {
+) -> (Option<Box<StyleDesc>>, CustomProperties) {
     let custom = match style {
         Some(style) => focus_styles.custom_of(id, style, focusable, parent),
         None => parent.clone(),
@@ -395,17 +395,18 @@ pub(crate) fn substitute_for_element(
 /// `style` with every `var()` in it substituted by what `custom`, the custom properties its element
 /// computes to, says, so that everything that reads the style (the build, the readers of the
 /// transform, stacking, the containing block, painting) sees the same values. `None` when there
-/// is none.
+/// is none. Boxed: a `StyleDesc` is thousands of bytes, and `None`, the answer for nearly every
+/// element in every frame, would still move that many through each return.
 ///
 /// A transform text that cannot be resolved is the initial value of its property: `none`, and
 /// `50% 50%` for an origin. The focus styles are laid over the element when it is built, so they
 /// are substituted too, against the same `custom`: the caller puts the custom properties of the
 /// variants that apply in it. The pointer states are folded into the style before this runs.
-pub(crate) fn resolve(style: &StyleDesc, custom: &CustomProperties) -> Option<StyleDesc> {
+pub(crate) fn resolve(style: &StyleDesc, custom: &CustomProperties) -> Option<Box<StyleDesc>> {
     if !reads_vars(style) {
         return None;
     }
-    let mut resolved = style.clone();
+    let mut resolved = Box::new(style.clone());
     resolve_in(&mut resolved, custom);
     Some(resolved)
 }
@@ -538,7 +539,7 @@ mod tests {
 
     fn resolved(json: &str, entries: &[(&str, &str)]) -> StyleDesc {
         let style = style(json);
-        resolve(&style, &custom(entries)).unwrap_or(style)
+        resolve(&style, &custom(entries)).map_or(style, |resolved| *resolved)
     }
 
     #[test]
@@ -746,7 +747,7 @@ mod tests {
 
     fn hovered(json: &str, entries: &[(&str, &str)]) -> StyleDesc {
         let folded = crate::events::state_styles::resolve_state_styles(&style(json), true, false);
-        resolve(&folded, &custom(entries)).unwrap_or(folded)
+        resolve(&folded, &custom(entries)).map_or(folded, |resolved| *resolved)
     }
 
     #[test]

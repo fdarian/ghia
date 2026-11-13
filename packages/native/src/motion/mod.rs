@@ -1417,7 +1417,7 @@ pub(crate) struct DeclaredStyle {
 /// changes is a change of the property, from the value the last style computed to the one this
 /// does.
 fn with_vars(style: Arc<StyleDesc>, parent_font: &ParentValues) -> Arc<StyleDesc> {
-    resolve_vars(&style, parent_font).map_or(style, Arc::new)
+    resolve_vars(&style, parent_font).map_or(style, Arc::from)
 }
 
 /// What [`with_vars`] makes of `style`, or `None` when it holds nothing to substitute. A box with
@@ -1426,7 +1426,7 @@ fn with_vars(style: Arc<StyleDesc>, parent_font: &ParentValues) -> Arc<StyleDesc
 /// The custom properties of a focus variant that applies are already `style`'s: the variants are
 /// folded into it (and gone from it) before it gets here, and a box has them in its
 /// `PointerStates`.
-fn resolve_vars(style: &StyleDesc, parent_font: &ParentValues) -> Option<StyleDesc> {
+fn resolve_vars(style: &StyleDesc, parent_font: &ParentValues) -> Option<Box<StyleDesc>> {
     if !crate::css::var_substitution::reads_vars(style) {
         return None;
     }

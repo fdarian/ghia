@@ -8124,7 +8124,7 @@ impl BuildCtx<'_> {
         &self,
         id: u64,
         style: Option<&StyleDesc>,
-    ) -> (Option<StyleDesc>, crate::css::custom_properties::CustomProperties) {
+    ) -> (Option<Box<StyleDesc>>, crate::css::custom_properties::CustomProperties) {
         crate::css::var_substitution::substitute_for_element(
             &self.focus_styles,
             self.focus_handles.contains_key(&id),
@@ -11593,7 +11593,7 @@ fn contents_frame(
     if var_style.is_some() {
         crate::css::custom_properties::reads::note();
     }
-    let base = var_style.as_ref().or(declared);
+    let base = var_style.as_deref().or(declared);
     if !moves {
         ctx.inherited = outside;
         return ContentsFrame {
@@ -11712,7 +11712,7 @@ fn build_element_unpumped(
     if var_style.is_some() {
         crate::css::custom_properties::reads::note();
     }
-    let base_style = var_style.as_ref().or(base_style);
+    let base_style = var_style.as_deref().or(base_style);
     ctx.retain.pointer(pointer_states);
     ctx.retain.focus(&ctx.focus_styles, id, ctx.focus_handles.contains_key(&id));
     if let Some(links) = crate::accessibility::links_key(id) {
@@ -13507,7 +13507,7 @@ fn build_atomics(
                 match crate::css::var_substitution::resolve(&declared, &inherited.custom_of(Some(&*declared))) {
                     Some(resolved) => {
                         crate::css::custom_properties::reads::note();
-                        std::borrow::Cow::Owned(resolved)
+                        std::borrow::Cow::Owned(*resolved)
                     }
                     None => declared,
                 }

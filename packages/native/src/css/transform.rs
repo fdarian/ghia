@@ -1536,7 +1536,7 @@ mod tests {
 
     fn resolved(json: &str, custom: &CustomProperties) -> Option<ElementTransform> {
         let style = style(json);
-        of(crate::css::var_substitution::resolve(&style, custom).as_ref().unwrap_or(&style), &lengths())
+        of(crate::css::var_substitution::resolve(&style, custom).as_deref().unwrap_or(&style), &lengths())
     }
 
     #[test]
