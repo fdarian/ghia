@@ -1,11 +1,13 @@
-import type { Key, ReactNode, Ref } from "react"
+import type { Key, ReactNode, Ref, RefCallback, RefObject } from "react"
 import type { EventPayload } from "@ghia/native"
 import { HOST_BINDING } from "@ghia/native/host"
 import type {
   AnimateOptions,
   Animation,
   BoundingClientRect,
+  DomElementOf,
   ElementIdAllocator,
+  RefElementOf,
   ElementType,
   EventHandlerMap,
   FocusableElement,
@@ -95,6 +97,8 @@ export * from "@ghia/native/host"
  */
 type ReactHostProps<Props> = Omit<Props, "onFocusIn" | "onFocusOut" | "onFocusInCapture" | "onFocusOutCapture" | "onChange"> & {
   onChange?: (event: HostInputEvent) => void
+  /** The `class` attribute, which stylesheet rules (`.name`) match, as in React DOM. */
+  className?: string
 }
 
 export interface Props extends Omit<ReactHostProps<HostProps>, "style"> {
@@ -154,6 +158,8 @@ export interface SvgProps extends ReactHostProps<NativeSvgProps> {
 
 /** A shape inside an `<svg>`. React adds `key`, `children` and `ref`. */
 type SvgShapeElementProps<Native> = Native & {
+  /** The `class` attribute, as on an HTML element. */
+  className?: string
   key?: Key | null
   children?: ReactNode
   ref?: Ref<PublicInstance>
@@ -223,13 +229,17 @@ export interface MarkdownProps extends ReactHostProps<NativeMarkdownProps> {
   ref?: Ref<PublicInstance>
 }
 
-export interface AnchoredProps extends ReactHostProps<NativeAnchoredProps> {
+/** `style` takes motion values, as a `div`'s does: the reconciler binds them on any host element. */
+export interface AnchoredProps extends Omit<ReactHostProps<NativeAnchoredProps>, "style"> {
+  style?: MotionValueStyle
   key?: Key | null
   children?: ReactNode
   ref?: Ref<PublicInstance>
 }
 
 export type VirtualListProps = import("@ghia/native/host").VirtualListProps & {
+  /** The `class` attribute, as on any host element. */
+  className?: string
   key?: Key | null
   children?: ReactNode
   ref?: Ref<PublicInstance>
@@ -339,6 +349,19 @@ export type PublicInstance = Instance &
   ScrollableElement &
   DomElement &
   Required<Pick<Instance, "getBoundingClientRect" | "getAnimations" | typeof HOST_BINDING>>
+
+/**
+ * The `ref` of a host element of tag `Tag` in JSX. A ref object can hold Ghia's instance type (`PublicInstance`,
+ * `TextControlInstance`) or the tag's DOM interface (`HTMLDivElement`, `HTMLInputElement`), so a ref written for React
+ * DOM fits as it is; a callback ref is given the element as both, and one typed for either (`measureElement`'s
+ * `(node: Element | null) => void`) fits. As in React DOM, a ref object of a wider DOM type (`RefObject<HTMLElement>`
+ * on a `div`) does not. Without the DOM lib it is `Ref<Instance>`.
+ */
+export type HostRef<Instance, Tag extends string> =
+  | RefCallback<Instance & RefElementOf<Tag>>
+  // One arm for both, so `ComponentRef<typeof motion.div>` (their union) fits too.
+  | RefObject<Instance | DomElementOf<Tag> | null>
+  | null
 
 /** The reconciler keeps no context per host parent. */
 export type HostContext = Record<string, never>

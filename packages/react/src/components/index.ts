@@ -1,7 +1,7 @@
 // GPUIX component definitions and native motion wrappers.
 
 import { createElement, forwardRef, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import type { ReactElement, ReactNode } from "react"
+import type { ForwardRefExoticComponent, PropsWithoutRef, ReactElement, ReactNode } from "react"
 import {
   elementScope,
   gestureDescription,
@@ -35,6 +35,7 @@ import type {
   MotionValueStyle,
   MotionVariantContext,
   Props,
+  HostRef,
   PublicInstance,
   SvgCircleProps,
   SvgEllipseProps,
@@ -96,6 +97,8 @@ export type GpuixComponentType = keyof typeof gpuixComponents
 export interface MotionDivProps extends MotionAnimation<MotionStyle>, MotionGestureCallbacks, MotionLayoutProps {
   children?: ReactNode
   style?: MotionValueStyle
+  /** The `class` attribute, as on a `div`. */
+  className?: string
   onClick?: Props["onClick"]
   onMouseDown?: Props["onMouseDown"]
   onMouseUp?: Props["onMouseUp"]
@@ -144,9 +147,18 @@ interface MotionSource<Style, Transition> extends MotionAnimation<Style, Transit
   onMotionComplete?: Props["onMotionComplete"]
 }
 
-export function createMotionComponent<Source extends MotionSource<object, MotionTransition | SvgMotionTransition>>(tag: string) {
+/** A `motion.*` component: its `ref` is the `ref` of the element it renders (see `HostRef`). */
+export type MotionComponent<Source, Tag extends string> = ForwardRefExoticComponent<
+  PropsWithoutRef<Source> & { ref?: HostRef<PublicInstance, Tag> }
+>
+
+export function createMotionComponent<
+  Source extends MotionSource<object, MotionTransition | SvgMotionTransition>,
+  Tag extends string = string,
+>(tag: Tag): MotionComponent<Source, Tag> {
   const inline = tag === "span"
   const scope = inline ? SPAN_SCOPE : elementScope(`motion.${tag}`)
+  // The ref is handed the host element `tag` renders, which is what `HostRef` says (a ref object of either type).
   return forwardRef<PublicInstance, Source>(function Motion(
     {
       initial,
@@ -298,7 +310,7 @@ export function createMotionComponent<Source extends MotionSource<object, Motion
     // Always a provider, so that a component that starts or stops controlling variants keeps its element.
     const handedDown = useStableVariants(resolved.controls ?? inheritedVariants)
     return createElement(VariantContext.Provider, { value: handedDown }, createElement(tag, hostProps))
-  })
+  }) as unknown as MotionComponent<Source, Tag>
 }
 
 /** The same object for the same names, so that a render of the controller does not render what is under it. */
@@ -307,8 +319,8 @@ function useStableVariants(value: MotionVariantContext | undefined): MotionVaria
   return useMemo(() => value, [key])
 }
 
-const MotionDiv = createMotionComponent<MotionDivProps>("div")
-const MotionSpan = createMotionComponent<MotionSpanProps>("span")
+const MotionDiv = createMotionComponent<MotionDivProps, "div">("div")
+const MotionSpan = createMotionComponent<MotionSpanProps, "span">("span")
 
 /** `motion.div` plus the drag values `Reorder.Item` hands it, for the element type it is `as`. */
 export type MotionDragProps = MotionDivProps & { layoutDrag?: LayoutDrag }
@@ -320,8 +332,8 @@ export type MotionShapeProps<Shape> = Omit<Shape, "motion" | "ref" | "key"> &
     onMotionComplete?: Props["onMotionComplete"]
   }
 
-function motionShape<Shape>(tag: string) {
-  return createMotionComponent<MotionShapeProps<Shape>>(tag)
+function motionShape<Shape, Tag extends string>(tag: Tag) {
+  return createMotionComponent<MotionShapeProps<Shape>, Tag>(tag)
 }
 
 /**
@@ -332,21 +344,21 @@ function motionShape<Shape>(tag: string) {
 export const motion = {
   div: MotionDiv,
   span: MotionSpan,
-  g: motionShape<SvgGroupProps>("g"),
-  path: motionShape<SvgPathProps>("path"),
-  circle: motionShape<SvgCircleProps>("circle"),
-  ellipse: motionShape<SvgEllipseProps>("ellipse"),
-  rect: motionShape<SvgRectProps>("rect"),
-  line: motionShape<SvgLineProps>("line"),
-  polyline: motionShape<SvgPolyProps>("polyline"),
-  polygon: motionShape<SvgPolyProps>("polygon"),
-  text: motionShape<SvgTextProps>("text"),
-  tspan: motionShape<SvgTspanProps>("tspan"),
-  image: motionShape<SvgImageProps>("image"),
-  feGaussianBlur: motionShape<SvgFeGaussianBlurProps>("feGaussianBlur"),
-  feOffset: motionShape<SvgFeOffsetProps>("feOffset"),
-  feFlood: motionShape<SvgFeFloodProps>("feFlood"),
-  feDropShadow: motionShape<SvgFeDropShadowProps>("feDropShadow"),
+  g: motionShape<SvgGroupProps, "g">("g"),
+  path: motionShape<SvgPathProps, "path">("path"),
+  circle: motionShape<SvgCircleProps, "circle">("circle"),
+  ellipse: motionShape<SvgEllipseProps, "ellipse">("ellipse"),
+  rect: motionShape<SvgRectProps, "rect">("rect"),
+  line: motionShape<SvgLineProps, "line">("line"),
+  polyline: motionShape<SvgPolyProps, "polyline">("polyline"),
+  polygon: motionShape<SvgPolyProps, "polygon">("polygon"),
+  text: motionShape<SvgTextProps, "text">("text"),
+  tspan: motionShape<SvgTspanProps, "tspan">("tspan"),
+  image: motionShape<SvgImageProps, "image">("image"),
+  feGaussianBlur: motionShape<SvgFeGaussianBlurProps, "feGaussianBlur">("feGaussianBlur"),
+  feOffset: motionShape<SvgFeOffsetProps, "feOffset">("feOffset"),
+  feFlood: motionShape<SvgFeFloodProps, "feFlood">("feFlood"),
+  feDropShadow: motionShape<SvgFeDropShadowProps, "feDropShadow">("feDropShadow"),
 } as const
 
 // There is no `VirtualList` React wrapper. Windowing on the React side is the
