@@ -49,8 +49,8 @@ pub fn ua_style(element_type: &str) -> Option<Arc<StyleDesc>> {
 
 /// Whether the `hidden` attribute is on: Chrome's `html.css` has `[hidden]:not([hidden=until-found i]) { display: none }`
 /// for every element. `until-found` keeps its box (it skips the content, which Ghia does not do).
-fn hidden_by_attribute(element: &crate::retained_tree::RetainedElement) -> bool {
-    match element.custom_props().get("hidden") {
+pub(crate) fn hidden_by_value(value: Option<&serde_json::Value>) -> bool {
+    match value {
         Some(serde_json::Value::Bool(on)) => *on,
         Some(serde_json::Value::String(text)) => !text.eq_ignore_ascii_case("until-found"),
         _ => false,
@@ -79,7 +79,7 @@ fn displayed_as_none(base: Option<Arc<StyleDesc>>) -> Arc<StyleDesc> {
 /// that, whatever its tag.
 pub fn ua_style_of(element: &crate::retained_tree::RetainedElement) -> Option<Arc<StyleDesc>> {
     let tag_style = ua_style_of_tag_and_type(element);
-    if hidden_by_attribute(element) {
+    if element.hidden_attribute() {
         return Some(displayed_as_none(tag_style));
     }
     tag_style

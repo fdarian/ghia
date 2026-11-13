@@ -111,6 +111,11 @@ pub struct RetainedElement {
     /// Whether an `<svg>` wrote the element: only then do `set_custom_prop`s keep what they replace
     /// (`ElementExtras::props_before`). An element still being created has nothing before it.
     svg_written: std::cell::Cell<bool>,
+    /// What `html::popover::kind_of` says of the element, kept because every restyle asks and the answer
+    /// is a string hash away. Only `set_custom_prop` writes the props it is made from.
+    popover_kind: Option<crate::html::popover::Kind>,
+    /// Whether the `hidden` attribute is on (`html::hidden_by_value`), kept for the same reason.
+    hidden_attribute: bool,
     /// The `display` the last build found for the element once its `@container` blocks were
     /// folded in, which its parent decided its children by (`display: none` takes no part in
     /// layout, `inline-block` is a box on a line of its parent's text). The outer `None` until
@@ -340,6 +345,8 @@ impl RetainedElement {
             markup: None,
             auto_focus: false,
             svg_written: std::cell::Cell::new(false),
+            popover_kind: None,
+            hidden_attribute: false,
             container_display: Default::default(),
             container_order: Default::default(),
             kept_plan: Default::default(),
@@ -352,6 +359,27 @@ impl RetainedElement {
 
     pub fn events(&self) -> &HashSet<String> {
         &self.extras.as_deref().unwrap_or(&EMPTY_EXTRAS).events
+    }
+
+    pub(crate) fn popover_kind(&self) -> Option<crate::html::popover::Kind> {
+        self.popover_kind
+    }
+
+    pub(crate) fn hidden_attribute(&self) -> bool {
+        self.hidden_attribute
+    }
+
+    /// Brings the kept answers in line after a write of the custom prop `key`.
+    fn refresh_prop_caches(&mut self, key: &str) {
+        match key {
+            crate::html::popover::ATTRIBUTE_PROP => {
+                self.popover_kind = crate::html::popover::kind_of(self);
+            }
+            "hidden" => {
+                self.hidden_attribute = crate::html::hidden_by_value(self.custom_props().get("hidden"));
+            }
+            _ => {}
+        }
     }
 
     pub fn custom_props(&self) -> &HashMap<String, serde_json::Value> {
@@ -1998,15 +2026,16 @@ impl RetainedTree {
                     .as_mut()
                     .and_then(|extras| extras.custom_props.remove(&key));
                 changed = removed.is_some();
+                element.refresh_prop_caches(&key);
                 if written && removed.is_some() {
                     element.extras_mut().props_before_mut().entry(key).or_insert(removed);
                 }
                 element.release_empty_extras();
             } else if element.custom_props().get(&key) != Some(&value) {
-                let extras = element.extras_mut();
-                let old = extras.custom_props.insert(key.clone(), value);
+                let old = element.extras_mut().custom_props.insert(key.clone(), value);
+                element.refresh_prop_caches(&key);
                 if written {
-                    extras.props_before_mut().entry(key).or_insert(old);
+                    element.extras_mut().props_before_mut().entry(key).or_insert(old);
                 }
                 changed = true;
             }
