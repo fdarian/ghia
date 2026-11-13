@@ -14,12 +14,18 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
 use super::atoms::{Atom, Atoms};
-use super::document::ClassAtoms;
+use super::document::{ClassAtoms, StyleSheets};
 use super::cascade::MatchedRules;
 use super::invalidation::Reach;
 use super::share::{Found, StyleSharing};
 use super::unnamed::UnnamedNames;
 use super::view::{count_sibling_work, SiblingPositions, TreeView};
+
+#[cfg(test)]
+thread_local! {
+    /// Elements `read_element_atoms` read, which the tests read to tell a targeted read from a full one.
+    pub(super) static ATOM_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// Elements of a subtree `contains_style_element` walks for each `<style>` element there is, which
 /// is about what walking up from that one costs.
@@ -35,7 +41,8 @@ fn lowercase(name: &str) -> Cow<'_, str> {
 
 /// A class or id no sheet names cannot match a selector, so it has no atom and an element keeps
 /// nothing of it: the interner holds the names of the sheets, not of every element ever seen. The
-/// names left out are noted, to be found when a sheet names them.
+/// names left out are noted, to be found when a sheet names them, and stay noted whatever the
+/// element is written to next (see `unnamed.rs`).
 fn class_atoms(atoms: &Atoms, unnamed: &mut UnnamedNames, element: u64, value: Option<Cow<'_, str>>) -> ClassAtoms {
     let mut classes = ClassAtoms::new();
     for class in value.iter().flat_map(|value| value.split_ascii_whitespace()) {
@@ -54,6 +61,15 @@ fn id_atom(atoms: &Atoms, unnamed: &mut UnnamedNames, element: u64, value: Optio
         unnamed.note(&value, element);
     }
     atom
+}
+
+/// Reads the class and id atoms of `element` and keeps them, noting the names no sheet has.
+fn read_element_atoms(sheets: &mut StyleSheets, id: u64, element: &mut RetainedElement) {
+    #[cfg(test)]
+    ATOM_READS.with(|count| count.set(count.get() + 1));
+    let element_id = id_atom(&sheets.atoms, &mut sheets.unnamed, id, element.attribute("id"));
+    let classes = class_atoms(&sheets.atoms, &mut sheets.unnamed, id, element.attribute("class"));
+    element.set_css_atoms(element_id, classes);
 }
 
 impl RetainedTree {
@@ -109,29 +125,7 @@ impl RetainedTree {
             self.sheets.sources_dirty = true;
         }
         if self.sheets.atoms_fresh {
-            self.sheets.forget_names(id, element, "class");
-            self.sheets.forget_names(id, element, "id");
-        }
-    }
-
-    /// Before the class or id of `id` is written: the names it carries now are not noted any more.
-    /// What the write leaves is noted again by [`Self::sheets_attribute_changed`], or by
-    /// [`Self::sheets_attribute_kept`] when the write changed nothing.
-    pub(crate) fn sheets_attribute_changing(&mut self, id: u64, name: &str) {
-        if self.sheets.atoms_fresh {
-            if let Some(element) = self.elements.get(&id) {
-                self.sheets.forget_names(id, element, &lowercase(name));
-            }
-        }
-    }
-
-    pub(crate) fn sheets_attribute_kept(&mut self, id: u64, name: &str) {
-        if self.sheets.atoms_fresh {
-            match &*lowercase(name) {
-                "class" => drop(self.refresh_class_atoms(id)),
-                "id" => drop(self.refresh_id_atom(id)),
-                _ => {}
-            }
+            self.sheets.forget_names(id, element);
         }
     }
 
@@ -353,7 +347,7 @@ impl RetainedTree {
             return;
         }
         let names = self.sheets.atoms.len();
-        let reload = self.sheets.load(&texts);
+        let reload = self.sheets.load(texts);
         // Elements keep atoms only for the names a sheet had when they were read, so the elements
         // that carry a name the new sheets bring have to be read again, whatever else the load
         // changed. Until then a rule added later cannot find the elements it names.
@@ -376,28 +370,26 @@ impl RetainedTree {
 
     fn init_all_css(&mut self) {
         let sheets = &mut self.sheets;
-        sheets.unnamed.clear();
         for (id, element) in &mut self.elements {
-            let element_id = id_atom(&sheets.atoms, &mut sheets.unnamed, *id, element.attribute("id"));
-            let classes = class_atoms(&sheets.atoms, &mut sheets.unnamed, *id, element.attribute("class"));
-            element.set_css_atoms(element_id, classes);
+            read_element_atoms(sheets, *id, element);
         }
     }
 
-    /// Reads the atoms again of the elements that carry a name interned after the first `names`.
+    /// Reads the atoms again of the elements noted under a name interned after the first `names`.
     fn read_atoms_of_new_names(&mut self, names: usize) {
         let sheets = &mut self.sheets;
-        let mut carriers: FxHashSet<u64> = FxHashSet::default();
+        let mut carriers: Vec<u64> = Vec::new();
         for name in sheets.atoms.names_from(names) {
             carriers.extend(sheets.unnamed.take(name));
         }
+        carriers.sort_unstable();
+        carriers.dedup();
         for id in carriers {
+            // An element destroyed after it dropped the name is still noted under it.
             let Some(element) = self.elements.get_mut(&id) else {
                 continue;
             };
-            let element_id = id_atom(&sheets.atoms, &mut sheets.unnamed, id, element.attribute("id"));
-            let classes = class_atoms(&sheets.atoms, &mut sheets.unnamed, id, element.attribute("class"));
-            element.set_css_atoms(element_id, classes);
+            read_element_atoms(sheets, id, element);
         }
     }
 

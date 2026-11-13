@@ -58,7 +58,7 @@ pub struct StyleSheets {
     /// Elements to match again, each with the places around it a change reaches.
     pub(crate) pending: Vec<(u64, Reach)>,
     pub(crate) atoms: Atoms,
-    /// The class and id names of the elements that no sheet names, kept while the elements' atoms are fresh.
+    /// The elements that carry a class or id no sheet names.
     pub(super) unnamed: UnnamedNames,
     pub(crate) style: Atom,
     /// Every `<style>` element, connected or not.
@@ -124,26 +124,16 @@ impl StyleSheets {
         self.parse_cache.texts()
     }
 
-    /// Notes no more that `element` carries the names no sheet has that its `attribute` (class or
-    /// id) holds.
-    pub(super) fn forget_names(&mut self, id: u64, element: &RetainedElement, attribute: &str) {
-        let Some(value) = element.attribute(attribute) else {
-            return;
-        };
-        match attribute {
-            "class" => {
-                for class in value.split_ascii_whitespace() {
-                    self.forget_unnamed(class, id);
-                }
+    /// Notes no more that a destroyed `element` carries the names no sheet has that its class and
+    /// id hold now. The names it held before stay noted, until a sheet takes them.
+    pub(super) fn forget_names(&mut self, id: u64, element: &RetainedElement) {
+        if let Some(value) = element.attribute("class") {
+            for class in value.split_ascii_whitespace() {
+                self.unnamed.forget(class, id);
             }
-            "id" => self.forget_unnamed(&value, id),
-            _ => {}
         }
-    }
-
-    fn forget_unnamed(&mut self, name: &str, id: u64) {
-        if self.atoms.get(name).is_none() {
-            self.unnamed.forget(name, id);
+        if let Some(value) = element.attribute("id") {
+            self.unnamed.forget(&value, id);
         }
     }
 
@@ -219,7 +209,7 @@ impl StyleSheets {
     /// What the elements hold (`matched`, the interner) is numbered by the index just replaced, and
     /// is the caller's to bring to the new one: by the returned [`Reload`] when it can, else by
     /// matching every element again.
-    pub(super) fn load(&mut self, texts: &[String]) -> Option<Reload> {
+    pub(super) fn load(&mut self, texts: Vec<String>) -> Option<Reload> {
         let mut layers = Layers::default();
         let assembled = self.parse_cache.parse(texts, &mut self.atoms, &mut layers, &mut self.validator);
         for skipped in assembled.unsupported {
@@ -321,7 +311,7 @@ impl StyleSheets {
         self.index = Default::default();
         self.interner = Default::default();
         self.atoms = Atoms::default();
-        self.unnamed.clear();
+        self.unnamed = Default::default();
         self.style = self.atoms.intern("style");
         self.style_texts.get_mut().clear();
     }

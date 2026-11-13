@@ -83,7 +83,6 @@ impl ParseCache {
         self.texts.clear();
     }
 
-    /// The texts of the last load.
     pub(super) fn texts(&self) -> &[String] {
         &self.texts
     }
@@ -93,7 +92,7 @@ impl ParseCache {
     /// only the rules of `texts`.
     pub(super) fn parse(
         &mut self,
-        texts: &[String],
+        texts: Vec<String>,
         atoms: &mut Atoms,
         layers: &mut Layers,
         validator: &mut Validator,
@@ -155,7 +154,7 @@ impl ParseCache {
             self.rules.retain(|_, cached| cached.used_in.load(Ordering::Relaxed) == load);
         }
         self.cut = cut;
-        self.texts = texts.to_vec();
+        self.texts = texts;
         assembled
     }
 }
@@ -548,7 +547,7 @@ mod tests {
 
     fn assemble(cache: &mut ParseCache, atoms: &mut Atoms, texts: &[String]) -> (Vec<String>, Assembled) {
         let (mut layers, mut validator) = (Layers::default(), Validator::default());
-        let assembled = cache.parse(texts, atoms, &mut layers, &mut validator);
+        let assembled = cache.parse(texts.to_vec(), atoms, &mut layers, &mut validator);
         (describe(&assembled, &layers), assembled)
     }
 

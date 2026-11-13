@@ -1224,8 +1224,12 @@ fn names_no_sheet_mentions_are_not_interned_and_elements_keep_nothing_of_them() 
     assert!(doc.tree.elements[&last].attribute_store().is_some());
 }
 
+fn atom_reads() -> usize {
+    super::tree::ATOM_READS.with(std::cell::Cell::get)
+}
+
 #[test]
-fn the_names_no_sheet_has_are_noted_for_the_elements_that_carry_them_until_they_do_not() {
+fn the_names_no_sheet_has_are_noted_for_the_elements_that_carry_them() {
     let mut doc = Doc::new();
     doc.style_element(ROOT, ".a { color: red }");
     let first = doc.classed("div", ROOT, "late other a");
@@ -1237,15 +1241,37 @@ fn the_names_no_sheet_has_are_noted_for_the_elements_that_carry_them_until_they_
 
     doc.tree.set_attribute(first, "class", Some("late a".into()));
     doc.flush();
-    assert_eq!((unnamed(&doc, "late"), unnamed(&doc, "other")), (2, 1));
-    doc.tree.set_attribute(first, "class", Some("late a".into()));
-    assert_eq!(unnamed(&doc, "late"), 2, "a write that changes nothing keeps what it noted");
+    assert_eq!(unnamed(&doc, "other"), 2, "a note is not taken back when the name is dropped");
     doc.tree.set_attribute(second, "id", None);
-    assert_eq!(unnamed(&doc, "late"), 1);
-    doc.tree.destroy_element(first);
-    doc.tree.destroy_element(second);
+    assert_eq!(unnamed(&doc, "late"), 2);
+}
+
+#[test]
+fn a_destroyed_element_is_forgotten_by_the_names_it_carries() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a { color: red }");
+    let carrier = doc.classed("div", ROOT, "late other");
+    doc.tree.set_attribute(carrier, "id", Some("menu".into()));
+    doc.flush();
+    assert_eq!(doc.tree.sheets.unnamed.names(), 3);
+    doc.tree.destroy_element(carrier);
     doc.flush();
     assert_eq!(doc.tree.sheets.unnamed.names(), 0);
+}
+
+#[test]
+fn a_name_an_element_dropped_before_it_was_destroyed_is_no_trouble_when_a_sheet_names_it() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a { color: red }");
+    let dropped = doc.classed("div", ROOT, "late");
+    let kept = doc.classed("div", ROOT, "late");
+    doc.flush();
+    doc.tree.set_attribute(dropped, "class", Some("other".into()));
+    doc.flush();
+    doc.tree.destroy_element(dropped);
+    doc.style_element(ROOT, ".late { color: blue }");
+    doc.flush();
+    assert_eq!(doc.color(kept), Some("blue"));
 }
 
 #[test]
@@ -1255,13 +1281,43 @@ fn a_sheet_that_names_a_name_reads_only_the_elements_that_carry_it() {
     let carrier = doc.classed("div", ROOT, "late other");
     let others: Vec<u64> = (0..50).map(|n| doc.classed("div", ROOT, &format!("c{n}"))).collect();
     doc.flush();
+    let before = atom_reads();
     doc.style_element(ROOT, ".late { color: blue }");
     doc.flush();
+    assert_eq!(atom_reads() - before, 1, "only the carrier is read");
     assert_eq!(doc.color(carrier), Some("blue"));
     assert_eq!(doc.tree.sheets.unnamed.carriers("late"), 0);
     assert_eq!(doc.tree.sheets.unnamed.carriers("other"), 1, "a name still unnamed stays noted");
     assert!(others.iter().all(|other| doc.color(*other).is_none()));
     assert!(doc.tree.elements[&others[0]].css().is_none_or(|css| css.classes.is_empty()));
+}
+
+#[test]
+fn a_rewritten_class_does_not_hide_the_id_beside_it_from_a_later_sheet() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a { color: red }");
+    let menu = doc.classed("div", ROOT, "menu");
+    doc.tree.set_attribute(menu, "id", Some("menu".into()));
+    doc.flush();
+    doc.tree.set_attribute(menu, "class", Some("other".into()));
+    doc.flush();
+    doc.style_element(ROOT, "#menu { color: blue }");
+    doc.flush();
+    assert_eq!(doc.color(menu), Some("blue"));
+}
+
+#[test]
+fn a_rewritten_id_does_not_hide_the_class_beside_it_from_a_later_sheet() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a { color: red }");
+    let menu = doc.classed("div", ROOT, "menu");
+    doc.tree.set_attribute(menu, "id", Some("menu".into()));
+    doc.flush();
+    doc.tree.set_attribute(menu, "id", None);
+    doc.flush();
+    doc.style_element(ROOT, ".menu { color: blue }");
+    doc.flush();
+    assert_eq!(doc.color(menu), Some("blue"));
 }
 
 #[test]

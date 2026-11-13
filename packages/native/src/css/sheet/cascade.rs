@@ -10,7 +10,7 @@
 
 use std::sync::{Arc, Weak};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::css::covers;
 use crate::css::lenient::Declaration;
@@ -75,7 +75,7 @@ impl MatchedInterner {
                 continue;
             }
             let renumbered = key.iter().map(|found| renumber(found.rule).map(|rule| RuleMatch { rule, ..*found })).collect();
-            changes.push(Renumbering { list, key: key.clone(), renumbered });
+            changes.push(Renumbering { list, renumbered });
         }
         changes
     }
@@ -86,16 +86,19 @@ impl MatchedInterner {
     pub(super) fn replace(
         &mut self,
         index: &RuleIndex,
-        changes: &[Renumbering],
+        changes: Vec<Renumbering>,
     ) -> FxHashMap<usize, Option<Arc<MatchedRules>>> {
-        for change in changes {
-            self.lists.remove(&change.key);
-        }
+        let changed: FxHashSet<usize> = changes.iter().map(Renumbering::address).collect();
+        self.lists.retain(|_, weak| weak.strong_count() > 0 && !changed.contains(&(weak.as_ptr() as usize)));
         let mut replaced = FxHashMap::default();
         replaced.reserve(changes.len());
+        // The old lists are held until every replacement is interned, so a new list cannot take an
+        // address `replaced` is keyed by.
+        let mut held = Vec::with_capacity(changes.len());
         for change in changes {
-            let replacement = change.renumbered.as_ref().map(|key| self.intern(index, key.clone()));
-            replaced.insert(change.address(), replacement);
+            let address = change.address();
+            replaced.insert(address, change.renumbered.map(|key| self.intern(index, key)));
+            held.push(change.list);
         }
         replaced
     }
@@ -105,7 +108,6 @@ impl MatchedInterner {
 pub(super) struct Renumbering {
     /// Held so that its address stays its own until the change is made.
     list: Arc<MatchedRules>,
-    key: Key,
     /// What the list is after the change, `None` when it read a rule that is gone.
     renumbered: Option<Key>,
 }

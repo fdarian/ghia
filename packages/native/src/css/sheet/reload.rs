@@ -260,7 +260,6 @@ impl Features {
 
 /// What a scoped reload will do, decided before anything is changed.
 pub(super) struct Plan {
-    reload: Reload,
     /// The matched lists the new numbering changes.
     renumbering: Vec<Renumbering>,
     /// The elements to match again.
@@ -299,14 +298,14 @@ impl RetainedTree {
                 }
             }
         }
-        Some(Plan { reload, renumbering, reached, holders })
+        Some(Plan { renumbering, reached, holders })
     }
 
     /// Brings the elements to the sheets just loaded: renumbers what they matched, and marks the
     /// elements the plan reached for the flush.
     pub(super) fn apply_reload(&mut self, plan: Plan) {
         if !plan.renumbering.is_empty() {
-            let replaced = self.sheets.interner.replace(&self.sheets.index, &plan.renumbering);
+            let replaced = self.sheets.interner.replace(&self.sheets.index, plan.renumbering);
             for id in &plan.holders {
                 let element = self.elements.get_mut(id).expect("the plan found the element in this tree");
                 let moved = element

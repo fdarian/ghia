@@ -40,7 +40,6 @@ impl Atoms {
         self.names.len()
     }
 
-    /// The names interned after the first `count`.
     pub(super) fn names_from(&self, count: usize) -> impl Iterator<Item = &str> {
         self.names[count..].iter().map(|name| &**name)
     }

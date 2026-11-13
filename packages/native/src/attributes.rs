@@ -129,20 +129,12 @@ impl RetainedTree {
     /// and not on an HTML one (see `RetainedElement::attribute`). Returns whether it changed. An
     /// element that does not exist changes nothing.
     pub fn set_attribute(&mut self, id: u64, name: &str, value: Option<String>) -> bool {
-        let names_noted = self.sheets.enabled && (name.eq_ignore_ascii_case("class") || name.eq_ignore_ascii_case("id"));
-        if names_noted {
-            self.sheets_attribute_changing(id, name);
-        }
         let changed = match self.elements.get_mut(&id) {
             Some(element) => element.set_attribute(&mut self.attribute_names, name, value),
             None => false,
         };
-        if self.sheets.enabled {
-            if changed {
-                self.sheets_attribute_changed(id, name);
-            } else if names_noted {
-                self.sheets_attribute_kept(id, name);
-            }
+        if changed && self.sheets.enabled {
+            self.sheets_attribute_changed(id, name);
         }
         changed
     }
