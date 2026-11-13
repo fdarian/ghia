@@ -192,7 +192,7 @@ impl StyleSheets {
     /// matching every element again.
     pub(super) fn load(&mut self, texts: Vec<String>) -> Option<Reload> {
         let mut layers = Layers::default();
-        let assembled = self.parse_cache.parse(&texts, &mut self.atoms, &mut layers, &mut self.validator);
+        let assembled = self.parse_cache.parse(&self.loaded, &texts, &mut self.atoms, &mut layers, &mut self.validator);
         for skipped in assembled.unsupported {
             self.warn_skipped(skipped);
         }
