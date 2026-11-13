@@ -150,7 +150,7 @@ fn enter_ancestors(ctx: &mut BuildCtx, chain: &[u64]) -> ParentFacts {
             .map(|style| crate::events::state_styles::resolve_pointer_states(style, pointer_states));
         let base = stated.as_ref().or(declared);
         let (substituted, custom) = ctx.substitute_vars(*id, base);
-        let base = substituted.as_ref().or(base);
+        let base = substituted.as_deref().or(base);
         let focused = base.map(|style| ctx.focus_styles.folded(*id, style, ctx.focus_handles.contains_key(id)));
         let style = focused.as_deref();
         parent.lays_out_items = crate::layout::display::lays_out_items(style.and_then(|style| style.display.as_deref()));
@@ -176,7 +176,7 @@ fn style_at_read(
     };
     if crate::layout::box_generation::is_display_none(element) {
         let (substituted, custom) = ctx.substitute_vars(id, declared);
-        let style = substituted.as_ref().or(declared).map(|style| focused(ctx, style)).unwrap_or_default();
+        let style = substituted.as_deref().or(declared).map(|style| focused(ctx, style)).unwrap_or_default();
         return (style, custom);
     }
     let pointer_states = declared
@@ -189,7 +189,7 @@ fn style_at_read(
     });
     let base_style = state_style.as_ref().or(declared);
     let (var_style, custom) = ctx.substitute_vars(id, base_style);
-    let base_style = var_style.as_ref().or(base_style);
+    let base_style = var_style.as_deref().or(base_style);
     let animations = ctx.css_animations.rewind_point(id);
     let transitions = ctx.css_transitions.rewind_point(id);
     let animated = crate::renderer::animate_style_at(

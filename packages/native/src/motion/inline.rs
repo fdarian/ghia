@@ -145,7 +145,7 @@ impl InlineStyles {
                     (None, Some(base)) => {
                         let folded = folded(base, states(*id, base));
                         match super::resolve_vars(&folded, &font) {
-                            Some(resolved) => Cow::Borrowed(&*substituted.entry(*id).or_insert(resolved)),
+                            Some(resolved) => Cow::Borrowed(&*substituted.entry(*id).or_insert(*resolved)),
                             None => folded,
                         }
                     }
@@ -174,7 +174,7 @@ fn is_moving(
     };
     let at_rest = folded(style, states(id, style));
     let at_rest = match super::resolve_vars(&at_rest, font) {
-        Some(substituted) => Cow::Owned(substituted),
+        Some(substituted) => Cow::Owned(*substituted),
         None => at_rest,
     };
     *shown != *at_rest || super::css_animation::declares_animation(&at_rest)
