@@ -35,6 +35,7 @@ pub(crate) mod mask_border;
 mod parse_cost;
 pub(crate) mod keyword_number;
 pub(crate) mod opacity;
+pub(crate) mod paint_diff;
 pub(crate) mod outline;
 pub(crate) mod overflow_anchor;
 pub(crate) mod place;
