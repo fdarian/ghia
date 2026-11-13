@@ -40,6 +40,11 @@ impl Atoms {
         self.names.len()
     }
 
+    /// The names interned after the first `count`.
+    pub(super) fn names_from(&self, count: usize) -> impl Iterator<Item = &str> {
+        self.names[count..].iter().map(|name| &**name)
+    }
+
     /// The atom of an HTML element's tag: a selector compares it lower-cased, elements keep it as given.
     pub fn tag(&self, name: &str) -> Option<Atom> {
         if name.bytes().any(|byte| byte.is_ascii_uppercase()) {

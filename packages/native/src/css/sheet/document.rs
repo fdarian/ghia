@@ -11,7 +11,7 @@ use std::sync::{Arc, Weak};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::retained_tree::{InternedStyle, StyleTable};
+use crate::retained_tree::{InternedStyle, RetainedElement, StyleTable};
 use crate::style::StyleDesc;
 
 use super::atoms::{Atom, Atoms};
@@ -22,6 +22,7 @@ use super::layers::Layers;
 use super::parse_cache::{ParseCache, ParsedRule};
 use super::reload::Reload;
 use super::states::LoggedFolds;
+use super::unnamed::UnnamedNames;
 use super::validate::Validator;
 use crate::css::lenient::number_text;
 
@@ -57,6 +58,8 @@ pub struct StyleSheets {
     /// Elements to match again, each with the places around it a change reaches.
     pub(crate) pending: Vec<(u64, Reach)>,
     pub(crate) atoms: Atoms,
+    /// The class and id names of the elements that no sheet names, kept while the elements' atoms are fresh.
+    pub(super) unnamed: UnnamedNames,
     pub(crate) style: Atom,
     /// Every `<style>` element, connected or not.
     pub(crate) style_elements: FxHashSet<u64>,
@@ -95,6 +98,7 @@ impl Default for StyleSheets {
             mark_all: false,
             pending: Vec::new(),
             atoms,
+            unnamed: UnnamedNames::default(),
             style,
             style_elements: FxHashSet::default(),
             constructed: FxHashMap::default(),
@@ -118,6 +122,29 @@ impl StyleSheets {
     /// The texts the index was built from, in cascade order.
     pub(crate) fn loaded(&self) -> &[String] {
         self.parse_cache.texts()
+    }
+
+    /// Notes no more that `element` carries the names no sheet has that its `attribute` (class or
+    /// id) holds.
+    pub(super) fn forget_names(&mut self, id: u64, element: &RetainedElement, attribute: &str) {
+        let Some(value) = element.attribute(attribute) else {
+            return;
+        };
+        match attribute {
+            "class" => {
+                for class in value.split_ascii_whitespace() {
+                    self.forget_unnamed(class, id);
+                }
+            }
+            "id" => self.forget_unnamed(&value, id),
+            _ => {}
+        }
+    }
+
+    fn forget_unnamed(&mut self, name: &str, id: u64) {
+        if self.atoms.get(name).is_none() {
+            self.unnamed.forget(name, id);
+        }
     }
 
     pub(crate) fn has_work(&self) -> bool {
@@ -294,6 +321,7 @@ impl StyleSheets {
         self.index = Default::default();
         self.interner = Default::default();
         self.atoms = Atoms::default();
+        self.unnamed.clear();
         self.style = self.atoms.intern("style");
         self.style_texts.get_mut().clear();
     }

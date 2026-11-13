@@ -35,6 +35,8 @@
 // Runtime sheet changes (mode `runtime`): N items mounted with an adopted CSSStyleSheet (`.item` rules, plus EXTRA_RULES unrelated
 // atomic ones) that styles them, then CSSOM edits of that sheet, each phase an add and a remove reported separately:
 //   insert-nomatch / delete-nomatch  insertRule(`.nomatch-x { color: red }`) at the end / deleteRule of it
+//   insert-newname / delete-newname  the same with a class no earlier rule named, a new one each repetition (CSS-in-JS inserts one per
+//                                    component), which the elements' class atoms have to be read for; insert-nomatch repeats one name
 //   insert-one / delete-one          the same for a rule that matches one element (`#i<middle>`)
 //   insert-all / delete-all          the same for a rule that matches every item (`.item`)
 //   edit-all / edit-one              deleteRule + insertRule at the same index in one flush, new declaration value (the CSSOM here has
@@ -599,6 +601,8 @@ function runSheetChanges(count: number) {
   }
   const nothing = () => {}
   pair("insert-nomatch", "delete-nomatch", () => append(".nomatch-x { color: red }"), removeLast, nothing)
+  let fresh = 0
+  pair("insert-newname", "delete-newname", () => append(`.nomatch-${fresh++} { color: red }`), removeLast, nothing)
   pair("insert-one", "delete-one", () => append(`#i${middle} { color: #123456 }`), removeLast, (added, where) => {
     expectColor(middle, added ? marked : white, where)
     expectColor(last, white, where)
