@@ -133,6 +133,8 @@ The same walk counts the elements reached. If more than half are, the plan is `N
 
 The load falls back to matching every element (clearing the interner and the cascade cache) when any of these holds, and a test names each: a source was parsed whole in either load; a rule that stays changed its layer rank or the unlayered rank moved (an `@layer` added or removed); an added rule's subject needs none of an id, class, attribute or tag (`*`, `:root`, `:not(.a)`; an `:is()` or `:where()` subject, which is what `&:hover` nested in `.a` is, takes the features of its arguments and falls back only if one has none); mark-all was already pending or the atoms were not fresh; or more than half of the elements are reached.
 
+Measured (`profile-stylesheet-cost`, `runtime` mode, 10,000 items, batch Minstr): `insertRule` of a rule nothing matches 1.0, with a class name no rule had before the same; a rule matching one element 0.65; a second `<style>` with an unrelated rule 2.5; a rule matching every item 93, which is a match of every item whatever the reload does. With 3,000 unrelated rules in the sheet the first is 7.3, the cost of indexing them again.
+
 An element that is not in the document, or is not matchable, matches nothing: removing a `<style>` element restores every element it styled.
 
 ## Sheet sources
