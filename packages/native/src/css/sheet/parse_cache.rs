@@ -45,9 +45,17 @@ pub(super) struct Assembled {
     pub(super) units: Option<Vec<Arc<ParsedRule>>>,
 }
 
+struct Cached {
+    text: Arc<str>,
+    parsed: Arc<ParsedRule>,
+    /// The load that last used the rule: a rule no load uses is dropped.
+    used_in: u64,
+}
+
 #[derive(Default)]
 pub(super) struct ParseCache {
-    rules: FxHashMap<Arc<str>, Arc<ParsedRule>>,
+    rules: FxHashMap<Arc<str>, Cached>,
+    loads: u64,
     /// Per source of the last load, its top-level rule texts, `None` when it was parsed whole.
     sources: Vec<Option<Vec<Arc<str>>>>,
 }
@@ -75,7 +83,9 @@ impl ParseCache {
         layers: &mut Layers,
         validator: &mut Validator,
     ) -> Assembled {
-        let mut seen: FxHashMap<Arc<str>, Arc<ParsedRule>> = FxHashMap::default();
+        self.loads += 1;
+        let load = self.loads;
+        let mut used = 0;
         let mut sources = Vec::with_capacity(texts.len());
         let mut assembled = Assembled { rules: Vec::new(), unsupported: Vec::new(), units: Some(Vec::new()) };
         for text in texts {
@@ -90,9 +100,21 @@ impl ParseCache {
             let mut rule_texts = Vec::with_capacity(ranges.len());
             for range in ranges {
                 let rule_text = &text[range];
-                let (key, parsed) = match seen.get_key_value(rule_text).or_else(|| self.rules.get_key_value(rule_text)) {
-                    Some((key, parsed)) => (key.clone(), parsed.clone()),
-                    None => (Arc::<str>::from(rule_text), Arc::new(parse_rule(rule_text, atoms, validator))),
+                let (key, parsed) = match self.rules.get_mut(rule_text) {
+                    Some(cached) => {
+                        if cached.used_in != load {
+                            cached.used_in = load;
+                            used += 1;
+                        }
+                        (cached.text.clone(), cached.parsed.clone())
+                    }
+                    None => {
+                        let key = Arc::<str>::from(rule_text);
+                        let parsed = Arc::new(parse_rule(rule_text, atoms, validator));
+                        self.rules.insert(key.clone(), Cached { text: key.clone(), parsed: parsed.clone(), used_in: load });
+                        used += 1;
+                        (key, parsed)
+                    }
                 };
                 let mapped = parsed.layers.replay_into(layers);
                 assembled.rules.extend(parsed.rules.iter().map(|(body, layer)| DocRule {
@@ -103,12 +125,13 @@ impl ParseCache {
                 if let Some(units) = &mut assembled.units {
                     units.push(parsed.clone());
                 }
-                seen.insert(key.clone(), parsed);
                 rule_texts.push(key);
             }
             sources.push(Some(rule_texts));
         }
-        self.rules = seen;
+        if used != self.rules.len() {
+            self.rules.retain(|_, cached| cached.used_in == load);
+        }
         self.sources = sources;
         assembled
     }
