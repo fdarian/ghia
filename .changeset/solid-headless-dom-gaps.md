@@ -25,3 +25,5 @@ The lists `getElementsByTagName`, `getElementsByClassName` and `getElementsByNam
 An attribute written to the stand-in `<html>`, `<head>` or `<body>` before the first `render()` (`document.documentElement.classList.add("dark")`) updates the live lists (`document.getElementsByClassName("dark")` finds it) and gives a `MutationObserver` on it a record.
 
 A live list drops the elements it found at the next change to the tree instead of holding them until it is read again.
+
+A layer's `initialFocus` and `finalFocus` target, and the focus a Select or Combobox gives back or takes, is judged by the tree as the update left it: the queued mutations are sent before `focusElement`, so a target mounted, shown or made focusable in the same update takes focus. `focusElementById(renderer, id)` is exported from `@ghia/native/host` for code that holds an id.

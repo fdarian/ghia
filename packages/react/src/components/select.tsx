@@ -12,6 +12,7 @@ import React, {
 } from "react"
 import type { ReactElement, ReactNode } from "react"
 import type { HostMouseEvent, HostPointerEvent, KeyEvent, Props, PublicInstance } from "../types/host.js"
+import { focusElementById } from "@ghia/native/host"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import {
   FloatingLayer,
@@ -115,8 +116,8 @@ export function Select({
 
   const setOpen = (nextOpen: boolean, restoreFocus = true) => {
     setOpenState(nextOpen)
-    if (!nextOpen && restoreFocus && triggerRef.current) {
-      renderer?.focusElement?.(triggerRef.current.nativeId)
+    if (!nextOpen && restoreFocus && triggerRef.current && renderer) {
+      focusElementById(renderer, triggerRef.current.nativeId)
     }
   }
 

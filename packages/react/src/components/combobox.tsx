@@ -9,7 +9,7 @@ import React, {
 } from "react"
 import type { ReactElement, ReactNode } from "react"
 import type { DomEvent, HostInputEvent } from "@ghia/native/host"
-import { preventEventDefault } from "@ghia/native/host"
+import { focusElementById, preventEventDefault } from "@ghia/native/host"
 import type {
   HostMouseEvent,
   HostPointerEvent,
@@ -153,7 +153,7 @@ export function Combobox({
     setOpenState(nextOpen)
     if (nextOpen) {
       queueMicrotask(() => {
-        if (inputRef.current) renderer?.focusElement?.(inputRef.current.nativeId)
+        if (inputRef.current && renderer) focusElementById(renderer, inputRef.current.nativeId)
       })
     }
   }

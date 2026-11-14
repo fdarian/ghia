@@ -38,6 +38,16 @@ export function focusHostElement(element: FocusableHost, options?: FocusOptions)
   if (!options?.preventScroll) scrollFocusIntoView(renderer, element.nativeId)
 }
 
+/**
+ * `renderer.focusElement(id)` after the queued mutations are sent, so native judges the element by
+ * what it has now (a `tabIndex`, `display` or `inert` written in the same update). For code that
+ * has an id and no element; `focusHostElement` is `element.focus()`.
+ */
+export function focusElementById(renderer: NativeRenderer, id: number): void {
+  flushPendingMutations(renderer)
+  renderer.focusElement?.(id)
+}
+
 /** Tab and Shift+Tab. The renderer scrolls the new focus into view itself. */
 export function moveFocusByTab(renderer: NativeRenderer, backwards: boolean): void {
   const move = backwards ? renderer.focusPrevious : renderer.focusNext

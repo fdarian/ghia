@@ -6348,7 +6348,9 @@ import { DismissableLayer } from '@ghia/react' // or '@ghia/solid'
 A layer mounted inside another is always above it, even when both open in the
 same commit. `DismissableLayer` also takes `initialFocus()` and
 `finalFocus(previous)`, which return an element id or `null`. The stack calls
-them in stack order, so only the top layer takes focus on open.
+them in stack order, so only the top layer takes focus on open. The queued mutations are sent first, so a target
+mounted, shown or made focusable in the same update as the layer is judged by what it has now.
+`focusElementById(renderer, id)` from `@ghia/native/host` does the same for code that calls `renderer.focusElement(id)` itself.
 
 Framework-free code uses `pushDismissLayer(renderer, layer, { previousFocus })`
 with a `parent` field, and calls the returned function when the layer closes.

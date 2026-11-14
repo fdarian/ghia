@@ -9,7 +9,7 @@ import {
   type JSX,
 } from "solid-js"
 import type { DomEvent, HostInputEvent } from "@ghia/native/host"
-import { preventEventDefault, type HostMouseEvent, type HostPointerEvent, type HostProps, type InputProps, type KeyEvent } from "@ghia/native/host"
+import { focusElementById, preventEventDefault, type HostMouseEvent, type HostPointerEvent, type HostProps, type InputProps, type KeyEvent } from "@ghia/native/host"
 import type { HostElement } from "../host.js"
 import { jsx } from "../jsx-runtime.js"
 import { useGpuixRequired } from "../root.js"
@@ -91,7 +91,7 @@ export function Combobox(props: ComboboxProps): JSX.Element {
     if (previous !== next) props.onOpenChange?.(next)
     if (next) {
       queueMicrotask(() => {
-        if (inputRef.current) renderer.focusElement?.(inputRef.current.nativeId)
+        if (inputRef.current) focusElementById(renderer, inputRef.current.nativeId)
       })
     }
   }
