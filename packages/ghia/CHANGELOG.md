@@ -1,5 +1,71 @@
 # ghia
 
+## 0.13.0
+
+### Minor Changes
+
+- 530acb9: `ghia build` bundles a Worker the app starts with `new Worker(new URL("./raster.ts", import.meta.url))`, in the UI or the server code: the file is bundled on its own into `dist/raster-<hash>.worker.js`, the URL points at it, and the compiled binary carries it, so an app with its own Workers runs as one executable. A URL that is not a relative string literal is not found. The compiled binary no longer loads a `bunfig.toml` or a `.env` from the directory it is launched in. Every chunk of the build is written flat into `dist/` (no `assets/` directory). `ghia()` returns two plugins, the main one and `ghia:workers`, so code that used its result as a single `Plugin` has to index into it. With `build.sourcemap: true`, each Worker has its own `.map` file; with `'inline'` the map stays inline in the Worker. A Worker may start other Workers, or its own file. Each Worker is a build of its own, so a plugin's build hooks run once more for it.
+
+### Patch Changes
+
+- 4dcfbbf: A full reload under `ghia dev` unmounts the roots (and keeps the window) before it runs the entry again, as a page reload does. What the entry writes to `document` before `render()` (`document.documentElement.classList.add("dark")`, `document.body.addEventListener(...)`) used to land on the outgoing root's `<html>` and `<body>`, which `render()` then destroyed; it now goes to the stand-ins and carries to the new root's elements once. `@ghia/native/roots` exports `unmountAllRoots()`, and `registerRoot()` is how an adapter's root joins it. A `stop` that throws is logged and the reload goes on.
+- 2e44be5: A caret blink, or any other patch, is no longer a whole frame after a stylesheet sets `white-space` on elements mounted in the same batch (StyleX does this for rows it appends). A wheel on a div scroller is a scroll write, as in a browser, so a scroll listener that reads `scrollTop` after it no longer forces a layout pass on every wheel event (TanStack Virtual does this). `ghia dev` no longer fails at startup in a directory with an HTML page: the unused Vite `client` environment does not scan it for dependencies.
+- Updated dependencies [0207da8]
+- Updated dependencies [3fbd83c]
+- Updated dependencies [7a2b5a8]
+- Updated dependencies [80a3be4]
+- Updated dependencies [4a1e865]
+- Updated dependencies [f016dcd]
+- Updated dependencies [3f8d04b]
+- Updated dependencies [4c17914]
+- Updated dependencies [17a52f2]
+- Updated dependencies [9ee7f29]
+- Updated dependencies [404fff1]
+- Updated dependencies [108927a]
+- Updated dependencies [f2bef8f]
+- Updated dependencies [a493cf1]
+- Updated dependencies [3452f68]
+- Updated dependencies [18c692c]
+- Updated dependencies [947501e]
+- Updated dependencies [0f1bf90]
+- Updated dependencies [1d7829a]
+- Updated dependencies [ec44f9b]
+- Updated dependencies [cccd1c5]
+- Updated dependencies [b08d26b]
+- Updated dependencies [bbc26f7]
+- Updated dependencies [4572e56]
+- Updated dependencies [4abfea9]
+- Updated dependencies [3cc3b0b]
+- Updated dependencies [0925cff]
+- Updated dependencies [59be768]
+- Updated dependencies [7785655]
+- Updated dependencies [4dcfbbf]
+- Updated dependencies [86435ae]
+- Updated dependencies [75aa218]
+- Updated dependencies [fb29c70]
+- Updated dependencies [04d2672]
+- Updated dependencies [d636ace]
+- Updated dependencies [61a5e5b]
+- Updated dependencies [bc7a267]
+- Updated dependencies [ff24328]
+- Updated dependencies [65419e0]
+- Updated dependencies [6c10302]
+- Updated dependencies [a5987b1]
+- Updated dependencies [b7cb690]
+- Updated dependencies [1c653fa]
+- Updated dependencies [4fcc0be]
+- Updated dependencies [2e44be5]
+- Updated dependencies [dbff079]
+- Updated dependencies [aaea77f]
+- Updated dependencies [205828b]
+- Updated dependencies [7ae7555]
+- Updated dependencies [8cec6c4]
+- Updated dependencies [7fd691e]
+- Updated dependencies [bf87967]
+- Updated dependencies [0809748]
+- Updated dependencies [2b472be]
+  - @ghia/native@0.13.0
+
 ## 0.12.1
 
 ### Patch Changes
