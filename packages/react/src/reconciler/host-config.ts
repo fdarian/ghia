@@ -435,6 +435,20 @@ export function portalContainerFor(target: Instance): Container {
  * change of the `style` prop is applied onto the style code wrote, property by property, and a
  * prop React changed or removed drops code's value for it.
  */
+/**
+ * React DOM sets an attribute it has no property for under the name it was given, so `<label for="x">` links in a
+ * browser. The element reads the label's target as `htmlFor`, so the prop is renamed on the way in. `for` is not in
+ * React's types; this is for code that writes it anyway (a library's JSX, an untyped spread).
+ */
+function hostPropsOf(type: ElementType, props: Props): Props {
+  if (type !== "label" || !("for" in props)) return props
+  const written = props as Record<string, unknown>
+  const renamed: Record<string, unknown> = { ...written }
+  delete renamed.for
+  if (renamed.htmlFor === undefined) renamed.htmlFor = written.for
+  return renamed as Props
+}
+
 function adoptProps(
   instance: Instance,
   state: HostNodeState,
@@ -523,7 +537,7 @@ export const hostConfig = {
     rootContainerInstance: Container,
     _hostContext: HostContext
   ): Instance {
-    return createHostElement(nextId(rootContainerInstance), type, props, rootContainerInstance)
+    return createHostElement(nextId(rootContainerInstance), type, hostPropsOf(type, props), rootContainerInstance)
   },
 
   appendChild(parent: Instance, child: Instance | TextInstance): void {
@@ -651,11 +665,13 @@ export const hostConfig = {
 
   commitUpdate(
     instance: Instance,
-    _type: ElementType,
-    oldProps: Props,
-    newProps: Props,
+    type: ElementType,
+    previousProps: Props,
+    nextProps: Props,
     _internalInstanceHandle: unknown
   ): void {
+    const oldProps = hostPropsOf(type, previousProps)
+    const newProps = hostPropsOf(type, nextProps)
     // A showing popover whose `popover` prop changed closes, with its events, once the whole update is queued.
     if (oldProps.popover !== newProps.popover) {
       writePopoverAttribute(instance, () => applyUpdate(instance, oldProps, newProps))

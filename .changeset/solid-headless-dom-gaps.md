@@ -27,3 +27,5 @@ An attribute written to the stand-in `<html>`, `<head>` or `<body>` before the f
 A live list drops the elements it found at the next change to the tree instead of holding them until it is read again.
 
 A layer's `initialFocus` and `finalFocus` target, and the focus a Select or Combobox gives back or takes, is judged by the tree as the update left it: the queued mutations are sent before `focusElement`, so a target mounted, shown or made focusable in the same update takes focus. `focusElementById(renderer, id)` is exported from `@ghia/native/host` for code that holds an id.
+
+A `<label>` that React is given `for` (a library's JSX, an untyped spread) names its control as in a browser, where React DOM sets the attribute: `@ghia/react` sets it as `htmlFor`, as `@ghia/solid` does.
