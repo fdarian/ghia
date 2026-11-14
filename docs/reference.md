@@ -3982,8 +3982,7 @@ A `<span>` with a `tabIndex` is focusable like any element, and stays inline:
   has no size, so a screen reader finds it at the top-left of the paragraph, not
   over its glyphs.
 - A span with no text left, or with `display: none`, has no box and no tab stop.
-  Like a `display: none` element, it still takes `focus()`, and its `focus`, `focusVisible`
-  and `focusWithin` styles are not painted.
+  Like a `display: none` element, it does not take `focus()` (see [Imperative focus](#imperative-focus)).
 
 **Focus styles on a span.** `focus` (while the span is the focused one),
 `focusVisible` (while the span matches `:focus-visible`) and `focusWithin` (while
@@ -5013,6 +5012,7 @@ bubbling, but a `div` that only declares `onKeyDown` never takes focus. Give it 
 | `autoFocus` | Takes focus once, when it mounts: in the commit that attaches it, as in React DOM. Windows and Linux focus it on the next frame |
 | `disabled` (`<input>`, `<textarea>`, `<button>`) | Not focusable, whatever its `tabIndex`. Focus leaves it when it becomes disabled |
 | `inert` | Nothing in the subtree is focusable; focus leaves it when an ancestor becomes inert. See below |
+| `display: none` on the element or an ancestor, from its `style`, a stylesheet rule or the `hidden` attribute | `focus()` does nothing, as in a browser: no focus change and no event, and the element is not scrolled to. See [Imperative focus](#imperative-focus) |
 
 ### `inert`
 
@@ -5593,6 +5593,16 @@ the calls that start another input, or drive the test app itself
 handler.
 
 ### Imperative focus
+
+`element.focus()` does nothing for an element that is not being rendered: it, or an ancestor, is
+`display: none` (its `style`, a stylesheet rule or the `hidden` attribute). Chrome does the same, and a
+focus trap that falls back to a popup inside a closed `[hidden]` positioner depends on it. The check reads
+the style the element has when `focus()` is called, with the queued mutations sent first (as a browser
+flushes style before `focus()`), so an element mounted in the same tick, or one a signal just made
+visible, takes focus. It costs a computed-style read of the element and of each ancestor
+([forced reads](./fork/forced-reads.md#getcomputedstyle)). A press focuses natively and
+needs no check: a `display: none` element cannot be pressed. A label click's focus of its control and
+`focusElement` on the renderer, below `element.focus()`, do not check.
 
 `focus()`, `blur()`, `focusNext()`, `focusPrevious()` and the `within` variants fire
 their `blur`, `focusout`, `focus` and `focusin` events before they return, on

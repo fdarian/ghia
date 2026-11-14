@@ -175,7 +175,7 @@ class ReactHostElement extends HTMLElement implements Instance {
   }
 
   focus(options?: FocusOptions): void {
-    focusHostElement(containerFor(this).nativeRenderer, this.nativeId, options)
+    focusHostElement(this, options)
   }
 
   blur(): void {

@@ -88,11 +88,7 @@ describeNative('Base UI Solid Select', () => {
     expect(trigger().textContent).toBe('Cherry')
   })
 
-  // Ghia gap, not the port: the port returns focus to the trigger, and then the popup's `onMouseLeave` (pointer was over
-  // the option that closed it) calls `popup.focus()` 0 ms later (select/popup/SelectPopup.tsx:276), on a popup inside a
-  // `hidden` positioner. A browser does not focus an element that is not rendered (Chrome: `focus()` on an element under
-  // `[hidden]` or `display: none` leaves `activeElement` alone); Ghia's `focusHostElement` (native/js/focus.ts:20) does.
-  it.fails('returns focus to the trigger after a click picks an option', async () => {
+  it('returns focus to the trigger after a click picks an option', async () => {
     const app = mount(() => <Example />)
     await click(app, trigger())
     await settle(app)

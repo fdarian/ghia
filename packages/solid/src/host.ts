@@ -329,7 +329,7 @@ export class HostElement extends HTMLElement {
   }
 
   focus(options?: FocusOptions): void {
-    focusHostElement(this.mountedRenderer(), this.nativeId, options)
+    focusHostElement(this, options)
   }
 
   blur(): void {

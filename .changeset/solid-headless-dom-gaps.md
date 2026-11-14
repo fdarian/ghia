@@ -11,3 +11,5 @@ More gaps from running Kobalte unmodified. `<label for>` written by Solid's JSX 
 `HTMLButtonElement` is a global (and exported) beside `HTMLInputElement` and `HTMLTextAreaElement`: `el instanceof HTMLButtonElement` holds for a `<button>` and no other element (the Base UI ports' `useButton` checks it).
 
 A prop that leaves a Solid spread is removed. `<div {...(open() ? { "data-open": "" } : {})} />` and `<Dynamic component="div" {...props()} />` used to keep `data-open` (and an `onClick`, an `aria-*`, a `style`) after the key was gone, because `solid-js/universal`'s `spread` only visits the keys it has now; Ghia's spread takes them away as `solid-js/web` does.
+
+`element.focus()` does nothing on an element that is not rendered: `display: none` on it or an ancestor (its `style`, a stylesheet rule or the `hidden` attribute), as in a browser, where it leaves `document.activeElement` alone. It used to focus it (a Select's popup inside a `hidden` positioner took focus back from the trigger). The check reads computed `display` of the element and its ancestors after sending the queued mutations, so an element mounted or shown in the same tick is still focusable.
