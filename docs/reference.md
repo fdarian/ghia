@@ -5033,7 +5033,7 @@ bubbling, but a `div` that only declares `onKeyDown` never takes focus. Give it 
 | `autoFocus` | Takes focus once, when it mounts: in the commit that attaches it, as in React DOM. Windows and Linux focus it on the next frame |
 | `disabled` (`<input>`, `<textarea>`, `<button>`) | Not focusable, whatever its `tabIndex`. Focus leaves it when it becomes disabled |
 | `inert` | Nothing in the subtree is focusable; focus leaves it when an ancestor becomes inert. See below |
-| `display: none` on the element or an ancestor, from its `style`, a stylesheet rule or the `hidden` attribute | `focus()` does nothing, as in a browser: no focus change and no event, and the element is not scrolled to. See [Imperative focus](#imperative-focus) |
+| `display: none` on the element or an ancestor, from its `style`, a stylesheet rule or the `hidden` attribute; `visibility: hidden` or `collapse` on the element (a `visible` descendant of a hidden one is focusable); an `inert` ancestor | `focus()` does nothing, as in a browser: no focus change and no event, and the element is not scrolled to. See [Imperative focus](#imperative-focus) |
 
 ### `inert`
 
@@ -5613,15 +5613,18 @@ handler.
 
 ### Imperative focus
 
-`element.focus()` does nothing for an element that is not being rendered: it, or an ancestor, is
-`display: none` (its `style`, a stylesheet rule or the `hidden` attribute). Chrome does the same, and a
-focus trap that falls back to a popup inside a closed `[hidden]` positioner depends on it. The check reads
-the style the element has when `focus()` is called, with the queued mutations sent first (as a browser
-flushes style before `focus()`), so an element mounted in the same tick, or one a signal just made
-visible, takes focus. It costs a computed-style read of the element and of each ancestor
-([forced reads](./fork/forced-reads.md#getcomputedstyle)). A press focuses natively and
-needs no check: a `display: none` element cannot be pressed. A label click's focus of its control and
-`focusElement` on the renderer, below `element.focus()`, do not check.
+`element.focus()` does nothing for an element a browser's `focus()` would refuse, and returns with no focus
+change, no event and no scroll into view: it is not in a mounted root, it or an ancestor is `display: none`
+(its `style`, a stylesheet rule or the `hidden` attribute), its computed `visibility` is `hidden` or
+`collapse` (inherited, so a `visible` element inside a `visibility: hidden` parent does take focus), or it is
+inside an `inert` subtree. Chrome does the same, and a focus trap that falls back to a popup inside a closed
+`[hidden]` positioner depends on it. The decision uses the style the element has when `focus()` is called,
+with the queued mutations sent first (as a browser flushes style before `focus()`), so an element mounted in
+the same tick, or one a signal just made visible, takes focus. It is one native call that walks the ancestors
+once and lays nothing out ([forced reads](./fork/forced-reads.md#getcomputedstyle)), so a `focus()` after a
+mutation, as a roving-focus menu makes on every key, costs the same at any depth. `renderer.focusElement(id)`
+takes the same decision and returns whether focus was asked for. A press focuses natively and needs no
+check: a `display: none` element cannot be pressed, and a label click's focus of its control is not checked.
 
 `focus()`, `blur()`, `focusNext()`, `focusPrevious()` and the `within` variants fire
 their `blur`, `focusout`, `focus` and `focusin` events before they return, on

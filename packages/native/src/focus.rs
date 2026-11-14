@@ -563,6 +563,46 @@ fn event_payload(
     }
 }
 
+/// Whether script's `focus()` may move focus to `id`, which a browser decides from style alone: the
+/// element is in the document, takes focus (`focusable_ids` also leaves out an `inert` subtree and a
+/// computed `visibility: hidden`), has no `display: none` on it or an ancestor, and its computed
+/// `visibility` is not `collapse`. One walk up the ancestors, reading the display the build and
+/// `getComputedStyle` read (`is_display_none`: its style, a stylesheet rule, the `hidden` attribute,
+/// `@container`), with no layout or paint, because a browser's `focus()` updates style, not layout.
+///
+/// An id the tree does not hold yet is allowed: the element takes focus when it arrives
+/// (`GpuixView::request_focus`).
+pub(crate) fn script_may_focus(tree: &RetainedTree, id: u64) -> bool {
+    let Some(element) = tree.elements.get(&id) else {
+        return true;
+    };
+    if !tree.focusable_ids.contains(&id) {
+        return false;
+    }
+    let mut visibility_settled = false;
+    let mut current = element;
+    loop {
+        if crate::layout::box_generation::is_display_none(current) {
+            return false;
+        }
+        if !visibility_settled {
+            match current.style.as_deref().and_then(|style| style.visibility.as_deref()) {
+                Some("collapse") => return false,
+                // The nearest declaration is the computed value; `hidden` is already out of `focusable_ids`.
+                Some(_) => visibility_settled = true,
+                None => {}
+            }
+        }
+        let Some(parent) = current.parent else {
+            return tree.root_id == Some(current.id);
+        };
+        let Some(above) = tree.elements.get(&parent) else {
+            return false;
+        };
+        current = above;
+    }
+}
+
 /// Runs a focus change a script asked for (`focus()`, `blur()`, the `within`
 /// moves), then tells JS about it before returning. When the root view is being
 /// updated it waits for that update, like every state change a handler makes.
@@ -1362,5 +1402,52 @@ mod tests {
         let state = FocusState::default();
         assert!(state.matches(&tree, 1, ":hover").is_err());
         assert!(state.matches(&tree, 1, "div").is_err());
+    }
+
+    #[test]
+    fn script_may_focus_in_one_walk_up_the_ancestors() {
+        // 1 root > 2 > 3 > 4 (focusable); 5 is a focusable sibling of 2; 6 is detached.
+        let mut tree = tree_with(&[(1, "div"), (2, "div"), (3, "div"), (4, "div"), (5, "div"), (6, "div")]);
+        tree.set_root(1);
+        tree.append_child(1, 2);
+        tree.append_child(2, 3);
+        tree.append_child(3, 4);
+        tree.append_child(1, 5);
+        for id in [4, 5, 6] {
+            tree.set_custom_prop(id, "tabIndex".to_string(), serde_json::json!(0));
+        }
+        let style = |json: &str| Arc::new(serde_json::from_str::<StyleDesc>(json).unwrap());
+        assert!(script_may_focus(&tree, 4) && script_may_focus(&tree, 5));
+        assert!(!script_may_focus(&tree, 3), "not focusable");
+        assert!(!script_may_focus(&tree, 6), "not in the document");
+        assert!(script_may_focus(&tree, 99), "an element that has not arrived takes focus when it does");
+
+        tree.set_style_arc(2, style(r#"{"display":"none"}"#));
+        assert!(!script_may_focus(&tree, 4), "display: none on an ancestor");
+        assert!(script_may_focus(&tree, 5));
+        tree.set_style_arc(2, style(r#"{"display":"flex"}"#));
+        assert!(script_may_focus(&tree, 4));
+        tree.set_style_arc(4, style(r#"{"display":"none"}"#));
+        assert!(!script_may_focus(&tree, 4), "display: none on the element");
+        tree.set_style_arc(4, style(r#"{}"#));
+
+        tree.set_style_arc(2, style(r#"{"visibility":"hidden"}"#));
+        assert!(!script_may_focus(&tree, 4), "visibility: hidden is inherited");
+        tree.set_style_arc(4, style(r#"{"visibility":"visible"}"#));
+        assert!(script_may_focus(&tree, 4), "a visible descendant of a hidden element takes focus");
+        tree.set_style_arc(4, style(r#"{"visibility":"hidden"}"#));
+        assert!(!script_may_focus(&tree, 4));
+        tree.set_style_arc(4, style(r#"{}"#));
+        tree.set_style_arc(2, style(r#"{"visibility":"collapse"}"#));
+        assert!(!script_may_focus(&tree, 4), "visibility: collapse is inherited");
+        tree.set_style_arc(4, style(r#"{"visibility":"visible"}"#));
+        assert!(script_may_focus(&tree, 4));
+        tree.set_style_arc(4, style(r#"{}"#));
+        tree.set_style_arc(2, style(r#"{}"#));
+        assert!(script_may_focus(&tree, 4));
+
+        tree.set_custom_prop(2, "inert".to_string(), serde_json::json!(true));
+        assert!(!script_may_focus(&tree, 4), "an inert ancestor");
+        assert!(script_may_focus(&tree, 5));
     }
 }

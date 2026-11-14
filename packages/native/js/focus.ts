@@ -1,5 +1,4 @@
-import { HOST_BINDING, type ObservableElement } from "./bounds.js"
-import { readComputedStyle } from "./computed-style.js"
+import { HOST_BINDING, flushPendingMutations, type ObservableElement } from "./bounds.js"
 import type { NativeRenderer } from "./host.js"
 
 export interface FocusOptions {
@@ -18,42 +17,24 @@ function required<Method>(method: Method | undefined, name: string): Method {
   return method
 }
 
-/** A host element as `focus()` takes it: the element and the chain of its ancestors, whose `display` decides whether it is rendered. */
-export interface FocusableHost extends ObservableElement {
-  readonly parentElement: object | null
-}
+/** A host element as `focus()` takes it. */
+export type FocusableHost = ObservableElement
 
 /**
- * Whether `element` or an ancestor is `display: none` (its own style, a stylesheet rule or the `hidden`
- * attribute), which leaves it without a box. `display` is not inherited, so each ancestor is read. The
- * reads flush the pending mutations first, as a browser flushes style before `focus()`, so an element
- * mounted in this tick is judged by what it has now.
- */
-function isNotRendered(renderer: NativeRenderer, element: FocusableHost): boolean {
-  const own = readComputedStyle(renderer, element.nativeId, false)
-  // Not in the document: a removed element does not take focus either.
-  if (own === undefined) return true
-  if (own.get("display") === "none") return true
-  // Ancestors of a host element are host elements, up to the stand-ins that have no native element.
-  let ancestor = element.parentElement as FocusableHost | null
-  while (ancestor !== null && ancestor[HOST_BINDING]() !== undefined) {
-    if (readComputedStyle(renderer, ancestor.nativeId, false)?.get("display") === "none") return true
-    ancestor = ancestor.parentElement as FocusableHost | null
-  }
-  return false
-}
-
-/**
- * `element.focus()`. Does nothing for an element that is not in a mounted root, or that is not being
- * rendered (`display: none` on it or an ancestor), as in a browser.
+ * `element.focus()`. Does nothing for an element a browser's `focus()` would refuse: not in a mounted
+ * root, not rendered (`display: none` on it or an ancestor), `visibility: hidden` or `collapse`, or
+ * inside an `inert` subtree. The queued mutations are sent first, as a browser flushes style before
+ * `focus()`, so an element mounted or shown in this tick is judged by what it has now; native then
+ * decides and moves focus in one call, with no layout.
  */
 export function focusHostElement(element: FocusableHost, options?: FocusOptions): void {
   const binding = element[HOST_BINDING]()
   if (binding === undefined) return
   const renderer = binding.renderer
-  // A renderer that cannot read styles (the web renderer) cannot tell, so it focuses as it always did.
-  if (renderer.getComputedStyle !== undefined && isNotRendered(renderer, element)) return
-  required(renderer.focusElement, "focus()").call(renderer, element.nativeId)
+  flushPendingMutations(renderer)
+  // The web renderer's `focusElement` returns nothing and takes the focus as it always did.
+  const asked = required(renderer.focusElement, "focus()").call(renderer, element.nativeId)
+  if (asked === false) return
   if (!options?.preventScroll) scrollFocusIntoView(renderer, element.nativeId)
 }
 

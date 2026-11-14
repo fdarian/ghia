@@ -333,6 +333,69 @@ describe.skipIf(!hasNativeTestRenderer)("Solid focus model", () => {
       expect(log).toEqual([])
     })
 
+    it("leaves focus where it is for visibility: hidden or collapse and for an inert ancestor", () => {
+      const refs: Record<string, HostElement> = {}
+      const ref = (name: string) => (el: HostElement) => (refs[name] = el)
+      const { focused } = setup(() => (
+        <div style={{ width: 200, height: 100 }}>
+          <div ref={ref("stop")} testId="stop" tabIndex={0} style={box} />
+          <div ref={ref("hidden")} testId="hidden" tabIndex={0} style={{ ...box, visibility: "hidden" }} />
+          <div ref={ref("collapsed")} testId="collapsed" tabIndex={0} style={{ ...box, visibility: "collapse" }} />
+          <div style={{ visibility: "hidden" }}>
+            <div ref={ref("underHidden")} testId="underHidden" tabIndex={0} style={box} />
+          </div>
+          <div inert>
+            <div>
+              <div ref={ref("underInert")} testId="underInert" tabIndex={0} style={box} />
+            </div>
+          </div>
+        </div>
+      ))
+      refs.stop.focus()
+      for (const name of ["hidden", "collapsed", "underHidden", "underInert"]) {
+        refs[name].focus()
+        expect(focused(), name).toBe("stop")
+        expect(document.activeElement, name).toBe(refs.stop)
+      }
+    })
+
+    it("focuses a visible element inside a visibility: hidden parent", () => {
+      const refs: Record<string, HostElement> = {}
+      const { focused } = setup(() => (
+        <div style={{ width: 200, height: 100 }}>
+          <div style={{ visibility: "hidden" }}>
+            <div ref={(el) => (refs.shown = el)} testId="shown" tabIndex={0} style={{ ...box, visibility: "visible" }} />
+          </div>
+          <div style={{ visibility: "collapse" }}>
+            <div ref={(el) => (refs.collapsedParent = el)} testId="collapsedParent" tabIndex={0} style={{ ...box, visibility: "visible" }} />
+          </div>
+        </div>
+      ))
+      refs.shown.focus()
+      expect(focused()).toBe("shown")
+      refs.collapsedParent.focus()
+      expect(focused()).toBe("collapsedParent")
+    })
+
+    it("judges visibility and inert by what a signal wrote in the same tick", () => {
+      let target!: HostElement
+      const [hidden, setHidden] = createSignal(true)
+      const [inert, setInert] = createSignal(true)
+      const { app, focused } = setup(() => (
+        <div style={{ width: 200, height: 100 }} inert={inert()}>
+          <div ref={target} testId="target" tabIndex={0} style={{ ...box, visibility: hidden() ? "hidden" : "visible" }} />
+        </div>
+      ))
+      target.focus()
+      expect(focused()).toBe(null)
+      app.root.flushSync(() => setInert(false))
+      target.focus()
+      expect(focused()).toBe(null)
+      app.root.flushSync(() => setHidden(false))
+      target.focus()
+      expect(focused()).toBe("target")
+    })
+
     it("focuses an element mounted in the same tick, and one made visible in the same tick", () => {
       const { refs, view, setHidden } = scene()
       const [show, setShow] = createSignal(false)
