@@ -1,4 +1,4 @@
-import { createRoot as createSolidRoot, type JSX } from "solid-js"
+import { createRoot as createSolidRoot, type JSX, type Owner } from "solid-js"
 import { createRenderer } from "solid-js/universal"
 import {
   createHostElement,
@@ -19,6 +19,7 @@ import {
   type HostParent,
   type HostText,
 } from "./host.js"
+import { createSpread } from "./spread.js"
 import { notePresenceHost, runInPresenceScope } from "./presence-scope.js"
 
 function isHostRoot(value: unknown): value is HostRoot {
@@ -64,6 +65,21 @@ function anchorNodeFor(anchor: HostNode | HostParent): HostNode {
   return known
 }
 
+/** Solid's JSX writes a label's `for` under the attribute's own name; the host reads it as `htmlFor`. */
+function propNameOn(node: HostNode | HostParent, name: string): string {
+  return name === "for" && node.kind === "element" && node.elementType === "label" ? "htmlFor" : name
+}
+
+function setProperty(node: HostNode | HostParent, name: string, value: unknown, previous: unknown): void {
+  if (
+    node.kind !== "root" &&
+    isHostPropertyValue(value) &&
+    isHostPropertyValue(previous)
+  ) {
+    setHostProperty(node, propNameOn(node, name), value, previous)
+  }
+}
+
 const runtime = createRenderer<HostNode | HostParent>({
   createElement: createHostElement,
   createTextNode: createHostText,
@@ -71,15 +87,7 @@ const runtime = createRenderer<HostNode | HostParent>({
     if (!isHostText(node)) throw new TypeError("Expected a GPUIX text node")
     replaceHostText(node, value)
   },
-  setProperty(node, name, value, previous) {
-    if (
-      node.kind !== "root" &&
-      isHostPropertyValue(value) &&
-      isHostPropertyValue(previous)
-    ) {
-      setHostProperty(node, name, value, previous)
-    }
-  },
+  setProperty,
   insertNode(parent, node, anchor) {
     if (parent.kind === "text") throw new TypeError("Expected GPUIX host nodes")
     // Universal passes `null` as the anchor to append (`cleanChildren(parent, current, null, node)`).
@@ -107,13 +115,25 @@ const runtime = createRenderer<HostNode | HostParent>({
   },
 })
 
+export type UniversalRenderOptions = {
+  /** `null` makes the code's nodes go before nothing, so a node already in `body` is kept. */
+  marker?: null
+  /** What `body` is taken to hold already, as `insert`'s last argument. */
+  initial?: JSX.Element
+  owner?: Owner | null
+}
+
 // `body` is the parent, not the HostRoot: Solid's `cleanChildren` removes a node only when
 // `getParentNode(node)` is the parent it was inserted into, and a top-level node's parent is `body`.
-export function universalRender(code: () => JSX.Element, body: HostElement): () => void {
+export function universalRender(
+  code: () => JSX.Element,
+  body: HostNode | HostParent,
+  options: UniversalRenderOptions = {}
+): () => void {
   return createSolidRoot((dispose) => {
-    runtime.insert(body, code())
+    runtime.insert(body, code(), options.marker, options.initial)
     return dispose
-  })
+  }, options.owner ?? undefined)
 }
 
 export const effect = runtime.effect
@@ -128,7 +148,7 @@ export const createElement: typeof runtime.createElement = (tag) => {
 export const createTextNode = runtime.createTextNode
 export const insertNode = runtime.insertNode
 export const insert = runtime.insert
-export const spread = runtime.spread
+export const spread = createSpread<HostNode | HostParent>({ insert: runtime.insert, setProperty })
 export const setProp = runtime.setProp
 export const mergeProps = runtime.mergeProps
 export const use = runtime.use

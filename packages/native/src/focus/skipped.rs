@@ -101,6 +101,15 @@ fn place(tree: &RetainedTree, element: &RetainedElement) -> Place {
     (crate::renderer::focus_handle_tab(element).0, path)
 }
 
+/// What `ancestor` does to the content below it, or `None` when it does not hold content back: only a
+/// host container that generates a box applies `content-visibility`.
+pub(super) fn contents_held_back_by(tree: &RetainedTree, ancestor: &RetainedElement) -> Option<ContentVisibility> {
+    if !crate::text::inline::is_host_container(ancestor) || crate::layout::contents::is_display_contents(ancestor) {
+        return None;
+    }
+    Some(tree.content_visibility_of(ancestor))
+}
+
 /// Whether `element` is below an `auto` element that skips its content, and reachable: no box of it
 /// or of an element between is `display: none`, and none of them skips its content for good
 /// (`hidden`).
@@ -114,14 +123,12 @@ fn is_in_skipped_auto(tree: &RetainedTree, element: &RetainedElement) -> bool {
         if crate::layout::box_generation::is_display_none(ancestor) {
             return false;
         }
-        if crate::text::inline::is_host_container(ancestor) && !crate::layout::contents::is_display_contents(ancestor) {
-            match tree.content_visibility_of(ancestor) {
-                ContentVisibility::Hidden => return false,
-                ContentVisibility::Auto => {
-                    skipped_auto |= crate::layout::content_visibility::skips_content(tree, ancestor)
-                }
-                ContentVisibility::Visible => {}
+        match contents_held_back_by(tree, ancestor) {
+            Some(ContentVisibility::Hidden) => return false,
+            Some(ContentVisibility::Auto) => {
+                skipped_auto |= crate::layout::content_visibility::skips_content(tree, ancestor)
             }
+            Some(ContentVisibility::Visible) | None => {}
         }
         current = ancestor.parent.and_then(|parent| tree.elements.get(&parent));
     }

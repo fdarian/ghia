@@ -3049,19 +3049,26 @@ impl GpuixRenderer {
         Ok(promise)
     }
 
+    /// `element.focus()`: asks for focus on `element_id` and says whether it was asked for. False when
+    /// script may not focus it (`focus::script_may_focus`: not rendered, `visibility` hidden or
+    /// collapsed, inert, not focusable), in which case nothing happens and no event fires.
     #[napi]
-    pub fn focus_element(&self, element_id: f64) -> Result<()> {
+    pub fn focus_element(&self, element_id: f64) -> Result<bool> {
         let id = to_element_id(element_id)?;
+        if !crate::focus::script_may_focus(&self.tree.lock().unwrap(), id) {
+            return Ok(false);
+        }
         #[cfg(target_os = "macos")]
         return update_window_without_view(move |window, cx| {
             crate::focus::change_focus(window, cx, move |view, window, cx| {
                 view.request_focus(id, window, cx)
             })
         })?
+        .map(|()| true)
         .map_err(Error::from_reason);
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::FocusElement(id));
+        return self.send_ui_command(UiCommand::FocusElement(id)).map(|()| true);
 
         #[cfg(not(any(
             target_os = "macos",

@@ -84,6 +84,19 @@ describeNative("input and change events of text controls, in React", () => {
     expect(heard).toEqual(["onInput checkbox", "onChange checkbox"])
   })
 
+  it("an ancestor's onChange runs on the input event for a text control and on the change event for a checkbox", () => {
+    const ran: string[] = []
+    testRoot.render(
+      <div style={{ width: 400, height: 200 }} onChange={(event) => ran.push(`${event.target.props.type ?? "text"} ${event.type}`)}>
+        <input testId="field" style={box} />
+        <input testId="box" type="checkbox" ref={(node) => node && (checkbox = node)} style={{ width: 13, height: 13 }} />
+      </div>,
+    )
+    press("a")
+    checkbox.click()
+    expect(ran).toEqual(["text input", "checkbox change"])
+  })
+
   it("onChange of a checkbox is its change event, and moves with its type", () => {
     function Switch({ type }) {
       return <input testId="field" type={type} style={box} onChange={() => log.push("onChange")} ref={(node) => node && (field = node)} />

@@ -110,8 +110,7 @@ function setProp(element: FakeElement, name: string, value: unknown): void {
     if (value === undefined) delete element.props[name]
     else element.props[name] = value
   }
-  if (hasMutationObservers()) recordAttributeChanges(element, [name], apply)
-  else apply()
+  recordAttributeChanges(element, () => [name], apply)
 }
 
 function setText(text: FakeText, value: string): void {
@@ -501,7 +500,7 @@ describe("MutationObserver", () => {
       const svg = new FakeSvg("svg")
       const mo = observer(() => {})
       mo.observe(svg, { attributes: true })
-      recordAttributeChanges(svg, ["viewBox"], () => {
+      recordAttributeChanges(svg, () => ["viewBox"], () => {
         svg.props.viewBox = "0 0 1 1"
       })
       expect(mo.takeRecords().map((record) => record.attributeName)).toEqual(["viewBox"])

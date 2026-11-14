@@ -5,8 +5,10 @@
  * changes a node, and those find the observers by walking `parentNode` from the target, as
  * the DOM standard's "queue a mutation record" does.
  *
- * With no observer alive every hook is one integer check, and no node gets a field: the
- * registrations live in a `WeakMap` that is only written by `observe()`.
+ * With no observer alive every hook is one integer check and no node gets a field: the
+ * registrations live in a `WeakMap` that is only written by `observe()`. An adapter checks
+ * `hasMutationObservers()` before it builds the arguments of a hook, so a tree change with no
+ * observer allocates nothing, and bumps the tree version the live lists read (`bumpTreeVersion`) itself.
  *
  * An observer does not keep what it observes alive, as in the DOM standard (its node list is
  * weak). The only strong edge is node to registration, in that `WeakMap`; the observer holds
@@ -16,6 +18,7 @@
 
 import { reportUncaught } from "../events/dispatch.js"
 import { attributeNameOf, isNotAttribute } from "./attribute-names.js"
+import { bumpTreeVersion } from "./tree-version.js"
 import { Node, SVGElement, type Element } from "./nodes.js"
 
 export type MutationObserverInit = {
@@ -362,7 +365,8 @@ function queueRecord(init: RecordInit, oldValue: string | null): void {
 
 /**
  * Call after `added` were placed in `target` and `removed` taken out, with the siblings the
- * change happened between. For one node leaving, pass its siblings from before it left.
+ * change happened between. For one node leaving, pass its siblings from before it left. The
+ * caller bumps the tree version, with or without an observer.
  */
 export function queueChildListMutation(
   target: Node,
@@ -454,15 +458,24 @@ export function queueCharacterDataMutation(target: Node, oldValue: string): void
 }
 
 /**
- * Runs `apply`, which changes the props `propNames` of `element`, and queues a record for each
+ * Runs `apply`, which changes the props `propNames()` lists of `element`, and queues a record for each
  * attribute `getAttribute` reads differently afterwards, with the value it read before. A
  * prop that is no attribute (a handler, an object, `children`) reads `null` on both
- * sides and produces nothing. `style` is an attribute: its text is the `cssText`, so a framework's commit of it produces a record. Only call it while `hasMutationObservers()`.
+ * sides and produces nothing. `style` is an attribute: its text is the `cssText`, so a framework's commit of it produces a record.
+ *
+ * Bumps the tree version, with or without an observer, so the live lists see the write. An adapter's hot
+ * path checks `hasMutationObservers()` first and bumps the version itself, to build neither closure
+ * when nothing observes.
  */
-export function recordAttributeChanges(element: Element, propNames: Iterable<string>, apply: () => void): void {
+export function recordAttributeChanges(element: Element, propNames: () => Iterable<string>, apply: () => void): void {
+  if (shared.count === 0) {
+    apply()
+    bumpTreeVersion()
+    return
+  }
   const names: string[] = []
   const svg = element instanceof SVGElement
-  for (const prop of propNames) {
+  for (const prop of propNames()) {
     // `style` is no prop attribute that is sent to native, but `getAttribute("style")` reads the live style.
     if (prop !== "style" && isNotAttribute(prop)) continue
     const name = attributeNameOf(prop, svg)
@@ -470,6 +483,7 @@ export function recordAttributeChanges(element: Element, propNames: Iterable<str
   }
   const before = names.map((name) => element.getAttribute(name))
   apply()
+  bumpTreeVersion()
   names.forEach((name, index) => {
     if (element.getAttribute(name) !== before[index]) queueAttributeMutation(element, name, before[index])
   })

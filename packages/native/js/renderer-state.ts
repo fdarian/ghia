@@ -2,6 +2,7 @@ import type { EventPayload } from "../index.js"
 import { addFrameSource, runAnimationFrame } from "./animation-frame.js"
 import { reportUncaught, type DomDispatchResult } from "./events/dispatch.js"
 import { createDragDispatcher } from "./events/drag.js"
+import { focusElementById } from "./focus.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
 import { popoversOfRendererGone } from "./dom/popover.js"
 import { elementOf, GpuixEventTarget, noteFocusEvent } from "./events/window-target.js"
@@ -415,7 +416,7 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       if (firstChild < 0) {
         layers.push(entry)
         const target = layer.initialFocus?.() ?? null
-        if (target !== null) renderer.focusElement?.(target)
+        if (target !== null) focusElementById(renderer, target)
       } else {
         layers.splice(firstChild, 0, entry)
         // The children opened in the same commit and captured the same
@@ -434,7 +435,7 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         // A parent that closed first already restored focus for its subtree.
         if (layer.parent && !layers.some((open) => open.layer === layer.parent)) return
         const target = layer.finalFocus?.(entry.previous) ?? null
-        if (target !== null) renderer.focusElement?.(target)
+        if (target !== null) focusElementById(renderer, target)
       }
     },
   }

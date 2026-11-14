@@ -41,7 +41,7 @@ describe("the nodes React builds", () => {
   it("keeps the id, type and props fields, and the members on the prototype", () => {
     const div = element("div", { className: "a" })
     expect(typeof div.nativeId).toBe("number")
-    expect(div.type).toBe("div")
+    expect(div.elementType).toBe("div")
     expect(div.props).toEqual({ className: "a" })
     expect(Object.keys(div)).not.toContain("focus")
     expect(typeof div.focus).toBe("function")

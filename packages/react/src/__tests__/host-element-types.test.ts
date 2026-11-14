@@ -81,6 +81,9 @@ export function App(props: { divRef: Ref<HTMLDivElement>; inputRef: ForwardedRef
       <div ref={span} />
       {/* @ts-expect-error className is text */}
       <div className={1} />
+      <label htmlFor="field" />
+      {/* @ts-expect-error React's label names its control with htmlFor, not for */}
+      <label for="field" />
     </div>
   )
 }

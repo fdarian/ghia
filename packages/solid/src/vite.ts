@@ -2,6 +2,7 @@ import { ENVIRONMENT_NAME, findPluginApi, SERVER_ENVIRONMENT_NAME } from "ghia"
 import solidRefresh from "solid-refresh/babel"
 import type { Plugin, ResolvedConfig } from "vite"
 import vitePluginSolid, { type Options } from "vite-plugin-solid"
+import { solidLibrarySource } from "./vite/library-source.js"
 
 export const RUN_START_MODULE = "virtual:ghia/solid-run-start"
 const RESOLVED_RUN_START_MODULE = `\0${RUN_START_MODULE}`
@@ -22,6 +23,7 @@ export function solid(options: SolidOptions = {}): Plugin[] {
   let config: ResolvedConfig
 
   return [
+    solidLibrarySource(),
     {
       name: "ghia:solid-refresh",
       configResolved(resolved) {

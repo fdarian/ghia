@@ -21,6 +21,11 @@ export function attributeNameOf(prop: string, svg: boolean): string {
 /** The input types whose `value` attribute is the value itself (the HTML spec's "default" and "default/on" value modes). */
 const VALUE_IS_ATTRIBUTE = new Set(["checkbox", "radio", "hidden", "submit", "button", "reset", "image"])
 
+/** Whether the `value` of an `<input>` of this type is its `value` attribute, not a state of its own. */
+export function inputValueIsAttribute(inputType: unknown): boolean {
+  return VALUE_IS_ATTRIBUTE.has(normalizedInputType(inputType))
+}
+
 /**
  * The prop that holds an `<input>`'s `checked` or `value` attribute, where it is not the prop of that
  * name: the attribute is `defaultChecked`, and for the types with the "value" value mode (text,
@@ -30,7 +35,7 @@ const VALUE_IS_ATTRIBUTE = new Set(["checkbox", "radio", "hidden", "submit", "bu
 export function inputDefaultProp(attribute: string, inputType: unknown): "defaultChecked" | "defaultValue" | undefined {
   if (attribute === "checked") return "defaultChecked"
   if (attribute !== "value") return undefined
-  return VALUE_IS_ATTRIBUTE.has(normalizedInputType(inputType)) ? undefined : "defaultValue"
+  return inputValueIsAttribute(inputType) ? undefined : "defaultValue"
 }
 
 /**
@@ -45,7 +50,7 @@ export function inputDefaultProp(attribute: string, inputType: unknown): "defaul
  */
 export function inputAttributeValue(attribute: "checked" | "value", prop: (name: string) => unknown, inputType: unknown): unknown {
   if (attribute === "checked") return prop("defaultChecked") ?? prop("checked")
-  return VALUE_IS_ATTRIBUTE.has(normalizedInputType(inputType))
+  return inputValueIsAttribute(inputType)
     ? (prop("value") ?? prop("defaultValue"))
     : (prop("defaultValue") ?? prop("value"))
 }

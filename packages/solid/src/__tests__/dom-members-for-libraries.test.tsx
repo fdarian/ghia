@@ -266,6 +266,45 @@ describe.skipIf(!hasNativeTestRenderer)("DOM members that libraries read, in Sol
       expect((document.createElement("div") as { htmlFor?: unknown }).htmlFor).toBeUndefined()
     })
 
+    it("reflects type on an input, a button and a textarea through the type attribute", () => {
+      const found = mount((grab) => (
+        <div>
+          <input ref={grab("input")} type="Checkbox" />
+          <input ref={grab("plain")} />
+          <input ref={grab("invalid")} type="bogus" />
+          <button ref={grab("button")} />
+          <button ref={grab("reset")} type="RESET" />
+          <button ref={grab("invalidButton")} type="x" />
+          <textarea ref={grab("textarea")} />
+        </div>
+      ))
+      expect((found.input as HTMLInputElement).type).toBe("checkbox")
+      expect(found.input.getAttribute("type")).toBe("Checkbox")
+      expect((found.plain as HTMLInputElement).type).toBe("text")
+      expect((found.invalid as HTMLInputElement).type).toBe("text")
+      expect((found.button as HTMLButtonElement).type).toBe("submit")
+      expect((found.reset as HTMLButtonElement).type).toBe("reset")
+      expect((found.invalidButton as HTMLButtonElement).type).toBe("submit")
+      expect((found.textarea as HTMLTextAreaElement).type).toBe("textarea")
+      expect(() => {
+        ;(found.textarea as HTMLTextAreaElement).type = "x"
+      }).toThrow(TypeError)
+
+      ;(found.plain as HTMLInputElement).type = "RADIO"
+      expect(found.plain.getAttribute("type")).toBe("RADIO")
+      expect((found.plain as HTMLInputElement).type).toBe("radio")
+      ;(found.button as HTMLButtonElement).type = "button"
+      expect(found.button.getAttribute("type")).toBe("button")
+      expect((found.button as HTMLButtonElement).type).toBe("button")
+
+      const created = document.createElement("input") as HTMLInputElement
+      expect(created.type).toBe("text")
+      created.type = "number"
+      expect(created.getAttribute("type")).toBe("number")
+      expect((document.createElement("button") as HTMLButtonElement).type).toBe("submit")
+      expect((document.createElement("div") as { type?: unknown }).type).toBeUndefined()
+    })
+
     it("works on an input made by createElement once it is inserted: checked, value, valueAsNumber, stepUp", () => {
       mount(() => <div />)
       const checkbox = document.createElement("input") as HTMLInputElement
@@ -302,7 +341,7 @@ describe.skipIf(!hasNativeTestRenderer)("DOM members that libraries read, in Sol
       range.remove()
     })
 
-    it("an input made by createElement before it is inserted reads its attributes, and has no state to assign until it is mounted", () => {
+    it("an input made by createElement before it is inserted reads its attributes, and keeps what code writes to its state until it is mounted", () => {
       mount(() => <div />)
       const input = document.createElement("input") as HTMLInputElement
       input.setAttribute("type", "number")
@@ -312,13 +351,111 @@ describe.skipIf(!hasNativeTestRenderer)("DOM members that libraries read, in Sol
       expect(input.value).toBe("3")
       expect(input.checked).toBe(true)
       expect(input.valueAsNumber).toBe(3)
-      expect(() => {
-        input.value = "4"
-      }).toThrowError("needs a mounted element")
-      expect(() => {
-        input.checked = false
-      }).toThrowError("needs a mounted element")
+      input.value = "4"
+      input.checked = false
+      expect(input.value).toBe("4")
+      expect(input.checked).toBe(false)
+      expect(input.valueAsNumber).toBe(4)
       expect(() => input.stepUp()).toThrowError("needs a mounted element")
+    })
+
+    it("keeps value, checked and indeterminate written before the element is mounted, and shows them once it is", () => {
+      mount(() => <div />)
+      const text = document.createElement("input") as HTMLInputElement
+      text.value = "draft"
+      const box = document.createElement("input") as HTMLInputElement
+      box.setAttribute("type", "checkbox")
+      box.checked = true
+      box.indeterminate = true
+      const area = document.createElement("textarea") as HTMLTextAreaElement
+      area.value = "lines"
+      expect(text.value).toBe("draft")
+      expect(box.checked).toBe(true)
+      expect(box.indeterminate).toBe(true)
+      expect(area.value).toBe("lines")
+      for (const element of [text, box, area]) document.body!.appendChild(element)
+      expect(text.value).toBe("draft")
+      expect(box.checked).toBe(true)
+      expect(box.indeterminate).toBe(true)
+      expect(box.matches(":checked")).toBe(true)
+      expect(area.value).toBe("lines")
+      text.value = "after"
+      expect(text.value).toBe("after")
+      for (const element of [text, box, area]) element.remove()
+    })
+
+    it("a property write before the mount is the control's own state: no attribute, no default and no observer record, and it is applied once the element mounts", () => {
+      mount(() => <div />)
+      const text = document.createElement("input") as HTMLInputElement
+      const box = document.createElement("input") as HTMLInputElement
+      box.setAttribute("type", "checkbox")
+      const area = document.createElement("textarea") as HTMLTextAreaElement
+      const range = document.createElement("input") as HTMLInputElement
+      range.setAttribute("type", "range")
+      range.setAttribute("min", "0")
+      range.setAttribute("max", "10")
+      range.setAttribute("step", "2")
+      const observer = new MutationObserver(() => {})
+      for (const element of [text, box, area, range]) observer.observe(element, { attributes: true })
+
+      text.value = "x"
+      box.checked = true
+      box.indeterminate = true
+      area.value = "y"
+      range.value = "99"
+      expect(text.value).toBe("x")
+      expect(box.checked).toBe(true)
+      expect(box.indeterminate).toBe(true)
+      expect(area.value).toBe("y")
+
+      expect(text.getAttribute("value")).toBeNull()
+      expect(text.defaultValue).toBe("")
+      expect(text.matches("[value]")).toBe(false)
+      expect(box.getAttribute("checked")).toBeNull()
+      expect(box.hasAttribute("indeterminate")).toBe(false)
+      expect(box.defaultChecked).toBe(false)
+      expect(box.matches("[checked]")).toBe(false)
+      expect(area.getAttribute("value")).toBeNull()
+      expect(area.defaultValue).toBe("")
+      expect(observer.takeRecords()).toEqual([])
+
+      // The write set the dirty flag, so the default changes under it.
+      text.setAttribute("value", "d")
+      expect(text.value).toBe("x")
+      expect(text.defaultValue).toBe("d")
+      observer.disconnect()
+
+      for (const element of [text, box, area, range]) document.body!.appendChild(element)
+      expect(text.value).toBe("x")
+      expect(box.checked).toBe(true)
+      expect(box.indeterminate).toBe(true)
+      expect(box.matches(":checked")).toBe(true)
+      expect(area.value).toBe("y")
+      expect(range.value).toBe("10")
+      expect(text.getAttribute("value")).toBe("d")
+      expect(text.defaultValue).toBe("d")
+      expect(box.getAttribute("checked")).toBeNull()
+      expect(box.defaultChecked).toBe(false)
+      expect(area.getAttribute("value")).toBeNull()
+      for (const element of [text, box, area, range]) element.remove()
+    })
+
+    it("reads and sets the selection of a text control that is not mounted without a native read", () => {
+      mount(() => <div />)
+      const input = document.createElement("input") as HTMLInputElement
+      expect(input.selectionStart).toBe(0)
+      expect(input.selectionEnd).toBe(0)
+      input.value = "hello"
+      expect(input.selectionStart).toBe(5)
+      input.setSelectionRange(1, 3, "backward")
+      expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([1, 3, "backward"])
+      input.setSelectionRange(2, 99)
+      expect([input.selectionStart, input.selectionEnd]).toEqual([2, 5])
+      input.select()
+      expect([input.selectionStart, input.selectionEnd]).toEqual([0, 5])
+      input.setAttribute("type", "checkbox")
+      expect(input.selectionStart).toBeNull()
+      expect(() => input.setSelectionRange(0, 1)).toThrowError("does not apply")
     })
   })
 })

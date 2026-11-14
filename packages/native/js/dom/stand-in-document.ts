@@ -18,6 +18,7 @@ import { defineDomMembers, type DomElement } from "../dom-members.js"
 import { ElementListeners } from "../events/element-listeners.js"
 import { defineScrollMembers } from "../scroll.js"
 import type { StyleDesc } from "../host.js"
+import { recordAttributeChanges } from "./mutation-observer.js"
 import { DOM_BINDING, HTMLElement, ROOT_ELEMENT_TYPES, type ElementBinding, type Node } from "./nodes.js"
 import type { DocumentElements } from "../events/window-target.js"
 
@@ -31,7 +32,7 @@ let gone: ReturnType<typeof createDetachedRenderer> | undefined
 function noWindow(element: StandInElement, what: string): never {
   throw new DOMException(
     element.replaced
-      ? `This <${element.type}> was the document's before a root mounted and is in no document now, so ${what} of it cannot change.`
+      ? `This <${element.elementType}> was the document's before a root mounted and is in no document now, so ${what} of it cannot change.`
       : `The document has no root mounted, so ${what} of its <html>, <head> and <body> cannot change: render() first.`,
     "NoModificationAllowedError"
   )
@@ -47,7 +48,7 @@ class StandInElement extends HTMLElement {
   replaced = false
   private binding: ElementBinding | undefined
 
-  constructor(readonly type: string) {
+  constructor(readonly elementType: string) {
     super()
   }
 
@@ -78,7 +79,7 @@ class StandInBinding implements ElementBinding {
   }
   readonly root = null
   get type(): string {
-    return this.element.type
+    return this.element.elementType
   }
   get style(): StyleDesc {
     return this.element.liveStyle
@@ -93,8 +94,14 @@ class StandInBinding implements ElementBinding {
     return this.element.props.keys()
   }
   setProp(name: string, value: string | number | boolean | undefined): void {
-    if (value === undefined) this.element.props.delete(name)
-    else this.element.props.set(name, value)
+    recordAttributeChanges(
+      this.element,
+      () => [name],
+      () => {
+        if (value === undefined) this.element.props.delete(name)
+        else this.element.props.set(name, value)
+      }
+    )
   }
   assertSameWindow(): void {
     noWindow(this.element, "the children")
@@ -169,7 +176,7 @@ export function replaceStandInDocumentElements(mounted: DocumentElements): void 
     const to = mounted[part] as DomElement
     for (const name of from.getAttributeNames()) {
       const text = from.getAttribute(name)
-      if (text === null) throw new Error(`The stand-in <${from.type}> lists the attribute "${name}" and has no text for it`)
+      if (text === null) throw new Error(`The stand-in <${from.elementType}> lists the attribute "${name}" and has no text for it`)
       to.setAttribute(name, text)
     }
     for (const added of from.listeners.addedListeners()) to.addEventListener(added.type, added.listener, added.options)

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { DOM_BINDING, DocumentFragment, HTMLElement, SVGElement, Text, type Element, type ElementBinding, type Node, type TextBinding } from "../dom/nodes.js"
 import { document, installElementSource } from "../events/window-target.js"
+import { NodeList } from "../dom/html-collection.js"
 import { mountedRenderers } from "../mounted-renderer.js"
 import type { NativeRenderer } from "../host.js"
 import { defineDomMembers } from "../dom-members.js"
@@ -251,7 +252,18 @@ describe("querySelectorAll", () => {
     expect(list.length).toBe(3)
     expect(t.root.querySelectorAll("p").length).toBe(1)
     expect(Array.from(list).map((element) => element.id)).toEqual(["p1", "p2", "p3"])
-    expect(list.map((element) => element.id)).toEqual(["p1", "p2", "p3"])
+  })
+
+  it("returns a NodeList: instanceof holds, and it has no array methods", () => {
+    const t = page()
+    for (const list of [t.root.querySelectorAll("p"), document.querySelectorAll("*")]) {
+      expect(list instanceof NodeList).toBe(true)
+      expect(Object.prototype.toString.call(list)).toBe("[object NodeList]")
+      expect(Array.isArray(list)).toBe(false)
+      expect((list as unknown as { map?: unknown }).map).toBeUndefined()
+      expect([...list.keys()]).toEqual(Array.from({ length: list.length }, (_unused, index) => index))
+    }
+    expect(Array.from(t.root.querySelectorAll("p"), (element) => element.id)).toEqual(["p1", "p2", "p3"])
   })
 
   it("sees a tree the adapter changed since the last query with the same selector", () => {
@@ -494,6 +506,13 @@ describe("document and fragment queries", () => {
   it("finds only the stand-in html, head and body while no window is mounted", () => {
     expect(document.querySelector("div")).toBeNull()
     expect(Array.from(document.querySelectorAll("*")).map((element) => element.localName)).toEqual(["html", "head", "body"])
+  })
+
+  it("the stand-in html, head and body have no type property, as a browser's have none", () => {
+    for (const element of [document.documentElement, document.head, document.body]) {
+      expect((element as { type?: unknown }).type).toBeUndefined()
+    }
+    expect(document.body.localName).toBe("body")
   })
 
   it("throws a SyntaxError that names the document", () => {

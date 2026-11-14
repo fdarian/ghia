@@ -278,6 +278,176 @@ describe.skipIf(!hasNativeTestRenderer)("Solid focus model", () => {
     expect(focused()).toBe(null)
   })
 
+  describe("focus() on an element that is not rendered", () => {
+    function scene() {
+      const refs: Record<string, HostElement> = {}
+      const ref = (name: string) => (el: HostElement) => (refs[name] = el)
+      const [hidden, setHidden] = createSignal(true)
+      const view = () => (
+        <div style={{ width: 200, height: 100 }}>
+          <style>{".gone { display: none }"}</style>
+          <div ref={ref("stop")} testId="stop" tabIndex={0} style={box} />
+          <div ref={ref("attribute")} testId="attribute" hidden tabIndex={0} style={box} />
+          <div ref={ref("style")} testId="style" tabIndex={0} style={{ ...box, display: "none" }} />
+          <div ref={ref("sheet")} testId="sheet" class="gone" tabIndex={0} style={box} />
+          <div hidden>
+            <div ref={ref("underAttribute")} testId="underAttribute" tabIndex={0} style={box} />
+          </div>
+          <div style={{ display: "none" }}>
+            <div>
+              <div ref={ref("underStyle")} testId="underStyle" tabIndex={0} style={box} />
+            </div>
+          </div>
+          <div class="gone">
+            <div ref={ref("underSheet")} testId="underSheet" tabIndex={0} style={box} />
+          </div>
+          <div ref={ref("toggled")} testId="toggled" hidden={hidden()} tabIndex={0} style={box} />
+        </div>
+      )
+      return { refs, view, setHidden }
+    }
+
+    it("leaves focus where it is, for its own display, the hidden attribute, a stylesheet rule and an ancestor's", () => {
+      const { refs, view } = scene()
+      const { focused } = setup(view)
+      refs.stop.focus()
+      expect(focused()).toBe("stop")
+      for (const name of ["attribute", "style", "sheet", "underAttribute", "underStyle", "underSheet", "toggled"]) {
+        refs[name].focus()
+        expect(focused(), name).toBe("stop")
+        expect(document.activeElement, name).toBe(refs.stop)
+      }
+    })
+
+    it("gives no focus event to an element it does not focus", () => {
+      const log: string[] = []
+      let target!: HostElement
+      setup(() => (
+        <div style={{ width: 200, height: 100 }}>
+          <div hidden>
+            <div ref={target} tabIndex={0} style={box} onFocus={() => log.push("focus")} />
+          </div>
+        </div>
+      ))
+      target.focus()
+      expect(log).toEqual([])
+    })
+
+    it("leaves focus where it is for visibility: hidden or collapse and for an inert ancestor", () => {
+      const refs: Record<string, HostElement> = {}
+      const ref = (name: string) => (el: HostElement) => (refs[name] = el)
+      const { focused } = setup(() => (
+        <div style={{ width: 200, height: 100 }}>
+          <div ref={ref("stop")} testId="stop" tabIndex={0} style={box} />
+          <div ref={ref("hidden")} testId="hidden" tabIndex={0} style={{ ...box, visibility: "hidden" }} />
+          <div ref={ref("collapsed")} testId="collapsed" tabIndex={0} style={{ ...box, visibility: "collapse" }} />
+          <div style={{ visibility: "hidden" }}>
+            <div ref={ref("underHidden")} testId="underHidden" tabIndex={0} style={box} />
+          </div>
+          <div inert>
+            <div>
+              <div ref={ref("underInert")} testId="underInert" tabIndex={0} style={box} />
+            </div>
+          </div>
+        </div>
+      ))
+      refs.stop.focus()
+      for (const name of ["hidden", "collapsed", "underHidden", "underInert"]) {
+        refs[name].focus()
+        expect(focused(), name).toBe("stop")
+        expect(document.activeElement, name).toBe(refs.stop)
+      }
+    })
+
+    it("focuses a visible element inside a visibility: hidden parent", () => {
+      const refs: Record<string, HostElement> = {}
+      const { focused } = setup(() => (
+        <div style={{ width: 200, height: 100 }}>
+          <div style={{ visibility: "hidden" }}>
+            <div ref={(el) => (refs.shown = el)} testId="shown" tabIndex={0} style={{ ...box, visibility: "visible" }} />
+          </div>
+          <div style={{ visibility: "collapse" }}>
+            <div ref={(el) => (refs.collapsedParent = el)} testId="collapsedParent" tabIndex={0} style={{ ...box, visibility: "visible" }} />
+          </div>
+        </div>
+      ))
+      refs.shown.focus()
+      expect(focused()).toBe("shown")
+      refs.collapsedParent.focus()
+      expect(focused()).toBe("collapsedParent")
+    })
+
+    it("leaves focus where it is inside content-visibility: hidden content, and focuses it again once shown", () => {
+      const refs: Record<string, HostElement> = {}
+      const [contentVisibility, setContentVisibility] = createSignal<"hidden" | "visible">("hidden")
+      const { app, focused } = setup(() => (
+        <div style={{ width: 200, height: 100 }}>
+          <div ref={(el) => (refs.stop = el)} testId="stop" tabIndex={0} style={box} />
+          <div style={{ width: 100, height: 40, contentVisibility: contentVisibility() }}>
+            <div>
+              <div ref={(el) => (refs.held = el)} testId="held" tabIndex={0} style={box} />
+            </div>
+          </div>
+          <div style={{ width: 100, height: 40, contentVisibility: "auto" }}>
+            <div ref={(el) => (refs.auto = el)} testId="auto" tabIndex={0} style={box} />
+          </div>
+        </div>
+      ))
+      refs.stop.focus()
+      refs.held.focus()
+      expect(focused()).toBe("stop")
+      expect(document.activeElement).toBe(refs.stop)
+      refs.auto.focus()
+      expect(focused()).toBe("auto")
+      refs.stop.focus()
+      app.root.flushSync(() => setContentVisibility("visible"))
+      refs.held.focus()
+      expect(focused()).toBe("held")
+    })
+
+    it("judges visibility and inert by what a signal wrote in the same tick", () => {
+      let target!: HostElement
+      const [hidden, setHidden] = createSignal(true)
+      const [inert, setInert] = createSignal(true)
+      const { app, focused } = setup(() => (
+        <div style={{ width: 200, height: 100 }} inert={inert()}>
+          <div ref={target} testId="target" tabIndex={0} style={{ ...box, visibility: hidden() ? "hidden" : "visible" }} />
+        </div>
+      ))
+      target.focus()
+      expect(focused()).toBe(null)
+      app.root.flushSync(() => setInert(false))
+      target.focus()
+      expect(focused()).toBe(null)
+      app.root.flushSync(() => setHidden(false))
+      target.focus()
+      expect(focused()).toBe("target")
+    })
+
+    it("focuses an element mounted in the same tick, and one made visible in the same tick", () => {
+      const { refs, view, setHidden } = scene()
+      const [show, setShow] = createSignal(false)
+      const { app, focused } = setup(() => (
+        <>
+          {view()}
+          {show() ? <div ref={(el) => (refs.late = el)} testId="late" tabIndex={0} style={box} /> : null}
+        </>
+      ))
+      app.root.flushSync(() => setShow(true))
+      refs.late.focus()
+      expect(focused()).toBe("late")
+
+      app.root.flushSync(() => setHidden(false))
+      refs.toggled.focus()
+      expect(focused()).toBe("toggled")
+
+      app.root.flushSync(() => setHidden(true))
+      refs.stop.focus()
+      refs.toggled.focus()
+      expect(focused()).toBe("stop")
+    })
+  })
+
   it("targets the topmost element of a press, so a backdrop does not focus the input under it", () => {
     const { renderer, focused, idOf, center } = setup(() => (
       <div style={{ width: 300, height: 200 }}>

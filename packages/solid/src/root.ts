@@ -90,7 +90,7 @@ export function createRoot(
   })
   mutations.setElementSource({
     forEachElement(visit) {
-      for (const node of container.elements.values()) visit(node.nativeId, node.type, node.props)
+      for (const node of container.elements.values()) visit(node.nativeId, node.elementType, node.props)
     },
     rememberAttributes(id, attributes) {
       container.elements.get(id)?.sent.rememberAttributes(attributes)

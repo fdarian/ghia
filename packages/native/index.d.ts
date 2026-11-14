@@ -148,7 +148,12 @@ export declare class GpuixRenderer {
    * expression, or null when that is `undefined`; rejects with the script's error.
    */
   webviewExecuteJavascript(elementId: number, code: string): Promise<string | null>
-  focusElement(elementId: number): void
+  /**
+   * `element.focus()`: asks for focus on `element_id` and says whether it was asked for. False when
+   * script may not focus it (`focus::script_may_focus`: not rendered, `visibility` hidden or
+   * collapsed, inert, not focusable), in which case nothing happens and no event fires.
+   */
+  focusElement(elementId: number): boolean
   /** `element.blur()`: clear focus when `element_id` is the focused element. */
   blurElement(elementId: number): void
   /**
@@ -1027,7 +1032,7 @@ export declare class TestGpuixRenderer {
    * element with a `tabIndex`), which is what gives it a FocusHandle.
    * Call flush() before this so the element tree and focus handles exist.
    */
-  focusElement(id: number): void
+  focusElement(id: number): boolean
   blurElement(id: number): void
   matchesFocus(id: number, selector: string): boolean
   focusNext(): void

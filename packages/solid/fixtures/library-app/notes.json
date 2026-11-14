@@ -1,0 +1,1 @@
+{ "migration": "replace the import of template from solid-js/web with the JSX source" }

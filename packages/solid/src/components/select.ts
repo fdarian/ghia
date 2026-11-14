@@ -8,7 +8,7 @@ import {
   useContext,
   type JSX,
 } from "solid-js"
-import type { HostMouseEvent, HostPointerEvent, HostProps, KeyEvent } from "@ghia/native/host"
+import { focusElementById, type HostMouseEvent, type HostPointerEvent, type HostProps, type KeyEvent } from "@ghia/native/host"
 import type { HostElement } from "../host.js"
 import { jsx } from "../jsx-runtime.js"
 import { useGpuixRequired } from "../root.js"
@@ -89,7 +89,7 @@ export function Select(props: SelectProps): JSX.Element {
     const previous = open()
     if (props.open === undefined) setInternalOpen(next)
     if (previous !== next) props.onOpenChange?.(next)
-    if (!next && restoreFocus && trigger.current) renderer.focusElement?.(trigger.current.nativeId)
+    if (!next && restoreFocus && trigger.current) focusElementById(renderer, trigger.current.nativeId)
     if (next) setActive(items.find((item) => item.value === value() && !item.disabled)?.value ?? null)
   }
   const move = (delta: number) => {

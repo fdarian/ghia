@@ -1,8 +1,10 @@
 /** A dispatched click runs the activation behaviour of its target, as the DOM does for an uncanceled `click`. */
+import { createSignal } from "solid-js"
 import { afterEach, describe, expect, it } from "vitest"
 import { document, window, type DomEvent } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import type { HostElement } from "../host.js"
+import { Dynamic } from "../web.js"
 
 describe.skipIf(!hasNativeTestRenderer)("dispatchEvent of a click, in Solid", () => {
   let testRoot: ReturnType<typeof createTestRoot>
@@ -86,6 +88,41 @@ describe.skipIf(!hasNativeTestRenderer)("dispatchEvent of a click, in Solid", ()
     expect(focusedTestId()).toBeNull()
     nodes.label.dispatchEvent(click())
     expect(focusedTestId()).toBe("field")
+  })
+
+  it("toggles the checkbox a label names with for, the attribute's own name that Solid's JSX writes", () => {
+    testRoot = createTestRoot()
+    const nodes: Record<string, HostElement> = {}
+    const ref = (name: string) => (instance: unknown) => {
+      if (instance) nodes[name] = instance as HostElement
+    }
+    testRoot.render(() => (
+      <div style={{ width: 300, height: 100 }}>
+        <label ref={ref("label")} for="box" style={{ width: 80, height: 20 }}>
+          Name
+        </label>
+        <input ref={ref("box")} id="box" type="checkbox" style={{ width: 20, height: 20 }} />
+      </div>
+    ))
+    const box = nodes.box as unknown as HTMLInputElement
+    expect(box.checked).toBe(false)
+    nodes.label.dispatchEvent(click())
+    expect(box.checked).toBe(true)
+    nodes.label.dispatchEvent(click())
+    expect(box.checked).toBe(false)
+    expect((nodes.label as unknown as HTMLLabelElement).htmlFor).toBe("box")
+  })
+
+  it("takes for from a spread and a Dynamic label too, and drops it when the key leaves", () => {
+    testRoot = createTestRoot()
+    const [named, setNamed] = createSignal(true)
+    let label!: HostElement
+    testRoot.render(() => (
+      <Dynamic component="label" ref={(element: HostElement) => (label = element)} {...(named() ? { for: "box" } : {})} />
+    ))
+    expect((label as unknown as HTMLLabelElement).htmlFor).toBe("box")
+    testRoot.flushSync(() => setNamed(false))
+    expect((label as unknown as HTMLLabelElement).htmlFor).toBe("")
   })
 
   it("leaves focus alone for a label click a listener canceled", () => {

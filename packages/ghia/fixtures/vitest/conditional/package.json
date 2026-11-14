@@ -1,0 +1,11 @@
+{
+  "name": "conditional",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "custom": "./custom.js",
+      "default": "./default.js"
+    }
+  }
+}

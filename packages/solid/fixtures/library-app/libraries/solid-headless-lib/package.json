@@ -1,0 +1,14 @@
+{
+  "name": "solid-headless-lib",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "solid": "./lib/index.jsx",
+      "default": "./lib/index.js"
+    }
+  },
+  "peerDependencies": {
+    "solid-js": "^1.9.0"
+  }
+}
