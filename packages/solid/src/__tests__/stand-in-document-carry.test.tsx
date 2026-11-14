@@ -22,6 +22,12 @@ describe.skipIf(!hasNativeTestRenderer)("stand-in document elements, carried ont
     return app
   }
 
+  it("has no computed style before render: getComputedStyle throws a TypeError for the stand-ins", () => {
+    for (const element of [document.documentElement, document.head, document.body]) {
+      expect(() => getComputedStyle(element)).toThrow(TypeError)
+    }
+  })
+
   it("keeps a class set on <html> before render", () => {
     document.documentElement.classList.add("dark")
     mount()
