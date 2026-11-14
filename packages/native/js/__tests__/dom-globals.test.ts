@@ -138,7 +138,7 @@ describe("window size members", () => {
     for (const binding of mounted.splice(0)) binding.detach()
   })
 
-  it("throws before a root is mounted, as matchMedia does", () => {
+  it("throws before any root has been mounted, as matchMedia does", () => {
     expect(() => window.innerWidth).toThrow(/mounted/)
     expect(() => window.innerHeight).toThrow(/mounted/)
     expect(() => window.visualViewport!.width).toThrow(/mounted/)
@@ -155,6 +155,18 @@ describe("window size members", () => {
     expect(window.innerWidth).toBe(450)
     mounted.pop()!.detach()
     expect(window.innerWidth).toBe(first.width)
+  })
+
+  it("keeps the size the last window had once no root is mounted", () => {
+    const fake = mountWindow()
+    fake.width = 321
+    fake.height = 123
+    expect(window.innerWidth).toBe(321)
+    mounted.pop()!.detach()
+    expect(window.innerWidth).toBe(321)
+    expect(window.innerHeight).toBe(123)
+    expect(window.visualViewport!.width).toBe(321)
+    expect(window.visualViewport!.height).toBe(123)
   })
 
   it("has a visualViewport the size of the window, with no offset, scroll or zoom", () => {

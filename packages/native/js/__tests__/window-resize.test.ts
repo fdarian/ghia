@@ -117,7 +117,6 @@ describe("the resize event", () => {
     const listener = () => seen.push(window.visualViewport!.width)
     window.visualViewport!.addEventListener("resize", listener)
     try {
-      expect(() => window.visualViewport!.width).toThrow(/mounted/)
       const fake = mountWindow()
       expect(fake.mediaChangeCalls).toEqual([true])
       fake.width = 640

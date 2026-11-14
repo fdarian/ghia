@@ -5396,13 +5396,15 @@ has no document to scroll, as with a page that does not overflow. Libraries that
 check `typeof window` for a browser, such as TanStack Query, see a client.
 `getComputedStyle`, `matchMedia` and `IntersectionObserver` are globals too, and
 so is a handful of members of `window`: `innerWidth` and `innerHeight` (the window's
-content size in CSS pixels, read live from the window that mounted last, and an
-error before any root is mounted, as for `matchMedia`), `visualViewport`,
+content size in CSS pixels, read live from the window that mounted last; once the last root
+unmounts they keep answering with the size they last read, as in a browser while the window
+exists, and they throw only if no root was ever mounted), `visualViewport`,
 `frameElement` (`null`) and `parent`, `top` and `self` (the global object, unless the
 runtime defines them). `visualViewport` has `width` and `height` equal to the inner size,
 `offsetLeft`, `offsetTop`, `pageLeft` and `pageTop` of 0 (the document cannot scroll),
 `scale` of 1, and `addEventListener` and `removeEventListener` for `resize` (a listener
-added before any root is mounted is accepted, though `width` and `height` throw until one is). `window` gets
+added before any root is mounted is accepted, though `width` and `height` throw until one is, and after
+the last root unmounts they read the size last seen). `window` gets
 a `resize` event too: both are sent when the size of the window that mounted last changes
 (not for a change of OS preference), `visualViewport` first, from one subscription that
 exists only while either has a listener, and a listener added before any root is mounted

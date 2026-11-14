@@ -7,15 +7,6 @@ import type { NativeRenderer } from "./host.js"
 
 type WindowSize = { width: number; height: number }
 
-/** The window every member below reads is the one that mounted last, as for `matchMedia` and `document.body`. */
-function currentRenderer(member: string): NativeRenderer {
-  const renderer = mountedRenderer()
-  if (renderer === undefined) {
-    throw new Error(`${member} needs a mounted GPUIX root. Read it after render().`)
-  }
-  return renderer
-}
-
 function windowSizeOf(renderer: NativeRenderer, member: string): WindowSize {
   if (renderer.getWindowSize === undefined) {
     throw new Error(`This renderer does not report the window size, so ${member} cannot be read`)
@@ -23,8 +14,25 @@ function windowSizeOf(renderer: NativeRenderer, member: string): WindowSize {
   return renderer.getWindowSize()
 }
 
+/** What a window last measured, so the size members keep answering after the last root unmounts. */
+let lastWindowSize: WindowSize | undefined
+
+/**
+ * The size of the window that mounted last. Once no root is mounted it is the size that window
+ * last had when it was read: in a browser `innerWidth` and `visualViewport` answer as long as the
+ * window exists, and floating-ui measures after the root that opened a popover has unmounted. It
+ * throws only when no root has ever been mounted.
+ */
 function currentWindowSize(member: string): WindowSize {
-  return windowSizeOf(currentRenderer(member), member)
+  const renderer = mountedRenderer()
+  if (renderer === undefined) {
+    if (lastWindowSize === undefined) {
+      throw new Error(`${member} needs a mounted GPUIX root. Read it after render().`)
+    }
+    return lastWindowSize
+  }
+  lastWindowSize = windowSizeOf(renderer, member)
+  return lastWindowSize
 }
 
 const NO_ROOT = { eventHandlers: new Map(), elementById: () => undefined }
@@ -80,6 +88,7 @@ class ResizeWatch {
     const watched = this.watched
     if (watched === undefined || watched.renderer !== renderer) return
     const size = windowSizeOf(renderer, "resize")
+    lastWindowSize = size
     const last = watched.size
     watched.size = size
     if (last.width === size.width && last.height === size.height) return
