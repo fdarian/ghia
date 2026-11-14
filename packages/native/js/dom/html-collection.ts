@@ -133,6 +133,11 @@ function live<List extends LiveList>(prototype: object, search: Search, named: b
   return listOver(prototype, remembered(search), named)
 }
 
+/** A `NodeList` that never changes: what `querySelectorAll` returns. */
+export function staticNodeList(elements: readonly Element[]): NodeList {
+  return listOver<NodeList>(NodeListClass.prototype, () => elements, false)
+}
+
 function matchingTag(name: string): (element: Element) => boolean {
   if (name === "*") return () => true
   const lowered = name.toLowerCase()

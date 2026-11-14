@@ -17,3 +17,5 @@ A prop that leaves a Solid spread is removed. `<div {...(open() ? { "data-open":
 Children that change through a Solid spread replace the nodes they inserted before. `<Dynamic component="div">{tab() === 1 ? <List /> : <Detail />}</Dynamic>` (and `{...props()}` with a `children` key) used to keep the old nodes and append the new ones.
 
 The lists `getElementsByTagName`, `getElementsByClassName` and `getElementsByName` return keep what they found until the tree or an attribute changes (one counter for the whole document, moved by every insert, remove, root mount or unmount and prop write), so a loop over `length` and `list[index]` walks the tree once instead of once per access. `classList`, `HTMLCollection` and `NodeList` share one indexed-view helper.
+
+`querySelectorAll` returns a static `NodeList` (`instanceof NodeList`, `item`, `forEach`, `keys`, `values`, `entries`, iteration), not an `Array` subclass: it has no `map` or `filter`, as in a browser; `Array.from(list)` makes an array. `children` and `childNodes` stay arrays (listed in the deviations).

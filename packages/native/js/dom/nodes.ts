@@ -16,9 +16,9 @@ import { classListOf, type DOMTokenList } from "./class-list.js"
 import { datasetOf } from "./dataset.js"
 import type { DOMRectList } from "./dom-rect.js"
 import { defineConstraintValidation } from "./constraint-validation.js"
-import { elementsByClassName, elementsByName, elementsByTagName, type HTMLCollection, type NodeList } from "./html-collection.js"
+import { elementsByClassName, elementsByName, elementsByTagName, staticNodeList, type HTMLCollection, type NodeList } from "./html-collection.js"
 import { defineReflectedMembers, type ReflectedMembers } from "./reflected-members.js"
-import { closestElement, elementById, matchesSelector, querySelector, querySelectorAll, type ElementList } from "./selectors.js"
+import { closestElement, elementById, matchesSelector, querySelector, querySelectorAll } from "./selectors.js"
 import * as tree from "./tree-mutation.js"
 
 export { crossRootError } from "./tree-mutation.js"
@@ -612,8 +612,8 @@ abstract class ElementClass extends NodeClass {
   }
 
   /** The descendants `selector` matches, as a list that does not change with the tree. */
-  querySelectorAll(selector: string): ElementList {
-    return querySelectorAll(this as unknown as Element, selector, "Element")
+  querySelectorAll(selector: string): NodeList {
+    return staticNodeList(querySelectorAll(this as unknown as Element, selector, "Element"))
   }
 
   /** The descendants with that tag name (`"*"` for all), as a live list. */
@@ -700,8 +700,8 @@ abstract class DocumentClass extends NodeClass {
     return querySelector(this as unknown as Node, selector, "Document")
   }
 
-  querySelectorAll(selector: string): ElementList {
-    return querySelectorAll(this as unknown as Node, selector, "Document")
+  querySelectorAll(selector: string): NodeList {
+    return staticNodeList(querySelectorAll(this as unknown as Node, selector, "Document"))
   }
 
   getElementsByTagName(qualifiedName: string): HTMLCollection {
@@ -750,8 +750,8 @@ abstract class DocumentFragmentClass extends NodeClass {
     return querySelector(this as unknown as Node, selector, "DocumentFragment")
   }
 
-  querySelectorAll(selector: string): ElementList {
-    return querySelectorAll(this as unknown as Node, selector, "DocumentFragment")
+  querySelectorAll(selector: string): NodeList {
+    return staticNodeList(querySelectorAll(this as unknown as Node, selector, "DocumentFragment"))
   }
 
   set textContent(_value: string | null) {}

@@ -19,17 +19,6 @@ import { DOM_BINDING, SVGElement, type Element, type Node } from "./nodes.js"
 
 const ELEMENT_NODE = 1
 
-/** What a query returns: a static list in document order, as `NodeList` is for `querySelectorAll`. */
-export class ElementList extends Array<Element> {
-  static get [Symbol.species](): ArrayConstructor {
-    return Array
-  }
-
-  item(index: number): Element | null {
-    return this[index] ?? null
-  }
-}
-
 function isElement(node: Node): node is Element {
   return node.nodeType === ELEMENT_NODE
 }
@@ -254,9 +243,9 @@ export function findDescendants(root: Node, test: (element: Element) => boolean)
 }
 
 /** `root` is an element, or the document or fragment a query on it searches below. */
-export function querySelectorAll(root: Node, selector: string, owner: string): ElementList {
+export function querySelectorAll(root: Node, selector: string, owner: string): Element[] {
   const query = queryFor(String(selector), "querySelectorAll", owner)
-  const found = new ElementList()
+  const found: Element[] = []
   runScoped(isElement(root) ? root : null, () =>
     walkDescendants(root, (element) => {
       if (query(element)) found.push(element)
