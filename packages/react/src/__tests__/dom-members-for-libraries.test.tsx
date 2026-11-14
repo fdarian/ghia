@@ -385,5 +385,61 @@ describeNative("DOM members that libraries read, in React", () => {
       expect(text.value).toBe("after")
       for (const element of [text, box, area]) element.remove()
     })
+
+    it("a property write before the mount is the control's own state: no attribute, no default and no observer record, and it is applied once the element mounts", () => {
+      mount(() => <div />)
+      const text = document.createElement("input") as HTMLInputElement
+      const box = document.createElement("input") as HTMLInputElement
+      box.setAttribute("type", "checkbox")
+      const area = document.createElement("textarea") as HTMLTextAreaElement
+      const range = document.createElement("input") as HTMLInputElement
+      range.setAttribute("type", "range")
+      range.setAttribute("min", "0")
+      range.setAttribute("max", "10")
+      range.setAttribute("step", "2")
+      const observer = new MutationObserver(() => {})
+      for (const element of [text, box, area, range]) observer.observe(element, { attributes: true })
+
+      text.value = "x"
+      box.checked = true
+      box.indeterminate = true
+      area.value = "y"
+      range.value = "99"
+      expect(text.value).toBe("x")
+      expect(box.checked).toBe(true)
+      expect(box.indeterminate).toBe(true)
+      expect(area.value).toBe("y")
+
+      expect(text.getAttribute("value")).toBeNull()
+      expect(text.defaultValue).toBe("")
+      expect(text.matches("[value]")).toBe(false)
+      expect(box.getAttribute("checked")).toBeNull()
+      expect(box.hasAttribute("indeterminate")).toBe(false)
+      expect(box.defaultChecked).toBe(false)
+      expect(box.matches("[checked]")).toBe(false)
+      expect(area.getAttribute("value")).toBeNull()
+      expect(area.defaultValue).toBe("")
+      expect(observer.takeRecords()).toEqual([])
+
+      // The write set the dirty flag, so the default changes under it.
+      text.setAttribute("value", "d")
+      expect(text.value).toBe("x")
+      expect(text.defaultValue).toBe("d")
+      observer.disconnect()
+
+      for (const element of [text, box, area, range]) document.body!.appendChild(element)
+      expect(text.value).toBe("x")
+      expect(box.checked).toBe(true)
+      expect(box.indeterminate).toBe(true)
+      expect(box.matches(":checked")).toBe(true)
+      expect(area.value).toBe("y")
+      expect(range.value).toBe("10")
+      expect(text.getAttribute("value")).toBe("d")
+      expect(text.defaultValue).toBe("d")
+      expect(box.getAttribute("checked")).toBeNull()
+      expect(box.defaultChecked).toBe(false)
+      expect(area.getAttribute("value")).toBeNull()
+      for (const element of [text, box, area, range]) element.remove()
+    })
   })
 })

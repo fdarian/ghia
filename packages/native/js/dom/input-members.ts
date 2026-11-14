@@ -1,8 +1,8 @@
-import { flushPendingMutations, HOST_BINDING, type HostBinding } from "../bounds.js"
+import { flushPendingMutations, HOST_BINDING, type HostBinding, type ObservableElement } from "../bounds.js"
 import type { NativeRenderer } from "../host.js"
 import type { InputChoiceState } from "../../index.js"
 import { namedError } from "../named-error.js"
-import { attributeText, inputAttributeValue } from "./attribute-names.js"
+import { attributeText, inputAttributeValue, inputValueIsAttribute } from "./attribute-names.js"
 import { requiredMethod } from "./renderer-method.js"
 import { onTags } from "./tag-members.js"
 
@@ -86,6 +86,49 @@ function writeValueProp(self: object, layout: Layout, value: string): void {
   binding.mutations.flushMutations()
 }
 
+/**
+ * What code assigned to `checked`, `indeterminate` and `value` of a control that has no native element
+ * yet. As after the mount, an assignment is the control's own state (the dirty flag, a checkedness apart
+ * from the `checked` attribute) and not a prop: `getAttribute`, `defaultValue`, a `[checked]` selector and
+ * observers see none of it. It is kept here and written to native as those assignments are, when the
+ * element is created (`applyWrittenInputState`). Keyed by the element, so no adapter holds a field for it.
+ */
+type WrittenState = { checked?: boolean; indeterminate?: boolean; value?: string }
+const written = new WeakMap<object, WrittenState>()
+
+function writtenState(element: object): WrittenState {
+  let state = written.get(element)
+  if (state === undefined) written.set(element, (state = {}))
+  return state
+}
+
+/** The text assigned to the `value` of a control that is not mounted, `undefined` when none was. */
+export function writtenInputValue(element: object): string | undefined {
+  return written.get(element)?.value
+}
+
+function writeValue(self: object, layout: Layout, text: string): void {
+  if (isInput(self) && readInputChoice(layout).kind === "range") writeRangeValue(layout, text)
+  else writeValueProp(self, layout, text)
+}
+
+/**
+ * Writes what code assigned before the element had a native one, the way the same assignments after it
+ * are written (a range sanitizes the value). The adapter calls it right after it creates the native
+ * element, when `[HOST_BINDING]()` answers.
+ */
+export function applyWrittenInputState(element: ObservableElement): void {
+  const state = written.get(element)
+  if (state === undefined) return
+  written.delete(element)
+  const binding = element[HOST_BINDING]()
+  if (binding === undefined) throw new Error("Input state written before the mount can only be applied to a mounted element")
+  const layout: Layout = { renderer: binding.renderer, id: element.nativeId }
+  if (state.value !== undefined) writeValue(element, layout, state.value)
+  if (state.checked !== undefined) writeFlag(layout, "checked", state.checked)
+  if (state.indeterminate !== undefined) writeFlag(layout, "indeterminate", state.indeterminate)
+}
+
 function propText(value: unknown): string {
   return value === undefined || value === null ? "" : String(value)
 }
@@ -113,12 +156,11 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
       name,
       (self) => {
         const binding = bind(self)
-        return binding.layout === undefined ? prop(binding) : readInputChoice(binding.layout)[name]
+        return binding.layout === undefined ? (written.get(self)?.[name] ?? prop(binding)) : readInputChoice(binding.layout)[name]
       },
       (self, value) => {
         const binding = bind(self)
-        // Not mounted yet: the write is kept as the prop native reads as the same property assignment once it creates the element.
-        if (binding.layout === undefined) binding.setProp(name, Boolean(value))
+        if (binding.layout === undefined) writtenState(self)[name] = Boolean(value)
         else writeFlag(binding.layout, name, Boolean(value))
       }
     )
@@ -195,7 +237,7 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
       (self) => {
         const binding = bind(self)
         const layout = binding.layout
-        if (layout === undefined) return propText(binding.prop("value") ?? binding.prop("defaultValue"))
+        if (layout === undefined) return written.get(self)?.value ?? propText(binding.prop("value") ?? binding.prop("defaultValue"))
         if (isInput(self)) {
           const state = readInputChoice(layout)
           if (state.kind !== "text") return state.value
@@ -207,10 +249,10 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
       (self, value) => {
         const binding = bind(self)
         const text = propText(value)
-        // Not mounted yet: the write is kept as the prop native reads as the control's dirty value once it creates the element.
-        if (binding.layout === undefined) binding.setProp("value", text)
-        else if (isInput(self) && readInputChoice(binding.layout).kind === "range") writeRangeValue(binding.layout, text)
-        else writeValueProp(self, binding.layout, text)
+        if (binding.layout !== undefined) writeValue(self, binding.layout, text)
+        // The value of a checkbox, radio or hidden input is its attribute, so a write is the attribute's.
+        else if (isInput(self) && inputValueIsAttribute(binding.prop("type"))) binding.setProp("value", text)
+        else writtenState(self).value = text
       }
     ),
   })

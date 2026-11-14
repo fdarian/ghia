@@ -28,6 +28,8 @@ import {
   HOST_BINDING,
   HOST_MOUNT,
   copyPrototypeMembers,
+  applyWrittenInputState,
+  writtenInputValue,
   queueCharacterDataMutation,
   queueChildListMutation,
   recordAttributeChanges,
@@ -469,10 +471,10 @@ export class HostElement extends HTMLElement {
     this.detachedSelection ??= new UnmountedTextSelection({
       inputType: () => this.props.get("type"),
       text: () => {
-        const written = this.props.get("value") ?? this.props.get("defaultValue")
+        const written = writtenInputValue(this) ?? this.props.get("value") ?? this.props.get("defaultValue")
         return written === undefined ? "" : String(written)
       },
-      valueWritten: () => this.props.get("value") !== undefined,
+      valueWritten: () => writtenInputValue(this) !== undefined || this.props.get("value") !== undefined,
     })
     return this.detachedSelection
   }
@@ -916,6 +918,7 @@ function mount(root: HostRoot, node: HostNode): void {
       }
     }
     if (node.elementType === "nativeview") syncNativeviewProps(root, node)
+    if (node.elementType === "input" || node.elementType === "textarea") applyWrittenInputState(node)
   }
   if (node.kind === "element") {
     if (node.mountListeners.size > 0) for (const listener of [...node.mountListeners]) listener()

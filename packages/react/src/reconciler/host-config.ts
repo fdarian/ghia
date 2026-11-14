@@ -16,6 +16,7 @@ import {
   ROOT_ELEMENT_TYPES,
   sameMutationValue,
   serializeCustomProp,
+  applyWrittenInputState,
   attributesOfProps,
   forwardsCustomProp,
   queueCharacterDataMutation,
@@ -338,6 +339,7 @@ export function materialize(node: HostNode): ReturnType<typeof stateFor> {
     renderer.setText(node.nativeId, node.text)
   }
   state.mounted = true
+  if ("elementType" in node && (node.elementType === "input" || node.elementType === "textarea")) applyWrittenInputState(node)
 
   // Its children are the ones React gave it as initial children, and any that code placed in it
   // while it had no native element.
