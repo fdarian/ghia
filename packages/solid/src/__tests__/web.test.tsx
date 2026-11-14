@@ -2,7 +2,7 @@
  * `@ghia/solid/web`: the renderer-independent part of `solid-js/web` that Solid libraries import (`Dynamic`,
  * `Portal`, `isServer`), on Ghia's universal renderer.
  */
-import { DEV, createEffect, createSignal, onMount, type JSX } from "solid-js"
+import { DEV, Show, createContext, createEffect, createSignal, getOwner, onCleanup, onMount, useContext, type JSX } from "solid-js"
 import { afterEach, describe, expect, it } from "vitest"
 import { document } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
@@ -96,6 +96,57 @@ describe.skipIf(!hasNativeTestRenderer)("Dynamic and Portal in Solid", () => {
       expect(host!.children.length).toBe(0)
     })
 
+    it("render into an element with children keeps them while the code's own nodes come and go", () => {
+      const [open, setOpen] = createSignal(true)
+      let host: HTMLElement | undefined
+      mount(() => (
+        <section ref={(el: unknown) => (host = el as HTMLElement)}>
+          <p>app</p>
+        </section>
+      ))
+      const dispose = render(() => <Show when={open()}><b>toast</b></Show>, host!)
+      const tags = () => [...host!.children].map((child) => child.tagName)
+      expect(tags()).toEqual(["P", "B"])
+      app!.flushSync(() => setOpen(false))
+      expect(tags()).toEqual(["P"])
+      app!.flushSync(() => setOpen(true))
+      expect(tags()).toEqual(["P", "B"])
+      dispose()
+      expect(host!.children.length).toBe(0)
+    })
+
+    it("render into document runs the code under a root without inserting what it returns", () => {
+      mount(() => <section />)
+      let disposed = false
+      const dispose = render(() => {
+        onCleanup(() => (disposed = true))
+        return <b>never mounted</b>
+      }, document as unknown as Document)
+      expect(bodyTags()).toEqual(["section"])
+      dispose()
+      expect(disposed).toBe(true)
+    })
+
+    it("render runs under the owner it is given", () => {
+      let seen: string | undefined
+      const Context = createContext("outer")
+      mount(() => (
+        <Context.Provider value="inner">
+          {(() => {
+            const owner = getOwner()
+            const host = document.createElement("div") as unknown as HTMLElement
+            render(() => (seen = useContext(Context)), host, undefined, { owner })
+            return host as unknown as JSX.Element
+          })()}
+        </Context.Provider>
+      ))
+      expect(seen).toBe("inner")
+    })
+
+    it("render says so for a node that is not an element of this document", () => {
+      expect(() => render(() => null, {} as unknown as Element)).toThrow("into an element of this window's document")
+    })
+
     it("spread(node, props, isSVG, skipChildren) sets the props and the children, and skipChildren leaves the children out", () => {
       let both: HTMLElement | undefined
       let bare: HTMLElement | undefined
@@ -110,6 +161,14 @@ describe.skipIf(!hasNativeTestRenderer)("Dynamic and Portal in Solid", () => {
       expect(both!.textContent).toBe("kids")
       expect(bare!.getAttribute("id")).toBe("b")
       expect(bare!.textContent).toBe("")
+    })
+
+    it("spread returns the props it wrote", () => {
+      mount(() => {
+        const node = document.createElement("div") as HTMLElement
+        expect(spread(node, { id: "a", title: "t" }, false)).toEqual({ id: "a", title: "t" })
+        return node as unknown as JSX.Element
+      })
     })
   })
 

@@ -35,16 +35,21 @@ export function createSpread<Node>(host: SpreadHost<Node>) {
     return prevProps
   }
 
-  return function spread(node: Node, accessor: Props | (() => Props | undefined) | undefined, skipChildren?: boolean): void {
+  /** Returns the props it has written, as `solid-js/web`'s does. */
+  return function spread(node: Node, accessor: Props | (() => Props | undefined) | undefined, skipChildren?: boolean): Props {
+    const prevProps: Props = {}
     if (typeof accessor === "function") {
       // One insert for the node's life: it keeps what it inserted, so a new value replaces the old nodes.
       // Inserting inside the effect below would start from nothing each time `accessor` re-runs.
       const props = createMemo(accessor)
       if (!skipChildren) host.insert(node, () => props()?.children)
-      createRenderEffect((current: Props | undefined) => spreadExpression(node, props(), current))
+      createRenderEffect(() => {
+        spreadExpression(node, props(), prevProps)
+      })
     } else {
       if (!skipChildren) host.insert(node, () => accessor?.children)
-      spreadExpression(node, accessor)
+      spreadExpression(node, accessor, prevProps)
     }
+    return prevProps
   }
 }

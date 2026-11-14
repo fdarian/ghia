@@ -10,6 +10,7 @@ import {
   DEV,
   createEffect,
   createMemo,
+  createRoot,
   getOwner,
   onCleanup,
   runWithOwner,
@@ -18,9 +19,11 @@ import {
   untrack,
   type ComponentProps,
   type JSX,
+  type Owner,
   type ValidComponent,
 } from "solid-js"
 import { document } from "@ghia/native/host"
+import { isHostNode } from "./host.js"
 import {
   createComponent,
   createElement,
@@ -37,9 +40,30 @@ import {
 export * from "solid-js"
 export { createComponent, effect, insert, memo, mergeProps, use }
 
-/** Solid's web renderer's `render(code, element)`: mounts into `element` and returns the dispose. Ghia's window-opening `render` is `@ghia/solid`'s. */
-export function render(code: () => JSX.Element, element: Element): () => void {
-  const dispose = universalRender(code, element as never)
+/**
+ * Solid's web renderer's `render(code, element, init, options)`: mounts into `element` beside what it holds already, and
+ * returns the dispose. Ghia's window-opening `render` is `@ghia/solid`'s. `document` runs the code without inserting its result.
+ */
+export function render(
+  code: () => JSX.Element,
+  element: Element | Document,
+  init?: JSX.Element,
+  options: { owner?: Owner | null } = {}
+): () => void {
+  if (element === (document as unknown)) {
+    return createRoot((dispose) => {
+      code()
+      return dispose
+    }, options.owner ?? undefined)
+  }
+  if (!isHostNode(element)) {
+    throw new TypeError("render() mounts into an element of this window's document or into the document itself")
+  }
+  const dispose = universalRender(code, element, {
+    marker: element.firstChild ? null : undefined,
+    initial: init,
+    owner: options.owner,
+  })
   return () => {
     dispose()
     element.textContent = ""
@@ -52,8 +76,8 @@ export function spread(
   props: Parameters<typeof spreadProps>[1],
   _isSVG?: boolean,
   skipChildren?: boolean
-): void {
-  spreadProps(node, props, skipChildren)
+): Record<string, unknown> {
+  return spreadProps(node, props, skipChildren)
 }
 
 export const isServer = false

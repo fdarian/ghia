@@ -1,4 +1,4 @@
-import { createRoot as createSolidRoot, type JSX } from "solid-js"
+import { createRoot as createSolidRoot, type JSX, type Owner } from "solid-js"
 import { createRenderer } from "solid-js/universal"
 import {
   createHostElement,
@@ -115,13 +115,25 @@ const runtime = createRenderer<HostNode | HostParent>({
   },
 })
 
+export type UniversalRenderOptions = {
+  /** `null` makes the code's nodes go before nothing, so a node already in `body` is kept. */
+  marker?: null
+  /** What `body` is taken to hold already, as `insert`'s last argument. */
+  initial?: JSX.Element
+  owner?: Owner | null
+}
+
 // `body` is the parent, not the HostRoot: Solid's `cleanChildren` removes a node only when
 // `getParentNode(node)` is the parent it was inserted into, and a top-level node's parent is `body`.
-export function universalRender(code: () => JSX.Element, body: HostNode | HostParent): () => void {
+export function universalRender(
+  code: () => JSX.Element,
+  body: HostNode | HostParent,
+  options: UniversalRenderOptions = {}
+): () => void {
   return createSolidRoot((dispose) => {
-    runtime.insert(body, code())
+    runtime.insert(body, code(), options.marker, options.initial)
     return dispose
-  })
+  }, options.owner ?? undefined)
 }
 
 export const effect = runtime.effect

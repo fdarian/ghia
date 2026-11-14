@@ -751,10 +751,13 @@ on the DOM:
 
 - everything `solid-js` exports, plus `createComponent`, `effect`, `insert`, `memo`, `mergeProps`, `spread`, `use` and
   `render`;
-- `render(code, element)` is `solid-js/web`'s: it mounts `code` into the element it is given and returns a function
-  that disposes it and empties the element. It does not open a window; that is [`render()`](./solid.md#render) of
-  `@ghia/solid`;
-- `spread(node, props, isSVG, skipChildren)` has `solid-js/web`'s signature (`isSVG` is ignored); the compiled JSX of
+- `render(code, element, init, options)` is `solid-js/web`'s: it mounts `code` into the element it is given and returns a function
+  that disposes it and empties the element. An element that has children keeps them: the code's nodes go after them, and
+  a `<Show>` in `code` adds and removes only its own. `document` runs `code` under a root and inserts nothing. `init` is
+  what the element is taken to hold already, and `options.owner` is the owner the code runs under (its contexts are
+  readable). An `element` that is not of this window's document throws a `TypeError`. It does not open a window; that is
+  [`render()`](./solid.md#render) of `@ghia/solid`;
+- `spread(node, props, isSVG, skipChildren)` has `solid-js/web`'s signature (`isSVG` is ignored) and returns the props it has written; the compiled JSX of
   `@ghia/solid` uses `solid-js/universal`'s `(node, props, skipChildren)`. Both do what `solid-js/web` does where
   `solid-js/universal` does not: a prop that was in the spread and is not any more is removed (`{...(open() ? { "data-open": "" } : {})}` drops `data-open`, an `onClick` stops firing, a
   `style` is emptied), where `solid-js/universal` leaves its last value on the element. A `children` that changes
