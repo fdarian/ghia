@@ -7,7 +7,6 @@ import {
   attributesWritten,
   crossRootError,
   forwardsCustomProp,
-  hasMutationObservers,
   queueCharacterDataMutation,
   recordAttributeChanges,
   runAll,
@@ -142,8 +141,7 @@ export function setDomStyle(instance: Instance, next: StyleDesc): void {
   const apply = () => {
     state.codeStyle = next
   }
-  if (hasMutationObservers()) recordAttributeChanges(instance, ["style"], apply)
-  else apply()
+  recordAttributeChanges(instance, () => ["style"], apply)
   // A burst of writes (a drag writing the transform on every pointer move) is one `setStyle` for the next flush.
   // The element may have been released, or React may have sent this style, by the time the flush runs it.
   if (state.mounted) {
@@ -160,8 +158,7 @@ export function setDomProp(instance: Instance, name: string, value: string | num
     state.propOverrides ??= new Map()
     state.propOverrides.set(name, value)
   }
-  if (hasMutationObservers()) recordAttributeChanges(instance, [name], apply)
-  else apply()
+  recordAttributeChanges(instance, () => [name], apply)
   if (state.mounted && forwardsCustomProp(instance.elementType, name)) {
     state.container.renderer.setCustomProp(instance.nativeId, name, serializeCustomProp(value))
   }

@@ -1,23 +1,20 @@
 /**
  * `getElementsByTagName`, `getElementsByClassName` and `getElementsByName`, and the live lists they
- * return. A list holds no elements: it is a search that runs again on every access (`length`, an
- * index, `item`, `namedItem`, iteration), so it follows the tree as a browser's list does.
+ * return. A list is a search, and it keeps what the search found until the tree or an attribute
+ * changes (`tree-version.ts`), so a loop over `length` and indices walks the tree once and a list
+ * still follows the tree as a browser's does.
  */
 
+import { indexedView, splitOnSpaces } from "./indexed-view.js"
 import { findDescendants } from "./selectors.js"
 import { SVGElement, type Element, type Node } from "./nodes.js"
+import { treeVersion } from "./tree-version.js"
 
 type Search = () => readonly Element[]
 
 /** Where a list keeps its search, on the list itself, so a method called on the proxy finds it. */
 const SEARCH = Symbol("search")
 const CREATE = Symbol("create live list")
-
-const ARRAY_INDEX = /^(0|[1-9][0-9]*)$/
-
-function indexOf(key: string | symbol): number | undefined {
-  return typeof key === "string" && ARRAY_INDEX.test(key) ? Number(key) : undefined
-}
 
 function searchOf(list: object): Search {
   return Reflect.get(list, SEARCH) as Search
@@ -108,36 +105,32 @@ export type HTMLCollection = HTMLCollectionClass
 export const NodeList = shared.NodeList
 export type NodeList = NodeListClass
 
-function live<List extends LiveList>(prototype: object, search: Search, named: boolean): List {
+/** Runs `search` again only when the tree version moved since the last run. */
+function remembered(search: Search): Search {
+  let version = -1
+  let found: readonly Element[] = []
+  return () => {
+    const current = treeVersion()
+    if (current !== version) {
+      found = search()
+      version = current
+    }
+    return found
+  }
+}
+
+function listOver<List extends LiveList>(prototype: object, elements: Search, named: boolean): List {
   const list = Object.create(prototype) as List
-  Object.defineProperty(list, SEARCH, { value: search })
-  return new Proxy(list, {
-    get(target, key, receiver) {
-      const index = indexOf(key)
-      if (index !== undefined) return search()[index]
-      if (named && typeof key === "string" && !Reflect.has(target, key)) return namedElement(search(), key) ?? undefined
-      return Reflect.get(target, key, receiver)
-    },
-    has(target, key) {
-      const index = indexOf(key)
-      if (index !== undefined) return index < search().length
-      if (named && typeof key === "string" && !Reflect.has(target, key)) return namedElement(search(), key) !== null
-      return Reflect.has(target, key)
-    },
-    ownKeys(target) {
-      const keys: Array<string | symbol> = search().map((_, index) => String(index))
-      return keys.concat(Reflect.ownKeys(target))
-    },
-    getOwnPropertyDescriptor(target, key) {
-      const index = indexOf(key)
-      if (index === undefined) return Reflect.getOwnPropertyDescriptor(target, key)
-      const element = search()[index]
-      return element === undefined ? undefined : { value: element, writable: false, enumerable: true, configurable: true }
-    },
-    set(target, key, value, receiver) {
-      return indexOf(key) === undefined && Reflect.set(target, key, value, receiver)
-    },
-  })
+  Object.defineProperty(list, SEARCH, { value: elements })
+  return indexedView(
+    list,
+    { length: () => elements().length, at: (index) => elements()[index] },
+    named ? { get: (name) => namedElement(elements(), name) ?? undefined, has: (name) => namedElement(elements(), name) !== null } : undefined
+  )
+}
+
+function live<List extends LiveList>(prototype: object, search: Search, named: boolean): List {
+  return listOver(prototype, remembered(search), named)
 }
 
 function matchingTag(name: string): (element: Element) => boolean {
@@ -147,10 +140,8 @@ function matchingTag(name: string): (element: Element) => boolean {
   return (element) => element.localName === (element instanceof SVGElement ? name : lowered)
 }
 
-const WHITESPACE = /[\t\n\f\r ]+/
-
 function classTokens(element: Element): string[] {
-  return (element.getAttribute("class") ?? "").split(WHITESPACE).filter((token) => token !== "")
+  return splitOnSpaces(element.getAttribute("class") ?? "")
 }
 
 /** The elements below `root` (not `root`) with that tag name; `"*"` is all of them. */
@@ -161,7 +152,7 @@ export function elementsByTagName(root: Node, name: string): HTMLCollection {
 
 /** The elements below `root` that carry every class of the whitespace-separated `names`; none when it names none. */
 export function elementsByClassName(root: Node, names: string): HTMLCollection {
-  const wanted = String(names).split(WHITESPACE).filter((token) => token !== "")
+  const wanted = splitOnSpaces(String(names))
   return live<HTMLCollection>(
     HTMLCollectionClass.prototype,
     () => {

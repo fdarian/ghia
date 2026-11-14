@@ -28,7 +28,6 @@ import {
   HOST_BINDING,
   HOST_MOUNT,
   copyPrototypeMembers,
-  hasMutationObservers,
   queueCharacterDataMutation,
   queueChildListMutation,
   recordAttributeChanges,
@@ -649,8 +648,7 @@ class ElementDomBinding implements ElementBinding {
   }
 
   setStyle(next: StyleDesc): void {
-    if (hasMutationObservers()) recordAttributeChanges(this.element, ["style"], () => this.element.setCodeStyle(next))
-    else this.element.setCodeStyle(next)
+    recordAttributeChanges(this.element, () => ["style"], () => this.element.setCodeStyle(next))
   }
 
   setProp(name: string, value: string): void {
@@ -761,8 +759,7 @@ export function setHostProperty(
   if (name === "style") {
     const split = splitMotionStyle(isStyle(value) ? value : undefined)
     const next = split.style ?? {}
-    if (hasMutationObservers()) recordAttributeChanges(node, ["style"], () => node.setFrameworkStyle(next))
-    else node.setFrameworkStyle(next)
+    recordAttributeChanges(node, () => ["style"], () => node.setFrameworkStyle(next))
     node.motionValues = split.motionValues
     if (node.root && node.mounted) {
       node.writeStyle()
@@ -796,8 +793,7 @@ export function setHostProperty(
 }
 
 function storeAndSyncProp(node: HostElement, name: string, value: HostPropertyValue): void {
-  if (hasMutationObservers()) recordAttributeChanges(node, [name], () => storeHostProp(node, name, value))
-  else storeHostProp(node, name, value)
+  recordAttributeChanges(node, () => [name], () => storeHostProp(node, name, value))
   syncStoredProp(node, name, value)
 }
 
@@ -839,8 +835,7 @@ function setMergedClass(node: HostElement, name: string, value: HostPropertyValu
     node.props.delete("className")
     storeHostProp(node, "class", merged)
   }
-  if (hasMutationObservers()) recordAttributeChanges(node, ["class"], store)
-  else store()
+  recordAttributeChanges(node, () => ["class"], store)
   syncStoredProp(node, "class", merged)
 }
 
@@ -937,7 +932,7 @@ function removeFromParent(node: HostNode): void {
   const index = parent.childList.indexOf(node)
   if (index >= 0) parent.childList.splice(index, 1)
   node.parent = null
-  if (index >= 0 && parent.kind === "element" && hasMutationObservers()) {
+  if (index >= 0 && parent.kind === "element") {
     queueChildListMutation(parent, [], [node], parent.childList[index - 1] ?? null, parent.childList[index] ?? null)
   }
 }
@@ -960,9 +955,7 @@ export function insertHostNode(
   const index = anchor ? parent.childList.indexOf(anchor) : parent.childList.length
   parent.childList.splice(index, 0, node)
   node.parent = parent
-  if (hasMutationObservers()) {
-    queueChildListMutation(parent, [node], [], parent.childList[index - 1] ?? null, parent.childList[index + 1] ?? null)
-  }
+  queueChildListMutation(parent, [node], [], parent.childList[index - 1] ?? null, parent.childList[index + 1] ?? null)
   const root = parent.mounted ? parent.root : null
   if (root === null) {
     // The new parent has no native element (it was never mounted, or was released), so a node

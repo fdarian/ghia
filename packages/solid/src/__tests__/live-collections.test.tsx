@@ -4,7 +4,7 @@
  */
 import type { JSX } from "solid-js"
 import { createSignal, Show } from "solid-js"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { document } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
@@ -118,6 +118,72 @@ describe.skipIf(!hasNativeTestRenderer)("live element lists and className, in So
     expect(late.length).toBe(0)
     setShown(true)
     expect(late.length).toBe(1)
+  })
+
+  describe("what a list found is kept until the tree or an attribute changes", () => {
+    /** How many times the elements were asked for their `class`: once each per search of the tree. */
+    function watchClassReads(elements: HTMLElement[]): () => number {
+      const spies = elements.map((element) => vi.spyOn(element, "getAttribute"))
+      return () => spies.reduce((total, spy) => total + spy.mock.calls.filter((call) => call[0] === "class").length, 0)
+    }
+
+    it("a loop over length and index searches the tree once, and so does a name no member has", () => {
+      const found = mount((grab) => (
+        <div ref={grab("root")} style={{ width: 200, height: 200 }}>
+          <span ref={grab("a")} class="item" />
+          <span ref={grab("b")} class="item" />
+          <span ref={grab("c")} class="item" />
+        </div>
+      ))
+      const reads = watchClassReads([found.a, found.b, found.c])
+      const items = found.root.getElementsByClassName("item")
+      const seen: Element[] = []
+      for (let index = 0; index < items.length; index += 1) seen.push(items[index], items.item(index)!)
+      expect(seen.length).toBe(6)
+      expect(reads()).toBe(3)
+      // A promise or a serializer asks a list for these; they read the kept list and search nothing.
+      expect((items as unknown as Record<string, unknown>).then).toBeUndefined()
+      expect((items as unknown as Record<string, unknown>).toJSON).toBeUndefined()
+      expect((items as unknown as Record<string, unknown>)[Symbol.toPrimitive]).toBeUndefined()
+      expect(reads()).toBe(3)
+    })
+
+    it("an element inserted and a class that changes after the list was read show in it", () => {
+      const [on, setOn] = createSignal(false)
+      const found = mount((grab) => (
+        <div ref={grab("root")} style={{ width: 200, height: 200 }}>
+          <span ref={grab("a")} class="item" />
+          <span ref={grab("b")} classList={{ item: on() }} />
+        </div>
+      ))
+      const items = found.root.getElementsByClassName("item")
+      expect(items.length).toBe(1)
+      setOn(true)
+      expect(items.length).toBe(2)
+      setOn(false)
+      expect(items.length).toBe(1)
+      const added = document.createElement("span")
+      added.className = "item"
+      found.root.appendChild(added)
+      expect(items.length).toBe(2)
+      expect(items[1]).toBe(added)
+      added.setAttribute("class", "other")
+      expect(items.length).toBe(1)
+      found.a.classList.add("two")
+      expect(found.root.getElementsByClassName("two").length).toBe(1)
+      added.remove()
+      expect(items.length).toBe(1)
+    })
+
+    it("a list on document follows a root that mounts and unmounts", () => {
+      const spans = document.getElementsByTagName("span")
+      expect(spans.length).toBe(0)
+      mount(() => <span />)
+      expect(spans.length).toBe(1)
+      app?.unmount()
+      app = undefined
+      expect(spans.length).toBe(0)
+    })
   })
 
   it("className is assigned as the class attribute", () => {

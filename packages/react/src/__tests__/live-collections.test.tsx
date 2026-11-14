@@ -2,9 +2,10 @@
  * `getElementsByTagName`, `getElementsByClassName` and `getElementsByName` on elements and on
  * `document`, the live lists they return, and the `className` setter, in React.
  */
-import type { ReactNode } from "react"
-import { afterEach, describe, expect, it } from "vitest"
+import { useState, type ReactNode } from "react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { document } from "@ghia/native/host"
+import { flushSync } from "../reconciler/reconciler.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -68,6 +69,55 @@ describeNative("live element lists and className, in React", () => {
     mount(() => <div />)
     expect(document.head!.getElementsByTagName("style").length).toBe(0)
     expect(document.getElementsByTagName("body").length).toBe(1)
+  })
+
+  describe("what a list found is kept until the tree or an attribute changes", () => {
+    it("a loop over length and index searches the tree once", () => {
+      const found = mount((grab) => (
+        <div ref={grab("root")} style={{ width: 200, height: 200 }}>
+          <span ref={grab("a")} className="item" />
+          <span ref={grab("b")} className="item" />
+          <span ref={grab("c")} className="item" />
+        </div>
+      ))
+      const spies = [found.a, found.b, found.c].map((element) => vi.spyOn(element, "getAttribute"))
+      const classReads = () => spies.reduce((total, spy) => total + spy.mock.calls.filter((call) => call[0] === "class").length, 0)
+      const items = found.root.getElementsByClassName("item")
+      for (let index = 0; index < items.length; index += 1) expect(items[index]).toBe(items.item(index))
+      expect(classReads()).toBe(3)
+      expect((items as unknown as Record<string, unknown>).then).toBeUndefined()
+      expect(classReads()).toBe(3)
+    })
+
+    it("an element inserted and a class that changes after the list was read show in it", () => {
+      let setOn!: (on: boolean) => void
+      function Toggled(props: { grab: (name: string) => (instance: unknown) => void }) {
+        const [on, set] = useState(false)
+        setOn = set
+        return <span ref={props.grab("b")} className={on ? "item" : undefined} />
+      }
+      const found = mount((grab) => (
+        <div ref={grab("root")} style={{ width: 200, height: 200 }}>
+          <span ref={grab("a")} className="item" />
+          <Toggled grab={grab} />
+        </div>
+      ))
+      const items = found.root.getElementsByClassName("item")
+      expect(items.length).toBe(1)
+      flushSync(() => setOn(true))
+      expect(items.length).toBe(2)
+      flushSync(() => setOn(false))
+      expect(items.length).toBe(1)
+      const added = document.createElement("span")
+      added.className = "item"
+      found.root.appendChild(added)
+      expect(items.length).toBe(2)
+      expect(items[1]).toBe(added)
+      added.setAttribute("class", "other")
+      expect(items.length).toBe(1)
+      added.remove()
+      expect(items.length).toBe(1)
+    })
   })
 
   it("className is assigned as the class attribute", () => {

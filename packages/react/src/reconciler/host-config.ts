@@ -18,7 +18,6 @@ import {
   serializeCustomProp,
   attributesOfProps,
   forwardsCustomProp,
-  hasMutationObservers,
   queueCharacterDataMutation,
   readTextControlSelection,
   recordAttributeChanges,
@@ -463,13 +462,11 @@ function applyUpdate(instance: Instance, oldProps: Props, newProps: Props): void
   // their style, so send it only when it did.
   const styleChanged = !sameStyle(oldProps.style, newProps.style)
   const overridesBefore = state.propOverrides === undefined ? undefined : new Map(state.propOverrides)
-  if (hasMutationObservers()) {
-    recordAttributeChanges(instance, new Set([...Object.keys(oldProps), ...Object.keys(newProps)]), () => {
-      adoptProps(instance, state, oldProps, newProps, styleChanged)
-    })
-  } else {
-    adoptProps(instance, state, oldProps, newProps, styleChanged)
-  }
+  recordAttributeChanges(
+    instance,
+    () => new Set([...Object.keys(oldProps), ...Object.keys(newProps)]),
+    () => adoptProps(instance, state, oldProps, newProps, styleChanged)
+  )
   // Code took it out of the document and native let it go: it is made again, from these
   // props, when it is inserted. Its handler slots are kept up to date meanwhile, because that
   // re-registers them; they do not reach native, which has no element for them.
