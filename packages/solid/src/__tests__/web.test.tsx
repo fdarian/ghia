@@ -11,9 +11,8 @@ import * as web from "../web.js"
 import { Dynamic, Portal, isDev, isServer } from "../web.js"
 
 describe("@ghia/solid/web exports", () => {
-  it("are the names the Solid plugin allows an import from solid-js/web", () => {
-    const missing = Object.keys(web).filter((name) => !WEB_EXPORTS.includes(name))
-    expect(missing).toEqual([])
+  it("are exactly the names the Solid plugin allows an import from solid-js/web", () => {
+    expect(Object.keys(web).sort()).toEqual([...WEB_EXPORTS].sort())
   })
 
   it("has no DOM renderer members", () => {

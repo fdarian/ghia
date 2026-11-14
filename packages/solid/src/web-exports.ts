@@ -1,6 +1,6 @@
 /**
  * What `@ghia/solid/web` exports. The Solid plugin reads it to tell a module that imports something
- * else from `solid-js/web` (DOM compiler output); `web-exports.test.ts` keeps it equal to `web.ts`.
+ * else from `solid-js/web` (DOM compiler output); the first test in `web.test.tsx` keeps it equal to `web.ts`.
  * A separate module so the plugin does not load the renderer.
  */
 export const WEB_EXPORTS: readonly string[] = [
