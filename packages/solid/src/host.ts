@@ -46,6 +46,7 @@ import {
   syncNativeviewListeners,
   unregisterEventHandlers,
   readTextControlSelection,
+  UnmountedTextSelection,
   requestFormSubmit,
   selectTextControl,
   setTextControlSelectionRange,
@@ -231,6 +232,7 @@ export class HostElement extends HTMLElement {
   readonly props = new Map<string, HostPropertyValue>()
   /** What `class`, `className` and `classList` were each given, once more than one of them is in play: see `mergeClassProp`. */
   classSources: ClassSources | undefined
+  private detachedSelection: UnmountedTextSelection | undefined
   parent: HostParent | null = null
   root: HostRoot | null = null
   nativeId = 0
@@ -345,27 +347,35 @@ export class HostElement extends HTMLElement {
 
   /** `<input>` and `<textarea>` only: select all of the text. */
   select(): void {
-    selectTextControl(this.textControl("select()"))
+    if (!this.mountedControl()) this.unmountedSelection("select()").select()
+    else selectTextControl(this.textControl("select()"))
   }
 
   /** `<input>` and `<textarea>` only. Offsets are UTF-16 code units. */
   setSelectionRange(start: number, end: number, direction?: SelectionDirection): void {
-    setTextControlSelectionRange(this.textControl("setSelectionRange()"), start, end, direction)
+    if (!this.mountedControl()) this.unmountedSelection("setSelectionRange()").setRange(start, end, direction)
+    else setTextControlSelectionRange(this.textControl("setSelectionRange()"), start, end, direction)
   }
 
   /** `<input>` and `<textarea>` only. */
   get selectionStart(): number | null {
-    return readTextControlSelection(this.textControl("selectionStart")).start
+    return this.mountedControl()
+      ? readTextControlSelection(this.textControl("selectionStart")).start
+      : this.unmountedSelection("selectionStart").read().start
   }
 
   /** `<input>` and `<textarea>` only. */
   get selectionEnd(): number | null {
-    return readTextControlSelection(this.textControl("selectionEnd")).end
+    return this.mountedControl()
+      ? readTextControlSelection(this.textControl("selectionEnd")).end
+      : this.unmountedSelection("selectionEnd").read().end
   }
 
   /** `<input>` and `<textarea>` only. */
   get selectionDirection(): SelectionDirection | null {
-    return readTextControlSelection(this.textControl("selectionDirection")).direction
+    return this.mountedControl()
+      ? readTextControlSelection(this.textControl("selectionDirection")).direction
+      : this.unmountedSelection("selectionDirection").read().direction
   }
 
   /** `<webview>` only. See `WebviewMethods`. */
@@ -446,6 +456,26 @@ export class HostElement extends HTMLElement {
       },
       submitter,
     )
+  }
+
+  private mountedControl(): boolean {
+    return this.root !== null && this.mounted
+  }
+
+  /** The selection a control keeps until it is mounted; see `UnmountedTextSelection`. */
+  private unmountedSelection(member: string): UnmountedTextSelection {
+    if (this.type !== "input" && this.type !== "textarea") {
+      throw new Error(`${member} is only valid on <input> and <textarea>, got <${this.type}>`)
+    }
+    this.detachedSelection ??= new UnmountedTextSelection({
+      inputType: () => this.props.get("type"),
+      text: () => {
+        const written = this.props.get("value") ?? this.props.get("defaultValue")
+        return written === undefined ? "" : String(written)
+      },
+      valueWritten: () => this.props.get("value") !== undefined,
+    })
+    return this.detachedSelection
   }
 
   private textControl(member: string): TextControlHost {

@@ -304,7 +304,7 @@ describeNative("DOM members that libraries read, in React", () => {
       range.remove()
     })
 
-    it("an input made by createElement before it is inserted reads its attributes, and has no state to assign until it is mounted", () => {
+    it("an input made by createElement before it is inserted reads its attributes, and keeps what code writes to its state until it is mounted", () => {
       mount(() => <div />)
       const input = document.createElement("input") as HTMLInputElement
       input.setAttribute("type", "number")
@@ -314,13 +314,37 @@ describeNative("DOM members that libraries read, in React", () => {
       expect(input.value).toBe("3")
       expect(input.checked).toBe(true)
       expect(input.valueAsNumber).toBe(3)
-      expect(() => {
-        input.value = "4"
-      }).toThrowError("needs a mounted element")
-      expect(() => {
-        input.checked = false
-      }).toThrowError("needs a mounted element")
+      input.value = "4"
+      input.checked = false
+      expect(input.value).toBe("4")
+      expect(input.checked).toBe(false)
+      expect(input.valueAsNumber).toBe(4)
       expect(() => input.stepUp()).toThrowError("needs a mounted element")
+    })
+
+    it("keeps value, checked and indeterminate written before the element is mounted, and shows them once it is", () => {
+      mount(() => <div />)
+      const text = document.createElement("input") as HTMLInputElement
+      text.value = "draft"
+      const box = document.createElement("input") as HTMLInputElement
+      box.setAttribute("type", "checkbox")
+      box.checked = true
+      box.indeterminate = true
+      const area = document.createElement("textarea") as HTMLTextAreaElement
+      area.value = "lines"
+      expect(text.value).toBe("draft")
+      expect(box.checked).toBe(true)
+      expect(box.indeterminate).toBe(true)
+      expect(area.value).toBe("lines")
+      for (const element of [text, box, area]) document.body!.appendChild(element)
+      expect(text.value).toBe("draft")
+      expect(box.checked).toBe(true)
+      expect(box.indeterminate).toBe(true)
+      expect(box.matches(":checked")).toBe(true)
+      expect(area.value).toBe("lines")
+      text.value = "after"
+      expect(text.value).toBe("after")
+      for (const element of [text, box, area]) element.remove()
     })
   })
 })

@@ -114,9 +114,10 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
         return binding.layout === undefined ? prop(binding) : readInputChoice(binding.layout)[name]
       },
       (self, value) => {
-        const layout = bind(self).layout
-        if (layout === undefined) throw new Error(`Setting ${name} needs a mounted element`)
-        writeFlag(layout, name, Boolean(value))
+        const binding = bind(self)
+        // Not mounted yet: the write is kept as the prop native reads as the same property assignment once it creates the element.
+        if (binding.layout === undefined) binding.setProp(name, Boolean(value))
+        else writeFlag(binding.layout, name, Boolean(value))
       }
     )
   const attribute = (name: "min" | "max" | "step") =>
@@ -165,7 +166,7 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
       },
       (self, value) => bind(self).setProp("defaultChecked", value ? true : undefined)
     ),
-    indeterminate: flag("indeterminate", () => false),
+    indeterminate: flag("indeterminate", (binding) => Boolean(binding.prop("indeterminate"))),
     defaultValue: onTags<This>(
       "defaultValue",
       VALUE_TAGS,
@@ -196,11 +197,12 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
         return read.call(layout.renderer, layout.id)
       },
       (self, value) => {
-        const layout = bind(self).layout
-        if (layout === undefined) throw new Error("Setting value needs a mounted element")
+        const binding = bind(self)
         const text = propText(value)
-        if (isInput(self) && readInputChoice(layout).kind === "range") writeRangeValue(layout, text)
-        else writeValueProp(self, layout, text)
+        // Not mounted yet: the write is kept as the prop native reads as the control's dirty value once it creates the element.
+        if (binding.layout === undefined) binding.setProp("value", text)
+        else if (isInput(self) && readInputChoice(binding.layout).kind === "range") writeRangeValue(binding.layout, text)
+        else writeValueProp(self, binding.layout, text)
       }
     ),
   })

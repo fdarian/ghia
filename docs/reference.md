@@ -4497,6 +4497,8 @@ ref.current.selectionEnd // 4
 ref.current.selectionDirection // 'backward'
 ```
 
+On a Solid element that is not mounted yet (one made by `document.createElement`, or a ref before it is inserted), `select()`, `setSelectionRange()` and the three getters do not throw: they answer from a selection kept on the element and measured against its text, with no native read. A caret nobody placed is at the end of a text assigned to `value` and at the start otherwise. That selection is not carried onto the native element when the element mounts. (A React element has these members only once it is mounted.)
+
 `select()` selects all the text and `setSelectionRange(start, end)` clamps both
 ends to the text; an `end` at or before `start` collapses the selection to
 `end`. Neither moves focus. A selection made from code reports
@@ -4540,7 +4542,7 @@ unknown value is `'text'`. `type` on a `<textarea>` is ignored.
 - `'email'`, `'tel'` and `'url'` behave as `'text'`.
 
 `defaultValue` (and the `value` attribute, `setAttribute('value', text)`) is the text of a text control that was never given a `value` and has not been edited by the user: it
-follows the default while the control is clean and stops at the first user edit or `value` write, as the DOM's dirty value flag does. A number is its JavaScript text, as in React DOM: `defaultValue={5}` and `value={5}` are `"5"`. `input.defaultValue` and `textarea.defaultValue` read and write that default: for an `<input>` it is the `value` attribute (`""` without one) and an assignment is `setAttribute('value', text)`, so `getAttribute`, a `[value]` selector and a `MutationObserver` see it; for a `<textarea>` it is its default text. Another element has no `defaultValue`.
+follows the default while the control is clean and stops at the first user edit or `value` write, as the DOM's dirty value flag does. A write to `value`, `checked` or `indeterminate` (or `textarea.value`) before the element is mounted, as a library does on an element it made with `document.createElement` and configures before inserting it, is kept: reading it back before mount gives it, and the control shows it once it mounts, with the same dirty state as a write after mount. `stepUp()` and `stepDown()` still need a mounted element. A number is its JavaScript text, as in React DOM: `defaultValue={5}` and `value={5}` are `"5"`. `input.defaultValue` and `textarea.defaultValue` read and write that default: for an `<input>` it is the `value` attribute (`""` without one) and an assignment is `setAttribute('value', text)`, so `getAttribute`, a `[value]` selector and a `MutationObserver` see it; for a `<textarea>` it is its default text. Another element has no `defaultValue`.
 
 `maxLength` cuts what the user types or pastes so the text stays within that
 many UTF-16 code units. A `value` set from code is kept whole even when it is
