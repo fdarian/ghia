@@ -19,7 +19,7 @@ import { ValidityState } from "./dom/constraint-validation.js"
 import { CSSStyleDeclaration } from "./dom/css-style-declaration.js"
 import { DOMRect, DOMRectReadOnly } from "./dom/dom-rect.js"
 import { HTMLCollection, NodeList } from "./dom/html-collection.js"
-import { HTMLInputElement, HTMLTextAreaElement } from "./dom/html-element-classes.js"
+import { HTMLButtonElement, HTMLInputElement, HTMLTextAreaElement } from "./dom/html-element-classes.js"
 import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
 import { ToggleEvent } from "./dom/toggle-event.js"
 import { NodeFilter, TreeWalker } from "./dom/tree-walker.js"
@@ -51,6 +51,7 @@ const DOM_CLASSES = {
   HTMLElement,
   HTMLInputElement,
   HTMLTextAreaElement,
+  HTMLButtonElement,
   SVGElement,
   Document,
   DocumentFragment,
