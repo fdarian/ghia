@@ -53,8 +53,8 @@ export function createDynamic<T extends ValidComponent>(
 }
 
 export function Dynamic<T extends ValidComponent>(props: DynamicProps<T>): JSX.Element {
-  const [, others] = splitProps(props, ["component"])
-  return createDynamic(() => props.component, others as ComponentProps<T>)
+  const split = splitProps(props, ["component"])
+  return createDynamic(() => props.component, split[1] as ComponentProps<T>)
 }
 
 export type PortalProps = {
