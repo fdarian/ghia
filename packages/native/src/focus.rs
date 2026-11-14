@@ -20,6 +20,7 @@ use crate::element_tree::EventPayload;
 use crate::events::keyboard::{path_to_root, InputRouting};
 use crate::events::state_styles::PointerStates;
 use crate::events::sync_dispatch;
+use crate::layout::content_visibility::ContentVisibility;
 use crate::renderer::GpuixView;
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -565,13 +566,18 @@ fn event_payload(
 
 /// Whether script's `focus()` may move focus to `id`, which a browser decides from style alone: the
 /// element is in the document, takes focus (`focusable_ids` also leaves out an `inert` subtree and a
-/// computed `visibility: hidden`), has no `display: none` on it or an ancestor, and its computed
-/// `visibility` is not `collapse`. One walk up the ancestors, reading the display the build and
-/// `getComputedStyle` read (`is_display_none`: its style, a stylesheet rule, the `hidden` attribute,
-/// `@container`), with no layout or paint, because a browser's `focus()` updates style, not layout.
+/// computed `visibility: hidden`), has no `display: none` on it or an ancestor, is not inside
+/// `content-visibility: hidden` content, and its computed `visibility` is not `collapse`. One walk up
+/// the ancestors, reading the display the build and `getComputedStyle` read (`is_display_none`: its
+/// style, a stylesheet rule, the `hidden` attribute, `@container`) and the `content-visibility` the Tab
+/// rule reads (`skipped::contents_held_back_by`), with no layout or paint, because a browser's
+/// `focus()` updates style, not layout. Content an `auto` element skips off-screen takes focus, as in
+/// Chrome, where it becomes relevant.
 ///
-/// An id the tree does not hold yet is allowed: the element takes focus when it arrives
-/// (`GpuixView::request_focus`).
+/// An id the tree does not hold yet is allowed: callers that do not send the queued mutations first
+/// (`pushLayer`'s `initialFocus` and `finalFocus`, the automation `focus` command) can ask for an
+/// element created in the same tick, which takes focus when it arrives (`GpuixView::request_focus`).
+/// `element.focus()` sends them first, so for it an unknown id is an element that is gone.
 pub(crate) fn script_may_focus(tree: &RetainedTree, id: u64) -> bool {
     let Some(element) = tree.elements.get(&id) else {
         return true;
@@ -588,9 +594,10 @@ pub(crate) fn script_may_focus(tree: &RetainedTree, id: u64) -> bool {
         if !visibility_settled {
             match current.style.as_deref().and_then(|style| style.visibility.as_deref()) {
                 Some("collapse") => return false,
-                // The nearest declaration is the computed value; `hidden` is already out of `focusable_ids`.
-                Some(_) => visibility_settled = true,
-                None => {}
+                // The nearest explicit value is the computed one (`hidden` is already out of
+                // `focusable_ids`); `inherit` and `unset` take the parent's, so keep walking.
+                Some("visible" | "hidden") => visibility_settled = true,
+                Some(_) | None => {}
             }
         }
         let Some(parent) = current.parent else {
@@ -599,6 +606,9 @@ pub(crate) fn script_may_focus(tree: &RetainedTree, id: u64) -> bool {
         let Some(above) = tree.elements.get(&parent) else {
             return false;
         };
+        if skipped::contents_held_back_by(tree, above) == Some(ContentVisibility::Hidden) {
+            return false;
+        }
         current = above;
     }
 }
@@ -1449,5 +1459,44 @@ mod tests {
         tree.set_custom_prop(2, "inert".to_string(), serde_json::json!(true));
         assert!(!script_may_focus(&tree, 4), "an inert ancestor");
         assert!(script_may_focus(&tree, 5));
+    }
+
+    #[test]
+    fn script_may_focus_walks_past_inherit_and_unset_to_a_collapse() {
+        let mut tree = tree_with(&[(1, "div"), (2, "div"), (3, "div"), (4, "div")]);
+        tree.set_root(1);
+        tree.append_child(1, 2);
+        tree.append_child(2, 3);
+        tree.append_child(3, 4);
+        tree.set_custom_prop(4, "tabIndex".to_string(), serde_json::json!(0));
+        let style = |json: &str| Arc::new(serde_json::from_str::<StyleDesc>(json).unwrap());
+        tree.set_style_arc(2, style(r#"{"visibility":"collapse"}"#));
+        for value in ["inherit", "unset"] {
+            tree.set_style_arc(3, style(&format!(r#"{{"visibility":"{value}"}}"#)));
+            assert!(!script_may_focus(&tree, 4), "{value} takes the collapse above it");
+        }
+        tree.set_style_arc(3, style(r#"{"visibility":"visible"}"#));
+        assert!(script_may_focus(&tree, 4), "an explicit visible ends the walk");
+    }
+
+    #[test]
+    fn script_may_focus_refuses_hidden_content_and_allows_skipped_auto() {
+        let mut tree = tree_with(&[(1, "div"), (2, "div"), (3, "div"), (4, "div")]);
+        tree.set_root(1);
+        tree.append_child(1, 2);
+        tree.append_child(2, 3);
+        tree.append_child(3, 4);
+        tree.set_custom_prop(4, "tabIndex".to_string(), serde_json::json!(0));
+        let style = |json: &str| Arc::new(serde_json::from_str::<StyleDesc>(json).unwrap());
+        tree.set_style_arc(2, style(r#"{"contentVisibility":"hidden"}"#));
+        assert!(!script_may_focus(&tree, 4), "below content-visibility: hidden");
+        tree.set_style_arc(2, style(r#"{"contentVisibility":"auto"}"#));
+        assert!(script_may_focus(&tree, 4), "auto content takes focus and becomes relevant");
+        tree.set_style_arc(2, style(r#"{"contentVisibility":"visible"}"#));
+        assert!(script_may_focus(&tree, 4));
+        tree.set_style_arc(2, style(r#"{}"#));
+        tree.set_custom_prop(2, "tabIndex".to_string(), serde_json::json!(0));
+        tree.set_style_arc(4, style(r#"{"contentVisibility":"hidden"}"#));
+        assert!(script_may_focus(&tree, 4), "the element's own content-visibility holds back its children, not it");
     }
 }
