@@ -61,6 +61,8 @@
     "@kobalte/core": "^0.13.14",
     "@msviderok/base-ui-solid": "github:msviderok/base-ui-solid#e49117f0106493a3f3981ea048c7b274c9fe0c2e&path:/packages/solid",
     "@photon-ai/base-ui-solid": "github:photon-hq/base-ui-solid#c155ca9c5e45cf9cf522808ea82bdf4412f68395&path:/packages/solid",
+    "@stylexjs/stylex": "^0.19.2",
+    "@stylexjs/unplugin": "^0.19.2",
     "@tanstack/solid-virtual": "3.13.53",
     "@types/mdast": "^4.0.4",
     "@types/react": "^19.2.0",

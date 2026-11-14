@@ -8,6 +8,12 @@
 // window). Instructions are the process's ri_instructions, which include native threads.
 //
 // Env of the profile:
+//   APP=stack     measures ghia-bench's "Solid stack" app (../mailbox-stack: StyleX and @tanstack/solid-virtual, a div scroller rather
+//                 than <virtual-list>) with its StyleX stylesheet in a <style>, as its main.tsx renders it, instead of the plain
+//                 mailbox of ./App.tsx (APP=plain, the default). The scroll point, the hover column and the row height are the
+//                 bench's for both. The list is then found as the scrolling ancestor of the element at the scroll point, and the
+//                 `visibleRange` event, which only <virtual-list> emits, stays at 0. SCROLLBAR, NO_ROW_HOVER, NO_FOLDER_HOVER and
+//                 ROW_BG are env of ./App.tsx and do nothing for the stack app (the run prints a note if one is set)
 //   GHIA_BENCH_MESSAGES  path of ghia-bench's data/messages.json (required: there is no default, the run stops without it)
 //   PHASE=scroll  360 wheel events of +30 (DOM sign; the harness posts CG dy=-30) down, then 360 of -30 up, at (430,442)
 //   PHASE=hover   240 moves along x=430 from y=84 to 799 and 240 back, with movement deltas
@@ -29,18 +35,21 @@
 //   A11Y=0        takes the pretend screen reader the test window starts with away (as a bench run has none)
 //   ACTIVE=1      the window is key and the search input is focused, so its caret blinks (the executor's clock moves with each tick);
 //                 DEBUG_BLINK=1 prints the patch counters across six blinks
+//   SETTLE_LAX=1  the settling step (600 ticks until 120 in a row paint nothing) no longer stops the run when the window keeps painting, as with an
+//                 app whose caret blink paints whole frames; the measurement then includes those frames
 // Env of App.tsx, which change the app being measured:
 //   SCROLLBAR=none  the list has no scrollbar (scrollbarWidth: 'none'), so a frame is not a `Thumb`
 //   NO_ROW_HOVER=1  the message rows have no hover style; NO_FOLDER_HOVER=1  the folders have none; ROW_BG=1  rows have a white background
 import { dlopen, ptr } from "bun:ffi"
 import { existsSync, readFileSync } from "node:fs"
-import { createTestRoot } from "@ghia/solid/testing"
+import { createTestRoot, type TestElement } from "@ghia/solid/testing"
 import type { Message } from "./types"
-import { App } from "./App"
 
 const MESSAGES_PATH = process.env.GHIA_BENCH_MESSAGES
 if (!MESSAGES_PATH) throw new Error("GHIA_BENCH_MESSAGES must be the path of ghia-bench's data/messages.json")
 if (!existsSync(MESSAGES_PATH)) throw new Error(`GHIA_BENCH_MESSAGES is ${MESSAGES_PATH}, which does not exist`)
+const APP = process.env.APP ?? "plain"
+if (APP !== "plain" && APP !== "stack") throw new Error(`APP must be plain or stack, got ${APP}`)
 const PHASE = process.env.PHASE ?? "scroll"
 if (PHASE !== "scroll" && PHASE !== "hover" && PHASE !== "idle") throw new Error(`PHASE must be scroll, hover or idle, got ${PHASE}`)
 const RAW = process.env.RAW === "1"
@@ -95,6 +104,14 @@ const readOverhead = (() => {
   return median(deltas)
 })()
 
+// Imported by the app chosen only: the stack app's StyleX files are not transformed in a plain run.
+const Mailbox =
+  APP === "stack" ? (await import("../mailbox-stack/stack")).StackApp : (await import("./App")).App
+if (APP === "stack") {
+  const ignored = ["SCROLLBAR", "NO_ROW_HOVER", "NO_FOLDER_HOVER", "ROW_BG"].filter((name) => process.env[name] !== undefined)
+  if (ignored.length > 0) console.error(`note: ${ignored.join(", ")} is env of the plain App.tsx and does nothing for APP=stack`)
+}
+
 const messages = JSON.parse(readFileSync(MESSAGES_PATH, "utf8")) as Message[]
 const root = createTestRoot({ ...WINDOW, appearance: "light" })
 const renderer = root.renderer
@@ -107,7 +124,7 @@ const native = (renderer as any).native as {
 
 if (process.env.A11Y === "0") renderer.setA11yActive(false)
 const mountStart = performance.now()
-root.render(() => <App messages={messages} />)
+root.render(() => <Mailbox messages={messages} />)
 const mountMs = performance.now() - mountStart
 renderer.clockPause()
 renderer.setInlineDraws(false)
@@ -156,7 +173,7 @@ for (let i = 0; i < 5; i++) frameStep(TICK_MS)
     frameStep(TICK_MS)
     quiet = renderer.getPaintedFrameCount() === before ? quiet + 1 : 0
   }
-  if (quiet < 120) throw new Error("the window still paints after 600 ticks of settling")
+  if (quiet < 120 && process.env.SETTLE_LAX !== "1") throw new Error("the window still paints after 600 ticks of settling")
 }
 
 if (process.env.ACTIVE === "1") {
@@ -174,8 +191,24 @@ if (process.env.ACTIVE === "1") {
   }
 }
 
-const list = renderer.findByType("virtual-list")[0]
-if (!list) throw new Error("no <virtual-list> in the app")
+// The message list: the plain app's <virtual-list>, and for the stack app the nearest scrolling ancestor of what is at the scroll
+// point (the list is a div with overflow-y: auto, so its type says nothing).
+function findList(): TestElement {
+  if (APP === "plain") {
+    const virtualList = renderer.findByType("virtual-list")[0]
+    if (!virtualList) throw new Error("no <virtual-list> in the app")
+    return virtualList
+  }
+  for (const hit of renderer.getElementsAt(SCROLL_AT.x, SCROLL_AT.y)) {
+    for (let element = renderer.getElement(hit); element; element = element.parentId === null ? undefined : renderer.getElement(element.parentId)) {
+      const metrics = renderer.getScrollMetrics(element.id)
+      // [scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]
+      if (metrics && metrics[3]! > metrics[5]!) return element
+    }
+  }
+  throw new Error(`no scrolling element at (${SCROLL_AT.x}, ${SCROLL_AT.y}), so no message list for APP=stack`)
+}
+const list = findList()
 const scrollTop = () => renderer.getScrollMetrics(list.id)![1]!
 
 function flatten(prefix: string, value: unknown, out: Numbers) {
@@ -384,7 +417,7 @@ if (PHASE === "scroll") {
 for (let i = 0; i < 60; i++) frameStep(TICK_MS)
 if (scrollTop() !== 0) throw new Error(`list starts at scrollTop ${scrollTop()}`)
 
-console.error(`mounted ${messages.length} messages in ${mountMs.toFixed(0)} ms, phase ${PHASE}${RAW ? " (raw)" : ""}, pid ${process.pid}, rusage read overhead ${readOverhead} instr`)
+console.error(`mounted ${messages.length} messages in ${mountMs.toFixed(0)} ms, app ${APP}, phase ${PHASE}${RAW ? " (raw)" : ""}, pid ${process.pid}, rusage read overhead ${readOverhead} instr`)
 if (HOLD_MS > 0) await new Promise((resolve) => setTimeout(resolve, HOLD_MS))
 
 // ── RAW: loops and totals only ──────────────────────────────────

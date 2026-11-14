@@ -1304,9 +1304,12 @@ impl TestGpuixRenderer {
         crate::custom_elements::nativeview::teardown::tell_destroyed(tree_id, &destroyed)?;
         // Like the live renderer, a change made from a handler marks the window dirty at once, so
         // that a read in the same handler draws it. Outside a handler `flush()` does.
-        UNFLUSHED_MUTATIONS.with(|unflushed| unflushed.set(unflushed.get().merge(dirty)));
         if dirty != Dirty::Clean && crate::events::sync_dispatch::in_sync_call() {
             crate::events::sync_dispatch::invalidate_root_view(dirty).map_err(Error::from_reason)?;
+        } else {
+            // A batch the root view was already told about is not owed to the next frame: merging it
+            // would invalidate a commit that frame already drew, and the next read would lay out again.
+            UNFLUSHED_MUTATIONS.with(|unflushed| unflushed.set(unflushed.get().merge(dirty)));
         }
         if auto_focus {
             window_call(|window, cx| {
@@ -2073,7 +2076,7 @@ impl TestGpuixRenderer {
             });
             if moved {
                 let entity = cx.entity_id();
-                crate::scroll_write::finish_write(window, cx, entity, id, was_current);
+                crate::scroll_write::finish_write(window, cx, entity, id);
             }
         })
     }

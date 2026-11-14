@@ -968,8 +968,10 @@ the patcher turns it on with `Window::set_contained_patches`.
 
 - **Which commits.** The tree notes the elements a commit changed (`RetainedTree::pending_structure`: props, style, text and children
   other than a strict restyle by paint; a created element is covered by the element it is put under, a destroyed one by the
-  parent it left) and moves `patch_barrier` only for a change no element is named for (`setRoot`, the universal style,
-  `autoFocus`, `testId`, `white-space` below an element). While the frame shown has anchors or box roots (`RetainedTree::set_anchors`, published
+  parent it left; a `white-space` change is one of the element, which the root that holds it builds with everything below it) and
+  moves `patch_barrier` only for a change no element is named for (`setRoot`, the universal style, `autoFocus`, `testId`). A change
+  that a patch cannot follow takes one revision for the element, its ancestors and its subtree, so the barrier never stands past the
+  root's revision and a frame built whole after it is current with it. While the frame shown has anchors or box roots (`RetainedTree::set_anchors`, published
   by `Retain::publish_anchors` when the frame is over) a batch whose changes are all attributed is `Dirty::LayoutPatchable`:
   `invalidate_after_mutation` asks for a tick (`Window::request_tick`) and notes the view in `LAYOUT_PENDING`, where a batch with
   an unattributed change notifies as before.

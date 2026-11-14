@@ -888,9 +888,10 @@ pub(crate) fn invalidate_after_scroll(window: &mut gpui::Window, cx: &mut gpui::
         LIST_WRITTEN.with(|written| written.borrow_mut().insert(view));
         return;
     }
-    // The view is notified, so the patch of anchors a read prepared is gone and the tick is drawn whole.
+    // The view is notified, so the patch of anchors a read prepared is gone and the tick is drawn whole. A layout still owed
+    // (`Waiting`) stays owed: this notifies the scroll only, and `layout_awaits_a_read` is what tells the next write that the
+    // scroll metrics are older than the tree.
     discard_prepared_patch(window, cx, view, PendingLayout::Notified);
-    note_pending(view, PendingLayout::Notified);
     cx.notify_scroll_only(view);
 }
 
@@ -1228,7 +1229,7 @@ async fn run_ui_commands(
                 let was_current = crate::scroll_write::metrics_current(window);
                 if scroll_element_to(was_current, id, left, top, behavior) {
                     let view = cx.entity_id();
-                    crate::scroll_write::finish_write(window, cx, view, id, was_current);
+                    crate::scroll_write::finish_write(window, cx, view, id);
                 }
             }),
             UiCommand::ScrollToItem { id, index, offset } => {
@@ -3862,7 +3863,7 @@ impl GpuixRenderer {
             let was_current = crate::scroll_write::metrics_current(window);
             if scroll_element_to(was_current, id, left, top, behavior) {
                 let view = crate::events::sync_dispatch::root_view(window).map_err(Error::from_reason)?;
-                crate::scroll_write::finish_write(window, cx, view.entity_id(), id, was_current);
+                crate::scroll_write::finish_write(window, cx, view.entity_id(), id);
             }
             Ok(())
         })?;
@@ -10681,7 +10682,6 @@ impl gpui::Render for GpuixView {
                 crate::scroll_write::settle_lists(&states.borrow(), &reporters.borrow())
             })
         });
-        crate::scroll_write::note_metrics_current(window);
 
         let motion_value_demand = motion_value_demand(&tree, &self.motion_values, &self.retain);
         let asks_next_frame = motion_active

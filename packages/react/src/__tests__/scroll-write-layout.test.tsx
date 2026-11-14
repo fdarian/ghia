@@ -708,3 +708,176 @@ describeNative("a scrollTop write after a commit inside the scroller and a resty
     }
   })
 })
+
+describeNative("a scrollTop write after a commit inside the scroller and a scrollTop write", () => {
+  it("lays out first for the commit before the second write is clamped", () => {
+    let scroller: PublicInstance | null = null
+    let setGrown!: (grown: boolean) => void
+    function Page() {
+      const [grown, grow] = useState(false)
+      setGrown = grow
+      return (
+        <div style={{ width: WIDTH, height: HEIGHT, display: "flex", flexDirection: "column" }}>
+          <div
+            ref={(instance) => {
+              scroller = instance
+            }}
+            style={{ height: 200, overflowY: "scroll", display: "flex", flexDirection: "column" }}
+          >
+            <div style={{ height: grown ? 800 : ROW, flexShrink: 0 }} />
+            <Rows count={24} />
+          </div>
+        </div>
+      )
+    }
+    const root = createTestRoot({ width: WIDTH, height: HEIGHT })
+    const renderer = root.renderer
+    const unmount = () => root.unmount()
+    renderer.clockPause()
+    renderer.setInlineDraws(false)
+    renderer.setRetainPlanning(true)
+    renderer.setRetainVerify(true)
+    renderer.setPatchEnabled(true)
+    try {
+      root.render(<Page />)
+      renderer.drawFrame()
+      scroller!.scrollTop = 50
+      renderer.drawFrame()
+
+      // The commit lies inside an anchor and waits for a read to prepare its patch; a write to the offset is not that read,
+      // and must not take the wait away from the write after it.
+      flushSync(() => setGrown(true))
+      renderer["native"].flushIfDirty()
+      scroller!.scrollTop = 0
+      scroller!.scrollTop = 1000
+      expect(scroller!.scrollTop).toBe(1000)
+    } finally {
+      renderer.setInlineDraws(true)
+      unmount()
+    }
+  })
+})
+
+describeNative("a scrollTop write after a wheel", () => {
+  // A wheel is a scroll write to gpui: the scroll metrics stay current, so the write that comes
+  // before the next frame is clamped at once, as one with nothing dirty is.
+  function mountScrollers() {
+    const scrollers: Record<"a" | "b", PublicInstance | null> = { a: null, b: null }
+    const column = (name: "a" | "b") => (
+      <div
+        ref={(instance) => {
+          scrollers[name] = instance
+        }}
+        style={{ width: WIDTH / 2, height: HEIGHT, overflowY: "scroll", flexDirection: "column" }}
+      >
+        <Rows count={60} />
+      </div>
+    )
+    const root = mount(
+      <div style={{ width: WIDTH, height: HEIGHT, display: "flex", flexDirection: "row" }}>
+        {column("a")}
+        {column("b")}
+      </div>
+    )
+    return { ...root, scrollers: scrollers as Record<"a" | "b", PublicInstance> }
+  }
+
+  it("holds a scrollTop written before the next frame, and reads it back", () => {
+    const { renderer, scrollers, unmount } = mountScrollers()
+    try {
+      renderer.nativeSimulateScrollWheel(50, 50, 0, 50)
+      expect(scrollers.a.scrollTop).toBe(50)
+      const layoutPasses = renderer.getLayoutPassCount()
+
+      scrollers.a.scrollTop = 300
+      expect(scrollers.a.scrollTop, "the write was made, not recorded for the next layout").toBe(300)
+      expect(renderer.getLayoutPassCount() - layoutPasses, "and laid out nothing").toBe(0)
+    } finally {
+      renderer.setInlineDraws(true)
+      unmount()
+    }
+  })
+
+  it("moves by both of two scrollBy calls of one handler", () => {
+    const { renderer, scrollers, unmount } = mountScrollers()
+    try {
+      renderer.nativeSimulateScrollWheel(50, 50, 0, 50)
+      scrollers.a.scrollBy(0, 100)
+      scrollers.a.scrollBy(0, 100)
+      expect(scrollers.a.scrollTop).toBe(250)
+    } finally {
+      renderer.setInlineDraws(true)
+      unmount()
+    }
+  })
+
+  it("holds a write to a second scroller after a wheel on the first", () => {
+    const { renderer, scrollers, unmount } = mountScrollers()
+    try {
+      renderer.nativeSimulateScrollWheel(50, 50, 0, 50)
+      scrollers.b.scrollTop = 400
+      expect(scrollers.b.scrollTop).toBe(400)
+      expect(scrollers.a.scrollTop, "the scroller the wheel moved stays where it is").toBe(50)
+    } finally {
+      renderer.setInlineDraws(true)
+      unmount()
+    }
+  })
+
+  it("holds a write to a virtual-list after a wheel on it, with no layout pass", () => {
+    let list: PublicInstance | null = null
+    const { renderer, unmount } = mount(
+      <virtual-list
+        ref={(instance: PublicInstance | null) => {
+          list = instance
+        }}
+        overdraw={0}
+        estimatedItemHeight={ROW}
+        style={{ width: WIDTH, height: HEIGHT }}
+      >
+        <ListRows count={100} />
+      </virtual-list>
+    )
+    try {
+      renderer.nativeSimulateScrollWheel(50, 50, 0, 50)
+      expect(list!.scrollTop).toBeGreaterThan(0)
+      const layoutPasses = renderer.getLayoutPassCount()
+      list!.scrollTop = 600
+      list!.scrollTop = 900
+      expect(list!.scrollTop).toBe(900)
+      expect(renderer.getLayoutPassCount() - layoutPasses).toBe(0)
+    } finally {
+      renderer.setInlineDraws(true)
+      unmount()
+    }
+  })
+
+  it("still lays out for a write after the content changed since the wheel, and clamps it", () => {
+    let setCount!: (count: number) => void
+    let scroller: PublicInstance | null = null
+    function Page() {
+      const [count, set] = useState(25)
+      setCount = set
+      return (
+        <div
+          ref={(instance) => {
+            scroller = instance
+          }}
+          style={{ width: WIDTH, height: HEIGHT, overflowY: "scroll", flexDirection: "column" }}
+        >
+          <Rows count={count} />
+        </div>
+      )
+    }
+    const { renderer, unmount } = mount(<Page />)
+    try {
+      renderer.nativeSimulateScrollWheel(50, 50, 0, 50)
+      flushSync(() => setCount(100))
+      scroller!.scrollTop = 1e6
+      expect(scroller!.scrollTop).toBe(100 * ROW - HEIGHT)
+    } finally {
+      renderer.setInlineDraws(true)
+      unmount()
+    }
+  })
+})
