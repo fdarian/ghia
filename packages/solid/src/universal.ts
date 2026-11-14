@@ -19,6 +19,7 @@ import {
   type HostParent,
   type HostText,
 } from "./host.js"
+import { createSpread } from "./spread.js"
 import { notePresenceHost, runInPresenceScope } from "./presence-scope.js"
 
 function isHostRoot(value: unknown): value is HostRoot {
@@ -64,6 +65,16 @@ function anchorNodeFor(anchor: HostNode | HostParent): HostNode {
   return known
 }
 
+function setProperty(node: HostNode | HostParent, name: string, value: unknown, previous: unknown): void {
+  if (
+    node.kind !== "root" &&
+    isHostPropertyValue(value) &&
+    isHostPropertyValue(previous)
+  ) {
+    setHostProperty(node, name, value, previous)
+  }
+}
+
 const runtime = createRenderer<HostNode | HostParent>({
   createElement: createHostElement,
   createTextNode: createHostText,
@@ -71,15 +82,7 @@ const runtime = createRenderer<HostNode | HostParent>({
     if (!isHostText(node)) throw new TypeError("Expected a GPUIX text node")
     replaceHostText(node, value)
   },
-  setProperty(node, name, value, previous) {
-    if (
-      node.kind !== "root" &&
-      isHostPropertyValue(value) &&
-      isHostPropertyValue(previous)
-    ) {
-      setHostProperty(node, name, value, previous)
-    }
-  },
+  setProperty,
   insertNode(parent, node, anchor) {
     if (parent.kind === "text") throw new TypeError("Expected GPUIX host nodes")
     // Universal passes `null` as the anchor to append (`cleanChildren(parent, current, null, node)`).
@@ -128,7 +131,7 @@ export const createElement: typeof runtime.createElement = (tag) => {
 export const createTextNode = runtime.createTextNode
 export const insertNode = runtime.insertNode
 export const insert = runtime.insert
-export const spread = runtime.spread
+export const spread = createSpread<HostNode | HostParent>({ insert: runtime.insert, setProperty })
 export const setProp = runtime.setProp
 export const mergeProps = runtime.mergeProps
 export const use = runtime.use
