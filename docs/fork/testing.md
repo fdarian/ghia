@@ -24,13 +24,13 @@ cd packages/native/examples/webview-e2e && bun run e2e         # <webview> on re
 - Tests that need the native addon are `describe.skip` when it is missing (`hasNativeTestRenderer`), so a green run without the addon proves little.
 - Almost none of the tests needs a real window: the test renderer (`createTestRoot`) draws offscreen. The macOS-only pieces (pointer lock, Metal effects, the OS reduced-motion read, the real window drag) were therefore checked against a simulated platform, not a live one. The exceptions open a real window: zed's `native_surface` test and the `<webview>` e2e below.
 
-CI (`.github/workflows/ci.yml`, GitHub's shared `macos-latest` runner) runs a smaller bar than a local run. Pushes and pull requests build the four packages and run the native, Vite, Solid and examples suites; they do not run the React suite. It runs on demand, split over three runners (`--shard=1/3` to `3/3`), after the same builds:
+CI (`.github/workflows/ci.yml`, GitHub's shared `macos-latest` runner) does not check ordinary pull requests or pushes. The `Version Packages` PR needs its `ci-passed` status green before it merges (a ruleset on `main`), and any branch can be checked on demand. A run builds the four packages, runs the native, Vite, Solid and examples suites, and runs the React suite split over three runners (`--shard=1/3` to `3/3`). Start it by commenting `/ci` on the PR, with "Approve and run" on the PR's pending run, or from the command line, for any branch:
 
 ```bash
 gh workflow run ci.yml -R fdarian/ghia --ref <branch>
 ```
 
-The local run is still the full bar. With `CI` set (the on-demand React run too), `packages/react/vitest.config.ts` leaves out `font-smoothing`, `transform-text` and `motion-waapi`, whose Chrome references were captured on the development machine's fonts and wall-clock times, and `filter-motion`, `events`, `animation-frame-work` and `retained-frame-sources`, which wait on real time and overshoot their limits on a loaded VM. Nothing is retried. `frame-loop-yields.test.ts`'s slow-frames and fast-frames tests are skipped too. Without `CI`, every test runs once with vitest's defaults, and that full run stays the bar before landing.
+The local full run is the bar before landing. With `CI` set (every CI run), `packages/react/vitest.config.ts` leaves out `font-smoothing`, `transform-text` and `motion-waapi`, whose Chrome references were captured on the development machine's fonts and wall-clock times, and `filter-motion`, `events`, `animation-frame-work` and `retained-frame-sources`, which wait on real time and overshoot their limits on a loaded VM. Nothing is retried. `frame-loop-yields.test.ts`'s slow-frames and fast-frames tests are skipped too. Without `CI`, every test runs once with vitest's defaults, and that full run stays the bar before landing.
 
 The perf pass has a guard per issue, each failing on the bug it was written for and not on a clock:
 

@@ -1,0 +1,41 @@
+name: CI command
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  dispatch:
+    if: >-
+      github.event.issue.pull_request
+      && startsWith(github.event.comment.body, '/ci')
+      && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      pull-requests: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.issue.number }}
+      COMMENT_ID: ${{ github.event.comment.id }}
+    steps:
+      - id: pr
+        run: |
+          gh pr view "$PR_NUMBER" --json headRefName,isCrossRepository > pr.json
+          if [ "$(jq -r .isCrossRepository pr.json)" = true ]; then
+            echo "::error::PR #$PR_NUMBER is from a fork; a fork branch cannot be dispatched."
+            exit 1
+          fi
+          echo "head=$(jq -r .headRefName pr.json)" >> "$GITHUB_OUTPUT"
+
+      # GITHUB_TOKEN may trigger workflow_dispatch (a documented exception to the rule that its events
+      # start no workflows). The dispatched run's ci-passed lands on the PR head commit, which satisfies the ruleset.
+      - run: gh workflow run ci.yml --ref "$HEAD_REF"
+        env:
+          HEAD_REF: ${{ steps.pr.outputs.head }}
+
+      - run: gh api "repos/$GH_REPO/issues/comments/$COMMENT_ID/reactions" -f content=rocket

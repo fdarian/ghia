@@ -414,13 +414,19 @@ keeps its own build script for them.
 
 ## CI and releases
 
-`ci.yml` runs on pushes to `main` and on pull requests (not for changes that only touch Markdown, `docs/`, `LICENSE`, `NOTICE` or
-`.changeset/`, and not for the `Version Packages` PR, which only changes versions and changelogs) as one `check` job on
-`macos-latest`: the native build, the `ghia`, Solid and React builds, then `bun run test` in `packages/native`, `packages/ghia`,
-`packages/solid` and `examples`. A failing suite does not skip the ones after it. The React suite is not part of that run. Start it on a branch with
-`gh workflow run ci.yml -R fdarian/ghia --ref <branch>`: `check` runs as above and uploads the build output, and the
-`react-tests` job then runs the suite on three runners, a third of the files each, even if a `check` suite failed. Running the
-React suite locally is still the bar before landing ([testing.md](testing.md#test-commands)). The `*.perf.test.tsx` files and the e2e apps are not run.
+`ci.yml` does not check ordinary pull requests or pushes: the local full suites, React included, are the bar before landing
+([testing.md](testing.md#test-commands)). The `Version Packages` PR cannot merge until its `ci-passed` status is green. A ruleset on
+`main` requires that one status, and an ordinary PR passes it as skipped. The full run is one `check` job on `macos-latest`: the
+native build, the `ghia`, Solid and React builds, then `bun run test` in `packages/native`, `packages/ghia`, `packages/solid` and
+`examples`, where a failing suite does not skip the ones after it. It uploads the build output, and the `react-tests` job then runs
+the React suite on three runners, a third of the files each, even if a `check` suite failed. `ci-passed` fails when either job fails
+or is cancelled.
+
+Start the run in one of three ways: comment `/ci` on the PR (`ci-command.yml` dispatches `ci.yml` on the PR's head branch for an
+owner, member or collaborator; a fork branch cannot be dispatched), click "Approve and run" on the PR's pending run (the Version
+Packages PR is opened by `github-actions[bot]`, so its `pull_request` run waits for that approval), or
+`gh workflow run ci.yml -R fdarian/ghia --ref <branch>`, which works for any branch. A new changeset re-pushes the Version
+Packages PR, so the check has to be re-run on the new head. The `*.perf.test.tsx` files and the e2e apps are not run.
 There is no format job and no Turbo: a format commit over upstream-derived code would conflict with every pick.
 
 A user-visible change adds a changeset with `pnpm changeset`. Pushing it to `main` runs `release.yml`, where the changesets
