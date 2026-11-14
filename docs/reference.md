@@ -753,7 +753,8 @@ on the DOM:
   `render` (Ghia's [`render()`](./solid.md#render));
 - `spread` is `solid-js/universal`'s with one difference, the one `solid-js/web` has: a prop that was in the spread and
   is not any more is removed (`{...(open() ? { "data-open": "" } : {})}` drops `data-open`, an `onClick` stops firing, a
-  `style` is emptied), where `solid-js/universal` leaves its last value on the element;
+  `style` is emptied), where `solid-js/universal` leaves its last value on the element. A `children` that changes
+  (`<Dynamic component="div">{tab() === 1 ? <List /> : <Detail />}</Dynamic>`) replaces the nodes it inserted before;
 - `Dynamic` and `createDynamic`: a string component is a host element given the other props, a function is called as a
   component;
 - `Portal`: renders its children into a container `div` appended to `mount` (default `document.body`), removed when

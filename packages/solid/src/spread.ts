@@ -1,7 +1,7 @@
-import { createRenderEffect } from "solid-js"
+import { createMemo, createRenderEffect } from "solid-js"
 
 interface SpreadHost<Node> {
-  insert(parent: Node, accessor: unknown, marker?: undefined, initial?: unknown): unknown
+  insert(parent: Node, accessor: unknown): unknown
   setProperty(node: Node, name: string, value: unknown, previous: unknown): void
 }
 
@@ -13,13 +13,8 @@ type Props = Record<string, unknown>
  * does the same, by writing `undefined` over it.
  */
 export function createSpread<Node>(host: SpreadHost<Node>) {
-  function spreadExpression(node: Node, props: Props | undefined, prevProps: Props = {}, skipChildren?: boolean): Props {
+  function spreadExpression(node: Node, props: Props | undefined, prevProps: Props = {}): Props {
     const next = props ?? {}
-    if (!skipChildren) {
-      createRenderEffect(() => {
-        prevProps.children = host.insert(node, next.children, undefined, prevProps.children)
-      })
-    }
     createRenderEffect(() => {
       if (next.ref) (next.ref as (node: Node) => void)(node)
     })
@@ -42,7 +37,14 @@ export function createSpread<Node>(host: SpreadHost<Node>) {
 
   return function spread(node: Node, accessor: Props | (() => Props | undefined) | undefined, skipChildren?: boolean): void {
     if (typeof accessor === "function") {
-      createRenderEffect((current: Props | undefined) => spreadExpression(node, accessor(), current, skipChildren))
-    } else spreadExpression(node, accessor, undefined, skipChildren)
+      // One insert for the node's life: it keeps what it inserted, so a new value replaces the old nodes.
+      // Inserting inside the effect below would start from nothing each time `accessor` re-runs.
+      const props = createMemo(accessor)
+      if (!skipChildren) host.insert(node, () => props()?.children)
+      createRenderEffect((current: Props | undefined) => spreadExpression(node, props(), current))
+    } else {
+      if (!skipChildren) host.insert(node, () => accessor?.children)
+      spreadExpression(node, accessor)
+    }
   }
 }
