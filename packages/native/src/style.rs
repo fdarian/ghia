@@ -1364,82 +1364,9 @@ impl StyleDesc {
     /// element paints in that state and moves no box. One that is declared by only one of them is
     /// layout, as it can change what the element is.
     ///
-    /// Every other field, a custom property included, is compared whole: a key that is added to the
-    /// struct is a layout key until it is listed here.
+    /// Every other field is compared whole; where a new field goes: `css::paint_diff::paint_only_difference`.
     pub(crate) fn differs_only_in_paint(&self, other: &Self) -> bool {
-        let mut painted = self.clone();
-        macro_rules! paint_states {
-            ($($field:ident),+ $(,)?) => {
-                $(
-                    let paints = match (&painted.$field, &other.$field) {
-                        (Some(before), Some(after)) => before.differs_only_in_paint_as_state(after),
-                        _ => false,
-                    };
-                    if paints {
-                        painted.$field = other.$field.clone();
-                    }
-                )+
-            };
-        }
-        paint_states!(
-            hover, active, focus, focus_visible, focus_within, group_hover, group_active, group_focus_within,
-            has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
-        );
-        // What a style reset below it is already in the style it was laid over: no box reads it.
-        painted.reset = other.reset.clone();
-        painted.revert = other.revert.clone();
-        painted.opacity = other.opacity;
-        painted.box_shadow = other.box_shadow.clone();
-        painted.color = other.color.clone();
-        painted.background_color = other.background_color.clone();
-        painted.border_color = other.border_color.clone();
-        painted.border_top_color = other.border_top_color.clone();
-        painted.border_right_color = other.border_right_color.clone();
-        painted.border_bottom_color = other.border_bottom_color.clone();
-        painted.border_left_color = other.border_left_color.clone();
-        painted.outline_color = other.outline_color.clone();
-        painted.text_decoration_color = other.text_decoration_color.clone();
-        painted.scrollbar_color = other.scrollbar_color.clone();
-        painted.selection_color = other.selection_color.clone();
-        painted.backface_visibility = other.backface_visibility.clone();
-        // Having a transform makes the element a containing block, which layout reads: only the
-        // values of one that stays on or off are paint. Whether a text with a `var()` is a
-        // transform is not known until the custom properties substitute it.
-        let has_transform = |style: &Self| crate::css::transform::forms_context(style, &LengthContext::initial(0.0, 0.0));
-        let reads_vars = crate::css::transform::reads_vars(self) || crate::css::transform::reads_vars(other);
-        if !reads_vars && has_transform(self) == has_transform(other) {
-            painted.perspective = other.perspective.clone();
-            painted.perspective_origin = other.perspective_origin.clone();
-            painted.transform_style = other.transform_style.clone();
-            painted.z = other.z.clone();
-            painted.translate_z = other.translate_z.clone();
-            painted.transform_perspective = other.transform_perspective.clone();
-            painted.rotate_x = other.rotate_x;
-            painted.rotate_y = other.rotate_y;
-            painted.transform = other.transform.clone();
-            painted.translate = other.translate.clone();
-            painted.rotate = other.rotate.clone();
-            painted.scale = other.scale.clone();
-            painted.transform_origin = other.transform_origin.clone();
-            painted.x = other.x.clone();
-            painted.y = other.y.clone();
-            painted.translate_x = other.translate_x.clone();
-            painted.translate_y = other.translate_y.clone();
-            painted.motion_scale = other.motion_scale;
-            painted.scale_x = other.scale_x;
-            painted.scale_y = other.scale_y;
-            painted.scale_z = other.scale_z;
-            painted.motion_rotate = other.motion_rotate;
-            painted.rotate_z = other.rotate_z;
-            painted.skew = other.skew;
-            painted.skew_x = other.skew_x;
-            painted.skew_y = other.skew_y;
-            painted.origin_x = other.origin_x.clone();
-            painted.origin_y = other.origin_y.clone();
-            painted.origin_z = other.origin_z.clone();
-            painted.motion_transform = other.motion_transform.clone();
-        }
-        painted == *other
+        crate::css::paint_diff::paint_only_difference(self, other, false)
     }
 
     /// Whether `other` has another transform, an origin or one of Motion's transform keys included: the
@@ -1490,12 +1417,7 @@ impl StyleDesc {
     /// turns on or off with it (`transform: var(--t)`) moves a containing block, which the next frame
     /// lays out but a read of bounds before it does not see.
     pub(crate) fn differs_only_in_paint_or_custom_properties(&self, other: &Self) -> bool {
-        if self.custom_properties == other.custom_properties {
-            return self.differs_only_in_paint(other);
-        }
-        let mut same = self.clone();
-        same.custom_properties = other.custom_properties.clone();
-        same.differs_only_in_paint(other)
+        crate::css::paint_diff::paint_only_difference(self, other, true)
     }
 
     /// Whether the style, or a state style or `@container` block of it, holds a declaration that

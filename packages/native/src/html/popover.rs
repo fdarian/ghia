@@ -75,8 +75,13 @@ fn kind_of_value(value: &serde_json::Value) -> Option<Kind> {
 }
 
 /// What kind of popover `element` is, if it is one. A custom element has its props to itself, so
-/// only the elements built as a `div` are.
+/// only the elements built as a `div` are. The element keeps the answer (`RetainedElement::popover_kind`).
 pub(crate) fn kind(element: &RetainedElement) -> Option<Kind> {
+    element.popover_kind()
+}
+
+/// [`kind`] worked out from the props, for the element to keep.
+pub(crate) fn kind_of(element: &RetainedElement) -> Option<Kind> {
     if !crate::text::inline::is_host_container(element) {
         return None;
     }
@@ -232,6 +237,45 @@ mod tests {
         assert_eq!(style_of(&tree).unwrap().display.as_deref(), Some("none"));
         tree.set_custom_prop(1, ATTRIBUTE_PROP.to_string(), json!(false));
         assert_eq!(style_of(&tree), None);
+    }
+
+    #[test]
+    fn the_attribute_set_changed_or_removed_after_creation_moves_the_kept_kind_and_the_styles() {
+        let mut tree = tree_with(None);
+        assert_eq!(kind(&tree.elements[&1]), None);
+
+        tree.set_custom_prop(1, ATTRIBUTE_PROP.to_string(), json!("auto"));
+        assert_eq!(kind(&tree.elements[&1]), Some(Kind::Auto));
+        assert_eq!(style_of(&tree).unwrap().display.as_deref(), Some("none"), "the user agent style follows");
+
+        tree.set_custom_prop(1, ATTRIBUTE_PROP.to_string(), json!("manual"));
+        assert_eq!(kind(&tree.elements[&1]), Some(Kind::Manual));
+        tree.set_custom_prop(1, OPEN_PROP.to_string(), json!(1));
+        assert_eq!(style_of(&tree).unwrap().position.as_deref(), Some("fixed"), "the used style follows");
+
+        tree.set_custom_prop(1, ATTRIBUTE_PROP.to_string(), json!(false));
+        assert_eq!(kind(&tree.elements[&1]), None);
+        assert_eq!(style_of(&tree), None, "false is no popover, open or not");
+
+        tree.set_custom_prop(1, ATTRIBUTE_PROP.to_string(), json!(""));
+        assert_eq!(kind(&tree.elements[&1]), Some(Kind::Auto));
+        tree.set_custom_prop(1, ATTRIBUTE_PROP.to_string(), serde_json::Value::Null);
+        assert_eq!(kind(&tree.elements[&1]), None);
+        assert_eq!(style_of(&tree), None);
+    }
+
+    #[test]
+    fn the_hidden_attribute_set_changed_or_removed_after_creation_moves_the_style() {
+        let mut tree = tree_with(None);
+        let display = |tree: &RetainedTree| style_of(tree).and_then(|style| style.display.clone());
+        tree.set_custom_prop(1, "hidden".to_string(), json!(true));
+        assert_eq!(display(&tree).as_deref(), Some("none"));
+        tree.set_custom_prop(1, "hidden".to_string(), json!("until-found"));
+        assert_ne!(display(&tree).as_deref(), Some("none"), "until-found keeps its box");
+        tree.set_custom_prop(1, "hidden".to_string(), json!(""));
+        assert_eq!(display(&tree).as_deref(), Some("none"));
+        tree.set_custom_prop(1, "hidden".to_string(), serde_json::Value::Null);
+        assert_ne!(display(&tree).as_deref(), Some("none"));
     }
 
     #[test]

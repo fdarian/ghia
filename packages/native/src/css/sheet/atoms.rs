@@ -40,6 +40,10 @@ impl Atoms {
         self.names.len()
     }
 
+    pub(super) fn names_from(&self, count: usize) -> impl Iterator<Item = &str> {
+        self.names.get(count..).expect("the atoms of a load only grow").iter().map(|name| &**name)
+    }
+
     /// The atom of an HTML element's tag: a selector compares it lower-cased, elements keep it as given.
     pub fn tag(&self, name: &str) -> Option<Atom> {
         if name.bytes().any(|byte| byte.is_ascii_uppercase()) {

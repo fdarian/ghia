@@ -6,7 +6,8 @@ use rustc_hash::FxHashMap;
 
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
-use super::atoms::Atom;
+use super::atoms::{Atom, Atoms};
+use super::document::StyleSheets;
 use super::matching::{AttrValue, ElementView, SiblingTest};
 use super::selector::AttrName;
 
@@ -131,14 +132,38 @@ impl<'a> TreeView<'a> {
     }
 }
 
+/// What the matcher reads of an element, for code that has to agree with it on which elements
+/// have a tag or an attribute.
+pub(super) fn tag_of(atoms: &Atoms, element: &RetainedElement) -> Option<Atom> {
+    if element.is_svg() {
+        atoms.get(&element.element_type)
+    } else {
+        atoms.tag(&element.element_type)
+    }
+}
+
+/// An HTML element holds lower-cased attribute names and an SVG one the names as written.
+fn attribute_name(element: &RetainedElement, name: AttrName) -> Atom {
+    if element.is_svg() {
+        name.written
+    } else {
+        name.lower
+    }
+}
+
+/// Whether [`TreeView::attr`] finds the attribute: `style` is the element's own style.
+pub(super) fn has_attr(sheets: &StyleSheets, element: &RetainedElement, name: AttrName) -> bool {
+    let name = attribute_name(element, name);
+    if name == sheets.style {
+        element.own_style().is_some()
+    } else {
+        element.attribute(sheets.atoms.name(name)).is_some()
+    }
+}
+
 impl ElementView for TreeView<'_> {
     fn tag(&self) -> Option<Atom> {
-        let element = self.element();
-        if element.is_svg() {
-            self.tree.sheets.atoms.get(&element.element_type)
-        } else {
-            self.tree.sheets.atoms.tag(&element.element_type)
-        }
+        tag_of(&self.tree.sheets.atoms, self.element())
     }
 
     fn is_svg(&self) -> bool {
@@ -156,7 +181,7 @@ impl ElementView for TreeView<'_> {
     fn attr(&self, name: AttrName) -> Option<AttrValue<'_>> {
         let sheets = &self.tree.sheets;
         let element = self.element();
-        let name = if element.is_svg() { name.written } else { name.lower };
+        let name = attribute_name(element, name);
         if name == sheets.style {
             let own = element.own_style()?;
             let raw = self.tree.styles.raw_of(own);

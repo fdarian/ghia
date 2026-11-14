@@ -20,6 +20,12 @@ use super::invalidation::Reach;
 use super::share::{Found, StyleSharing};
 use super::view::{count_sibling_work, SiblingPositions, TreeView};
 
+#[cfg(test)]
+thread_local! {
+    /// Elements `read_element_atoms` read, which the tests read to tell a targeted read from a full one.
+    pub(super) static ATOM_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Elements of a subtree `contains_style_element` walks for each `<style>` element there is, which
 /// is about what walking up from that one costs.
 const SUBTREE_WALK_PER_STYLE: usize = 8;
@@ -35,13 +41,19 @@ fn lowercase(name: &str) -> Cow<'_, str> {
 /// A class or id no sheet names cannot match a selector, so it has no atom and an element keeps
 /// nothing of it: the interner holds the names of the sheets, not of every element ever seen.
 fn class_atoms(atoms: &Atoms, value: Option<Cow<'_, str>>) -> ClassAtoms {
-    value
-        .map(|value| value.split_ascii_whitespace().filter_map(|class| atoms.get(class)).collect())
-        .unwrap_or_default()
+    value.iter().flat_map(|value| value.split_ascii_whitespace()).filter_map(|class| atoms.get(class)).collect()
 }
 
 fn id_atom(atoms: &Atoms, value: Option<Cow<'_, str>>) -> Option<Atom> {
-    value.and_then(|value| atoms.get(&value))
+    atoms.get(&value?)
+}
+
+fn read_element_atoms(atoms: &Atoms, element: &mut RetainedElement) {
+    #[cfg(test)]
+    ATOM_READS.with(|count| count.set(count.get() + 1));
+    let element_id = id_atom(atoms, element.attribute("id"));
+    let classes = class_atoms(atoms, element.attribute("class"));
+    element.set_css_atoms(element_id, classes);
 }
 
 impl RetainedTree {
@@ -237,19 +249,17 @@ impl RetainedTree {
 
     /// Reads the class atoms again, and returns the ones the element had.
     fn refresh_class_atoms(&mut self, id: u64) -> ClassAtoms {
-        let atoms = &self.sheets.atoms;
         let Some(element) = self.elements.get_mut(&id) else {
             return ClassAtoms::new();
         };
-        let classes = class_atoms(atoms, element.attribute("class"));
+        let classes = class_atoms(&self.sheets.atoms, element.attribute("class"));
         element.replace_css_classes(classes)
     }
 
     /// Reads the id atom again, and returns the one the element had.
     fn refresh_id_atom(&mut self, id: u64) -> Option<Atom> {
-        let atoms = &self.sheets.atoms;
         let element = self.elements.get_mut(&id)?;
-        let element_id = id_atom(atoms, element.attribute("id"));
+        let element_id = id_atom(&self.sheets.atoms, element.attribute("id"));
         element.replace_css_id(element_id)
     }
 
@@ -312,26 +322,52 @@ impl RetainedTree {
             .collect();
         connected.sort();
         let texts = self.sheets.texts_with(connected.iter().map(|(_, id)| self.text_content(*id)).collect());
-        if texts == self.sheets.loaded {
+        if texts == self.sheets.loaded() {
             return;
         }
         let names = self.sheets.atoms.len();
-        self.sheets.load(texts);
-        // Elements keep atoms only for the names a sheet had when they were read, so a name the
-        // new sheets bring has to be looked for in every element's class and id again.
-        if self.sheets.atoms.len() != names {
-            self.sheets.atoms_fresh = false;
+        let reload = self.sheets.load(texts);
+        // Elements keep atoms only for the names a sheet had when they were read, so the elements
+        // that carry a name the new sheets bring have to be read again, whatever else the load
+        // changed. Until then a rule added later cannot find the elements it names.
+        if self.sheets.atoms_fresh && self.sheets.atoms.len() != names {
+            self.read_atoms_of_new_names(names);
         }
+        let plan = match reload {
+            Some(reload) if self.sheets.atoms_fresh && !self.sheets.mark_all => self.plan_reload(reload),
+            _ => None,
+        };
+        if let Some(plan) = plan {
+            self.apply_reload(plan);
+            super::reload::count_scoped();
+            return;
+        }
+        self.sheets.interner = Default::default();
         self.styles.cascaded.clear();
         self.sheets.mark_all = true;
     }
 
     fn init_all_css(&mut self) {
-        let atoms = &self.sheets.atoms;
         for element in self.elements.values_mut() {
-            let element_id = id_atom(atoms, element.attribute("id"));
-            let classes = class_atoms(atoms, element.attribute("class"));
-            element.set_css_atoms(element_id, classes);
+            read_element_atoms(&self.sheets.atoms, element);
+        }
+    }
+
+    /// Reads the atoms again of the elements whose `id` is one of the names interned after the
+    /// first `names`, or whose `class` has one of them as a token.
+    fn read_atoms_of_new_names(&mut self, names: usize) {
+        let atoms = &self.sheets.atoms;
+        let new_names: FxHashSet<&str> = atoms.names_from(names).collect();
+        let carries_a_new_name = |element: &RetainedElement| {
+            element.attribute("id").is_some_and(|id| new_names.contains(&*id))
+                || element
+                    .attribute("class")
+                    .is_some_and(|class| class.split_ascii_whitespace().any(|token| new_names.contains(token)))
+        };
+        for element in self.elements.values_mut() {
+            if carries_a_new_name(element) {
+                read_element_atoms(atoms, element);
+            }
         }
     }
 

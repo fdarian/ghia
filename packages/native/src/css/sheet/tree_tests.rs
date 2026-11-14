@@ -1224,6 +1224,104 @@ fn names_no_sheet_mentions_are_not_interned_and_elements_keep_nothing_of_them() 
     assert!(doc.tree.elements[&last].attribute_store().is_some());
 }
 
+fn atom_reads() -> usize {
+    super::tree::ATOM_READS.with(std::cell::Cell::get)
+}
+
+#[test]
+fn a_name_an_element_dropped_before_it_was_destroyed_is_no_trouble_when_a_sheet_names_it() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a { color: red }");
+    let dropped = doc.classed("div", ROOT, "late");
+    let kept = doc.classed("div", ROOT, "late");
+    doc.flush();
+    doc.tree.set_attribute(dropped, "class", Some("other".into()));
+    doc.flush();
+    doc.tree.destroy_element(dropped);
+    doc.style_element(ROOT, ".late { color: blue }");
+    doc.flush();
+    assert_eq!(doc.color(kept), Some("blue"));
+}
+
+#[test]
+fn a_sheet_that_names_a_name_reads_only_the_elements_that_carry_it() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a { color: red }");
+    let carrier = doc.classed("div", ROOT, "late other");
+    let identified = doc.element("div", ROOT);
+    doc.tree.set_attribute(identified, "id", Some("late".into()));
+    let others: Vec<u64> = (0..50).map(|n| doc.classed("div", ROOT, &format!("c{n}"))).collect();
+    doc.flush();
+    let before = atom_reads();
+    doc.style_element(ROOT, ".late { color: blue }");
+    doc.flush();
+    assert_eq!(atom_reads() - before, 2, "only the elements that carry the name are read");
+    assert_eq!(doc.color(carrier), Some("blue"));
+    assert!(others.iter().all(|other| doc.color(*other).is_none()));
+    assert!(doc.tree.elements[&others[0]].css().is_none_or(|css| css.classes.is_empty()));
+}
+
+#[test]
+fn an_element_that_holds_a_new_name_inside_a_longer_one_is_not_read() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a { color: red }");
+    let longer_class = doc.classed("div", ROOT, "latest later");
+    let longer_id = doc.element("div", ROOT);
+    doc.tree.set_attribute(longer_id, "id", Some("late-menu".into()));
+    let carrier = doc.classed("div", ROOT, "other late");
+    doc.flush();
+    let before = atom_reads();
+    doc.style_element(ROOT, ".late { color: blue }");
+    doc.flush();
+    assert_eq!(atom_reads() - before, 1, "only the carrier is read");
+    assert_eq!(doc.color(carrier), Some("blue"));
+    assert_eq!((doc.color(longer_class), doc.color(longer_id)), (None, None));
+}
+
+#[test]
+fn a_load_that_interns_many_names_reads_exactly_the_carriers() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a { color: red }");
+    let carriers: Vec<u64> = (0..20).map(|n| doc.classed("div", ROOT, &format!("other n{n}"))).collect();
+    let others: Vec<u64> = (0..50).map(|n| doc.classed("div", ROOT, &format!("c{n} n{n}x"))).collect();
+    doc.flush();
+    let before = atom_reads();
+    let rules: String = (0..20).map(|n| format!(".n{n} {{ color: blue }}")).collect();
+    doc.style_element(ROOT, &rules);
+    doc.flush();
+    assert_eq!(atom_reads() - before, carriers.len());
+    assert!(carriers.iter().all(|carrier| doc.color(*carrier) == Some("blue")));
+    assert!(others.iter().all(|other| doc.color(*other).is_none()));
+}
+
+#[test]
+fn a_rewritten_class_does_not_hide_the_id_beside_it_from_a_later_sheet() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a { color: red }");
+    let menu = doc.classed("div", ROOT, "menu");
+    doc.tree.set_attribute(menu, "id", Some("menu".into()));
+    doc.flush();
+    doc.tree.set_attribute(menu, "class", Some("other".into()));
+    doc.flush();
+    doc.style_element(ROOT, "#menu { color: blue }");
+    doc.flush();
+    assert_eq!(doc.color(menu), Some("blue"));
+}
+
+#[test]
+fn a_rewritten_id_does_not_hide_the_class_beside_it_from_a_later_sheet() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a { color: red }");
+    let menu = doc.classed("div", ROOT, "menu");
+    doc.tree.set_attribute(menu, "id", Some("menu".into()));
+    doc.flush();
+    doc.tree.set_attribute(menu, "id", None);
+    doc.flush();
+    doc.style_element(ROOT, ".menu { color: blue }");
+    doc.flush();
+    assert_eq!(doc.color(menu), Some("blue"));
+}
+
 #[test]
 fn a_sheet_that_names_a_class_elements_already_have_matches_them() {
     let mut doc = Doc::new();
@@ -2248,7 +2346,7 @@ fn an_element_a_combinator_rule_could_match_is_matched_in_full() {
     doc.style_element(ROOT, ".cell { opacity: 0.5 }");
     reset_full_matches();
     doc.flush();
-    assert_eq!(full_matches(), 6 + 1 + 1, "the rows and the list again, one cell");
+    assert_eq!(full_matches(), 1, "the cells are the elements the new rule reaches, and they share one match");
     assert!(plain.iter().all(|id| doc.style(*id).and_then(|style| style.opacity) == Some(0.5)));
 }
 
@@ -3025,3 +3123,5 @@ mod states {
         assert_eq!((pressed.color.as_deref(), pressed.opacity), (Some("red"), None));
     }
 }
+
+mod reload;

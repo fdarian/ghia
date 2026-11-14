@@ -19,7 +19,8 @@ use super::cascade::{merge, MatchedInterner, MatchedRules};
 use super::index::RuleIndex;
 use super::invalidation::Reach;
 use super::layers::Layers;
-use super::parser::parse_sheet;
+use super::parse_cache::{ParseCache, ParsedRule};
+use super::reload::Reload;
 use super::states::LoggedFolds;
 use super::validate::Validator;
 use crate::css::lenient::number_text;
@@ -61,11 +62,12 @@ pub struct StyleSheets {
     pub(crate) style_elements: FxHashSet<u64>,
     pub(crate) constructed: FxHashMap<u64, String>,
     pub(crate) adopted: Vec<u64>,
-    /// The texts the index was built from, in cascade order.
-    pub(crate) loaded: Vec<String>,
     pub(crate) index: RuleIndex,
+    /// The top-level rules `index` was built from, when every source was cut into them.
+    loaded_units: Option<Vec<Arc<ParsedRule>>>,
     pub(crate) interner: MatchedInterner,
     validator: Validator,
+    parse_cache: ParseCache,
     /// The skipped rules already logged, kept across reloads (every sheet is parsed again when
     /// one changes) so each is logged once.
     logged_skips: FxHashSet<String>,
@@ -97,10 +99,11 @@ impl Default for StyleSheets {
             style_elements: FxHashSet::default(),
             constructed: FxHashMap::default(),
             adopted: Vec::new(),
-            loaded: Vec::new(),
             index: RuleIndex::default(),
+            loaded_units: None,
             interner: MatchedInterner::default(),
             validator: Validator::default(),
+            parse_cache: ParseCache::default(),
             logged_skips: FxHashSet::default(),
             skip_log_capped: false,
             logged_folds: LoggedFolds::default(),
@@ -112,6 +115,11 @@ impl Default for StyleSheets {
 }
 
 impl StyleSheets {
+    /// The texts the index was built from, in cascade order.
+    pub(crate) fn loaded(&self) -> &[String] {
+        self.parse_cache.texts()
+    }
+
     pub(crate) fn has_work(&self) -> bool {
         self.enabled && (self.sources_dirty || self.mark_all || !self.atoms_fresh || !self.pending.is_empty())
     }
@@ -178,21 +186,25 @@ impl StyleSheets {
     }
 
     /// Parses `texts` as the document's sheets and indexes their rules. Layers are declared in
-    /// parse order across the whole document, so every sheet is parsed again when any changes.
-    pub(crate) fn load(&mut self, texts: Vec<String>) {
+    /// parse order across the whole document, so every sheet is assembled again when any
+    /// changes; the rules whose text is unchanged come from the parse cache.
+    ///
+    /// What the elements hold (`matched`, the interner) is numbered by the index just replaced, and
+    /// is the caller's to bring to the new one: by the returned [`Reload`] when it can, else by
+    /// matching every element again.
+    pub(super) fn load(&mut self, texts: Vec<String>) -> Option<Reload> {
         let mut layers = Layers::default();
-        let mut sheets = Vec::with_capacity(texts.len());
-        for text in &texts {
-            let mut sheet = parse_sheet(text, &mut self.atoms, &mut layers);
-            self.validator.filter(&mut sheet.rules);
-            for skipped in sheet.unsupported.drain(..) {
-                self.warn_skipped(skipped);
-            }
-            sheets.push(sheet);
+        let assembled = self.parse_cache.parse(texts, &mut self.atoms, &mut layers, &mut self.validator);
+        for skipped in assembled.unsupported {
+            self.warn_skipped(skipped);
         }
-        self.index = RuleIndex::build(sheets, &layers.order(), self.style);
-        self.interner = MatchedInterner::default();
-        self.loaded = texts;
+        let index = RuleIndex::build(&assembled.rules, &layers.order(), self.style);
+        let old_units = std::mem::replace(&mut self.loaded_units, assembled.units);
+        let old_index = std::mem::replace(&mut self.index, index);
+        match (old_units, &self.loaded_units) {
+            (Some(old), Some(new)) => Reload::between(&old, new, &old_index, &self.index),
+            _ => None,
+        }
     }
 
     fn warn_skipped(&mut self, skipped: String) {
@@ -273,7 +285,9 @@ impl StyleSheets {
     pub(crate) fn wind_down(&mut self) {
         self.enabled = false;
         self.atoms_fresh = false;
-        self.loaded.clear();
+        self.loaded_units = None;
+        // Its rules hold atoms of the interner replaced below.
+        self.parse_cache.clear();
         self.logged_skips.clear();
         self.logged_folds.clear();
         self.skip_log_capped = false;

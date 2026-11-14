@@ -6,24 +6,54 @@
 //! every attribute name a selector reads, plus the universal list. Matching then runs the whole
 //! selector on each candidate.
 
+use std::ops::Deref;
+use std::sync::Arc;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::css::lenient::Declaration;
 
 use super::atoms::Atom;
 use super::invalidation::Invalidation;
-use super::layers::LayerOrder;
+use super::layers::{LayerId, LayerOrder};
 use super::matching::{matches, ElementView};
 use super::selector::{AttrName, ComplexSelector, Simple, Specificity};
 use super::states::{Applies, RuleMatch};
-use super::StyleSheet;
 
-pub struct IndexedRule {
+/// What a rule says, which does not depend on where it stands in a document: shared by the parse
+/// cache and every index built from it.
+pub struct RuleBody {
+    /// Without the selectors that name a pseudo-element, and never empty.
     pub selectors: Vec<(ComplexSelector, Specificity)>,
     pub normal: Vec<Declaration>,
     pub important: Vec<Declaration>,
+}
+
+/// A rule in the order of a document's cascade, with the layer it was written in.
+#[derive(Clone)]
+pub struct DocRule {
+    pub body: Arc<RuleBody>,
+    pub layer: Option<LayerId>,
+}
+
+pub struct IndexedRule {
+    body: Arc<RuleBody>,
     /// Where the rule's layer ranks for normal declarations: higher wins.
     layer_rank: u32,
+}
+
+impl IndexedRule {
+    pub(super) fn layer_rank(&self) -> u32 {
+        self.layer_rank
+    }
+}
+
+impl Deref for IndexedRule {
+    type Target = RuleBody;
+
+    fn deref(&self) -> &RuleBody {
+        &self.body
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -57,41 +87,33 @@ pub struct RuleIndex {
 }
 
 impl RuleIndex {
-    /// Rules are numbered in cascade source order: sheet by sheet, each in its own order.
-    pub fn build(sheets: Vec<StyleSheet>, layers: &LayerOrder, style: Atom) -> RuleIndex {
+    /// Rules are numbered in cascade source order.
+    pub fn build(rules: &[DocRule], layers: &LayerOrder, style: Atom) -> RuleIndex {
         let mut index = RuleIndex { unlayered_rank: layers.unlayered(), ..RuleIndex::default() };
+        index.rules.reserve(rules.len());
         let mut self_contained_lists: FxHashMap<usize, bool> = FxHashMap::default();
         let mut attributes = Attributes::default();
-        for mut sheet in sheets {
-            sheet.rules.sort_by_key(|rule| rule.order);
-            for rule in sheet.rules {
-                let selectors: Vec<_> =
-                    rule.selectors.into_iter().filter(|(selector, _)| !selector.has_pseudo_element()).collect();
-                if selectors.is_empty() {
-                    continue;
-                }
-                let number = u32::try_from(index.rules.len()).expect("fewer than 2^32 rules");
-                for (position, (selector, _)) in selectors.iter().enumerate() {
-                    index.invalidation.read(selector);
-                    attributes.read(selector);
-                    let self_contained = is_self_contained(selector, style, &mut self_contained_lists);
-                    index.shares |= self_contained;
-                    let entry = Entry { rule: number, selector: position as u32, self_contained };
-                    index.bucket(selector, entry);
-                }
-                index.rules.push(IndexedRule {
-                    selectors,
-                    normal: rule.normal,
-                    important: rule.important,
-                    layer_rank: layers.rank(rule.layer),
-                });
+        for rule in rules {
+            let number = u32::try_from(index.rules.len()).expect("fewer than 2^32 rules");
+            for (position, (selector, _)) in rule.body.selectors.iter().enumerate() {
+                index.invalidation.read(selector);
+                attributes.read(selector);
+                let self_contained = is_self_contained(selector, style, &mut self_contained_lists);
+                index.shares |= self_contained;
+                let entry = Entry { rule: number, selector: position as u32, self_contained };
+                index.bucket(selector, entry);
             }
+            index.rules.push(IndexedRule { body: rule.body.clone(), layer_rank: layers.rank(rule.layer) });
         }
         index.html_attributes = attributes.html.into_iter().collect();
         index.svg_attributes = attributes.svg.into_iter().collect();
         index.html_attributes.sort();
         index.svg_attributes.sort();
         index
+    }
+
+    pub(super) fn unlayered_rank(&self) -> u32 {
+        self.unlayered_rank
     }
 
     pub(super) fn shares(&self) -> bool {
@@ -108,27 +130,18 @@ impl RuleIndex {
     }
 
     fn bucket(&mut self, selector: &ComplexSelector, entry: Entry) {
-        let subject = &selector.compounds[0].simples;
-        if let Some(id) = subject.iter().find_map(|simple| if let Simple::Id(id) = simple { Some(*id) } else { None }) {
-            self.by_id.entry(id).or_default().push(entry);
-        } else if let Some(class) =
-            subject.iter().find_map(|simple| if let Simple::Class(class) = simple { Some(*class) } else { None })
-        {
-            self.by_class.entry(class).or_default().push(entry);
-        } else if let Some(attribute) =
-            subject.iter().find_map(|simple| if let Simple::Attr(attr) = simple { Some(attr.name) } else { None })
-        {
-            self.by_attribute.entry(attribute).or_default().push(entry);
-        } else if let Some(tag) =
-            subject.iter().find_map(|simple| if let Simple::Tag(tag) = simple { Some(*tag) } else { None })
-        {
-            // An HTML element looks its tag up lower-cased and an SVG one as given.
-            self.by_tag.entry(tag.lower).or_default().push(entry);
-            if tag.written != tag.lower {
-                self.by_tag.entry(tag.written).or_default().push(entry);
+        match bucket_simple(&selector.compounds[0].simples) {
+            Some(Simple::Id(id)) => self.by_id.entry(*id).or_default().push(entry),
+            Some(Simple::Class(class)) => self.by_class.entry(*class).or_default().push(entry),
+            Some(Simple::Attr(attr)) => self.by_attribute.entry(attr.name).or_default().push(entry),
+            Some(Simple::Tag(tag)) => {
+                // An HTML element looks its tag up lower-cased and an SVG one as given.
+                self.by_tag.entry(tag.lower).or_default().push(entry);
+                if tag.written != tag.lower {
+                    self.by_tag.entry(tag.written).or_default().push(entry);
+                }
             }
-        } else {
-            self.universal.push(entry);
+            _ => self.universal.push(entry),
         }
     }
 
@@ -216,6 +229,16 @@ impl RuleIndex {
         });
         important.into_iter().map(|found| Applies { rule: found.rule, condition: found.condition }).collect()
     }
+}
+
+/// The simple selector of a subject compound that a rule is filed under, by what is likely to be the
+/// rarest: an id, a class, an attribute, a tag. `None` for a subject that has none of them.
+pub(super) fn bucket_simple(subject: &[Simple]) -> Option<&Simple> {
+    let first = |is: fn(&Simple) -> bool| subject.iter().find(|simple| is(simple));
+    first(|simple| matches!(simple, Simple::Id(_)))
+        .or_else(|| first(|simple| matches!(simple, Simple::Class(_))))
+        .or_else(|| first(|simple| matches!(simple, Simple::Attr(_))))
+        .or_else(|| first(|simple| matches!(simple, Simple::Tag(_))))
 }
 
 /// Whether `selector` reads nothing of an element but its type, id, classes and attributes other

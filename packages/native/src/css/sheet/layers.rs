@@ -8,7 +8,14 @@
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct LayerId(u32);
 
+impl LayerId {
+    pub(super) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 struct Node {
+    parent: Option<LayerId>,
     name: Option<Box<str>>,
     children: Vec<LayerId>,
 }
@@ -43,12 +50,27 @@ impl Layers {
 
     fn add(&mut self, parent: Option<LayerId>, name: Option<Box<str>>) -> LayerId {
         let id = LayerId(u32::try_from(self.nodes.len()).expect("fewer than 2^32 layers"));
-        self.nodes.push(Node { name, children: Vec::new() });
+        self.nodes.push(Node { parent, name, children: Vec::new() });
         match parent {
             Some(parent) => self.nodes[parent.0 as usize].children.push(id),
             None => self.roots.push(id),
         }
         id
+    }
+
+    /// Declares in `target` every layer of this tree, in the order they were created here, and
+    /// returns where each went, indexed by [`LayerId::index`]. A tree parsed from one rule alone
+    /// replayed this way leaves `target` as parsing the rule in place would have.
+    pub(super) fn replay_into(&self, target: &mut Layers) -> Vec<LayerId> {
+        let mut mapped: Vec<LayerId> = Vec::with_capacity(self.nodes.len());
+        for node in &self.nodes {
+            let parent = node.parent.map(|parent| mapped[parent.index()]);
+            mapped.push(match &node.name {
+                Some(name) => target.declare(parent, name),
+                None => target.anonymous(parent),
+            });
+        }
+        mapped
     }
 
     pub fn order(&self) -> LayerOrder {
