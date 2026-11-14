@@ -1,8 +1,10 @@
 /** A dispatched click runs the activation behaviour of its target, as the DOM does for an uncanceled `click`. */
+import { createSignal } from "solid-js"
 import { afterEach, describe, expect, it } from "vitest"
 import { document, window, type DomEvent } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import type { HostElement } from "../host.js"
+import { Dynamic } from "../web.js"
 
 describe.skipIf(!hasNativeTestRenderer)("dispatchEvent of a click, in Solid", () => {
   let testRoot: ReturnType<typeof createTestRoot>
@@ -109,6 +111,18 @@ describe.skipIf(!hasNativeTestRenderer)("dispatchEvent of a click, in Solid", ()
     nodes.label.dispatchEvent(click())
     expect(box.checked).toBe(false)
     expect((nodes.label as unknown as HTMLLabelElement).htmlFor).toBe("box")
+  })
+
+  it("takes for from a spread and a Dynamic label too, and drops it when the key leaves", () => {
+    testRoot = createTestRoot()
+    const [named, setNamed] = createSignal(true)
+    let label!: HostElement
+    testRoot.render(() => (
+      <Dynamic component="label" ref={(element: HostElement) => (label = element)} {...(named() ? { for: "box" } : {})} />
+    ))
+    expect((label as unknown as HTMLLabelElement).htmlFor).toBe("box")
+    testRoot.flushSync(() => setNamed(false))
+    expect((label as unknown as HTMLLabelElement).htmlFor).toBe("")
   })
 
   it("leaves focus alone for a label click a listener canceled", () => {

@@ -136,8 +136,7 @@ export function createMutationQueue(
     },
     setCustomProp(id, key, value) {
       blobImages.prop(id, key, value)
-      // Solid's JSX writes the `for` attribute's own name; native reads the label's target as `htmlFor`.
-      writer.setCustomProp(id, key === "for" ? "htmlFor" : key, value)
+      writer.setCustomProp(id, key, value)
       requestFlush()
     },
     get forwardsAttributes() {
@@ -342,7 +341,6 @@ const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "role",
   "id",
   "htmlFor",
-  "for",
   "popover",
 ])
 

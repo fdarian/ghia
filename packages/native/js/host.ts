@@ -2085,8 +2085,6 @@ export interface LabelProps extends HostProps {
   /** The `id` of the control to label. Without it, the first `<input>`, `<textarea>`
    *  or `<button>` inside the label is the control. */
   htmlFor?: string
-  /** The same as `htmlFor`, under the attribute's own name, which is what Solid's JSX writes. */
-  for?: string
 }
 
 export type VirtualListShared = AriaProps & {

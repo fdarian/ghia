@@ -65,13 +65,18 @@ function anchorNodeFor(anchor: HostNode | HostParent): HostNode {
   return known
 }
 
+/** Solid's JSX writes a label's `for` under the attribute's own name; the host reads it as `htmlFor`. */
+function propNameOn(node: HostNode | HostParent, name: string): string {
+  return name === "for" && node.kind === "element" && node.elementType === "label" ? "htmlFor" : name
+}
+
 function setProperty(node: HostNode | HostParent, name: string, value: unknown, previous: unknown): void {
   if (
     node.kind !== "root" &&
     isHostPropertyValue(value) &&
     isHostPropertyValue(previous)
   ) {
-    setHostProperty(node, name, value, previous)
+    setHostProperty(node, propNameOn(node, name), value, previous)
   }
 }
 

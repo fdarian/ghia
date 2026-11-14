@@ -4833,9 +4833,10 @@ skipped they are there too, as Chrome has them.
 ### `<label>`
 
 `<label htmlFor="email">` names the `<input>` or `<textarea>` whose `id` is
-`"email"`. Solid's JSX writes the attribute's own name, `<label for="email">`,
-and both name the same control (`for` reaches native as `htmlFor`). Without
-`htmlFor`, the label names the first `<input>` or `<textarea>` inside it. The control's accessible name comes from the label
+`"email"`. In Solid, `<label for="email">` (the attribute's own name, which Solid's
+JSX writes) names the same control: `@ghia/solid` sets it as `htmlFor`, and `for` is
+a prop of `<label>` in Solid's JSX types only, not React's. Without `htmlFor`, the
+label names the first `<input>` or `<textarea>` inside it. The control's accessible name comes from the label
 (AccessKit `labelled_by`), unless the control has its own `aria-label` or
 `aria-labelledby`. A control can have several labels. Clicking a label focuses
 its control and dispatches a `click` on it (same position and `detail`, bubbling
