@@ -62,7 +62,8 @@ describeNative('Base UI Solid Tabs', () => {
 
   // The port's TabsTab effect "keeps the highlighted item in sync with the selected tab" tracks the highlighted index, so
   // it snaps the roving index back to the selected tab as soon as focus lands on another one; the next arrow key then
-  // starts from the selected tab (Tab A) and wraps to Tab C. Solid semantics, not a Ghia gap: a browser runs the same effect.
+  // starts from the selected tab (Tab A) and wraps to Tab C. Not a Ghia gap: the photon port's Tabs rendered by
+  // solid-js/web in Chromium (vite-plugin-solid, DOM mode) does the same, focusing Tab B and pressing ArrowLeft lands on Tab C.
   it.fails('moves from the focused tab on an arrow key (port bug: the roving index snaps back)', async () => {
     const app = mount(() => <Example activateOnFocus={false} />)
     await focus(app, queryAll('[role="tab"]')[1])
