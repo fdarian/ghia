@@ -7,8 +7,9 @@
     "titlebar": "ghia dev titlebar.main.tsx",
     "counter": "ghia dev counter.tsx",
     "diff": "ghia dev diff.main.tsx",
-    "test": "vitest run --exclude '**/*.perf.test.tsx' --exclude 'tanstack-virtual.test.tsx' && bun run test:base-ui && bun run test:solid",
+    "test": "vitest run --exclude '**/*.perf.test.tsx' --exclude 'tanstack-virtual.test.tsx' && bun run test:base-ui && bun run test:kobalte && bun run test:solid",
     "test:base-ui": "vitest run --config vitest.base-ui.config.ts",
+    "test:kobalte": "vitest run --config vitest.kobalte.config.ts",
     "test:solid": "vitest run --config vitest.solid.config.ts",
     "test:perf": "NODE_ENV=production vitest run --no-file-parallelism chat.perf.test.tsx timeline.perf.test.tsx rerender.perf.test.tsx",
     "test:perf:overflow": "NODE_ENV=production vitest run --no-file-parallelism overflow-clip.perf.test.tsx",
@@ -56,6 +57,7 @@
   },
   "devDependencies": {
     "@base-ui/react": "1.9.0",
+    "@kobalte/core": "^0.13.14",
     "@tanstack/solid-virtual": "3.13.53",
     "@types/mdast": "^4.0.4",
     "@types/react": "^19.2.0",
