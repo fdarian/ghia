@@ -28,6 +28,16 @@ function trigger(): HTMLElement {
 }
 
 describeNative('Kobalte Tooltip', () => {
+  // First in the file: once any tooltip has shown, Kobalte keeps its module-level warm-up state and the next one opens at once.
+  it('does not show before the open delay has passed', async () => {
+    const app = mount(() => <Example openDelay={400} />)
+    await hover(app, trigger())
+    await wait(app, 150)
+    expect(exists('[data-testid="tip"]')).toBe(false)
+    await wait(app, 450)
+    expect(exists('[data-testid="tip"]')).toBe(true)
+  })
+
   it('is hidden until the pointer rests on the trigger, then shows its text above the trigger with the tooltip role', async () => {
     const changes: boolean[] = []
     const app = mount(() => <Example onOpenChange={(open) => changes.push(open)} />)
@@ -46,15 +56,6 @@ describeNative('Kobalte Tooltip', () => {
     const popup = box(tip)
     expect(popup.y + popup.height).toBeCloseTo(anchor.y - 6, 0)
     expect(popup.y).toBeGreaterThan(0)
-  })
-
-  it('does not show before the open delay has passed', async () => {
-    const app = mount(() => <Example openDelay={400} />)
-    await hover(app, trigger())
-    await wait(app, 150)
-    expect(exists('[data-testid="tip"]')).toBe(false)
-    await wait(app, 450)
-    expect(exists('[data-testid="tip"]')).toBe(true)
   })
 
   it('hides when the pointer leaves the trigger', async () => {

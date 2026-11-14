@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Combobox } from '@kobalte/core/combobox'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { box, byText, click, exists, focus, isShown, mount, press, query, queryAll, settle } from './harness'
+import { box, byText, click, exists, focus, isShown, mount, press, query, queryAll, settle, wait } from './harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -31,7 +31,7 @@ function Example(props: { onChange?: (value: string | null) => void; onInputChan
         </Combobox.Control>
         <Combobox.Portal>
           <Combobox.Content data-testid="content" style={{ display: 'block', width: 200 }}>
-            <Combobox.Listbox style={{ display: 'block', width: 200 }} />
+            <Combobox.Listbox style={{ display: 'block', width: 200, margin: 0, padding: 0 }} />
           </Combobox.Content>
         </Combobox.Portal>
       </Combobox>

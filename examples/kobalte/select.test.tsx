@@ -2,7 +2,7 @@ import { createSignal } from 'solid-js'
 import { describe, expect, it } from 'vitest'
 import { Select } from '@kobalte/core/select'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { activeText, box, byText, click, exists, focus, isShown, mount, press, query, queryAll, settle } from './harness'
+import { activeText, box, byText, click, exists, focus, isShown, mount, press, query, queryAll, settle, wait } from './harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -37,7 +37,7 @@ function Example(props: {
         </Select.Trigger>
         <Select.Portal>
           <Select.Content data-testid="content" style={{ display: 'block', width: 140 }}>
-            <Select.Listbox style={{ display: 'block', width: 140 }} />
+            <Select.Listbox style={{ display: 'block', width: 140, margin: 0, padding: 0 }} />
           </Select.Content>
         </Select.Portal>
       </Select>
@@ -155,6 +155,7 @@ describeNative('Kobalte Select', () => {
     await settle(app)
     await press(app, 'd')
     expect(activeOption()).toBe('Date')
+    await wait(app, 600)
     await press(app, 'b')
     expect(activeOption()).toBe('Banana')
   })

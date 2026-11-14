@@ -11,7 +11,9 @@ function Example(props: { onOpenChange?: (open: boolean) => void; modal?: boolea
       <Dialog onOpenChange={props.onOpenChange} modal={props.modal}>
         <Dialog.Trigger style={{ display: 'block', width: 100, height: 30 }}>Open</Dialog.Trigger>
         <Dialog.Portal>
-          <Dialog.Overlay data-testid="overlay" style={{ position: 'fixed', top: 0, left: 0, width: 640, height: 480 }} />
+          {props.modal !== false && (
+            <Dialog.Overlay data-testid="overlay" style={{ position: 'fixed', top: 0, left: 0, width: 640, height: 480 }} />
+          )}
           <div style={{ position: 'fixed', top: 100, left: 100, width: 300, height: 220 }}>
             <Dialog.Content data-testid="content" style={{ display: 'block', width: 300, height: 220 }}>
               <Dialog.Title style={{ margin: 0 }}>Profile</Dialog.Title>

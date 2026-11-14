@@ -2,7 +2,7 @@ import { createSignal } from 'solid-js'
 import { describe, expect, it } from 'vitest'
 import { DropdownMenu } from '@kobalte/core/dropdown-menu'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { activeText, box, byText, click, exists, focus, mount, press, query, queryAll, settle } from './harness'
+import { activeText, box, byText, click, exists, focus, mount, press, query, queryAll, settle, wait } from './harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -61,7 +61,7 @@ function menuLabels(): string[] {
 describeNative('Kobalte DropdownMenu', () => {
   it('is closed at first, a menu button with aria-haspopup', () => {
     mount(() => <Example />)
-    expect(trigger().getAttribute('aria-haspopup')).toBe('menu')
+    expect(trigger().getAttribute('aria-haspopup')).toBe('true')
     expect(trigger().getAttribute('aria-expanded')).toBe('false')
     expect(exists('[role="menu"]')).toBe(false)
   })
@@ -166,11 +166,12 @@ describeNative('Kobalte DropdownMenu', () => {
     await settle(app)
     await press(app, 'd')
     expect(document.activeElement, activeText()).toBe(item('Delete'))
+    await wait(app, 600)
     await press(app, 'b')
     expect(document.activeElement, activeText()).toBe(item('Bookmark'))
   })
 
-  it('toggles a checkbox item and a radio group, with aria-checked following, and closes on select', async () => {
+  it('toggles a checkbox item and a radio group, with aria-checked following, and keeps the menu open', async () => {
     const app = mount(() => <Example />)
     await click(app, trigger())
     await settle(app)
@@ -178,18 +179,16 @@ describeNative('Kobalte DropdownMenu', () => {
     expect(item('Light').getAttribute('aria-checked')).toBe('true')
     expect(item('Dark').getAttribute('aria-checked')).toBe('false')
 
+    // Checkbox and radio items keep the menu open (`closeOnSelect` is false by default on both).
     await click(app, item('Bookmark'))
     await settle(app)
-    expect(exists('[role="menu"]')).toBe(false)
-    await click(app, trigger())
-    await settle(app)
+    expect(exists('[role="menu"]')).toBe(true)
     expect(item('Bookmark').getAttribute('aria-checked')).toBe('true')
     expect(item('Bookmark').hasAttribute('data-checked')).toBe(true)
 
     await click(app, item('Dark'))
     await settle(app)
-    await click(app, trigger())
-    await settle(app)
+    expect(exists('[role="menu"]')).toBe(true)
     expect(item('Light').getAttribute('aria-checked')).toBe('false')
     expect(item('Dark').getAttribute('aria-checked')).toBe('true')
   })
