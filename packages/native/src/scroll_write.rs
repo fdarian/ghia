@@ -11,18 +11,18 @@
 //!
 //! Where the order of the DOM matters, the write lays out first (see [`lays_out_first`]).
 //!
-//! "Older than the tree" is known from [`gpui::LayoutStamp`]: the stamp of the last render, and of
-//! the writes since that kept the metrics current, is the last at which the range was the tree's.
-//! A write with no layout invalidation since it is clamped at once, as it always was.
+//! "Older than the tree" is known from gpui, [`gpui::Window::scroll_metrics_are_current`]: no
+//! invalidation since the last layout other than paint-only ones and scroll writes (a wheel, a
+//! write made here), which move no extent. A write with the metrics current is clamped at once, as
+//! it always was. Ghia keeps no record of its own: a second one goes stale on the first wheel,
+//! which gpui's follows.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::scroll;
 
 thread_local! {
-    /// The stamp at which the scroll metrics of every scroller were last known to be the tree's.
-    static CURRENT_AT: Cell<Option<gpui::LayoutStamp>> = const { Cell::new(None) };
     /// The offsets written to a container while its layout was behind the tree, whole device pixels.
     static PENDING_CONTAINER_WRITES: RefCell<HashMap<u64, gpui::Point<gpui::Pixels>>> =
         RefCell::new(HashMap::new());
@@ -31,21 +31,12 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 
-/// Records that the scroll metrics are the tree's as of now. A render calls it: the layout of its
-/// pass follows, and an invalidation after it is not covered.
-pub(crate) fn note_metrics_current(window: &gpui::Window) {
-    CURRENT_AT.with(|current| current.set(Some(window.layout_stamp())));
-}
-
-/// Whether no layout invalidation came since [`note_metrics_current`], and no commit is waiting for
-/// its patch to be prepared: a commit inside an anchor counts as no invalidation, but moves the
-/// extents. A scroll write counts as one; [`finish_write`] takes its own back.
+/// Whether the extent every scroller of the window clamps to is the tree's: gpui says no layout
+/// invalidation came since its last layout other than paint-only ones and scroll offset writes, and
+/// no commit is waiting for its patch to be prepared (a commit inside an anchor counts as no
+/// invalidation, but moves the extents).
 pub(crate) fn metrics_current(window: &gpui::Window) -> bool {
-    CURRENT_AT.with(|current| {
-        current
-            .get()
-            .is_some_and(|stamp| stamp.same_invalidations(&window.layout_stamp()))
-    }) && !crate::renderer::layout_awaits_a_read()
+    window.scroll_metrics_are_current() && !crate::renderer::layout_awaits_a_read()
 }
 
 /// What the renderer holds for the element a write is aimed at.
@@ -96,20 +87,10 @@ pub(crate) fn lays_out_first(
     target != 0.0 && target != held
 }
 
-/// Invalidates the window for a write that moved the scroller `id`. `was_current` is
-/// [`metrics_current`] from before the write: the invalidation moves no extent, so the metrics stay
-/// current.
-pub(crate) fn finish_write(
-    window: &mut gpui::Window,
-    cx: &mut gpui::App,
-    view: gpui::EntityId,
-    id: u64,
-    was_current: bool,
-) {
+/// Invalidates the window for a write that moved the scroller `id`. The invalidation moves no
+/// extent (`Window::scroll_metrics_are_current` keeps its answer through it).
+pub(crate) fn finish_write(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, id: u64) {
     crate::renderer::invalidate_after_scroll(window, cx, view, crate::renderer::is_virtual_list(id));
-    if was_current {
-        note_metrics_current(window);
-    }
 }
 
 /// Writes a scroll container. An axis left out keeps the offset the handle holds, or the one an

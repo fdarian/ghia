@@ -2072,7 +2072,7 @@ impl TestGpuixRenderer {
             });
             if moved {
                 let entity = cx.entity_id();
-                crate::scroll_write::finish_write(window, cx, entity, id, was_current);
+                crate::scroll_write::finish_write(window, cx, entity, id);
             }
         })
     }

@@ -1228,7 +1228,7 @@ async fn run_ui_commands(
                 let was_current = crate::scroll_write::metrics_current(window);
                 if scroll_element_to(was_current, id, left, top, behavior) {
                     let view = cx.entity_id();
-                    crate::scroll_write::finish_write(window, cx, view, id, was_current);
+                    crate::scroll_write::finish_write(window, cx, view, id);
                 }
             }),
             UiCommand::ScrollToItem { id, index, offset } => {
@@ -3855,7 +3855,7 @@ impl GpuixRenderer {
             let was_current = crate::scroll_write::metrics_current(window);
             if scroll_element_to(was_current, id, left, top, behavior) {
                 let view = crate::events::sync_dispatch::root_view(window).map_err(Error::from_reason)?;
-                crate::scroll_write::finish_write(window, cx, view.entity_id(), id, was_current);
+                crate::scroll_write::finish_write(window, cx, view.entity_id(), id);
             }
             Ok(())
         })?;
@@ -10674,7 +10674,6 @@ impl gpui::Render for GpuixView {
                 crate::scroll_write::settle_lists(&states.borrow(), &reporters.borrow())
             })
         });
-        crate::scroll_write::note_metrics_current(window);
 
         let motion_value_demand = motion_value_demand(&tree, &self.motion_values, &self.retain);
         let asks_next_frame = motion_active
