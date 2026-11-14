@@ -204,6 +204,10 @@ See [paint-and-transforms.md](paint-and-transforms.md).
 - **A change to `Quad` needs the shader and the Rust struct to move together,** on every backend, or the stride checks fail.
   `Underline` is a GPU struct too: change the Rust struct, `shaders.metal`, `shaders.wgsl`, `shaders_webgl.wgsl` (stride and
   loader) and `shaders.hlsl` together.
+  A `Quad` field that `quad_fragment` reads, or a change in what it does with one it reads, must be checked against
+  `is_plain_quad` and `plain_quad_fragment` (`gpui_apple/src/metal_renderer.rs`, `shaders.metal`), or a quad that uses it is
+  drawn by the light pipeline and loses it. The `size_of::<Quad>()` assert beside `is_plain_quad` only catches a size change.
+  `quad_vertex` is shared by both pipelines and stays as the full one has it.
 - **`StyleDesc::differs_only_in_paint`** (`style.rs`) and **`AnimProp::paints_only`** are the paint-only key list. A style
   field that is not copied over the clone is a layout key, which is the safe side. A field added to the list must not move or
   size a box, change a stacking context or a clip, or start a motion, or a bounds read after the write answers from a stale
