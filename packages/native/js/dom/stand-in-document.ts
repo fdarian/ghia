@@ -31,7 +31,7 @@ let gone: ReturnType<typeof createDetachedRenderer> | undefined
 function noWindow(element: StandInElement, what: string): never {
   throw new DOMException(
     element.replaced
-      ? `This <${element.type}> was the document's before a root mounted and is in no document now, so ${what} of it cannot change.`
+      ? `This <${element.elementType}> was the document's before a root mounted and is in no document now, so ${what} of it cannot change.`
       : `The document has no root mounted, so ${what} of its <html>, <head> and <body> cannot change: render() first.`,
     "NoModificationAllowedError"
   )
@@ -47,7 +47,7 @@ class StandInElement extends HTMLElement {
   replaced = false
   private binding: ElementBinding | undefined
 
-  constructor(readonly type: string) {
+  constructor(readonly elementType: string) {
     super()
   }
 
@@ -78,7 +78,7 @@ class StandInBinding implements ElementBinding {
   }
   readonly root = null
   get type(): string {
-    return this.element.type
+    return this.element.elementType
   }
   get style(): StyleDesc {
     return this.element.liveStyle
@@ -169,7 +169,7 @@ export function replaceStandInDocumentElements(mounted: DocumentElements): void 
     const to = mounted[part] as DomElement
     for (const name of from.getAttributeNames()) {
       const text = from.getAttribute(name)
-      if (text === null) throw new Error(`The stand-in <${from.type}> lists the attribute "${name}" and has no text for it`)
+      if (text === null) throw new Error(`The stand-in <${from.elementType}> lists the attribute "${name}" and has no text for it`)
       to.setAttribute(name, text)
     }
     for (const added of from.listeners.addedListeners()) to.addEventListener(added.type, added.listener, added.options)

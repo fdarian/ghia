@@ -496,6 +496,13 @@ describe("document and fragment queries", () => {
     expect(Array.from(document.querySelectorAll("*")).map((element) => element.localName)).toEqual(["html", "head", "body"])
   })
 
+  it("the stand-in html, head and body have no type property, as a browser's have none", () => {
+    for (const element of [document.documentElement, document.head, document.body]) {
+      expect((element as { type?: unknown }).type).toBeUndefined()
+    }
+    expect(document.body.localName).toBe("body")
+  })
+
   it("throws a SyntaxError that names the document", () => {
     expect(() => document.querySelector("[")).toThrow(/Failed to execute 'querySelector' on 'Document'/)
     expect(() => document.querySelectorAll("a:b:")).toThrow(expect.objectContaining({ name: "SyntaxError" }))
