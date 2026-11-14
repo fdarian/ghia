@@ -57,7 +57,7 @@ export function Dynamic<T extends ValidComponent>(props: DynamicProps<T>): JSX.E
   return createDynamic(() => props.component, others as ComponentProps<T>)
 }
 
-export interface PortalProps {
+export type PortalProps = {
   /** The element the content is appended to; default `document.body` of the window's root. */
   mount?: Node
   /** Receives the container element the content is rendered in. */
@@ -73,9 +73,14 @@ export function Portal(props: PortalProps): JSX.Element {
   const marker = createTextNode("")
   const owner = getOwner()
   let content: (() => JSX.Element) | undefined
+  const contentMemo = () => {
+    const memoized = runWithOwner(owner, () => createMemo(() => props.children))
+    if (memoized === undefined) throw new Error("Portal's content was created outside its owner")
+    return memoized
+  }
   createEffect(() => {
-    content ||= runWithOwner(owner, () => createMemo(() => props.children))!
-    const mount: Node = props.mount || document.body
+    content ||= contentMemo()
+    const mount = (props.mount || document.body) as Node
     const container = createElement("div")
     insert(container, content)
     mount.appendChild(container as unknown as Node)
