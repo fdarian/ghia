@@ -29,8 +29,8 @@ import {
   insert,
   memo,
   mergeProps,
-  renderInto,
   spread as spreadProps,
+  universalRender,
   use,
 } from "./universal.js"
 
@@ -39,7 +39,7 @@ export { createComponent, effect, insert, memo, mergeProps, use }
 
 /** Solid's web renderer's `render(code, element)`: mounts into `element` and returns the dispose. Ghia's window-opening `render` is `@ghia/solid`'s. */
 export function render(code: () => JSX.Element, element: Element): () => void {
-  const dispose = renderInto(code, element as never)
+  const dispose = universalRender(code, element as never)
   return () => {
     dispose()
     element.textContent = ""

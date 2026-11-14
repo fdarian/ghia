@@ -117,14 +117,13 @@ const runtime = createRenderer<HostNode | HostParent>({
 
 // `body` is the parent, not the HostRoot: Solid's `cleanChildren` removes a node only when
 // `getParentNode(node)` is the parent it was inserted into, and a top-level node's parent is `body`.
-export function universalRender(code: () => JSX.Element, body: HostElement): () => void {
+export function universalRender(code: () => JSX.Element, body: HostNode | HostParent): () => void {
   return createSolidRoot((dispose) => {
     runtime.insert(body, code())
     return dispose
   })
 }
 
-export const renderInto = runtime.render
 export const effect = runtime.effect
 export const memo = runtime.memo
 export const createComponent: typeof runtime.createComponent = (component, props) =>
