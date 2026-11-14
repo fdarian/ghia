@@ -21,7 +21,7 @@ test(
     cpSync(join(FIXTURE_ROOT, "app"), appDir, { recursive: true })
     // Installed packages: vitest externalizes them unless told otherwise, and Node then resolves
     // what `wrapper` imports with the `node` condition.
-    for (const name of ["wrapper", "dual-build"]) {
+    for (const name of ["wrapper", "dual-build", "conditional"]) {
       cpSync(join(FIXTURE_ROOT, name), join(appDir, "node_modules", name), { recursive: true })
     }
 
