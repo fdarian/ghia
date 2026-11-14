@@ -57,7 +57,10 @@ function unsupportedWebNames(program: ReturnType<Rollup.PluginContext["parse"]>)
   return [...unsupported]
 }
 
-/** The parser's language for a module: this runs before any compile, so a `.tsx` file is still TypeScript with JSX. */
+/** The modules `transform` parses: JavaScript and TypeScript, with or without a `?query`. A CSS or JSON module that mentions `solid-js/web` is not JS. */
+const SCRIPT_MODULE = /\.[cm]?[jt]sx?(?:\?|$)/
+
+/** The parser's language for a script module: this runs before any compile, so a `.tsx` file is still TypeScript with JSX. */
 function languageOf(file: string): "js" | "jsx" | "ts" | "tsx" {
   if (/\.[cm]?tsx$/.test(file)) return "tsx"
   if (/\.[cm]?ts$/.test(file)) return "ts"
@@ -85,7 +88,7 @@ export function solidLibrarySource(): Plugin {
     transform: {
       // Before any other transform: Vite's import analysis rewrites `solid-js/web` to a file path.
       order: "pre",
-      filter: { code: /solid-js\/web/ },
+      filter: { id: SCRIPT_MODULE, code: /solid-js\/web/ },
       handler(code, id) {
         const file = id.split("?")[0]
         // The plugin context's parser, not an import of `vite`: under vitest every dependency is inlined, and

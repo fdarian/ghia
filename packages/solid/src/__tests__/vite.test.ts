@@ -251,6 +251,7 @@ describe("solid() under ghia build", () => {
 describe("solid() with a Solid library that publishes its JSX source", () => {
   const expected = {
     renders: ["true"],
+    notes: ["migration"],
     body: ["main,div"],
     text: ["tag|component|overlay"],
     after: [""],
@@ -259,6 +260,7 @@ describe("solid() with a Solid library that publishes its JSX source", () => {
   function report(output: string) {
     return {
       renders: lines(output, "RENDERS_ON_GHIA "),
+      notes: lines(output, "NOTES "),
       body: lines(output, "BODY "),
       text: lines(output, "TEXT "),
       after: lines(output, "BODY_AFTER "),

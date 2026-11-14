@@ -79,6 +79,7 @@ import { Dialog } from '@kobalte/core/dialog'
 
 - **`solid-js/web` is `@ghia/solid/web`.** The library's `Dynamic`, `Portal` and `isServer` come from there, built on Ghia's renderer: `Portal` appends its content to `document.body`, or to the `mount` element, and removes it on cleanup.
 - **A library that ships only compiled output does not work.** Code compiled for Solid's DOM renderer calls `template`, `delegateEvents` and `insert` on DOM nodes, which Ghia does not have. The build fails and names the module and the imports, such as `template` and `delegateEvents`. Ask the library for a `solid` condition, or use one that has it.
+- **What the check reads.** Only the named imports and re-exports from `solid-js/web` in JavaScript and TypeScript modules; `import * as web from "solid-js/web"` and `export * from "solid-js/web"` are not checked, because the names they use are not known until the code runs.
 - **If you narrow `solid({ include })`, it must still cover those files.** The default compiles every `.jsx` and `.tsx`, `node_modules` included. A narrower `include` (an app that also uses `react()` has one) has to match the library's `.jsx` files too, or they reach Ghia uncompiled and fail to parse.
 
 The reference is [Solid component libraries](reference.md#solid-component-libraries).

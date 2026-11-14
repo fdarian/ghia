@@ -1,8 +1,11 @@
 import { createTestRoot } from "@ghia/solid/testing"
 import { document } from "@ghia/native/host"
 import { Overlay, Tag, rendersOnGhia } from "solid-headless-lib"
+import notes from "./notes.json"
 
 console.log(`RENDERS_ON_GHIA ${rendersOnGhia}`)
+// Its text names solid-js/web: a JSON module is not scanned for imports of it.
+console.log(`NOTES ${Object.keys(notes)}`)
 
 const app = createTestRoot()
 function Custom(props: { children?: unknown }) {
