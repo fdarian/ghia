@@ -234,6 +234,12 @@ importers:
       '@kobalte/core':
         specifier: ^0.13.14
         version: 0.13.14(solid-js@1.9.15)
+      '@msviderok/base-ui-solid':
+        specifier: github:msviderok/base-ui-solid#e49117f0106493a3f3981ea048c7b274c9fe0c2e&path:/packages/solid
+        version: https://codeload.github.com/msviderok/base-ui-solid/tar.gz/e49117f0106493a3f3981ea048c7b274c9fe0c2e#path:/packages/solid(solid-js@1.9.15)
+      '@photon-ai/base-ui-solid':
+        specifier: github:photon-hq/base-ui-solid#c155ca9c5e45cf9cf522808ea82bdf4412f68395&path:/packages/solid
+        version: https://codeload.github.com/photon-hq/base-ui-solid/tar.gz/c155ca9c5e45cf9cf522808ea82bdf4412f68395#path:/packages/solid(solid-js@1.9.15)
       '@tanstack/solid-virtual':
         specifier: 3.13.53
         version: 3.13.53(solid-js@1.9.15)
@@ -1078,6 +1084,13 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@msviderok/base-ui-solid@https://codeload.github.com/msviderok/base-ui-solid/tar.gz/e49117f0106493a3f3981ea048c7b274c9fe0c2e#path:/packages/solid':
+    resolution: {gitHosted: true, integrity: sha512-tVM5+bLBBxQegfFO/XXfmrqV2wX0TASZCWSoihwIZUFsbzv9kwldfzpv3Lu9FpRpk6R4x5B0yl0eF8nXKiyIzA==, path: /packages/solid, tarball: https://codeload.github.com/msviderok/base-ui-solid/tar.gz/e49117f0106493a3f3981ea048c7b274c9fe0c2e}
+    version: 1.0.0-beta.12
+    engines: {node: '>=14.0.0'}
+    peerDependencies:
+      solid-js: ^1.8
+
   '@napi-rs/cli@3.10.4':
     resolution: {integrity: sha512-7yvXpu/m4p1Re1/DViAooSYAyivYEhqDrjuq66a6haXLEAKrZSzndG7B850g1irngI1pAdZS5xL4tsu0xQ8P9Q==}
     engines: {node: ^20.17.0 || ^22.13.0 || >= 23.5.0}
@@ -1502,6 +1515,13 @@ packages:
   '@oxc-project/types@0.157.0':
     resolution: {integrity: sha512-95iTox1qdt6WGWce3xwNOVayByOfLaYAq+qGPpub6NWbBh9sv0GG3+zyfh9ZBCO/jVu5A0EWI+qQI7g6fevjxg==}
 
+  '@photon-ai/base-ui-solid@https://codeload.github.com/photon-hq/base-ui-solid/tar.gz/c155ca9c5e45cf9cf522808ea82bdf4412f68395#path:/packages/solid':
+    resolution: {gitHosted: true, integrity: sha512-c8QRNmSeYv5A8TuKSwo1/me7juwHjRbnd7+Qts5jq/dPFHtQWEEVbuo+aPKVEtkR3XeaxpVZURu20/0jfk7gZw==, path: /packages/solid, tarball: https://codeload.github.com/photon-hq/base-ui-solid/tar.gz/c155ca9c5e45cf9cf522808ea82bdf4412f68395}
+    version: 1.0.0-beta.13
+    engines: {node: '>=14.0.0'}
+    peerDependencies:
+      solid-js: ^1.8
+
   '@pnpm/deps.graph-sequencer@1100.0.1':
     resolution: {integrity: sha512-pOr5+q1fLYKwFN3LAJuGZEnfXDcQ73zqgDHMtGy+K+uIoUqyY+6MeDCWFwfu+4EFuq76I5EPFofoNAI+Bmmq4A==}
     engines: {node: '>=22.13'}
@@ -1787,6 +1807,11 @@ packages:
     resolution: {integrity: sha512-ISSB5QX1qP2ynrheIpYwc4oKR5Ny4siNuUyf1qZniy+Il+p/PtDB0QK1Dnle8noiHpwRD3gpPdubOC3qI/Zamg==}
     peerDependencies:
       solid-js: ^1.6.12
+
+  '@solidjs/router@0.15.4':
+    resolution: {integrity: sha512-WOpgg9a9T638cR+5FGbFi/IV4l2FpmBs1GpIMSPa0Ce9vyJN7Wts+X2PqMf9IYn0zUj2MlSJtm1gp7/HI/n5TQ==}
+    peerDependencies:
+      solid-js: ^1.8.6
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
@@ -2916,6 +2941,9 @@ packages:
   style-to-object@1.0.14:
     resolution: {integrity: sha512-LIN7rULI0jBscWQYaSswptyderlarFkjQ+t79nzty8tcIAceVomEVlLzH5VP4Cmsv6MtKhs7qaAiwlcp+Mgaxw==}
 
+  tabbable@6.5.1:
+    resolution: {integrity: sha512-dMCuwDUY6Noz3zVKLefBC4wq+aJV20yc7vWmM7uTNGwtQSFF5kX7OUIUsxuVajz/bdt5Xqdah3/0NLjth+cM5A==}
+
   tar@7.5.22:
     resolution: {integrity: sha512-MFO/QzvtAOmJbkhOaCTvbGcFN9L9b+JunIsDwaKljSOdcLMea3NJ1k9Usz/rjdfSXTq4dfzfeS7W4p4YOAAHeA==}
     engines: {node: '>=18'}
@@ -3896,6 +3924,16 @@ snapshots:
   '@msgpackr-extract/msgpackr-extract-win32-x64@3.0.4':
     optional: true
 
+  '@msviderok/base-ui-solid@https://codeload.github.com/msviderok/base-ui-solid/tar.gz/e49117f0106493a3f3981ea048c7b274c9fe0c2e#path:/packages/solid(solid-js@1.9.15)':
+    dependencies:
+      '@babel/runtime': 7.29.10
+      '@floating-ui/dom': 1.8.0
+      '@floating-ui/utils': 0.2.12
+      '@solid-primitives/props': 3.2.4(solid-js@1.9.15)
+      '@solidjs/router': 0.15.4(solid-js@1.9.15)
+      solid-js: 1.9.15
+      tabbable: 6.5.1
+
   '@napi-rs/cli@3.10.4(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.9.9)':
     dependencies:
       '@inquirer/prompts': 8.7.5(@types/node@25.9.9)
@@ -4234,6 +4272,16 @@ snapshots:
 
   '@oxc-project/types@0.157.0': {}
 
+  '@photon-ai/base-ui-solid@https://codeload.github.com/photon-hq/base-ui-solid/tar.gz/c155ca9c5e45cf9cf522808ea82bdf4412f68395#path:/packages/solid(solid-js@1.9.15)':
+    dependencies:
+      '@babel/runtime': 7.29.10
+      '@floating-ui/dom': 1.8.0
+      '@floating-ui/utils': 0.2.12
+      '@solid-primitives/props': 3.2.4(solid-js@1.9.15)
+      '@solidjs/router': 0.15.4(solid-js@1.9.15)
+      solid-js: 1.9.15
+      tabbable: 6.5.1
+
   '@pnpm/deps.graph-sequencer@1100.0.1': {}
 
   '@preact/signals-core@1.14.5': {}
@@ -4430,6 +4478,10 @@ snapshots:
       solid-js: 1.9.15
 
   '@solid-primitives/utils@6.4.1(solid-js@1.9.15)':
+    dependencies:
+      solid-js: 1.9.15
+
+  '@solidjs/router@0.15.4(solid-js@1.9.15)':
     dependencies:
       solid-js: 1.9.15
 
@@ -5847,6 +5899,8 @@ snapshots:
   style-to-object@1.0.14:
     dependencies:
       inline-style-parser: 0.2.7
+
+  tabbable@6.5.1: {}
 
   tar@7.5.22:
     dependencies:
