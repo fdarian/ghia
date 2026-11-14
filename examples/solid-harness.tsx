@@ -1,24 +1,38 @@
-import type { JSX } from 'solid-js'
+import { createRoot, type JSX } from 'solid-js'
 import { afterEach } from 'vitest'
 import { createTestRoot } from '@ghia/solid/testing'
 
 type App = {
   root: ReturnType<typeof createTestRoot>
   renderer: ReturnType<typeof createTestRoot>['renderer']
+  /** Runs the cleanups of everything `ui` created, as a component tree's owner does when it goes. */
+  disposeUi(): void
 }
 
 const mounted: App[] = []
 
-afterEach(() => {
-  for (const app of mounted.splice(0)) app.root.unmount()
+// Libraries start asynchronous work that reads the window (floating-ui's `computePosition` awaits its middleware
+// and then measures the viewport). The tree's cleanups run first, which stop what keeps starting such work, and
+// the work already started settles while the window still exists; only then the window goes.
+afterEach(async () => {
+  for (const app of mounted.splice(0)) {
+    app.disposeUi()
+    await settle(app)
+    await settle(app)
+    app.root.unmount()
+  }
 })
 
 /** Renders `ui` in a window of its own; every app is unmounted after the test. */
 export function mount(ui: () => JSX.Element, size = { width: 640, height: 480 }): App {
   const root = createTestRoot(size)
-  const app: App = { root, renderer: root.renderer }
+  let disposeUi!: () => void
+  const app: App = { root, renderer: root.renderer, disposeUi: () => disposeUi() }
   mounted.push(app)
-  root.render(ui)
+  root.render(() => createRoot((dispose) => {
+    disposeUi = dispose
+    return ui()
+  }))
   return app
 }
 
