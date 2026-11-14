@@ -56,7 +56,7 @@ import type {
   SvgTextProps,
   SvgTspanProps,
 } from "@ghia/native/host"
-import type { SolidHostProps } from "../jsx-runtime.js"
+import type { SolidHostProps, SolidHostRef } from "../jsx-runtime.js"
 import { createElement, spread } from "../universal.js"
 import type { HostElement } from "../host.js"
 import { useContext } from "solid-js"
@@ -86,7 +86,7 @@ export type MotionSpanProps = Omit<
   MotionSpanIgnoredProps & { style?: MotionValueStyle }
 
 /** A `motion.path`, `motion.circle`, ...: the shape's own props plus the animation. */
-export type MotionShapeProps<Shape> = SolidHostProps<Shape> &
+export type MotionShapeProps<Shape, Tag extends string = string> = SolidHostProps<Shape, Tag> &
   MotionAnimation<SvgMotionStyle, SvgMotionTransition> &
   Pick<MotionGestureCallbacks, "onViewportEnter" | "onViewportLeave">
 
@@ -100,7 +100,10 @@ interface MotionSource extends MotionAnimation<object, MotionTransition | SvgMot
 /** `motion.div` plus the drag values `Reorder.Item` hands it, for the element type it is `as`. */
 export type MotionDragProps = MotionDivProps & { layoutDrag?: LayoutDrag }
 
-export function createMotionComponent<Props extends MotionSource & SolidHostProps<object>>(tag: string) {
+/** A `motion.*` component's props for the element `Tag` it renders: its `ref` is that element's (see `SolidHostRef`). */
+export type MotionElementProps<Props, Tag extends string> = Omit<Props, "ref"> & { ref?: SolidHostRef<Tag> }
+
+export function createMotionComponent<Props extends MotionSource & Omit<SolidHostProps<object>, "ref">>(tag: string) {
   const inline = tag === "span"
   const scope = inline ? SPAN_SCOPE : elementScope(`motion.${tag}`)
   return function Motion(props: Props): JSX.Element {
@@ -286,8 +289,8 @@ export function createMotionComponent<Props extends MotionSource & SolidHostProp
   }
 }
 
-const MotionDiv = createMotionComponent<MotionDivProps>("div")
-const MotionSpan = createMotionComponent<MotionSpanProps>("span")
+const MotionDiv = createMotionComponent<MotionElementProps<MotionDivProps, "div">>("div")
+const MotionSpan = createMotionComponent<MotionElementProps<MotionSpanProps, "span">>("span")
 
 /**
  * Native animations. `motion.path`, `motion.circle` and the other SVG shapes
@@ -297,19 +300,19 @@ const MotionSpan = createMotionComponent<MotionSpanProps>("span")
 export const motion = {
   div: MotionDiv,
   span: MotionSpan,
-  g: createMotionComponent<MotionShapeProps<SvgGroupProps>>("g"),
-  path: createMotionComponent<MotionShapeProps<SvgPathProps>>("path"),
-  circle: createMotionComponent<MotionShapeProps<SvgCircleProps>>("circle"),
-  ellipse: createMotionComponent<MotionShapeProps<SvgEllipseProps>>("ellipse"),
-  rect: createMotionComponent<MotionShapeProps<SvgRectProps>>("rect"),
-  line: createMotionComponent<MotionShapeProps<SvgLineProps>>("line"),
-  polyline: createMotionComponent<MotionShapeProps<SvgPolyProps>>("polyline"),
-  polygon: createMotionComponent<MotionShapeProps<SvgPolyProps>>("polygon"),
-  text: createMotionComponent<MotionShapeProps<SvgTextProps>>("text"),
-  tspan: createMotionComponent<MotionShapeProps<SvgTspanProps>>("tspan"),
-  image: createMotionComponent<MotionShapeProps<SvgImageProps>>("image"),
-  feGaussianBlur: createMotionComponent<MotionShapeProps<SvgFeGaussianBlurProps>>("feGaussianBlur"),
-  feOffset: createMotionComponent<MotionShapeProps<SvgFeOffsetProps>>("feOffset"),
-  feFlood: createMotionComponent<MotionShapeProps<SvgFeFloodProps>>("feFlood"),
-  feDropShadow: createMotionComponent<MotionShapeProps<SvgFeDropShadowProps>>("feDropShadow"),
+  g: createMotionComponent<MotionShapeProps<SvgGroupProps, "g">>("g"),
+  path: createMotionComponent<MotionShapeProps<SvgPathProps, "path">>("path"),
+  circle: createMotionComponent<MotionShapeProps<SvgCircleProps, "circle">>("circle"),
+  ellipse: createMotionComponent<MotionShapeProps<SvgEllipseProps, "ellipse">>("ellipse"),
+  rect: createMotionComponent<MotionShapeProps<SvgRectProps, "rect">>("rect"),
+  line: createMotionComponent<MotionShapeProps<SvgLineProps, "line">>("line"),
+  polyline: createMotionComponent<MotionShapeProps<SvgPolyProps, "polyline">>("polyline"),
+  polygon: createMotionComponent<MotionShapeProps<SvgPolyProps, "polygon">>("polygon"),
+  text: createMotionComponent<MotionShapeProps<SvgTextProps, "text">>("text"),
+  tspan: createMotionComponent<MotionShapeProps<SvgTspanProps, "tspan">>("tspan"),
+  image: createMotionComponent<MotionShapeProps<SvgImageProps, "image">>("image"),
+  feGaussianBlur: createMotionComponent<MotionShapeProps<SvgFeGaussianBlurProps, "feGaussianBlur">>("feGaussianBlur"),
+  feOffset: createMotionComponent<MotionShapeProps<SvgFeOffsetProps, "feOffset">>("feOffset"),
+  feFlood: createMotionComponent<MotionShapeProps<SvgFeFloodProps, "feFlood">>("feFlood"),
+  feDropShadow: createMotionComponent<MotionShapeProps<SvgFeDropShadowProps, "feDropShadow">>("feDropShadow"),
 } as const
