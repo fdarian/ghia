@@ -20,6 +20,8 @@ export interface InputMembers {
   defaultValue: string
   /** `type="number"` and `"range"`: `value` as a number, `NaN` for text that is none or another type. Assigning writes `value`. */
   valueAsNumber: number
+  /** The `placeholder` attribute of an `<input>` or `<textarea>`, `""` when absent. Assigning writes it. */
+  placeholder: string
   /** The `min`, `max` and `step` attributes as text, `""` when absent. A range sanitizes its value against them. */
   min: string
   max: string
@@ -127,6 +129,12 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
       (self, value) => bind(self).setProp(name, String(value))
     )
   Object.defineProperties(target, {
+    placeholder: onTags<This>(
+      "placeholder",
+      VALUE_TAGS,
+      (self) => propText(bind(self).prop("placeholder")),
+      (self, value) => bind(self).setProp("placeholder", String(value))
+    ),
     min: attribute("min"),
     max: attribute("max"),
     step: attribute("step"),

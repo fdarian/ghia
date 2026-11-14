@@ -460,4 +460,23 @@ describe.skipIf(!hasNativeTestRenderer)("attribute writes on a Solid element", (
     created.defaultValue = "c"
     expect([created.defaultValue, created.getAttribute("value")]).toEqual(["c", "c"])
   })
+  it("reflects placeholder on an input and a textarea, empty without one", () => {
+    const nodes: Record<string, any> = {}
+    setup(() => (
+      <div>
+        <input ref={(element: unknown) => (nodes.input = element)} placeholder="Name" style={{ width: 80, height: 20 }} />
+        <textarea ref={(element: unknown) => (nodes.area = element)} style={{ width: 80, height: 40 }} />
+        <div ref={(element: unknown) => (nodes.div = element)} />
+      </div>
+    ))
+    expect([nodes.input.placeholder, nodes.input.getAttribute("placeholder")]).toEqual(["Name", "Name"])
+    expect(nodes.area.placeholder).toBe("")
+    nodes.area.placeholder = "Notes"
+    expect([nodes.area.placeholder, nodes.area.getAttribute("placeholder")]).toEqual(["Notes", "Notes"])
+    expect(nodes.div.placeholder).toBeUndefined()
+    const created: any = document.createElement("input")
+    expect(created.placeholder).toBe("")
+    created.placeholder = "c"
+    expect(created.placeholder).toBe("c")
+  })
 })
