@@ -709,6 +709,55 @@ describeNative("a scrollTop write after a commit inside the scroller and a resty
   })
 })
 
+describeNative("a scrollTop write after a commit inside the scroller and a scrollTop write", () => {
+  it("lays out first for the commit before the second write is clamped", () => {
+    let scroller: PublicInstance | null = null
+    let setGrown!: (grown: boolean) => void
+    function Page() {
+      const [grown, grow] = useState(false)
+      setGrown = grow
+      return (
+        <div style={{ width: WIDTH, height: HEIGHT, display: "flex", flexDirection: "column" }}>
+          <div
+            ref={(instance) => {
+              scroller = instance
+            }}
+            style={{ height: 200, overflowY: "scroll", display: "flex", flexDirection: "column" }}
+          >
+            <div style={{ height: grown ? 800 : ROW, flexShrink: 0 }} />
+            <Rows count={24} />
+          </div>
+        </div>
+      )
+    }
+    const root = createTestRoot({ width: WIDTH, height: HEIGHT })
+    const renderer = root.renderer
+    const unmount = () => root.unmount()
+    renderer.clockPause()
+    renderer.setInlineDraws(false)
+    renderer.setRetainPlanning(true)
+    renderer.setRetainVerify(true)
+    renderer.setPatchEnabled(true)
+    try {
+      root.render(<Page />)
+      renderer.drawFrame()
+      scroller!.scrollTop = 50
+      renderer.drawFrame()
+
+      // The commit lies inside an anchor and waits for a read to prepare its patch; a write to the offset is not that read,
+      // and must not take the wait away from the write after it.
+      flushSync(() => setGrown(true))
+      renderer["native"].flushIfDirty()
+      scroller!.scrollTop = 0
+      scroller!.scrollTop = 1000
+      expect(scroller!.scrollTop).toBe(1000)
+    } finally {
+      renderer.setInlineDraws(true)
+      unmount()
+    }
+  })
+})
+
 describeNative("a scrollTop write after a wheel", () => {
   // A wheel is a scroll write to gpui: the scroll metrics stay current, so the write that comes
   // before the next frame is clamped at once, as one with nothing dirty is.

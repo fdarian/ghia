@@ -888,9 +888,10 @@ pub(crate) fn invalidate_after_scroll(window: &mut gpui::Window, cx: &mut gpui::
         LIST_WRITTEN.with(|written| written.borrow_mut().insert(view));
         return;
     }
-    // The view is notified, so the patch of anchors a read prepared is gone and the tick is drawn whole.
+    // The view is notified, so the patch of anchors a read prepared is gone and the tick is drawn whole. A layout still owed
+    // (`Waiting`) stays owed: this notifies the scroll only, and `layout_awaits_a_read` is what tells the next write that the
+    // scroll metrics are older than the tree.
     discard_prepared_patch(window, cx, view, PendingLayout::Notified);
-    note_pending(view, PendingLayout::Notified);
     cx.notify_scroll_only(view);
 }
 
