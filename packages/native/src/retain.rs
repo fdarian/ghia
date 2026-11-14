@@ -7024,6 +7024,35 @@ mod tests {
         assert_eq!(page.preview(&[], false), Err(Unpatchable::Edited));
     }
 
+    #[test]
+    fn a_white_space_change_below_a_root_is_followed_and_leaves_no_barrier_past_the_root() {
+        let nowrap = || restyled(r##"{"whiteSpace":"nowrap"}"##);
+
+        // Followed: the root takes the revision of the change, the root that holds the element lays out all of it again.
+        let mut page = anchored_page();
+        page.tree.set_style_arc(3, nowrap());
+        assert!(page.tree.patch_barrier() <= page.tree.root_revision());
+        assert_eq!(page.preview(&[], false), Ok(vec![2]), "the box root that holds 3 builds 3 and what is below it");
+        page.edit(1);
+        page.edit(2);
+        page.edit(3);
+        anchor_frame(&mut page);
+        assert!(page.tree.patch_barrier() <= page.tree.root_revision());
+        assert_eq!(page.retain.plan.revision, page.tree.root_revision());
+        page.tree.set_text(3, "words".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![2]), "the patches after the frame built whole are not declined as edited");
+
+        // Not followed (patch frames are off): the barrier is the revision the root carries, so the frame built whole is past it.
+        let mut page = Units::new();
+        page.patch_roots = [1, 2, 3].into_iter().collect();
+        hover_page(&mut page, &[]);
+        page.tree.set_style_arc(3, nowrap());
+        assert_eq!(page.tree.patch_barrier(), page.tree.root_revision());
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Edited));
+        hover_page(&mut page, &[]);
+        assert_eq!(page.preview(&[], false), Ok(vec![]), "the frame built whole is current with the barrier");
+    }
+
     /// A page of `1 > (2 > (3, 4), 5)` whose frame `build`s the box root 2 (if it is a candidate) in 1.
     fn box_frame(page: &mut Units, inside: impl Fn(&mut Units)) {
         page.frame(&[], false, |page| {

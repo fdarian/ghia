@@ -1408,10 +1408,11 @@ impl RetainedTree {
     }
 
     /// Invalidate `id`, its ancestors and everything below it, including their
-    /// searchable text.
+    /// searchable text. One revision for all of them: the root has to carry the revision the
+    /// barrier is set to when a patch cannot follow the change, or `patch_barrier` stays past
+    /// `root_revision` and every later patch is declined as `Edited`.
     fn mark_subtree_changed(&mut self, id: u64) {
-        self.mark_changed(id);
-        let revision = self.take_revision();
+        let revision = self.mark_changed_detail(id, true, Dirty::Layout);
         let mut pending = vec![id];
         while let Some(current) = pending.pop() {
             let Some(element) = self.elements.get_mut(&current) else {
@@ -1423,7 +1424,7 @@ impl RetainedTree {
         }
     }
 
-    fn mark_changed_detail(&mut self, id: u64, search: bool, dirty: Dirty) {
+    fn mark_changed_detail(&mut self, id: u64, search: bool, dirty: Dirty) -> u64 {
         let revision = self.take_revision_for(dirty, Some(id));
         let mut current = Some(id);
         while let Some(current_id) = current {
@@ -1436,6 +1437,7 @@ impl RetainedTree {
             }
             current = element.parent;
         }
+        revision
     }
 
     /// Recursively destroy an element and all its children.
