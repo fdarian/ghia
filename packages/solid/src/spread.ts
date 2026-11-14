@@ -9,7 +9,7 @@ type Props = Record<string, unknown>
 
 /**
  * `spread` of `solid-js/universal`, which only visits the keys a spread has now, so a key that left it
- * (`{...(open() ? { "data-open": "" } : {})}`) keeps its last value. `solid-js/web` takes it away; this
+ * (`{...(open() ? { "data-open": "" } : {})}`) keeps its last value. Solid's DOM renderer takes it away; this
  * does the same, by writing `undefined` over it.
  */
 export function createSpread<Node>(host: SpreadHost<Node>) {
