@@ -46,6 +46,8 @@ export function App() {
         // @ts-expect-error a canvas has no drawing context, so its element is an HTMLElement
         element.getContext("2d")
       }} />
+      <label for="field" />
+      <label htmlFor="field" />
       {/* @ts-expect-error as in solid-js, a variable of a wider DOM type does not fit */}
       <div ref={wide} />
       {/* @ts-expect-error another tag's DOM type */}

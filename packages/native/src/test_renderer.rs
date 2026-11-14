@@ -1569,8 +1569,11 @@ impl TestGpuixRenderer {
     /// element with a `tabIndex`), which is what gives it a FocusHandle.
     /// Call flush() before this so the element tree and focus handles exist.
     #[napi]
-    pub fn focus_element(&self, id: f64) -> Result<()> {
+    pub fn focus_element(&self, id: f64) -> Result<bool> {
         let id = to_element_id(id)?;
+        if !crate::focus::script_may_focus(&self.tree.lock().unwrap(), id) {
+            return Ok(false);
+        }
         // Same path as the live renderer: an element whose focus handle does
         // not exist yet (Solid applies its mutations in a microtask) takes
         // focus when its handle is created.
@@ -1579,6 +1582,7 @@ impl TestGpuixRenderer {
                 view.request_focus(id, window, cx)
             })
         })?
+        .map(|()| true)
         .map_err(Error::from_reason)
     }
 

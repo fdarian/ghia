@@ -151,9 +151,14 @@ function ghiaPlugin(options: GhiaOptions): Plugin<GhiaPluginApi> {
     // A default the user can override: `config` would win over the user's own values.
     configEnvironment(name, environment) {
       if (underVitest) {
-        // Replaces the defaults instead of merging into them: the `node` condition vitest adds
-        // would come before `browser` in a package whose exports list the node build first.
-        environment.resolve = { ...environment.resolve, conditions: UI_CONDITIONS }
+        // The `node` condition vitest adds is dropped: it would win over `browser` in a package whose exports
+        // list the node build first. Every other condition other plugins added stays: vite-plugin-solid runs before
+        // this hook (it is `enforce: "pre"`) and adds `solid`, which selects a library's JSX source, and
+        // `development`, which selects the dev build of `solid-js`.
+        const added = (environment.resolve?.conditions ?? []).filter(
+          (condition) => condition !== "node" && !UI_CONDITIONS.includes(condition)
+        )
+        environment.resolve = { ...environment.resolve, conditions: [...UI_CONDITIONS, ...added] }
         return
       }
       const entryFileName = ENTRY_FILE_NAMES[name]

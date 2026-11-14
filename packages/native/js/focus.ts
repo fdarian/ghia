@@ -1,3 +1,4 @@
+import { HOST_BINDING, flushPendingMutations, type ObservableElement } from "./bounds.js"
 import type { NativeRenderer } from "./host.js"
 
 export interface FocusOptions {
@@ -16,15 +17,32 @@ function required<Method>(method: Method | undefined, name: string): Method {
   return method
 }
 
-/** `renderer` is `undefined` for an element that is not in a mounted root, whose `focus()` does nothing as in the DOM. */
-export function focusHostElement(
-  renderer: NativeRenderer | undefined,
-  id: number,
-  options?: FocusOptions
-): void {
-  if (renderer === undefined) return
-  required(renderer.focusElement, "focus()").call(renderer, id)
-  if (!options?.preventScroll) scrollFocusIntoView(renderer, id)
+/**
+ * `element.focus()`. Does nothing for an element a browser's `focus()` would refuse: not in a mounted
+ * root, not rendered (`display: none` on it or an ancestor), `visibility: hidden` or `collapse`,
+ * inside `content-visibility: hidden` content, or inside an `inert` subtree. The queued mutations are sent first, as a browser flushes style before
+ * `focus()`, so an element mounted or shown in this tick is judged by what it has now; native then
+ * decides and moves focus in one call, with no layout.
+ */
+export function focusHostElement(element: ObservableElement, options?: FocusOptions): void {
+  const binding = element[HOST_BINDING]()
+  if (binding === undefined) return
+  const renderer = binding.renderer
+  flushPendingMutations(renderer)
+  // The web renderer's `focusElement` returns nothing and takes the focus as it always did.
+  const asked = required(renderer.focusElement, "focus()").call(renderer, element.nativeId)
+  if (asked === false) return
+  if (!options?.preventScroll) scrollFocusIntoView(renderer, element.nativeId)
+}
+
+/**
+ * `renderer.focusElement(id)` after the queued mutations are sent, so native judges the element by
+ * what it has now (a `tabIndex`, `display` or `inert` written in the same update). For code that
+ * has an id and no element; `focusHostElement` is `element.focus()`.
+ */
+export function focusElementById(renderer: NativeRenderer, id: number): void {
+  flushPendingMutations(renderer)
+  renderer.focusElement?.(id)
 }
 
 /** Tab and Shift+Tab. The renderer scrolls the new focus into view itself. */

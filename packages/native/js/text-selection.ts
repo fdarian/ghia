@@ -92,3 +92,51 @@ export function readTextControlSelection(host: TextControlHost): {
     direction: selection.direction as SelectionDirection,
   }
 }
+
+/** What the selection of a control that is not mounted needs to know of it. */
+export interface UnmountedTextControl {
+  inputType(): unknown
+  /** The text the control has now, which its selection is measured against. */
+  text(): string
+  /** Whether `value` was assigned, which puts a caret that nobody placed at the end of the text. */
+  valueWritten(): boolean
+}
+
+/**
+ * The selection of an `<input>` or `<textarea>` that has no native element yet (a library builds
+ * and configures one before it is inserted). Native holds the selection of a mounted control, so
+ * until then it is kept here and answers as the DOM does with no native read: it clamps to the
+ * text, and a control nobody selected in has its caret at the end of a text that was written to
+ * `value` and at the start otherwise. It is not carried over to the native element when it mounts.
+ */
+export class UnmountedTextSelection {
+  private range: { start: number; end: number; direction: SelectionDirection } | undefined
+
+  constructor(private readonly control: UnmountedTextControl) {}
+
+  select(): void {
+    if (TYPES_WITHOUT_SELECT.has(normalizedInputType(this.control.inputType()))) return
+    this.range = { start: 0, end: this.control.text().length, direction: "none" }
+  }
+
+  setRange(start: number, end: number, direction: SelectionDirection = "none"): void {
+    if (!TYPES_WITH_TEXT_SELECTION.has(normalizedInputType(this.control.inputType()))) {
+      throw namedError("InvalidStateError", `setSelectionRange() does not apply to <input type="${String(this.control.inputType())}">`)
+    }
+    const length = this.control.text().length
+    const clampedEnd = Math.min(Math.max(end, 0), length)
+    const clampedStart = Math.min(Math.max(start, 0), clampedEnd)
+    this.range = { start: clampedStart, end: clampedEnd, direction }
+  }
+
+  read(): { start: number | null; end: number | null; direction: SelectionDirection | null } {
+    if (!TYPES_WITH_TEXT_SELECTION.has(normalizedInputType(this.control.inputType()))) return { start: null, end: null, direction: null }
+    const length = this.control.text().length
+    if (this.range === undefined) {
+      const caret = this.control.valueWritten() ? length : 0
+      return { start: caret, end: caret, direction: "none" }
+    }
+    const end = Math.min(this.range.end, length)
+    return { start: Math.min(this.range.start, end), end, direction: this.range.direction }
+  }
+}

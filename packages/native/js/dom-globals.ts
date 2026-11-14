@@ -18,9 +18,11 @@ import { DOMTokenList } from "./dom/class-list.js"
 import { ValidityState } from "./dom/constraint-validation.js"
 import { CSSStyleDeclaration } from "./dom/css-style-declaration.js"
 import { DOMRect, DOMRectReadOnly } from "./dom/dom-rect.js"
-import { HTMLInputElement, HTMLTextAreaElement } from "./dom/html-element-classes.js"
+import { HTMLCollection, NodeList } from "./dom/html-collection.js"
+import { HTMLButtonElement, HTMLInputElement, HTMLTextAreaElement } from "./dom/html-element-classes.js"
 import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
 import { ToggleEvent } from "./dom/toggle-event.js"
+import { NodeFilter, TreeWalker } from "./dom/tree-walker.js"
 import { Selection } from "./dom/selection.js"
 import { EVENT_CLASSES } from "./events/classes.js"
 import { replaceStandInDocumentElements, standInDocumentElements } from "./dom/stand-in-document.js"
@@ -49,12 +51,17 @@ const DOM_CLASSES = {
   HTMLElement,
   HTMLInputElement,
   HTMLTextAreaElement,
+  HTMLButtonElement,
   SVGElement,
   Document,
   DocumentFragment,
   ShadowRoot,
   ValidityState,
   DOMTokenList,
+  HTMLCollection,
+  NodeList,
+  NodeFilter,
+  TreeWalker,
   CSSStyleDeclaration,
   CSSStyleSheet,
   CSSRule,

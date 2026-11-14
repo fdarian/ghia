@@ -227,6 +227,19 @@ describe.skipIf(!hasNativeTestRenderer)("DOM members of a Solid element", () => 
       app.unmount()
     })
 
+    it("is an HTMLButtonElement only for a <button>", () => {
+      let button!: HostElement
+      let div!: HostElement
+      const app = setup(() => (
+        <div ref={div} style={{ width: 40, height: 40 }}>
+          <button ref={button} style={{ width: 20, height: 20 }} />
+        </div>
+      ))
+      expect(button instanceof HTMLButtonElement).toBe(true)
+      expect(div instanceof HTMLButtonElement).toBe(false)
+      app.unmount()
+    })
+
     it("throws Illegal constructor for the public classes", () => {
       expect(() => new (HTMLElement as unknown as new () => object)()).toThrow("Illegal constructor")
       expect(() => new (Node as unknown as new () => object)()).toThrow("Illegal constructor")

@@ -185,7 +185,8 @@ export namespace JSX {
     style: SolidHostProps<HostProps, "style">
     input: SolidHostProps<InputProps, "input">
     textarea: SolidHostProps<TextareaProps, "textarea">
-    label: SolidHostProps<LabelProps, "label">
+    /** `for` is the attribute's own name, which Solid's JSX writes; it is `htmlFor`. */
+    label: SolidHostProps<LabelProps & { for?: string }, "label">
     form: SolidHostProps<FormProps, "form">
     anchored: SolidHostProps<AnchoredProps, "anchored">
     code: SolidHostProps<CodeProps, "code">

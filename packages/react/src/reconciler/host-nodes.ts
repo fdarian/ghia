@@ -15,6 +15,7 @@ import {
   focusHostElement,
   HOST_BINDING,
   HTMLElement,
+  bumpTreeVersion,
   hasMutationObservers,
   queueChildListMutation,
   readBoundingClientRect,
@@ -133,7 +134,7 @@ class ReactHostElement extends HTMLElement implements Instance {
 
   constructor(
     readonly nativeId: number,
-    readonly type: ElementType,
+    readonly elementType: ElementType,
     public props: Props
   ) {
     super()
@@ -175,7 +176,7 @@ class ReactHostElement extends HTMLElement implements Instance {
   }
 
   focus(options?: FocusOptions): void {
-    focusHostElement(containerFor(this).nativeRenderer, this.nativeId, options)
+    focusHostElement(this, options)
   }
 
   blur(): void {
@@ -279,7 +280,7 @@ class ElementDomBinding implements ElementBinding {
   }
 
   get type(): string {
-    return this.instance.type
+    return this.instance.elementType
   }
 
   prop(name: string): unknown {
@@ -345,7 +346,7 @@ class TextDomBinding implements TextBinding {
 
   get connected(): boolean {
     const parent = this.state.parent
-    return parent !== null && "type" in parent && isConnected(parent)
+    return parent !== null && "elementType" in parent && isConnected(parent)
   }
 
   get root(): object | null {
@@ -397,6 +398,7 @@ export function linkChild(parent: HostNode, child: HostNode, before?: HostNode):
   if (index < 0) throw new Error(`GPUIX host node ${before?.nativeId} is not a child of node ${parent.nativeId}`)
   siblings.splice(index, 0, child)
   stateFor(child).parent = parent
+  bumpTreeVersion()
   if (hasMutationObservers()) {
     queueChildListMutation(parent, [child], [], siblings[index - 1] ?? null, siblings[index + 1] ?? null)
   }
@@ -410,7 +412,10 @@ export function unlinkChild(child: HostNode): void {
   const index = siblings.indexOf(child)
   if (index >= 0) siblings.splice(index, 1)
   state.parent = null
-  if (index >= 0 && hasMutationObservers()) {
-    queueChildListMutation(parent, [], [child], siblings[index - 1] ?? null, siblings[index] ?? null)
+  if (index >= 0) {
+    bumpTreeVersion()
+    if (hasMutationObservers()) {
+      queueChildListMutation(parent, [], [child], siblings[index - 1] ?? null, siblings[index] ?? null)
+    }
   }
 }

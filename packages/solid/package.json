@@ -27,6 +27,11 @@
       "import": "./dist/vite.js",
       "default": "./dist/vite.js"
     },
+    "./web": {
+      "types": "./dist/web.d.ts",
+      "import": "./dist/web.js",
+      "default": "./dist/web.js"
+    },
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js",
@@ -103,6 +108,8 @@
   },
   "devDependencies": {
     "@dnd-kit/solid": "0.5.3",
+    "@solidjs/meta": "0.29.8",
+    "@solidjs/router": "1.0.3",
     "ghia": "workspace:^",
     "@types/bun": "^1.4.0",
     "@types/node": "^25.3.3",

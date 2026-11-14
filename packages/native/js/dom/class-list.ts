@@ -5,15 +5,15 @@
  * as they see any other attribute write.
  */
 
+import { indexedView, splitOnSpaces } from "./indexed-view.js"
 import type { Element } from "./nodes.js"
 
 const CONSTRUCT: unique symbol = Symbol("DOMTokenList")
 const SPACE = /[\t\n\f\r ]/
-const SPACES = /[\t\n\f\r ]+/
 
 function tokensOf(value: string | null): string[] {
   if (value === null) return []
-  return [...new Set(value.split(SPACES).filter((token) => token !== ""))]
+  return [...new Set(splitOnSpaces(value))]
 }
 
 function validated(token: unknown, method: string): string {
@@ -161,14 +161,6 @@ export class DOMTokenList {
   }
 }
 
-function indexOf(key: string | symbol): number | undefined {
-  if (typeof key !== "string") return undefined
-  // Nearly every key is a method or a property name, so the pattern runs only for one that starts with a digit.
-  const first = key.charCodeAt(0)
-  if (first < 48 || first > 57 || !/^(0|[1-9][0-9]*)$/.test(key)) return undefined
-  return Number(key)
-}
-
 const lists = new WeakMap<object, DOMTokenList>()
 
 /** The one `DOMTokenList` of `element`, which `list[0]` and `0 in list` read as the DOM's indexed getter does. */
@@ -176,24 +168,9 @@ export function classListOf(element: Element): DOMTokenList {
   const existing = lists.get(element)
   if (existing !== undefined) return existing
   const list = new DOMTokenList(element, CONSTRUCT)
-  const view = new Proxy(list, {
-    get(target, key) {
-      const index = indexOf(key)
-      return index === undefined ? Reflect.get(target, key, target) : target.item(index) ?? undefined
-    },
-    has(target, key) {
-      const index = indexOf(key)
-      return index === undefined ? Reflect.has(target, key) : index < target.length
-    },
-    ownKeys(target) {
-      return [...Array.from({ length: target.length }, (_unused, index) => String(index)), ...Reflect.ownKeys(target)]
-    },
-    getOwnPropertyDescriptor(target, key) {
-      const index = indexOf(key)
-      if (index === undefined) return Reflect.getOwnPropertyDescriptor(target, key)
-      const token = target.item(index)
-      return token === null ? undefined : { value: token, writable: false, enumerable: true, configurable: true }
-    },
+  const view = indexedView(list, {
+    length: () => list.length,
+    at: (index) => list.item(index) ?? undefined,
   })
   elements.set(view, element)
   lists.set(element, view)

@@ -33,8 +33,8 @@ function isChoiceType(type: unknown): boolean {
 }
 
 function isChoice(target: unknown): boolean {
-  const instance = target as { type?: unknown; props?: Record<string, unknown> } | null
-  return instance?.type === "input" && isChoiceType(instance.props?.type)
+  const instance = target as { elementType?: unknown; props?: Record<string, unknown> } | null
+  return instance?.elementType === "input" && isChoiceType(instance.props?.type)
 }
 
 // A handler that is the same function in two commits has to be the same function out of here, or

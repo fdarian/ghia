@@ -1,10 +1,11 @@
 /**
  * The members of an element that are its attributes under another name or a fixed answer:
- * `hidden`, `tabIndex`, `disabled`, `htmlFor`, `isContentEditable`, `shadowRoot` and `assignedSlot`. They read and write
+ * `hidden`, `tabIndex`, `disabled`, `htmlFor`, `type`, `isContentEditable`, `shadowRoot` and `assignedSlot`. They read and write
  * through `getAttribute` and `setAttribute`, so they follow a prop a framework committed and
  * a write reaches native as the attribute would.
  */
 
+import { normalizedInputType } from "./input-type.js"
 import type { Element } from "./nodes.js"
 import { onTags } from "./tag-members.js"
 
@@ -25,6 +26,10 @@ const FOCUSABLE_TAGS: ReadonlySet<string> = new Set([
 const DISABLEABLE_TAGS: ReadonlySet<string> = new Set(["button", "fieldset", "input", "optgroup", "option", "select", "textarea"])
 
 const LABEL_TAG: ReadonlySet<string> = new Set(["label"])
+
+const TYPED_TAGS: ReadonlySet<string> = new Set(["button", "input", "textarea"])
+
+const BUTTON_TYPES: ReadonlySet<string> = new Set(["submit", "reset", "button"])
 
 /** The DOM's "rules for parsing integers": leading white space, a sign, digits, and anything after them ignored. */
 const LEADING_INTEGER = /^[ \t\n\f\r]*([+-]?\d+)/
@@ -52,6 +57,11 @@ export interface ReflectedMembers {
   disabled: boolean
   /** The `for` attribute of a `<label>`, `""` without one; `undefined` on any other element. */
   htmlFor: string
+  /**
+   * The `type` attribute of an `<input>` (lowercased, `"text"` for a missing or unknown keyword) or a `<button>` (`"submit"`
+   * unless it is `reset` or `button`); `"textarea"` on a `<textarea>`, which is read-only. `undefined` on any other element.
+   */
+  type: string
   /** Always `false`: Ghia has no `contenteditable`. */
   readonly isContentEditable: boolean
   /** Always `null`: there is no shadow DOM. */
@@ -102,6 +112,20 @@ export function defineReflectedMembers(target: object): void {
       LABEL_TAG,
       (element) => element.getAttribute("for") ?? "",
       (element, value) => element.setAttribute("for", String(value))
+    ),
+    type: onTags<Element>(
+      "type",
+      TYPED_TAGS,
+      (element) => {
+        if (element.localName === "textarea") return "textarea"
+        if (element.localName === "input") return normalizedInputType(element.getAttribute("type"))
+        const keyword = (element.getAttribute("type") ?? "").toLowerCase()
+        return BUTTON_TYPES.has(keyword) ? keyword : "submit"
+      },
+      (element, value) => {
+        if (element.localName === "textarea") throw new TypeError("Cannot set property type of HTMLTextAreaElement, which has only a getter")
+        element.setAttribute("type", String(value))
+      }
     ),
     isContentEditable: { configurable: true, get: () => false },
     shadowRoot: { configurable: true, get: () => null },

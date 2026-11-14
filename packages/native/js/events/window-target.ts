@@ -4,6 +4,8 @@ import { isElementType, isSvgElementType } from "../dom/element-types.js"
 import { Document, DOM_BINDING, registerDocument, type HTMLElement, type Node, type NodeBinding, type Text } from "../dom/nodes.js"
 import { getAdoptedStyleSheets, replaceAdoptedStyleSheets, type CSSStyleSheet } from "../css/index.js"
 import { getSelection, type Selection } from "../dom/selection.js"
+import { bumpTreeVersion } from "../dom/tree-version.js"
+import { createTreeWalker, type NodeFilterLike, type TreeWalker } from "../dom/tree-walker.js"
 import { mountedRenderer } from "../mounted-renderer.js"
 import {
   createDomEvent,
@@ -400,6 +402,11 @@ export class GpuixDocument<Element = unknown> extends Document {
     return currentNodeFactory("createTextNode").createTextNode(String(data))
   }
 
+  /** A `TreeWalker` over `root`, standing on `root`, as `document.createTreeWalker` does: `whatToShow` is every node by default. */
+  createTreeWalker(root: Node, whatToShow?: number, filter: NodeFilterLike | null = null): TreeWalker {
+    return createTreeWalker(root, whatToShow, filter)
+  }
+
   /** The `<html>` element of the window that mounted last, or the stand-in `<html>` while nothing is mounted: never `null`. */
   get documentElement(): Element {
     return currentDocumentElements().html as Element
@@ -577,19 +584,24 @@ export function installElementSource(
   }
   const firstRoot = elementSources.size === 0
   elementSources.set(renderer, entry)
+  bumpTreeVersion()
   if (firstRoot) {
     const mounted = entry.source.documentElements()
     // Not installed: nothing could have read a stand-in, which throws.
     if (mounted !== null) standInDocument?.replace(mounted)
   }
   return () => {
-    if (elementSources.get(renderer) === entry) elementSources.delete(renderer)
+    if (elementSources.get(renderer) === entry) {
+      elementSources.delete(renderer)
+      bumpTreeVersion()
+    }
   }
 }
 
 /** Drops the root of `renderer` whose window is gone, so nothing asks it for elements. */
 export function forgetElementSource(renderer: object): void {
   elementSources.delete(renderer)
+  bumpTreeVersion()
 }
 
 /**

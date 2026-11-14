@@ -737,7 +737,7 @@ describeNative("a button in a form", () => {
         </form>,
       )
       keys("b", "Enter")
-      expect(submits).toEqual([{ entries: [["a", "1"], ["b", "2"]], submitter: expect.objectContaining({ type: "button", props: expect.objectContaining({ testId: "go" }) }) }])
+      expect(submits).toEqual([{ entries: [["a", "1"], ["b", "2"]], submitter: expect.objectContaining({ type: "submit", props: expect.objectContaining({ testId: "go" }) }) }])
     })
   })
 })

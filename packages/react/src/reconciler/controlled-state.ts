@@ -14,7 +14,7 @@ export function restoreControlledState(container: Container, event: EventPayload
   const id = event.path?.[0] ?? event.target
   if (id === undefined || id === null) return
   const instance = container.instances.get(id)
-  if (instance === undefined || instance.type !== "input") return
+  if (instance === undefined || instance.elementType !== "input") return
   const type = (instance.props as { type?: unknown }).type
   const isChoice = type === "checkbox" || type === "radio"
   if (isChoice ? event.eventType !== "change" : type !== "range" || event.eventType !== "input") return

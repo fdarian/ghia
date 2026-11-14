@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 const PACKAGE_ROOT = join(import.meta.dirname, "..", "..")
@@ -17,6 +17,7 @@ const running: Bun.Subprocess[] = []
 let appDir: string
 let reloadDir: string
 let documentDir: string
+let libraryDir: string
 
 function spawn(command: string[], cwd = appDir): Run {
   const child = Bun.spawn(command, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
@@ -42,8 +43,8 @@ function spawn(command: string[], cwd = appDir): Run {
   }
 }
 
-async function runToExit(command: string[]): Promise<string> {
-  const run = spawn(command)
+async function runToExit(command: string[], cwd = appDir): Promise<string> {
+  const run = spawn(command, cwd)
   const code = await run.process.exited
   if (code !== 0) throw new Error(`${command.join(" ")} exited ${code}:\n${run.output()}`)
   return run.output()
@@ -95,6 +96,19 @@ function copyFixture(name: string): string {
   return directory
 }
 
+/**
+ * The fixture's libraries laid out as pnpm lays them out: the package in the store, a symlink to it in
+ * `node_modules`. Nothing beside the store resolves `@ghia/solid`.
+ */
+function installLibraries(directory: string): void {
+  for (const name of ["solid-headless-lib", "solid-dom-lib"]) {
+    const store = join(directory, "node_modules", ".pnpm", `${name}@1.0.0`, "node_modules")
+    mkdirSync(store, { recursive: true })
+    renameSync(join(directory, "libraries", name), join(store, name))
+    symlinkSync(join(store, name), join(directory, "node_modules", name))
+  }
+}
+
 function editFile(directory: string, file: string, from: string, to: string): void {
   const path = join(directory, file)
   writeFileSync(path, readFileSync(path, "utf8").replace(from, to))
@@ -104,6 +118,8 @@ beforeEach(() => {
   appDir = copyFixture("vite-app")
   reloadDir = copyFixture("reload-app")
   documentDir = copyFixture("document-app")
+  libraryDir = copyFixture("library-app")
+  installLibraries(libraryDir)
 })
 
 afterEach(async () => {
@@ -114,6 +130,7 @@ afterEach(async () => {
   rmSync(appDir, { recursive: true, force: true })
   rmSync(reloadDir, { recursive: true, force: true })
   rmSync(documentDir, { recursive: true, force: true })
+  rmSync(libraryDir, { recursive: true, force: true })
 })
 
 describe("solid() under ghia dev", () => {
@@ -226,6 +243,62 @@ describe("solid() under ghia build", () => {
       expect(lines(output, "RENDERED ")).toEqual(["label v1 2"])
       expect(lines(output, "IS_SERVER ")).toEqual(["false"])
       expect(readFileSync(join(appDir, "dist", "main.js"), "utf8")).not.toContain("solid-refresh")
+    },
+    TIMEOUT_MS * 2
+  )
+})
+
+describe("solid() with a Solid library that publishes its JSX source", () => {
+  const expected = {
+    renders: ["true"],
+    notes: ["migration"],
+    body: ["main,div"],
+    text: ["tag|component|overlay"],
+    after: [""],
+  }
+
+  function report(output: string) {
+    return {
+      renders: lines(output, "RENDERS_ON_GHIA "),
+      notes: lines(output, "NOTES "),
+      body: lines(output, "BODY "),
+      text: lines(output, "TEXT "),
+      after: lines(output, "BODY_AFTER "),
+    }
+  }
+
+  test(
+    "compiles the library from the solid export condition, and Dynamic, Portal and @ghia/solid resolve from the pnpm store",
+    async () => {
+      const run = spawn(["bun", GHIA_CLI, "dev"], libraryDir)
+      await run.waitFor("BODY_AFTER")
+      expect(report(run.output())).toEqual(expected)
+      expect(run.output()).not.toContain("multiple instances of Solid")
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "builds a bundle with the library in it",
+    async () => {
+      await runToExit(["bun", GHIA_CLI, "build"], libraryDir)
+      const bundle = readFileSync(join(libraryDir, "dist", "main.js"), "utf8")
+      expect(bundle).not.toMatch(/from ["']solid-js\/web["']/)
+      expect(report(await runToExit(["bun", join(libraryDir, "dist", "main.js")], libraryDir))).toEqual(expected)
+    },
+    TIMEOUT_MS * 2
+  )
+
+  test(
+    "fails a module that imports a helper of Solid's DOM renderer, naming the module and the helper",
+    async () => {
+      const run = spawn(["bun", GHIA_CLI, "dev", "dom-main.tsx"], libraryDir)
+      const code = await run.process.exited
+      expect(code).not.toBe(0)
+      expect(run.output()).toContain(join("solid-dom-lib@1.0.0", "node_modules", "solid-dom-lib", "lib", "index.js"))
+      expect(run.output()).toContain('imports template from "solid-js/web"')
+      expect(run.output()).not.toContain("delegateEvents")
+      expect(run.output()).toContain("they need Solid's DOM renderer")
     },
     TIMEOUT_MS * 2
   )
