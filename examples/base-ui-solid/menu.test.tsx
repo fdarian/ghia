@@ -74,11 +74,7 @@ describeNative('Base UI Solid Menu', () => {
     expect(activeText()).toBe('Delete')
   })
 
-  // Ghia gap, not the port: the port spreads `getStyleHookProps(state)`, which leaves a key out once its state is false.
-  // Solid's DOM `assign` removes an attribute whose key disappeared from a spread (solid-js/web web.js:334-339; the
-  // same test in Chrome passes), while `solid-js/universal`'s `spreadExpression` only visits the keys still present
-  // (universal.js:194-201), so `data-highlighted` stays on every item the highlight passed over.
-  it.fails('leaves data-highlighted on only the item that holds the highlight', async () => {
+  it('leaves data-highlighted on only the item that holds the highlight', async () => {
     const app = mount(() => <Single />)
     await click(app, trigger())
     await settle(app)

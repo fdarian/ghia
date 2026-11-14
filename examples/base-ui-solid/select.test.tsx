@@ -101,6 +101,18 @@ describeNative('Base UI Solid Select', () => {
     expect(document.activeElement).toBe(trigger())
   })
 
+  it('leaves no open-state attribute on the trigger or the popup after a pick', async () => {
+    const app = mount(() => <Example />)
+    await click(app, trigger())
+    await settle(app)
+    expect(trigger().hasAttribute('data-popup-open')).toBe(true)
+    await click(app, byText('Cherry', '[role="option"]'))
+    await settle(app)
+    const stale = ['data-open', 'data-starting-style', 'data-ending-style', 'data-popup-open', 'data-pressed']
+    const popup = query('[role="listbox"]')
+    expect([trigger(), popup].flatMap((el) => stale.filter((name) => el.hasAttribute(name)).map((name) => `${el.tagName}:${name}`))).toEqual([])
+  })
+
   it('picks with the keyboard: ArrowDown opens, the arrows move the highlight, Enter picks', async () => {
     const values: unknown[] = []
     const app = mount(() => <Example onValueChange={(value) => values.push(value)} />)
@@ -123,9 +135,7 @@ describeNative('Base UI Solid Select', () => {
     expect(document.activeElement).toBe(trigger())
   })
 
-  // Ghia gap, not the port: see the Menu test of the same name. A state that turns false drops its `data-*` key from the
-  // spread, and `solid-js/universal` never removes an attribute for a key that went away (Chrome does, via solid-js/web).
-  it.fails('leaves data-highlighted on only the option that holds the highlight', async () => {
+  it('leaves data-highlighted on only the option that holds the highlight', async () => {
     const app = mount(() => <Example />)
     await focus(app, trigger())
     await press(app, 'ArrowDown')
