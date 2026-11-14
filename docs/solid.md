@@ -722,7 +722,7 @@ export default defineConfig({
 bun --bun vitest run
 ```
 
-`--bun` runs vitest itself under Bun; without it vitest's `node` shebang wins. Under vitest `ghia()` needs no `entry`. It gives the tests the app's resolution (browser export conditions without `node`, plus the ones other plugins add such as `solid`, so a library's JSX source is what loads; one `solid-js`), inlines every dependency, loads `@ghia/native` natively, and runs `@ghia/native/dom-globals` before each test file.
+`--bun` runs vitest itself under Bun; without it vitest's `node` shebang wins. Under vitest `ghia()` needs no `entry`. It gives the tests the app's resolution (browser export conditions without `node`, plus every one other plugins add, such as vite-plugin-solid's `solid`, so a library's JSX source is what loads, and `development`, so `solid-js` is its dev build and `isDev` from `solid-js/web` is `true`; one `solid-js`), inlines every dependency, loads `@ghia/native` natively, and runs `@ghia/native/dom-globals` before each test file.
 
 ```ts
 import { createTestRoot, hasNativeTestRenderer } from '@ghia/solid/testing'

@@ -152,8 +152,9 @@ function ghiaPlugin(options: GhiaOptions): Plugin<GhiaPluginApi> {
     configEnvironment(name, environment) {
       if (underVitest) {
         // The `node` condition vitest adds is dropped: it would win over `browser` in a package whose exports
-        // list the node build first. Conditions other plugins added stay: vite-plugin-solid runs before this
-        // hook (it is `enforce: "pre"`) and adds `solid`, which selects a library's JSX source.
+        // list the node build first. Every other condition other plugins added stays: vite-plugin-solid runs before
+        // this hook (it is `enforce: "pre"`) and adds `solid`, which selects a library's JSX source, and
+        // `development`, which selects the dev build of `solid-js`.
         const added = (environment.resolve?.conditions ?? []).filter(
           (condition) => condition !== "node" && !UI_CONDITIONS.includes(condition)
         )

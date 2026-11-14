@@ -760,7 +760,8 @@ on the DOM:
 - `Portal`: renders its children into a container `div` appended to `mount` (default `document.body`), removed when
   the portal is disposed; `ref` receives the container. It mounts in a render effect, as `solid-js/web`'s does, so its
   content is in place before an `onMount` or `createEffect` beside it runs. `useShadow` and `isSVG` are accepted and ignored;
-- `isServer` (`false`) and `isDev` (`false`).
+- `isServer` (`false`) and `isDev`, which follows the `solid-js` build that loaded: `true` for its dev build (what vitest and
+  `ghia dev` resolve), `false` for the production build;
 
 A module that imports anything else from `solid-js/web` (`template`, `delegateEvents`, `setAttribute`, `className`,
 `hydrate`, `ssr*`, ...) fails the build with an error that names the module and the imports. It ships code compiled for

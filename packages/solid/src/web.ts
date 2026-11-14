@@ -6,6 +6,7 @@
  * the plugin reports a module that imports one of those.
  */
 import {
+  DEV,
   createEffect,
   createMemo,
   getOwner,
@@ -25,7 +26,8 @@ export * from "solid-js"
 export { createComponent, effect, insert, memo, mergeProps, render, spread, use }
 
 export const isServer = false
-export const isDev = false
+// `DEV` is `undefined` in the production build of `solid-js`, which is how `solid-js/web` sets its own `isDev`.
+export const isDev = DEV !== undefined
 
 export type DynamicProps<T extends ValidComponent, P = ComponentProps<T>> = {
   [K in keyof P]: P[K]

@@ -2,7 +2,7 @@
  * `@ghia/solid/web`: the renderer-independent part of `solid-js/web` that Solid libraries import (`Dynamic`,
  * `Portal`, `isServer`), on Ghia's universal renderer.
  */
-import { createEffect, createSignal, onMount, type JSX } from "solid-js"
+import { DEV, createEffect, createSignal, onMount, type JSX } from "solid-js"
 import { afterEach, describe, expect, it } from "vitest"
 import { document } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
@@ -21,7 +21,12 @@ describe("@ghia/solid/web exports", () => {
       expect(name in web).toBe(false)
     }
     expect(isServer).toBe(false)
-    expect(isDev).toBe(false)
+  })
+
+  it("isDev follows the solid-js build that is loaded", () => {
+    expect(isDev).toBe(DEV !== undefined)
+    // vitest resolves the `development` condition, so `solid-js` is its dev build here.
+    expect(isDev).toBe(true)
   })
 })
 
