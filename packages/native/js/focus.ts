@@ -19,8 +19,8 @@ function required<Method>(method: Method | undefined, name: string): Method {
 
 /**
  * `element.focus()`. Does nothing for an element a browser's `focus()` would refuse: not in a mounted
- * root, not rendered (`display: none` on it or an ancestor), `visibility: hidden` or `collapse`, or
- * inside an `inert` subtree. The queued mutations are sent first, as a browser flushes style before
+ * root, not rendered (`display: none` on it or an ancestor), `visibility: hidden` or `collapse`,
+ * inside `content-visibility: hidden` content, or inside an `inert` subtree. The queued mutations are sent first, as a browser flushes style before
  * `focus()`, so an element mounted or shown in this tick is judged by what it has now; native then
  * decides and moves focus in one call, with no layout.
  */

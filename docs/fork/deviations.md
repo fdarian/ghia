@@ -123,7 +123,7 @@ An HTML tag ([docs/reference.md](../reference.md#html-tags)) is the user agent s
 - **An inline `<a>` has no accessibility node,** and no other inline box has one: only an `a` with `display: block` or `inline-block` is a `link`.
 - **The tab stop of an inline `<a>` follows paint order.** It comes after the `inline-block` elements (a `button`) beside it in the paragraph, not in the order of the tree.
 - **`th scope` is not forwarded,** so a `th` is always a `columnheader`, never a row header.
-- **`<fieldset disabled>` does not disable its controls,** and a `<fieldset>` is not a form control for `:disabled`.
+- **`<fieldset disabled>` does not disable its controls,** and a `<fieldset>` is not a form control for `:disabled`. `focus()` therefore focuses a control inside one, where Chrome refuses it.
 - **A button does not reset, and only `<button>` submits.** `<button type="reset">` does nothing, because Ghia does not reset controls. `<input type="submit">` does not exist (every `<input type>` is text-like), so only a `<button>` is a submitter. A `<button>` is not submitted as a `name` and `value` in `formData`.
 - **`type` is the host type, not the DOM `type` property.** `event.submitter.type`, and the `type` field of any element, is the element's host type: `"button"` for a submit button, where Chrome says `"submit"`.
 - **`aside` is always `complementary`.** Per HTML-AAM an `<aside>` scoped to `body` or `main` is `complementary`, and one inside `article`, `aside`, `nav` or `section` is `complementary` only with an accessible name, and otherwise `generic`. Ghia gives it `complementary` everywhere, so an unnamed `<aside>` in sectioning content is a landmark where Chrome has none. Unlike `header` and `footer`, it does not change with its place.

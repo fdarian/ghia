@@ -5617,12 +5617,16 @@ handler.
 
 ### Imperative focus
 
-`element.focus()` does nothing for an element a browser's `focus()` would refuse, and returns with no focus
-change, no event and no scroll into view: it is not in a mounted root, it or an ancestor is `display: none`
-(its `style`, a stylesheet rule or the `hidden` attribute), its computed `visibility` is `hidden` or
-`collapse` (inherited, so a `visible` element inside a `visibility: hidden` parent does take focus), or it is
-inside an `inert` subtree. Chrome does the same, and a focus trap that falls back to a popup inside a closed
-`[hidden]` positioner depends on it. The decision uses the style the element has when `focus()` is called,
+`element.focus()` does nothing, with no focus change, no event and no scroll into view, in exactly these
+cases: the element is not in a mounted root, it is not focusable (no `tabIndex`, not a focusable control, or
+`disabled`), it or an ancestor is `display: none` (its `style`, a stylesheet rule or the `hidden`
+attribute), it is inside `content-visibility: hidden` content, its computed `visibility` is `hidden` or
+`collapse` (inherited, so a `visible` element inside a `visibility: hidden` parent does take focus, and
+`inherit` and `unset` take the parent's), or it is inside an `inert` subtree. Content that
+`content-visibility: auto` skips off-screen takes focus, as in Chrome. Chrome refuses these too, and a
+focus trap that falls back to a popup inside a closed `[hidden]` positioner depends on it; the one case
+Chrome refuses that this does not is a control inside a `<fieldset disabled>`
+([deviations](./fork/deviations.md#html-tags)). The decision uses the style the element has when `focus()` is called,
 with the queued mutations sent first (as a browser flushes style before `focus()`), so an element mounted in
 the same tick, or one a signal just made visible, takes focus. It is one native call that walks the ancestors
 once and lays nothing out ([forced reads](./fork/forced-reads.md#getcomputedstyle)), so a `focus()` after a

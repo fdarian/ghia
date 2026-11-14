@@ -377,6 +377,34 @@ describe.skipIf(!hasNativeTestRenderer)("Solid focus model", () => {
       expect(focused()).toBe("collapsedParent")
     })
 
+    it("leaves focus where it is inside content-visibility: hidden content, and focuses it again once shown", () => {
+      const refs: Record<string, HostElement> = {}
+      const [contentVisibility, setContentVisibility] = createSignal<"hidden" | "visible">("hidden")
+      const { app, focused } = setup(() => (
+        <div style={{ width: 200, height: 100 }}>
+          <div ref={(el) => (refs.stop = el)} testId="stop" tabIndex={0} style={box} />
+          <div style={{ width: 100, height: 40, contentVisibility: contentVisibility() }}>
+            <div>
+              <div ref={(el) => (refs.held = el)} testId="held" tabIndex={0} style={box} />
+            </div>
+          </div>
+          <div style={{ width: 100, height: 40, contentVisibility: "auto" }}>
+            <div ref={(el) => (refs.auto = el)} testId="auto" tabIndex={0} style={box} />
+          </div>
+        </div>
+      ))
+      refs.stop.focus()
+      refs.held.focus()
+      expect(focused()).toBe("stop")
+      expect(document.activeElement).toBe(refs.stop)
+      refs.auto.focus()
+      expect(focused()).toBe("auto")
+      refs.stop.focus()
+      app.root.flushSync(() => setContentVisibility("visible"))
+      refs.held.focus()
+      expect(focused()).toBe("held")
+    })
+
     it("judges visibility and inert by what a signal wrote in the same tick", () => {
       let target!: HostElement
       const [hidden, setHidden] = createSignal(true)
