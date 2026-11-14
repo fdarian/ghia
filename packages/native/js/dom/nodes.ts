@@ -16,6 +16,7 @@ import { classListOf, type DOMTokenList } from "./class-list.js"
 import { datasetOf } from "./dataset.js"
 import type { DOMRectList } from "./dom-rect.js"
 import { defineConstraintValidation } from "./constraint-validation.js"
+import { elementsByClassName, elementsByName, elementsByTagName, type HTMLCollection, type NodeList } from "./html-collection.js"
 import { defineReflectedMembers, type ReflectedMembers } from "./reflected-members.js"
 import { closestElement, elementById, matchesSelector, querySelector, querySelectorAll, type ElementList } from "./selectors.js"
 import * as tree from "./tree-mutation.js"
@@ -615,6 +616,16 @@ abstract class ElementClass extends NodeClass {
     return querySelectorAll(this as unknown as Element, selector, "Element")
   }
 
+  /** The descendants with that tag name (`"*"` for all), as a live list. */
+  getElementsByTagName(qualifiedName: string): HTMLCollection {
+    return elementsByTagName(this as unknown as Node, qualifiedName)
+  }
+
+  /** The descendants that carry every one of the space-separated classes, as a live list. */
+  getElementsByClassName(classNames: string): HTMLCollection {
+    return elementsByClassName(this as unknown as Node, classNames)
+  }
+
   /** The `data-*` attributes as a live map, with the names in camel case: see `datasetOf`. */
   get dataset(): DOMStringMap {
     return datasetOf(this as unknown as Element)
@@ -691,6 +702,19 @@ abstract class DocumentClass extends NodeClass {
 
   querySelectorAll(selector: string): ElementList {
     return querySelectorAll(this as unknown as Node, selector, "Document")
+  }
+
+  getElementsByTagName(qualifiedName: string): HTMLCollection {
+    return elementsByTagName(this as unknown as Node, qualifiedName)
+  }
+
+  getElementsByClassName(classNames: string): HTMLCollection {
+    return elementsByClassName(this as unknown as Node, classNames)
+  }
+
+  /** The HTML elements whose `name` attribute is `elementName`, as a live list. */
+  getElementsByName(elementName: string): NodeList {
+    return elementsByName(this as unknown as Node, elementName)
   }
 
   /** The first element of any window's tree, in document order, with that `id`; `null` for none. */

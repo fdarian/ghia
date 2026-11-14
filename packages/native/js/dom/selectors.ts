@@ -243,6 +243,16 @@ function walkDescendants(root: Node, visit: (element: Element) => boolean): void
   }
 }
 
+/** The elements below `root`, in document order, that `test` accepts. */
+export function findDescendants(root: Node, test: (element: Element) => boolean): Element[] {
+  const found: Element[] = []
+  walkDescendants(root, (element) => {
+    if (test(element)) found.push(element)
+    return false
+  })
+  return found
+}
+
 /** `root` is an element, or the document or fragment a query on it searches below. */
 export function querySelectorAll(root: Node, selector: string, owner: string): ElementList {
   const query = queryFor(String(selector), "querySelectorAll", owner)

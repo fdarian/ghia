@@ -18,6 +18,7 @@ import { DOMTokenList } from "./dom/class-list.js"
 import { ValidityState } from "./dom/constraint-validation.js"
 import { CSSStyleDeclaration } from "./dom/css-style-declaration.js"
 import { DOMRect, DOMRectReadOnly } from "./dom/dom-rect.js"
+import { HTMLCollection, NodeList } from "./dom/html-collection.js"
 import { HTMLInputElement, HTMLTextAreaElement } from "./dom/html-element-classes.js"
 import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
 import { ToggleEvent } from "./dom/toggle-event.js"
@@ -55,6 +56,8 @@ const DOM_CLASSES = {
   ShadowRoot,
   ValidityState,
   DOMTokenList,
+  HTMLCollection,
+  NodeList,
   CSSStyleDeclaration,
   CSSStyleSheet,
   CSSRule,
