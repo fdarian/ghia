@@ -758,7 +758,8 @@ on the DOM:
 - `Dynamic` and `createDynamic`: a string component is a host element given the other props, a function is called as a
   component;
 - `Portal`: renders its children into a container `div` appended to `mount` (default `document.body`), removed when
-  the portal is disposed; `ref` receives the container. `useShadow` and `isSVG` are accepted and ignored;
+  the portal is disposed; `ref` receives the container. It mounts in a render effect, as `solid-js/web`'s does, so its
+  content is in place before an `onMount` or `createEffect` beside it runs. `useShadow` and `isSVG` are accepted and ignored;
 - `isServer` (`false`) and `isDev` (`false`).
 
 A module that imports anything else from `solid-js/web` (`template`, `delegateEvents`, `setAttribute`, `className`,
