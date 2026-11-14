@@ -466,6 +466,11 @@ abstract class ElementClass extends NodeClass {
     return value === null ? "" : value
   }
 
+  /** Sets the `class` attribute, as `setAttribute("class", value)` does. */
+  set className(value: string) {
+    this.setAttribute("class", String(value))
+  }
+
   /** The tokens of the `class` attribute as a live `DOMTokenList`, one object per element: see `classListOf`. */
   get classList(): DOMTokenList {
     return classListOf(this as unknown as Element)
