@@ -17,9 +17,6 @@ function required<Method>(method: Method | undefined, name: string): Method {
   return method
 }
 
-/** A host element as `focus()` takes it. */
-export type FocusableHost = ObservableElement
-
 /**
  * `element.focus()`. Does nothing for an element a browser's `focus()` would refuse: not in a mounted
  * root, not rendered (`display: none` on it or an ancestor), `visibility: hidden` or `collapse`, or
@@ -27,7 +24,7 @@ export type FocusableHost = ObservableElement
  * `focus()`, so an element mounted or shown in this tick is judged by what it has now; native then
  * decides and moves focus in one call, with no layout.
  */
-export function focusHostElement(element: FocusableHost, options?: FocusOptions): void {
+export function focusHostElement(element: ObservableElement, options?: FocusOptions): void {
   const binding = element[HOST_BINDING]()
   if (binding === undefined) return
   const renderer = binding.renderer
