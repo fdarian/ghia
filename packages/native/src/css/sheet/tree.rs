@@ -56,10 +56,6 @@ fn read_element_atoms(atoms: &Atoms, element: &mut RetainedElement) {
     element.set_css_atoms(element_id, classes);
 }
 
-/// Most names a load can intern for the elements to be found by a scan of their `class` and `id`
-/// for each; past it every element is read, as a load of a whole sheet does.
-const MAX_SCANNED_NEW_NAMES: usize = 8;
-
 impl RetainedTree {
     // Sources.
 
@@ -357,20 +353,19 @@ impl RetainedTree {
         }
     }
 
-    /// Reads the atoms again of the elements whose `class` or `id` holds a name interned after
-    /// the first `names`. The substring test is a prefilter: it passes an element that holds the
-    /// name inside a longer one, which the read then finds nothing to change in.
+    /// Reads the atoms again of the elements whose `id` is one of the names interned after the
+    /// first `names`, or whose `class` has one of them as a token.
     fn read_atoms_of_new_names(&mut self, names: usize) {
         let atoms = &self.sheets.atoms;
-        if atoms.len() - names > MAX_SCANNED_NEW_NAMES {
-            return self.init_all_css();
-        }
-        let new_names: Vec<&str> = atoms.names_from(names).collect();
-        let holds_a_new_name = |value: Option<Cow<'_, str>>| {
-            value.is_some_and(|value| new_names.iter().any(|name| value.contains(name)))
+        let new_names: FxHashSet<&str> = atoms.names_from(names).collect();
+        let carries_a_new_name = |element: &RetainedElement| {
+            element.attribute("id").is_some_and(|id| new_names.contains(&*id))
+                || element
+                    .attribute("class")
+                    .is_some_and(|class| class.split_ascii_whitespace().any(|token| new_names.contains(token)))
         };
         for element in self.elements.values_mut() {
-            if holds_a_new_name(element.attribute("class")) || holds_a_new_name(element.attribute("id")) {
+            if carries_a_new_name(element) {
                 read_element_atoms(atoms, element);
             }
         }

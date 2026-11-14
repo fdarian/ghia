@@ -41,7 +41,7 @@ impl Atoms {
     }
 
     pub(super) fn names_from(&self, count: usize) -> impl Iterator<Item = &str> {
-        self.names[count..].iter().map(|name| &**name)
+        self.names.get(count..).expect("the atoms of a load only grow").iter().map(|name| &**name)
     }
 
     /// The atom of an HTML element's tag: a selector compares it lower-cased, elements keep it as given.

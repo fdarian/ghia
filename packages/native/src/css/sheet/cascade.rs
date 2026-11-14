@@ -10,7 +10,7 @@
 
 use std::sync::{Arc, Weak};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::css::covers;
 use crate::css::lenient::Declaration;
@@ -75,7 +75,7 @@ impl MatchedInterner {
                 continue;
             }
             let renumbered = key.iter().map(|found| renumber(found.rule).map(|rule| RuleMatch { rule, ..*found })).collect();
-            changes.push(Renumbering { list, key: key.clone(), renumbered });
+            changes.push(Renumbering { list, renumbered });
         }
         changes
     }
@@ -88,9 +88,10 @@ impl MatchedInterner {
         index: &RuleIndex,
         changes: Vec<Renumbering>,
     ) -> FxHashMap<usize, Option<Arc<MatchedRules>>> {
-        for change in &changes {
-            self.lists.remove(&change.key);
-        }
+        let changed: FxHashSet<usize> = changes.iter().map(Renumbering::address).collect();
+        // Every changed list is held by an element until `apply_reload` swaps the holders, after this
+        // returns, so no list interned here can take an address `replaced` is keyed by.
+        self.lists.retain(|_, weak| weak.strong_count() > 0 && !changed.contains(&(weak.as_ptr() as usize)));
         let mut replaced = FxHashMap::default();
         replaced.reserve(changes.len());
         for change in changes {
@@ -103,8 +104,6 @@ impl MatchedInterner {
 /// A list of matched rules that a renumbering of the rules changes.
 pub(super) struct Renumbering {
     list: Arc<MatchedRules>,
-    /// The key the interner holds `list` under.
-    key: Key,
     /// What the list is after the change, `None` when it read a rule that is gone.
     renumbered: Option<Key>,
 }

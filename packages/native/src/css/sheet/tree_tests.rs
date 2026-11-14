@@ -1262,18 +1262,36 @@ fn a_sheet_that_names_a_name_reads_only_the_elements_that_carry_it() {
 }
 
 #[test]
-fn a_load_that_interns_many_names_reads_every_element() {
+fn an_element_that_holds_a_new_name_inside_a_longer_one_is_not_read() {
     let mut doc = Doc::new();
     doc.style_element(ROOT, ".a { color: red }");
-    let carrier = doc.classed("div", ROOT, "n3");
-    let others: Vec<u64> = (0..20).map(|n| doc.classed("div", ROOT, &format!("c{n}"))).collect();
+    let longer_class = doc.classed("div", ROOT, "latest later");
+    let longer_id = doc.element("div", ROOT);
+    doc.tree.set_attribute(longer_id, "id", Some("late-menu".into()));
+    let carrier = doc.classed("div", ROOT, "other late");
     doc.flush();
     let before = atom_reads();
-    let rules: String = (0..9).map(|n| format!(".n{n} {{ color: blue }}")).collect();
+    doc.style_element(ROOT, ".late { color: blue }");
+    doc.flush();
+    assert_eq!(atom_reads() - before, 1, "only the carrier is read");
+    assert_eq!(doc.color(carrier), Some("blue"));
+    assert_eq!((doc.color(longer_class), doc.color(longer_id)), (None, None));
+}
+
+#[test]
+fn a_load_that_interns_many_names_reads_exactly_the_carriers() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a { color: red }");
+    let carriers: Vec<u64> = (0..20).map(|n| doc.classed("div", ROOT, &format!("other n{n}"))).collect();
+    let others: Vec<u64> = (0..50).map(|n| doc.classed("div", ROOT, &format!("c{n} n{n}x"))).collect();
+    doc.flush();
+    let before = atom_reads();
+    let rules: String = (0..20).map(|n| format!(".n{n} {{ color: blue }}")).collect();
     doc.style_element(ROOT, &rules);
     doc.flush();
-    assert!(atom_reads() - before >= others.len() + 1, "all are read: {}", atom_reads() - before);
-    assert_eq!(doc.color(carrier), Some("blue"));
+    assert_eq!(atom_reads() - before, carriers.len());
+    assert!(carriers.iter().all(|carrier| doc.color(*carrier) == Some("blue")));
+    assert!(others.iter().all(|other| doc.color(*other).is_none()));
 }
 
 #[test]
