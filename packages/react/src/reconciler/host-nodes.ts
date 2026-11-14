@@ -15,6 +15,8 @@ import {
   focusHostElement,
   HOST_BINDING,
   HTMLElement,
+  bumpTreeVersion,
+  hasMutationObservers,
   queueChildListMutation,
   readBoundingClientRect,
   splitMotionStyle,
@@ -396,7 +398,10 @@ export function linkChild(parent: HostNode, child: HostNode, before?: HostNode):
   if (index < 0) throw new Error(`GPUIX host node ${before?.nativeId} is not a child of node ${parent.nativeId}`)
   siblings.splice(index, 0, child)
   stateFor(child).parent = parent
-  queueChildListMutation(parent, [child], [], siblings[index - 1] ?? null, siblings[index + 1] ?? null)
+  bumpTreeVersion()
+  if (hasMutationObservers()) {
+    queueChildListMutation(parent, [child], [], siblings[index - 1] ?? null, siblings[index + 1] ?? null)
+  }
 }
 
 export function unlinkChild(child: HostNode): void {
@@ -408,6 +413,9 @@ export function unlinkChild(child: HostNode): void {
   if (index >= 0) siblings.splice(index, 1)
   state.parent = null
   if (index >= 0) {
-    queueChildListMutation(parent, [], [child], siblings[index - 1] ?? null, siblings[index] ?? null)
+    bumpTreeVersion()
+    if (hasMutationObservers()) {
+      queueChildListMutation(parent, [], [child], siblings[index - 1] ?? null, siblings[index] ?? null)
+    }
   }
 }

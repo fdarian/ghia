@@ -5,9 +5,10 @@
  * changes a node, and those find the observers by walking `parentNode` from the target, as
  * the DOM standard's "queue a mutation record" does.
  *
- * With no observer alive every hook is one integer check (and, for a child-list change or a prop
- * write, a bump of the tree version the live lists read), and no node gets a field: the
- * registrations live in a `WeakMap` that is only written by `observe()`.
+ * With no observer alive every hook is one integer check and no node gets a field: the
+ * registrations live in a `WeakMap` that is only written by `observe()`. An adapter checks
+ * `hasMutationObservers()` before it builds the arguments of a hook, so a tree change with no
+ * observer allocates nothing, and bumps the tree version the live lists read (`bumpTreeVersion`) itself.
  *
  * An observer does not keep what it observes alive, as in the DOM standard (its node list is
  * weak). The only strong edge is node to registration, in that `WeakMap`; the observer holds
@@ -364,8 +365,8 @@ function queueRecord(init: RecordInit, oldValue: string | null): void {
 
 /**
  * Call after `added` were placed in `target` and `removed` taken out, with the siblings the
- * change happened between. For one node leaving, pass its siblings from before it left. Call it
- * whether or not an observer is alive: it is also what tells the live lists the tree changed.
+ * change happened between. For one node leaving, pass its siblings from before it left. The
+ * caller bumps the tree version, with or without an observer.
  */
 export function queueChildListMutation(
   target: Node,
@@ -374,7 +375,6 @@ export function queueChildListMutation(
   previousSibling: Node | null,
   nextSibling: Node | null
 ): void {
-  bumpTreeVersion()
   if (shared.count === 0) return
   if (removed.length > 0) addTransientRegistrations(target, removed)
   queueRecord(
@@ -463,8 +463,9 @@ export function queueCharacterDataMutation(target: Node, oldValue: string): void
  * prop that is no attribute (a handler, an object, `children`) reads `null` on both
  * sides and produces nothing. `style` is an attribute: its text is the `cssText`, so a framework's commit of it produces a record.
  *
- * Every write of a prop goes through here, with or without an observer: it is also what tells the
- * live lists an attribute changed. `propNames` is only called when an observer is alive.
+ * Bumps the tree version, with or without an observer, so the live lists see the write. An adapter's hot
+ * path checks `hasMutationObservers()` first and bumps the version itself, to build neither closure
+ * when nothing observes.
  */
 export function recordAttributeChanges(element: Element, propNames: () => Iterable<string>, apply: () => void): void {
   if (shared.count === 0) {
