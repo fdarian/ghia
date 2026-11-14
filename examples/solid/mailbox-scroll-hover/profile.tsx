@@ -35,6 +35,8 @@
 //   A11Y=0        takes the pretend screen reader the test window starts with away (as a bench run has none)
 //   ACTIVE=1      the window is key and the search input is focused, so its caret blinks (the executor's clock moves with each tick);
 //                 DEBUG_BLINK=1 prints the patch counters across six blinks
+//   SETTLE_LAX=1  the settling step (600 ticks until 120 in a row paint nothing) no longer stops the run when the window keeps painting, as with an
+//                 app whose caret blink paints whole frames; the measurement then includes those frames
 // Env of App.tsx, which change the app being measured:
 //   SCROLLBAR=none  the list has no scrollbar (scrollbarWidth: 'none'), so a frame is not a `Thumb`
 //   NO_ROW_HOVER=1  the message rows have no hover style; NO_FOLDER_HOVER=1  the folders have none; ROW_BG=1  rows have a white background
@@ -171,7 +173,7 @@ for (let i = 0; i < 5; i++) frameStep(TICK_MS)
     frameStep(TICK_MS)
     quiet = renderer.getPaintedFrameCount() === before ? quiet + 1 : 0
   }
-  if (quiet < 120) throw new Error("the window still paints after 600 ticks of settling")
+  if (quiet < 120 && process.env.SETTLE_LAX !== "1") throw new Error("the window still paints after 600 ticks of settling")
 }
 
 if (process.env.ACTIVE === "1") {
