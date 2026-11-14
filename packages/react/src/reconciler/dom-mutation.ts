@@ -162,12 +162,12 @@ export function setDomProp(instance: Instance, name: string, value: string | num
   }
   if (hasMutationObservers()) recordAttributeChanges(instance, [name], apply)
   else apply()
-  if (state.mounted && forwardsCustomProp(instance.type, name)) {
+  if (state.mounted && forwardsCustomProp(instance.elementType, name)) {
     state.container.renderer.setCustomProp(instance.nativeId, name, serializeCustomProp(value))
   }
   if (state.mounted) {
     // The attribute store natively reads is the one a framework prop writes, so a code write goes there too.
-    for (const [attribute, text] of attributesWritten(instance.type, name, value, (prop) => propOf(instance, prop))) {
+    for (const [attribute, text] of attributesWritten(instance.elementType, name, value, (prop) => propOf(instance, prop))) {
       state.container.renderer.setAttribute(instance.nativeId, attribute, text)
     }
   }

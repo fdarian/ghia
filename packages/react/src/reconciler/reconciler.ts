@@ -131,7 +131,7 @@ export function createRoot(
   batchedRenderer.setElementSource({
     forEachElement(visit) {
       for (const instance of gpuixContainer.instances.values()) {
-        visit(instance.nativeId, instance.type, livePropEntries(instance))
+        visit(instance.nativeId, instance.elementType, livePropEntries(instance))
       }
     },
   })

@@ -133,7 +133,7 @@ class ReactHostElement extends HTMLElement implements Instance {
 
   constructor(
     readonly nativeId: number,
-    readonly type: ElementType,
+    readonly elementType: ElementType,
     public props: Props
   ) {
     super()
@@ -279,7 +279,7 @@ class ElementDomBinding implements ElementBinding {
   }
 
   get type(): string {
-    return this.instance.type
+    return this.instance.elementType
   }
 
   prop(name: string): unknown {
@@ -345,7 +345,7 @@ class TextDomBinding implements TextBinding {
 
   get connected(): boolean {
     const parent = this.state.parent
-    return parent !== null && "type" in parent && isConnected(parent)
+    return parent !== null && "elementType" in parent && isConnected(parent)
   }
 
   get root(): object | null {

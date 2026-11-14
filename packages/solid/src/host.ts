@@ -263,7 +263,7 @@ export class HostElement extends HTMLElement {
 
   private domBinding: ElementBinding | undefined
 
-  constructor(readonly type: ElementType) {
+  constructor(readonly elementType: ElementType) {
     super()
   }
 
@@ -431,8 +431,8 @@ export class HostElement extends HTMLElement {
   private webview(member: string): WebviewMethods {
     const root = this.root
     if (!root || !this.mounted) throw new Error(`${member} needs a mounted element`)
-    if (this.type !== "webview") {
-      throw new Error(`${member} is only valid on <webview>, got <${this.type}>`)
+    if (this.elementType !== "webview") {
+      throw new Error(`${member} is only valid on <webview>, got <${this.elementType}>`)
     }
     return createWebviewMethods({
       id: this.nativeId,
@@ -445,8 +445,8 @@ export class HostElement extends HTMLElement {
   requestSubmit(submitter?: object | null): void {
     const root = this.root
     if (!root || !this.mounted) throw new Error("requestSubmit() needs a mounted element")
-    if (this.type !== "form") {
-      throw new Error(`requestSubmit() is only valid on <form>, got <${this.type}>`)
+    if (this.elementType !== "form") {
+      throw new Error(`requestSubmit() is only valid on <form>, got <${this.elementType}>`)
     }
     requestFormSubmit(
       {
@@ -464,8 +464,8 @@ export class HostElement extends HTMLElement {
 
   /** The selection a control keeps until it is mounted; see `UnmountedTextSelection`. */
   private unmountedSelection(member: string): UnmountedTextSelection {
-    if (this.type !== "input" && this.type !== "textarea") {
-      throw new Error(`${member} is only valid on <input> and <textarea>, got <${this.type}>`)
+    if (this.elementType !== "input" && this.elementType !== "textarea") {
+      throw new Error(`${member} is only valid on <input> and <textarea>, got <${this.elementType}>`)
     }
     this.detachedSelection ??= new UnmountedTextSelection({
       inputType: () => this.props.get("type"),
@@ -481,8 +481,8 @@ export class HostElement extends HTMLElement {
   private textControl(member: string): TextControlHost {
     const root = this.root
     if (!root || !this.mounted) throw new Error(`${member} needs a mounted element`)
-    if (this.type !== "input" && this.type !== "textarea") {
-      throw new Error(`${member} is only valid on <input> and <textarea>, got <${this.type}>`)
+    if (this.elementType !== "input" && this.elementType !== "textarea") {
+      throw new Error(`${member} is only valid on <input> and <textarea>, got <${this.elementType}>`)
     }
     return {
       id: this.nativeId,
@@ -633,7 +633,7 @@ class ElementDomBinding implements ElementBinding {
   }
 
   get type(): string {
-    return this.element.type
+    return this.element.elementType
   }
 
   prop(name: string): unknown {
@@ -746,7 +746,7 @@ function eventTypeFor(name: string): string | undefined {
 }
 
 function customPropAllowed(node: HostElement, name: string): boolean {
-  return forwardsCustomProp(node.type, name)
+  return forwardsCustomProp(node.elementType, name)
 }
 
 export function setHostProperty(
@@ -766,14 +766,14 @@ export function setHostProperty(
     node.motionValues = split.motionValues
     if (node.root && node.mounted) {
       node.writeStyle()
-      syncMotionBindings(node.root, node.root.mutations, node.nativeId, node.motionValues, node.kind === "element" ? node.type : undefined, node.liveStyle)
+      syncMotionBindings(node.root, node.root.mutations, node.nativeId, node.motionValues, node.kind === "element" ? node.elementType : undefined, node.liveStyle)
     }
     return
   }
   if (isNativeviewHandlerProp(name)) {
     if (isEventHandler(value)) node.props.set(name, value)
     else node.props.delete(name)
-    if (node.root && node.mounted && node.type === "nativeview") syncNativeviewProps(node.root, node)
+    if (node.root && node.mounted && node.elementType === "nativeview") syncNativeviewProps(node.root, node)
     return
   }
   const eventType = eventTypeFor(name)
@@ -876,7 +876,7 @@ function tokensOf(text: string): string[] {
 function syncAttribute(root: HostRoot, node: HostElement, prop: string, value: HostPropertyValue): void {
   // The record of what was sent is filled when the gate opens (`ElementSource.rememberAttributes`).
   if (!root.mutations.forwardsAttributes || isNotNativeAttribute(prop)) return
-  for (const [attribute, text] of attributesWritten(node.type, prop, value, (name) => node.props.get(name))) {
+  for (const [attribute, text] of attributesWritten(node.elementType, prop, value, (name) => node.props.get(name))) {
     if (node.sent.writesAttribute(attribute, text)) root.mutations.setAttribute(node.nativeId, attribute, text)
   }
 }
@@ -905,13 +905,13 @@ function mount(root: HostRoot, node: HostNode): void {
   if (node.mounted) return
   node.mounted = true
   if (node.kind === "element") root.elements.set(node.nativeId, node)
-  root.mutations.createElement(node.nativeId, node.kind === "text" ? "#text" : node.type)
+  root.mutations.createElement(node.nativeId, node.kind === "text" ? "#text" : node.elementType)
   if (node.kind === "text") {
     root.mutations.setText(node.nativeId, node.text)
   } else {
     node.sent.reset()
     node.writeStyle()
-    if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.type, node.liveStyle)
+    if (node.motionValues) syncMotionBindings(root, root.mutations, node.nativeId, node.motionValues, node.elementType, node.liveStyle)
     node.listeners.attach({ eventHandlers: root.eventHandlers, renderer: root.mutations, elementId: node.nativeId })
     for (const [name, value] of node.props) {
       syncAttribute(root, node, name, value)
@@ -920,7 +920,7 @@ function mount(root: HostRoot, node: HostNode): void {
         if (node.sent.writesProp(name, serialized)) root.mutations.setCustomProp(node.nativeId, name, serialized)
       }
     }
-    if (node.type === "nativeview") syncNativeviewProps(root, node)
+    if (node.elementType === "nativeview") syncNativeviewProps(root, node)
   }
   if (node.kind === "element") {
     if (node.mountListeners.size > 0) for (const listener of [...node.mountListeners]) listener()
@@ -955,7 +955,7 @@ export function insertHostNode(
   if (anchor && anchor.parent !== parent) {
     throw new Error("GPUIX Solid anchor is not a child of its parent")
   }
-  if (node.kind === "element") assertSvgPlacement(parent.type, node.type)
+  if (node.kind === "element") assertSvgPlacement(parent.elementType, node.elementType)
   removeFromParent(node)
   const index = anchor ? parent.childList.indexOf(anchor) : parent.childList.length
   parent.childList.splice(index, 0, node)
@@ -981,7 +981,7 @@ function markUnmounted(node: HostNode): void {
   if (node.root) {
     // A `<nativeview>` hears `detach` while the batch that destroys it is applied, which is
     // after this: it stays known until `createRoot` releases the destroyed ids.
-    if (!(node.kind === "element" && node.type === "nativeview")) {
+    if (!(node.kind === "element" && node.elementType === "nativeview")) {
       node.root.elements.delete(node.nativeId)
       if (node.kind === "element") node.listeners.detach()
       unregisterEventHandlers(node.root.eventHandlers, node.nativeId)

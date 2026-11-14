@@ -36,7 +36,7 @@ describe("the nodes Solid builds", () => {
 
   it("gives an svg shape the members and fields of a host element", () => {
     const path = createHostElement("path")
-    expect(path.type).toBe("path")
+    expect(path.elementType).toBe("path")
     expect(path.mounted).toBe(false)
     expect(path.childList).toEqual([])
     expect(typeof path.focus).toBe("function")

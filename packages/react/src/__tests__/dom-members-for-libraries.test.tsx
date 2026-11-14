@@ -268,6 +268,45 @@ describeNative("DOM members that libraries read, in React", () => {
       expect((document.createElement("div") as { htmlFor?: unknown }).htmlFor).toBeUndefined()
     })
 
+    it("reflects type on an input, a button and a textarea through the type attribute", () => {
+      const found = mount((grab) => (
+        <div>
+          <input ref={grab("input")} type="Checkbox" />
+          <input ref={grab("plain")} />
+          <input ref={grab("invalid")} type="bogus" />
+          <button ref={grab("button")} />
+          <button ref={grab("reset")} type="RESET" />
+          <button ref={grab("invalidButton")} type="x" />
+          <textarea ref={grab("textarea")} />
+        </div>
+      ))
+      expect((found.input as HTMLInputElement).type).toBe("checkbox")
+      expect(found.input.getAttribute("type")).toBe("Checkbox")
+      expect((found.plain as HTMLInputElement).type).toBe("text")
+      expect((found.invalid as HTMLInputElement).type).toBe("text")
+      expect((found.button as HTMLButtonElement).type).toBe("submit")
+      expect((found.reset as HTMLButtonElement).type).toBe("reset")
+      expect((found.invalidButton as HTMLButtonElement).type).toBe("submit")
+      expect((found.textarea as HTMLTextAreaElement).type).toBe("textarea")
+      expect(() => {
+        ;(found.textarea as HTMLTextAreaElement).type = "x"
+      }).toThrow(TypeError)
+
+      ;(found.plain as HTMLInputElement).type = "RADIO"
+      expect(found.plain.getAttribute("type")).toBe("RADIO")
+      expect((found.plain as HTMLInputElement).type).toBe("radio")
+      ;(found.button as HTMLButtonElement).type = "button"
+      expect(found.button.getAttribute("type")).toBe("button")
+      expect((found.button as HTMLButtonElement).type).toBe("button")
+
+      const created = document.createElement("input") as HTMLInputElement
+      expect(created.type).toBe("text")
+      created.type = "number"
+      expect(created.getAttribute("type")).toBe("number")
+      expect((document.createElement("button") as HTMLButtonElement).type).toBe("submit")
+      expect((document.createElement("div") as { type?: unknown }).type).toBeUndefined()
+    })
+
     it("works on an input made by createElement once it is inserted: checked, value, valueAsNumber, stepUp", () => {
       mount(() => <div />)
       const checkbox = document.createElement("input") as HTMLInputElement

@@ -99,9 +99,9 @@ function attachHostMethods(instance: Instance): PublicInstance {
 }
 
 function attachTypeMembers(instance: Instance, container: Container): void {
-  if (instance.type === "input" || instance.type === "textarea") {
+  if (instance.elementType === "input" || instance.elementType === "textarea") {
     attachTextControlMethods(instance as TextControlInstance, container)
-  } else if (instance.type === "form") {
+  } else if (instance.elementType === "form") {
     const form = instance as FormInstance
     form.requestSubmit = (submitter) =>
       requestFormSubmit(
@@ -112,7 +112,7 @@ function attachTypeMembers(instance: Instance, container: Container): void {
         },
         submitter,
       )
-  } else if (instance.type === "webview") {
+  } else if (instance.elementType === "webview") {
     Object.assign(
       instance as WebviewInstance,
       createWebviewMethods({
@@ -121,7 +121,7 @@ function attachTypeMembers(instance: Instance, container: Container): void {
         flushMutations: () => container.renderer.flushMutations(),
       }),
     )
-  } else if (instance.type === "img") {
+  } else if (instance.elementType === "img") {
     const img = instance as ImgInstance
     img.setImage = (bytes) => {
       container.nativeRenderer.setImage?.(img.nativeId, bytes as Buffer)
@@ -156,7 +156,7 @@ function attachTextControlMethods(control: TextControlInstance, container: Conta
 }
 
 export function adopt(parent: Instance | undefined, child: Instance | TextInstance): void {
-  if (!("type" in child)) return
+  if (!("elementType" in child)) return
   if (parent) child.parentId = parent.nativeId
   else delete child.parentId
 }
@@ -179,7 +179,7 @@ export function nextId(container: Container): number {
 
 /** SVG shapes, `<text>` among them, exist only inside an `<svg>`; every other element goes anywhere. */
 export function assertPlacement(parent: Instance | undefined, child: Instance | TextInstance): void {
-  if ("type" in child) assertSvgPlacement(parent?.type, child.type)
+  if ("elementType" in child) assertSvgPlacement(parent?.elementType, child.elementType)
 }
 
 // ── Event wiring helpers ─────────────────────────────────────────────
@@ -191,14 +191,14 @@ function syncEventListeners(container: Container, instance: Instance): void {
     renderer: container.renderer,
     elementId: instance.nativeId,
   })
-  if (instance.type === "nativeview") syncNativeviewProps(container, instance.nativeId, instance.props as Record<string, unknown>)
+  if (instance.elementType === "nativeview") syncNativeviewProps(container, instance.nativeId, instance.props as Record<string, unknown>)
   const record = instance.props as Record<string, unknown>
   for (const propName in record) {
     const eventType = EVENT_TYPE_BY_PROP.get(propName)
     const handler = record[propName]
     if (eventType && handler) listeners.setProp(eventType, handler as HostEventHandler)
   }
-  const fields = fieldHandlers(instance.type, instance.props)
+  const fields = fieldHandlers(instance.elementType, instance.props)
   if (fields.input) listeners.setProp("input", fields.input)
   if (fields.change) listeners.setProp("change", fields.change)
 }
@@ -254,8 +254,8 @@ function diffEventListeners(instance: Instance, oldProps: Props, newProps: Props
     if (eventType && previous[propName]) listeners.setProp(eventType, undefined)
   }
   if (previous.onInput === next.onInput && previous.onChange === next.onChange && previous.type === next.type) return
-  const before = fieldHandlers(instance.type, oldProps)
-  const after = fieldHandlers(instance.type, newProps)
+  const before = fieldHandlers(instance.elementType, oldProps)
+  const after = fieldHandlers(instance.elementType, newProps)
   if (before.input !== after.input) listeners.setProp("input", after.input)
   if (before.change !== after.change) listeners.setProp("change", after.change)
 }
@@ -324,16 +324,16 @@ export function materialize(node: HostNode): ReturnType<typeof stateFor> {
   if (state.mounted) return state
 
   const renderer = state.container.renderer
-  if ("type" in node) {
-    renderer.createElement(node.nativeId, node.type)
+  if ("elementType" in node) {
+    renderer.createElement(node.nativeId, node.elementType)
     state.container.instances.set(node.nativeId, node)
     state.sent.reset()
     sendLiveStyle(node, state)
-    syncMotionBindings(state.container, node.nativeId, node.props.style, node.type)
+    syncMotionBindings(state.container, node.nativeId, node.props.style, node.elementType)
     syncEventListeners(state.container, node)
     const liveProps = livePropEntries(node)
-    syncCustomProps(renderer, node.nativeId, node.type, liveProps)
-    syncAttributes(renderer, node.nativeId, node.type, liveProps)
+    syncCustomProps(renderer, node.nativeId, node.elementType, liveProps)
+    syncAttributes(renderer, node.nativeId, node.elementType, liveProps)
   } else {
     renderer.createElement(node.nativeId, "#text")
     renderer.setText(node.nativeId, node.text)
@@ -479,19 +479,19 @@ function applyUpdate(instance: Instance, oldProps: Props, newProps: Props): void
   }
   if (styleChanged) {
     sendLiveStyle(instance, state)
-    syncMotionBindings(container, instance.nativeId, newProps.style, instance.type)
+    syncMotionBindings(container, instance.nativeId, newProps.style, instance.elementType)
   }
   diffEventListeners(instance, oldProps, newProps)
-  if (instance.type === "nativeview") {
+  if (instance.elementType === "nativeview") {
     diffNativeviewProps(container, instance.nativeId, oldProps, newProps)
   }
   // Custom prop diff (for non-div/text elements)
-  diffCustomProps(container.renderer, instance.nativeId, instance.type, oldProps, newProps)
+  diffCustomProps(container.renderer, instance.nativeId, instance.elementType, oldProps, newProps)
   // What code wrote is an attribute too (a script's `defaultValue` answers the `value` attribute over a controlled `value`).
   diffAttributes(
     container.renderer,
     instance.nativeId,
-    instance.type,
+    instance.elementType,
     withOverrides(oldProps, overridesBefore),
     withOverrides(newProps, state.propOverrides)
   )

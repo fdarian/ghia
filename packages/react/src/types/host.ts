@@ -286,7 +286,7 @@ export interface Container {
 export interface Instance extends Partial<FocusableElement>, HTMLElement {
   /** The handle the native renderer knows the element by; `id` is the DOM's. */
   nativeId: number
-  type: ElementType
+  elementType: ElementType
   props: Props
   /** The element this one is placed in; absent at the root of a window. */
   parentId?: number
@@ -312,7 +312,7 @@ export interface Instance extends Partial<FocusableElement>, HTMLElement {
 }
 
 export interface ImgInstance extends PublicInstance {
-  type: "img"
+  elementType: "img"
   setImage(bytes: Buffer | Uint8Array): void
   setImagePixels(
     width: number,
@@ -324,17 +324,17 @@ export interface ImgInstance extends PublicInstance {
 
 /** The ref of a `<webview>`: Electron's `<webview>` methods. */
 export interface WebviewInstance extends PublicInstance, WebviewMethods {
-  type: "webview"
+  elementType: "webview"
 }
 
 /** The ref of an `<input>` or `<textarea>`: the DOM selection API. */
 export interface TextControlInstance extends PublicInstance, TextControlSelection, Partial<InputMembers> {
-  type: "input" | "textarea"
+  elementType: "input" | "textarea"
 }
 
 /** The ref of a `<form>`. */
 export interface FormInstance extends PublicInstance, FormMethods {
-  type: "form"
+  elementType: "form"
 }
 
 export interface TextInstance extends Text {
