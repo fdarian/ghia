@@ -1229,37 +1229,6 @@ fn atom_reads() -> usize {
 }
 
 #[test]
-fn the_names_no_sheet_has_are_noted_for_the_elements_that_carry_them() {
-    let mut doc = Doc::new();
-    doc.style_element(ROOT, ".a { color: red }");
-    let first = doc.classed("div", ROOT, "late other a");
-    let second = doc.classed("div", ROOT, "other");
-    doc.tree.set_attribute(second, "id", Some("late".into()));
-    doc.flush();
-    let unnamed = |doc: &Doc, name: &str| doc.tree.sheets.unnamed.carriers(name);
-    assert_eq!((unnamed(&doc, "late"), unnamed(&doc, "other"), unnamed(&doc, "a")), (2, 2, 0));
-
-    doc.tree.set_attribute(first, "class", Some("late a".into()));
-    doc.flush();
-    assert_eq!(unnamed(&doc, "other"), 2, "a note is not taken back when the name is dropped");
-    doc.tree.set_attribute(second, "id", None);
-    assert_eq!(unnamed(&doc, "late"), 2);
-}
-
-#[test]
-fn a_destroyed_element_is_forgotten_by_the_names_it_carries() {
-    let mut doc = Doc::new();
-    doc.style_element(ROOT, ".a { color: red }");
-    let carrier = doc.classed("div", ROOT, "late other");
-    doc.tree.set_attribute(carrier, "id", Some("menu".into()));
-    doc.flush();
-    assert_eq!(doc.tree.sheets.unnamed.names(), 3);
-    doc.tree.destroy_element(carrier);
-    doc.flush();
-    assert_eq!(doc.tree.sheets.unnamed.names(), 0);
-}
-
-#[test]
 fn a_name_an_element_dropped_before_it_was_destroyed_is_no_trouble_when_a_sheet_names_it() {
     let mut doc = Doc::new();
     doc.style_element(ROOT, ".a { color: red }");
@@ -1279,17 +1248,32 @@ fn a_sheet_that_names_a_name_reads_only_the_elements_that_carry_it() {
     let mut doc = Doc::new();
     doc.style_element(ROOT, ".a { color: red }");
     let carrier = doc.classed("div", ROOT, "late other");
+    let identified = doc.element("div", ROOT);
+    doc.tree.set_attribute(identified, "id", Some("late".into()));
     let others: Vec<u64> = (0..50).map(|n| doc.classed("div", ROOT, &format!("c{n}"))).collect();
     doc.flush();
     let before = atom_reads();
     doc.style_element(ROOT, ".late { color: blue }");
     doc.flush();
-    assert_eq!(atom_reads() - before, 1, "only the carrier is read");
+    assert_eq!(atom_reads() - before, 2, "only the elements that carry the name are read");
     assert_eq!(doc.color(carrier), Some("blue"));
-    assert_eq!(doc.tree.sheets.unnamed.carriers("late"), 0);
-    assert_eq!(doc.tree.sheets.unnamed.carriers("other"), 1, "a name still unnamed stays noted");
     assert!(others.iter().all(|other| doc.color(*other).is_none()));
     assert!(doc.tree.elements[&others[0]].css().is_none_or(|css| css.classes.is_empty()));
+}
+
+#[test]
+fn a_load_that_interns_many_names_reads_every_element() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".a { color: red }");
+    let carrier = doc.classed("div", ROOT, "n3");
+    let others: Vec<u64> = (0..20).map(|n| doc.classed("div", ROOT, &format!("c{n}"))).collect();
+    doc.flush();
+    let before = atom_reads();
+    let rules: String = (0..9).map(|n| format!(".n{n} {{ color: blue }}")).collect();
+    doc.style_element(ROOT, &rules);
+    doc.flush();
+    assert!(atom_reads() - before >= others.len() + 1, "all are read: {}", atom_reads() - before);
+    assert_eq!(doc.color(carrier), Some("blue"));
 }
 
 #[test]

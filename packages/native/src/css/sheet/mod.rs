@@ -31,7 +31,6 @@ mod share;
 mod states;
 mod tokenizer;
 mod tree;
-mod unnamed;
 mod validate;
 mod view;
 mod wide_keyword;

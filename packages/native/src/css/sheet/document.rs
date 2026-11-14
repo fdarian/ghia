@@ -11,7 +11,7 @@ use std::sync::{Arc, Weak};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::retained_tree::{InternedStyle, RetainedElement, StyleTable};
+use crate::retained_tree::{InternedStyle, StyleTable};
 use crate::style::StyleDesc;
 
 use super::atoms::{Atom, Atoms};
@@ -22,7 +22,6 @@ use super::layers::Layers;
 use super::parse_cache::{ParseCache, ParsedRule};
 use super::reload::Reload;
 use super::states::LoggedFolds;
-use super::unnamed::UnnamedNames;
 use super::validate::Validator;
 use crate::css::lenient::number_text;
 
@@ -58,8 +57,6 @@ pub struct StyleSheets {
     /// Elements to match again, each with the places around it a change reaches.
     pub(crate) pending: Vec<(u64, Reach)>,
     pub(crate) atoms: Atoms,
-    /// The elements that carry a class or id no sheet names.
-    pub(super) unnamed: UnnamedNames,
     pub(crate) style: Atom,
     /// Every `<style>` element, connected or not.
     pub(crate) style_elements: FxHashSet<u64>,
@@ -98,7 +95,6 @@ impl Default for StyleSheets {
             mark_all: false,
             pending: Vec::new(),
             atoms,
-            unnamed: UnnamedNames::default(),
             style,
             style_elements: FxHashSet::default(),
             constructed: FxHashMap::default(),
@@ -122,19 +118,6 @@ impl StyleSheets {
     /// The texts the index was built from, in cascade order.
     pub(crate) fn loaded(&self) -> &[String] {
         self.parse_cache.texts()
-    }
-
-    /// Notes no more that a destroyed `element` carries the names no sheet has that its class and
-    /// id hold now. The names it held before stay noted, until a sheet takes them.
-    pub(super) fn forget_names(&mut self, id: u64, element: &RetainedElement) {
-        if let Some(value) = element.attribute("class") {
-            for class in value.split_ascii_whitespace() {
-                self.unnamed.forget(class, id);
-            }
-        }
-        if let Some(value) = element.attribute("id") {
-            self.unnamed.forget(&value, id);
-        }
     }
 
     pub(crate) fn has_work(&self) -> bool {
@@ -311,7 +294,6 @@ impl StyleSheets {
         self.index = Default::default();
         self.interner = Default::default();
         self.atoms = Atoms::default();
-        self.unnamed = Default::default();
         self.style = self.atoms.intern("style");
         self.style_texts.get_mut().clear();
     }

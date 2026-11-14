@@ -1511,7 +1511,7 @@ impl RetainedTree {
             self.var_style_count -= usize::from(holds_var_declarations(&element));
             self.relations.destroyed(&element);
             if self.sheets.enabled {
-                self.sheets_destroyed(id, &element);
+                self.sheets_destroyed(id);
             }
             self.resolved.get_mut().forget(id);
             self.fresh.get_mut().remove(&id);
