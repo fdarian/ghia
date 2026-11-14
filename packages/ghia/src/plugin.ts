@@ -156,6 +156,13 @@ function ghiaPlugin(options: GhiaOptions): Plugin<GhiaPluginApi> {
         environment.resolve = { ...environment.resolve, conditions: UI_CONDITIONS }
         return
       }
+      if (name === "client") {
+        // Vite always creates `client`, though nothing of a Ghia app runs in it (the UI is the `ghia` environment). Its
+        // optimizer would scan every `*.html` under the root, and a page for a browser build (`examples/web.html`) pulls in
+        // dependencies that the `ghia` environment resolves otherwise, which then fail to prebundle.
+        if (environment.optimizeDeps?.noDiscovery !== undefined) return
+        return { optimizeDeps: { noDiscovery: true } }
+      }
       const entryFileName = ENTRY_FILE_NAMES[name]
       if (entryFileName === undefined) return
       const output = environment.build?.rolldownOptions?.output
