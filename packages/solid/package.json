@@ -108,6 +108,8 @@
   },
   "devDependencies": {
     "@dnd-kit/solid": "0.5.3",
+    "@solidjs/meta": "0.29.8",
+    "@solidjs/router": "1.0.3",
     "ghia": "workspace:^",
     "@types/bun": "^1.4.0",
     "@types/node": "^25.3.3",

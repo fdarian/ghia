@@ -394,6 +394,12 @@ importers:
       '@dnd-kit/solid':
         specifier: 0.5.3
         version: 0.5.3(solid-js@1.9.15)
+      '@solidjs/meta':
+        specifier: 0.29.8
+        version: 0.29.8(solid-js@1.9.15)
+      '@solidjs/router':
+        specifier: 1.0.3
+        version: 1.0.3(solid-js@1.9.15)
       '@types/bun':
         specifier: ^1.4.0
         version: 1.4.4
@@ -1808,8 +1814,18 @@ packages:
     peerDependencies:
       solid-js: ^1.6.12
 
+  '@solidjs/meta@0.29.8':
+    resolution: {integrity: sha512-DkK5odQmnNJ/JlDFPf4rV6RaYN+G6ZtJyyb8jPmKAFT6HpRWnajYq4JaiDm/9UdY4rLKLVv+Q4ilkG1CD4x7mw==}
+    peerDependencies:
+      solid-js: ^1.8.4
+
   '@solidjs/router@0.15.4':
     resolution: {integrity: sha512-WOpgg9a9T638cR+5FGbFi/IV4l2FpmBs1GpIMSPa0Ce9vyJN7Wts+X2PqMf9IYn0zUj2MlSJtm1gp7/HI/n5TQ==}
+    peerDependencies:
+      solid-js: ^1.8.6
+
+  '@solidjs/router@1.0.3':
+    resolution: {integrity: sha512-EULOxZNMGISNgQU+uXLtt6o4X5bIE+0HiPW0gGSOyl3HJmyClSDDHLGJ5JTHkbiyUSc6DttVvnVZYfK1a+70BA==}
     peerDependencies:
       solid-js: ^1.8.6
 
@@ -4481,7 +4497,15 @@ snapshots:
     dependencies:
       solid-js: 1.9.15
 
+  '@solidjs/meta@0.29.8(solid-js@1.9.15)':
+    dependencies:
+      solid-js: 1.9.15
+
   '@solidjs/router@0.15.4(solid-js@1.9.15)':
+    dependencies:
+      solid-js: 1.9.15
+
+  '@solidjs/router@1.0.3(solid-js@1.9.15)':
     dependencies:
       solid-js: 1.9.15
 

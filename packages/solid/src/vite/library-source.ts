@@ -96,9 +96,9 @@ export function solidLibrarySource(): Plugin {
         const names = unsupportedWebNames(this.parse(code, { lang: languageOf(file) }))
         if (names.length === 0) return
         this.error(
-          `${file} imports ${names.join(", ")} from "${SOLID_WEB}", which @ghia/solid/web does not export. ` +
-            "The module ships code compiled for Solid's DOM renderer. Ghia compiles Solid libraries from their JSX source " +
-            'and needs the library to publish it under the "solid" export condition.'
+          `${file} imports ${names.join(", ")} from "${SOLID_WEB}", which @ghia/solid/web does not export: ` +
+            "they need Solid's DOM renderer (they are the helpers of code compiled for solid-js/web's DOM output). " +
+            'Ghia compiles a library that publishes its JSX source under the "solid" export condition instead.'
         )
       },
     },

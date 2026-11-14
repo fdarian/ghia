@@ -767,9 +767,22 @@ on the DOM:
 - `isServer` (`false`) and `isDev`, which follows the `solid-js` build that loaded: `true` for its dev build (what vitest and
   `ghia dev` resolve), `false` for the production build;
 
-A module that imports anything else from `solid-js/web` (`template`, `delegateEvents`, `setAttribute`, `className`,
-`hydrate`, `ssr*`, ...) fails the build with an error that names the module and the imports. It ships code compiled for
-Solid's DOM renderer; Ghia needs the library's JSX source under the `solid` condition. See
+The server-only API is there, with what `solid-js/web`'s browser build does with it: `getRequestEvent`, `useAssets`,
+`getAssets`, `Assets`, `HydrationScript`, `generateHydrationScript` and `ssr`, `ssrElement`, `ssrAttribute`,
+`ssrClassList`, `ssrStyle`, `ssrSpread`, `ssrHydrationKey`, `escape` and `resolveSSRNode` return `undefined` (so
+`getRequestEvent()` is `undefined` on the client, as in a browser); `NoHydration` and `Hydration` render their
+children; `getHydrationKey` reads Solid's hydration counter; `renderToString`, `renderToStringAsync` and
+`renderToStream` log "is not supported in the browser, returning undefined" and return `undefined`;
+`RequestContext` is a symbol. `delegateEvents` and `clearDelegatedEvents` do nothing, because compiled JSX attaches
+every handler to its element and never produces delegated `$$event` handlers. `hydrate` throws: there is no
+server-rendered DOM in a Ghia window. This is what lets `@solidjs/router` and `@solidjs/meta` compile from their JSX source. They do not run yet for want of DOM members
+Ghia lacks: the router reads `window.history` when it is imported, and `@solidjs/meta`'s `Title` creates a `<title>` element
+(see [deviations](./fork/deviations.md#solid-adapter)).
+
+A module that imports a name `@ghia/solid/web` does not export (the helpers only the DOM compiler's output calls:
+`template`, `setAttribute`, `className`, `classList`, `style`, `addEventListener`, `innerHTML`, ...) fails the build with
+an error that names the module and the imports and says they need Solid's DOM renderer. It does not say the library as a
+whole is DOM-compiled: a library that publishes its JSX source under the `solid` condition is compiled instead. See
 [deviations](./fork/deviations.md#solid-adapter). An app that narrows `solid({ include })` has to keep those
 `node_modules` files in it ([the Solid guide](./solid.md#using-solid-component-libraries)).
 

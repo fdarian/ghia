@@ -16,7 +16,7 @@ describe("@ghia/solid/web exports", () => {
   })
 
   it("has no DOM renderer members", () => {
-    for (const name of ["template", "delegateEvents", "setAttribute", "className", "classList", "style", "addEventListener", "hydrate", "ssr"]) {
+    for (const name of ["template", "setAttribute", "setAttributeNS", "className", "classList", "style", "addEventListener", "setProperty", "assign", "innerHTML", "DelegatedEvents", "getNextElement"]) {
       expect(name in web).toBe(false)
     }
     expect(isServer).toBe(false)
@@ -26,6 +26,46 @@ describe("@ghia/solid/web exports", () => {
     expect(isDev).toBe(DEV !== undefined)
     // vitest resolves the `development` condition, so `solid-js` is its dev build here.
     expect(isDev).toBe(true)
+  })
+})
+
+describe("the server-only API, as solid-js/web's browser build has it", () => {
+  it("answers with nothing where there is no server", () => {
+    expect(web.getRequestEvent()).toBeUndefined()
+    expect(web.useAssets()).toBeUndefined()
+    expect(web.generateHydrationScript()).toBeUndefined()
+    expect(web.escape("<")).toBeUndefined()
+    expect(web.ssr()).toBeUndefined()
+    expect(typeof web.RequestContext).toBe("symbol")
+  })
+
+  it("NoHydration and Hydration render their children", () => {
+    expect(web.NoHydration({ children: "a" })).toBe("a")
+    expect(web.Hydration({ children: "b" })).toBe("b")
+  })
+
+  it("renderToString and its siblings report an error and return undefined", () => {
+    const logged: string[] = []
+    const original = console.error
+    console.error = (error: unknown) => logged.push((error as Error).message)
+    try {
+      expect(web.renderToString(() => null)).toBeUndefined()
+      expect(web.renderToStringAsync(() => null)).toBeUndefined()
+      expect(web.renderToStream(() => null)).toBeUndefined()
+    } finally {
+      console.error = original
+    }
+    expect(logged).toEqual([
+      "renderToString is not supported in the browser, returning undefined",
+      "renderToStringAsync is not supported in the browser, returning undefined",
+      "renderToStream is not supported in the browser, returning undefined",
+    ])
+  })
+
+  it("delegateEvents and clearDelegatedEvents set nothing up, and hydrate says there is nothing to hydrate", () => {
+    expect(web.delegateEvents(["click"])).toBeUndefined()
+    expect(web.clearDelegatedEvents()).toBeUndefined()
+    expect(() => web.hydrate(() => null, {})).toThrow("no server-rendered DOM")
   })
 })
 

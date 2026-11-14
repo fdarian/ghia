@@ -283,22 +283,22 @@ describe("solid() with a Solid library that publishes its JSX source", () => {
     async () => {
       await runToExit(["bun", GHIA_CLI, "build"], libraryDir)
       const bundle = readFileSync(join(libraryDir, "dist", "main.js"), "utf8")
-      expect(bundle).not.toContain("solid-js/web")
+      expect(bundle).not.toMatch(/from ["']solid-js\/web["']/)
       expect(report(await runToExit(["bun", join(libraryDir, "dist", "main.js")], libraryDir))).toEqual(expected)
     },
     TIMEOUT_MS * 2
   )
 
   test(
-    "fails a library that ships only code compiled for Solid's DOM renderer, naming the module and the imports",
+    "fails a module that imports a helper of Solid's DOM renderer, naming the module and the helper",
     async () => {
       const run = spawn(["bun", GHIA_CLI, "dev", "dom-main.tsx"], libraryDir)
       const code = await run.process.exited
       expect(code).not.toBe(0)
       expect(run.output()).toContain(join("solid-dom-lib@1.0.0", "node_modules", "solid-dom-lib", "lib", "index.js"))
-      expect(run.output()).toContain("template, delegateEvents")
-      expect(run.output()).toContain("ships code compiled for Solid's DOM renderer")
-      expect(run.output()).toContain('"solid" export condition')
+      expect(run.output()).toContain('imports template from "solid-js/web"')
+      expect(run.output()).not.toContain("delegateEvents")
+      expect(run.output()).toContain("they need Solid's DOM renderer")
     },
     TIMEOUT_MS * 2
   )
