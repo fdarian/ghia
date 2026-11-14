@@ -12,7 +12,7 @@
  */
 
 import { createElementMethods } from "../host-runtime.js"
-import { HOST_BINDING, readBoundingClientRect, type HostBinding } from "../bounds.js"
+import { readBoundingClientRect } from "../bounds.js"
 import { createDetachedRenderer } from "../detached-renderer.js"
 import { defineDomMembers, type DomElement } from "../dom-members.js"
 import { ElementListeners } from "../events/element-listeners.js"
@@ -54,15 +54,6 @@ class StandInElement extends HTMLElement {
   [DOM_BINDING](): ElementBinding {
     this.binding ??= new StandInBinding(this)
     return this.binding
-  }
-
-  /** Not a native element, as an element that is not mounted yet: `getComputedStyle` reads it as `""`. */
-  get nativeId(): number {
-    return 0
-  }
-
-  [HOST_BINDING](): HostBinding | undefined {
-    return undefined
   }
 
   focus(): void {}

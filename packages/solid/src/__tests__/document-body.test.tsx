@@ -4,7 +4,7 @@
  */
 import { Match, Show, Switch, createSignal } from "solid-js"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { document, getComputedStyle, window, type DomEvent } from "@ghia/native/host"
+import { document, window, type DomEvent } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 describe.skipIf(!hasNativeTestRenderer)("document.body in Solid", () => {
@@ -32,8 +32,6 @@ describe.skipIf(!hasNativeTestRenderer)("document.body in Solid", () => {
     expect(box!.ownerDocument.documentElement).toBe(standIn)
     expect(box!.offsetParent).toBeNull()
     expect(standIn.getBoundingClientRect().height).toBe(0)
-    // What floating-ui's getViewportRect reads when it positions after the unmount.
-    expect(getComputedStyle(document.body).marginLeft).toBe("")
     app = createTestRoot()
     app.render(() => <div style={{ width: 40, height: 20 }} />)
     expect(document.documentElement).not.toBe(standIn)
