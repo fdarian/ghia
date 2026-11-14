@@ -2,7 +2,7 @@
  * `@ghia/solid/web`: the renderer-independent part of `solid-js/web` that Solid libraries import (`Dynamic`,
  * `Portal`, `isServer`), on Ghia's universal renderer.
  */
-import { createSignal, type JSX } from "solid-js"
+import { createEffect, createSignal, onMount, type JSX } from "solid-js"
 import { afterEach, describe, expect, it } from "vitest"
 import { document } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
@@ -112,6 +112,23 @@ describe.skipIf(!hasNativeTestRenderer)("Dynamic and Portal in Solid", () => {
       expect(target!.children[0]!.children[0]!.tagName).toBe("B")
       app!.flushSync(() => setShown(false))
       expect(target!.children[0]!.children[0]!.tagName).toBe("I")
+    })
+
+    it("has its content in place before a sibling's onMount and createEffect run", () => {
+      const seen: Array<string | undefined> = []
+      mount(() => {
+        onMount(() => seen.push(document.querySelector("aside#overlay")?.tagName))
+        createEffect(() => seen.push(document.querySelector("aside#overlay")?.tagName))
+        return (
+          <>
+            <Portal>
+              <aside id="overlay" />
+            </Portal>
+            <main />
+          </>
+        )
+      })
+      expect(seen).toEqual(["ASIDE", "ASIDE"])
     })
 
     it("removes the container when its parent Show closes", () => {

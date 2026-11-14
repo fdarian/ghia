@@ -78,6 +78,7 @@ export function Portal(props: PortalProps): JSX.Element {
     if (memoized === undefined) throw new Error("Portal's content was created outside its owner")
     return memoized
   }
+  // A render effect, as in `solid-js/web`: the content is in place before a sibling's `onMount` or `createEffect` runs.
   createEffect(() => {
     content ||= contentMemo()
     const mount = (props.mount || document.body) as Node
@@ -88,6 +89,6 @@ export function Portal(props: PortalProps): JSX.Element {
     onCleanup(() => {
       if (mount.contains(container as unknown as Node)) mount.removeChild(container as unknown as Node)
     })
-  })
+  }, undefined, { render: true })
   return marker as unknown as JSX.Element
 }
