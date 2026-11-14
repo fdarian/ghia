@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Combobox } from '@kobalte/core/combobox'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { box, byText, click, exists, focus, isShown, mount, press, query, queryAll, settle, wait } from './harness'
+import { box, byText, click, exists, focus, isShown, mount, press, query, queryAll, settle, wait } from '../solid-harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 

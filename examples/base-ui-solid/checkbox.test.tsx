@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Checkbox } from '@photon-ai/base-ui-solid/checkbox'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { byText, click, exists, focus, mount, press, query } from '../kobalte/harness'
+import { byText, click, exists, focus, mount, press, query } from '../solid-harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ScrollArea } from '@photon-ai/base-ui-solid/scroll-area'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { box, center, mount, query, settle } from '../kobalte/harness'
+import { box, center, mount, query, settle } from '../solid-harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 

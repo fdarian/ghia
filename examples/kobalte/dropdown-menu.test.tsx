@@ -2,7 +2,7 @@ import { createSignal } from 'solid-js'
 import { describe, expect, it } from 'vitest'
 import { DropdownMenu } from '@kobalte/core/dropdown-menu'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { activeText, box, byText, click, exists, focus, mount, press, query, queryAll, settle, wait } from './harness'
+import { activeText, box, byText, click, exists, focus, mount, press, query, queryAll, settle, wait } from '../solid-harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 

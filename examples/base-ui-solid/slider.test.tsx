@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Slider } from '@photon-ai/base-ui-solid/slider'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { box, focus, mount, press, query } from '../kobalte/harness'
+import { box, focus, mount, press, query } from '../solid-harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 

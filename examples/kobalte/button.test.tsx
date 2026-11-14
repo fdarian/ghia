@@ -2,7 +2,7 @@ import { createSignal } from 'solid-js'
 import { describe, expect, it } from 'vitest'
 import { Button } from '@kobalte/core/button'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { byText, click, focus, mount, press, query } from './harness'
+import { byText, click, focus, mount, press, query } from '../solid-harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 

@@ -2,7 +2,7 @@ import { createSignal } from 'solid-js'
 import { describe, expect, it } from 'vitest'
 import { Checkbox } from '@kobalte/core/checkbox'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { byText, click, exists, focus, mount, press, query } from './harness'
+import { byText, click, exists, focus, mount, press, query } from '../solid-harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 

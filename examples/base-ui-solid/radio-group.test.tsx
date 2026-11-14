@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { Radio } from '@photon-ai/base-ui-solid/radio'
 import { RadioGroup } from '@photon-ai/base-ui-solid/radio-group'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { byText, click, focus, mount, press, queryAll } from '../kobalte/harness'
+import { byText, click, focus, mount, press, queryAll } from '../solid-harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Tooltip } from '@kobalte/core/tooltip'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { box, byText, click, exists, focus, hover, hoverNothing, mount, press, query, settle, wait } from './harness'
+import { box, byText, click, exists, focus, hover, hoverNothing, mount, press, query, settle, wait } from '../solid-harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 

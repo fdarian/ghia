@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Tabs } from '@kobalte/core/tabs'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { activeText, box, byText, click, focus, isShown, mount, press, query, queryAll } from './harness'
+import { activeText, box, byText, click, focus, isShown, mount, press, query, queryAll } from '../solid-harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 

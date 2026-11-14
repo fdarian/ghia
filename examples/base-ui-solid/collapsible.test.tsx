@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Collapsible } from '@photon-ai/base-ui-solid/collapsible'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { click, exists, focus, mount, press, query } from '../kobalte/harness'
+import { click, exists, focus, mount, press, query } from '../solid-harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 

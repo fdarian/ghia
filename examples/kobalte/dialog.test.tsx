@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Dialog } from '@kobalte/core/dialog'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { activeText, byText, click, clickAt, exists, focus, mount, press, query } from './harness'
+import { activeText, byText, click, clickAt, exists, focus, mount, press, query } from '../solid-harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 

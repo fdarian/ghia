@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Popover } from '@kobalte/core/popover'
 import { hasNativeTestRenderer } from '@ghia/solid/testing'
-import { activeText, box, byText, click, exists, focus, mount, press, query } from './harness'
+import { activeText, box, byText, click, exists, focus, mount, press, query } from '../solid-harness'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
