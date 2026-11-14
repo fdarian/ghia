@@ -90,6 +90,26 @@ describeNative("dispatchEvent of a click, in React", () => {
     expect(focusedTestId()).toBe("field")
   })
 
+  it("toggles the checkbox a label names with htmlFor", () => {
+    testRoot = createTestRoot()
+    const nodes: Record<string, PublicInstance> = {}
+    const ref = (name: string) => (instance: unknown) => {
+      if (instance) nodes[name] = instance as PublicInstance
+    }
+    testRoot.render(
+      <div style={{ width: 300, height: 100 }}>
+        <label ref={ref("label")} htmlFor="box" style={{ width: 80, height: 20 }}>
+          Name
+        </label>
+        <input ref={ref("box")} id="box" type="checkbox" style={{ width: 20, height: 20 }} />
+      </div>
+    )
+    const box = nodes.box as unknown as HTMLInputElement
+    expect(box.checked).toBe(false)
+    nodes.label.dispatchEvent(click())
+    expect(box.checked).toBe(true)
+  })
+
   it("leaves focus alone for a label click a listener canceled", () => {
     const nodes = mountLabel({ onClick: (event: DomEvent) => event.preventDefault() })
     nodes.label.dispatchEvent(click())
