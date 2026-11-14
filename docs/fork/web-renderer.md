@@ -58,6 +58,19 @@ The UI thread draws frames, so server work that blocks it stalls the window. The
 - **`react({ include, exclude })`** scopes the plugin to some files, because React and Solid both compile `.tsx` and one Vite config for both has to say which is which; `solid({ include, exclude })` is the same. `examples/vite.config.mts` gives Solid `examples/solid/**` and React the rest. The setup import goes only into an entry the plugin owns.
 - **The server environment gets neither plugin's transforms.**
 
+## Solid libraries compile from source
+
+A Solid library is written for a renderer, and the DOM renderer is the one it was compiled for when it ships `dist/*.js`. The libraries that publish JSX under the `solid` export condition (Kobalte, Corvu's utilities) leave the choice of renderer to the app, so `solid()` compiles them with Ghia's like its own files: the environment has `noExternal: true` and vite-plugin-solid adds the `solid` condition and compiles every `.jsx` it is given.
+
+Two things stand in the way, and `ghia:solid-libraries` (`solidLibrarySource()` in `packages/solid/src/vite/library-source.ts`, added to the plugins `solid()` returns) (the environments `solid()` already applies to, not the server Worker) removes them:
+
+- **`@ghia/solid` from inside `node_modules`.** The compiled code imports it, and a library in a pnpm store (`node_modules/.pnpm/<lib>/node_modules/<lib>`) has no `@ghia/solid` beside it, and a package that is not `@ghia/solid` cannot self-reference it. A `resolveId` hook (`order: "pre"`) answers `@ghia/solid` and `@ghia/solid/*` from any importer with the file in the plugin's own package, taken from its `exports`. The plugin is loaded from the app's `@ghia/solid`, so the library and the app share one instance, which the contexts and the host tree need.
+- **`solid-js/web`.** The same hook resolves it to `@ghia/solid/web` (`packages/solid/src/web.ts`): `export * from "solid-js"`, `Dynamic`, `createDynamic`, `Portal` with the structure of Solid's (an effect, a container appended to the mount, removed on cleanup), `isServer = false` and the universal helpers. Nothing the DOM compiler's output calls is there, and no shim stands in for it: the decision is that Solid's DOM renderer is never made to work on Ghia.
+
+A library that ships only DOM-compiled output imports `template` and the like, and nothing can run it. A `transform` hook (`order: "pre"`, parsed as the file's own language, because Vite's import analysis rewrites the specifier later) fails any module whose code contains `solid-js/web` and imports or re-exports a name outside `WEB_EXPORTS` (`src/web-exports.ts`, kept equal to `web.ts` by `web.test.tsx`), naming the module, the names and the cause. The cost is a substring filter on every module and a parse of the few that match, at transform time only. The npm packages `@photon-ai/base-ui-solid` and `@msviderok/base-ui-solid` publish compiled output and no `solid` condition, so they fail this way.
+
+Tests: `packages/solid/src/__tests__/vite.test.ts` (a library laid out as a pnpm store, under `ghia dev` and `ghia build`, and the failing compiled one) and `web.test.tsx`.
+
 ## A full reload is a page reload
 
 A full reload under `ghia dev` unmounts the roots, keeps the window, and then runs the entry again (`createFullReload`'s `stop`, `unmountAllRoots` from `@ghia/native/roots`). Each adapter's root registers its unmount with `registerRoot` (`packages/native/js/roots.ts`, a set on `globalThis`, like the element sources), and the same unmount `render()` runs before it mounts again runs here, so the window, the renderer and the frame loop stay.

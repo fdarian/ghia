@@ -739,6 +739,30 @@ Worker behind RPC: [Server code](./solid.md#server-code).
 
 `@ghia/solid` targets stable Solid 1.9. Its peer range is `>=1.9 <2`.
 
+#### Solid component libraries
+
+A Solid library is compiled from its JSX source, by `solid()` with the app's other files. A library that publishes it
+under the `solid` export condition (Kobalte's `@kobalte/core` does) runs unmodified; the compiled code finds the app's
+`@ghia/solid` from inside `node_modules`, even in a pnpm store where the library does not depend on it.
+
+`solid-js/web` is Solid's DOM renderer and Ghia has none, so `solid()` resolves that specifier to
+**`@ghia/solid/web`**, in the UI process and in vitest (not in the server Worker). It exports what does not depend
+on the DOM:
+
+- everything `solid-js` exports, plus `createComponent`, `effect`, `insert`, `memo`, `mergeProps`, `spread`, `use` and
+  `render` (Ghia's [`render()`](./solid.md#render));
+- `Dynamic` and `createDynamic`: a string component is a host element given the other props, a function is called as a
+  component;
+- `Portal`: renders its children into a container `div` appended to `mount` (default `document.body`), removed when
+  the portal is disposed; `ref` receives the container. `useShadow` and `isSVG` are accepted and ignored;
+- `isServer` (`false`) and `isDev` (`false`).
+
+A module that imports anything else from `solid-js/web` (`template`, `delegateEvents`, `setAttribute`, `className`,
+`hydrate`, `ssr*`, ...) fails the build with an error that names the module and the imports. It ships code compiled for
+Solid's DOM renderer; Ghia needs the library's JSX source under the `solid` condition. See
+[deviations](./fork/deviations.md#solid-adapter). An app that narrows `solid({ include })` has to keep those
+`node_modules` files in it ([the Solid guide](./solid.md#using-solid-component-libraries)).
+
 The full Solid adapter API is in the [Solid guide](./solid.md).
 
 ## Building

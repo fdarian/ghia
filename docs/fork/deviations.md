@@ -416,6 +416,8 @@ A native view from another library between the GPUI layers ([nativeview.md](nati
 
 - **A rendered object that is not a node renders nothing, once-warned.** A component that renders an object (a plain value, an AST node, solid-refresh's `{ name: "[solid-refresh]Name" }` after a throw on mount) gets an empty text node in its place and one `console.warn("Unrecognized value. Rendered nothing in its place", value)` for that object. `solid-js/web` keeps the previous content for a lone object and renders `[object Object]` inside an array; the nodes of Ghia's tree are host nodes only, and `solid-js/universal` reads the rendered value back as a position (a sibling, an anchor), so the object needs a node to stand for it. The same object rendered in two places acts as one node, so it moves from the first place to the second within a root; it cannot be rendered in two roots at once, and throws "Cannot move a GPUIX host node between roots" as a real node would.
 
+- **Libraries compiled for Solid's DOM renderer do not run.** `solid-js/web` is `@ghia/solid/web`, which has `Dynamic`, `Portal`, `isServer` and the universal helpers and none of the DOM compiler's (`template`, `delegateEvents`, ...). A module that imports one fails the build, naming the module ([web-renderer.md](web-renderer.md#solid-libraries-compile-from-source)). The decision is that Solid's DOM renderer is never made to work on Ghia.
+
 ## Base UI
 
 - **`initialFocus` defaults to the popup, not the first tabbable element.** Base UI picks the first tabbable element. GPUI's tab order exists only after the popup has painted, so the popup is focused and the first Tab walks that order.

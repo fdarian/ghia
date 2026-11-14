@@ -65,9 +65,23 @@ Name the file `vite.config.mts` unless your `package.json` has `"type": "module"
 
 **`ghia({ entry })`** sets up the environment the app runs in. The UI process behaves like a browser page: it resolves packages with their `browser` export conditions and has `window` and `document`, but it runs inside Bun next to the native addon. The plugin bundles every dependency into the app except `@ghia/native`. `entry` is the file that calls `render()`, relative to the project root. It is the single input of `ghia build`.
 
-**`solid()`** compiles JSX for Solid's universal renderer with `@ghia/solid` as its module, resolves one `solid-js` for the app and the adapter, and adds solid-refresh in `ghia dev`. The app resolves Solid's client builds, so `isServer` from `solid-js/web` is `false` and libraries that branch on it, such as `@tanstack/solid-query`, run their client code.
+**`solid()`** compiles JSX for Solid's universal renderer with `@ghia/solid` as its module, resolves one `solid-js` for the app and the adapter, and adds solid-refresh in `ghia dev`. `solid-js/web` resolves to [`@ghia/solid/web`](#using-solid-component-libraries), so `isServer` is `false` and libraries that branch on it, such as `@tanstack/solid-query`, run their client code.
 
 The design behind these choices is in [web-renderer.md](fork/web-renderer.md).
+
+### Using Solid component libraries
+
+A Solid library that publishes its JSX source under the `solid` export condition (Kobalte's `@kobalte/core` exports `"solid": "./dist/*/index.jsx"`) runs on Ghia as it is. The Ghia environment bundles dependencies, and `solid()` compiles that `.jsx` for Ghia's renderer like your own, so install the library and import it:
+
+```tsx
+import { Dialog } from '@kobalte/core/dialog'
+```
+
+- **`solid-js/web` is `@ghia/solid/web`.** The library's `Dynamic`, `Portal` and `isServer` come from there, built on Ghia's renderer: `Portal` appends its content to `document.body`, or to the `mount` element, and removes it on cleanup.
+- **A library that ships only compiled output does not work.** Code compiled for Solid's DOM renderer calls `template`, `delegateEvents` and `insert` on DOM nodes, which Ghia does not have. The build fails and names the module and the imports, such as `template` and `delegateEvents`. Ask the library for a `solid` condition, or use one that has it.
+- **If you narrow `solid({ include })`, it must still cover those files.** The default compiles every `.jsx` and `.tsx`, `node_modules` included. A narrower `include` (an app that also uses `react()` has one) has to match the library's `.jsx` files too, or they reach Ghia uncompiled and fail to parse.
+
+The reference is [Solid component libraries](reference.md#solid-component-libraries).
 
 ## First app
 
@@ -314,6 +328,7 @@ Import the router into the UI as a type only. A value import would pull the serv
 | `@ghia/solid/jsx-runtime`     | `jsx`, `jsxs`, `Fragment`. Used by `jsxImportSource` |
 | `@ghia/solid/jsx-dev-runtime` | `jsxDEV`, `Fragment`                                 |
 | `@ghia/solid/vite`            | `solid()`, the Vite plugin for JSX and solid-refresh |
+| `@ghia/solid/web`             | What `solid-js/web` offers without a DOM: `Dynamic`, `Portal`, `isServer` |
 | `@ghia/solid/testing`         | `createTestRoot`, `TestRenderer`                     |
 | `@ghia/solid/automation`      | `launch`, `connectTest`                              |
 | `@ghia/solid/select`          | Select primitives                                    |
