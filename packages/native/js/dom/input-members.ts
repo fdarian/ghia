@@ -117,11 +117,11 @@ function writeValue(self: object, layout: Layout, text: string): void {
  * are written (a range sanitizes the value). The adapter calls it right after it creates the native
  * element, when `[HOST_BINDING]()` answers.
  */
-export function applyWrittenInputState(element: ObservableElement): void {
+export function applyWrittenInputState(element: Pick<ObservableElement, "nativeId"> & Partial<Pick<ObservableElement, typeof HOST_BINDING>>): void {
   const state = written.get(element)
   if (state === undefined) return
   written.delete(element)
-  const binding = element[HOST_BINDING]()
+  const binding = element[HOST_BINDING]?.()
   if (binding === undefined) throw new Error("Input state written before the mount can only be applied to a mounted element")
   const layout: Layout = { renderer: binding.renderer, id: element.nativeId }
   if (state.value !== undefined) writeValue(element, layout, state.value)
