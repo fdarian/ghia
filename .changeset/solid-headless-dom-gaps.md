@@ -23,3 +23,5 @@ The lists `getElementsByTagName`, `getElementsByClassName` and `getElementsByNam
 `render(code, element)` from `@ghia/solid/web` keeps the children `element` already has, as `solid-js/web`'s does (it used to remove all of them, so a `<Show>` that went false inside `render(..., document.body)` emptied the app). It takes `init` and `options.owner`, `render(..., document)` runs the code under a root, an element that is not of this window's document throws a `TypeError`, and `spread` returns the props it wrote.
 
 An attribute written to the stand-in `<html>`, `<head>` or `<body>` before the first `render()` (`document.documentElement.classList.add("dark")`) updates the live lists (`document.getElementsByClassName("dark")` finds it) and gives a `MutationObserver` on it a record.
+
+A live list drops the elements it found at the next change to the tree instead of holding them until it is read again.

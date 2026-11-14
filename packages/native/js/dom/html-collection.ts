@@ -8,7 +8,7 @@
 import { indexedView, splitOnSpaces } from "./indexed-view.js"
 import { findDescendants } from "./selectors.js"
 import { SVGElement, type Element, type Node } from "./nodes.js"
-import { treeVersion } from "./tree-version.js"
+import { registerPopulated, treeVersion, type Remembered } from "./tree-version.js"
 
 type Search = () => readonly Element[]
 
@@ -105,17 +105,38 @@ export type HTMLCollection = HTMLCollectionClass
 export const NodeList = shared.NodeList
 export type NodeList = NodeListClass
 
-/** Runs `search` again only when the tree version moved since the last run. */
-function remembered(search: Search): Search {
-  let version = -1
-  let found: readonly Element[] = []
-  return () => {
+const NOTHING: readonly Element[] = []
+
+/** What a live list found by its last search, and the tree version it found it at. */
+class RememberedSearch {
+  private version = -1
+  private found = NOTHING
+  private registered = false
+  private readonly ref = new WeakRef<Remembered>(this)
+
+  constructor(private readonly search: Search) {}
+
+  /** Runs the search again only when the tree version moved since the last run. */
+  elements = (): readonly Element[] => {
     const current = treeVersion()
-    if (current !== version) {
-      found = search()
-      version = current
+    if (current !== this.version) {
+      this.found = this.search()
+      this.version = current
+      if (this.found.length > 0 && !this.registered) {
+        this.registered = true
+        registerPopulated(this.ref)
+      }
     }
-    return found
+    return this.found
+  }
+
+  forget(): void {
+    this.found = NOTHING
+    this.registered = false
+  }
+
+  get remembered(): readonly Element[] {
+    return this.found
   }
 }
 
@@ -129,8 +150,18 @@ function listOver<List extends LiveList>(prototype: object, elements: Search, na
   )
 }
 
+const REMEMBERED = Symbol("remembered search")
+
 function live<List extends LiveList>(prototype: object, search: Search, named: boolean): List {
-  return listOver(prototype, remembered(search), named)
+  const remembered = new RememberedSearch(search)
+  const list = listOver<List>(prototype, remembered.elements, named)
+  Object.defineProperty(list, REMEMBERED, { value: remembered })
+  return list
+}
+
+/** What a live list holds on to between reads: for tests, to see that a change dropped it. */
+export function elementsRememberedBy(list: HTMLCollection | NodeList): readonly Element[] {
+  return (Reflect.get(list, REMEMBERED) as RememberedSearch).remembered
 }
 
 /** A `NodeList` that never changes: what `querySelectorAll` returns. */
