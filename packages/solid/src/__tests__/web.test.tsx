@@ -8,7 +8,7 @@ import { document } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
 import { WEB_EXPORTS } from "../web-exports.js"
 import * as web from "../web.js"
-import { Dynamic, Portal, isDev, isServer } from "../web.js"
+import { Dynamic, Portal, isDev, isServer, render, spread } from "../web.js"
 
 describe("@ghia/solid/web exports", () => {
   it("are exactly the names the Solid plugin allows an import from solid-js/web", () => {
@@ -44,6 +44,34 @@ describe.skipIf(!hasNativeTestRenderer)("Dynamic and Portal in Solid", () => {
   }
 
   const bodyTags = () => [...document.body.children].map((child) => child.tagName.toLowerCase())
+
+  describe("render and spread, with solid-js/web's signatures", () => {
+    it("render(code, element) mounts into that element and returns the dispose", () => {
+      let host: HTMLElement | undefined
+      mount(() => <section ref={(el: unknown) => (host = el as HTMLElement)} />)
+      const dispose = render(() => <p>inside</p>, host!)
+      expect([...host!.children].map((child) => child.tagName)).toEqual(["P"])
+      expect(bodyTags()).toEqual(["section"])
+      dispose()
+      expect(host!.children.length).toBe(0)
+    })
+
+    it("spread(node, props, isSVG, skipChildren) sets the props and the children, and skipChildren leaves the children out", () => {
+      let both: HTMLElement | undefined
+      let bare: HTMLElement | undefined
+      mount(() => {
+        both = document.createElement("div") as HTMLElement
+        bare = document.createElement("div") as HTMLElement
+        spread(both, { id: "a", children: "kids" }, false)
+        spread(bare, { id: "b", children: "kids" }, false, true)
+        return [both, bare] as unknown as JSX.Element
+      })
+      expect(both!.getAttribute("id")).toBe("a")
+      expect(both!.textContent).toBe("kids")
+      expect(bare!.getAttribute("id")).toBe("b")
+      expect(bare!.textContent).toBe("")
+    })
+  })
 
   describe("Dynamic", () => {
     it("renders a string component as a host element with the props and the children", () => {

@@ -19,11 +19,40 @@ import {
   type ValidComponent,
 } from "solid-js"
 import { document } from "@ghia/native/host"
-import { createComponent, createElement, createTextNode, effect, insert, memo, mergeProps, spread, use } from "./universal.js"
-import { render } from "./renderer.js"
+import {
+  createComponent,
+  createElement,
+  createTextNode,
+  effect,
+  insert,
+  memo,
+  mergeProps,
+  renderInto,
+  spread as spreadProps,
+  use,
+} from "./universal.js"
 
 export * from "solid-js"
-export { createComponent, effect, insert, memo, mergeProps, render, spread, use }
+export { createComponent, effect, insert, memo, mergeProps, use }
+
+/** `solid-js/web`'s `render(code, element)`: mounts into `element` and returns the dispose. Ghia's window-opening `render` is `@ghia/solid`'s. */
+export function render(code: () => JSX.Element, element: Element): () => void {
+  const dispose = renderInto(code, element as never)
+  return () => {
+    dispose()
+    element.textContent = ""
+  }
+}
+
+/** `solid-js/web`'s signature; `isSVG` has nothing to select, as Ghia has no namespaces. */
+export function spread(
+  node: Parameters<typeof spreadProps>[0],
+  props: Parameters<typeof spreadProps>[1],
+  _isSVG?: boolean,
+  skipChildren?: boolean
+): void {
+  spreadProps(node, props, skipChildren)
+}
 
 export const isServer = false
 // `DEV` is `undefined` in the production build of `solid-js`, which is how `solid-js/web` sets its own `isDev`.
@@ -47,7 +76,7 @@ export function createDynamic<T extends ValidComponent>(
         return untrack(() => (resolved as (props: ComponentProps<T>) => JSX.Element)(props))
       case "string": {
         const element = createElement(resolved)
-        spread(element, props)
+        spreadProps(element, props)
         return element
       }
     }

@@ -124,6 +124,7 @@ export function universalRender(code: () => JSX.Element, body: HostElement): () 
   })
 }
 
+export const renderInto = runtime.render
 export const effect = runtime.effect
 export const memo = runtime.memo
 export const createComponent: typeof runtime.createComponent = (component, props) =>

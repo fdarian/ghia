@@ -750,9 +750,13 @@ under the `solid` export condition (Kobalte's `@kobalte/core` does) runs unmodif
 on the DOM:
 
 - everything `solid-js` exports, plus `createComponent`, `effect`, `insert`, `memo`, `mergeProps`, `spread`, `use` and
-  `render` (Ghia's [`render()`](./solid.md#render));
-- `spread` is `solid-js/universal`'s with one difference, the one `solid-js/web` has: a prop that was in the spread and
-  is not any more is removed (`{...(open() ? { "data-open": "" } : {})}` drops `data-open`, an `onClick` stops firing, a
+  `render`;
+- `render(code, element)` is `solid-js/web`'s: it mounts `code` into the element it is given and returns a function
+  that disposes it and empties the element. It does not open a window; that is [`render()`](./solid.md#render) of
+  `@ghia/solid`;
+- `spread(node, props, isSVG, skipChildren)` has `solid-js/web`'s signature (`isSVG` is ignored); the compiled JSX of
+  `@ghia/solid` uses `solid-js/universal`'s `(node, props, skipChildren)`. Both do what `solid-js/web` does where
+  `solid-js/universal` does not: a prop that was in the spread and is not any more is removed (`{...(open() ? { "data-open": "" } : {})}` drops `data-open`, an `onClick` stops firing, a
   `style` is emptied), where `solid-js/universal` leaves its last value on the element. A `children` that changes
   (`<Dynamic component="div">{tab() === 1 ? <List /> : <Detail />}</Dynamic>`) replaces the nodes it inserted before;
 - `Dynamic` and `createDynamic`: a string component is a host element given the other props, a function is called as a
