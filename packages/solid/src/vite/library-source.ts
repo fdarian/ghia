@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { SERVER_ENVIRONMENT_NAME } from "ghia"
-import { parseAst, type Plugin } from "vite"
+import type { Plugin, Rollup } from "vite"
 import { WEB_EXPORTS } from "../web-exports.js"
 
 const SOLID_WEB = "solid-js/web"
@@ -33,14 +33,14 @@ function resolveOwnPackage(id: string): string | undefined {
 }
 
 /** The names a module imports or re-exports from `solid-js/web` that `@ghia/solid/web` does not export. */
-function unsupportedWebNames(code: string, lang: "js" | "jsx" | "ts" | "tsx"): string[] {
+function unsupportedWebNames(program: ReturnType<Rollup.PluginContext["parse"]>): string[] {
   const unsupported = new Set<string>()
   const check = (name: string) => {
     if (!WEB_EXPORT_NAMES.has(name)) unsupported.add(name)
   }
   const nameOf = (node: { type: string; name?: string; value?: unknown }) =>
     node.type === "Identifier" ? String(node.name) : String(node.value)
-  for (const statement of parseAst(code, { lang }).body) {
+  for (const statement of program.body) {
     if (statement.type === "ImportDeclaration" && statement.source.value === SOLID_WEB && statement.importKind !== "type") {
       for (const specifier of statement.specifiers) {
         if (specifier.type === "ImportSpecifier" && specifier.importKind !== "type") check(nameOf(specifier.imported))
@@ -88,7 +88,9 @@ export function solidLibrarySource(): Plugin {
       filter: { code: /solid-js\/web/ },
       handler(code, id) {
         const file = id.split("?")[0]
-        const names = unsupportedWebNames(code, languageOf(file))
+        // The plugin context's parser, not an import of `vite`: under vitest every dependency is inlined, and
+        // Vite's own server code cannot be evaluated that way.
+        const names = unsupportedWebNames(this.parse(code, { lang: languageOf(file) }))
         if (names.length === 0) return
         this.error(
           `${file} imports ${names.join(", ")} from "${SOLID_WEB}", which @ghia/solid/web does not export. ` +
