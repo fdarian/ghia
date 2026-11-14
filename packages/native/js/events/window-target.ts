@@ -4,6 +4,7 @@ import { isElementType, isSvgElementType } from "../dom/element-types.js"
 import { Document, DOM_BINDING, registerDocument, type HTMLElement, type Node, type NodeBinding, type Text } from "../dom/nodes.js"
 import { getAdoptedStyleSheets, replaceAdoptedStyleSheets, type CSSStyleSheet } from "../css/index.js"
 import { getSelection, type Selection } from "../dom/selection.js"
+import { createTreeWalker, type NodeFilterLike, type TreeWalker } from "../dom/tree-walker.js"
 import { mountedRenderer } from "../mounted-renderer.js"
 import {
   createDomEvent,
@@ -398,6 +399,11 @@ export class GpuixDocument<Element = unknown> extends Document {
   /** A new text node of the window that mounted last, in no tree. */
   createTextNode(data: string): Text {
     return currentNodeFactory("createTextNode").createTextNode(String(data))
+  }
+
+  /** A `TreeWalker` over `root`, standing on `root`, as `document.createTreeWalker` does: `whatToShow` is every node by default. */
+  createTreeWalker(root: Node, whatToShow?: number, filter: NodeFilterLike | null = null): TreeWalker {
+    return createTreeWalker(root, whatToShow, filter)
   }
 
   /** The `<html>` element of the window that mounted last, or the stand-in `<html>` while nothing is mounted: never `null`. */

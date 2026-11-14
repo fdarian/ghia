@@ -22,6 +22,7 @@ import { HTMLCollection, NodeList } from "./dom/html-collection.js"
 import { HTMLInputElement, HTMLTextAreaElement } from "./dom/html-element-classes.js"
 import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
 import { ToggleEvent } from "./dom/toggle-event.js"
+import { NodeFilter, TreeWalker } from "./dom/tree-walker.js"
 import { Selection } from "./dom/selection.js"
 import { EVENT_CLASSES } from "./events/classes.js"
 import { replaceStandInDocumentElements, standInDocumentElements } from "./dom/stand-in-document.js"
@@ -58,6 +59,8 @@ const DOM_CLASSES = {
   DOMTokenList,
   HTMLCollection,
   NodeList,
+  NodeFilter,
+  TreeWalker,
   CSSStyleDeclaration,
   CSSStyleSheet,
   CSSRule,

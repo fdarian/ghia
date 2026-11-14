@@ -364,4 +364,33 @@ describe.skipIf(!hasNativeTestRenderer)("DOM building from code in Solid", () =>
     expect(records[0].removedNodes).toEqual([made])
     await settle()
   })
+  it("walks the framework's elements and text with createTreeWalker, from document.body", () => {
+    app.render(() => (
+      <div data-name="outer" style={{ width: 60, height: 40 }}>
+        <button data-name="first">one</button>
+        <span data-name="hidden">
+          <button data-name="inside">two</button>
+        </span>
+        <button data-name="last">three</button>
+      </div>
+    ))
+    const names = (walker: TreeWalker) => {
+      const seen: string[] = []
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        seen.push((node as Element).getAttribute?.("data-name") ?? `"${node.textContent}"`)
+      }
+      return seen
+    }
+    const buttons = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, (node) =>
+      (node as Element).localName === "button" ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+    )
+    expect(names(buttons)).toEqual(["first", "inside", "last"])
+    const withoutHidden = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => ((node as Element).getAttribute?.("data-name") === "hidden" ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    })
+    expect(names(withoutHidden)).toEqual(["outer", "first", '"one"', "last", '"three"'])
+    const made = document.createElement("div")
+    made.append("x", document.createElement("i"))
+    expect(names(document.createTreeWalker(made, NodeFilter.SHOW_ALL))).toEqual(['"x"', '""'])
+  })
 })
