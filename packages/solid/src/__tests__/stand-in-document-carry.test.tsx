@@ -28,6 +28,28 @@ describe.skipIf(!hasNativeTestRenderer)("stand-in document elements, carried ont
     }
   })
 
+  it("moves the live lists when a class is written to the stand-in <html>", () => {
+    const dark = document.getElementsByClassName("dark")
+    expect(dark.length).toBe(0)
+    document.documentElement.classList.add("dark")
+    expect(dark.length).toBe(1)
+    expect(dark[0]).toBe(document.documentElement)
+    document.documentElement.classList.remove("dark")
+    expect(dark.length).toBe(0)
+  })
+
+  it("tells a MutationObserver on the stand-in <html> about a class write", async () => {
+    const records: string[] = []
+    const observer = new MutationObserver((list) => {
+      for (const record of list) records.push(String(record.attributeName))
+    })
+    observer.observe(document.documentElement, { attributes: true })
+    document.documentElement.classList.add("dark")
+    await Promise.resolve()
+    observer.disconnect()
+    expect(records).toEqual(["class"])
+  })
+
   it("keeps a class set on <html> before render", () => {
     document.documentElement.classList.add("dark")
     mount()

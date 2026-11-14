@@ -18,6 +18,7 @@ import { defineDomMembers, type DomElement } from "../dom-members.js"
 import { ElementListeners } from "../events/element-listeners.js"
 import { defineScrollMembers } from "../scroll.js"
 import type { StyleDesc } from "../host.js"
+import { recordAttributeChanges } from "./mutation-observer.js"
 import { DOM_BINDING, HTMLElement, ROOT_ELEMENT_TYPES, type ElementBinding, type Node } from "./nodes.js"
 import type { DocumentElements } from "../events/window-target.js"
 
@@ -93,8 +94,14 @@ class StandInBinding implements ElementBinding {
     return this.element.props.keys()
   }
   setProp(name: string, value: string | number | boolean | undefined): void {
-    if (value === undefined) this.element.props.delete(name)
-    else this.element.props.set(name, value)
+    recordAttributeChanges(
+      this.element,
+      () => [name],
+      () => {
+        if (value === undefined) this.element.props.delete(name)
+        else this.element.props.set(name, value)
+      }
+    )
   }
   assertSameWindow(): void {
     noWindow(this.element, "the children")
