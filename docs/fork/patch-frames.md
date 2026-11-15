@@ -1381,7 +1381,7 @@ came in, 3.6M instructions or so a row and a layout pass of the row. `Scroller::
 A row is recorded when the list builds it, up to the list's overdraw outside the clip, and is replayed until it leaves across the
 viewport, so it travels the overdraw, the viewport and its own height; the box of a row that has never painted is not known, and a root is
 at most `ROOT_VIEWPORTS` (2) viewports tall, so the overscan of a row is three heights of the list plus the overdraw (`Scroller::of_list`,
-`overdraw` read from the list's config where the row is built). A scroller that is no list keeps half a viewport (`OVERSCAN_VIEWPORTS`).
+`overdraw` read from the list's config where the row is built). A scroller that is no list (`Scroller::of`) records a root for the same travel less the overdraw: a viewport of the scroller (its height, its width, or the larger, as it scrolls) and `ROOT_VIEWPORTS` more, where it used to have half a viewport (it still has half of its window-sized stand-in before its first layout: the window is several times the viewport of a scroller in a dialog, and the extra band would be prepainted for nothing, then culled and built again by the first scroll), and a root was built again for `Region` at about 4 a tick at a 30 px wheel step (TanStack Virtual's rows in the stack mailbox).
 
 The region is bigger, not the row: what a recording holds is the box of the row cut by the region, and a row the list builds is within
 the overdraw of the clip, so every row is recorded whole as it was when the overscan was bigger than the distance of the row from the

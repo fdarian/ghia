@@ -590,11 +590,8 @@ pub(crate) struct Scroller {
 /// bigger one is not a root: it is built, and what is below it is judged by itself.
 const ROOT_VIEWPORTS: f32 = 2.0;
 
-/// How far past the clip of a scroller that is no list a root is recorded, in viewports of the
-/// scroller (its height, its width, or the larger, as it scrolls). The recording of a root is put
-/// elsewhere while the scroll since it was made is within it, so a bigger one is built fewer
-/// times and replays more roots that are not shown.
-const OVERSCAN_VIEWPORTS: f32 = 0.5;
+/// The overscan of a scroller that has no box yet, in viewports of its window-sized stand-in.
+const UNLAID_OVERSCAN_VIEWPORTS: f32 = 0.5;
 
 impl Scroller {
     /// The scroller `handle` is, if its content can move: it scrolls for the user or by script
@@ -603,6 +600,18 @@ impl Scroller {
     /// (`declared`, which the handle learns when it paints): the first frame records its content to
     /// be moved, as the frames after do, where it would else record it where it stands and build it
     /// again when the scroller first moves it.
+    ///
+    /// A root is recorded when it is built, up to the clip of the scroller, and replayed while it is
+    /// shown, at most a viewport of the scroller (its height, its width, or the larger, as it
+    /// scrolls) and its own height further (a root is at most `ROOT_VIEWPORTS` viewports tall). The
+    /// region that covers the clip after that travel is the overscan, so a root is not built again
+    /// for `RelocationMiss::Region` while it is shown.
+    ///
+    /// The first frame, before the scroller has a box, keeps half of the reach of its window-sized
+    /// viewport (`UNLAID_OVERSCAN_VIEWPORTS`): the window is several times the real viewport of a
+    /// scroller in a dialog, so a band of three of them would be prepainted for nothing, and the
+    /// roots in it that the first scroll culls (the band is now three real viewports) miss on
+    /// `RelocationMiss::Place` and are built again.
     pub(crate) fn of(
         handle: &gpui::ScrollHandle,
         window: gpui::WindowId,
@@ -611,7 +620,8 @@ impl Scroller {
     ) -> Option<Self> {
         let (offset, max, user) = (handle.offset(), handle.max_offset(), handle.user_scrollable());
         let laid_out = handle.padding_box().size;
-        let (viewport, moves_x, moves_y) = if laid_out.width <= gpui::px(0.0) || laid_out.height <= gpui::px(0.0) {
+        let unlaid = laid_out.width <= gpui::px(0.0) || laid_out.height <= gpui::px(0.0);
+        let (viewport, moves_x, moves_y) = if unlaid {
             (window_size, declared.x, declared.y)
         } else {
             (
@@ -626,7 +636,8 @@ impl Scroller {
             (false, true) => viewport.height,
             (true, true) => viewport.width.max(viewport.height),
         };
-        Some(Self { window, viewport, overscan: reach * OVERSCAN_VIEWPORTS })
+        let overscan = if unlaid { reach * UNLAID_OVERSCAN_VIEWPORTS } else { reach * (1.0 + ROOT_VIEWPORTS) };
+        Some(Self { window, viewport, overscan })
     }
 
     /// The scroller a virtual list is for its rows: it always scrolls, by its height. Before its
@@ -6138,6 +6149,19 @@ mod tests {
             });
         });
         skip
+    }
+
+    #[test]
+    fn a_scroller_that_is_no_list_records_three_viewports_once_it_is_laid_out_and_less_before() {
+        let window = gpui::WindowId::from(4);
+        let handle = gpui::ScrollHandle::new();
+        let window_size = gpui::size(gpui::px(1000.0), gpui::px(600.0));
+        // Not laid out: the window is the viewport, and the axes the style scrolls are the ones it moves along;
+        // the band is half of it, not the three viewports of a scroller that is laid out.
+        let unlaid = Scroller::of(&handle, window, window_size, gpui::point(false, true)).unwrap();
+        assert_eq!(unlaid.overscan, gpui::px(600.0 * 0.5));
+        let across = Scroller::of(&handle, window, window_size, gpui::point(true, true)).unwrap();
+        assert_eq!(across.overscan, gpui::px(1000.0 * 0.5), "the larger side, as it scrolls both ways");
     }
 
     #[test]
