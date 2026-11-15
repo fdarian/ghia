@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   attributeNameOf,
+  attributeText,
   attributesOfProps,
   attributesWritten,
   inputAttributeValue,
@@ -140,5 +141,15 @@ describe("what answers the checked and value attributes of an input", () => {
     current.type = "text"
     expect(attributesWritten("input", "type", "text", props(current))).toEqual([["type", "text"], ["value", "y"]])
     expect(attributesWritten("div", "tabIndex", 1, props({}))).toEqual([["tabindex", "1"]])
+  })
+})
+
+describe("attributeText", () => {
+  it("gives draggable the enumerated text a boolean reflects as, and any other boolean attribute presence", () => {
+    expect(attributeText("draggable", true)).toBe("true")
+    expect(attributeText("draggable", false)).toBe("false")
+    expect(attributeText("hidden", true)).toBe("")
+    expect(attributeText("hidden", false)).toBeNull()
+    expect(attributeText("aria-hidden", false)).toBe("false")
   })
 })

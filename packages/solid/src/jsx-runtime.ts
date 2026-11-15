@@ -79,8 +79,10 @@ export type SolidHostRef<Tag extends string> = string extends Tag
   : HostElement | DomElementOf<Tag> | ((element: HostElement & RefElementOf<Tag>) => void)
 
 /** A host element's props in Solid JSX, with the `ref` of `Tag` (see `SolidHostRef`). */
-export type SolidHostProps<Props = HostProps, Tag extends string = string> = Omit<Props, "style"> & HtmlAttributeNames & {
-  style?: SolidStyle
+export type SolidHostProps<Props = HostProps, Tag extends string = string> = Omit<Props, "style" | "tabIndex"> & HtmlAttributeNames & {
+  /** An object, or CSS text, which sets `style.cssText` as it does on the web. */
+  style?: SolidStyle | string
+  tabIndex?: number | string
   children?: SolidJSX.Element
   /** The `class` attribute, which stylesheet rules (`.name`) match. */
   class?: string

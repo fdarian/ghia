@@ -46,6 +46,7 @@ import {
   writePopoverAttribute,
   serializeCustomProp,
   splitMotionStyle,
+  styleFromCssText,
   syncMotionBindings,
   syncNativeviewListeners,
   unregisterEventHandlers,
@@ -767,7 +768,7 @@ export function setHostProperty(
     return
   }
   if (name === "style") {
-    const split = splitMotionStyle(isStyle(value) ? cssNamedStyle(value) : undefined)
+    const split = splitMotionStyle(styleObjectOf(value))
     const next = split.style ?? {}
     if (hasMutationObservers()) recordAttributeChanges(node, () => ["style"], () => node.setFrameworkStyle(next))
     else {
@@ -1109,6 +1110,15 @@ function isStyle(value: HostPropertyValue): value is StyleDesc {
   return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
+/**
+ * The style a `style` prop renders: Solid on the web writes a string as `style.cssText` and an object key by
+ * key with `setProperty`, and anything falsy (`""` too) removes the attribute.
+ */
+function styleObjectOf(value: HostPropertyValue): StyleDesc | undefined {
+  if (typeof value === "string") return value === "" ? undefined : styleFromCssText(value)
+  return isStyle(value) ? cssNamedStyle(value) : undefined
+}
+
 type Kebab<Name extends string> = Name extends `${infer Head}${infer Tail}`
   ? `${Head extends Lowercase<Head> ? Head : `-${Lowercase<Head>}`}${Kebab<Tail>}`
   : Name
@@ -1128,8 +1138,9 @@ type CssNamedStyle = {
 /** A Solid host element's `style`: Ghia's camelCase keys, or the CSS names a web Solid style object has. */
 export type SolidStyle = MotionValueStyle & CssNamedStyle
 
-export type SolidHostProps = Omit<HostProps, "style"> & {
-  style?: SolidStyle
+export type SolidHostProps = Omit<HostProps, "style" | "tabIndex"> & {
+  style?: SolidStyle | string
+  tabIndex?: number | string
   children?: unknown
   ref?: (element: HostElement) => void
 }

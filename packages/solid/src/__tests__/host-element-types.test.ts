@@ -134,19 +134,19 @@ export const App = () => (
 `
 
 // The props a web Solid component takes as solid-js types them (`JSX.HTMLAttributes<HTMLSpanElement>`, the base of
-// every element's props) spread onto the matching host element without a cast. The event handlers, `style` and `tabIndex`
-// are left out: a host handler takes Ghia's own event type, a host `style` is an object, and a host `tabIndex` is a
-// number where solid-js's is a number or text.
+// every element's props) spread onto the matching host element without a cast. The event handlers are left out: a host
+// handler takes Ghia's own event type.
 const withSolidAttributes = `import type { JSX } from "solid-js"
 
-declare const spanProps: Omit<JSX.HTMLAttributes<HTMLSpanElement>, "style" | "tabIndex" | \`on\${string}\`>
-declare const buttonProps: Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, "style" | "tabIndex" | \`on\${string}\`>
+declare const spanProps: Omit<JSX.HTMLAttributes<HTMLSpanElement>, \`on\${string}\`>
+declare const buttonProps: Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, \`on\${string}\`>
 
 export const App = () => (
   <>
     <span {...spanProps} />
     <button {...buttonProps} />
-    <span draggable="true" popover={false} aria-level="2" />
+    <span draggable="true" popover={false} aria-level="2" tabIndex="0" style="color: red" />
+    <span tabIndex={-1} style={{ color: "red" }} />
     <span draggable="false" popover />
     <span draggable />
     {/* @ts-expect-error draggable is true or false */}

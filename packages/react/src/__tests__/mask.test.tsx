@@ -126,12 +126,15 @@ describeNative("mask", () => {
     expectScreenshotsEqual(plain.file, shoot("invalid-shorthand", masked({ mask: "red linear-gradient(black, transparent)" })).file)
   })
 
-  it("a number mask is px, so 0 is a position and no mask", () => {
+  it("a number mask is px, so 0 is a position that takes the image away", () => {
     const plain = shoot("plain-3", masked({}))
-    expectScreenshotsEqual(plain.file, shoot("zero", masked({ mask: 0 })).file)
-    expectScreenshotsEqual(plain.file, shoot("zero-px", masked({ mask: "0px" })).file)
+    // The shorthand after the longhand resets the image, but only if it is accepted: an invalid one leaves the fade.
+    const fade = shoot("fade-3", masked({ maskImage: FADE }))
+    expectScreenshotsEqual(fade.file, shoot("bogus", masked({ maskImage: FADE, mask: "bogus" })).file)
+    expectScreenshotsEqual(plain.file, shoot("zero", masked({ maskImage: FADE, mask: 0 })).file)
+    expectScreenshotsEqual(plain.file, shoot("zero-px", masked({ maskImage: FADE, mask: "0px" })).file)
     // A mask that is only a position has no image, and hides nothing.
-    expectScreenshotsEqual(plain.file, shoot("five", masked({ mask: 5 })).file)
+    expectScreenshotsEqual(plain.file, shoot("five", masked({ maskImage: FADE, mask: 5 })).file)
   })
 
   it("maskImage: none in a hover state clears the base mask", () => {
