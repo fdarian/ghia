@@ -79,6 +79,38 @@ export function App() {
 }
 `
 
+// A style object typed by solid-js, whose lengths are csstype's `string | 0`, goes to the `style` of every host
+// element without a cast.
+const withCssProperties = `import { motion } from "@ghia/solid"
+import type { JSX } from "solid-js"
+
+export const visuallyHidden: JSX.CSSProperties = {
+  clip: "rect(0 0 0 0)",
+  overflow: "hidden",
+  "white-space": "nowrap",
+  position: "fixed",
+  top: 0,
+  left: 0,
+  border: 0,
+  padding: 0,
+  width: "1px",
+  height: "1px",
+  margin: "-1px",
+  mask: 0,
+}
+
+declare const written: JSX.CSSProperties
+
+export const App = () => (
+  <>
+    <span style={visuallyHidden} />
+    <div style={written} />
+    <motion.div style={written} />
+    <svg style={written} />
+  </>
+)
+`
+
 function check(name: string, source: string, lib: string[]) {
   const directory = join(temp, name)
   mkdirSync(directory)
@@ -106,6 +138,11 @@ function check(name: string, source: string, lib: string[]) {
 describe("host element types", () => {
   it("take class, classList, <style>, and refs typed as the DOM element or as a HostElement", () => {
     const result = check("dom", withDom, ["ES2022", "DOM"])
+    expect(result.status, result.stdout).toBe(0)
+  }, tscTimeout)
+
+  it("take a style typed as solid-js's CSSProperties", () => {
+    const result = check("css-properties", withCssProperties, ["ES2022", "DOM"])
     expect(result.status, result.stdout).toBe(0)
   }, tscTimeout)
 

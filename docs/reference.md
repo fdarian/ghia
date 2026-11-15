@@ -8905,6 +8905,12 @@ hides and any opaque colour shows. `maskSize`, `maskPosition`,
 `maskRepeat`, `maskOrigin` and `maskClip` are comma lists that repeat to cover the
 layers, and `mask` is the shorthand (layers, `position / size`, repeat, origin
 and clip boxes, a mode and a composite keyword). A longhand written after it wins over it.
+A number `mask` is px, as for the other lengths, so `mask: 0` is `mask-position: 0`: a mask
+with no image, which is no mask, as in Chrome. A style typed as solid-js's `JSX.CSSProperties`
+(csstype's `0 | string` lengths) is assignable to `style` for this reason, and for the same
+widening on `border`, `outline`, `translate`, `background`, `animation` (a number there is
+an invalid value, dropped), `opacity` and `order` (a numeric string), `direction` and `cursor`
+(any string; one that is not a supported keyword is ignored, so a `url()` list takes no effect).
 `maskOrigin` and `maskClip` start at
 `border-box`, not at the `padding-box` a background starts from. A layer that does
 not cover an area leaves it hidden, so a non-repeating mask hides what it does not
