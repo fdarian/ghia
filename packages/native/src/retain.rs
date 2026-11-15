@@ -441,6 +441,8 @@ struct Record {
     /// Something in it lifts out of it, past it to the context around (`Node::lifts_out`): the
     /// part of `lifts` that is not its own `lift_z`.
     lifts_out: bool,
+    /// The element or something in it carries the relevance watch, `Below::watched` for the parent.
+    watches: bool,
     /// What `Below::holes` added up to when it was built: what the lifted elements in it, however
     /// deep, were keyed by.
     holes: u64,
@@ -748,11 +750,13 @@ impl Node {
     /// root that lifts itself and forms a context is recorded and moved whole, as gpui records
     /// it (`Retained::lift_z` with `Retained::relocatable`).
     ///
-    /// The exception is an element that carries the relevance watch: its own `lift_z` counts. A replay
-    /// that moves it skips the prepaint listener of the watch, which remembers its size and answers
-    /// whether it is near the viewport, and moving it is when that answer changes.
+    /// The exception is an element that carries the relevance watch, or has one below it: its own `lift_z`
+    /// counts. A replay that moves it skips the prepaint listener of the watch, which remembers its size and
+    /// answers whether it is near the viewport, and moving it is when that answer changes. What is below a
+    /// root that lifts itself was never moved with it until its own lift stopped keeping it in place, and it
+    /// is not moved now; a root that does not lift was always moved with what is below it.
     fn lifts_out(&self, below: &Below) -> bool {
-        (self.watches_relevance && self.lift_z.is_some()) || (!self.forms_context && below.lifts)
+        (self.lift_z.is_some() && (self.watches_relevance || below.watched)) || (!self.forms_context && below.lifts)
     }
 }
 
@@ -796,6 +800,9 @@ struct Below {
     excluded: Option<Exclusion>,
     /// Something below is lifted out of the elements between it and here.
     lifts: bool,
+    /// Something below carries the relevance watch, however far down: a replay that moves the element moves it too, and
+    /// skips its listener (see [`Node::lifts_out`]).
+    watched: bool,
     /// The tokens of the lifted elements below that this one's recording holds a hole or a
     /// fragment for.
     holes: u64,
@@ -3251,10 +3258,10 @@ impl Retain {
             own.scrolled = before.is_some_and(|before| before.vol.scroll != node.vol.scroll);
         }
         let escaped = node.absolute || (!node.positioned && own.escapes);
-        let (escapes, epoch, token, holes) = match (&node.skipped, self.records.get(&node.id)) {
+        let (escapes, epoch, token, holes, watches) = match (&node.skipped, self.records.get(&node.id)) {
             // Its children were never entered, so `own.lifts` is empty: what they lift is what its
-            // last build folded, which is `Record::lifts`.
-            (Some(_), Some(record)) => (record.lifts, record.epoch, record.token, record.holes),
+            // last build folded, which is `Record::lifts`, and the same goes for the watch.
+            (Some(_), Some(record)) => (record.lifts, record.epoch, record.token, record.holes, record.watches),
             (Some(_), None) => unreachable!("an element is skipped by the record of its last build"),
             (None, before) => {
                 let escapes = node.lift_z.is_some() || node.lifts_out(&own);
@@ -3282,7 +3289,7 @@ impl Retain {
                 // A hole is not asked for alone: the recording around it is of the build that
                 // made it, so it is not the one for another build of the hole.
                 token.word(own.holes);
-                (escapes, epoch, token.finish(), own.holes)
+                (escapes, epoch, token.finish(), own.holes, node.watches_relevance || own.watched)
             }
         };
         own.epoch = epoch;
@@ -3310,6 +3317,7 @@ impl Retain {
         let parent = &mut self.below[node.parent as usize];
         parent.changed_below |= own.changed.is_some() || own.changed_below;
         parent.lifts |= escapes;
+        parent.watched |= watches;
         if node.lift_z.is_some() {
             parent.holes = parent.holes.rotate_left(7) ^ token;
         } else if !node.forms_context {
@@ -3829,6 +3837,7 @@ impl Retain {
                     lift_run: node.lift_run,
                     lifts,
                     lifts_out,
+                    watches: node.watches_relevance || own.watched,
                     holes,
                     size: own.size,
                     patch_root: node.patch_root && eligible && !lifts && own.size <= PATCH_ROOT_MAX_ELEMENTS && node.vol.dynamic == 0 && !own.dynamic,
@@ -6942,7 +6951,8 @@ mod tests {
         let window = gpui::WindowId::from(5);
         let scroller = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
         crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
-        let root_skip = |lift_z: Option<i32>, forms_context: bool, child_lifted: bool, watched: bool| {
+        // `watched`: 0 nothing, 1 the root carries the relevance watch, 2 an element two levels below it does.
+        let root_skip = |lift_z: Option<i32>, forms_context: bool, child_lifted: bool, watched: u8| {
             let mut page = Units::new();
             for _ in 0..2 {
                 let mut skip = None;
@@ -6952,8 +6962,15 @@ mod tests {
                         skip = page.enter_in(2, Some(scroller));
                         if skip.is_none() {
                             page.retain.stacking(|| (lift_z, forms_context));
-                            if watched {
+                            if watched == 1 {
                                 page.retain.watches_relevance();
+                            }
+                            if watched == 2 {
+                                assert!(!page.enter(5));
+                                assert!(!page.enter(6));
+                                page.retain.watches_relevance();
+                                page.retain.exit();
+                                page.retain.exit();
                             }
                             page.leaf(3);
                             if child_lifted {
@@ -6974,24 +6991,30 @@ mod tests {
         let overscan = Some(gpui::px(390.0));
         // The lift of the root is kept, and is not what keeps gpui from moving it: the stacking
         // context takes it where it is and the recording around it holds no hole for it.
-        let lifted = root_skip(Some(0), false, false, false);
+        let lifted = root_skip(Some(0), false, false, 0);
         assert_eq!(lifted.lift_z, Some(0));
         assert_eq!(lifted.overscan, overscan);
-        let forming = root_skip(Some(0), true, true, false);
+        let forming = root_skip(Some(0), true, true, 0);
         assert_eq!(forming.lift_z, Some(0));
         assert_eq!(forming.overscan, overscan, "what is lifted in its own context stays in the recording");
-        assert_eq!(root_skip(None, false, false, false).overscan, overscan);
+        assert_eq!(root_skip(None, false, false, 0).overscan, overscan);
         // What lifts out of a root that forms no context is a hole in its recording, lifted or not.
-        let leaking = root_skip(Some(0), false, true, false);
+        let leaking = root_skip(Some(0), false, true, 0);
         assert_eq!(leaking.lift_z, Some(0));
         assert_eq!(leaking.overscan, None);
-        assert_eq!(root_skip(None, false, true, false).overscan, None);
+        assert_eq!(root_skip(None, false, true, 0).overscan, None);
         // A root with the relevance watch is not moved by its own lift either: the replay would skip the
         // listener that answers whether it is near, and its move is when that changes.
-        let watched = root_skip(Some(0), true, false, true);
+        let watched = root_skip(Some(0), true, false, 1);
         assert_eq!(watched.lift_z, Some(0));
         assert_eq!(watched.overscan, None);
-        assert_eq!(root_skip(None, true, false, true).overscan, overscan, "a watched root that does not lift is moved");
+        assert_eq!(root_skip(None, true, false, 1).overscan, overscan, "a watched root that does not lift is moved");
+        // An element below it with the watch is moved with it, and a replay that moves it skips its listener as well: a root
+        // that lifts itself is not moved then, as it was not before its own lift stopped counting, and one that does not lift is.
+        let watching = root_skip(Some(0), true, false, 2);
+        assert_eq!(watching.lift_z, Some(0));
+        assert_eq!(watching.overscan, None);
+        assert_eq!(root_skip(None, true, false, 2).overscan, overscan);
     }
 
     #[test]
