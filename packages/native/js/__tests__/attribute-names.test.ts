@@ -8,6 +8,7 @@ import {
   isStoredAttribute,
   jsxAttributeOf,
   jsxAttributeValue,
+  nativeValueOfText,
   propWrittenBy,
 } from "../dom/attribute-names.js"
 
@@ -69,6 +70,23 @@ describe("jsxAttributeOf and jsxAttributeValue", () => {
     for (const name of ["class", "className", "tabIndex", "autoFocus", "disabled", "span", "hidden", "draggable", "data-x"]) {
       expect(jsxAttributeOf(name)).toBeUndefined()
     }
+  })
+})
+
+describe("nativeValueOfText", () => {
+  it("gives native an integer for a number prop and a boolean for draggable, as setAttribute does", () => {
+    expect(nativeValueOfText("tabIndex", "0")).toBe(0)
+    expect(nativeValueOfText("maxLength", " 4 ")).toBe(4)
+    expect(nativeValueOfText("colSpan", "2")).toBe(2)
+    expect(nativeValueOfText("tabIndex", "abc")).toBe("abc")
+    expect(nativeValueOfText("draggable", "true")).toBe(true)
+    expect(nativeValueOfText("draggable", "false")).toBe(false)
+    expect(nativeValueOfText("draggable", "")).toBe(false)
+  })
+
+  it("keeps the text of any other prop", () => {
+    expect(nativeValueOfText("title", "0")).toBe("0")
+    expect(nativeValueOfText("hidden", "until-found")).toBe("until-found")
   })
 })
 

@@ -61,6 +61,19 @@ describe.skipIf(!hasNativeTestRenderer)("Solid JSX written with the HTML attribu
     app.unmount()
   })
 
+  it("makes an element focusable with tabIndex given as a text", () => {
+    const app = createTestRoot({ width: 300, height: 200 })
+    let target!: HostElement
+    app.render(() => (
+      <div style={{ width: 200, height: 100 }}>
+        <div ref={target} {...{ tabIndex: "-1" }} style={box} />
+      </div>
+    ))
+    target.focus()
+    expect(document.activeElement).toBe(target)
+    app.unmount()
+  })
+
   it("follows a tabindex signal and removes it on undefined", () => {
     const app = createTestRoot({ width: 300, height: 200 })
     const [index, setIndex] = createSignal<number | undefined>(0)

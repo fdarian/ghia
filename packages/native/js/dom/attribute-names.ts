@@ -160,8 +160,7 @@ export function propWrittenBy(
   if (text === null) return { prop, value: undefined }
   switch (entry?.kind) {
     case "number":
-      // A text that is no integer stays as it is: `getAttribute` gives it back and native ignores it.
-      return { prop, value: INTEGER.test(text) ? Number(text) : text }
+      return { prop, value: integerOrText(text) }
     case "presence":
       return { prop, value: true }
     case "until-found":
@@ -171,6 +170,29 @@ export function propWrittenBy(
       return { prop, value: text === "true" }
     default:
       return { prop, value: text }
+  }
+}
+
+/** A text that is no integer stays as it is: `getAttribute` gives it back and native ignores it. */
+function integerOrText(text: string): string | number {
+  return INTEGER.test(text) ? Number(text) : text
+}
+
+const KIND_OF_PROP = new Map(Object.values(WRITTEN_AS_PROP).map((entry) => [entry.prop, entry.kind]))
+
+/**
+ * What native reads of a prop given as text (`tabIndex="0"`, `draggable="true"`): an integer for a
+ * number prop and a boolean for the enumerated `draggable`, as `setAttribute` gives them. Any other
+ * text is kept, and so is a prop that is not one of these.
+ */
+export function nativeValueOfText(prop: string, text: string): string | number | boolean {
+  switch (KIND_OF_PROP.get(prop)) {
+    case "number":
+      return integerOrText(text)
+    case "true-text":
+      return text === "true"
+    default:
+      return text
   }
 }
 
@@ -203,7 +225,7 @@ export function jsxAttributeValue(attribute: JsxAttribute, value: unknown): unkn
     case "presence":
       return typeof value === "string" ? true : Boolean(value)
     case "number":
-      return typeof value === "string" && INTEGER.test(value) ? Number(value) : value
+      return typeof value === "string" ? integerOrText(value) : value
     default:
       return value
   }

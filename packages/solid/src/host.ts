@@ -819,7 +819,7 @@ function syncStoredProp(node: HostElement, name: string, value: HostPropertyValu
   if (!node.root || !node.mounted) return
   syncAttribute(node.root, node, name, value)
   if (!customPropAllowed(node, name)) return
-  const serialized = serializeCustomProp(value)
+  const serialized = serializeCustomProp(name, value)
   if (node.sent.writesProp(name, serialized)) node.root.mutations.setCustomProp(node.nativeId, name, serialized)
 }
 
@@ -933,7 +933,7 @@ function mount(root: HostRoot, node: HostNode): void {
     for (const [name, value] of node.props) {
       syncAttribute(root, node, name, value)
       if (!EVENT_PROP_NAMES.has(name) && customPropAllowed(node, name)) {
-        const serialized = serializeCustomProp(value)
+        const serialized = serializeCustomProp(name, value)
         if (node.sent.writesProp(name, serialized)) root.mutations.setCustomProp(node.nativeId, name, serialized)
       }
     }

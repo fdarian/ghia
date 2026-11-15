@@ -1915,7 +1915,7 @@ export interface HostProps
    * element when the drag ends. No pointer or mouse event fires meanwhile.
    * `preventDefault()` in `onDragStart` cancels the drag. There is no drag image.
    */
-  draggable?: boolean
+  draggable?: boolean | "true" | "false"
   /**
    * Like the DOM `inert`: the element and everything below it cannot be
    * focused (no tab stop, `focus()` is a no-op, a focused descendant is
@@ -1954,7 +1954,7 @@ export interface HostProps
    * and `"hint"`) closes on Escape and on a press outside and closes the other `auto` popovers
    * that do not hold it; `"manual"` only closes with `hidePopover()`. See `docs/reference.md`.
    */
-  popover?: "auto" | "manual" | "hint" | ""
+  popover?: boolean | "auto" | "manual" | "hint" | ""
   /** Stable locator id for automation. */
   testId?: string
   /**
