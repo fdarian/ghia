@@ -968,8 +968,11 @@ the patcher turns it on with `Window::set_contained_patches`.
 
 - **Which commits.** The tree notes the elements a commit changed (`RetainedTree::pending_structure`: props, style, text and children
   other than a strict restyle by paint; a created element is covered by the element it is put under, a destroyed one by the
-  parent it left; a `white-space` change is one of the element, which the root that holds it builds with everything below it) and
-  moves `patch_barrier` only for a change no element is named for (`setRoot`, the universal style, `autoFocus`, `testId`). A change
+  parent it left; a `white-space` change is one of the element, which the root that holds it builds with everything below it). A
+  change of an element that is not under the window's root is no change of a frame and is noted for nothing (`outside_the_frame`): a
+  subtree `detach_child` took out has its stylesheet matches taken away at the end of the batch (it is out of the document), and that
+  restyle must not be a `Structure` that no anchor holds, which the next read of layout would decline. Putting it back is a change
+  of its own, noted for the parent that takes it. The tree moves `patch_barrier` only for a change no element is named for (`setRoot`, the universal style, `autoFocus`, `testId`). A change
   that a patch cannot follow takes one revision for the element, its ancestors and its subtree, so the barrier never stands past the
   root's revision and a frame built whole after it is current with it. While the frame shown has anchors or box roots (`RetainedTree::set_anchors`, published
   by `Retain::publish_anchors` when the frame is over) a batch whose changes are all attributed is `Dirty::LayoutPatchable`:
