@@ -25,11 +25,11 @@ pub(crate) fn wrap_unrecorded(
     let (Some(subtree), Some(env)) = (subtree, env) else {
         return element;
     };
-    let hook = crate::renderer::replay_hook(id, ctx.tapes.clone(), ctx.measurements.clone());
+    let hook = crate::renderer::replay_hook(id, ctx.tapes.clone(), ctx.measurements.clone(), ctx.doc_path());
     let retained = gpui::retained(
         crate::renderer::retained_id(id),
         ctx.retain.unit_key(),
-        crate::renderer::taped_build(id, element, ctx.tapes.clone()),
+        crate::renderer::taped_build(id, element, ctx.tapes.clone(), ctx.doc_path()),
     )
     .on_replay_translated(hook)
     .cull_outset(subtree.outset())

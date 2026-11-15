@@ -52,8 +52,8 @@ pub(crate) use paint::{describe_registries, shift};
 #[cfg(feature = "test-support")]
 pub(crate) use paint::registry_slots;
 pub(crate) use paint::{
-    publish_captured_start_region, publish_captured_text, same_painted_text, same_start_region_apart_from_transform,
-    same_text_apart_from_transform,
+    describe_text_write, publish_captured_start_region, publish_captured_text, same_painted_text, same_start_region_apart_from_transform,
+    same_text_apart_from_transform, text_write_position,
 };
 #[cfg(test)]
 pub(crate) use paint::{describe_start_region_apart_from_transform, describe_text_apart_from_transform};

@@ -1281,8 +1281,6 @@ pub(crate) struct Entry<'a> {
     pub id: u64,
     pub revision: u64,
     pub inherited: &'a Inherited,
-    /// Its index among its parent's children, the last step of its document path.
-    pub at: u32,
     pub stacking_root: bool,
     pub stacking_item: bool,
     /// Whether the box of its parent lays the element out and is its containing block, so that an
@@ -2914,7 +2912,6 @@ impl Retain {
             None => {
                 let mut shape = Fingerprint::new();
                 shape.word(entry.id);
-                shape.word(u64::from(entry.at));
                 shape.word(self.nodes.get(parent as usize).map_or(self.row_parent_shape, |parent| parent.key.shape));
                 shape.word(entry.container.map_or(0, |size| size | 1));
                 shape.word(entry.contents_overlay.map_or(0, |key| key | 1));
@@ -4101,7 +4098,6 @@ mod tests {
             id: 1,
             revision: 7,
             inherited,
-            at: 0,
             stacking_root: true,
             stacking_item: false,
             placed_by_parent: false,
@@ -4178,11 +4174,10 @@ mod tests {
             layout_only: false,
         });
         let inherited = root_inherited();
-        let entry = |id, at| Entry {
+        let entry = |id| Entry {
             id,
             revision: 7,
             inherited: &inherited,
-            at,
             stacking_root: false,
             stacking_item: false,
             placed_by_parent: false,
@@ -4200,9 +4195,9 @@ mod tests {
                 box_root: false,
         };
         let mut recordings = Vec::new();
-        let skipped = retain.enter(entry(1, 0)).is_some();
+        let skipped = retain.enter(entry(1)).is_some();
         if !skipped {
-            if retain.enter(entry(2, 0)).is_none() {
+            if retain.enter(entry(2)).is_none() {
                 if motion_in_child {
                     retain.dynamic(Dynamic::Animation);
                 }
@@ -4258,7 +4253,6 @@ mod tests {
                 id: 1,
                 revision: 7,
                 inherited: &inherited,
-                at: 0,
                 stacking_root: false,
                 stacking_item: false,
                 placed_by_parent: false,
@@ -4347,7 +4341,6 @@ mod tests {
                     id: 1,
                     revision: 7,
                     inherited: &inherited,
-                    at: 0,
                     stacking_root: true,
                     stacking_item: false,
                     placed_by_parent: false,
@@ -4483,7 +4476,6 @@ mod tests {
                 id: *id,
                 revision: 7,
                 inherited: &inherited,
-                at: 0,
                 stacking_root: true,
                 stacking_item: false,
                 placed_by_parent: false,
@@ -4634,7 +4626,6 @@ mod tests {
                 id,
                 revision,
                 inherited: &inherited,
-                at: 0,
                 stacking_root: true,
                 stacking_item: false,
                 placed_by_parent: false,
@@ -5973,7 +5964,6 @@ mod tests {
                     id,
                     revision: self.revisions.get(&id).copied().unwrap_or(7),
                     inherited: &self.inherited,
-                    at: 0,
                     stacking_root: true,
                     stacking_item: false,
                     placed_by_parent: self.placed.contains(&id),
@@ -6472,6 +6462,35 @@ mod tests {
         // keeps no recording of what a box outside places.
         assert!(!page.retain.records.get(&2).unwrap().eligible);
         assert!(page.retain.records.get(&2).unwrap().unit_eligible);
+    }
+
+    #[test]
+    fn a_sibling_inserted_before_a_root_leaves_it_skipped_and_a_parent_that_changed_does_not() {
+        // The parent is edited in each frame, as a child added to it edits it, so that the frame enters 2.
+        let skipped = |page: &mut Units, before: Option<u64>| {
+            let mut skipped = false;
+            page.edit(1);
+            page.frame(&[], false, |page| {
+                page.element(1, None, |page| {
+                    if let Some(id) = before {
+                        page.leaf(id);
+                    }
+                    skipped = page.enter(2);
+                    if !skipped {
+                        page.leaf(3);
+                        page.retain.exit();
+                    }
+                });
+            });
+            skipped
+        };
+        let mut page = Units::new();
+        assert!(!skipped(&mut page, None), "the first build");
+        assert!(skipped(&mut page, None), "nothing changed");
+        assert!(skipped(&mut page, Some(5)), "a sibling in front of 2 moves its place among its siblings, which its key does not say");
+        assert!(skipped(&mut page, None), "and the sibling gone again");
+        page.placed.insert(1);
+        assert!(!skipped(&mut page, Some(5)), "a parent whose shape changed hands another shape down");
     }
 
     #[test]

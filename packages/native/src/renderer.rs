@@ -9447,6 +9447,7 @@ impl GpuixView {
         let pointer = pointer_state.borrow();
         let mut highlight_events = Vec::new();
         self.retain.begin_deferred(env.relocatable, env.forced);
+        let env_doc = env.start.doc_path();
         // The parent that spliced the element out of its wrappers is not there to say what they hand down.
         let splice = crate::layout::contents::splice_parent(&tree, id);
         let element = {
@@ -9469,7 +9470,7 @@ impl GpuixView {
         if self.dormant_clock_wake(&tree) == crate::dormant_wake::Wake::NextFrame {
             self.wake_dormant(crate::dormant_wake::Wake::NextFrame, window, cx);
         }
-        taped(&self.tapes, id, element, window)
+        taped(&self.tapes, id, element, window, env_doc)
     }
 
     /// Builds the unit `id` of the last frame built whole (see `Retain::begin_unit`) as it is at
@@ -9494,6 +9495,7 @@ impl GpuixView {
         self.note_pass(window);
         let mut env = self.retain.unit(id)?.env.clone();
         env.start.now = now;
+        let doc = env.start.doc_path();
         let effects = crate::tape::build_effects_len();
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();
@@ -9518,7 +9520,7 @@ impl GpuixView {
         self.frame_instant = Some(now);
         self.emit_css_events(&callback, &tree);
         emit_layout_events(&callback, &tree, self.layout_flips.take_events());
-        let tape = crate::tape::Tape::capturing();
+        let tape = crate::tape::Tape::capturing(doc);
         Some(ScratchUnit {
             id: retained_id(id),
             element: crate::tape::Taped::new(element, tape.clone()).into_any_element(),
@@ -10765,7 +10767,6 @@ fn build_element_in(
             id,
             revision: known.subtree_revision,
             inherited: &ctx.inherited,
-            at: ctx.doc_path.last().copied().unwrap_or(0),
             stacking_root: ctx.stacking_root,
             stacking_item: ctx.stacking_item,
             placed_by_parent: ctx.placed_by_parent,
@@ -10878,6 +10879,11 @@ pub(crate) struct BuildStart {
 }
 
 impl BuildStart {
+    /// Where the element this starts the build of sits in the document.
+    fn doc_path(&self) -> crate::text::selection::DocPath {
+        crate::text::selection::DocPath::new(self.doc_hosts.clone(), self.doc_path.as_slice().into())
+    }
+
     /// What `ctx` hands the element it is about to build, left as it is: the element takes the
     /// flags itself.
     fn of(ctx: &BuildCtx) -> Self {
@@ -10964,6 +10970,7 @@ fn retained_root(
     ctx.stacking_item = false;
     ctx.placed_by_parent = false;
     ctx.text_box_trim = Default::default();
+    let doc = ctx.doc_path();
     let env = FrameEnv { start, enter: skip.enter, relocatable: skip.overscan.is_some(), forced: ctx.retain.in_forced_content() };
     let patch_root_env = env.clone();
     let view = cx.weak_entity();
@@ -10975,7 +10982,7 @@ fn retained_root(
                 .expect("the view of a window lives as long as the window draws")
         },
     )
-    .on_replay_translated(replay_hook(id, ctx.tapes.clone(), ctx.measurements.clone()));
+    .on_replay_translated(replay_hook(id, ctx.tapes.clone(), ctx.measurements.clone(), doc));
     if let Some(overscan) = skip.overscan {
         retained = retained.relocatable(overscan);
     }
@@ -11002,14 +11009,14 @@ fn retained_root(
 /// `element`, the build of the root `id`, with the tape that goes with what gpui records of it: the
 /// tape of the recording of a presented frame, or in a pass that only lays out the tape of its layout
 /// record, which is kept apart so that the recording that stands keeps its own.
-fn taped(tapes: &crate::tape::Tapes, id: u64, element: gpui::AnyElement, window: &gpui::Window) -> gpui::AnyElement {
+fn taped(tapes: &crate::tape::Tapes, id: u64, element: gpui::AnyElement, window: &gpui::Window, doc: crate::text::selection::DocPath) -> gpui::AnyElement {
     use gpui::IntoElement;
 
     if window.retention_records() {
-        let tape = tapes.renew(id);
+        let tape = tapes.renew(id, doc);
         crate::tape::Taped::new(element, tape).into_any_element()
     } else if window.is_layout_pass() && window.retention_allowed() {
-        let tape = crate::tape::Tape::laid_out();
+        let tape = crate::tape::Tape::laid_out(doc);
         tapes.set_laid_out(id, tape.clone());
         crate::tape::Taped::laid_out(element, tape).into_any_element()
     } else {
@@ -11022,11 +11029,13 @@ pub(crate) fn retained_id(id: u64) -> gpui::ElementId {
 }
 
 /// What a replay of the retained root `id` does outside the frame: the registries it wrote are
-/// written again from its tape.
+/// written again from its tape. `doc` is where the root is in the document in the frame that makes the hook: its text goes
+/// under that path, wherever the root was when it was recorded.
 pub(crate) fn replay_hook(
     id: u64,
     tapes: crate::tape::Tapes,
     measurements: crate::motion::measure::Measurements,
+    doc: crate::text::selection::DocPath,
 ) -> impl Fn(gpui::RetainedPhase, gpui::Point<gpui::Pixels>, &mut gpui::Window, &mut gpui::App) + 'static {
     move |phase, delta, window, _| {
         let phase = match phase {
@@ -11046,7 +11055,7 @@ pub(crate) fn replay_hook(
             gpui::RetainedPhase::LiftedPaint(rel) => crate::tape::Phase::Lifted(rel),
             gpui::RetainedPhase::Scrolled(shift) => return tapes.shift(window.window_handle().window_id(), id, shift),
         };
-        tapes.replay(window.window_handle().window_id(), id, phase, delta);
+        tapes.replay(window.window_handle().window_id(), id, phase, delta, &doc);
     }
 }
 
@@ -11065,8 +11074,8 @@ fn unit_root(
 ) -> gpui::AnyElement {
     use gpui::IntoElement;
 
-    let hook = replay_hook(id, ctx.tapes.clone(), ctx.measurements.clone());
-    let mut retained = gpui::retained(retained_id(id), ctx.retain.unit_key(), taped_build(id, element, ctx.tapes.clone()))
+    let hook = replay_hook(id, ctx.tapes.clone(), ctx.measurements.clone(), ctx.doc_path());
+    let mut retained = gpui::retained(retained_id(id), ctx.retain.unit_key(), taped_build(id, element, ctx.tapes.clone(), ctx.doc_path()))
         .on_replay_translated(hook)
         .cull_outset(subtree.outset());
     if let Some(z) = lift_z {
@@ -11093,8 +11102,8 @@ fn anchor_root(
 ) -> gpui::AnyElement {
     use gpui::IntoElement;
 
-    let hook = replay_hook(id, ctx.tapes.clone(), ctx.measurements.clone());
-    let retained = gpui::retained(retained_id(id), ctx.retain.unit_key(), taped_build(id, element, ctx.tapes.clone()))
+    let hook = replay_hook(id, ctx.tapes.clone(), ctx.measurements.clone(), ctx.doc_path());
+    let retained = gpui::retained(retained_id(id), ctx.retain.unit_key(), taped_build(id, element, ctx.tapes.clone(), ctx.doc_path()))
         .on_replay_translated(hook)
         .cull_outset(subtree.outset())
         .patchable_relayout();
@@ -11116,8 +11125,8 @@ fn recorded_root(
 ) -> gpui::AnyElement {
     use gpui::IntoElement;
 
-    let hook = replay_hook(id, ctx.tapes.clone(), ctx.measurements.clone());
-    let mut retained = gpui::retained(retained_id(id), recording.token, taped_build(id, element, ctx.tapes.clone()))
+    let hook = replay_hook(id, ctx.tapes.clone(), ctx.measurements.clone(), ctx.doc_path());
+    let mut retained = gpui::retained(retained_id(id), recording.token, taped_build(id, element, ctx.tapes.clone(), ctx.doc_path()))
         .on_replay_translated(hook)
         .cull_outset(recording.subtree.outset());
     if let Some(overscan) = recording.overscan {
@@ -11157,8 +11166,9 @@ pub(crate) fn taped_build(
     id: u64,
     element: gpui::AnyElement,
     tapes: crate::tape::Tapes,
+    doc: crate::text::selection::DocPath,
 ) -> impl FnOnce(&mut gpui::Window, &mut gpui::App) -> gpui::AnyElement {
-    move |window, _| taped(&tapes, id, element, window)
+    move |window, _| taped(&tapes, id, element, window, doc)
 }
 
 /// Takes the query containers and custom properties of the `display: contents` ancestors a

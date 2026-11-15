@@ -199,7 +199,7 @@ pub(crate) fn order_by_rows(window: WindowId, rows: &[crate::tape::Roots]) {
     PARAGRAPHS.with(|paragraphs| paragraphs.borrow_mut().entry(window).or_default().order_by_rows(rows, Kind::Paragraph, entry_of));
 }
 
-fn entry_of(data: &dyn std::any::Any, _: Point<Pixels>) -> Entry {
+fn entry_of(data: &dyn std::any::Any, _: Point<Pixels>, _: crate::tape::DocBase<'_>) -> Entry {
     let (_, container, layout, targets) = data.downcast_ref::<Written>().expect("a paragraph write holds its paragraph");
     Entry { container: *container, layout: layout.clone(), targets: targets.clone() }
 }
