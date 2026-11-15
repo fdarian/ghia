@@ -2665,7 +2665,7 @@ impl Retain {
     /// beyond a restyle by paint, which is the innermost relayout root of it. A unit or a patch root that is a box
     /// root too is also one a hover or a running animation repaints, which is no layout.
     pub(crate) fn is_relaid(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
-        tree.pending_structure().into_iter().any(|changed| tree.elements.contains_key(&changed) && self.relayout_holding(tree, changed) == Some(id))
+        tree.pending_structure_in_frame().into_iter().any(|changed| self.relayout_holding(tree, changed) == Some(id))
     }
 
     /// Whether frames are recorded to be patched: the retention is planning.
@@ -2797,14 +2797,12 @@ impl Retain {
         // The innermost anchor or box root that holds what a commit changed beyond a restyle by paint: it is laid out
         // again, and builds everything in it, so what else changed in it needs no root of its own.
         let mut relaid = FxHashSet::default();
-        for id in sources.tree.pending_structure() {
-            if sources.tree.elements.contains_key(&id) {
-                let holder = self.relayout_holding(sources.tree, id).ok_or(Unpatchable::Structure(id))?;
-                if self.is_anchor_beside_candidate(sources.tree, id, holder) {
-                    return Err(Unpatchable::Structure(id));
-                }
-                relaid.insert(holder);
+        for id in sources.tree.pending_structure_in_frame() {
+            let holder = self.relayout_holding(sources.tree, id).ok_or(Unpatchable::Structure(id))?;
+            if self.is_anchor_beside_candidate(sources.tree, id, holder) {
+                return Err(Unpatchable::Structure(id));
             }
+            relaid.insert(holder);
         }
         let covered = |id: u64| !relaid.is_empty() && self.relayout_holding(sources.tree, id).is_some_and(|holder| relaid.contains(&holder));
         for &id in &sources.hover_paint {
@@ -2812,7 +2810,7 @@ impl Retain {
                 touched.insert(self.root_holding(sources.tree, id).ok_or(Unpatchable::Hover(id))?);
             }
         }
-        for id in sources.tree.pending_restyles() {
+        for id in sources.tree.pending_restyles_in_frame() {
             if covered(id) {
                 continue;
             }
@@ -7544,6 +7542,46 @@ mod tests {
         let mut both = page.preview(&[], false).expect("each is held by a root");
         both.sort();
         assert_eq!(both, vec![1], "the anchor builds the box root in it too, which a patch of both would decline");
+    }
+
+    #[test]
+    fn a_change_of_an_element_that_left_the_document_after_it_is_no_structure_a_patch_has_to_hold() {
+        let mut page = anchored_page();
+        // Noted while it was in the document, then taken out in the same batch: the parent's note covers the removal.
+        page.tree.set_text(5, "words".to_owned());
+        page.tree.detach_child(5);
+        assert!(page.tree.pending_structure().contains(&5), "what was noted stays noted: nothing prunes it");
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "the anchor that held it patches the removal");
+        assert!(page.retain.is_relaid(&page.tree, 1));
+
+        // Kept, with what was noted of it, it is out of the next patches too, until something puts it back.
+        page.tree.set_text(3, "again".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "the next patch finds what is in the document");
+        page.tree.append_child(1, 5);
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "put back, it is in the anchor again");
+    }
+
+    #[test]
+    fn a_change_of_an_element_below_one_that_left_the_document_is_out_of_it_too() {
+        let mut page = anchored_page();
+        page.tree.set_text(3, "words".to_owned());
+        page.tree.set_text(4, "words".to_owned());
+        page.tree.detach_child(2);
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "the box root left the anchor with what it held");
+    }
+
+    #[test]
+    fn a_restyle_by_paint_of_an_element_that_left_the_document_is_no_commit_a_patch_has_to_hold() {
+        let mut page = anchored_page();
+        page.tree.set_style_arc(3, restyled(r##"{"backgroundColor":"#111111"}"##));
+        page.tree.take_dirty();
+        page.tree.take_structure();
+        page.tree.take_restyles();
+        page.tree.set_style_arc(3, restyled(r##"{"backgroundColor":"#222222"}"##));
+        assert_eq!(page.tree.pending_restyles(), [3]);
+        page.tree.detach_child(3);
+        assert_eq!(page.tree.pending_restyles(), [3], "what was noted stays noted: nothing prunes it");
+        assert_eq!(page.preview(&[], false), Ok(vec![2]), "the box root that held it patches the removal");
     }
 
     #[test]
