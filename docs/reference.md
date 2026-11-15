@@ -7835,7 +7835,25 @@ In Solid, a `style` object's keys may also be CSS property names, as on the web 
 each key with `style.setProperty`: `style={{ 'white-space': 'nowrap', 'z-index': 1, '--gap': '4px' }}`
 is `whiteSpace`, `zIndex` and the custom property `--gap`. The camelCase keys keep working, a custom
 property keeps its name, a motion value is bound under either spelling, and where two keys name one
-property the later one wins. React takes camelCase keys only, as React DOM does.
+property the later one wins. The vendor-prefixed names a style key is also known by work in a Solid key and in
+`style.setProperty`: `-webkit-app-region` (Electron's name for `appRegion`), `-webkit-line-clamp` and
+`-webkit-user-select`. A number under a hyphenated key is px, as under a camelCase one, where in a browser
+`style.setProperty('padding-top', 7)` is ignored (a length needs its unit there); a state block (`hover`,
+`focusVisible`, ...) takes camelCase keys only.
+
+solid-js types `style` as `CSSProperties | string`, and a string is CSS text, as on the web where Solid
+writes it with `style.cssText`: `style="color: red; padding-top: 4px"` is the declarations of the text
+(a part that is no declaration is dropped, `!important` is kept) and nothing else, so it replaces the
+previous style, string or object, and `""` or `undefined` leaves no `style` attribute. What code wrote
+through `element.style` stays, as it does when the object changes. 
+A style typed as solid-js's `JSX.CSSProperties` (csstype's `0 | string` lengths) is assignable to
+`style`: the widening covers `mask`, `border`, `outline`, `translate`, `background` and `animation`,
+which take a number (written as React DOM writes it: `0` is `0`, any other number is `npx`; that is
+a valid `border`, `outline`, `translate` or `background`, and for `animation` it is an invalid value,
+dropped), `opacity` and `order` (a numeric string), `direction` and `cursor` (any string; one that is not a
+supported keyword is ignored, so a `url()` list takes no effect). React takes camelCase keys only: a
+hyphenated key in a React `style` is ignored, where React DOM, which assigns `style[name] = value`,
+also takes a dashed name in a browser (with a dev warning). See [deviations](./fork/deviations.md#dom-attributes).
 
 > [!IMPORTANT]
 > **Ghia styles look like CSS but are not CSS.** A few differences trip
@@ -8926,11 +8944,8 @@ hides and any opaque colour shows. `maskSize`, `maskPosition`,
 layers, and `mask` is the shorthand (layers, `position / size`, repeat, origin
 and clip boxes, a mode and a composite keyword). A longhand written after it wins over it.
 A number `mask` is px, as for the other lengths, so `mask: 0` is `mask-position: 0`: a mask
-with no image, which is no mask, as in Chrome. A style typed as solid-js's `JSX.CSSProperties`
-(csstype's `0 | string` lengths) is assignable to `style` for this reason, and for the same
-widening on `border`, `outline`, `translate`, `background`, `animation` (a number there is
-an invalid value, dropped), `opacity` and `order` (a numeric string), `direction` and `cursor`
-(any string; one that is not a supported keyword is ignored, so a `url()` list takes no effect).
+with no image, which is no mask, as in Chrome. (A number is also what a `JSX.CSSProperties` style may hold on
+other properties: see [Supported Styles](#supported-styles).)
 `maskOrigin` and `maskClip` start at
 `border-box`, not at the `padding-box` a background starts from. A layer that does
 not cover an area leaves it hidden, so a non-repeating mask hides what it does not
