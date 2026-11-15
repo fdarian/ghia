@@ -1806,7 +1806,8 @@ fn a_detached_subtree_that_loses_its_rules_is_no_change_of_the_frame() {
     // Put back, it is matched again and the change is the parent's.
     doc.tree.append_child(ROOT, card);
     doc.flush();
-    assert_eq!(doc.color(label), Some("blue"));
+    assert_eq!(doc.color(card), Some("red"), "its rules match again");
+    assert_eq!(doc.color(label), Some("#ff0000"), "under the inline style it was given out of the tree");
     assert_eq!(doc.tree.pending_structure().first(), Some(&ROOT));
 }
 

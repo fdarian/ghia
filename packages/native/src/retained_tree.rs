@@ -1368,6 +1368,13 @@ impl RetainedTree {
         revision
     }
 
+    /// A revision that invalidates the caches and changes nothing a frame draws.
+    fn take_revision_outside_the_frame(&mut self) -> u64 {
+        let revision = self.next_revision;
+        self.next_revision = self.next_revision.wrapping_add(1).max(1);
+        revision
+    }
+
     fn take_revision_for(&mut self, dirty: Dirty, id: Option<u64>) -> u64 {
         // Every content change takes a revision to invalidate caches, so this is
         // the one place that covers style, text, structure and custom props.
@@ -1401,7 +1408,9 @@ impl RetainedTree {
     fn mark_paint_changed(&mut self, id: u64, strict: bool) {
         if strict {
             self.mark_changed_detail(id, false, Dirty::PaintPatchable);
-            self.restyled.get_mut().push(id);
+            if !self.outside_the_frame(id) {
+                self.restyled.get_mut().push(id);
+            }
         } else {
             self.mark_changed_detail(id, false, Dirty::Paint);
         }
@@ -1424,8 +1433,20 @@ impl RetainedTree {
         }
     }
 
+    /// Whether a change of `id` is one no frame draws: with patch frames made, an element that is not under the root. It is
+    /// out of the frame, and putting it in is a change of its own (`append_child`, `insert_before`), noted for the
+    /// parent that takes it. It is what a stylesheet unmatches when `detach_child` takes a subtree out, which would
+    /// otherwise be a `Structure` no anchor holds, declined by the next read of layout.
+    fn outside_the_frame(&self, id: u64) -> bool {
+        self.commit_patching && self.root_id.is_some() && !crate::css::computed_style::is_connected(self, id)
+    }
+
     fn mark_changed_detail(&mut self, id: u64, search: bool, dirty: Dirty) -> u64 {
-        let revision = self.take_revision_for(dirty, Some(id));
+        let revision = if self.outside_the_frame(id) {
+            self.take_revision_outside_the_frame()
+        } else {
+            self.take_revision_for(dirty, Some(id))
+        };
         let mut current = Some(id);
         while let Some(current_id) = current {
             let Some(element) = self.elements.get_mut(&current_id) else {
