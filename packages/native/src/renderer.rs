@@ -10334,6 +10334,7 @@ impl gpui::Render for GpuixView {
                 tapes.describe_replays(window.is_retention_reference())
             }) as Rc<dyn Fn(&gpui::Window) -> String>
         }));
+        self.tapes.begin_frame();
         if !window.is_retention_reference() {
             self.tapes.forget_replays();
         }
@@ -11029,14 +11030,17 @@ pub(crate) fn retained_id(id: u64) -> gpui::ElementId {
 }
 
 /// What a replay of the retained root `id` does outside the frame: the registries it wrote are
-/// written again from its tape. `doc` is where the root is in the document in the frame that makes the hook: its text goes
-/// under that path, wherever the root was when it was recorded.
+/// written again from its tape. `doc` is where the visit that makes the hook found the root in the document. The hook does not
+/// keep it: gpui keeps a lifted root that is no relocatable as a hole in the recording of the root around it, and paints the
+/// hole with the hook it had when that recording was made, which a later frame may paint after something was inserted before
+/// that root. The text goes under the path the root has when the hook runs ([`crate::tape::TapeStore::doc_of`]).
 pub(crate) fn replay_hook(
     id: u64,
     tapes: crate::tape::Tapes,
     measurements: crate::motion::measure::Measurements,
     doc: crate::text::selection::DocPath,
 ) -> impl Fn(gpui::RetainedPhase, gpui::Point<gpui::Pixels>, &mut gpui::Window, &mut gpui::App) + 'static {
+    tapes.visited(id, doc);
     move |phase, delta, window, _| {
         let phase = match phase {
             gpui::RetainedPhase::Prepaint => {
@@ -11055,7 +11059,7 @@ pub(crate) fn replay_hook(
             gpui::RetainedPhase::LiftedPaint(rel) => crate::tape::Phase::Lifted(rel),
             gpui::RetainedPhase::Scrolled(shift) => return tapes.shift(window.window_handle().window_id(), id, shift),
         };
-        tapes.replay(window.window_handle().window_id(), id, phase, delta, &doc);
+        tapes.replay(window.window_handle().window_id(), id, phase, delta, &tapes.doc_of(id));
     }
 }
 

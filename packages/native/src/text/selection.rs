@@ -85,20 +85,25 @@ fn host_of(path: &Arc<[u32]>) -> Host {
     Host { path: path.clone(), sub: 0, offset: 0 }
 }
 
-/// The levels `hosts` and `last` hold with `root`'s taken off the front. Panics for levels that are
-/// not under `root`: a text is recorded under the root that is being recorded, and a root under the
-/// root it is nested in, so a position that is not is a bug in the document path.
+/// The levels `hosts` and `last` hold with `root`'s taken off the front.
+///
+/// A position that is not under `root` is a bug in the document path, which a debug build asserts and a release build keeps as it
+/// is. Every caller strips a position from the root it was recorded under, or a root from the root it was nested in, and takes
+/// the root from the same tape: the path a replay has for a root is [`crate::tape::TapeStore::doc_of`], which is where the
+/// root that holds the recording has it now.
 fn strip_root(hosts: &Arc<[Host]>, last: &Host, root: &DocPath) -> (Arc<[Host]>, Host) {
     let shared = root.hosts.len();
-    assert!(
-        hosts.len() >= shared && hosts[..shared] == root.hosts[..],
-        "a document position is under the paragraphs that host its root: {hosts:?} under {root:?}"
-    );
+    let under = hosts.len() >= shared && hosts[..shared] == root.hosts[..];
+    debug_assert!(under, "a document position is under the paragraphs that host its root: {hosts:?} under {root:?}");
+    if !under {
+        return (hosts.clone(), last.clone());
+    }
     let own = hosts.len() == shared;
     let first = if own { last } else { &hosts[shared] };
-    let path = first.path.strip_prefix(&root.path[..]).unwrap_or_else(|| {
-        panic!("a document position is under the path of its root: {:?} under {:?}", first.path, root.path)
-    });
+    let Some(path) = first.path.strip_prefix(&root.path[..]) else {
+        debug_assert!(false, "a document position is under the path of its root: {:?} under {:?}", first.path, root.path);
+        return (hosts.clone(), last.clone());
+    };
     let first = Host { path: path.into(), ..first.clone() };
     if own {
         (Arc::from([]), first)

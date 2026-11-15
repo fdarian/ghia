@@ -883,6 +883,12 @@ pub(crate) struct Tape {
     /// The path of the root the tape records, as the build that made it had it: the position of a
     /// text it holds is kept as seen from here ([`DocPos::relative_to`]).
     doc: DocPath,
+    /// The root this is the tape of, once the store has it, for the tape of the root around to say who it was nested in.
+    root: Option<u64>,
+    /// The root whose recording the prepaint of this one was last nested in, and where this one is in that root: how a root
+    /// that a frame replays without visiting it (a hole in the recording of a root that was replayed) finds the path it has
+    /// now, see [`TapeStore::doc_of`].
+    nested_in: RefCell<Option<(u64, DocPath)>>,
 }
 
 impl Default for Tape {
@@ -894,6 +900,8 @@ impl Default for Tape {
             capture_only: false,
             laid_out: false,
             doc: DocPath::default(),
+            root: None,
+            nested_in: RefCell::new(None),
         }
     }
 }
@@ -974,6 +982,19 @@ impl Tape {
         }
     }
 
+    /// The prepaint of this tape was nested in the recording of `outer`, `under` its root.
+    fn note_nested_in(&self, outer: &Tape, under: &DocPath) {
+        if let Some(outer) = outer.root {
+            *self.nested_in.borrow_mut() = Some((outer, under.clone()));
+        }
+    }
+
+    /// This tape takes the place of `old`, the tape of the root before a patch built it again: the root is where it was nested.
+    fn takes_place_of(&mut self, old: &Tape) {
+        self.root = old.root;
+        *self.nested_in.get_mut() = old.nested_in.borrow().clone();
+    }
+
     fn entries(&self, phase: Phase) -> Option<&Rc<Entries>> {
         match phase {
             Phase::Prepaint => Some(&self.prepaint),
@@ -1012,6 +1033,7 @@ impl Tape {
     /// holds any more to record into.
     fn renew(&mut self, doc: DocPath) {
         self.doc = doc;
+        *self.nested_in.get_mut() = None;
         self.capture_only = false;
         self.laid_out = false;
         self.lifted.clear();
@@ -1077,6 +1099,7 @@ impl Tape {
                         );
                         let mut outer = recording.tape.borrow_mut();
                         let under = doc.relative_to(&outer.doc);
+                        self.note_nested_in(&outer, &under);
                         let outer = outer.recording(recording.phase);
                         outer.push_nested(self.prepaint.clone(), delta, under.clone());
                         outer.push_nested(self.paint.clone(), delta, under);
@@ -1103,6 +1126,9 @@ impl Tape {
                 );
                 let mut outer = recording.tape.borrow_mut();
                 let under = doc.relative_to(&outer.doc);
+                if phase == Phase::Prepaint {
+                    self.note_nested_in(&outer, &under);
+                }
                 outer.recording(recording.phase).push_nested(entries.clone(), delta, under);
             }
         });
@@ -1149,6 +1175,9 @@ pub(crate) struct TapeStore {
     /// ordinal: a root that replayed has to have put back every one it wrote when it was built.
     replayed_lifted: RefCell<Vec<(u64, u32, String)>>,
     rows: RefCell<Rows>,
+    /// The path each root a frame visited has in the document, as the frame has it ([`TapeStore::visited`]), for the hook of a root
+    /// to put its text under the path the root has now, whatever the frame that made the hook had.
+    docs: RefCell<FxHashMap<u64, DocPath>>,
 }
 
 /// Which rows of virtual lists the frame shown has, and what a frame that moved them in place did to
@@ -1181,18 +1210,55 @@ impl TapeStore {
         self.moved.borrow_mut().remove(&root);
         let mut tapes = self.tapes.borrow_mut();
         if let Some(tape) = tapes.get(&root).filter(|tape| Rc::strong_count(tape) == 1) {
-            tape.borrow_mut().renew(doc);
+            let mut tape_mut = tape.borrow_mut();
+            tape_mut.renew(doc);
+            tape_mut.root = Some(root);
+            drop(tape_mut);
             return tape.clone();
         }
         let tape = SharedTape::default();
-        tape.borrow_mut().doc = doc;
+        {
+            let mut tape = tape.borrow_mut();
+            tape.doc = doc;
+            tape.root = Some(root);
+        }
         tapes.insert(root, tape.clone());
         tape
     }
 
+    #[cfg(test)]
     pub(crate) fn set(&self, root: u64, tape: SharedTape) {
         self.moved.borrow_mut().remove(&root);
+        tape.borrow_mut().root = Some(root);
         self.tapes.borrow_mut().insert(root, tape);
+    }
+
+    /// A frame is about to build: the roots it visits say where they are, and nothing is known of a root that it does not visit
+    /// until a replay of the root it is in says so (see [`Self::doc_of`]).
+    pub(crate) fn begin_frame(&self) {
+        self.docs.borrow_mut().clear();
+    }
+
+    /// The frame visited `root` where `doc` is: a root it builds, and a root it leaves unbuilt for gpui to replay.
+    pub(crate) fn visited(&self, root: u64, doc: DocPath) {
+        self.docs.borrow_mut().insert(root, doc);
+    }
+
+    /// The path `root` has in the frame being drawn. A root the frame visited has the path it said. A root it did not is inside a
+    /// root that was replayed (a lifted root that is no relocatable is a hole in the recording of the root around it, and the
+    /// stacking context paints the hole with the hook it had when that recording was made): it is where the recording that
+    /// last held it had it in the root of that recording, which is where the frame has that root.
+    pub(crate) fn doc_of(&self, root: u64) -> DocPath {
+        if let Some(doc) = self.docs.borrow().get(&root) {
+            return doc.clone();
+        }
+        let nested_in = |tapes: &RefCell<FxHashMap<u64, SharedTape>>| tapes.borrow().get(&root).and_then(|tape| tape.borrow().nested_in.borrow().clone());
+        let (outer, under) = nested_in(&self.tapes)
+            .or_else(|| nested_in(&self.laid_out))
+            .expect("a root that a frame replays without visiting is inside the recording of a root that it visits");
+        let doc = under.under(&self.doc_of(outer));
+        self.docs.borrow_mut().insert(root, doc.clone());
+        doc
     }
 
     /// How far from where the last build of `root` wrote it the frame shown has it: what a patch that builds the root again, where
@@ -1203,6 +1269,7 @@ impl TapeStore {
 
     /// `tape` is what a pass that only lays out wrote when it built `root`.
     pub(crate) fn set_laid_out(&self, root: u64, tape: SharedTape) {
+        tape.borrow_mut().root = Some(root);
         self.laid_out.borrow_mut().insert(root, tape);
     }
 
@@ -1235,6 +1302,7 @@ impl TapeStore {
     pub(crate) fn replace_recorded(&self, window: WindowId, root: u64, captured: &SharedTape, moved: Point<Pixels>) {
         let old = self.tapes.borrow().get(&root).cloned();
         if let Some(old) = old {
+            {
             let (old, new) = (old.borrow(), captured.borrow());
             let roots = old.roots();
             crate::text::replace(window, &roots, &new.lives(moved));
@@ -1251,6 +1319,8 @@ impl TapeStore {
                 }
             });
             crate::automation::forget_boxes(window, &gone);
+            }
+            captured.borrow_mut().takes_place_of(&old.borrow());
         }
         self.tapes.borrow_mut().insert(root, captured.clone());
     }
@@ -1273,6 +1343,7 @@ impl TapeStore {
         new.each(Kind::Bounds, &mut |data, offset| crate::automation::publish_captured_bounds(data, offset + moved));
         OWNER.set(before);
         drop(new);
+        captured.borrow_mut().takes_place_of(&old.borrow());
         self.tapes.borrow_mut().insert(root, captured.clone());
     }
 
@@ -1526,6 +1597,9 @@ impl Recording {
             if let Some(outer) = recordings.borrow().last() {
                 let mut outer_tape = outer.tape.borrow_mut();
                 let under = doc.relative_to(&outer_tape.doc);
+                if self.phase == Phase::Prepaint {
+                    self.tape.borrow().note_nested_in(&outer_tape, &under);
+                }
                 outer_tape.recording(outer.phase).push_nested(written, Point::default(), under);
             }
         });
@@ -2030,6 +2104,32 @@ mod tests {
             seen.push(base.place(&DocPos::new(Arc::<[u32]>::from([0]), 0)));
         });
         assert_eq!(seen, [DocPos::new(Arc::<[u32]>::from([9, 1, 2, 0]), 0)], "the root moved from 4 to 9, the child is its first, the grandchild the child's second");
+    }
+
+    #[test]
+    fn a_root_the_frame_did_not_visit_has_the_path_of_the_root_that_holds_its_recording_now() {
+        use std::sync::Arc;
+        let path = |path: &[u32]| DocPath::from(Arc::<[u32]>::from(path));
+        let at = |doc: DocPath| DocPos::new(doc, 0);
+        let tapes = TapeStore::default();
+        // Roots 1, 2 and 3 are nested in the recording of the one before, 2 at [4, 1] and 3 at [4, 1, 2].
+        let (outer, hole, deeper) = (tapes.renew(1, path(&[4])), tapes.renew(2, path(&[4, 1])), tapes.renew(3, path(&[4, 1, 2])));
+        {
+            let _outer = Recorder::begin(&outer, Phase::Prepaint);
+            let _hole = Recorder::begin(&hole, Phase::Prepaint);
+            let _deeper = Recorder::begin(&deeper, Phase::Prepaint);
+            write(Kind::Paragraph, 1_i32, |_| {}, |_, _| String::new());
+        }
+        tapes.begin_frame();
+        // A sibling was inserted before the root that the frame replays, which says where it is now.
+        tapes.visited(1, path(&[9]));
+        assert_eq!(at(tapes.doc_of(2)), at(path(&[9, 1])));
+        assert_eq!(at(tapes.doc_of(3)), at(path(&[9, 1, 2])));
+        tapes.begin_frame();
+        tapes.visited(1, path(&[4]));
+        tapes.visited(3, path(&[7, 7]));
+        assert_eq!(at(tapes.doc_of(2)), at(path(&[4, 1])), "a frame says again where it is");
+        assert_eq!(at(tapes.doc_of(3)), at(path(&[7, 7])), "a root that the frame visited is where the visit found it");
     }
 
     #[test]
