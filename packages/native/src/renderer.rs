@@ -12568,6 +12568,7 @@ pub(crate) fn build_host_container(
         ctx.retain.show_content(element.id);
     }
     if remembers_size {
+        ctx.retain.watches_relevance();
         // The matches of a search in the content it skips are numbered where the element is.
         let skipped_matches = ctx
             .inherited

@@ -438,6 +438,9 @@ struct Record {
     lift_run: bool,
     /// The element or something in it is lifted out of it, which a recording is not moved with.
     lifts: bool,
+    /// Something in it lifts out of it, past it to the context around (`Node::lifts_out`): the
+    /// part of `lifts` that is not its own `lift_z`.
+    lifts_out: bool,
     /// What `Below::holes` added up to when it was built: what the lifted elements in it, however
     /// deep, were keyed by.
     holes: u64,
@@ -723,6 +726,9 @@ struct Node {
     /// The element is the host of content that a read of geometry forces to be built, see
     /// [`Retain::forced_host`].
     forced_host: bool,
+    /// The element carries the relevance watch (`layout::content_visibility::watch`), see
+    /// [`Retain::watches_relevance`] and [`Node::lifts_out`].
+    watches_relevance: bool,
     /// An element above it is a forced host: it is built as the content of one.
     under_forced: bool,
     /// `background_images::still_loading` when the element was entered.
@@ -733,6 +739,21 @@ struct Node {
     /// `custom_properties::reads::count` when the element was entered, while it is built.
     custom_reads_at: u64,
     reads_custom: bool,
+}
+
+impl Node {
+    /// Whether something in the element lifts out of it, to the stacking context around it. An element
+    /// that forms a context keeps what is lifted in it, so its recording holds it. The element's own
+    /// `lift_z` is not this: it only matters to the parent, which `Below::lifts` takes it for, and a
+    /// root that lifts itself and forms a context is recorded and moved whole, as gpui records
+    /// it (`Retained::lift_z` with `Retained::relocatable`).
+    ///
+    /// The exception is an element that carries the relevance watch: its own `lift_z` counts. A replay
+    /// that moves it skips the prepaint listener of the watch, which remembers its size and answers
+    /// whether it is near the viewport, and moving it is when that answer changes.
+    fn lifts_out(&self, below: &Below) -> bool {
+        (self.watches_relevance && self.lift_z.is_some()) || (!self.forms_context && below.lifts)
+    }
 }
 
 /// Whether building the element alone costs more than replaying it: it carries text (its own, or a
@@ -2960,6 +2981,7 @@ impl Retain {
             collapsed_table: false,
             wrapped: None,
             forced_host: false,
+            watches_relevance: false,
             under_forced: self.nodes.get(parent as usize).map_or(self.deferred_forced, |parent| parent.forced_host || parent.under_forced),
             loading: crate::background_images::still_loading(),
             colors_frame: None,
@@ -3007,7 +3029,7 @@ impl Retain {
                     Some(wrapped) if self.layout_only => wrapped,
                     _ => node
                         .scroller
-                        .filter(|scroller| scroller.holds(node.id) && !record.lifts)
+                        .filter(|scroller| scroller.holds(node.id) && !record.lifts_out)
                         .map(|scroller| scroller.overscan),
                 };
                 let planned = overscan.is_some() && moved && record.seasoned;
@@ -3048,7 +3070,7 @@ impl Retain {
     /// to be moved, and frames are not resting from planning on it.
     fn relocates(&self, node: &Node, record: Option<&Record>) -> bool {
         !self.relocation.resting
-            && record.is_some_and(|record| !record.lifts)
+            && record.is_some_and(|record| !record.lifts_out)
             && node.scroller.is_some_and(|scroller| scroller.holds(node.id))
     }
 
@@ -3120,7 +3142,7 @@ impl Retain {
         // a build that is not asked to move it does not. A pass that only lays out follows the wrap.
         if !self.layout_only
             && record.wrapped.is_some_and(|overscan| overscan.is_some())
-            && !(node.scroller.is_some_and(|scroller| scroller.holds(node.id)) && !record.lifts)
+            && !(node.scroller.is_some_and(|scroller| scroller.holds(node.id)) && !record.lifts_out)
         {
             return Err(Kept::Unmoved);
         }
@@ -3198,10 +3220,11 @@ impl Retain {
         if node.scroller.is_some_and(|scroller| scroller.too_big(node.id)) {
             return None;
         }
-        let lifts = node.lift_z.is_some() || (!node.forms_context && own.lifts);
+        let lifts_out = node.lifts_out(own);
+        let lifts = node.lift_z.is_some() || lifts_out;
         let overscan = node
             .scroller
-            .filter(|scroller| !lifts && scroller.fits(node.id) != Some(false))
+            .filter(|scroller| !lifts_out && scroller.fits(node.id) != Some(false))
             .map(|scroller| scroller.overscan);
         Some(Recording {
             token: own.token,
@@ -3237,7 +3260,7 @@ impl Retain {
             (Some(_), Some(record)) => (record.lifts, record.epoch, record.token, record.holes),
             (Some(_), None) => unreachable!("an element is skipped by the record of its last build"),
             (None, before) => {
-                let escapes = node.lift_z.is_some() || (!node.forms_context && own.lifts);
+                let escapes = node.lift_z.is_some() || node.lifts_out(&own);
                 let epoch = match (before, self.deferred) {
                     (Some(before), true) => before.epoch,
                     (Some(before), false) => before.epoch + 1,
@@ -3389,6 +3412,14 @@ impl Retain {
     pub(crate) fn forced_host(&mut self) {
         if let Some(node) = self.top() {
             node.forced_host = true;
+        }
+    }
+
+    /// The element being built carries the relevance watch, which asks whether it is near the viewport
+    /// when it is prepainted: a replay that moves it does not run that, see [`Node::lifts_out`].
+    pub(crate) fn watches_relevance(&mut self) {
+        if let Some(node) = self.top() {
+            node.watches_relevance = true;
         }
     }
 
@@ -3625,7 +3656,7 @@ impl Retain {
                 }
             });
         }
-        if !node.forms_context && own.lifts {
+        if node.lifts_out(&own) {
             return Some(Refusal::Lifts);
         }
         if own.size > UNIT_MAX_ELEMENTS {
@@ -3697,14 +3728,15 @@ impl Retain {
             // An absolute element is no root to skip, and it is the root of a unit.
             let escaped_below = !node.positioned && own.escapes;
             let unit_clear = node.exclusion.is_none() && own.excluded.is_none() && !escaped_below;
-            let lifts = node.lift_z.is_some() || (!node.forms_context && own.lifts);
+            let lifts_out = node.lifts_out(&own);
+            let lifts = node.lift_z.is_some() || lifts_out;
             let clean = own.changed.is_none() && !own.changed_below;
             let parent = (node.parent != NO_PARENT).then_some(node.parent as usize);
             self.moved[at] = parent.is_some_and(|parent| self.moved[parent] || self.below[parent].scrolled);
             // A root under a scroller that gpui can record to move is skipped by a frame that finds
             // the scroller moved. One that it cannot is built when it does.
             let holds = eligible
-                && !lifts
+                && !lifts_out
                 && node.skipped.is_none()
                 && node.scroller.is_some_and(|scroller| scroller.holds(node.id));
             let relocates = holds && !self.relocation.resting;
@@ -3799,6 +3831,7 @@ impl Retain {
                     forms_context: node.forms_context,
                     lift_run: node.lift_run,
                     lifts,
+                    lifts_out,
                     holes,
                     size: own.size,
                     patch_root: node.patch_root && eligible && !lifts && own.size <= PATCH_ROOT_MAX_ELEMENTS && node.vol.dynamic == 0 && !own.dynamic,
@@ -6870,7 +6903,7 @@ mod tests {
     }
 
     #[test]
-    fn a_row_root_that_does_not_lift_is_relocatable_whatever_is_lifted_inside_its_context() {
+    fn a_row_root_is_relocatable_whatever_is_lifted_inside_its_context_and_whether_it_lifts_itself() {
         let window = gpui::WindowId::from(4);
         let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
         crate::automation::set_bounds(window, 3, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
@@ -6879,18 +6912,18 @@ mod tests {
         let skip = row_skip(&mut Units::new(), list, None, true);
         assert_eq!(skip.lift_z, None);
         assert_eq!(skip.overscan, Some(gpui::px(390.0)));
-        // A root that lifts is a hole in gpui's recording and cannot be put elsewhere.
+        // A root that lifts and forms a context keeps what is lifted in it, so it is relocatable too.
         let skip = row_skip(&mut Units::new(), list, Some(0), true);
         assert_eq!(skip.lift_z, Some(0));
-        assert_eq!(skip.overscan, None);
+        assert_eq!(skip.overscan, Some(gpui::px(390.0)));
     }
 
     #[test]
-    fn a_root_that_is_no_row_keeps_its_lift_and_is_not_relocatable() {
+    fn a_root_is_relocatable_unless_something_lifts_out_of_it_or_it_is_watched_and_lifts_itself() {
         let window = gpui::WindowId::from(5);
         let scroller = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
         crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
-        let root_skip = |lift_z: Option<i32>| {
+        let root_skip = |lift_z: Option<i32>, forms_context: bool, child_lifted: bool, watched: bool| {
             let mut page = Units::new();
             for _ in 0..2 {
                 let mut skip = None;
@@ -6899,8 +6932,16 @@ mod tests {
                     page.element(1, None, |page| {
                         skip = page.enter_in(2, Some(scroller));
                         if skip.is_none() {
-                            page.retain.stacking(|| (lift_z, false));
+                            page.retain.stacking(|| (lift_z, forms_context));
+                            if watched {
+                                page.retain.watches_relevance();
+                            }
                             page.leaf(3);
+                            if child_lifted {
+                                assert!(!page.enter(4));
+                                page.retain.stacking(|| (Some(1), false));
+                                page.retain.exit();
+                            }
                             page.retain.exit();
                         }
                     });
@@ -6911,10 +6952,27 @@ mod tests {
             }
             unreachable!("the second frame found the root unchanged")
         };
-        let lifting = root_skip(Some(0));
-        assert_eq!(lifting.lift_z, Some(0));
-        assert_eq!(lifting.overscan, None);
-        assert_eq!(root_skip(None).overscan, Some(gpui::px(390.0)));
+        let overscan = Some(gpui::px(390.0));
+        // The lift of the root is kept, and is not what keeps gpui from moving it: the stacking
+        // context takes it where it is and the recording around it holds no hole for it.
+        let lifted = root_skip(Some(0), false, false, false);
+        assert_eq!(lifted.lift_z, Some(0));
+        assert_eq!(lifted.overscan, overscan);
+        let forming = root_skip(Some(0), true, true, false);
+        assert_eq!(forming.lift_z, Some(0));
+        assert_eq!(forming.overscan, overscan, "what is lifted in its own context stays in the recording");
+        assert_eq!(root_skip(None, false, false, false).overscan, overscan);
+        // What lifts out of a root that forms no context is a hole in its recording, lifted or not.
+        let leaking = root_skip(Some(0), false, true, false);
+        assert_eq!(leaking.lift_z, Some(0));
+        assert_eq!(leaking.overscan, None);
+        assert_eq!(root_skip(None, false, true, false).overscan, None);
+        // A root with the relevance watch is not moved by its own lift either: the replay would skip the
+        // listener that answers whether it is near, and its move is when that changes.
+        let watched = root_skip(Some(0), true, false, true);
+        assert_eq!(watched.lift_z, Some(0));
+        assert_eq!(watched.overscan, None);
+        assert_eq!(root_skip(None, true, false, true).overscan, overscan, "a watched root that does not lift is moved");
     }
 
     #[test]
