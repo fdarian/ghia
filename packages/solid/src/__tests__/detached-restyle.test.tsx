@@ -11,7 +11,7 @@ import path from "node:path"
 import { For, Show, createSignal } from "solid-js"
 import { describe, expect, it } from "vitest"
 import { getComputedStyle } from "@ghia/native/host"
-import { insertHostNode, removeHostNode } from "../host.js"
+import { insertHostNode, removeHostNode, setHostProperty } from "../host.js"
 import type { HostElement } from "../host.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import type { TestRenderer } from "../testing.js"
@@ -34,6 +34,7 @@ const SHEET = `
   .row.selected { background-color: #335577 }
   .detail { flex-grow: 1; min-width: 0; height: 100%; padding: 16px; overflow-y: auto; background-color: #ffffff }
   .message { display: flex; flex-direction: column; gap: 8px }
+  .message.wide { gap: 12px }
   .title { font-size: 16px; color: #18181b }
   .paragraph { font-size: 14px; color: #27272a }
 `
@@ -41,7 +42,7 @@ const SHEET = `
 type Styling = "class" | "inline"
 
 const inline = {
-  message: { display: "flex", flexDirection: "column", gap: 8 },
+  message: { display: "flex", flexDirection: "column", gap: 8, backgroundColor: "#eeeeee" },
   title: { fontSize: 16, color: "#18181b" },
   paragraph: { fontSize: 14, color: "#27272a" },
 } as const
@@ -52,6 +53,7 @@ function open(styling: Styling) {
   const app = createTestRoot({ width: 600, height: 400 })
   let detail!: HostElement
   let list!: HostElement
+  let message!: HostElement
   const byClass = styling === "class"
   app.render(() => (
     <div style={{ display: "flex", flexDirection: "row", width: 600, height: 400, backgroundColor: "#ffffff" }}>
@@ -75,7 +77,7 @@ function open(styling: Styling) {
       <div ref={detail} testId="detail" class="detail">
         <Show when={selected()} keyed>
           {(current) => (
-            <div testId={`message-${current}`} class={byClass ? "message" : undefined} style={byClass ? undefined : inline.message}>
+            <div ref={message} testId={`message-${current}`} class={byClass ? "message" : undefined} style={byClass ? undefined : inline.message}>
               <div class={byClass ? "title" : undefined} style={byClass ? undefined : inline.title}>{`Message ${current}`}</div>
               <For each={Array.from({ length: 2 + (current % 4) }, (_, index) => index)}>
                 {(index) => (
@@ -92,28 +94,32 @@ function open(styling: Styling) {
   ))
   app.renderer.setA11yActive(false)
   app.renderer.setInlineDraws(false)
-  return { app, renderer: app.renderer, detail, list, next: () => setSelected(selected() + 1) }
+  return { app, renderer: app.renderer, detail, list, message: () => message, next: () => setSelected(selected() + 1) }
 }
 
 const sum = (counts: string) => Object.values(JSON.parse(counts) as Record<string, number>).reduce((a, b) => a + b, 0)
 const unpatchable = (renderer: TestRenderer) => JSON.parse(renderer.getPatchCounters().unpatchable) as Record<string, number>
 
+/** Every row measured, by showing every row once: a row with no measured size is a frame built whole. */
+function warm(renderer: TestRenderer, list: HostElement, patch = true) {
+  renderer.clockPause()
+  renderer.setPatchEnabled(patch)
+  renderer.setScrollPatchEnabled(patch)
+  renderer.drawFrame()
+  renderer.drawFrame()
+  for (let at = 0; at <= COUNT * ROW - VIEW; at += 20) {
+    renderer.scrollTo(list.nativeId, 0, at)
+    renderer.drawFrame()
+  }
+  renderer.scrollTo(list.nativeId, 0, 0)
+  renderer.drawFrame()
+}
+
 /** The keys one after another, each a draw: the handler selects the next row, which swaps the detail, and reads the detail's metrics before it returns. */
 function navigate(styling: Styling, keys: number, patch = true) {
   const { app, renderer, detail, list, next } = open(styling)
   try {
-    renderer.clockPause()
-    renderer.setPatchEnabled(patch)
-    renderer.setScrollPatchEnabled(patch)
-    renderer.drawFrame()
-    renderer.drawFrame()
-    // Every row measured, by showing every row once: a row with no measured size is a frame built whole.
-    for (let at = 0; at <= COUNT * ROW - VIEW; at += 20) {
-      renderer.scrollTo(list.nativeId, 0, at)
-      renderer.drawFrame()
-    }
-    renderer.scrollTo(list.nativeId, 0, 0)
-    renderer.drawFrame()
+    warm(renderer, list, patch)
     const steps = []
     for (let key = 0; key < keys; key++) {
       const before = renderer.getPatchCounters()
@@ -167,6 +173,65 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a read after a swap leaves the d
     const whole = navigate("class", 4, false)
     expect(patched.map((step) => step.metrics)).toEqual(whole.map((step) => step.metrics))
   })
+})
+
+describe.skipIf(!hasNativeTestRenderer)("Solid: a change noted while the element was in the document, then the element detached in the same batch", () => {
+  type Change = (message: HostElement) => void
+  const changes: Record<string, { styling: Styling; change: Change }> = {
+    "a layout style": { styling: "inline", change: (message) => setHostProperty(message, "style", { ...inline.message, gap: 12 }) },
+    "a style that only paints": { styling: "inline", change: (message) => setHostProperty(message, "style", { ...inline.message, backgroundColor: "#dddddd" }) },
+    "a class toggle": { styling: "class", change: (message) => setHostProperty(message, "class", "message wide") },
+  }
+
+  /** What a handler does: changes the message, takes it out of the detail, and reads the detail, or lets the frame come with no read. */
+  function swap(name: string, how: { read: boolean; kept: boolean }) {
+    const { styling, change } = changes[name]!
+    const { app, renderer, detail, list, message } = open(styling)
+    try {
+      warm(renderer, list)
+      const before = renderer.getPatchCounters()
+      const frames = renderer.getPaintedFrameCount()
+      const shown = message()
+      change(shown)
+      if (how.kept) {
+        // A cached subtree: native is told it is out of the document, and nobody destroys it.
+        shown.root!.mutations.detachChild(shown.nativeId)
+      } else {
+        removeHostNode(detail, shown)
+      }
+      const reads = how.read ? detail.scrollHeight : undefined
+      if (!how.read) app.root.flush()
+      renderer.drawFrame()
+      const after = renderer.getPatchCounters()
+      return {
+        reads,
+        patched: after.patchedFrames - before.patchedFrames,
+        whole: renderer.getPaintedFrameCount() - frames,
+        unpatchable: sum(after.unpatchable) - sum(before.unpatchable),
+        counters: after.unpatchable,
+      }
+    } finally {
+      app.unmount()
+    }
+  }
+
+  for (const name of Object.keys(changes)) {
+    for (const how of [
+      { read: true, kept: false },
+      { read: false, kept: true },
+      { read: true, kept: true },
+    ]) {
+      const label = `${how.kept ? "kept" : "removed"}${how.read ? ", then a read" : ", then the frame"}`
+      test(`${name}, then the detach (${label}) is a patch: the removal is the parent's change`, () => {
+        const step = swap(name, how)
+        if (!counted) return
+        const where = JSON.stringify(step)
+        expect(step.unpatchable, where).toBe(0)
+        expect(step.patched, where).toBe(1)
+        expect(step.whole, where).toBe(0)
+      })
+    }
+  }
 })
 
 describe.skipIf(!hasNativeTestRenderer)("Solid: a detached subtree is matched again when it is put back", () => {

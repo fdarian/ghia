@@ -7547,6 +7547,46 @@ mod tests {
     }
 
     #[test]
+    fn a_change_of_an_element_that_left_the_document_after_it_is_no_structure_a_patch_has_to_hold() {
+        let mut page = anchored_page();
+        // Noted while it was in the document, then taken out in the same batch: the parent's note covers the removal.
+        page.tree.set_text(5, "words".to_owned());
+        page.tree.detach_child(5);
+        assert!(page.tree.pending_structure().contains(&5), "what was noted stays noted: nothing prunes it");
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "the anchor that held it patches the removal");
+        assert!(page.retain.is_relaid(&page.tree, 1));
+
+        // Kept, with what was noted of it, it is out of the next patches too, until something puts it back.
+        page.tree.set_text(3, "again".to_owned());
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "the next patch finds what is in the document");
+        page.tree.append_child(1, 5);
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "put back, it is in the anchor again");
+    }
+
+    #[test]
+    fn a_change_of_an_element_below_one_that_left_the_document_is_out_of_it_too() {
+        let mut page = anchored_page();
+        page.tree.set_text(3, "words".to_owned());
+        page.tree.set_text(4, "words".to_owned());
+        page.tree.detach_child(2);
+        assert_eq!(page.preview(&[], false), Ok(vec![1]), "the box root left the anchor with what it held");
+    }
+
+    #[test]
+    fn a_restyle_by_paint_of_an_element_that_left_the_document_is_no_commit_a_patch_has_to_hold() {
+        let mut page = anchored_page();
+        page.tree.set_style_arc(3, restyled(r##"{"backgroundColor":"#111111"}"##));
+        page.tree.take_dirty();
+        page.tree.take_structure();
+        page.tree.take_restyles();
+        page.tree.set_style_arc(3, restyled(r##"{"backgroundColor":"#222222"}"##));
+        assert_eq!(page.tree.pending_restyles(), [3]);
+        page.tree.detach_child(3);
+        assert_eq!(page.tree.pending_restyles(), [3], "what was noted stays noted: nothing prunes it");
+        assert_eq!(page.preview(&[], false), Ok(vec![2]), "the box root that held it patches the removal");
+    }
+
+    #[test]
     fn edits_in_an_anchor_and_in_a_box_root_nested_in_it_preview_to_the_anchor_alone() {
         let mut page = anchored_page();
         page.tree.set_text(5, "words".to_owned());
