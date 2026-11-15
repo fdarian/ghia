@@ -1303,22 +1303,22 @@ impl TapeStore {
         let old = self.tapes.borrow().get(&root).cloned();
         if let Some(old) = old {
             {
-            let (old, new) = (old.borrow(), captured.borrow());
-            let roots = old.roots();
-            crate::text::replace(window, &roots, &new.lives(moved));
-            let mut written = FxHashSet::default();
-            new.each(Kind::Bounds, &mut |data, offset| {
-                written.insert(crate::automation::id_of_bounds_write(data));
-                crate::automation::publish_captured_bounds(data, offset + moved);
-            });
-            let mut gone = Vec::new();
-            old.each(Kind::Bounds, &mut |data, _| {
-                let id = crate::automation::id_of_bounds_write(data);
-                if !written.contains(&id) {
-                    gone.push(id);
-                }
-            });
-            crate::automation::forget_boxes(window, &gone);
+                let (old, new) = (old.borrow(), captured.borrow());
+                let roots = old.roots();
+                crate::text::replace(window, &roots, &new.lives(moved));
+                let mut written = FxHashSet::default();
+                new.each(Kind::Bounds, &mut |data, offset| {
+                    written.insert(crate::automation::id_of_bounds_write(data));
+                    crate::automation::publish_captured_bounds(data, offset + moved);
+                });
+                let mut gone = Vec::new();
+                old.each(Kind::Bounds, &mut |data, _| {
+                    let id = crate::automation::id_of_bounds_write(data);
+                    if !written.contains(&id) {
+                        gone.push(id);
+                    }
+                });
+                crate::automation::forget_boxes(window, &gone);
             }
             captured.borrow_mut().takes_place_of(&old.borrow());
         }

@@ -3661,7 +3661,8 @@ impl Retain {
                 }
             });
         }
-        if node.lifts_out(&own) {
+        // A unit is never replayed, so a relevance watch below a lifted element does not refuse it: what lifts out does.
+        if !node.forms_context && own.lifts {
             return Some(Refusal::Lifts);
         }
         if own.size > UNIT_MAX_ELEMENTS {
@@ -6430,6 +6431,20 @@ mod tests {
             assert_eq!(page.ids(), Vec::<u64>::new(), "{what}");
             assert_eq!(page.preview(&[], false), Err(Unpatchable::Refused(refusal)), "{what}: the tick says why");
         }
+        // A lifted element with the relevance watch below it, and nothing lifted out of it, is no `Lifts` refusal.
+        let mut page = Units::new();
+        for _ in 0..2 {
+            page.frame(&[], false, |page| {
+                page.element(1, None, |page| {
+                    page.element(2, Some(true), |page| {
+                        page.retain.stacking(|| (Some(1), false));
+                        page.leaf(3);
+                        page.element(4, None, |page| page.retain.watches_relevance());
+                    });
+                });
+            });
+        }
+        assert_ne!(page.retain.records[&2].refusal, Some(Refusal::Lifts), "a watch below a lifted element is not a lift out of it");
         // The same page without any of them has its unit.
         let mut page = Units::new();
         page.page(&[], Some(true), None);
