@@ -92,7 +92,11 @@ defineKeyframes("skipped-read-kf", {
   "100%": { transform: "translate(100px, 50px) rotate(90deg)" },
 })
 
+/** Whether the scenes are built with their boxes in flow (`flow`) and not absolute: only the root stays absolute. */
+let flow = false
+
 function abs(left: number, top: number, width: number, height: number): CSSProperties {
+  if (flow && width < 800) return { marginLeft: left, marginTop: top, width, height }
   return { position: "absolute", left, top, width, height }
 }
 
@@ -552,6 +556,73 @@ describeNative("a native motion and a motion value that run in skipped content",
         const got = reads(mode, how)
         expect(got.filter((rect, index) => apart(rect, want[index]!)), `got ${JSON.stringify(got)} want ${JSON.stringify(want)}`).toEqual([])
         expect(apart(want[0]!, want[2]!), "and it moves the target").toBe(true)
+      }, SLOW)
+    }
+  }
+})
+
+/**
+ * Two of the scenes above with every box but the root in flow, which a parent-placed absolute box must not be worse than:
+ * the two bugs marked here are the ones of in-flow content, found when absolute boxes became retained roots.
+ */
+describeNative("the same reads with the boxes in flow", () => {
+  const inFlow = <T,>(run: () => T): T => {
+    flow = true
+    try {
+      return run()
+    } finally {
+      flow = false
+    }
+  }
+
+  for (const mode of ["hidden", "auto"] as const) {
+    // Known bug, not caused by the absolute boxes a parent places: an in-flow root that holds the host of content a read
+    // forced is recorded in the forced layout-only pass and replays a tape that republishes boxes of the skipped content.
+    const keeps = verifying ? it.fails : it
+    keeps(`keeps the pass of a read of skipped content for a write to an element that is not on its chain (${mode})`, () => {
+      inFlow(() => {
+        const mounted = mountScene(mode, TRANSFORMED)
+        try {
+          const target = mounted.rect("target")
+          const start = mounted.passes()
+          mounted.write("elsewhere", WRITTEN)
+          expect(mounted.rect("target"), "a write elsewhere").toEqual(target)
+          expect(mounted.passes() - start, "the pass of the read before is shared").toBe(0)
+          mounted.rect("elsewhere")
+          mounted.frames(2)
+          mounted.write("elsewhere", { transform: "rotate(17deg)" })
+          mounted.frames(2)
+          expect(mounted.rect("target"), "a write elsewhere and two frames").toEqual(target)
+        } finally {
+          mounted.unmount()
+        }
+      })
+    }, SLOW)
+
+    for (const [name, animation] of [
+      ["a loop", "skipped-read-kf 1000ms linear infinite"],
+      ["a run that ends between the reads", "skipped-read-kf 600ms linear both"],
+    ] as const) {
+      // Known bug: the reads after the first show the box at the instant of the first, as if a replay of the content forced
+      // by the read before had kept the animation where it was (an in-flow element, so no absolute box is involved).
+      it.fails(`shows the value of the frame it reads in: ${name} on the target (${mode})`, () => {
+        inFlow(() => {
+          const mounted = mountScene(mode, { target: { animation } })
+          try {
+            mounted.frames(12)
+            expect(mounted.skipped(), "skipped").toBe(true)
+            const renderer = mounted.renderer
+            const seen: Rect[] = []
+            for (const elapsed of [200, 200, 300, 300]) {
+              renderer.clockAdvance(elapsed)
+              mounted.frames(1)
+              seen.push(mounted.rect("target"))
+            }
+            expect(new Set(seen.map((rect) => rect.join())).size, "the animation moves the box between reads").toBeGreaterThan(1)
+          } finally {
+            mounted.unmount()
+          }
+        })
       }, SLOW)
     }
   }

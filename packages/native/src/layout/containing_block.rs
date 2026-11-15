@@ -42,6 +42,41 @@ pub(crate) fn escape(tree: &RetainedTree, element: &RetainedElement) -> Option<g
     }
 }
 
+/// Whether `parent`'s own box is the layout parent of `child` and its containing block, so that a
+/// `position: absolute` `child` can be placed by it (`gpui::Position::Absolute`, which taffy
+/// resolves against the parent) and need not escape to it. That is so when `parent` is a host
+/// element that lays out a box and is not `static`, and `child` is one of its blocks: not spliced
+/// out of a `display: contents` element, not in the top layer, and `parent` is no table part (its
+/// blocks sit in anonymous cells and tables there). A `static` parent with a transform is a
+/// containing block too, and keeps `AbsoluteInAncestor`: only a parent that says it is positioned
+/// is relied on.
+pub(crate) fn is_placed_by(tree: &RetainedTree, parent: &RetainedElement, child: &RetainedElement) -> bool {
+    child.parent == Some(parent.id)
+        && crate::text::inline::is_host_container(parent)
+        && !tree.display_of(parent).0
+        && tree.position_of(parent) != Position::Static
+        && crate::layout::table::part(parent).is_none()
+        && crate::html::popover::top_layer_priority(child).is_none()
+}
+
+/// Whether `child`, which `is_placed_by` its parent or not, is built as an absolute box that its
+/// parent places. Only a host container is: a custom element, a virtual list and an `<anchored>`
+/// build their own box, and an element that generates none has nothing to place.
+pub(crate) fn is_placed_absolute(child: &RetainedElement, position: Option<&str>, placed_by_parent: bool) -> bool {
+    placed_by_parent
+        && position == Some("absolute")
+        && crate::text::inline::is_host_container(child)
+        && !crate::layout::contents::is_display_contents(child)
+}
+
+/// `el` as the box its parent places: taffy resolves its insets against the padding box of the
+/// parent, which is what `AbsoluteInAncestor` ends up with once gpui finds the parent to be the
+/// containing block, and it escapes nothing, so a retained root of it is placed by what holds it.
+pub(crate) fn place_by_parent<E: gpui::Styled>(mut el: E) -> E {
+    el.style().position = Some(gpui::Position::Absolute);
+    el
+}
+
 /// Whether the element can escape in some state: it does so declared, or a state refinement
 /// sets an `absolute` or `fixed` position. A walk that prunes what a clip excludes needs to know
 /// there is none of these first.
@@ -343,5 +378,51 @@ mod tests {
         assert!(may_escape(&style(r#"{"hover": {"position": "absolute"}}"#)));
         assert!(may_escape(&style(r#"{"groupFocusWithin": {"position": "fixed"}}"#)));
         assert!(!may_escape(&style(r#"{"hover": {"position": "relative"}}"#)));
+    }
+
+    #[test]
+    fn a_block_of_a_positioned_host_is_placed_by_it_and_one_of_a_static_host_is_not() {
+        let placed = |nodes: &[(u64, &str, Option<&str>)]| {
+            let tree = tree(nodes);
+            is_placed_by(&tree, &tree.elements[&2], &tree.elements[&3])
+        };
+        let child = (3, "div", Some("absolute"));
+        assert!(placed(&[(1, "div", None), (2, "div", Some("relative")), child]));
+        assert!(placed(&[(1, "div", None), (2, "div", Some("absolute")), child]));
+        assert!(placed(&[(1, "div", None), (2, "div", Some("sticky")), child]));
+        assert!(!placed(&[(1, "div", None), (2, "div", None), child]));
+        assert!(!placed(&[(1, "div", None), (2, "div", Some("static")), child]));
+    }
+
+    #[test]
+    fn a_transformed_static_host_does_not_place_its_blocks() {
+        let mut tree = tree(&[(1, "div", None), (2, "div", None), (3, "div", Some("absolute"))]);
+        with_transform(&mut tree, 2, None, "translateX(1px)");
+        assert!(is_positioned(&tree, &tree.elements[&2]));
+        assert!(!is_placed_by(&tree, &tree.elements[&2], &tree.elements[&3]));
+    }
+
+    #[test]
+    fn a_block_spliced_out_of_display_contents_or_of_a_box_that_is_no_host_is_not_placed_by_it() {
+        // 3 is the child of the `display: contents` 2, spliced into the positioned 1.
+        let mut tree = tree(&[(1, "div", Some("relative")), (2, "div", None), (3, "div", Some("absolute"))]);
+        tree.set_style_desc(2, crate::style::StyleDesc { display: Some("contents".into()), ..Default::default() });
+        assert!(!is_placed_by(&tree, &tree.elements[&1], &tree.elements[&3]));
+        assert!(!is_placed_by(&tree, &tree.elements[&2], &tree.elements[&3]));
+        // A virtual list and an anchored box build children of their own.
+        for kind in ["virtual-list", "anchored", "svg"] {
+            let tree = self::tree(&[(1, "div", None), (2, kind, Some("relative")), (3, "div", Some("absolute"))]);
+            assert!(!is_placed_by(&tree, &tree.elements[&2], &tree.elements[&3]), "{kind}");
+        }
+    }
+
+    #[test]
+    fn only_an_absolute_host_block_that_its_parent_places_is_built_parent_relative() {
+        let tree = tree(&[(1, "div", Some("relative")), (2, "div", Some("absolute")), (3, "virtual-list", Some("absolute"))]);
+        assert!(is_placed_absolute(&tree.elements[&2], Some("absolute"), true));
+        assert!(!is_placed_absolute(&tree.elements[&2], Some("absolute"), false));
+        assert!(!is_placed_absolute(&tree.elements[&2], Some("relative"), true));
+        assert!(!is_placed_absolute(&tree.elements[&2], Some("fixed"), true));
+        assert!(!is_placed_absolute(&tree.elements[&3], Some("absolute"), true));
     }
 }

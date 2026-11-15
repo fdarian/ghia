@@ -1264,6 +1264,10 @@ pub(crate) struct Entry<'a> {
     pub at: u32,
     pub stacking_root: bool,
     pub stacking_item: bool,
+    /// Whether the box of its parent lays the element out and is its containing block, so that an
+    /// absolute element is placed by the parent and does not escape to it: the gpui position it
+    /// is built with depends on the parent's, which the key of the parent does not say of a child.
+    pub placed_by_parent: bool,
     pub atomic_root: bool,
     /// `Some` for a child spliced out of `display: contents` elements: the key of the styles they
     /// hand down (`layout::contents::Overlay::key`).
@@ -2896,6 +2900,7 @@ impl Retain {
                 shape.bits(&[
                     entry.stacking_root,
                     entry.stacking_item,
+                    entry.placed_by_parent,
                     entry.atomic_root,
                     entry.anchor_scope,
                     entry.text_box_trim.start,
@@ -4066,6 +4071,7 @@ mod tests {
             at: 0,
             stacking_root: true,
             stacking_item: false,
+            placed_by_parent: false,
             atomic_root: false,
             contents_overlay: None,
             anchor_scope: false,
@@ -4146,6 +4152,7 @@ mod tests {
             at,
             stacking_root: false,
             stacking_item: false,
+            placed_by_parent: false,
             atomic_root: false,
             contents_overlay: None,
             anchor_scope: false,
@@ -4221,6 +4228,7 @@ mod tests {
                 at: 0,
                 stacking_root: false,
                 stacking_item: false,
+                placed_by_parent: false,
                 atomic_root: false,
                 contents_overlay: None,
                 anchor_scope: false,
@@ -4309,6 +4317,7 @@ mod tests {
                     at: 0,
                     stacking_root: true,
                     stacking_item: false,
+                    placed_by_parent: false,
                     atomic_root: false,
                     contents_overlay: None,
                     anchor_scope: false,
@@ -4444,6 +4453,7 @@ mod tests {
                 at: 0,
                 stacking_root: true,
                 stacking_item: false,
+                placed_by_parent: false,
                 atomic_root: false,
                 contents_overlay: None,
                 anchor_scope: false,
@@ -4594,6 +4604,7 @@ mod tests {
                 at: 0,
                 stacking_root: true,
                 stacking_item: false,
+                placed_by_parent: false,
                 atomic_root: false,
                 contents_overlay: None,
                 anchor_scope: false,
@@ -5472,6 +5483,51 @@ mod tests {
     }
 
     #[gpui::test]
+    fn an_absolute_box_its_parent_places_is_a_root_and_follows_the_position_of_the_parent(cx: &mut gpui::TestAppContext) {
+        let mut elements = page([CARD; 3]);
+        elements.push(div(40, Some(1), r#"{"position": "relative", "width": 100, "height": 30}"#));
+        elements.push(div(42, Some(40), r#"{"position": "absolute", "top": 5, "left": 7, "width": 10, "height": 10}"#));
+        for line in 1..=3 {
+            elements.push(div(42 + line, Some(42), r#"{"height": 3}"#));
+        }
+        let scene = Scene::new(cx, elements);
+        scene
+            .window
+            .update(cx, |view, _, _| {
+                view.retain.set_planning(true);
+                view.retain.set_verify(true);
+                view.retain.set_min_root(2);
+            })
+            .unwrap();
+        for _ in 0..4 {
+            scene.notified_draw(cx);
+        }
+        let eligible = |cx: &mut gpui::TestAppContext| {
+            scene.window.update(cx, |view, _, _| view.retain.records.get(&42).map(|record| record.eligible)).unwrap()
+        };
+        let top_left = |scene: &Scene| {
+            let bounds = crate::automation::get_bounds(scene.window.window_id(), 42).expect("painted");
+            (bounds.x, bounds.y)
+        };
+        // It is in the box that places it: a root, and not one that escapes.
+        assert_eq!(eligible(cx), Some(true));
+        assert_eq!(top_left(&scene), (7.0, 185.0));
+
+        // The parent is no containing block any more: the box is placed against the page, and a frame
+        // that replayed it where its parent put it would be one that the verifier finds.
+        scene.set_style(40, r#"{"width": 100, "height": 30}"#);
+        scene.draw(cx);
+        assert_eq!(eligible(cx), Some(false));
+        assert_eq!(top_left(&scene), (7.0, 5.0));
+
+        scene.set_style(40, r#"{"position": "relative", "width": 100, "height": 30}"#);
+        scene.draw(cx);
+        scene.settle(cx);
+        assert_eq!(eligible(cx), Some(true));
+        assert_eq!(top_left(&scene), (7.0, 185.0));
+    }
+
+    #[gpui::test]
     fn an_animating_node_is_changed_every_frame_and_nothing_else_is(cx: &mut gpui::TestAppContext) {
         let mut elements = page([CARD; 3]);
         elements.push(with(
@@ -5822,6 +5878,8 @@ mod tests {
         patch_roots: FxHashSet<u64>,
         /// The elements whose style and parent's make them candidates for a box root.
         box_roots: FxHashSet<u64>,
+        /// The elements their parent places, as `layout::containing_block::is_placed_by` says.
+        placed: FxHashSet<u64>,
         /// The elements a hover restyled by paint, which the next preview and frame find.
         hover_paint: Vec<u64>,
     }
@@ -5848,6 +5906,7 @@ mod tests {
                 customs: Vec::new(),
                 patch_roots: FxHashSet::default(),
                 box_roots: FxHashSet::default(),
+                placed: FxHashSet::default(),
                 hover_paint: Vec::new(),
             }
         }
@@ -5884,6 +5943,7 @@ mod tests {
                     at: 0,
                     stacking_root: true,
                     stacking_item: false,
+                    placed_by_parent: self.placed.contains(&id),
                     atomic_root: false,
                     contents_overlay: None,
                     anchor_scope: false,
@@ -6379,6 +6439,53 @@ mod tests {
         // keeps no recording of what a box outside places.
         assert!(!page.retain.records.get(&2).unwrap().eligible);
         assert!(page.retain.records.get(&2).unwrap().unit_eligible);
+    }
+
+    #[test]
+    fn an_element_is_built_again_when_its_parent_stops_placing_it() {
+        let skipped = |page: &mut Units| {
+            let mut skipped = false;
+            // The page is built whole, so that 2 is entered.
+            page.edit(1);
+            page.frame(&[], false, |page| {
+                page.element(1, None, |page| {
+                    skipped = page.enter(2);
+                    if !skipped {
+                        page.leaf(3);
+                        page.retain.exit();
+                    }
+                });
+            });
+            skipped
+        };
+        // The same element at the same revision, with nothing else changed.
+        let mut page = Units::new();
+        page.retain.set_min_root(1);
+        page.placed.insert(2);
+        let settled = (0..4).any(|_| skipped(&mut page));
+        assert!(settled, "a frame that finds nothing changed skips it");
+        page.placed.clear();
+        assert!(!skipped(&mut page), "its parent is no longer what places it: the position it was recorded with is not its own");
+        assert!((0..4).any(|_| skipped(&mut page)));
+        page.placed.insert(2);
+        assert!(!skipped(&mut page));
+    }
+
+    #[test]
+    fn an_absolute_element_its_parent_places_is_a_root_to_skip() {
+        // `Retain::containing_block(true, false)` is what the build says of it: positioned, and not placed by a box outside.
+        let mut page = Units::new();
+        for _ in 0..2 {
+            page.frame(&[], false, |page| {
+                page.element(1, None, |page| {
+                    page.element(2, Some(true), |page| {
+                        page.retain.containing_block(true, false);
+                        page.element(3, None, |page| page.retain.containing_block(false, false));
+                    });
+                });
+            });
+        }
+        assert!(page.retain.records.get(&2).unwrap().eligible);
     }
 
     #[test]

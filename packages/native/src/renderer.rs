@@ -7901,6 +7901,7 @@ impl GpuixView {
                 now,
                 stacking_root: true,
                 stacking_item: false,
+                placed_by_parent: false,
                 text_box_trim: Default::default(),
                 focus_styles,
                 control_styles: Default::default(),
@@ -8090,6 +8091,9 @@ pub(crate) struct BuildCtx<'a> {
     /// Set while building a child of a flex or grid container, which its `z-index` applies to
     /// without a `position`. Taken by `build_element`.
     pub stacking_item: bool,
+    /// Set while building a block child that the box of its parent lays out and is the containing
+    /// block of (`layout::containing_block::is_placed_by`). Taken by `build_element`.
+    pub placed_by_parent: bool,
     /// Set while building an atomic inline, taken by `build_element`, which takes the
     /// margin and a percentage width off its style into `atomic_extracted`.
     pub atomic_root: bool,
@@ -9374,6 +9378,7 @@ impl GpuixView {
             anchor_scope: None,
             stacking_root: start.stacking_root,
             stacking_item: start.stacking_item,
+            placed_by_parent: start.placed_by_parent,
             atomic_root: false,
             atomic_extracted: None,
             atomic_height_definite: false,
@@ -9411,6 +9416,7 @@ impl GpuixView {
             now: self.read_instant().unwrap_or_else(|| self.clock.now()),
             stacking_root: true,
             stacking_item: false,
+            placed_by_parent: false,
             text_box_trim: Default::default(),
             focus_styles: self.focus.styles(&tree, tree.keyboard_focus_dim()),
             control_styles: Default::default(),
@@ -10548,6 +10554,7 @@ impl gpui::Render for GpuixView {
                         now,
                         stacking_root: true,
                         stacking_item: false,
+                        placed_by_parent: false,
                         text_box_trim: Default::default(),
                         focus_styles,
                         control_styles: Default::default(),
@@ -10761,6 +10768,7 @@ fn build_element_in(
             at: ctx.doc_path.last().copied().unwrap_or(0),
             stacking_root: ctx.stacking_root,
             stacking_item: ctx.stacking_item,
+            placed_by_parent: ctx.placed_by_parent,
             atomic_root: ctx.atomic_root,
             contents_overlay: ctx.contents_overlay.is_some().then_some(ctx.contents_key),
             anchor_scope: ctx.anchor_scope.is_some(),
@@ -10862,6 +10870,7 @@ pub(crate) struct BuildStart {
     now: web_time::Instant,
     stacking_root: bool,
     stacking_item: bool,
+    placed_by_parent: bool,
     text_box_trim: gpui::TextBoxTrim,
     focus_styles: crate::focus::FocusStyles,
     control_styles: crate::retained_tree::ControlStyles,
@@ -10879,6 +10888,7 @@ impl BuildStart {
             now: ctx.now,
             stacking_root: ctx.stacking_root,
             stacking_item: ctx.stacking_item,
+            placed_by_parent: ctx.placed_by_parent,
             text_box_trim: ctx.text_box_trim,
             focus_styles: ctx.focus_styles.clone(),
             control_styles: ctx.control_styles.clone(),
@@ -10910,6 +10920,7 @@ impl FrameEnv {
                 now,
                 stacking_root: false,
                 stacking_item: false,
+                placed_by_parent: false,
                 text_box_trim: Default::default(),
                 focus_styles: Default::default(),
                 control_styles: Default::default(),
@@ -10951,6 +10962,7 @@ fn retained_root(
     let start = BuildStart::of(ctx);
     ctx.stacking_root = false;
     ctx.stacking_item = false;
+    ctx.placed_by_parent = false;
     ctx.text_box_trim = Default::default();
     let env = FrameEnv { start, enter: skip.enter, relocatable: skip.overscan.is_some(), forced: ctx.retain.in_forced_content() };
     let patch_root_env = env.clone();
@@ -11647,6 +11659,7 @@ fn build_element_unpumped(
     let tree = ctx.tree;
     let stacking_root = std::mem::take(&mut ctx.stacking_root);
     let stacking_item = std::mem::take(&mut ctx.stacking_item);
+    let placed_by_parent = std::mem::take(&mut ctx.placed_by_parent);
     let atomic_root = std::mem::take(&mut ctx.atomic_root);
     let passed_trim = std::mem::take(&mut ctx.text_box_trim);
     // Meant for this element, and not for the next one built when it returns early.
@@ -11823,7 +11836,12 @@ fn build_element_unpumped(
         ctx.retain.exclude(crate::retain::Exclusion::UnstableLayout);
     }
     let position = style.and_then(|style| style.position.as_deref());
-    ctx.retain.containing_block(position.is_some_and(|position| position != "static"), position == Some("absolute"));
+    let places_absolute = crate::layout::containing_block::is_placed_absolute(element, position, placed_by_parent);
+    // A box its parent places is not placed by one outside it, so what holds it holds its containing block.
+    // Not in the pass of a read that forces skipped content: a root recorded there replays a tape that
+    // republishes boxes of the content the frames skip, so it stays the escape it was.
+    let escapes = position == Some("absolute") && !(places_absolute && !tree.relevance.any_forced());
+    ctx.retain.containing_block(position.is_some_and(|position| position != "static"), escapes);
     match position {
         Some("sticky") => ctx.retain.exclude(crate::retain::Exclusion::Sticky),
         Some("fixed") => ctx.retain.exclude(crate::retain::Exclusion::Fixed),
@@ -11976,7 +11994,7 @@ fn build_element_unpumped(
                     &ctx.inherited.colors,
                     &ctx.inherited.lengths,
                 );
-                build_host_container(element, style, stacking_root, lift_absorbed, ctx, window, cx)
+                build_host_container(element, style, stacking_root, lift_absorbed, places_absolute, ctx, window, cx)
             }
         }
         "virtual-list" => {
@@ -12460,6 +12478,7 @@ pub(crate) fn build_host_container(
     style: Option<&StyleDesc>,
     stacking_root: bool,
     lift_absorbed: bool,
+    places_absolute: bool,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -12493,6 +12512,9 @@ pub(crate) fn build_host_container(
 
     if let Some(style) = style {
         el = crate::css::style_cache::apply(el, element.style.as_ref(), style, &ctx.inherited.colors, &ctx.inherited.lengths);
+        if places_absolute {
+            el = crate::layout::containing_block::place_by_parent(el);
+        }
 
         if let Some(features) = ctx.inherited.font_features.clone() {
             el = el.font_features(features);
@@ -12980,7 +13002,7 @@ fn build_content(
             .filter(|probe| probe.container == element.id)
             .map(crate::text::atomic::Probe::clone_handle);
         let label_paragraphs = crate::accessibility::labels_paragraphs(window.is_a11y_active(), element, plan);
-        build_plan(element, plan, trim, probe.as_ref(), label_paragraphs, &mut 0, &mut content_elements, &mut placements, ctx, window, cx);
+        build_plan(element, plan, trim, probe.as_ref(), label_paragraphs, true, &mut 0, &mut content_elements, &mut placements, ctx, window, cx);
     }
     let containing_heights = std::mem::replace(&mut ctx.containing_heights, outer_heights);
     (content_elements, placements, containing_heights)
@@ -12994,6 +13016,8 @@ fn build_plan(
     trim: gpui::TextBoxTrim,
     probe: Option<&crate::text::atomic::Probe>,
     label_paragraphs: bool,
+    // Whether the blocks of `plan` are built into the box of `element` itself, and not into an anonymous cell or table in it.
+    in_box: bool,
     anonymous: &mut usize,
     content_elements: &mut Vec<gpui::AnyElement>,
     placements: &mut Vec<Placement>,
@@ -13033,7 +13057,7 @@ fn build_plan(
                     .inherited
                     .table_row
                     .map(|row| crate::text::selection::TableCell { row, cell: key.token() });
-                build_plan(element, cell, gpui::TextBoxTrim::default(), probe, label_paragraphs, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
+                build_plan(element, cell, gpui::TextBoxTrim::default(), probe, label_paragraphs, false, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
                 ctx.inherited.table_cell = outside;
                 let halves = ctx.inherited.table.collapse.then(|| ctx.collapsed.cell(key));
                 let mut cell = crate::layout::table::anonymous_cell(halves);
@@ -13062,7 +13086,7 @@ fn build_plan(
                 let mut inside_placements = Vec::new();
                 let outside = (ctx.inherited.table_row, ctx.inherited.table_cell);
                 (ctx.inherited.table_row, ctx.inherited.table_cell) = (Some(key.token()), None);
-                build_plan(element, &blocks, gpui::TextBoxTrim::default(), probe, label_paragraphs, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
+                build_plan(element, &blocks, gpui::TextBoxTrim::default(), probe, label_paragraphs, false, &mut 0, &mut inside, &mut inside_placements, ctx, window, cx);
                 (ctx.inherited.table_row, ctx.inherited.table_cell) = outside;
                 settle_collapsed_borders(ctx, key, used_from, window);
                 let mut table = crate::layout::table::anonymous_table(&ctx.inherited.table, ctx.collapsed.table(key));
@@ -13098,6 +13122,8 @@ fn build_plan(
                 });
                 splice_overlay(ctx, window, element, child_id);
                 ctx.stacking_item = item;
+                ctx.placed_by_parent =
+                    in_box && child_element.is_some_and(|child| crate::layout::containing_block::is_placed_by(ctx.tree, element, child));
                 ctx.text_box_trim = child_trim;
                 let out_of_flow = child_element.is_some_and(|child| {
                     matches!(
