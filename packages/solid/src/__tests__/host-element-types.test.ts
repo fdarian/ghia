@@ -111,6 +111,28 @@ export const App = () => (
 )
 `
 
+// An object literal with the CSS names of the properties, as a web Solid app writes one: the kebab-case name of each
+// `StyleDesc` key takes that key's value type or any CSS text or number, and a motion value where the camelCase key takes one.
+const withCssNamedKeys = `import { motion, motionValue } from "@ghia/solid"
+
+const padding = motionValue(0)
+
+export const App = () => (
+  <>
+    <div style={{ "white-space": "nowrap", "z-index": 1, "padding-top": 4, "--gap": "4px", "-webkit-font-smoothing": "antialiased", whiteSpace: "pre" }} />
+    <motion.div style={{ "padding-left": padding, "background-color": "red" }} />
+    <motion.span style={{ "font-weight": 700 }} />
+    <svg style={{ "pointer-events": "none" }} />
+    {/* @ts-expect-error a motion value only where the camelCase key takes one */}
+    <div style={{ "white-space": padding }} />
+    {/* @ts-expect-error z-index is a number */}
+    <div style={{ "z-index": {} }} />
+    {/* @ts-expect-error a name that is no property of a style */}
+    <div style={{ "not-a-property": 1 }} />
+  </>
+)
+`
+
 function check(name: string, source: string, lib: string[]) {
   const directory = join(temp, name)
   mkdirSync(directory)
@@ -143,6 +165,11 @@ describe("host element types", () => {
 
   it("take a style typed as solid-js's CSSProperties", () => {
     const result = check("css-properties", withCssProperties, ["ES2022", "DOM"])
+    expect(result.status, result.stdout).toBe(0)
+  }, tscTimeout)
+
+  it("take a style object literal written with CSS property names", () => {
+    const result = check("css-named-keys", withCssNamedKeys, ["ES2022", "DOM"])
     expect(result.status, result.stdout).toBe(0)
   }, tscTimeout)
 

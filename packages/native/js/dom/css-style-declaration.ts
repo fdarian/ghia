@@ -116,6 +116,37 @@ function keyOf(name: string): string | undefined {
   return PROPERTY_BY_NAME.get(text.toLowerCase())
 }
 
+/**
+ * `style` with each hyphenated key read as the CSS property it names, the way `style.setProperty`
+ * takes one: `{ "white-space": "nowrap" }` is `{ whiteSpace: "nowrap" }`. A web framework that writes
+ * a style object key by key with `setProperty` (Solid) has CSS names for keys. A custom property
+ * (`--gap`) keeps its name, and so does a hyphenated key that names no `StyleDesc` property. Where
+ * two keys name one property, the later one wins, as two `setProperty` calls would. A style with
+ * no hyphenated key comes back as it is, not copied.
+ */
+export function cssNamedStyle<Style extends object>(style: Style): Style {
+  const record = style as StyleRecord
+  const keys = Object.keys(record)
+  let named: StyleRecord | undefined
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index]
+    if (named === undefined) {
+      if (!key.includes("-") || isCustom(key)) continue
+      const property = PROPERTY_BY_NAME.get(key.toLowerCase())
+      if (property === undefined) continue
+      named = {}
+      for (let before = 0; before < index; before++) named[keys[before]] = record[keys[before]]
+      delete named[property]
+      named[property] = record[key]
+      continue
+    }
+    const property = key.includes("-") && !isCustom(key) ? (PROPERTY_BY_NAME.get(key.toLowerCase()) ?? key) : key
+    delete named[property]
+    named[property] = record[key]
+  }
+  return (named ?? style) as Style
+}
+
 /** The lower-case name of a CSS property a browser has and Ghia has no style key for, or `undefined` for a name that is none. */
 function unsupportedNameOf(name: string): string | undefined {
   const lower = String(name).toLowerCase()

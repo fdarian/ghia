@@ -14,7 +14,6 @@ import type {
   LabelProps,
   MarkdownProps,
   MotionProps,
-  MotionValueStyle,
   NativeviewProps,
   RefElementOf,
   SvgMotionProps,
@@ -67,7 +66,7 @@ import type {
   VirtualListProps,
 } from "@ghia/native/host"
 import { createComponent, createElement, spread } from "./universal.js"
-import type { HostElement } from "./host.js"
+import type { HostElement, SolidStyle } from "./host.js"
 
 /**
  * The `ref` of a host element of tag `Tag`: a variable typed with Ghia's `HostElement` or with the tag's DOM interface
@@ -81,7 +80,7 @@ export type SolidHostRef<Tag extends string> = string extends Tag
 
 /** A host element's props in Solid JSX, with the `ref` of `Tag` (see `SolidHostRef`). */
 export type SolidHostProps<Props = HostProps, Tag extends string = string> = Omit<Props, "style"> & HtmlAttributeNames & {
-  style?: MotionValueStyle
+  style?: SolidStyle
   children?: SolidJSX.Element
   /** The `class` attribute, which stylesheet rules (`.name`) match. */
   class?: string

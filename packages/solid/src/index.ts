@@ -13,7 +13,7 @@ export {
 } from "./universal.js"
 export { isWebBuild } from "@ghia/native/host"
 export { createRoot, GpuixContext, useGpuix, useGpuixRequired } from "./root.js"
-export type { HostElement } from "./host.js"
+export type { HostElement, SolidStyle } from "./host.js"
 import { document as sharedDocument, window } from "@ghia/native/host"
 import type { GpuixDocument } from "@ghia/native/host"
 import type { HostElement } from "./host.js"

@@ -7822,6 +7822,12 @@ CSS-like styling via the `style` prop:
 </div>
 ```
 
+In Solid, a `style` object's keys may also be CSS property names, as on the web where Solid writes
+each key with `style.setProperty`: `style={{ 'white-space': 'nowrap', 'z-index': 1, '--gap': '4px' }}`
+is `whiteSpace`, `zIndex` and the custom property `--gap`. The camelCase keys keep working, a custom
+property keeps its name, a motion value is bound under either spelling, and where two keys name one
+property the later one wins. React takes camelCase keys only, as React DOM does.
+
 > [!IMPORTANT]
 > **Ghia styles look like CSS but are not CSS.** A few differences trip
 > everyone up on the first project:

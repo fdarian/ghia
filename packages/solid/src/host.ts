@@ -6,6 +6,7 @@ import {
   createElementMethods,
   createWebviewMethods,
   crossRootError,
+  cssNamedStyle,
   defineDomMembers,
   document,
   DOM_BINDING,
@@ -77,6 +78,7 @@ import type {
   MotionValue,
   MotionValueStyle,
   MutationRenderer,
+  StyleProperty,
   NativeRenderer,
   Node,
   NodeBinding,
@@ -765,7 +767,7 @@ export function setHostProperty(
     return
   }
   if (name === "style") {
-    const split = splitMotionStyle(isStyle(value) ? value : undefined)
+    const split = splitMotionStyle(isStyle(value) ? cssNamedStyle(value) : undefined)
     const next = split.style ?? {}
     if (hasMutationObservers()) recordAttributeChanges(node, () => ["style"], () => node.setFrameworkStyle(next))
     else {
@@ -1107,8 +1109,27 @@ function isStyle(value: HostPropertyValue): value is StyleDesc {
   return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
+type Kebab<Name extends string> = Name extends `${infer Head}${infer Tail}`
+  ? `${Head extends Lowercase<Head> ? Head : `-${Lowercase<Head>}`}${Kebab<Tail>}`
+  : Name
+
+/**
+ * Each `StyleDesc` key that is one CSS property under its CSS name (`whiteSpace` as `"white-space"`), which Solid
+ * writes with `setProperty`. The value is the key's own type or any CSS text or number: solid-js types a style as
+ * csstype does (`WhiteSpace` has `"-moz-pre-wrap"`, `FlexGrow` is text), and a style typed so has to be assignable.
+ */
+type CssNamedStyle = {
+  [Property in StyleProperty as Kebab<Property>]?:
+    | (Property extends keyof MotionValueStyle ? MotionValueStyle[Property] : never)
+    | string
+    | number
+}
+
+/** A Solid host element's `style`: Ghia's camelCase keys, or the CSS names a web Solid style object has. */
+export type SolidStyle = MotionValueStyle & CssNamedStyle
+
 export type SolidHostProps = Omit<HostProps, "style"> & {
-  style?: MotionValueStyle
+  style?: SolidStyle
   children?: unknown
   ref?: (element: HostElement) => void
 }
