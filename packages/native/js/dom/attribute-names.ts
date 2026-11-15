@@ -169,6 +169,32 @@ export function propWrittenBy(
   }
 }
 
+/** The attributes a JSX written for the web names differently from their prop, `class` aside (Solid keeps `class`, and the class merge reads it). */
+const JSX_ATTRIBUTES = new Map(
+  Object.entries(WRITTEN_AS_PROP).filter(([attribute, entry]) => attribute !== "class" && entry.prop !== attribute)
+)
+
+/**
+ * The prop and value for a prop name as web JSX writes it (`autofocus`, `tabindex`, `for`), which
+ * dom-expressions sets without turning it into the prop's name. A presence attribute is its
+ * property's truthiness (`autofocus=""` is off, `autofocus="false"` is on), a number attribute is
+ * the integer its text holds, and `null` or `undefined` stays as it is, the removal. Any other name
+ * is returned as it came.
+ */
+export function propOfJsxAttribute(name: string, value: unknown): { prop: string; value: unknown } {
+  const entry = JSX_ATTRIBUTES.get(name)
+  if (entry === undefined) return { prop: name, value }
+  if (value === null || value === undefined) return { prop: entry.prop, value }
+  switch (entry.kind) {
+    case "presence":
+      return { prop: entry.prop, value: Boolean(value) }
+    case "number":
+      return { prop: entry.prop, value: typeof value === "string" && INTEGER.test(value) ? Number(value) : value }
+    default:
+      return { prop: entry.prop, value }
+  }
+}
+
 /** Attributes written to elements that have no prop for them (`style`, `onclick`), by element. */
 const storedAttributes = new WeakMap<object, Map<string, string>>()
 

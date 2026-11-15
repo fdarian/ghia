@@ -15,10 +15,12 @@ import {
   replaceHostText,
   setHostProperty,
   type HostElement,
+  type HostPropertyValue,
   type HostNode,
   type HostParent,
   type HostText,
 } from "./host.js"
+import { propOfJsxAttribute } from "@ghia/native/host"
 import { createSpread } from "./spread.js"
 import { notePresenceHost, runInPresenceScope } from "./presence-scope.js"
 
@@ -65,18 +67,16 @@ function anchorNodeFor(anchor: HostNode | HostParent): HostNode {
   return known
 }
 
-/** Solid's JSX writes a label's `for` under the attribute's own name; the host reads it as `htmlFor`. */
-function propNameOn(node: HostNode | HostParent, name: string): string {
-  return name === "for" && node.kind === "element" && node.elementType === "label" ? "htmlFor" : name
-}
-
+/** Web JSX writes `autofocus`, `tabindex` and `for` under the attribute's name; the host reads the props `autoFocus`, `tabIndex` and `htmlFor`. */
 function setProperty(node: HostNode | HostParent, name: string, value: unknown, previous: unknown): void {
   if (
     node.kind !== "root" &&
     isHostPropertyValue(value) &&
     isHostPropertyValue(previous)
   ) {
-    setHostProperty(node, propNameOn(node, name), value, previous)
+    const written = propOfJsxAttribute(name, value)
+    // A conversion keeps the kinds a prop can hold, so the result is still a host property value.
+    setHostProperty(node, written.prop, written.value as HostPropertyValue, propOfJsxAttribute(name, previous).value as HostPropertyValue)
   }
 }
 

@@ -5039,6 +5039,11 @@ bubbling, but a `div` that only declares `onKeyDown` never takes focus. Give it 
 | `inert` | Nothing in the subtree is focusable; focus leaves it when an ancestor becomes inert. See below |
 | `display: none` on the element or an ancestor, from its `style`, a stylesheet rule or the `hidden` attribute; `visibility: hidden` or `collapse` on the element (a `visible` descendant of a hidden one is focusable); an `inert` ancestor | `focus()` does nothing, as in a browser: no focus change and no event, and the element is not scrolled to. See [Imperative focus](#imperative-focus) |
 
+In Solid the HTML attribute names work too, as on the web: `autofocus`, `tabindex`, `readonly`, `maxlength`, `colspan`,
+`rowspan` and `for` are the props `autoFocus`, `tabIndex`, `readOnly`, `maxLength`, `colSpan`, `rowSpan` and `htmlFor`
+(`autofocus=""` is off and `tabindex="0"` is `0`, as the DOM's property and reflection have them). React DOM ignores the
+lowercase names, and so does Ghia's React.
+
 ### `inert`
 
 `<div inert>` takes its whole subtree out of interaction, like the DOM attribute:
