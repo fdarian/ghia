@@ -28,7 +28,7 @@ Hit testing follows paint order, but selection and find follow document order. S
 
 A retained subtree that a frame replays does not hold the document position of its texts as they were when it was built: its tape keeps each as seen from the root (`DocPos::relative_to`) and the frame reads it under the root's path as it is now (`DocPos::under`, [retention.md](retention.md#the-effect-tape)), so a row that something was inserted before is replayed and still sorts where its siblings put it. That holds for a lifted root inside such a row too (a badge with `position: relative; z-index: 1`, which the stacking context paints from a hole in the row's recording): its text goes under the path the root has when the context paints it, not the one it had when the row was recorded.
 
-The text of an atomic inline sorts at the byte of the box's placeholder in the paragraph around it. The paragraph is cut there for the drag, and copy puts no line break between the text of the line and the box's inline content.
+The text of an atomic inline sorts at the byte of the box's placeholder in the paragraph around it. The path of a text in the box is the one the document has there, it does not start over inside the box, so a root's path is taken off the paragraph that hosts the box and off the text in it alike. The paragraph is cut there for the drag, and copy puts no line break between the text of the line and the box's inline content.
 
 ## Atomic inlines
 

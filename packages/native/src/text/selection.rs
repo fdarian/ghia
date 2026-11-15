@@ -54,7 +54,9 @@ impl DocPath {
     }
 
     /// The path of the box whose placeholder is at `offset` of the run `sub` of this element, for
-    /// the texts built inside that box. `path` starts over inside it.
+    /// the texts built inside that box. What is built inside the box does not start its path over: it
+    /// is the path the document has there, the child indices from the root, so it starts with the path
+    /// of this element (and with the path of any root this element is in).
     pub fn host(&self, sub: usize, offset: usize) -> Arc<[Host]> {
         let level = Host {
             path: self.path.clone(),
@@ -85,7 +87,9 @@ fn host_of(path: &Arc<[u32]>) -> Host {
     Host { path: path.clone(), sub: 0, offset: 0 }
 }
 
-/// The levels `hosts` and `last` hold with `root`'s taken off the front.
+/// The levels `hosts` and `last` hold with `root`'s taken off the front: the paragraphs `root` is inside are left out, and the path
+/// of `root` is taken off the path of every level after them, the paragraphs that host a box of the root as well as the text
+/// (a box's content does not start its path over, see [`DocPath::host`]).
 ///
 /// A position that is not under `root` is a bug in the document path, which a debug build asserts and a release build keeps as it
 /// is. Every caller strips a position from the root it was recorded under, or a root from the root it was nested in, and takes
@@ -98,30 +102,20 @@ fn strip_root(hosts: &Arc<[Host]>, last: &Host, root: &DocPath) -> (Arc<[Host]>,
     if !under {
         return (hosts.clone(), last.clone());
     }
-    let own = hosts.len() == shared;
-    let first = if own { last } else { &hosts[shared] };
-    let Some(path) = first.path.strip_prefix(&root.path[..]) else {
-        debug_assert!(false, "a document position is under the path of its root: {:?} under {:?}", first.path, root.path);
-        return (hosts.clone(), last.clone());
+    let strip = |host: &Host| match host.path.strip_prefix(&root.path[..]) {
+        Some(path) => Host { path: path.into(), ..host.clone() },
+        None => {
+            debug_assert!(false, "a document position is under the path of its root: {:?} under {:?}", host.path, root.path);
+            host.clone()
+        }
     };
-    let first = Host { path: path.into(), ..first.clone() };
-    if own {
-        (Arc::from([]), first)
-    } else {
-        (std::iter::once(first).chain(hosts[shared + 1..].iter().cloned()).collect(), last.clone())
-    }
+    (hosts[shared..].iter().map(strip).collect(), strip(last))
 }
 
 /// The inverse of [`strip_root`].
 fn put_under_root(hosts: &Arc<[Host]>, last: &Host, root: &DocPath) -> (Arc<[Host]>, Host) {
-    let own = hosts.is_empty();
-    let first = if own { last } else { &hosts[0] };
-    let first = Host { path: root.path.iter().chain(first.path.iter()).copied().collect(), ..first.clone() };
-    if own {
-        (root.hosts.clone(), first)
-    } else {
-        (root.hosts.iter().cloned().chain(std::iter::once(first)).chain(hosts[1..].iter().cloned()).collect(), last.clone())
-    }
+    let put = |host: &Host| Host { path: root.path.iter().chain(host.path.iter()).copied().collect(), ..host.clone() };
+    (root.hosts.iter().cloned().chain(hosts.iter().map(put)).collect(), put(last))
 }
 
 impl From<Arc<[u32]>> for DocPath {
@@ -1081,21 +1075,36 @@ mod tests {
     }
 
     #[test]
-    fn a_position_inside_a_box_of_a_paragraph_of_the_root_is_seen_from_the_root_by_the_path_of_the_paragraph() {
+    fn a_position_inside_a_box_of_a_paragraph_of_the_root_is_seen_from_the_root_in_every_level() {
         let root = DocPath::from(Arc::<[u32]>::from([1, 2]));
         let moved = DocPath::from(Arc::<[u32]>::from([1, 7]));
         let paragraph = DocPath::new(Arc::from([]), Arc::<[u32]>::from([1, 2, 0]));
-        let boxed = DocPos::new(DocPath::new(paragraph.host(0, 3), Arc::from([0, 1])), 0);
+        // What the renderer builds: the text in the box has the path the document has there, which starts with the paragraph's.
+        let boxed = DocPos::new(DocPath::new(paragraph.host(0, 3), Arc::from([1, 2, 0, 0, 1])), 0);
         let relative = boxed.relative_to(&root);
         let expected = DocPath::from(Arc::<[u32]>::from([0])).host(0, 3);
-        assert_eq!(relative, DocPos::new(DocPath::new(expected, Arc::from([0, 1])), 0), "only the host path is the root's: the box starts over");
+        assert_eq!(relative, DocPos::new(DocPath::new(expected, Arc::from([0, 0, 1])), 0), "the host and the text are both seen from the root");
         assert_eq!(relative.under(&root), boxed);
-        let moved_box = DocPos::new(
-            DocPath::new(DocPath::new(Arc::from([]), Arc::<[u32]>::from([1, 7, 0])).host(0, 3), Arc::from([0, 1])),
-            0,
-        );
-        assert_eq!(relative.under(&moved), moved_box);
+        let moved_paragraph = DocPath::new(Arc::from([]), Arc::<[u32]>::from([1, 7, 0]));
+        let moved_box = DocPos::new(DocPath::new(moved_paragraph.host(0, 3), Arc::from([1, 7, 0, 0, 1])), 0);
+        assert_eq!(relative.under(&moved), moved_box, "a sibling inserted before the root moved the paragraph and the text in its box");
         assert!(relative.under(&moved) > DocPos::new(Arc::<[u32]>::from([1, 6, 9]), 0), "and it sorts after what is before the root now");
+    }
+
+    #[test]
+    fn a_position_inside_a_box_in_a_box_is_seen_from_the_root_in_every_level() {
+        let root = DocPath::from(Arc::<[u32]>::from([4]));
+        let moved = DocPath::from(Arc::<[u32]>::from([5]));
+        let outer = DocPath::from(Arc::<[u32]>::from([4, 1]));
+        let inner = DocPath::new(outer.host(0, 2), Arc::from([4, 1, 0, 3]));
+        let text = DocPos::new(DocPath::new(inner.host(1, 6), Arc::from([4, 1, 0, 3, 0, 2])), 0);
+        let relative = text.relative_to(&root);
+        assert_eq!(relative.depth(), 2);
+        assert_eq!(relative.under(&root), text);
+        let after = relative.under(&moved);
+        assert_eq!(after.depth(), 2);
+        assert!(after > text, "it is where the root is now, in each paragraph of the way");
+        assert_eq!(after.relative_to(&moved), relative, "and seen from the root it is as it was");
     }
 
     #[test]
