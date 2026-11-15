@@ -49,8 +49,8 @@ TypeScript replaces `paths` from an extended config instead of merging it. If yo
 
 ```json
 "paths": {
-  "@ghia/solid/jsx-runtime": ["${configDir}/node_modules/@ghia/solid/dist/jsx-runtime.d.ts"],
-  "@ghia/solid/jsx-dev-runtime": ["${configDir}/node_modules/@ghia/solid/dist/jsx-dev-runtime.d.ts"]
+  "@ghia/solid/jsx-runtime": ["${configDir}/node_modules/@ghia/solid/dist/jsx-runtime"],
+  "@ghia/solid/jsx-dev-runtime": ["${configDir}/node_modules/@ghia/solid/dist/jsx-dev-runtime"]
 }
 ```
 

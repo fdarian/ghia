@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest"
 import { spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
 // A consumer program type-checked with `tsc`: host props and refs as an app written for solid-js on the web types
@@ -10,7 +11,11 @@ import { join, resolve } from "node:path"
 const root = resolve(import.meta.dirname, "../..")
 mkdirSync(join(root, "tmp"), { recursive: true })
 const temp = mkdtempSync(join(root, "tmp/host-element-types-"))
-afterAll(() => rmSync(temp, { recursive: true, force: true }))
+const outside: string[] = []
+afterAll(() => {
+  rmSync(temp, { recursive: true, force: true })
+  for (const directory of outside) rmSync(directory, { recursive: true, force: true })
+})
 
 const tscTimeout = 60_000
 const tsc = join(root, "node_modules/typescript/bin/tsc")
@@ -179,6 +184,30 @@ function check(name: string, source: string, lib: string[]) {
   return spawnSync(process.execPath, [tsc, "-p", directory], { cwd: root, encoding: "utf8" })
 }
 
+// The pnpm shape: a library that ships `.tsx` and depends only on solid-js has its real path in a store outside the
+// app, so TypeScript checks it from there, where `@ghia/solid` cannot be reached and its JSX runtime is TS2875 unless
+// the app's `paths` supply it. Outside the package, so nothing above the library resolves `@ghia/solid` either.
+function pnpmApp(name: string, tsconfig: { extends?: string; jsx?: object }) {
+  const base = mkdtempSync(join(tmpdir(), `ghia-${name}-`))
+  outside.push(base)
+  const library = join(base, "store/lib")
+  mkdirSync(join(library, "node_modules"), { recursive: true })
+  writeFileSync(join(library, "package.json"), JSON.stringify({ name: "lib", type: "module", exports: { ".": "./src/x.tsx" } }))
+  mkdirSync(join(library, "src"))
+  writeFileSync(join(library, "src/x.tsx"), "export function Guard() { return <span tabIndex={0} /> }\n")
+  symlinkSync(realpathSync(join(root, "node_modules/solid-js")), join(library, "node_modules/solid-js"))
+
+  const app = join(base, "app")
+  mkdirSync(join(app, "node_modules/@ghia"), { recursive: true })
+  symlinkSync(library, join(app, "node_modules/lib"))
+  symlinkSync(root, join(app, "node_modules/@ghia/solid"))
+  mkdirSync(join(app, "src"))
+  writeFileSync(join(app, "src/main.tsx"), `import { Guard } from "lib"\nexport const app = <div><Guard /></div>\n`)
+  const basics = { target: "ES2022", module: "ESNext", moduleResolution: "bundler", strict: true, skipLibCheck: true, noEmit: true, types: [] }
+  writeFileSync(join(app, "tsconfig.json"), JSON.stringify({ extends: tsconfig.extends, compilerOptions: { ...basics, ...tsconfig.jsx }, include: ["src"] }))
+  return spawnSync(process.execPath, [tsc, "-p", app], { cwd: root, encoding: "utf8" })
+}
+
 describe("host element types", () => {
   it("take class, classList, <style>, and refs typed as the DOM element or as a HostElement", () => {
     const result = check("dom", withDom, ["ES2022", "DOM"])
@@ -203,5 +232,16 @@ describe("host element types", () => {
   it("hold without the DOM lib, where a ref is a HostElement", () => {
     const result = check("no-dom", withoutDom, ["ES2022"])
     expect(result.status, result.stdout).toBe(0)
+  }, tscTimeout)
+
+  it("type-check a .tsx library in the pnpm store when the app extends @ghia/solid/tsconfig", () => {
+    const result = pnpmApp("tsconfig-base", { extends: "@ghia/solid/tsconfig" })
+    expect(result.status, result.stdout).toBe(0)
+  }, tscTimeout)
+
+  it("report TS2875 for that library when the app sets jsx and jsxImportSource by hand", () => {
+    const result = pnpmApp("by-hand", { jsx: { jsx: "preserve", jsxImportSource: "@ghia/solid" } })
+    expect(result.status).not.toBe(0)
+    expect(result.stdout).toContain("TS2875")
   }, tscTimeout)
 })
