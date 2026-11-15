@@ -14,7 +14,6 @@ import type {
   LabelProps,
   MarkdownProps,
   MotionProps,
-  MotionValueStyle,
   NativeviewProps,
   RefElementOf,
   SvgMotionProps,
@@ -67,7 +66,7 @@ import type {
   VirtualListProps,
 } from "@ghia/native/host"
 import { createComponent, createElement, spread } from "./universal.js"
-import type { HostElement } from "./host.js"
+import type { HostElement, SolidStyle } from "./host.js"
 
 /**
  * The `ref` of a host element of tag `Tag`: a variable typed with Ghia's `HostElement` or with the tag's DOM interface
@@ -80,8 +79,10 @@ export type SolidHostRef<Tag extends string> = string extends Tag
   : HostElement | DomElementOf<Tag> | ((element: HostElement & RefElementOf<Tag>) => void)
 
 /** A host element's props in Solid JSX, with the `ref` of `Tag` (see `SolidHostRef`). */
-export type SolidHostProps<Props = HostProps, Tag extends string = string> = Omit<Props, "style"> & {
-  style?: MotionValueStyle
+export type SolidHostProps<Props = HostProps, Tag extends string = string> = Omit<Props, "style" | "tabIndex"> & HtmlAttributeNames & {
+  /** An object, or CSS text, which sets `style.cssText` as it does on the web. */
+  style?: SolidStyle | string
+  tabIndex?: number | string
   children?: SolidJSX.Element
   /** The `class` attribute, which stylesheet rules (`.name`) match. */
   class?: string
@@ -117,8 +118,27 @@ export function Fragment(props: { children?: unknown }): SolidJSX.Element {
   return (props.children ?? null) as SolidJSX.Element
 }
 
+/**
+ * The attributes under their HTML names, as solid-js's own JSX types have them, so a library written for
+ * solid-js type-checks. The renderer writes them as their camelCase props (`autofocus` is `autoFocus`).
+ */
+type HtmlAttributeNames = {
+  autofocus?: boolean
+  tabindex?: number | string
+}
+type TextControlAttributeNames = {
+  readonly?: boolean
+  maxlength?: number | string
+}
+type TableCellAttributeNames = {
+  colspan?: number | string
+  rowspan?: number | string
+}
+
 /** The HTML tags that lay out as a `div` or a `span`, each with its own DOM interface for `ref`. */
-type HtmlTagElements = { [Tag in HtmlTag]: SolidHostProps<HostProps, Tag> }
+type HtmlTagElements = {
+  [Tag in HtmlTag]: SolidHostProps<HostProps & (Tag extends "td" | "th" ? TableCellAttributeNames : {}), Tag>
+}
 
 export namespace JSX {
   export type Element = SolidJSX.Element
@@ -183,8 +203,8 @@ export namespace JSX {
     canvas: SolidHostProps<HostProps, "canvas">
     /** A stylesheet: its text children are the CSS. It is never drawn. */
     style: SolidHostProps<HostProps, "style">
-    input: SolidHostProps<InputProps, "input">
-    textarea: SolidHostProps<TextareaProps, "textarea">
+    input: SolidHostProps<InputProps & TextControlAttributeNames, "input">
+    textarea: SolidHostProps<TextareaProps & TextControlAttributeNames, "textarea">
     /** `for` is the attribute's own name, which Solid's JSX writes; it is `htmlFor`. */
     label: SolidHostProps<LabelProps & { for?: string }, "label">
     form: SolidHostProps<FormProps, "form">

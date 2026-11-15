@@ -61,4 +61,23 @@ describe.skipIf(!hasNativeTestRenderer)("Solid draggable elements", () => {
     app.renderer.nativeSimulateMouseUp(81, 50)
     expect(log).toEqual(["dragstart", "pointermove"])
   })
+
+  it("reads draggable as the DOM's enumerated text: \"true\" is a drag source and \"false\" is not", () => {
+    const started: string[] = []
+    const app = createTestRoot()
+    app.render(() => (
+      <div style={{ width: 400, height: 200, display: "flex" }}>
+        <div draggable="false" style={{ width: 100, height: 100 }} onDragStart={() => started.push("false")} />
+        <div draggable="true" style={{ width: 100, height: 100 }} onDragStart={() => started.push("true")} />
+      </div>
+    ))
+
+    for (const x of [50, 150]) {
+      app.renderer.nativeSimulateMouseDown(x, 50)
+      app.renderer.nativeSimulateMouseMove(x + 30, 50)
+      app.renderer.nativeSimulateMouseMove(x + 31, 50)
+      app.renderer.nativeSimulateMouseUp(x + 31, 50)
+    }
+    expect(started).toEqual(["true"])
+  })
 })

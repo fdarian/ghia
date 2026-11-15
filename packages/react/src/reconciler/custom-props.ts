@@ -31,11 +31,11 @@ export function diffCustomProps(
     const value = next[key]
     const oldValue = previous[key]
     if (value === oldValue) continue
-    const serialized = serializeCustomProp(value as Parameters<typeof serializeCustomProp>[0])
+    const serialized = serializeCustomProp(key, value as Parameters<typeof serializeCustomProp>[1])
     if (
       key in previous &&
       sameMutationValue(
-        serializeCustomProp(oldValue as Parameters<typeof serializeCustomProp>[0]),
+        serializeCustomProp(key, oldValue as Parameters<typeof serializeCustomProp>[1]),
         serialized
       )
     ) {

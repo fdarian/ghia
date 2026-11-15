@@ -28,21 +28,29 @@ Install **`@ghia/native`** yourself, although `@ghia/solid` depends on it. The `
 
 ### TypeScript
 
-**`jsx: "preserve"`** and **`jsxImportSource: "@ghia/solid"`** are required. Without them TypeScript uses DOM types, so `<virtual-list>`, `<markdown>`, and `style.hover` fail to typecheck.
+Extend **`@ghia/solid/tsconfig`**. It sets **`jsx: "preserve"`** and **`jsxImportSource: "@ghia/solid"`**, which are required: without them TypeScript uses DOM types, so `<virtual-list>`, `<markdown>`, and `style.hover` fail to typecheck. It also maps `@ghia/solid/jsx-runtime` and `@ghia/solid/jsx-dev-runtime` to your app's `node_modules`, because a library that ships `.tsx` source (its `exports` point at `src/*.tsx`) is type-checked from its own real path, and under pnpm that path cannot reach `@ghia/solid` (the library depends on `solid-js`, not on Ghia), so TypeScript reports TS2875 for it. The mapping uses `${configDir}`, which needs TypeScript 5.5 or newer.
 
 ```json
 {
+  "extends": "@ghia/solid/tsconfig",
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "jsx": "preserve",
-    "jsxImportSource": "@ghia/solid",
     "types": ["vite/client"],
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true
   }
+}
+```
+
+TypeScript replaces `paths` from an extended config instead of merging it. If your tsconfig sets its own `paths`, copy the two entries into it:
+
+```json
+"paths": {
+  "@ghia/solid/jsx-runtime": ["${configDir}/node_modules/@ghia/solid/dist/jsx-runtime"],
+  "@ghia/solid/jsx-dev-runtime": ["${configDir}/node_modules/@ghia/solid/dist/jsx-dev-runtime"]
 }
 ```
 

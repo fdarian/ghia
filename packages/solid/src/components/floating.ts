@@ -1,6 +1,6 @@
 import { createComponent, createContext, onCleanup, onMount, useContext, type JSX } from "solid-js"
 import type { DomEvent, RootEvent } from "@ghia/native/host"
-import { pushDismissLayer } from "@ghia/native/host"
+import { cssNamedStyle, pushDismissLayer } from "@ghia/native/host"
 import type { DismissLayer, HostProps, KeyEvent, StyleDesc } from "@ghia/native/host"
 import { useGpuixRequired } from "../root.js"
 import { isHostElement } from "../host.js"
@@ -182,9 +182,8 @@ export function FloatingLayer(props: FloatingContentProps): JSX.Element {
     // The anchored surface is hit where it paints, so a layer that must not take
     // the pointer (a tooltip) has to say so on the surface itself.
     get style() {
-      return props.style?.pointerEvents === undefined
-        ? undefined
-        : { pointerEvents: props.style.pointerEvents }
+      const pointerEvents = props.style === undefined ? undefined : cssNamedStyle(props.style).pointerEvents
+      return pointerEvents === undefined ? undefined : { pointerEvents }
     },
     get children() {
       return jsx("div", overrideProps(props, {

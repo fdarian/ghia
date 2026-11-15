@@ -9,7 +9,7 @@ import {
   type AttributeGateMember,
   type SheetSink,
 } from "./css/index.js"
-import { attributesOfProps } from "./dom/attribute-names.js"
+import { attributesOfProps, nativeValueOfText } from "./dom/attribute-names.js"
 import { popoversDestroyed } from "./dom/popover.js"
 import { createBlobImageLoader, type BlobImageHost } from "./blob-images.js"
 import type { MutationHost, MutationRenderer } from "./host.js"
@@ -421,8 +421,10 @@ export function sameMutationValue(left: unknown, right: unknown): boolean {
 }
 
 export function serializeCustomProp(
+  name: string,
   value: object | string | number | boolean | null | undefined
 ): string | object | number | boolean | null {
   if (value === undefined || typeof value === "function") return null
+  if (typeof value === "string") return nativeValueOfText(name, value)
   return value
 }

@@ -59,17 +59,17 @@ export interface AriaProps {
 
   // Structure
   /** Heading level, 1-based. */
-  "aria-level"?: number
-  "aria-posinset"?: number
-  "aria-setsize"?: number
-  "aria-rowindex"?: number
-  "aria-colindex"?: number
-  "aria-rowcount"?: number
-  "aria-colcount"?: number
-  "aria-rowspan"?: number
-  "aria-colspan"?: number
-  "aria-rowindextext"?: string
-  "aria-colindextext"?: string
+  "aria-level"?: number | string
+  "aria-posinset"?: number | string
+  "aria-setsize"?: number | string
+  "aria-rowindex"?: number | string
+  "aria-colindex"?: number | string
+  "aria-rowcount"?: number | string
+  "aria-colcount"?: number | string
+  "aria-rowspan"?: number | string
+  "aria-colspan"?: number | string
+  "aria-rowindextext"?: string | number
+  "aria-colindextext"?: string | number
 
   // Relationships
   "aria-controls"?: AriaIdList

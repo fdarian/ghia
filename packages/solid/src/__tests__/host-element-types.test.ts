@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest"
 import { spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
 // A consumer program type-checked with `tsc`: host props and refs as an app written for solid-js on the web types
@@ -10,7 +11,11 @@ import { join, resolve } from "node:path"
 const root = resolve(import.meta.dirname, "../..")
 mkdirSync(join(root, "tmp"), { recursive: true })
 const temp = mkdtempSync(join(root, "tmp/host-element-types-"))
-afterAll(() => rmSync(temp, { recursive: true, force: true }))
+const outside: string[] = []
+afterAll(() => {
+  rmSync(temp, { recursive: true, force: true })
+  for (const directory of outside) rmSync(directory, { recursive: true, force: true })
+})
 
 const tscTimeout = 60_000
 const tsc = join(root, "node_modules/typescript/bin/tsc")
@@ -79,6 +84,82 @@ export function App() {
 }
 `
 
+// A style object typed by solid-js, whose lengths are csstype's `string | 0`, goes to the `style` of every host
+// element without a cast.
+const withCssProperties = `import { motion } from "@ghia/solid"
+import type { JSX } from "solid-js"
+
+export const visuallyHidden: JSX.CSSProperties = {
+  clip: "rect(0 0 0 0)",
+  overflow: "hidden",
+  "white-space": "nowrap",
+  position: "fixed",
+  top: 0,
+  left: 0,
+  border: 0,
+  padding: 0,
+  width: "1px",
+  height: "1px",
+  margin: "-1px",
+  mask: 0,
+}
+
+declare const written: JSX.CSSProperties
+
+export const App = () => (
+  <>
+    <span style={visuallyHidden} />
+    <div style={written} />
+    <motion.div style={written} />
+    <svg style={written} />
+  </>
+)
+`
+
+// An object literal with the CSS names of the properties, as a web Solid app writes one: the kebab-case name of each
+// `StyleDesc` key takes that key's value type or any CSS text or number, and a motion value where the camelCase key takes one.
+const withCssNamedKeys = `import { motion, motionValue } from "@ghia/solid"
+
+const padding = motionValue(0)
+
+export const App = () => (
+  <>
+    <div style={{ "white-space": "nowrap", "z-index": 1, "padding-top": 4, "--gap": "4px", "-webkit-font-smoothing": "antialiased", whiteSpace: "pre" }} />
+    <motion.div style={{ "padding-left": padding, "background-color": "red" }} />
+    <motion.span style={{ "font-weight": 700 }} />
+    <svg style={{ "pointer-events": "none" }} />
+    {/* @ts-expect-error a motion value only where the camelCase key takes one */}
+    <div style={{ "white-space": padding }} />
+    {/* @ts-expect-error z-index is a number */}
+    <div style={{ "z-index": {} }} />
+    {/* @ts-expect-error a name that is no property of a style */}
+    <div style={{ "not-a-property": 1 }} />
+  </>
+)
+`
+
+// The props a web Solid component takes as solid-js types them (`JSX.HTMLAttributes<HTMLSpanElement>`, the base of
+// every element's props) spread onto the matching host element without a cast. The event handlers are left out: a host
+// handler takes Ghia's own event type.
+const withSolidAttributes = `import type { JSX } from "solid-js"
+
+declare const spanProps: Omit<JSX.HTMLAttributes<HTMLSpanElement>, \`on\${string}\`>
+declare const buttonProps: Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, \`on\${string}\`>
+
+export const App = () => (
+  <>
+    <span {...spanProps} />
+    <button {...buttonProps} />
+    <span draggable="true" popover={false} aria-level="2" tabIndex="0" style="color: red" />
+    <span tabIndex={-1} style={{ color: "red" }} />
+    <span draggable="false" popover />
+    <span draggable />
+    {/* @ts-expect-error draggable is true or false */}
+    <span draggable="maybe" />
+  </>
+)
+`
+
 function check(name: string, source: string, lib: string[]) {
   const directory = join(temp, name)
   mkdirSync(directory)
@@ -103,14 +184,64 @@ function check(name: string, source: string, lib: string[]) {
   return spawnSync(process.execPath, [tsc, "-p", directory], { cwd: root, encoding: "utf8" })
 }
 
+// The pnpm shape: a library that ships `.tsx` and depends only on solid-js has its real path in a store outside the
+// app, so TypeScript checks it from there, where `@ghia/solid` cannot be reached and its JSX runtime is TS2875 unless
+// the app's `paths` supply it. Outside the package, so nothing above the library resolves `@ghia/solid` either.
+function pnpmApp(name: string, tsconfig: { extends?: string; jsx?: object }) {
+  const base = mkdtempSync(join(tmpdir(), `ghia-${name}-`))
+  outside.push(base)
+  const library = join(base, "store/lib")
+  mkdirSync(join(library, "node_modules"), { recursive: true })
+  writeFileSync(join(library, "package.json"), JSON.stringify({ name: "lib", type: "module", exports: { ".": "./src/x.tsx" } }))
+  mkdirSync(join(library, "src"))
+  writeFileSync(join(library, "src/x.tsx"), "export function Guard() { return <span tabIndex={0} /> }\n")
+  symlinkSync(realpathSync(join(root, "node_modules/solid-js")), join(library, "node_modules/solid-js"))
+
+  const app = join(base, "app")
+  mkdirSync(join(app, "node_modules/@ghia"), { recursive: true })
+  symlinkSync(library, join(app, "node_modules/lib"))
+  symlinkSync(root, join(app, "node_modules/@ghia/solid"))
+  mkdirSync(join(app, "src"))
+  writeFileSync(join(app, "src/main.tsx"), `import { Guard } from "lib"\nexport const app = <div><Guard /></div>\n`)
+  const basics = { target: "ES2022", module: "ESNext", moduleResolution: "bundler", strict: true, skipLibCheck: true, noEmit: true, types: [] }
+  writeFileSync(join(app, "tsconfig.json"), JSON.stringify({ extends: tsconfig.extends, compilerOptions: { ...basics, ...tsconfig.jsx }, include: ["src"] }))
+  return spawnSync(process.execPath, [tsc, "-p", app], { cwd: root, encoding: "utf8" })
+}
+
 describe("host element types", () => {
   it("take class, classList, <style>, and refs typed as the DOM element or as a HostElement", () => {
     const result = check("dom", withDom, ["ES2022", "DOM"])
     expect(result.status, result.stdout).toBe(0)
   }, tscTimeout)
 
+  it("take a style typed as solid-js's CSSProperties", () => {
+    const result = check("css-properties", withCssProperties, ["ES2022", "DOM"])
+    expect(result.status, result.stdout).toBe(0)
+  }, tscTimeout)
+
+  it("take a style object literal written with CSS property names", () => {
+    const result = check("css-named-keys", withCssNamedKeys, ["ES2022", "DOM"])
+    expect(result.status, result.stdout).toBe(0)
+  }, tscTimeout)
+
+  it("take the props solid-js types for an element spread onto it", () => {
+    const result = check("solid-attributes", withSolidAttributes, ["ES2022", "DOM"])
+    expect(result.status, result.stdout).toBe(0)
+  }, tscTimeout)
+
   it("hold without the DOM lib, where a ref is a HostElement", () => {
     const result = check("no-dom", withoutDom, ["ES2022"])
     expect(result.status, result.stdout).toBe(0)
+  }, tscTimeout)
+
+  it("type-check a .tsx library in the pnpm store when the app extends @ghia/solid/tsconfig", () => {
+    const result = pnpmApp("tsconfig-base", { extends: "@ghia/solid/tsconfig" })
+    expect(result.status, result.stdout).toBe(0)
+  }, tscTimeout)
+
+  it("report TS2875 for that library when the app sets jsx and jsxImportSource by hand", () => {
+    const result = pnpmApp("by-hand", { jsx: { jsx: "preserve", jsxImportSource: "@ghia/solid" } })
+    expect(result.status).not.toBe(0)
+    expect(result.stdout).toContain("TS2875")
   }, tscTimeout)
 })
