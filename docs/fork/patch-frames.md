@@ -716,7 +716,8 @@ keeps what builds it again.
   at most `PATCH_ROOT_MAX_ELEMENTS` (64) elements (a row, a card or a small control, not a page of cards) and has no size an
   intrinsic keyword gives and declares or follows no group. It is a candidate when one of:
   1. it, or something below it, declares a hover that only paints (`hover_paint::declares_paint_hover`: all it declares of `hover`
-     and `hasHover` paints only, it has no `@container` rule), and nothing is lifted out of it;
+     and `hasHover` paints only, it has no `@container` rule), and nothing is lifted out of it (the element's own lift is not that: see
+     below);
   2. it is a row of a virtual list, whatever its style (a commit restyles rows that declare no hover: the selection). What a
      relocatable row holds is built whole already (its children keep no recordings), so the flag asks nothing more of the build, and a
      row consumes what is lifted in it;
@@ -739,10 +740,22 @@ keeps what builds it again.
   its own: 74 against 122 in the first page tried). A frame built whole that rebuilds a patch root therefore builds everything in it,
   where its nested roots would have been replayed; the cap is what bounds that. This is decided before the root is built, from
   the tree, so it has to be right for the roots that are recorded:
-  - nothing in the subtree **might lift** (`hover_paint::may_lift`: positioned, a `z-index`, an opacity below 1, a transform,
-    a filter, a mask, a clip path, `content-visibility`), unless the root is a row of a virtual list, which consumes whatever is
-    lifted in it (`stacking::is_virtual_row`): a root that lifts is recorded as one that hands elements to the stacking context around, and
-    leaving the roots in it unrecorded changed how it replays (found by the retention fuzz under the verifier);
+  - nothing **lifts out of** the root: no element in the subtree might lift (`hover_paint::may_lift`: positioned, a `z-index`, an
+    opacity below 1, a transform, a filter, a mask, a clip path, `content-visibility`) into a stacking context around the root, unless the
+    root is a row of a virtual list, which consumes whatever is lifted in it (`stacking::is_virtual_row`), or forms a stacking context
+    itself, which takes what is lifted in it. A root that hands elements to the context around is recorded as one that does, and
+    leaving the roots in it unrecorded changed how it replays (found by the retention fuzz under the verifier). **The root's own lift
+    is no reason to refuse it**: gpui patches a lifted root where the context orders it (it must say the same `lift_z`, and the patch
+    must hand nothing to a context outside it, `PatchDecline::Lifts`), so a TanStack Virtual row (`position: absolute; transform:
+    translateY()`, a `:hover` background, an absolute box of its own, in a `position: relative` container) is a patch root, and a
+    crossing of rows is a patched frame (stack app, hover phase: 8.9M a crossing, whole, to 3.2M, patched; 217M to 125M over the phase).
+    `scan_patch_root` keeps per element whether it lifts itself (`PatchRootScan::lifts`, what its parent sees) and whether something lifts
+    out of it (`PatchRootScan::lifts_out`, which refuses it): `lifts_out` is a lifted child (or one lifting out of the child) while the
+    element forms no context. Whether it forms one is read from the style (`stacking::creates_context` over `Resolved::of_style`, as
+    the scan does not know whether the element is a flex or grid item, one whose `z-index` alone forms a context is judged as forming none:
+    a root refused too often, never too seldom; the build re-decides with the real flags). `Recording::patch_root` and `Record::patch_root` then ask `Node::hands_lifts_out` (`!forms_context && below.lifts`),
+    the same without the relevance-watch clause of `Node::lifts_out`, which is for the relocation of a replay: a patch prepaints the
+    watch itself. A lifted row that forms no context and holds a lifted child, and an element above a lifted row, are not patch roots;
   - nothing in it has a **size an intrinsic keyword gives** (`min-content`, `fit-content`, ...): its box is measured under another
     style and asked for again, and a retained root that holds one is laid out again by every frame unless the box is a root of its own
     (`retained-intrinsic.test.tsx`);
@@ -817,7 +830,7 @@ marks `Replaced` with `derived: true`, which a build at the row's own place does
 **Limits.**
 
 - A hover that adds or takes away a primitive (a shadow, a border colour from transparent, a text colour from transparent, a
-  background that is more than a colour) is a frame built whole; so is a group, a root that might lift, a size by an intrinsic keyword, a root of more than 64 elements, and a
+  background that is more than a colour) is a frame built whole; so is a group, a root that something lifts out of, a size by an intrinsic keyword, a root of more than 64 elements, and a
   row that a frame built whole replayed from a recording made elsewhere (`Hover:Relocated`: a whole frame after a scroll replays the rows with
   a delta, and builds one again only when something changes it, so the hover of that row is a frame built whole, which records it where it stands; a row a translate moved is patched). After a wheel phase and back (`AFTER_SCROLL=1`) six of the ten rows that show are such rows, one is rebuilt by each crossing that meets one (`retained.relocations` 6, 5, 4 ...), and those crossings cost 7.4M, not 3.4M.
 - A page of at most 64 elements is one root: a patch builds all of it, as a frame built whole does.

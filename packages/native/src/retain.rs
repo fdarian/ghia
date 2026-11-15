@@ -767,7 +767,16 @@ impl Node {
     /// root that lifts itself was never moved with it until its own lift stopped keeping it in place, and it
     /// is not moved now; a root that does not lift was always moved with what is below it.
     fn lifts_out(&self, below: &Below) -> bool {
-        (self.lift_z.is_some() && (self.watches_relevance || below.watched)) || (!self.forms_context && below.lifts)
+        (self.lift_z.is_some() && (self.watches_relevance || below.watched)) || self.hands_lifts_out(below)
+    }
+
+    /// Whether something below is handed to a stacking context around the element, which a patch of the element
+    /// as one piece does not repeat (gpui declines it, `PatchDecline::Lifts`). The element's own lift is not this:
+    /// gpui patches a lifted root in the place its context orders it, and what is lifted below a root that forms a
+    /// context goes into that context, inside the patch. Not [`Self::lifts_out`], whose relevance clause is for
+    /// the relocation of a replay: a patch prepaints the watch itself.
+    fn hands_lifts_out(&self, below: &Below) -> bool {
+        !self.forms_context && below.lifts
     }
 }
 
@@ -790,7 +799,12 @@ pub(crate) fn costly(tree: &crate::retained_tree::RetainedTree, element: &crate:
 struct PatchRootScan {
     hovers: bool,
     size: u32,
+    /// The element lifts itself, or something below it is handed to a context around it: what a parent sees as
+    /// lifting.
     lifts: bool,
+    /// Something below is handed to a stacking context around the element, which the element does not form
+    /// (`Node::hands_lifts_out`): it is no patch root.
+    lifts_out: bool,
     /// Something below the element (not the element) is worth a root of its own (`Retain::worth`): a patch
     /// root records nothing inside it, so it would take that root from the frames.
     root_below: bool,
@@ -2321,11 +2335,17 @@ impl Retain {
     ///   a patch root records nothing inside it, which for such an element changes nothing that was recorded (a unit
     ///   is one that something runs on).
     /// Worked out once per revision of the subtree. False while nothing is recorded.
-    pub(crate) fn can_be_patch_root(&mut self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
+    pub(crate) fn can_be_patch_root(
+        &mut self,
+        tree: &crate::retained_tree::RetainedTree,
+        id: u64,
+        colors: &crate::color::ColorContext,
+        lengths: &crate::css::length::LengthContext,
+    ) -> bool {
         if !self.open || !self.planning || !self.makes_patch_roots {
             return false;
         }
-        let scan = self.scan_patch_root(tree, id);
+        let scan = self.scan_patch_root(tree, id, colors, lengths);
         if scan.unfit || scan.size > PATCH_ROOT_MAX_ELEMENTS {
             return false;
         }
@@ -2335,7 +2355,7 @@ impl Retain {
         if crate::layout::stacking::is_virtual_row(tree, element) {
             return true;
         }
-        if scan.lifts {
+        if scan.lifts_out {
             return false;
         }
         scan.hovers || (self.quiet && !scan.root_below && (self.worth(scan.size, false) || costly(tree, element)))
@@ -2345,7 +2365,18 @@ impl Retain {
     /// paints only, how many elements it holds, whether something in it might lift, and whether something in it is
     /// worth a root. A subtree bigger than a patch root says it holds one more than one may, and nothing of the
     /// elements below it: they are asked for when they are entered.
-    fn scan_patch_root(&mut self, tree: &crate::retained_tree::RetainedTree, id: u64) -> PatchRootScan {
+    ///
+    /// `colors` and `lengths` are those the element is built in, for the style of the elements below to be read
+    /// as the build reads it; a child that sets its own font size is judged by its parent's, which only matters
+    /// for a transform that is valid in one and not the other, and the build decides `Recording::patch_root` by
+    /// the style it reads.
+    fn scan_patch_root(
+        &mut self,
+        tree: &crate::retained_tree::RetainedTree,
+        id: u64,
+        colors: &crate::color::ColorContext,
+        lengths: &crate::css::length::LengthContext,
+    ) -> PatchRootScan {
         let Some(element) = tree.elements.get(&id) else {
             return PatchRootScan::default();
         };
@@ -2357,7 +2388,8 @@ impl Retain {
         let mut hovers = element.style.as_ref().is_some_and(|style| {
             self.hover_scans.of_one(style, crate::events::hover_paint::paint_hover_of).settled(tree, id)
         });
-        let mut lifts = element.style.as_deref().is_some_and(crate::events::hover_paint::may_lift);
+        let lifts_itself = element.style.as_deref().is_some_and(crate::events::hover_paint::may_lift);
+        let mut lifted_below = false;
         let mut unfit = element
             .style
             .as_deref()
@@ -2365,9 +2397,9 @@ impl Retain {
         let mut root_below = false;
         let mut size = 1;
         for child in &element.children {
-            let below = self.scan_patch_root(tree, *child);
+            let below = self.scan_patch_root(tree, *child, colors, lengths);
             hovers |= below.hovers;
-            lifts |= below.lifts;
+            lifted_below |= below.lifts;
             unfit |= below.unfit;
             root_below |= below.rooted;
             size += below.size;
@@ -2375,11 +2407,20 @@ impl Retain {
                 break;
             }
         }
+        // Something that lifts is in the context of the element if it forms one: certain only from its style,
+        // so an element that might form one is judged as one that does not.
+        let forms_context = lifted_below
+            && element.style.as_deref().is_some_and(|style| {
+                let resolved = crate::resolved_style::Resolved::of_style(style, colors, lengths);
+                crate::layout::stacking::creates_context(&resolved, false)
+            });
+        let lifts_out = lifted_below && !forms_context;
+        let lifts = lifts_itself || lifts_out;
         let scanned = if size > PATCH_ROOT_MAX_ELEMENTS {
-            PatchRootScan { hovers: false, size: PATCH_ROOT_MAX_ELEMENTS + 1, lifts, root_below: true, rooted: true, unfit }
+            PatchRootScan { hovers: false, size: PATCH_ROOT_MAX_ELEMENTS + 1, lifts, lifts_out, root_below: true, rooted: true, unfit }
         } else {
             let rooted = root_below || self.worth(size, false) || costly(tree, element);
-            PatchRootScan { hovers, size, lifts, root_below, rooted, unfit }
+            PatchRootScan { hovers, size, lifts, lifts_out, root_below, rooted, unfit }
         };
         self.patch_root_scans.insert(id, (element.subtree_revision, scanned));
         scanned
@@ -3247,7 +3288,7 @@ impl Retain {
             ignores_text_color: !node.reads_colors && !lifts,
             subtree: node.subtree,
             overscan,
-            patch_root: node.patch_root && !lifts && own.size <= PATCH_ROOT_MAX_ELEMENTS,
+            patch_root: node.patch_root && !node.hands_lifts_out(own) && own.size <= PATCH_ROOT_MAX_ELEMENTS,
             box_root: box_root && !lifts && own.size <= UNIT_MAX_ELEMENTS,
         })
     }
@@ -3852,7 +3893,7 @@ impl Retain {
                     watches: node.watches_relevance || own.watched,
                     holes,
                     size: own.size,
-                    patch_root: node.patch_root && eligible && !lifts && own.size <= PATCH_ROOT_MAX_ELEMENTS && node.vol.dynamic == 0 && !own.dynamic,
+                    patch_root: node.patch_root && eligible && !node.hands_lifts_out(&own) && own.size <= PATCH_ROOT_MAX_ELEMENTS && node.vol.dynamic == 0 && !own.dynamic,
                     box_root: node.box_root && eligible && !lifts && own.size <= UNIT_MAX_ELEMENTS && node.vol.dynamic == 0 && !own.dynamic,
                     reads_colors: node.reads_colors,
                     reads_custom: node.reads_custom,
@@ -6033,6 +6074,16 @@ mod tests {
             Some(is_patch_root)
         }
 
+        /// `patch_root`, with the `lift_z` and context the renderer decided for the element.
+        fn patch_root_with(&mut self, id: u64, stacking: (Option<i32>, bool), inside: impl FnOnce(&mut Self)) -> Option<bool> {
+            assert!(self.enter_in(id, None).is_none());
+            self.retain.stacking(|| stacking);
+            let enter = self.retain.begin_patch_root();
+            inside(self);
+            let recording = self.retain.exit();
+            Some(enter.zip(recording).is_some_and(|(_, recording)| recording.patch_root))
+        }
+
         /// Builds the element `id` the way `build_element_in` does for a box root that is no patch root, with `inside`
         /// building what is in it. Says whether it is one. Nothing if the frame skipped it, in which case the skip
         /// says whether it is and it is kept as one.
@@ -7113,6 +7164,75 @@ mod tests {
         page.table(None, |_| {});
         assert_eq!(page.retain.records.get(&2).map(|record| record.eligible), Some(false));
         assert_eq!(page.retain.records.get(&1).map(|record| record.eligible), Some(false));
+    }
+
+    /// `1 > 2 > (3, 4)` with the styles `styles` gives, as a patch root scan sees it from the root 2.
+    fn scan_of(styles: [(u64, crate::style::StyleDesc); 3]) -> PatchRootScan {
+        let mut page = Units::new();
+        for (id, style) in styles {
+            page.tree.set_style_arc(id, Arc::new(style));
+        }
+        page.retain.scan_patch_root(&page.tree, 2, &page.inherited.colors, &page.inherited.lengths)
+    }
+
+    fn style_of(json: &str) -> crate::style::StyleDesc {
+        serde_json::from_str(json).expect("a style")
+    }
+
+    #[test]
+    fn a_patch_root_scan_takes_its_own_lift_but_not_one_out_of_it_unless_it_forms_a_context() {
+        let plain = || style_of("{}");
+        let row = || style_of(r#"{"position":"absolute","transform":"translateY(10px)"}"#);
+        let dot = || style_of(r#"{"position":"absolute"}"#);
+        let relative = || style_of(r#"{"position":"relative"}"#);
+        // A row that lifts itself and forms a context holds a lifted child: it is a root, and the parent sees a lift.
+        let scan = scan_of([(2, row()), (3, dot()), (4, plain())]);
+        assert!(!scan.lifts_out && scan.lifts);
+        // The same row without a context is a root only while nothing is lifted in it ...
+        let scan = scan_of([(2, relative()), (3, plain()), (4, plain())]);
+        assert!(!scan.lifts_out && scan.lifts);
+        let scan = scan_of([(2, relative()), (3, dot()), (4, plain())]);
+        assert!(scan.lifts_out, "the dot is handed to the context around the row");
+        // ... and an element that lifts nothing itself is no root while a row below it lifts.
+        let scan = scan_of([(2, plain()), (3, row()), (4, plain())]);
+        assert!(scan.lifts_out && scan.lifts);
+        // Unless it forms a context: a lifted row is in it.
+        let scan = scan_of([(2, style_of(r#"{"opacity":0.5}"#)), (3, row()), (4, plain())]);
+        assert!(!scan.lifts_out && scan.lifts);
+        let scan = scan_of([(2, plain()), (3, plain()), (4, plain())]);
+        assert!(!scan.lifts_out && !scan.lifts);
+    }
+
+    #[test]
+    fn a_patch_root_records_unless_something_is_handed_to_the_context_around_it() {
+        // (the root lifts itself, forms a context, a child is lifted, whether it is a patch root)
+        let cases = [
+            (false, false, false, true),
+            (true, true, false, true),
+            (true, true, true, true),
+            (true, false, false, true),
+            (true, false, true, false),
+            (false, false, true, false),
+            (false, true, true, true),
+        ];
+        for (lifts, forms_context, child_lifted, is_root) in cases {
+            let mut page = Units::new();
+            page.patch_roots = [2].into_iter().collect();
+            let mut root = None;
+            page.frame(&[], false, |page| {
+                page.element(1, None, |page| {
+                    root = page.patch_root_with(2, (lifts.then_some(0), forms_context), |page| {
+                        page.leaf(3);
+                        if child_lifted {
+                            assert!(!page.enter(4));
+                            page.retain.stacking(|| (Some(1), false));
+                            page.retain.exit();
+                        }
+                    });
+                });
+            });
+            assert_eq!(root, Some(is_root), "lifts {lifts}, context {forms_context}, lifted child {child_lifted}");
+        }
     }
 
     #[test]
