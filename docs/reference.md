@@ -666,12 +666,11 @@ files for Solid's universal renderer and selects the reactive client runtime.
 
 ```json
 {
+  "extends": "@ghia/solid/tsconfig",
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "jsx": "preserve",
-    "jsxImportSource": "@ghia/solid",
     "types": ["vite/client"],
     "strict": true,
     "skipLibCheck": true,
@@ -679,6 +678,12 @@ files for Solid's universal renderer and selects the reactive client runtime.
   }
 }
 ```
+
+`@ghia/solid/tsconfig` sets `jsx: "preserve"`, `jsxImportSource: "@ghia/solid"`
+and `paths` for the two JSX runtimes, so a library that ships `.tsx` source
+type-checks under pnpm. TypeScript replaces `paths` from an extended config, so
+an app with its own `paths` copies those two entries; see
+[docs/solid.md](./solid.md#typescript).
 
 Host elements take `class` and `classList`, the `class` attribute that
 [stylesheet](#stylesheets) rules match, as solid-js does on the web. A `ref`
