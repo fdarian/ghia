@@ -1122,6 +1122,47 @@ impl RetainedTree {
         self.structure.borrow().clone()
     }
 
+    /// The elements of `pending_structure` a patch has to find a root for: those in the document. One destroyed, or taken out of
+    /// it after the change was noted (`detach_child`, which noted the parent and so the removal), has nothing in the frame.
+    pub fn pending_structure_in_frame(&self) -> Vec<u64> {
+        self.in_the_frame(&self.structure.borrow())
+    }
+
+    /// The elements of `pending_restyles` in the document, as [`Self::pending_structure_in_frame`] keeps those of the changes.
+    pub fn pending_restyles_in_frame(&self) -> Vec<u64> {
+        self.in_the_frame(&self.restyled.borrow())
+    }
+
+    /// The elements of `ids` that exist and, with the root set, are under it. A walk up that stops at an element already
+    /// answered, so a batch of changes in one subtree walks it once and not once for each change, the way
+    /// `css::computed_style::is_connected` would.
+    fn in_the_frame(&self, ids: &[u64]) -> Vec<u64> {
+        if self.root_id.is_none() {
+            return ids.iter().copied().filter(|id| self.elements.contains_key(id)).collect();
+        }
+        let mut answered: FxHashMap<u64, bool> = FxHashMap::default();
+        let mut path = Vec::new();
+        ids.iter()
+            .copied()
+            .filter(|&id| {
+                let mut at = id;
+                let connected = loop {
+                    if let Some(&known) = answered.get(&at) {
+                        break known;
+                    }
+                    let Some(element) = self.elements.get(&at) else { break false };
+                    path.push(at);
+                    match element.parent {
+                        Some(parent) => at = parent,
+                        None => break self.root_id == Some(at),
+                    }
+                };
+                answered.extend(path.drain(..).map(|walked| (walked, connected)));
+                connected
+            })
+            .collect()
+    }
+
     /// The innermost anchor of the frame shown that holds `id`, walking up the tree as it is now.
     pub fn anchor_holding(&self, id: u64) -> Option<u64> {
         let anchors = self.anchors.borrow();

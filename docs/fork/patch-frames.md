@@ -972,7 +972,12 @@ the patcher turns it on with `Window::set_contained_patches`.
   change of an element that is not under the window's root is no change of a frame and is noted for nothing (`outside_the_frame`): a
   subtree `detach_child` took out has its stylesheet matches taken away at the end of the batch (it is out of the document), and that
   restyle must not be a `Structure` that no anchor holds, which the next read of layout would decline. Putting it back is a change
-  of its own, noted for the parent that takes it. The tree moves `patch_barrier` only for a change no element is named for (`setRoot`, the universal style, `autoFocus`, `testId`). A change
+  of its own, noted for the parent that takes it. A change noted while the element was still in the document and then taken out
+  (a `setStyle` or a class toggle, then `detachChild`, in one batch, or a subtree kept out for a later frame) stays in the lists, which
+  `detach_child` does not prune (a bulk clear would be quadratic in them); what plans a patch skips it, as it skips a destroyed
+  element (`pending_structure_in_frame` and `pending_restyles_in_frame`, which `Retain::preview` and `is_relaid` read): the removal is
+  the parent's note, and an element out of the document has nothing in the frame to patch. They answer whether an element is under
+  the root by walking up once for a whole list, stopping at an element already answered. The tree moves `patch_barrier` only for a change no element is named for (`setRoot`, the universal style, `autoFocus`, `testId`). A change
   that a patch cannot follow takes one revision for the element, its ancestors and its subtree, so the barrier never stands past the
   root's revision and a frame built whole after it is current with it. While the frame shown has anchors or box roots (`RetainedTree::set_anchors`, published
   by `Retain::publish_anchors` when the frame is over) a batch whose changes are all attributed is `Dirty::LayoutPatchable`:

@@ -2665,7 +2665,7 @@ impl Retain {
     /// beyond a restyle by paint, which is the innermost relayout root of it. A unit or a patch root that is a box
     /// root too is also one a hover or a running animation repaints, which is no layout.
     pub(crate) fn is_relaid(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
-        tree.pending_structure().into_iter().any(|changed| tree.elements.contains_key(&changed) && self.relayout_holding(tree, changed) == Some(id))
+        tree.pending_structure_in_frame().into_iter().any(|changed| self.relayout_holding(tree, changed) == Some(id))
     }
 
     /// Whether frames are recorded to be patched: the retention is planning.
@@ -2797,14 +2797,12 @@ impl Retain {
         // The innermost anchor or box root that holds what a commit changed beyond a restyle by paint: it is laid out
         // again, and builds everything in it, so what else changed in it needs no root of its own.
         let mut relaid = FxHashSet::default();
-        for id in sources.tree.pending_structure() {
-            if sources.tree.elements.contains_key(&id) {
-                let holder = self.relayout_holding(sources.tree, id).ok_or(Unpatchable::Structure(id))?;
-                if self.is_anchor_beside_candidate(sources.tree, id, holder) {
-                    return Err(Unpatchable::Structure(id));
-                }
-                relaid.insert(holder);
+        for id in sources.tree.pending_structure_in_frame() {
+            let holder = self.relayout_holding(sources.tree, id).ok_or(Unpatchable::Structure(id))?;
+            if self.is_anchor_beside_candidate(sources.tree, id, holder) {
+                return Err(Unpatchable::Structure(id));
             }
+            relaid.insert(holder);
         }
         let covered = |id: u64| !relaid.is_empty() && self.relayout_holding(sources.tree, id).is_some_and(|holder| relaid.contains(&holder));
         for &id in &sources.hover_paint {
@@ -2812,7 +2810,7 @@ impl Retain {
                 touched.insert(self.root_holding(sources.tree, id).ok_or(Unpatchable::Hover(id))?);
             }
         }
-        for id in sources.tree.pending_restyles() {
+        for id in sources.tree.pending_restyles_in_frame() {
             if covered(id) {
                 continue;
             }
