@@ -54,7 +54,9 @@ impl DocPath {
     }
 
     /// The path of the box whose placeholder is at `offset` of the run `sub` of this element, for
-    /// the texts built inside that box. `path` starts over inside it.
+    /// the texts built inside that box. What is built inside the box does not start its path over: it
+    /// is the path the document has there, the child indices from the root, so it starts with the path
+    /// of this element (and with the path of any root this element is in).
     pub fn host(&self, sub: usize, offset: usize) -> Arc<[Host]> {
         let level = Host {
             path: self.path.clone(),
@@ -63,6 +65,57 @@ impl DocPath {
         };
         self.hosts.iter().cloned().chain(std::iter::once(level)).collect()
     }
+}
+
+impl DocPath {
+    /// This path as seen from `root`, the path of an element it is inside: what `root` has in
+    /// common with it is left out, so the result stays the same when something is inserted before
+    /// `root`. [`Self::under`] puts it back.
+    pub fn relative_to(&self, root: &DocPath) -> DocPath {
+        let (hosts, last) = strip_root(&self.hosts, &host_of(&self.path), root);
+        DocPath { hosts, path: last.path }
+    }
+
+    /// `self`, as seen from `root` (see [`Self::relative_to`]), in the document `root` is in.
+    pub fn under(&self, root: &DocPath) -> DocPath {
+        let (hosts, last) = put_under_root(&self.hosts, &host_of(&self.path), root);
+        DocPath { hosts, path: last.path }
+    }
+}
+
+fn host_of(path: &Arc<[u32]>) -> Host {
+    Host { path: path.clone(), sub: 0, offset: 0 }
+}
+
+/// The levels `hosts` and `last` hold with `root`'s taken off the front: the paragraphs `root` is inside are left out, and the path
+/// of `root` is taken off the path of every level after them, the paragraphs that host a box of the root as well as the text
+/// (a box's content does not start its path over, see [`DocPath::host`]).
+///
+/// A position that is not under `root` is a bug in the document path, which a debug build asserts and a release build keeps as it
+/// is. Every caller strips a position from the root it was recorded under, or a root from the root it was nested in, and takes
+/// the root from the same tape: the path a replay has for a root is [`crate::tape::TapeStore::doc_of`], which is where the
+/// root that holds the recording has it now.
+fn strip_root(hosts: &Arc<[Host]>, last: &Host, root: &DocPath) -> (Arc<[Host]>, Host) {
+    let shared = root.hosts.len();
+    let under = hosts.len() >= shared && hosts[..shared] == root.hosts[..];
+    debug_assert!(under, "a document position is under the paragraphs that host its root: {hosts:?} under {root:?}");
+    if !under {
+        return (hosts.clone(), last.clone());
+    }
+    let strip = |host: &Host| match host.path.strip_prefix(&root.path[..]) {
+        Some(path) => Host { path: path.into(), ..host.clone() },
+        None => {
+            debug_assert!(false, "a document position is under the path of its root: {:?} under {:?}", host.path, root.path);
+            host.clone()
+        }
+    };
+    (hosts[shared..].iter().map(strip).collect(), strip(last))
+}
+
+/// The inverse of [`strip_root`].
+fn put_under_root(hosts: &Arc<[Host]>, last: &Host, root: &DocPath) -> (Arc<[Host]>, Host) {
+    let put = |host: &Host| Host { path: root.path.iter().chain(host.path.iter()).copied().collect(), ..host.clone() };
+    (root.hosts.iter().cloned().chain(hosts.iter().map(put)).collect(), put(last))
 }
 
 impl From<Arc<[u32]>> for DocPath {
@@ -106,6 +159,20 @@ impl DocPos {
                 ..self.own.clone()
             },
         }
+    }
+
+    /// This position as seen from `root`, the path of an element the text is inside (see
+    /// [`DocPath::relative_to`]). What a retained subtree keeps of where its text is, so that
+    /// the subtree is not built again because its place among its siblings moved.
+    pub fn relative_to(&self, root: &DocPath) -> Self {
+        let (hosts, own) = strip_root(&self.hosts, &self.own, root);
+        Self { hosts, own }
+    }
+
+    /// The position that `self`, seen from `root`, has in the document `root` is in.
+    pub fn under(&self, root: &DocPath) -> Self {
+        let (hosts, own) = put_under_root(&self.hosts, &self.own, root);
+        Self { hosts, own }
     }
 
     /// How many atomic inlines the run sits inside.
@@ -992,6 +1059,63 @@ mod tests {
         );
         assert_eq!(selection.wash_range("first"), Some(6..10));
         assert_eq!(selection.wash_range("third"), Some(0..5));
+    }
+
+    #[test]
+    fn a_position_seen_from_its_root_is_the_same_wherever_the_root_is_and_comes_back_under_the_path_it_has() {
+        let before = DocPath::from(Arc::<[u32]>::from([0, 4]));
+        let after = DocPath::from(Arc::<[u32]>::from([0, 5]));
+        let inside = DocPos::new(Arc::<[u32]>::from([0, 4, 2, 1]), 3);
+        let relative = inside.relative_to(&before);
+        assert_eq!(relative, DocPos::new(Arc::<[u32]>::from([2, 1]), 3));
+        assert_eq!(relative.under(&before), inside);
+        assert_eq!(relative.under(&after), DocPos::new(Arc::<[u32]>::from([0, 5, 2, 1]), 3), "a sibling inserted before moved the root");
+        assert_eq!(DocPos::new(before.clone(), 0).relative_to(&before), DocPos::new(Arc::<[u32]>::from([]), 0), "the root's own text");
+        assert!(after.relative_to(&after).under(&before).hosts.is_empty());
+    }
+
+    #[test]
+    fn a_position_inside_a_box_of_a_paragraph_of_the_root_is_seen_from_the_root_in_every_level() {
+        let root = DocPath::from(Arc::<[u32]>::from([1, 2]));
+        let moved = DocPath::from(Arc::<[u32]>::from([1, 7]));
+        let paragraph = DocPath::new(Arc::from([]), Arc::<[u32]>::from([1, 2, 0]));
+        // What the renderer builds: the text in the box has the path the document has there, which starts with the paragraph's.
+        let boxed = DocPos::new(DocPath::new(paragraph.host(0, 3), Arc::from([1, 2, 0, 0, 1])), 0);
+        let relative = boxed.relative_to(&root);
+        let expected = DocPath::from(Arc::<[u32]>::from([0])).host(0, 3);
+        assert_eq!(relative, DocPos::new(DocPath::new(expected, Arc::from([0, 0, 1])), 0), "the host and the text are both seen from the root");
+        assert_eq!(relative.under(&root), boxed);
+        let moved_paragraph = DocPath::new(Arc::from([]), Arc::<[u32]>::from([1, 7, 0]));
+        let moved_box = DocPos::new(DocPath::new(moved_paragraph.host(0, 3), Arc::from([1, 7, 0, 0, 1])), 0);
+        assert_eq!(relative.under(&moved), moved_box, "a sibling inserted before the root moved the paragraph and the text in its box");
+        assert!(relative.under(&moved) > DocPos::new(Arc::<[u32]>::from([1, 6, 9]), 0), "and it sorts after what is before the root now");
+    }
+
+    #[test]
+    fn a_position_inside_a_box_in_a_box_is_seen_from_the_root_in_every_level() {
+        let root = DocPath::from(Arc::<[u32]>::from([4]));
+        let moved = DocPath::from(Arc::<[u32]>::from([5]));
+        let outer = DocPath::from(Arc::<[u32]>::from([4, 1]));
+        let inner = DocPath::new(outer.host(0, 2), Arc::from([4, 1, 0, 3]));
+        let text = DocPos::new(DocPath::new(inner.host(1, 6), Arc::from([4, 1, 0, 3, 0, 2])), 0);
+        let relative = text.relative_to(&root);
+        assert_eq!(relative.depth(), 2);
+        assert_eq!(relative.under(&root), text);
+        let after = relative.under(&moved);
+        assert_eq!(after.depth(), 2);
+        assert!(after > text, "it is where the root is now, in each paragraph of the way");
+        assert_eq!(after.relative_to(&moved), relative, "and seen from the root it is as it was");
+    }
+
+    #[test]
+    fn a_root_inside_a_box_keeps_the_paragraphs_around_it_out_of_its_positions() {
+        let paragraph = DocPath::from(Arc::<[u32]>::from([3]));
+        let root = DocPath::new(paragraph.host(0, 5), Arc::from([0, 2]));
+        let text = DocPos::new(DocPath::new(paragraph.host(0, 5), Arc::from([0, 2, 1])), 0);
+        let relative = text.relative_to(&root);
+        assert_eq!(relative, DocPos::new(Arc::<[u32]>::from([1]), 0));
+        let elsewhere = DocPath::new(DocPath::from(Arc::<[u32]>::from([4])).host(0, 5), Arc::from([0, 2]));
+        assert_eq!(relative.under(&elsewhere).depth(), 1);
     }
 
     /// `AA <box>BB</box> CC`, then a block `DD`: the paragraph is one painted string with the

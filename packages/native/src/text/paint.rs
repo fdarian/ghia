@@ -84,7 +84,7 @@ pub(crate) fn describe_registries(window: WindowId) -> String {
     with_frame(window, |frame| {
         let mut out = String::new();
         for entry in frame.registry() {
-            writeln!(out, "{}", describe_text(entry, true, gpui::Point::default())).ok();
+            writeln!(out, "{}", describe_text(entry, &entry.doc, true, gpui::Point::default())).ok();
         }
         for region in frame.start_regions() {
             writeln!(out, "start region {} {:?} {} {:?}", region.id, region.bounds, region.selectable, region.to_window).ok();
@@ -150,12 +150,14 @@ pub(crate) fn order_by_rows(window: WindowId, rows: &[crate::tape::Roots]) {
     });
 }
 
-fn reg_entry(data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>) -> RegEntry {
+/// The entry a text write stands for in the frame: the write holds the position as seen from the root that recorded it,
+/// and the frame has it under the path the root has now.
+fn reg_entry(data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>, base: crate::tape::DocBase<'_>) -> RegEntry {
     let entry = &data.downcast_ref::<(WindowId, RegEntry)>().expect("a text write holds its entry").1;
-    RegEntry { to_window: moved_matrix(entry.to_window, offset), ..entry.clone() }
+    RegEntry { to_window: moved_matrix(entry.to_window, offset), doc: base.place(&entry.doc), ..entry.clone() }
 }
 
-fn start_region(data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>) -> StartRegion {
+fn start_region(data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>, _: crate::tape::DocBase<'_>) -> StartRegion {
     let (_, id, bounds, selectable, to_window) = data.downcast_ref::<StartRegionWrite>().expect("a start region write holds its box");
     StartRegion {
         id: *id,
@@ -165,7 +167,7 @@ fn start_region(data: &dyn std::any::Any, offset: gpui::Point<gpui::Pixels>) -> 
     }
 }
 
-fn painted_text_of(data: &dyn std::any::Any, _: gpui::Point<gpui::Pixels>) -> SharedString {
+fn painted_text_of(data: &dyn std::any::Any, _: gpui::Point<gpui::Pixels>, _: crate::tape::DocBase<'_>) -> SharedString {
     data.downcast_ref::<(WindowId, SharedString)>().expect("a painted text write holds its text").1.clone()
 }
 
@@ -361,8 +363,10 @@ pub(crate) fn publish_captured_start_region(old: Option<&crate::tape::Roots>, da
 /// Whether two text writes say the same, apart from the transforms around the element, the layout of each `moved` as given.
 pub(crate) fn same_text_apart_from_transform(
     left: &dyn std::any::Any,
+    left_doc: &selection::DocPos,
     left_moved: gpui::Point<gpui::Pixels>,
     right: &dyn std::any::Any,
+    right_doc: &selection::DocPos,
     right_moved: gpui::Point<gpui::Pixels>,
 ) -> bool {
     let (left, right) = (&text_write(left).1, &text_write(right).1);
@@ -371,7 +375,7 @@ pub(crate) fn same_text_apart_from_transform(
         Bounds::new(bounds.origin + moved, bounds.size)
     };
     left.key == right.key
-        && left.doc == right.doc
+        && left_doc == right_doc
         && left.text == right.text
         && moved_bounds(left, left_moved) == moved_bounds(right, right_moved)
         && left.group == right.group
@@ -391,8 +395,20 @@ fn painted_write(data: &dyn std::any::Any) -> &(WindowId, SharedString) {
 
 /// What a text write says, apart from the transforms around the element.
 #[cfg(test)]
-pub(crate) fn describe_text_apart_from_transform(data: &dyn std::any::Any, moved: gpui::Point<gpui::Pixels>) -> String {
-    describe_text(&text_write(data).1, false, moved)
+pub(crate) fn describe_text_apart_from_transform(data: &dyn std::any::Any, base: &crate::tape::DocBase<'_>, moved: gpui::Point<gpui::Pixels>) -> String {
+    let entry = &text_write(data).1;
+    describe_text(entry, &base.place(&entry.doc), false, moved)
+}
+
+/// What a text write says, its position seen from the base of the list it is read from.
+pub(crate) fn describe_text_write(data: &dyn std::any::Any, base: &crate::tape::DocBase<'_>) -> String {
+    let entry = &text_write(data).1;
+    describe_text(entry, &base.place(&entry.doc), true, gpui::Point::default())
+}
+
+/// Where in the document a text write is, as seen from the root that recorded it.
+pub(crate) fn text_write_position(data: &dyn std::any::Any) -> &selection::DocPos {
+    &text_write(data).1.doc
 }
 
 /// Gives the text that a patch painted again the matrix it was painted through, as for
@@ -424,14 +440,14 @@ fn text_write(data: &dyn std::any::Any) -> &(WindowId, RegEntry) {
     data.downcast_ref().expect("a text write holds its entry")
 }
 
-fn describe_text(entry: &RegEntry, with_matrix: bool, moved: gpui::Point<gpui::Pixels>) -> String {
+fn describe_text(entry: &RegEntry, doc: &selection::DocPos, with_matrix: bool, moved: gpui::Point<gpui::Pixels>) -> String {
     let bounds = entry.layout.bounds();
     let bounds = Bounds::new(bounds.origin + moved, bounds.size);
     let matrix = if with_matrix { format!(" {:?}", entry.to_window) } else { String::new() };
     format!(
         "text {} {:?} {:?} {:?} {:?} {:?} {:?}{matrix}",
         entry.key,
-        entry.doc,
+        doc,
         entry.text,
         bounds,
         entry.group,
@@ -828,12 +844,16 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                     cell,
                     to_window: window.transform(),
                 };
-                crate::tape::write(
+                crate::tape::write_placed(
                     Kind::Text,
                     (window_id, entry),
                     // Its layout is moved by the frame, with the subtree.
                     |(window, entry)| with_frame(*window, |frame| frame.registry.push(entry.clone())),
-                    |(_, entry), _| describe_text(entry, true, gpui::Point::default()),
+                    |(_, entry), _| describe_text(entry, &entry.doc, true, gpui::Point::default()),
+                    |(window, entry), root| {
+                        let doc = entry.doc.relative_to(root);
+                        (window, RegEntry { doc, ..entry })
+                    },
                 );
             }
             log_painted_text(window_id, text.clone());

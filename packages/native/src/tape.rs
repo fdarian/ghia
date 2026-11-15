@@ -26,6 +26,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use gpui::{AnyElement, App, Bounds, Edges, Element, ElementId, GlobalElementId, InspectorElementId, LayoutId, Pixels, Point, Window, WindowId};
 
+use crate::text::selection::{DocPath, DocPos};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Phase {
     Prepaint,
@@ -126,7 +128,40 @@ enum Entry {
     /// The writes of another subtree, `by` away from where they were made: a subtree that was
     /// replayed or built inside this one while it recorded. They are held by reference, so that
     /// recording a replay costs the same however much the replayed subtree wrote.
-    Nested(Rc<Entries>, Point<Pixels>),
+    Nested(Rc<Entries>, Point<Pixels>, DocPath),
+}
+
+/// Where the document positions of the writes of a list are put: a text write keeps its position as
+/// seen from the root that recorded it (so that a root that something was inserted before replays
+/// without being built again), and a registry reads it under the path the root has now.
+#[derive(Clone, Copy)]
+pub(crate) struct DocBase<'a> {
+    root: &'a DocPath,
+    nested: Option<&'a Nesting<'a>>,
+}
+
+/// A list nested in the one being read, and where its root is in the root of that one.
+struct Nesting<'a> {
+    under: &'a DocPath,
+    outer: Option<&'a Nesting<'a>>,
+}
+
+impl<'a> DocBase<'a> {
+    /// A base for positions that are read as the lists hold them, seen from the root of the first.
+    fn relative(root: &'a DocPath) -> Self {
+        Self { root, nested: None }
+    }
+
+    /// `position`, written by the list this is the base of, in the document.
+    pub(crate) fn place(&self, position: &DocPos) -> DocPos {
+        let mut placed = position.clone();
+        let mut at = self.nested;
+        while let Some(nesting) = at {
+            placed = placed.under(nesting.under);
+            at = nesting.outer;
+        }
+        placed.under(self.root)
+    }
 }
 
 thread_local! {
@@ -160,7 +195,7 @@ impl Clone for Entries {
     fn clone(&self) -> Self {
         let serial = next_serial() | (self.serial & LAID_OUT);
         for entry in &self.list {
-            if let Entry::Nested(child, by) = entry {
+            if let Entry::Nested(child, by, _) = entry {
                 nest(child.serial, serial, *by);
             }
         }
@@ -259,49 +294,51 @@ impl Entries {
         self.list.push(Entry::Write(effect));
     }
 
-    fn push_nested(&mut self, child: Rc<Entries>, by: Point<Pixels>) {
+    /// `under` is where the root of `child` is in the root of this list.
+    fn push_nested(&mut self, child: Rc<Entries>, by: Point<Pixels>, under: DocPath) {
         if child.list.is_empty() {
             return;
         }
         self.kinds = self.kinds.union(child.kinds);
         self.layout_kinds = self.layout_kinds.union(child.layout_kinds);
         nest(child.serial, self.serial, by);
-        self.list.push(Entry::Nested(child, by));
+        self.list.push(Entry::Nested(child, by, under));
     }
 
     /// Calls `visit` with every write, `offset` away from where it was made, in the order it was
     /// made. A pass that only lays out makes `layout_only` of them.
-    fn walk(&self, offset: Point<Pixels>, layout_only: bool, visit: &mut dyn FnMut(&Effect, Point<Pixels>)) {
+    fn walk(&self, offset: Point<Pixels>, base: DocBase<'_>, layout_only: bool, visit: &mut dyn FnMut(&Effect, Point<Pixels>, DocBase<'_>)) {
         for entry in &self.list {
             match entry {
                 Entry::Write(effect) => {
                     if !layout_only || effect.in_layout() {
-                        visit(effect, offset);
+                        visit(effect, offset, base);
                     }
                 }
-                Entry::Nested(child, by) => {
+                Entry::Nested(child, by, under) => {
                     if !layout_only || !child.layout_kinds.is_empty() {
-                        child.walk(offset + *by, layout_only, visit);
+                        let nesting = Nesting { under, outer: base.nested };
+                        child.walk(offset + *by, DocBase { root: base.root, nested: Some(&nesting) }, layout_only, visit);
                     }
                 }
             }
         }
     }
 
-    fn described(&self, phase: &str, delta: Point<Pixels>) -> String {
+    fn described(&self, phase: &str, delta: Point<Pixels>, root: &DocPath) -> String {
         let mut text = String::new();
-        self.walk(delta, false, &mut |effect, offset| {
+        self.walk(delta, DocBase::relative(root), false, &mut |effect, offset, base| {
             text.push_str(&format!(
                 "{phase}{} {}\n",
                 if effect.in_layout() { "+layout" } else { "" },
-                effect.describe(offset)
+                describe_placed(effect, offset, base)
             ));
         });
         text
     }
 
-    fn lines(&self) -> Vec<(bool, String)> {
-        self.lines_by(|effect, offset| effect.describe(offset))
+    fn lines(&self, root: &DocPath) -> Vec<(bool, String)> {
+        self.lines_by(root, describe_placed)
     }
 
     /// Whether the writes of the two lists are the same, the boxes, texts and start regions compared apart from the
@@ -309,15 +346,25 @@ impl Entries {
     /// the words that [`Replay::describe`] says are for a write with no comparison of its own.
     fn same_apart_from_transforms(&self, other: &Entries, moved: Point<Pixels>) -> bool {
         let (mut mine, mut theirs) = (Vec::new(), Vec::new());
-        self.collect(Point::default(), &mut mine);
-        other.collect(Point::default(), &mut theirs);
+        // A text is compared by where it is seen from the root that wrote it: the root a build is compared with may be at
+        // another place among its siblings than the one recorded, and a replay puts the text under the path it has then.
+        let (mine_root, theirs_root) = (DocPath::default(), DocPath::default());
+        self.collect(Point::default(), DocBase::relative(&mine_root), &mut mine);
+        other.collect(Point::default(), DocBase::relative(&theirs_root), &mut theirs);
         mine.len() == theirs.len()
-            && mine.iter().zip(&theirs).all(|((left, left_offset), (right, right_offset))| {
+            && mine.iter().zip(&theirs).all(|((left, left_offset, left_doc), (right, right_offset, right_doc))| {
                 left.kind() == right.kind()
                     && left.in_layout() == right.in_layout()
                     && match left.kind() {
                         Kind::Bounds => crate::automation::same_bounds_apart_from_transform(left.data(), *left_offset, right.data(), *right_offset),
-                        Kind::Text => crate::text::same_text_apart_from_transform(left.data(), moved, right.data(), Point::default()),
+                        Kind::Text => crate::text::same_text_apart_from_transform(
+                            left.data(),
+                            left_doc.as_ref().expect("a text write is placed"),
+                            moved,
+                            right.data(),
+                            right_doc.as_ref().expect("a text write is placed"),
+                            Point::default(),
+                        ),
                         Kind::StartRegion => {
                             crate::text::same_start_region_apart_from_transform(left.data(), *left_offset, right.data(), *right_offset)
                         }
@@ -328,12 +375,19 @@ impl Entries {
             })
     }
 
-    /// Every write in the order it was made, with how far from where it was made it is.
-    fn collect<'a>(&'a self, offset: Point<Pixels>, writes: &mut Vec<(&'a dyn Replay, Point<Pixels>)>) {
+    /// Every write in the order it was made, with how far from where it was made it is and, for a text, where in the
+    /// document it is, seen from `base`.
+    fn collect<'a>(&'a self, offset: Point<Pixels>, base: DocBase<'_>, writes: &mut Vec<(&'a dyn Replay, Point<Pixels>, Option<DocPos>)>) {
         for entry in &self.list {
             match entry {
-                Entry::Write(effect) => writes.push((effect.as_ref(), offset)),
-                Entry::Nested(child, by) => child.collect(offset + *by, writes),
+                Entry::Write(effect) => {
+                    let placed = (effect.kind() == Kind::Text).then(|| base.place(crate::text::text_write_position(effect.data())));
+                    writes.push((effect.as_ref(), offset, placed));
+                }
+                Entry::Nested(child, by, under) => {
+                    let nesting = Nesting { under, outer: base.nested };
+                    child.collect(offset + *by, DocBase { root: base.root, nested: Some(&nesting) }, writes);
+                }
             }
         }
     }
@@ -341,18 +395,28 @@ impl Entries {
     /// [`Self::lines`] said by words: what [`Self::same_apart_from_transforms`] compares, which a test holds it to.
     #[cfg(test)]
     fn lines_apart_from_transforms(&self, moved: Point<Pixels>) -> Vec<(bool, String)> {
-        self.lines_by(|effect, offset| match effect.kind() {
+        self.lines_by(&DocPath::default(), |effect, offset, base| match effect.kind() {
             Kind::Bounds => crate::automation::describe_apart_from_transform(effect.data(), offset),
-            Kind::Text => crate::text::describe_text_apart_from_transform(effect.data(), moved),
+            Kind::Text => crate::text::describe_text_apart_from_transform(effect.data(), &base, moved),
             Kind::StartRegion => crate::text::describe_start_region_apart_from_transform(effect.data(), offset),
             _ => effect.describe(offset),
         })
     }
 
-    fn lines_by(&self, describe: impl Fn(&Effect, Point<Pixels>) -> String) -> Vec<(bool, String)> {
+    fn lines_by(&self, root: &DocPath, describe: impl Fn(&Effect, Point<Pixels>, DocBase<'_>) -> String) -> Vec<(bool, String)> {
         let mut lines = Vec::new();
-        self.walk(Point::default(), false, &mut |effect, offset| lines.push((effect.in_layout(), describe(effect, offset))));
+        self.walk(Point::default(), DocBase::relative(root), false, &mut |effect, offset, base| {
+            lines.push((effect.in_layout(), describe(effect, offset, base)))
+        });
         lines
+    }
+}
+
+/// What `effect` says, a text with its position seen from the root of the list it is read from.
+fn describe_placed(effect: &Effect, offset: Point<Pixels>, base: DocBase<'_>) -> String {
+    match effect.kind() {
+        Kind::Text => crate::text::describe_text_write(effect.data(), &base),
+        _ => effect.describe(offset),
     }
 }
 
@@ -362,6 +426,8 @@ pub(crate) struct Live {
     entries: Rc<Entries>,
     delta: Point<Pixels>,
     layout_only: bool,
+    /// The path of the root that wrote the list, as it is now.
+    root: DocPath,
 }
 
 impl Live {
@@ -371,11 +437,12 @@ impl Live {
     }
 
     /// Calls `read` with the data of every write to the registry of `kind`, and how far from
-    /// where it was made it is made now, in the order it was made.
-    pub(crate) fn each(&self, kind: Kind, mut read: impl FnMut(&dyn Any, Point<Pixels>)) {
-        self.entries.walk(self.delta, self.layout_only, &mut |effect, offset| {
+    /// where it was made it is made now, in the order it was made, and the base that puts the position it holds
+    /// in the document.
+    pub(crate) fn each(&self, kind: Kind, mut read: impl FnMut(&dyn Any, Point<Pixels>, DocBase<'_>)) {
+        self.entries.walk(self.delta, DocBase::relative(&self.root), self.layout_only, &mut |effect, offset, base| {
             if effect.kind() == kind {
-                read(effect.data(), offset);
+                read(effect.data(), offset, base);
             }
         });
     }
@@ -553,12 +620,12 @@ impl<T> Layered<T> {
 
     /// Every write, in order. `from` makes one from the data of a write of `kind` and how far from
     /// where it was made it is made.
-    pub(crate) fn all(&mut self, kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T) -> &[T] {
+    pub(crate) fn all(&mut self, kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>, DocBase<'_>) -> T) -> &[T] {
         self.all_mut(kind, from)
     }
 
     /// [`Self::all`] for a registry whose entries a patch changes in place.
-    pub(crate) fn all_mut(&mut self, kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T) -> &mut [T] {
+    pub(crate) fn all_mut(&mut self, kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>, DocBase<'_>) -> T) -> &mut [T] {
         if !self.pending.is_empty() {
             self.placed = None;
             self.placed_pending = None;
@@ -571,8 +638,8 @@ impl<T> Layered<T> {
                 }
                 Slot::Live(live) => {
                     let list = live.entries.serial;
-                    live.each(kind, |data, offset| {
-                        self.read.push(from(data, offset));
+                    live.each(kind, |data, offset, base| {
+                        self.read.push(from(data, offset, base));
                         self.owners.push(list);
                     });
                 }
@@ -593,7 +660,7 @@ impl<T> Layered<T> {
     /// A registry holds the writes of the whole window and a patch replaces a few rows of them, so this
     /// only looks at who owns each write and puts the new writes over the ones it takes out ([`replace_runs`]): what is left
     /// is not copied, and when as many come as went out nothing after them moves.
-    pub(crate) fn replace(&mut self, old: &Roots, new: &[Live], kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T) {
+    pub(crate) fn replace(&mut self, old: &Roots, new: &[Live], kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>, DocBase<'_>) -> T) {
         let brings = new.iter().any(|live| live.has(kind));
         if !brings && self.read.is_empty() && self.pending.is_empty() {
             return;
@@ -627,8 +694,8 @@ impl<T> Layered<T> {
         let (mut values, mut owners) = (Vec::new(), Vec::new());
         for live in new.iter().filter(|live| live.has(kind)) {
             let list = live.entries.serial;
-            live.each(kind, |data, offset| {
-                values.push(from(data, offset));
+            live.each(kind, |data, offset, base| {
+                values.push(from(data, offset, base));
                 owners.push(list);
             });
         }
@@ -644,7 +711,7 @@ impl<T> Layered<T> {
 
     /// Calls `visit` on every write that was made into one of the lists `roots` stand for (or one nested in them), for a patch
     /// that changes what a root wrote without writing it again. Like [`Self::replace`] it asks the index, not every write.
-    pub(crate) fn for_each_held_mut(&mut self, roots: &Roots, kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T, mut visit: impl FnMut(&mut T)) {
+    pub(crate) fn for_each_held_mut(&mut self, roots: &Roots, kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>, DocBase<'_>) -> T, mut visit: impl FnMut(&mut T)) {
         self.all_mut(kind, from);
         let held = roots.lists();
         for run in runs_held_by(&mut self.placed, self.owners.len(), |at| self.owners[at], &held) {
@@ -655,7 +722,7 @@ impl<T> Layered<T> {
     /// Puts the writes that were made into the lists of each of `rows` (or into one nested in them)
     /// together, in the order of `rows`, where the first of them was; what was written around them keeps
     /// its order. For a registry that a frame which brought rows in put the writes of at its end.
-    pub(crate) fn order_by_rows(&mut self, rows: &[Roots], kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>) -> T) {
+    pub(crate) fn order_by_rows(&mut self, rows: &[Roots], kind: Kind, from: impl Fn(&dyn Any, Point<Pixels>, DocBase<'_>) -> T) {
         self.all_mut(kind, &from);
         self.placed = None;
         self.placed_pending = None;
@@ -813,11 +880,29 @@ pub(crate) struct Tape {
     capture_only: bool,
     /// The tape of a subtree built by a pass that only lays out, see [`Tape::laid_out`].
     laid_out: bool,
+    /// The path of the root the tape records, as the build that made it had it: the position of a
+    /// text it holds is kept as seen from here ([`DocPos::relative_to`]).
+    doc: DocPath,
+    /// The root this is the tape of, once the store has it, for the tape of the root around to say who it was nested in.
+    root: Option<u64>,
+    /// The root whose recording the prepaint of this one was last nested in, and where this one is in that root: how a root
+    /// that a frame replays without visiting it (a hole in the recording of a root that was replayed) finds the path it has
+    /// now, see [`TapeStore::doc_of`].
+    nested_in: RefCell<Option<(u64, DocPath)>>,
 }
 
 impl Default for Tape {
     fn default() -> Self {
-        Self { prepaint: Entries::new(false), paint: Entries::new(false), lifted: Vec::new(), capture_only: false, laid_out: false }
+        Self {
+            prepaint: Entries::new(false),
+            paint: Entries::new(false),
+            lifted: Vec::new(),
+            capture_only: false,
+            laid_out: false,
+            doc: DocPath::default(),
+            root: None,
+            nested_in: RefCell::new(None),
+        }
     }
 }
 
@@ -826,24 +911,25 @@ impl Tape {
     /// prepaint wrote, and its `paint` what the publications queued by the prepaint wrote once the
     /// whole tree was prepainted ([`Taped`]): a pass that lays out makes both, and a replay of it
     /// puts both back.
-    pub(crate) fn laid_out() -> SharedTape {
-        Rc::new(RefCell::new(Tape { prepaint: Entries::new(true), paint: Entries::new(true), laid_out: true, ..Tape::default() }))
+    pub(crate) fn laid_out(doc: DocPath) -> SharedTape {
+        Rc::new(RefCell::new(Tape { prepaint: Entries::new(true), paint: Entries::new(true), laid_out: true, doc, ..Tape::default() }))
     }
 
     /// A tape for a subtree that is prepainted and painted only to see what it would write: the
     /// writes are on the tape and not in the registries, which hold what the frame before made of
     /// the subtree. [`Tape::same_writes`] says whether the frame would have made the same.
-    pub(crate) fn capturing() -> SharedTape {
-        Rc::new(RefCell::new(Tape { capture_only: true, ..Tape::default() }))
+    pub(crate) fn capturing(doc: DocPath) -> SharedTape {
+        Rc::new(RefCell::new(Tape { capture_only: true, doc, ..Tape::default() }))
     }
 
     /// Whether `other` holds the writes this does, phase by phase, in the same order, at the same
     /// places.
     pub(crate) fn same_writes(&self, other: &Tape) -> bool {
-        self.prepaint.lines() == other.prepaint.lines()
-            && self.paint.lines() == other.paint.lines()
+        let root = DocPath::default();
+        self.prepaint.lines(&root) == other.prepaint.lines(&root)
+            && self.paint.lines(&root) == other.paint.lines(&root)
             && self.lifted.len() == other.lifted.len()
-            && self.lifted.iter().zip(&other.lifted).all(|(left, right)| left.lines() == right.lines())
+            && self.lifted.iter().zip(&other.lifted).all(|(left, right)| left.lines(&root) == right.lines(&root))
     }
 
     /// [`Self::same_writes`] where the boxes of the elements, and the matrices of their texts and
@@ -874,7 +960,7 @@ impl Tape {
         [&self.prepaint, &self.paint]
             .into_iter()
             .chain(&self.lifted)
-            .map(|entries| Live { entries: entries.clone(), delta, layout_only: false })
+            .map(|entries| Live { entries: entries.clone(), delta, layout_only: false, root: self.doc.clone() })
             .collect()
     }
 
@@ -888,12 +974,25 @@ impl Tape {
     /// it was made it is made now (none).
     pub(crate) fn each(&self, kind: Kind, visit: &mut dyn FnMut(&dyn Any, Point<Pixels>)) {
         for entries in [&self.prepaint, &self.paint].into_iter().chain(&self.lifted) {
-            entries.walk(Point::default(), false, &mut |effect, offset| {
+            entries.walk(Point::default(), DocBase::relative(&self.doc), false, &mut |effect, offset, _| {
                 if effect.kind() == kind {
                     visit(effect.data(), offset);
                 }
             });
         }
+    }
+
+    /// The prepaint of this tape was nested in the recording of `outer`, `under` its root.
+    fn note_nested_in(&self, outer: &Tape, under: &DocPath) {
+        if let Some(outer) = outer.root {
+            *self.nested_in.borrow_mut() = Some((outer, under.clone()));
+        }
+    }
+
+    /// This tape takes the place of `old`, the tape of the root before a patch built it again: the root is where it was nested.
+    fn takes_place_of(&mut self, old: &Tape) {
+        self.root = old.root;
+        *self.nested_in.get_mut() = old.nested_in.borrow().clone();
     }
 
     fn entries(&self, phase: Phase) -> Option<&Rc<Entries>> {
@@ -932,7 +1031,9 @@ impl Tape {
 
     /// This tape as [`Tape::default`] makes one, for the build of a root whose last tape nothing
     /// holds any more to record into.
-    fn renew(&mut self) {
+    fn renew(&mut self, doc: DocPath) {
+        self.doc = doc;
+        *self.nested_in.get_mut() = None;
         self.capture_only = false;
         self.laid_out = false;
         self.lifted.clear();
@@ -963,11 +1064,11 @@ impl Tape {
     /// Puts back what `phase` of the subtree wrote, `delta` from where it wrote it: the registries
     /// are told, and read it when something asks. A subtree inside another that is being recorded
     /// is part of its tape too.
-    pub(crate) fn replay(&self, window: WindowId, phase: Phase, delta: Point<Pixels>) {
+    pub(crate) fn replay(&self, window: WindowId, phase: Phase, delta: Point<Pixels>, doc: &DocPath) {
         debug_assert!(!is_capturing(), "a subtree that is only captured holds no subtree to replay");
         let put = |entries: &Rc<Entries>, layout_only: bool| {
             if !entries.list.is_empty() {
-                publish(window, &Live { entries: entries.clone(), delta, layout_only });
+                publish(window, &Live { entries: entries.clone(), delta, layout_only, root: doc.clone() });
             }
         };
         match phase {
@@ -997,9 +1098,11 @@ impl Tape {
                             "the publications of a pass that only lays out are recorded in the paint list"
                         );
                         let mut outer = recording.tape.borrow_mut();
+                        let under = doc.relative_to(&outer.doc);
+                        self.note_nested_in(&outer, &under);
                         let outer = outer.recording(recording.phase);
-                        outer.push_nested(self.prepaint.clone(), delta);
-                        outer.push_nested(self.paint.clone(), delta);
+                        outer.push_nested(self.prepaint.clone(), delta, under.clone());
+                        outer.push_nested(self.paint.clone(), delta, under);
                     }
                 });
                 return;
@@ -1021,22 +1124,33 @@ impl Tape {
                     },
                     "a subtree is replayed in the phase it is recorded in"
                 );
-                recording.tape.borrow_mut().recording(recording.phase).push_nested(entries.clone(), delta);
+                let mut outer = recording.tape.borrow_mut();
+                let under = doc.relative_to(&outer.doc);
+                if phase == Phase::Prepaint {
+                    self.note_nested_in(&outer, &under);
+                }
+                outer.recording(recording.phase).push_nested(entries.clone(), delta, under);
             }
         });
     }
 
-    /// What the tape writes `delta` from where it wrote it, as text, one line per write.
-    pub(crate) fn describe(&self, delta: Point<Pixels>) -> String {
-        let lifted = (0..self.lifted.len() as u32).map(|rel| self.describe_lifted(rel)).collect::<String>();
-        self.prepaint.described("prepaint", delta) + &self.paint.described("paint", delta) + &lifted
+    /// What the tape writes `delta` from where it wrote it, as text, one line per write, the texts
+    /// where `root` is the path of the root that wrote it.
+    pub(crate) fn describe(&self, delta: Point<Pixels>, root: &DocPath) -> String {
+        let lifted = (0..self.lifted.len() as u32).map(|rel| self.describe_lifted(rel, root)).collect::<String>();
+        self.prepaint.described("prepaint", delta, root) + &self.paint.described("paint", delta, root) + &lifted
     }
 
     /// What the element handed to the stacking context as `rel` wrote, as text.
-    fn describe_lifted(&self, rel: u32) -> String {
+    fn describe_lifted(&self, rel: u32, root: &DocPath) -> String {
         self.lifted
             .get(rel as usize)
-            .map_or_else(String::new, |entries| entries.described(&format!("lifted {rel} "), Point::default()))
+            .map_or_else(String::new, |entries| entries.described(&format!("lifted {rel} "), Point::default(), root))
+    }
+
+    /// [`Self::describe`] of the tape as the build that made it had its path.
+    fn describe_built(&self) -> String {
+        self.describe(Point::default(), &self.doc)
     }
 }
 
@@ -1061,6 +1175,9 @@ pub(crate) struct TapeStore {
     /// ordinal: a root that replayed has to have put back every one it wrote when it was built.
     replayed_lifted: RefCell<Vec<(u64, u32, String)>>,
     rows: RefCell<Rows>,
+    /// The path each root a frame visited has in the document, as the frame has it ([`TapeStore::visited`]), for the hook of a root
+    /// to put its text under the path the root has now, whatever the frame that made the hook had.
+    docs: RefCell<FxHashMap<u64, DocPath>>,
 }
 
 /// Which rows of virtual lists the frame shown has, and what a frame that moved them in place did to
@@ -1089,21 +1206,59 @@ pub(crate) type Tapes = Rc<TapeStore>;
 impl TapeStore {
     /// The tape the build of `root` records into: the last build's, emptied, when nothing but the
     /// store holds it (the lists it has are reused when nothing holds them either), else a new one.
-    pub(crate) fn renew(&self, root: u64) -> SharedTape {
+    pub(crate) fn renew(&self, root: u64, doc: DocPath) -> SharedTape {
         self.moved.borrow_mut().remove(&root);
         let mut tapes = self.tapes.borrow_mut();
         if let Some(tape) = tapes.get(&root).filter(|tape| Rc::strong_count(tape) == 1) {
-            tape.borrow_mut().renew();
+            let mut tape_mut = tape.borrow_mut();
+            tape_mut.renew(doc);
+            tape_mut.root = Some(root);
+            drop(tape_mut);
             return tape.clone();
         }
         let tape = SharedTape::default();
+        {
+            let mut tape = tape.borrow_mut();
+            tape.doc = doc;
+            tape.root = Some(root);
+        }
         tapes.insert(root, tape.clone());
         tape
     }
 
+    #[cfg(test)]
     pub(crate) fn set(&self, root: u64, tape: SharedTape) {
         self.moved.borrow_mut().remove(&root);
+        tape.borrow_mut().root = Some(root);
         self.tapes.borrow_mut().insert(root, tape);
+    }
+
+    /// A frame is about to build: the roots it visits say where they are, and nothing is known of a root that it does not visit
+    /// until a replay of the root it is in says so (see [`Self::doc_of`]).
+    pub(crate) fn begin_frame(&self) {
+        self.docs.borrow_mut().clear();
+    }
+
+    /// The frame visited `root` where `doc` is: a root it builds, and a root it leaves unbuilt for gpui to replay.
+    pub(crate) fn visited(&self, root: u64, doc: DocPath) {
+        self.docs.borrow_mut().insert(root, doc);
+    }
+
+    /// The path `root` has in the frame being drawn. A root the frame visited has the path it said. A root it did not is inside a
+    /// root that was replayed (a lifted root that is no relocatable is a hole in the recording of the root around it, and the
+    /// stacking context paints the hole with the hook it had when that recording was made): it is where the recording that
+    /// last held it had it in the root of that recording, which is where the frame has that root.
+    pub(crate) fn doc_of(&self, root: u64) -> DocPath {
+        if let Some(doc) = self.docs.borrow().get(&root) {
+            return doc.clone();
+        }
+        let nested_in = |tapes: &RefCell<FxHashMap<u64, SharedTape>>| tapes.borrow().get(&root).and_then(|tape| tape.borrow().nested_in.borrow().clone());
+        let (outer, under) = nested_in(&self.tapes)
+            .or_else(|| nested_in(&self.laid_out))
+            .expect("a root that a frame replays without visiting is inside the recording of a root that it visits");
+        let doc = under.under(&self.doc_of(outer));
+        self.docs.borrow_mut().insert(root, doc.clone());
+        doc
     }
 
     /// How far from where the last build of `root` wrote it the frame shown has it: what a patch that builds the root again, where
@@ -1114,19 +1269,20 @@ impl TapeStore {
 
     /// `tape` is what a pass that only lays out wrote when it built `root`.
     pub(crate) fn set_laid_out(&self, root: u64, tape: SharedTape) {
+        tape.borrow_mut().root = Some(root);
         self.laid_out.borrow_mut().insert(root, tape);
     }
 
     /// Puts back what the pass that only laid out wrote when it built `root`, `delta` from where it
     /// wrote it.
-    fn replay_laid_out(&self, window: WindowId, root: u64, delta: Point<Pixels>) {
+    fn replay_laid_out(&self, window: WindowId, root: u64, delta: Point<Pixels>, doc: &DocPath) {
         let tape = self
             .laid_out
             .borrow()
             .get(&root)
             .expect("a root skipped with its layout record has the tape of the build that made it")
             .clone();
-        tape.borrow().replay(window, Phase::LayoutRecorded, delta);
+        tape.borrow().replay(window, Phase::LayoutRecorded, delta, doc);
     }
 
     /// Whether `captured`, the tape of a subtree prepainted and painted again, holds the writes
@@ -1146,22 +1302,25 @@ impl TapeStore {
     pub(crate) fn replace_recorded(&self, window: WindowId, root: u64, captured: &SharedTape, moved: Point<Pixels>) {
         let old = self.tapes.borrow().get(&root).cloned();
         if let Some(old) = old {
-            let (old, new) = (old.borrow(), captured.borrow());
-            let roots = old.roots();
-            crate::text::replace(window, &roots, &new.lives(moved));
-            let mut written = FxHashSet::default();
-            new.each(Kind::Bounds, &mut |data, offset| {
-                written.insert(crate::automation::id_of_bounds_write(data));
-                crate::automation::publish_captured_bounds(data, offset + moved);
-            });
-            let mut gone = Vec::new();
-            old.each(Kind::Bounds, &mut |data, _| {
-                let id = crate::automation::id_of_bounds_write(data);
-                if !written.contains(&id) {
-                    gone.push(id);
-                }
-            });
-            crate::automation::forget_boxes(window, &gone);
+            {
+                let (old, new) = (old.borrow(), captured.borrow());
+                let roots = old.roots();
+                crate::text::replace(window, &roots, &new.lives(moved));
+                let mut written = FxHashSet::default();
+                new.each(Kind::Bounds, &mut |data, offset| {
+                    written.insert(crate::automation::id_of_bounds_write(data));
+                    crate::automation::publish_captured_bounds(data, offset + moved);
+                });
+                let mut gone = Vec::new();
+                old.each(Kind::Bounds, &mut |data, _| {
+                    let id = crate::automation::id_of_bounds_write(data);
+                    if !written.contains(&id) {
+                        gone.push(id);
+                    }
+                });
+                crate::automation::forget_boxes(window, &gone);
+            }
+            captured.borrow_mut().takes_place_of(&old.borrow());
         }
         self.tapes.borrow_mut().insert(root, captured.clone());
     }
@@ -1184,13 +1343,15 @@ impl TapeStore {
         new.each(Kind::Bounds, &mut |data, offset| crate::automation::publish_captured_bounds(data, offset + moved));
         OWNER.set(before);
         drop(new);
+        captured.borrow_mut().takes_place_of(&old.borrow());
         self.tapes.borrow_mut().insert(root, captured.clone());
     }
 
-    /// Replays what the last build of `root` wrote in `phase`, `delta` from where it wrote it.
-    pub(crate) fn replay(&self, window: WindowId, root: u64, phase: Phase, delta: Point<Pixels>) {
+    /// Replays what the last build of `root` wrote in `phase`, `delta` from where it wrote it, `doc` being the path
+    /// the root has now.
+    pub(crate) fn replay(&self, window: WindowId, root: u64, phase: Phase, delta: Point<Pixels>, doc: &DocPath) {
         if phase == Phase::LayoutRecorded {
-            return self.replay_laid_out(window, root, delta);
+            return self.replay_laid_out(window, root, delta, doc);
         }
         let tape = self
             .tapes
@@ -1200,15 +1361,15 @@ impl TapeStore {
             .clone();
         if self.verifying.get() {
             match phase {
-                Phase::Prepaint => self.replayed.borrow_mut().push((root, tape.borrow().describe(delta))),
-                Phase::Lifted(rel) => self.replayed_lifted.borrow_mut().push((root, rel, tape.borrow().describe_lifted(rel))),
+                Phase::Prepaint => self.replayed.borrow_mut().push((root, tape.borrow().describe(delta, doc))),
+                Phase::Lifted(rel) => self.replayed_lifted.borrow_mut().push((root, rel, tape.borrow().describe_lifted(rel, doc))),
                 _ => {}
             }
         }
         if matches!(phase, Phase::Prepaint | Phase::Paint | Phase::Lifted(_)) {
             self.moved.borrow_mut().insert(root, delta);
         }
-        tape.borrow().replay(window, phase, delta);
+        tape.borrow().replay(window, phase, delta, doc);
     }
 
     /// A frame moved the rows of a list in place: the root `root` is `shift` further than the frame
@@ -1393,10 +1554,10 @@ impl TapeStore {
                     self.tapes.borrow().get(&root).map_or_else(Default::default, |tape| {
                         let tape = tape.borrow();
                         let lifted = (0..tape.lifted.len() as u32)
-                            .map(|rel| tape.describe_lifted(rel))
+                            .map(|rel| tape.describe_lifted(rel, &tape.doc))
                             .filter(|slice| !slice.is_empty())
                             .collect::<String>();
-                        (tape.describe(Point::default()), lifted)
+                        (tape.describe_built(), lifted)
                     })
                 } else {
                     let mut slices: Vec<(u32, String)> = self
@@ -1428,10 +1589,18 @@ struct Recording {
 impl Recording {
     /// The subtree is done: what it wrote is part of the subtree it is inside, if it is inside one.
     fn end(self) {
-        let written = self.tape.borrow().entries(self.phase).expect("a recording has its list").clone();
+        let (written, doc) = {
+            let tape = self.tape.borrow();
+            (tape.entries(self.phase).expect("a recording has its list").clone(), tape.doc.clone())
+        };
         RECORDING.with(|recordings| {
             if let Some(outer) = recordings.borrow().last() {
-                outer.tape.borrow_mut().recording(outer.phase).push_nested(written, Point::default());
+                let mut outer_tape = outer.tape.borrow_mut();
+                let under = doc.relative_to(&outer_tape.doc);
+                if self.phase == Phase::Prepaint {
+                    self.tape.borrow().note_nested_in(&outer_tape, &under);
+                }
+                outer_tape.recording(outer.phase).push_nested(written, Point::default(), under);
             }
         });
     }
@@ -1466,16 +1635,36 @@ pub(crate) fn owner() -> u64 {
 /// how far from there it is (`describe` takes that too: a write that holds a position moves by it,
 /// any other ignores it).
 pub(crate) fn write<D: 'static>(kind: Kind, data: D, apply: fn(&D), describe: fn(&D, Point<Pixels>) -> String) {
-    write_with(kind, data, apply, describe, false);
+    write_with(kind, data, apply, describe, false, None);
+}
+
+/// [`write`] for a write that holds a document position: `apply` makes it as it is given, and the one on the tape is what
+/// `relative` makes of it for the root being recorded (the path of the root is handed over), so that a replay puts the
+/// position under the path the root has then. A registry reads it back with [`DocBase::place`].
+pub(crate) fn write_placed<D: 'static>(
+    kind: Kind,
+    data: D,
+    apply: fn(&D),
+    describe: fn(&D, Point<Pixels>) -> String,
+    relative: fn(D, &DocPath) -> D,
+) {
+    write_with(kind, data, apply, describe, false, Some(relative));
 }
 
 /// [`write`] for a registry that a pass which only lays out (a bounds read) writes too, from
 /// prepaint: the painted boxes. A subtree that such a pass does not build repeats it from its tape.
 pub(crate) fn write_in_layout<D: 'static>(kind: Kind, data: D, apply: fn(&D), describe: fn(&D, Point<Pixels>) -> String) {
-    write_with(kind, data, apply, describe, true);
+    write_with(kind, data, apply, describe, true, None);
 }
 
-fn write_with<D: 'static>(kind: Kind, data: D, apply: fn(&D), describe: fn(&D, Point<Pixels>) -> String, in_layout: bool) {
+fn write_with<D: 'static>(
+    kind: Kind,
+    data: D,
+    apply: fn(&D),
+    describe: fn(&D, Point<Pixels>) -> String,
+    in_layout: bool,
+    relative: Option<fn(D, &DocPath) -> D>,
+) {
     let list = RECORDING.with(|recordings| {
         recordings.borrow().last().map(|recording| recording.tape.borrow_mut().recording(recording.phase).serial)
     });
@@ -1485,6 +1674,13 @@ fn write_with<D: 'static>(kind: Kind, data: D, apply: fn(&D), describe: fn(&D, P
         OWNER.set(0);
     }
     if list.is_some() {
+        let data = match relative {
+            Some(relative) => {
+                let root = RECORDING.with(|recordings| recordings.borrow().last().expect("a list was found").tape.borrow().doc.clone());
+                relative(data, &root)
+            }
+            None => data,
+        };
         let effect: Effect = Rc::new(Write { data, describe, in_layout, kind });
         RECORDING.with(|recordings| {
             let recordings = recordings.borrow();
@@ -1717,16 +1913,16 @@ mod tests {
         record(&recorded, &[2, 3]);
         assert_eq!(REGISTRY.get(), 5);
 
-        let captured = Tape::capturing();
+        let captured = Tape::capturing(DocPath::default());
         record(&captured, &[2, 3]);
         assert_eq!(REGISTRY.get(), 5, "a capture leaves the registry as the frame made it");
         assert!(!is_capturing(), "and only while it records");
         assert!(captured.borrow().same_writes(&recorded.borrow()));
 
-        let other = Tape::capturing();
+        let other = Tape::capturing(DocPath::default());
         record(&other, &[2, 4]);
         assert!(!other.borrow().same_writes(&recorded.borrow()), "a write that differs");
-        let fewer = Tape::capturing();
+        let fewer = Tape::capturing(DocPath::default());
         record(&fewer, &[2]);
         assert!(!fewer.borrow().same_writes(&recorded.borrow()), "a write that is missing");
         add(1);
@@ -1739,10 +1935,10 @@ mod tests {
         let recorded = SharedTape::default();
         record(&recorded, &[7]);
         tapes.set(1, recorded);
-        let same = Tape::capturing();
+        let same = Tape::capturing(DocPath::default());
         record(&same, &[7]);
         assert!(tapes.same_as_recorded(1, &same, Point::default()));
-        let different = Tape::capturing();
+        let different = Tape::capturing(DocPath::default());
         record(&different, &[8]);
         assert!(!tapes.same_as_recorded(1, &different, Point::default()));
         assert!(!tapes.same_as_recorded(2, &same, Point::default()), "a root with no recording has nothing to be the same as");
@@ -1777,7 +1973,7 @@ mod tests {
         tapes.shift(window, 1, down(-20.0));
         tapes.shift(window, 1, down(-40.0));
         assert_eq!(tapes.moved(1), down(-60.0), "scrolls add up");
-        tapes.replay(window, 1, Phase::Paint, down(-100.0));
+        tapes.replay(window, 1, Phase::Paint, down(-100.0), &DocPath::default());
         assert_eq!(tapes.moved(1), down(-100.0), "a replay says where the root is");
         tapes.set(1, SharedTape::default());
         assert_eq!(tapes.moved(1), Point::default(), "a root built again is where it was built");
@@ -1822,7 +2018,7 @@ mod tests {
                     crate::text::log_painted_text(window, (*text).into());
                     region(*x, *selectable);
                     if let Some(dx) = replayed {
-                        child.borrow().replay(window, Phase::Paint, gpui::point(gpui::px(*dx), gpui::px(0.0)));
+                        child.borrow().replay(window, Phase::Paint, gpui::point(gpui::px(*dx), gpui::px(0.0)), &DocPath::default());
                     }
                 }
                 tape
@@ -1855,11 +2051,11 @@ mod tests {
         record_box(&recorded, window, moved(5.0), 30.0);
         tapes.set(1, recorded.clone());
 
-        let later = Tape::capturing();
+        let later = Tape::capturing(DocPath::default());
         record_box(&later, window, moved(9.0), 30.0);
         assert!(!later.borrow().same_writes(&recorded.borrow()), "the placement is a write like the others");
         assert!(tapes.same_as_recorded(1, &later, Point::default()), "but a patch of a transform that moves paints the same");
-        let wider = Tape::capturing();
+        let wider = Tape::capturing(DocPath::default());
         record_box(&wider, window, moved(5.0), 31.0);
         assert!(!tapes.same_as_recorded(1, &wider, Point::default()), "a box that is another size is not the same");
 
@@ -1884,7 +2080,56 @@ mod tests {
     }
 
     fn replay(tape: &SharedTape, window: WindowId) {
-        tape.borrow().replay(window, Phase::Paint, Point::default());
+        tape.borrow().replay(window, Phase::Paint, Point::default(), &DocPath::default());
+    }
+
+    #[test]
+    fn a_position_is_put_under_the_path_the_root_replayed_has_now_and_under_each_root_nested_between() {
+        use std::sync::Arc;
+        let path = |path: &[u32]| DocPath::from(Arc::<[u32]>::from(path));
+        let (root, child, grandchild) = (SharedTape::default(), SharedTape::default(), SharedTape::default());
+        for (tape, at) in [(&root, [4].as_slice()), (&child, &[4, 1]), (&grandchild, &[4, 1, 2])] {
+            tape.borrow_mut().doc = path(at);
+        }
+        {
+            let _root = Recorder::begin(&root, Phase::Paint);
+            let _child = Recorder::begin(&child, Phase::Paint);
+            let _grandchild = Recorder::begin(&grandchild, Phase::Paint);
+            write(Kind::Paragraph, 1_i32, |_| {}, |_, _| String::new());
+        }
+        let mut seen = Vec::new();
+        let now = path(&[9]);
+        let paint = root.borrow().paint.clone();
+        paint.walk(Point::default(), DocBase::relative(&now), false, &mut |_, _, base| {
+            seen.push(base.place(&DocPos::new(Arc::<[u32]>::from([0]), 0)));
+        });
+        assert_eq!(seen, [DocPos::new(Arc::<[u32]>::from([9, 1, 2, 0]), 0)], "the root moved from 4 to 9, the child is its first, the grandchild the child's second");
+    }
+
+    #[test]
+    fn a_root_the_frame_did_not_visit_has_the_path_of_the_root_that_holds_its_recording_now() {
+        use std::sync::Arc;
+        let path = |path: &[u32]| DocPath::from(Arc::<[u32]>::from(path));
+        let at = |doc: DocPath| DocPos::new(doc, 0);
+        let tapes = TapeStore::default();
+        // Roots 1, 2 and 3 are nested in the recording of the one before, 2 at [4, 1] and 3 at [4, 1, 2].
+        let (outer, hole, deeper) = (tapes.renew(1, path(&[4])), tapes.renew(2, path(&[4, 1])), tapes.renew(3, path(&[4, 1, 2])));
+        {
+            let _outer = Recorder::begin(&outer, Phase::Prepaint);
+            let _hole = Recorder::begin(&hole, Phase::Prepaint);
+            let _deeper = Recorder::begin(&deeper, Phase::Prepaint);
+            write(Kind::Paragraph, 1_i32, |_| {}, |_, _| String::new());
+        }
+        tapes.begin_frame();
+        // A sibling was inserted before the root that the frame replays, which says where it is now.
+        tapes.visited(1, path(&[9]));
+        assert_eq!(at(tapes.doc_of(2)), at(path(&[9, 1])));
+        assert_eq!(at(tapes.doc_of(3)), at(path(&[9, 1, 2])));
+        tapes.begin_frame();
+        tapes.visited(1, path(&[4]));
+        tapes.visited(3, path(&[7, 7]));
+        assert_eq!(at(tapes.doc_of(2)), at(path(&[4, 1])), "a frame says again where it is");
+        assert_eq!(at(tapes.doc_of(3)), at(path(&[7, 7])), "a root that the frame visited is where the visit found it");
     }
 
     #[test]
@@ -1917,13 +2162,13 @@ mod tests {
     fn a_tape_that_the_store_renews_is_emptied_in_place_and_leaves_what_a_replay_holds() {
         let (recorded_in, window) = (WindowId::from(931), WindowId::from(932));
         let tapes = TapeStore::default();
-        let first = tapes.renew(1);
+        let first = tapes.renew(1, DocPath::default());
         record_logs(&first, recorded_in, &["old"]);
         replay(&first, window);
         let first_serial = first.borrow().roots().0;
         drop(first);
 
-        let second = tapes.renew(1);
+        let second = tapes.renew(1, DocPath::default());
         assert_ne!(second.borrow().roots().0[1], first_serial[1], "the list a replay holds is left as it was, and the tape has one of its own");
         record_logs(&second, recorded_in, &["new"]);
         assert_eq!(crate::text::painted_text(window), ["old"]);
@@ -1934,7 +2179,7 @@ mod tests {
         drop(second);
 
         // Nothing holds this one any more but the registry of another window, which has not read it.
-        let third = tapes.renew(1);
+        let third = tapes.renew(1, DocPath::default());
         assert_eq!(Rc::as_ptr(&third), second_address, "the tape of the store is reused");
         assert_ne!(third.borrow().roots().0[1], second_serial[1], "what was written under a serial is not taken for what is written now");
         for kind in [Kind::Bounds, Kind::StartRegion, Kind::Painted, Kind::Text, Kind::Paragraph, Kind::Measured] {
@@ -1965,9 +2210,9 @@ mod tests {
         let whole = SharedTape::default();
         record_logs(&whole, window, &["o1", "i1", "i2", "o2"]);
 
-        let said = whole.borrow().describe(Point::default());
-        assert_eq!(replayed.borrow().describe(Point::default()), said);
-        assert_eq!(built.borrow().describe(Point::default()), said);
+        let said = whole.borrow().describe(Point::default(), &DocPath::default());
+        assert_eq!(replayed.borrow().describe(Point::default(), &DocPath::default()), said);
+        assert_eq!(built.borrow().describe(Point::default(), &DocPath::default()), said);
         assert!(replayed.borrow().same_writes(&whole.borrow()));
         assert!(built.borrow().same_writes(&whole.borrow()));
     }
@@ -1993,7 +2238,7 @@ mod tests {
         crate::automation::forget_window(window);
         assert_eq!(x_of(window, 7), None, "a frame forgets the boxes of the one before");
 
-        tape.borrow().replay(window, Phase::Paint, gpui::point(gpui::px(3.0), gpui::px(0.0)));
+        tape.borrow().replay(window, Phase::Paint, gpui::point(gpui::px(3.0), gpui::px(0.0)), &DocPath::default());
         assert_eq!(x_of(window, 7), Some(13.0));
 
         // A pass that builds the element and records nothing writes it where the build put it,
@@ -2022,11 +2267,11 @@ mod tests {
         let by = gpui::point(gpui::px(3.0), gpui::px(0.0));
 
         crate::automation::forget_window(window);
-        outer.borrow().replay(window, Phase::Paint, by);
+        outer.borrow().replay(window, Phase::Paint, by, &DocPath::default());
         assert_eq!((x_of(window, 1), x_of(window, 2)), (Some(8.0), Some(23.0)), "the replay moves what is nested in it");
 
         crate::automation::forget_window(window);
-        inner.borrow().replay(window, Phase::Paint, by);
+        inner.borrow().replay(window, Phase::Paint, by, &DocPath::default());
         assert_eq!((x_of(window, 1), x_of(window, 2)), (None, Some(23.0)), "and the replay of what is nested only what it holds");
     }
 
@@ -2043,7 +2288,7 @@ mod tests {
             let _recording = Recorder::begin(&painted, Phase::Paint);
             box_at(window, 1, 10.0);
         }
-        let laid_out = Tape::laid_out();
+        let laid_out = Tape::laid_out(DocPath::default());
         record_laid_out(&laid_out, window, 1, 20.0);
         assert!(is_laid_out(laid_out.borrow().paint.serial) && !is_laid_out(painted.borrow().paint.serial));
 
@@ -2052,7 +2297,7 @@ mod tests {
         replay(&painted, window);
         assert_eq!(x_of(window, 1), Some(10.0));
         crate::automation::forget_window(window);
-        laid_out.borrow().replay(window, Phase::LayoutRecorded, Point::default());
+        laid_out.borrow().replay(window, Phase::LayoutRecorded, Point::default(), &DocPath::default());
         assert_eq!(x_of(window, 1), Some(20.0));
 
         // A build that writes without recording leaves both.
@@ -2062,29 +2307,29 @@ mod tests {
         replay(&painted, window);
         assert_eq!(x_of(window, 1), Some(10.0));
         crate::automation::forget_window(window);
-        laid_out.borrow().replay(window, Phase::LayoutRecorded, Point::default());
+        laid_out.borrow().replay(window, Phase::LayoutRecorded, Point::default(), &DocPath::default());
         assert_eq!(x_of(window, 1), Some(20.0));
     }
 
     #[test]
     fn a_layout_tape_skipped_inside_another_is_part_of_it() {
         let window = WindowId::from(910);
-        let inner = Tape::laid_out();
+        let inner = Tape::laid_out(DocPath::default());
         record_laid_out(&inner, window, 2, 20.0);
 
         // The pass that builds the outer subtree skips the inner one, which publishes when the
         // publications of the pass run, inside the outer one's bracket.
-        let outer = Tape::laid_out();
+        let outer = Tape::laid_out(DocPath::default());
         crate::automation::forget_window(window);
         {
             let _recording = Recorder::begin(&outer, Phase::Paint);
             box_at(window, 1, 5.0);
-            inner.borrow().replay(window, Phase::LayoutRecorded, Point::default());
+            inner.borrow().replay(window, Phase::LayoutRecorded, Point::default(), &DocPath::default());
         }
         assert_eq!((x_of(window, 1), x_of(window, 2)), (Some(5.0), Some(20.0)));
 
         crate::automation::forget_window(window);
-        outer.borrow().replay(window, Phase::LayoutRecorded, gpui::point(gpui::px(3.0), gpui::px(0.0)));
+        outer.borrow().replay(window, Phase::LayoutRecorded, gpui::point(gpui::px(3.0), gpui::px(0.0)), &DocPath::default());
         assert_eq!((x_of(window, 1), x_of(window, 2)), (Some(8.0), Some(23.0)), "the replay of the outer moves what is nested");
     }
 
@@ -2092,14 +2337,14 @@ mod tests {
     fn a_root_skipped_with_its_layout_record_is_put_back_where_the_skip_says() {
         let window = WindowId::from(912);
         let store = TapeStore::default();
-        let laid_out = Tape::laid_out();
+        let laid_out = Tape::laid_out(DocPath::default());
         record_laid_out(&laid_out, window, 1, 20.0);
         store.set_laid_out(7, laid_out);
 
         // Each skip is as far from the build as the place says, and not from the skip before.
         for by in [3.0_f32, 0.0, 10.0, 10.0, -4.0] {
             crate::automation::forget_window(window);
-            store.replay(window, 7, Phase::LayoutRecorded, gpui::point(gpui::px(by), gpui::px(0.0)));
+            store.replay(window, 7, Phase::LayoutRecorded, gpui::point(gpui::px(by), gpui::px(0.0)), &DocPath::default());
             assert_eq!(x_of(window, 1), Some(f64::from(20.0 + by)));
         }
     }
@@ -2107,7 +2352,7 @@ mod tests {
     #[test]
     fn the_box_of_a_layout_tape_outlasts_the_frames_of_a_page_of_many_boxes() {
         let window = WindowId::from(911);
-        let laid_out = Tape::laid_out();
+        let laid_out = Tape::laid_out(DocPath::default());
         record_laid_out(&laid_out, window, 1, 20.0);
         // The first reset purges whatever there is, the ones after it only past 4096 boxes.
         crate::automation::forget_window(window);
@@ -2117,26 +2362,26 @@ mod tests {
             }
             crate::automation::forget_window(window);
         }
-        laid_out.borrow().replay(window, Phase::LayoutRecorded, Point::default());
+        laid_out.borrow().replay(window, Phase::LayoutRecorded, Point::default(), &DocPath::default());
         assert_eq!(x_of(window, 1), Some(20.0), "the pass that lays the content out again finds its box");
 
         // Until the element is destroyed.
         crate::automation::retain_bounds(window, |id| id != 1);
         crate::automation::forget_window(window);
-        laid_out.borrow().replay(window, Phase::LayoutRecorded, Point::default());
+        laid_out.borrow().replay(window, Phase::LayoutRecorded, Point::default(), &DocPath::default());
         assert_eq!(x_of(window, 1), None);
     }
 
     #[test]
     fn the_boxes_a_forced_pass_left_are_read_after_frames_that_did_not_write_them() {
         let window = WindowId::from(913);
-        let laid_out = Tape::laid_out();
+        let laid_out = Tape::laid_out(DocPath::default());
         record_laid_out(&laid_out, window, 2, 20.0);
 
         // The pass writes one box and puts back another by a layout record, moved by 3.
         crate::automation::forget_window(window);
         box_at(window, 1, 5.0);
-        laid_out.borrow().replay(window, Phase::LayoutRecorded, gpui::point(gpui::px(3.0), gpui::px(0.0)));
+        laid_out.borrow().replay(window, Phase::LayoutRecorded, gpui::point(gpui::px(3.0), gpui::px(0.0)), &DocPath::default());
         assert_eq!((x_of(window, 1), x_of(window, 2)), (Some(5.0), Some(23.0)));
         crate::automation::keep_bounds(window);
 
@@ -2192,7 +2437,7 @@ mod tests {
 
         // The next frame puts the root back, 3 down, and a shift moves the replay by what it moved.
         crate::automation::forget_window(window);
-        tape.borrow().replay(window, Phase::Paint, gpui::point(gpui::px(0.0), gpui::px(3.0)));
+        tape.borrow().replay(window, Phase::Paint, gpui::point(gpui::px(0.0), gpui::px(3.0)), &DocPath::default());
         assert_eq!(nudge(window), 23.0);
         tapes.shift(window, 1, gpui::point(gpui::px(0.0), gpui::px(-5.0)));
         assert_eq!(nudge(window), 18.0);
@@ -2243,7 +2488,7 @@ mod tests {
         log(window, "unrelated");
         let by = gpui::point(gpui::px(0.0), gpui::px(-5.0));
         registry.shift(&roots(&outer), by, |value, by| *value += f32::from(by.y) as i32);
-        let read: Vec<i32> = registry.all(Kind::Paragraph, |_, _| 0).to_vec();
+        let read: Vec<i32> = registry.all(Kind::Paragraph, |_, _, _| 0).to_vec();
         assert_eq!(read, [-4, -3, 3]);
     }
 
@@ -2257,14 +2502,14 @@ mod tests {
     }
 
     fn numbers(registry: &mut Layered<i32>) -> Vec<i32> {
-        registry.all(Kind::Paragraph, |data, _| *data.downcast_ref::<i32>().expect("the test writes numbers")).to_vec()
+        registry.all(Kind::Paragraph, |data, _, _| *data.downcast_ref::<i32>().expect("the test writes numbers")).to_vec()
     }
 
     fn lives_of(tape: &SharedTape) -> Vec<Live> {
         tape.borrow().lives(Point::default()).into_iter().filter(|live| live.has(Kind::Paragraph)).collect()
     }
 
-    fn read_number(data: &dyn Any, _: Point<Pixels>) -> i32 {
+    fn read_number(data: &dyn Any, _: Point<Pixels>, _: DocBase<'_>) -> i32 {
         *data.downcast_ref::<i32>().expect("the test writes numbers")
     }
 
