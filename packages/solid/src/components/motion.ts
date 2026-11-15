@@ -9,7 +9,7 @@ import {
   splitProps,
   type JSX,
 } from "solid-js"
-import type { DomEvent, MotionValueStyle } from "@ghia/native/host"
+import type { DomEvent } from "@ghia/native/host"
 import {
   elementScope,
   gestureDescription,
@@ -58,7 +58,7 @@ import type {
 } from "@ghia/native/host"
 import type { SolidHostProps, SolidHostRef } from "../jsx-runtime.js"
 import { createElement, spread } from "../universal.js"
-import type { HostElement } from "../host.js"
+import type { HostElement, SolidStyle } from "../host.js"
 import { useContext } from "solid-js"
 import { PresenceGroupContext, useIsPresent } from "./animate-presence.js"
 import { LayoutGroupContext } from "./layout-group.js"
@@ -83,7 +83,7 @@ export type MotionSpanProps = Omit<
 > &
   MotionSpanAnimation &
   MotionGestureCallbacks &
-  MotionSpanIgnoredProps & { style?: MotionValueStyle }
+  MotionSpanIgnoredProps & { style?: SolidStyle }
 
 /** A `motion.path`, `motion.circle`, ...: the shape's own props plus the animation. */
 export type MotionShapeProps<Shape, Tag extends string = string> = SolidHostProps<Shape, Tag> &

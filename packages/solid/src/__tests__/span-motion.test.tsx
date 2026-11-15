@@ -142,6 +142,25 @@ describe.skipIf(!hasNativeTestRenderer)("Solid motion values in the style of a s
     page.app.unmount()
   })
 
+  it("take a motion value written under a CSS property name, and still keep the transforms off a motion.span", () => {
+    const padding = motionValue(0)
+    const page = setup(() => (
+      <>
+        <motion.span testId="s" style={{ "padding-left": padding, transform: "translateX(50px)", scale: 2 } as never}>
+          aaaa
+        </motion.span>
+        <span testId="n">bbbb</span>
+      </>
+    ))
+    const before = page.left("n")
+    const box = page.bounds("s")
+    animate(padding, 40, LINEAR)
+    page.advance(500)
+    expect(page.left("n") - before).toBeCloseTo(20, 0)
+    expect(page.bounds("s").x).toBeCloseTo(box.x, 0)
+    page.app.unmount()
+  })
+
   it("take the transforms and keep them off the span", () => {
     const page = setup(() => (
       <>

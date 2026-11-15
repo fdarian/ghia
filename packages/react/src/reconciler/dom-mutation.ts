@@ -170,7 +170,7 @@ export function setDomProp(instance: Instance, name: string, value: string | num
     bumpTreeVersion()
   }
   if (state.mounted && forwardsCustomProp(instance.elementType, name)) {
-    state.container.renderer.setCustomProp(instance.nativeId, name, serializeCustomProp(value))
+    state.container.renderer.setCustomProp(instance.nativeId, name, serializeCustomProp(name, value))
   }
   if (state.mounted) {
     // The attribute store natively reads is the one a framework prop writes, so a code write goes there too.

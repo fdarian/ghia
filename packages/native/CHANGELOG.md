@@ -1,5 +1,91 @@
 # @ghia/native
 
+## 0.13.0
+
+The tree is now a DOM. Every window root is `<html>` with `<head>` and `<body>`, nodes are real `Node`, `Element` and `Text` objects, CSS stylesheets and HTML tags work, and code that is not the framework can build, query, style and observe the tree as it does in a browser. As a result these run unmodified: `@base-ui/react` (Checkbox, Switch, Radio, Slider, Field, Popover, Menu, Select), Kobalte and the Base UI Solid ports, the `@dnd-kit/dom` sortable (`@dnd-kit/solid` and `@dnd-kit/react` 0.5.3), floating-ui and TanStack Virtual.
+
+### Breaking changes
+
+- **`<text>` is only an SVG element now.** A string is a DOM text node and goes directly into any element (`<div>Saved</div>`, or strings and `<span>`s as one inline paragraph). `<text>` outside an `<svg>` throws `<text> is only valid inside <svg>`. To migrate, turn a `<text>` that sat inside other text or a `<span>` into a `<span>`, any other `<text>` into a `<div>`, or put the string straight into its parent. `findByType("text")` and tests that read a string node's type now use `"#text"`.
+- **`id` is the DOM `id`.** On a host element, `id` is the `id` prop as a string (`""` without one). The number native knows an element by is now `nativeId`, on host elements and text nodes of both adapters. Migrate `renderer.scrollToItem(ref.id, i)` to `renderer.scrollToItem(ref.nativeId, i)`; `FocusableNode` and `ObservableElement` take `nativeId` as well.
+- **A text control's `change` fires on commit (Solid and native).** `onChange` and `addEventListener('change')` on an `<input>` or `<textarea>` fire when the user commits a changed value (blur, or Enter in an `<input>`), as in the DOM, instead of on every edit. Move per-keystroke handlers to `onInput` (`HostInputEvent`); `onChange` now receives a `HostChangeEvent`, a plain `Event` rather than an `InputEvent`. Solid's `ComboboxInput` reports through `onInput`. React apps need no change: `onChange` still fires per edit as React DOM's does, and `addEventListener('change')` on a ref gives the commit. For renderer code, `getTextSelection` no longer carries the text; read it with `getTextValue`.
+- **Top-level nodes live in `<body>`.** A window root is `<html>` > `<head>` + `<body>`, and the app's top-level nodes are children of `body`, so several top-level siblings all draw (only the last one did). Event paths end at `html`. `<html>` and `<body>` are `display: block`, fill the window and have no default margin.
+- **`document.activeElement` is `document.body` when nothing is focused**, where it was `null`, and a key pressed with nothing focused targets `body` and bubbles through `html`, `document` and `window`, where it went to `window` alone with `target === null`. Replace `document.activeElement === null` with `=== document.body`, and a `window` key listener's `event.target === null` check with `=== document.body`.
+- **`querySelectorAll` returns a static `NodeList`**, not an `Array` subclass, so it has no `map` or `filter`, as in a browser. Wrap it in `Array.from(...)`. `children` and `childNodes` stay arrays.
+- **Host node fields renamed.** A Solid host node's child list is `childList`, because `children` is now the DOM's elements-only list, and a host node's `tag` field is `elementType`.
+- **Host element types follow React DOM and solid-js**, which can fail a build that passed: React's `JSX.IntrinsicElements[tag]` props carry the tag's DOM `ref` (`useRef<HTMLDivElement>` on a `div`), which Ghia's own components (still `Ref<PublicInstance>`) do not accept; a callback ref typed narrower than the tag's instance no longer fits; under `moduleResolution: "nodenext"` JSX props are now type-checked where they were `any`; and in Solid a `<li>` callback ref's `value` is `never`.
+- **Text selection only on text-like inputs.** `selectionStart`, `selectionEnd` and `selectionDirection` are `null`, and `setSelectionRange()` throws `InvalidStateError`, on every `<input>` type except `text`, `search`, `url`, `tel` and `password`, as HTML says. `email`, `number` and `date` used to have a selection; `select()` still selects their text.
+- **For custom adapters and renderer code.** `className` is no longer a native element prop; it is the `class` attribute, sent with the other attributes. Adapters implement the new `ParentBinding`, `TextBinding` and `ElementBinding` members on their `DOM_BINDING`, register a `DomNodeFactory` with `installElementSource`, and join `unmountAllRoots()` through `registerRoot()`. `appliedBatchCount` moved from `@ghia/native/host` to `@ghia/native/testing`.
+
+### Features
+
+**Stylesheets**
+
+- `<style>` elements and constructed sheets (`new CSSStyleSheet()` in `document.adoptedStyleSheets`, with `replace`, `insertRule`, `deleteRule` and `cssRules`) style the tree. Type, class, id and attribute selectors, `:is()`, `:where()`, `:not()`, `:root`, the four combinators, nesting and `@layer` match, and `!important` is honoured against the `style` prop. `@media`, `@keyframes`, pseudo-elements and the other at-rules are skipped; see `docs/fork/deviations.md`.
+- Stylesheets read `:hover`, `:active`, `:focus`, `:focus-visible`, `:focus-within` and `:popover-open`, and a new inline `focus` style block applies while the element has focus. Focus styles transition and pass inherited values (`color`, `fontSize`) to children.
+- `initial`, `unset`, `inherit` and `revert` take back user agent and base styles as in CSS, in sheets, inline styles and state blocks.
+- `var()` works in every style property (`width: "var(--anchor-width)"`, colours, borders), with fallbacks, and transitions run between computed `var()` values.
+
+**HTML tags and form controls**
+
+- HTML tags are host elements with Chrome's default style and implicit accessibility roles: `<p>`, `<h1>` to `<h6>`, lists, `<section>`, `<nav>`, `<main>`, `<table>` and its parts, `<strong>`, `<em>`, `<a>`, `<br>`, `<button>` and the rest listed in `docs/reference.md`. Inline tags join their parent's paragraph like a `<span>`. `<button>` and `<a href>` are tab stops, Enter and Space click a focused button, and a button submits its form (`event.submitter`, `form.requestSubmit(submitter)`).
+- `<input type="checkbox">`, `"radio"`, `"hidden"` and `"range"` work as in HTML: toggling and radio groups, `input` then `change`, `checked`, `defaultChecked`, `indeterminate`, `valueAsNumber`, `stepUp()`, keyboard stepping for a range, and `FormData`. They paint nothing themselves, since Base UI draws its own; see the deviations.
+- Text controls fire `input` (an `InputEvent` with `inputType` and `data`) once per edit and `change` on commit, at the DOM's times.
+- The constraint validation API on `<input>` and `<textarea>`: `required`, `validity` (`valueMissing`, `customError`), `setCustomValidity()`, `checkValidity()` and `reportValidity()`. `ValidityState` is a global.
+- `setAttribute('value' | 'checked')`, `defaultValue` and `defaultChecked` behave as the DOM's defaults, and `value`, `checked` and `indeterminate` can be written before the element mounts.
+
+**The DOM from code**
+
+- `Node`, `Element`, `HTMLElement`, `SVGElement`, `Text`, `Document` and the `HTML*Element` classes Base UI checks are real classes, exported by `@ghia/native/host` and installed as globals where the runtime has none.
+- Build and move nodes from code beside the framework's: `document.createElement`, `createElementNS`, `createTextNode`, `appendChild`, `insertBefore`, `removeChild`, `replaceChild`, `remove`, `before`, `after`, `append`, `prepend`, `replaceChildren`, `cloneNode` and the `textContent` setters. React and Solid pick up the tree the code left.
+- `matches`, `closest`, `querySelector` and `querySelectorAll` take real CSS selectors, compiled once and cached. `getElementsByTagName`, `getElementsByClassName`, `getElementsByName`, `getElementById` and `document.createTreeWalker` are there too.
+- `MutationObserver` with the standard's options and delivery. With no observer alive it costs one integer check per change.
+- `setAttribute`, `removeAttribute` and `toggleAttribute` write the prop through the framework's own path, so `aria-hidden`, `inert` and `data-*` set by floating-ui or Base UI reach native at once. `classList` and a live `dataset` come with them.
+- `element.style` is a `CSSStyleDeclaration` over the live style (`setProperty` with `important`, `getPropertyPriority`, `cssText`, camelCase members), merged with the framework's own style updates.
+- Layout reads: `getComputedStyle`, `offsetWidth`/`offsetHeight`, `offsetParent`/`offsetLeft`/`offsetTop`, `clientLeft`/`clientTop`, `getClientRects()`, `document.elementFromPoint` and `elementsFromPoint`.
+- Events: delivered events are instances of `PointerEvent`, `MouseEvent`, `KeyboardEvent`, `FocusEvent`, `InputEvent` and the other DOM classes (with `getModifierState`), `element.dispatchEvent` and `document.dispatchEvent` run capture, target and bubble (and a dispatched `click` activates labels and submit buttons), and `addEventListener` takes `capture`, `once`, `passive` and `signal`. `onKeyDownCapture`, `onKeyUpCapture`, `onFocusCapture` and `onBlurCapture` (plus `onFocusInCapture` and `onFocusOutCapture` in Solid) used to be dropped silently.
+- The popover API: `popover`, `showPopover()`, `hidePopover()`, `togglePopover()`, `beforetoggle` and `toggle`, drawn in the top layer with light dismiss for `popover="auto"`.
+- Web Animations: `element.animate(keyframes, options)` returns the same `Animation` that `getAnimations()` lists, and `KeyframeEffect`, `Animation`, `CSSAnimation`, `CSSTransition` and `DocumentTimeline` are globals.
+- `window` has `innerWidth`, `innerHeight`, `visualViewport` and a `resize` event; `requestAnimationFrame` runs in the window's frame steps; `ResizeObserver`, `IntersectionObserver` (which takes `document` as its root) and `matchMedia` are globals; `document.getSelection()` and `selectionchange` exist.
+
+**Solid**
+
+- JSX written with HTML attribute names works: `autofocus`, `tabindex`, `readonly`, `maxlength`, `colspan`, `rowspan` and `for`.
+- `style` takes CSS-named keys (`'white-space'`, `'z-index'`, `-webkit-app-region`) and a CSS text string (`style="color: red"`), as Solid on the web does. A style typed as solid-js's `JSX.CSSProperties` is assignable without a cast.
+- Host props accept what solid-js types for the same attribute, so `JSX.HTMLAttributes` spreads onto a host element.
+
+**React**
+
+- Host elements take `className` and `<style>` is a JSX element. Refs are typed by the tag's DOM interface, so TanStack Virtual's `measureElement` needs no cast; `HostRef`, `TextControlInstance` and `FormInstance` are exported.
+- Suspense and Activity hide a child through its live `style` as React DOM does.
+
+### Performance
+
+- Plain fills are drawn by a lighter fragment shader. In the Mailbox bench the GPU time of the scroll phase fell from about 540 to 370 ms, typing from 40 to 26 ms and navigating from 40 to 28 ms, close to GPUI alone (341, 25 and 29 ms).
+- A layout edit is patched at the fixed-size box that holds it instead of laying out the whole frame: a text edit in a row of a 10,000-row list went from 323M to 1.7M instructions, about the cost of a hover. `GPUIX_BOX_ROOTS_OFF=1` turns it off.
+- Absolutely positioned rows, the shape TanStack Virtual renders, are kept and moved between frames instead of rebuilt, and inserting a row no longer rebuilds the rows after it.
+- A wheel on a scroller is a scroll write, so a scroll listener that reads `scrollTop` no longer forces a layout pass per wheel event. A caret blink is no longer a whole frame after a stylesheet sets `white-space`.
+- A stylesheet change reparses only new rules and rematches only the elements a changed rule can reach (`insertRule` at 10,000 elements: 21M to 1.1M instructions), and a class toggled on 5,000 elements costs about half what it did.
+- A layout read (`scrollTop`, `clientHeight`, `scrollHeight`) after swapping out class-styled content, such as a Solid `<Show>` swap, patches the frame instead of building it whole. An element outside the document no longer counts as a change of the frame.
+- An element with no `var()` skips substitution, about 1% fewer instructions when scrolling a long list.
+
+### Fixes
+
+- A style value that does not parse (`border: 0`, `height: "inherit"`) drops only that declaration, as in CSS, instead of rejecting the style and unmounting the app.
+- `onScroll` runs before the frame that paints the new offset, so a virtualizer shows the right rows with no blank frame.
+- A transition or animation below an element that goes `display: none` is cancelled, as in a browser.
+- `element.animate()` keeps running after the element is removed, and `getKeyframes()` of a retargeted transition no longer throws.
+- A throw while flushing no longer stops later flushes. Solid's `render()`, `flush()`, `flushSync()`, `dispatch()` and `unmount()` and React's `unmount()` finish their work and then rethrow (one error, or an `AggregateError`), a Solid root without `onUncaughtError` logs errors with `console.error`, and a throwing `onCleanup` no longer leaves a Solid root unable to render.
+- A prop that leaves a Solid spread is removed, and children that change through a spread replace the old nodes instead of being appended.
+- `element.focus()` does nothing on an element that is not rendered (`display: none`, `visibility: hidden`, `inert`), as in a browser.
+- An element used after its window closed, or after a test renderer was disposed, behaves as a detached node instead of throwing or reaching another window. Handlers that moved focus to each other in a loop throw `Maximum call stack size exceeded` instead of aborting the process.
+- `document.documentElement`, `head` and `body` are never `null`; what code writes to them before the first `render()` carries over to the real root.
+- A full reload under `ghia dev` unmounts the roots before running the entry again, as a page reload does.
+- `<label for>` names its control in React, and in Solid on every element.
+- `draggable` reflects as `"true"` or `"false"`, as the DOM does.
+- `selectionStart` and friends on a checkbox, radio, range or hidden input are `null` instead of throwing.
+- A required radio outside the document reports `valueMissing` correctly.
+
 ## 0.12.1
 
 ### Patch Changes

@@ -666,12 +666,11 @@ files for Solid's universal renderer and selects the reactive client runtime.
 
 ```json
 {
+  "extends": "@ghia/solid/tsconfig",
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "jsx": "preserve",
-    "jsxImportSource": "@ghia/solid",
     "types": ["vite/client"],
     "strict": true,
     "skipLibCheck": true,
@@ -679,6 +678,12 @@ files for Solid's universal renderer and selects the reactive client runtime.
   }
 }
 ```
+
+`@ghia/solid/tsconfig` sets `jsx: "preserve"`, `jsxImportSource: "@ghia/solid"`
+and `paths` for the two JSX runtimes, so a library that ships `.tsx` source
+type-checks under pnpm. TypeScript replaces `paths` from an extended config, so
+an app with its own `paths` copies those two entries; see
+[docs/solid.md](./solid.md#typescript).
 
 Host elements take `class` and `classList`, the `class` attribute that
 [stylesheet](#stylesheets) rules match, as solid-js does on the web. A `ref`
@@ -5039,6 +5044,19 @@ bubbling, but a `div` that only declares `onKeyDown` never takes focus. Give it 
 | `inert` | Nothing in the subtree is focusable; focus leaves it when an ancestor becomes inert. See below |
 | `display: none` on the element or an ancestor, from its `style`, a stylesheet rule or the `hidden` attribute; `visibility: hidden` or `collapse` on the element (a `visible` descendant of a hidden one is focusable); an `inert` ancestor | `focus()` does nothing, as in a browser: no focus change and no event, and the element is not scrolled to. See [Imperative focus](#imperative-focus) |
 
+In Solid the HTML attribute names work too, as on the web: `autofocus`, `tabindex`, `readonly`, `maxlength`, `colspan`,
+`rowspan` and `for` are the props `autoFocus`, `tabIndex`, `readOnly`, `maxLength`, `colSpan`, `rowSpan` and `htmlFor`.
+A boolean attribute given a text is on, as a template has it (`autofocus=""` and `readonly="false"` are on, `autofocus={false}`
+is off), and `tabindex="0"` is `0`. Solid's `autofocus` focuses the element every time it mounts, where Chrome honours the
+first one of a document ([deviations](./fork/deviations.md#solid-adapter)).
+
+In React only the camelCase props work: `tabindex`, `autofocus`, `readonly`, `maxlength`, `colspan` and `rowspan` are kept
+as the props of that name, which native does not read, so the element is not focusable and does not take focus when it
+mounts (`getAttribute` reads them back). The one exception is `for` on a `<label>`, which is `htmlFor`. React DOM differs: it
+writes an unknown name as an attribute when its value is a string or a number, so `<div tabindex={0}>` is focusable in Chrome
+(with a development warning), and drops only a boolean (`autofocus`, `readonly`)
+([deviations](./fork/deviations.md#dom-attributes)).
+
 ### `inert`
 
 `<div inert>` takes its whole subtree out of interaction, like the DOM attribute:
@@ -5331,7 +5349,7 @@ Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `
 | `querySelector(selector)`, `querySelectorAll(selector)` | On an element, on `document` and on a `DocumentFragment`. The elements below the node that match, in document order: the node itself is not one, but the whole selector is matched against the tree, so `el.querySelectorAll('main p')` finds a `p` in `el` whose `main` is above it. `querySelectorAll` returns a static `NodeList` (`length`, `item(index)`, `list[index]`, `forEach`, `keys`, `values`, `entries` and iteration; `instanceof NodeList` holds, and it has no `map` or `filter`, as in a browser: `Array.from(list)` makes an array) that does not follow later changes to the tree, and `querySelector` the first or `null`. `document.querySelector(…)` searches the `<html>` of every window, so an app's elements and a portal into `document.body` are both found; with nothing mounted it finds the stand-in `<html>`, `<head>` and `<body>` and nothing else. `:scope` in a query on `document` is `<html>`. A selector is compiled once and kept by its text, so asking the same question on every focus change (a focus trap's tabbable list, `a[href], button:not([disabled]), [tabindex]`) walks the tree and parses nothing. |
 | `getElementsByTagName(name)`, `getElementsByClassName(names)`, `document.getElementsByName(name)` | On an element and on `document` (`getElementsByName` on `document` only). The elements below the node, in document order, as a **live** list: it searches the tree again when the tree or an attribute has changed since its last access (one counter for the whole document, moved by every insert, remove, root mount and unmount, and prop write) and otherwise answers from what it found (the next change to the tree drops that, so a list nobody reads again does not keep its elements alive), so a loop over `length` and `list[index]` walks the tree once and `length`, `item(index)`, `list[index]`, `namedItem(id or name)` (an `HTMLCollection` also answers `list.someId`) and iteration follow later changes to the tree, as in a browser. `getElementsByTagName` compares the lowercased name with an HTML element's tag and the name as written with an SVG element's, and `"*"` is every element; `getElementsByClassName` takes the whitespace-separated classes an element must all carry (an empty list is no element); `getElementsByName` is the HTML elements whose `name` attribute is the text, as a `NodeList` (no `namedItem`). `HTMLCollection` and `NodeList` are globals, `instanceof` works on them (and holds for `querySelectorAll`'s result, not for `children` and `childNodes`, which are arrays: [deviations](fork/deviations.md#dom-selectors)), and they cannot be constructed. They work on `document.head`, `document.body` and `document.documentElement` before a root mounts as well as after. Base UI's ScrollArea calls `document.head.getElementsByTagName("style")`. |
 | `document.createTreeWalker(root, whatToShow = NodeFilter.SHOW_ALL, filter = null)`, `TreeWalker`, `NodeFilter` | The DOM's tree walker, as focus scopes, `ariaHideOutside` and menus use it. `NodeFilter` is a global with `SHOW_ALL`, `SHOW_ELEMENT`, `SHOW_TEXT` and the other `SHOW_*` masks and `FILTER_ACCEPT`, `FILTER_REJECT` and `FILTER_SKIP`. The walker has `root`, `whatToShow`, `filter` (a function or an object with `acceptNode`, called on the object), `currentNode` (settable to any node, even outside `root`), `parentNode()`, `firstChild()`, `lastChild()`, `previousSibling()`, `nextSibling()`, `previousNode()` and `nextNode()`, with the standard's algorithms: `FILTER_SKIP` drops a node and still walks its children, `FILTER_REJECT` drops its subtree (for `parentNode()` it is the same as skip), and `previousNode()` can end at `root` itself. It walks the nodes Ghia has, elements and text (there are no comments, so `SHOW_COMMENT` matches nothing). A filter that uses the walker it is running in throws `InvalidStateError`. `createNodeIterator` does not exist. |
-| `className`, `classList`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `class` attribute (`""` without one; `class` wins over `className`, as `getAttribute("class")` does) and assigning it is `setAttribute("class", value)`, an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a live `DOMStringMap` of the `data-*` attributes with the names in camel case (`data-row-id` is `rowId`): a read goes through `getAttribute`, and an assignment or a `delete` through `setAttribute` and `removeAttribute`, so Base UI's `element.dataset.tabindex = ...` works. `classList` is a live `DOMTokenList` (global `DOMTokenList`) of the `class` attribute, the same object every time: `add`, `remove`, `toggle(token, force?)`, `replace`, `contains`, `item`, `length`, `value` (assignable, as is `element.classList = text`), `toString()`, `forEach`, `keys`, `values`, `entries`, iteration and `list[0]`. A write goes through `setAttribute('class', ...)`, so a stylesheet's `.name` rules, a `MutationObserver` and the framework's `class` handling see it, and it works on elements made by `document.createElement` and on the stand-in `<html>` before the first `render()`. A bad token throws `SyntaxError` (empty) or `InvalidCharacterError` (white space), `supports()` throws `TypeError` as for `classList`, and removing the last token leaves `class=""` while removing from an element with no `class` attribute leaves none. |
+| `className`, `classList`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `class` attribute (`""` without one; `class` wins over `className`, as `getAttribute("class")` does) and assigning it is `setAttribute("class", value)`, an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG, except `tabindex` and `autofocus`, which are lowercase there as in Chrome). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a live `DOMStringMap` of the `data-*` attributes with the names in camel case (`data-row-id` is `rowId`): a read goes through `getAttribute`, and an assignment or a `delete` through `setAttribute` and `removeAttribute`, so Base UI's `element.dataset.tabindex = ...` works. `classList` is a live `DOMTokenList` (global `DOMTokenList`) of the `class` attribute, the same object every time: `add`, `remove`, `toggle(token, force?)`, `replace`, `contains`, `item`, `length`, `value` (assignable, as is `element.classList = text`), `toString()`, `forEach`, `keys`, `values`, `entries`, iteration and `list[0]`. A write goes through `setAttribute('class', ...)`, so a stylesheet's `.name` rules, a `MutationObserver` and the framework's `class` handling see it, and it works on elements made by `document.createElement` and on the stand-in `<html>` before the first `render()`. A bad token throws `SyntaxError` (empty) or `InvalidCharacterError` (white space), `supports()` throws `TypeError` as for `classList`, and removing the last token leaves `class=""` while removing from an element with no `class` attribute leaves none. |
 | `hidden`, `tabIndex`, `disabled`, `htmlFor`, `isContentEditable`, `shadowRoot`, `assignedSlot` | `hidden` is the `hidden` attribute: `false` without it, `true` with it, and `"until-found"` when the attribute says that; assigning `true` or a non-empty string sets it, `false` removes it. An element that has it is `display: none` by its user agent style, as in Chrome (`[hidden]:not([hidden=until-found i])`), whatever its tag, so the author's own `display` is over it, and `until-found` keeps its box. `tabIndex` is the `tabindex` attribute as an integer (text that does not start with one reads the default), and without it the default of the tag, as in the HTML standard: 0 for `a`, `area`, `button`, `frame`, `iframe`, `input`, `object`, `select`, `textarea` and the first `summary` of a `details`, -1 for the rest; assigning writes the attribute. `disabled` is the `disabled` attribute as a boolean on `button`, `input`, `select`, `textarea`, `fieldset`, `optgroup` and `option` (assigning `true` sets it empty, `false` removes it), and `htmlFor` is the `for` attribute of a `label`, `""` without one; on any other element neither is there. `isContentEditable` is `false`: Ghia has no `contenteditable`, so nothing in it is an editing host (an element given the attribute is not editable, and Base UI's tabbable walk reads it as not focusable by it). `shadowRoot` and `assignedSlot` are `null`: there is no shadow DOM. |
 | `setAttribute(name, value)`, `removeAttribute(name)`, `toggleAttribute(name, force?)` | Write the prop the attribute stands for through the framework's own prop path, so native applies it as if the app had rendered that prop, at once (the mutations are flushed before the call returns; `setAttribute('style', text)` is the exception, which waits for the next flush as every write of `element.style` does), and `getAttribute` gives it back. This is what `@floating-ui`'s `markOthers` and Base UI's focus manager do: `setAttribute('aria-hidden', 'true')` leaves the element out of the accessibility tree, `setAttribute('inert', '')` makes the subtree inert, `setAttribute('tabindex', '-1')` makes the element focusable and `'0'` a tab stop (`removeAttribute('tabindex')` undoes it), and `setAttribute(name, '')` reads back `""` with `hasAttribute(name)` true. `popover` goes through the same path as the `popover` property and a framework's prop: a showing popover whose kind the write changes, or that loses the attribute, is hidden with its events. Names are lowercased on HTML elements, as in the DOM, and an empty name or one with a space, `/`, `>`, `=` or NUL throws `InvalidCharacterError`. The value is text: `tabindex`, `colspan`, `rowspan`, `span` and `maxlength` hold the integer the text is (text that is no integer is kept as it is, and native ignores it); `inert`, `disabled`, `hidden` (except `until-found`, which is kept as that text), `required`, `readonly`, `autofocus`, `multiple`, `selected` and `open` are on whatever the text is (`""` too), and `draggable` is on for `"true"`. `class` is `className` (or `class`, where the element was given that), `for` is `htmlFor`, and any other name is the prop of that name (`aria-*`, `data-*`). On an `<input>` the `checked` attribute is `defaultChecked` (on whatever its text is) and the `value` attribute is `defaultValue`, as in the DOM: the control's `checked` and `value` follow them only while it is clean (no user toggle or edit, no script write of the property), and `getAttribute` gives the attribute back; a checkbox, radio, hidden, submit, button, reset or image `value` attribute is the control's value itself and writes `value`. A `<textarea>` has no `value` attribute, so it is kept as text only. One rule says which prop answers an `<input>`'s `checked` and `value` attributes, for `getAttribute` and for the attribute a stylesheet's `[checked]` and `[value="…"]` match alike: the default prop (`defaultChecked`, `defaultValue`) when the element has one, else the `checked` or `value` prop, as React DOM puts a controlled value in the attribute too (a checkbox's `value` is the attribute itself, so `value` comes first there). So `setAttribute('checked', '')` on an input a framework renders `checked={false}` stays matched after the framework commits `checked` again, and `setAttribute('value', 'y')` on a controlled text input reads back `"y"` while its text stays the controlled value; `removeAttribute` then falls back to the prop. An element keeps the key its framework used for an attribute. The write goes the way a rendered prop's does to the attribute store native's [stylesheet](#stylesheets) selectors read, so `[data-state="open"]`, `[hidden]` and `.foo` match what `setAttribute`, `toggleAttribute` and `dataset` write, and stop matching when it is removed. Like the DOM, a later commit of the same prop by React or Solid overwrites the attribute, a commit that leaves the prop as it was does not, and an attribute the framework never set stays. `setAttribute('style', text)` sets `style.cssText` (below), and `on*` is kept as text for `getAttribute` and does nothing else: see [deviations](./fork/deviations.md#dom-attributes). `toggleAttribute` follows the DOM and returns whether the attribute is there afterwards. A `MutationObserver` with `attributes` gets a record, with `oldValue` where it asked, for each write that changes what `getAttribute` reads. |
 | `style` | The element's inline style as a `CSSStyleDeclaration`; what it reads and writes, and how a framework's `style` merges with code's, is under [Style and id from code](#style-and-id-from-code). `setAttribute('style', text)` is `style.cssText = text`, and `getAttribute('style')` is the `cssText`. |
@@ -7537,7 +7555,8 @@ whether the drop was accepted. They are also delivered synchronously on macOS,
 where the handler runs inside the OS drag callback; a handler that takes long
 holds up the drag cursor.
 
-**Dragging an element.** `draggable` makes an element a drag source, like the DOM attribute. A primary press
+**Dragging an element.** `draggable` makes an element a drag source, like the DOM attribute (a boolean, or the DOM's
+text: `"true"` is on and `"false"` is off). A primary press
 on it, or on anything inside it that is not itself `draggable`, followed by a move of
 more than 4px (logical pixels, from the press) starts a drag:
 
@@ -7811,6 +7830,30 @@ CSS-like styling via the `style` prop:
   </div>
 </div>
 ```
+
+In Solid, a `style` object's keys may also be CSS property names, as on the web where Solid writes
+each key with `style.setProperty`: `style={{ 'white-space': 'nowrap', 'z-index': 1, '--gap': '4px' }}`
+is `whiteSpace`, `zIndex` and the custom property `--gap`. The camelCase keys keep working, a custom
+property keeps its name, a motion value is bound under either spelling, and where two keys name one
+property the later one wins. The vendor-prefixed names a style key is also known by work in a Solid key and in
+`style.setProperty`: `-webkit-app-region` (Electron's name for `appRegion`), `-webkit-line-clamp` and
+`-webkit-user-select`. A number under a hyphenated key is px, as under a camelCase one, where in a browser
+`style.setProperty('padding-top', 7)` is ignored (a length needs its unit there); a state block (`hover`,
+`focusVisible`, ...) takes camelCase keys only.
+
+solid-js types `style` as `CSSProperties | string`, and a string is CSS text, as on the web where Solid
+writes it with `style.cssText`: `style="color: red; padding-top: 4px"` is the declarations of the text
+(a part that is no declaration is dropped, `!important` is kept) and nothing else, so it replaces the
+previous style, string or object, and `""` or `undefined` leaves no `style` attribute. What code wrote
+through `element.style` stays, as it does when the object changes. 
+A style typed as solid-js's `JSX.CSSProperties` (csstype's `0 | string` lengths) is assignable to
+`style`: the widening covers `mask`, `border`, `outline`, `translate`, `background` and `animation`,
+which take a number (written as React DOM writes it: `0` is `0`, any other number is `npx`; that is
+a valid `border`, `outline`, `translate` or `background`, and for `animation` it is an invalid value,
+dropped), `opacity` and `order` (a numeric string), `direction` and `cursor` (any string; one that is not a
+supported keyword is ignored, so a `url()` list takes no effect). React takes camelCase keys only: a
+hyphenated key in a React `style` is ignored, where React DOM, which assigns `style[name] = value`,
+also takes a dashed name in a browser (with a dev warning). See [deviations](./fork/deviations.md#dom-attributes).
 
 > [!IMPORTANT]
 > **Ghia styles look like CSS but are not CSS.** A few differences trip
@@ -8900,6 +8943,9 @@ hides and any opaque colour shows. `maskSize`, `maskPosition`,
 `maskRepeat`, `maskOrigin` and `maskClip` are comma lists that repeat to cover the
 layers, and `mask` is the shorthand (layers, `position / size`, repeat, origin
 and clip boxes, a mode and a composite keyword). A longhand written after it wins over it.
+A number `mask` is px, as for the other lengths, so `mask: 0` is `mask-position: 0`: a mask
+with no image, which is no mask, as in Chrome. (A number is also what a `JSX.CSSProperties` style may hold on
+other properties: see [Supported Styles](#supported-styles).)
 `maskOrigin` and `maskClip` start at
 `border-box`, not at the `padding-box` a background starts from. A layer that does
 not cover an area leaves it hidden, so a non-repeating mask hides what it does not

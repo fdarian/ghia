@@ -85,10 +85,12 @@ describe.skipIf(!hasNativeTestRenderer)("attributes on native in Solid", () => {
           [for] { padding-right: 6px }
           svg[viewBox] { opacity: 0.5 }
           svg[viewbox] { padding-top: 9px }
+          svg[tabindex="0"] { padding-left: 7px }
+          svg[tabIndex] { padding-right: 8px }
         `}</style>
         <div ref={ref("div")} tabIndex={tabIndex()} {...{ "data-rowId": "7" }} className="x" />
         <label ref={ref("label")} htmlFor="a" />
-        <svg ref={ref("svg")} viewBox="0 0 1 1" />
+        <svg ref={ref("svg")} viewBox="0 0 1 1" tabIndex={0} />
       </>
     ))
     const div = getComputedStyle(refs.div)
@@ -98,6 +100,10 @@ describe.skipIf(!hasNativeTestRenderer)("attributes on native in Solid", () => {
     expect(app.renderer.getAttribute(refs.svg.nativeId, "viewbox")).toBeNull()
     expect(getComputedStyle(refs.svg).opacity).toBe("0.5")
     expect(getComputedStyle(refs.svg).paddingTop).toBe("0px")
+    // The two SVG attributes shared with HTML are lowercase in Chrome, unlike `viewBox`.
+    expect(app.renderer.getAttribute(refs.svg.nativeId, "tabindex")).toBe("0")
+    expect(app.renderer.getAttribute(refs.svg.nativeId, "tabIndex")).toBeNull()
+    expect([getComputedStyle(refs.svg).paddingLeft, getComputedStyle(refs.svg).paddingRight]).toEqual(["7px", "0px"])
 
     app.flushSync(() => setTabIndex(-1))
     expect(getComputedStyle(refs.div).opacity).toBe("1")

@@ -671,7 +671,7 @@ export interface StyleDesc {
   columnGap?: DimensionValue
   /** Reorders the children of a flex or grid container, lowest first. Ties keep document
    *  order. Layout and paint follow it; focus order stays in the document order. */
-  order?: number
+  order?: number | string
   justifyItems?: string
   justifySelf?: string
   /** A CSS track list (`"1fr 200px"`, `"repeat(auto-fill, minmax(120px, 1fr))"`,
@@ -779,7 +779,7 @@ export interface StyleDesc {
   /** The CSS shorthand (`"linear-gradient(...) center / cover no-repeat, #fff"`: layers
    *  then a final colour), a plain colour, or the two-stop object form. The
    *  `background*` longhands below override parts of the shorthand. */
-  background?: string | LinearGradientBackground
+  background?: number | string | LinearGradientBackground
   backgroundColor?: string
   /** Comma list of `linear-`, `radial-`, `conic-gradient()` and `repeating-` forms
    *  (any number of stops and colour hints, `in srgb | oklab`), `none`, or `url()`
@@ -813,7 +813,7 @@ export interface StyleDesc {
    *  `CanvasText`): black under a light scheme, white under a dark one, until some
    *  element declares a `color`. */
   colorScheme?: string
-  opacity?: number
+  opacity?: number | string
 
   /** One to four lengths in CSS order, as for `padding`, each a length (see `DimensionValue`)
    *  with no percentage, or `"thin"` (1px), `"medium"` (3px) or `"thick"` (5px):
@@ -840,7 +840,7 @@ export interface StyleDesc {
    *  `border` sets all sides, then `borderTop` ... `borderLeft` override one, then
    *  `borderStyle`, then the longhands (`borderWidth`, `borderColor`,
    *  `borderTopStyle`, ...) override those. */
-  border?: string
+  border?: number | string
   /** `borderBlock` sets the top and the bottom, `borderInline` the left and the right, written
    *  like `border`. They win over `border`, and `borderTop` ... `borderLeft` win over them. */
   borderBlock?: string
@@ -910,8 +910,10 @@ export interface StyleDesc {
   maskComposite?: "add" | "subtract" | "intersect" | "exclude" | string
   /** CSS `mask` shorthand: layers, `position / size`, repeat, origin / clip boxes,
    *  and a mode and a composite keyword, in any order. The longhands win over it.
-   *  An invalid string is ignored. It does not touch `maskBorder`. */
-  mask?: string
+   *  An invalid string is ignored. It does not touch `maskBorder`. A number is a length in px,
+   *  as it is for `border`, `borderRadius` and the other lengths, so `0` is `mask-position: 0` and
+   *  no mask. */
+  mask?: number | string
   /** CSS `mask-border-source`: one `linear-`, `radial-`, `conic-gradient()` (or `repeating-`
    *  form) or `url()` image, or `none`. The element is multiplied by a nine-slice of the image
    *  drawn around its border box (and `maskBorderOutset`), as another layer added to the
@@ -969,7 +971,7 @@ export interface StyleDesc {
    *  degrees, or `x`, `y`, `z` or three numbers for an axis, then the angle); `scale` one to
    *  three numbers or percentages (a number is the factor). `translate` takes a length along z
    *  as a third value. */
-  translate?: string
+  translate?: number | string
   rotate?: number | string
   scale?: number | string
   /** CSS `transform-origin`: one or two of `left`, `center`, `right`, `top`, `bottom`, lengths
@@ -1013,7 +1015,7 @@ export interface StyleDesc {
    *  `currentColor` unless given. Width, style and colour of the shorthand come in any
    *  order, `hidden` is an error, and `outlineWidth`, `outlineStyle` and `outlineColor`
    *  win over it. `auto` is painted as `solid`. `outlineOffset` is not part of it. */
-  outline?: string
+  outline?: number | string
   outlineWidth?: DimensionValue
   outlineStyle?: OutlineStyle | (string & {})
   outlineColor?: string
@@ -1033,7 +1035,7 @@ export interface StyleDesc {
    *  table and of a grid, a row flex container's main axis, the side `textAlign: "start"` is,
    *  where a block narrower than its parent sits, and the side of a vertical scrollbar. Physical
    *  properties (`left`, `borderLeft`, `marginLeft`) do not swap. Not animatable. */
-  direction?: "ltr" | "rtl"
+  direction?: "ltr" | "rtl" | (string & {})
   /** CSS `line-height`, inherited. A number multiplies the element's font size, as in CSS and React DOM:
    *  `1.5` is one and a half times the font size, and a child with another `fontSize` gets its own multiple.
    *  `"normal"` is the font's default leading. A string with a unit is a length (see `DimensionValue`),
@@ -1247,7 +1249,7 @@ export interface StyleDesc {
    *  priority. */
   overflowAnchor?: "auto" | "none"
 
-  cursor?: CursorValue
+  cursor?: CursorValue | (string & {})
   /** `"none"` makes the element never the target of a pointer event, so the
    *  pointer reaches what is under it. It inherits, and a descendant's `"auto"`
    *  restores it, like CSS. Every other element is a target where it paints,
@@ -1331,7 +1333,7 @@ export interface StyleDesc {
    * this shorthand. `animation-composition`, `animation-timeline` and
    * `animation-range` are not supported.
    */
-  animation?: string
+  animation?: number | string
   /** `none` or a list of names given to `defineKeyframes`. */
   animationName?: string
   /** A list of `<time>`s, or `auto` (`0s`). */
@@ -1913,7 +1915,7 @@ export interface HostProps
    * element when the drag ends. No pointer or mouse event fires meanwhile.
    * `preventDefault()` in `onDragStart` cancels the drag. There is no drag image.
    */
-  draggable?: boolean
+  draggable?: boolean | "true" | "false"
   /**
    * Like the DOM `inert`: the element and everything below it cannot be
    * focused (no tab stop, `focus()` is a no-op, a focused descendant is
@@ -1952,7 +1954,7 @@ export interface HostProps
    * and `"hint"`) closes on Escape and on a press outside and closes the other `auto` popovers
    * that do not hold it; `"manual"` only closes with `hidePopover()`. See `docs/reference.md`.
    */
-  popover?: "auto" | "manual" | "hint" | ""
+  popover?: boolean | "auto" | "manual" | "hint" | ""
   /** Stable locator id for automation. */
   testId?: string
   /**

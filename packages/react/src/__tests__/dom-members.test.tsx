@@ -399,7 +399,7 @@ describeNative("DOM members of a React host instance", () => {
     expect(row!.getAttribute("data-on")).toBe("true")
     expect(row!.getAttribute("Aria-Expanded")).toBe("false")
     expect(row!.getAttribute("hidden")).toBe("")
-    expect(row!.getAttribute("draggable")).toBeNull()
+    expect(row!.getAttribute("draggable")).toBe("false")
     expect(row!.getAttribute("TITLE")).toBe("t")
     expect(row!.getAttribute("data-absent")).toBeNull()
     root.unmount()

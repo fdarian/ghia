@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { applyStyleChange, carryStyleMarks, CSSStyleDeclaration, serializeStyle, styleAttributeText, styleDeclarationFor, writeStyleText } from "../dom/css-style-declaration.js"
+import { applyStyleChange, carryStyleMarks, cssNamedStyle, CSSStyleDeclaration, serializeStyle, styleAttributeText, styleDeclarationFor, styleFromCssText, writeStyleText } from "../dom/css-style-declaration.js"
 import type { StyleDesc } from "../host.js"
 import { STYLE_PROPERTIES } from "../style-properties.js"
 import "../dom-globals.js"
@@ -157,6 +157,18 @@ describe("CSSStyleDeclaration", () => {
       WebkitFontSmoothing: "antialiased",
     })
     expect(subject.style.getPropertyValue("BACKGROUND-COLOR")).toBe("red")
+  })
+
+  it("takes the vendor-prefixed names of a style key: Electron's -webkit-app-region and -webkit-line-clamp", () => {
+    const subject = declare()
+    subject.style.setProperty("-webkit-app-region", "drag")
+    subject.style.setProperty("-webkit-line-clamp", "3")
+    subject.style.setProperty("-webkit-user-select", "none")
+    expect(subject.owner.style).toEqual({ appRegion: "drag", lineClamp: 3, userSelect: "none" })
+    expect(subject.style.getPropertyValue("-webkit-app-region")).toBe("drag")
+    expect(subject.style.webkitLineClamp).toBe("3")
+    expect(cssNamedStyle({ "-webkit-app-region": "drag", "-webkit-line-clamp": 2 })).toEqual({ appRegion: "drag", lineClamp: 2 })
+    expect(styleFromCssText("-webkit-app-region: drag; -webkit-line-clamp: 2")).toEqual({ appRegion: "drag", lineClamp: 2 })
   })
 
   it("keeps custom properties verbatim, case included", () => {
@@ -374,5 +386,51 @@ describe("applyStyleChange", () => {
   it("does not change the live style in place", () => {
     applyStyleChange(live, { width: "1px" }, { width: "2px" })
     expect(live.width).toBe("7px")
+  })
+})
+
+describe("cssNamedStyle", () => {
+  it("returns a style with no hyphenated key as it is", () => {
+    const style = { width: 1, "--gap": "2px", paddingTop: 3 }
+    expect(cssNamedStyle(style)).toBe(style)
+    expect(cssNamedStyle({ "touch-action": "none" })).toEqual({ "touch-action": "none" })
+  })
+
+  it("reads a hyphenated key as the style key it names, lower-cased, and keeps custom properties", () => {
+    expect(cssNamedStyle({ width: 1, "White-Space": "nowrap", "--gap": "2px", "-webkit-font-smoothing": "antialiased" })).toEqual({
+      width: 1,
+      whiteSpace: "nowrap",
+      "--gap": "2px",
+      WebkitFontSmoothing: "antialiased",
+    })
+  })
+
+  it("lets the later of two keys for one property win, in object order", () => {
+    expect(Object.entries(cssNamedStyle({ paddingTop: 1, "padding-left": 2, "padding-top": 3 }))).toEqual([["paddingLeft", 2], ["paddingTop", 3]])
+    expect(Object.entries(cssNamedStyle({ "padding-top": 3, paddingTop: 1 }))).toEqual([["paddingTop", 1]])
+  })
+
+  it("does not change the style it is given", () => {
+    const style = { "padding-top": 3 }
+    cssNamedStyle(style)
+    expect(style).toEqual({ "padding-top": 3 })
+  })
+})
+
+describe("styleFromCssText", () => {
+  it("is the style cssText = text leaves on an element with no other style", () => {
+    const subject = declare({ width: 1, hover: { opacity: 0.5 } } as StyleDesc)
+    subject.style.cssText = "color: red; touch-action: none; padding-top: 4px !important; bogus"
+    const kept = { ...subject.owner.style }
+    delete (kept as Record<string, unknown>).hover
+    const parsed = styleFromCssText("color: red; touch-action: none; padding-top: 4px !important; bogus")
+    expect(parsed).toEqual(kept)
+    expect(serializeStyle(parsed)).toBe(serializeStyle(subject.owner.style))
+    expect(styleAttributeText(parsed)).toBe("color: red; padding-top: 4px !important; touch-action: none;")
+  })
+
+  it("is an empty style with the attribute present for text that holds no declaration", () => {
+    expect(styleFromCssText("")).toEqual({})
+    expect(styleAttributeText(styleFromCssText("bogus"))).toBe("")
   })
 })

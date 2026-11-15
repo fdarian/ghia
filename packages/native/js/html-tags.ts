@@ -60,6 +60,7 @@ export interface HtmlAnchorProps {
 }
 
 export interface HtmlButtonProps {
-  type?: "button" | "submit" | "reset"
+  /** `"menu"` is obsolete and, like any unknown text, a submit button, as in Chrome. */
+  type?: "button" | "submit" | "reset" | "menu"
   disabled?: boolean
 }

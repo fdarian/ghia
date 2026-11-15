@@ -9,7 +9,7 @@ import {
   useContext,
   type JSX,
 } from "solid-js"
-import { resolveFocusTarget } from "@ghia/native/host"
+import { cssNamedStyle, resolveFocusTarget } from "@ghia/native/host"
 import type { FocusTarget, HostPointerEvent, HostProps, KeyEvent } from "@ghia/native/host"
 import type { HostElement } from "../host.js"
 import { jsx } from "../jsx-runtime.js"
@@ -121,14 +121,15 @@ export function DialogPortal(props: DialogPortalProps): JSX.Element {
         // opens on top of it.
         priority: 0,
         get style() {
+          const style = props.style === undefined ? undefined : cssNamedStyle(props.style)
           return {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             // Explicit transparent: the Backdrop paints the dim, not the layer.
             backgroundColor: "transparent",
-            ...props.style,
-            pointerEvents: state.modal() ? props.style?.pointerEvents : "none",
+            ...style,
+            pointerEvents: state.modal() ? style?.pointerEvents : "none",
           }
         },
         get children() { return props.children },

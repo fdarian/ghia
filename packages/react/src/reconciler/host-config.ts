@@ -300,7 +300,7 @@ function syncCustomProps(
   for (const [key, value] of props) {
     if (isReservedProp(key)) continue
     if (!forwardsCustomProp(type, key)) continue
-    renderer.setCustomProp(id, key, serializeCustomProp(value as Parameters<typeof serializeCustomProp>[0]))
+    renderer.setCustomProp(id, key, serializeCustomProp(key, value as Parameters<typeof serializeCustomProp>[1]))
   }
 }
 

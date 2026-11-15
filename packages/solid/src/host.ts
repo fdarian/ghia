@@ -6,6 +6,7 @@ import {
   createElementMethods,
   createWebviewMethods,
   crossRootError,
+  cssNamedStyle,
   defineDomMembers,
   document,
   DOM_BINDING,
@@ -45,6 +46,7 @@ import {
   writePopoverAttribute,
   serializeCustomProp,
   splitMotionStyle,
+  styleFromCssText,
   syncMotionBindings,
   syncNativeviewListeners,
   unregisterEventHandlers,
@@ -77,6 +79,7 @@ import type {
   MotionValue,
   MotionValueStyle,
   MutationRenderer,
+  StyleProperty,
   NativeRenderer,
   Node,
   NodeBinding,
@@ -765,7 +768,7 @@ export function setHostProperty(
     return
   }
   if (name === "style") {
-    const split = splitMotionStyle(isStyle(value) ? value : undefined)
+    const split = splitMotionStyle(styleObjectOf(value))
     const next = split.style ?? {}
     if (hasMutationObservers()) recordAttributeChanges(node, () => ["style"], () => node.setFrameworkStyle(next))
     else {
@@ -817,7 +820,7 @@ function syncStoredProp(node: HostElement, name: string, value: HostPropertyValu
   if (!node.root || !node.mounted) return
   syncAttribute(node.root, node, name, value)
   if (!customPropAllowed(node, name)) return
-  const serialized = serializeCustomProp(value)
+  const serialized = serializeCustomProp(name, value)
   if (node.sent.writesProp(name, serialized)) node.root.mutations.setCustomProp(node.nativeId, name, serialized)
 }
 
@@ -931,7 +934,7 @@ function mount(root: HostRoot, node: HostNode): void {
     for (const [name, value] of node.props) {
       syncAttribute(root, node, name, value)
       if (!EVENT_PROP_NAMES.has(name) && customPropAllowed(node, name)) {
-        const serialized = serializeCustomProp(value)
+        const serialized = serializeCustomProp(name, value)
         if (node.sent.writesProp(name, serialized)) root.mutations.setCustomProp(node.nativeId, name, serialized)
       }
     }
@@ -1107,8 +1110,37 @@ function isStyle(value: HostPropertyValue): value is StyleDesc {
   return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
-export type SolidHostProps = Omit<HostProps, "style"> & {
-  style?: MotionValueStyle
+/**
+ * The style a `style` prop renders: Solid on the web writes a string as `style.cssText` and an object key by
+ * key with `setProperty`, and anything falsy (`""` too) removes the attribute.
+ */
+function styleObjectOf(value: HostPropertyValue): StyleDesc | undefined {
+  if (typeof value === "string") return value === "" ? undefined : styleFromCssText(value)
+  return isStyle(value) ? cssNamedStyle(value) : undefined
+}
+
+type Kebab<Name extends string> = Name extends `${infer Head}${infer Tail}`
+  ? `${Head extends Lowercase<Head> ? Head : `-${Lowercase<Head>}`}${Kebab<Tail>}`
+  : Name
+
+/**
+ * Each `StyleDesc` key that is one CSS property under its CSS name (`whiteSpace` as `"white-space"`), which Solid
+ * writes with `setProperty`. The value is the key's own type or any CSS text or number: solid-js types a style as
+ * csstype does (`WhiteSpace` has `"-moz-pre-wrap"`, `FlexGrow` is text), and a style typed so has to be assignable.
+ */
+type CssNamedStyle = {
+  [Property in StyleProperty as Kebab<Property>]?:
+    | (Property extends keyof MotionValueStyle ? MotionValueStyle[Property] : never)
+    | string
+    | number
+}
+
+/** A Solid host element's `style`: Ghia's camelCase keys, or the CSS names a web Solid style object has. */
+export type SolidStyle = MotionValueStyle & CssNamedStyle
+
+export type SolidHostProps = Omit<HostProps, "style" | "tabIndex"> & {
+  style?: SolidStyle | string
+  tabIndex?: number | string
   children?: unknown
   ref?: (element: HostElement) => void
 }

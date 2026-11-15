@@ -7,9 +7,14 @@
 import { isSvgType } from "../svg.js"
 import { normalizedInputType } from "./input-type.js"
 
-/** HTML names are lowercase in the DOM; SVG names keep their case (`viewBox`), as in Chrome. */
+/**
+ * HTML names are lowercase in the DOM; SVG names keep their case (`viewBox`), as in Chrome, except
+ * the two global attributes SVG shares with HTML, `tabindex` and `autofocus`, which are lowercase there too.
+ */
 export function attributeNameOf(prop: string, svg: boolean): string {
   if (prop === "className") return "class"
+  if (prop === "tabIndex") return "tabindex"
+  if (prop === "autoFocus") return "autofocus"
   if (svg) return prop
   if (prop === "htmlFor") return "for"
   // The `checked` and `value` attributes of an `<input>` are its defaults: the properties are `checked` and `value`.
@@ -155,8 +160,7 @@ export function propWrittenBy(
   if (text === null) return { prop, value: undefined }
   switch (entry?.kind) {
     case "number":
-      // A text that is no integer stays as it is: `getAttribute` gives it back and native ignores it.
-      return { prop, value: INTEGER.test(text) ? Number(text) : text }
+      return { prop, value: integerOrText(text) }
     case "presence":
       return { prop, value: true }
     case "until-found":
@@ -166,6 +170,64 @@ export function propWrittenBy(
       return { prop, value: text === "true" }
     default:
       return { prop, value: text }
+  }
+}
+
+/** A text that is no integer stays as it is: `getAttribute` gives it back and native ignores it. */
+function integerOrText(text: string): string | number {
+  return INTEGER.test(text) ? Number(text) : text
+}
+
+const KIND_OF_PROP = new Map(Object.values(WRITTEN_AS_PROP).map((entry) => [entry.prop, entry.kind]))
+
+/**
+ * What native reads of a prop given as text (`tabIndex="0"`, `draggable="true"`): an integer for a
+ * number prop and a boolean for the enumerated `draggable`, as `setAttribute` gives them. Any other
+ * text is kept, and so is a prop that is not one of these.
+ */
+export function nativeValueOfText(prop: string, text: string): string | number | boolean {
+  switch (KIND_OF_PROP.get(prop)) {
+    case "number":
+      return integerOrText(text)
+    case "true-text":
+      return text === "true"
+    default:
+      return text
+  }
+}
+
+/** The attributes a JSX written for the web names differently from their prop, `class` aside (Solid keeps `class`, and the class merge reads it). */
+const JSX_ATTRIBUTES = new Map(
+  Object.entries(WRITTEN_AS_PROP).filter(([attribute, entry]) => attribute !== "class" && entry.prop !== attribute)
+)
+
+/** A web JSX attribute name and the prop it stands for, as `jsxAttributeOf` finds it. */
+export type JsxAttribute = { readonly prop: string; readonly kind?: AttributeKind }
+
+/**
+ * What web JSX writes under an attribute's name (`autofocus`, `tabindex`, `for`), which dom-expressions
+ * sets without turning it into the prop's name: the prop that attribute is, or `undefined` for any
+ * other name. One Map lookup and no allocation, as an adapter asks it for every prop write.
+ */
+export function jsxAttributeOf(name: string): JsxAttribute | undefined {
+  return JSX_ATTRIBUTES.get(name)
+}
+
+/**
+ * The value of a prop written under its attribute's name, as the DOM would read it. A presence
+ * attribute is on for any string, as it is on in a template (`autofocus=""`, `readonly="false"`),
+ * and a boolean keeps its value; a number attribute is the integer its text holds. `null` and
+ * `undefined` stay as they are, the removal.
+ */
+export function jsxAttributeValue(attribute: JsxAttribute, value: unknown): unknown {
+  if (value === null || value === undefined) return value
+  switch (attribute.kind) {
+    case "presence":
+      return typeof value === "string" ? true : Boolean(value)
+    case "number":
+      return typeof value === "string" ? integerOrText(value) : value
+    default:
+      return value
   }
 }
 
@@ -204,8 +266,9 @@ export function isNotNativeAttribute(prop: string): boolean {
 
 /**
  * A prop as the string a DOM attribute holds, or null where the DOM would have no attribute. A
- * `data-*` or `aria-*` attribute holds "false" for false; any other boolean attribute is present
- * (empty) for true and absent for false.
+ * `data-*` or `aria-*` attribute holds "false" for false, and `draggable`, which is enumerated,
+ * holds "true" and "false" as `el.draggable = true` reflects them; any other boolean attribute is
+ * present (empty) for true and absent for false.
  */
 export function attributeText(name: string, value: unknown): string | null {
   switch (typeof value) {
@@ -228,7 +291,7 @@ export function attributeText(name: string, value: unknown): string | null {
 
 function holdsBooleanText(name: string): boolean {
   const lower = lowerCased(name)
-  return lower.startsWith("data-") || lower.startsWith("aria-")
+  return lower.startsWith("data-") || lower.startsWith("aria-") || lower === "draggable"
 }
 
 /**

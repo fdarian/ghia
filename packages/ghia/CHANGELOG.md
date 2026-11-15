@@ -1,5 +1,26 @@
 # ghia
 
+## 0.13.0
+
+### Breaking changes
+
+- **`ghia()` returns two plugins** (the main one and `ghia:workers`), so code that used its result as one `Plugin` indexes into it. `ghia build` writes every chunk flat into `dist/` (no `assets/` directory), and the compiled binary no longer loads a `bunfig.toml` or `.env` from the directory it is launched in.
+
+### Features
+
+**Toolchain**
+
+- `ghia build` bundles Workers the app starts with `new Worker(new URL("./file.ts", import.meta.url))`, in UI or server code, into the single executable.
+
+### Performance
+
+- A wheel on a scroller is a scroll write, so a scroll listener that reads `scrollTop` no longer forces a layout pass per wheel event. A caret blink is no longer a whole frame after a stylesheet sets `white-space`.
+
+### Fixes
+
+- A full reload under `ghia dev` unmounts the roots before running the entry again, as a page reload does.
+- `ghia dev` no longer fails at startup in a directory that contains an HTML page.
+
 ## 0.12.1
 
 ### Patch Changes

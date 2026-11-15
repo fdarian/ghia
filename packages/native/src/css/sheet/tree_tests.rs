@@ -1773,6 +1773,45 @@ fn an_insert_matches_the_new_subtree_and_siblings_only_when_a_selector_looks_at_
 }
 
 #[test]
+fn a_detached_subtree_that_loses_its_rules_is_no_change_of_the_frame() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".card { height: 30px; color: red } .card .label { color: blue; font-size: 20px }");
+    let card = doc.classed("div", ROOT, "card");
+    let label = doc.classed("span", card, "label");
+    doc.flush();
+    assert_eq!(doc.color(label), Some("blue"));
+    doc.tree.set_commit_patching(true);
+    doc.tree.take_structure();
+    doc.tree.take_dirty();
+
+    doc.tree.detach_child(card);
+    doc.flush();
+    assert_eq!(doc.color(card), None, "out of the document it has no rules");
+    assert_eq!(doc.color(label), None);
+    // The frame changed where the card was, and that is all: what is out of the document is in no frame for a patch to hold.
+    assert_eq!(doc.tree.pending_structure(), [ROOT]);
+    assert!(doc.tree.pending_restyles().is_empty());
+
+    // A change to what is out of the tree is none either, a restyle by paint, a layout change or text.
+    doc.tree.take_structure();
+    doc.tree.take_dirty();
+    doc.tree.set_attribute(card, "class", Some("card other".into()));
+    doc.inline(label, r##"{"color":"#ff0000"}"##);
+    doc.inline(card, r##"{"height":50}"##);
+    doc.flush();
+    assert!(doc.tree.pending_structure().is_empty());
+    assert!(doc.tree.pending_restyles().is_empty());
+    assert_eq!(doc.tree.take_dirty(), crate::retained_tree::Dirty::Clean);
+
+    // Put back, it is matched again and the change is the parent's.
+    doc.tree.append_child(ROOT, card);
+    doc.flush();
+    assert_eq!(doc.color(card), Some("red"), "its rules match again");
+    assert_eq!(doc.color(label), Some("#ff0000"), "under the inline style it was given out of the tree");
+    assert_eq!(doc.tree.pending_structure().first(), Some(&ROOT));
+}
+
+#[test]
 fn a_general_sibling_combinator_matches_the_following_siblings_on_insert_and_removal() {
     let mut list = Vec::new();
     let mut doc = Doc::settled(".a ~ .b { color: red }", |doc| list = doc.run(10, "div", ROOT, "x"));
