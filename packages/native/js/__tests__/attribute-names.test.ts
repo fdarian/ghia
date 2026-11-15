@@ -6,7 +6,8 @@ import {
   inputAttributeValue,
   inputDefaultProp,
   isStoredAttribute,
-  propOfJsxAttribute,
+  jsxAttributeOf,
+  jsxAttributeValue,
   propWrittenBy,
 } from "../dom/attribute-names.js"
 
@@ -35,32 +36,38 @@ describe("propWrittenBy", () => {
   })
 })
 
-describe("propOfJsxAttribute", () => {
-  it("names the prop of a web JSX attribute and converts its value as the DOM would", () => {
-    expect(propOfJsxAttribute("for", "x")).toEqual({ prop: "htmlFor", value: "x" })
-    expect(propOfJsxAttribute("tabindex", 0)).toEqual({ prop: "tabIndex", value: 0 })
-    expect(propOfJsxAttribute("tabindex", " -1 ")).toEqual({ prop: "tabIndex", value: -1 })
-    expect(propOfJsxAttribute("tabindex", "abc")).toEqual({ prop: "tabIndex", value: "abc" })
-    expect(propOfJsxAttribute("colspan", "2")).toEqual({ prop: "colSpan", value: 2 })
-    expect(propOfJsxAttribute("rowspan", 3)).toEqual({ prop: "rowSpan", value: 3 })
-    expect(propOfJsxAttribute("maxlength", "4")).toEqual({ prop: "maxLength", value: 4 })
+function jsxWritten(name: string, value: unknown): { prop: string; value: unknown } {
+  const attribute = jsxAttributeOf(name)
+  if (attribute === undefined) return { prop: name, value }
+  return { prop: attribute.prop, value: jsxAttributeValue(attribute, value) }
+}
+
+describe("jsxAttributeOf and jsxAttributeValue", () => {
+  it("name the prop of a web JSX attribute and convert its value as the DOM would", () => {
+    expect(jsxWritten("for", "x")).toEqual({ prop: "htmlFor", value: "x" })
+    expect(jsxWritten("tabindex", 0)).toEqual({ prop: "tabIndex", value: 0 })
+    expect(jsxWritten("tabindex", " -1 ")).toEqual({ prop: "tabIndex", value: -1 })
+    expect(jsxWritten("tabindex", "abc")).toEqual({ prop: "tabIndex", value: "abc" })
+    expect(jsxWritten("colspan", "2")).toEqual({ prop: "colSpan", value: 2 })
+    expect(jsxWritten("rowspan", 3)).toEqual({ prop: "rowSpan", value: 3 })
+    expect(jsxWritten("maxlength", "4")).toEqual({ prop: "maxLength", value: 4 })
   })
 
-  it("gives a presence attribute its truthiness", () => {
-    expect(propOfJsxAttribute("autofocus", true)).toEqual({ prop: "autoFocus", value: true })
-    expect(propOfJsxAttribute("autofocus", "")).toEqual({ prop: "autoFocus", value: false })
-    expect(propOfJsxAttribute("readonly", "false")).toEqual({ prop: "readOnly", value: true })
-    expect(propOfJsxAttribute("readonly", false)).toEqual({ prop: "readOnly", value: false })
+  it("make a presence attribute on for any string, as a template does, and keep a boolean", () => {
+    expect(jsxWritten("autofocus", true)).toEqual({ prop: "autoFocus", value: true })
+    expect(jsxWritten("autofocus", "")).toEqual({ prop: "autoFocus", value: true })
+    expect(jsxWritten("readonly", "false")).toEqual({ prop: "readOnly", value: true })
+    expect(jsxWritten("readonly", false)).toEqual({ prop: "readOnly", value: false })
   })
 
-  it("keeps null and undefined, the removal", () => {
-    expect(propOfJsxAttribute("autofocus", undefined)).toEqual({ prop: "autoFocus", value: undefined })
-    expect(propOfJsxAttribute("tabindex", null)).toEqual({ prop: "tabIndex", value: null })
+  it("keep null and undefined, the removal", () => {
+    expect(jsxWritten("autofocus", undefined)).toEqual({ prop: "autoFocus", value: undefined })
+    expect(jsxWritten("tabindex", null)).toEqual({ prop: "tabIndex", value: null })
   })
 
-  it("passes every other name through", () => {
+  it("find nothing for every other name", () => {
     for (const name of ["class", "className", "tabIndex", "autoFocus", "disabled", "span", "hidden", "draggable", "data-x"]) {
-      expect(propOfJsxAttribute(name, "1")).toEqual({ prop: name, value: "1" })
+      expect(jsxAttributeOf(name)).toBeUndefined()
     }
   })
 })

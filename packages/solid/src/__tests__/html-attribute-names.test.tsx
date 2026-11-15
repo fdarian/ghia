@@ -21,7 +21,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid JSX written with the HTML attribu
     app.unmount()
   })
 
-  it("does not focus on autofocus={false} or autofocus=''", () => {
+  it("does not focus on autofocus={false}, and takes a string as present, as a template does", () => {
     const app = createTestRoot({ width: 300, height: 200 })
     let off!: HostElement
     let empty!: HostElement
@@ -31,8 +31,9 @@ describe.skipIf(!hasNativeTestRenderer)("Solid JSX written with the HTML attribu
         <input ref={empty} autofocus={"" as unknown as boolean} style={box} />
       </div>
     ))
-    expect(document.activeElement).not.toBe(off)
-    expect(document.activeElement).not.toBe(empty)
+    expect(document.activeElement).toBe(empty)
+    expect(off.getAttribute("autofocus")).toBeNull()
+    expect(empty.getAttribute("autofocus")).toBe("")
     app.unmount()
   })
 
@@ -74,6 +75,8 @@ describe.skipIf(!hasNativeTestRenderer)("Solid JSX written with the HTML attribu
     expect(target.getAttribute("tabindex")).toBe("-1")
     setIndex(undefined)
     expect(target.getAttribute("tabindex")).toBeNull()
+    target.focus()
+    expect(document.activeElement).not.toBe(target)
     app.unmount()
   })
 
@@ -100,6 +103,76 @@ describe.skipIf(!hasNativeTestRenderer)("Solid JSX written with the HTML attribu
     expect(cell.getAttribute("colspan")).toBe("2")
     expect(cell.getAttribute("rowspan")).toBe("3")
     expect(label.getAttribute("for")).toBe("x")
+    app.unmount()
+  })
+
+  it("keeps tabindex and autofocus lowercase on an svg element, as Chrome does", () => {
+    const app = createTestRoot({ width: 300, height: 200 })
+    let svg!: HostElement
+    app.render(() => (
+      <div style={{ width: 200, height: 100 }}>
+        <svg ref={svg as never} tabindex="0" style={box} />
+      </div>
+    ))
+    expect(svg.getAttribute("tabindex")).toBe("0")
+    expect(svg.getAttributeNames()).toContain("tabindex")
+    expect(svg.getAttributeNames()).not.toContain("tabIndex")
+    expect(svg.tabIndex).toBe(0)
+    svg.focus()
+    expect(document.activeElement).toBe(svg)
+    app.unmount()
+  })
+
+  it("ignores typing in a readonly input and stops it at maxlength", () => {
+    const app = createTestRoot({ width: 300, height: 200 })
+    const keys = (testId: string, text: string) => app.renderer.nativeSimulateKeystrokes(app.renderer.findByTestId(testId)!.id, text)
+    let readonly!: HTMLInputElement
+    let limited!: HTMLInputElement
+    app.render(() => (
+      <div style={{ width: 200, height: 100 }}>
+        <input ref={readonly as never} testId="readonly" readonly value="ab" style={box} />
+        <input ref={limited as never} testId="limited" maxlength={3} style={box} />
+      </div>
+    ))
+    keys("readonly", "x y")
+    expect(readonly.value).toBe("ab")
+    keys("limited", "a b c d e")
+    expect(limited.value).toBe("abc")
+    app.unmount()
+  })
+
+  it("spans a td over two columns with colspan", () => {
+    const app = createTestRoot({ width: 300, height: 200 })
+    let wide!: HostElement
+    let left!: HostElement
+    let right!: HostElement
+    app.render(() => (
+      <div style={{ width: 300, height: 200 }}>
+        <table style={{ borderSpacing: 0 }}>
+          <tbody>
+            <tr>
+              <td ref={wide} colspan={2} style={{ padding: 0 }}>
+                <div style={{ width: 60, height: 10 }} />
+              </td>
+            </tr>
+            <tr>
+              <td ref={left} style={{ padding: 0 }}>
+                <div style={{ width: 40, height: 10 }} />
+              </td>
+              <td ref={right} style={{ padding: 0 }}>
+                <div style={{ width: 50, height: 10 }} />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    ))
+    const rect = (element: HostElement) => element.getBoundingClientRect()
+    expect(rect(left).width).toBe(40)
+    expect(rect(right).width).toBe(50)
+    expect(rect(wide).width).toBe(90)
+    expect(rect(wide).left).toBe(rect(left).left)
+    expect(rect(wide).right).toBe(rect(right).right)
     app.unmount()
   })
 

@@ -7,9 +7,14 @@
 import { isSvgType } from "../svg.js"
 import { normalizedInputType } from "./input-type.js"
 
-/** HTML names are lowercase in the DOM; SVG names keep their case (`viewBox`), as in Chrome. */
+/**
+ * HTML names are lowercase in the DOM; SVG names keep their case (`viewBox`), as in Chrome, except
+ * the two global attributes SVG shares with HTML, `tabindex` and `autofocus`, which are lowercase there too.
+ */
 export function attributeNameOf(prop: string, svg: boolean): string {
   if (prop === "className") return "class"
+  if (prop === "tabIndex") return "tabindex"
+  if (prop === "autoFocus") return "autofocus"
   if (svg) return prop
   if (prop === "htmlFor") return "for"
   // The `checked` and `value` attributes of an `<input>` are its defaults: the properties are `checked` and `value`.
@@ -174,24 +179,33 @@ const JSX_ATTRIBUTES = new Map(
   Object.entries(WRITTEN_AS_PROP).filter(([attribute, entry]) => attribute !== "class" && entry.prop !== attribute)
 )
 
+/** A web JSX attribute name and the prop it stands for, as `jsxAttributeOf` finds it. */
+export type JsxAttribute = { readonly prop: string; readonly kind?: AttributeKind }
+
 /**
- * The prop and value for a prop name as web JSX writes it (`autofocus`, `tabindex`, `for`), which
- * dom-expressions sets without turning it into the prop's name. A presence attribute is its
- * property's truthiness (`autofocus=""` is off, `autofocus="false"` is on), a number attribute is
- * the integer its text holds, and `null` or `undefined` stays as it is, the removal. Any other name
- * is returned as it came.
+ * What web JSX writes under an attribute's name (`autofocus`, `tabindex`, `for`), which dom-expressions
+ * sets without turning it into the prop's name: the prop that attribute is, or `undefined` for any
+ * other name. One Map lookup and no allocation, as an adapter asks it for every prop write.
  */
-export function propOfJsxAttribute(name: string, value: unknown): { prop: string; value: unknown } {
-  const entry = JSX_ATTRIBUTES.get(name)
-  if (entry === undefined) return { prop: name, value }
-  if (value === null || value === undefined) return { prop: entry.prop, value }
-  switch (entry.kind) {
+export function jsxAttributeOf(name: string): JsxAttribute | undefined {
+  return JSX_ATTRIBUTES.get(name)
+}
+
+/**
+ * The value of a prop written under its attribute's name, as the DOM would read it. A presence
+ * attribute is on for any string, as it is on in a template (`autofocus=""`, `readonly="false"`),
+ * and a boolean keeps its value; a number attribute is the integer its text holds. `null` and
+ * `undefined` stay as they are, the removal.
+ */
+export function jsxAttributeValue(attribute: JsxAttribute, value: unknown): unknown {
+  if (value === null || value === undefined) return value
+  switch (attribute.kind) {
     case "presence":
-      return { prop: entry.prop, value: Boolean(value) }
+      return typeof value === "string" ? true : Boolean(value)
     case "number":
-      return { prop: entry.prop, value: typeof value === "string" && INTEGER.test(value) ? Number(value) : value }
+      return typeof value === "string" && INTEGER.test(value) ? Number(value) : value
     default:
-      return { prop: entry.prop, value }
+      return value
   }
 }
 

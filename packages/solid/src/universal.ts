@@ -20,7 +20,7 @@ import {
   type HostParent,
   type HostText,
 } from "./host.js"
-import { propOfJsxAttribute } from "@ghia/native/host"
+import { jsxAttributeOf, jsxAttributeValue } from "@ghia/native/host"
 import { createSpread } from "./spread.js"
 import { notePresenceHost, runInPresenceScope } from "./presence-scope.js"
 
@@ -74,9 +74,13 @@ function setProperty(node: HostNode | HostParent, name: string, value: unknown, 
     isHostPropertyValue(value) &&
     isHostPropertyValue(previous)
   ) {
-    const written = propOfJsxAttribute(name, value)
+    const attribute = jsxAttributeOf(name)
+    if (attribute === undefined) {
+      setHostProperty(node, name, value, previous)
+      return
+    }
     // A conversion keeps the kinds a prop can hold, so the result is still a host property value.
-    setHostProperty(node, written.prop, written.value as HostPropertyValue, propOfJsxAttribute(name, previous).value as HostPropertyValue)
+    setHostProperty(node, attribute.prop, jsxAttributeValue(attribute, value) as HostPropertyValue, previous)
   }
 }
 
