@@ -371,6 +371,48 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in Solid", () => {
     expect(effective("inherit"), "the user agent's bold is taken back").not.toHaveProperty("fontWeight")
   })
 
+  it("matches the form state pseudo-classes again as the props of a control change", () => {
+    const [disabled, setDisabled] = createSignal(false)
+    const [checked, setChecked] = createSignal(false)
+    const [required, setRequired] = createSignal(false)
+    let button: any
+    let label: any
+    let field: any
+    app.render(() => (
+      <div>
+        <style>{`
+          button:disabled { opacity: 0.5 }
+          input:checked + label { padding-top: 7px }
+          input:required { padding-left: 3px }
+          input:not(:required) { padding-left: 1px }
+        `}</style>
+        <button ref={(element: unknown) => (button = element)} disabled={disabled()} />
+        <input type="checkbox" id="agree" checked={checked()} />
+        <label ref={(element: unknown) => (label = element)} for="agree" />
+        <input ref={(element: unknown) => (field = element)} required={required()} />
+      </div>
+    ))
+    expect(getComputedStyle(button).opacity).toBe("1")
+    expect(getComputedStyle(label).paddingTop).toBe("0px")
+    expect(getComputedStyle(field).paddingLeft).toBe("1px")
+
+    app.flushSync(() => setDisabled(true))
+    expect(getComputedStyle(button).opacity).toBe("0.5")
+    app.flushSync(() => setChecked(true))
+    expect(getComputedStyle(label).paddingTop).toBe("7px")
+    app.flushSync(() => setRequired(true))
+    expect(getComputedStyle(field).paddingLeft).toBe("3px")
+
+    app.flushSync(() => {
+      setDisabled(false)
+      setChecked(false)
+      setRequired(false)
+    })
+    expect(getComputedStyle(button).opacity).toBe("1")
+    expect(getComputedStyle(label).paddingTop).toBe("0px")
+    expect(getComputedStyle(field).paddingLeft).toBe("1px")
+  })
+
   it("lets an author keyword beat the universal style", () => {
     let taken: any
     let kept: any
