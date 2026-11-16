@@ -16,6 +16,7 @@ use crate::retained_tree::{Dirty, RetainedElement, RetainedTree};
 use super::atoms::{Atom, Atoms};
 use super::document::ClassAtoms;
 use super::cascade::MatchedRules;
+use super::has::Presence;
 use super::invalidation::Reach;
 use super::share::{Found, StyleSharing};
 use super::tree_states::TreeStates;
@@ -130,7 +131,7 @@ impl RetainedTree {
         }
         if self.sheets.atoms_fresh {
             self.positions_unlinking(child, parent_id);
-            self.has_structure_changed(child, false);
+            self.has_structure_changed(child, Presence::Leaving);
         }
     }
 
@@ -146,7 +147,7 @@ impl RetainedTree {
         }
         if let Some(parent) = parent.filter(|_| self.sheets.atoms_fresh) {
             self.positions_linked(child, parent);
-            self.has_structure_changed(child, true);
+            self.has_structure_changed(child, Presence::Appended);
         }
     }
 
@@ -182,7 +183,7 @@ impl RetainedTree {
         }
         if self.sheets.atoms_fresh {
             let has = self.sheets.has_tree_state_read(changed);
-            self.mark_has_anchors(id, has, false);
+            self.mark_has_anchors(id, has);
         }
     }
 
@@ -192,7 +193,7 @@ impl RetainedTree {
             let reach = self.sheets.style_reach();
             self.sheets.mark(id, reach);
             let has = self.sheets.has_style_read();
-            self.mark_has_anchors(id, has, false);
+            self.mark_has_anchors(id, has);
         }
     }
 
@@ -211,7 +212,7 @@ impl RetainedTree {
             _ => (self.sheets.attribute_reach(name), self.sheets.has_attribute_read(name)),
         };
         self.sheets.mark(id, reach);
-        self.mark_has_anchors(id, has, false);
+        self.mark_has_anchors(id, has);
     }
 
     /// Whether `ancestor` is a `<style>` element or has one below it. Asked on every insert and
@@ -393,7 +394,7 @@ impl RetainedTree {
     }
 
     /// The first sibling after `id` that selectors can match.
-    fn next_element_sibling(&self, id: u64) -> Option<u64> {
+    pub(super) fn next_element_sibling(&self, id: u64) -> Option<u64> {
         let parent = self.elements.get(self.elements.get(&id)?.parent.as_ref()?)?;
         let position = parent.children.iter().position(|child| *child == id)?;
         parent.children[position + 1..]

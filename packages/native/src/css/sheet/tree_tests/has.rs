@@ -5,7 +5,7 @@
 use serde_json::json;
 
 use super::positions::same_as_fresh;
-use super::{counts, Doc, ROOT};
+use super::{counts, reset_sibling_work, sibling_work, Doc, ROOT};
 
 fn red(doc: &Doc, id: u64) -> bool {
     doc.color(id) == Some("red")
@@ -485,6 +485,170 @@ fn a_class_change_below_an_anchor_that_does_not_hold_its_key_marks_nothing() {
     assert!(blue(&doc, title));
 }
 
+fn steps() -> usize {
+    crate::css::sheet::has::STEPS.with(|count| count.get())
+}
+
+fn reset_steps() {
+    crate::css::sheet::has::STEPS.with(|count| count.set(0));
+}
+
+#[test]
+fn a_row_that_holds_nothing_the_argument_reads_marks_no_anchor_above_it() {
+    for (css, tag) in [("html:has(.dark) .card { background-color: blue }", true), (":root:has(.dark) .card { background-color: blue }", false)] {
+        let mut doc = Doc::new();
+        doc.style_element(ROOT, css);
+        let top = if tag { doc.element("html", ROOT) } else { ROOT };
+        let main = doc.element("main", top);
+        let rows = doc.run(10_000, "div", main, "card");
+        doc.flush();
+        assert!(!blue(&doc, rows[0]), "{css}");
+
+        let mut plain = 0;
+        let rematched = doc.rematched(|doc| plain = doc.classed("div", main, "card"));
+        eprintln!("{css}: plain append {rematched}");
+        assert_eq!(rematched, 1, "{css}: a plain row");
+        assert_eq!(doc.rematched(|doc| doc.tree.destroy_element(plain).clear()), 0, "{css}: and its removal");
+
+        let mut dark = 0;
+        let rematched = doc.rematched(|doc| dark = doc.classed("i", main, "dark"));
+        eprintln!("{css}: dark append {rematched}");
+        assert!(rematched > 10_000, "{css}: the subtree of the anchor");
+        assert!(blue(&doc, rows[0]) && blue(&doc, rows[9_999]), "{css}");
+        let rematched = doc.rematched(|doc| doc.tree.destroy_element(dark).clear());
+        eprintln!("{css}: dark removal {rematched}");
+        assert!(rematched > 10_000, "{css}");
+        assert!(!blue(&doc, rows[0]), "{css}");
+
+        let nested = doc.make("div");
+        let inner = doc.classed("span", nested, "dark");
+        let rematched = doc.rematched(|doc| doc.tree.append_child(main, nested));
+        assert!(rematched > 10_000, "{css}: a subtree that holds it");
+        assert!(blue(&doc, rows[0]), "{css}");
+        let rematched = doc.rematched(|doc| doc.tree.destroy_element(inner).clear());
+        assert!(rematched > 10_000, "{css}");
+        assert!(!blue(&doc, rows[0]), "{css}");
+    }
+}
+
+#[test]
+fn a_root_anchor_is_the_root_alone() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ":root:has(.x) { color: red } .host:has(.x) { opacity: 0.5 }");
+    let host = doc.classed("div", ROOT, "host");
+    let deep = doc.element("div", host);
+    doc.flush();
+    assert_eq!(doc.rematched(|doc| _ = doc.classed("i", deep, "x")), 3, "the new one, the root and the host");
+    assert!(red(&doc, ROOT) && faded(&doc, host));
+}
+
+#[test]
+fn building_a_list_a_row_at_a_time_under_a_sibling_search_costs_work_in_proportion_to_its_length() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".row:has(~ .done) { top: 1px }");
+    let list = doc.element("ul", ROOT);
+    doc.flush();
+    let n = 2000;
+    crate::perf_counters::reset();
+    reset_steps();
+    let mut rows = Vec::new();
+    for _ in 0..n {
+        rows.push(doc.classed("li", list, "row"));
+        doc.flush();
+    }
+    eprintln!("sibling search build: rematched {} steps {}", counts().elements_rematched, steps());
+    assert!(counts().elements_rematched <= 2 * n as u64, "marks: {}", counts().elements_rematched);
+    assert!(steps() <= 4 * n, "steps: {}", steps());
+    assert!(!raised(&doc, rows[0]));
+
+    let done = doc.classed("li", list, "done");
+    doc.flush();
+    assert!(rows.iter().all(|row| raised(&doc, *row)), "every row before it");
+    doc.tree.destroy_element(done);
+    doc.flush();
+    assert!(rows.iter().all(|row| !raised(&doc, *row)));
+
+    let middle = doc.make("li");
+    doc.class(middle, "done");
+    doc.tree.insert_before(list, middle, rows[1000]);
+    doc.flush();
+    assert!(rows[..1000].iter().all(|row| raised(&doc, *row)) && rows[1000..].iter().all(|row| !raised(&doc, *row)));
+}
+
+#[test]
+fn building_a_list_a_row_at_a_time_under_a_position_read_costs_work_in_proportion_to_its_length() {
+    for css in ["li:has(:empty) { top: 1px }", "li:has(+ :nth-child(3)) { top: 1px }", "li:has(> :nth-child(2)) { top: 1px }"] {
+        let mut doc = Doc::new();
+        doc.style_element(ROOT, css);
+        let list = doc.element("ul", ROOT);
+        doc.flush();
+        let n = 1000;
+        for _ in 0..n {
+            let row = doc.make("li");
+            doc.class(row, "row");
+            let text = doc.make("#text");
+            doc.tree.set_text(text, "x".into());
+            doc.tree.append_child(row, text);
+            doc.tree.append_child(list, row);
+        }
+        crate::perf_counters::reset();
+        reset_sibling_work();
+        doc.flush();
+        eprintln!("{css}: rematched {} work {}", counts().elements_rematched, sibling_work());
+        assert!(counts().elements_rematched <= 2 * n as u64, "{css}: marks {}", counts().elements_rematched);
+        assert!(sibling_work() < 40 * n, "{css}: work {}", sibling_work());
+    }
+}
+
+#[test]
+fn a_child_appended_to_a_long_list_marks_no_row_for_an_empty_read() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, "li:has(:empty) { top: 1px }");
+    let list = doc.element("ul", ROOT);
+    for _ in 0..10_000 {
+        let li = doc.element("li", list);
+        let text = doc.element("#text", li);
+        doc.tree.set_text(text, "x".into());
+    }
+    let hollow = doc.element("li", list);
+    let span = doc.element("span", hollow);
+    doc.flush();
+    assert!(raised(&doc, hollow));
+
+    let mut row = 0;
+    let rematched = doc.rematched(|doc| {
+        row = doc.make("li");
+        let text = doc.make("#text");
+        doc.tree.set_text(text, "x".into());
+        doc.tree.append_child(row, text);
+        doc.tree.append_child(list, row);
+    });
+    eprintln!("li:has(:empty) append: {rematched}");
+    assert!(rematched <= 3, "{rematched}");
+    let rematched = doc.rematched(|doc| doc.tree.destroy_element(row).clear());
+    eprintln!("li:has(:empty) remove: {rematched}");
+    assert!(rematched <= 3, "{rematched}");
+
+    let text = doc.element("#text", span);
+    doc.tree.set_text(text, "y".into());
+    doc.flush();
+    assert!(!raised(&doc, hollow), "the span is not empty now");
+}
+
+#[test]
+fn a_text_node_reaches_a_has_only_when_an_argument_reads_empty() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, "li:has(:first-child) { top: 1px } li:has(> .a) { color: red }");
+    let list = doc.element("ul", ROOT);
+    let lis = doc.run(100, "li", list, "x");
+    doc.flush();
+    let mut text = 0;
+    assert_eq!(doc.rematched(|doc| text = doc.element("#text", lis[5])), 0);
+    assert_eq!(doc.rematched(|doc| doc.tree.set_text(text, "hi".into())), 0, "from empty to not");
+    assert_eq!(doc.rematched(|doc| doc.tree.set_text(text, String::new())), 0, "and back");
+    assert_eq!(doc.rematched(|doc| doc.tree.destroy_element(text).clear()), 0);
+}
+
 // Reload.
 
 #[test]
@@ -531,6 +695,13 @@ div:not(:has(> p)) { padding-left: 2px }
 :has(> .big) { right: 1px }
 .a:has(+ .b + .c) { bottom: 1px }
 li:has(:empty) { top: 1px }
+:root:has(.err) .row { top: 2px }
+.row:has(~ .m:first-child) { margin-left: 3px }
+.a:has(+ :nth-child(2)) { margin-right: 3px }
+.b:has(+ :empty) { margin-bottom: 3px }
+.y:has(.b .c) { padding-top: 2px }
+.row:has(~ .x > .y) { padding-left: 3px }
+.card:has(+ .row .err) { padding-right: 3px }
 ";
 
 const TAGS: [&str; 6] = ["div", "p", "svg", "span", "h1", "li"];

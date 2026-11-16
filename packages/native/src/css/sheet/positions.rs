@@ -20,20 +20,51 @@ use crate::retained_tree::{RetainedElement, RetainedTree};
 use super::invalidation::Reach;
 use super::view::count_sibling_work;
 
-/// The siblings of `anchor`, from it (when `inclusive`) to the end of the list when `after`, or to
-/// the start when not, as the list stands at the flush. An element that stays on its side of the
-/// anchor between the note and the flush is covered, and one that moves has marked itself, which
-/// is what makes the final positions enough.
+/// What the elements of a range are marked with.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum RangeMarks {
+    /// What the counting pseudo-classes read on the side of the range, for every element sibling.
+    Counting,
+    /// The `:has()` anchors among them, the ones that hold what their compound requires.
+    Anchors(Reach),
+}
+
+/// The children of `parent` from `anchor`, from it (when `inclusive`) to the end of the list when
+/// `after`, or to the start when not, as the list stands at the flush. An element that stays on
+/// its side of the anchor between the note and the flush is covered, and one that moves has
+/// marked itself, which is what makes the final positions enough. An anchor that is no longer a
+/// child of `parent` (it moved or is gone, and may have been what told the siblings apart) leaves
+/// the whole list, as does none.
 #[derive(Clone, Copy)]
 pub(crate) struct SiblingRange {
-    anchor: u64,
+    parent: u64,
+    anchor: Option<u64>,
     inclusive: bool,
     after: bool,
+    marks: RangeMarks,
 }
 
 impl SiblingRange {
+    fn counting(parent: u64, anchor: u64, inclusive: bool, after: bool) -> SiblingRange {
+        SiblingRange { parent, anchor: Some(anchor), inclusive, after, marks: RangeMarks::Counting }
+    }
+
+    /// The `:has()` anchors among the children of `parent` before `anchor`, not including it.
+    pub(super) fn anchors_before(parent: u64, anchor: Option<u64>, reach: Reach) -> SiblingRange {
+        SiblingRange { parent, anchor, inclusive: false, after: false, marks: RangeMarks::Anchors(reach) }
+    }
+
+    /// The `:has()` anchors among every child of `parent`.
+    pub(super) fn anchors_among_children(parent: u64, reach: Reach) -> SiblingRange {
+        SiblingRange { parent, anchor: None, inclusive: true, after: true, marks: RangeMarks::Anchors(reach) }
+    }
+
     fn same_as(&self, other: &SiblingRange) -> bool {
-        self.anchor == other.anchor && self.inclusive == other.inclusive && self.after == other.after
+        self.parent == other.parent
+            && self.anchor == other.anchor
+            && self.inclusive == other.inclusive
+            && self.after == other.after
+            && self.marks == other.marks
     }
 }
 
@@ -69,8 +100,7 @@ impl RetainedTree {
         (before, after)
     }
 
-    fn note_range(&mut self, anchor: u64, inclusive: bool, after: bool) {
-        let range = SiblingRange { anchor, inclusive, after };
+    pub(super) fn note_range(&mut self, range: SiblingRange) {
         if self.sheets.ranges.last().is_some_and(|last| last.same_as(&range)) {
             return;
         }
@@ -95,13 +125,13 @@ impl RetainedTree {
         if let Some(before) = before {
             self.sheets.mark(before, positional.edge);
             if !positional.backward.is_empty() {
-                self.note_range(before, true, false);
+                self.note_range(SiblingRange::counting(parent_id, before, true, false));
             }
         }
         if let Some(after) = after {
             self.sheets.mark(after, positional.edge);
             if !positional.forward.is_empty() {
-                self.note_range(after, true, true);
+                self.note_range(SiblingRange::counting(parent_id, after, true, true));
             }
         }
     }
@@ -123,10 +153,10 @@ impl RetainedTree {
             }
         }
         if !positional.forward.is_empty() {
-            self.note_range(child, false, true);
+            self.note_range(SiblingRange::counting(parent_id, child, false, true));
         }
         if !positional.backward.is_empty() {
-            self.note_range(child, false, false);
+            self.note_range(SiblingRange::counting(parent_id, child, false, false));
         }
     }
 
@@ -145,55 +175,72 @@ impl RetainedTree {
     /// children covers every range under it.
     pub(super) fn range_marks(&self, ranges: &[SiblingRange]) -> Vec<(u64, Reach)> {
         let positional = self.sheets.index.invalidation.positional;
-        let mut by_parent: FxHashMap<u64, Vec<SiblingRange>> = FxHashMap::default();
+        let mut by_parent: FxHashMap<u64, Vec<&SiblingRange>> = FxHashMap::default();
         for range in ranges {
-            if let Some(parent_id) = self.elements.get(&range.anchor).and_then(|element| element.parent) {
-                by_parent.entry(parent_id).or_default().push(*range);
-            }
+            by_parent.entry(range.parent).or_default().push(range);
         }
-        // Per parent: the first position the forward ranges reach, and one past the last position
-        // the backward ones do.
-        let mut spans: FxHashMap<u64, (Option<usize>, Option<usize>)> = FxHashMap::default();
+        let mut marks = Vec::new();
         for (parent_id, ranges) in by_parent {
             let Some(parent) = self.elements.get(&parent_id) else {
                 continue;
             };
-            count_sibling_work(parent.children.len());
+            let children = &parent.children;
+            count_sibling_work(children.len());
+            let anchors: Vec<u64> = ranges.iter().filter_map(|range| range.anchor).collect();
             // Built children one by one, a list has a range for each, so a scan for each would be quadratic.
-            let positions: FxHashMap<u64, usize> = if let [range] = &ranges[..] {
-                parent.children.iter().position(|id| *id == range.anchor).map(|at| (range.anchor, at)).into_iter().collect()
-            } else {
-                parent.children.iter().enumerate().map(|(at, id)| (*id, at)).collect()
+            let positions: FxHashMap<u64, usize> = match &anchors[..] {
+                [] => FxHashMap::default(),
+                [only] => children.iter().position(|id| id == only).map(|at| (*only, at)).into_iter().collect(),
+                _ => children.iter().enumerate().map(|(at, id)| (*id, at)).collect(),
             };
-            let span = spans.entry(parent_id).or_default();
+            // Per kind of mark: the first position the forward ranges reach, and one past the last
+            // position the backward ones do.
+            let mut spans: Vec<(RangeMarks, Option<usize>, Option<usize>)> = Vec::new();
             for range in ranges {
-                let Some(position) = positions.get(&range.anchor).copied() else {
-                    continue;
+                let position = range.anchor.and_then(|anchor| positions.get(&anchor).copied());
+                let at = match spans.iter().position(|(kind, ..)| *kind == range.marks) {
+                    Some(at) => at,
+                    None => {
+                        spans.push((range.marks, None, None));
+                        spans.len() - 1
+                    }
                 };
+                let (_, forward_from, backward_to) = &mut spans[at];
                 if range.after {
-                    let start = position + usize::from(!range.inclusive);
-                    span.0 = Some(span.0.map_or(start, |first| first.min(start)));
+                    let start = position.map_or(0, |position| position + usize::from(!range.inclusive));
+                    *forward_from = Some(forward_from.map_or(start, |first| first.min(start)));
                 } else {
-                    let end = position + usize::from(range.inclusive);
-                    span.1 = Some(span.1.map_or(end, |last| last.max(end)));
+                    let end = position.map_or(children.len(), |position| position + usize::from(range.inclusive));
+                    *backward_to = Some(backward_to.map_or(end, |last| last.max(end)));
                 }
             }
-        }
-        let mut marks = Vec::new();
-        for (parent_id, (forward_from, backward_to)) in spans {
-            let children = &self.elements[&parent_id].children;
-            count_sibling_work(children.len());
-            if let Some(start) = forward_from {
-                marks.extend(self.matchable_marks(&children[start.min(children.len())..], positional.forward));
-            }
-            if let Some(end) = backward_to {
-                marks.extend(self.matchable_marks(&children[..end.min(children.len())], positional.backward));
+            for (kind, forward_from, backward_to) in spans {
+                if let Some(start) = forward_from {
+                    let reach = match kind {
+                        RangeMarks::Counting => positional.forward,
+                        RangeMarks::Anchors(reach) => reach,
+                    };
+                    marks.extend(self.range_elements(&children[start.min(children.len())..], kind, reach));
+                }
+                if let Some(end) = backward_to {
+                    let reach = match kind {
+                        RangeMarks::Counting => positional.backward,
+                        RangeMarks::Anchors(reach) => reach,
+                    };
+                    marks.extend(self.range_elements(&children[..end.min(children.len())], kind, reach));
+                }
             }
         }
         marks
     }
 
-    fn matchable_marks<'a>(&'a self, children: &'a [u64], reach: Reach) -> impl Iterator<Item = (u64, Reach)> + 'a {
-        children.iter().filter(|id| self.is_matchable_id(**id)).map(move |id| (*id, reach))
+    fn range_elements<'a>(&'a self, children: &'a [u64], kind: RangeMarks, reach: Reach) -> impl Iterator<Item = (u64, Reach)> + 'a {
+        children
+            .iter()
+            .filter(move |id| match kind {
+                RangeMarks::Counting => self.is_matchable_id(**id),
+                RangeMarks::Anchors(_) => self.holds_anchor_key(**id),
+            })
+            .map(move |id| (*id, reach))
     }
 }
