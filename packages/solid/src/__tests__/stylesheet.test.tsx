@@ -413,6 +413,50 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in Solid", () => {
     expect(getComputedStyle(field).paddingLeft).toBe("1px")
   })
 
+  it("matches :has() again as what is below, after and inside an element changes", () => {
+    const [checked, setChecked] = createSignal(false)
+    const [icon, setIcon] = createSignal(false)
+    const [next, setNext] = createSignal(true)
+    let label: any
+    let button: any
+    let heading: any
+    app.render(() => (
+      <div>
+        <style>{`
+          .field:has(input:checked) .label { padding-top: 7px }
+          button:has(> svg) { opacity: 0.5 }
+          h1:has(+ p) { padding-left: 3px }
+        `}</style>
+        <div class="field">
+          <span class="label" ref={(element: unknown) => (label = element)} />
+          <input type="checkbox" checked={checked()} />
+        </div>
+        <button ref={(element: unknown) => (button = element)}>{icon() ? <svg /> : <span />}</button>
+        <h1 ref={(element: unknown) => (heading = element)} />
+        {next() ? <p /> : <div />}
+      </div>
+    ))
+    expect(getComputedStyle(label).paddingTop).toBe("0px")
+    expect(getComputedStyle(button).opacity).toBe("1")
+    expect(getComputedStyle(heading).paddingLeft).toBe("3px")
+
+    app.flushSync(() => setChecked(true))
+    expect(getComputedStyle(label).paddingTop).toBe("7px")
+    app.flushSync(() => setIcon(true))
+    expect(getComputedStyle(button).opacity).toBe("0.5")
+    app.flushSync(() => setNext(false))
+    expect(getComputedStyle(heading).paddingLeft).toBe("0px")
+
+    app.flushSync(() => {
+      setChecked(false)
+      setIcon(false)
+      setNext(true)
+    })
+    expect(getComputedStyle(label).paddingTop).toBe("0px")
+    expect(getComputedStyle(button).opacity).toBe("1")
+    expect(getComputedStyle(heading).paddingLeft).toBe("3px")
+  })
+
   it("lets an author keyword beat the universal style", () => {
     let taken: any
     let kept: any
