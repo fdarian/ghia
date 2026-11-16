@@ -208,21 +208,26 @@ function navigate(name: string, styling: Styling): Scenario {
   }
 }
 
+const mount: Scenario = {
+  name: 'mount',
+  styling: 'inline',
+  prepare: (session) => ({
+    run() {
+      session.mount()
+      for (let i = 0; i < 3; i++) session.frame()
+    },
+    verify() {
+      expectTextCount(session, `${MESSAGE_COUNT} conversations`, 1, 'after mounting')
+      expectTextCount(session, session.messages[1].subject, 1, 'after mounting')
+    },
+  }),
+}
+
+/** `mount` as the first window of a process, which `cold-mount.test.tsx` measures once with no warm-up. */
+export const coldMount: Scenario = { ...mount, name: 'cold-mount' }
+
 export const scenarios: Scenario[] = [
-  {
-    name: 'mount',
-    styling: 'inline',
-    prepare: (session) => ({
-      run() {
-        session.mount()
-        for (let i = 0; i < 3; i++) session.frame()
-      },
-      verify() {
-        expectTextCount(session, `${MESSAGE_COUNT} conversations`, 1, 'after mounting')
-        expectTextCount(session, session.messages[1].subject, 1, 'after mounting')
-      },
-    }),
-  },
+  mount,
   {
     name: 'mount-css',
     styling: 'sheet',

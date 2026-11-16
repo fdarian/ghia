@@ -339,6 +339,11 @@ function Detail(props: { message: Message | undefined; ref: (element: HostElemen
   )
 }
 
+function required<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new Error(`${what} is undefined`)
+  return value
+}
+
 export function App(props: { messages: Message[]; styling: 'inline' | 'sheet' }) {
   const haystacks = props.messages.map((message) =>
     `${message.fromName} ${message.subject} ${message.snippet}`.toLowerCase(),
@@ -350,8 +355,8 @@ export function App(props: { messages: Message[]; styling: 'inline' | 'sheet' })
   const [windowStart, setWindowStart] = createSignal(0)
 
   const RowComponent = props.styling === 'sheet' ? SheetRow : Row
-  let list!: HostElement
-  let detail!: HostElement
+  let list: HostElement | undefined
+  let detail: HostElement | undefined
 
   const results = createMemo(() => {
     const query = text().trim().toLowerCase()
@@ -363,7 +368,7 @@ export function App(props: { messages: Message[]; styling: 'inline' | 'sheet' })
 
   function select(index: number) {
     setSelectedIndex(index)
-    detail.scrollTo({ top: 0 })
+    required(detail, 'the detail pane').scrollTo({ top: 0 })
   }
 
   function filter(value: string) {
@@ -372,15 +377,16 @@ export function App(props: { messages: Message[]; styling: 'inline' | 'sheet' })
       setSelectedIndex(0)
       setWindowStart(0)
     })
-    list.scrollTo({ top: 0 })
-    detail.scrollTo({ top: 0 })
+    required(list, 'the list').scrollTo({ top: 0 })
+    required(detail, 'the detail pane').scrollTo({ top: 0 })
   }
 
   function reveal(index: number) {
+    const element = required(list, 'the list')
     const top = index * ROW_HEIGHT
     const bottom = top + ROW_HEIGHT
-    if (top < list.scrollTop) list.scrollTo({ top })
-    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTo({ top: bottom - list.clientHeight })
+    if (top < element.scrollTop) element.scrollTo({ top })
+    else if (bottom > element.scrollTop + element.clientHeight) element.scrollTo({ top: bottom - element.clientHeight })
   }
 
   function onKeyDown(event: { key?: string; preventDefault(): void }) {
@@ -416,7 +422,7 @@ export function App(props: { messages: Message[]; styling: 'inline' | 'sheet' })
             autoFocus
             value={text()}
             placeholder="Search mail"
-            onInput={(event) => filter(event.value ?? '')}
+            onInput={(event) => filter(required(event.value, 'input event value'))}
             onKeyDown={onKeyDown}
             style={{
               width: 396,
@@ -442,7 +448,7 @@ export function App(props: { messages: Message[]; styling: 'inline' | 'sheet' })
           windowStart={windowStart()}
           onVisibleRange={(event) =>
             setWindowStart(
-              Math.max(0, Math.floor(((event.startIndex ?? 0) - WINDOW_LEAD) / WINDOW_STEP) * WINDOW_STEP),
+              Math.max(0, Math.floor((required(event.startIndex, 'visible range startIndex') - WINDOW_LEAD) / WINDOW_STEP) * WINDOW_STEP),
             )
           }
           style={{ flexGrow: 1, minHeight: 0 }}

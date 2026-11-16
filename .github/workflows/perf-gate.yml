@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # A superseded PR run is dropped; every push to main is gated.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  # A superseded PR run is dropped; every push to main has a group of its own (its sha), so none is cancelled.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -17,8 +17,9 @@ permissions:
 
 jobs:
   perf-gate:
-    # Pinned, not macos-latest (macos-26-arm64 when this was written): expected-counts.json holds the CoreText-dependent
-    # counts measured on this image's macOS, so a runner image change means re-taking them from the perf-gate-measured artifact.
+    # macos-26 gets point releases over days, so the runner's macOS varies. expected-counts.json keys the CoreText-dependent
+    # counts by macOS version: a version without an entry passes with a warning when its counts equal a recorded one, and the
+    # entry is added from the perf-gate-measured artifact.
     runs-on: macos-26
     timeout-minutes: 60
     steps:
@@ -60,6 +61,6 @@ jobs:
         if: always()
         with:
           name: perf-gate-measured
-          path: examples/perf-gate/.measured.json
+          path: examples/perf-gate/.measured
           include-hidden-files: true
           if-no-files-found: warn
