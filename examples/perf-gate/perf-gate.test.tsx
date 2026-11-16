@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { afterAll, beforeAll, describe, it } from 'vitest'
 import { hasNativeTestRenderer } from '@ghia/native/testing'
 import { measure, scenarios, type Counts } from './scenarios'
@@ -36,8 +36,14 @@ function readExpected(): CountsFile | undefined {
 }
 
 const expected = readExpected()
+const onCI = process.env.CI !== undefined && process.env.CI !== ''
+/** CI is the authority for the tied fields, so a different macOS there is a failure, not a skip. */
+const macosMismatch = expected !== undefined && expected.macos !== macos
+const compareTied = !macosMismatch || onCI
+const takeFromArtifact = 'take the tied fields and "macos" from the perf-gate-measured artifact of this run'
 const measured: Record<string, Counts> = {}
 const failed = new Set<string>()
+const summaryTables: string[] = []
 
 function changes(before: Counts, after: Counts, skip: string[]): Change[] {
   const fields = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort()
@@ -85,10 +91,11 @@ function compare(name: string, counts: Counts) {
   if (!expected) throw new Error('perf gate: expected-counts.json does not exist (PERF_GATE_UPDATE=1 writes it)')
   const wanted = expected.scenarios[name]
   if (!wanted) throw new Error(`perf gate: ${name} has no counts in expected-counts.json (PERF_GATE_UPDATE=1 adds it)`)
-  const skip = expected.macos === macos ? [] : MACOS_TIED_FIELDS
-  const rows = changes(wanted, counts, skip)
+  const rows = changes(wanted, counts, compareTied ? [] : MACOS_TIED_FIELDS)
   if (rows.length > 0) {
-    throw new Error(`perf gate: ${name} differs from expected-counts.json (PERF_GATE_UPDATE=1 accepts the new counts)\n${table(name, ['expected', 'actual'], rows)}`)
+    const text = table(name, ['expected', 'actual'], rows)
+    summaryTables.push(text)
+    throw new Error(`perf gate: ${name} differs from expected-counts.json (PERF_GATE_UPDATE=1 accepts the new counts)\n${text}`)
   }
 }
 
@@ -136,9 +143,9 @@ function reportUpdate(next: CountsFile) {
 
 describe('perf gate', () => {
   beforeAll(() => {
-    if (!UPDATE && expected && expected.macos !== macos) {
+    if (!UPDATE && macosMismatch && !onCI) {
       console.log(
-        `perf gate: macOS ${macos} here, expected-counts.json was measured on ${expected.macos}; ${MACOS_TIED_FIELDS.join(' and ')} are not compared`,
+        `perf gate: macOS ${macos} here, expected-counts.json was measured on ${expected?.macos}; ${MACOS_TIED_FIELDS.join(' and ')} are not compared`,
       )
     }
   })
@@ -150,6 +157,13 @@ describe('perf gate', () => {
     const known = scenarios.map((scenario) => scenario.name)
     const stale = Object.keys(expected.scenarios).filter((name) => !known.includes(name))
     if (stale.length > 0) throw new Error(`perf gate: expected-counts.json has counts for scenarios that no longer exist: ${stale.join(', ')}`)
+  })
+
+  it('expected-counts.json was measured on this macOS', () => {
+    if (UPDATE || !macosMismatch || !onCI) return
+    const message = `macOS ${macos} here, expected-counts.json was measured on ${expected?.macos}; ${takeFromArtifact}`
+    summaryTables.unshift(message)
+    throw new Error(`perf gate: ${message}`)
   })
 
   for (const scenario of scenarios) {
@@ -167,6 +181,10 @@ describe('perf gate', () => {
 
   afterAll(() => {
     writeFileSync(MEASURED_PATH, `${JSON.stringify({ macos, scenarios: measured }, null, 2)}\n`)
+    const summaryPath = process.env.GITHUB_STEP_SUMMARY
+    if (summaryPath && summaryTables.length > 0) {
+      appendFileSync(summaryPath, `### Perf gate differs from expected-counts.json\n\n\`\`\`\n${summaryTables.join('\n\n')}\n\`\`\`\n`)
+    }
     if (!UPDATE) return
     const missing = scenarios.filter((scenario) => !(scenario.name in measured)).map((scenario) => scenario.name)
     if (missing.length > 0 || failed.size > 0) {
