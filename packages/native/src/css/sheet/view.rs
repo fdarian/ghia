@@ -93,6 +93,9 @@ pub struct SiblingPositions {
     parents: RefCell<FxHashMap<u64, Positions>>,
     scans: RefCell<FxHashMap<(u64, SiblingTest), Scan>>,
     slots: RefCell<FxHashMap<u64, Slots>>,
+    /// What each `:has()` answered for the elements it was asked of: the element, and the address
+    /// of its argument list.
+    has: RefCell<FxHashMap<(u64, usize), bool>>,
 }
 
 impl SiblingPositions {
@@ -355,6 +358,38 @@ impl ElementView for TreeView<'_> {
         !self.element().children.iter().filter_map(|id| self.tree.elements.get(id)).any(|child| {
             child.is_matchable() || child.content.as_deref().is_some_and(|text| !text.is_empty())
         })
+    }
+
+    fn children(&self) -> Vec<Self> {
+        let children = &self.element().children;
+        count_sibling_work(children.len());
+        children
+            .iter()
+            .filter(|id| self.tree.elements.get(id).is_some_and(RetainedElement::is_matchable))
+            .map(|id| self.with_id(*id))
+            .collect()
+    }
+
+    fn next_sibling(&self) -> Option<Self> {
+        let parent_id = self.element().parent?;
+        let parent = self.tree.elements.get(&parent_id)?;
+        let position = self.positions.position(parent_id, parent, self.id)?;
+        let mut steps = 0;
+        let found = parent.children[position + 1..].iter().find(|sibling| {
+            steps += 1;
+            self.tree.elements.get(sibling).is_some_and(RetainedElement::is_matchable)
+        });
+        count_sibling_work(steps);
+        found.map(|sibling| self.with_id(*sibling))
+    }
+
+    fn remembered_has(&self, list: usize, compute: impl FnOnce() -> bool) -> bool {
+        if let Some(known) = self.positions.has.borrow().get(&(self.id, list)) {
+            return *known;
+        }
+        let answer = compute();
+        self.positions.has.borrow_mut().insert((self.id, list), answer);
+        answer
     }
 
     fn any_earlier_sibling(&self, test: SiblingTest, satisfies: impl Fn(&Self) -> bool) -> bool {

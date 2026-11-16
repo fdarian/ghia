@@ -54,6 +54,17 @@ pub trait ElementView: Sized {
     /// Whether the element has no element child and no text: whitespace is text.
     fn is_empty(&self) -> bool;
 
+    /// The element children, in order.
+    fn children(&self) -> Vec<Self>;
+    /// The closest following sibling that is an element.
+    fn next_sibling(&self) -> Option<Self>;
+    /// What `compute` answers for the `:has()` argument list at address `list` asked of this
+    /// element. The answer depends on nothing but the two, so an implementation can remember it,
+    /// and a `:has()` that many rules or many subjects ask of one element is searched once.
+    fn remembered_has(&self, _list: usize, compute: impl FnOnce() -> bool) -> bool {
+        compute()
+    }
+
     /// Whether `satisfies` holds for some sibling before this one. `key` names `satisfies` (it is
     /// the same for every element it is asked of, and its answer for a sibling does not depend on
     /// this element), so an implementation can remember what it learnt about a parent's children
@@ -112,7 +123,7 @@ fn matches_from<E: ElementView>(selector: &ComplexSelector, index: usize, elemen
     }
 }
 
-fn compound_matches(compound: &Compound, element: &impl ElementView) -> bool {
+pub(super) fn compound_matches(compound: &Compound, element: &impl ElementView) -> bool {
     compound.simples.iter().all(|simple| simple_matches(simple, element))
 }
 
@@ -129,6 +140,7 @@ fn simple_matches<E: ElementView>(simple: &Simple, element: &E) -> bool {
         Simple::State(_) => true,
         Simple::TreeState(state) => element.tree_state(*state),
         Simple::Position(position) => position_matches(*position, element),
+        Simple::Has(arguments) => super::has::matches(arguments, element),
         Simple::Host | Simple::PseudoElement => false,
     }
 }

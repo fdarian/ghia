@@ -38,7 +38,7 @@ impl SiblingRange {
 }
 
 impl RetainedTree {
-    fn is_matchable_id(&self, id: u64) -> bool {
+    pub(super) fn is_matchable_id(&self, id: u64) -> bool {
         self.elements.get(&id).is_some_and(RetainedElement::is_matchable)
     }
 

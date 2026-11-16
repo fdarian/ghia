@@ -3167,4 +3167,6 @@ mod reload;
 
 mod positions;
 
+mod has;
+
 mod tree_states;

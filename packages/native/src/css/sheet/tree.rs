@@ -130,6 +130,7 @@ impl RetainedTree {
         }
         if self.sheets.atoms_fresh {
             self.positions_unlinking(child, parent_id);
+            self.has_structure_changed(child, false);
         }
     }
 
@@ -145,6 +146,7 @@ impl RetainedTree {
         }
         if let Some(parent) = parent.filter(|_| self.sheets.atoms_fresh) {
             self.positions_linked(child, parent);
+            self.has_structure_changed(child, true);
         }
     }
 
@@ -156,6 +158,7 @@ impl RetainedTree {
         }
         if emptiness_changed && self.sheets.atoms_fresh {
             self.positions_text_emptiness_changed(id);
+            self.has_text_emptiness_changed(id);
         }
     }
 
@@ -177,6 +180,10 @@ impl RetainedTree {
         if self.sheets.atoms_fresh && !reach.is_empty() {
             self.sheets.mark(id, reach);
         }
+        if self.sheets.atoms_fresh {
+            let has = self.sheets.has_tree_state_read(changed);
+            self.mark_has_anchors(id, has, false);
+        }
     }
 
     /// The own style of an element changed: only a `[style]` selector can tell.
@@ -184,24 +191,27 @@ impl RetainedTree {
         if self.sheets.atoms_fresh {
             let reach = self.sheets.style_reach();
             self.sheets.mark(id, reach);
+            let has = self.sheets.has_style_read();
+            self.mark_has_anchors(id, has, false);
         }
     }
 
     fn attribute_changed(&mut self, id: u64, name: &str) {
-        let reach = match name {
+        let (reach, has) = match name {
             "class" => {
                 let before = self.refresh_class_atoms(id);
                 let after = self.elements.get(&id).and_then(|element| element.css()).map_or(&[][..], |css| &css.classes[..]);
-                self.sheets.class_reach(&before, after)
+                (self.sheets.class_reach(&before, after), self.sheets.has_class_read(&before, after))
             }
             "id" => {
                 let before = self.refresh_id_atom(id);
                 let after = self.elements.get(&id).and_then(|element| element.css()).and_then(|css| css.id);
-                self.sheets.id_reach(before, after)
+                (self.sheets.id_reach(before, after), self.sheets.has_id_read(before, after))
             }
-            _ => self.sheets.attribute_reach(name),
+            _ => (self.sheets.attribute_reach(name), self.sheets.has_attribute_read(name)),
         };
         self.sheets.mark(id, reach);
+        self.mark_has_anchors(id, has, false);
     }
 
     /// Whether `ancestor` is a `<style>` element or has one below it. Asked on every insert and

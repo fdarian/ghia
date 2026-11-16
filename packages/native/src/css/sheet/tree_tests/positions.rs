@@ -60,7 +60,14 @@ fn in_order(doc: &Doc, id: u64, out: &mut Vec<u64>) {
 
 /// Panics unless every element of `doc` has the style and the matched rules a fresh match of the
 /// same tree gives it.
-fn same_as_fresh(doc: &Doc, css: &str, step: &str) {
+pub(super) fn same_as_fresh(doc: &Doc, css: &str, step: &str) {
+    same_as_fresh_in(doc, css, step, true);
+}
+
+/// [`same_as_fresh`], and with `compare_styles` false only the rules each element matched: an
+/// element that matched and stopped keeps the style of its tag, which one that never matched has
+/// not been given yet.
+pub(super) fn same_as_fresh_in(doc: &Doc, css: &str, step: &str, compare_styles: bool) {
     let mut fresh = Doc::new();
     fresh.style_element(ROOT, css);
     for child in &doc.tree.elements[&ROOT].children {
@@ -76,7 +83,9 @@ fn same_as_fresh(doc: &Doc, css: &str, step: &str) {
     for (position, (mine, theirs)) in mine.iter().zip(&theirs).enumerate() {
         let (mine, theirs) = (&doc.tree.elements[mine], &fresh.tree.elements[theirs]);
         let describe = || format!("{step}: element {position} ({}, {:?})", mine.element_type, mine.attribute("class"));
-        assert_eq!(mine.style.as_deref(), theirs.style.as_deref(), "{}", describe());
+        if compare_styles {
+            assert_eq!(mine.style.as_deref(), theirs.style.as_deref(), "{}", describe());
+        }
         let matched = |element: &crate::retained_tree::RetainedElement| {
             element.css().and_then(|css| css.matched.as_ref()).map(|matched| (matched.normal.clone(), matched.important.clone()))
         };

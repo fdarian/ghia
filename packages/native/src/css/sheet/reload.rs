@@ -181,7 +181,7 @@ fn push_option(options: &mut Vec<Others>, others: Others) {
 /// The elements an added rule can match, as what they have: for each selector of an added rule,
 /// the features its subject compound requires. An element that has them all may be matched by it.
 #[derive(Default)]
-struct Features {
+pub(super) struct Features {
     ids: FxHashMap<Atom, Vec<Others>>,
     classes: FxHashMap<Atom, Vec<Others>>,
     attributes: FxHashMap<AttrName, Vec<Others>>,
@@ -205,7 +205,12 @@ impl Features {
     }
 
     fn add(&mut self, selector: &ComplexSelector) -> Option<()> {
-        let subject = &selector.compounds[0].simples;
+        self.add_compound(&selector.compounds[0].simples)
+    }
+
+    /// The requirements of `subject`, a compound, under its first feature. `None` when it
+    /// requires none of them.
+    pub(super) fn add_compound(&mut self, subject: &[Simple]) -> Option<()> {
         let Some(key) = bucket_simple(subject) else {
             // `&:hover` nested in `.a` is `:is(.a):hover`: an element has to match one of the
             // selectors of the list, and what the rest of the compound requires is left out.
@@ -240,7 +245,7 @@ impl Features {
     }
 
     /// Whether `element` has the features of some added selector, from the atoms stored on it.
-    fn reach(&self, sheets: &StyleSheets, element: &RetainedElement) -> bool {
+    pub(super) fn reach(&self, sheets: &StyleSheets, element: &RetainedElement) -> bool {
         let read = Read { sheets, element, tag: OnceCell::new() };
         let any_held = |options: &Vec<Others>| options.iter().any(|others| others.iter().all(|feature| feature.held_by(&read)));
         if let Some(css) = element.css() {

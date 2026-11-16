@@ -4,6 +4,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use super::atoms::Atom;
+use super::has::HasArguments;
 use super::nth::Position;
 use super::states::State;
 use super::tree_states::TreeState;
@@ -58,6 +59,8 @@ pub enum Simple {
     /// `:first-child`, `:nth-child()`, `:only-of-type`, `:empty` and the rest that read where an
     /// element stands among its siblings or what it holds.
     Position(Position),
+    /// `:has()`: the element has something that one of the relative selectors matches.
+    Has(HasArguments),
     /// Parses, but nothing in a document is a shadow host.
     Host,
     /// `::x` and the legacy `:before`, `:after`, `:first-line`, `:first-letter`: they style a part
@@ -197,6 +200,7 @@ impl Simple {
             }
             Simple::Id(_) => Specificity::new(1, 0, 0),
             Simple::Is(list) => list.specificity,
+            Simple::Has(arguments) => arguments.specificity(),
             Simple::Not(list) => most_specific(list),
             Simple::Where(_) => Specificity::default(),
         }

@@ -12,7 +12,7 @@ use crate::retained_tree::{RetainedElement, RetainedTree};
 
 use super::invalidation::Reach;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum TreeState {
     /// An element with the `popover` attribute that `showPopover()` opened.
     PopoverOpen,
@@ -75,6 +75,10 @@ impl TreeStates {
 
     pub fn is_empty(self) -> bool {
         self == TreeStates::NONE
+    }
+
+    pub fn contains(self, state: TreeState) -> bool {
+        self.0 & (1 << state as u16) != 0
     }
 
     /// The states a write of the prop `key` can change the answer of. Not `popoverOpen` and

@@ -10,6 +10,8 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::atoms::Atom;
+use super::has::HasInvalidation;
+use super::index::bucket_simple;
 use super::nth::Position;
 use super::selector::{Combinator, ComplexSelector, Simple};
 use super::tree_states::TreeStateReach;
@@ -179,6 +181,8 @@ pub struct Invalidation {
     /// the state of an element marks these.
     pub tree_states: TreeStateReach,
     pub positional: Positional,
+    /// What the `:has()` of the selectors read, from the other side: the anchors a change reaches.
+    pub has: HasInvalidation,
     /// The `&` lists already read, with what the chain they were read through does to a reach
     /// (`Reach::image`). A nested rule shares its parent's list, so without this each level would
     /// read every level above it again. Keyed by the image, not the chain: chains that differ in
@@ -190,16 +194,18 @@ pub struct Invalidation {
 
 impl Invalidation {
     pub fn read(&mut self, selector: &ComplexSelector) {
-        self.read_through(selector, &[]);
+        self.read_through(selector, &[], None);
     }
 
     /// `tail` is what leads on from the subject of `selector` to the subject of the selector it
-    /// is an argument of: empty for a selector that is not one.
+    /// is an argument of: empty for a selector that is not one. `hint` is the compound of that
+    /// selector that holds `selector` when it names an id, a class, an attribute or a tag: the
+    /// same element as the subject of `selector`.
     ///
     /// A feature in an argument has the reach it has through the argument's own combinators and
     /// then through the rest of the selector that holds it, so `:is(.a .b)` is read as the
     /// descendant combinator it holds and the combinators around it.
-    fn read_through(&mut self, selector: &ComplexSelector, tail: &[Combinator]) {
+    fn read_through(&mut self, selector: &ComplexSelector, tail: &[Combinator], hint: Option<&[Simple]>) {
         #[cfg(test)]
         {
             self.reads += 1;
@@ -207,6 +213,14 @@ impl Invalidation {
         for (position, compound) in selector.compounds.iter().enumerate() {
             let chain = chain_from(selector, position, tail);
             let reach = Reach::SELF.through(&chain);
+            // Only the subject of an argument is the element that holds it.
+            let inner_hint = if position != 0 {
+                None
+            } else if bucket_simple(&compound.simples).is_some() {
+                Some(&compound.simples[..])
+            } else {
+                hint
+            };
             for simple in &compound.simples {
                 match simple {
                     Simple::Class(class) => *self.classes.entry(*class).or_default() |= reach,
@@ -215,15 +229,16 @@ impl Invalidation {
                     Simple::Is(list) => {
                         if self.shared_read.insert((list.as_ptr() as usize, Reach::image(&chain))) {
                             for inner in list.iter() {
-                                self.read_through(inner, &chain);
+                                self.read_through(inner, &chain, inner_hint);
                             }
                         }
                     }
                     Simple::Where(list) | Simple::Not(list) => {
                         for inner in list {
-                            self.read_through(inner, &chain);
+                            self.read_through(inner, &chain, inner_hint);
                         }
                     }
+                    Simple::Has(arguments) => self.has.read(arguments, &compound.simples, hint.filter(|_| position == 0), reach),
                     Simple::TreeState(state) => self.tree_states.read(*state, reach),
                     Simple::Position(position) => self.positional.read(*position, reach),
                     Simple::Tag(_) | Simple::Root | Simple::Host | Simple::PseudoElement | Simple::State(_) => {}
