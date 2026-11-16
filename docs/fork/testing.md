@@ -10,7 +10,7 @@ cd packages/native && bun run test              # vitest; one test skips without
 cd packages/react && bun run test               # vitest, needs the addon built
 cd packages/solid && bun run test               # builds, then vitest under Bun (bun --bun vitest run)
 cd packages/ghia && bun run test               # builds, then bun test: the CLI tests spawn ghia dev and ghia build, and the compile tests run the 128 MB binaries from an empty directory; the API tests call dev() and build()
-cd examples && bun run test                     # the examples suite, then the Base UI acceptance suite (`base-ui/`, `bun run test:base-ui`), the Kobalte suite (`kobalte/`, `bun run test:kobalte`), the Base UI Solid suite (`base-ui-solid/`, `bun run test:base-ui-solid`) and the Solid examples' tests (tanstack-virtual, `bun run test:solid`), each under its own config; *.perf.test.tsx is excluded
+cd examples && bun run test                     # the examples suite, then the Base UI acceptance suite (`base-ui/`, `bun run test:base-ui`), the Kobalte suite (`kobalte/`, `bun run test:kobalte`), the Base UI Solid suite (`base-ui-solid/`, `bun run test:base-ui-solid`) and the Solid examples' tests (tanstack-virtual, `bun run test:solid`), each under its own config; *.perf.test.tsx is excluded, and so is the perf gate (`bun run test:perf-gate`, [below](#the-perf-gate))
 cd zed && cargo test -p gpui --lib --features test-support   # GPUI's own tests, where the zed commits are tested
 cd zed && cargo test -p gpui_macos --test native_surface       # window composition in a real window (needs an unoccluded display)
 cd zed && cargo test -p gpui_macos --test native_surface_present # a surface's size before its first frame and which frames present with a transaction (a window that is never shown)
@@ -350,6 +350,14 @@ The gpui fuzzers run inside `cargo test -p gpui --lib --features test-support`.
 - **Baselines.** `poc` is the fork before the retention work, "off" is `GPUIX_RETAIN_OFF=1` (the persistent engine and the cheaper build, nothing skipped), "perf" is everything on. The tables are in [retention.md](retention.md#measured). Use p50 over several runs (three on the demo pages, medians of 7 rounds after one warm-up for the offscreen runs); the machine is shared, so compare numbers taken together.
 - **Tick timings.** CPU per draw in the headless test renderer with a 75 Hz timer (10 s a run, 2 s of settling) for loops, and in the offscreen test renderer for one-off pages. `getPatchCounters().unpatchable` and `declines`, `getBuildCounters` and `getFrameWorkCounters` say why a tick is drawn whole; pin a fix with a test that counts it again.
 - **A suite under the verifier is not a timing.** It builds every replayed frame twice.
+
+### The perf gate
+
+`bun run test:perf-gate` in `examples` (about 2 s, release addon with test-support) holds a ceiling on every count of work in six scenarios of a Solid mailbox (`examples/solid/mailbox-navigate`, 200 generated messages, 1280 x 800 at scale 1, the repo's Inter subset registered, paused clock, one frame per input): `mount` (first frame), `navigate` (20 ArrowDown), `type` (6 characters into the filter), `scroll` (20 wheel steps of 120), `hover` (20 rows entered) and `idle` (20 frames). Each scenario runs in a window of its own with its warm-up before the span; the counts are the deltas over the span of every numeric field of `getBuildCounters`, `getLayoutCounters`, `getFrameWorkCounters` (not `dormantTicks`, which counts the host's wall clock), `getRetainedCounters` and `getPatchCounters`, `getPaintedFrameCount`, `getLayoutPassCount`, `getCulledSubtreeCount`, and the `applyBatch` calls, ops and bytes. They are the same on every run and in any order, so a ceiling is exact and a count above it is a change, never noise.
+
+- **A count above its ceiling fails**, naming the scenario, field, value and ceiling, every violation of a scenario in one failure. A count below its ceiling passes and is listed as one that can tighten; a field with no ceiling fails.
+- **`PERF_GATE_UPDATE=1 bun run test:perf-gate` rewrites `perf-gate/ceilings.json`** with the measured counts. Do it in the commit that changes the engine on purpose, and read the diff: a rise of `elementsBuilt` or `nodesLaidOut` is a cost every frame of that scenario now pays (two elements more per navigate key was once +4..6% of a navigate).
+- Ceilings are for the release addon on this machine's font stack only through the registered font; they do not depend on system fonts or the clock.
 
 ### The pan budgets
 
