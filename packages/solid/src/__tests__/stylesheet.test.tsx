@@ -426,8 +426,11 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in Solid", () => {
     expect(getComputedStyle(label).paddingTop).toBe("0px")
     box.dispatchEvent(new globalThis.PointerEvent("click", { bubbles: true, cancelable: true }))
     expect(box.checked).toBe(true)
+    // No batch ran, so the frame a window draws on its next tick is delivered by hand.
+    app.renderer.flush()
     expect(getComputedStyle(label).paddingTop).toBe("7px")
     box.checked = false
+    app.renderer.flush()
     expect(getComputedStyle(label).paddingTop).toBe("0px")
   })
 
