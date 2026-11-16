@@ -7,6 +7,7 @@
 
 import fs from "fs"
 import { describe, expect, it } from "vitest"
+import { flushSync } from "../reconciler/reconciler"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
 import { readLogicalPixels, SHOTS_DIR } from "./test-utils.js"
 
@@ -17,16 +18,18 @@ const ROW_HEIGHT = 40
 const VIEW = { width: 300, height: 240 }
 const TAG = { left: 120, top: 6, width: 50, height: 10 }
 const RED = [255, 0, 0, 255]
-const EDITED = "#00aa00"
+const ROW_ELEMENTS = 3 // the row, its text and its tag
+const REMOUNTED = "#00aa00"
 const GREEN = [0, 170, 0, 255]
 
-function Rows(props: { clicks: number[]; edited?: number }) {
+/** The rows in `remounted` are new elements (another key) with a green background: the rows of a list that a commit adds. */
+function Rows(props: { clicks: number[]; remounted?: number[] }) {
   return (
     <div testId="scroller" style={{ ...VIEW, overflow: "auto" }}>
       <div testId="container" style={{ position: "relative", width: "100%", height: ROWS * ROW_HEIGHT }}>
         {Array.from({ length: ROWS }, (_, index) => (
           <div
-            key={index}
+            key={props.remounted?.includes(index) ? `new-${index}` : index}
             testId={`row-${index}`}
             style={{
               position: "absolute",
@@ -35,7 +38,7 @@ function Rows(props: { clicks: number[]; edited?: number }) {
               width: "100%",
               height: ROW_HEIGHT,
               transform: `translateY(${index * ROW_HEIGHT}px)`,
-              backgroundColor: index === props.edited ? EDITED : index % 2 === 0 ? "#223344" : "#334455",
+              backgroundColor: props.remounted?.includes(index) ? REMOUNTED : index % 2 === 0 ? "#223344" : "#334455",
             }}
           >
             <div style={{ fontSize: 14, color: "#ffffff" }}>{`Row ${index}`}</div>
@@ -58,13 +61,13 @@ function Rows(props: { clicks: number[]; edited?: number }) {
   )
 }
 
-function setup(verify: boolean, edited?: number) {
+function setup(verify: boolean) {
   const clicks: number[] = []
   const root = createTestRoot(VIEW)
   const renderer = root.renderer
   renderer.setRetainPlanning(true)
   renderer.setRetainVerify(verify)
-  root.render(<Rows clicks={clicks} edited={edited} />)
+  root.render(<Rows clicks={clicks} />)
   for (let frame = 0; frame < 5; frame++) renderer.flush()
   const scroller = renderer.findByTestId("scroller")!
   const id = (testId: string) => renderer.findByTestId(testId)!.id
@@ -78,8 +81,9 @@ function setup(verify: boolean, edited?: number) {
     renderer.scrollTo(scroller.id, 0, top, "instant")
     renderer.flush()
   }
-  const rerender = (next?: number) => root.render(<Rows clicks={clicks} edited={next} />)
-  return { ...root, clicks, id, sample, scrollTo, rerender, counters: () => renderer.getRetainedCounters() }
+  // Commits to the host tree and draws nothing: the frame that draws it is the caller's.
+  const remount = (rows: number[]) => flushSync(() => root.root.render(<Rows clicks={clicks} remounted={rows} />))
+  return { ...root, clicks, id, sample, scrollTo, remount, counters: () => renderer.getRetainedCounters() }
 }
 
 /** The rows with a tag in the viewport at `scrolled`, and where the tag is. */
@@ -131,32 +135,44 @@ describeNative("rows that are positioned, moved by a transform and hold a positi
 })
 
 describeNative("a row built in the frame that its scroller scrolled", () => {
-  // A row that a wheel tick moves and an edit changes is built by that frame, where the scroller has put it. The frame
-  // is recorded as any other build is, so the frame after puts that recording where the next tick moves it: the row is
-  // not built a second time, late, to make the recording the first build did not.
-  it.each([true, false])("is replayed by the frame after, with the verifier %s", (verify) => {
-    const { renderer, id, sample, rerender, counters, unmount } = setup(verify)
+  // A row that a commit adds while a wheel tick moves its scroller is built by that frame, where the scroller puts it.
+  // The frame records what it builds, as one that moved nothing does: left unrecorded, the frame after skips the row by
+  // its record, finds no recording of it and builds it a second time, late (in the same draw, by its second pass, or in
+  // the frame after, when a draw has one).
+  it.each([true, false])("is built once and recorded, with the verifier %s", (verify) => {
+    const { renderer, id, sample, remount, counters, unmount } = setup(verify)
     try {
-      const row = 3
-      const rowY = (scrolled: number) => row * ROW_HEIGHT - scrolled
-      rerender(row)
-      renderer.dispatchScrollWheel(150, 100, 0, 4)
-      renderer.flush()
-      const built = counters()
-      expect(renderer.getElementBounds(id(`row-${row}`)), "the wheel moved the row").toMatchObject({ y: rowY(4) })
-      expect(sample("edited-built", 10, rowY(4) + 20), "the frame that scrolled and edited shows the edit").toEqual(GREEN)
-
-      renderer.dispatchScrollWheel(150, 100, 0, 6)
-      renderer.flush()
-      const next = counters()
-      expect(renderer.getElementBounds(id(`row-${row}`))).toMatchObject({ y: rowY(10) })
-      expect(sample("edited-moved", 10, rowY(10) + 20), "the frame after shows it where the wheel put it").toEqual(GREEN)
-      expect(sample("edited-tag", TAG.left + 5, rowY(10) + TAG.top + 5)).toEqual(RED)
-      expect(next.mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
-      if (!verify) {
-        expect(next.lazyBuilds - built.lazyBuilds, "no row is built late to be recorded").toBe(0)
-        expect(next.relocations, "the recording of the edited row is moved").toBeGreaterThan(built.relocations)
+      const frame = (change: () => void) => {
+        const retained = counters()
+        const elements = renderer.getBuildCounters().elementsBuilt
+        change()
+        renderer.flush()
+        return { elements: renderer.getBuildCounters().elementsBuilt - elements, relocations: counters().relocations - retained.relocations }
       }
+      // What a scrolled frame builds by itself (the scroller and what is above it: the rows are replayed).
+      const control = frame(() => renderer.dispatchScrollWheel(150, 100, 0, 2))
+      remount([5])
+      renderer.flush()
+      const scrolled = frame(() => {
+        remount([5, 3])
+        renderer.dispatchScrollWheel(150, 100, 0, 2)
+      })
+      expect(renderer.getElementBounds(id("row-3")), "the wheel moved the row").toMatchObject({ y: 3 * ROW_HEIGHT - 4 })
+      if (!verify) {
+        expect(scrolled.elements - control.elements, "the new row is built once, where the scroller put it").toBeLessThanOrEqual(ROW_ELEMENTS)
+      }
+      const moved = frame(() => renderer.dispatchScrollWheel(150, 100, 0, 6))
+      if (!verify) {
+        expect(moved.elements, "the frame after builds no row").toBeLessThanOrEqual(control.elements)
+        expect(moved.relocations, "it puts the recorded rows where the wheel moved them").toBeGreaterThan(0)
+      }
+      for (const row of [3, 5]) {
+        const y = row * ROW_HEIGHT - 10
+        expect(renderer.getElementBounds(id(`row-${row}`)), `row ${row}`).toMatchObject({ y })
+        expect(sample(`remounted-${row}`, 10, y + 20), `row ${row} shows its own background`).toEqual(GREEN)
+        expect(sample(`remounted-tag-${row}`, TAG.left + 5, y + TAG.top + 5), `row ${row} keeps its tag`).toEqual(RED)
+      }
+      expect(counters().mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
     } finally {
       unmount()
     }
