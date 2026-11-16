@@ -2388,7 +2388,7 @@ impl Retain {
         let mut hovers = element.style.as_ref().is_some_and(|style| {
             self.hover_scans.of_one(style, crate::events::hover_paint::paint_hover_of).settled(tree, id)
         });
-        let lifts_itself = element.style.as_deref().is_some_and(crate::events::hover_paint::may_lift);
+        let lifts_itself = crate::events::hover_paint::may_lift_in_any_state(element, colors, lengths);
         let mut lifted_below = false;
         let mut unfit = element
             .style
@@ -2407,13 +2407,10 @@ impl Retain {
                 break;
             }
         }
-        // Something that lifts is in the context of the element if it forms one: certain only from its style,
-        // so an element that might form one is judged as one that does not.
-        let forms_context = lifted_below
-            && element.style.as_deref().is_some_and(|style| {
-                let resolved = crate::resolved_style::Resolved::of_style(style, colors, lengths);
-                crate::layout::stacking::creates_context(&resolved, false)
-            });
+        // Something that lifts is in the context of the element if it forms one: certain only if it does in every
+        // state it is built in, so an element that might form one is judged as one that does not.
+        let forms_context =
+            lifted_below && crate::events::hover_paint::forms_context_in_every_state(element, colors, lengths);
         let lifts_out = lifted_below && !forms_context;
         let lifts = lifts_itself || lifts_out;
         let scanned = if size > PATCH_ROOT_MAX_ELEMENTS {
@@ -7166,11 +7163,16 @@ mod tests {
 
     /// `1 > 2 > (3, 4)` with the styles `styles` gives, as a patch root scan sees it from the root 2.
     fn scan_of(styles: [(u64, crate::style::StyleDesc); 3]) -> PatchRootScan {
+        scan_from(2, styles)
+    }
+
+    /// The scan of `root` in the page `1 > (2 > (3, 4), 5)` with the styles `styles` gives.
+    fn scan_from<const N: usize>(root: u64, styles: [(u64, crate::style::StyleDesc); N]) -> PatchRootScan {
         let mut page = Units::new();
         for (id, style) in styles {
             page.tree.set_style_arc(id, Arc::new(style));
         }
-        page.retain.scan_patch_root(&page.tree, 2, &page.inherited.colors, &page.inherited.lengths)
+        page.retain.scan_patch_root(&page.tree, root, &page.inherited.colors, &page.inherited.lengths)
     }
 
     fn style_of(json: &str) -> crate::style::StyleDesc {
@@ -7198,6 +7200,56 @@ mod tests {
         let scan = scan_of([(2, style_of(r#"{"opacity":0.5}"#)), (3, row()), (4, plain())]);
         assert!(!scan.lifts_out && scan.lifts);
         let scan = scan_of([(2, plain()), (3, plain()), (4, plain())]);
+        assert!(!scan.lifts_out && !scan.lifts);
+    }
+
+    #[test]
+    fn a_patch_root_scan_forms_a_context_only_where_every_state_of_the_element_does() {
+        let plain = || style_of("{}");
+        let dot = || style_of(r#"{"position":"absolute"}"#);
+        let refused = |scan: PatchRootScan| scan.lifts_out;
+        // The context a declared opacity forms is certain only if nothing but a hover restyles the element.
+        let faded = r#""opacity":0.5"#;
+        assert!(!refused(scan_of([(2, style_of(&format!("{{{faded}}}"))), (3, dot()), (4, plain())])));
+        assert!(!refused(scan_of([(2, style_of(&format!(r##"{{{faded},"hover":{{"backgroundColor":"#eee"}}}}"##))), (3, dot()), (4, plain())])));
+        for restyled in [
+            r#""animation":"fade-in 1s forwards""#,
+            r#""transition":"opacity 1s""#,
+            r#""active":{"opacity":1}"#,
+            r#""focus":{"opacity":1}"#,
+            r#""focusWithin":{"opacity":1}"#,
+            r#""focusVisible":{"opacity":1}"#,
+            r#""groupHover":{"opacity":1}"#,
+        ] {
+            let scan = scan_of([(2, style_of(&format!("{{{faded},{restyled}}}"))), (3, dot()), (4, plain())]);
+            assert!(refused(scan), "{restyled}: the opacity may not be the one the element is built with");
+        }
+        // A lifted child below an element with a state that is not a hover: it may form no context.
+        let scan = scan_of([(2, style_of(r#"{"opacity":0.5,"active":{"opacity":1}}"#)), (3, dot()), (4, plain())]);
+        assert!(scan.lifts_out);
+    }
+
+    #[test]
+    fn a_patch_root_scan_sees_a_child_lift_that_may_lift_misses() {
+        let plain = || style_of("{}");
+        let dot = || style_of(r#"{"position":"absolute"}"#);
+        // `1 > 2 > 3`: the card 2 forms a context at z 0 (or might lift) and holds the dot 3. The card lifts out of 1,
+        // which forms none, whether or not it takes the dot.
+        for card in [
+            r#"{"transformStyle":"preserve-3d"}"#,
+            r#"{"transformStyle":"preserve-3d","active":{"opacity":0.5}}"#,
+            r#"{"animation":"spin 1s infinite"}"#,
+            r#"{"active":{"transform":"scale(1.1)"}}"#,
+        ] {
+            let scan = scan_from(1, [(1, plain()), (2, style_of(card)), (3, dot()), (4, plain()), (5, plain())]);
+            assert!(scan.lifts_out, "{card}: the card is lifted out of 1");
+        }
+        // As a root the card takes the dot only when it forms its context in every state.
+        let scan = scan_from(2, [(2, style_of(r#"{"transformStyle":"preserve-3d"}"#)), (3, dot()), (4, plain())]);
+        assert!(!scan.lifts_out);
+        let scan = scan_from(2, [(2, style_of(r#"{"transformStyle":"preserve-3d","active":{"opacity":0.5}}"#)), (3, dot()), (4, plain())]);
+        assert!(scan.lifts_out);
+        let scan = scan_from(1, [(1, plain()), (2, plain()), (3, plain()), (4, plain()), (5, plain())]);
         assert!(!scan.lifts_out && !scan.lifts);
     }
 

@@ -23,7 +23,7 @@
 use crate::color::{ColorContext, Scheme};
 use crate::css::length::LengthContext;
 use crate::events::state_styles::{resolve_pointer_states, PointerStates};
-use crate::retained_tree::RetainedTree;
+use crate::retained_tree::{RetainedElement, RetainedTree};
 use crate::style::{BackgroundValue, StyleDesc};
 
 /// The most elements a root that a patch repaints holds. A frame built whole that rebuilds the root builds all
@@ -112,6 +112,60 @@ pub(crate) fn may_lift(style: &StyleDesc) -> bool {
         || set(&style.mask_image)
         || set(&style.clip_path)
         || style.content_visibility.is_some()
+}
+
+/// Whether the style the build lays out for an element may be other than the one it declares by anything but a
+/// hover: an animation, a transition, Motion (`motion`, `motionValues`, `layout`), a `var()`, an `@container` block or a
+/// state variant other than `hover` and `hasHover`, whose paint-only refinement never changes what an element lifts
+/// (`paints_only`). A fold like that can give the element an opacity, a transform or a context that it does not declare,
+/// or take one away.
+fn restyles_beyond_hover(element: &RetainedElement, style: Option<&StyleDesc>) -> bool {
+    let props = element.custom_props();
+    if ["motion", "motionValues", "layout"].into_iter().any(|key| props.contains_key(key)) {
+        return true;
+    }
+    style.is_some_and(|style| {
+        style.container_rules.is_some()
+            || style.var_declarations.is_some()
+            || crate::motion::declares_animation(style)
+            || crate::motion::declares_transitions(style)
+            || crate::css::var_substitution::state_blocks(style)
+                .into_iter()
+                .any(|(key, state)| state.is_some() && !matches!(key, "hover" | "hasHover"))
+    })
+}
+
+/// [`may_lift`] for what the element might be lifted as in any state it is built in, not only the one it declares: it
+/// lifts as declared, forms a stacking context as declared (a `transform-style`, a Motion transform key or a mask border
+/// forms one and lifts at `z-index` 0, which `may_lift` does not name), or [`restyles_beyond_hover`], which might
+/// give it any of those. What a scan of a patch root asks of an element below the root (`Retain::can_be_patch_root`).
+pub(crate) fn may_lift_in_any_state(
+    element: &RetainedElement,
+    colors: &ColorContext,
+    lengths: &LengthContext,
+) -> bool {
+    let style = element.style.as_deref();
+    style.is_some_and(may_lift)
+        || restyles_beyond_hover(element, style)
+        || style.is_some_and(|style| declared_context(style, colors, lengths))
+}
+
+/// Whether the element forms a stacking context in every state it is built in: it does as declared, and nothing but a
+/// hover (which cannot change that) restyles it ([`restyles_beyond_hover`]). Not a flex or grid item with a `z-index`
+/// alone: the scan does not know whether it is one, so it counts it as forming none, the safe side for a root that
+/// is refused when something is lifted out of it.
+pub(crate) fn forms_context_in_every_state(
+    element: &RetainedElement,
+    colors: &ColorContext,
+    lengths: &LengthContext,
+) -> bool {
+    let style = element.style.as_deref();
+    !restyles_beyond_hover(element, style) && style.is_some_and(|style| declared_context(style, colors, lengths))
+}
+
+fn declared_context(style: &StyleDesc, colors: &ColorContext, lengths: &LengthContext) -> bool {
+    let resolved = crate::resolved_style::Resolved::of_style(style, colors, lengths);
+    crate::layout::stacking::creates_context(&resolved, false)
 }
 
 /// Whether an element has a size that an intrinsic keyword gives (`min-content`, `max-content`, `fit-content`, `content`):

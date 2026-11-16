@@ -10,6 +10,7 @@
 import fs from "fs"
 import React from "react"
 import { describe, expect, it } from "vitest"
+import { defineKeyframes } from "../index"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
 import { readLogicalPixels, SHOTS_DIR } from "./test-utils.js"
 
@@ -164,4 +165,98 @@ describeNative("rows that are positioned, moved by a transform and hold a positi
       unmount()
     }
   })
+})
+
+/**
+ * The scan that decides a hover patch root reads the declared style. A row whose declared style forms no context, or does,
+ * but is built with another (an animation that ends at opacity 1, a state that sets it), has to be judged as one whose
+ * lifted children may be lifted out of it: a patched frame must still show what a frame built whole shows.
+ */
+defineKeyframes("rows-fade-in", { from: { opacity: 0 }, to: { opacity: 1 } })
+
+const BG = ["#223344", "#334455"]
+
+type Variant = { name: string; row: (index: number) => Record<string, unknown>; inner?: boolean }
+
+function Restyled({ variant }: { variant: Variant }) {
+  return (
+    <div testId="scroller" style={{ ...VIEW, overflow: "auto", scrollbarWidth: "none" }}>
+      {Array.from({ length: 4 }, (_, index) => (
+        <div
+          key={index}
+          testId={`row-${index}`}
+          style={{
+            height: ROW_HEIGHT,
+            backgroundColor: BG[index % 2],
+            hover: { backgroundColor: "#664422" },
+            ...variant.row(index),
+          }}
+        >
+          {variant.inner ? (
+            <div testId={`plane-${index}`} style={{ transformStyle: "preserve-3d" }}>
+              <div style={{ position: "absolute", ...TAG, backgroundColor: "#ff0000" }} />
+            </div>
+          ) : (
+            <div style={{ position: "absolute", ...TAG, backgroundColor: "#ff0000" }} />
+          )}
+          <div style={{ fontSize: 14, color: "#ffffff" }}>{`Row ${index}`}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const VARIANTS: Variant[] = [
+  { name: "an animation that ends at opacity 1", row: () => ({ opacity: 0, animation: "rows-fade-in 100ms linear forwards" }) },
+  { name: "an active state that sets opacity 1 over a lower one", row: () => ({ opacity: 0.5, active: { opacity: 1 } }) },
+  { name: "a child with preserve-3d that holds the lifted box", row: () => ({}), inner: true },
+  { name: "a child with a scale that holds the lifted box", row: () => ({ scale: "1.01 1" }), inner: true },
+]
+
+describeNative("hover patches of rows that are restyled other than by their hover", { timeout: TIMEOUT }, () => {
+  for (const variant of VARIANTS) {
+    it(`show what a frame built whole shows with ${variant.name}, under the verifier`, () => {
+      const run = (patch: boolean) => {
+        const root = createTestRoot(VIEW)
+        const renderer = root.renderer
+        renderer.clockPause()
+        renderer.setRetainPlanning(true)
+        renderer.setRetainVerify(true)
+        root.render(<Restyled variant={variant} />)
+        for (let frame = 0; frame < 5; frame++) renderer.flush()
+        renderer.clockFastForward(500)
+        for (let frame = 0; frame < 3; frame++) renderer.flush()
+        renderer.dispatchNativeEvents()
+        renderer.setA11yActive(false)
+        renderer.setPatchEnabled(patch)
+        try {
+          const frames = []
+          const way = [20, 60, 100, 60, 20, 100, 20]
+          for (const y of way) move(renderer, 20, y)
+          if (variant.name.startsWith("an active")) renderer.nativeSimulateMouseDown(20, 20)
+          for (const y of way) {
+            move(renderer, 20, y)
+            frames.push({
+              boxes: boxes(renderer),
+              under: renderer.getElementsAt(20, y),
+              pixels: pixels(renderer, `${variant.name.replace(/\W+/g, "-")}-${patch}-${frames.length}`, [
+                [20, 20],
+                [20, 60],
+                [20, 100],
+                [TAG.left + 5, TAG.top + 5],
+              ]),
+            })
+          }
+          return { frames, mismatches: renderer.getRetainedCounters().mismatches }
+        } finally {
+          root.unmount()
+        }
+      }
+      const on = run(true)
+      const off = run(false)
+      expect(on.frames).toEqual(off.frames)
+      expect(on.mismatches).toBe(0)
+      expect(off.mismatches).toBe(0)
+    })
+  }
 })

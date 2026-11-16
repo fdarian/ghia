@@ -42,7 +42,7 @@ pub(crate) use curve::cubic_bezier;
 pub(crate) use inline::{InlineStyles, Timeline};
 use css_animation::animates_width;
 pub(crate) use css_animation::{
-    validate_animations, AnimationEvent, CssAnimations, PropTarget, Subject, SvgSource,
+    declares_animation, validate_animations, AnimationEvent, CssAnimations, PropTarget, Subject, SvgSource,
 };
 pub(crate) use keyframes::{validate_keyframes, KeyframesRegistry};
 pub(crate) use layout_flip::{drag_value_ids, LayoutEvent, LayoutFlips};
