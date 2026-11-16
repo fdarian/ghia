@@ -357,7 +357,7 @@ The gpui fuzzers run inside `cargo test -p gpui --lib --features test-support`.
 
 - **A count above its ceiling fails**, naming the scenario, field, value and ceiling, every violation of a scenario in one failure. A count below its ceiling passes and is listed as one that can tighten; a field with no ceiling fails.
 - **`PERF_GATE_UPDATE=1 bun run test:perf-gate` rewrites `perf-gate/ceilings.json`** with the measured counts. Do it in the commit that changes the engine on purpose, and read the diff: a rise of `elementsBuilt` or `nodesLaidOut` is a cost every frame of that scenario now pays (two elements more per navigate key was once +4..6% of a navigate).
-- Ceilings are for the release addon on this machine's font stack only through the registered font; they do not depend on system fonts or the clock.
+- The counts do not depend on system fonts or the clock; they were taken with the release addon.
 
 ### The pan budgets
 
