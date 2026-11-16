@@ -6,8 +6,8 @@
 //!
 //! - the end of the gesture: 500 ms after the last tick of a mouse wheel (the latch of the wheel
 //!   transaction, [`gpui::WHEEL_LATCH_TIMEOUT`]), or 100 ms after a trackpad lift unless momentum
-//!   comes (macOS reports `Ended` at the lift and nothing at the end of the momentum, whose events
-//!   are `Moved` and so run the 500 ms again);
+//!   comes. Momentum events are `Moved` and run the 500 ms again; GPUI does not carry macOS's
+//!   momentum phase, so the quiet period ends a fling (deviations.md, Scroll);
 //! - a scroll that code made (`scrollTop = n`, `scrollTo`, `scrollIntoView`, a key, a scrollbar, a
 //!   row), when it has moved, or when its smooth animation ends;
 //! - a build that changed the tree, a style or the layout, or that ran an animation of the layout

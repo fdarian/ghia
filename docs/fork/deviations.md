@@ -237,6 +237,7 @@ An HTML tag ([docs/reference.md](../reference.md#html-tags)) is the user agent s
 - **Scroll anchoring: a nested scroller is one box.** A nested scroller is anchored as one box and is not looked into. There is no priority candidate for the focused editable or a find-in-page match, and `scroll-padding` does not shrink the area a box must be in. None of the three is exercised.
 - **Scroll anchoring: Chrome's stale flag on a relative anchor.** Chrome compensates nothing in the layout after a second change of `top` of a relative anchor, as if the flag stayed set until the box is laid out. gpuix compensates (scene `anchorTopStale`, `it.fails`).
 - **A `<virtual-list>` keeps its own row-index anchoring.** It does not use `overflowAnchor`.
+- **The hover under a still pointer follows up to 500 ms after a fling ends, not at its end.** macOS reports the end of the momentum (`momentumPhase`), but GPUI's `ScrollWheelEvent` maps only `phase()`, so every momentum event arrives as `Moved` and Ghia ends the gesture 500 ms after the last one, where Chrome ends it at the momentum's end. Upstream [zed-industries/zed#64534](https://github.com/zed-industries/zed/pull/64534) adds a `momentum` flag to `ScrollWheelEvent`; once it lands, Ghia can end the gesture with the momentum.
 
 ## Motion
 
