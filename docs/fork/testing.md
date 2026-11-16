@@ -26,7 +26,7 @@ cd packages/native/examples/webview-e2e && bun run e2e         # <webview> on re
 - Tests that need the native addon are `describe.skip` when it is missing (`hasNativeTestRenderer`), so a green run without the addon proves little.
 - Almost none of the tests needs a real window: the test renderer (`createTestRoot`) draws offscreen. The macOS-only pieces (pointer lock, Metal effects, the OS reduced-motion read, the real window drag) were therefore checked against a simulated platform, not a live one. The exceptions open a real window: zed's `native_surface` test and the `<webview>` e2e below.
 
-CI (`.github/workflows/ci.yml`, GitHub's shared `macos-latest` runner) does not check ordinary pull requests or pushes. The `Version Packages` PR needs its `ci-passed` status green before it merges (a ruleset on `main`), and any branch can be checked on demand. A run builds the four packages, runs the native, Vite, Solid and examples suites, and runs the React suite split over three runners (`--shard=1/3` to `3/3`). Start it by commenting `/ci` on the PR, with "Approve and run" on the PR's pending run, or from the command line, for any branch:
+CI (`.github/workflows/ci.yml`, GitHub's shared `macos-latest` runner) does not check ordinary pull requests or pushes; only [the perf gate](#the-perf-gate) does, in its own workflow (`perf-gate.yml`). The `Version Packages` PR needs its `ci-passed` status green before it merges (a ruleset on `main`), and any branch can be checked on demand. A run builds the four packages, runs the native, Vite, Solid and examples suites, and runs the React suite split over three runners (`--shard=1/3` to `3/3`). Start it by commenting `/ci` on the PR, with "Approve and run" on the PR's pending run, or from the command line, for any branch:
 
 ```bash
 gh workflow run ci.yml -R fdarian/ghia --ref <branch>
@@ -358,6 +358,7 @@ The gpui fuzzers run inside `cargo test -p gpui --lib --features test-support`.
 - **A count above its ceiling fails**, naming the scenario, field, value and ceiling, every violation of a scenario in one failure. A count below its ceiling passes and is listed as one that can tighten; a field with no ceiling fails.
 - **`PERF_GATE_UPDATE=1 bun run test:perf-gate` rewrites `perf-gate/ceilings.json`** with the measured counts. Do it in the commit that changes the engine on purpose, and read the diff: a rise of `elementsBuilt` or `nodesLaidOut` is a cost every frame of that scenario now pays (two elements more per navigate key was once +4..6% of a navigate).
 - The counts do not depend on system fonts or the clock; they were taken with the release addon.
+- **It runs on every pull request and every push to `main`** (`.github/workflows/perf-gate.yml`, about 10 minutes on `macos-latest`, nearly all of it the addon build), and is not part of `ci-passed`, so a merge does not wait on it. A PR that raises a ceiling commits the new `ceilings.json` and gives the reason in the PR body. Run it locally before opening a PR, with the rest of the pre-PR run.
 
 ### The pan budgets
 
