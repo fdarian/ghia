@@ -4,6 +4,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use super::atoms::Atom;
+use super::nth::Position;
 use super::states::State;
 
 /// What a [`ComplexSelector`] link says about the compound to its left.
@@ -52,6 +53,9 @@ pub enum Simple {
     State(State),
     /// `:popover-open`: an element with the `popover` attribute that `showPopover()` opened.
     PopoverOpen,
+    /// `:first-child`, `:nth-child()`, `:only-of-type`, `:empty` and the rest that read where an
+    /// element stands among its siblings or what it holds.
+    Position(Position),
     /// Parses, but nothing in a document is a shadow host.
     Host,
     /// `::x` and the legacy `:before`, `:after`, `:first-line`, `:first-letter`: they style a part
@@ -180,7 +184,13 @@ impl Simple {
     fn specificity(&self) -> Specificity {
         match self {
             Simple::Tag(_) | Simple::PseudoElement => Specificity::new(0, 0, 1),
-            Simple::Class(_) | Simple::Attr(_) | Simple::Root | Simple::Host | Simple::State(_) | Simple::PopoverOpen => {
+            Simple::Class(_)
+            | Simple::Attr(_)
+            | Simple::Root
+            | Simple::Host
+            | Simple::State(_)
+            | Simple::PopoverOpen
+            | Simple::Position(_) => {
                 Specificity::new(0, 1, 0)
             }
             Simple::Id(_) => Specificity::new(1, 0, 0),

@@ -127,6 +127,9 @@ impl RetainedTree {
                 self.sheets.mark(next, structure.from_next_sibling());
             }
         }
+        if self.sheets.atoms_fresh {
+            self.positions_unlinking(child, parent_id);
+        }
     }
 
     /// After `child` was put where it is, or taken out of the document.
@@ -139,12 +142,19 @@ impl RetainedTree {
             let structure = self.sheets.index.invalidation.structure;
             self.sheets.mark(child, Reach::SELF | Reach::DESCENDANTS | structure);
         }
+        if let Some(parent) = parent.filter(|_| self.sheets.atoms_fresh) {
+            self.positions_linked(child, parent);
+        }
     }
 
-    pub(crate) fn sheets_text_changed(&mut self, id: u64) {
+    /// The text of `id` changed, from empty to not or back when `emptiness_changed`.
+    pub(crate) fn sheets_text_changed(&mut self, id: u64, emptiness_changed: bool) {
         let parent = self.elements.get(&id).and_then(|element| element.parent);
         if parent.is_some_and(|parent| self.sheets.style_elements.contains(&parent)) {
             self.sheets.sources_dirty = true;
+        }
+        if emptiness_changed && self.sheets.atoms_fresh {
+            self.positions_text_emptiness_changed(id);
         }
     }
 
@@ -497,7 +507,9 @@ impl RetainedTree {
             self.sheets.atoms_fresh = true;
             self.sheets.mark_all = true;
         }
-        let marks = std::mem::take(&mut self.sheets.pending);
+        let mut marks = std::mem::take(&mut self.sheets.pending);
+        let ranges = std::mem::take(&mut self.sheets.ranges);
+        marks.extend(self.range_marks(&ranges));
         let all = std::mem::take(&mut self.sheets.mark_all);
         let restyle = self.restyle_set(&marks, all);
 

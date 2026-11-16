@@ -1,5 +1,6 @@
 //! The retained tree as something selectors match against.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 
 use rustc_hash::FxHashMap;
@@ -31,6 +32,48 @@ enum Positions {
     Map(FxHashMap<u64, usize>),
 }
 
+/// An element's place among the element children of its parent, from 1.
+#[derive(Clone, Copy)]
+pub(super) struct Slot {
+    from_start: u32,
+    from_end: u32,
+    of_type_from_start: u32,
+    of_type_from_end: u32,
+}
+
+impl Slot {
+    fn get(self, of_type: bool, from_end: bool) -> u32 {
+        match (of_type, from_end) {
+            (false, false) => self.from_start,
+            (false, true) => self.from_end,
+            (true, false) => self.of_type_from_start,
+            (true, true) => self.of_type_from_end,
+        }
+    }
+}
+
+enum Slots {
+    /// Asked once: a scan answered it, which costs less than numbering every child.
+    Asked,
+    Map(FxHashMap<u64, Slot>),
+}
+
+/// Whether two elements are of one type: an HTML type is case-insensitive, an SVG one as written,
+/// and an SVG `a` is not an HTML `a`.
+fn same_type(a: &RetainedElement, b: &RetainedElement) -> bool {
+    a.is_svg() == b.is_svg()
+        && if a.is_svg() { a.element_type == b.element_type } else { a.element_type.eq_ignore_ascii_case(&b.element_type) }
+}
+
+/// The key an element's type is counted under, equal for elements [`same_type`] holds for.
+fn type_key(element: &RetainedElement) -> (bool, Cow<'_, str>) {
+    if element.is_svg() || !element.element_type.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        (element.is_svg(), Cow::Borrowed(element.element_type.as_str()))
+    } else {
+        (false, Cow::Owned(element.element_type.to_ascii_lowercase()))
+    }
+}
+
 /// How far the children of one parent have been tried against one [`SiblingTest`].
 #[derive(Clone, Copy, Default)]
 struct Scan {
@@ -48,6 +91,7 @@ struct Scan {
 pub struct SiblingPositions {
     parents: RefCell<FxHashMap<u64, Positions>>,
     scans: RefCell<FxHashMap<(u64, SiblingTest), Scan>>,
+    slots: RefCell<FxHashMap<u64, Slots>>,
 }
 
 impl SiblingPositions {
@@ -70,6 +114,89 @@ impl SiblingPositions {
         count_sibling_work(position.map_or(parent.children.len(), |position| position + 1));
         position
     }
+}
+
+impl SiblingPositions {
+    /// The place of the child `id` among the element children of `parent`, which counts the
+    /// children once: by a scan the first time a parent is asked, and from a map of all of them
+    /// from the second. `None` when the parent does not list it.
+    pub(super) fn slot(&self, tree: &RetainedTree, parent_id: u64, parent: &RetainedElement, id: u64) -> Option<Slot> {
+        let mut slots = self.slots.borrow_mut();
+        match slots.get(&parent_id) {
+            Some(Slots::Map(map)) => return map.get(&id).copied(),
+            Some(Slots::Asked) => {
+                count_sibling_work(parent.children.len());
+                let map = number_children(tree, parent);
+                let slot = map.get(&id).copied();
+                slots.insert(parent_id, Slots::Map(map));
+                return slot;
+            }
+            None => {}
+        }
+        slots.insert(parent_id, Slots::Asked);
+        count_sibling_work(parent.children.len());
+        scan_child(tree, parent, id)
+    }
+}
+
+/// The slot of one child, found by walking the children.
+fn scan_child(tree: &RetainedTree, parent: &RetainedElement, id: u64) -> Option<Slot> {
+    let element = tree.elements.get(&id)?;
+    let (mut before, mut before_of_type, mut found) = (0u32, 0u32, false);
+    let (mut after, mut after_of_type) = (0u32, 0u32);
+    for child_id in &parent.children {
+        let Some(child) = tree.elements.get(child_id).filter(|child| child.is_matchable()) else {
+            continue;
+        };
+        let of_type = same_type(child, element);
+        if *child_id == id {
+            found = true;
+        } else if found {
+            after += 1;
+            after_of_type += u32::from(of_type);
+        } else {
+            before += 1;
+            before_of_type += u32::from(of_type);
+        }
+    }
+    found.then_some(Slot {
+        from_start: before + 1,
+        from_end: after + 1,
+        of_type_from_start: before_of_type + 1,
+        of_type_from_end: after_of_type + 1,
+    })
+}
+
+/// The slot of every element child of `parent`.
+fn number_children(tree: &RetainedTree, parent: &RetainedElement) -> FxHashMap<u64, Slot> {
+    let children: Vec<(u64, &RetainedElement)> = parent
+        .children
+        .iter()
+        .filter_map(|id| tree.elements.get(id).filter(|child| child.is_matchable()).map(|child| (*id, child)))
+        .collect();
+    let mut totals: FxHashMap<(bool, Cow<'_, str>), u32> = FxHashMap::default();
+    for &(_, child) in &children {
+        *totals.entry(type_key(child)).or_default() += 1;
+    }
+    let total = children.len() as u32;
+    let mut seen: FxHashMap<(bool, Cow<'_, str>), u32> = FxHashMap::default();
+    let mut map = FxHashMap::with_capacity_and_hasher(children.len(), Default::default());
+    for (position, &(id, child)) in children.iter().enumerate() {
+        let key = type_key(child);
+        let before_of_type = seen.entry(key.clone()).or_default();
+        let of_type_total = totals[&key];
+        map.insert(
+            id,
+            Slot {
+                from_start: position as u32 + 1,
+                from_end: total - position as u32,
+                of_type_from_start: *before_of_type + 1,
+                of_type_from_end: of_type_total - *before_of_type,
+            },
+        );
+        *before_of_type += 1;
+    }
+    map
 }
 
 impl SiblingPositions {
@@ -213,6 +340,20 @@ impl ElementView for TreeView<'_> {
 
     fn is_popover_open(&self) -> bool {
         crate::html::popover::is_open(self.element())
+    }
+
+    fn child_index(&self, of_type: bool, from_end: bool) -> Option<u32> {
+        let Some(parent_id) = self.element().parent else {
+            return Some(1);
+        };
+        let parent = self.tree.elements.get(&parent_id)?;
+        self.positions.slot(self.tree, parent_id, parent, self.id).map(|slot| slot.get(of_type, from_end))
+    }
+
+    fn is_empty(&self) -> bool {
+        !self.element().children.iter().filter_map(|id| self.tree.elements.get(id)).any(|child| {
+            child.is_matchable() || child.content.as_deref().is_some_and(|text| !text.is_empty())
+        })
     }
 
     fn any_earlier_sibling(&self, test: SiblingTest, satisfies: impl Fn(&Self) -> bool) -> bool {

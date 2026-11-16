@@ -6,6 +6,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use super::atoms::Atom;
+use super::nth::Position;
 use super::selector::{AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, Simple};
 
 /// An attribute's text: borrowed from the element, or shared with a cache that made it (the
@@ -44,6 +45,13 @@ pub trait ElementView: Sized {
     fn is_root(&self) -> bool;
     /// Whether the element is a `popover` that `showPopover()` has opened.
     fn is_popover_open(&self) -> bool;
+    /// The element's place among the elements of its parent, from 1: counted from the start or
+    /// the end, over every element child or only those of its type (an HTML type compares
+    /// case-insensitively, an SVG one as written). An element with no parent is alone, so 1.
+    /// `None` when the parent does not list it, which no selector matches.
+    fn child_index(&self, of_type: bool, from_end: bool) -> Option<u32>;
+    /// Whether the element has no element child and no text: whitespace is text.
+    fn is_empty(&self) -> bool;
 
     /// Whether `satisfies` holds for some sibling before this one. `key` names `satisfies` (it is
     /// the same for every element it is asked of, and its answer for a sibling does not depend on
@@ -119,7 +127,18 @@ fn simple_matches<E: ElementView>(simple: &Simple, element: &E) -> bool {
         Simple::Root => element.is_root(),
         Simple::State(_) => true,
         Simple::PopoverOpen => element.is_popover_open(),
+        Simple::Position(position) => position_matches(*position, element),
         Simple::Host | Simple::PseudoElement => false,
+    }
+}
+
+fn position_matches(position: Position, element: &impl ElementView) -> bool {
+    match position {
+        Position::Nth { of_type, from_end, an_b } => element.child_index(of_type, from_end).is_some_and(|index| an_b.matches(index)),
+        Position::Only { of_type } => {
+            element.child_index(of_type, false) == Some(1) && element.child_index(of_type, true) == Some(1)
+        }
+        Position::Empty => element.is_empty(),
     }
 }
 

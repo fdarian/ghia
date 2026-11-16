@@ -10,6 +10,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::atoms::Atom;
+use super::nth::Position;
 use super::selector::{Combinator, ComplexSelector, Simple};
 
 /// A set of places relative to an element: it, its children, everything below it, and the same
@@ -124,6 +125,44 @@ impl std::ops::BitOrAssign for Reach {
     }
 }
 
+/// Where the structural pseudo-classes are read, by what a change among an element's siblings
+/// does to them. Each is the reach, from the element whose answer changes, of the selectors that
+/// read it, so it is empty until a selector uses that kind and a document without one marks
+/// nothing for a child that comes or goes.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub struct Positional {
+    /// `:first-child`, `:last-child`, `:only-child`: only the two neighbours of a child that comes
+    /// or goes change their answer.
+    pub edge: Reach,
+    /// `:nth-child()`, `:nth-of-type()`, `:first-of-type`, `:only-of-type`: every sibling after.
+    pub forward: Reach,
+    /// `:nth-last-child()`, `:nth-last-of-type()`, `:last-of-type`, `:only-of-type`: every
+    /// sibling before.
+    pub backward: Reach,
+    /// `:empty`: the parent, when a child of any kind comes or goes or text becomes or stops being empty.
+    pub empty: Reach,
+}
+
+impl Positional {
+    fn read(&mut self, position: Position, reach: Reach) {
+        match position {
+            Position::Nth { of_type: false, an_b, .. } if an_b.is_first_only() => self.edge |= reach,
+            Position::Nth { from_end: false, .. } => self.forward |= reach,
+            Position::Nth { from_end: true, .. } => self.backward |= reach,
+            Position::Only { of_type: false } => self.edge |= reach,
+            Position::Only { of_type: true } => {
+                self.forward |= reach;
+                self.backward |= reach;
+            }
+            Position::Empty => self.empty |= reach,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Positional::default()
+    }
+}
+
 /// The reach of every feature the selectors of a document read.
 #[derive(Default)]
 pub struct Invalidation {
@@ -137,6 +176,7 @@ pub struct Invalidation {
     pub structure: Reach,
     /// Where `:popover-open` is read: an element opening or closing as a popover marks these.
     pub popover_open: Reach,
+    pub positional: Positional,
     /// The `&` lists already read, with what the chain they were read through does to a reach
     /// (`Reach::image`). A nested rule shares its parent's list, so without this each level would
     /// read every level above it again. Keyed by the image, not the chain: chains that differ in
@@ -183,6 +223,7 @@ impl Invalidation {
                         }
                     }
                     Simple::PopoverOpen => self.popover_open |= reach,
+                    Simple::Position(position) => self.positional.read(*position, reach),
                     Simple::Tag(_) | Simple::Root | Simple::Host | Simple::PseudoElement | Simple::State(_) => {}
                 }
             }

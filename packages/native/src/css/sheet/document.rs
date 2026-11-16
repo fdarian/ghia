@@ -20,6 +20,7 @@ use super::index::RuleIndex;
 use super::invalidation::Reach;
 use super::layers::Layers;
 use super::parse_cache::{ParseCache, ParsedRule};
+use super::positions::SiblingRange;
 use super::reload::Reload;
 use super::states::LoggedFolds;
 use super::validate::Validator;
@@ -56,6 +57,8 @@ pub struct StyleSheets {
     pub(crate) mark_all: bool,
     /// Elements to match again, each with the places around it a change reaches.
     pub(crate) pending: Vec<(u64, Reach)>,
+    /// Runs of siblings the structural pseudo-classes read, which the flush turns into marks.
+    pub(crate) ranges: Vec<SiblingRange>,
     pub(crate) atoms: Atoms,
     pub(crate) style: Atom,
     /// Every `<style>` element, connected or not.
@@ -94,6 +97,7 @@ impl Default for StyleSheets {
             sources_dirty: false,
             mark_all: false,
             pending: Vec::new(),
+            ranges: Vec::new(),
             atoms,
             style,
             style_elements: FxHashSet::default(),
@@ -121,7 +125,7 @@ impl StyleSheets {
     }
 
     pub(crate) fn has_work(&self) -> bool {
-        self.enabled && (self.sources_dirty || self.mark_all || !self.atoms_fresh || !self.pending.is_empty())
+        self.enabled && (self.sources_dirty || self.mark_all || !self.atoms_fresh || !self.pending.is_empty() || !self.ranges.is_empty())
     }
 
     pub(crate) fn mark(&mut self, id: u64, reach: Reach) {

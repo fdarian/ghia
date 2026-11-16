@@ -54,6 +54,8 @@ struct Node {
 #[derive(Default)]
 struct Tree {
     nodes: Vec<Node>,
+    /// Text children: the node they are in and what they say.
+    texts: Vec<(usize, String)>,
 }
 
 impl Tree {
@@ -78,8 +80,23 @@ impl Tree {
         self.nodes.len() - 1
     }
 
+    fn add_text(&mut self, parent: usize, text: &str) {
+        self.texts.push((parent, text.to_owned()));
+    }
+
     fn view(&self, index: usize) -> View<'_> {
         View { tree: self, index }
+    }
+
+    /// The children of `parent` in order, from the `prev` links.
+    fn children_of(&self, parent: Option<usize>) -> Vec<usize> {
+        let mut order = Vec::new();
+        let mut at = self.nodes.iter().position(|node| node.parent == parent && node.prev.is_none());
+        while let Some(index) = at {
+            order.push(index);
+            at = self.nodes.iter().position(|node| node.prev == Some(index) && node.parent == parent);
+        }
+        order
     }
 }
 
@@ -117,6 +134,23 @@ impl ElementView for View<'_> {
     }
     fn is_popover_open(&self) -> bool {
         self.tree.nodes[self.index].attrs.iter().any(|(_, value)| value == "popover-open")
+    }
+    fn child_index(&self, of_type: bool, from_end: bool) -> Option<u32> {
+        let Some(parent) = self.tree.nodes[self.index].parent else {
+            return Some(1);
+        };
+        let mut siblings = self.tree.children_of(Some(parent));
+        if of_type {
+            siblings.retain(|sibling| self.tree.nodes[*sibling].tag == self.tree.nodes[self.index].tag);
+        }
+        if from_end {
+            siblings.reverse();
+        }
+        siblings.iter().position(|sibling| *sibling == self.index).map(|position| position as u32 + 1)
+    }
+    fn is_empty(&self) -> bool {
+        self.tree.nodes.iter().all(|node| node.parent != Some(self.index))
+            && self.tree.texts.iter().all(|(parent, text)| *parent != self.index || text.is_empty())
     }
 }
 
@@ -278,10 +312,10 @@ fn unknown_at_rules_are_skipped_whole_and_recorded() {
 
 #[test]
 fn an_invalid_selector_drops_the_rule_and_is_recorded() {
-    let sheet = Doc::new().parse("a, b:checked { color: red } c { top: 1px } d:nth-child(2n) { x: y } ,a { x: y }");
+    let sheet = Doc::new().parse("a, b:checked { color: red } c { top: 1px } d:nth-child(2n of .a) { x: y } ,a { x: y }");
     assert_eq!(sheet.rules.len(), 1);
     assert_eq!(pairs(&sheet.rules[0].normal), [("top", r#""1px""#)]);
-    assert_eq!(sheet.unsupported, ["a, b:checked", "d:nth-child(2n)", ",a"]);
+    assert_eq!(sheet.unsupported, ["a, b:checked", "d:nth-child(2n of .a)", ",a"]);
 }
 
 #[test]
@@ -652,11 +686,157 @@ fn pseudo_elements_parse_and_never_match() {
 #[test]
 fn other_pseudo_classes_and_syntax_are_invalid() {
     for selector in [
-        ":checked", "a:visited", ":first-child", ":nth-child(2)", ":has(a)", ":matches(a)", ":scope", "a|b", "*|*",
+        ":checked", "a:visited", ":nth-child(2n of .a)", ":nth-last-child(odd of a)", ":nth-child()", ":nth-child(2 n)", ":nth-child(foo)",
+        ":nth-of-type(2n+)", ":first-child(1)", ":empty(a)", ":only-child()", ":has(a)", ":matches(a)", ":scope", "a|b", "*|*",
         "a >", "> a", "a > > b", "a,", ",a", "a, , b", ".", "#1", "a$", "a b!", "&&&:x", ":", "a:", "::",
     ] {
         assert!(!is_valid(selector), "{selector}");
     }
+}
+
+#[test]
+fn structural_pseudo_classes_count_as_one_class_each() {
+    for selector in [
+        ":first-child", ":last-child", ":only-child", ":first-of-type", ":last-of-type", ":only-of-type", ":empty",
+        ":nth-child(2n+1)", ":nth-last-child(odd)", ":nth-of-type(-n+3)", ":nth-last-of-type(even)", ":NTH-CHILD( 2N + 1 )",
+        ":First-Child",
+    ] {
+        assert_eq!(specificity(selector), (0, 1, 0), "{selector}");
+    }
+    assert_eq!(specificity("li:first-child"), (0, 1, 1));
+    assert_eq!(specificity("li.a:nth-child(2n):not(:empty)"), (0, 3, 1));
+    assert_eq!(specificity(":is(:first-child, #a)"), (1, 0, 0));
+    assert_eq!(specificity(":where(:first-child)"), (0, 0, 0));
+    assert_eq!(specificity(":not(:last-child)"), (0, 1, 0));
+}
+
+/// A `ul` and the children it was given, which tests read by their position from 1.
+struct List {
+    tree: Tree,
+    ul: usize,
+    items: Vec<usize>,
+}
+
+fn flat(atoms: &mut Atoms, tags: &[(&str, &[&str])]) -> List {
+    let mut tree = Tree::default();
+    let ul = tree.add(atoms, "ul", None, None, None, &[], &[]);
+    let mut items: Vec<usize> = Vec::new();
+    for (tag, classes) in tags {
+        let prev = items.last().copied();
+        items.push(tree.add(atoms, tag, Some(ul), prev, None, classes, &[]));
+    }
+    List { tree, ul, items }
+}
+
+fn selected_in(list: &List, atoms: &mut Atoms, selector: &str) -> Vec<usize> {
+    let selector = {
+        let sheet = parse_sheet(&format!("{selector} {{ color: red }}"), atoms, &mut Layers::default());
+        assert_eq!(sheet.rules.len(), 1, "{selector} is valid");
+        sheet.rules[0].selectors[0].0.clone()
+    };
+    // Positions among `items`, so a test reads as the list it wrote.
+    list.items.iter().enumerate().filter(|(_, index)| matches(&selector, &list.tree.view(**index))).map(|(at, _)| at + 1).collect()
+}
+
+fn mixed(atoms: &mut Atoms) -> List {
+    flat(atoms, &[("li", &["a"]), ("li", &["b"]), ("p", &[]), ("li", &["a"]), ("li", &["c"]), ("p", &[])])
+}
+
+#[test]
+fn child_pseudo_classes_count_the_element_children() {
+    let mut atoms = Atoms::default();
+    let list = mixed(&mut atoms);
+    let mut at = |selector: &str| selected_in(&list, &mut atoms, selector);
+    assert_eq!(at(":first-child"), [1]);
+    assert_eq!(at(":last-child"), [6]);
+    assert_eq!(at(":only-child"), Vec::<usize>::new());
+    assert_eq!(at(":nth-child(odd)"), [1, 3, 5]);
+    assert_eq!(at(":nth-child(2n)"), [2, 4, 6]);
+    assert_eq!(at(":nth-child(3)"), [3]);
+    assert_eq!(at(":nth-child(n+5)"), [5, 6]);
+    assert_eq!(at(":nth-child(-n+2)"), [1, 2]);
+    assert_eq!(at(":nth-child(0n+0)"), Vec::<usize>::new());
+    assert_eq!(at(":nth-last-child(1)"), [6]);
+    assert_eq!(at(":nth-last-child(2)"), [5]);
+    assert_eq!(at(":nth-last-child(odd)"), [2, 4, 6]);
+    assert_eq!(at(":nth-last-child(-n+2)"), [5, 6]);
+}
+
+#[test]
+fn type_pseudo_classes_count_the_children_of_the_same_type() {
+    let mut atoms = Atoms::default();
+    let list = mixed(&mut atoms);
+    let mut at = |selector: &str| selected_in(&list, &mut atoms, selector);
+    assert_eq!(at(":first-of-type"), [1, 3]);
+    assert_eq!(at(":last-of-type"), [5, 6]);
+    assert_eq!(at(":only-of-type"), Vec::<usize>::new());
+    assert_eq!(at("li:nth-of-type(2)"), [2]);
+    assert_eq!(at("li:nth-of-type(odd)"), [1, 4]);
+    assert_eq!(at("li:nth-last-of-type(2)"), [4]);
+    assert_eq!(at("p:nth-of-type(2)"), [6]);
+    assert_eq!(at(":nth-of-type(2)"), [2, 6]);
+    assert_eq!(at(":nth-last-of-type(1)"), [5, 6]);
+    assert_eq!(at(".b:only-of-type"), Vec::<usize>::new());
+}
+
+#[test]
+fn an_element_alone_is_first_last_and_only() {
+    let mut atoms = Atoms::default();
+    let list = flat(&mut atoms, &[("li", &[])]);
+    let mut at = |selector: &str| selected_in(&list, &mut atoms, selector);
+    for selector in [":first-child", ":last-child", ":only-child", ":first-of-type", ":last-of-type", ":only-of-type", ":nth-child(1)"] {
+        assert_eq!(at(selector), [1], "{selector}");
+    }
+    let alone = flat(&mut atoms, &[("li", &[]), ("p", &[])]);
+    assert_eq!(selected_in(&alone, &mut atoms, ":only-of-type"), [1, 2]);
+    assert_eq!(selected_in(&alone, &mut atoms, ":only-child"), Vec::<usize>::new());
+}
+
+#[test]
+fn the_root_has_no_siblings() {
+    for selector in [":first-child", ":last-child", ":only-child", ":first-of-type", ":only-of-type", ":nth-child(1)", ":nth-last-child(1)"] {
+        assert!(selected(selector).contains(&HTML), "{selector}");
+    }
+    assert!(!selected(":nth-child(2)").contains(&HTML));
+}
+
+#[test]
+fn structural_pseudo_classes_work_inside_compounds_and_functional_ones() {
+    let mut atoms = Atoms::default();
+    let list = mixed(&mut atoms);
+    let mut at = |selector: &str| selected_in(&list, &mut atoms, selector);
+    assert_eq!(at("li.a:first-child"), [1]);
+    assert_eq!(at("li.a:last-child"), Vec::<usize>::new());
+    assert_eq!(at(":not(:first-child)"), [2, 3, 4, 5, 6]);
+    assert_eq!(at("li:not(:nth-child(odd))"), [2, 4]);
+    assert_eq!(at(":is(:first-child, :last-child)"), [1, 6]);
+    assert_eq!(at(":where(:nth-child(2), p)"), [2, 3, 6]);
+    assert_eq!(at(":first-child + li"), [2]);
+    assert_eq!(at(":nth-child(odd) ~ .c"), [5]);
+    assert_eq!(at("ul > :last-child"), [6]);
+    assert_eq!(at("ul :nth-child(2)"), [2]);
+}
+
+#[test]
+fn an_element_is_empty_without_elements_or_text() {
+    let mut atoms = Atoms::default();
+    let mut tree = Tree::default();
+    let ul = tree.add(&mut atoms, "ul", None, None, None, &[], &[]);
+    let bare = tree.add(&mut atoms, "li", Some(ul), None, None, &[], &[]);
+    let spaced = tree.add(&mut atoms, "li", Some(ul), Some(bare), None, &[], &[]);
+    tree.add_text(spaced, " ");
+    let emptied = tree.add(&mut atoms, "li", Some(ul), Some(spaced), None, &[], &[]);
+    tree.add_text(emptied, "");
+    let worded = tree.add(&mut atoms, "li", Some(ul), Some(emptied), None, &[], &[]);
+    tree.add_text(worded, "a");
+    let nested = tree.add(&mut atoms, "li", Some(ul), Some(worded), None, &[], &[]);
+    tree.add(&mut atoms, "b", Some(nested), None, None, &[], &[]);
+    let list = List { tree, ul, items: vec![bare, spaced, emptied, worded, nested] };
+    let mut at = |selector: &str| selected_in(&list, &mut atoms, selector);
+    assert_eq!(at(":empty"), [1, 3]);
+    assert_eq!(at(":not(:empty)"), [2, 4, 5]);
+    assert_eq!(at("li:empty"), [1, 3]);
+    assert!(!matches(&Doc::new().selector(":empty"), &list.tree.view(list.ul)));
 }
 
 #[test]
