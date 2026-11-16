@@ -413,6 +413,24 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in Solid", () => {
     expect(getComputedStyle(field).paddingLeft).toBe("1px")
   })
 
+  it("restyles what follows a checkbox when a click toggles it, with no handler and no render", () => {
+    let box: any
+    let label: any
+    app.render(() => (
+      <div>
+        <style>{`input:checked + label { padding-top: 7px }`}</style>
+        <input ref={(element: unknown) => (box = element)} type="checkbox" style={{ width: 20, height: 20 }} />
+        <label ref={(element: unknown) => (label = element)} style={{ width: 40, height: 20 }} />
+      </div>
+    ))
+    expect(getComputedStyle(label).paddingTop).toBe("0px")
+    box.dispatchEvent(new globalThis.PointerEvent("click", { bubbles: true, cancelable: true }))
+    expect(box.checked).toBe(true)
+    expect(getComputedStyle(label).paddingTop).toBe("7px")
+    box.checked = false
+    expect(getComputedStyle(label).paddingTop).toBe("0px")
+  })
+
   it("matches :has() again as what is below, after and inside an element changes", () => {
     const [checked, setChecked] = createSignal(false)
     const [icon, setIcon] = createSignal(false)

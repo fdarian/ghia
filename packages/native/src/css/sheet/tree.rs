@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::retained_tree::{RetainedElement, RetainedTree};
+use crate::retained_tree::{Dirty, RetainedElement, RetainedTree};
 
 use super::atoms::{Atom, Atoms};
 use super::document::ClassAtoms;
@@ -502,6 +502,13 @@ impl RetainedTree {
             count_sibling_work(1);
             expansion.add(*sibling, folded, connected);
         }
+    }
+
+    /// What a change made natively (a click, a script write, a restore) leaves to draw. No batch
+    /// follows such a change, so the sheets match what it marked before the dirty state is taken.
+    pub(crate) fn take_dirty_restyled(&mut self) -> Dirty {
+        self.flush_styles();
+        self.take_dirty()
     }
 
     /// Matches what the batch marked, and restyles the elements whose rules changed.

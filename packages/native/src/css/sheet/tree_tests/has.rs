@@ -312,13 +312,13 @@ fn a_tree_state_inside_an_argument_follows_a_click_and_a_prop() {
 
     crate::perf_counters::reset();
     assert!(doc.tree.pre_activate(input));
+    doc.tree.take_dirty_restyled();
     doc.tree.finish_activation(input);
-    doc.flush();
     assert!(raised(&doc, label));
     assert_eq!(counts().elements_rematched, 2, "what is below the field");
     assert!(doc.tree.pre_activate(input));
+    doc.tree.take_dirty_restyled();
     doc.tree.finish_activation(input);
-    doc.flush();
     assert!(!raised(&doc, label));
 
     assert_eq!(doc.rematched(|doc| doc.tree.set_custom_prop(button, "disabled".into(), json!(true))), 1);

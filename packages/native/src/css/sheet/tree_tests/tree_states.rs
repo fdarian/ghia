@@ -26,10 +26,20 @@ fn input(doc: &mut Doc, class: &str, kind: &str) -> u64 {
     with_prop(doc, "input", class, &[("type", json!(kind))])
 }
 
-/// Presses the control the way a click that no handler cancels does.
+/// Presses the control the way a click that no handler cancels does. No batch follows it, so what
+/// the click marked is matched by what the native path ends with, not by a `flush`.
 fn click(doc: &mut Doc, id: u64) {
     assert!(doc.tree.pre_activate(id));
+    doc.tree.take_dirty_restyled();
     doc.tree.finish_activation(id);
+}
+
+/// A click a handler canceled.
+fn canceled_click(doc: &mut Doc, id: u64) {
+    assert!(doc.tree.pre_activate(id));
+    doc.tree.take_dirty_restyled();
+    doc.tree.cancel_activation(id);
+    doc.tree.take_dirty_restyled();
 }
 
 #[test]
@@ -139,11 +149,11 @@ fn a_canceled_click_leaves_the_selectors_as_they_were() {
 
     assert!(doc.tree.pre_activate(checkbox));
     assert!(doc.tree.pre_activate(second));
-    doc.flush();
+    doc.tree.take_dirty_restyled();
     assert!(red(&doc, checkbox) && doc.background(checkbox).is_none() && red(&doc, second) && !red(&doc, first));
     doc.tree.cancel_activation(checkbox);
     doc.tree.cancel_activation(second);
-    doc.flush();
+    doc.tree.take_dirty_restyled();
     assert!(!red(&doc, checkbox) && doc.background(checkbox) == Some("blue"), "unchecked and indeterminate again");
     assert!(red(&doc, first) && !red(&doc, second));
 }
@@ -305,4 +315,71 @@ fn a_sheet_added_after_the_props_matches_the_state_they_already_made() {
     doc.style_element(ROOT, "input:checked, button:disabled { color: red }");
     doc.flush();
     assert!(red(&doc, checkbox) && red(&doc, button));
+}
+
+fn label_after(doc: &mut Doc, sheet: &str) -> (u64, u64) {
+    doc.style_element(ROOT, sheet);
+    let input = input(doc, "i", "checkbox");
+    let label = doc.classed("label", ROOT, "l");
+    doc.flush();
+    assert!(!red(doc, label));
+    (input, label)
+}
+
+#[test]
+fn a_click_restyles_the_label_that_follows_the_checkbox_with_no_batch() {
+    let mut doc = Doc::new();
+    let (input, label) = label_after(&mut doc, "input:checked + label { color: red }");
+    click(&mut doc, input);
+    assert!(red(&doc, label));
+    click(&mut doc, input);
+    assert!(!red(&doc, label));
+}
+
+#[test]
+fn a_script_write_restyles_the_label_that_follows_the_checkbox_with_no_batch() {
+    let mut doc = Doc::new();
+    let (input, label) = label_after(&mut doc, "input:checked + label { color: red } input:indeterminate + label { opacity: 0.5 }");
+    doc.tree.script_wrote_flag(input, "checked", true).expect("an input");
+    doc.tree.take_dirty_restyled();
+    assert!(red(&doc, label));
+    doc.tree.script_wrote_flag(input, "indeterminate", true).expect("an input");
+    doc.tree.take_dirty_restyled();
+    assert!(faded(&doc, label));
+}
+
+#[test]
+fn restoring_a_controlled_checkbox_restyles_the_label_with_no_batch() {
+    let mut doc = Doc::new();
+    let (input, label) = label_after(&mut doc, "input:checked + label { color: red }");
+    doc.tree.set_custom_prop(input, "checked".into(), json!(false));
+    doc.flush();
+    click(&mut doc, input);
+    assert!(red(&doc, label));
+    doc.tree.restore_controlled(input);
+    doc.tree.take_dirty_restyled();
+    assert!(!red(&doc, label), "the prop the framework committed is shown again");
+}
+
+#[test]
+fn a_canceled_click_puts_the_label_back_with_no_batch() {
+    let mut doc = Doc::new();
+    let (input, label) = label_after(&mut doc, "input:checked + label { color: red }");
+    canceled_click(&mut doc, input);
+    assert!(!red(&doc, label));
+}
+
+#[test]
+fn a_radio_unchecked_by_its_group_restyles_what_follows_it_with_no_batch() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, "input:checked + label { color: red }");
+    let first = with_prop(&mut doc, "input", "r", &[("type", json!("radio")), ("name", json!("g"))]);
+    let first_label = doc.classed("label", ROOT, "l");
+    let second = with_prop(&mut doc, "input", "r", &[("type", json!("radio")), ("name", json!("g"))]);
+    let second_label = doc.classed("label", ROOT, "l");
+    doc.flush();
+    click(&mut doc, first);
+    assert!(red(&doc, first_label) && !red(&doc, second_label));
+    click(&mut doc, second);
+    assert!(!red(&doc, first_label) && red(&doc, second_label));
 }
