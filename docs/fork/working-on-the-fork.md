@@ -279,7 +279,7 @@ See [patch-frames.md](patch-frames.md).
 - **zed `elements/retained.rs` (`record_prepaint`, `paint_subtree`, `prepaint_skipped`) and `window/patch.rs` (`patch_blocker`, `Frame::relocated`):**
   a relocatable root keeps its `PatchUnit` while its recording is plain but for its own scene, and registers it at the place it was
   recorded (`delta` zero and the key equal) and at a place a replay put it, when its recording is in a region of its own under the mask it was
-  recorded under: the state a scroll translate leaves it in, where a patch paints in the region, puts the result `delta` away and rewrites
+  recorded under and holds no scroller of its own: the state a scroll translate leaves it in, where a patch paints in the region, puts the result `delta` away and rewrites
   the recording, so the translate after it moves what the patch painted. Anything else that puts the recording elsewhere has to note it as
   relocated, and a patch that leaves such a recording as it was makes the recordings stale for the scroll translate. `PaintOperation::differs_from` compares the fields of the kinds it
   lists (`fields_equal`) before it formats, and says "differs" with no formatting when one of them does (a quad that a hover gave another background: 34 fallbacks in 18 crossings, all of them quads): a new field of `Quad` or `MonochromeSprite` has to be in it, or an operation that differs only there reads as the same. `hover_patch_tests.rs`, and the scene test that changes each field alone.

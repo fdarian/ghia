@@ -97,15 +97,16 @@ paint repaints those roots in the frame that is shown and leaves the rest as it 
   recording is plain but for the scene of its own (`PaintRecord::is_plain_or_relocated`: nothing handed to a stacking context). The
   unit is registered in the frame that records the root, in a frame that replays it with the key it was recorded with (`delta` zero
   and the key equal), and in a frame that replays it elsewhere (a list scrolled since) when the recording is in a region of its own
-  (`Relocation::regional`: not culled, not direct) and the content mask around it is the one it recorded under. That is the state a scroll
+  (`Relocation::regional`: not culled, not direct), the content mask around it is the one it recorded under and the root has no scroller of its own (a box with an overflow other than visible: `PrepaintRecord::holds_scroller`). That is the state a scroll
   translate leaves a row in (`RetainedState::scrolled_to`: `recorded.delta` and the handles of the relocation moved), and a patch of such
   a root runs as it does for a translated row: the scratch frame paints the root in its region under the content mask captured when it was
   recorded, which is what a recording at its own place was cut by, puts what it painted `delta` away, and **rewrites the recording** with
   what it painted in the region (`RecordingRewrite::relocation`, `Window::relocated_rewrite`), so the translate that follows, which moves
   the recorded operations, moves the paint of the patch and not the paint before. A root that is not in that state is noted as
   *relocated* (`Frame::relocated`) and a patch of it declines as `PatchDecline::Relocated`: a mask that differs, a recording that is
-  culled or direct, and, found by the patch, a scroller of its own in the root, a hitbox placed by a box outside it, a region that no
-  longer holds the root, or a recording that cannot be rewritten (`relocated_rewritable`). A root that was never patchable is
+  culled or direct, a scroller of its own in the root (a patch would have to move the offset and extent the frame holds of it, and a
+  root registered with one would be built and declined, so it is not registered), and, found by the patch, a hitbox placed by a box
+  outside it, a region that no longer holds the root, or a recording that cannot be rewritten (`relocated_rewritable`). A root that was never patchable is
   `UnknownUnit`. `Window::patch_blocker` answers the same question without painting, for an embedder that would build the root for
   nothing. A patch that could not rewrite the recording of a relocatable root makes the recordings of the rows stale for the scroll
   translate: until a frame is built whole (`PatchWindow::recordings_stale`) the classifier answers `Other`.
@@ -762,7 +763,7 @@ keeps what builds it again.
   that holds it in the last frame built whole, walking up the tree; an element no root of the frame holds (the frame skipped the
   root above it, so it never visited it, or the root is not a patch root) is `Unpatchable::Hover(id)` and the frame is built whole:
   that frame visits the roots, and the hover after it is patched. A root the frame has elsewhere than it was recorded that gpui cannot paint
-  in its region (a mask that differs from the one it recorded under, a culled or direct recording) is asked of gpui before it is built
+  in its region (a mask that differs from the one it recorded under, a culled or direct recording, a scroller of its own in the row) is asked of gpui before it is built
   (`Window::patch_blocker`), and counted as `Hover:Relocated`. A row a translate moved is not one, and neither is a row a frame built whole
   replayed from a recording made elsewhere (a list or a scroller scrolled since): both keep a unit, and a patch of either paints in its region
   ([Under a wheel](#under-a-wheel-slice-g3e)).
@@ -825,7 +826,7 @@ marks `Replaced` with `derived: true`, which a build at the row's own place does
 - A hover that adds or takes away a primitive (a shadow, a border colour from transparent, a text colour from transparent, a
   background that is more than a colour) is a frame built whole; so is a group, a root that might lift, a size by an intrinsic keyword, a root of more than 64 elements, and a
   row put elsewhere than it was recorded that gpui cannot paint in its region (`Hover:Relocated`: a mask around it that differs from the one it
-  recorded under, a culled or direct recording; a row a translate moved and a row a whole frame replayed with a delta are patched in their region).
+  recorded under, a culled or direct recording, a scroller of its own in the row, which every `overflow: hidden` text is; a row a translate moved and a row a whole frame replayed with a delta are patched in their region).
 - A page of at most 64 elements is one root: a patch builds all of it, as a frame built whole does.
 - A patch root that a frame built whole rebuilds builds everything in it.
 - The children of a relocatable row cannot keep their own recordings (`Retained::prepaint_in_scope`), so a rebuilt row builds all its
@@ -1348,11 +1349,18 @@ only for a hover that is a frame built whole (`Restyle::Whole`) or that a listen
   `scroll-patch-hover.test.tsx` draws two frames a wheel, as a window's second frame is the tick the first asked for. A test renderer that
   draws one frame per input (the proxy's tick) leaves the hover where it was while the wheel goes on, with the translate on or off; the
   first frame without a wheel repaints it.
-- **`Hover:Relocated` is a row a frame built whole replayed.** A frame built whole after a scroll replays the rows from the recordings
-  made where they were, with a delta, and they are not patch sources until something builds them again: the hover of one is declined as
-  `Relocated`, a frame built whole, which records the two rows where they stand. A translate does not do that: it keeps the units of the
-  rows it moves, so the hover after a translate is a patch. `scroll-patch-hover.test.tsx` builds every row where it stands before the
-  wheel steps (`rebuild`, as `scroll-patch-membership.test.tsx` does). Under the window's resync timing the tick of a crossing is patched in the draw of the next wheel: `scroll-patch-hover.test.tsx` (live resync) wheels a row at a time and has every draw a translate, with the hover colour on the row under the pointer; without the `rebuild` every tick is `Hover:Relocated` and every draw is built whole, the cycle a frame built whole keeps going by replaying the rows again. The scroll proxy with `HOVER_RESYNC=live` (`PHASE=scroll`, plain app) is that cycle: 407 of 720 ticks are translates and 312 are built whole, as before the compose, but the declines are `Hover:Relocated` (0.39 a tick) where they were `PendingView` (0.43), so the hover patch is asked and refused by Ghia, not by gpui; the default timing (693 of 720 translates) and the stack app are as they were.
+- **`Hover:Relocated` is a row gpui cannot paint in its region.** A frame built whole after a scroll replays the rows from the recordings
+  made where they were, with a delta. Such a row is a patch unit where it stands, as a row a translate moved is: the patch of it paints in its
+  region, puts the result `delta` away and rewrites the recording, so a translate that follows moves what the patch painted. A row is
+  declined `Relocated` (a frame built whole) when it has a scroller of its own (a box with an overflow other than visible), under a mask other
+  than the one it recorded under, or recorded culled or direct. `scroll-patch-hover.test.tsx` (live resync) wheels a row at a time with and
+  without the rows built where they stand first (`rebuild`), and has every draw a translate with the hover colour on the row under the pointer
+  in both; "a row a frame built whole put elsewhere" holds the translate by an edit in the draw of every second wheel (the frame built whole
+  replays the rows at the new place), and checks the colour of every row after each step, under the verifier too. gpui:
+  `hover_patch_tests.rs`. The scroll proxy with `HOVER_RESYNC=live` (`PHASE=scroll`, plain app) does not move: its rows are
+  `overflow: hidden` texts (`oneLine`), so 407 of 720 ticks are translates and 313 are built whole, `Hover:Relocated` 0.39 a tick, as before
+  (5013.7M against 5008.7M; default timing 693 of 720 and 3502.9M, the stack app 9085M to 9131M in three runs). Rows with a scroller of their own
+  are patched at a moved place only when a patch moves a scroller's offset and extent, which is not done: that is what holds the live cycle.
 - **What tells the causes of `Hover` apart.** gpui holds `Hover` for a pointer that is not where the frame shown had it as well as for a
   hit chain the owner says matters; `scrollPatch.hoverAsked` counts the frames the owner was asked about and `hoverMatters` those it said
   yes to, so `held.Hover - hoverMatters` is the wheels whose position differs from the shown mouse. The scroll proxy has one (the first),
@@ -1699,7 +1707,7 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   built whole, in a root it is patched; a group is a frame built whole, however small.
 - gpui `window/hover_patch_tests.rs`: a row recorded to be put elsewhere is patched where it was recorded and paints what the frame
   built whole paints, two rows write in place, a row a frame built whole put elsewhere than it was recorded is patched in its region (and a row built
-  where it stands after a scroll is), also when a translate follows it, a patched row keeps a scroll from putting back the paint before; `scene::tests`:
+  where it stands after a scroll is), also when a translate follows it, except one with a scroller of its own, which is declined as `Relocated`, a patched row keeps a scroll from putting back the paint before; `scene::tests`:
   operations are told apart by their fields and a `Replaced` marker is the same whatever its `derived`.
 - `retain.rs` unit tests, hover: a hover is no source of a tick; the outermost root that holds a hover is the patch root and holds
   what is in it; a skipped page hides the roots in it; an element no root holds is `Unpatchable::Hover`; a root found unfit blocks the
