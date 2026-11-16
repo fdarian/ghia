@@ -783,7 +783,7 @@ keeps what builds it again.
   that holds it in the last frame built whole, walking up the tree; an element no root of the frame holds (the frame skipped the
   root above it, so it never visited it, or the root is not a patch root) is `Unpatchable::Hover(id)` and the frame is built whole:
   that frame visits the roots, and the hover after it is patched. A root the frame has elsewhere than it was recorded that gpui cannot paint
-  in its region (a mask that differs from the one it recorded under, a culled or direct recording, a scroller of its own in the row that the user scrolls or that is scrolled) is asked of gpui before it is built
+  in its region (a mask that differs from the one it recorded under, a culled or direct recording, a scroller in the row that the user scrolls or that has a non-zero offset) is asked of gpui before it is built
   (`Window::patch_blocker`), and counted as `Hover:Relocated`. A row a translate moved is not one, and neither is a row a frame built whole
   replayed from a recording made elsewhere (a list or a scroller scrolled since): both keep a unit, and a patch of either paints in its region
   ([Under a wheel](#under-a-wheel-slice-g3e)).
@@ -846,7 +846,7 @@ marks `Replaced` with `derived: true`, which a build at the row's own place does
 - A hover that adds or takes away a primitive (a shadow, a border colour from transparent, a text colour from transparent, a
   background that is more than a colour) is a frame built whole; so is a group, a root that something lifts out of, a size by an intrinsic keyword, a root of more than 64 elements, and a
   row put elsewhere than it was recorded that gpui cannot paint in its region (`Hover:Relocated`: a mask around it that differs from the one it
-  recorded under, a culled or direct recording, a scroller of its own in the row that the user scrolls or that is scrolled; an `overflow: hidden` text is a scroller that only code scrolls, and at its offset of zero it is patched; a row a translate moved and a row a whole frame replayed with a delta are patched in their region).
+  recorded under, a culled or direct recording, a scroller in the row that the user scrolls or that has a non-zero offset; an `overflow: hidden` text is a scroller that only code scrolls, and at its offset of zero it is patched; a row a translate moved and a row a whole frame replayed with a delta are patched in their region).
 - A page of at most 64 elements is one root: a patch builds all of it, as a frame built whole does.
 - A patch root that a frame built whole rebuilds builds everything in it.
 - The children of a relocatable row cannot keep their own recordings (`Retained::prepaint_in_scope`), so a rebuilt row builds all its
@@ -1287,7 +1287,7 @@ first wheel after a commit, slice 3's.
 
 ### Rows that come in and leave (slice G3)
 
-A scroll that changes which rows show is a translate as well, when every row that comes in has a measured size (zed `window/scroll_patch.rs`, `elements/list/scroll_patch.rs`, `window/patch_splice.rs`; counters `membershipFrames`, `rowsBuilt`, `rowsRemoved`). gpui moves the rows that stay as before, takes the rows that leave out of the frame (their ranges in every vector), and builds the rows that come in through the builder the list was given, which is `GpuixView::build_virtual_child`: each is laid out as a root of its own, prepainted and painted in a scratch frame at the place the new position gives it, and spliced in at the head or the tail of the rows. A row whose height differs from the one the list measured is `Height` (the rows after it would be somewhere else, as only a layout puts them), and a row that defers a draw, asks for a frame or lies under the pointer declines as `Effects` or `Pointer`. What holds the frame whole is counted by cause under `Membership` in `held`: `Membership.unmeasured` (a row that shows has no size), `.unmeasuredOverdraw` (one in the overdraw has none: a layout would measure it), `.settles` (the list moves its own position or does not fill), `.disjoint` (none of the rows of the frame shown shows), `.noBuilder`. A row that stays can be moved by no more than the overscan its recording was made with (`Region`, half of the list's height); in slices G3b and G3c a scroll by more than that was a whole frame, and since [G3d](#overdraw-measured-and-rows-built-again-slice-g3d) a row that cannot be moved is built where it is, so only a scroll that leaves none of the rows of the frame shown (`Membership.disjoint`) is whole for it.
+A scroll that changes which rows show is a translate as well, when every row that comes in has a measured size (zed `window/scroll_patch.rs`, `elements/list/scroll_patch.rs`, `window/patch_splice.rs`; counters `membershipFrames`, `rowsBuilt`, `rowsRemoved`). gpui moves the rows that stay as before, takes the rows that leave out of the frame (their ranges in every vector), and builds the rows that come in through the builder the list was given, which is `GpuixView::build_virtual_child`: each is laid out as a root of its own, prepainted and painted in a scratch frame at the place the new position gives it, and spliced in at the head or the tail of the rows. A row whose height differs from the one the list measured is `Height` (the rows after it would be somewhere else, as only a layout puts them), and a row that defers a draw or asks for a frame declines as `Effects`; a row that comes in under a still pointer is not a reason, as the hover is not recomputed while the scroll goes on. What holds the frame whole is counted by cause under `Membership` in `held`: `Membership.unmeasured` (a row that shows has no size), `.unmeasuredOverdraw` (one in the overdraw has none: a layout would measure it), `.settles` (the list moves its own position or does not fill), `.disjoint` (none of the rows of the frame shown shows), `.noBuilder`. A row that stays can be moved by no more than the overscan its recording was made with (`Region`, half of the list's height); in slices G3b and G3c a scroll by more than that was a whole frame, and since [G3d](#overdraw-measured-and-rows-built-again-slice-g3d) a row that cannot be moved is built where it is, so only a scroll that leaves none of the rows of the frame shown (`Membership.disjoint`) is whole for it.
 
 **A programmatic write takes the same route.** `scrollTo`, `scrollTop = n` and what they are made of (`scroll_write::finish_write`) say that the list scrolled with `Window::note_list_scrolled` (`invalidate_after_scroll`), where only a wheel did before, and notify nothing ([a key in one draw](#a-key-in-one-draw-slice-g3c)). A scroll to a row (`scrollToItem`) is applied by the render that follows and is a whole frame, as is a write while the layout is behind the tree.
 
@@ -1362,16 +1362,18 @@ paint, a layout, a listener); the rows' hover is not asked of the owner.
 - **`Hover:Relocated` is a row gpui cannot paint in its region.** A frame built whole after a scroll replays the rows from the recordings
   made where they were, with a delta. Such a row is a patch unit where it stands, as a row a translate moved is: the patch of it paints in its
   region, puts the result `delta` away and rewrites the recording, so a translate that follows moves what the patch painted. A row is
-  declined `Relocated` (a frame built whole) when it has a scroller of its own (a box with an overflow other than visible), under a mask other
-  than the one it recorded under, or recorded culled or direct. `scroll-patch-hover.test.tsx` (live resync) wheels a row at a time with and
+  declined `Relocated` (a frame built whole) when it holds a scroller that the user scrolls (the wheel or the keys scroll it) or that has a
+  non-zero offset (`ScrollerRecord::blocks_moved_patch`), under a mask other than the one it recorded under, or recorded culled or direct.
+  A box with an overflow other than visible that only code scrolls, and has not (every ellipsized `overflow: hidden` line of text), is not
+  one: its offset and extent are relative to its padding box, which moves with the row, and the bounds its handle reports move with the
+  recording. `scroll-patch-hover.test.tsx` (live resync) wheels a row at a time with and
   without the rows built where they stand first (`rebuild`), has every wheel a translate, and the hover colour on the row under the pointer
   when the wheel stops, in both; "a row a frame built whole put elsewhere" holds the translate by an edit in the draw of every second wheel (the
   frame built whole replays the rows at the new place), and checks the colour of every row after the scroll ends of each step, under the
   verifier too. gpui: `hover_patch_tests.rs`. The scroll proxy with `HOVER_RESYNC=live` (`PHASE=scroll`, plain app, `A11Y=0`): 668 of 720
   ticks are translates and 52 are built whole (`Edited` 51, `Hover` 1: the commits of the windowed list, and the tick of the hover that
   follows each of them), 3413.0M instructions; the hover followed every crossing before, and 407 of 720 were translates with 313 built whole,
-  5013.7M. Rows with a scroller of their own are patched at a moved place only when a patch moves a scroller's offset and extent, which is
-  not done.
+  5013.7M.
 - **A fully clipped primitive in a `div` scroller (open, zed).** Under `GPUIX_RETAIN_VERIFY` the three wheel and `scrollTo` cases of
   `retained-scroll.test.tsx` (a `<div>` scroller of rows with an avatar and two texts, not a list) report a patched frame that differs from
   the one built whole by a primitive that the patch has and the frame drops because it is clipped away: the avatar's quad at y -48 (40 by 40,
@@ -1711,7 +1713,7 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   built whole, in a root it is patched; a group is a frame built whole, however small.
 - gpui `window/hover_patch_tests.rs`: a row recorded to be put elsewhere is patched where it was recorded and paints what the frame
   built whole paints, two rows write in place, a row a frame built whole put elsewhere than it was recorded is patched in its region (and a row built
-  where it stands after a scroll is), also when a translate follows it, except one with a scroller of its own, which is declined as `Relocated`, a patched row keeps a scroll from putting back the paint before; `scene::tests`:
+  where it stands after a scroll is), also when a translate follows it, except one with a scroller that the user scrolls or that has scrolled, which is declined as `Relocated`, a patched row keeps a scroll from putting back the paint before; `scene::tests`:
   operations are told apart by their fields and a `Replaced` marker is the same whatever its `derived`.
 - `retain.rs` unit tests, hover: a hover is no source of a tick; the outermost root that holds a hover is the patch root and holds
   what is in it; a skipped page hides the roots in it; an element no root holds is `Unpatchable::Hover`; a root found unfit blocks the
