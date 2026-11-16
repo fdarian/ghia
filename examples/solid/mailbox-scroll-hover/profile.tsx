@@ -32,6 +32,8 @@
 //   HOLD_MS=0     waits before the loop (time to attach `sample`)
 //   JSON=1        also prints the aggregates as JSON
 //   DUMP_TICKS=file   the scrollPatch counters of each tick, as JSON lines (DUMP_ALL=1: every counter, and the instructions of each stage)
+//   HOVER_RESYNC=live  resyncs the hover from the draw that moved the rows under the pointer, as a live window does, so the hover tick of a
+//                 wheel event is still pending when the next one arrives; the test window's default waits for the next frame callback
 //   A11Y=0        takes the pretend screen reader the test window starts with away (as a bench run has none)
 //   ACTIVE=1      the window is key and the search input is focused, so its caret blinks (the executor's clock moves with each tick);
 //                 DEBUG_BLINK=1 prints the patch counters across six blinks
@@ -128,6 +130,7 @@ root.render(() => <Mailbox messages={messages} />)
 const mountMs = performance.now() - mountStart
 renderer.clockPause()
 renderer.setInlineDraws(false)
+if (process.env.HOVER_RESYNC === "live") renderer.setHoverResyncByFrame(false)
 
 // Counted from the first call, so the settle's events are in the totals too; each tick reads and resets them.
 const emitted = new Map<string, number>()

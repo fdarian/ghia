@@ -5,13 +5,17 @@
  * follows the frame with repaints the two rows where the translate left them (`hoverMatters` stays 0, `patchedFrames` counts the
  * repaints, and no frame is built whole). The picture, the boxes and what is under a point are what they are with the translate off.
  * A hover a listener hears is a frame built whole still.
+ *
+ * A window that resyncs the hover from the draw a translate made (`setHoverResyncByFrame(false)`) has the tick of one wheel event
+ * pending when the next wheel event arrives, so the draw of that event meets the tick and the notified list: the hover patch and
+ * the translate are one draw.
  */
 
 import fs from "fs"
 import React from "react"
 import { describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
-import { SHOTS_DIR } from "./test-utils.js"
+import { readLogicalPixels, SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 // Under the retention verifier a frame that replays rows is built a second time, whole, and that build is the frame shown: the rows
@@ -225,6 +229,104 @@ describeNative("a wheel under a still pointer over rows with a hover style", { t
       expect(scroll(renderer).mispredicted).toBe(0)
       expect(renderer.getRetainedCounters().mismatches).toBe(0)
       expect(renderer.getRetainedCounters().verified).toBeGreaterThan(0)
+    } finally {
+      unmount()
+    }
+  })
+
+})
+
+const hex = (rgb: number[]) => rgb.map((channel) => channel.toString(16).padStart(2, "0")).join("")
+const HOVER = "664422"
+
+/** The row of the list the pointer is over, from the boxes of the rows. */
+function rowAtPointer(renderer): number {
+  for (let row = 0; row < COUNT; row += 1) {
+    const found = renderer.findByTestId(`row-${row}`)
+    const box = found && renderer.getElementBounds(found.id)
+    if (box && box.y <= Y && Y < box.y + box.height) return row
+  }
+  throw new Error("no row is under the pointer")
+}
+
+/**
+ * The colour at the right edge (no text) of the middle of each row the list shows, by row, from the picture of the frame shown.
+ */
+function rowColours(renderer, name: string): Map<number, string> {
+  const file = `${SHOTS_DIR}/scroll-patch-hover-${process.pid}-${name}.png`
+  fs.rmSync(file, { force: true })
+  renderer.captureShownFrame(file)
+  const pixels = readLogicalPixels(file, renderer)
+  fs.rmSync(file, { force: true })
+  const colours = new Map<number, string>()
+  for (let row = 0; row < COUNT; row += 1) {
+    const found = renderer.findByTestId(`row-${row}`)
+    const box = found && renderer.getElementBounds(found.id)
+    if (!box) continue
+    const middle = Math.floor(box.y + box.height / 2)
+    if (middle >= 0 && middle < VIEWPORT) colours.set(row, hex(pixels.at(190, middle).slice(0, 3)))
+  }
+  return colours
+}
+
+/** Wheels of one row under a pointer that stays: each puts another row under it. */
+const LIVE_WHEELS = 20
+
+describeNative("a wheel under a still pointer, in a window that resyncs the hover from the draw that moved the rows", { timeout: TIMEOUT }, () => {
+  function live() {
+    const page = open("paint")
+    const renderer = page.renderer
+    renderer.setHoverResyncByFrame(false)
+    renderer.scrollTo(page.list, 0, 200)
+    rebuild(renderer)
+    renderer.setInlineDraws(false)
+    return page
+  }
+
+  // The next wheel event arrives before the frame that the last one's hover tick asked for is drawn: one frame per event, and no
+  // flush of the pending draw before an input (`nativeSimulateScrollWheel` flushes, a window does not).
+  function wheels(renderer, count: number) {
+    for (let wheeled = 0; wheeled < count; wheeled += 1) {
+      renderer.dispatchScrollWheel(X, Y, 0, ROW)
+      renderer.drawFrame()
+    }
+  }
+
+  unverified("draws the translate in the draw that meets the pending hover tick, and paints the hover where the pointer is", () => {
+    const { renderer, unmount } = live()
+    try {
+      const before = { painted: renderer.getPaintedFrameCount(), scroll: scroll(renderer) }
+      wheels(renderer, LIVE_WHEELS)
+      // The frame a window draws after the last wheel event: the tick of its crossing.
+      renderer.drawFrame()
+      const after = scroll(renderer)
+      const whole = renderer.getPaintedFrameCount() - before.painted
+      const translated = after.patched - before.scroll.patched
+
+      expect(after.frames - before.scroll.frames, "every wheel event is classified").toBe(LIVE_WHEELS)
+      expect(translated, `translates, with ${whole} frames built whole`).toBeGreaterThanOrEqual(LIVE_WHEELS - 2)
+      expect(whole, "frames built whole").toBeLessThanOrEqual(2)
+      expect(after.mispredicted).toBe(0)
+      expect(renderer.getRetentionMismatches()).toEqual([])
+
+      const under = rowAtPointer(renderer)
+      const colours = rowColours(renderer, "live-end")
+      expect(colours.get(under), "the row under the pointer has the hover colour").toBe(HOVER)
+      const hovered = [...colours].filter(([, colour]) => colour === HOVER).map(([row]) => row)
+      expect(hovered, "no other row has it").toEqual([under])
+    } finally {
+      unmount()
+    }
+  })
+
+  it("is what a build gives under the retention verifier", () => {
+    const { renderer, unmount } = live()
+    try {
+      renderer.setRetainVerify(true)
+      wheels(renderer, LIVE_WHEELS)
+      renderer.drawFrame()
+      expect(renderer.getRetentionMismatches().join("\n")).toBe("")
+      expect(renderer.getRetainedCounters().mismatches).toBe(0)
     } finally {
       unmount()
     }

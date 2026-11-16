@@ -800,7 +800,7 @@ impl TestGpuixRenderer {
                         view.force_scroller_style(crate::scrollbar::ScrollerStyle::Overlay);
                         view.simulate_platform_pointer_lock(simulated_platform_clone);
                         view.simulate_window_actions(window_actions_clone);
-                        view.resync_hover_by_frame();
+                        view.set_resync_hover_by_frame(true);
                         view.set_frameless(frameless);
                         crate::events::enable_dom_hit_testing(window);
                         crate::focus_emulation::apply(window, cx);
@@ -1342,6 +1342,18 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn flush(&self) -> Result<()> {
         crate::frame_steps::as_frame(|| self.flush_for(Dirty::Layout))
+    }
+
+    /// Whether a hover that a layout moved under a still pointer is resynced from the next frame
+    /// callback (the default of a test window, so the frame that moved the layout is the one the
+    /// hover follows) or from the draw that moved it, as a live window does (`false`). Takes effect
+    /// from the next frame built whole, which this asks for.
+    #[napi]
+    pub fn set_hover_resync_by_frame(&self, by_frame: bool) -> Result<()> {
+        update_view(move |view, _window, cx| {
+            view.set_resync_hover_by_frame(by_frame);
+            cx.notify();
+        })
     }
 
     /// Whether the test window is drawn whenever an update or a simulated input flushes, which

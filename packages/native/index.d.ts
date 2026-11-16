@@ -949,6 +949,13 @@ export declare class TestGpuixRenderer {
    */
   flush(): void
   /**
+   * Whether a hover that a layout moved under a still pointer is resynced from the next frame
+   * callback (the default of a test window, so the frame that moved the layout is the one the
+   * hover follows) or from the draw that moved it, as a live window does (`false`). Takes effect
+   * from the next frame built whole, which this asks for.
+   */
+  setHoverResyncByFrame(byFrame: boolean): void
+  /**
    * Whether the test window is drawn whenever an update or a simulated input flushes, which
    * is how a test sees the result of what it just did. A live window is drawn by the display
    * link once per frame, however many inputs and reads came in it. A test that counts draws

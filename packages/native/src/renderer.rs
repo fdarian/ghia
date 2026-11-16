@@ -7700,8 +7700,8 @@ impl GpuixView {
         self.frameless = frameless;
     }
 
-    pub(crate) fn resync_hover_by_frame(&mut self) {
-        self.resync_by_frame = true;
+    pub(crate) fn set_resync_hover_by_frame(&mut self, by_frame: bool) {
+        self.resync_by_frame = by_frame;
     }
 
     pub(crate) fn simulate_window_actions(

@@ -367,6 +367,7 @@ interface NativeTestRendererApi
   getCulledSubtreeCount(): number
   setA11yActive(active: boolean): void
   setInlineDraws(enabled: boolean): void
+  setHoverResyncByFrame(byFrame: boolean): void
   drawFrame(): void
   getElementBounds(elementId: number): ElementBounds | null
   getBuiltElementBounds(elementId: number): ElementBounds | null
@@ -1389,6 +1390,14 @@ export class TestRenderer implements NativeRenderer {
    *  display link. A test that counts draws per frame turns it off. */
   setInlineDraws(enabled: boolean): void {
     this.native.setInlineDraws(enabled)
+  }
+
+  /** When a hover that a layout moved under a still pointer is resynced: from the next frame callback
+   *  (`true`, the default of a test window) or from the draw that moved it (`false`), which is how a
+   *  live window does it and what puts the hover tick in the draw of the next wheel event. Takes effect
+   *  from the next frame built whole, which this asks for. */
+  setHoverResyncByFrame(byFrame: boolean): void {
+    this.native.setHoverResyncByFrame(byFrame)
   }
 
   /** One display-link frame: deliver the queued frame callbacks, then draw a
