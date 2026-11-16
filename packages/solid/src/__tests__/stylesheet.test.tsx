@@ -110,6 +110,59 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in Solid", () => {
     expect(app.renderer.getBuildCounters().elementsRematched).toBe(2)
   })
 
+  it("matches the structural pseudo-classes again as items of a list come and go", () => {
+    const [names, setNames] = createSignal(["a", "b", "c", "d"])
+    const [note, setNote] = createSignal("")
+    const rows = new Map<string, any>()
+    let paragraph: any
+    app.render(() => (
+      <div>
+        <style>{`
+          li:nth-child(odd) { opacity: 0.5 }
+          li:first-child { padding-left: 3px }
+          li:last-child { padding-top: 7px }
+          #note:empty { padding-bottom: 5px }
+        `}</style>
+        <ul>
+          <For each={names()}>{(name) => <li ref={(element: unknown) => rows.set(name, element)}>{name}</li>}</For>
+        </ul>
+        <p id="note" ref={(element: unknown) => (paragraph = element)}>
+          {note()}
+        </p>
+      </div>
+    ))
+    const look = (name: string) => {
+      const style = getComputedStyle(rows.get(name))
+      return [style.opacity, style.paddingLeft, style.paddingTop]
+    }
+    expect(look("a")).toEqual(["0.5", "3px", "0px"])
+    expect(look("b")).toEqual(["1", "0px", "0px"])
+    expect(look("c")).toEqual(["0.5", "0px", "0px"])
+    expect(look("d")).toEqual(["1", "0px", "7px"])
+    expect(getComputedStyle(paragraph).paddingBottom).toBe("5px")
+
+    app.flushSync(() => setNames(["a", "b", "c", "d", "e"]))
+    expect(look("d")).toEqual(["1", "0px", "0px"])
+    expect(look("e")).toEqual(["0.5", "0px", "7px"])
+
+    app.flushSync(() => setNames(["z", "a", "b", "c", "d", "e"]))
+    expect(look("z")).toEqual(["0.5", "3px", "0px"])
+    expect(look("a")).toEqual(["1", "0px", "0px"])
+    expect(look("b")).toEqual(["0.5", "0px", "0px"])
+    expect(look("e")).toEqual(["1", "0px", "7px"])
+
+    app.flushSync(() => setNames(["a", "b", "d", "e"]))
+    expect(look("a")).toEqual(["0.5", "3px", "0px"])
+    expect(look("b")).toEqual(["1", "0px", "0px"])
+    expect(look("d")).toEqual(["0.5", "0px", "0px"])
+    expect(look("e")).toEqual(["1", "0px", "7px"])
+
+    app.flushSync(() => setNote("text"))
+    expect(getComputedStyle(paragraph).paddingBottom).toBe("0px")
+    app.flushSync(() => setNote(""))
+    expect(getComputedStyle(paragraph).paddingBottom).toBe("5px")
+  })
+
   it("follows the text of the style element and its removal", () => {
     let box: any
     const [css, setCss] = createSignal(".a { opacity: 0.5 }")
