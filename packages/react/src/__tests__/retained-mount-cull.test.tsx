@@ -88,7 +88,9 @@ describeNative("a dialog mounted with rows below its scroller's clip", () => {
     if (!process.env.GPUIX_RETAIN_OFF && !verifying) {
       const recorded = mount(24, true)
       const built = mount(24, false)
-      expect(recorded.built, "the first scroll builds a few elements").toBeLessThan(40)
+      // The mounting frame records half a window past the clip, and the scroller laid out has a band of three of its
+      // viewports: the first scroll builds the roots between the two (4 of them at 27 elements).
+      expect(recorded.built, "the first scroll builds a few elements").toBeLessThan(120)
       expect(built.built, "the same scroll with nothing recorded builds the whole page").toBeGreaterThan(recorded.built * 5)
     }
   })

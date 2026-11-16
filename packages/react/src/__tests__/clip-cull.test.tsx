@@ -26,6 +26,12 @@ const ROW = 40
 const ROWS = 10
 /** 100 high: rows 0 and 1 are inside, row 2 is cut by the clip, rows 3 to 9 are outside. */
 const CLIP = { width: 200, height: 100 }
+/**
+ * A scroller records the subtrees it can move up to three of its viewports past its clip once it is laid out (and under
+ * `GPUIX_RETAIN_VERIFY`, which makes every row a root), and those are built, not skipped. What a test needs skipped in a
+ * scroller lies past the clip and that.
+ */
+const SCROLLER_RECORDS_TO = CLIP.height * 4
 
 function setup(element: React.ReactElement, size = { width: 300, height: 400 }) {
   const root = createTestRoot(size)
@@ -50,8 +56,8 @@ function setup(element: React.ReactElement, size = { width: 300, height: 400 }) 
   return { ...root, refs, ref, culled, skippedPerFrame, element: (name: string) => refs.get(name) }
 }
 
-const rows = (ref, extra: (index: number) => object = () => ({})) =>
-  Array.from({ length: ROWS }, (_, index) => (
+const rows = (ref, extra: (index: number) => object = () => ({}), count = ROWS) =>
+  Array.from({ length: count }, (_, index) => (
     <div
       key={index}
       ref={ref(`row${index}`)}
@@ -159,13 +165,14 @@ describeNative("content outside a clip", () => {
   })
 
   it("is painted when it is scrolled into view, and skipped again when it leaves", () => {
+    const SCROLLER_ROWS = SCROLLER_RECORDS_TO / ROW + 10
     const { renderer, skippedPerFrame, element, unmount, ...root } = setup((ref) => (
       <div ref={ref("scroller")} testId="scroller" style={{ ...CLIP, overflow: "auto", backgroundColor: "#ffffff" }}>
-        {rows(ref, (index) => ({ backgroundColor: index === 5 ? "#ff0000" : "#335577" }))}
+        {rows(ref, (index) => ({ backgroundColor: index === 5 ? "#ff0000" : "#335577" }), SCROLLER_ROWS)}
       </div>
     ))
     try {
-      // Row 3 is within the overscan of a row a scroll can move, which keeps it ready: rows 4 to 9 are skipped.
+      // The rows up to the overscan of a row a scroll can move are kept ready, not skipped: the rows past it are.
       expect(skippedPerFrame()).toBeGreaterThanOrEqual(6)
       // Row 5 is 200 to 240; the scroller shows 100 high.
       expect(sample({ renderer }, "scroll-out", 20, 20)).not.toEqual(RED)
@@ -210,7 +217,7 @@ describeNative("content outside a clip", () => {
     const { renderer, skippedPerFrame, refs, unmount } = setup((ref) => (
       <div testId="scroller" ref={ref("scroller")} style={{ ...CLIP, overflow: "scroll" }}>
         {Array.from({ length: 6 }, (_, index) => (
-          <div key={index} testId={`i${index}`} tabIndex={0} style={{ width: 150, height: ROW, flexShrink: 0 }} />
+          <div key={index} testId={`i${index}`} tabIndex={0} style={{ width: 150, height: 150, flexShrink: 0 }} />
         ))}
       </div>
     ))
@@ -219,7 +226,7 @@ describeNative("content outside a clip", () => {
       const focused = () => renderer.getElement(renderer.getFocusedElementId())?.testId ?? null
       renderer.simulateKeystrokes("Tab")
       expect(focused()).toBe("i0")
-      // i3 starts at 120, below the 100 clip, and so do i4 and i5.
+      // i3 starts at 450, past the clip and what the scroller records (400), and so do i4 and i5.
       renderer.simulateKeystrokes("Tab Tab Tab")
       expect(focused()).toBe("i3")
       expect(refs.get("scroller").scrollTop).toBeGreaterThan(0)
@@ -304,7 +311,7 @@ describeNative("content outside a clip", () => {
     const { renderer, skippedPerFrame, refs, unmount } = setup((ref) => (
       <div ref={ref("scroller")} style={{ ...CLIP, overflow: "auto" }}>
         {/* Past the clip and the overscan of the rows a scroll can move. */}
-        <div style={{ width: 150, height: 250, flexShrink: 0 }} />
+        <div style={{ width: 150, height: SCROLLER_RECORDS_TO + 50, flexShrink: 0 }} />
         <div ref={ref("target")} style={{ width: 150, height: 30, flexShrink: 0 }} />
       </div>
     ))
@@ -316,7 +323,8 @@ describeNative("content outside a clip", () => {
       renderer.dispatchNativeEvents()
       expect(entries).toEqual([false])
 
-      refs.get("scroller").scrollTop = 200
+      // The most it scrolls: the target is its last 30 of 480.
+      refs.get("scroller").scrollTop = SCROLLER_RECORDS_TO + 80 - CLIP.height
       renderer.flush()
       renderer.dispatchNativeEvents()
       expect(entries).toEqual([false, true])
