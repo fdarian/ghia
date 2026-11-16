@@ -379,15 +379,13 @@ impl Source {
 
     /// A user's drag or click on a list's bar is a scroll the page hears of as it hears of a wheel.
     /// gpui calls a list's scroll handler for the wheel only, so the range is reported here.
-    fn set_offset(&self, offset: gpui::Point<gpui::Pixels>) {
+    fn set_offset(&self, window: gpui::WindowId, offset: gpui::Point<gpui::Pixels>) {
         match self {
             Source::Container { id, handle } => {
-                crate::scroll::scroll_to(*id, handle, offset, crate::scroll::Behavior::Instant);
+                crate::scroll::scroll_to(window, *id, handle, offset, crate::scroll::Behavior::Instant);
             }
             Source::List(state, reporter) => {
-                let before = state.scroll_px_offset_for_scrollbar();
-                state.set_offset_from_scrollbar(offset);
-                if state.scroll_px_offset_for_scrollbar() != before {
+                if crate::scroll::scroll_list_by_bar(window, state, offset) {
                     reporter.report_at(state, state.logical_scroll_top());
                 }
             }
@@ -979,7 +977,7 @@ fn along(position: gpui::Point<gpui::Pixels>, vertical: bool) -> f32 {
 }
 
 /// Moves `axis` to a scroll position (pixels from the start) without touching the other one.
-fn scroll_axis_to(source: &Source, axis: usize, position: f32, max: f32) {
+fn scroll_axis_to(window: gpui::WindowId, source: &Source, axis: usize, position: f32, max: f32) {
     let (_, mut offset) = source.extent();
     let target = gpui::px(0.0 - position.clamp(0.0, max));
     if axis == 1 {
@@ -987,7 +985,7 @@ fn scroll_axis_to(source: &Source, axis: usize, position: f32, max: f32) {
     } else {
         offset.x = target;
     }
-    source.set_offset(offset);
+    source.set_offset(window, offset);
 }
 
 impl AxisLayout {
@@ -1294,7 +1292,7 @@ fn paint(
                 if travel > 0.0 {
                     let pointer = along(event.position, drag.axis == 1);
                     let fraction = (pointer - drag.grab - axis.track_start) / travel;
-                    scroll_axis_to(&source, drag.axis, fraction.clamp(0.0, 1.0) * axis.max, axis.max);
+                    scroll_axis_to(window.window_handle().window_id(), &source, drag.axis, fraction.clamp(0.0, 1.0) * axis.max, axis.max);
                 }
                 cx.notify(view);
                 return;
@@ -1345,7 +1343,7 @@ fn paint(
                         - if index == 1 { f32::from(offset.y) } else { f32::from(offset.x) };
                     let page = axis.port_len * PAGE_FRACTION;
                     let next = if pointer < thumb { position - page } else { position + page };
-                    scroll_axis_to(&source, index, next, axis.max);
+                    scroll_axis_to(window.window_handle().window_id(), &source, index, next, axis.max);
                 }
                 cx.stop_propagation();
                 cx.notify(view);

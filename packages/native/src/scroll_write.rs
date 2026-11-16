@@ -96,6 +96,7 @@ pub(crate) fn finish_write(window: &mut gpui::Window, cx: &mut gpui::App, view: 
 /// Writes a scroll container. An axis left out keeps the offset the handle holds, or the one an
 /// earlier write recorded. Returns whether the scroller moved, or will.
 pub(crate) fn write_container(
+    window: gpui::WindowId,
     metrics_current: bool,
     id: u64,
     handle: &gpui::ScrollHandle,
@@ -109,7 +110,7 @@ pub(crate) fn write_container(
     let offset = scroll::gpui_offset(left.unwrap_or(position[0]), top.unwrap_or(position[1]));
     if metrics_current || scroll::is_smooth(id, behavior) {
         PENDING_CONTAINER_WRITES.with(|pending| pending.borrow_mut().remove(&id));
-        return scroll::scroll_to(id, handle, offset, behavior);
+        return scroll::scroll_to(window, id, handle, offset, behavior);
     }
     scroll::end_smooth_scroll(id);
     let target = scroll::snapped_offset(offset, handle.scale_factor());
@@ -128,11 +129,12 @@ pub(crate) fn has_pending_container(id: u64) -> bool {
 
 /// Called when a render starts, before it builds anything and before the layout it is followed by
 /// clamps the offset: the writes recorded since the last render are made.
-pub(crate) fn settle_containers(handles: &HashMap<u64, gpui::ScrollHandle>) {
+pub(crate) fn settle_containers(window: gpui::WindowId, handles: &HashMap<u64, gpui::ScrollHandle>) {
     let pending = PENDING_CONTAINER_WRITES.with(|pending| std::mem::take(&mut *pending.borrow_mut()));
     for (id, offset) in pending {
         if let Some(handle) = handles.get(&id) {
             handle.set_offset(offset);
+            scroll::note_write(window, false);
         }
     }
 }
@@ -142,6 +144,7 @@ pub(crate) fn settle_containers(handles: &HashMap<u64, gpui::ScrollHandle>) {
 /// was behind the tree, since a pixel position is converted against the rows the list has. A write
 /// that moved the list reports its `visibleRange` as a wheel does.
 pub(crate) fn write_list(
+    window: gpui::WindowId,
     metrics_current: bool,
     id: u64,
     state: &gpui::ListState,
@@ -154,7 +157,7 @@ pub(crate) fn write_list(
     crate::renderer::cancel_queued_list_scroll(id);
     let target = scroll::gpui_offset(0.0, top);
     let before = state.scroll_px_offset_for_scrollbar();
-    let moved = scroll::scroll_list_to(state, target);
+    let moved = scroll::scroll_list_to(window, state, target);
     if let Some(reporter) = reporter.filter(|_| moved) {
         reporter.report_at(state, state.logical_scroll_top());
     }
@@ -175,13 +178,14 @@ pub(crate) fn write_list(
 /// last one are made again against the rows the layout will measure, and the range they show is
 /// reported if the rows changed it.
 pub(crate) fn settle_lists(
+    window: gpui::WindowId,
     states: &HashMap<u64, gpui::ListState>,
     reporters: &HashMap<u64, std::rc::Rc<crate::visible_range::RangeReporter>>,
 ) {
     let pending = PENDING_LIST_WRITES.with(|pending| std::mem::take(&mut *pending.borrow_mut()));
     for (id, offset) in pending {
         if let Some(state) = states.get(&id) {
-            scroll::scroll_list_to(state, offset);
+            scroll::scroll_list_to(window, state, offset);
             if let Some(reporter) = reporters.get(&id) {
                 reporter.report_at(state, state.logical_scroll_top());
             }

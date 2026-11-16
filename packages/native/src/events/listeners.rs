@@ -402,6 +402,7 @@ pub(crate) fn pointer_frame(
     view: WeakEntity<GpuixView>,
     press: PointerDispatch,
     observed: ObservedChain,
+    after_scroll: Rc<super::hover_after_scroll::HoverAfterScroll>,
 ) -> impl IntoElement {
     canvas(
         |_, _, _| (),
@@ -410,6 +411,8 @@ pub(crate) fn pointer_frame(
             let hover = press.pointer.clone();
             let release = press.clone();
             let wheel = press.clone();
+            let wheel_hover = after_scroll.clone();
+            let move_hover = after_scroll.clone();
             let file_drag = press.clone();
             let press = press.clone();
             window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
@@ -478,7 +481,7 @@ pub(crate) fn pointer_frame(
                     return;
                 }
                 let tick = wheel_tick(event);
-                super::hover_after_scroll::of(window).note_wheel(tick.phase, window, cx);
+                wheel_hover.note_wheel(tick.phase, window, cx);
                 let action = PointerAction::Wheel(tick);
                 let sample = sample(window, action, event.position, event.modifiers);
                 wheel.wheel(sample, window, cx);
@@ -500,7 +503,7 @@ pub(crate) fn pointer_frame(
                         move_dispatch.file_drag(&move_view, drag, window, cx);
                     }
                     None => {
-                        super::hover_after_scroll::of(window).pointer_moved();
+                        move_hover.pointer_moved();
                         let action = PointerAction::Move {
                             pressed_button: event.pressed_button.map(dom_button),
                         };
@@ -563,8 +566,7 @@ pub(crate) fn pointer_frame(
 
             // A frame that moves the rows in place builds none of this, so what follows the hover after a scroll that
             // ends is told to the state of the window, which every frame's paint tells again.
-            let hover = super::hover_after_scroll::of(window);
-            hover.install({
+            after_scroll.install({
                 let (dispatch, view, observed) = (file_drag.clone(), view.clone(), observed.clone());
                 Rc::new(move |window: &mut Window, cx: &mut App| dispatch.resync(&view, &observed, false, window, cx))
             });
@@ -572,7 +574,7 @@ pub(crate) fn pointer_frame(
             // frame being painted are readable only from then on, so a drag region that appeared
             // under a still pointer is seen by this resync and not a frame late. A build for nothing but a scroll
             // leaves the hover where it is until the scroll ends.
-            if hover.follows_build() {
+            if after_scroll.follows_build(window.window_handle().window_id()) {
                 window.defer(cx, move |window, cx| {
                     file_drag.resync(&view, &observed, false, window, cx);
                 });

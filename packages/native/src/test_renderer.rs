@@ -2081,9 +2081,10 @@ impl TestGpuixRenderer {
         }
         update_view_or_defer(move |view, window, cx| {
             let was_current = crate::scroll_write::metrics_current(window);
-            let moved = view.write_virtual_list(was_current, id, top).unwrap_or_else(|| {
+            let window_id = window.window_handle().window_id();
+            let moved = view.write_virtual_list(window_id, was_current, id, top).unwrap_or_else(|| {
                 view.scrollable_handle(id).is_some_and(|handle| {
-                    crate::scroll_write::write_container(was_current, id, handle, left, top, behavior)
+                    crate::scroll_write::write_container(window_id, was_current, id, handle, left, top, behavior)
                 })
             });
             if moved {

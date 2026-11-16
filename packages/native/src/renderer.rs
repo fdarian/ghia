@@ -261,6 +261,7 @@ fn scroll_element_position(id: u64) -> Option<[f64; 2]> {
 /// invalidates the window with [`invalidate_after_scroll`] then and does nothing for a write that
 /// leaves the scroller where it is, as a browser's setter does.
 fn scroll_element_to(
+    window: gpui::WindowId,
     metrics_current: bool,
     id: u64,
     left: Option<f64>,
@@ -272,7 +273,7 @@ fn scroll_element_to(
             VIRTUAL_LIST_REPORTERS.with(|reporters| {
                 let reporters = reporters.borrow();
                 let reporter = reporters.get(&id).map(|reporter| reporter.as_ref());
-                crate::scroll_write::write_list(metrics_current, id, state, reporter, top)
+                crate::scroll_write::write_list(window, metrics_current, id, state, reporter, top)
             })
         })
     });
@@ -282,7 +283,7 @@ fn scroll_element_to(
     SCROLL_HANDLES.with(|cell| {
         cell.borrow()
             .get(&id)
-            .is_some_and(|handle| crate::scroll_write::write_container(metrics_current, id, handle, left, top, behavior))
+            .is_some_and(|handle| crate::scroll_write::write_container(window, metrics_current, id, handle, left, top, behavior))
     })
 }
 
@@ -306,8 +307,8 @@ fn scroll_write_lays_out_first(
 }
 
 /// Makes the scroll writes recorded since the last render, before it builds (see `scroll_write`).
-pub(crate) fn settle_scroll_writes() {
-    SCROLL_HANDLES.with(|cell| crate::scroll_write::settle_containers(&cell.borrow()));
+pub(crate) fn settle_scroll_writes(window: gpui::WindowId) {
+    SCROLL_HANDLES.with(|cell| crate::scroll_write::settle_containers(window, &cell.borrow()));
 }
 
 /// The room `id` reserves for classic scrollbars as of its last layout: the width on its right and
@@ -883,8 +884,6 @@ pub(crate) fn is_virtual_list(id: u64) -> bool {
 /// finish before it moves the rows, and the frame whose translate declines is built whole by the view
 /// gpui queues for it. A window that does not classify the frame is notified, as a `div` scroller is.
 pub(crate) fn invalidate_after_scroll(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, list: bool) {
-    // A write ends its scroll at once, or when its animation does: the hover under the pointer follows then.
-    crate::events::hover_after_scroll::of(window).note_written(crate::scroll::animating());
     if list && crate::retain::scroll_gate::list_write_is_quiet(view) {
         window.note_list_scrolled(view);
         LIST_WRITTEN.with(|written| written.borrow_mut().insert(view));
@@ -1229,7 +1228,7 @@ async fn run_ui_commands(
                     { crate::renderer::notify_pending_layout(cx); window.draw_if_scroll_metrics_dirty(cx) };
                 }
                 let was_current = crate::scroll_write::metrics_current(window);
-                if scroll_element_to(was_current, id, left, top, behavior) {
+                if scroll_element_to(window.window_handle().window_id(), was_current, id, left, top, behavior) {
                     let view = cx.entity_id();
                     crate::scroll_write::finish_write(window, cx, view, id);
                 }
@@ -3863,7 +3862,7 @@ impl GpuixRenderer {
                 { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) };
             }
             let was_current = crate::scroll_write::metrics_current(window);
-            if scroll_element_to(was_current, id, left, top, behavior) {
+            if scroll_element_to(window.window_handle().window_id(), was_current, id, left, top, behavior) {
                 let view = crate::events::sync_dispatch::root_view(window).map_err(Error::from_reason)?;
                 crate::scroll_write::finish_write(window, cx, view.entity_id(), id);
             }
@@ -6299,6 +6298,9 @@ pub(crate) struct GpuixView {
     /// Hover and press state for those elements, until the event model owns it.
     /// The glide of the elements that declare `layout`.
     pub(crate) layout_flips: crate::motion::LayoutFlips,
+    /// Shared with the closures the window keeps that read it (the pointer frame, the scroll gate), which cannot
+    /// reach this view while it is leased.
+    pub(crate) hover_after_scroll: Rc<crate::events::hover_after_scroll::HoverAfterScroll>,
     /// Serialised markup of the `<svg>` elements that have shape children.
     pub(crate) svg_trees: crate::custom_elements::svg_tree::SvgTrees,
     /// Live text selection, shared with the paint closures and the napi methods.
@@ -7337,6 +7339,7 @@ impl GpuixView {
             contents_styles: Default::default(),
             measurements: Default::default(),
             layout_flips: Default::default(),
+            hover_after_scroll: Default::default(),
             svg_trees: Default::default(),
             selection,
             virtual_lists: HashMap::new(),
@@ -7514,7 +7517,7 @@ impl GpuixView {
             under_pointer.sort_by(|a, b| a.0.total_cmp(&b.0));
             scrollers.extend(under_pointer.into_iter().map(|(_, id, handle)| (id, handle)));
         }
-        crate::scroll::scroll_by_key(scrollers, key)
+        crate::scroll::scroll_by_key(window.window_handle().window_id(), scrollers, key)
     }
 
     /// The DOM's `scrollIntoView`. Walks the scrollers around the element from the inside out
@@ -7985,12 +7988,13 @@ impl GpuixView {
     /// Writes the scroll position of the list `id`: whether it moved, or `None` if `id` is not a list.
     pub(crate) fn write_virtual_list(
         &self,
+        window: gpui::WindowId,
         metrics_current: bool,
         id: u64,
         top: Option<f64>,
     ) -> Option<bool> {
         let entry = self.virtual_lists.get(&id)?;
-        Some(crate::scroll_write::write_list(metrics_current, id, &entry.state, Some(&entry.reporter), top))
+        Some(crate::scroll_write::write_list(window, metrics_current, id, &entry.state, Some(&entry.reporter), top))
     }
 
     pub(crate) fn virtual_list_position(&self, id: u64) -> Option<[f64; 2]> {
@@ -10296,7 +10300,7 @@ impl gpui::Render for GpuixView {
         use gpui::IntoElement;
 
         self.apply_window_title(window);
-        settle_scroll_writes();
+        settle_scroll_writes(window.window_handle().window_id());
         self.paint_reports.borrow_mut().scrolls.begin_pass();
         self.note_pass(window);
         self.apply_pointer_lock(window, cx);
@@ -10589,10 +10593,18 @@ impl gpui::Render for GpuixView {
         let motion_active = !motion_awake.is_empty();
         // What a frame that changed nothing but a scroll offset is told from: the paint of the pointer frame asks.
         let viewport = window.viewport_size();
-        crate::events::hover_after_scroll::of(window).note_build(
+        let layout_animating = crate::motion::take_layout_animating(
+            &mut self.css_transitions,
+            &mut self.css_animations,
+            &self.motion_states,
+            &motion_awake,
+            &self.layout_flips,
+            now,
+        );
+        self.hover_after_scroll.note_build(
             tree.revision(),
             (f32::from(viewport.width), f32::from(viewport.height)),
-            transitions_active || motion_active,
+            layout_animating,
         );
         if !window.is_layout_pass() {
             self.layout_flips.note_ticking(transitions_active || motion_active);
@@ -10626,6 +10638,7 @@ impl gpui::Render for GpuixView {
                         resync_by_frame: self.resync_by_frame,
                     },
                     self.pointer.borrow().observed(),
+                    self.hover_after_scroll.clone(),
                 ))
                 .child(crate::events::keyboard::window_input_listeners(
                     tree_arc.clone(),
@@ -10698,7 +10711,7 @@ impl gpui::Render for GpuixView {
         });
         VIRTUAL_LIST_STATES.with(|states| {
             VIRTUAL_LIST_REPORTERS.with(|reporters| {
-                crate::scroll_write::settle_lists(&states.borrow(), &reporters.borrow())
+                crate::scroll_write::settle_lists(window.window_handle().window_id(), &states.borrow(), &reporters.borrow())
             })
         });
 
@@ -12324,7 +12337,7 @@ fn build_virtual_list(
             entry.sizes.set_scale(window.scale_factor());
             if let Some(row_id) = focused_row.filter(|row_id| !entry.seen_rows.contains(row_id)) {
                 if let Some(index) = entry.logical_index_of(row_id) {
-                    entry.state.scroll_to(gpui::ListOffset {
+                    crate::scroll::scroll_list_to_row(window.window_handle().window_id(), &entry.state, gpui::ListOffset {
                         item_ix: index,
                         offset_in_item: gpui::px(0.0),
                     });
@@ -12349,7 +12362,7 @@ fn build_virtual_list(
             entry.sizes.set_scale(window.scale_factor());
             if let Some(row_id) = focused_row {
                 if let Some(index) = entry.logical_index_of(row_id) {
-                    entry.state.scroll_to(gpui::ListOffset {
+                    crate::scroll::scroll_list_to_row(window.window_handle().window_id(), &entry.state, gpui::ListOffset {
                         item_ix: index,
                         offset_in_item: gpui::px(0.0),
                     });
@@ -12377,7 +12390,7 @@ fn build_virtual_list(
         report
     });
     if let Some(offset) = queued_scroll {
-        list_state.scroll_to(offset);
+        crate::scroll::scroll_list_to_row(window.window_handle().window_id(), &list_state, offset);
         reporter.await_layout();
     }
     if listens {

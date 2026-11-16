@@ -99,6 +99,7 @@ impl GpuixView {
         let callback = self.event_callback.clone();
         let settled_tapes = self.tapes.clone();
         let settled_view = view.clone();
+        let hover = self.hover_after_scroll.clone();
         window.set_scroll_patch_settled(Some(Rc::new(move |window: &mut gpui::Window, cx: &mut gpui::App| {
             // The rows that left are out of the registries before the sweeps read the boxes, and out of
             // the page's records before a frame builds a row that comes in again.
@@ -108,8 +109,7 @@ impl GpuixView {
                 view.update(cx, |view, _| view.forget_left_rows());
             }
             // A translate under a wheel leaves the hover where it was: it follows when the scroll ends.
-            let hover = crate::events::hover_after_scroll::of(window);
-            if hover.follows_translate() {
+            if hover.follows_translate(window.window_handle().window_id()) {
                 hover.follow(window, cx);
             }
             crate::observers::sweep_after_translate(window.window_handle(), window.viewport_size(), &reports, &sweep_tree, &callback, cx);
