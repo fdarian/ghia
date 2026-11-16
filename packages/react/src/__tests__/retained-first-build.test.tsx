@@ -61,11 +61,13 @@ describeNative("a root recorded by the frame that builds it", () => {
         // The scroller is an anchor: gpui records it in every frame built whole, as a source for a patch, and replays it in none.
         expect(second.builds, "no card is built to be recorded, and the scroller's anchor is").toBe(1)
         expect(second.hits, "every card has its recording").toBe(ENTRIES)
-        // The card at the edge of what the scroller records beyond its clip is recorded where it stands by the
-        // frame that mounts it, before the scroller has a box, and is built where it is put by the next.
-        expect(second.lazy).toBeLessThanOrEqual(1)
-        // The spine and that card, and nothing of the page.
-        expect(second.built).toBeLessThan(15)
+        // The frame that mounts the cards records them to half of the window beyond the clip, the scroller having no box
+        // yet; the next has its box, and a band of three of it. The cards between the two bands were recorded where they
+        // stand, and are built where they are put by the second frame (12 cards of 5 elements: work the first scroll
+        // did before, now done once with the band it will scroll through).
+        expect(second.lazy).toBeLessThanOrEqual(12)
+        // The spine and those cards, and nothing of the page.
+        expect(second.built).toBeLessThan(80)
       }
       view.expectWhatABuildShows("second-draw")
       view.finish(retained)

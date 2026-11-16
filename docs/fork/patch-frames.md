@@ -721,7 +721,8 @@ keeps what builds it again.
   at most `PATCH_ROOT_MAX_ELEMENTS` (64) elements (a row, a card or a small control, not a page of cards) and has no size an
   intrinsic keyword gives and declares or follows no group. It is a candidate when one of:
   1. it, or something below it, declares a hover that only paints (`hover_paint::declares_paint_hover`: all it declares of `hover`
-     and `hasHover` paints only, it has no `@container` rule), and nothing is lifted out of it;
+     and `hasHover` paints only, it has no `@container` rule), and nothing is lifted out of it (the element's own lift is not that: see
+     below);
   2. it is a row of a virtual list, whatever its style (a commit restyles rows that declare no hover: the selection). What a
      relocatable row holds is built whole already (its children keep no recordings), so the flag asks nothing more of the build, and a
      row consumes what is lifted in it;
@@ -744,10 +745,29 @@ keeps what builds it again.
   its own: 74 against 122 in the first page tried). A frame built whole that rebuilds a patch root therefore builds everything in it,
   where its nested roots would have been replayed; the cap is what bounds that. This is decided before the root is built, from
   the tree, so it has to be right for the roots that are recorded:
-  - nothing in the subtree **might lift** (`hover_paint::may_lift`: positioned, a `z-index`, an opacity below 1, a transform,
-    a filter, a mask, a clip path, `content-visibility`), unless the root is a row of a virtual list, which consumes whatever is
-    lifted in it (`stacking::is_virtual_row`): a root that lifts is recorded as one that hands elements to the stacking context around, and
-    leaving the roots in it unrecorded changed how it replays (found by the retention fuzz under the verifier);
+  - nothing **lifts out of** the root: no element in the subtree might lift (`hover_paint::may_lift`: positioned, a `z-index`, an
+    opacity below 1, a transform, a filter, a mask, a clip path, `content-visibility`) into a stacking context around the root, unless the
+    root is a row of a virtual list, which consumes whatever is lifted in it (`stacking::is_virtual_row`), or forms a stacking context
+    itself, which takes what is lifted in it. A root that hands elements to the context around is recorded as one that does, and
+    leaving the roots in it unrecorded changed how it replays (found by the retention fuzz under the verifier). **The root's own lift
+    is no reason to refuse it**: gpui patches a lifted root where the context orders it (it must say the same `lift_z`, and the patch
+    must hand nothing to a context outside it, `PatchDecline::Lifts`), so a TanStack Virtual row (`position: absolute; transform:
+    translateY()`, a `:hover` background, an absolute box of its own, in a `position: relative` container) is a patch root, and a
+    crossing of rows is a patched frame (stack app, hover phase: 8.9M a crossing, whole, to 3.2M, patched; 217M to 125M over the phase).
+    `scan_patch_root` keeps per element whether it lifts itself (`PatchRootScan::lifts`, what its parent sees) and whether something lifts
+    out of it (`PatchRootScan::lifts_out`, which refuses it): `lifts_out` is a lifted child (or one lifting out of the child) while the
+    element forms no context. The scan reads the declared style, and the build lays out another one when an animation, a transition, Motion,
+    a `var()` (one held by a state block too), an `@container` block, a state other than `hover` and `hasHover` (`active`, `focus`, `focusWithin`, `focusVisible`, a group, `disabled`)
+    or a `hover` or `hasHover` that is more than paint (an opacity that crosses 1, a transform, a size: `hover_paint::paint_hover_of` says `No`)
+    restyles the element (an animation that ends at opacity 1 forms no context, `active: { opacity: 1 }` over a lower opacity none while pressed), so both
+    answers are given as the safe side: an element **forms a context** only when it does as declared and nothing but a hover that paints only restyles it
+    (`hover_paint::forms_context_in_every_state`; `stacking::creates_context` over `Resolved::of_style`; as the scan does not know whether the
+    element is a flex or grid item, one whose `z-index` alone forms a context is judged as forming none), and an element **lifts itself** when
+    `may_lift` says so, when it forms a context as declared (a `transform-style: preserve-3d`, a Motion transform key or a mask border forms one and
+    lifts at `z-index` 0 without `may_lift` naming it) or when something other than a hover that paints only might restyle it (`hover_paint::may_lift_in_any_state`).
+    A root is refused too often, never too seldom; the build re-decides with the real flags. `Recording::patch_root` and `Record::patch_root` then ask `Node::hands_lifts_out` (`!forms_context && below.lifts`),
+    the same without the relevance-watch clause of `Node::lifts_out`, which is for the relocation of a replay: a patch prepaints the
+    watch itself. A lifted row that forms no context and holds a lifted child, and an element above a lifted row, are not patch roots;
   - nothing in it has a **size an intrinsic keyword gives** (`min-content`, `fit-content`, ...): its box is measured under another
     style and asked for again, and a retained root that holds one is laid out again by every frame unless the box is a root of its own
     (`retained-intrinsic.test.tsx`);
@@ -824,7 +844,7 @@ marks `Replaced` with `derived: true`, which a build at the row's own place does
 **Limits.**
 
 - A hover that adds or takes away a primitive (a shadow, a border colour from transparent, a text colour from transparent, a
-  background that is more than a colour) is a frame built whole; so is a group, a root that might lift, a size by an intrinsic keyword, a root of more than 64 elements, and a
+  background that is more than a colour) is a frame built whole; so is a group, a root that something lifts out of, a size by an intrinsic keyword, a root of more than 64 elements, and a
   row put elsewhere than it was recorded that gpui cannot paint in its region (`Hover:Relocated`: a mask around it that differs from the one it
   recorded under, a culled or direct recording, a scroller of its own in the row that the user scrolls or that is scrolled; an `overflow: hidden` text is a scroller that only code scrolls, and at its offset of zero it is patched; a row a translate moved and a row a whole frame replayed with a delta are patched in their region).
 - A page of at most 64 elements is one root: a patch builds all of it, as a frame built whole does.
@@ -1389,7 +1409,7 @@ came in, 3.6M instructions or so a row and a layout pass of the row. `Scroller::
 A row is recorded when the list builds it, up to the list's overdraw outside the clip, and is replayed until it leaves across the
 viewport, so it travels the overdraw, the viewport and its own height; the box of a row that has never painted is not known, and a root is
 at most `ROOT_VIEWPORTS` (2) viewports tall, so the overscan of a row is three heights of the list plus the overdraw (`Scroller::of_list`,
-`overdraw` read from the list's config where the row is built). A scroller that is no list keeps half a viewport (`OVERSCAN_VIEWPORTS`).
+`overdraw` read from the list's config where the row is built). A scroller that is no list (`Scroller::of`) records a root for the same travel less the overdraw: a viewport of the scroller (its height, its width, or the larger, as it scrolls) and `ROOT_VIEWPORTS` more, where it used to have half a viewport (it still has half of its window-sized stand-in before its first layout: the window is several times the viewport of a scroller in a dialog, and the extra band would be prepainted for nothing, then culled and built again by the first scroll), and a root was built again for `Region` at about 4 a tick at a 30 px wheel step (TanStack Virtual's rows in the stack mailbox).
 
 The region is bigger, not the row: what a recording holds is the box of the row cut by the region, and a row the list builds is within
 the overdraw of the clip, so every row is recorded whole as it was when the overscan was bigger than the distance of the row from the
