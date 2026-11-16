@@ -225,6 +225,7 @@ function calls(r, ids) {
     setRetainPlanning: () => r.setRetainPlanning(true),
     setRetainEnabled: () => r.setRetainEnabled(true),
     setRetainVerify: () => r.setRetainVerify(false),
+    setHoverResyncByFrame: () => r.setHoverResyncByFrame(true),
     setScrollbarStyle: () => r.setScrollbarStyle("overlay"),
     setSelectionRange: () => r.setSelectionRange(ids.field, 0, 1),
     setStyleImage: () => r.setStyleImage("blob:handler-calls", PNG_1X1),
