@@ -71,7 +71,7 @@ cannot do without); the engine otherwise stays as upstream ships it, and upstrea
 needs the owner's explicit permission and an entry here: the decision, the considerations and the reasoning. A sync keeps
 each entry or applies it again.
 
-### A node's layout input is normalized before the cache and the computation (zed `third_party/taffy`: `tree/input_norm.rs`, `compute_child_layout` in `tree/taffy_tree.rs`; zed `ZEDSHA`)
+### A node's layout input is normalized before the cache and the computation (zed `third_party/taffy`: `tree/input_norm.rs`, `compute_child_layout` in `tree/taffy_tree.rs`; zed `de983ebaff`)
 
 - **Decision.** A layout-engine change for what Ghia needs (a subtree that mounts should not size its nodes again for inputs that cannot differ), inside the vendored taffy. Owner OK'd 2026-11-16, fork-only. The idea is from zgui (cephal 0.2.0), whose `normalize` runs before its cache. Always on, no switch. Not upstream taffy behaviour.
 - **What it changes.** `compute_child_layout` normalizes the input once, and the result feeds both the cache and the computation (`SavedLayout` keeps what the parent asked, which a boundary is asked again with and normalizes again). The parent size is dropped on each axis the node's own style does not resolve a percentage, calc or `fit-content(%)` against (`NodeData::reads_parent_width` and `reads_parent_height`, set with the style); a table keeps both. A block container with children and no known height gets a max-content available height.
