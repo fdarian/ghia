@@ -177,6 +177,29 @@ fn required_and_optional_are_the_fields_that_take_the_attribute() {
 }
 
 #[test]
+fn required_and_optional_skip_the_input_types_that_take_no_required() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ":required { color: red } :optional { background-color: blue }");
+    let takes: Vec<u64> = ["text", "EMAIL", "checkbox", "radio", "file", "number", "bogus"].iter().map(|kind| input(&mut doc, "a", kind)).collect();
+    let skips: Vec<u64> = ["hidden", "range", "color", "submit", "reset", "button", "IMAGE"].iter().map(|kind| input(&mut doc, "b", kind)).collect();
+    for id in takes.iter().chain(&skips) {
+        doc.tree.set_custom_prop(*id, "required".into(), json!(true));
+    }
+    doc.flush();
+    for id in takes {
+        assert_eq!((red(&doc, id), doc.background(id)), (true, None), "{id}");
+    }
+    for id in skips.iter() {
+        assert_eq!((doc.color(*id), doc.background(*id)), (None, None), "{id}");
+    }
+    let field = input(&mut doc, "c", "text");
+    doc.flush();
+    assert_eq!(doc.background(field), Some("blue"));
+    assert_eq!(doc.rematched(|doc| doc.tree.set_custom_prop(field, "type".into(), json!("hidden"))), 1);
+    assert_eq!((doc.color(field), doc.background(field)), (None, None));
+}
+
+#[test]
 fn read_write_is_a_text_field_that_is_neither_read_only_nor_disabled() {
     let mut doc = Doc::new();
     doc.style_element(ROOT, ":read-write { color: red } :read-only { background-color: blue }");

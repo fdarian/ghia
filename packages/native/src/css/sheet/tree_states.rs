@@ -90,7 +90,14 @@ impl TreeStates {
             "required" => TreeStates::REQUIRED | TreeStates::OPTIONAL,
             "readOnly" => TreeStates::READ_ONLY | TreeStates::READ_WRITE,
             "href" => TreeStates::ANY_LINK,
-            "type" => TreeStates::CHECKED | TreeStates::INDETERMINATE | TreeStates::READ_ONLY | TreeStates::READ_WRITE,
+            "type" => {
+                TreeStates::CHECKED
+                    | TreeStates::INDETERMINATE
+                    | TreeStates::REQUIRED
+                    | TreeStates::OPTIONAL
+                    | TreeStates::READ_ONLY
+                    | TreeStates::READ_WRITE
+            }
             _ => TreeStates::NONE,
         }
     }
@@ -157,8 +164,16 @@ fn is_choice(element: &RetainedElement, radio: bool) -> bool {
     }
 }
 
+/// A `select`, a `textarea`, or an `input` whose type can be required.
 fn takes_required(element: &RetainedElement) -> bool {
-    matches!(element.element_type.as_str(), "input" | "select" | "textarea")
+    match element.element_type.as_str() {
+        "select" | "textarea" => true,
+        "input" => !matches!(
+            element.custom_props().get("type").and_then(Value::as_str).unwrap_or_default().trim().to_ascii_lowercase().as_str(),
+            "hidden" | "range" | "color" | "submit" | "reset" | "button" | "image"
+        ),
+        _ => false,
+    }
 }
 
 /// A `textarea`, or an `input` that is edited as text, that is neither `readOnly` nor disabled.
