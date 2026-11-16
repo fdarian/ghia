@@ -2736,6 +2736,8 @@ export interface ScrollPatchCounters {
   rowsRebuilt: number
   /** The rows those frames took out of the frame. */
   rowsRemoved: number
+  /** The frames presented with a shift: the platform copied the pixels of the list that stayed and drew the rest. */
+  shifted: number
   /**
    * How the virtual lists of the window found the size of the rows they measured, summed over the
    * lists that are mounted: by building and laying the row out, or from the size its style declares
