@@ -105,6 +105,15 @@ impl PropKey {
         }
     }
 
+    /// Whether a change of what this animates can move a box or a line of text.
+    fn changes_layout(self) -> bool {
+        match self {
+            Self::Style(prop) => !prop.paints_only(),
+            // The attributes of an SVG shape change the picture of the `<svg>`, never its box.
+            Self::Svg(_) => false,
+        }
+    }
+
     fn from_name(target: Target, name: &str) -> Option<Self> {
         match target {
             Target::Style => AnimProp::from_name(name).map(Self::Style),
@@ -1306,6 +1315,27 @@ pub(super) fn subtree_ids(tree: &crate::retained_tree::RetainedTree, id: u64) ->
         }
     }
     ids
+}
+
+/// Whether anything that runs on the page moves a box or a line of text at `now`: a CSS transition or
+/// animation of a property that does, a motion (`awake` are the ones drawn) animating one or
+/// waiting to measure, or a `layout` glide. Opacity, colors, shadows, filters and transforms move
+/// nothing the pointer is over, so they are not asked about: a page that runs them lays out as it
+/// was. Takes what the transitions and animations noted since the last call.
+pub(crate) fn take_layout_animating(
+    transitions: &mut CssTransitions,
+    animations: &mut CssAnimations,
+    motions: &HashMap<u64, MotionState>,
+    awake: &[u64],
+    flips: &LayoutFlips,
+    now: Instant,
+) -> bool {
+    let transitioning = transitions.take_layout_active();
+    let animating = animations.take_layout_active();
+    transitioning
+        || animating
+        || flips.gliding()
+        || awake.iter().any(|id| motions.get(id).is_some_and(|motion| !motion.paints_only(now)))
 }
 
 /// Whether layout should also measure the width `declared` would have with

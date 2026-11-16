@@ -1794,6 +1794,8 @@ pub(crate) struct CssAnimations {
     /// The elements a Web Animations command reached since the last frame.
     commanded: Vec<u64>,
     active: bool,
+    /// An animation that wants frames animates a property that moves a box or a line of text.
+    layout_active: bool,
     /// The elements this frame leaves dormant (see `retain::Sources::dormant`): what keeps their
     /// animations going is a tick that builds nothing, so they do not ask for a drawn frame.
     dormant: HashSet<u64>,
@@ -1868,6 +1870,7 @@ pub(crate) struct Rewind {
     events: usize,
     api_events: usize,
     active: bool,
+    layout_active: bool,
     queued: bool,
 }
 
@@ -1881,6 +1884,7 @@ impl CssAnimations {
             events: self.events.len(),
             api_events: self.api_events.len(),
             active: self.active,
+            layout_active: self.layout_active,
             queued: self.sleepers.next.contains(&id),
         }
     }
@@ -1910,6 +1914,7 @@ impl CssAnimations {
         self.events.truncate(point.events);
         self.api_events.truncate(point.api_events);
         self.active = point.active;
+        self.layout_active = point.layout_active;
         if point.queued {
             self.sleepers.next.insert(point.id);
         } else {
@@ -2014,8 +2019,9 @@ impl CssAnimations {
                     now,
                 ));
             }
-            if !self.dormant.contains(&id) {
-                self.active |= run.wants_frame(now);
+            if !self.dormant.contains(&id) && run.wants_frame(now) {
+                self.active = true;
+                self.layout_active |= run.properties.iter().any(|key| key.changes_layout());
             }
         }
         state.moving = state.wants_frame(now);
@@ -2379,6 +2385,11 @@ impl CssAnimations {
     /// Whether an animation still needs frames as of the last update.
     pub(crate) fn take_active(&mut self) -> bool {
         std::mem::take(&mut self.active)
+    }
+
+    /// [`Self::take_active`] for the animations of properties that move a box or a line of text.
+    pub(crate) fn take_layout_active(&mut self) -> bool {
+        std::mem::take(&mut self.layout_active)
     }
 
     /// The animations of `element` in composite order (`animation-name` list
@@ -3355,6 +3366,26 @@ mod tests {
         assert!(frames.animations.take_active());
         near(opacity(&frames.frame(1000, &animated)), 0.5);
         assert_eq!(frames.events(), [named(Start, "fade", 0.0)]);
+    }
+
+    #[test]
+    fn only_an_animation_of_a_property_that_moves_a_box_asks_for_layout_frames() {
+        let mut frames = Frames::new();
+        frames.define("fade", FADE);
+        let fade = fading("fade 1s linear infinite");
+        frames.frame(0, &fade);
+        frames.frame(300, &fade);
+        assert!(frames.animations.take_active());
+        assert!(!frames.animations.take_layout_active(), "an opacity moves nothing");
+
+        let mut frames = Frames::new();
+        frames.define("grow", r#"{ "from": { "width": 10 }, "to": { "width": 20 } }"#);
+        let grow = fading("grow 1s linear");
+        frames.frame(0, &grow);
+        frames.frame(300, &grow);
+        assert!(frames.animations.take_active());
+        assert!(frames.animations.take_layout_active());
+        assert!(!frames.animations.take_layout_active(), "taken");
     }
 
     #[test]
