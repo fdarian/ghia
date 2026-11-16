@@ -9211,7 +9211,8 @@ what these six keys cannot express:
   of a descendant are tracked
 
 The other way round, a stylesheet `:has()` takes no pointer or focus state
-(`:has(:hover)` is invalid): `hasHover` and `hasFocus` are how to write that.
+(`:has(:hover)` is invalid, also inside a `:is()` there or brought in by `&` from
+a parent that holds one): `hasHover` and `hasFocus` are how to write that.
 
 ### Form control state (`:disabled`, `:enabled`)
 
@@ -10204,10 +10205,10 @@ Anything else makes the selector invalid and drops its rule (a list is all or no
 | Selector | Matches |
 |---|---|
 | `:popover-open` | an element with the `popover` attribute while `showPopover()` has it open (`[popover]:popover-open`, `:not(:popover-open)`, `:popover-open .child`) |
-| `:disabled`, `:enabled` | a `button`, `input`, `select` or `textarea` with and without `disabled`, and a Ghia `Button` or `Select` by its state; every other element matches neither |
+| `:disabled`, `:enabled` | a `button`, `input`, `select` or `textarea` with and without `disabled`, and a Ghia `Button` or `Select` by its state; every other element matches neither (a `fieldset`, an `optgroup` and an `option` too) |
 | `:checked` | a checkbox or a radio that is checked, as a click, `checked` or a script left it |
-| `:indeterminate` | a checkbox that is indeterminate |
-| `:required`, `:optional` | an `input`, `select` or `textarea` with and without `required`; every other element matches neither |
+| `:indeterminate` | a checkbox that is indeterminate (a radio never is) |
+| `:required`, `:optional` | a `select`, a `textarea` and an `input` whose `type` is not `hidden`, `range`, `color`, `submit`, `reset`, `button` or `image`, with and without `required`; every other element matches neither |
 | `:read-write` | a `textarea`, or an `input` that is edited as text, that is not `readOnly` and not disabled |
 | `:read-only` | every other element, `div`s and checkboxes included |
 | `:any-link`, `:link` | an `a` or `area` with an `href` (none is visited) |

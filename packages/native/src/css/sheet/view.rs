@@ -59,8 +59,9 @@ enum Slots {
     Map(FxHashMap<u64, Slot>),
 }
 
-/// Whether two elements are of one type: an HTML type is case-insensitive, an SVG one as written,
-/// and an SVG `a` is not an HTML `a`.
+/// Whether two elements are of one type: an HTML type is case-insensitive, an SVG one as written.
+/// An element is SVG by its tag name alone (`is_svg`), so an `a` inside an `<svg>` is an HTML `a`
+/// here, unlike in a DOM.
 fn same_type(a: &RetainedElement, b: &RetainedElement) -> bool {
     a.is_svg() == b.is_svg()
         && if a.is_svg() { a.element_type == b.element_type } else { a.element_type.eq_ignore_ascii_case(&b.element_type) }
