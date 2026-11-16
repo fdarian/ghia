@@ -97,15 +97,15 @@ paint repaints those roots in the frame that is shown and leaves the rest as it 
   recording is plain but for the scene of its own (`PaintRecord::is_plain_or_relocated`: nothing handed to a stacking context). The
   unit is registered in the frame that records the root, in a frame that replays it with the key it was recorded with (`delta` zero
   and the key equal), and in a frame that replays it elsewhere (a list scrolled since) when the recording is in a region of its own
-  (`Relocation::regional`: not culled, not direct), the content mask around it is the one it recorded under and the root has no scroller of its own (a box with an overflow other than visible: `PrepaintRecord::holds_scroller`). That is the state a scroll
+  (`Relocation::regional`: not culled, not direct), the content mask around it is the one it recorded under and the root has no scroller of its own that the user scrolls or that is scrolled (`PrepaintRecord::holds_scroller_blocking_a_move`: `user_scroll` on an axis, or an offset other than zero; an `overflow: hidden` box is a scroller that only code scrolls, so at its offset of zero it does not count). That is the state a scroll
   translate leaves a row in (`RetainedState::scrolled_to`: `recorded.delta` and the handles of the relocation moved), and a patch of such
   a root runs as it does for a translated row: the scratch frame paints the root in its region under the content mask captured when it was
   recorded, which is what a recording at its own place was cut by, puts what it painted `delta` away, and **rewrites the recording** with
   what it painted in the region (`RecordingRewrite::relocation`, `Window::relocated_rewrite`), so the translate that follows, which moves
   the recorded operations, moves the paint of the patch and not the paint before. A root that is not in that state is noted as
   *relocated* (`Frame::relocated`) and a patch of it declines as `PatchDecline::Relocated`: a mask that differs, a recording that is
-  culled or direct, a scroller of its own in the root (a patch would have to move the offset and extent the frame holds of it, and a
-  root registered with one would be built and declined, so it is not registered), and, found by the patch, a hitbox placed by a box
+  culled or direct, a scroller of its own in the root that the user scrolls or that is scrolled (a patch would have to put its thumb or the children its offset places, and a
+  root registered with one would be built and declined, so it is not registered; the offset and extent of one that only code scrolls are relative to its padding box, which moves with the root, and the bounds its handle holds are moved with the recording, so the patch rewrites them: `ScrollerRecord::blocks_moved_patch`, checked where a replay registers the root and again by the patch on the scrollers it prepainted, since `scrollTop` may have been written in between), and, found by the patch, a hitbox placed by a box
   outside it, a region that no longer holds the root, or a recording that cannot be rewritten (`relocated_rewritable`). A root that was never patchable is
   `UnknownUnit`. `Window::patch_blocker` answers the same question without painting, for an embedder that would build the root for
   nothing. A patch that could not rewrite the recording of a relocatable root makes the recordings of the rows stale for the scroll
@@ -763,7 +763,7 @@ keeps what builds it again.
   that holds it in the last frame built whole, walking up the tree; an element no root of the frame holds (the frame skipped the
   root above it, so it never visited it, or the root is not a patch root) is `Unpatchable::Hover(id)` and the frame is built whole:
   that frame visits the roots, and the hover after it is patched. A root the frame has elsewhere than it was recorded that gpui cannot paint
-  in its region (a mask that differs from the one it recorded under, a culled or direct recording, a scroller of its own in the row) is asked of gpui before it is built
+  in its region (a mask that differs from the one it recorded under, a culled or direct recording, a scroller of its own in the row that the user scrolls or that is scrolled) is asked of gpui before it is built
   (`Window::patch_blocker`), and counted as `Hover:Relocated`. A row a translate moved is not one, and neither is a row a frame built whole
   replayed from a recording made elsewhere (a list or a scroller scrolled since): both keep a unit, and a patch of either paints in its region
   ([Under a wheel](#under-a-wheel-slice-g3e)).
@@ -826,7 +826,7 @@ marks `Replaced` with `derived: true`, which a build at the row's own place does
 - A hover that adds or takes away a primitive (a shadow, a border colour from transparent, a text colour from transparent, a
   background that is more than a colour) is a frame built whole; so is a group, a root that might lift, a size by an intrinsic keyword, a root of more than 64 elements, and a
   row put elsewhere than it was recorded that gpui cannot paint in its region (`Hover:Relocated`: a mask around it that differs from the one it
-  recorded under, a culled or direct recording, a scroller of its own in the row, which every `overflow: hidden` text is; a row a translate moved and a row a whole frame replayed with a delta are patched in their region).
+  recorded under, a culled or direct recording, a scroller of its own in the row that the user scrolls or that is scrolled; an `overflow: hidden` text is a scroller that only code scrolls, and at its offset of zero it is patched; a row a translate moved and a row a whole frame replayed with a delta are patched in their region).
 - A page of at most 64 elements is one root: a patch builds all of it, as a frame built whole does.
 - A patch root that a frame built whole rebuilds builds everything in it.
 - The children of a relocatable row cannot keep their own recordings (`Retained::prepaint_in_scope`), so a rebuilt row builds all its
