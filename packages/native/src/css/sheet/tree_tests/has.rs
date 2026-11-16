@@ -4,7 +4,7 @@
 
 use serde_json::json;
 
-use super::positions::same_as_fresh_in;
+use super::positions::same_as_fresh;
 use super::{counts, Doc, ROOT};
 
 fn red(doc: &Doc, id: u64) -> bool {
@@ -649,7 +649,7 @@ fn random_edits(css: &str, seed: u64) {
                 }
             }
             doc.flush();
-            same_as_fresh_in(&doc, css, &format!("{}, seed {seed:x}, round {round}", css.trim()), false);
+            same_as_fresh(&doc, css, &format!("{}, seed {seed:x}, round {round}", css.trim()));
         }
     }
 }
