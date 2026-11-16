@@ -88,9 +88,11 @@ impl GpuixView {
         self.with_sources(window, self.clock.now(), |sources, _| self.retain.sources_changed(sources))
     }
 
-    /// Turns the classification on unless `GPUIX_SCROLL_PATCH_OFF`, and gives gpui the gate. Once.
+    /// Turns the classification on unless `GPUIX_SCROLL_PATCH_OFF`, and a translate's shift of the list's pixels on unless
+    /// `GPUI_SCROLL_SHIFT_OFF`, and gives gpui the gate. Once.
     pub(super) fn install_scroll_gate(&mut self, window: &mut gpui::Window, view: gpui::WeakEntity<GpuixView>) {
         set_scroll_patch(window, view.entity_id(), std::env::var_os("GPUIX_SCROLL_PATCH_OFF").is_none());
+        window.set_scroll_shift(std::env::var_os("GPUI_SCROLL_SHIFT_OFF").is_none());
         let shown = self.retain.shown.clone();
         let clock_asked = self.retain.clock_asked.clone();
         let tree = self.tree.clone();
