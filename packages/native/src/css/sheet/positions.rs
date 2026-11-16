@@ -13,7 +13,7 @@
 //!
 //! A move is an unlink and a link, so both places are covered by the same two hooks.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
@@ -21,7 +21,7 @@ use super::invalidation::Reach;
 use super::view::count_sibling_work;
 
 /// What the elements of a range are marked with.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum RangeMarks {
     /// What the counting pseudo-classes read on the side of the range, for every element sibling.
     Counting,
@@ -30,12 +30,17 @@ enum RangeMarks {
 }
 
 /// The children of `parent` from `anchor`, from it (when `inclusive`) to the end of the list when
-/// `after`, or to the start when not, as the list stands at the flush. An element that stays on
-/// its side of the anchor between the note and the flush is covered, and one that moves has
-/// marked itself, which is what makes the final positions enough. An anchor that is no longer a
-/// child of `parent` (it moved or is gone, and may have been what told the siblings apart) leaves
-/// the whole list, as does none.
-#[derive(Clone, Copy)]
+/// `after`, or to the start when not, as the list stands at the flush. An anchor that is no longer
+/// a child of `parent` (it moved or is gone, and may have been what told the siblings apart)
+/// leaves the whole list, as does none.
+///
+/// What an element that moves between the note and the flush does to the run depends on the kind.
+/// A `Counting` run needs nothing: the element that moves has marked itself, so the siblings on
+/// its side of the anchor that stay are covered by the final positions. An `Anchors` run is
+/// filtered by what an element holds, so an element that moves without the features of the
+/// subject noted nothing, and one the run is keyed on takes the run's end with it: the anchor
+/// leaving widens the run to the whole list ([`PendingRanges::anchor_leaving`]).
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct SiblingRange {
     parent: u64,
     anchor: Option<u64>,
@@ -58,13 +63,58 @@ impl SiblingRange {
     pub(super) fn anchors_among_children(parent: u64, reach: Reach) -> SiblingRange {
         SiblingRange { parent, anchor: None, inclusive: true, after: true, marks: RangeMarks::Anchors(reach) }
     }
+}
 
-    fn same_as(&self, other: &SiblingRange) -> bool {
-        self.parent == other.parent
-            && self.anchor == other.anchor
-            && self.inclusive == other.inclusive
-            && self.after == other.after
-            && self.marks == other.marks
+/// The ranges noted since the last flush, each once.
+#[derive(Default)]
+pub(crate) struct PendingRanges {
+    list: Vec<SiblingRange>,
+    seen: FxHashSet<SiblingRange>,
+    /// The elements an `Anchors` range is keyed on.
+    anchored_on: FxHashSet<u64>,
+}
+
+impl PendingRanges {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.list.is_empty()
+    }
+
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.list.len()
+    }
+
+    pub(super) fn note(&mut self, range: SiblingRange) {
+        if !self.seen.insert(range) {
+            return;
+        }
+        if let (RangeMarks::Anchors(_), Some(anchor)) = (range.marks, range.anchor) {
+            self.anchored_on.insert(anchor);
+        }
+        self.list.push(range);
+    }
+
+    pub(super) fn take(&mut self) -> Vec<SiblingRange> {
+        self.seen.clear();
+        self.anchored_on.clear();
+        std::mem::take(&mut self.list)
+    }
+
+    /// `child` is about to leave its place: an `Anchors` range keyed on it would be resolved
+    /// against where it is at the flush, which can be before the siblings it was noted for.
+    pub(super) fn anchor_leaving(&mut self, child: u64) {
+        if !self.anchored_on.remove(&child) {
+            return;
+        }
+        for at in 0..self.list.len() {
+            let range = self.list[at];
+            if range.anchor != Some(child) || !matches!(range.marks, RangeMarks::Anchors(_)) {
+                continue;
+            }
+            let widened = SiblingRange { anchor: None, inclusive: true, ..range };
+            self.list[at] = widened;
+            self.seen.insert(widened);
+        }
     }
 }
 
@@ -101,10 +151,7 @@ impl RetainedTree {
     }
 
     pub(super) fn note_range(&mut self, range: SiblingRange) {
-        if self.sheets.ranges.last().is_some_and(|last| last.same_as(&range)) {
-            return;
-        }
-        self.sheets.ranges.push(range);
+        self.sheets.ranges.note(range);
     }
 
     /// Before `child` leaves `parent_id`: what stays is marked as it will be without it.

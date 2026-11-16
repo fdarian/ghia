@@ -20,7 +20,7 @@ use super::index::RuleIndex;
 use super::invalidation::Reach;
 use super::layers::Layers;
 use super::parse_cache::{ParseCache, ParsedRule};
-use super::positions::SiblingRange;
+use super::positions::PendingRanges;
 use super::reload::Reload;
 use super::states::LoggedFolds;
 use super::validate::Validator;
@@ -58,7 +58,7 @@ pub struct StyleSheets {
     /// Elements to match again, each with the places around it a change reaches.
     pub(crate) pending: Vec<(u64, Reach)>,
     /// Runs of siblings the structural pseudo-classes read, which the flush turns into marks.
-    pub(crate) ranges: Vec<SiblingRange>,
+    pub(crate) ranges: PendingRanges,
     pub(crate) atoms: Atoms,
     pub(crate) style: Atom,
     /// Every `<style>` element, connected or not.
@@ -97,7 +97,7 @@ impl Default for StyleSheets {
             sources_dirty: false,
             mark_all: false,
             pending: Vec::new(),
-            ranges: Vec::new(),
+            ranges: PendingRanges::default(),
             atoms,
             style,
             style_elements: FxHashSet::default(),

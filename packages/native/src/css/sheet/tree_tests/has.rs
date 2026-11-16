@@ -542,6 +542,94 @@ fn a_root_anchor_is_the_root_alone() {
     assert!(red(&doc, ROOT) && faded(&doc, host));
 }
 
+fn padded(doc: &Doc, id: u64) -> bool {
+    doc.style(id).is_some_and(|style| style.padding_top.is_some())
+}
+
+#[test]
+fn a_sibling_that_moves_earlier_in_the_batch_that_changed_it_leaves_no_anchor_stale() {
+    let css = ".row:has(~ .done) { padding-top: 1px }";
+
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, css);
+    let host = doc.element("div", ROOT);
+    let row = doc.classed("div", host, "row");
+    let done = doc.classed("div", host, "done");
+    doc.flush();
+    assert!(padded(&doc, row));
+    doc.tree.set_attribute(done, "class", None);
+    doc.tree.insert_before(host, done, row);
+    doc.flush();
+    assert!(!padded(&doc, row), "the sibling lost its class and went before the anchor");
+    same_as_fresh(&doc, css, "class removed, then moved before");
+
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, css);
+    let host = doc.element("div", ROOT);
+    let row = doc.classed("div", host, "row");
+    let done = doc.classed("div", host, "done");
+    let next = doc.element("div", host);
+    doc.flush();
+    assert!(padded(&doc, row));
+    doc.tree.destroy_element(done);
+    doc.tree.insert_before(host, next, row);
+    doc.flush();
+    assert!(!padded(&doc, row), "the sibling is gone and the one the run was noted against went before");
+    same_as_fresh(&doc, css, "destroyed, then the next moved before");
+
+    let css = ".row:has(~ div .a) { padding-top: 1px }";
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, css);
+    let host = doc.element("div", ROOT);
+    let row = doc.classed("div", host, "row");
+    let inner = doc.element("div", host);
+    let a = doc.classed("i", inner, "a");
+    doc.flush();
+    assert!(padded(&doc, row));
+    doc.tree.destroy_element(a);
+    doc.tree.insert_before(host, inner, row);
+    doc.flush();
+    assert!(!padded(&doc, row), "what the argument found below an ancestor is gone and the ancestor went before");
+    same_as_fresh(&doc, css, "descendant destroyed, then its ancestor moved before");
+}
+
+#[test]
+fn a_subtree_built_bottom_up_apart_is_walked_once_when_it_comes_in() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".row:has(.done) { top: 1px }");
+    let host = doc.element("div", ROOT);
+    doc.flush();
+    let n = 1000;
+    reset_steps();
+    let mut top = doc.make("div");
+    for _ in 0..n {
+        let parent = doc.make("div");
+        doc.tree.append_child(parent, top);
+        top = parent;
+    }
+    assert_eq!(steps(), 0, "nothing is read while the subtree is out of the document");
+    doc.tree.append_child(host, top);
+    assert!(steps() <= n + 2, "one walk when it comes in: {}", steps());
+    doc.flush();
+    same_as_fresh(&doc, ".row:has(.done) { top: 1px }", "built apart");
+}
+
+#[test]
+fn a_list_built_in_one_batch_notes_a_run_for_each_parent_and_not_for_each_row() {
+    let css = "li:has(+ :nth-child(3)) { top: 1px }";
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, css);
+    let list = doc.element("ul", ROOT);
+    doc.flush();
+    let n = 1000;
+    for _ in 0..n {
+        doc.element("li", list);
+    }
+    assert!(doc.tree.sheets.ranges.len() <= 4, "runs: {}", doc.tree.sheets.ranges.len());
+    doc.flush();
+    same_as_fresh(&doc, css, "one batch");
+}
+
 #[test]
 fn building_a_list_a_row_at_a_time_under_a_sibling_search_costs_work_in_proportion_to_its_length() {
     let mut doc = Doc::new();

@@ -130,8 +130,9 @@ impl RetainedTree {
             }
         }
         if self.sheets.atoms_fresh {
+            self.sheets.ranges.anchor_leaving(child);
             self.positions_unlinking(child, parent_id);
-            self.has_structure_changed(child, Presence::Leaving);
+            self.has_structure_changed(child, parent_id, Presence::Leaving);
         }
     }
 
@@ -147,7 +148,7 @@ impl RetainedTree {
         }
         if let Some(parent) = parent.filter(|_| self.sheets.atoms_fresh) {
             self.positions_linked(child, parent);
-            self.has_structure_changed(child, Presence::Appended);
+            self.has_structure_changed(child, parent, Presence::Appended);
         }
     }
 
@@ -288,7 +289,7 @@ impl RetainedTree {
     // The tree.
 
     /// Whether `id` is `root_id` or below it.
-    fn is_connected(&self, id: u64) -> bool {
+    pub(super) fn is_connected(&self, id: u64) -> bool {
         let Some(root) = self.root_id else {
             return false;
         };
@@ -527,7 +528,7 @@ impl RetainedTree {
             self.sheets.mark_all = true;
         }
         let mut marks = std::mem::take(&mut self.sheets.pending);
-        let ranges = std::mem::take(&mut self.sheets.ranges);
+        let ranges = self.sheets.ranges.take();
         marks.extend(self.range_marks(&ranges));
         let all = std::mem::take(&mut self.sheets.mark_all);
         let restyle = self.restyle_set(&marks, all);

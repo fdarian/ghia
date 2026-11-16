@@ -36,7 +36,8 @@ use super::view::count_sibling_work;
 #[cfg(test)]
 thread_local! {
     /// Searches the matcher ran (not the ones a remembered answer saved), and elements it tried
-    /// a compound on, which the tests read to check that an answer is worked out once.
+    /// a compound on or a structure read walked, which the tests read to check that an answer is
+    /// worked out once.
     pub(super) static SEARCHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     pub(super) static STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
@@ -688,9 +689,12 @@ impl RetainedTree {
 
     /// `child` comes into or goes out of its parent: the anchors that can have, or have had, what
     /// an argument reads in it, and the ones that read a position it changes.
-    pub(super) fn has_structure_changed(&mut self, child: u64, presence: Presence) {
+    pub(super) fn has_structure_changed(&mut self, child: u64, parent: u64, presence: Presence) {
         let has = &self.sheets.index.invalidation.has;
-        if !has.used {
+        // A subtree outside the document is matched when it comes in, with everything below it
+        // marked, so what a child does to the anchors around it there is not read: a tree built
+        // bottom-up apart would otherwise be walked at every level.
+        if !has.used || !self.is_connected(parent) {
             return;
         }
         let matchable = self.is_matchable_id(child);
@@ -716,6 +720,7 @@ impl RetainedTree {
             let Some(element) = self.elements.get(&id).filter(|element| element.is_matchable()) else {
                 continue;
             };
+            count_step();
             wanted.retain(|filter| {
                 let holds = filter.features.reach(&self.sheets, element);
                 if holds {
@@ -730,7 +735,9 @@ impl RetainedTree {
 
     /// A text node's text became empty or stopped being.
     pub(super) fn has_text_emptiness_changed(&mut self, text: u64) {
-        self.mark_positional_anchors(text, true);
+        if self.is_connected(text) {
+            self.mark_positional_anchors(text, true);
+        }
     }
 
     /// The anchors of a position read that `changed` changes: the ancestors, and the siblings of
