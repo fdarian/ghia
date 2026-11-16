@@ -31,7 +31,8 @@ const X = 100
 const Y = 50
 const TIMEOUT = 120_000
 
-type Rows = "paint" | "heard"
+/** `ellipsis`: each row holds a line of text that an `overflow: hidden` box cuts with an ellipsis, a scroller that only code scrolls. */
+type Rows = "paint" | "heard" | "ellipsis"
 
 /** `salt`: another tree for the same page, so that a frame drawn after a wheel is an edit, and the rows are replayed where it puts them. */
 function Page({ rows, salt }: { rows: Rows; salt?: number }) {
@@ -55,7 +56,14 @@ function Page({ rows, salt }: { rows: Rows; salt?: number }) {
           }}
           {...(rows === "heard" ? { onPointerEnter: () => {} } : {})}
         >
-          <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
+          {rows === "ellipsis" ? (
+            <div
+              testId={`text-${index}`}
+              style={{ color: "#ffffff", width: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            >{`row-${index} a line of text that is wider than its box`}</div>
+          ) : (
+            <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
+          )}
         </div>
       ))}
     </virtual-list>
@@ -395,8 +403,27 @@ describeNative("a row a frame built whole put elsewhere than it recorded it", { 
     [true, 40],
   ]
 
-  function walk(verify: boolean) {
-    const { renderer, unmount, render, list } = open("paint", 0)
+  /** `scrollTop`, `scrollHeight` and the rest of the hidden box of each row in the frame, which the same box reads as in every step. */
+  function readHidden(renderer, seen: Map<number, number[]>, context: string) {
+    let read = 0
+    for (let row = 0; row < COUNT; row += 1) {
+      const found = renderer.findByTestId(`text-${row}`)
+      if (!found) continue
+      const box = renderer.getElementBounds(found.id)
+      if (!box) continue
+      const metrics = [...renderer.getScrollMetrics(found.id)!]
+      read += 1
+      expect(metrics[1], `${context}: scrollTop of row ${row}`).toBe(0)
+      expect(metrics[4], `${context}: clientWidth of row ${row}`).toBe(80)
+      const before = seen.get(row)
+      if (before) expect(metrics, `${context}: the box of row ${row} reads as it did`).toEqual(before)
+      seen.set(row, metrics)
+    }
+    expect(read, `${context}: boxes read`).toBeGreaterThan(1)
+  }
+
+  function walk(verify: boolean, rows: Rows = "paint") {
+    const { renderer, unmount, render, list } = open(rows, 0)
     try {
       renderer.scrollTo(list, 0, 200)
       rebuild(renderer)
@@ -405,6 +432,7 @@ describeNative("a row a frame built whole put elsewhere than it recorded it", { 
       let salt = 0
       const before = { patched: renderer.getPatchCounters().patchedFrames, relocated: declined(renderer), scroll: scroll(renderer), painted: renderer.getPaintedFrameCount() }
       let whole = 0
+      const seenMetrics = new Map<number, number[]>()
       for (const [index, [translate, by]] of STEPS_MOVED.entries()) {
         // Under the verifier a frame that replays rows is shown as its build: the rows are built again before each step.
         if (verify) rebuild(renderer)
@@ -414,7 +442,7 @@ describeNative("a row a frame built whole put elsewhere than it recorded it", { 
           // An edit in the draw of the wheel holds the translate: the frame is built whole and replays the rows where the wheel puts them.
           renderer.dispatchScrollWheel(X, Y, 0, by)
           salt += 1
-          render(<Page rows="paint" salt={salt} />)
+          render(<Page rows={rows} salt={salt} />)
           renderer.flush()
           renderer.drawFrame()
           renderer.drawFrame()
@@ -423,11 +451,18 @@ describeNative("a row a frame built whole put elsewhere than it recorded it", { 
         expect(renderer.getRetentionMismatches().join("\n"), `step ${index}`).toBe("")
         // The hover follows the wheel when the scroll ends, and an edit in the draw of the wheel is a change to the page.
         end(renderer)
-        expectPicture(renderer, `moved-${verify}-${index}`)
+        expectPicture(renderer, `moved-${verify}-${rows}-${index}`)
+        if (rows === "ellipsis") readHidden(renderer, seenMetrics, `step ${index}`)
       }
       const after = renderer.getPatchCounters()
       expect(declined(renderer) - before.relocated, "no hover is declined as relocated").toBe(0)
-      return { patched: after.patchedFrames - before.patched, translates: after.scrollPatch.patched - before.scroll.patched, whole, painted: renderer.getPaintedFrameCount() - before.painted }
+      const result = { patched: after.patchedFrames - before.patched, translates: after.scrollPatch.patched - before.scroll.patched, whole, painted: renderer.getPaintedFrameCount() - before.painted }
+      if (rows === "ellipsis") {
+        // A frame built whole builds every box again: what it reads of the boxes the patches painted is what the patches left.
+        rebuild(renderer)
+        readHidden(renderer, seenMetrics, "after a build")
+      }
+      return result
     } finally {
       unmount()
     }
@@ -442,6 +477,17 @@ describeNative("a row a frame built whole put elsewhere than it recorded it", { 
 
   it("is what a build gives under the retention verifier", () => {
     walk(true)
+  })
+
+  unverified("holding an overflow: hidden box is patched too, as the box is a scroller only code scrolls", () => {
+    const run = walk(false, "ellipsis")
+    expect(run.patched, "every crossing is a patch").toBeGreaterThanOrEqual(STEPS_MOVED.length)
+    expect(run.translates, "the wheels no edit holds are translates").toBe(STEPS_MOVED.filter(([translate]) => translate).length)
+    expect(run.painted, "the frames built whole are the wheels with an edit").toBe(run.whole)
+  })
+
+  it("holding an overflow: hidden box is what a build gives under the retention verifier", () => {
+    walk(true, "ellipsis")
   })
 })
 
