@@ -3261,7 +3261,17 @@ impl Retain {
         // A box root that a scroller moved is recorded where it is built, as `skippable` takes the record of one: the
         // frame after a patch of a row builds it (the record the patch kept is of the build before the edit), and it has
         // to be a recorded root again for the next edit of the row to be a patch.
-        let moved = node.moved && !(box_root && (candidate || self.relocates(node, self.records.get(&node.id))));
+        let lifts_out = node.lifts_out(own);
+        // Any root that a scroller moved is recorded where it is built when `skippable` would move that recording, as
+        // it moves the one a frame that moved nothing leaves: the frame after is a replay, not a build late in prepaint
+        // to make the recording this one did not ask for. What gpui cannot move (a box too big for a root, a lift out
+        // of the root, a stretch that does not plan on moves) is built and left unrecorded, since nothing would use it.
+        let moves_with_scroller = !self.relocation.resting
+            && !lifts_out
+            && node.scroller.is_some_and(|scroller| scroller.fits(node.id) != Some(false));
+        let moved = node.moved
+            && !moves_with_scroller
+            && !(box_root && (candidate || self.relocates(node, self.records.get(&node.id))));
         if !(node.records || candidate) || node.absent || moved || own.dynamic || node.vol.dynamic != 0 {
             return None;
         }
@@ -3278,7 +3288,6 @@ impl Retain {
         if node.scroller.is_some_and(|scroller| scroller.too_big(node.id)) {
             return None;
         }
-        let lifts_out = node.lifts_out(own);
         let lifts = node.lift_z.is_some() || lifts_out;
         let overscan = node
             .scroller

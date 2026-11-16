@@ -17,8 +17,10 @@ const ROW_HEIGHT = 40
 const VIEW = { width: 300, height: 240 }
 const TAG = { left: 120, top: 6, width: 50, height: 10 }
 const RED = [255, 0, 0, 255]
+const EDITED = "#00aa00"
+const GREEN = [0, 170, 0, 255]
 
-function Rows(props: { clicks: number[] }) {
+function Rows(props: { clicks: number[]; edited?: number }) {
   return (
     <div testId="scroller" style={{ ...VIEW, overflow: "auto" }}>
       <div testId="container" style={{ position: "relative", width: "100%", height: ROWS * ROW_HEIGHT }}>
@@ -33,7 +35,7 @@ function Rows(props: { clicks: number[] }) {
               width: "100%",
               height: ROW_HEIGHT,
               transform: `translateY(${index * ROW_HEIGHT}px)`,
-              backgroundColor: index % 2 === 0 ? "#223344" : "#334455",
+              backgroundColor: index === props.edited ? EDITED : index % 2 === 0 ? "#223344" : "#334455",
             }}
           >
             <div style={{ fontSize: 14, color: "#ffffff" }}>{`Row ${index}`}</div>
@@ -56,13 +58,13 @@ function Rows(props: { clicks: number[] }) {
   )
 }
 
-function setup(verify: boolean) {
+function setup(verify: boolean, edited?: number) {
   const clicks: number[] = []
   const root = createTestRoot(VIEW)
   const renderer = root.renderer
   renderer.setRetainPlanning(true)
   renderer.setRetainVerify(verify)
-  root.render(<Rows clicks={clicks} />)
+  root.render(<Rows clicks={clicks} edited={edited} />)
   for (let frame = 0; frame < 5; frame++) renderer.flush()
   const scroller = renderer.findByTestId("scroller")!
   const id = (testId: string) => renderer.findByTestId(testId)!.id
@@ -76,7 +78,8 @@ function setup(verify: boolean) {
     renderer.scrollTo(scroller.id, 0, top, "instant")
     renderer.flush()
   }
-  return { ...root, clicks, id, sample, scrollTo, counters: () => renderer.getRetainedCounters() }
+  const rerender = (next?: number) => root.render(<Rows clicks={clicks} edited={next} />)
+  return { ...root, clicks, id, sample, scrollTo, rerender, counters: () => renderer.getRetainedCounters() }
 }
 
 /** The rows with a tag in the viewport at `scrolled`, and where the tag is. */
@@ -121,6 +124,39 @@ describeNative("rows that are positioned, moved by a transform and hold a positi
       // keeping what lifts in it 9960. The verifier shows the build of a frame that replays, which keeps what was
       // recorded where it was, so only a run without it counts the moves.
       if (!verify) expect(after.relocations - before.relocations).toBeGreaterThan(5000)
+    } finally {
+      unmount()
+    }
+  }, 60_000)
+})
+
+describeNative("a row built in the frame that its scroller scrolled", () => {
+  // A row that a wheel tick moves and an edit changes is built by that frame, where the scroller has put it. The frame
+  // is recorded as any other build is, so the frame after puts that recording where the next tick moves it: the row is
+  // not built a second time, late, to make the recording the first build did not.
+  it.each([true, false])("is replayed by the frame after, with the verifier %s", (verify) => {
+    const { renderer, id, sample, rerender, counters, unmount } = setup(verify)
+    try {
+      const row = 3
+      const rowY = (scrolled: number) => row * ROW_HEIGHT - scrolled
+      rerender(row)
+      renderer.dispatchScrollWheel(150, 100, 0, 4)
+      renderer.flush()
+      const built = counters()
+      expect(renderer.getElementBounds(id(`row-${row}`)), "the wheel moved the row").toMatchObject({ y: rowY(4) })
+      expect(sample("edited-built", 10, rowY(4) + 20), "the frame that scrolled and edited shows the edit").toEqual(GREEN)
+
+      renderer.dispatchScrollWheel(150, 100, 0, 6)
+      renderer.flush()
+      const next = counters()
+      expect(renderer.getElementBounds(id(`row-${row}`))).toMatchObject({ y: rowY(10) })
+      expect(sample("edited-moved", 10, rowY(10) + 20), "the frame after shows it where the wheel put it").toEqual(GREEN)
+      expect(sample("edited-tag", TAG.left + 5, rowY(10) + TAG.top + 5)).toEqual(RED)
+      expect(next.mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
+      if (!verify) {
+        expect(next.lazyBuilds - built.lazyBuilds, "no row is built late to be recorded").toBe(0)
+        expect(next.relocations, "the recording of the edited row is moved").toBeGreaterThan(built.relocations)
+      }
     } finally {
       unmount()
     }
