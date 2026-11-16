@@ -530,6 +530,18 @@ fn hostile_nesting_is_cut_off_instead_of_overflowing_the_stack() {
 }
 
 #[test]
+fn a_state_the_parent_brings_into_has_drops_the_rule() {
+    let sheet = Doc::new().parse(
+        ".item:hover { top: 1px; .list:has(> &) { top: 2px } .list:has(:is(&, .x)) { top: 3px } }
+         .a:focus-within, .b { .c:has(> &) { top: 5px } }
+         .p { .q:has(> &) { top: 6px } }",
+    );
+    let tops: Vec<_> = sheet.rules.iter().map(|rule| pairs(&rule.normal)[0].1.to_owned()).collect();
+    assert_eq!(tops, [r#""1px""#, r#""6px""#]);
+    assert_eq!(sheet.unsupported, [".list:has(> &)", ".list:has(:is(&, .x))", ".c:has(> &)"]);
+}
+
+#[test]
 fn an_invalid_nested_selector_drops_only_that_rule() {
     let sheet = Doc::new().parse("a { top: 1px; &:invalid { top: 2px } b { top: 3px } }");
     let tops: Vec<_> = sheet.rules.iter().map(|rule| pairs(&rule.normal)[0].1.to_owned()).collect();
@@ -881,16 +893,16 @@ fn has_is_not_forgiving_and_does_not_nest() {
         ":has(:has(a))", ":has(> :has(a))", ":has(a :has(b))", ":has(:not(a:has(b)))", ":not(:has(:has(a)))",
         ":has(a:hover)", ":has(:active)", ":has(:focus)", ":has(:focus-visible)", ":has(:focus-within)",
         ":has(.a:not(:hover))", ".a:has(b:hover)",
+        // A state is invalid anywhere inside `:has()`, also where a forgiving `:is()` would drop it.
+        ":has(:is(a:hover))", ":has(:where(a:focus))", ":has(:is(a:hover, span))", ":has(:is(:is(a:focus-within), b))",
     ] {
         assert!(!is_valid(selector), "{selector}");
     }
     assert!(is_valid(":is(a, :bogus)"), ":is() forgives, :has() does not");
     // A `:is()` forgives the argument that is invalid in it, so what is left of it matches nothing.
-    for selector in [":has(:is(:has(a)))", ":has(:is(a:hover))", ":has(:where(a:focus))"] {
-        assert!(is_valid(selector), "{selector}");
-        assert_eq!(selected(selector), Vec::<usize>::new(), "{selector}");
-    }
-    assert_eq!(selected(":has(:is(a:hover, span))"), [HTML, BODY, MAIN]);
+    assert!(is_valid(":has(:is(:has(a)))"));
+    assert_eq!(selected(":has(:is(:has(a)))"), Vec::<usize>::new());
+    assert!(is_valid(":is(.a, :has(b:hover))"), "an argument of an outer :is() is forgiven as a whole");
 }
 
 #[test]

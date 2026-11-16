@@ -35,7 +35,7 @@ pub(super) fn parse_selector_list(
     atoms: &mut Atoms,
     nesting: Nesting,
 ) -> Result<Vec<(ComplexSelector, Specificity)>, InvalidSelector> {
-    let mut parser = Parser { src, atoms, nesting, saw_nesting: false, depth: 0, in_has: false };
+    let mut parser = Parser { src, atoms, nesting, saw_nesting: false, depth: 0, in_has: false, state_in_has: false };
     let relative = matches!(nesting, Nesting::Parent(_));
     let list = parser.list(tokens, false, relative, true)?;
     if list.is_empty() {
@@ -60,6 +60,9 @@ struct Parser<'a, 'n> {
     /// the states of the pointer and the focus are not read (they compile into the style block of
     /// the subject, which an element inside the argument is not).
     in_has: bool,
+    /// Whether a state was met inside the `:has(` being parsed, written there or brought in by `&`.
+    /// A forgiving `:is()` drops the argument that holds it, so the `:has(` checks this when it ends.
+    state_in_has: bool,
 }
 
 fn combinator_of(kind: &Kind) -> Option<Combinator> {
@@ -223,7 +226,13 @@ impl Parser<'_, '_> {
                     self.saw_nesting = true;
                     simples.push(match self.nesting {
                         Nesting::Top => Simple::Root,
-                        Nesting::Parent(parent) => Simple::Is(parent.clone()),
+                        Nesting::Parent(parent) => {
+                            if self.in_has && parent.iter().any(|selector| selector.condition.is_some()) {
+                                self.state_in_has = true;
+                                return Err(InvalidSelector);
+                            }
+                            Simple::Is(parent.clone())
+                        }
                     });
                 }
                 Kind::Delim('.') => match tokens.get(*index + 1).map(|next| &next.kind) {
@@ -287,7 +296,10 @@ impl Parser<'_, '_> {
                 match name.as_str() {
                     "root" => Ok(Simple::Root),
                     "host" => Ok(Simple::Host),
-                    "hover" | "active" | "focus" | "focus-visible" | "focus-within" if self.in_has => Err(InvalidSelector),
+                    "hover" | "active" | "focus" | "focus-visible" | "focus-within" if self.in_has => {
+                        self.state_in_has = true;
+                        Err(InvalidSelector)
+                    }
                     "hover" => Ok(Simple::State(State::Hover)),
                     "active" => Ok(Simple::State(State::Active)),
                     "focus" => Ok(Simple::State(State::Focus)),
@@ -347,8 +359,12 @@ impl Parser<'_, '_> {
                     return Err(InvalidSelector);
                 }
                 self.in_has = true;
+                self.state_in_has = false;
                 let relatives = self.relative_list(arguments);
                 self.in_has = false;
+                if std::mem::take(&mut self.state_in_has) {
+                    return Err(InvalidSelector);
+                }
                 Ok(Simple::Has(HasArguments::new(relatives?)))
             }
             _ => unreachable!("the caller passed only is, where, not and has"),
