@@ -2807,7 +2807,14 @@ impl Retain {
         let covered = |id: u64| !relaid.is_empty() && self.relayout_holding(sources.tree, id).is_some_and(|holder| relaid.contains(&holder));
         for &id in &sources.hover_paint {
             if !covered(id) {
-                touched.insert(self.root_holding(sources.tree, id).ok_or(Unpatchable::Hover(id))?);
+                match self.root_holding(sources.tree, id) {
+                    Some(root) => {
+                        touched.insert(root);
+                    }
+                    // The hover follows a scroll late, so the element it leaves is often a row the scroll took out of the frame.
+                    None if self.in_row_out_of_frame(sources.tree, id) => {}
+                    None => return Err(Unpatchable::Hover(id)),
+                }
             }
         }
         for id in sources.tree.pending_restyles_in_frame() {
@@ -7194,6 +7201,31 @@ mod tests {
 
         page.retain.forget_left_rows(&[3], &page.tree);
         assert_eq!(page.preview(&[], false), Ok(vec![]), "a row that left the frame is not one that is built");
+    }
+
+    #[test]
+    fn a_hover_that_leaves_a_row_the_frame_does_not_hold_needs_no_unit_and_one_in_a_row_it_holds_with_no_root_is_a_frame_built_whole() {
+        let mut page = Units::new();
+        page.tree = tree_of(&[
+            (1, None, "div", None),
+            (2, Some(1), "virtual-list", None),
+            (3, Some(2), "div", None),
+            (4, Some(2), "div", None),
+            (6, Some(3), "div", None),
+            (7, Some(4), "div", None),
+        ]);
+        let shape = page.list_frame(false);
+        // The list builds the row 3 and not the row 4: a scroll took it out, and the hover that follows it leaves it late.
+        page.row(shape, 3, |page| page.leaf(6));
+        let env = crate::renderer::FrameEnv::for_test(page.inherited.clone(), EnterKey(Key::default()), web_time::Instant::now());
+        page.retain.add_patch_root(Unit { id: 3, env });
+
+        page.hover_paint = vec![7, 6];
+        assert_eq!(page.preview(&[], false), Ok(vec![3]), "the row that is not built has nothing to repaint; the one built is repainted");
+
+        page.retain.plan.patch_root_ids.clear();
+        page.retain.plan.patch_roots = Default::default();
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Hover(6)), "a row that is built and no root holds is a frame built whole");
     }
 
     fn restyled(json: &str) -> Arc<crate::style::StyleDesc> {

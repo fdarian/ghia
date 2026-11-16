@@ -444,3 +444,35 @@ describeNative("a row a frame built whole put elsewhere than it recorded it", { 
     walk(true)
   })
 })
+
+describeNative("a hover that follows a build leaves a row the scrolls took out of the frame", { timeout: TIMEOUT }, () => {
+  const declined = (renderer) => JSON.parse(renderer.getPatchCounters().unpatchable).Hover ?? 0
+
+  unverified("is a patch of the row it enters, as the row it left has nothing to repaint", () => {
+    const { renderer, unmount, render, list } = open("paint", 0)
+    try {
+      renderer.scrollTo(list, 0, 200)
+      rebuild(renderer)
+      renderer.setInlineDraws(false)
+      const first = rowUnder(renderer)
+      // The wheels leave the hover on the row it was on, and carry that row out of the frame: the viewport shows 100 of the 40 high rows.
+      for (let tick = 0; tick < 6; tick += 1) wheel(renderer, 40)
+      expect(rowUnder(renderer), "the rows moved under the pointer").toBe(first + 6)
+      expect(renderer.getPatchCounters().scrollPatch.patched, "by translates").toBeGreaterThanOrEqual(6)
+      const before = { patched: renderer.getPatchCounters().patchedFrames, declined: declined(renderer), painted: renderer.getPaintedFrameCount() }
+      // A commit is a build that changed the page: the hover follows it, from the row that left to the one under the pointer.
+      render(<Page rows="paint" salt={1} />)
+      renderer.flush()
+      for (let frame = 0; frame < 3; frame += 1) {
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+      }
+      expect(rowColours(renderer, "after-commit").get(first + 6), "the hover moved").toBe(HOVER)
+      expect(declined(renderer) - before.declined, "no hover is declined for the row that left").toBe(0)
+      expect(renderer.getPatchCounters().patchedFrames - before.patched, "the hover is painted by a patch").toBe(1)
+      expect(renderer.getPaintedFrameCount() - before.painted, "the commit's frame is the only one built whole").toBe(1)
+    } finally {
+      unmount()
+    }
+  })
+})
