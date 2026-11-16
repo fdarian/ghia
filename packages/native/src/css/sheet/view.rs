@@ -11,6 +11,7 @@ use super::atoms::{Atom, Atoms};
 use super::document::StyleSheets;
 use super::matching::{AttrValue, ElementView, SiblingTest};
 use super::selector::AttrName;
+use super::tree_states::TreeState;
 
 // Children scanned and siblings stepped over by the matcher, which the tests read to check that
 // sibling combinators cost work in proportion to the siblings and not their square.
@@ -338,8 +339,8 @@ impl ElementView for TreeView<'_> {
         self.tree.root_id == Some(self.id)
     }
 
-    fn is_popover_open(&self) -> bool {
-        crate::html::popover::is_open(self.element())
+    fn tree_state(&self, state: TreeState) -> bool {
+        super::tree_states::read(self.tree, self.id, self.element(), state)
     }
 
     fn child_index(&self, of_type: bool, from_end: bool) -> Option<u32> {

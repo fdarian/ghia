@@ -18,6 +18,7 @@ use super::document::ClassAtoms;
 use super::cascade::MatchedRules;
 use super::invalidation::Reach;
 use super::share::{Found, StyleSharing};
+use super::tree_states::TreeStates;
 use super::view::{count_sibling_work, SiblingPositions, TreeView};
 
 #[cfg(test)]
@@ -169,10 +170,10 @@ impl RetainedTree {
         }
     }
 
-    /// An element became or stopped being a popover, or `showPopover()` or `hidePopover()` ran on
-    /// it: only a `:popover-open` selector can tell.
-    pub(crate) fn sheets_popover_changed(&mut self, id: u64) {
-        let reach = self.sheets.index.invalidation.popover_open;
+    /// A prop or a checkedness changed what the element is in `changed`: only a selector that
+    /// reads one of those states can tell.
+    pub(crate) fn sheets_tree_state_changed(&mut self, id: u64, changed: TreeStates) {
+        let reach = self.sheets.index.invalidation.tree_states.of(changed);
         if self.sheets.atoms_fresh && !reach.is_empty() {
             self.sheets.mark(id, reach);
         }

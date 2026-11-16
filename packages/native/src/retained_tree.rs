@@ -2049,6 +2049,8 @@ impl RetainedTree {
         let affects_focusability = key == "tabIndex" || key == "disabled" || key == "href" || key == "type";
         let is_inert = key == "inert";
         let is_popover = crate::html::popover::is_popover_prop(&key);
+        let changed_states =
+            if is_popover { crate::css::sheet::TreeStates::POPOVER_OPEN } else { crate::css::sheet::TreeStates::changed_by_prop(&key) };
         let relation_key = RelationRegistry::reads(&key).then(|| key.clone());
         let mut previous_relation = None;
         let is_form_control = key == FORM_CONTROL_PROP;
@@ -2153,8 +2155,10 @@ impl RetainedTree {
             self.inert_count = self.inert_count + usize::from(now_inert) - usize::from(was_inert);
             self.track_focusable_subtree(id);
         }
+        if !changed_states.is_empty() {
+            self.sheets_tree_state_changed(id, changed_states);
+        }
         if is_popover {
-            self.sheets_popover_changed(id);
             let change = self.refresh_effective_style(id, false);
             self.settle_style_change(id, change);
         }

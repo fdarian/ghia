@@ -12,6 +12,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::atoms::Atom;
 use super::nth::Position;
 use super::selector::{Combinator, ComplexSelector, Simple};
+use super::tree_states::TreeStateReach;
 
 /// A set of places relative to an element: it, its children, everything below it, and the same
 /// for its next sibling and for all its following siblings. Nine bits, `sibling * 3 + depth`.
@@ -174,8 +175,9 @@ pub struct Invalidation {
     /// What an element appearing or disappearing among its siblings can reach: the places
     /// that sibling combinators look at it from.
     pub structure: Reach,
-    /// Where `:popover-open` is read: an element opening or closing as a popover marks these.
-    pub popover_open: Reach,
+    /// Where each tree state (`:popover-open`, `:disabled`, `:checked`...) is read: a change of
+    /// the state of an element marks these.
+    pub tree_states: TreeStateReach,
     pub positional: Positional,
     /// The `&` lists already read, with what the chain they were read through does to a reach
     /// (`Reach::image`). A nested rule shares its parent's list, so without this each level would
@@ -222,7 +224,7 @@ impl Invalidation {
                             self.read_through(inner, &chain);
                         }
                     }
-                    Simple::PopoverOpen => self.popover_open |= reach,
+                    Simple::TreeState(state) => self.tree_states.read(*state, reach),
                     Simple::Position(position) => self.positional.read(*position, reach),
                     Simple::Tag(_) | Simple::Root | Simple::Host | Simple::PseudoElement | Simple::State(_) => {}
                 }

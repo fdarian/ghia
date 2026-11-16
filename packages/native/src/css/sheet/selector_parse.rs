@@ -5,6 +5,7 @@
 use super::atoms::Atoms;
 use super::nth::{AnPlusB, Position};
 use super::states::{self, State};
+use super::tree_states::TreeState;
 use super::selector::{
     AttrMatcher, AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, SelectorList, Simple, Specificity, TypeName,
 };
@@ -286,7 +287,6 @@ impl Parser<'_, '_> {
                     "focus" => Ok(Simple::State(State::Focus)),
                     "focus-visible" => Ok(Simple::State(State::FocusVisible)),
                     "focus-within" => Ok(Simple::State(State::FocusWithin)),
-                    "popover-open" => Ok(Simple::PopoverOpen),
                     "first-child" => Ok(Simple::Position(Position::first(false))),
                     "last-child" => Ok(Simple::Position(Position::last(false))),
                     "only-child" => Ok(Simple::Position(Position::Only { of_type: false })),
@@ -294,7 +294,7 @@ impl Parser<'_, '_> {
                     "last-of-type" => Ok(Simple::Position(Position::last(true))),
                     "only-of-type" => Ok(Simple::Position(Position::Only { of_type: true })),
                     "empty" => Ok(Simple::Position(Position::Empty)),
-                    _ => Err(InvalidSelector),
+                    _ => TreeState::parse(&name).map(Simple::TreeState).ok_or(InvalidSelector),
                 }
             }
             Kind::Function(name) => {

@@ -1437,7 +1437,7 @@ fn a_type_selector_ignores_case_on_an_html_element_and_not_on_an_svg_one() {
 #[test]
 fn a_skipped_rule_is_logged_once_across_reloads_and_again_after_the_sheets_are_gone() {
     let mut doc = Doc::new();
-    let (first, _) = doc.style_element(ROOT, "@media print { a { color: red } } a:checked { color: red } .a { color: blue }");
+    let (first, _) = doc.style_element(ROOT, "@media print { a { color: red } } a:invalid { color: red } .a { color: blue }");
     doc.flush();
     assert_eq!(doc.tree.sheets.skip_warnings, 2);
 
@@ -2133,7 +2133,7 @@ fn an_inline_value_that_gains_or_loses_important_restyles() {
 fn skipped_rules_are_logged_up_to_a_cap_and_then_summed_up_once() {
     let mut doc = Doc::new();
     let limit = 1024;
-    let rules = |from: usize, to: usize| (from..to).map(|n| format!(".css-{n}:checked {{ color: red }} ")).collect::<String>();
+    let rules = |from: usize, to: usize| (from..to).map(|n| format!(".css-{n}:invalid {{ color: red }} ")).collect::<String>();
     let (_, text) = doc.style_element(ROOT, &rules(0, limit));
     doc.flush();
     assert_eq!(doc.tree.sheets.skip_warnings, limit);
@@ -3166,3 +3166,5 @@ mod states {
 mod reload;
 
 mod positions;
+
+mod tree_states;

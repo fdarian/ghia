@@ -6,6 +6,7 @@ use std::sync::Arc;
 use super::atoms::Atom;
 use super::nth::Position;
 use super::states::State;
+use super::tree_states::TreeState;
 
 /// What a [`ComplexSelector`] link says about the compound to its left.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -51,8 +52,9 @@ pub enum Simple {
     /// `:hover`, `:active`, `:focus`, `:focus-visible` and `:focus-within`. Matches any element:
     /// the selector's [`ComplexSelector::condition`] carries it, since these are not tree state.
     State(State),
-    /// `:popover-open`: an element with the `popover` attribute that `showPopover()` opened.
-    PopoverOpen,
+    /// `:popover-open`, `:disabled`, `:checked`, `:required`, `:read-write`, `:any-link` and the
+    /// rest that read what the tree holds of the element.
+    TreeState(TreeState),
     /// `:first-child`, `:nth-child()`, `:only-of-type`, `:empty` and the rest that read where an
     /// element stands among its siblings or what it holds.
     Position(Position),
@@ -189,7 +191,7 @@ impl Simple {
             | Simple::Root
             | Simple::Host
             | Simple::State(_)
-            | Simple::PopoverOpen
+            | Simple::TreeState(_)
             | Simple::Position(_) => {
                 Specificity::new(0, 1, 0)
             }

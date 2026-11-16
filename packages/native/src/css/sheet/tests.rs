@@ -47,6 +47,8 @@ struct Node {
     id: Option<Atom>,
     classes: Vec<Atom>,
     attrs: Vec<(Atom, String)>,
+    /// The tree states the node is in.
+    states: Vec<TreeState>,
     parent: Option<usize>,
     prev: Option<usize>,
 }
@@ -74,6 +76,7 @@ impl Tree {
             id: id.map(|id| atoms.intern(id)),
             classes: classes.iter().map(|class| atoms.intern(class)).collect(),
             attrs: attrs.iter().map(|(name, value)| (atoms.intern(name), (*value).to_owned())).collect(),
+            states: Vec::new(),
             parent,
             prev,
         });
@@ -132,8 +135,8 @@ impl ElementView for View<'_> {
     fn is_root(&self) -> bool {
         self.tree.nodes[self.index].parent.is_none()
     }
-    fn is_popover_open(&self) -> bool {
-        self.tree.nodes[self.index].attrs.iter().any(|(_, value)| value == "popover-open")
+    fn tree_state(&self, state: TreeState) -> bool {
+        self.tree.nodes[self.index].states.contains(&state)
     }
     fn child_index(&self, of_type: bool, from_end: bool) -> Option<u32> {
         let Some(parent) = self.tree.nodes[self.index].parent else {
@@ -312,10 +315,10 @@ fn unknown_at_rules_are_skipped_whole_and_recorded() {
 
 #[test]
 fn an_invalid_selector_drops_the_rule_and_is_recorded() {
-    let sheet = Doc::new().parse("a, b:checked { color: red } c { top: 1px } d:nth-child(2n of .a) { x: y } ,a { x: y }");
+    let sheet = Doc::new().parse("a, b:invalid { color: red } c { top: 1px } d:nth-child(2n of .a) { x: y } ,a { x: y }");
     assert_eq!(sheet.rules.len(), 1);
     assert_eq!(pairs(&sheet.rules[0].normal), [("top", r#""1px""#)]);
-    assert_eq!(sheet.unsupported, ["a, b:checked", "d:nth-child(2n of .a)", ",a"]);
+    assert_eq!(sheet.unsupported, ["a, b:invalid", "d:nth-child(2n of .a)", ",a"]);
 }
 
 #[test]
@@ -520,10 +523,10 @@ fn hostile_nesting_is_cut_off_instead_of_overflowing_the_stack() {
 
 #[test]
 fn an_invalid_nested_selector_drops_only_that_rule() {
-    let sheet = Doc::new().parse("a { top: 1px; &:checked { top: 2px } b { top: 3px } }");
+    let sheet = Doc::new().parse("a { top: 1px; &:invalid { top: 2px } b { top: 3px } }");
     let tops: Vec<_> = sheet.rules.iter().map(|rule| pairs(&rule.normal)[0].1.to_owned()).collect();
     assert_eq!(tops, [r#""1px""#, r#""3px""#]);
-    assert_eq!(sheet.unsupported, ["&:checked"]);
+    assert_eq!(sheet.unsupported, ["&:invalid"]);
 }
 
 #[test]
@@ -648,12 +651,12 @@ fn is_where_and_not() {
 
 #[test]
 fn is_and_where_drop_invalid_arguments() {
-    assert_eq!(selected(":is(.first, :checked, p)"), [FIRST, PARA]);
-    assert_eq!(selected(":where(:checked, .first, 5)"), [FIRST]);
-    assert_eq!(selected(":is(:checked)"), Vec::<usize>::new());
+    assert_eq!(selected(":is(.first, :invalid, p)"), [FIRST, PARA]);
+    assert_eq!(selected(":where(:invalid, .first, 5)"), [FIRST]);
+    assert_eq!(selected(":is(:invalid)"), Vec::<usize>::new());
     assert_eq!(selected(":is(, .first,)"), [FIRST]);
     assert_eq!(selected(":is(::before, .first)"), [FIRST]);
-    assert!(!is_valid(":not(:checked)"));
+    assert!(!is_valid(":not(:invalid)"));
     assert!(!is_valid(":not()"));
     assert!(!is_valid(":not(.a,)"));
     assert!(!is_valid(":not(::before)"));
@@ -686,7 +689,7 @@ fn pseudo_elements_parse_and_never_match() {
 #[test]
 fn other_pseudo_classes_and_syntax_are_invalid() {
     for selector in [
-        ":checked", "a:visited", ":nth-child(2n of .a)", ":nth-last-child(odd of a)", ":nth-child()", ":nth-child(2 n)", ":nth-child(foo)",
+        ":invalid", "a:visited", ":nth-child(2n of .a)", ":nth-last-child(odd of a)", ":nth-child()", ":nth-child(2 n)", ":nth-child(foo)",
         ":nth-of-type(2n+)", ":first-child(1)", ":empty(a)", ":only-child()", ":has(a)", ":matches(a)", ":scope", "a|b", "*|*",
         "a >", "> a", "a > > b", "a,", ",a", "a, , b", ".", "#1", "a$", "a b!", "&&&:x", ":", "a:", "::",
     ] {
@@ -914,12 +917,49 @@ fn popover_open_is_read_from_the_element() {
     assert_eq!(selected("div:popover-open"), Vec::<usize>::new());
     let mut doc = Doc::new();
     let mut tree = fixture(&mut doc.atoms);
-    tree.nodes[FIRST].attrs.push((doc.atoms.intern("open"), "popover-open".into()));
+    tree.nodes[FIRST].states.push(TreeState::PopoverOpen);
     let selector = doc.selector("span:popover-open");
     let matched: Vec<usize> = (0..tree.nodes.len()).filter(|index| matches(&selector, &tree.view(*index))).collect();
     assert_eq!(matched, [FIRST]);
     let not_open = doc.selector("span:not(:popover-open)");
     assert!(!matches(&not_open, &tree.view(FIRST)) && matches(&not_open, &tree.view(SECOND)));
+}
+
+const FORM_STATES: [(&str, TreeState); 10] = [
+    (":popover-open", TreeState::PopoverOpen),
+    (":disabled", TreeState::Disabled),
+    (":enabled", TreeState::Enabled),
+    (":checked", TreeState::Checked),
+    (":indeterminate", TreeState::Indeterminate),
+    (":required", TreeState::Required),
+    (":optional", TreeState::Optional),
+    (":read-only", TreeState::ReadOnly),
+    (":read-write", TreeState::ReadWrite),
+    (":any-link", TreeState::AnyLink),
+];
+
+#[test]
+fn each_tree_state_matches_an_element_that_is_in_it_and_not_one_that_is_not() {
+    let mut doc = Doc::new();
+    let mut tree = fixture(&mut doc.atoms);
+    for (name, state) in FORM_STATES {
+        tree.nodes[FIRST].states = vec![state];
+        let plain = doc.selector(&format!("span{name}"));
+        let negated = doc.selector(&format!("span:not({name})"));
+        let wrapped = doc.selector(&format!(":is({name}, .nothing)"));
+        let hidden = doc.selector(&format!(":where({name}).first"));
+        assert!(matches(&plain, &tree.view(FIRST)) && !matches(&plain, &tree.view(SECOND)), "{name}");
+        assert!(!matches(&negated, &tree.view(FIRST)) && matches(&negated, &tree.view(SECOND)), "{name}");
+        assert!(matches(&wrapped, &tree.view(FIRST)) && !matches(&wrapped, &tree.view(SECOND)), "{name}");
+        assert!(matches(&hidden, &tree.view(FIRST)), "{name}");
+    }
+}
+
+#[test]
+fn link_is_any_link_and_the_names_are_not_case_sensitive() {
+    assert_eq!(Doc::new().selector(":link").compounds, Doc::new().selector(":any-link").compounds);
+    assert!(is_valid("a:LINK") && is_valid("input:Read-Write") && is_valid(":is(:disabled, :checked) > :not(:required)"));
+    assert!(!is_valid(":visited") && !is_valid(":invalid") && !is_valid(":placeholder-shown") && !is_valid(":disabled(1)"));
 }
 
 #[test]
@@ -941,7 +981,11 @@ fn specificity_follows_the_spec() {
     assert_eq!(specificity(":not(.a, div p)"), (0, 1, 0));
     assert_eq!(specificity(":is()"), (0, 0, 0));
     assert_eq!(specificity(":is(:root, :host) [a]"), (0, 2, 0));
-    for state in [":hover", ":active", ":focus", ":focus-visible", ":focus-within", ":popover-open"] {
+    for state in [":hover", ":active", ":focus", ":focus-visible", ":focus-within"]
+        .into_iter()
+        .chain(FORM_STATES.iter().map(|(name, _)| *name))
+        .chain([":link"])
+    {
         assert_eq!(specificity(&format!("a{state}")), (0, 1, 1), "{state}");
         assert_eq!(specificity(&format!(".b{state}")), (0, 2, 0), "{state}");
     }

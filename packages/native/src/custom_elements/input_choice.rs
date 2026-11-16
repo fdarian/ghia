@@ -29,6 +29,7 @@ use serde_json::Value;
 
 use super::input_rules::InputType;
 use super::{CustomElement, CustomRenderContext};
+use crate::css::sheet::TreeStates;
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -232,7 +233,7 @@ impl RetainedTree {
                 };
                 if state.indeterminate != flag {
                     state.indeterminate = flag;
-                    self.mark_render_changed(id);
+                    self.choice_state_changed(id, TreeStates::INDETERMINATE);
                 }
             }
             _ => {}
@@ -267,7 +268,14 @@ impl RetainedTree {
         if self.is_checked(id) && self.radio_of(id) {
             self.uncheck_group_of(id);
         }
+        self.choice_state_changed(id, TreeStates::CHECKED);
+    }
+
+    /// The checkedness or `indeterminate` of `id` changed: the box is painted again, and a
+    /// `:checked` or `:indeterminate` selector is matched again.
+    fn choice_state_changed(&mut self, id: u64, changed: TreeStates) {
         self.mark_render_changed(id);
+        self.sheets_tree_state_changed(id, changed);
     }
 
     fn uncheck_group_of(&mut self, id: u64) {
@@ -275,7 +283,7 @@ impl RetainedTree {
             if let Some(state) = self.choices.states.get_mut(&other) {
                 if state.checked {
                     state.checked = false;
-                    self.mark_render_changed(other);
+                    self.choice_state_changed(other, TreeStates::CHECKED);
                 }
             }
         }
@@ -363,7 +371,7 @@ impl RetainedTree {
         if let Some(state) = self.choices.states.get_mut(&id) {
             if state.indeterminate != indeterminate {
                 state.indeterminate = indeterminate;
-                self.mark_render_changed(id);
+                self.choice_state_changed(id, TreeStates::INDETERMINATE);
             }
         }
     }
@@ -392,9 +400,9 @@ impl RetainedTree {
             if let Some(state) = self.choices.states.get_mut(&other) {
                 state.checked = true;
             }
-            self.mark_render_changed(other);
+            self.choice_state_changed(other, TreeStates::CHECKED);
         }
-        self.mark_render_changed(id);
+        self.choice_state_changed(id, TreeStates::CHECKED | TreeStates::INDETERMINATE);
     }
 
     /// The click was not canceled: whether the control's checkedness differs from before it, which
@@ -438,7 +446,7 @@ impl RetainedTree {
             if let Some(state) = self.choices.states.get_mut(&id) {
                 if state.checked != checked {
                     state.checked = checked;
-                    self.mark_render_changed(id);
+                    self.choice_state_changed(id, TreeStates::CHECKED);
                 }
             }
         }

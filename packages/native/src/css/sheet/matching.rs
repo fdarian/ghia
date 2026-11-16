@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use super::atoms::Atom;
 use super::nth::Position;
+use super::tree_states::TreeState;
 use super::selector::{AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, Simple};
 
 /// An attribute's text: borrowed from the element, or shared with a cache that made it (the
@@ -43,8 +44,8 @@ pub trait ElementView: Sized {
     /// The closest preceding sibling that is an element.
     fn prev_sibling(&self) -> Option<Self>;
     fn is_root(&self) -> bool;
-    /// Whether the element is a `popover` that `showPopover()` has opened.
-    fn is_popover_open(&self) -> bool;
+    /// Whether the element is in the state: an open popover, a disabled control, a checked box.
+    fn tree_state(&self, state: TreeState) -> bool;
     /// The element's place among the elements of its parent, from 1: counted from the start or
     /// the end, over every element child or only those of its type (an HTML type compares
     /// case-insensitively, an SVG one as written). An element with no parent is alone, so 1.
@@ -126,7 +127,7 @@ fn simple_matches<E: ElementView>(simple: &Simple, element: &E) -> bool {
         Simple::Not(list) => !list.iter().any(|selector| matches(selector, element)),
         Simple::Root => element.is_root(),
         Simple::State(_) => true,
-        Simple::PopoverOpen => element.is_popover_open(),
+        Simple::TreeState(state) => element.tree_state(*state),
         Simple::Position(position) => position_matches(*position, element),
         Simple::Host | Simple::PseudoElement => false,
     }
