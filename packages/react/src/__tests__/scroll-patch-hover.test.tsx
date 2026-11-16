@@ -8,7 +8,8 @@
  *
  * A window that resyncs the hover from the draw a translate made (`setHoverResyncByFrame(false)`) has the tick of one wheel event
  * pending when the next wheel event arrives, so the draw of that event meets the tick and the notified list: the hover patch and
- * the translate are one draw.
+ * the translate are one draw, also when the rows the draw moves are ones a frame built whole put elsewhere than it recorded them: a
+ * row so placed is a patch unit as a row a translate moved is, and its patch rewrites the recording the next translate moves.
  */
 
 import fs from "fs"
@@ -32,8 +33,9 @@ const TIMEOUT = 120_000
 
 type Rows = "paint" | "heard"
 
-function Page({ rows }: { rows: Rows }) {
-  return (
+/** `salt`: another tree for the same page, so that a frame drawn after a wheel is an edit, and the rows are replayed where it puts them. */
+function Page({ rows, salt }: { rows: Rows; salt?: number }) {
+  const list = (
     <virtual-list
       testId="list"
       itemCount={COUNT}
@@ -58,11 +60,20 @@ function Page({ rows }: { rows: Rows }) {
       ))}
     </virtual-list>
   )
+  if (salt === undefined) return list
+  return (
+    <>
+      {list}
+      <div testId="salt" style={{ height: 0 }}>
+        {salt}
+      </div>
+    </>
+  )
 }
 
-function open(rows: Rows) {
+function open(rows: Rows, salt?: number) {
   const root = createTestRoot({ width: 300, height: 200 })
-  root.render(<Page rows={rows} />)
+  root.render(<Page rows={rows} salt={salt} />)
   const renderer = root.renderer
   renderer.setA11yActive(false)
   renderer.dispatchNativeEvents()
@@ -273,12 +284,13 @@ function rowColours(renderer, name: string): Map<number, string> {
 const LIVE_WHEELS = 20
 
 describeNative("a wheel under a still pointer, in a window that resyncs the hover from the draw that moved the rows", { timeout: TIMEOUT }, () => {
-  function live() {
+  /** `built`: the rows that show are built where they stand before the wheels, so that none is a row a frame built whole replayed. */
+  function live(built = true) {
     const page = open("paint")
     const renderer = page.renderer
     renderer.setHoverResyncByFrame(false)
     renderer.scrollTo(page.list, 0, 200)
-    rebuild(renderer)
+    if (built) rebuild(renderer)
     renderer.setInlineDraws(false)
     return page
   }
@@ -292,43 +304,119 @@ describeNative("a wheel under a still pointer, in a window that resyncs the hove
     }
   }
 
-  unverified("draws the translate in the draw that meets the pending hover tick, and paints the hover where the pointer is", () => {
-    const { renderer, unmount } = live()
+  for (const built of [true, false]) {
+    unverified(`draws the translate in the draw that meets the pending hover tick, and paints the hover where the pointer is${built ? "" : ", with no row built where it stands first"}`, () => {
+      const { renderer, unmount } = live(built)
+      try {
+        const before = { painted: renderer.getPaintedFrameCount(), scroll: scroll(renderer) }
+        wheels(renderer, LIVE_WHEELS)
+        // The frame a window draws after the last wheel event: the tick of its crossing.
+        renderer.drawFrame()
+        const after = scroll(renderer)
+        const whole = renderer.getPaintedFrameCount() - before.painted
+        const translated = after.patched - before.scroll.patched
+
+        expect(after.frames - before.scroll.frames, "every wheel event is classified").toBe(LIVE_WHEELS)
+        expect(translated, `translates, with ${whole} frames built whole`).toBeGreaterThanOrEqual(LIVE_WHEELS - 2)
+        expect(whole, "frames built whole").toBeLessThanOrEqual(2)
+        expect(after.mispredicted).toBe(0)
+        expect(renderer.getRetentionMismatches()).toEqual([])
+
+        const under = rowAtPointer(renderer)
+        const colours = rowColours(renderer, "live-end")
+        expect(colours.get(under), "the row under the pointer has the hover colour").toBe(HOVER)
+        const hovered = [...colours].filter(([, colour]) => colour === HOVER).map(([row]) => row)
+        expect(hovered, "no other row has it").toEqual([under])
+      } finally {
+        unmount()
+      }
+    })
+
+    it(`is what a build gives under the retention verifier${built ? "" : ", with no row built where it stands first"}`, () => {
+      const { renderer, unmount } = live(built)
+      try {
+        renderer.setRetainVerify(true)
+        wheels(renderer, LIVE_WHEELS)
+        renderer.drawFrame()
+        expect(renderer.getRetentionMismatches().join("\n")).toBe("")
+        expect(renderer.getRetainedCounters().mismatches).toBe(0)
+      } finally {
+        unmount()
+      }
+    })
+  }
+})
+
+const BASE = (row: number) => (row % 2 === 0 ? "223344" : "334455")
+
+/** Every row that shows has the colour of its style, and the hover colour is the one under the pointer's alone. */
+function expectPicture(renderer, name: string) {
+  const under = rowAtPointer(renderer)
+  const colours = rowColours(renderer, name)
+  expect(colours.size, `${name}: rows show`).toBeGreaterThan(1)
+  expect(colours.get(under), `${name}: the row under the pointer, ${under}`).toBe(HOVER)
+  for (const [row, colour] of colours) if (row !== under) expect(colour, `${name}: row ${row}`).toBe(BASE(row))
+}
+
+describeNative("a row a frame built whole put elsewhere than it recorded it", { timeout: TIMEOUT }, () => {
+  const declined = (renderer) => JSON.parse(renderer.getPatchCounters().unpatchable)["Hover:Relocated"] ?? 0
+
+  // Each wheel crosses a row border (the pointer is at 50, the rows are 40 high, the list starts at 200): a frame built whole
+  // moves the rows of the first step of each pair, and a translate those of the second.
+  const STEPS_MOVED: Array<[boolean, number]> = [
+    [false, 30],
+    [true, 40],
+    [false, 40],
+    [true, -40],
+    [false, -40],
+    [true, 40],
+    [true, 40],
+  ]
+
+  function walk(verify: boolean) {
+    const { renderer, unmount, render, list } = open("paint", 0)
     try {
-      const before = { painted: renderer.getPaintedFrameCount(), scroll: scroll(renderer) }
-      wheels(renderer, LIVE_WHEELS)
-      // The frame a window draws after the last wheel event: the tick of its crossing.
-      renderer.drawFrame()
-      const after = scroll(renderer)
-      const whole = renderer.getPaintedFrameCount() - before.painted
-      const translated = after.patched - before.scroll.patched
-
-      expect(after.frames - before.scroll.frames, "every wheel event is classified").toBe(LIVE_WHEELS)
-      expect(translated, `translates, with ${whole} frames built whole`).toBeGreaterThanOrEqual(LIVE_WHEELS - 2)
-      expect(whole, "frames built whole").toBeLessThanOrEqual(2)
-      expect(after.mispredicted).toBe(0)
-      expect(renderer.getRetentionMismatches()).toEqual([])
-
-      const under = rowAtPointer(renderer)
-      const colours = rowColours(renderer, "live-end")
-      expect(colours.get(under), "the row under the pointer has the hover colour").toBe(HOVER)
-      const hovered = [...colours].filter(([, colour]) => colour === HOVER).map(([row]) => row)
-      expect(hovered, "no other row has it").toEqual([under])
+      renderer.scrollTo(list, 0, 200)
+      rebuild(renderer)
+      renderer.setInlineDraws(false)
+      if (verify) renderer.setRetainVerify(true)
+      let salt = 0
+      const before = { patched: renderer.getPatchCounters().patchedFrames, relocated: declined(renderer), scroll: scroll(renderer), painted: renderer.getPaintedFrameCount() }
+      let whole = 0
+      for (const [index, [translate, by]] of STEPS_MOVED.entries()) {
+        // Under the verifier a frame that replays rows is shown as its build: the rows are built again before each step.
+        if (verify) rebuild(renderer)
+        if (translate) {
+          wheel(renderer, by)
+        } else {
+          // An edit in the draw of the wheel holds the translate: the frame is built whole and replays the rows where the wheel puts them.
+          renderer.dispatchScrollWheel(X, Y, 0, by)
+          salt += 1
+          render(<Page rows="paint" salt={salt} />)
+          renderer.flush()
+          renderer.drawFrame()
+          renderer.drawFrame()
+          whole += 1
+        }
+        expect(renderer.getRetentionMismatches().join("\n"), `step ${index}`).toBe("")
+        expectPicture(renderer, `moved-${verify}-${index}`)
+      }
+      const after = renderer.getPatchCounters()
+      expect(declined(renderer) - before.relocated, "no hover is declined as relocated").toBe(0)
+      return { patched: after.patchedFrames - before.patched, translates: after.scrollPatch.patched - before.scroll.patched, whole, painted: renderer.getPaintedFrameCount() - before.painted }
     } finally {
       unmount()
     }
+  }
+
+  unverified("is patched where it stands, and a translate after the patch moves what the patch painted", () => {
+    const run = walk(false)
+    expect(run.patched, "every crossing is a patch").toBeGreaterThanOrEqual(STEPS_MOVED.length)
+    expect(run.translates, "the wheels no edit holds are translates").toBe(STEPS_MOVED.filter(([translate]) => translate).length)
+    expect(run.painted, "the frames built whole are the wheels with an edit").toBe(run.whole)
   })
 
   it("is what a build gives under the retention verifier", () => {
-    const { renderer, unmount } = live()
-    try {
-      renderer.setRetainVerify(true)
-      wheels(renderer, LIVE_WHEELS)
-      renderer.drawFrame()
-      expect(renderer.getRetentionMismatches().join("\n")).toBe("")
-      expect(renderer.getRetainedCounters().mismatches).toBe(0)
-    } finally {
-      unmount()
-    }
+    walk(true)
   })
 })
