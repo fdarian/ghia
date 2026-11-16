@@ -3,7 +3,10 @@
 //! `:is()` and `:where()` forgive, by dropping the argument.
 
 use super::atoms::Atoms;
+use super::has::{HasArguments, RelativeSelector};
+use super::nth::{AnPlusB, Position};
 use super::states::{self, State};
+use super::tree_states::TreeState;
 use super::selector::{
     AttrMatcher, AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, SelectorList, Simple, Specificity, TypeName,
 };
@@ -27,11 +30,12 @@ pub(super) enum Nesting<'a> {
 }
 
 pub(super) fn parse_selector_list(
+    src: &str,
     tokens: &[Token],
     atoms: &mut Atoms,
     nesting: Nesting,
 ) -> Result<Vec<(ComplexSelector, Specificity)>, InvalidSelector> {
-    let mut parser = Parser { atoms, nesting, saw_nesting: false, depth: 0 };
+    let mut parser = Parser { src, atoms, nesting, saw_nesting: false, depth: 0, in_has: false, state_in_has: false };
     let relative = matches!(nesting, Nesting::Parent(_));
     let list = parser.list(tokens, false, relative, true)?;
     if list.is_empty() {
@@ -44,12 +48,21 @@ pub(super) fn parse_selector_list(
 }
 
 struct Parser<'a, 'n> {
+    /// The text the tokens index, for the digits of an `An+B`.
+    src: &'a str,
     atoms: &'a mut Atoms,
     nesting: Nesting<'n>,
     /// Whether the complex selector being parsed has named `&` so far.
     saw_nesting: bool,
-    /// How many `:is(`, `:where(` and `:not(` the selector being parsed sits inside.
+    /// How many `:is(`, `:where(`, `:not(` and `:has(` the selector being parsed sits inside.
     depth: usize,
+    /// Whether the selector being parsed is inside a `:has(`, where `:has()` nests no deeper and
+    /// the states of the pointer and the focus are not read (they compile into the style block of
+    /// the subject, which an element inside the argument is not).
+    in_has: bool,
+    /// Whether a state was met inside the `:has(` being parsed, written there or brought in by `&`.
+    /// A forgiving `:is()` drops the argument that holds it, so the `:has(` checks this when it ends.
+    state_in_has: bool,
 }
 
 fn combinator_of(kind: &Kind) -> Option<Combinator> {
@@ -57,6 +70,17 @@ fn combinator_of(kind: &Kind) -> Option<Combinator> {
         Kind::Delim('>') => Some(Combinator::Child),
         Kind::Delim('+') => Some(Combinator::NextSibling),
         Kind::Delim('~') => Some(Combinator::SubsequentSibling),
+        _ => None,
+    }
+}
+
+/// `(of_type, from_end)` of the functional pseudo-classes that take an `An+B`.
+fn nth_function(name: &str) -> Option<(bool, bool)> {
+    match name {
+        "nth-child" => Some((false, false)),
+        "nth-last-child" => Some((false, true)),
+        "nth-of-type" => Some((true, false)),
+        "nth-last-of-type" => Some((true, true)),
         _ => None,
     }
 }
@@ -202,7 +226,13 @@ impl Parser<'_, '_> {
                     self.saw_nesting = true;
                     simples.push(match self.nesting {
                         Nesting::Top => Simple::Root,
-                        Nesting::Parent(parent) => Simple::Is(parent.clone()),
+                        Nesting::Parent(parent) => {
+                            if self.in_has && parent.iter().any(|selector| selector.condition.is_some()) {
+                                self.state_in_has = true;
+                                return Err(InvalidSelector);
+                            }
+                            Simple::Is(parent.clone())
+                        }
                     });
                 }
                 Kind::Delim('.') => match tokens.get(*index + 1).map(|next| &next.kind) {
@@ -266,13 +296,23 @@ impl Parser<'_, '_> {
                 match name.as_str() {
                     "root" => Ok(Simple::Root),
                     "host" => Ok(Simple::Host),
+                    "hover" | "active" | "focus" | "focus-visible" | "focus-within" if self.in_has => {
+                        self.state_in_has = true;
+                        Err(InvalidSelector)
+                    }
                     "hover" => Ok(Simple::State(State::Hover)),
                     "active" => Ok(Simple::State(State::Active)),
                     "focus" => Ok(Simple::State(State::Focus)),
                     "focus-visible" => Ok(Simple::State(State::FocusVisible)),
                     "focus-within" => Ok(Simple::State(State::FocusWithin)),
-                    "popover-open" => Ok(Simple::PopoverOpen),
-                    _ => Err(InvalidSelector),
+                    "first-child" => Ok(Simple::Position(Position::first(false))),
+                    "last-child" => Ok(Simple::Position(Position::last(false))),
+                    "only-child" => Ok(Simple::Position(Position::Only { of_type: false })),
+                    "first-of-type" => Ok(Simple::Position(Position::first(true))),
+                    "last-of-type" => Ok(Simple::Position(Position::last(true))),
+                    "only-of-type" => Ok(Simple::Position(Position::Only { of_type: true })),
+                    "empty" => Ok(Simple::Position(Position::Empty)),
+                    _ => TreeState::parse(&name).map(Simple::TreeState).ok_or(InvalidSelector),
                 }
             }
             Kind::Function(name) => {
@@ -283,7 +323,12 @@ impl Parser<'_, '_> {
                 if element {
                     return if allow_pseudo_element { Ok(Simple::PseudoElement) } else { Err(InvalidSelector) };
                 }
-                if !matches!(name.as_str(), "is" | "where" | "not") {
+                if let Some((of_type, from_end)) = nth_function(&name) {
+                    // `of S` is not supported: it is left in the arguments, which then are no `An+B`.
+                    let an_b = AnPlusB::parse(self.src, arguments).ok_or(InvalidSelector)?;
+                    return Ok(Simple::Position(Position::Nth { of_type, from_end, an_b }));
+                }
+                if !matches!(name.as_str(), "is" | "where" | "not" | "has") {
                     return Err(InvalidSelector);
                 }
                 if self.depth == MAX_FUNCTION_DEPTH {
@@ -309,8 +354,47 @@ impl Parser<'_, '_> {
                 }
                 Ok(Simple::Not(list))
             }
-            _ => unreachable!("the caller passed only is, where and not"),
+            "has" => {
+                if self.in_has {
+                    return Err(InvalidSelector);
+                }
+                self.in_has = true;
+                self.state_in_has = false;
+                let relatives = self.relative_list(arguments);
+                self.in_has = false;
+                if std::mem::take(&mut self.state_in_has) {
+                    return Err(InvalidSelector);
+                }
+                Ok(Simple::Has(HasArguments::new(relatives?)))
+            }
+            _ => unreachable!("the caller passed only is, where, not and has"),
         }
+    }
+
+    /// The arguments of `:has()`: one invalid argument invalidates the selector.
+    fn relative_list(&mut self, tokens: &[Token]) -> Result<Vec<RelativeSelector>, InvalidSelector> {
+        split_commas(tokens)
+            .into_iter()
+            .map(|piece| {
+                let piece = trim(piece);
+                if piece.is_empty() {
+                    return Err(InvalidSelector);
+                }
+                self.relative(piece)
+            })
+            .collect()
+    }
+
+    fn relative(&mut self, tokens: &[Token]) -> Result<RelativeSelector, InvalidSelector> {
+        let leading = combinator_of(&tokens[0].kind).unwrap_or(Combinator::Descendant);
+        let parts = self.complex_parts(tokens, true, false)?;
+        let mut compounds = Vec::with_capacity(parts.len());
+        let mut links = Vec::with_capacity(parts.len());
+        for (compound, link) in parts.into_iter().rev() {
+            compounds.push(compound);
+            links.extend(link);
+        }
+        Ok(RelativeSelector { leading, selector: ComplexSelector { compounds, links, condition: None } })
     }
 
     /// The tokens between `[` and `]`.

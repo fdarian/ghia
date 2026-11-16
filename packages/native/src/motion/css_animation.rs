@@ -1762,7 +1762,7 @@ impl AnimationStyle {
 
 /// Whether `style` sets an animation name that is not `none`, or holds an `animation*` declaration
 /// with a `var()`, which says what it is once the custom properties are known.
-pub(super) fn declares_animation(style: &StyleDesc) -> bool {
+pub(crate) fn declares_animation(style: &StyleDesc) -> bool {
     crate::css::var_substitution::holds_family(style, "animation")
         || [&style.animation, &style.animation_name]
             .into_iter()

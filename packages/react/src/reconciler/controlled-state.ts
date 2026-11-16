@@ -1,4 +1,5 @@
 import type { EventPayload } from "@ghia/native"
+import { invalidateComputedStyles } from "@ghia/native/host"
 import type { Container } from "../types/host.js"
 
 /**
@@ -21,4 +22,5 @@ export function restoreControlledState(container: Container, event: EventPayload
   // The commit the handlers made sends at its end; what a handler wrote since is sent here.
   container.renderer.flushMutations()
   container.nativeRenderer.restoreControlledState?.(id)
+  invalidateComputedStyles()
 }

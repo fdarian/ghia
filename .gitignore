@@ -7,6 +7,8 @@ dist/
 .DS_Store
 opensrc
 tmp/
+# Test output churns every run; the curated set the README links to lives in
+# docs/images and is regenerated with `bun scripts/screenshots.ts`.
 screenshots/
 packages/native/wasm/
 # `bun scripts/web.ts` writes the browser bundle and the Wasm blob here, the
@@ -16,5 +18,5 @@ examples/bundle/
 examples/idle-hello.cjs
 examples/AppIcon.icns
 tmp-icons/
-# Test output churns every run; the curated set the README links to lives in
-# docs/images and is regenerated with `bun scripts/screenshots.ts`.
+# What the perf gate measured: the per-file parts and counts.json, which CI uploads as an artifact.
+examples/perf-gate/.measured/

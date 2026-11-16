@@ -10762,7 +10762,7 @@ fn build_element_in(
                     | crate::layout::table::Part::ColumnGroup
             )
         );
-        let patch_root = ctx.retain.can_be_patch_root(ctx.tree, id);
+        let patch_root = ctx.retain.can_be_patch_root(ctx.tree, id, &ctx.inherited.colors, &ctx.inherited.lengths);
         let box_root = ctx.retain.makes_box_roots() && crate::layout::box_root::is_candidate(ctx.tree, known);
         let skip = ctx.retain.enter(crate::retain::Entry {
             id,

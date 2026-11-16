@@ -282,6 +282,8 @@ A node caches its size measurements in slots chosen from the known dimensions an
 
 The key is the fork's own, because a cache that survives from one frame to the next is asked more kinds of question than a per-frame one: it tells apart everything the answer of a node can depend on. Upstream's packs the requested axis into the sign bits of the parent size (a negative parent size, an inner size below its padding, was the same key as the positive one) and leaves out the sizing mode and whether the node's top and bottom margins may collapse with its parent's. A node moved to a parent that asks the other way then answered with the old parent's entries. Here a `modes` byte holds the sizing mode, the two collapsing flags, the axes asked and which dimensions are known.
 
+A node's input is normalized before the lookup, so the parent size it does not read and a block container's available height do not make two keys of one question: [the engine patch](syncing-upstream.md#engine-patches-we-carry) has the rules.
+
 A size measurement is cached with the margins that collapse through the node, which a block container reads (upstream cached the size alone, so a container's height depended on how many times it had asked). And a block container no longer adds a child's offset to the height its floats take when the child holds none, which made a scroll container as tall as the top of its last box when the box overflowed it, and as tall as the box when the box came from the cache. The engine fuzz found all of these.
 
 ### Vendored taffy patches

@@ -8,7 +8,7 @@ mod semantics;
 mod tags;
 
 pub(crate) use semantics::{
-    activation_keys, activation_target, button_type, heading_level, implicit_role, is_activatable, is_focusable_by_default, ActivationKeys,
+    activation_keys, activation_target, button_type, has_href, heading_level, implicit_role, is_activatable, is_focusable_by_default, ActivationKeys,
     ButtonType,
 };
 

@@ -10,7 +10,11 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::atoms::Atom;
+use super::has::HasInvalidation;
+use super::index::bucket_simple;
+use super::nth::Position;
 use super::selector::{Combinator, ComplexSelector, Simple};
+use super::tree_states::TreeStateReach;
 
 /// A set of places relative to an element: it, its children, everything below it, and the same
 /// for its next sibling and for all its following siblings. Nine bits, `sibling * 3 + depth`.
@@ -124,6 +128,44 @@ impl std::ops::BitOrAssign for Reach {
     }
 }
 
+/// Where the structural pseudo-classes are read, by what a change among an element's siblings
+/// does to them. Each is the reach, from the element whose answer changes, of the selectors that
+/// read it, so it is empty until a selector uses that kind and a document without one marks
+/// nothing for a child that comes or goes.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub struct Positional {
+    /// `:first-child`, `:last-child`, `:only-child`: only the two neighbours of a child that comes
+    /// or goes change their answer.
+    pub edge: Reach,
+    /// `:nth-child()`, `:nth-of-type()`, `:first-of-type`, `:only-of-type`: every sibling after.
+    pub forward: Reach,
+    /// `:nth-last-child()`, `:nth-last-of-type()`, `:last-of-type`, `:only-of-type`: every
+    /// sibling before.
+    pub backward: Reach,
+    /// `:empty`: the parent, when a child of any kind comes or goes or text becomes or stops being empty.
+    pub empty: Reach,
+}
+
+impl Positional {
+    fn read(&mut self, position: Position, reach: Reach) {
+        match position {
+            Position::Nth { of_type: false, an_b, .. } if an_b.is_first_only() => self.edge |= reach,
+            Position::Nth { from_end: false, .. } => self.forward |= reach,
+            Position::Nth { from_end: true, .. } => self.backward |= reach,
+            Position::Only { of_type: false } => self.edge |= reach,
+            Position::Only { of_type: true } => {
+                self.forward |= reach;
+                self.backward |= reach;
+            }
+            Position::Empty => self.empty |= reach,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Positional::default()
+    }
+}
+
 /// The reach of every feature the selectors of a document read.
 #[derive(Default)]
 pub struct Invalidation {
@@ -135,8 +177,12 @@ pub struct Invalidation {
     /// What an element appearing or disappearing among its siblings can reach: the places
     /// that sibling combinators look at it from.
     pub structure: Reach,
-    /// Where `:popover-open` is read: an element opening or closing as a popover marks these.
-    pub popover_open: Reach,
+    /// Where each tree state (`:popover-open`, `:disabled`, `:checked`...) is read: a change of
+    /// the state of an element marks these.
+    pub tree_states: TreeStateReach,
+    pub positional: Positional,
+    /// What the `:has()` of the selectors read, from the other side: the anchors a change reaches.
+    pub has: HasInvalidation,
     /// The `&` lists already read, with what the chain they were read through does to a reach
     /// (`Reach::image`). A nested rule shares its parent's list, so without this each level would
     /// read every level above it again. Keyed by the image, not the chain: chains that differ in
@@ -148,16 +194,18 @@ pub struct Invalidation {
 
 impl Invalidation {
     pub fn read(&mut self, selector: &ComplexSelector) {
-        self.read_through(selector, &[]);
+        self.read_through(selector, &[], None);
     }
 
     /// `tail` is what leads on from the subject of `selector` to the subject of the selector it
-    /// is an argument of: empty for a selector that is not one.
+    /// is an argument of: empty for a selector that is not one. `hint` is the compound of that
+    /// selector that holds `selector` when it names an id, a class, an attribute or a tag: the
+    /// same element as the subject of `selector`.
     ///
     /// A feature in an argument has the reach it has through the argument's own combinators and
     /// then through the rest of the selector that holds it, so `:is(.a .b)` is read as the
     /// descendant combinator it holds and the combinators around it.
-    fn read_through(&mut self, selector: &ComplexSelector, tail: &[Combinator]) {
+    fn read_through(&mut self, selector: &ComplexSelector, tail: &[Combinator], hint: Option<&[Simple]>) {
         #[cfg(test)]
         {
             self.reads += 1;
@@ -165,6 +213,14 @@ impl Invalidation {
         for (position, compound) in selector.compounds.iter().enumerate() {
             let chain = chain_from(selector, position, tail);
             let reach = Reach::SELF.through(&chain);
+            // Only the subject of an argument is the element that holds it.
+            let inner_hint = if position != 0 {
+                None
+            } else if bucket_simple(&compound.simples).is_some() {
+                Some(&compound.simples[..])
+            } else {
+                hint
+            };
             for simple in &compound.simples {
                 match simple {
                     Simple::Class(class) => *self.classes.entry(*class).or_default() |= reach,
@@ -173,16 +229,18 @@ impl Invalidation {
                     Simple::Is(list) => {
                         if self.shared_read.insert((list.as_ptr() as usize, Reach::image(&chain))) {
                             for inner in list.iter() {
-                                self.read_through(inner, &chain);
+                                self.read_through(inner, &chain, inner_hint);
                             }
                         }
                     }
                     Simple::Where(list) | Simple::Not(list) => {
                         for inner in list {
-                            self.read_through(inner, &chain);
+                            self.read_through(inner, &chain, inner_hint);
                         }
                     }
-                    Simple::PopoverOpen => self.popover_open |= reach,
+                    Simple::Has(arguments) => self.has.read(arguments, &compound.simples, hint.filter(|_| position == 0), reach),
+                    Simple::TreeState(state) => self.tree_states.read(*state, reach),
+                    Simple::Position(position) => self.positional.read(*position, reach),
                     Simple::Tag(_) | Simple::Root | Simple::Host | Simple::PseudoElement | Simple::State(_) => {}
                 }
             }

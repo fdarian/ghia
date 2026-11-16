@@ -22,7 +22,7 @@ fn changing(
     let dirty = {
         let mut tree = tree.lock().unwrap();
         change(&mut tree)?;
-        tree.take_dirty()
+        tree.take_dirty_restyled()
     };
     let view = sync_dispatch::root_view(window)?;
     crate::renderer::invalidate_after_mutation(window, cx, view.entity_id(), dirty);

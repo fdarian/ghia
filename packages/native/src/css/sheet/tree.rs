@@ -11,13 +11,15 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::retained_tree::{RetainedElement, RetainedTree};
+use crate::retained_tree::{Dirty, RetainedElement, RetainedTree};
 
 use super::atoms::{Atom, Atoms};
 use super::document::ClassAtoms;
 use super::cascade::MatchedRules;
+use super::has::Presence;
 use super::invalidation::Reach;
 use super::share::{Found, StyleSharing};
+use super::tree_states::TreeStates;
 use super::view::{count_sibling_work, SiblingPositions, TreeView};
 
 #[cfg(test)]
@@ -127,6 +129,11 @@ impl RetainedTree {
                 self.sheets.mark(next, structure.from_next_sibling());
             }
         }
+        if self.sheets.atoms_fresh {
+            self.sheets.ranges.anchor_leaving(child);
+            self.positions_unlinking(child, parent_id);
+            self.has_structure_changed(child, parent_id, Presence::Leaving);
+        }
     }
 
     /// After `child` was put where it is, or taken out of the document.
@@ -139,12 +146,21 @@ impl RetainedTree {
             let structure = self.sheets.index.invalidation.structure;
             self.sheets.mark(child, Reach::SELF | Reach::DESCENDANTS | structure);
         }
+        if let Some(parent) = parent.filter(|_| self.sheets.atoms_fresh) {
+            self.positions_linked(child, parent);
+            self.has_structure_changed(child, parent, Presence::Appended);
+        }
     }
 
-    pub(crate) fn sheets_text_changed(&mut self, id: u64) {
+    /// The text of `id` changed, from empty to not or back when `emptiness_changed`.
+    pub(crate) fn sheets_text_changed(&mut self, id: u64, emptiness_changed: bool) {
         let parent = self.elements.get(&id).and_then(|element| element.parent);
         if parent.is_some_and(|parent| self.sheets.style_elements.contains(&parent)) {
             self.sheets.sources_dirty = true;
+        }
+        if emptiness_changed && self.sheets.atoms_fresh {
+            self.positions_text_emptiness_changed(id);
+            self.has_text_emptiness_changed(id);
         }
     }
 
@@ -159,12 +175,16 @@ impl RetainedTree {
         }
     }
 
-    /// An element became or stopped being a popover, or `showPopover()` or `hidePopover()` ran on
-    /// it: only a `:popover-open` selector can tell.
-    pub(crate) fn sheets_popover_changed(&mut self, id: u64) {
-        let reach = self.sheets.index.invalidation.popover_open;
+    /// A prop or a checkedness changed what the element is in `changed`: only a selector that
+    /// reads one of those states can tell.
+    pub(crate) fn sheets_tree_state_changed(&mut self, id: u64, changed: TreeStates) {
+        let reach = self.sheets.index.invalidation.tree_states.of(changed);
         if self.sheets.atoms_fresh && !reach.is_empty() {
             self.sheets.mark(id, reach);
+        }
+        if self.sheets.atoms_fresh {
+            let has = self.sheets.has_tree_state_read(changed);
+            self.mark_has_anchors(id, has);
         }
     }
 
@@ -173,24 +193,27 @@ impl RetainedTree {
         if self.sheets.atoms_fresh {
             let reach = self.sheets.style_reach();
             self.sheets.mark(id, reach);
+            let has = self.sheets.has_style_read();
+            self.mark_has_anchors(id, has);
         }
     }
 
     fn attribute_changed(&mut self, id: u64, name: &str) {
-        let reach = match name {
+        let (reach, has) = match name {
             "class" => {
                 let before = self.refresh_class_atoms(id);
                 let after = self.elements.get(&id).and_then(|element| element.css()).map_or(&[][..], |css| &css.classes[..]);
-                self.sheets.class_reach(&before, after)
+                (self.sheets.class_reach(&before, after), self.sheets.has_class_read(&before, after))
             }
             "id" => {
                 let before = self.refresh_id_atom(id);
                 let after = self.elements.get(&id).and_then(|element| element.css()).and_then(|css| css.id);
-                self.sheets.id_reach(before, after)
+                (self.sheets.id_reach(before, after), self.sheets.has_id_read(before, after))
             }
-            _ => self.sheets.attribute_reach(name),
+            _ => (self.sheets.attribute_reach(name), self.sheets.has_attribute_read(name)),
         };
         self.sheets.mark(id, reach);
+        self.mark_has_anchors(id, has);
     }
 
     /// Whether `ancestor` is a `<style>` element or has one below it. Asked on every insert and
@@ -266,7 +289,7 @@ impl RetainedTree {
     // The tree.
 
     /// Whether `id` is `root_id` or below it.
-    fn is_connected(&self, id: u64) -> bool {
+    pub(super) fn is_connected(&self, id: u64) -> bool {
         let Some(root) = self.root_id else {
             return false;
         };
@@ -372,7 +395,7 @@ impl RetainedTree {
     }
 
     /// The first sibling after `id` that selectors can match.
-    fn next_element_sibling(&self, id: u64) -> Option<u64> {
+    pub(super) fn next_element_sibling(&self, id: u64) -> Option<u64> {
         let parent = self.elements.get(self.elements.get(&id)?.parent.as_ref()?)?;
         let position = parent.children.iter().position(|child| *child == id)?;
         parent.children[position + 1..]
@@ -483,6 +506,13 @@ impl RetainedTree {
         }
     }
 
+    /// What a change made natively (a click, a script write, a restore) leaves to draw. No batch
+    /// follows such a change, so the sheets match what it marked before the dirty state is taken.
+    pub(crate) fn take_dirty_restyled(&mut self) -> Dirty {
+        self.flush_styles();
+        self.take_dirty()
+    }
+
     /// Matches what the batch marked, and restyles the elements whose rules changed.
     pub fn flush_styles(&mut self) {
         if !self.sheets.has_work() {
@@ -497,7 +527,9 @@ impl RetainedTree {
             self.sheets.atoms_fresh = true;
             self.sheets.mark_all = true;
         }
-        let marks = std::mem::take(&mut self.sheets.pending);
+        let mut marks = std::mem::take(&mut self.sheets.pending);
+        let ranges = self.sheets.ranges.take();
+        marks.extend(self.range_marks(&ranges));
         let all = std::mem::take(&mut self.sheets.mark_all);
         let restyle = self.restyle_set(&marks, all);
 
