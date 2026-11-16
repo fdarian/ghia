@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { HOST_BINDING } from "../bounds.js"
 import { COMPUTED_STYLE_PROPERTIES, getComputedStyle, invalidateComputedStyles } from "../computed-style.js"
+import { requiredWriter } from "../dom/renderer-writer.js"
 import type { MutationRenderer, NativeRenderer } from "../host.js"
+import { MouseEvent } from "../events/classes.js"
+import { activateAfterClick, preActivateClick } from "../events/activation.js"
+import { createElementMethods } from "../host-runtime.js"
 
 function fakeElement(id: number, pairs: string[] | null, mounted = true) {
   const reads: [number, boolean][] = []
@@ -95,5 +99,65 @@ describe("getComputedStyle", () => {
       expect.objectContaining({ name: "NoModificationAllowedError" })
     )
     expect(getComputedStyle(element).length).toBe(COMPUTED_STYLE_PROPERTIES.length)
+  })
+
+  describe("after a native change that restyles with no batch", () => {
+    /** A renderer whose padding follows a checked flag that each of the native calls changes. */
+    function checkable() {
+      let checked = false
+      const flip = () => {
+        checked = !checked
+      }
+      const renderer = {
+        applyBatch: () => [],
+        getComputedStyle: () => ["padding-top", checked ? "7px" : "0px"],
+        clickElement: flip,
+        preActivateElement: flip,
+        activateElement: flip,
+        cancelActivation: flip,
+        writeInputFlag: flip,
+        restoreControlledState: flip,
+      } as unknown as NativeRenderer
+      const element = {
+        nativeId: 3,
+        [HOST_BINDING]: () => ({ renderer, mutations: {} as MutationRenderer }),
+      }
+      return { renderer, style: getComputedStyle(element) }
+    }
+
+    it("reads the new style in the same turn, for each call the DOM members make", () => {
+      const click = new MouseEvent("click")
+      const calls: [string, (renderer: NativeRenderer) => void][] = [
+        ["element.click()", (renderer) => createElementMethods(renderer, 3).click()],
+        ["the toggle before a click", (renderer) => preActivateClick({ renderer, id: 3 }, click)],
+        ["the activation after a click", (renderer) => activateAfterClick({ renderer, id: 3 }, click)],
+        ["a canceled click", (renderer) => {
+          const canceled = new MouseEvent("click", { cancelable: true })
+          canceled.preventDefault()
+          activateAfterClick({ renderer, id: 3 }, canceled)
+        }],
+        ["a script write", (renderer) => requiredWriter(renderer, "writeInputFlag", "")(3, "checked", true)],
+        ["a restore", (renderer) => requiredWriter(renderer, "restoreControlledState", "")(3)],
+      ]
+      for (const [name, call] of calls) {
+        const fake = checkable()
+        expect(fake.style.paddingTop, name).toBe("0px")
+        call(fake.renderer)
+        expect(fake.style.paddingTop, name).toBe("7px")
+      }
+    })
+
+    it("ends the kept styles when the native call throws", () => {
+      const fake = checkable()
+      expect(fake.style.paddingTop).toBe("0px")
+      const renderer = fake.renderer as unknown as { writeInputFlag: () => void }
+      const flip = renderer.writeInputFlag
+      renderer.writeInputFlag = () => {
+        flip()
+        throw new Error("native failed")
+      }
+      expect(() => requiredWriter(fake.renderer, "writeInputFlag", "")(3, "checked", true)).toThrow("native failed")
+      expect(fake.style.paddingTop).toBe("7px")
+    })
   })
 })

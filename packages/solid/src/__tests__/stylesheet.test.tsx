@@ -110,6 +110,59 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in Solid", () => {
     expect(app.renderer.getBuildCounters().elementsRematched).toBe(2)
   })
 
+  it("matches the structural pseudo-classes again as items of a list come and go", () => {
+    const [names, setNames] = createSignal(["a", "b", "c", "d"])
+    const [note, setNote] = createSignal("")
+    const rows = new Map<string, any>()
+    let paragraph: any
+    app.render(() => (
+      <div>
+        <style>{`
+          li:nth-child(odd) { opacity: 0.5 }
+          li:first-child { padding-left: 3px }
+          li:last-child { padding-top: 7px }
+          #note:empty { padding-bottom: 5px }
+        `}</style>
+        <ul>
+          <For each={names()}>{(name) => <li ref={(element: unknown) => rows.set(name, element)}>{name}</li>}</For>
+        </ul>
+        <p id="note" ref={(element: unknown) => (paragraph = element)}>
+          {note()}
+        </p>
+      </div>
+    ))
+    const look = (name: string) => {
+      const style = getComputedStyle(rows.get(name))
+      return [style.opacity, style.paddingLeft, style.paddingTop]
+    }
+    expect(look("a")).toEqual(["0.5", "3px", "0px"])
+    expect(look("b")).toEqual(["1", "0px", "0px"])
+    expect(look("c")).toEqual(["0.5", "0px", "0px"])
+    expect(look("d")).toEqual(["1", "0px", "7px"])
+    expect(getComputedStyle(paragraph).paddingBottom).toBe("5px")
+
+    app.flushSync(() => setNames(["a", "b", "c", "d", "e"]))
+    expect(look("d")).toEqual(["1", "0px", "0px"])
+    expect(look("e")).toEqual(["0.5", "0px", "7px"])
+
+    app.flushSync(() => setNames(["z", "a", "b", "c", "d", "e"]))
+    expect(look("z")).toEqual(["0.5", "3px", "0px"])
+    expect(look("a")).toEqual(["1", "0px", "0px"])
+    expect(look("b")).toEqual(["0.5", "0px", "0px"])
+    expect(look("e")).toEqual(["1", "0px", "7px"])
+
+    app.flushSync(() => setNames(["a", "b", "d", "e"]))
+    expect(look("a")).toEqual(["0.5", "3px", "0px"])
+    expect(look("b")).toEqual(["1", "0px", "0px"])
+    expect(look("d")).toEqual(["0.5", "0px", "0px"])
+    expect(look("e")).toEqual(["1", "0px", "7px"])
+
+    app.flushSync(() => setNote("text"))
+    expect(getComputedStyle(paragraph).paddingBottom).toBe("0px")
+    app.flushSync(() => setNote(""))
+    expect(getComputedStyle(paragraph).paddingBottom).toBe("5px")
+  })
+
   it("follows the text of the style element and its removal", () => {
     let box: any
     const [css, setCss] = createSignal(".a { opacity: 0.5 }")
@@ -316,6 +369,110 @@ describe.skipIf(!hasNativeTestRenderer)("stylesheets in Solid", () => {
     const effective = (name: string) => app.renderer.getElement(nodes[name].nativeId)!.style
     expect(effective("h1")).toHaveProperty("fontWeight")
     expect(effective("inherit"), "the user agent's bold is taken back").not.toHaveProperty("fontWeight")
+  })
+
+  it("matches the form state pseudo-classes again as the props of a control change", () => {
+    const [disabled, setDisabled] = createSignal(false)
+    const [checked, setChecked] = createSignal(false)
+    const [required, setRequired] = createSignal(false)
+    let button: any
+    let label: any
+    let field: any
+    app.render(() => (
+      <div>
+        <style>{`
+          button:disabled { opacity: 0.5 }
+          input:checked + label { padding-top: 7px }
+          input:required { padding-left: 3px }
+          input:not(:required) { padding-left: 1px }
+        `}</style>
+        <button ref={(element: unknown) => (button = element)} disabled={disabled()} />
+        <input type="checkbox" id="agree" checked={checked()} />
+        <label ref={(element: unknown) => (label = element)} for="agree" />
+        <input ref={(element: unknown) => (field = element)} required={required()} />
+      </div>
+    ))
+    expect(getComputedStyle(button).opacity).toBe("1")
+    expect(getComputedStyle(label).paddingTop).toBe("0px")
+    expect(getComputedStyle(field).paddingLeft).toBe("1px")
+
+    app.flushSync(() => setDisabled(true))
+    expect(getComputedStyle(button).opacity).toBe("0.5")
+    app.flushSync(() => setChecked(true))
+    expect(getComputedStyle(label).paddingTop).toBe("7px")
+    app.flushSync(() => setRequired(true))
+    expect(getComputedStyle(field).paddingLeft).toBe("3px")
+
+    app.flushSync(() => {
+      setDisabled(false)
+      setChecked(false)
+      setRequired(false)
+    })
+    expect(getComputedStyle(button).opacity).toBe("1")
+    expect(getComputedStyle(label).paddingTop).toBe("0px")
+    expect(getComputedStyle(field).paddingLeft).toBe("1px")
+  })
+
+  it("restyles what follows a checkbox when a click toggles it, with no handler and no render", () => {
+    let box: any
+    let label: any
+    app.render(() => (
+      <div>
+        <style>{`input:checked + label { padding-top: 7px }`}</style>
+        <input ref={(element: unknown) => (box = element)} type="checkbox" style={{ width: 20, height: 20 }} />
+        <label ref={(element: unknown) => (label = element)} style={{ width: 40, height: 20 }} />
+      </div>
+    ))
+    expect(getComputedStyle(label).paddingTop).toBe("0px")
+    box.dispatchEvent(new globalThis.PointerEvent("click", { bubbles: true, cancelable: true }))
+    expect(box.checked).toBe(true)
+    expect(getComputedStyle(label).paddingTop).toBe("7px")
+    box.checked = false
+    expect(getComputedStyle(label).paddingTop).toBe("0px")
+  })
+
+  it("matches :has() again as what is below, after and inside an element changes", () => {
+    const [checked, setChecked] = createSignal(false)
+    const [icon, setIcon] = createSignal(false)
+    const [next, setNext] = createSignal(true)
+    let label: any
+    let button: any
+    let heading: any
+    app.render(() => (
+      <div>
+        <style>{`
+          .field:has(input:checked) .label { padding-top: 7px }
+          button:has(> svg) { opacity: 0.5 }
+          h1:has(+ p) { padding-left: 3px }
+        `}</style>
+        <div class="field">
+          <span class="label" ref={(element: unknown) => (label = element)} />
+          <input type="checkbox" checked={checked()} />
+        </div>
+        <button ref={(element: unknown) => (button = element)}>{icon() ? <svg /> : <span />}</button>
+        <h1 ref={(element: unknown) => (heading = element)} />
+        {next() ? <p /> : <div />}
+      </div>
+    ))
+    expect(getComputedStyle(label).paddingTop).toBe("0px")
+    expect(getComputedStyle(button).opacity).toBe("1")
+    expect(getComputedStyle(heading).paddingLeft).toBe("3px")
+
+    app.flushSync(() => setChecked(true))
+    expect(getComputedStyle(label).paddingTop).toBe("7px")
+    app.flushSync(() => setIcon(true))
+    expect(getComputedStyle(button).opacity).toBe("0.5")
+    app.flushSync(() => setNext(false))
+    expect(getComputedStyle(heading).paddingLeft).toBe("0px")
+
+    app.flushSync(() => {
+      setChecked(false)
+      setIcon(false)
+      setNext(true)
+    })
+    expect(getComputedStyle(label).paddingTop).toBe("0px")
+    expect(getComputedStyle(button).opacity).toBe("1")
+    expect(getComputedStyle(heading).paddingLeft).toBe("3px")
   })
 
   it("lets an author keyword beat the universal style", () => {
