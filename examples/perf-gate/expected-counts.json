@@ -1330,6 +1330,10 @@
       "idle": {
         "frameWork.paintedPrimitives": 51,
         "frameWork.replayedPrimitives": 0
+      },
+      "cold-mount": {
+        "frameWork.paintedPrimitives": 1478,
+        "frameWork.replayedPrimitives": 0
       }
     },
     "27.2.1": {
