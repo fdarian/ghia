@@ -249,7 +249,7 @@ fn is_self_contained(selector: &ComplexSelector, style: Atom, lists: &mut FxHash
         && selector.compounds[0].simples.iter().all(|simple| match simple {
             Simple::Tag(_) | Simple::Class(_) | Simple::Id(_) | Simple::Host | Simple::PseudoElement | Simple::State(_) => true,
             Simple::Attr(attr) => attr.name.lower != style && attr.name.written != style,
-            Simple::Root | Simple::PopoverOpen => false,
+            Simple::Root | Simple::TreeState(_) | Simple::Position(_) | Simple::Has(_) => false,
             Simple::Is(list) => {
                 let key = list.as_ptr() as usize;
                 if let Some(known) = lists.get(&key) {
@@ -299,7 +299,9 @@ impl Attributes {
                     | Simple::Host
                     | Simple::PseudoElement
                     | Simple::State(_)
-                    | Simple::PopoverOpen => {}
+                    | Simple::TreeState(_)
+                    | Simple::Position(_)
+                    | Simple::Has(_) => {}
                 }
             }
         }

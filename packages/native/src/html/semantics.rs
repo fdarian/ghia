@@ -59,7 +59,7 @@ pub(crate) fn heading_level(element_type: &str) -> Option<usize> {
     }
 }
 
-fn has_href(element: &RetainedElement) -> bool {
+pub(crate) fn has_href(element: &RetainedElement) -> bool {
     element.custom_props().get("href").is_some_and(Value::is_string)
 }
 

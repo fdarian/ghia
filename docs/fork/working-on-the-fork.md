@@ -426,7 +426,7 @@ keeps its own build script for them.
 native build, the `ghia`, Solid and React builds, then `bun run test` in `packages/native`, `packages/ghia`, `packages/solid` and
 `examples`, where a failing suite does not skip the ones after it. It uploads the build output, and the `react-tests` job then runs
 the React suite on three runners, a third of the files each, even if a `check` suite failed. `ci-passed` fails when either job fails
-or is cancelled.
+or is cancelled. A separate workflow, `perf-gate.yml`, runs the [perf gate](testing.md#the-perf-gate) on every PR and every push to `main`.
 
 Start the run in one of three ways: comment `/ci` on the PR (`ci-command.yml` dispatches `ci.yml` on the PR's head branch for an
 owner, member or collaborator; a fork branch cannot be dispatched), click "Approve and run" on the PR's pending run (the Version

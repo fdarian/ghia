@@ -3,7 +3,7 @@ import type { NativeRenderer } from "../host.js"
 import type { InputChoiceState } from "../../index.js"
 import { namedError } from "../named-error.js"
 import { attributeText, inputAttributeValue, inputValueIsAttribute } from "./attribute-names.js"
-import { requiredMethod } from "./renderer-method.js"
+import { requiredWriter } from "./renderer-writer.js"
 import { onTags } from "./tag-members.js"
 
 /** `checked`, `defaultChecked`, `indeterminate`, `value` and `defaultValue` of an `<input>`, which native holds. */
@@ -62,13 +62,13 @@ export function readInputChoice(layout: Layout): InputChoiceState {
  * The state is native's, so the call is made once the pending mutations are sent.
  */
 function writeFlag(layout: Layout, name: "checked" | "indeterminate", value: boolean): void {
-  const write = requiredMethod(layout.renderer, "writeInputFlag", `${name} cannot be assigned`)
+  const write = requiredWriter(layout.renderer, "writeInputFlag", `${name} cannot be assigned`)
   flushPendingMutations(layout.renderer)
   write(layout.id, name, value)
 }
 
 function writeRangeValue(layout: Layout, text: string): void {
-  const write = requiredMethod(layout.renderer, "writeRangeValue", "the value of a range cannot be assigned")
+  const write = requiredWriter(layout.renderer, "writeRangeValue", "the value of a range cannot be assigned")
   flushPendingMutations(layout.renderer)
   write(layout.id, text)
 }

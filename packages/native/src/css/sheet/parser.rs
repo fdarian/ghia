@@ -93,7 +93,7 @@ impl Parser<'_> {
         }
         let (contents_end, after) = self.block(open, end);
         let prelude = &self.tokens[start..open];
-        match parse_selector_list(prelude, self.atoms, nesting) {
+        match parse_selector_list(self.src, prelude, self.atoms, nesting) {
             Ok(_) if self.depth == MAX_BLOCK_DEPTH => self.record_dropped(start, open),
             Ok(selectors) => {
                 self.depth += 1;

@@ -47,6 +47,8 @@ struct Node {
     id: Option<Atom>,
     classes: Vec<Atom>,
     attrs: Vec<(Atom, String)>,
+    /// The tree states the node is in.
+    states: Vec<TreeState>,
     parent: Option<usize>,
     prev: Option<usize>,
 }
@@ -54,6 +56,8 @@ struct Node {
 #[derive(Default)]
 struct Tree {
     nodes: Vec<Node>,
+    /// Text children: the node they are in and what they say.
+    texts: Vec<(usize, String)>,
 }
 
 impl Tree {
@@ -72,14 +76,30 @@ impl Tree {
             id: id.map(|id| atoms.intern(id)),
             classes: classes.iter().map(|class| atoms.intern(class)).collect(),
             attrs: attrs.iter().map(|(name, value)| (atoms.intern(name), (*value).to_owned())).collect(),
+            states: Vec::new(),
             parent,
             prev,
         });
         self.nodes.len() - 1
     }
 
+    fn add_text(&mut self, parent: usize, text: &str) {
+        self.texts.push((parent, text.to_owned()));
+    }
+
     fn view(&self, index: usize) -> View<'_> {
         View { tree: self, index }
+    }
+
+    /// The children of `parent` in order, from the `prev` links.
+    fn children_of(&self, parent: Option<usize>) -> Vec<usize> {
+        let mut order = Vec::new();
+        let mut at = self.nodes.iter().position(|node| node.parent == parent && node.prev.is_none());
+        while let Some(index) = at {
+            order.push(index);
+            at = self.nodes.iter().position(|node| node.prev == Some(index) && node.parent == parent);
+        }
+        order
     }
 }
 
@@ -115,8 +135,33 @@ impl ElementView for View<'_> {
     fn is_root(&self) -> bool {
         self.tree.nodes[self.index].parent.is_none()
     }
-    fn is_popover_open(&self) -> bool {
-        self.tree.nodes[self.index].attrs.iter().any(|(_, value)| value == "popover-open")
+    fn children(&self) -> Vec<Self> {
+        self.tree.children_of(Some(self.index)).into_iter().map(|index| View { tree: self.tree, index }).collect()
+    }
+    fn next_sibling(&self) -> Option<Self> {
+        let parent = self.tree.nodes[self.index].parent;
+        let next = self.tree.nodes.iter().position(|node| node.prev == Some(self.index) && node.parent == parent)?;
+        Some(View { tree: self.tree, index: next })
+    }
+    fn tree_state(&self, state: TreeState) -> bool {
+        self.tree.nodes[self.index].states.contains(&state)
+    }
+    fn child_index(&self, of_type: bool, from_end: bool) -> Option<u32> {
+        let Some(parent) = self.tree.nodes[self.index].parent else {
+            return Some(1);
+        };
+        let mut siblings = self.tree.children_of(Some(parent));
+        if of_type {
+            siblings.retain(|sibling| self.tree.nodes[*sibling].tag == self.tree.nodes[self.index].tag);
+        }
+        if from_end {
+            siblings.reverse();
+        }
+        siblings.iter().position(|sibling| *sibling == self.index).map(|position| position as u32 + 1)
+    }
+    fn is_empty(&self) -> bool {
+        self.tree.nodes.iter().all(|node| node.parent != Some(self.index))
+            && self.tree.texts.iter().all(|(parent, text)| *parent != self.index || text.is_empty())
     }
 }
 
@@ -278,10 +323,10 @@ fn unknown_at_rules_are_skipped_whole_and_recorded() {
 
 #[test]
 fn an_invalid_selector_drops_the_rule_and_is_recorded() {
-    let sheet = Doc::new().parse("a, b:checked { color: red } c { top: 1px } d:nth-child(2n) { x: y } ,a { x: y }");
+    let sheet = Doc::new().parse("a, b:invalid { color: red } c { top: 1px } d:nth-child(2n of .a) { x: y } ,a { x: y }");
     assert_eq!(sheet.rules.len(), 1);
     assert_eq!(pairs(&sheet.rules[0].normal), [("top", r#""1px""#)]);
-    assert_eq!(sheet.unsupported, ["a, b:checked", "d:nth-child(2n)", ",a"]);
+    assert_eq!(sheet.unsupported, ["a, b:invalid", "d:nth-child(2n of .a)", ",a"]);
 }
 
 #[test]
@@ -485,11 +530,23 @@ fn hostile_nesting_is_cut_off_instead_of_overflowing_the_stack() {
 }
 
 #[test]
+fn a_state_the_parent_brings_into_has_drops_the_rule() {
+    let sheet = Doc::new().parse(
+        ".item:hover { top: 1px; .list:has(> &) { top: 2px } .list:has(:is(&, .x)) { top: 3px } }
+         .a:focus-within, .b { .c:has(> &) { top: 5px } }
+         .p { .q:has(> &) { top: 6px } }",
+    );
+    let tops: Vec<_> = sheet.rules.iter().map(|rule| pairs(&rule.normal)[0].1.to_owned()).collect();
+    assert_eq!(tops, [r#""1px""#, r#""6px""#]);
+    assert_eq!(sheet.unsupported, [".list:has(> &)", ".list:has(:is(&, .x))", ".c:has(> &)"]);
+}
+
+#[test]
 fn an_invalid_nested_selector_drops_only_that_rule() {
-    let sheet = Doc::new().parse("a { top: 1px; &:checked { top: 2px } b { top: 3px } }");
+    let sheet = Doc::new().parse("a { top: 1px; &:invalid { top: 2px } b { top: 3px } }");
     let tops: Vec<_> = sheet.rules.iter().map(|rule| pairs(&rule.normal)[0].1.to_owned()).collect();
     assert_eq!(tops, [r#""1px""#, r#""3px""#]);
-    assert_eq!(sheet.unsupported, ["&:checked"]);
+    assert_eq!(sheet.unsupported, ["&:invalid"]);
 }
 
 #[test]
@@ -614,12 +671,12 @@ fn is_where_and_not() {
 
 #[test]
 fn is_and_where_drop_invalid_arguments() {
-    assert_eq!(selected(":is(.first, :checked, p)"), [FIRST, PARA]);
-    assert_eq!(selected(":where(:checked, .first, 5)"), [FIRST]);
-    assert_eq!(selected(":is(:checked)"), Vec::<usize>::new());
+    assert_eq!(selected(":is(.first, :invalid, p)"), [FIRST, PARA]);
+    assert_eq!(selected(":where(:invalid, .first, 5)"), [FIRST]);
+    assert_eq!(selected(":is(:invalid)"), Vec::<usize>::new());
     assert_eq!(selected(":is(, .first,)"), [FIRST]);
     assert_eq!(selected(":is(::before, .first)"), [FIRST]);
-    assert!(!is_valid(":not(:checked)"));
+    assert!(!is_valid(":not(:invalid)"));
     assert!(!is_valid(":not()"));
     assert!(!is_valid(":not(.a,)"));
     assert!(!is_valid(":not(::before)"));
@@ -652,11 +709,298 @@ fn pseudo_elements_parse_and_never_match() {
 #[test]
 fn other_pseudo_classes_and_syntax_are_invalid() {
     for selector in [
-        ":checked", "a:visited", ":first-child", ":nth-child(2)", ":has(a)", ":matches(a)", ":scope", "a|b", "*|*",
+        ":invalid", "a:visited", ":nth-child(2n of .a)", ":nth-last-child(odd of a)", ":nth-child()", ":nth-child(2 n)", ":nth-child(foo)",
+        ":nth-of-type(2n+)", ":first-child(1)", ":empty(a)", ":only-child()", ":matches(a)", ":scope", "a|b", "*|*",
         "a >", "> a", "a > > b", "a,", ",a", "a, , b", ".", "#1", "a$", "a b!", "&&&:x", ":", "a:", "::",
     ] {
         assert!(!is_valid(selector), "{selector}");
     }
+}
+
+#[test]
+fn structural_pseudo_classes_count_as_one_class_each() {
+    for selector in [
+        ":first-child", ":last-child", ":only-child", ":first-of-type", ":last-of-type", ":only-of-type", ":empty",
+        ":nth-child(2n+1)", ":nth-last-child(odd)", ":nth-of-type(-n+3)", ":nth-last-of-type(even)", ":NTH-CHILD( 2N + 1 )",
+        ":First-Child",
+    ] {
+        assert_eq!(specificity(selector), (0, 1, 0), "{selector}");
+    }
+    assert_eq!(specificity("li:first-child"), (0, 1, 1));
+    assert_eq!(specificity("li.a:nth-child(2n):not(:empty)"), (0, 3, 1));
+    assert_eq!(specificity(":is(:first-child, #a)"), (1, 0, 0));
+    assert_eq!(specificity(":where(:first-child)"), (0, 0, 0));
+    assert_eq!(specificity(":not(:last-child)"), (0, 1, 0));
+}
+
+/// A `ul` and the children it was given, which tests read by their position from 1.
+struct List {
+    tree: Tree,
+    ul: usize,
+    items: Vec<usize>,
+}
+
+fn flat(atoms: &mut Atoms, tags: &[(&str, &[&str])]) -> List {
+    let mut tree = Tree::default();
+    let ul = tree.add(atoms, "ul", None, None, None, &[], &[]);
+    let mut items: Vec<usize> = Vec::new();
+    for (tag, classes) in tags {
+        let prev = items.last().copied();
+        items.push(tree.add(atoms, tag, Some(ul), prev, None, classes, &[]));
+    }
+    List { tree, ul, items }
+}
+
+fn selected_in(list: &List, atoms: &mut Atoms, selector: &str) -> Vec<usize> {
+    let selector = {
+        let sheet = parse_sheet(&format!("{selector} {{ color: red }}"), atoms, &mut Layers::default());
+        assert_eq!(sheet.rules.len(), 1, "{selector} is valid");
+        sheet.rules[0].selectors[0].0.clone()
+    };
+    // Positions among `items`, so a test reads as the list it wrote.
+    list.items.iter().enumerate().filter(|(_, index)| matches(&selector, &list.tree.view(**index))).map(|(at, _)| at + 1).collect()
+}
+
+fn mixed(atoms: &mut Atoms) -> List {
+    flat(atoms, &[("li", &["a"]), ("li", &["b"]), ("p", &[]), ("li", &["a"]), ("li", &["c"]), ("p", &[])])
+}
+
+#[test]
+fn child_pseudo_classes_count_the_element_children() {
+    let mut atoms = Atoms::default();
+    let list = mixed(&mut atoms);
+    let mut at = |selector: &str| selected_in(&list, &mut atoms, selector);
+    assert_eq!(at(":first-child"), [1]);
+    assert_eq!(at(":last-child"), [6]);
+    assert_eq!(at(":only-child"), Vec::<usize>::new());
+    assert_eq!(at(":nth-child(odd)"), [1, 3, 5]);
+    assert_eq!(at(":nth-child(2n)"), [2, 4, 6]);
+    assert_eq!(at(":nth-child(3)"), [3]);
+    assert_eq!(at(":nth-child(n+5)"), [5, 6]);
+    assert_eq!(at(":nth-child(-n+2)"), [1, 2]);
+    assert_eq!(at(":nth-child(0n+0)"), Vec::<usize>::new());
+    assert_eq!(at(":nth-last-child(1)"), [6]);
+    assert_eq!(at(":nth-last-child(2)"), [5]);
+    assert_eq!(at(":nth-last-child(odd)"), [2, 4, 6]);
+    assert_eq!(at(":nth-last-child(-n+2)"), [5, 6]);
+}
+
+#[test]
+fn type_pseudo_classes_count_the_children_of_the_same_type() {
+    let mut atoms = Atoms::default();
+    let list = mixed(&mut atoms);
+    let mut at = |selector: &str| selected_in(&list, &mut atoms, selector);
+    assert_eq!(at(":first-of-type"), [1, 3]);
+    assert_eq!(at(":last-of-type"), [5, 6]);
+    assert_eq!(at(":only-of-type"), Vec::<usize>::new());
+    assert_eq!(at("li:nth-of-type(2)"), [2]);
+    assert_eq!(at("li:nth-of-type(odd)"), [1, 4]);
+    assert_eq!(at("li:nth-last-of-type(2)"), [4]);
+    assert_eq!(at("p:nth-of-type(2)"), [6]);
+    assert_eq!(at(":nth-of-type(2)"), [2, 6]);
+    assert_eq!(at(":nth-last-of-type(1)"), [5, 6]);
+    assert_eq!(at(".b:only-of-type"), Vec::<usize>::new());
+}
+
+#[test]
+fn an_element_alone_is_first_last_and_only() {
+    let mut atoms = Atoms::default();
+    let list = flat(&mut atoms, &[("li", &[])]);
+    let mut at = |selector: &str| selected_in(&list, &mut atoms, selector);
+    for selector in [":first-child", ":last-child", ":only-child", ":first-of-type", ":last-of-type", ":only-of-type", ":nth-child(1)"] {
+        assert_eq!(at(selector), [1], "{selector}");
+    }
+    let alone = flat(&mut atoms, &[("li", &[]), ("p", &[])]);
+    assert_eq!(selected_in(&alone, &mut atoms, ":only-of-type"), [1, 2]);
+    assert_eq!(selected_in(&alone, &mut atoms, ":only-child"), Vec::<usize>::new());
+}
+
+#[test]
+fn the_root_has_no_siblings() {
+    for selector in [":first-child", ":last-child", ":only-child", ":first-of-type", ":only-of-type", ":nth-child(1)", ":nth-last-child(1)"] {
+        assert!(selected(selector).contains(&HTML), "{selector}");
+    }
+    assert!(!selected(":nth-child(2)").contains(&HTML));
+}
+
+#[test]
+fn structural_pseudo_classes_work_inside_compounds_and_functional_ones() {
+    let mut atoms = Atoms::default();
+    let list = mixed(&mut atoms);
+    let mut at = |selector: &str| selected_in(&list, &mut atoms, selector);
+    assert_eq!(at("li.a:first-child"), [1]);
+    assert_eq!(at("li.a:last-child"), Vec::<usize>::new());
+    assert_eq!(at(":not(:first-child)"), [2, 3, 4, 5, 6]);
+    assert_eq!(at("li:not(:nth-child(odd))"), [2, 4]);
+    assert_eq!(at(":is(:first-child, :last-child)"), [1, 6]);
+    assert_eq!(at(":where(:nth-child(2), p)"), [2, 3, 6]);
+    assert_eq!(at(":first-child + li"), [2]);
+    assert_eq!(at(":nth-child(odd) ~ .c"), [5]);
+    assert_eq!(at("ul > :last-child"), [6]);
+    assert_eq!(at("ul :nth-child(2)"), [2]);
+}
+
+#[test]
+fn an_element_is_empty_without_elements_or_text() {
+    let mut atoms = Atoms::default();
+    let mut tree = Tree::default();
+    let ul = tree.add(&mut atoms, "ul", None, None, None, &[], &[]);
+    let bare = tree.add(&mut atoms, "li", Some(ul), None, None, &[], &[]);
+    let spaced = tree.add(&mut atoms, "li", Some(ul), Some(bare), None, &[], &[]);
+    tree.add_text(spaced, " ");
+    let emptied = tree.add(&mut atoms, "li", Some(ul), Some(spaced), None, &[], &[]);
+    tree.add_text(emptied, "");
+    let worded = tree.add(&mut atoms, "li", Some(ul), Some(emptied), None, &[], &[]);
+    tree.add_text(worded, "a");
+    let nested = tree.add(&mut atoms, "li", Some(ul), Some(worded), None, &[], &[]);
+    tree.add(&mut atoms, "b", Some(nested), None, None, &[], &[]);
+    let list = List { tree, ul, items: vec![bare, spaced, emptied, worded, nested] };
+    let mut at = |selector: &str| selected_in(&list, &mut atoms, selector);
+    assert_eq!(at(":empty"), [1, 3]);
+    assert_eq!(at(":not(:empty)"), [2, 4, 5]);
+    assert_eq!(at("li:empty"), [1, 3]);
+    assert!(!matches(&Doc::new().selector(":empty"), &list.tree.view(list.ul)));
+}
+
+// `:has()`
+
+fn relatives(selector: &str) -> Vec<(Combinator, usize)> {
+    let parsed = Doc::new().selector(selector);
+    let Some(Simple::Has(arguments)) = parsed.compounds[0].simples.iter().find(|simple| matches!(simple, Simple::Has(_))) else {
+        panic!("{selector} has a :has()");
+    };
+    arguments.iter().map(|argument| (argument.leading, argument.selector.compounds.len())).collect()
+}
+
+#[test]
+fn has_takes_relative_selectors_that_start_with_any_combinator() {
+    use Combinator::{Child, Descendant, NextSibling, SubsequentSibling};
+    assert_eq!(relatives(":has(a)"), [(Descendant, 1)]);
+    assert_eq!(relatives(":has(> a)"), [(Child, 1)]);
+    assert_eq!(relatives(":has(+ a)"), [(NextSibling, 1)]);
+    assert_eq!(relatives(":has(~ a)"), [(SubsequentSibling, 1)]);
+    assert_eq!(relatives(":has(>a b)"), [(Child, 2)]);
+    assert_eq!(relatives(":has( ~  a  >  b )"), [(SubsequentSibling, 2)]);
+    assert_eq!(relatives(":has(a b, > c, + d e f)"), [(Descendant, 2), (Child, 1), (NextSibling, 3)]);
+    assert_eq!(relatives(".x:HAS(> a)"), [(Child, 1)]);
+}
+
+#[test]
+fn has_is_not_forgiving_and_does_not_nest() {
+    for selector in [
+        ":has()", ":has( )", ":has(,)", ":has(a,)", ":has(, a)", ":has(a, , b)", ":has(> )", ":has(a >)", ":has(> > a)", ":has(a b !)",
+        ":has(a, :bogus)", ":has(a, :nth-child(2n of b))", ":has(a, ::before)", ":has(a::before)", ":has(:before)",
+        ":has(:has(a))", ":has(> :has(a))", ":has(a :has(b))", ":has(:not(a:has(b)))", ":not(:has(:has(a)))",
+        ":has(a:hover)", ":has(:active)", ":has(:focus)", ":has(:focus-visible)", ":has(:focus-within)",
+        ":has(.a:not(:hover))", ".a:has(b:hover)",
+        // A state is invalid anywhere inside `:has()`, also where a forgiving `:is()` would drop it.
+        ":has(:is(a:hover))", ":has(:where(a:focus))", ":has(:is(a:hover, span))", ":has(:is(:is(a:focus-within), b))",
+    ] {
+        assert!(!is_valid(selector), "{selector}");
+    }
+    assert!(is_valid(":is(a, :bogus)"), ":is() forgives, :has() does not");
+    // A `:is()` forgives the argument that is invalid in it, so what is left of it matches nothing.
+    assert!(is_valid(":has(:is(:has(a)))"));
+    assert_eq!(selected(":has(:is(:has(a)))"), Vec::<usize>::new());
+    assert!(is_valid(":is(.a, :has(b:hover))"), "an argument of an outer :is() is forgiven as a whole");
+}
+
+#[test]
+fn has_is_valid_in_a_compound_and_inside_the_functional_pseudo_classes() {
+    for selector in [
+        "a:has(b)", "a:has(b):has(c)", ":has(a):hover", ".a:has(> b):first-child", ":is(:has(> a), b)", ":not(:has(a))", ":where(:has(a))",
+        ":not(.a:has(> .b)) .c", ".a :has(b) > c", ":has(a:first-child)", ":has(a:not(.b))", ":has(:is(a, b) > c)", ":has(a:is(.b:not(.c)))",
+        ":has(.a:nth-child(2n+1), > b:empty)", ":has(*)", ":has(> *)",
+    ] {
+        assert!(is_valid(selector), "{selector}");
+    }
+}
+
+#[test]
+fn has_counts_as_its_most_specific_argument() {
+    assert_eq!(specificity(":has(.a)"), (0, 1, 0));
+    assert_eq!(specificity(":has(#a, .b, c)"), (1, 0, 0));
+    assert_eq!(specificity("a:has(b c.d)"), (0, 1, 3));
+    assert_eq!(specificity("a:has(> b, + c.d)"), (0, 1, 2));
+    assert_eq!(specificity(":where(:has(#a))"), (0, 0, 0));
+    assert_eq!(specificity(":not(:has(.a, #b))"), (1, 0, 0));
+    assert_eq!(specificity(":is(:has(.a), b)"), (0, 1, 0));
+    assert_eq!(specificity(":has(*)"), (0, 0, 0));
+    assert_eq!(specificity(".x:has(:is(#a, .b))"), (1, 1, 0));
+}
+
+#[test]
+fn has_matches_what_the_anchor_holds_by_the_leading_combinator() {
+    assert_eq!(selected(":has(> span)"), [MAIN]);
+    assert_eq!(selected(":has(span)"), [HTML, BODY, MAIN], "a descendant at any depth");
+    assert_eq!(selected(":has(> p)"), [MAIN], "not the grandparent");
+    assert_eq!(selected(":has(> div)"), [BODY]);
+    assert_eq!(selected(":has(> body > div)"), [HTML]);
+    assert_eq!(selected(":has(body > div)"), [HTML]);
+    assert_eq!(selected(":has(> div)"), [BODY]);
+    assert_eq!(selected("div:has(.nothing)"), Vec::<usize>::new());
+    assert_eq!(selected(":has(.first, .nothing)"), [HTML, BODY, MAIN]);
+    assert_eq!(selected("body :has(> .first)"), [MAIN]);
+    assert_eq!(selected(":has(span.second[lang|=en])"), [HTML, BODY, MAIN]);
+}
+
+#[test]
+fn has_with_a_sibling_combinator_looks_at_the_siblings_after_the_anchor() {
+    assert_eq!(selected("span:has(+ span)"), [FIRST]);
+    assert_eq!(selected("span:has(+ p)"), [SECOND]);
+    assert_eq!(selected("span:has(~ p)"), [FIRST, SECOND]);
+    assert_eq!(selected(":has(~ p)"), [FIRST, SECOND]);
+    assert_eq!(selected(":has(+ .second)"), [FIRST]);
+    assert_eq!(selected(".first:has(+ .second + p)"), [FIRST]);
+    assert_eq!(selected(".second:has(+ .second + p)"), Vec::<usize>::new());
+    assert_eq!(selected(":has(+ .first)"), Vec::<usize>::new(), "nothing before the first child");
+    assert_eq!(selected(":has(+ body)"), Vec::<usize>::new(), "the root has no siblings");
+    assert_eq!(selected(".first:has(~ .nothing)"), Vec::<usize>::new());
+}
+
+#[test]
+fn has_follows_the_combinators_of_its_argument() {
+    assert_eq!(selected("div:has(> span + p)"), [MAIN]);
+    assert_eq!(selected("div:has(> p + span)"), Vec::<usize>::new());
+    assert_eq!(selected(":has(> .first + .second)"), [MAIN]);
+    assert_eq!(selected(":has(> .second + .first)"), Vec::<usize>::new());
+    assert_eq!(selected(":has(.first ~ p)"), [HTML, BODY, MAIN]);
+    assert_eq!(selected(":has(:is(.first, .second) ~ p)"), [HTML, BODY, MAIN]);
+    assert_eq!(selected(":has(~ .first + .second)"), Vec::<usize>::new(), "nothing is before the first child");
+    assert_eq!(selected("span:has(+ span + p)"), [FIRST]);
+    assert_eq!(selected("body:has(> div > span)"), [BODY]);
+    assert_eq!(selected("body:has(> span)"), Vec::<usize>::new());
+    assert_eq!(selected("html:has(> div span)"), Vec::<usize>::new(), "the div is not a child of html");
+    assert_eq!(selected("html:has(body span)"), [HTML]);
+}
+
+#[test]
+fn has_works_inside_compounds_and_functional_pseudo_classes() {
+    assert_eq!(selected("div:has(> span):has(> p)"), [MAIN]);
+    assert_eq!(selected(":not(:has(span))"), [FIRST, SECOND, PARA]);
+    assert_eq!(selected(":is(:has(> p), .first)"), [MAIN, FIRST]);
+    assert_eq!(selected(":where(:has(> p))"), [MAIN]);
+    assert_eq!(selected(":has(:not(.first))"), [HTML, BODY, MAIN]);
+    assert_eq!(selected("div:has(> :nth-child(3))"), [MAIN]);
+    assert_eq!(selected("div:has(> :nth-child(4))"), Vec::<usize>::new());
+    assert_eq!(selected(":has(:empty)"), [HTML, BODY, MAIN]);
+    assert_eq!(selected(".box:has(> .first) > .second"), [SECOND]);
+    assert_eq!(selected(".box:has(> .nothing) > .second"), Vec::<usize>::new());
+    assert_eq!(selected(":has(> .first) .second"), [SECOND]);
+    assert_eq!(selected(":has(> .first) + .second"), Vec::<usize>::new(), "the anchor is the parent");
+    assert_eq!(selected(".first:has(+ .second) ~ p"), [PARA]);
+    assert_eq!(selected(".first:has(+ .nothing) ~ p"), Vec::<usize>::new());
+}
+
+#[test]
+fn has_reads_tree_state_of_what_it_looks_at() {
+    let mut doc = Doc::new();
+    let mut tree = fixture(&mut doc.atoms);
+    tree.nodes[FIRST].states.push(TreeState::Disabled);
+    let selector = doc.selector("div:has(> :disabled)");
+    assert!((0..tree.nodes.len()).filter(|index| matches(&selector, &tree.view(*index))).eq([MAIN]));
+    let none = doc.selector("div:has(> :enabled)");
+    assert!(!(0..tree.nodes.len()).any(|index| matches(&none, &tree.view(index))));
 }
 
 #[test]
@@ -734,12 +1078,49 @@ fn popover_open_is_read_from_the_element() {
     assert_eq!(selected("div:popover-open"), Vec::<usize>::new());
     let mut doc = Doc::new();
     let mut tree = fixture(&mut doc.atoms);
-    tree.nodes[FIRST].attrs.push((doc.atoms.intern("open"), "popover-open".into()));
+    tree.nodes[FIRST].states.push(TreeState::PopoverOpen);
     let selector = doc.selector("span:popover-open");
     let matched: Vec<usize> = (0..tree.nodes.len()).filter(|index| matches(&selector, &tree.view(*index))).collect();
     assert_eq!(matched, [FIRST]);
     let not_open = doc.selector("span:not(:popover-open)");
     assert!(!matches(&not_open, &tree.view(FIRST)) && matches(&not_open, &tree.view(SECOND)));
+}
+
+const FORM_STATES: [(&str, TreeState); 10] = [
+    (":popover-open", TreeState::PopoverOpen),
+    (":disabled", TreeState::Disabled),
+    (":enabled", TreeState::Enabled),
+    (":checked", TreeState::Checked),
+    (":indeterminate", TreeState::Indeterminate),
+    (":required", TreeState::Required),
+    (":optional", TreeState::Optional),
+    (":read-only", TreeState::ReadOnly),
+    (":read-write", TreeState::ReadWrite),
+    (":any-link", TreeState::AnyLink),
+];
+
+#[test]
+fn each_tree_state_matches_an_element_that_is_in_it_and_not_one_that_is_not() {
+    let mut doc = Doc::new();
+    let mut tree = fixture(&mut doc.atoms);
+    for (name, state) in FORM_STATES {
+        tree.nodes[FIRST].states = vec![state];
+        let plain = doc.selector(&format!("span{name}"));
+        let negated = doc.selector(&format!("span:not({name})"));
+        let wrapped = doc.selector(&format!(":is({name}, .nothing)"));
+        let hidden = doc.selector(&format!(":where({name}).first"));
+        assert!(matches(&plain, &tree.view(FIRST)) && !matches(&plain, &tree.view(SECOND)), "{name}");
+        assert!(!matches(&negated, &tree.view(FIRST)) && matches(&negated, &tree.view(SECOND)), "{name}");
+        assert!(matches(&wrapped, &tree.view(FIRST)) && !matches(&wrapped, &tree.view(SECOND)), "{name}");
+        assert!(matches(&hidden, &tree.view(FIRST)), "{name}");
+    }
+}
+
+#[test]
+fn link_is_any_link_and_the_names_are_not_case_sensitive() {
+    assert_eq!(Doc::new().selector(":link").compounds, Doc::new().selector(":any-link").compounds);
+    assert!(is_valid("a:LINK") && is_valid("input:Read-Write") && is_valid(":is(:disabled, :checked) > :not(:required)"));
+    assert!(!is_valid(":visited") && !is_valid(":invalid") && !is_valid(":placeholder-shown") && !is_valid(":disabled(1)"));
 }
 
 #[test]
@@ -761,7 +1142,11 @@ fn specificity_follows_the_spec() {
     assert_eq!(specificity(":not(.a, div p)"), (0, 1, 0));
     assert_eq!(specificity(":is()"), (0, 0, 0));
     assert_eq!(specificity(":is(:root, :host) [a]"), (0, 2, 0));
-    for state in [":hover", ":active", ":focus", ":focus-visible", ":focus-within", ":popover-open"] {
+    for state in [":hover", ":active", ":focus", ":focus-visible", ":focus-within"]
+        .into_iter()
+        .chain(FORM_STATES.iter().map(|(name, _)| *name))
+        .chain([":link"])
+    {
         assert_eq!(specificity(&format!("a{state}")), (0, 1, 1), "{state}");
         assert_eq!(specificity(&format!(".b{state}")), (0, 2, 0), "{state}");
     }

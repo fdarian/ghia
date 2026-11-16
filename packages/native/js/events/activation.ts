@@ -1,6 +1,6 @@
 import { flushPendingMutations } from "../bounds.js"
 import type { NativeRenderer } from "../host.js"
-import { requiredMethod } from "../dom/renderer-method.js"
+import { requiredWriter } from "../dom/renderer-writer.js"
 import { MouseEvent } from "./classes.js"
 
 const NO_ACTIVATION = "a dispatched click has no activation behaviour"
@@ -19,7 +19,7 @@ function activates(target: ClickTarget, event: Event): target is NonNullable<Cli
  */
 export function preActivateClick(target: ClickTarget, event: Event): void {
   if (!activates(target, event)) return
-  const preActivate = requiredMethod(target.renderer, "preActivateElement", NO_ACTIVATION)
+  const preActivate = requiredWriter(target.renderer, "preActivateElement", NO_ACTIVATION)
   flushPendingMutations(target.renderer)
   preActivate(target.id)
 }
@@ -33,8 +33,8 @@ export function preActivateClick(target: ClickTarget, event: Event): void {
  */
 export function activateAfterClick(target: ClickTarget, event: Event): void {
   if (!activates(target, event)) return
-  if (event.defaultPrevented) requiredMethod(target.renderer, "cancelActivation", NO_ACTIVATION)(target.id)
-  else requiredMethod(target.renderer, "activateElement", NO_ACTIVATION)(target.id)
+  if (event.defaultPrevented) requiredWriter(target.renderer, "cancelActivation", NO_ACTIVATION)(target.id)
+  else requiredWriter(target.renderer, "activateElement", NO_ACTIVATION)(target.id)
 }
 
 function isMouseEvent(event: Event): boolean {
