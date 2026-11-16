@@ -4,7 +4,7 @@ name: Perf gate
 on:
   pull_request:
   push:
-    branches: [main, claude/project-thread-mkcdjp]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
