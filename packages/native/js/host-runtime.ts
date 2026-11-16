@@ -12,6 +12,7 @@ import type {
   WindowSizeHost,
 } from "./host.js"
 import type { KeyframesInput } from "./animate-keyframes.js"
+import { invalidateComputedStyles } from "./computed-style.js"
 import { animateElement, getElementAnimations, type AnimateOptions, type Animation, type GetAnimationsOptions } from "./web-animations.js"
 
 /**
@@ -101,7 +102,13 @@ export function createElementMethods(
     setPointerCapture: (pointerId) => supported("setPointerCapture")(elementId, pointerId),
     releasePointerCapture: (pointerId) => supported("releasePointerCapture")(elementId, pointerId),
     hasPointerCapture: (pointerId) => supported("hasPointerCapture")(elementId, pointerId),
-    click: () => supported("clickElement")(elementId),
+    click: () => {
+      try {
+        supported("clickElement")(elementId)
+      } finally {
+        invalidateComputedStyles()
+      }
+    },
     requestPointerLock: () => supported("requestPointerLock")(elementId),
     getAnimations(this: object, options?: GetAnimationsOptions) {
       return getElementAnimations(renderer, elementId, this, options)
