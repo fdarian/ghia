@@ -7230,6 +7230,32 @@ mod tests {
     }
 
     #[test]
+    fn a_patch_root_scan_ignores_a_hover_only_where_it_paints_only() {
+        let plain = || style_of("{}");
+        let dot = || style_of(r#"{"position":"absolute"}"#);
+        // The row 2 forms a context at 0.5 and takes the dot, unless its hover builds it at opacity 1.
+        let scan = scan_of([(2, style_of(r##"{"opacity":0.5,"hover":{"backgroundColor":"#eee"}}"##)), (3, dot()), (4, plain())]);
+        assert!(!scan.lifts_out, "a hover that paints only leaves the context");
+        for row in [
+            r##"{"opacity":0.5,"hover":{"backgroundColor":"#eee","opacity":1}}"##,
+            r##"{"opacity":0.5,"hasHover":{"opacity":1}}"##,
+            r##"{"opacity":0.5,"hover":{"backgroundColor":"var(--on)"}}"##,
+        ] {
+            // As the retained tree parses it: a `var()` in a state is held by the state, not read as a colour.
+            let row = crate::css::var_substitution::parse(row.as_bytes()).expect("a style");
+            let scan = scan_of([(2, row), (3, dot()), (4, plain())]);
+            assert!(scan.lifts_out, "the row may form no context while hovered");
+        }
+        // A child that lifts as soon as it is hovered is lifted out of a row that forms no context.
+        for child in [r#"{"hover":{"transform":"scale(1.1)"}}"#, r#"{"hasHover":{"position":"relative"}}"#] {
+            let scan = scan_of([(2, plain()), (3, style_of(child)), (4, plain())]);
+            assert!(scan.lifts && scan.lifts_out, "{child}: the child lifts out of the row while hovered");
+        }
+        let scan = scan_of([(2, plain()), (3, style_of(r##"{"hover":{"backgroundColor":"#eee"}}"##)), (4, plain())]);
+        assert!(!scan.lifts && !scan.lifts_out);
+    }
+
+    #[test]
     fn a_patch_root_scan_sees_a_child_lift_that_may_lift_misses() {
         let plain = || style_of("{}");
         let dot = || style_of(r#"{"position":"absolute"}"#);

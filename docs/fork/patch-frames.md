@@ -752,13 +752,14 @@ keeps what builds it again.
     `scan_patch_root` keeps per element whether it lifts itself (`PatchRootScan::lifts`, what its parent sees) and whether something lifts
     out of it (`PatchRootScan::lifts_out`, which refuses it): `lifts_out` is a lifted child (or one lifting out of the child) while the
     element forms no context. The scan reads the declared style, and the build lays out another one when an animation, a transition, Motion,
-    a `var()`, an `@container` block or a state other than `hover` and `hasHover` (`active`, `focus`, `focusWithin`, `focusVisible`, a group, `disabled`)
+    a `var()` (one held by a state block too), an `@container` block, a state other than `hover` and `hasHover` (`active`, `focus`, `focusWithin`, `focusVisible`, a group, `disabled`)
+    or a `hover` or `hasHover` that is more than paint (an opacity that crosses 1, a transform, a size: `hover_paint::paint_hover_of` says `No`)
     restyles the element (an animation that ends at opacity 1 forms no context, `active: { opacity: 1 }` over a lower opacity none while pressed), so both
-    answers are given as the safe side: an element **forms a context** only when it does as declared and nothing but a hover restyles it
+    answers are given as the safe side: an element **forms a context** only when it does as declared and nothing but a hover that paints only restyles it
     (`hover_paint::forms_context_in_every_state`; `stacking::creates_context` over `Resolved::of_style`; as the scan does not know whether the
     element is a flex or grid item, one whose `z-index` alone forms a context is judged as forming none), and an element **lifts itself** when
     `may_lift` says so, when it forms a context as declared (a `transform-style: preserve-3d`, a Motion transform key or a mask border forms one and
-    lifts at `z-index` 0 without `may_lift` naming it) or when something other than a hover might restyle it (`hover_paint::may_lift_in_any_state`).
+    lifts at `z-index` 0 without `may_lift` naming it) or when something other than a hover that paints only might restyle it (`hover_paint::may_lift_in_any_state`).
     A root is refused too often, never too seldom; the build re-decides with the real flags. `Recording::patch_root` and `Record::patch_root` then ask `Node::hands_lifts_out` (`!forms_context && below.lifts`),
     the same without the relevance-watch clause of `Node::lifts_out`, which is for the relocation of a replay: a patch prepaints the
     watch itself. A lifted row that forms no context and holds a lifted child, and an element above a lifted row, are not patch roots;

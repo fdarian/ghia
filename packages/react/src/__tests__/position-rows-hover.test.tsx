@@ -176,7 +176,10 @@ defineKeyframes("rows-fade-in", { from: { opacity: 0 }, to: { opacity: 1 } })
 
 const BG = ["#223344", "#334455"]
 
-type Variant = { name: string; row: (index: number) => Record<string, unknown>; inner?: boolean }
+/** The badge of a row that reaches into the next row, so that where the context orders it shows. */
+const REACH = { ...TAG, top: 30, height: 20 }
+
+type Variant = { name: string; row: (index: number) => Record<string, unknown>; inner?: Record<string, unknown>; tag?: typeof TAG }
 
 function Restyled({ variant }: { variant: Variant }) {
   return (
@@ -193,11 +196,11 @@ function Restyled({ variant }: { variant: Variant }) {
           }}
         >
           {variant.inner ? (
-            <div testId={`plane-${index}`} style={{ transformStyle: "preserve-3d" }}>
-              <div style={{ position: "absolute", ...TAG, backgroundColor: "#ff0000" }} />
+            <div testId={`plane-${index}`} style={variant.inner}>
+              <div style={{ position: "absolute", ...(variant.tag ?? TAG), backgroundColor: "#ff0000" }} />
             </div>
           ) : (
-            <div style={{ position: "absolute", ...TAG, backgroundColor: "#ff0000" }} />
+            <div style={{ position: "absolute", ...(variant.tag ?? TAG), backgroundColor: "#ff0000" }} />
           )}
           <div style={{ fontSize: 14, color: "#ffffff" }}>{`Row ${index}`}</div>
         </div>
@@ -209,8 +212,13 @@ function Restyled({ variant }: { variant: Variant }) {
 const VARIANTS: Variant[] = [
   { name: "an animation that ends at opacity 1", row: () => ({ opacity: 0, animation: "rows-fade-in 100ms linear forwards" }) },
   { name: "an active state that sets opacity 1 over a lower one", row: () => ({ opacity: 0.5, active: { opacity: 1 } }) },
-  { name: "a child with preserve-3d that holds the lifted box", row: () => ({}), inner: true },
-  { name: "a child with a scale that holds the lifted box", row: () => ({ scale: "1.01 1" }), inner: true },
+  { name: "a child with preserve-3d that holds the lifted box", row: () => ({}), inner: { transformStyle: "preserve-3d" } },
+  { name: "a child with a scale that holds the lifted box", row: () => ({}), inner: { scale: "1.01 1" } },
+  {
+    name: "a row with a hover that crosses opacity 1 and holds a lifted box",
+    row: () => ({ opacity: 0.5, hover: { backgroundColor: "#664422", opacity: 1 } }),
+    tag: REACH,
+  },
 ]
 
 describeNative("hover patches of rows that are restyled other than by their hover", { timeout: TIMEOUT }, () => {
@@ -244,6 +252,7 @@ describeNative("hover patches of rows that are restyled other than by their hove
                 [20, 60],
                 [20, 100],
                 [TAG.left + 5, TAG.top + 5],
+                [REACH.left + 5, ROW_HEIGHT + 5],
               ]),
             })
           }
