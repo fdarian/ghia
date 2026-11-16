@@ -260,7 +260,11 @@ impl FrameSteps {
     fn run(&self, window: &mut Window, cx: &mut App) {
         let now = self.clock.now();
         crate::renderer::settle_scroll_writes();
+        let animating = crate::scroll::animating();
         crate::scroll::advance_animations(now);
+        if animating && !crate::scroll::animating() {
+            crate::events::hover_after_scroll::of(window).animation_ended();
+        }
         self.report_scrolls(window, cx);
         self.run_animation_frame(now, window, cx);
     }

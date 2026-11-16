@@ -332,7 +332,7 @@ each entry or applies it again.
   to the offset that was drawn as a translate is not lost to the wheel after it); the scene a patch wrote in place is described for the
   retention verifier after the splice of the same patch; and a patch of a root painted in its region does less work at delta zero (the
   hitboxes the prepaint relocated in place are not relocated again, and the recording rewrite is not given the hitboxes it then replaces).
-  A hover that only paints is the owner's to say it does not hold a translate (`Window::set_scroll_patch_hover`), and the rows a translate moved are
+  The hover under a still pointer is not asked of the owner: a scroll does not recompute it (it follows when the scroll ends, `events/hover_after_scroll.rs`), and the rows a translate moved are
   patchable where they stand ([patch-frames.md](patch-frames.md#under-a-wheel-slice-g3e)).
 - **Why.** One key of the mailbox of ghia-bench is a restyle of two rows, a swap of the detail and a scroll of the list; each
   of the three was a patch or a translate alone and the key, drawn whole, cost 40M instructions

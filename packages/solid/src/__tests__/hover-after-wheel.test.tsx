@@ -158,8 +158,10 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: hover crossings of a windowed li
       expect(on.second.picture).toEqual(off.second.picture)
       if (!counted) return
       expect(on.faded.thumbRepaints, "the fade is steps of the thumb").toBeGreaterThan(0)
-      expect(on.faded.whole, "the hold and the fade of the bar after the wheel build no frame").toBe(0)
-      expect(on.faded.unpatchable, "a step of the fade is not a decline").toBe(0)
+      // The first 500 ms of the hold are the wheel's: when they pass the hover follows the scroll to the row under the pointer, which is
+      // a frame of its own (the rows of the window were made again while it moved, so the chain the hover has names rows that are gone).
+      expect(on.faded.whole, "the hold and the fade of the bar after the wheel build no frame but the one of the hover that follows the scroll").toBeLessThanOrEqual(1)
+      expect(on.faded.unpatchable, "a step of the fade is not a decline: the one is the hover that follows the scroll").toBeLessThanOrEqual(1)
       expect(on.first.unpatchable, "no row was replayed from a recording made elsewhere, so no crossing is a frame built whole").toBe(0)
       expect(on.first.outside + on.second.outside, "no tick is declined for an element outside every unit").toBe(0)
       expect(on.second.crossings).toBeGreaterThanOrEqual(4)

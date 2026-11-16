@@ -883,6 +883,8 @@ pub(crate) fn is_virtual_list(id: u64) -> bool {
 /// finish before it moves the rows, and the frame whose translate declines is built whole by the view
 /// gpui queues for it. A window that does not classify the frame is notified, as a `div` scroller is.
 pub(crate) fn invalidate_after_scroll(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, list: bool) {
+    // A write ends its scroll at once, or when its animation does: the hover under the pointer follows then.
+    crate::events::hover_after_scroll::of(window).note_written(crate::scroll::animating());
     if list && crate::retain::scroll_gate::list_write_is_quiet(view) {
         window.note_list_scrolled(view);
         LIST_WRITTEN.with(|written| written.borrow_mut().insert(view));
@@ -10585,6 +10587,13 @@ impl gpui::Render for GpuixView {
             self.css_transitions.take_active() | self.css_animations.take_active();
         let (motion_awake, dormant_motion) = self.note_motion_split(&tree, motion_animating, now);
         let motion_active = !motion_awake.is_empty();
+        // What a frame that changed nothing but a scroll offset is told from: the paint of the pointer frame asks.
+        let viewport = window.viewport_size();
+        crate::events::hover_after_scroll::of(window).note_build(
+            tree.revision(),
+            (f32::from(viewport.width), f32::from(viewport.height)),
+            transitions_active || motion_active,
+        );
         if !window.is_layout_pass() {
             self.layout_flips.note_ticking(transitions_active || motion_active);
         }
@@ -14934,15 +14943,9 @@ pub struct ScrollPatchCounters {
     pub eligible: f64,
     /// Of the eligible ones, the ones whose build was not what the classifier predicted.
     pub mispredicted: f64,
-    /// Of the frames whose first reason is the hover, the ones nothing else stops: eligible with
-    /// the pointer elsewhere.
+    /// Of the frames whose first reason is the hover (the pointer moved since the frame shown), the ones
+    /// nothing else stops: eligible with the pointer where the frame shown had it.
     pub hover_only: f64,
-    /// The frames whose rows move under a pointer where the frame shown had it and change the hitboxes under it, for which
-    /// the owner was asked whether the hover would matter (`hover_would_matter`).
-    pub hover_asked: f64,
-    /// Of those, the ones that would be a frame built whole (a hover that is more than paint, or that a listener hears).
-    /// `Hover` held for a frame that is not one of these is a pointer that is not where the frame shown had it.
-    pub hover_matters: f64,
     /// Of the eligible ones, the ones drawn by moving the rows of the frame shown.
     pub patched: f64,
     /// Of those, the ones that built rows that came in or took out rows that left.
@@ -14967,8 +14970,7 @@ pub struct ScrollPatchCounters {
     pub apply_declines: std::collections::HashMap<String, f64>,
     /// The others, by the first reason they were not.
     pub reasons: std::collections::HashMap<String, f64>,
-    /// The same frames, by every reason that held for them, first or not (`HitboxChain` is only
-    /// counted here, it stops no frame), and by what lay behind a reason (`NotRelocatable.noRun`,
+    /// The same frames, by every reason that held for them, first or not, and by what lay behind a reason (`NotRelocatable.noRun`,
     /// `NotRelocatable.noRecording`, `NotRelocatable.unmovable`, `Region.top`, `Region.bottom`,
     /// `Region.side`, `Thumb.size`, `Thumb.alpha`, `Thumb.appear`, `Thumb.track`, `Membership.settles`,
     /// `Membership.unmeasured`, `Membership.unmeasuredOverdraw`, `Membership.disjoint`, `Membership.noBuilder`).
@@ -15007,8 +15009,6 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
                 eligible: scroll.eligible as f64,
                 mispredicted: scroll.mispredicted as f64,
                 hover_only: scroll.hover_only as f64,
-                hover_asked: view.pointer.borrow().scroll_hover_asked.get() as f64,
-                hover_matters: view.pointer.borrow().scroll_hover_matters.get() as f64,
                 patched: scroll.patched as f64,
                 membership_frames: scroll.membership_frames as f64,
                 rows_built: scroll.rows_built as f64,

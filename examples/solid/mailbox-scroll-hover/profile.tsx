@@ -37,6 +37,8 @@
 //   A11Y=0        takes the pretend screen reader the test window starts with away (as a bench run has none)
 //   ACTIVE=1      the window is key and the search input is focused, so its caret blinks (the executor's clock moves with each tick);
 //                 DEBUG_BLINK=1 prints the patch counters across six blinks
+//   EXECUTOR_CLOCK=1  moves the executor's clock with each tick, as a live window's runs, so the timers of the page fire: the hover that follows a
+//                 scroll 500 ms after its last wheel event (the TAIL_MS ticks), and the end of a scrollbar's hold. Without it they never do
 //   SETTLE_LAX=1  the settling step (600 ticks until 120 in a row paint nothing) no longer stops the run when the window keeps painting, as with an
 //                 app whose caret blink paints whole frames; the measurement then includes those frames
 // Env of App.tsx, which change the app being measured:
@@ -153,7 +155,7 @@ if (!RAW) {
 
 // The caret's timer runs on the executor's clock, which clockAdvance does not move.
 const advanceExecutor = (ms: number) => {
-  if (process.env.ACTIVE === "1") renderer.advanceTime(ms)
+  if (process.env.ACTIVE === "1" || process.env.EXECUTOR_CLOCK === "1") renderer.advanceTime(ms)
 }
 
 function frameStep(ms: number) {

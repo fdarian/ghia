@@ -2722,20 +2722,10 @@ export interface ScrollPatchCounters {
   /** Of the eligible ones, the ones whose build was not what the classifier predicted. */
   mispredicted: number
   /**
-   * Of the frames whose first reason is the hover, the ones nothing else stops: eligible with
-   * the pointer elsewhere.
+   * Of the frames whose first reason is the hover (the pointer moved since the frame shown), the ones
+   * nothing else stops: eligible with the pointer where the frame shown had it.
    */
   hoverOnly: number
-  /**
-   * The frames whose rows move under a pointer where the frame shown had it and change the hitboxes under it, for which
-   * the owner was asked whether the hover would matter (`hover_would_matter`).
-   */
-  hoverAsked: number
-  /**
-   * Of those, the ones that would be a frame built whole (a hover that is more than paint, or that a listener hears).
-   * `Hover` held for a frame that is not one of these is a pointer that is not where the frame shown had it.
-   */
-  hoverMatters: number
   /** Of the eligible ones, the ones drawn by moving the rows of the frame shown. */
   patched: number
   /** Of those, the ones that built rows that came in or took out rows that left. */
@@ -2765,8 +2755,7 @@ export interface ScrollPatchCounters {
   /** The others, by the first reason they were not. */
   reasons: Record<string, number>
   /**
-   * The same frames, by every reason that held for them, first or not (`HitboxChain` is only
-   * counted here, it stops no frame), and by what lay behind a reason (`NotRelocatable.noRun`,
+   * The same frames, by every reason that held for them, first or not, and by what lay behind a reason (`NotRelocatable.noRun`,
    * `NotRelocatable.noRecording`, `NotRelocatable.unmovable`, `Region.top`, `Region.bottom`,
    * `Region.side`, `Thumb.size`, `Thumb.alpha`, `Thumb.appear`, `Thumb.track`, `Membership.settles`,
    * `Membership.unmeasured`, `Membership.unmeasuredOverdraw`, `Membership.disjoint`, `Membership.noBuilder`).

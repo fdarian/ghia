@@ -174,10 +174,10 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
     const { renderer, unmount } = open("hit")
     try {
       warm(renderer, 100, 38)
-      // The pointer at 38 is in the row 0 (0 to 40) and in the row 1 after a scroll by 5. The hover only paints, so the tick
-      // after the translate repaints the two rows (`scroll-patch-hover.test.tsx`).
+      // The pointer at 38 is in the row 0 (0 to 40) and in the row 1 after a scroll by 5. A pointer that did not move
+      // is not asked what is under it: the hover follows when the scroll ends (`hover-after-scroll.test.tsx`).
       const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 38, by: 5 }))
-      expect(delta).toEqual({ frames: 1, eligible: 1, mispredicted: 0, hoverOnly: 0, reasons: {}, held: { HitboxChain: 1 } })
+      expect(delta).toEqual({ frames: 1, eligible: 1, mispredicted: 0, hoverOnly: 0, reasons: {}, held: {} })
     } finally {
       unmount()
     }
@@ -187,22 +187,38 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
     const { renderer, unmount } = open("plain")
     try {
       warm(renderer, 100, 38)
-      // The pointer at 38 is in the row 0 (0 to 40) and in the row 1 after a scroll by 5: the hitboxes under it change, and
-      // moving the hover from one row to the other restyles nothing and emits nothing.
       const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 38, by: 5 }))
-      expect(delta).toEqual({ frames: 1, eligible: 1, mispredicted: 0, hoverOnly: 0, reasons: {}, held: { HitboxChain: 1 } })
+      expect(delta).toEqual({ frames: 1, eligible: 1, mispredicted: 0, hoverOnly: 0, reasons: {}, held: {} })
     } finally {
       unmount()
     }
   })
 
-  unverified("counts a pointer that crosses to a row that listens for it as a hover change", () => {
+  unverified("counts a pointer that crosses to a row that listens for it as a translate", () => {
     const { renderer, unmount } = open("heard")
     try {
       warm(renderer, 100, 38)
+      // The `pointerenter` is sent when the scroll ends, not by the frame that moves the rows.
       const delta = since(renderer, undefined, () => wheel(renderer, { x: 100, y: 38, by: 5 }))
+      expect(delta).toEqual({ frames: 1, eligible: 1, mispredicted: 0, hoverOnly: 0, reasons: {}, held: {} })
+    } finally {
+      unmount()
+    }
+  })
+
+  unverified("counts a wheel at a pointer that moved since the frame shown as a hover change", () => {
+    const { renderer, unmount } = open("hit")
+    try {
+      warm(renderer, 100, 38)
+      // The pointer moved and the wheel came before the frame that shows either.
+      renderer.setInlineDraws(false)
+      const delta = since(renderer, undefined, () => {
+        renderer.dispatchMouseMove(100, 10)
+        renderer.dispatchScrollWheel(100, 10, 0, 5)
+        renderer.drawFrame()
+      })
       expect(delta.reasons).toEqual({ Hover: 1 })
-      expect(delta.held).toEqual({ Hover: 1, HitboxChain: 1 })
+      expect(delta.held).toEqual({ Hover: 1 })
       expect(delta.hoverOnly, "nothing else stops it").toBe(1)
     } finally {
       unmount()
@@ -236,7 +252,6 @@ describeNative("the frames drawn after a list scroll", { timeout: TIMEOUT }, () 
       expect(delta.reasons.Region).toBeUndefined()
       expect(Object.keys(counts(renderer).held)).toEqual(
         expect.arrayContaining([
-          "HitboxChain",
           "NotRelocatable.noRun",
           "NotRelocatable.noRecording",
           "NotRelocatable.unmovable",
