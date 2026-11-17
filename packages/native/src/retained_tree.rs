@@ -909,6 +909,9 @@ pub struct RetainedTree {
     /// How many elements carry `inert`. While it is zero, no mutation has to
     /// look at ancestors to decide what is focusable.
     inert_count: usize,
+    /// How many elements carry their own `contenteditable`. While it is zero, moving a subtree
+    /// cannot change what is an editing host.
+    editable_count: usize,
     /// Elements whose style declares a `visibility`, so a tree without any skips the ancestor walk.
     visibility_count: usize,
     /// Elements whose own style says `display: none`, so a tree without any skips the ancestor walk
@@ -1016,6 +1019,7 @@ impl RetainedTree {
             focusable_ids: Default::default(),
             geometry_ids: FxHashSet::default(),
             inert_count: 0,
+            editable_count: 0,
             visibility_count: 0,
             display_none_count: 0,
             pending_hides: Default::default(),
@@ -1381,10 +1385,11 @@ impl RetainedTree {
         let hidden = element.declared_hidden().unwrap_or(inherited_hidden);
         let children = element.children.clone();
         let focusable = !inert && !hidden && self.takes_focus(id);
-        if focusable {
-            self.focusable_ids.insert(id);
-        } else {
-            self.focusable_ids.remove(&id);
+        let was_focusable = if focusable { !self.focusable_ids.insert(id) } else { self.focusable_ids.remove(&id) };
+        if focusable != was_focusable {
+            // The element's own props did not change, so a retained root holding it would replay the
+            // tab stop and focus registration it had.
+            self.mark_render_changed(id);
         }
         for child in children {
             self.track_focusable_below(child, inert, hidden);
@@ -1571,6 +1576,7 @@ impl RetainedTree {
             self.focusable_ids.remove(&id);
             self.geometry_ids.remove(&id);
             self.inert_count -= usize::from(element.has_inert_prop());
+            self.editable_count -= usize::from(crate::html::editing::own_value(&element).is_some());
             self.visibility_count -= usize::from(element.declared_hidden().is_some());
             self.display_none_count -= usize::from(styles_display_none(&element));
             self.anchored_count -= usize::from(element.element_type == "anchored");
@@ -1611,6 +1617,9 @@ impl RetainedTree {
         self.mark_fresh_subtree(id);
         if self.sheets.enabled {
             self.sheets_linked(id);
+        }
+        if self.editable_count > 0 {
+            self.track_focusable_subtree(id);
         }
         self.mark_changed(parent_id);
         self.relations.restructured();
@@ -1666,7 +1675,7 @@ impl RetainedTree {
         if self.sheets.enabled {
             self.sheets_linked(child_id);
         }
-        if self.inert_count > 0 || self.visibility_count > 0 {
+        if self.inert_count > 0 || self.visibility_count > 0 || self.editable_count > 0 {
             self.track_focusable_subtree(child_id);
         }
         if placed_before {
@@ -1708,7 +1717,7 @@ impl RetainedTree {
         if self.sheets.enabled {
             self.sheets_linked(child_id);
         }
-        if self.inert_count > 0 || self.visibility_count > 0 {
+        if self.inert_count > 0 || self.visibility_count > 0 || self.editable_count > 0 {
             self.track_focusable_subtree(child_id);
         }
         if placed_before {
@@ -2064,6 +2073,7 @@ impl RetainedTree {
             .elements
             .get(&id)
             .is_some_and(RetainedElement::has_inert_prop);
+        let was_editable = is_editing && self.elements.get(&id).is_some_and(|element| crate::html::editing::own_value(element).is_some());
         let was_declaration = self
             .elements
             .get(&id)
@@ -2131,6 +2141,8 @@ impl RetainedTree {
             self.track_focusable(id);
         }
         if is_editing {
+            let now_editable = self.elements.get(&id).is_some_and(|element| crate::html::editing::own_value(element).is_some());
+            self.editable_count = self.editable_count + usize::from(now_editable) - usize::from(was_editable);
             self.track_focusable_subtree(id);
         }
         if is_hidden_attribute {
@@ -2980,6 +2992,55 @@ mod tests {
         assert_eq!(focusable(&tree), vec![4]);
         tree.set_custom_prop(4, "contenteditable".to_string(), serde_json::json!(""));
         assert_eq!(focusable(&tree), vec![4], "an empty text is true");
+    }
+
+    #[test]
+    fn an_editable_element_is_a_host_only_by_where_it_is_put() {
+        let mut tree = RetainedTree::new();
+        for id in 1..=3 {
+            tree.create_element(id, "div".to_string());
+        }
+        let focusable = |tree: &RetainedTree| tree.focusable_ids.iter().copied().collect::<Vec<_>>();
+        // React writes the props before it appends the child.
+        tree.set_custom_prop(1, "contentEditable".to_string(), serde_json::json!(true));
+        tree.set_custom_prop(2, "contentEditable".to_string(), serde_json::json!(true));
+        assert_eq!(focusable(&tree), vec![1, 2], "parentless, both are hosts");
+        tree.append_child(1, 2);
+        assert_eq!(focusable(&tree), vec![1], "put into a host, 2 is not one");
+
+        tree.set_custom_prop(3, "contentEditable".to_string(), serde_json::json!(true));
+        tree.append_child(2, 3);
+        assert_eq!(focusable(&tree), vec![1]);
+
+        tree.detach_child(2);
+        assert_eq!(focusable(&tree), vec![1, 2], "taken out of the host, 2 and its subtree are hosts again, 3 is not");
+        tree.insert_before(1, 2, 0);
+        assert_eq!(focusable(&tree), vec![1]);
+
+        tree.destroy_element(1);
+        assert_eq!(tree.editable_count, 0);
+    }
+
+    #[test]
+    fn a_descendant_whose_focusability_flips_with_an_ancestor_is_marked_changed() {
+        let mut tree = RetainedTree::new();
+        for id in 1..=3 {
+            tree.create_element(id, "div".to_string());
+        }
+        tree.append_child(1, 2);
+        tree.append_child(2, 3);
+        tree.set_custom_prop(3, "contentEditable".to_string(), serde_json::json!(true));
+        let revision = |tree: &RetainedTree, id: u64| tree.elements[&id].subtree_revision;
+
+        let before = revision(&tree, 3);
+        tree.set_custom_prop(1, "contentEditable".to_string(), serde_json::json!(true));
+        assert!(revision(&tree, 3) > before, "3 stopped being a tab stop");
+        let before = revision(&tree, 3);
+        tree.set_custom_prop(1, "contentEditable".to_string(), serde_json::json!(false));
+        assert!(revision(&tree, 3) > before, "and became one again");
+        let before = revision(&tree, 3);
+        tree.set_custom_prop(1, "contentEditable".to_string(), serde_json::Value::Null);
+        assert_eq!(revision(&tree, 3), before, "nothing flipped");
     }
 
     #[test]

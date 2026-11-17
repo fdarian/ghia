@@ -2,7 +2,7 @@ import type { EventPayload } from "../index.js"
 import { addFrameSource, runAnimationFrame } from "./animation-frame.js"
 import { reportUncaught, type DomDispatchResult } from "./events/dispatch.js"
 import { createDragDispatcher } from "./events/drag.js"
-import { focusElementById } from "./focus.js"
+import { focusElementById, placeCaretOnFocusIn } from "./focus.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
 import { popoversOfRendererGone } from "./dom/popover.js"
 import { elementOf, GpuixEventTarget, noteFocusEvent } from "./events/window-target.js"
@@ -328,7 +328,10 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       }
       const root = active
       if (!root) return false
-      if (received.eventType === "focusin") noteFocusEvent(renderer)
+      if (received.eventType === "focusin") {
+        noteFocusEvent(renderer)
+        placeCaretOnFocusIn(renderer, received.elementId)
+      }
       const event = shapeScrollEvent(normalizeEventType(received))
       if (deliverObservation(renderer, event)) return true
       if (!handlesEvent(root, event)) {
@@ -350,7 +353,10 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         return { defaultPrevented: false, propagationStopped: false }
       }
       const root = active
-      if (received.eventType === "focusin") noteFocusEvent(renderer)
+      if (received.eventType === "focusin") {
+        noteFocusEvent(renderer)
+        placeCaretOnFocusIn(renderer, received.elementId)
+      }
       const event = shapeScrollEvent(normalizeEventType(received))
       if (!root || !handlesEvent(root, event)) {
         if (root) settleAfter(root, event)

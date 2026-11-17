@@ -7484,6 +7484,7 @@ impl GpuixView {
                 return false;
             };
             if crate::custom_elements::input_choice::is_text_editor(element)
+                || crate::html::editing::is_editable(&tree, focused)
                 || crate::custom_elements::input_range::takes_key(element, key_name)
             {
                 return false;
