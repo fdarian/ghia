@@ -39,6 +39,7 @@ import type {
   WindowKeyEventHandlers,
 } from "./host.js"
 import { bindClipboard } from "./clipboard.js"
+import { runEditingComposition, runEditingInput, type EditingCompositionStep } from "./editing/input.js"
 import { forgetElementSource, forgetWindowSource } from "./events/window-target.js"
 import { detachRenderer } from "./detached-renderer.js"
 import type { HostDropEffect } from "./events/types.js"
@@ -534,6 +535,10 @@ export interface TestRendererOptions extends WindowOptions, WindowFontsOption {
   onError?: (error: unknown) => void
 }
 
+function noEditingHost(method: string): Error {
+  return new Error(`${method} needs a focused editing host whose selection holds the caret. Focus it, then place the selection.`)
+}
+
 /** The motion a simulated mouse move reports, in logical pixels. */
 /**
  * One key an input method consumes, and what the input method then does with
@@ -901,6 +906,39 @@ export class TestRenderer implements NativeRenderer {
     this.dispatchNativeEvents()
     this.native.simulateKeystrokes(keystrokes)
     this.dispatchNativeEvents()
+    this.native.flushIfDirty()
+  }
+
+  /** One edit of the focused editing host (`<div contenteditable>`), as the browser makes it
+   *  without a key: `beforeinput`, the change to the DOM unless a listener canceled it, then
+   *  `input`. `inputType` is an Input Events `inputType` (`"insertText"`, `"deleteContentBackward"`,
+   *  `"insertParagraph"`...) and `data` the text of an insertion. A paragraph or line break fires
+   *  `beforeinput` only. Throws when no editing host holds focus and the selection.
+   *  @param inputType - e.g. `"insertText"`
+   *  @param data - the inserted text */
+  simulateEditingInput(inputType: string, data?: string): void {
+    this.native.flushIfDirty()
+    this.dispatchNativeEvents()
+    if (!runEditingInput(inputType, data ?? null).handled) throw noEditingHost("simulateEditingInput")
+    this.dispatchNativeEvents()
+    this.native.flushIfDirty()
+  }
+
+  /** Run an input method composition in the focused editing host. A `mark` step starts the
+   *  composition (`compositionstart`) if none runs and replaces the marked text with `text`
+   *  (`beforeinput`, `compositionupdate`, the change, `input`, all `insertCompositionText` with
+   *  `isComposing`); `commit` does the same with the final text if it differs, then
+   *  `compositionend`; `unmark` is `compositionend` alone. No key events are sent, so a step's
+   *  `key` (see `CompositionStep`) is ignored. Throws when no editing host holds focus and the
+   *  selection.
+   *  @param steps - the steps in order */
+  simulateEditingComposition(steps: readonly EditingCompositionStep[]): void {
+    this.native.flushIfDirty()
+    this.dispatchNativeEvents()
+    for (const step of steps) {
+      if (!runEditingComposition(step)) throw noEditingHost("simulateEditingComposition")
+      this.dispatchNativeEvents()
+    }
     this.native.flushIfDirty()
   }
 

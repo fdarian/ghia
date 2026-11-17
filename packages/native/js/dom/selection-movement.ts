@@ -125,6 +125,16 @@ function segmenter(granularity: MovementGranularity): Intl.Segmenter | undefined
   return created
 }
 
+/** Whether `text` is exactly one grapheme cluster: what a typed key is. */
+export function isSingleGrapheme(text: string): boolean {
+  if (text === "") return false
+  const segments = segmenter("character")
+  if (segments === undefined) return [...text].length === 1
+  const pieces = segments.segment(text)[Symbol.iterator]()
+  pieces.next()
+  return pieces.next().done === true
+}
+
 /** Where a caret may stop going `forward` or backward in `text`, ascending. */
 function stopsOf(text: string, granularity: MovementGranularity, forward: boolean): number[] {
   const stops = [0, text.length]
