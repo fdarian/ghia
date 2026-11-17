@@ -2736,7 +2736,10 @@ export interface ScrollPatchCounters {
   rowsRebuilt: number
   /** The rows those frames took out of the frame. */
   rowsRemoved: number
-  /** The frames presented with a shift: the platform copied the pixels of the list that stayed and drew the rest. */
+  /**
+   * The presentations whose damage carried a shift, not the copies made: a platform may draw such a frame whole
+   * (a window that is not opaque, a composed window, a target that is not valid, a shift that does not fit the target).
+   */
   shifted: number
   /**
    * How the virtual lists of the window found the size of the rows they measured, summed over the

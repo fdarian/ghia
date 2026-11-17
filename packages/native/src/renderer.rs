@@ -14969,7 +14969,8 @@ pub struct ScrollPatchCounters {
     pub rows_rebuilt: f64,
     /// The rows those frames took out of the frame.
     pub rows_removed: f64,
-    /// The frames presented with a shift: the platform copied the pixels of the list that stayed and drew the rest.
+    /// The presentations whose damage carried a shift, not the copies made: a platform may draw such a frame whole
+    /// (a window that is not opaque, a composed window, a target that is not valid, a shift that does not fit the target).
     pub shifted: f64,
     /// How the virtual lists of the window found the size of the rows they measured, summed over the
     /// lists that are mounted: by building and laying the row out, or from the size its style declares
