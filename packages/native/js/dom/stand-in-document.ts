@@ -118,6 +118,9 @@ class StandInBinding implements ElementBinding {
   createElement(): never {
     return noWindow(this.element, "the elements")
   }
+  createFragment(): never {
+    return noWindow(this.element, "the fragments")
+  }
 }
 
 function detachedRenderer(): ReturnType<typeof createDetachedRenderer> {

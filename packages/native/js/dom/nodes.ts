@@ -64,6 +64,8 @@ export type ParentBinding = NodeBinding & {
   createText(data: string): Text
   /** An element of the window that owns this node, in no tree yet: `type` is one of the element types. */
   createElement(type: string): Element
+  /** An empty `DocumentFragment` of the window that owns this node: never known to native, whatever is placed in it. */
+  createFragment(): DocumentFragment
 }
 
 export type ElementBinding = ParentBinding & StyleBinding & {
@@ -89,6 +91,8 @@ export type TextBinding = NodeBinding & {
   setData(data: string): void
   /** A text node of the window that owns this one, in no tree yet. */
   createText(data: string): Text
+  /** An empty `DocumentFragment` of the window that owns this one. */
+  createFragment(): DocumentFragment
 }
 
 const ELEMENT_NODE = 1
@@ -809,12 +813,20 @@ abstract class DocumentClass extends NodeClass {
 
 Object.defineProperty(DocumentClass.prototype, "ownerDocument", { configurable: true, get: () => null })
 
-/** Never instantiated: it exists so `node instanceof DocumentFragment` is false, not an error. */
+/**
+ * A light container for nodes: what `document.createDocumentFragment()` and `Range.cloneContents()` hand
+ * out. An adapter's fragment class holds children through the same binding an element does, and
+ * is never mounted: inserting a fragment moves its children (tree-mutation.ts), so a fragment
+ * does not reach native as a node. `new DocumentFragment()` throws, unlike in a browser: the
+ * adapters make the nodes of a window.
+ */
 abstract class DocumentFragmentClass extends NodeClass {
   constructor() {
     super()
-    illegalConstructor()
+    if (new.target === DocumentFragmentClass) illegalConstructor()
   }
+
+  abstract [DOM_BINDING](): ParentBinding
 
   get nodeType(): number {
     return DOCUMENT_FRAGMENT_NODE
@@ -830,6 +842,39 @@ abstract class DocumentFragmentClass extends NodeClass {
     return text
   }
 
+  /** Every child goes; a non-empty string becomes the one child, a text node. */
+  set textContent(value: string | null) {
+    tree.replaceAllWithText(this as unknown as Node, value)
+  }
+
+  get children(): readonly Element[] {
+    return this[DOM_BINDING]().children.filter(isElement)
+  }
+
+  get childElementCount(): number {
+    return this.children.length
+  }
+
+  get firstElementChild(): Element | null {
+    return this[DOM_BINDING]().children.find(isElement) ?? null
+  }
+
+  get lastElementChild(): Element | null {
+    return this.children[this.children.length - 1] ?? null
+  }
+
+  append(...nodes: Array<Node | string>): void {
+    tree.append(this as unknown as Node, nodes)
+  }
+
+  prepend(...nodes: Array<Node | string>): void {
+    tree.prepend(this as unknown as Node, nodes)
+  }
+
+  replaceChildren(...nodes: Array<Node | string>): void {
+    tree.replaceChildren(this as unknown as Node, nodes)
+  }
+
   querySelector(selector: string): Element | null {
     return querySelector(this as unknown as Node, selector, "DocumentFragment")
   }
@@ -837,12 +882,15 @@ abstract class DocumentFragmentClass extends NodeClass {
   querySelectorAll(selector: string): NodeList {
     return staticNodeList(querySelectorAll(this as unknown as Node, selector, "DocumentFragment"))
   }
-
-  set textContent(_value: string | null) {}
 }
 
-/** Never instantiated, like `DocumentFragment`, which it extends in the DOM. */
-abstract class ShadowRootClass extends DocumentFragmentClass {}
+/** Never instantiated: there is no shadow DOM. */
+abstract class ShadowRootClass extends DocumentFragmentClass {
+  constructor() {
+    super()
+    illegalConstructor()
+  }
+}
 
 type DomClassSet = {
   Node: typeof NodeClass

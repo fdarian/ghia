@@ -3,8 +3,7 @@
  * A `Range` is live: `live-ranges.ts` moves its boundary points when the tree or a node's data
  * changes. A `StaticRange` is a plain pair of boundary points.
  *
- * `cloneContents`, `extractContents` and `surroundContents` need a `DocumentFragment` and are not
- * here. `getBoundingClientRect` and `getClientRects` answer with the box of the element the start
+ * `createContextualFragment` and `expand` are not here. `getBoundingClientRect` and `getClientRects` answer with the box of the element the start
  * container is, or is in, not the box of the selected text: see deviations.md.
  */
 
@@ -17,13 +16,19 @@ import {
   indexOfNode,
   Node,
   runtimeDocument,
+  type DocumentFragment,
   type Element,
+  type ParentBinding,
   type Text,
+  type TextBinding,
 } from "./nodes.js"
-import { assertCanInsert } from "./tree-mutation.js"
+import { cloneNode } from "./clone.js"
+import { assertCanInsert, replaceChildren } from "./tree-mutation.js"
 
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
+const DOCUMENT_NODE = 9
+const DOCUMENT_FRAGMENT_NODE = 11
 
 const DOCUMENT_POSITION_FOLLOWING = 4
 const DOCUMENT_POSITION_CONTAINS = 8
@@ -139,6 +144,149 @@ function appendContainedText(node: Node, into: string[]): void {
     return
   }
   for (const child of node[DOM_BINDING]().children) appendContainedText(child, into)
+}
+
+/** An empty fragment of the window `node` belongs to; the document's, which has no window of its own, for a node that is not in one. */
+function createFragmentFor(node: Node): DocumentFragment {
+  const binding = node[DOM_BINDING]() as Partial<ParentBinding & TextBinding>
+  if (binding.createFragment !== undefined) return binding.createFragment()
+  return (runtimeDocument() as unknown as { createDocumentFragment(): DocumentFragment }).createDocumentFragment()
+}
+
+/** The children of the common ancestor that hold one end of the range but not the other. */
+function partiallyContainedChildren(bounds: RangeBoundaries): { first: Node | null; last: Node | null } {
+  const ancestor = commonAncestor(bounds)
+  const children = ancestor[DOM_BINDING]().children
+  const first = isInclusiveAncestor(bounds.startNode, bounds.endNode)
+    ? null
+    : (children.find((child) => isPartiallyContained(bounds, child)) ?? null)
+  let last: Node | null = null
+  if (!isInclusiveAncestor(bounds.endNode, bounds.startNode)) {
+    for (let index = children.length - 1; index >= 0 && last === null; index -= 1) {
+      if (isPartiallyContained(bounds, children[index])) last = children[index]
+    }
+  }
+  return { first, last }
+}
+
+/** Whether an element lies across a boundary of the range, which `surroundContents` cannot wrap. */
+function partiallyContainsNonText(bounds: RangeBoundaries): boolean {
+  const ancestor = commonAncestor(bounds)
+  for (const end of [bounds.startNode, bounds.endNode]) {
+    for (let node: Node | null = end; node !== null && node !== ancestor; node = node.parentNode) {
+      if (node.nodeType !== TEXT_NODE) return true
+    }
+  }
+  return false
+}
+
+function containedChildren(bounds: RangeBoundaries): Node[] {
+  return commonAncestor(bounds)[DOM_BINDING]().children.filter((child) => isContained(bounds, child))
+}
+
+function boundsOf(startNode: Node, startOffset: number, endNode: Node, endOffset: number): RangeBoundaries {
+  return { startNode, startOffset, endNode, endOffset }
+}
+
+/** A clone of the character data node with only `data` as its text; for the ends of a cloned or extracted range. */
+function cloneCharacterData(node: Node, offset: number, count: number): Node {
+  const clone = cloneNode(node, false) as CharacterData
+  clone.data = (node as CharacterData).substringData(offset, count)
+  return clone
+}
+
+/** "Clone the contents of a range": a fragment of copies of what the range covers, the tree untouched. */
+function cloneContentsOf(bounds: RangeBoundaries): DocumentFragment {
+  const fragment = createFragmentFor(bounds.startNode)
+  if (bounds.startNode === bounds.endNode && bounds.startOffset === bounds.endOffset) return fragment
+  const startNode = bounds.startNode
+  const startOffset = bounds.startOffset
+  const endNode = bounds.endNode
+  const endOffset = bounds.endOffset
+  if (startNode === endNode && startNode instanceof CharacterData) {
+    fragment.appendChild(cloneCharacterData(startNode, startOffset, endOffset - startOffset))
+    return fragment
+  }
+  const partial = partiallyContainedChildren(bounds)
+  const first = partial.first
+  const last = partial.last
+  const contained = containedChildren(bounds)
+  if (first instanceof CharacterData) {
+    fragment.appendChild(cloneCharacterData(startNode, startOffset, first.data.length - startOffset))
+  } else if (first !== null) {
+    const clone = cloneNode(first, false)
+    fragment.appendChild(clone)
+    clone.appendChild(cloneContentsOf(boundsOf(startNode, startOffset, first, nodeLength(first))))
+  }
+  for (const child of contained) fragment.appendChild(cloneNode(child, true))
+  if (last instanceof CharacterData) {
+    fragment.appendChild(cloneCharacterData(last, 0, endOffset))
+  } else if (last !== null) {
+    const clone = cloneNode(last, false)
+    fragment.appendChild(clone)
+    clone.appendChild(cloneContentsOf(boundsOf(last, 0, endNode, endOffset)))
+  }
+  return fragment
+}
+
+/**
+ * "Extract a live range": what the range covers moves into the returned fragment, with copies of
+ * the partly covered ends, and the range collapses where the standard says. The sub-ranges the
+ * partly covered children take are plain boundary points: nothing reads them after their own
+ * extraction has started.
+ */
+function extractContentsOf(bounds: RangeBoundaries): DocumentFragment {
+  const fragment = createFragmentFor(bounds.startNode)
+  if (bounds.startNode === bounds.endNode && bounds.startOffset === bounds.endOffset) return fragment
+  const startNode = bounds.startNode
+  const startOffset = bounds.startOffset
+  const endNode = bounds.endNode
+  const endOffset = bounds.endOffset
+  if (startNode === endNode && startNode instanceof CharacterData) {
+    fragment.appendChild(cloneCharacterData(startNode, startOffset, endOffset - startOffset))
+    startNode.replaceData(startOffset, endOffset - startOffset, "")
+    return fragment
+  }
+  const partial = partiallyContainedChildren(bounds)
+  const first = partial.first
+  const last = partial.last
+  const contained = containedChildren(bounds)
+  let newNode: Node
+  let newOffset: number
+  if (isInclusiveAncestor(startNode, endNode)) {
+    newNode = startNode
+    newOffset = startOffset
+  } else {
+    let reference = startNode
+    for (let parent = reference.parentNode; parent !== null && !isInclusiveAncestor(parent, endNode); parent = reference.parentNode) {
+      reference = parent
+    }
+    newNode = parentOrThrow(reference)
+    newOffset = indexOfNode(reference) + 1
+  }
+  if (first instanceof CharacterData) {
+    const count = first.data.length - startOffset
+    fragment.appendChild(cloneCharacterData(first, startOffset, count))
+    first.replaceData(startOffset, count, "")
+  } else if (first !== null) {
+    const clone = cloneNode(first, false)
+    fragment.appendChild(clone)
+    clone.appendChild(extractContentsOf(boundsOf(startNode, startOffset, first, nodeLength(first))))
+  }
+  for (const child of contained) fragment.appendChild(child)
+  if (last instanceof CharacterData) {
+    fragment.appendChild(cloneCharacterData(last, 0, endOffset))
+    last.replaceData(0, endOffset, "")
+  } else if (last !== null) {
+    const clone = cloneNode(last, false)
+    fragment.appendChild(clone)
+    clone.appendChild(extractContentsOf(boundsOf(last, 0, endNode, endOffset)))
+  }
+  bounds.startNode = newNode
+  bounds.startOffset = newOffset
+  bounds.endNode = newNode
+  bounds.endOffset = newOffset
+  return fragment
 }
 
 function setBoundary(bounds: RangeBoundaries, node: Node, offset: number, isStart: boolean): void {
@@ -453,12 +601,37 @@ class RangeClass extends AbstractRangeClass {
     if (startIsText) reference = (startNode as Text).splitText(bounds.startOffset)
     if (node === reference) reference = node.nextSibling
     node.parentNode?.removeChild(node)
-    const newOffset = (reference === null ? nodeLength(parent) : indexOfNode(reference)) + 1
+    const newOffset = (reference === null ? nodeLength(parent) : indexOfNode(reference)) + (node.nodeType === DOCUMENT_FRAGMENT_NODE ? nodeLength(node) : 1)
     parent.insertBefore(node, reference)
     if (bounds.startNode === bounds.endNode && bounds.startOffset === bounds.endOffset) {
       bounds.endNode = parent
       bounds.endOffset = newOffset
     }
+  }
+
+  cloneContents(): DocumentFragment {
+    return cloneContentsOf(this.#bounds)
+  }
+
+  extractContents(): DocumentFragment {
+    return extractContentsOf(this.#bounds)
+  }
+
+  /** Wraps what the range covers in `newParent`, emptied first: the contents are extracted into it, and it takes their place. */
+  surroundContents(newParent: Node): void {
+    assertNode(newParent, "surroundContents", "Range")
+    const bounds = this.#bounds
+    if (partiallyContainsNonText(bounds)) {
+      throw namedError("InvalidStateError", "The range partially selects a node that is not text") as DOMException
+    }
+    if (newParent.nodeType === DOCUMENT_NODE || newParent.nodeType === DOCUMENT_FRAGMENT_NODE) {
+      throw invalidNodeTypeError("A document or a fragment cannot wrap a range")
+    }
+    const fragment = this.extractContents()
+    replaceChildren(newParent, [])
+    this.insertNode(newParent)
+    newParent.appendChild(fragment)
+    this.selectNode(newParent)
   }
 
   getBoundingClientRect(): DOMRect {

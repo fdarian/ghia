@@ -21,6 +21,11 @@ export type RangeBoundaries = {
   startOffset: number
   endNode: Node
   endOffset: number
+  /**
+   * Called after a tree or data change moved a boundary point of this range, so its owner (the
+   * `Selection`) can tell. A range's own methods do not call it.
+   */
+  onAdjust?: () => void
 }
 
 type Held = { set: Set<WeakRef<RangeBoundaries>>; ref: WeakRef<RangeBoundaries> }
@@ -66,7 +71,20 @@ function forEachRange(visit: (range: RangeBoundaries) => void): void {
       if (registry.ranges.delete(ref)) registry.count -= 1
       continue
     }
+    const startNode = range.startNode
+    const startOffset = range.startOffset
+    const endNode = range.endNode
+    const endOffset = range.endOffset
     visit(range)
+    if (
+      range.onAdjust !== undefined &&
+      (range.startNode !== startNode ||
+        range.startOffset !== startOffset ||
+        range.endNode !== endNode ||
+        range.endOffset !== endOffset)
+    ) {
+      range.onAdjust()
+    }
   }
 }
 

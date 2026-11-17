@@ -21,7 +21,7 @@ import type {
   RootEvent,
   RootEventHandlers,
 } from "@ghia/native/host"
-import { createHostElement, createHostText, HostRoot, removeHostNode } from "./host.js"
+import { createHostElement, createHostText, HostFragment, HostRoot, removeHostNode } from "./host.js"
 import { universalRender } from "./universal.js"
 import { reportUncaughtError } from "./uncaught-error.js"
 
@@ -146,7 +146,7 @@ export function createRoot(
       renderer,
       (id) => container.elements.get(id),
       () => ({ html: container.html, head: container.head, body: container.body }),
-      { createElement: createHostElement, createTextNode: createHostText }
+      { createElement: createHostElement, createTextNode: createHostText, createDocumentFragment: () => new HostFragment() }
     )
     // Sent on every attach, so a remount without the option restores the default.
     mutations.setKeyboardFocusDim(rootHandlers.keyboardFocusDim !== false)

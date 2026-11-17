@@ -14,6 +14,7 @@ import {
   type PublicEventFields,
   type RootEvent,
 } from "./dispatch.js"
+import { paintedSelectionTookOver } from "../dom/selection.js"
 import { scrollKeyName } from "../scroll.js"
 import { moveFocusByTab } from "../focus.js"
 import { isDragEvent } from "./drag.js"
@@ -24,6 +25,7 @@ import {
   document,
   isDocumentEvent,
   listensForSelectionChange,
+  wantsNativeSelectionChange,
   window,
 } from "./window-target.js"
 
@@ -63,7 +65,7 @@ export function handlesEvent(root: ActiveRoot, event: EventPayload): boolean {
   if (event.eventType === "selectionChange") {
     return (
       event.elementId === root.windowSelectionEventId &&
-      (Boolean(root.handlers.onSelectionChange) || listensForSelectionChange())
+      (Boolean(root.handlers.onSelectionChange) || wantsNativeSelectionChange())
     )
   }
   if (event.eventType === "appearanceChange") {
@@ -113,6 +115,8 @@ export function runRootEvent(
   context: RootEventContext
 ): DomDispatchResult {
   if (event.eventType === "selectionChange") {
+    // `value` is the painted text, absent after a clear: a clear is not a replacement of a node selection.
+    if (event.value != null) paintedSelectionTookOver()
     root.handlers.onSelectionChange?.(windowLevelEvent(root, event), context.renderer)
     if (listensForSelectionChange()) dispatchSelectionChange(root, event)
     return notHandled

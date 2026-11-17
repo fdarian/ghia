@@ -9,6 +9,7 @@ import {
   cssNamedStyle,
   defineDomMembers,
   document,
+  DocumentFragment,
   DOM_BINDING,
   HTMLElement,
   SVGElement,
@@ -86,6 +87,7 @@ import type {
   NativeRenderer,
   Node,
   NodeBinding,
+  ParentBinding,
   SelectionDirection,
   ScrollableElement,
   StyleDesc,
@@ -97,6 +99,8 @@ import type { DomEvent } from "@ghia/native/host"
 
 export type HostNode = HostElement | HostText
 export type HostParent = HostRoot | HostElement
+/** What a node is placed in: a parent of the renderer, or a fragment code holds nodes in. */
+export type HostContainer = HostParent | HostFragment
 export type HostPropertyValue =
   | object
   | string
@@ -242,7 +246,7 @@ export class HostElement extends HTMLElement {
   /** What `class`, `className` and `classList` were each given, once more than one of them is in play: see `mergeClassProp`. */
   classSources: ClassSources | undefined
   private detachedSelection: UnmountedTextSelection | undefined
-  parent: HostParent | null = null
+  parent: HostContainer | null = null
   root: HostRoot | null = null
   nativeId = 0
   mounted = false
@@ -599,7 +603,7 @@ export class HostText extends Text {
   readonly kind = "text" as const
   readonly [HOST_NODE] = true
   readonly childList: HostNode[] = []
-  parent: HostParent | null = null
+  parent: HostContainer | null = null
   root: HostRoot | null = null
   nativeId = 0
   mounted = false
@@ -615,8 +619,27 @@ export class HostText extends Text {
   }
 }
 
+/**
+ * What `document.createDocumentFragment()` makes: it holds children like an element and is never
+ * mounted, so no native element is made for it and Solid's renderer never places one.
+ */
+export class HostFragment extends DocumentFragment {
+  readonly kind = "fragment" as const
+  readonly childList: HostNode[] = []
+  readonly parent = null
+  readonly root = null
+  readonly mounted = false
+  readonly nativeId = 0
+  private domBinding: ParentBinding | undefined
+
+  [DOM_BINDING](): ParentBinding {
+    this.domBinding ??= new FragmentDomBinding(this)
+    return this.domBinding
+  }
+}
+
 /** `<html>` is in the document, which is the top of every mounted tree. */
-function parentNodeOf(node: HostNode): HostElement | Document | null {
+function parentNodeOf(node: HostNode): HostElement | HostFragment | Document | null {
   const parent = node.parent
   if (parent === null) return null
   return parent.kind === "root" ? document : parent
@@ -695,6 +718,47 @@ class ElementDomBinding implements ElementBinding {
   createElement(type: string): DomNodeElement {
     return createHostElement(type) as unknown as DomNodeElement
   }
+
+  createFragment(): DocumentFragment {
+    return new HostFragment()
+  }
+}
+
+class FragmentDomBinding implements ParentBinding {
+  constructor(private readonly fragment: HostFragment) {}
+
+  readonly parent = null
+  readonly connected = false
+  readonly root = null
+
+  get children(): NodeBinding["children"] {
+    return this.fragment.childList
+  }
+
+  assertSameWindow(child: Node): void {
+    // A fragment has no window: its children are checked against the node they are inserted into.
+    void child
+  }
+
+  insertBefore(child: Node, before: Node | null): void {
+    insertHostNode(this.fragment, child as unknown as HostNode, before as unknown as HostNode | null)
+  }
+
+  removeChild(child: Node): void {
+    removeHostNode(this.fragment, child as unknown as HostNode)
+  }
+
+  createText(data: string): Text {
+    return createHostText(data)
+  }
+
+  createElement(type: string): DomNodeElement {
+    return createHostElement(type) as unknown as DomNodeElement
+  }
+
+  createFragment(): DocumentFragment {
+    return new HostFragment()
+  }
 }
 
 class TextDomBinding implements TextBinding {
@@ -726,6 +790,10 @@ class TextDomBinding implements TextBinding {
 
   createText(data: string): Text {
     return createHostText(data)
+  }
+
+  createFragment(): DocumentFragment {
+    return new HostFragment()
   }
 }
 
@@ -957,10 +1025,10 @@ function removeFromParent(node: HostNode): void {
   const parent = node.parent
   if (!parent) return
   const index = parent.childList.indexOf(node)
-  if (index >= 0 && parent.kind === "element" && hasLiveRanges()) liveRangesBeforeRemove(parent, node, index)
+  if (index >= 0 && parent.kind !== "root" && hasLiveRanges()) liveRangesBeforeRemove(parent, node, index)
   if (index >= 0) parent.childList.splice(index, 1)
   node.parent = null
-  if (index >= 0 && parent.kind === "element") {
+  if (index >= 0 && parent.kind !== "root") {
     bumpTreeVersion()
     if (hasMutationObservers()) {
       queueChildListMutation(parent, [], [node], parent.childList[index - 1] ?? null, parent.childList[index] ?? null)
@@ -969,7 +1037,7 @@ function removeFromParent(node: HostNode): void {
 }
 
 export function insertHostNode(
-  requestedParent: HostParent,
+  requestedParent: HostContainer,
   node: HostNode,
   requestedAnchor?: HostNode | null
 ): void {
@@ -981,7 +1049,8 @@ export function insertHostNode(
   if (anchor && anchor.parent !== parent) {
     throw new Error("GPUIX Solid anchor is not a child of its parent")
   }
-  if (node.kind === "element") assertSvgPlacement(parent.elementType, node.elementType)
+  // A fragment takes anything: the placement is checked where its children end up.
+  if (node.kind === "element" && parent.kind === "element") assertSvgPlacement(parent.elementType, node.elementType)
   removeFromParent(node)
   const index = anchor ? parent.childList.indexOf(anchor) : parent.childList.length
   parent.childList.splice(index, 0, node)
@@ -1027,7 +1096,7 @@ function markUnmounted(node: HostNode): void {
  * capture and layout animation would be gone. It is destroyed when the
  * batch is flushed, unless the node came back.
  */
-export function removeHostNode(requestedParent: HostParent, node: HostNode): void {
+export function removeHostNode(requestedParent: HostContainer, node: HostNode): void {
   const parent = requestedParent.kind === "root" ? requestedParent.body : requestedParent
   if (node.parent !== parent) return
   removeFromParent(node)
@@ -1069,7 +1138,7 @@ function crossRootTarget(parent: HostNode): HostRoot | null {
 
 /** The root whose tree `node` is in, or `null` for a node that is in none. */
 function treeRoot(node: HostNode): HostRoot | null {
-  let current: HostNode | HostRoot = node
+  let current: HostNode | HostRoot | HostFragment = node
   while (current.kind !== "root") {
     if (current.parent === null) return null
     current = current.parent
@@ -1078,7 +1147,8 @@ function treeRoot(node: HostNode): HostRoot | null {
 }
 
 export function getParentNode(node: HostNode): HostParent | undefined {
-  return node.parent ?? undefined
+  // Solid asks about the nodes it placed; a fragment is only code's holder.
+  return node.parent === null || node.parent.kind === "fragment" ? undefined : node.parent
 }
 
 export function getFirstChild(parent: HostParent): HostNode | undefined {

@@ -80,11 +80,16 @@ describe("getSelection", () => {
     expect(fake.clears).toBe(2)
   })
 
-  it("has only the members it can answer", () => {
-    const selection = document.getSelection() as unknown as Record<string, unknown>
-    for (const name of ["getRangeAt", "addRange", "anchorNode", "collapse", "selectAllChildren"]) {
-      expect(name in selection).toBe(false)
-    }
+  it("keeps painted text as it was: no nodes, no Caret, no range to hand over", () => {
+    const { fake } = mountWindow()
+    fake.selected = "text"
+    const selection = document.getSelection()
+    expect([selection.anchorNode, selection.anchorOffset, selection.focusNode, selection.focusOffset]).toEqual([null, 0, null, 0])
+    expect([selection.rangeCount, selection.type, selection.direction]).toEqual([1, "Range", "none"])
+    expect(() => selection.getRangeAt(0)).toThrow(/painted/)
+    expect(() => selection.collapseToStart()).toThrow(/range of nodes/)
+    selection.deleteFromDocument()
+    expect(selection.toString()).toBe("text")
   })
 
   it("throws before a root is mounted", () => {

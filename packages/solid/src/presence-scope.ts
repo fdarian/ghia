@@ -1,5 +1,5 @@
 import { createRoot, getOwner, onCleanup, runWithOwner, type Accessor, type Owner } from "solid-js"
-import type { HostNode, HostParent } from "./host.js"
+import type { HostContainer, HostNode, HostParent } from "./host.js"
 
 /**
  * Solid disposes the owner of whatever a `Show`, `For` item or `cond && <X/>`
@@ -142,7 +142,7 @@ export function registerPresence(waits: boolean): PresenceRegistration | undefin
 }
 
 export function isWithin(node: HostNode, ancestor: HostNode): boolean {
-  let current: HostNode | HostParent | null = node
+  let current: HostNode | HostContainer | null = node
   while (current) {
     if (current === ancestor) return true
     current = current.kind === "root" ? null : current.parent
