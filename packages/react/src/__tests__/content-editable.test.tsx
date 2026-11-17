@@ -43,13 +43,13 @@ describeNative("contentEditable", () => {
       expect(inside!.tabIndex).toBe(-1)
 
       host!.focus()
-      expect(document.activeElement).toBe(host)
+      expect(document.activeElement === host).toBe(true)
       inside!.focus()
-      expect(document.activeElement, "text inside a host is not a focus target of its own").toBe(host)
+      expect(document.activeElement === host, "text inside a host is not a focus target of its own").toBe(true)
       plain!.focus()
-      expect(document.activeElement).toBe(host)
+      expect(document.activeElement === host).toBe(true)
       nested!.focus()
-      expect(document.activeElement, "an editable element under a false island is a host").toBe(nested)
+      expect(document.activeElement === nested, "an editable element under a false island is a host").toBe(true)
     } finally {
       root.unmount()
     }
@@ -70,12 +70,12 @@ describeNative("contentEditable", () => {
       root.render(view(undefined))
       expect(box!.matches(":read-only")).toBe(true)
       box!.focus()
-      expect(document.activeElement).not.toBe(box)
+      expect(document.activeElement === box).toBe(false)
 
       root.render(view(true))
       expect(box!.matches(":read-write") && child!.matches(":read-write")).toBe(true)
       box!.focus()
-      expect(document.activeElement).toBe(box)
+      expect(document.activeElement === box).toBe(true)
 
       root.render(view(false))
       expect(box!.getAttribute("contenteditable")).toBe("false")

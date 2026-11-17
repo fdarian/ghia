@@ -330,6 +330,9 @@ const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "draggable",
   "inert",
   "hidden",
+  // Native reads either spelling: React writes `contentEditable`, Solid and `setAttribute` write `contenteditable`.
+  "contentEditable",
+  "contenteditable",
   "colSpan",
   "rowSpan",
   "span",
