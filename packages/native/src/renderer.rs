@@ -2534,6 +2534,13 @@ impl GpuixRenderer {
                         std::thread::sleep(Duration::from_millis(delay.into()));
                     }
                 }
+                // A-B switch for the input frame. Drained when off too, so a window listed
+                // while off is not stepped for a start that was before the switch came on.
+                if std::env::var_os("GPUIX_INPUT_FRAME_OFF").is_none() {
+                    gpui_macos::step_started_display_links();
+                } else {
+                    gpui_macos::discard_started_display_links();
+                }
                 Ok(running)
             });
             self.frame_wake.tick_finished();
@@ -2830,6 +2837,18 @@ impl GpuixRenderer {
 
         #[cfg(not(target_os = "macos"))]
         Err(Error::from_reason("getPatchCounters needs macOS"))
+    }
+
+    /// How many frames the window has painted, as the test renderer's `getPaintedFrameCount`: a
+    /// test of a live window compares reads to see which tick drew a frame.
+    #[cfg(feature = "test-support")]
+    #[napi]
+    pub fn get_painted_frame_count(&self) -> Result<f64> {
+        #[cfg(target_os = "macos")]
+        return update_window(|view, _window, _cx| view.painted_frame_count() as f64);
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason("getPaintedFrameCount needs macOS"))
     }
 
     /// Whether AppKit reports this window as the key window. A `kind: "panel"` window opened

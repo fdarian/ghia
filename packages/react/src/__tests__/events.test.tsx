@@ -162,6 +162,131 @@ describe("frame loop", () => {
     40_000,
   )
 
+  // A key that reaches an idle window starts the stopped display link in the tick that dispatches
+  // it, and its frame is drawn by the tick itself, not by the link's first vsync (7 to 10 ms later
+  // at 120 Hz). A frame is counted when the window paints it; a real window draws only in a frame
+  // request, which presents. The vsync can land inside a long tick and step the window there, so
+  // one key proves nothing about main: the test sends many and asks whether every one was drawn
+  // by its own tick.
+  describe.skipIf(process.platform !== "darwin")("the frame of a key for an idle window", () => {
+    type KeyFrame = { drawnByEndOfTick: number | null; drawnByLaterSteps: number | null }
+    type InputFrameReport = { idleWakes: number; handled: number; keys: KeyFrame[]; idleWakesAfter: number }
+    const keyCount = 12
+
+    const runInputFrameScript = (inputFrameOff: boolean): InputFrameReport => {
+      const rendererPath = fileURLToPath(new URL("../reconciler/renderer.ts", import.meta.url))
+      const reconcilerPath = fileURLToPath(new URL("../reconciler/reconciler.js", import.meta.url))
+      const script = [
+        'import React, { useState } from "react"',
+        `import { createRenderer, render } from ${JSON.stringify(rendererPath)}`,
+        `import { flushSync } from ${JSON.stringify(reconcilerPath)}`,
+        'import { startFrameLoop } from "@ghia/native/runtime"',
+        "const renderer = createRenderer()",
+        "renderer.init({ focus: false })",
+        "let wakes = 0",
+        "let handled = 0",
+        "let bump",
+        "const App = () => {",
+        "  const [count, setCount] = useState(0)",
+        "  bump = () => flushSync(() => setCount((value) => value + 1))",
+        '  return React.createElement("div", { style: { width: "100%", height: "100%" } }, `typed ${count}`)',
+        "}",
+        // Nothing has focus, so a key goes to the window's handler, which changes the visible text.
+        "render(React.createElement(App), { renderer, onKeyDown: () => { handled++; bump() } })",
+        "let handledAtLastKey = 0",
+        "let paintedAtEndOfKeyTick = null",
+        "startFrameLoop({",
+        "  requiresTick: () => renderer.requiresTick(),",
+        "  tick: () => {",
+        "    const running = renderer.tick()",
+        "    if (handled > handledAtLastKey && paintedAtEndOfKeyTick === null) paintedAtEndOfKeyTick = renderer.getPaintedFrameCount()",
+        "    return running",
+        "  },",
+        "  setFrameWakeCallback: (callback) => renderer.setFrameWakeCallback(callback && (() => {",
+        "    wakes++",
+        "    callback()",
+        "  })),",
+        "})",
+        "const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))",
+        // The window is occluded for the first seconds, and the launch measurements wake the loop
+        // in bursts for up to ~6 s.
+        "const quietFor = async (quietMs, atLeastMs) => {",
+        "  const startedAt = performance.now()",
+        "  let seen = -1",
+        "  let changedAt = startedAt",
+        "  for (;;) {",
+        "    const now = performance.now()",
+        "    const key = renderer.getPaintedFrameCount() + wakes",
+        "    if (key !== seen) { seen = key; changedAt = now }",
+        "    if (now - changedAt >= quietMs && now - startedAt >= atLeastMs) return",
+        '    if (now - startedAt > 20000) throw new Error("the window did not settle in 20 s")',
+        "    await sleep(20)",
+        "  }",
+        "}",
+        "await quietFor(800, 7000)",
+        "const size = renderer.getWindowSize()",
+        "const idleWakesFrom = wakes",
+        "await sleep(2000)",
+        "const idleWakes = wakes - idleWakesFrom",
+        "const keys = []",
+        "for (let key = 0; key < " + keyCount + "; key++) {",
+        "  await quietFor(300, 300)",
+        "  const paintedBefore = renderer.getPaintedFrameCount()",
+        "  handledAtLastKey = handled",
+        "  paintedAtEndOfKeyTick = null",
+        '  renderer.postNativeEvent("keyDown", size.width / 2, size.height / 2)',
+        "  await sleep(250)",
+        "  const paintedAfter = renderer.getPaintedFrameCount()",
+        "  keys.push({",
+        "    drawnByEndOfTick: paintedAtEndOfKeyTick === null ? null : paintedAtEndOfKeyTick - paintedBefore,",
+        "    drawnByLaterSteps: paintedAtEndOfKeyTick === null ? null : paintedAfter - paintedAtEndOfKeyTick,",
+        "  })",
+        "}",
+        "await quietFor(300, 300)",
+        "const idleFrom = wakes",
+        "await sleep(2000)",
+        "console.log(JSON.stringify({ idleWakes, handled, keys, idleWakesAfter: wakes - idleFrom }))",
+        "process.exit(0)",
+      ].join("\n")
+      const env = { ...process.env }
+      // The switch is read as set-or-not, so the empty string would turn it on.
+      delete env.GPUIX_INPUT_FRAME_OFF
+      if (inputFrameOff) env.GPUIX_INPUT_FRAME_OFF = "1"
+      const result = spawnSync("bun", ["-e", script], { encoding: "utf8", timeout: 90_000, env })
+      expect(result.status, result.stderr || result.error?.message).toBe(0)
+      return JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "")
+    }
+
+    it(
+      "is drawn by the tick that dispatched the key, and the link's next steps draw nothing",
+      () => {
+        const report = runInputFrameScript(false)
+        console.log(`key frames: ${JSON.stringify(report)}`)
+        expect(report.idleWakes).toBe(0)
+        expect(report.handled).toBe(keyCount)
+        for (const key of report.keys) {
+          expect(key.drawnByEndOfTick).toBeGreaterThan(0)
+          expect(key.drawnByLaterSteps).toBe(0)
+        }
+        expect(report.idleWakesAfter).toBe(0)
+      },
+      120_000,
+    )
+
+    it(
+      "is left to the display link's first vsync with GPUIX_INPUT_FRAME_OFF",
+      () => {
+        const report = runInputFrameScript(true)
+        console.log(`key frames, switch off: ${JSON.stringify(report)}`)
+        expect(report.handled).toBe(keyCount)
+        // A vsync inside a long tick steps the window there, so not every key is late, but some are.
+        expect(report.keys.some((key) => key.drawnByEndOfTick === 0 && key.drawnByLaterSteps !== null && key.drawnByLaterSteps > 0)).toBe(true)
+        expect(report.idleWakesAfter).toBe(0)
+      },
+      120_000,
+    )
+  })
+
   // AppKit begins a Core Animation transaction for every event it sends, and from macOS 26 its
   // update cycle commits one that begins before the next frame boundary from a timer at that
   // boundary: a second wake of JS for the event, unless the tick commits it. The moves come at

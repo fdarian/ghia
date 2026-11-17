@@ -130,6 +130,15 @@ AppKit events are only drained inside `tick()`, and a 100 ms fallback timer tick
 - **A draw outside a frame request asks for a frame** (`Window::draw` calls `schedule_frame`). It leaves `needs_present`
   for the next request to present, and a stopped link had nothing to wake it for that request. Not covered:
   `needs_present` set by `patch_frame` in a draw outside a frame request (`patch.rs`, left as it is).
+- **A tick that starts a stopped link steps it at once.** The link's first vsync is up to a frame period after the start
+  (7 to 10 ms at 120 Hz), and input that reaches an idle window starts the link in the tick that dispatches it, so its
+  frame waited that long. `start_display_link` lists the window; `gpui_macos::step_started_display_links()` runs at the
+  end of `tick()`, inside the native call and after the pump returned (so not inside input dispatch), and gives each
+  listed window whose link still runs and has a frame request the step the link would run: a real frame request, so frame
+  steps, rAF and scroll settle run and the frame is presented. The link's next vsync finds the window clean, presents
+  nothing and counts toward the idle stop as before. A link that is already running is never listed, so continuous input
+  keeps vsync pacing. `GPUIX_INPUT_FRAME_OFF=1` leaves the first step to the vsync. The step is not an inline draw and
+  not a tick from the wake callback, and `pending` is still cleared only by `tick_finished`, after it (#56).
 
 **Measured** (75 Hz display, one-text window, live window with the release addon):
 
@@ -649,6 +658,12 @@ drew.
 - react `events.test.tsx` "wakes JS once per mouse move, not again when the frame boundary comes" opens a visible window
   with `focus: false`, posts 240 mouse moves from NSEventThread at random points of 120 Hz periods and allows 1.15 wakes
   per move. Without the flush after `sendEvent:` it saw 352 and 339 wakes for 240 moves (1.47 and 1.41).
+- react `events.test.tsx` "the frame of a key for an idle window" opens a visible window with `focus: false` and posts 12 keys
+  from NSEventThread, each to an idle window, with a handler that changes the text. With the step, every key's frame was
+  painted by the end of the tick that dispatched it and the link's later steps painted nothing; with `GPUIX_INPUT_FRAME_OFF=1`
+  11 of 12 were painted by a later step (the first key's tick is long enough for a vsync to step the window inside it, which is
+  why one key proves nothing). The frame is counted by the test-support `GpuixRenderer.getPaintedFrameCount()`, read at the end
+  of each `tick()`. No present is counted: a draw of a real window only happens in a frame request, which presents.
 - zed `gpui_macos` `tests/pump_window_updates.rs` (`harness = false`): 100 mouse moves posted to a window through
   `pump_app_nonblocking` make 100 `NSApplicationDidUpdateNotification`, not 260 as with a `updateWindows` call in the pump.
 - zed `gpui_macos` `run_loop_wake` lib (1: the set is found twice alike, is not the main queue's port and has members)

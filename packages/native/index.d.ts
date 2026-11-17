@@ -111,6 +111,11 @@ export declare class GpuixRenderer {
    */
   getPatchCounters(): PatchCounters
   /**
+   * How many frames the window has painted, as the test renderer's `getPaintedFrameCount`: a
+   * test of a live window compares reads to see which tick drew a frame.
+   */
+  getPaintedFrameCount(): number
+  /**
    * Whether AppKit reports this window as the key window. A `kind: "panel"` window opened
    * with `focus: true` is key while another app stays frontmost. Unlike `setWindowActive` and
    * `GPUIX_BACKGROUND=1` focus emulation, which change what the page sees, this is the
