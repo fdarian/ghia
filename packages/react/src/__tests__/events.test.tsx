@@ -181,7 +181,7 @@ describe("frame loop", () => {
       handled: number
       keys: KeyFrame[]
       idleWakesAfter: number
-      // The most frames any one tick painted once the window had settled.
+      // The most frames any one tick painted after the first key's (cold) tick.
       maxFramesInOneTick: number
     }
     const keyCount = 12
@@ -264,7 +264,6 @@ describe("frame loop", () => {
         "await quietFor(800, 7000)",
         "const windowVisible = renderer.isWindowVisible()",
         "const size = renderer.getWindowSize()",
-        "measuring = true",
         "const idleWakesFrom = wakes",
         "await sleep(2000)",
         "const idleWakes = wakes - idleWakesFrom",
@@ -283,6 +282,8 @@ describe("frame loop", () => {
         "    drawnByLaterSteps: paintedAtEndOfKeyTick === null ? null : paintedAfter - paintedAtEndOfKeyTick,",
         "    animationFrameTimes: animationTimes,",
         "  })",
+        // The first key's tick is cold: it paints twice with the switch off as well.
+        "  measuring = true",
         "}",
         "await quietFor(300, 300)",
         "const idleFrom = wakes",

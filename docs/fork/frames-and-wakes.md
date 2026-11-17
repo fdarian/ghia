@@ -671,7 +671,7 @@ drew.
   11 of 12 were painted by a later step (the first key's tick is long enough for a vsync to step the window inside it, which is
   why one key proves nothing). The frame is counted by the test-support `GpuixRenderer.getPaintedFrameCount()`, read at the end
   of each `tick()`. No present is counted: a painted frame is presented only when gpui presents (`needs_present`), which
-  the test does not observe. The same script records the most frames any one tick painted after the window settled and asks for at most 1. The test reports `isWindowVisible()` and skips itself while the window is occluded, since no
+  the test does not observe. The same script records the most frames any one tick painted after the first key's tick (which paints twice, with the switch off as well) and asks for at most 1. The test reports `isWindowVisible()` and skips itself while the window is occluded, since no
   link starts then. A third test starts a `requestAnimationFrame` loop of 5 frames from the key handler and asks that no
   two callbacks run less than 3 ms apart (half a 120 Hz period less clock slack), which a link step queued behind the
   eager frame would break.
