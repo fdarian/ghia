@@ -436,12 +436,11 @@ struct Record {
     forms_context: bool,
     /// `Node::lift_run`.
     lift_run: bool,
-    /// The element or something in it is lifted out of it, which a recording is not moved with.
+    /// The element or something in it is handed to the stacking context around it.
     lifts: bool,
     /// gpui is not asked to move a recording of it (`Node::blocks_move`).
     blocks_move: bool,
-    /// Something it hands to the context around it is a retained root of its own (a hole in the
-    /// recording, `Below::lifted_roots`).
+    /// Something it hands to the context around it is a retained root of its own, `Below::lifted_roots`.
     lifted_roots: bool,
     /// The element or something in it carries the relevance watch, `Below::watched` for the parent.
     watches: bool,
@@ -779,9 +778,14 @@ impl Node {
         self.lift_z.is_some() && (self.watches_relevance || below.watched)
     }
 
-    /// Whether a recording of the element is not asked to be moved by a scroller. gpui moves the boxes it hands to the
-    /// context around it when each is a plain box recorded in the region of the recording (a regional cell), and refuses a
-    /// recording that hands over a hole, a lifted retained root, so that is what keeps a root in place besides the watch.
+    /// Whether a recording of the element is not asked to be moved by a scroller: it carries the relevance watch, or hands
+    /// the context around it a retained root of its own (`Below::lifted_roots`). A recording that hands over only plain
+    /// boxes is moved with them (gpui records each in the region of the recording, a regional cell).
+    ///
+    /// The second is a matter of cost and not of correctness: inside a region of its own gpui builds a nested lifted root
+    /// again instead of recording a hole for it, so a moved recording is right without the gate, but the nested root is then
+    /// built late every time the root is. On Showcase, without the gate the scroll frame built 206 elements and took a
+    /// test-renderer p50 of 8.2 ms against 6.5 for the base of that run; with it, 174 and 4.5 ms against 5.0.
     fn blocks_move(&self, below: &Below) -> bool {
         self.lifts_watched(below) || (self.hands_lifts_out(below) && below.lifted_roots)
     }
@@ -842,7 +846,7 @@ struct Below {
     /// Something below is lifted out of the elements between it and here.
     lifts: bool,
     /// Something below is handed to the context around the elements between it and here as a retained root of its own
-    /// with a `lift_z`: a hole in their recordings, which gpui does not move.
+    /// with a `lift_z`; what that costs a root that is moved is in [`Node::blocks_move`].
     lifted_roots: bool,
     /// Something below carries the relevance watch, however far down: a replay that moves the element moves it too, and
     /// skips its listener (see [`Node::lifts_watched`]).
@@ -3286,8 +3290,8 @@ impl Retain {
         let blocks_move = node.blocks_move(own);
         // Any root that a scroller moved is recorded where it is built when `skippable` would move that recording, as
         // it moves the one a frame that moved nothing leaves: the frame after is a replay, not a build late in prepaint
-        // to make the recording this one did not ask for. What gpui cannot move (a box too big for a root, a lift out
-        // of the root, a stretch that does not plan on moves) is built and left unrecorded, since nothing would use it.
+        // to make the recording this one did not ask for. What is not asked to be moved (a box too big for a root, a root
+        // that blocks a move, a stretch that does not plan on moves) is built and left unrecorded, since nothing would use it.
         let moves_with_scroller = !self.relocation.resting
             && !blocks_move
             && node.scroller.is_some_and(|scroller| scroller.fits(node.id) != Some(false));
@@ -7085,6 +7089,10 @@ mod tests {
         // `watched`: 0 nothing, 1 the root carries the relevance watch, 2 an element two levels below it does.
         let root_skip = |lift_z: Option<i32>, forms_context: bool, child_lifted: bool, watched: u8| {
             let mut page = Units::new();
+            // A test takes every element for a root of its own unless it says it does not: here the root is one and
+            // what it hands out (a lifted child of one element) is a plain box.
+            page.retain.set_verify(false);
+            page.retain.set_min_root(2);
             for _ in 0..2 {
                 let mut skip = None;
                 page.edit(1);
@@ -7147,6 +7155,77 @@ mod tests {
         assert_eq!(watching.lift_z, Some(0));
         assert_eq!(watching.overscan, None);
         assert_eq!(root_skip(None, true, false, 2).overscan, overscan);
+    }
+
+    /// The root 2 of a list in a page, with what it hands to the context around it as `below` builds it inside: the second
+    /// frame edits the root, so the elements in it that are skipped are the ones `below` marks, and the third skips the root.
+    fn handing_root_skip(scroller: Scroller, below: impl Fn(&mut Units)) -> Skip {
+        let mut page = Units::new();
+        page.retain.set_verify(false);
+        page.retain.set_min_root(2);
+        for frame in 0..3 {
+            if frame == 1 {
+                page.edit(2);
+            }
+            page.edit(1);
+            let mut skip = None;
+            page.frame(&[], false, |page| {
+                page.element(1, None, |page| {
+                    skip = page.enter_in(2, Some(scroller));
+                    if skip.is_none() {
+                        page.retain.stacking(|| (None, false));
+                        below(page);
+                        page.retain.exit();
+                    }
+                });
+            });
+            if let Some(skip) = skip {
+                return skip;
+            }
+        }
+        unreachable!("the third frame found the root unchanged")
+    }
+
+    #[test]
+    fn a_root_that_hands_a_retained_root_of_its_own_to_the_context_is_not_moved_unless_a_context_is_between() {
+        let window = gpui::WindowId::from(6);
+        let scroller = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
+        crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
+        let overscan = Some(gpui::px(390.0));
+        // A lifted element that is a root of its own is a hole in the recording of the root, and one that is
+        // not (too small to be worth one) is a plain box in it, which is moved along.
+        let lifted = |page: &mut Units, id: u64| {
+            if !page.enter(id) {
+                page.retain.stacking(|| (Some(1), false));
+                page.retain.exit();
+            }
+        };
+        // Below, directly: a lifted root keeps overscan None, a box that is no root does not.
+        assert_eq!(handing_root_skip(scroller, |page| lifted(page, 4)).overscan, overscan, "one that is no root of its own");
+        let held = |page: &mut Units| {
+            page.element(4, None, |page| {
+                page.retain.stacking(|| (Some(1), false));
+                page.leaf(104);
+            });
+        };
+        assert_eq!(handing_root_skip(scroller, held).overscan, None, "a lifted root is handed over as a hole");
+        // A skipped element in the root is where the flag is read from `Record::lifted_roots`, since its children are
+        // not entered.
+        let skipped = |page: &mut Units| {
+            page.element(5, None, |page| {
+                page.retain.stacking(|| (None, false));
+                held(page);
+            });
+        };
+        assert_eq!(handing_root_skip(scroller, skipped).overscan, None, "through an element that is skipped");
+        // An element that forms a context keeps what is lifted in it.
+        let forming = |page: &mut Units| {
+            page.element(5, None, |page| {
+                page.retain.stacking(|| (None, true));
+                held(page);
+            });
+        };
+        assert_eq!(handing_root_skip(scroller, forming).overscan, overscan, "a context is between");
     }
 
     #[test]

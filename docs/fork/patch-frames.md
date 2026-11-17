@@ -766,8 +766,8 @@ keeps what builds it again.
     `may_lift` says so, when it forms a context as declared (a `transform-style: preserve-3d`, a Motion transform key or a mask border forms one and
     lifts at `z-index` 0 without `may_lift` naming it) or when something other than a hover that paints only might restyle it (`hover_paint::may_lift_in_any_state`).
     A root is refused too often, never too seldom; the build re-decides with the real flags. `Recording::patch_root` and `Record::patch_root` then ask `Node::hands_lifts_out` (`!forms_context && below.lifts`),
-    the same without the relevance-watch clause of `Node::lifts_out`, which is for the relocation of a replay: a patch prepaints the
-    watch itself. A lifted row that forms no context and holds a lifted child, and an element above a lifted row, are not patch roots;
+    the clause that a relocation does not share (`Node::blocks_move` is the one a relocation asks: the relevance watch, and a hole among what the root hands out; a
+    recording that is moved takes plain boxes along): a patch prepaints the watch itself. A lifted row that forms no context and holds a lifted child, and an element above a lifted row, are not patch roots;
   - nothing in it has a **size an intrinsic keyword gives** (`min-content`, `fit-content`, ...): its box is measured under another
     style and asked for again, and a retained root that holds one is laid out again by every frame unless the box is a root of its own
     (`retained-intrinsic.test.tsx`);
