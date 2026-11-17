@@ -181,6 +181,8 @@ describe("frame loop", () => {
       handled: number
       keys: KeyFrame[]
       idleWakesAfter: number
+      // The most frames any one tick painted once the window had settled.
+      maxFramesInOneTick: number
     }
     const keyCount = 12
     const animationKeyCount = 30
@@ -227,10 +229,14 @@ describe("frame loop", () => {
         "render(React.createElement(App), { renderer, onKeyDown: () => { handled++; bump(); if (" + animate + ") animateFrames() } })",
         "let handledAtLastKey = 0",
         "let paintedAtEndOfKeyTick = null",
+        "let measuring = false",
+        "let maxFramesInOneTick = 0",
         "startFrameLoop({",
         "  requiresTick: () => renderer.requiresTick(),",
         "  tick: () => {",
+        "    const paintedBeforeTick = renderer.getPaintedFrameCount()",
         "    const running = renderer.tick()",
+        "    if (measuring) maxFramesInOneTick = Math.max(maxFramesInOneTick, renderer.getPaintedFrameCount() - paintedBeforeTick)",
         "    if (handled > handledAtLastKey && paintedAtEndOfKeyTick === null) paintedAtEndOfKeyTick = renderer.getPaintedFrameCount()",
         "    return running",
         "  },",
@@ -258,6 +264,7 @@ describe("frame loop", () => {
         "await quietFor(800, 7000)",
         "const windowVisible = renderer.isWindowVisible()",
         "const size = renderer.getWindowSize()",
+        "measuring = true",
         "const idleWakesFrom = wakes",
         "await sleep(2000)",
         "const idleWakes = wakes - idleWakesFrom",
@@ -280,7 +287,7 @@ describe("frame loop", () => {
         "await quietFor(300, 300)",
         "const idleFrom = wakes",
         "await sleep(2000)",
-        "console.log(JSON.stringify({ windowVisible, idleWakes, handled, keys, idleWakesAfter: wakes - idleFrom }))",
+        "console.log(JSON.stringify({ windowVisible, idleWakes, handled, keys, idleWakesAfter: wakes - idleFrom, maxFramesInOneTick }))",
         "process.exit(0)",
       ].join("\n")
       const env = { ...process.env }
@@ -305,6 +312,8 @@ describe("frame loop", () => {
           expect(key.drawnByLaterSteps).toBe(0)
         }
         expect(report.idleWakesAfter).toBe(0)
+        // A tick whose pump ran a link step must not also run the eager step: that is two draws.
+        expect(report.maxFramesInOneTick).toBeLessThanOrEqual(1)
       },
       120_000,
     )
@@ -333,6 +342,7 @@ describe("frame loop", () => {
         console.log(`key animation frames: ${JSON.stringify(report)}`)
         if (!report.windowVisible) context.skip("the window is occluded, so no display link can start")
         expect(report.handled).toBe(animationKeyCount)
+        expect(report.maxFramesInOneTick).toBeLessThanOrEqual(1)
         // The first key's tick is cold and long enough for vsyncs to step the window inside it, so
         // it is a warm-up and not judged.
         for (const key of report.keys.slice(1)) {

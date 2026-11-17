@@ -2526,12 +2526,13 @@ impl GpuixRenderer {
             // Key input is dispatched while the platform pumps, and JS handlers
             // run synchronously from there.
             let result = crate::events::sync_dispatch::native_call(|| {
-                let running = MAC_PLATFORM.with(|p| {
+                let pumped = MAC_PLATFORM.with(|p| {
                     p.borrow()
                         .as_ref()
-                        .map(|platform| platform.pump_events())
-                        .unwrap_or(false)
+                        .map(|platform| platform.pump_events_reporting_step())
                 });
+                let running = pumped.as_ref().is_some_and(|pumped| pumped.running);
+                let pump_stepped_a_link = pumped.as_ref().is_some_and(|pumped| pumped.link_stepped);
                 #[cfg(feature = "test-support")]
                 {
                     let delay = self
@@ -2544,8 +2545,9 @@ impl GpuixRenderer {
                 }
                 // A tick called from inside another native call (a JS handler of input) is not a
                 // place to draw: the list waits for the outermost tick, which also still has the
-                // pump's own work to do.
-                if crate::events::sync_dispatch::outermost_native_call() {
+                // pump's own work to do. A tick whose pump ran a link step already drew; the list
+                // is left for the next tick, whose pump may not step.
+                if crate::events::sync_dispatch::outermost_native_call() && !pump_stepped_a_link {
                     if INPUT_FRAME_OFF.load(std::sync::atomic::Ordering::Relaxed) {
                         gpui_macos::discard_started_display_links();
                     } else {

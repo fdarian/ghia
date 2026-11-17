@@ -144,7 +144,7 @@ AppKit events are only drained inside `tick()`, and a 100 ms fallback timer tick
   step less than half the period of the screen's `maximumFramesPerSecond` (4 ms when it reports none) after the eager step is let
   go by, without a frame and without counting: the frame request stays and the next vsync draws it, so an animation's
   next frame is not drawn unpaced. A link that is already running is never listed, so continuous input keeps vsync
-  pacing. `GPUIX_INPUT_FRAME_OFF=1` (read once) leaves the first step to the vsync. The step is not an inline draw and
+  pacing. A tick whose pump ran a link step (`pump_events_reporting_step().link_stepped`) skips the call and leaves the list for the next tick: that step was the frame, and a second would draw twice. `GPUIX_INPUT_FRAME_OFF=1` (read once) leaves the first step to the vsync. The step is not an inline draw and
   not a tick from the wake callback, and `pending` is still cleared only by `tick_finished`, after it (#56).
 
 **Measured** (75 Hz display, one-text window, live window with the release addon):
@@ -671,7 +671,7 @@ drew.
   11 of 12 were painted by a later step (the first key's tick is long enough for a vsync to step the window inside it, which is
   why one key proves nothing). The frame is counted by the test-support `GpuixRenderer.getPaintedFrameCount()`, read at the end
   of each `tick()`. No present is counted: a painted frame is presented only when gpui presents (`needs_present`), which
-  the test does not observe. The test reports `isWindowVisible()` and skips itself while the window is occluded, since no
+  the test does not observe. The same script records the most frames any one tick painted after the window settled and asks for at most 1. The test reports `isWindowVisible()` and skips itself while the window is occluded, since no
   link starts then. A third test starts a `requestAnimationFrame` loop of 5 frames from the key handler and asks that no
   two callbacks run less than 3 ms apart (half a 120 Hz period less clock slack), which a link step queued behind the
   eager frame would break.
