@@ -3,6 +3,7 @@ import type { Animation } from "../web-animations.js"
 import { isElementType, isSvgElementType } from "../dom/element-types.js"
 import { Document, DOM_BINDING, registerDocument, type HTMLElement, type Node, type NodeBinding, type Text } from "../dom/nodes.js"
 import { getAdoptedStyleSheets, replaceAdoptedStyleSheets, type CSSStyleSheet } from "../css/index.js"
+import { Range } from "../dom/range.js"
 import { getSelection, type Selection } from "../dom/selection.js"
 import { bumpTreeVersion } from "../dom/tree-version.js"
 import { createTreeWalker, type NodeFilterLike, type TreeWalker } from "../dom/tree-walker.js"
@@ -400,6 +401,20 @@ export class GpuixDocument<Element = unknown> extends Document {
   /** A new text node of the window that mounted last, in no tree. */
   createTextNode(data: string): Text {
     return currentNodeFactory("createTextNode").createTextNode(String(data))
+  }
+
+  /** A new `Range` collapsed at the start of the document: `(document, 0)`. */
+  createRange(): Range {
+    return new Range()
+  }
+
+  /**
+   * Whether a window of the app is open. Native does not tell JS which window is the key one, so
+   * the document of an app with a window is taken to have focus.
+   */
+  hasFocus(): boolean {
+    for (const entry of elementSources.values()) if (!entry.windowGone) return true
+    return false
   }
 
   /** A `TreeWalker` over `root`, standing on `root`, as `document.createTreeWalker` does: `whatToShow` is every node by default. */

@@ -48,7 +48,7 @@ function assertNode(value: unknown, method: string, owner: string, position: num
 }
 
 /** The DOM's "ensure pre-insertion validity", for the node types that exist here. */
-function assertCanInsert(parent: Node, node: Node, before: Node | null): ParentBinding {
+export function assertCanInsert(parent: Node, node: Node, before: Node | null): ParentBinding {
   const binding = parentBindingOf(parent)
   binding.assertSameWindow(node)
   if (node.nodeType !== ELEMENT_NODE && node.nodeType !== TEXT_NODE) {
