@@ -605,7 +605,8 @@ describeNative("a skipped root keeps what its last build lifted", () => {
           kit.render(<LiftedRows tick={tick} rounded={rounded} />)
           kit.renderer.flush()
           const before = kit.counters()
-          kit.renderer.scrollTo(scroller, 0, tick * 5)
+          // Offsets stay in a band where no row enters or leaves a corner reach, so the count differs only if idle frames change what is moved.
+          kit.renderer.scrollTo(scroller, 0, 6 + tick)
           kit.renderer.flush()
           const after = kit.counters()
           scrolls.push({ builds: after.builds - before.builds, relocations: after.relocations - before.relocations })
