@@ -116,6 +116,11 @@ export declare class GpuixRenderer {
    */
   getPaintedFrameCount(): number
   /**
+   * Whether AppKit counts this window as visible (not occluded), which a display link needs to
+   * start: a test of the frame a window draws skips itself while this is false.
+   */
+  isWindowVisible(): boolean
+  /**
    * Whether AppKit reports this window as the key window. A `kind: "panel"` window opened
    * with `focus: true` is key while another app stays frontmost. Unlike `setWindowActive` and
    * `GPUIX_BACKGROUND=1` focus emulation, which change what the page sees, this is the

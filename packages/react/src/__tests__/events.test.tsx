@@ -167,13 +167,29 @@ describe("frame loop", () => {
   // at 120 Hz). A frame is counted when the window paints it; a real window draws only in a frame
   // request, which presents. The vsync can land inside a long tick and step the window there, so
   // one key proves nothing about main: the test sends many and asks whether every one was drawn
-  // by its own tick.
+  // by its own tick. A window that is occluded never starts a link, so the test skips itself then.
   describe.skipIf(process.platform !== "darwin")("the frame of a key for an idle window", () => {
-    type KeyFrame = { drawnByEndOfTick: number | null; drawnByLaterSteps: number | null }
-    type InputFrameReport = { idleWakes: number; handled: number; keys: KeyFrame[]; idleWakesAfter: number }
+    type KeyFrame = {
+      drawnByEndOfTick: number | null
+      drawnByLaterSteps: number | null
+      // performance.now() of each requestAnimationFrame callback of the key's animation (animate mode).
+      animationFrameTimes: number[]
+    }
+    type InputFrameReport = {
+      windowVisible: boolean
+      idleWakes: number
+      handled: number
+      keys: KeyFrame[]
+      idleWakesAfter: number
+    }
     const keyCount = 12
+    const animationKeyCount = 30
+    const animationFrames = 5
+    // Half of a 120 Hz refresh period, less the slack of reading the clock inside a draw. A display
+    // faster than ~165 Hz would make this too strict.
+    const minimumFrameGapMs = 3
 
-    const runInputFrameScript = (inputFrameOff: boolean): InputFrameReport => {
+    const runInputFrameScript = (inputFrameOff: boolean, animate = false): InputFrameReport => {
       const rendererPath = fileURLToPath(new URL("../reconciler/renderer.ts", import.meta.url))
       const reconcilerPath = fileURLToPath(new URL("../reconciler/reconciler.js", import.meta.url))
       const script = [
@@ -186,13 +202,29 @@ describe("frame loop", () => {
         "let wakes = 0",
         "let handled = 0",
         "let bump",
+        "let animationTimes = []",
+        // The key starts a requestAnimationFrame loop: every frame's callback asks for the next.
+        // The first frame's callback is slower than a vsync: one merges into the link's source while
+        // the eager frame draws, so a step is queued behind it. It is timed when it is done.
+        "const animateFrames = () => {",
+        "  animationTimes = []",
+        "  const step = () => {",
+        "    if (animationTimes.length === 0) {",
+        "      const until = performance.now() + 12",
+        "      while (performance.now() < until) {}",
+        "    }",
+        "    animationTimes.push(performance.now())",
+        "    if (animationTimes.length < " + animationFrames + ") requestAnimationFrame(step)",
+        "  }",
+        "  requestAnimationFrame(step)",
+        "}",
         "const App = () => {",
         "  const [count, setCount] = useState(0)",
         "  bump = () => flushSync(() => setCount((value) => value + 1))",
         '  return React.createElement("div", { style: { width: "100%", height: "100%" } }, `typed ${count}`)',
         "}",
         // Nothing has focus, so a key goes to the window's handler, which changes the visible text.
-        "render(React.createElement(App), { renderer, onKeyDown: () => { handled++; bump() } })",
+        "render(React.createElement(App), { renderer, onKeyDown: () => { handled++; bump(); if (" + animate + ") animateFrames() } })",
         "let handledAtLastKey = 0",
         "let paintedAtEndOfKeyTick = null",
         "startFrameLoop({",
@@ -224,28 +256,31 @@ describe("frame loop", () => {
         "  }",
         "}",
         "await quietFor(800, 7000)",
+        "const windowVisible = renderer.isWindowVisible()",
         "const size = renderer.getWindowSize()",
         "const idleWakesFrom = wakes",
         "await sleep(2000)",
         "const idleWakes = wakes - idleWakesFrom",
         "const keys = []",
-        "for (let key = 0; key < " + keyCount + "; key++) {",
+        "for (let key = 0; key < " + (animate ? animationKeyCount : keyCount) + "; key++) {",
         "  await quietFor(300, 300)",
         "  const paintedBefore = renderer.getPaintedFrameCount()",
         "  handledAtLastKey = handled",
         "  paintedAtEndOfKeyTick = null",
+        "  animationTimes = []",
         '  renderer.postNativeEvent("keyDown", size.width / 2, size.height / 2)',
         "  await sleep(250)",
         "  const paintedAfter = renderer.getPaintedFrameCount()",
         "  keys.push({",
         "    drawnByEndOfTick: paintedAtEndOfKeyTick === null ? null : paintedAtEndOfKeyTick - paintedBefore,",
         "    drawnByLaterSteps: paintedAtEndOfKeyTick === null ? null : paintedAfter - paintedAtEndOfKeyTick,",
+        "    animationFrameTimes: animationTimes,",
         "  })",
         "}",
         "await quietFor(300, 300)",
         "const idleFrom = wakes",
         "await sleep(2000)",
-        "console.log(JSON.stringify({ idleWakes, handled, keys, idleWakesAfter: wakes - idleFrom }))",
+        "console.log(JSON.stringify({ windowVisible, idleWakes, handled, keys, idleWakesAfter: wakes - idleFrom }))",
         "process.exit(0)",
       ].join("\n")
       const env = { ...process.env }
@@ -259,9 +294,10 @@ describe("frame loop", () => {
 
     it(
       "is drawn by the tick that dispatched the key, and the link's next steps draw nothing",
-      () => {
+      (context) => {
         const report = runInputFrameScript(false)
         console.log(`key frames: ${JSON.stringify(report)}`)
+        if (!report.windowVisible) context.skip("the window is occluded, so no display link can start")
         expect(report.idleWakes).toBe(0)
         expect(report.handled).toBe(keyCount)
         for (const key of report.keys) {
@@ -275,13 +311,37 @@ describe("frame loop", () => {
 
     it(
       "is left to the display link's first vsync with GPUIX_INPUT_FRAME_OFF",
-      () => {
+      (context) => {
         const report = runInputFrameScript(true)
         console.log(`key frames, switch off: ${JSON.stringify(report)}`)
+        if (!report.windowVisible) context.skip("the window is occluded, so no display link can start")
         expect(report.handled).toBe(keyCount)
         // A vsync inside a long tick steps the window there, so not every key is late, but some are.
         expect(report.keys.some((key) => key.drawnByEndOfTick === 0 && key.drawnByLaterSteps !== null && key.drawnByLaterSteps > 0)).toBe(true)
         expect(report.idleWakesAfter).toBe(0)
+      },
+      120_000,
+    )
+
+    // A vsync that merges into the link's source while the eager frame draws leaves a step queued
+    // right behind it. Without the pacing guard that step draws the animation's next frame 0 to
+    // 3 ms after the eager one (the callbacks are timed when the slow first one is done).
+    it(
+      "paces an animation the key starts: its frames are not drawn right behind the eager one",
+      (context) => {
+        const report = runInputFrameScript(false, true)
+        console.log(`key animation frames: ${JSON.stringify(report)}`)
+        if (!report.windowVisible) context.skip("the window is occluded, so no display link can start")
+        expect(report.handled).toBe(animationKeyCount)
+        // The first key's tick is cold and long enough for vsyncs to step the window inside it, so
+        // it is a warm-up and not judged.
+        for (const key of report.keys.slice(1)) {
+          expect(key.drawnByEndOfTick).toBeGreaterThan(0)
+          expect(key.animationFrameTimes).toHaveLength(animationFrames)
+          for (let frame = 1; frame < key.animationFrameTimes.length; frame++) {
+            expect(key.animationFrameTimes[frame] - key.animationFrameTimes[frame - 1]).toBeGreaterThanOrEqual(minimumFrameGapMs)
+          }
+        }
       },
       120_000,
     )

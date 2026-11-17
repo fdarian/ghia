@@ -132,12 +132,19 @@ AppKit events are only drained inside `tick()`, and a 100 ms fallback timer tick
   `needs_present` set by `patch_frame` in a draw outside a frame request (`patch.rs`, left as it is).
 - **A tick that starts a stopped link steps it at once.** The link's first vsync is up to a frame period after the start
   (7 to 10 ms at 120 Hz), and input that reaches an idle window starts the link in the tick that dispatches it, so its
-  frame waited that long. `start_display_link` lists the window; `gpui_macos::step_started_display_links()` runs at the
-  end of `tick()`, inside the native call and after the pump returned (so not inside input dispatch), and gives each
-  listed window whose link still runs and has a frame request the step the link would run: a real frame request, so frame
-  steps, rAF and scroll settle run and the frame is presented. The link's next vsync finds the window clean, presents
-  nothing and counts toward the idle stop as before. A link that is already running is never listed, so continuous input
-  keeps vsync pacing. `GPUIX_INPUT_FRAME_OFF=1` leaves the first step to the vsync. The step is not an inline draw and
+  frame waited that long. A frame request (or the window becoming visible) that starts a link that was stopped sets the
+  window's `first_step_pending` and lists it; a link that `restart_display_link` or `resubscribe_display_link` brings
+  back does not, and a step or a synchronous draw (`display_layer`, `windowDidBecomeKey`) clears it. At the end of
+  `tick()`, inside the native call and after the pump returned (so not inside input dispatch), and only when that tick is
+  the outermost native call, `gpui_macos::step_started_display_links()` gives each listed window with the flag still
+  set, a frame request and a running link the step the link would run, in an autorelease pool of its own (the pump's has
+  drained): a real frame request, so frame steps, rAF and scroll settle run, and the frame is presented when gpui
+  presents (`needs_present`, `require_presentation`). The link's next vsync finds the window clean and counts toward the
+  idle stop as before. A vsync that merged while the eager frame drew has its step queued right behind it, and a link
+  step less than half the period of the screen's `maximumFramesPerSecond` (4 ms when it reports none) after the eager step is let
+  go by, without a frame and without counting: the frame request stays and the next vsync draws it, so an animation's
+  next frame is not drawn unpaced. A link that is already running is never listed, so continuous input keeps vsync
+  pacing. `GPUIX_INPUT_FRAME_OFF=1` (read once) leaves the first step to the vsync. The step is not an inline draw and
   not a tick from the wake callback, and `pending` is still cleared only by `tick_finished`, after it (#56).
 
 **Measured** (75 Hz display, one-text window, live window with the release addon):
@@ -663,7 +670,11 @@ drew.
   painted by the end of the tick that dispatched it and the link's later steps painted nothing; with `GPUIX_INPUT_FRAME_OFF=1`
   11 of 12 were painted by a later step (the first key's tick is long enough for a vsync to step the window inside it, which is
   why one key proves nothing). The frame is counted by the test-support `GpuixRenderer.getPaintedFrameCount()`, read at the end
-  of each `tick()`. No present is counted: a draw of a real window only happens in a frame request, which presents.
+  of each `tick()`. No present is counted: a painted frame is presented only when gpui presents (`needs_present`), which
+  the test does not observe. The test reports `isWindowVisible()` and skips itself while the window is occluded, since no
+  link starts then. A third test starts a `requestAnimationFrame` loop of 5 frames from the key handler and asks that no
+  two callbacks run less than 3 ms apart (half a 120 Hz period less clock slack), which a link step queued behind the
+  eager frame would break.
 - zed `gpui_macos` `tests/pump_window_updates.rs` (`harness = false`): 100 mouse moves posted to a window through
   `pump_app_nonblocking` make 100 `NSApplicationDidUpdateNotification`, not 260 as with a `updateWindows` call in the pump.
 - zed `gpui_macos` `run_loop_wake` lib (1: the set is found twice alike, is not the main queue's port and has members)
