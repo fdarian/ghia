@@ -13,8 +13,10 @@
 import { _compileUnsafe, type Options } from "css-select"
 import { isTraversal, parse, SelectorType, type Selector } from "css-what"
 import { hostElementMatches } from "../focus.js"
+import { isContentEditable } from "../editing/host.js"
 import { namedError } from "../named-error.js"
 import { readInputChoice } from "./input-members.js"
+import { normalizedInputType } from "./input-type.js"
 import { DOM_BINDING, SVGElement, type Element, type Node } from "./nodes.js"
 
 const ELEMENT_NODE = 1
@@ -146,6 +148,26 @@ function renameScope(rules: Selector[]): void {
   }
 }
 
+/** What `:read-write` is written in terms of: `css-select`'s own alias for it, which reads the `readonly` attribute, wins over a function under its name. */
+const READ_WRITE_PSEUDO = "ghia-read-write"
+
+/** The `type` keywords of an `<input>` that are not edited as text. */
+const NON_TEXT_INPUT_TYPES: ReadonlySet<string> = new Set(["checkbox", "radio", "range", "hidden", "color", "file", "button", "submit", "reset", "image"])
+
+/**
+ * `:read-write`: a `textarea` or a text `<input>` that is neither `readonly` nor `disabled` (a control
+ * is read-write by its own state, whatever it sits in), and any other element that is editable.
+ * Native reads the same rule (`css/sheet/tree_states.rs`).
+ */
+function isReadWrite(element: Element): boolean {
+  const tag = element.localName
+  if (tag === "textarea" || tag === "input") {
+    const takesText = tag === "textarea" || !NON_TEXT_INPUT_TYPES.has(normalizedInputType(element.getAttribute("type")))
+    return takesText && element.getAttribute("readonly") === null && element.getAttribute("disabled") === null
+  }
+  return isContentEditable(element)
+}
+
 const OPTIONS: Options<Node, Element> = {
   adapter,
   // `Element.matches("> a")` is a syntax error in the DOM: only `:has()` takes a relative selector.
@@ -164,6 +186,9 @@ const OPTIONS: Options<Node, Element> = {
     hover: nativeState(":hover"),
     active: nativeState(":active"),
     "popover-open": (element) => popoverIsOpen(element),
+    "read-write": `:${READ_WRITE_PSEUDO}`,
+    "read-only": `:not(:${READ_WRITE_PSEUDO})`,
+    [READ_WRITE_PSEUDO]: isReadWrite,
   },
 }
 

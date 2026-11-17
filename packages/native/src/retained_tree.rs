@@ -253,7 +253,8 @@ impl RetainedElement {
 
     /// Whether the element must own a gpui focus handle, which is what DOM calls
     /// focusable: an enabled text control or `<button>`, an `<a>` with an `href`, a `<webview>`, or any
-    /// other element with a `tabIndex`.
+    /// other element with a `tabIndex`. An editing host is too, but that needs the parent:
+    /// `RetainedTree::takes_focus` adds it.
     /// A key or focus listener does not make an element focusable; an ancestor's
     /// key listener still hears the keys of a focused descendant.
     pub fn needs_focus(&self) -> bool {
@@ -1343,16 +1344,19 @@ impl RetainedTree {
         false
     }
 
-    /// Bring `focusable_ids` in line with `id` after anything `needs_focus`
+    /// What `focusable_ids` holds: `needs_focus`, and an editing host (an element whose own
+    /// `contenteditable` makes it editable and whose parent is not), which has a box.
+    fn takes_focus(&self, id: u64) -> bool {
+        self.elements.get(&id).is_some_and(|element| {
+            element.needs_focus()
+                || (!crate::layout::contents::is_display_contents(element) && crate::html::editing::is_editing_host(self, id))
+        })
+    }
+
+    /// Bring `focusable_ids` in line with `id` after anything `takes_focus`
     /// reads has changed.
     fn track_focusable(&mut self, id: u64) {
-        if !self.is_inert(id)
-            && !self.is_visibility_hidden(id)
-            && self
-                .elements
-                .get(&id)
-                .is_some_and(RetainedElement::needs_focus)
-        {
+        if !self.is_inert(id) && !self.is_visibility_hidden(id) && self.takes_focus(id) {
             self.focusable_ids.insert(id);
         } else {
             self.focusable_ids.remove(&id);
@@ -1375,8 +1379,8 @@ impl RetainedTree {
         };
         let inert = inherited_inert || element.has_inert_prop();
         let hidden = element.declared_hidden().unwrap_or(inherited_hidden);
-        let focusable = !inert && !hidden && element.needs_focus();
         let children = element.children.clone();
+        let focusable = !inert && !hidden && self.takes_focus(id);
         if focusable {
             self.focusable_ids.insert(id);
         } else {
@@ -2047,6 +2051,8 @@ impl RetainedTree {
         let is_motion = key == "motion";
         let is_motion_values = key == "motionValues" || key == "layout";
         let affects_focusability = key == "tabIndex" || key == "disabled" || key == "href" || key == "type";
+        // The editing host of a subtree is the topmost editable element in it, so a write moves it.
+        let is_editing = crate::html::editing::is_prop(&key);
         let is_inert = key == "inert";
         let is_popover = crate::html::popover::is_popover_prop(&key);
         let changed_states =
@@ -2124,6 +2130,9 @@ impl RetainedTree {
         if affects_focusability {
             self.track_focusable(id);
         }
+        if is_editing {
+            self.track_focusable_subtree(id);
+        }
         if is_hidden_attribute {
             // The user agent style of any element is `display: none` while it is `hidden`.
             let change = self.refresh_effective_style(id, false);
@@ -2157,6 +2166,9 @@ impl RetainedTree {
         }
         if !changed_states.is_empty() {
             self.sheets_tree_state_changed(id, changed_states);
+            if is_editing {
+                self.sheets_tree_state_changed_below(id, changed_states);
+            }
         }
         if is_popover {
             let change = self.refresh_effective_style(id, false);
@@ -2936,6 +2948,38 @@ mod tests {
             tree.focusable_ids.is_empty(),
             "destroying a subtree forgets its ids"
         );
+    }
+
+    #[test]
+    fn an_editing_host_is_focusable_and_its_editable_descendants_are_not() {
+        let mut tree = RetainedTree::new();
+        for id in 1..=5 {
+            tree.create_element(id, "div".to_string());
+        }
+        for (parent, child) in [(1, 2), (2, 3), (3, 4), (4, 5)] {
+            tree.append_child(parent, child);
+        }
+        let focusable = |tree: &RetainedTree| tree.focusable_ids.iter().copied().collect::<Vec<_>>();
+        assert!(focusable(&tree).is_empty());
+
+        tree.set_custom_prop(2, "contentEditable".to_string(), serde_json::json!(true));
+        tree.set_custom_prop(4, "contenteditable".to_string(), serde_json::json!("true"));
+        assert_eq!(focusable(&tree), vec![2], "4 is inside the host 2");
+
+        tree.set_custom_prop(3, "contenteditable".to_string(), serde_json::json!("false"));
+        assert_eq!(focusable(&tree), vec![2, 4], "a false island makes 4 a host of its own");
+
+        tree.set_custom_prop(3, "contenteditable".to_string(), serde_json::json!("inherit"));
+        assert_eq!(focusable(&tree), vec![2], "a text that is no keyword inherits");
+
+        tree.set_custom_prop(2, "contentEditable".to_string(), serde_json::json!(false));
+        assert_eq!(focusable(&tree), vec![4], "turning the host off exposes the next one");
+
+        tree.set_custom_prop(2, "contentEditable".to_string(), serde_json::Value::Null);
+        tree.set_custom_prop(4, "contenteditable".to_string(), serde_json::json!("plaintext-only"));
+        assert_eq!(focusable(&tree), vec![4]);
+        tree.set_custom_prop(4, "contenteditable".to_string(), serde_json::json!(""));
+        assert_eq!(focusable(&tree), vec![4], "an empty text is true");
     }
 
     #[test]
