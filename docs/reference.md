@@ -5298,7 +5298,7 @@ A `keydown` that was not prevented, with no Ctrl, Alt or Cmd, on a focused editi
 A selected range is replaced or deleted whole; a caret deletes one grapheme, into the neighbouring Text of the host when it sits at the edge of
 its own. The caret ends after the inserted text, or at the deletion. `insertParagraph` and `insertLineBreak` fire `beforeinput` and change
 nothing. The text of an edit comes from `keydown`'s `key`, no caret is painted, and the other `inputType`s do nothing: see
-[deviations.md](./fork/deviations.md#events-and-input). Tab, Escape and the scroll keys keep their usual actions.
+[deviations.md](./fork/deviations.md#events-and-input). Tab and Escape keep their usual actions. The scroll keys (arrows, Page Up and Down, Home, End, Space) do not scroll the page while an editing host or an element inside one has focus, as with a focused `<input>`.
 ### Listeners and DOM members on an element
 
 A host element (a React ref, a Solid `HostElement`) has the members a library written for the DOM reaches for:
@@ -5607,7 +5607,7 @@ painted text, and a drag that paints text drops the node range.
 | `getComposedRanges(...)` | A one-item array of a `StaticRange`, or `[]`. There is no shadow DOM, so no argument changes it. |
 | `modify(alter, direction, granularity)` | `alter` is `"move"` or `"extend"`, `direction` `"forward"`, `"backward"`, `"left"` or `"right"` (the last two read as the first two: there is no bidirectional layout), `granularity` `"character"` (a grapheme cluster) or `"word"` (to the end of the next word going forward, the start of the previous one going back, as on macOS). The text is that of the Text nodes under the editing host the focus is in, or the document, in tree order; a block element or a `<br>` between two Text nodes is one step, an inline element none. Moving a range by character collapses it to its edge, as Chrome does. A name the standard does not have does nothing, and so does an empty selection. `"line"`, `"lineboundary"`, `"sentence"`, `"sentenceboundary"`, `"paragraph"`, `"paragraphboundary"` and `"documentboundary"` throw `NotSupportedError`, because they need layout. |
 
-`focus()` on an editing host that takes focus puts a collapsed caret at its first position (the start of its first Text, else `(host, 0)`), unless the selection is already inside it. The selection holds no caret or highlight that is painted yet: see [deviations](fork/deviations.md#events-and-input).
+Focus moving into an editing host puts a collapsed caret at its first position (the start of its first Text, else `(host, 0)`), unless the selection is already inside it: `focus()` does it, and so do Tab, Shift+Tab and a click (which does not yet put it at the point), before `focusin` is delivered. The selection holds no caret or highlight that is painted yet: see [deviations](fork/deviations.md#events-and-input).
 
 `document` hears `selectionchange` when the selection changes: a node selection made from code,
 moved by a tree or data change under it, or cleared, which is one event in one task however many
