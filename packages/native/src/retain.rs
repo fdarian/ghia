@@ -7060,7 +7060,7 @@ mod tests {
     }
 
     #[test]
-    fn a_root_is_relocatable_unless_something_lifts_out_of_it_or_it_is_watched_and_lifts_itself() {
+    fn a_root_is_relocatable_unless_it_is_watched_and_lifts_itself() {
         let window = gpui::WindowId::from(5);
         let scroller = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
         crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
@@ -7111,11 +7111,12 @@ mod tests {
         assert_eq!(forming.lift_z, Some(0));
         assert_eq!(forming.overscan, overscan, "what is lifted in its own context stays in the recording");
         assert_eq!(root_skip(None, false, false, 0).overscan, overscan);
-        // What lifts out of a root that forms no context is a hole in its recording, lifted or not.
+        // What lifts out of a root that forms no context goes to the context around it, which gpui records a
+        // box of in the region of the root and moves with it: the root is moved, lifted or not.
         let leaking = root_skip(Some(0), false, true, 0);
         assert_eq!(leaking.lift_z, Some(0));
-        assert_eq!(leaking.overscan, None);
-        assert_eq!(root_skip(None, false, true, 0).overscan, None);
+        assert_eq!(leaking.overscan, overscan);
+        assert_eq!(root_skip(None, false, true, 0).overscan, overscan);
         // A root with the relevance watch is not moved by its own lift either: the replay would skip the
         // listener that answers whether it is near, and its move is when that changes.
         let watched = root_skip(Some(0), true, false, 1);
