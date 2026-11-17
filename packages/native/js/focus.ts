@@ -1,7 +1,6 @@
 import { HOST_BINDING, flushPendingMutations, type ObservableElement } from "./bounds.js"
 import { placeCaretInEditingHost } from "./dom/selection.js"
 import { isEditingHost } from "./editing/host.js"
-import { elementOf } from "./events/window-target.js"
 import type { Element } from "./dom/nodes.js"
 import type { NativeRenderer } from "./host.js"
 
@@ -46,8 +45,7 @@ export function focusHostElement(element: ObservableElement, options?: FocusOpti
  * which places the caret itself. Chrome puts the caret at the start of the host unless the selection is
  * already in it. Runs before the event is delivered, so its listeners see the selection.
  */
-export function placeCaretOnFocusIn(renderer: object, elementId: number): void {
-  const element = elementOf(renderer, elementId)
+export function placeCaretOnFocusIn(element: object | undefined): void {
   // The root dropped the element between the focus change and this event.
   if (element === undefined) return
   if (isEditingHost(element as Element)) placeCaretInEditingHost(element as Element)

@@ -330,7 +330,7 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       if (!root) return false
       if (received.eventType === "focusin") {
         noteFocusEvent(renderer)
-        placeCaretOnFocusIn(renderer, received.elementId)
+        placeCaretOnFocusIn(elementOf(renderer, received.elementId))
       }
       const event = shapeScrollEvent(normalizeEventType(received))
       if (deliverObservation(renderer, event)) return true
@@ -355,7 +355,7 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       const root = active
       if (received.eventType === "focusin") {
         noteFocusEvent(renderer)
-        placeCaretOnFocusIn(renderer, received.elementId)
+        placeCaretOnFocusIn(elementOf(renderer, received.elementId))
       }
       const event = shapeScrollEvent(normalizeEventType(received))
       if (!root || !handlesEvent(root, event)) {
