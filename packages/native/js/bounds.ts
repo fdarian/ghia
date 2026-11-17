@@ -15,6 +15,7 @@ export interface BoundingClientRect {
 
 interface FlushableQueue {
   flushMutations(): void
+  requestFlush(): void
 }
 
 const QUEUES_KEY = Symbol.for("@ghia/native/mutation-queues")
@@ -59,6 +60,17 @@ export function flushPendingMutations(renderer: object): void {
   for (const ref of [...refs]) {
     const queue = ref.deref()
     if (queue) queue.flushMutations()
+    else refs.delete(ref)
+  }
+}
+
+/** Ask the queues of this renderer for the flush a mutation would have scheduled, for a change that queues no op yet. */
+export function requestMutationFlush(renderer: object): void {
+  const refs = allQueues().get(renderer)
+  if (!refs) return
+  for (const ref of [...refs]) {
+    const queue = ref.deref()
+    if (queue) queue.requestFlush()
     else refs.delete(ref)
   }
 }

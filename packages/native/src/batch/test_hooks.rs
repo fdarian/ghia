@@ -48,6 +48,17 @@ fn op_json(op: &BatchOp<'_>) -> String {
         BatchOp::SetKeyboardFocusDim { enabled } => {
             format!(r#"["setKeyboardFocusDim",{enabled}]"#)
         }
+        BatchOp::SetNodeSelection { selection } => match selection {
+            Some(selection) => format!(
+                r#"["setNodeSelection",{},{},{},{},{}]"#,
+                selection.anchor.node,
+                selection.anchor.offset,
+                selection.focus.node,
+                selection.focus.offset,
+                selection.host.unwrap_or(0)
+            ),
+            None => r#"["setNodeSelection",null]"#.to_string(),
+        },
         BatchOp::SetUniversalStyle { style } => {
             format!(r#"["setUniversalStyle",{}]"#, style.unwrap_or("null"))
         }

@@ -45,6 +45,7 @@ const INTERNAL = {
   holds: Symbol.for("@ghia/native/selection-holds"),
   painted: Symbol.for("@ghia/native/selection-painted"),
   caret: Symbol.for("@ghia/native/selection-caret"),
+  subscribe: Symbol.for("@ghia/native/selection-subscribe"),
 } as const
 
 const CREATE = Symbol("create selection")
@@ -116,6 +117,7 @@ abstract class SelectionClass {
   #shared = false
   #changePending = false
   #hooks: SelectionHooks | undefined
+  #nodeSelectionListener: (() => void) | undefined
   readonly #rangeChanged = (): void => {
     this.#goalX = null
     this.#queueChange()
@@ -488,6 +490,7 @@ abstract class SelectionClass {
     this.#direction = "forwards"
     this.#hooks?.heldChanged()
     if (announce) this.#queueChange()
+    else this.#nodeSelectionListener?.()
   }
 
   /** Painted text and a node range are exclusive, so a new node range removes what was painted. */
@@ -502,6 +505,7 @@ abstract class SelectionClass {
    * change and before the task runs hears it, so the task is queued whether or not one listens now.
    */
   #queueChange(): void {
+    this.#nodeSelectionListener?.()
     if (this.#changePending || this.#hooks === undefined) return
     this.#changePending = true
     setTimeout(() => {
@@ -512,6 +516,10 @@ abstract class SelectionClass {
 
   [INTERNAL.hooks](hooks: SelectionHooks): void {
     this.#hooks = hooks
+  }
+
+  [INTERNAL.subscribe](listener: () => void): void {
+    this.#nodeSelectionListener = listener
   }
 
   [INTERNAL.holds](): boolean {
@@ -569,6 +577,14 @@ export function getSelection(): Selection {
 export function setSelectionHooks(hooks: SelectionHooks): void {
   const instance = shared.instance as unknown as Record<symbol, (hooks: SelectionHooks) => void>
   instance[INTERNAL.hooks](hooks)
+}
+
+/**
+ * Calls `listener` whenever the node range changes: a new one, a boundary that moved (a selection method,
+ * or a tree change under it) or none. One listener: the one that sends the selection to native.
+ */
+export function subscribeNodeSelection(listener: () => void): void {
+  ;(shared.instance as unknown as Record<symbol, (listener: () => void) => void>)[INTERNAL.subscribe](listener)
 }
 
 /** Whether the selection holds a node range, which a painted selection replaces. */

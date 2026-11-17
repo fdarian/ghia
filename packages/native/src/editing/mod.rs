@@ -6,6 +6,7 @@
 //! for the rects, hit tests and line moves JS asks for.
 
 pub mod geometry;
+pub mod node_selection;
 pub mod positions;
 
 use gpui::WindowId;
@@ -32,6 +33,11 @@ fn dom_point(node_id: f64, offset: f64) -> Result<DomPoint, String> {
 impl Reads<'_> {
     pub(crate) fn text_range_rects(&self, start_node: f64, start_offset: f64, end_node: f64, end_offset: f64) -> Result<Vec<TextRect>, String> {
         geometry::text_range_rects(self.tree, self.window, dom_point(start_node, start_offset)?, dom_point(end_node, end_offset)?)
+    }
+
+    /// What the last frame washed for the node selection. Test renderer only.
+    pub(crate) fn painted_node_selection(&self) -> Vec<node_selection::PaintedWash> {
+        node_selection::painted(self.window)
     }
 
     pub(crate) fn caret_position_from_point(&self, x: f64, y: f64) -> Result<Option<CaretPoint>, String> {

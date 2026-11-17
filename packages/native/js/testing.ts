@@ -23,6 +23,7 @@ import {
   type PatchCounters,
   type WebAnimationEffectInfo,
   type CaretPoint,
+  type PaintedWash,
   type TextRect,
   type WebAnimationInfo,
   type WebAnimationKeyframeInfo,
@@ -496,6 +497,7 @@ interface NativeTestRendererApi
   getSelectedText(): string | null
   getPaintedText(): string[]
   getPaintedHighlights(): HighlightMatch[]
+  getPaintedNodeSelection(): PaintedWash[]
   getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): TextRect[]
   caretPositionFromPoint(x: number, y: number): CaretPoint | null
   moveCaretVisually(nodeId: number, offset: number, op: string, goalX?: number | null): CaretPoint | null
@@ -2258,6 +2260,15 @@ export class TestRenderer implements NativeRenderer {
    *  draw one box per visual row, so each entry carries its `rects`. */
   getPaintedHighlights(): HighlightMatch[] {
     return this.native.getPaintedHighlights()
+  }
+
+  /**
+   * What the last frame washed for the node selection (`getSelection()` over nodes): one entry for each
+   * washed paragraph, with the washed text as UTF-16 offsets into the paragraph and a box for each line.
+   * It reads what the frame painted, so a wash that did not follow a change shows here as it does on screen.
+   */
+  getPaintedNodeSelection(): PaintedWash[] {
+    return this.native.getPaintedNodeSelection()
   }
 
   getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): TextRect[] {

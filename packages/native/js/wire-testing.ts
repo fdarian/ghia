@@ -138,6 +138,9 @@ export function decodeWireBatchForTest(bytes: Uint8Array): DecodedOp[] {
         ops.push([name, sheetIds])
         break
       }
+      case WIRE_OPCODE.setNodeSelection:
+        ops.push(bool() ? [name, varint(), varint(), varint(), varint(), varint()] : [name, null])
+        break
       default:
         throw new Error(`Unknown opcode ${code} at byte ${position - 1}`)
     }
@@ -198,6 +201,19 @@ export function encodeWireBatchForTest(ops: readonly DecodedOp[]): Uint8Array {
         break
       case "setAdoptedStyleSheets":
         writer.setAdoptedStyleSheets(op[1] as number[])
+        break
+      case "setNodeSelection":
+        writer.setNodeSelection(
+          op[1] === null
+            ? null
+            : {
+                anchorId: op[1] as number,
+                anchorOffset: op[2] as number,
+                focusId: op[3] as number,
+                focusOffset: op[4] as number,
+                hostId: op[5] as number,
+              }
+        )
         break
       default:
         throw new Error(`No wire opcode for ${String(op[0])}`)

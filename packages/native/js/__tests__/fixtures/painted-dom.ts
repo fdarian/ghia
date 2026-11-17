@@ -121,6 +121,7 @@ function elementBinding(element: FakeEl): ElementBinding {
     type: element.type,
     prop: (name) => element.props[name],
     propNames: () => Object.keys(element.props),
+    native: element.window === undefined ? undefined : { renderer: element.window.renderer, id: element.id },
     style: {},
     assertSameWindow() {},
     insertBefore(child, before) {

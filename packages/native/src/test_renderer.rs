@@ -2054,6 +2054,13 @@ impl TestGpuixRenderer {
         self.read_painted_dom(|reads| reads.text_range_rects(start_node_id, start_offset, end_node_id, end_offset))
     }
 
+    /// What the last frame washed for the node selection (`setNodeSelection`): one entry for each washed
+    /// paragraph, with the bytes and the boxes. Test renderer only.
+    #[napi]
+    pub fn get_painted_node_selection(&self) -> Result<Vec<crate::editing::node_selection::PaintedWash>> {
+        self.read_painted_dom(|reads| Ok(reads.painted_node_selection()))
+    }
+
     /// The DOM position at a window point, see the live renderer's.
     #[napi]
     pub fn caret_position_from_point(&self, x: f64, y: f64) -> Result<Option<crate::editing::geometry::CaretPoint>> {

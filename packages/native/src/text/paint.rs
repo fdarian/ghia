@@ -61,6 +61,8 @@ pub(crate) struct RegEntry {
     cell: Option<selection::TableCell>,
     /// From the space `layout` is in to the window: a press hits the text where it is drawn.
     pub(crate) to_window: TransformationMatrix,
+    /// The bytes the node selection washed, which a replay of the text puts back with it.
+    pub(crate) node_wash: Vec<Range<usize>>,
 }
 
 impl RegEntry {
@@ -381,6 +383,7 @@ pub(crate) fn same_text_apart_from_transform(
         && left.group == right.group
         && left.line == right.line
         && left.cell == right.cell
+        && left.node_wash == right.node_wash
 }
 
 /// Whether two [`log_painted_text`] writes log the same text.
@@ -444,8 +447,9 @@ fn describe_text(entry: &RegEntry, doc: &selection::DocPos, with_matrix: bool, m
     let bounds = entry.layout.bounds();
     let bounds = Bounds::new(bounds.origin + moved, bounds.size);
     let matrix = if with_matrix { format!(" {:?}", entry.to_window) } else { String::new() };
+    let node_wash = if entry.node_wash.is_empty() { String::new() } else { format!(" node wash {:?}", entry.node_wash) };
     format!(
-        "text {} {:?} {:?} {:?} {:?} {:?} {:?}{matrix}",
+        "text {} {:?} {:?} {:?} {:?} {:?} {:?}{node_wash}{matrix}",
         entry.key,
         doc,
         entry.text,
@@ -480,6 +484,11 @@ pub fn painted_text(window: WindowId) -> Vec<String> {
 /// Every highlight wash `window` painted in its last frame, in paint order. Test-facing.
 pub fn painted_highlights(window: WindowId) -> Vec<PaintedHighlight> {
     with_frame(window, |frame| frame.highlights.clone())
+}
+
+/// The paragraphs of `window`'s last frame that the node selection washed, with the bytes of each. Test-facing.
+pub(crate) fn node_washed(window: WindowId) -> Vec<RegEntry> {
+    with_frame(window, |frame| frame.registry().iter().filter(|entry| !entry.node_wash.is_empty()).cloned().collect())
 }
 
 /// Byte offset to UTF-16 code-unit offset, so the log speaks JS's units.
@@ -563,6 +572,10 @@ pub struct SelectableText {
     pub run_styles: Vec<super::paragraph::RunStyle>,
     pub selection: SharedSelection,
     pub wash_color: Hsla,
+    /// The bytes washed for the node selection ([`crate::editing::node_selection`]), in `wash_color`
+    /// like the painted selection. It lives in the tree and not in `selection`, so a change to it
+    /// invalidates the paragraph and not the frame.
+    pub node_wash: Vec<Range<usize>>,
     /// Paints additional quads under the glyphs before the selection wash:
     /// inline-code pills, word-diff highlights. Receives the laid-out text so
     /// it can turn byte ranges into rects with [`range_rects`].
@@ -638,6 +651,7 @@ impl SelectableText {
             run_styles: Vec::new(),
             selection,
             wash_color,
+            node_wash: Vec::new(),
             extra_wash: None,
             links: Vec::new(),
             on_link: None,
@@ -674,6 +688,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         run_styles,
         selection,
         wash_color,
+        node_wash,
         extra_wash,
         links,
         on_link,
@@ -814,8 +829,11 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                 None => Vec::new(),
             };
             paint_highlight_washes(&layout, element_id, sub, &text, &washes, window);
+            let node_wash = if selectable { node_wash.clone() } else { Vec::new() };
             let ranges = if selectable {
-                selection.lock().wash_ranges(&key)
+                let mut ranges = selection.lock().wash_ranges(&key);
+                ranges.extend(node_wash.iter().cloned());
+                ranges
             } else {
                 Vec::new()
             };
@@ -843,6 +861,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                     line: line.clone(),
                     cell,
                     to_window: window.transform(),
+                    node_wash,
                 };
                 crate::tape::write_placed(
                     Kind::Text,
@@ -1643,6 +1662,7 @@ mod tests {
                 line: None,
                 cell: None,
                 to_window: TransformationMatrix::unit(),
+                node_wash: Vec::new(),
             });
             frame.highlights.push(PaintedHighlight {
                 element_id: 1,

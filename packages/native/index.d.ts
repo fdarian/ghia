@@ -1170,6 +1170,11 @@ export declare class TestGpuixRenderer {
   getPaintedHighlights(): Array<HighlightMatch>
   /** The rects of the text between two DOM positions, see the live renderer's. */
   getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): Array<TextRect>
+  /**
+   * What the last frame washed for the node selection (`setNodeSelection`): one entry for each washed
+   * paragraph, with the bytes and the boxes. Test renderer only.
+   */
+  getPaintedNodeSelection(): Array<PaintedWash>
   /** The DOM position at a window point, see the live renderer's. */
   caretPositionFromPoint(x: number, y: number): CaretPoint | null
   /** A DOM position moved along the lines of the painted text, see the live renderer's. */
@@ -2587,6 +2592,17 @@ export interface ObservationClip {
   y: number
   width: number
   height: number
+}
+
+/** One paragraph's node-selection wash as the last painted frame drew it. */
+export interface PaintedWash {
+  /** The paragraph, as `container:index`. */
+  key: string
+  /** The washed bytes of the paragraph text, as UTF-16 offsets into it. */
+  start: number
+  end: number
+  /** One box for each line the wash covers, in window coordinates. */
+  rects: Array<TextRect>
 }
 
 /**

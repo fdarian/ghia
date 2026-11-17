@@ -549,6 +549,7 @@ is atomic: native decodes it whole and resolves every style before it touches an
 | 13 | `setAttribute` | id, string name, bool present, then (when present) string value |
 | 14 | `setStyleSheet` | sheet id, bool present, then (when present) string text |
 | 15 | `setAdoptedStyleSheets` | varint count, then that many sheet ids |
+| 16 | `setNodeSelection` | bool present, then (when present) anchor id, anchor offset, focus id, focus offset, host id |
 
 A string child is an element of type `"#text"` (a DOM text node): the adapters send `createElement id "#text"` and then `setText`. It takes no style, listener, prop or child, and `setText` is for it only.
 
@@ -563,6 +564,8 @@ empty value is a present attribute, not a removal.
 ids. A sheet applies only while `setAdoptedStyleSheets` lists it (the list replaces the previous one; the order is the order of
 the cascade, after the sheets of the document's `<style>` elements). `CSSStyleSheet` and `document.adoptedStyleSheets` send both
 ([Stylesheets](#stylesheets)).
+
+**A `setNodeSelection` carries the selection of nodes** (`getSelection()` over a `Range`, see [Editing hosts](#editing-hosts)) of the root the batch is for: two boundary points, each a node id and a varint offset (UTF-16 code units in a `#text` node, a child index in an element, as in a DOM boundary point), and the id of the editing host that a collapsed selection is the caret of, 0 for none. 0 in the bool clears it. The writer puts it last in the batch, from the selection as it is when the queue flushes, and only when it differs from what the root was sent; a selection that moves to another root clears the one it left. Native paints it (the wash): see [editing.md](./fork/editing.md#painting-the-node-selection).
 
 **A `setCustomProp` value** is a tag byte and its payload:
 
@@ -5297,7 +5300,7 @@ A `keydown` that was not prevented, with no Ctrl, Alt or Cmd, on a focused editi
 
 A selected range is replaced or deleted whole; a caret deletes one grapheme, into the neighbouring Text of the host when it sits at the edge of
 its own, or the whole `contenteditable="false"` element it is next to (one stop, whatever it holds). Text typed over a selection that spans two blocks goes into the block the selection began in. The caret ends after the inserted text, or at the deletion. `insertParagraph` and `insertLineBreak` fire `beforeinput` and change
-nothing. The text of an edit comes from `keydown`'s `key`, no caret is painted, and the other `inputType`s do nothing: see
+nothing. The text of an edit comes from `keydown`'s `key`, no caret is painted (the selection is: below), and the other `inputType`s do nothing: see
 [deviations.md](./fork/deviations.md#events-and-input). Tab and Escape keep their usual actions. The scroll keys (arrows, Page Up and Down, Home, End, Space) do not scroll the page while an editing host or an element inside one has focus, as with a focused `<input>`.
 ### Listeners and DOM members on an element
 
@@ -5618,7 +5621,9 @@ painted text, and a drag that paints text drops the node range.
 | `getComposedRanges(...)` | A one-item array of a `StaticRange`, or `[]`. There is no shadow DOM, so no argument changes it. |
 | `modify(alter, direction, granularity)` | `alter` is `"move"` or `"extend"`, `direction` `"forward"`, `"backward"`, `"left"` or `"right"` (the last two read as the first two: there is no bidirectional layout). `"character"` (a grapheme cluster) and `"word"` (to the end of the next word going forward, the start of the previous one going back, as on macOS) walk the Text nodes under the editing host the focus is in, or the document, in tree order; a block element or a `<br>` between two Text nodes is one step, an inline element none, and a `contenteditable="false"` element inside the host is one step whole. `"line"` moves one painted line down (`forward`) or up (`backward`) in the paragraph or the one after or before it, to the character nearest the x the caret had when the run of moves began: consecutive `modify(..., "line")` calls keep that goal x across a shorter line, and any other change of the selection forgets it. With no line left in the host, the caret goes to the start of its text going up and the end going down, as on macOS. `"lineboundary"` goes to the start or the end of the painted line (the end of a line that wraps is before the space that hangs off it); `"documentboundary"` to the first or last position of the host's text. Moving a range by character collapses it to its edge, as Chrome does. A name the standard does not have does nothing, and so does an empty selection or a caret with no Text node next to it (an empty block). `"sentence"`, `"sentenceboundary"`, `"paragraph"` and `"paragraphboundary"` throw `NotSupportedError`. |
 
-Focus moving into an editing host puts a collapsed caret at its first position (the start of its first Text, else `(host, 0)`), unless the selection is already inside it: `focus()` does it, and so do Tab, Shift+Tab and a click (which does not yet put it at the point), before `focusin` is delivered. The selection holds no caret or highlight that is painted yet: see [deviations](fork/deviations.md#events-and-input).
+A node selection that is not collapsed is painted: the text between the two points, in every paragraph it reaches, gets a wash in the colour the dragged selection has (the theme's accent at 35%, or the CSS `selectionColor` as for dragged text), under the glyphs, for each line the selection covers; `user-select: none` text takes none. Changing the selection rebuilds the paragraphs it touches and no others (retention skips the rest), but the frame is built whole, not patched ([editing.md](./fork/editing.md#painting-the-node-selection)). A collapsed selection paints nothing yet: the caret is not drawn ([deviations](fork/deviations.md#events-and-input)). The wash is read back in tests with `renderer.getPaintedNodeSelection()`: one `{ key, start, end, rects }` per washed paragraph, with the washed text as UTF-16 offsets and a box for each line.
+
+Focus moving into an editing host puts a collapsed caret at its first position (the start of its first Text, else `(host, 0)`), unless the selection is already inside it: `focus()` does it, and so do Tab, Shift+Tab and a click (which does not yet put it at the point), before `focusin` is delivered. The selection's caret is not painted yet: see [deviations](fork/deviations.md#events-and-input).
 
 `document` hears `selectionchange` when the selection changes: a node selection made from code,
 moved by a tree or data change under it, changed through its `Range`, or cleared, which is one event in one task however many

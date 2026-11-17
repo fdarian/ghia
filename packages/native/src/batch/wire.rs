@@ -10,6 +10,7 @@
 use std::fmt;
 
 use super::BatchOp;
+use crate::editing::node_selection::{Boundary, Selection};
 
 pub const FORMAT_VERSION: u8 = 1;
 
@@ -32,6 +33,7 @@ pub mod opcode {
     pub const SET_ATTRIBUTE: u8 = 13;
     pub const SET_STYLE_SHEET: u8 = 14;
     pub const SET_ADOPTED_STYLE_SHEETS: u8 = 15;
+    pub const SET_NODE_SELECTION: u8 = 16;
 }
 
 /// The tag in front of a `setCustomProp` value.
@@ -196,6 +198,21 @@ impl<'a> Reader<'a> {
         std::str::from_utf8(bytes).map_err(|_| WireErrorKind::InvalidUtf8)
     }
 
+    /// A boundary point: the node's id and an offset in it.
+    fn boundary(&mut self) -> Read<Boundary> {
+        let node = self.id()?;
+        let offset = self.varint()?;
+        Ok(Boundary { node, offset: usize::try_from(offset).map_err(|_| WireErrorKind::VarintOverflow)? })
+    }
+
+    /// Anchor, focus, then the id of the editing host the caret is in, 0 for none.
+    fn node_selection(&mut self) -> Read<Selection> {
+        let anchor = self.boundary()?;
+        let focus = self.boundary()?;
+        let host = self.id()?;
+        Ok(Selection { anchor, focus, host: (host != 0).then_some(host) })
+    }
+
     fn custom_prop_value(&mut self) -> Read<serde_json::Value> {
         use serde_json::Value;
         match self.byte()? {
@@ -289,6 +306,9 @@ impl<'a> Reader<'a> {
                 }
                 BatchOp::SetAdoptedStyleSheets { sheet_ids }
             }
+            opcode::SET_NODE_SELECTION => BatchOp::SetNodeSelection {
+                selection: if self.bool()? { Some(self.node_selection()?) } else { None },
+            },
             other => return Err(WireErrorKind::UnknownOpcode(other)),
         })
     }
@@ -411,14 +431,23 @@ mod tests {
         varint(&mut ops, 2);
         varint(&mut ops, 7);
         varint(&mut ops, 300);
-        batch(15, &ops)
+        ops.push(opcode::SET_NODE_SELECTION);
+        ops.push(1);
+        varint(&mut ops, 11);
+        varint(&mut ops, 3);
+        varint(&mut ops, 12);
+        varint(&mut ops, 70_000);
+        varint(&mut ops, 5);
+        ops.push(opcode::SET_NODE_SELECTION);
+        ops.push(0);
+        batch(17, &ops)
     }
 
     #[test]
     fn decodes_every_op_kind() {
         let bytes = every_op();
         let ops = decode(&bytes).unwrap();
-        assert_eq!(ops.len(), 15);
+        assert_eq!(ops.len(), 17);
         assert!(
             matches!(&ops[0], BatchOp::CreateElement { id: 1, element_type } if element_type == "div")
         );
@@ -473,6 +502,17 @@ mod tests {
             BatchOp::SetStyleSheet { sheet_id: 7, text: Some(".a { color: red }") }
         ));
         assert!(matches!(&ops[14], BatchOp::SetAdoptedStyleSheets { sheet_ids } if sheet_ids == &[7, 300]));
+        assert!(matches!(
+            &ops[15],
+            BatchOp::SetNodeSelection {
+                selection: Some(Selection {
+                    anchor: Boundary { node: 11, offset: 3 },
+                    focus: Boundary { node: 12, offset: 70_000 },
+                    host: Some(5),
+                })
+            }
+        ));
+        assert!(matches!(&ops[16], BatchOp::SetNodeSelection { selection: None }));
     }
 
     #[test]
@@ -574,14 +614,14 @@ mod tests {
     fn truncation_names_the_op() {
         let bytes = every_op();
         let error = decode(&bytes[..bytes.len() - 1]).unwrap_err();
-        assert_eq!(error.op, Some(14));
+        assert_eq!(error.op, Some(16));
         assert_eq!(error.kind, WireErrorKind::Truncated);
-        assert!(error.to_string().starts_with("Batch op 14:"), "{error}");
+        assert!(error.to_string().starts_with("Batch op 16:"), "{error}");
     }
 
     #[test]
     fn unknown_opcode_is_an_error_not_a_skip() {
-        for code in [0u8, 16, 255] {
+        for code in [0u8, 17, 255] {
             assert_eq!(kind(&batch(1, &[code])), WireErrorKind::UnknownOpcode(code));
         }
     }

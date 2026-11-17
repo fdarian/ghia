@@ -90,6 +90,27 @@ fn window_rect(entry: &RegEntry, local: Bounds<Pixels>) -> Option<TextRect> {
     Some(TextRect { x: min.x, y: min.y, width: max.x - min.x, height: max.y - min.y })
 }
 
+/// Where the quads of a wash over `range` of the text of `entry` went, in window coordinates. The
+/// wash is painted at the rects the layout gives, with no fraction of a pixel added.
+pub(crate) fn wash_rects(entry: &RegEntry, range: &std::ops::Range<usize>) -> Vec<TextRect> {
+    let mut local = paint::range_rects(&entry.layout, range, 0.0, 0.0);
+    crate::text::inline_insets::trim_wash(&entry.layout, &entry.text, range, &mut local);
+    local
+        .into_iter()
+        .filter_map(|rect| {
+            let corners = [rect.origin, rect.top_right(), rect.bottom_left(), rect.bottom_right()];
+            let mut min = point(f64::MAX, f64::MAX);
+            let mut max = point(f64::MIN, f64::MIN);
+            for corner in corners {
+                let at = window_point_from(&entry.to_window, corner)?;
+                min = point(min.x.min(number(at.x)), min.y.min(number(at.y)));
+                max = point(max.x.max(number(at.x)), max.y.max(number(at.y)));
+            }
+            Some(TextRect { x: min.x, y: min.y, width: max.x - min.x, height: max.y - min.y })
+        })
+        .collect()
+}
+
 fn char_len_at(text: &str, byte: usize) -> usize {
     text[byte..].chars().next().map_or(0, char::len_utf8)
 }

@@ -13432,7 +13432,8 @@ fn paragraph_content(
             &motion,
         )
     };
-    ctx.retain.digest(|| format!("{} {:?}", paragraph.text, styles.runs));
+    let node_wash: Vec<std::ops::Range<usize>> = ctx.tree.node_selection.wash_range(paragraph).into_iter().collect();
+    ctx.retain.digest(|| format!("{} {:?} {node_wash:?}", paragraph.text, styles.runs));
     // A box in the paragraph, or the paragraph being inline content of a box, puts the texts around
     // and inside the boxes on one line for copy.
     let line = ctx
@@ -13514,6 +13515,7 @@ fn paragraph_content(
                 .clone()
                 .map(crate::text::HighlightSource::Resolved),
             run_styles: styles.runs,
+            node_wash,
             opacity_groups: styles.groups,
             aligned_boxes,
             atomics,
@@ -14345,7 +14347,17 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
 
     // Phase 3: apply. Cannot fail.
     let mut destroyed_ids: Vec<f64> = Vec::new();
+    let mut node_selection = None;
+    let mut reshaped = false;
     for batch_op in parsed {
+        reshaped |= matches!(
+            batch_op,
+            BatchOp::DestroyElement { .. }
+                | BatchOp::DetachChild { .. }
+                | BatchOp::AppendChild { .. }
+                | BatchOp::InsertBefore { .. }
+                | BatchOp::SetText { .. }
+        );
         match batch_op {
             BatchOp::CreateElement { id, element_type } => {
                 tree.create_element(id, element_type);
@@ -14390,6 +14402,9 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
             BatchOp::SetKeyboardFocusDim { enabled } => {
                 tree.set_keyboard_focus_dim(enabled);
             }
+            BatchOp::SetNodeSelection { selection } => {
+                node_selection = Some(selection);
+            }
             BatchOp::SetUniversalStyle { .. } => {
                 let shared = universal_styles
                     .next()
@@ -14413,6 +14428,13 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
 
     // Every mutation above only noted what the sheets must match again; this is where they do.
     tree.flush_styles();
+
+    // After the last change to the tree: the paragraphs a selection reaches are the ones that are there now.
+    match node_selection {
+        Some(selection) => crate::editing::node_selection::set(tree, selection),
+        None if reshaped => crate::editing::node_selection::refresh(tree),
+        None => {}
+    }
 
     // Release styles nothing references any more. Without this a dragged
     // element, which produces a distinct style every frame, would grow the
