@@ -279,7 +279,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit that only paints", () =
     expect(reasons.Commit).toBeGreaterThan(0)
   })
 
-  test("a root the list moved since it was recorded is declined as Commit:Relocated and drawn whole", () => {
+  test("a root the list moved since it was recorded is patched where it stands, not declined as Commit:Relocated", () => {
     const run = (patch: boolean, declared: boolean) => {
       const { app, renderer, select } = open("paint")
       try {
@@ -291,7 +291,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit that only paints", () =
           select(index)
           renderer.drawFrame()
         }
-        // The rows are built again where they stand after a scroll by a fraction of a row, and the frame after that is a translate.
+        // The rows are built again where they stand after a scroll by a fraction of a row (the sizes not told), and the frame after that is a translate.
         renderer.scrollTo(list, 0, 15)
         renderer.drawFrame()
         renderer.scrollTo(list, 0, 25)
@@ -310,10 +310,11 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit that only paints", () =
         app.unmount()
       }
     }
-    // The rows of the list are measured by layout, so the scrolls before it are built again where the rows stand.
+    // The rows of the list are measured by layout, so the scrolls before it are built again by frames built whole that replay the rows
+    // at a moved place. A row put elsewhere than it was recorded is patched in its region, so the commit is a patch, not Commit:Relocated.
     const on = run(true, false)
     expect(on.picture).toEqual(run(false, false).picture)
-    if (counted) expect(on).toMatchObject({ relocated: 1, patched: 0 })
+    if (counted) expect(on).toMatchObject({ relocated: 0, patched: 1 })
     // Told the sizes, the list translates those scrolls and the root is patched where it stands.
     const told = run(true, true)
     expect(told.picture).toEqual(run(false, true).picture)

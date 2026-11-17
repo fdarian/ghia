@@ -394,13 +394,15 @@ fn restyled(view: &WeakEntity<GpuixView>, output: &Output, window: &mut Window, 
 /// Capture phase, so it sees every event whatever the elements below do with
 /// it, and before them, as a DOM handler runs before the default action.
 ///
-/// `observed` is the chain of elements the dispatcher last saw under the pointer.
-/// When a frame paints a different one without any input, hover must follow: a wheel scroll moves
-/// content under the pointer, and a popover can open beneath it.
+/// `observed` is the chain of elements the hover last followed.
+/// When a frame paints a different one without any input, hover must follow: a popover can open
+/// beneath the pointer. A scroll that moves content under it does not make the hover follow until it
+/// ends (`hover_after_scroll`).
 pub(crate) fn pointer_frame(
     view: WeakEntity<GpuixView>,
     press: PointerDispatch,
     observed: ObservedChain,
+    after_scroll: Rc<super::hover_after_scroll::HoverAfterScroll>,
 ) -> impl IntoElement {
     canvas(
         |_, _, _| (),
@@ -409,6 +411,8 @@ pub(crate) fn pointer_frame(
             let hover = press.pointer.clone();
             let release = press.clone();
             let wheel = press.clone();
+            let wheel_hover = after_scroll.clone();
+            let move_hover = after_scroll.clone();
             let file_drag = press.clone();
             let press = press.clone();
             window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
@@ -476,7 +480,9 @@ pub(crate) fn pointer_frame(
                 if phase != DispatchPhase::Capture {
                     return;
                 }
-                let action = PointerAction::Wheel(wheel_tick(event));
+                let tick = wheel_tick(event);
+                wheel_hover.note_wheel(tick.phase, window, cx);
+                let action = PointerAction::Wheel(tick);
                 let sample = sample(window, action, event.position, event.modifiers);
                 wheel.wheel(sample, window, cx);
             });
@@ -497,6 +503,7 @@ pub(crate) fn pointer_frame(
                         move_dispatch.file_drag(&move_view, drag, window, cx);
                     }
                     None => {
+                        move_hover.pointer_moved();
                         let action = PointerAction::Move {
                             pressed_button: event.pressed_button.map(dom_button),
                         };
@@ -557,18 +564,21 @@ pub(crate) fn pointer_frame(
                 }
             });
 
-            // A frame that moves the rows in place builds none of this, and follows the hover with it.
-            let settle = {
+            // A frame that moves the rows in place builds none of this, so what follows the hover after a scroll that
+            // ends is told to the state of the window, which every frame's paint tells again.
+            after_scroll.install({
                 let (dispatch, view, observed) = (file_drag.clone(), view.clone(), observed.clone());
                 Rc::new(move |window: &mut Window, cx: &mut App| dispatch.resync(&view, &observed, false, window, cx))
-            };
-            file_drag.pointer.borrow_mut().scroll_settle = Some(settle);
+            });
             // After the draw: GPUI swaps frames only when it ends, and the control areas of the
             // frame being painted are readable only from then on, so a drag region that appeared
-            // under a still pointer is seen by this resync and not a frame late.
-            window.defer(cx, move |window, cx| {
-                file_drag.resync(&view, &observed, false, window, cx);
-            });
+            // under a still pointer is seen by this resync and not a frame late. A build for nothing but a scroll
+            // leaves the hover where it is until the scroll ends.
+            if after_scroll.follows_build(window.window_handle().window_id()) {
+                window.defer(cx, move |window, cx| {
+                    file_drag.resync(&view, &observed, false, window, cx);
+                });
+            }
         },
     )
     .absolute()

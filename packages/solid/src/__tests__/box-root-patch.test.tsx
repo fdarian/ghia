@@ -247,8 +247,9 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: a commit inside a box of a fixed
     if (!counted) return
     expect(on.steps.map((step) => step.relaid), JSON.stringify(on.counters)).toEqual([1, 1, 1, 1])
     expect(on.steps.map((step) => step.whole)).toEqual([0, 0, 0, 0])
-    // The one Structure is the edit that warms the page up: the first edit of a row a wheel put elsewhere is a frame built whole.
-    expect(reason(on.counters.unpatchable, "Structure")).toBe(1)
+    // The rows a wheel tick put elsewhere are recorded where they are built (a root built in a frame its scroller moved is a recorded box root),
+    // so the edit that warms the page up is no Structure frame as it was: a row of a scroller that was moved is a root as one that was not.
+    expect(reason(on.counters.unpatchable, "Structure")).toBe(0)
     expect(reason(on.counters.unpatchable, "Box:Relocated")).toBe(0)
   }, TIMEOUT)
 

@@ -2,9 +2,8 @@
 //! (`Window::set_scroll_patch_gate`): whether the tree is the one the frame shown was built from,
 //! whether something that follows the clock asked the last frame for another (`ClockAsked`), and
 //! whether an animation of the scroll has frames of its own to run, or the bar of a scroll container is due one (the bars of a
-//! list are planned by the bar, `scrollbar::plan_thumb`, through `Window::paint_scroll_thumb`). And what a hit chain that
-//! a scroll changes would do to the pointer (`Window::set_scroll_patch_hover`): restyle an
-//! element or reach a listener, or nothing. The classifier is in zed
+//! list are planned by the bar, `scrollbar::plan_thumb`, through `Window::paint_scroll_thumb`). The hover under a still pointer
+//! is not asked: a scroll does not recompute it (`events/hover_after_scroll.rs`). The classifier is in zed
 //! (`window/scroll_patch.rs`); see [patch-frames.md](../../../../docs/fork/patch-frames.md).
 
 use std::cell::{Cell, RefCell};
@@ -95,33 +94,12 @@ impl GpuixView {
         let shown = self.retain.shown.clone();
         let clock_asked = self.retain.clock_asked.clone();
         let tree = self.tree.clone();
-        let hover_tree = self.tree.clone();
-        let pointer = self.pointer.clone();
-        window.set_scroll_patch_hover(Some(Rc::new(
-            move |_: &gpui::Window, before: &[gpui::GlobalElementId], after: &[gpui::GlobalElementId]| {
-                // What cannot be read is a pointer that may matter.
-                let (Ok(tree), Ok(pointer)) = (hover_tree.try_lock(), pointer.try_borrow()) else {
-                    return true;
-                };
-                // The target of a hit chain, as `dispatch_at` takes it.
-                let target = |chain: &[gpui::GlobalElementId]| {
-                    chain
-                        .iter()
-                        .filter_map(|id| id.last().and_then(crate::events::ids::host_id_of))
-                        .find(|id| tree.elements.contains_key(id))
-                };
-                let matters = crate::events::dispatcher::hover_would_matter(&pointer, &tree, target(before), target(after));
-                pointer.scroll_hover_asked.set(pointer.scroll_hover_asked.get() + 1);
-                pointer.scroll_hover_matters.set(pointer.scroll_hover_matters.get() + u64::from(matters));
-                matters
-            },
-        )));
-        let settled = self.pointer.clone();
         let reports = self.paint_reports.clone();
         let sweep_tree = self.tree.clone();
         let callback = self.event_callback.clone();
         let settled_tapes = self.tapes.clone();
         let settled_view = view.clone();
+        let hover = self.hover_after_scroll.clone();
         window.set_scroll_patch_settled(Some(Rc::new(move |window: &mut gpui::Window, cx: &mut gpui::App| {
             // The rows that left are out of the registries before the sweeps read the boxes, and out of
             // the page's records before a frame builds a row that comes in again.
@@ -130,12 +108,10 @@ impl GpuixView {
             if let Some(view) = settled_view.upgrade().filter(|view| !view.is_updating(cx)) {
                 view.update(cx, |view, _| view.forget_left_rows());
             }
-            let settle = settled
-                .borrow()
-                .scroll_settle
-                .clone()
-                .expect("a frame that moves the rows has the pointer frame of the frame shown");
-            settle(window, cx);
+            // A translate under a wheel leaves the hover where it was: it follows when the scroll ends.
+            if hover.follows_translate(window.window_handle().window_id()) {
+                hover.follow(window, cx);
+            }
             crate::observers::sweep_after_translate(window.window_handle(), window.viewport_size(), &reports, &sweep_tree, &callback, cx);
         })));
         let gate_tapes = self.tapes.clone();

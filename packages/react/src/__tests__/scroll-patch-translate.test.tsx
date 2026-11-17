@@ -109,13 +109,15 @@ function seen(renderer, name: string, points: Array<[number, number]>) {
 }
 
 /** The steps run on a page with the translate on or off; each is seen after. */
-function run(translate: boolean, steps: Wheel[], points: Array<[number, number]>, between?: (index: number) => void) {
+function run(translate: boolean, steps: Wheel[], points: Array<[number, number]>, between?: (index: number) => void, ended = false) {
   const { renderer, unmount } = open()
   try {
     renderer.setScrollPatchEnabled(translate)
     // The first frames record the rows; a wheel and its way back put them elsewhere.
     wheel(renderer, { x: steps[0].x, y: steps[0].y, by: 4 })
     wheel(renderer, { x: steps[0].x, y: steps[0].y, by: -4 })
+    // A hover is where the last pointer input put it.
+    if (ended) renderer.nativeSimulateMouseMove(steps[0].x, steps[0].y)
     const frames: unknown[] = []
     const translated: boolean[] = []
     for (const [index, step] of steps.entries()) {
@@ -124,6 +126,13 @@ function run(translate: boolean, steps: Wheel[], points: Array<[number, number]>
       wheel(renderer, step)
       translated.push(scroll(renderer).patched > before)
       frames.push(seen(renderer, `${translate}-${index}`, points))
+    }
+    if (ended) {
+      // The hover follows the scroll once the wheel has been quiet: the row under the pointer is restyled then.
+      renderer.advanceTime(500)
+      renderer.drawFrame()
+      renderer.drawFrame()
+      frames.push(seen(renderer, `${translate}-end`, points))
     }
     return { frames, translated, counters: scroll(renderer) }
   } finally {
@@ -156,16 +165,17 @@ describeNative("the rows of a list translated by a scroll", { timeout: TIMEOUT }
     expect(on.frames).toEqual(off.frames)
   })
 
-  unverified("restyles the row that comes under the pointer in the frame after a translate, as the build does", () => {
+  unverified("leaves the hover on the row it was on while the rows move under the pointer, and restyles the row under it when the scroll ends, as the build does", () => {
     // The pointer at (20, 38) is in the row 0 and then, 5 up, still in it: a translate with the hover style on the row that
-    // moves. 5 more crosses into the row 1: a hover change that only paints, so a translate as well, and the tick after it
-    // repaints the rows (`scroll-patch-hover.test.tsx`).
+    // moves. 5 more crosses into the row 1: every step is a translate, and the hover follows once the wheel is quiet
+    // (`hover-after-scroll.test.tsx`, `scroll-patch-hover.test.tsx`).
     const steps: Wheel[] = [3, 2, 1, 5, 2, 2, -4, -4].map((by) => ({ x: 20, y: 38, by }))
-    const on = run(true, steps, [[20, 38], [20, 10]])
-    const off = run(false, steps, [[20, 38], [20, 10]])
+    const on = run(true, steps, [[20, 38], [20, 10]], undefined, true)
+    const off = run(false, steps, [[20, 38], [20, 10]], undefined, true)
     expect(on.counters.patched).toBeGreaterThan(0)
     expect(on.translated).toEqual([true, true, true, true, true, true, true, true])
     expect(on.frames).toEqual(off.frames)
+    expect(on.frames.at(-1).picture, "the hover moved when the scroll ended").not.toEqual(on.frames.at(-2).picture)
   })
 
   unverified("draws a whole frame for a commit between the wheel events, and a translate again after it", () => {

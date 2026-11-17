@@ -261,6 +261,7 @@ fn scroll_element_position(id: u64) -> Option<[f64; 2]> {
 /// invalidates the window with [`invalidate_after_scroll`] then and does nothing for a write that
 /// leaves the scroller where it is, as a browser's setter does.
 fn scroll_element_to(
+    window: gpui::WindowId,
     metrics_current: bool,
     id: u64,
     left: Option<f64>,
@@ -272,7 +273,7 @@ fn scroll_element_to(
             VIRTUAL_LIST_REPORTERS.with(|reporters| {
                 let reporters = reporters.borrow();
                 let reporter = reporters.get(&id).map(|reporter| reporter.as_ref());
-                crate::scroll_write::write_list(metrics_current, id, state, reporter, top)
+                crate::scroll_write::write_list(window, metrics_current, id, state, reporter, top)
             })
         })
     });
@@ -282,7 +283,7 @@ fn scroll_element_to(
     SCROLL_HANDLES.with(|cell| {
         cell.borrow()
             .get(&id)
-            .is_some_and(|handle| crate::scroll_write::write_container(metrics_current, id, handle, left, top, behavior))
+            .is_some_and(|handle| crate::scroll_write::write_container(window, metrics_current, id, handle, left, top, behavior))
     })
 }
 
@@ -306,8 +307,8 @@ fn scroll_write_lays_out_first(
 }
 
 /// Makes the scroll writes recorded since the last render, before it builds (see `scroll_write`).
-pub(crate) fn settle_scroll_writes() {
-    SCROLL_HANDLES.with(|cell| crate::scroll_write::settle_containers(&cell.borrow()));
+pub(crate) fn settle_scroll_writes(window: gpui::WindowId) {
+    SCROLL_HANDLES.with(|cell| crate::scroll_write::settle_containers(window, &cell.borrow()));
 }
 
 /// The room `id` reserves for classic scrollbars as of its last layout: the width on its right and
@@ -1227,7 +1228,7 @@ async fn run_ui_commands(
                     { crate::renderer::notify_pending_layout(cx); window.draw_if_scroll_metrics_dirty(cx) };
                 }
                 let was_current = crate::scroll_write::metrics_current(window);
-                if scroll_element_to(was_current, id, left, top, behavior) {
+                if scroll_element_to(window.window_handle().window_id(), was_current, id, left, top, behavior) {
                     let view = cx.entity_id();
                     crate::scroll_write::finish_write(window, cx, view, id);
                 }
@@ -3861,7 +3862,7 @@ impl GpuixRenderer {
                 { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) };
             }
             let was_current = crate::scroll_write::metrics_current(window);
-            if scroll_element_to(was_current, id, left, top, behavior) {
+            if scroll_element_to(window.window_handle().window_id(), was_current, id, left, top, behavior) {
                 let view = crate::events::sync_dispatch::root_view(window).map_err(Error::from_reason)?;
                 crate::scroll_write::finish_write(window, cx, view.entity_id(), id);
             }
@@ -6297,6 +6298,9 @@ pub(crate) struct GpuixView {
     /// Hover and press state for those elements, until the event model owns it.
     /// The glide of the elements that declare `layout`.
     pub(crate) layout_flips: crate::motion::LayoutFlips,
+    /// Shared with the closures the window keeps that read it (the pointer frame, the scroll gate), which cannot
+    /// reach this view while it is leased.
+    pub(crate) hover_after_scroll: Rc<crate::events::hover_after_scroll::HoverAfterScroll>,
     /// Serialised markup of the `<svg>` elements that have shape children.
     pub(crate) svg_trees: crate::custom_elements::svg_tree::SvgTrees,
     /// Live text selection, shared with the paint closures and the napi methods.
@@ -7335,6 +7339,7 @@ impl GpuixView {
             contents_styles: Default::default(),
             measurements: Default::default(),
             layout_flips: Default::default(),
+            hover_after_scroll: Default::default(),
             svg_trees: Default::default(),
             selection,
             virtual_lists: HashMap::new(),
@@ -7512,7 +7517,7 @@ impl GpuixView {
             under_pointer.sort_by(|a, b| a.0.total_cmp(&b.0));
             scrollers.extend(under_pointer.into_iter().map(|(_, id, handle)| (id, handle)));
         }
-        crate::scroll::scroll_by_key(scrollers, key)
+        crate::scroll::scroll_by_key(window.window_handle().window_id(), scrollers, key)
     }
 
     /// The DOM's `scrollIntoView`. Walks the scrollers around the element from the inside out
@@ -7700,8 +7705,8 @@ impl GpuixView {
         self.frameless = frameless;
     }
 
-    pub(crate) fn resync_hover_by_frame(&mut self) {
-        self.resync_by_frame = true;
+    pub(crate) fn set_resync_hover_by_frame(&mut self, by_frame: bool) {
+        self.resync_by_frame = by_frame;
     }
 
     pub(crate) fn simulate_window_actions(
@@ -7983,12 +7988,13 @@ impl GpuixView {
     /// Writes the scroll position of the list `id`: whether it moved, or `None` if `id` is not a list.
     pub(crate) fn write_virtual_list(
         &self,
+        window: gpui::WindowId,
         metrics_current: bool,
         id: u64,
         top: Option<f64>,
     ) -> Option<bool> {
         let entry = self.virtual_lists.get(&id)?;
-        Some(crate::scroll_write::write_list(metrics_current, id, &entry.state, Some(&entry.reporter), top))
+        Some(crate::scroll_write::write_list(window, metrics_current, id, &entry.state, Some(&entry.reporter), top))
     }
 
     pub(crate) fn virtual_list_position(&self, id: u64) -> Option<[f64; 2]> {
@@ -10294,7 +10300,7 @@ impl gpui::Render for GpuixView {
         use gpui::IntoElement;
 
         self.apply_window_title(window);
-        settle_scroll_writes();
+        settle_scroll_writes(window.window_handle().window_id());
         self.paint_reports.borrow_mut().scrolls.begin_pass();
         self.note_pass(window);
         self.apply_pointer_lock(window, cx);
@@ -10585,6 +10591,21 @@ impl gpui::Render for GpuixView {
             self.css_transitions.take_active() | self.css_animations.take_active();
         let (motion_awake, dormant_motion) = self.note_motion_split(&tree, motion_animating, now);
         let motion_active = !motion_awake.is_empty();
+        // What a frame that changed nothing but a scroll offset is told from: the paint of the pointer frame asks.
+        let viewport = window.viewport_size();
+        let layout_animating = crate::motion::take_layout_animating(
+            &mut self.css_transitions,
+            &mut self.css_animations,
+            &self.motion_states,
+            &motion_awake,
+            &self.layout_flips,
+            now,
+        );
+        self.hover_after_scroll.note_build(
+            tree.revision(),
+            (f32::from(viewport.width), f32::from(viewport.height)),
+            layout_animating,
+        );
         if !window.is_layout_pass() {
             self.layout_flips.note_ticking(transitions_active || motion_active);
         }
@@ -10617,6 +10638,7 @@ impl gpui::Render for GpuixView {
                         resync_by_frame: self.resync_by_frame,
                     },
                     self.pointer.borrow().observed(),
+                    self.hover_after_scroll.clone(),
                 ))
                 .child(crate::events::keyboard::window_input_listeners(
                     tree_arc.clone(),
@@ -10689,7 +10711,7 @@ impl gpui::Render for GpuixView {
         });
         VIRTUAL_LIST_STATES.with(|states| {
             VIRTUAL_LIST_REPORTERS.with(|reporters| {
-                crate::scroll_write::settle_lists(&states.borrow(), &reporters.borrow())
+                crate::scroll_write::settle_lists(window.window_handle().window_id(), &states.borrow(), &reporters.borrow())
             })
         });
 
@@ -12315,7 +12337,7 @@ fn build_virtual_list(
             entry.sizes.set_scale(window.scale_factor());
             if let Some(row_id) = focused_row.filter(|row_id| !entry.seen_rows.contains(row_id)) {
                 if let Some(index) = entry.logical_index_of(row_id) {
-                    entry.state.scroll_to(gpui::ListOffset {
+                    crate::scroll::scroll_list_to_row(window.window_handle().window_id(), &entry.state, gpui::ListOffset {
                         item_ix: index,
                         offset_in_item: gpui::px(0.0),
                     });
@@ -12340,7 +12362,7 @@ fn build_virtual_list(
             entry.sizes.set_scale(window.scale_factor());
             if let Some(row_id) = focused_row {
                 if let Some(index) = entry.logical_index_of(row_id) {
-                    entry.state.scroll_to(gpui::ListOffset {
+                    crate::scroll::scroll_list_to_row(window.window_handle().window_id(), &entry.state, gpui::ListOffset {
                         item_ix: index,
                         offset_in_item: gpui::px(0.0),
                     });
@@ -12368,7 +12390,7 @@ fn build_virtual_list(
         report
     });
     if let Some(offset) = queued_scroll {
-        list_state.scroll_to(offset);
+        crate::scroll::scroll_list_to_row(window.window_handle().window_id(), &list_state, offset);
         reporter.await_layout();
     }
     if listens {
@@ -14934,15 +14956,9 @@ pub struct ScrollPatchCounters {
     pub eligible: f64,
     /// Of the eligible ones, the ones whose build was not what the classifier predicted.
     pub mispredicted: f64,
-    /// Of the frames whose first reason is the hover, the ones nothing else stops: eligible with
-    /// the pointer elsewhere.
+    /// Of the frames whose first reason is the hover (the pointer moved since the frame shown), the ones
+    /// nothing else stops: eligible with the pointer where the frame shown had it.
     pub hover_only: f64,
-    /// The frames whose rows move under a pointer where the frame shown had it and change the hitboxes under it, for which
-    /// the owner was asked whether the hover would matter (`hover_would_matter`).
-    pub hover_asked: f64,
-    /// Of those, the ones that would be a frame built whole (a hover that is more than paint, or that a listener hears).
-    /// `Hover` held for a frame that is not one of these is a pointer that is not where the frame shown had it.
-    pub hover_matters: f64,
     /// Of the eligible ones, the ones drawn by moving the rows of the frame shown.
     pub patched: f64,
     /// Of those, the ones that built rows that came in or took out rows that left.
@@ -14967,8 +14983,7 @@ pub struct ScrollPatchCounters {
     pub apply_declines: std::collections::HashMap<String, f64>,
     /// The others, by the first reason they were not.
     pub reasons: std::collections::HashMap<String, f64>,
-    /// The same frames, by every reason that held for them, first or not (`HitboxChain` is only
-    /// counted here, it stops no frame), and by what lay behind a reason (`NotRelocatable.noRun`,
+    /// The same frames, by every reason that held for them, first or not, and by what lay behind a reason (`NotRelocatable.noRun`,
     /// `NotRelocatable.noRecording`, `NotRelocatable.unmovable`, `Region.top`, `Region.bottom`,
     /// `Region.side`, `Thumb.size`, `Thumb.alpha`, `Thumb.appear`, `Thumb.track`, `Membership.settles`,
     /// `Membership.unmeasured`, `Membership.unmeasuredOverdraw`, `Membership.disjoint`, `Membership.noBuilder`).
@@ -15007,8 +15022,6 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
                 eligible: scroll.eligible as f64,
                 mispredicted: scroll.mispredicted as f64,
                 hover_only: scroll.hover_only as f64,
-                hover_asked: view.pointer.borrow().scroll_hover_asked.get() as f64,
-                hover_matters: view.pointer.borrow().scroll_hover_matters.get() as f64,
                 patched: scroll.patched as f64,
                 membership_frames: scroll.membership_frames as f64,
                 rows_built: scroll.rows_built as f64,

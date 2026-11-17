@@ -118,9 +118,9 @@ pub(crate) fn may_lift(style: &StyleDesc) -> bool {
 /// hover that paints only: an animation, a transition, Motion (`motion`, `motionValues`, `layout`), a `var()`
 /// (one in a state block too: `holds_var_declarations`, as the paint check of a hover does not see a `var()` a state
 /// holds), an `@container` block, a state variant other than `hover` and `hasHover`, or a `hover` or `hasHover` that is
-/// more than paint (`paint_hover_of`: an opacity that crosses 1, a transform, a size). Only a paint-only hover is ignored, since it never changes what an element lifts. A fold like the others can give the element an opacity, a
+/// more than paint (`hover` is its `paint_hover_of`: an opacity that crosses 1, a transform, a size). It is taken from the caller's memo, not computed here: folding the states clones the style. Only a paint-only hover is ignored, since it never changes what an element lifts. A fold like the others can give the element an opacity, a
 /// transform or a context that it does not declare, or take one away.
-fn restyles_beyond_hover(element: &RetainedElement, style: Option<&StyleDesc>) -> bool {
+fn restyles_beyond_hover(element: &RetainedElement, style: Option<&StyleDesc>, hover: Option<Paints>) -> bool {
     let props = element.custom_props();
     if ["motion", "motionValues", "layout"].into_iter().any(|key| props.contains_key(key)) {
         return true;
@@ -129,7 +129,7 @@ fn restyles_beyond_hover(element: &RetainedElement, style: Option<&StyleDesc>) -
         let declares_hover = style.hover.is_some() || style.has_hover.is_some();
         style.container_rules.is_some()
             || style.holds_var_declarations()
-            || (declares_hover && paint_hover_of(style) == Paints::No)
+            || (declares_hover && hover == Some(Paints::No))
             || crate::motion::declares_animation(style)
             || crate::motion::declares_transitions(style)
             || crate::css::var_substitution::state_blocks(style)
@@ -145,12 +145,13 @@ fn restyles_beyond_hover(element: &RetainedElement, style: Option<&StyleDesc>) -
 /// give it any of those. What a scan of a patch root asks of an element below the root (`Retain::can_be_patch_root`).
 pub(crate) fn may_lift_in_any_state(
     element: &RetainedElement,
+    hover: Option<Paints>,
     colors: &ColorContext,
     lengths: &LengthContext,
 ) -> bool {
     let style = element.style.as_deref();
     style.is_some_and(may_lift)
-        || restyles_beyond_hover(element, style)
+        || restyles_beyond_hover(element, style, hover)
         || style.is_some_and(|style| declared_context(style, colors, lengths))
 }
 
@@ -160,11 +161,12 @@ pub(crate) fn may_lift_in_any_state(
 /// is refused when something is lifted out of it.
 pub(crate) fn forms_context_in_every_state(
     element: &RetainedElement,
+    hover: Option<Paints>,
     colors: &ColorContext,
     lengths: &LengthContext,
 ) -> bool {
     let style = element.style.as_deref();
-    !restyles_beyond_hover(element, style) && style.is_some_and(|style| declared_context(style, colors, lengths))
+    !restyles_beyond_hover(element, style, hover) && style.is_some_and(|style| declared_context(style, colors, lengths))
 }
 
 fn declared_context(style: &StyleDesc, colors: &ColorContext, lengths: &LengthContext) -> bool {
