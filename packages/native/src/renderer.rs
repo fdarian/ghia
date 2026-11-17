@@ -14969,6 +14969,9 @@ pub struct ScrollPatchCounters {
     pub rows_rebuilt: f64,
     /// The rows those frames took out of the frame.
     pub rows_removed: f64,
+    /// The presentations whose damage carried a shift, not the copies made: a platform may draw such a frame whole
+    /// (a window that is not opaque, a composed window, a target that is not valid, a shift that does not fit the target).
+    pub shifted: f64,
     /// How the virtual lists of the window found the size of the rows they measured, summed over the
     /// lists that are mounted: by building and laying the row out, or from the size its style declares
     /// (`list_sizes`). A list that is made again counts from zero.
@@ -15027,6 +15030,7 @@ pub(crate) fn patch_counters_js(view: &GpuixView, window: &gpui::Window) -> Patc
                 rows_built: scroll.rows_built as f64,
                 rows_rebuilt: scroll.rows_rebuilt as f64,
                 rows_removed: scroll.rows_removed as f64,
+                shifted: scroll.shifted as f64,
                 rows_measured_by_layout: measures.iter().map(|measure| measure.by_layout).sum::<u64>() as f64,
                 rows_measured_by_declaration: measures.iter().map(|measure| measure.by_exact_size).sum::<u64>() as f64,
                 declaration_mismatches: measures.iter().map(|measure| measure.exact_size_mismatches).sum::<u64>() as f64,

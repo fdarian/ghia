@@ -1186,6 +1186,8 @@ With the test window's pretend screen reader on (`A11Y` unset) `A11y` holds for 
 
 ### The translate
 
+A translate's damage is a shift of the list's pixels (what the platform copies) and the residual it draws, not the list's rectangle: [partial redraw](paint-and-transforms.md#partial-redraw).
+
 `Window::apply_scroll_patch` runs right after the classification, at the top of `Window::draw`, for a frame the classifier called eligible.
 It works from the runs of the frame shown, not from its operations moved by the offset: a row of the list was recorded in a region
 (its overscan past the list's clip) and a replay puts the recording where the key says and cuts it by the clip around, which is not
