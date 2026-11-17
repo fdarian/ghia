@@ -8,7 +8,7 @@ import { ContentEditable } from '@lexical/react/LexicalContentEditable'
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary'
 import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin'
 import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin'
-import { $createParagraphNode, $createTextNode, $getRoot, type LexicalEditor } from 'lexical'
+import { $createParagraphNode, $createTextNode, $getRoot, CAN_USE_BEFORE_INPUT, CAN_USE_DOM, IS_APPLE, type LexicalEditor } from 'lexical'
 import { createTestRoot, hasNativeTestRenderer } from '@ghia/react/testing'
 import { settle } from '../base-ui/harness'
 
@@ -365,8 +365,13 @@ function walk(node: Node, depth = 0): HostNode {
   return { tag: element.localName, attrs, children: Array.from(element.childNodes).map((child) => walk(child, depth + 1)) }
 }
 
+/** Lexical's own root element; the document may also hold the leftovers of earlier roots, so a selector can find a stale one. */
 function editableRoot(): HTMLElement | null {
-  return document.querySelector<HTMLElement>('[data-lexical-editor], [contenteditable]')
+  return (editor?.getRootElement() as HTMLElement | null | undefined) ?? document.querySelector<HTMLElement>('[data-lexical-editor]')
+}
+
+function documentEditableCount(): number {
+  return document.querySelectorAll('[data-lexical-editor]').length
 }
 
 function lexicalText(): string | { error: string } {
@@ -398,8 +403,12 @@ afterAll(() => {
 
 describeNative('Lexical (React bindings) on Ghia', () => {
   it('1. mount: does it throw', async () => {
-    // Install before the first render; a throwaway element supplies the prototype chain.
-    install(document.createElement('div'))
+    // Install before the first Lexical render; document.createElement needs a mounted root, so a throwaway one supplies
+    // the element, text and Selection whose prototype chains get instrumented.
+    const probeRoot = createTestRoot({ width: 100, height: 100 })
+    probeRoot.render(<div id="probe-sample">x</div>)
+    install(document.querySelector<HTMLElement>('#probe-sample') as HTMLElement)
+    probeRoot.unmount()
     resetProbes()
     const result = mountVariant(FULL)
     main = result.session
@@ -414,6 +423,33 @@ describeNative('Lexical (React bindings) on Ghia', () => {
       editorCaptured: editor !== undefined,
       editorRootElement: editor?.getRootElement() ? describeTarget(editor.getRootElement()) : null,
       lexicalText: lexicalText(),
+    })
+  })
+
+  it('2. painted text and the tree Lexical built', async () => {
+    if (main === undefined) throw new Error('no session')
+    // The variants unmounted their own roots; the editor handle belongs to the last one, so recapture from main.
+    const rootElement = editableRoot()
+    note('2.tree', {
+      painted: paintedOrError(main),
+      editableRootFound: rootElement !== null,
+      tree: rootElement === null ? null : walk(rootElement),
+      documentBody: walk(document.body),
+      isContentEditable: rootElement?.isContentEditable ?? null,
+      contentEditableProp: rootElement?.contentEditable ?? null,
+    })
+  })
+
+  it('3. DOM probes: listeners, selection, observers, undefined/throwing members', async () => {
+    note('3.probes', probeSnapshot())
+    const view = editor?.getRootElement()?.ownerDocument?.defaultView
+    note('3.liveRootElement', { documentEditableCount: documentEditableCount(), rootIsConnected: editor?.getRootElement()?.isConnected ?? null, rootNativeIdViaNative: (editor?.getRootElement() as unknown as { native?: { id: number } } | null)?.native?.id ?? null, selectionPrototypeMembers: (() => { const sel = document.getSelection(); return sel === null ? null : protoChain(sel).flatMap((proto) => Object.getOwnPropertyNames(proto)) })() })
+    note('3.lexicalEnvironmentFlags', { CAN_USE_DOM, CAN_USE_BEFORE_INPUT, IS_APPLE, inputEventInWindow: 'InputEvent' in window, typeofInputEvent: typeof (globalThis as Json).InputEvent, typeofRange: typeof (globalThis as Json).Range, typeofDocumentCreateRange: typeof (document as unknown as Json).createRange, typeofExecCommand: typeof (document as unknown as Json).execCommand })
+    note('3.ownerDocumentDefaultView', {
+      ownerDocumentIsDocument: editor?.getRootElement()?.ownerDocument === document,
+      defaultViewIsWindow: view === (typeof window === 'undefined' ? undefined : window),
+      defaultViewIsGlobalThis: view === globalThis,
+      defaultViewType: typeof view,
     })
   })
 
@@ -452,31 +488,6 @@ describeNative('Lexical (React bindings) on Ghia', () => {
     caught.length = 0
     uncaught.length = 0
   })
-
-  it('2. painted text and the tree Lexical built', async () => {
-    if (main === undefined) throw new Error('no session')
-    // The variants unmounted their own roots; the editor handle belongs to the last one, so recapture from main.
-    const rootElement = editableRoot()
-    note('2.tree', {
-      painted: paintedOrError(main),
-      editableRootFound: rootElement !== null,
-      tree: rootElement === null ? null : walk(rootElement),
-      documentBody: walk(document.body),
-      isContentEditable: rootElement?.isContentEditable ?? null,
-      contentEditableProp: rootElement?.contentEditable ?? null,
-    })
-  })
-
-  it('3. DOM probes: listeners, selection, observers, undefined/throwing members', async () => {
-    note('3.probes', probeSnapshot())
-    const view = editor?.getRootElement()?.ownerDocument?.defaultView
-    note('3.ownerDocumentDefaultView', {
-      ownerDocumentIsDocument: editor?.getRootElement()?.ownerDocument === document,
-      defaultViewIsWindow: view === (typeof window === 'undefined' ? undefined : window),
-      defaultViewIsGlobalThis: view === globalThis,
-      defaultViewType: typeof view,
-    })
-  })
 })
 
 // The steps below run on a fresh mount of the full app so the earlier variants cannot interfere.
@@ -500,10 +511,13 @@ describeNative('Lexical input and updates', () => {
     const reached = eventLog(from)
     const tally: Record<string, number> = {}
     for (const entry of reached) tally[`${entry.target}:${entry.eventType}`] = (tally[`${entry.target}:${entry.eventType}`] ?? 0) + 1
-    note(label, { error: error === undefined ? null : errorText(error), before, after: snapshot(), eventsReachedLexical: tally, listenerThrows: reached.filter((e) => e.threw).map((e) => e.threw) })
+    note(label, { error: error === undefined ? null : errorText(error), before, after: snapshot(), eventsReachedLexical: tally, listenerThrows: reached.filter((e) => e.threw).map((e) => ({ target: e.target, eventType: e.eventType, message: (e.threw as Json).message, frames: ((e.threw as Json).stack as string[]).slice(1, 6) })) })
   }
 
   it('prepare: fresh mount', async () => {
+    // Only one root at a time: the test document is shared, so a second live root's listeners would also fire.
+    main?.root.unmount()
+    sessions.splice(sessions.indexOf(main as Session), 1)
     caught.length = 0
     uncaught.length = 0
     changes.length = 0
@@ -518,6 +532,7 @@ describeNative('Lexical input and updates', () => {
   it('4a. focus the editable', async () => {
     const root = editableRoot()
     if (root === null) throw new Error('no editable root element')
+    note('4a.rootIdentity', { documentEditableCount: documentEditableCount(), rootIsConnected: root.isConnected, hasNativeBinding: (root as unknown as { native?: unknown }).native !== undefined })
     await step('4a.focus', () => root.focus())
     note('4a.focusOutcome', { rootIsActive: document.activeElement === root, tabIndex: root.tabIndex })
   })
@@ -536,7 +551,7 @@ describeNative('Lexical input and updates', () => {
   it('4d. composition commit', async () => {
     const root = editableRoot()
     if (root === null) throw new Error('no editable root element')
-    const id = (root as unknown as { native?: { id: number } }).native?.id
+    const id = (root as unknown as { native?: { id: number }; nativeId?: number }).native?.id ?? (root as unknown as { nativeId?: number }).nativeId
     await step('4d.composition', () => {
       if (id === undefined) throw new Error('root element has no native id')
       session.renderer.simulateComposition(id, [
@@ -591,7 +606,49 @@ describeNative('Lexical input and updates', () => {
       onChangeFired: changes.length > changesBefore,
       changesTotal: changes.length,
       domTextOfRoot: rootElement?.textContent ?? null,
+      documentEditableCount: documentEditableCount(),
+      bodyText: document.body.textContent,
     })
+  })
+
+  it('prepare 2: fresh mount for the focusable variant', async () => {
+    session.root.unmount()
+    sessions.splice(sessions.indexOf(session), 1)
+    caught.length = 0
+    uncaught.length = 0
+    const mounted = mountVariant(FULL)
+    session = mounted.session
+    sessions.push(session)
+    await settle(session)
+    note('prepare2', { syncError: mounted.syncError ?? null, documentEditableCount: documentEditableCount() })
+  })
+
+  it('4f. same input with the root made focusable (tabIndex=0, an app-side change) and a click', async () => {
+    const root = editableRoot()
+    if (root === null) throw new Error('no editable root element')
+    root.tabIndex = 0
+    await step('4f.focus-with-tabindex', () => root.focus())
+    note('4f.focusOutcome', { rootIsActive: document.activeElement === root })
+    await step('4f.type-abc', () => {
+      for (const key of ['a', 'b', 'c']) session.renderer.simulateKeystrokes(key)
+    })
+    await step('4f.enter', () => session.renderer.simulateKeystrokes('Enter'))
+    await step('4f.backspace', () => session.renderer.simulateKeystrokes('Backspace'))
+    const id = (root as unknown as { nativeId?: number }).nativeId
+    if (id !== undefined) {
+      await step('4f.composition', () =>
+        session.renderer.simulateComposition(id, [
+          { key: 'n', action: 'mark', text: 'に' },
+          { key: 'Enter', action: 'commit', text: '日' },
+        ]),
+      )
+    }
+    const box = root.getBoundingClientRect()
+    await step('4f.click', () => {
+      session.renderer.nativeSimulateMouseDown(box.x + 10, box.y + box.height / 2)
+      session.renderer.nativeSimulateMouseUp(box.x + 10, box.y + box.height / 2)
+    })
+    await step('4f.type-after-click', () => session.renderer.simulateKeystrokes('z'))
   })
 
   it('final probes after interaction', () => {

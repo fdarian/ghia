@@ -1,0 +1,1520 @@
+{
+  "1.mount": {
+    "syncError": null,
+    "errorBoundaryCaught": [],
+    "uncaught": [],
+    "editorCaptured": true,
+    "editorRootElement": "<div data-lexical-editor contenteditable role>",
+    "lexicalText": "Hello Lexical"
+  },
+  "2.tree": {
+    "painted": [
+      "Hello Lexical"
+    ],
+    "editableRootFound": true,
+    "tree": {
+      "tag": "div",
+      "attrs": {
+        "contenteditable": "",
+        "role": "textbox",
+        "spellcheck": "",
+        "style": "user-select: text; white-space: pre-wrap; word-break: break-word;",
+        "data-lexical-editor": "true"
+      },
+      "children": [
+        {
+          "tag": "p",
+          "attrs": {},
+          "children": [
+            {
+              "tag": "span",
+              "attrs": {
+                "data-lexical-text": "true"
+              },
+              "children": [
+                {
+                  "text": "Hello Lexical"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "documentBody": {
+      "tag": "body",
+      "attrs": {},
+      "children": [
+        {
+          "tag": "div",
+          "attrs": {
+            "contenteditable": "",
+            "role": "textbox",
+            "spellcheck": "",
+            "style": "user-select: text; white-space: pre-wrap; word-break: break-word;",
+            "data-lexical-editor": "true"
+          },
+          "children": [
+            {
+              "tag": "p",
+              "attrs": {},
+              "children": [
+                {
+                  "tag": "span",
+                  "attrs": {
+                    "data-lexical-text": "true"
+                  },
+                  "children": [
+                    {
+                      "text": "Hello Lexical"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "isContentEditable": false,
+    "contentEditableProp": null
+  },
+  "3.probes": {
+    "registrations": [
+      {
+        "target": "window",
+        "owner": "globalThis",
+        "type": "textInput",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at initTextEntryListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:1782:21)"
+      },
+      {
+        "target": "document",
+        "owner": "document",
+        "type": "selectionchange",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at /Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21173:7"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "blur",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "click",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "compositionend",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "compositionstart",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "copy",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "cut",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "dragend",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "dragover",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "dragstart",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "drop",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "focus",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "input",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "keydown",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "paste",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "pointerdown",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "document",
+        "owner": "document",
+        "type": "pointercancel",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "document",
+        "owner": "document",
+        "type": "pointermove",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "document",
+        "owner": "document",
+        "type": "pointerup",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "window",
+        "owner": "globalThis",
+        "type": "blur",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "contextmenu",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "dragstart",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "keydown",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "mousedown",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "pointerdown",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "window",
+        "owner": "globalThis",
+        "type": "message",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at addInstall (/Users/farreldarian/Library/pnpm/store/v11/links/@lexical/dragon/0.53.0/7097cca5554b1b148f53858bac34a89f1122d5c5e036fbf38f7f9cb438e9fa18/node_modules/@lexical/dragon/dist/LexicalDragon.dev.js:78:18)"
+      }
+    ],
+    "mutationObserverObserve": [
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "options": {
+          "characterData": true,
+          "childList": true,
+          "subtree": true
+        },
+        "fromLexical": true
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "options": {
+          "characterData": true,
+          "childList": true,
+          "subtree": true
+        },
+        "fromLexical": true
+      }
+    ],
+    "mutationObserverCallbacks": 0,
+    "getSelectionCalls": 2,
+    "getSelectionSample": [
+      {
+        "host": "document",
+        "returned": "Selection",
+        "fromLexical": true
+      },
+      {
+        "host": "window",
+        "returned": "Selection",
+        "fromLexical": true
+      }
+    ],
+    "missingReads": {
+      "Element.__lexicalEventHandles": {
+        "count": 5,
+        "firstLexicalFrame": "at getRootElementRemoveHandles (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:22729:34)"
+      },
+      "Element.__lexicalKey_bkwcf": {
+        "count": 2,
+        "firstLexicalFrame": "at getNodeKeyFromDOMNode (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:14337:13)"
+      },
+      "Element.__lexicalLastChildKind": {
+        "count": 5,
+        "firstLexicalFrame": "at ElementDOMSlot.setManagedLineBreak (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:1621:17)"
+      },
+      "Element.__lexicalLineBreak": {
+        "count": 15,
+        "firstLexicalFrame": "at ElementDOMSlot.getManagedLineBreak (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:1611:20)"
+      },
+      "Selection.getComposedRanges": {
+        "count": 5,
+        "firstLexicalFrame": "at getComposedStaticRange (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:15705:51)"
+      }
+    },
+    "undefinedGetters": {},
+    "throwingMembers": {},
+    "domMembersCalledByLexical": {
+      "Document(GpuixDocument).createElement": {
+        "count": 2
+      },
+      "Document(GpuixDocument).createTextNode": {
+        "count": 1
+      },
+      "Document(GpuixDocument).hasListeners": {
+        "count": 7
+      },
+      "Document(GpuixDocument).listenedTypes": {
+        "count": 7
+      },
+      "Document(Node).contains": {
+        "count": 3
+      },
+      "Document(Node).getRootNode": {
+        "count": 1
+      },
+      "Document(Node).insertBefore": {
+        "count": 3
+      },
+      "Document(Object).hasOwnProperty": {
+        "count": 120
+      },
+      "Element(Element).hasAttribute": {
+        "count": 73
+      },
+      "Element(Node).getRootNode": {
+        "count": 1
+      },
+      "Element(Node).insertBefore": {
+        "count": 3
+      },
+      "Element(Object).hasOwnProperty": {
+        "count": 120
+      },
+      "Element(ReactHostElement).getAttribute": {
+        "count": 76
+      },
+      "Element(ReactHostElement).removeAttribute": {
+        "count": 1
+      },
+      "Element(ReactHostElement).setAttribute": {
+        "count": 2
+      },
+      "Selection(Object).hasOwnProperty": {
+        "count": 120
+      },
+      "Text(Node).contains": {
+        "count": 3
+      },
+      "Text(Node).getRootNode": {
+        "count": 1
+      },
+      "Text(Node).insertBefore": {
+        "count": 3
+      },
+      "Text(Object).hasOwnProperty": {
+        "count": 120
+      }
+    }
+  },
+  "3.liveRootElement": {
+    "documentEditableCount": 1,
+    "rootIsConnected": true,
+    "rootNativeIdViaNative": null,
+    "selectionPrototypeMembers": [
+      "constructor",
+      "rangeCount",
+      "isCollapsed",
+      "type",
+      "toString",
+      "removeAllRanges",
+      "empty",
+      "constructor",
+      "__defineGetter__",
+      "__defineSetter__",
+      "hasOwnProperty",
+      "__lookupGetter__",
+      "__lookupSetter__",
+      "isPrototypeOf",
+      "propertyIsEnumerable",
+      "toString",
+      "valueOf",
+      "__proto__",
+      "toLocaleString"
+    ]
+  },
+  "3.lexicalEnvironmentFlags": {
+    "CAN_USE_DOM": true,
+    "CAN_USE_BEFORE_INPUT": false,
+    "IS_APPLE": true,
+    "inputEventInWindow": true,
+    "typeofInputEvent": "function",
+    "typeofRange": "undefined",
+    "typeofDocumentCreateRange": "undefined",
+    "typeofExecCommand": "undefined"
+  },
+  "3.ownerDocumentDefaultView": {
+    "ownerDocumentIsDocument": true,
+    "defaultViewIsWindow": true,
+    "defaultViewIsGlobalThis": true,
+    "defaultViewType": "object"
+  },
+  "1b.variants": {
+    "no HistoryPlugin": {
+      "syncError": null,
+      "caught": [],
+      "uncaught": [],
+      "painted": [
+        "Hello Lexical"
+      ],
+      "hasEditableRoot": true
+    },
+    "no OnChangePlugin": {
+      "syncError": null,
+      "caught": [],
+      "uncaught": [],
+      "painted": [
+        "Hello Lexical"
+      ],
+      "hasEditableRoot": true
+    },
+    "no RichTextPlugin (bare ContentEditable)": {
+      "syncError": null,
+      "caught": [],
+      "uncaught": [],
+      "painted": [
+        "Hello Lexical"
+      ],
+      "hasEditableRoot": true
+    },
+    "RichText only": {
+      "syncError": null,
+      "caught": [],
+      "uncaught": [],
+      "painted": [
+        "Hello Lexical"
+      ],
+      "hasEditableRoot": true
+    }
+  },
+  "prepare": {
+    "syncError": null,
+    "hasEditableRoot": true,
+    "registrationsAfterMount": 27,
+    "changesAfterMount": 0
+  },
+  "4a.rootIdentity": {
+    "documentEditableCount": 1,
+    "rootIsConnected": true,
+    "hasNativeBinding": false
+  },
+  "4a.focus": {
+    "error": null,
+    "before": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<body>"
+    },
+    "after": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<body>"
+    },
+    "eventsReachedLexical": {},
+    "listenerThrows": []
+  },
+  "4a.focusOutcome": {
+    "rootIsActive": false,
+    "tabIndex": -1
+  },
+  "4b.type-abc": {
+    "error": null,
+    "before": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<body>"
+    },
+    "after": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<body>"
+    },
+    "eventsReachedLexical": {},
+    "listenerThrows": []
+  },
+  "4c.enter": {
+    "error": null,
+    "before": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<body>"
+    },
+    "after": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<body>"
+    },
+    "eventsReachedLexical": {},
+    "listenerThrows": []
+  },
+  "4c.backspace": {
+    "error": null,
+    "before": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<body>"
+    },
+    "after": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<body>"
+    },
+    "eventsReachedLexical": {},
+    "listenerThrows": []
+  },
+  "4d.composition": {
+    "error": {
+      "name": "Error",
+      "message": "No text input is focused, so there is nothing for the input method to compose in",
+      "stack": [
+        "Error: No text input is focused, so there is nothing for the input method to compose in",
+        "    at TestRenderer.simulateComposition (/Users/farreldarian/code/fdarian/ghia-worktrees/lexical/packages/native/js/testing.ts:974:19)",
+        "    at /Users/farreldarian/code/fdarian/ghia-worktrees/lexical/examples/lexical/react.test.tsx:557:24",
+        "    at step (/Users/farreldarian/code/fdarian/ghia-worktrees/lexical/examples/lexical/react.test.tsx:506:13)",
+        "    at /Users/farreldarian/code/fdarian/ghia-worktrees/lexical/examples/lexical/react.test.tsx:555:11",
+        "    at file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11",
+        "    at file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26",
+        "    at file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20",
+        "    at new Promise (<anonymous>)",
+        "    at runWithCancel (file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)",
+        "    at file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20"
+      ]
+    },
+    "before": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<body>"
+    },
+    "after": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<body>"
+    },
+    "eventsReachedLexical": {},
+    "listenerThrows": []
+  },
+  "4e.selection-set": {
+    "error": null,
+    "before": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<body>"
+    },
+    "after": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<body>"
+    },
+    "eventsReachedLexical": {},
+    "listenerThrows": []
+  },
+  "4e.selectionOutcome": {
+    "name": "TypeError",
+    "message": "selection?.setBaseAndExtent is not a function",
+    "stack": [
+      "TypeError: selection?.setBaseAndExtent is not a function",
+      "    at /Users/farreldarian/code/fdarian/ghia-worktrees/lexical/examples/lexical/react.test.tsx:572:18",
+      "    at file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11",
+      "    at file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26",
+      "    at file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20",
+      "    at new Promise (<anonymous>)",
+      "    at runWithCancel (file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)",
+      "    at file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20",
+      "    at new Promise (<anonymous>)",
+      "    at runWithTimeout (file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)",
+      "    at file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:2956:64"
+    ]
+  },
+  "5.update": {
+    "updateError": null,
+    "uncaught": [],
+    "lexicalText": "Updated",
+    "painted": [
+      "Updated"
+    ],
+    "paintedShowsUpdated": true,
+    "onChangeFired": true,
+    "changesTotal": 1,
+    "domTextOfRoot": "Updated",
+    "documentEditableCount": 1,
+    "bodyText": "Updated"
+  },
+  "prepare2": {
+    "syncError": null,
+    "documentEditableCount": 1
+  },
+  "4f.focus-with-tabindex": {
+    "error": null,
+    "before": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<body>"
+    },
+    "after": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<div data-lexical-editor contenteditable role>"
+    },
+    "eventsReachedLexical": {
+      "<div data-lexical-editor contenteditable role>:focus": 1
+    },
+    "listenerThrows": []
+  },
+  "4f.focusOutcome": {
+    "rootIsActive": true
+  },
+  "4f.type-abc": {
+    "error": null,
+    "before": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<div data-lexical-editor contenteditable role>"
+    },
+    "after": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<div data-lexical-editor contenteditable role>"
+    },
+    "eventsReachedLexical": {
+      "<div data-lexical-editor contenteditable role>:keydown": 6
+    },
+    "listenerThrows": []
+  },
+  "4f.enter": {
+    "error": null,
+    "before": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<div data-lexical-editor contenteditable role>"
+    },
+    "after": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<div data-lexical-editor contenteditable role>"
+    },
+    "eventsReachedLexical": {
+      "<div data-lexical-editor contenteditable role>:keydown": 2
+    },
+    "listenerThrows": []
+  },
+  "4f.backspace": {
+    "error": null,
+    "before": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<div data-lexical-editor contenteditable role>"
+    },
+    "after": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<div data-lexical-editor contenteditable role>"
+    },
+    "eventsReachedLexical": {
+      "<div data-lexical-editor contenteditable role>:keydown": 2
+    },
+    "listenerThrows": []
+  },
+  "4f.composition": {
+    "error": {
+      "name": "Error",
+      "message": "No text input is focused, so there is nothing for the input method to compose in",
+      "stack": [
+        "Error: No text input is focused, so there is nothing for the input method to compose in",
+        "    at TestRenderer.simulateComposition (/Users/farreldarian/code/fdarian/ghia-worktrees/lexical/packages/native/js/testing.ts:974:19)",
+        "    at /Users/farreldarian/code/fdarian/ghia-worktrees/lexical/examples/lexical/react.test.tsx:640:26",
+        "    at step (/Users/farreldarian/code/fdarian/ghia-worktrees/lexical/examples/lexical/react.test.tsx:506:13)",
+        "    at /Users/farreldarian/code/fdarian/ghia-worktrees/lexical/examples/lexical/react.test.tsx:639:13",
+        "    at async file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+      ]
+    },
+    "before": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<div data-lexical-editor contenteditable role>"
+    },
+    "after": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<div data-lexical-editor contenteditable role>"
+    },
+    "eventsReachedLexical": {
+      "<div data-lexical-editor contenteditable role>:keydown": 2
+    },
+    "listenerThrows": []
+  },
+  "4f.click": {
+    "error": null,
+    "before": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<div data-lexical-editor contenteditable role>"
+    },
+    "after": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<div data-lexical-editor contenteditable role>"
+    },
+    "eventsReachedLexical": {
+      "<div data-lexical-editor contenteditable role>:pointerdown": 2,
+      "<div data-lexical-editor contenteditable role>:mousedown": 1,
+      "document:pointerup": 1,
+      "<div data-lexical-editor contenteditable role>:click": 1
+    },
+    "listenerThrows": [
+      {
+        "target": "document",
+        "eventType": "pointerup",
+        "message": "win.document.createRange is not a function",
+        "frames": [
+          "    at $moveMouseDragFocus (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21712:30)",
+          "    at $adjustMouseDrag (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21639:3)",
+          "    at /Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:23026:9",
+          "    at $beginUpdate (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:20849:5)",
+          "    at updateEditorSync (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:20971:5)"
+        ]
+      }
+    ]
+  },
+  "4f.type-after-click": {
+    "error": null,
+    "before": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<div data-lexical-editor contenteditable role>"
+    },
+    "after": {
+      "lexicalText": "Hello Lexical",
+      "painted": [
+        "Hello Lexical"
+      ],
+      "activeElement": "<div data-lexical-editor contenteditable role>"
+    },
+    "eventsReachedLexical": {
+      "<div data-lexical-editor contenteditable role>:keydown": 2
+    },
+    "listenerThrows": []
+  },
+  "final.probes": {
+    "registrations": [
+      {
+        "target": "window",
+        "owner": "globalThis",
+        "type": "textInput",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at initTextEntryListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:1782:21)"
+      },
+      {
+        "target": "document",
+        "owner": "document",
+        "type": "selectionchange",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at /Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21173:7"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "blur",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "click",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "compositionend",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "compositionstart",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "copy",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "cut",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "dragend",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "dragover",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "dragstart",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "drop",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "focus",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "input",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "keydown",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "paste",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "pointerdown",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "document",
+        "owner": "document",
+        "type": "pointercancel",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "document",
+        "owner": "document",
+        "type": "pointermove",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "document",
+        "owner": "document",
+        "type": "pointerup",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "window",
+        "owner": "globalThis",
+        "type": "blur",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "contextmenu",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "dragstart",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "keydown",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "mousedown",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "pointerdown",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "window",
+        "owner": "globalThis",
+        "type": "message",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at addInstall (/Users/farreldarian/Library/pnpm/store/v11/links/@lexical/dragon/0.53.0/7097cca5554b1b148f53858bac34a89f1122d5c5e036fbf38f7f9cb438e9fa18/node_modules/@lexical/dragon/dist/LexicalDragon.dev.js:78:18)"
+      },
+      {
+        "target": "window",
+        "owner": "globalThis",
+        "type": "textInput",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at initTextEntryListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:1782:21)"
+      },
+      {
+        "target": "document",
+        "owner": "document",
+        "type": "selectionchange",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at /Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21173:7"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "blur",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "click",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "compositionend",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "compositionstart",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "copy",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "cut",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "dragend",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "dragover",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "dragstart",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "drop",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "focus",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "input",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "keydown",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "paste",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "pointerdown",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "document",
+        "owner": "document",
+        "type": "pointercancel",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "document",
+        "owner": "document",
+        "type": "pointermove",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "document",
+        "owner": "document",
+        "type": "pointerup",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "window",
+        "owner": "globalThis",
+        "type": "blur",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "contextmenu",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "dragstart",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "keydown",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "mousedown",
+        "options": null,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "owner": "element",
+        "type": "pointerdown",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at registerEventListener (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21084:10)"
+      },
+      {
+        "target": "window",
+        "owner": "globalThis",
+        "type": "message",
+        "options": true,
+        "fromLexical": true,
+        "frame": "at addInstall (/Users/farreldarian/Library/pnpm/store/v11/links/@lexical/dragon/0.53.0/7097cca5554b1b148f53858bac34a89f1122d5c5e036fbf38f7f9cb438e9fa18/node_modules/@lexical/dragon/dist/LexicalDragon.dev.js:78:18)"
+      }
+    ],
+    "mutationObserverObserve": [
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "options": {
+          "characterData": true,
+          "childList": true,
+          "subtree": true
+        },
+        "fromLexical": true
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "options": {
+          "characterData": true,
+          "childList": true,
+          "subtree": true
+        },
+        "fromLexical": true
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "options": {
+          "characterData": true,
+          "childList": true,
+          "subtree": true
+        },
+        "fromLexical": true
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "options": {
+          "characterData": true,
+          "childList": true,
+          "subtree": true
+        },
+        "fromLexical": true
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "options": {
+          "characterData": true,
+          "childList": true,
+          "subtree": true
+        },
+        "fromLexical": true
+      },
+      {
+        "target": "<div data-lexical-editor contenteditable role>",
+        "options": {
+          "characterData": true,
+          "childList": true,
+          "subtree": true
+        },
+        "fromLexical": true
+      }
+    ],
+    "mutationObserverCallbacks": 0,
+    "getSelectionCalls": 29,
+    "getSelectionSample": [
+      {
+        "host": "document",
+        "returned": "Selection",
+        "fromLexical": true
+      },
+      {
+        "host": "window",
+        "returned": "Selection",
+        "fromLexical": true
+      },
+      {
+        "host": "document",
+        "returned": "Selection",
+        "fromLexical": false
+      },
+      {
+        "host": "document",
+        "returned": "Selection",
+        "fromLexical": true
+      },
+      {
+        "host": "window",
+        "returned": "Selection",
+        "fromLexical": true
+      }
+    ],
+    "missingReads": {
+      "Element.__lexicalCapturedSelection": {
+        "count": 2,
+        "firstLexicalFrame": "at isDOMCapturingSelection (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:16453:13)"
+      },
+      "Element.__lexicalEventHandles": {
+        "count": 2,
+        "firstLexicalFrame": "at getRootElementRemoveHandles (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:22729:34)"
+      },
+      "Element.__lexicalKey_ieebb": {
+        "count": 2,
+        "firstLexicalFrame": "at getNodeKeyFromDOMNode (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:14337:13)"
+      },
+      "Element.__lexicalKey_mmthj": {
+        "count": 4,
+        "firstLexicalFrame": "at getNodeKeyFromDOMNode (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:14337:13)"
+      },
+      "Element.__lexicalLastChildKind": {
+        "count": 3,
+        "firstLexicalFrame": "at ElementDOMSlot.setManagedLineBreak (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:1621:17)"
+      },
+      "Element.__lexicalLineBreak": {
+        "count": 8,
+        "firstLexicalFrame": "at ElementDOMSlot.getManagedLineBreak (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:1611:20)"
+      },
+      "Element.createRange": {
+        "count": 1,
+        "firstLexicalFrame": "at $moveMouseDragFocus (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:21712:30)"
+      },
+      "Selection.anchorNode": {
+        "count": 11,
+        "firstLexicalFrame": "at $internalCreateRangeSelection (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:25776:24)"
+      },
+      "Selection.anchorOffset": {
+        "count": 10,
+        "firstLexicalFrame": "at $internalCreateRangeSelection (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:25778:27)"
+      },
+      "Selection.focusNode": {
+        "count": 11,
+        "firstLexicalFrame": "at $internalCreateRangeSelection (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:25777:23)"
+      },
+      "Selection.focusOffset": {
+        "count": 10,
+        "firstLexicalFrame": "at $internalCreateRangeSelection (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:25779:26)"
+      },
+      "Selection.getComposedRanges": {
+        "count": 15,
+        "firstLexicalFrame": "at getComposedStaticRange (/Users/farreldarian/Library/pnpm/store/v11/links/@/lexical/0.53.0/c42d963450c6b149a2971c0d45008b08c2966b25117f38725b443c44cf7d1df9/node_modules/lexical/dist/Lexical.dev.js:15705:51)"
+      }
+    },
+    "undefinedGetters": {},
+    "throwingMembers": {},
+    "domMembersCalledByLexical": {
+      "Document(GpuixDocument).createElement": {
+        "count": 6
+      },
+      "Document(GpuixDocument).createTextNode": {
+        "count": 3
+      },
+      "Document(GpuixDocument).elementFromPoint": {
+        "count": 1
+      },
+      "Document(GpuixDocument).elementsFromPoint": {
+        "count": 1
+      },
+      "Document(GpuixDocument).hasListeners": {
+        "count": 9
+      },
+      "Document(GpuixDocument).listenedTypes": {
+        "count": 9
+      },
+      "Document(Node).contains": {
+        "count": 10
+      },
+      "Document(Node).getRootNode": {
+        "count": 4
+      },
+      "Document(Node).insertBefore": {
+        "count": 8
+      },
+      "Document(Node).replaceChild": {
+        "count": 1
+      },
+      "Document(Object).hasOwnProperty": {
+        "count": 66
+      },
+      "Element(Element).hasAttribute": {
+        "count": 161
+      },
+      "Element(Node).contains": {
+        "count": 1
+      },
+      "Element(Node).getRootNode": {
+        "count": 4
+      },
+      "Element(Node).insertBefore": {
+        "count": 8
+      },
+      "Element(Node).replaceChild": {
+        "count": 1
+      },
+      "Element(Object).hasOwnProperty": {
+        "count": 66
+      },
+      "Element(ReactHostElement).getAttribute": {
+        "count": 167
+      },
+      "Element(ReactHostElement).removeAttribute": {
+        "count": 2
+      },
+      "Element(ReactHostElement).setAttribute": {
+        "count": 5
+      },
+      "Selection(Object).hasOwnProperty": {
+        "count": 66
+      },
+      "Text(Node).contains": {
+        "count": 10
+      },
+      "Text(Node).getRootNode": {
+        "count": 4
+      },
+      "Text(Node).insertBefore": {
+        "count": 8
+      },
+      "Text(Node).replaceChild": {
+        "count": 1
+      },
+      "Text(Object).hasOwnProperty": {
+        "count": 66
+      }
+    }
+  },
+  "final.invocationTotals": {
+    "<div data-lexical-editor contenteditable role>:focus": 1,
+    "<div data-lexical-editor contenteditable role>:keydown": 14,
+    "<div data-lexical-editor contenteditable role>:pointerdown": 2,
+    "<div data-lexical-editor contenteditable role>:mousedown": 1,
+    "document:pointerup": 1,
+    "<div data-lexical-editor contenteditable role>:click": 1
+  }
+}
