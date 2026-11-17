@@ -4,14 +4,16 @@
  * a `MutationObserver` records it and live ranges and the selection move as they would in Chrome.
  *
  * Phase 1 edits text only. A paragraph or line break fires `beforeinput` and changes nothing; an
- * edit that would join two blocks or remove an element (a Backspace over a block edge or a `<br>`)
- * fires `beforeinput` and changes nothing; an emptied Text node stays in the tree.
+ * edit that would join two blocks or remove a `<br>` (a Backspace over a block edge) fires
+ * `beforeinput` and changes nothing, and text typed over a selection that spans two blocks goes
+ * into the block it began in without joining them; an emptied Text node stays in the tree. A
+ * Backspace or Delete next to a `contenteditable="false"` element removes it whole.
  */
 
 import { Node, type Element, type Text } from "../dom/nodes.js"
-import { Range, StaticRange } from "../dom/range.js"
+import { createTextFor, Range, StaticRange } from "../dom/range.js"
 import { getSelection, holdsNodeSelection } from "../dom/selection.js"
-import { movePoint } from "../dom/selection-movement.js"
+import { stepPoint } from "../dom/selection-movement.js"
 import { CompositionEvent, InputEvent } from "../events/classes.js"
 import { document } from "../events/window-target.js"
 import { editingHostOf } from "./host.js"
@@ -77,16 +79,28 @@ function rangeBetween(startNode: Node, startOffset: number, endNode: Node, endOf
   return range
 }
 
-/** What one Backspace or Delete removes: the selection, or one character from the caret. */
-function deletionRange(host: Element, selected: Range, forward: boolean): Range {
-  if (!selected.collapsed) return selected
+interface Deletion {
+  range: Range
+  /** The range is a `contenteditable="false"` element, which goes whole. */
+  island: boolean
+}
+
+/** What one Backspace or Delete removes: the selection, or one character from the caret, or the whole non-editable element the caret is next to. */
+function deletionRange(host: Element, selected: Range, forward: boolean): Deletion {
+  if (!selected.collapsed) return { range: selected, island: false }
   const node = selected.startContainer
   const offset = selected.startOffset
-  const moved = movePoint(host, node, offset, forward, "character")
-  if (moved === null) return selected
-  return forward
-    ? rangeBetween(node, offset, moved.node, moved.offset)
-    : rangeBetween(moved.node, moved.offset, node, offset)
+  const step = stepPoint(host, node, offset, forward, "character")
+  if (step === null) return { range: selected, island: false }
+  if (step.island !== null) {
+    const island = new Range()
+    island.selectNode(step.island)
+    return { range: island, island: true }
+  }
+  return {
+    range: forward ? rangeBetween(node, offset, step.node, step.offset) : rangeBetween(step.node, step.offset, node, offset),
+    island: false,
+  }
 }
 
 function isText(node: Node | null | undefined): node is Text {
@@ -98,32 +112,32 @@ interface Point {
   offset: number
 }
 
-/** Where `text` goes at a collapsed `range`: into the Text at the point or beside it, else a new Text. */
-function insertAtCollapsed(range: Range, text: string): { start: Point; end: Point } {
-  const container = range.startContainer
-  const offset = range.startOffset
+/** Where `text` goes at the point `(container, offset)`: into the Text at it or beside it, else a new Text. */
+function insertAt(container: Node, offset: number, text: string): { start: Point; end: Point } {
   if (isText(container)) {
     container.insertData(offset, text)
     return { start: { node: container, offset }, end: { node: container, offset: offset + text.length } }
   }
-  const before = container.childNodes[offset - 1]
+  const children = container.childNodes
+  const before = children[offset - 1]
   if (isText(before)) {
     const at = before.data.length
     before.insertData(at, text)
     return { start: { node: before, offset: at }, end: { node: before, offset: at + text.length } }
   }
-  const after = container.childNodes[offset]
+  const after = children[offset]
   if (isText(after)) {
     after.insertData(0, text)
     return { start: { node: after, offset: 0 }, end: { node: after, offset: text.length } }
   }
-  const created = document.createTextNode(text)
-  range.insertNode(created)
+  const created = createTextFor(container, text)
+  container.insertBefore(created, after ?? null)
   return { start: { node: created, offset: 0 }, end: { node: created, offset: text.length } }
 }
 
 function dispatchInput(host: Element, type: "beforeinput" | "input", inputType: string, data: string | null, isComposing: boolean, targets: StaticRange[]): boolean {
-  const cancelable = type === "beforeinput"
+  // Chrome's `beforeinput` of a composition cannot be canceled: the input method has already changed what it shows.
+  const cancelable = type === "beforeinput" && inputType !== "insertCompositionText"
   return host.dispatchEvent(
     new InputEvent(type, { bubbles: true, cancelable, composed: true, inputType, data, isComposing, targetRanges: targets })
   )
@@ -140,6 +154,7 @@ export function runEditingInput(inputType: string, data: string | null, options:
   const isComposing = options.isComposing ?? false
 
   let range: Range
+  let removesIsland = false
   switch (inputType) {
     case "insertText":
       range = target.range
@@ -148,9 +163,12 @@ export function runEditingInput(inputType: string, data: string | null, options:
       range = options.replacing === undefined ? target.range : options.replacing
       break
     case "deleteContentBackward":
-    case "deleteContentForward":
-      range = deletionRange(host, target.range, inputType === "deleteContentForward")
+    case "deleteContentForward": {
+      const deletion = deletionRange(host, target.range, inputType === "deleteContentForward")
+      range = deletion.range
+      removesIsland = deletion.island
       break
+    }
     default:
       range = target.range
   }
@@ -166,9 +184,12 @@ export function runEditingInput(inputType: string, data: string | null, options:
     case "insertText":
     case "insertCompositionText": {
       if (data === null) throw new Error(`${inputType} needs its text`)
+      // After the deletion the range sits at the common parent when it spanned two blocks; the caret belongs where the text began.
+      const startNode = range.startContainer
+      const startOffset = range.startOffset
       range.deleteContents()
-      const at = { node: range.startContainer, offset: range.startOffset }
-      const inserted = data === "" ? { start: at, end: at } : insertAtCollapsed(range, data)
+      const at = isText(startNode) ? { node: startNode, offset: startOffset } : { node: range.startContainer, offset: range.startOffset }
+      const inserted = data === "" ? { start: at, end: at } : insertAt(at.node, at.offset, data)
       if (options.replacing !== undefined) {
         options.replacing.setStart(inserted.start.node, inserted.start.offset)
         options.replacing.setEnd(inserted.end.node, inserted.end.offset)
@@ -178,7 +199,7 @@ export function runEditingInput(inputType: string, data: string | null, options:
     }
     case "deleteContentBackward":
     case "deleteContentForward": {
-      if (range.toString() === "") return { handled: true, canceled: false, changed: false }
+      if (!removesIsland && range.toString() === "") return { handled: true, canceled: false, changed: false }
       // deleteContents leaves a range over several nodes at their parent; the caret belongs where the removed text began.
       const startNode = range.startContainer
       const startOffset = range.startOffset
@@ -208,18 +229,17 @@ interface Composition {
   marked: Range
 }
 
-let composition: Composition | null = null
+/** By host, so a composition never carries over to another editing host or another window's. */
+const compositions = new WeakMap<Element, Composition>()
 
 function dispatchComposition(host: Element, type: string, data: string): void {
   host.dispatchEvent(new CompositionEvent(type, { bubbles: true, composed: true, data }))
 }
 
-function startComposition(): Composition | null {
-  const target = editingTarget()
-  if (target === null) return null
+function startComposition(target: EditingTarget): Composition {
   dispatchComposition(target.host, "compositionstart", target.range.toString())
   const started = { host: target.host, marked: target.range }
-  composition = started
+  compositions.set(target.host, started)
   return started
 }
 
@@ -237,21 +257,22 @@ function replaceMarked(active: Composition, text: string): EditingInputResult {
  * no editing host holds the selection and focus.
  */
 export function runEditingComposition(step: EditingCompositionStep): boolean {
+  const target = editingTarget()
+  if (target === null) return false
   if (step.action === "unmark") {
-    const ended = composition
-    if (ended === null) return false
-    composition = null
+    const ended = compositions.get(target.host)
+    if (ended === undefined) return false
+    compositions.delete(target.host)
     dispatchComposition(ended.host, "compositionend", ended.marked.toString())
     return true
   }
-  const active = composition ?? startComposition()
-  if (active === null) return false
+  const active = compositions.get(target.host) ?? startComposition(target)
   if (step.action === "mark") {
     replaceMarked(active, step.text)
     return true
   }
   if (active.marked.toString() !== step.text) replaceMarked(active, step.text)
-  composition = null
+  compositions.delete(target.host)
   dispatchComposition(active.host, "compositionend", step.text)
   return true
 }

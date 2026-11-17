@@ -2,18 +2,16 @@ import { editingHostOf } from "../editing/host.js"
 import { mountedRenderer } from "../mounted-renderer.js"
 import { namedError } from "../named-error.js"
 import type { NativeRenderer } from "../host.js"
-import { comparePoints } from "./boundary-points.js"
 import type { RangeBoundaries } from "./live-ranges.js"
-import { CharacterData, Node, type Element, type Text } from "./nodes.js"
-import { Range, StaticRange } from "./range.js"
-import { movePoint, type MovementGranularity } from "./selection-movement.js"
+import { Node, type Element, type Text } from "./nodes.js"
+import { boundariesOf, Range, StaticRange } from "./range.js"
+import { movePoint } from "./selection-movement.js"
+import type { MovementGranularity } from "./text-segmentation.js"
+import { childCount, comparePoints, isInclusiveAncestor, nodeLength } from "./tree-order.js"
 
 const DOCUMENT_NODE = 9
 const DOCUMENT_TYPE_NODE = 10
 const TEXT_NODE = 3
-
-/** Where a `Range` keeps its boundary points: the selection moves the one it owns directly. */
-const BOUNDS: unique symbol = Symbol.for("@ghia/native/range-boundaries")
 
 /** What the document tells the selection about, and what the selection asks of the document. */
 export interface SelectionHooks {
@@ -64,14 +62,6 @@ function selectedText(member: string): string | null {
 }
 
 
-function boundsOf(range: Range): RangeBoundaries {
-  return (range as unknown as Record<typeof BOUNDS, () => RangeBoundaries>)[BOUNDS]()
-}
-
-function nodeLength(node: Node): number {
-  return node instanceof CharacterData ? node.data.length : node.childNodes.length
-}
-
 function inDocument(node: Node): boolean {
   return node.getRootNode().nodeType === DOCUMENT_NODE
 }
@@ -88,13 +78,6 @@ function assertBoundary(node: Node, offset: number): void {
     throw namedError("InvalidNodeTypeError", "The node is a DocumentType, which a selection cannot be in.")
   }
   if (offset > nodeLength(node)) throw namedError("IndexSizeError", "The offset is larger than the node's length.")
-}
-
-function isInclusiveDescendant(node: Node, ancestor: Node): boolean {
-  for (let current: Node | null = node; current !== null; current = current.parentNode) {
-    if (current === ancestor) return true
-  }
-  return false
 }
 
 function firstTextIn(root: Node): Text | null {
@@ -116,23 +99,27 @@ function firstTextIn(root: Node): Text | null {
  * the selected text, and clearing it. The two never exist together: a node selection clears the
  * painted one, and a painted one clears the node range.
  *
- * Like Chrome, `getRangeAt()` gives a `Range` the selection does not follow: changing it does not
- * change the selection.
+ * The `Range` is the selection's own, as in the standard and in Chrome: `getRangeAt()` returns it,
+ * `addRange(range)` makes `range` it, and changing it (`setStart`, `collapse`, `deleteContents`, a
+ * tree change that moves one of its points) changes the selection and queues `selectionchange`. A
+ * method of the selection that sets the selection anew (`collapse()`, `setBaseAndExtent()`, ...)
+ * does not change a `Range` already handed out: that one stops being the selection's.
  */
 abstract class SelectionClass {
   #range: Range | null = null
   #direction: Direction = "forwards"
-  /** What `getRangeAt` and `addRange` last handed over, until the selection changes. */
-  #handedOver: Range | null = null
+  /** Code holds `#range` (`getRangeAt` or `addRange` gave it out), so the selection sets itself anew with another one. */
+  #shared = false
   #changePending = false
   #hooks: SelectionHooks | undefined
+  readonly #rangeChanged = (): void => this.#queueChange()
 
   constructor(token?: symbol) {
     if (token !== CREATE) throw new TypeError("Illegal constructor")
   }
 
   get #own(): { range: Range; bounds: RangeBoundaries } | null {
-    return this.#range === null ? null : { range: this.#range, bounds: boundsOf(this.#range) }
+    return this.#range === null ? null : { range: this.#range, bounds: boundariesOf(this.#range) }
   }
 
   get anchorNode(): Node | null {
@@ -194,8 +181,8 @@ abstract class SelectionClass {
       throw namedError("NotSupportedError", "The selection is painted text, which is not a Range of nodes.")
     }
     if (index >>> 0 !== 0) throw namedError("IndexSizeError", "The selection has one range: index 0.")
-    this.#handedOver ??= this.#range.cloneRange()
-    return this.#handedOver
+    this.#shared = true
+    return this.#range
   }
 
   /** Does nothing while a node range exists, as Chrome does. A painted selection gives way. */
@@ -205,15 +192,19 @@ abstract class SelectionClass {
     }
     if (this.#range !== null) return
     if (!inDocument(range.startContainer)) return
-    this.#assign(range.startContainer, range.startOffset, range.endContainer, range.endOffset, "forwards")
-    this.#handedOver = range
+    this.#clearPainted()
+    this.#hold(range)
+    this.#shared = true
+    this.#direction = "forwards"
+    this.#hooks?.heldChanged()
+    this.#queueChange()
   }
 
   removeRange(range: Range): void {
     if (!(range instanceof Range)) {
       throw new TypeError("Failed to execute 'removeRange' on 'Selection': parameter 1 is not of type 'Range'.")
     }
-    if (this.#range === null || range !== this.#handedOver) {
+    if (this.#range === null || range !== this.#range) {
       throw namedError("NotFoundError", "The range is not the range of this selection.")
     }
     this.#drop(true)
@@ -293,13 +284,10 @@ abstract class SelectionClass {
     assertNodeArgument(node, "selectAllChildren", 1)
     assertBoundary(node, 0)
     if (!inDocument(node)) return
-    this.#assign(node, 0, node, nodeLength(node), "forwards")
+    this.#assign(node, 0, node, childCount(node), "forwards")
   }
 
-  /**
-   * Whether `node` is inside the selection: all of it, or with `allowPartialContainment` any part of
-   * it (touching the boundary of the range does not count).
-   */
+  /** Whether `node` is inside the selection: all of it, or with `allowPartialContainment` any part of it. */
   containsNode(node: Node, allowPartialContainment: boolean = false): boolean {
     assertNodeArgument(node, "containsNode", 1)
     const own = this.#own
@@ -308,8 +296,8 @@ abstract class SelectionClass {
     const bounds = own.bounds
     if (allowPartialContainment) {
       return (
-        comparePoints(node, 0, bounds.endNode, bounds.endOffset) < 0 &&
-        comparePoints(node, length, bounds.startNode, bounds.startOffset) > 0
+        comparePoints(node, 0, bounds.endNode, bounds.endOffset) <= 0 &&
+        comparePoints(node, length, bounds.startNode, bounds.startOffset) >= 0
       )
     }
     return (
@@ -323,7 +311,6 @@ abstract class SelectionClass {
     const own = this.#own
     if (own === null) return
     own.range.deleteContents()
-    this.#changedByRange()
   }
 
   /** A `StaticRange` of the node range, or none. There is no shadow DOM here, so no shadow root changes it. */
@@ -421,42 +408,50 @@ abstract class SelectionClass {
     endOffset: number,
     direction: Direction
   ): void {
-    const created = this.#range === null
-    if (this.#range === null) {
-      this.#range = new Range()
-      boundsOf(this.#range).onAdjust = () => this.#changedByRange()
-    }
-    const bounds = boundsOf(this.#range)
+    const held = this.#range !== null
+    const current = this.#range === null ? null : boundariesOf(this.#range)
     const changed =
-      created ||
-      bounds.startNode !== startNode ||
-      bounds.startOffset !== startOffset ||
-      bounds.endNode !== endNode ||
-      bounds.endOffset !== endOffset ||
+      current === null ||
+      current.startNode !== startNode ||
+      current.startOffset !== startOffset ||
+      current.endNode !== endNode ||
+      current.endOffset !== endOffset ||
       this.#direction !== direction
-    bounds.startNode = startNode
-    bounds.startOffset = startOffset
-    bounds.endNode = endNode
-    bounds.endOffset = endOffset
-    this.#direction = direction
-    this.#clearPainted()
-    if (created) this.#hooks?.heldChanged()
+    // Painted text appears only while no node range is held (native then tells `paintedSelectionTookOver`), so one check, as the range begins, is enough.
+    if (!held) this.#clearPainted()
     if (changed) {
-      this.#handedOver = null
-      this.#queueChange()
+      // A range code holds is not moved from under it: a new one is the selection.
+      if (this.#range === null || this.#shared) this.#hold(new Range())
+      const bounds = boundariesOf(this.#range as Range)
+      bounds.startNode = startNode
+      bounds.startOffset = startOffset
+      bounds.endNode = endNode
+      bounds.endOffset = endOffset
     }
+    this.#direction = direction
+    if (!held) this.#hooks?.heldChanged()
+    if (changed) this.#queueChange()
   }
 
-  #changedByRange(): void {
-    this.#handedOver = null
-    this.#queueChange()
+  /** Makes `range` the selection's range, which tells the selection of every change to it; the range it had stops doing so. */
+  #hold(range: Range): void {
+    this.#release()
+    this.#range = range
+    this.#shared = false
+    boundariesOf(range).onAdjust = this.#rangeChanged
+  }
+
+  /** The selection stops listening to its range. A range that was dropped still adjusts to the tree, but it is no longer the selection. */
+  #release(): void {
+    if (this.#range !== null) boundariesOf(this.#range).onAdjust = undefined
   }
 
   /** Forgets the node range. `announce` queues `selectionchange`; a painted selection that replaces it announces itself. */
   #drop(announce: boolean): void {
     if (this.#range === null) return
+    this.#release()
     this.#range = null
-    this.#handedOver = null
+    this.#shared = false
     this.#direction = "forwards"
     this.#hooks?.heldChanged()
     if (announce) this.#queueChange()
@@ -469,9 +464,12 @@ abstract class SelectionClass {
     if (renderer.getSelectedText() !== null) renderer.clearSelection()
   }
 
-  /** One `selectionchange` per burst of changes, in a task of its own, and only while something listens. */
+  /**
+   * One `selectionchange` per burst of changes, in a task of its own. A listener added after the
+   * change and before the task runs hears it, so the task is queued whether or not one listens now.
+   */
   #queueChange(): void {
-    if (this.#changePending || this.#hooks === undefined || !this.#hooks.listens()) return
+    if (this.#changePending || this.#hooks === undefined) return
     this.#changePending = true
     setTimeout(() => {
       this.#changePending = false
@@ -493,7 +491,7 @@ abstract class SelectionClass {
 
   [INTERNAL.caret](host: Element): void {
     const own = this.#own
-    if (own !== null && isInclusiveDescendant(own.bounds.startNode, host) && isInclusiveDescendant(own.bounds.endNode, host)) {
+    if (own !== null && isInclusiveAncestor(host, own.bounds.startNode) && isInclusiveAncestor(host, own.bounds.endNode)) {
       return
     }
     const text = firstTextIn(host)

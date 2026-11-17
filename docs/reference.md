@@ -5275,13 +5275,13 @@ node selection's focus, and only while it is `document.activeElement`.
 | Step | Event |
 |---|---|
 | 1 | `keydown` (the key's default action runs only if no handler called `preventDefault()`) |
-| 2 | `beforeinput`: an `InputEvent` that bubbles, is cancelable and is composed, aimed at the host |
+| 2 | `beforeinput`: an `InputEvent` that bubbles, is cancelable (except for `insertCompositionText`) and is composed, aimed at the host |
 | 3 | the change to the DOM: text goes through `insertData`, `deleteContents` and `insertNode`, so a `MutationObserver` records `characterData`, and live ranges and the selection move |
 | 4 | `input`: an `InputEvent` that bubbles, is not cancelable, with the same `inputType`, `data` and `isComposing` |
 | 5 | `keyup` |
 
 A composition runs `compositionstart`, `beforeinput` (`insertCompositionText`, `isComposing` true), `compositionupdate`, the change,
-`input`, once per change, then `compositionend`. `preventDefault()` on `beforeinput` cancels the change, and `input` does not fire.
+`input`, once per change, then `compositionend`. `preventDefault()` on `beforeinput` cancels the change, and `input` does not fire; the `beforeinput` of `insertCompositionText` is not cancelable, as in Chrome, because the input method has already changed what it shows. A composition belongs to the editing host it started in: another host starts its own.
 
 `InputEvent` takes `targetRanges` (an array of `StaticRange`) in its init, and `getTargetRanges()` returns a fresh copy of it, an empty array
 for an event that has none. `beforeinput` carries the one range the edit will affect: the caret or the selection for `insertText`, the
@@ -5296,7 +5296,7 @@ A `keydown` that was not prevented, with no Ctrl, Alt or Cmd, on a focused editi
 | Backspace, Delete | `deleteContentBackward`, `deleteContentForward` | `null` |
 
 A selected range is replaced or deleted whole; a caret deletes one grapheme, into the neighbouring Text of the host when it sits at the edge of
-its own. The caret ends after the inserted text, or at the deletion. `insertParagraph` and `insertLineBreak` fire `beforeinput` and change
+its own, or the whole `contenteditable="false"` element it is next to (one stop, whatever it holds). Text typed over a selection that spans two blocks goes into the block the selection began in. The caret ends after the inserted text, or at the deletion. `insertParagraph` and `insertLineBreak` fire `beforeinput` and change
 nothing. The text of an edit comes from `keydown`'s `key`, no caret is painted, and the other `inputType`s do nothing: see
 [deviations.md](./fork/deviations.md#events-and-input). Tab and Escape keep their usual actions. The scroll keys (arrows, Page Up and Down, Home, End, Space) do not scroll the page while an editing host or an element inside one has focus, as with a focused `<input>`.
 ### Listeners and DOM members on an element
@@ -5598,20 +5598,20 @@ painted text, and a drag that paints text drops the node range.
 | Member | |
 |---|---|
 | `anchorNode`, `anchorOffset`, `focusNode`, `focusOffset`, `isCollapsed`, `rangeCount`, `type`, `direction`, `toString()` | From the node range: the anchor is the start of a `forwards` selection and the end of a `backwards` one, `type` is `"Caret"` when collapsed and `"Range"` otherwise, `direction` is `"none"` when collapsed, `rangeCount` is 1, and `toString()` is the range's text. With painted text and no node range: `rangeCount` is 1 while text is selected and 0 otherwise, `isCollapsed` is the opposite of that, `type` is `"Range"` or `"None"` (never `"Caret"`), `toString()` is the selected text (`""` for none), the nodes are `null`, the offsets 0 and `direction` `"none"`; these need a mounted root. |
-| `getRangeAt(0)` | A `Range` of the node range; the same object until the selection changes, and, as in Chrome, one the selection does not follow: changing it changes nothing. `IndexSizeError` for no range or an index but 0; `NotSupportedError` for painted text, which is not a range of nodes. |
-| `addRange(range)`, `removeRange(range)` | `addRange` does nothing while a node range exists, or for a range outside the document; it takes the range's boundary points (a painted selection gives way). `removeRange` takes the range `getRangeAt` or `addRange` handed over, else `NotFoundError`. |
+| `getRangeAt(0)` | The selection's own live `Range`, as in the standard and Chrome: the same object until the selection is set anew (`collapse`, `setBaseAndExtent`, ...); changing it (`setStart`, `collapse`, `deleteContents`, ...) changes the selection and queues `selectionchange`, and tree changes move it without replacing it. A `Range` that was handed out and then replaced stops being the selection's. `IndexSizeError` for no range or an index but 0; `NotSupportedError` for painted text, which is not a range of nodes. |
+| `addRange(range)`, `removeRange(range)` | `addRange` does nothing while a node range exists, or for a range outside the document; the range itself becomes the selection's (a painted selection gives way). `removeRange` takes the selection's range, else `NotFoundError`. |
 | `removeAllRanges()`, `empty()` | Clear the node range and the painted text. |
-| `collapse(node, offset = 0)`, `setPosition`, `collapseToStart()`, `collapseToEnd()`, `extend(node, offset = 0)`, `setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset)`, `selectAllChildren(node)` | The standard's steps. `collapse(null)` clears the selection. `IndexSizeError` for an offset past the node's length, `InvalidNodeTypeError` for a `DocumentType`, `InvalidStateError` from `collapseToStart`, `collapseToEnd` and `extend` with no node range (painted text counts as none), `TypeError` for a value that is not a `Node`. A node that is not in the document leaves the selection as it was. |
-| `containsNode(node, allowPartialContainment = false)` | Whether all of the node, or with the flag any of it, is in the node range (touching an edge is not partial). `false` with no node range. |
+| `collapse(node, offset = 0)`, `setPosition`, `collapseToStart()`, `collapseToEnd()`, `extend(node, offset = 0)`, `setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset)`, `selectAllChildren(node)` | The standard's steps (a Text, which has no children, ends at 0). `collapse(null)` clears the selection. `IndexSizeError` for an offset past the node's length, `InvalidNodeTypeError` for a `DocumentType`, `InvalidStateError` from `collapseToStart`, `collapseToEnd` and `extend` with no node range (painted text counts as none), `TypeError` for a value that is not a `Node`. A node that is not in the document leaves the selection as it was. |
+| `containsNode(node, allowPartialContainment = false)` | Whether all of the node, or with the flag any of it, is in the node range (with the flag a node whose first point is not after the range's end, or whose last point is not before its start, counts). `false` with no node range. |
 | `deleteFromDocument()` | `deleteContents()` on the node range, leaving a caret. Painted text is not nodes and stays. |
 | `getComposedRanges(...)` | A one-item array of a `StaticRange`, or `[]`. There is no shadow DOM, so no argument changes it. |
-| `modify(alter, direction, granularity)` | `alter` is `"move"` or `"extend"`, `direction` `"forward"`, `"backward"`, `"left"` or `"right"` (the last two read as the first two: there is no bidirectional layout), `granularity` `"character"` (a grapheme cluster) or `"word"` (to the end of the next word going forward, the start of the previous one going back, as on macOS). The text is that of the Text nodes under the editing host the focus is in, or the document, in tree order; a block element or a `<br>` between two Text nodes is one step, an inline element none. Moving a range by character collapses it to its edge, as Chrome does. A name the standard does not have does nothing, and so does an empty selection. `"line"`, `"lineboundary"`, `"sentence"`, `"sentenceboundary"`, `"paragraph"`, `"paragraphboundary"` and `"documentboundary"` throw `NotSupportedError`, because they need layout. |
+| `modify(alter, direction, granularity)` | `alter` is `"move"` or `"extend"`, `direction` `"forward"`, `"backward"`, `"left"` or `"right"` (the last two read as the first two: there is no bidirectional layout), `granularity` `"character"` (a grapheme cluster) or `"word"` (to the end of the next word going forward, the start of the previous one going back, as on macOS). The text is that of the Text nodes under the editing host the focus is in, or the document, in tree order; a block element or a `<br>` between two Text nodes is one step, an inline element none, and a `contenteditable="false"` element inside the host is one step whole. Moving a range by character collapses it to its edge, as Chrome does. A name the standard does not have does nothing, and so does an empty selection. `"line"`, `"lineboundary"`, `"sentence"`, `"sentenceboundary"`, `"paragraph"`, `"paragraphboundary"` and `"documentboundary"` throw `NotSupportedError`, because they need layout. |
 
 Focus moving into an editing host puts a collapsed caret at its first position (the start of its first Text, else `(host, 0)`), unless the selection is already inside it: `focus()` does it, and so do Tab, Shift+Tab and a click (which does not yet put it at the point), before `focusin` is delivered. The selection holds no caret or highlight that is painted yet: see [deviations](fork/deviations.md#events-and-input).
 
 `document` hears `selectionchange` when the selection changes: a node selection made from code,
-moved by a tree or data change under it, or cleared, which is one event in one task however many
-changes came before it, and only while a listener exists; and painted text selected by a drag, a
+moved by a tree or data change under it, changed through its `Range`, or cleared, which is one event in one task however many
+changes came before it, queued whether or not a listener exists yet, so one added in the same turn hears it; and painted text selected by a drag, a
 clear, `removeAllRanges()` or `renderer.clearSelection()`. A node selection's change does not reach a
 root's `onSelectionChange`. Like the event of `onSelectionChange`
 (`event.value` is the selected text, absent after a clear) it comes from the frame that

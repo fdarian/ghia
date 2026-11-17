@@ -101,6 +101,8 @@ describe.skipIf(!hasNativeTestRenderer)("Solid node selection", () => {
     expect(selection.toString()).toBe("world")
     const heard = listenForSelectionChange()
     await tick()
+    // A listener added in the turn of the change hears it, as in Chrome: the burst below is the second.
+    expect(heard.count()).toBe(1)
 
     setText("hello")
     setBefore(false)
@@ -108,7 +110,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid node selection", () => {
     expect([selection.anchorOffset, selection.focusOffset]).toEqual([0, 0])
     expect(selection.type).toBe("Caret")
     await tick()
-    expect(heard.count()).toBe(1)
+    expect(heard.count()).toBe(2)
   })
 
   it("is replaced by painted text that a drag selects, and replaces it", () => {

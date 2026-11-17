@@ -218,7 +218,7 @@ describe("node Selection", () => {
       expect(selection.getComposedRanges()).toEqual([])
     })
 
-    it("hands over a Range the selection does not follow, the same one until the selection changes", () => {
+    it("getRangeAt returns the selection's own live Range: changing it changes the selection", () => {
       const a = tx("hello")
       el("div", a)
       selection.setBaseAndExtent(n(a), 0, n(a), 2)
@@ -226,9 +226,78 @@ describe("node Selection", () => {
       expect(range).toBeInstanceOf(Range)
       expect(selection.getRangeAt(0)).toBe(range)
       range.setEnd(n(a), 5)
-      expect(selection.focusOffset).toBe(2)
-      selection.setBaseAndExtent(n(a), 0, n(a), 3)
-      expect(selection.getRangeAt(0)).not.toBe(range)
+      expect([selection.anchorOffset, selection.focusOffset]).toEqual([0, 5])
+      expect(selection.toString()).toBe("hello")
+      range.collapse(true)
+      expect([selection.type, selection.focusOffset]).toEqual(["Caret", 0])
+      range.selectNodeContents(n(a))
+      expect(selection.toString()).toBe("hello")
+    })
+
+    it("keeps the Range through tree changes, and a method that sets the selection anew hands out another", () => {
+      const a = tx("hello")
+      const b = tx("world")
+      const root = el("div", a, b)
+      selection.setBaseAndExtent(n(b), 1, n(b), 3)
+      const range = selection.getRangeAt(0)
+      n(root).removeChild(n(a))
+      n(b).insertData(0, "XX")
+      expect(selection.getRangeAt(0)).toBe(range)
+      expect([range.startOffset, range.endOffset]).toEqual([3, 5])
+      selection.setBaseAndExtent(n(b), 0, n(b), 2)
+      const next = selection.getRangeAt(0)
+      expect(next).not.toBe(range)
+      next.setEnd(n(b), 4)
+      expect(selection.focusOffset).toBe(4)
+      expect([range.startOffset, range.endOffset]).toEqual([3, 5])
+    })
+
+    it("a Range the selection let go of no longer adjusts or announces anything", async () => {
+      const a = tx("hello")
+      const root = el("div", a)
+      selection.setBaseAndExtent(n(a), 1, n(a), 4)
+      const stale = selection.getRangeAt(0)
+      selection.removeAllRanges()
+      selection.collapse(n(a), 0)
+      const live = selection.getRangeAt(0)
+      await tick()
+      const seen: string[] = []
+      const listener = () => seen.push("selectionchange")
+      document.addEventListener("selectionchange", listener)
+      try {
+        n(a).insertData(0, "ab")
+        stale.setStart(n(a), 0)
+        n(root).removeChild(n(a))
+        await tick()
+      } finally {
+        document.removeEventListener("selectionchange", listener)
+      }
+      // The live range sat in `a`, which left: one event for it; the stale range's changes added none and nothing threw.
+      expect(seen).toEqual(["selectionchange"])
+      expect(selection.getRangeAt(0)).toBe(live)
+      expect(() => selection.removeRange(live)).not.toThrow()
+      expect(errorName(() => selection.removeRange(stale))).toBe("NotFoundError")
+    })
+
+    it("changing the held Range queues selectionchange", async () => {
+      const a = tx("hello")
+      el("div", a)
+      selection.setBaseAndExtent(n(a), 0, n(a), 2)
+      const range = selection.getRangeAt(0)
+      await tick()
+      const seen: string[] = []
+      const listener = () => seen.push("selectionchange")
+      document.addEventListener("selectionchange", listener)
+      try {
+        range.setEnd(n(a), 4)
+        range.setEnd(n(a), 5)
+        await tick()
+        range.setEnd(n(a), 5)
+        await tick()
+      } finally {
+        document.removeEventListener("selectionchange", listener)
+      }
+      expect(seen).toEqual(["selectionchange"])
     })
 
     it("getComposedRanges gives one StaticRange", () => {
@@ -278,6 +347,14 @@ describe("node Selection", () => {
       expect([selection.anchorOffset, selection.focusOffset, selection.direction]).toEqual([2, 3, "forwards"])
     })
 
+    it("selectAllChildren of a Text ends at its child count, 0", () => {
+      const a = tx("hello")
+      el("div", a)
+      selection.selectAllChildren(n(a))
+      expect([selection.anchorNode, selection.anchorOffset, selection.focusNode, selection.focusOffset]).toEqual([n(a), 0, n(a), 0])
+      expect(selection.type).toBe("Caret")
+    })
+
     it("selectAllChildren selects the contents of a node", () => {
       const a = tx("one")
       const b = tx("two")
@@ -295,7 +372,9 @@ describe("node Selection", () => {
       range.setEnd(n(a), 3)
       selection.addRange(range)
       expect(selection.getRangeAt(0)).toBe(range)
-      expect(selection.toString()).toBe("el")
+      range.setEnd(n(a), 4)
+      expect(selection.toString()).toBe("ell")
+      range.setEnd(n(a), 3)
       const other = new Range()
       other.setStart(n(a), 0)
       other.setEnd(n(a), 5)
@@ -340,6 +419,18 @@ describe("node Selection", () => {
       expect(selection.containsNode(n(root), true)).toBe(true)
       expect(selection.containsNode(n(root))).toBe(false)
       expect(selection.containsNode(n(stray()))).toBe(false)
+    })
+
+    it("containsNode with allowPartialContainment counts a node whose edge is exactly a boundary point", () => {
+      const a = tx("hello")
+      const b = tx("world")
+      const c = tx("again")
+      el("div", a, b, c)
+      selection.setBaseAndExtent(n(a), 5, n(b), 0)
+      expect(selection.containsNode(n(a), true)).toBe(true)
+      expect(selection.containsNode(n(b), true)).toBe(true)
+      expect(selection.containsNode(n(c), true)).toBe(false)
+      expect(selection.containsNode(n(a))).toBe(false)
     })
 
     it("a node outside the document leaves the selection as it was", () => {
@@ -461,7 +552,20 @@ describe("node Selection", () => {
       expect(seen).toEqual(["capture"])
     })
 
-    it("is not sent for a change that changes nothing, nor when nobody listens", async () => {
+    it("is sent to a listener added after the change in the same turn, as Chrome does", async () => {
+      const a = tx("hello")
+      el("div", a)
+      selection.collapse(n(a), 1)
+      const heard = listen()
+      try {
+        await tick()
+        expect(heard.events).toHaveLength(1)
+      } finally {
+        heard.stop()
+      }
+    })
+
+    it("is not sent for a change that changes nothing", async () => {
       const a = tx("hello")
       el("div", a)
       selection.collapse(n(a), 1)

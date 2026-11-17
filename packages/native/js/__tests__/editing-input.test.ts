@@ -135,7 +135,10 @@ describe("editing input", () => {
   beforeEach(() => {
     mounted.push(createRendererState(new FakeWindow() as unknown as NativeRenderer).attach({ onSelectionChange: undefined }))
     active = undefined
-    vi.spyOn(document, "createTextNode").mockImplementation((data: string) => new FakeTx(data) as unknown as Text)
+    // A Text made through `document` belongs to the window mounted last, not the host's: the edit must use the host's binding.
+    vi.spyOn(document, "createTextNode").mockImplementation(() => {
+      throw new Error("document.createTextNode must not make the text of an edit")
+    })
     vi.spyOn(document, "activeElement", "get").mockImplementation(() => (active ?? document.body) as never)
   })
 
@@ -243,6 +246,27 @@ describe("editing input", () => {
       expect([selection.anchorNode, selection.anchorOffset]).toEqual([n(empty.kids[0]), 2])
     })
 
+    it("types over a selection that spans two blocks into the block it began in, without a stray Text at the host", () => {
+      const a = tx("hello")
+      const b = tx("world")
+      const host = editable("div", el("p", a), el("p", b))
+      active = host
+      selection.setBaseAndExtent(n(a), 2, n(b), 2)
+      runEditingInput("insertText", "-")
+      expect(a.text).toBe("he-")
+      expect(b.text).toBe("rld")
+      expect(host.kids).toHaveLength(2)
+      expect([selection.anchorNode, selection.anchorOffset, selection.isCollapsed]).toEqual([n(a), 3, true])
+    })
+
+    it("a caret in an empty element gets a Text made by the host's binding", () => {
+      const host = editable("div")
+      focus(host, host, 0)
+      runEditingInput("insertText", "q")
+      expect(host.kids.map((kid) => (kid as FakeTx).text)).toEqual(["q"])
+      expect(host.kids[0]).toBeInstanceOf(FakeTx)
+    })
+
     it("changes nothing and fires no input when a beforeinput listener cancels", () => {
       const text = tx("ab")
       const host = editable("div", text)
@@ -319,6 +343,34 @@ describe("editing input", () => {
       expect(selection.isCollapsed).toBe(true)
     })
 
+    it("Backspace and Delete next to a contenteditable=false element remove it whole", () => {
+      const before = tx("ab")
+      const inside = tx("island")
+      const island = el("span", inside)
+      island.props.contenteditable = "false"
+      const after = tx("cd")
+      const host = editable("div", before, island, after)
+      focus(host, after, 0)
+      const targets: string[] = []
+      host.addEventListener("beforeinput", (event) => {
+        const range = (event as InputEvent).getTargetRanges()[0]
+        targets.push(`${range.startContainer === n(host) ? "host" : "?"}:${range.startOffset}-${range.endOffset}`)
+      })
+      expect(runEditingInput("deleteContentBackward", null)).toEqual({ handled: true, canceled: false, changed: true })
+      expect(host.kids).toEqual([before, after])
+      expect(inside.text).toBe("island")
+      expect(targets).toEqual(["host:1-2"])
+      expect([selection.anchorNode, selection.anchorOffset]).toEqual([n(host), 1])
+
+      const second = el("span", tx("x"))
+      second.props.contenteditable = "false"
+      host.kids.splice(1, 0, second)
+      second.parent = host
+      focus(host, before, 2)
+      runEditingInput("deleteContentForward", null)
+      expect(host.kids).toEqual([before, after])
+    })
+
     it("fires beforeinput and nothing more at the edge of the host and over a block edge", () => {
       const a = tx("ab")
       const b = tx("cd")
@@ -351,6 +403,43 @@ describe("editing input", () => {
   })
 
   describe("composition", () => {
+    it("fires a beforeinput that cannot be canceled, and the change happens", () => {
+      const text = tx("ab")
+      const host = editable("div", text)
+      focus(host, text, 2)
+      const seen: boolean[] = []
+      host.addEventListener("beforeinput", (event) => {
+        seen.push(event.cancelable)
+        event.preventDefault()
+      })
+      runEditingComposition({ action: "mark", text: "k" })
+      expect(seen).toEqual([false])
+      expect(text.text).toBe("abk")
+      runEditingComposition({ action: "unmark" })
+      seen.length = 0
+      runEditingInput("insertText", "z")
+      expect(seen).toEqual([true])
+      expect(text.text).toBe("abk")
+    })
+
+    it("keeps one composition per editing host", () => {
+      const first = tx("ab")
+      const firstHost = editable("div", first)
+      const second = tx("cd")
+      const secondHost = editable("div", second)
+      focus(firstHost, first, 2)
+      runEditingComposition({ action: "mark", text: "x" })
+      focus(secondHost, second, 2)
+      const types: string[] = []
+      for (const type of ["compositionstart", "compositionend"]) secondHost.addEventListener(type, () => types.push(type))
+      expect(runEditingComposition({ action: "unmark" })).toBe(false)
+      runEditingComposition({ action: "mark", text: "y" })
+      expect(types).toEqual(["compositionstart"])
+      expect([first.text, second.text]).toEqual(["abx", "cdy"])
+      runEditingComposition({ action: "unmark" })
+      expect(types).toEqual(["compositionstart", "compositionend"])
+    })
+
     it("runs compositionstart, beforeinput, compositionupdate, input per mark, and compositionend after the commit", () => {
       const text = tx("ab")
       const host = editable("div", text)

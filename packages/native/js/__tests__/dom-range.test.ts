@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { DOM_BINDING, HTMLElement, Text, type ElementBinding, type Node, type TextBinding } from "../dom/nodes.js"
 import { hasLiveRanges, liveRangesAfterInsert, liveRangesBeforeRemove } from "../dom/live-ranges.js"
-import { Range, StaticRange } from "../dom/range.js"
+import { boundariesOf, createTextFor, Range, StaticRange } from "../dom/range.js"
 import { document } from "../events/window-target.js"
 import { defineDomMembers } from "../dom-members.js"
 import "../dom-globals.js"
@@ -680,5 +680,73 @@ describe("Range.insertNode", () => {
     const range = rangeOver(root, 1, root, 1)
     range.insertNode(n(c))
     expectKids(root, a, c, b)
+  })
+})
+
+describe("a range that has an owner", () => {
+  function owned(range: Range): { calls: number } {
+    const log = { calls: 0 }
+    boundariesOf(range).onAdjust = () => {
+      log.calls += 1
+    }
+    return log
+  }
+
+  it("tells it of each change its own methods make, and of none that change nothing", () => {
+    const a = tx("hello")
+    const b = tx("world")
+    el("div", a, b)
+    const range = rangeOver(a, 1, a, 3)
+    const log = owned(range)
+    range.setStart(n(a), 0)
+    range.setEnd(n(b), 2)
+    range.collapse(true)
+    range.selectNode(n(b))
+    range.selectNodeContents(n(a))
+    range.setStartAfter(n(a))
+    range.setEndAfter(n(b))
+    expect(log.calls).toBe(7)
+    range.setEndAfter(n(b))
+    range.setStartAfter(n(a))
+    expect(log.calls).toBe(7)
+  })
+
+  it("is told when deleteContents and insertNode change it", () => {
+    const a = tx("hello")
+    const b = tx("world")
+    el("div", a, b)
+    const range = rangeOver(a, 1, b, 2)
+    const log = owned(range)
+    range.deleteContents()
+    expect(log.calls).toBeGreaterThan(0)
+    expect([a.text, b.text]).toEqual(["h", "rld"])
+    const before = log.calls
+    range.deleteContents()
+    expect(log.calls).toBe(before)
+    range.insertNode(n(el("i")))
+    expect(log.calls).toBeGreaterThan(before)
+  })
+
+  it("is told of a tree change too, and nothing once the owner lets go", () => {
+    const a = tx("hello")
+    const root = el("div", a)
+    const range = rangeOver(a, 2, a, 4)
+    const log = owned(range)
+    n(a).insertData(0, "xx")
+    expect(log.calls).toBe(1)
+    boundariesOf(range).onAdjust = undefined
+    n(root).removeChild(n(a))
+    expect(log.calls).toBe(1)
+    expect(range.startContainer).toBe(n(root))
+  })
+})
+
+describe("createTextFor", () => {
+  it("makes the Text through the binding of the node it is for", () => {
+    const parent = el("p", tx("a"))
+    const made = createTextFor(n(parent), "xyz")
+    expect(made).toBeInstanceOf(FakeTx)
+    expect(made.data).toBe("xyz")
+    expect(made.parentNode).toBeNull()
   })
 })

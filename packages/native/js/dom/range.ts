@@ -13,7 +13,6 @@ import { registerLiveRange, type RangeBoundaries } from "./live-ranges.js"
 import {
   CharacterData,
   DOM_BINDING,
-  indexOfNode,
   Node,
   runtimeDocument,
   type DocumentFragment,
@@ -23,15 +22,13 @@ import {
   type TextBinding,
 } from "./nodes.js"
 import { cloneNode } from "./clone.js"
+import { comparePoints, indexOfNode, isInclusiveAncestor, nodeLength, rootOf } from "./tree-order.js"
 import { assertCanInsert, replaceChildren } from "./tree-mutation.js"
 
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
 const DOCUMENT_NODE = 9
 const DOCUMENT_FRAGMENT_NODE = 11
-
-const DOCUMENT_POSITION_FOLLOWING = 4
-const DOCUMENT_POSITION_CONTAINS = 8
 
 const START_TO_START = 0
 const START_TO_END = 1
@@ -59,47 +56,12 @@ function assertNode(value: unknown, method: string, owner: string): asserts valu
   }
 }
 
-function nodeLength(node: Node): number {
-  return node instanceof CharacterData ? node.data.length : node[DOM_BINDING]().children.length
-}
-
-function rootOf(node: Node): Node {
-  let top = node
-  for (let parent = top.parentNode; parent !== null; parent = top.parentNode) top = parent
-  return top
-}
-
-function isInclusiveAncestor(ancestor: Node, node: Node): boolean {
-  for (let current: Node | null = node; current !== null; current = current.parentNode) {
-    if (current === ancestor) return true
-  }
-  return false
-}
-
-/** The position of a boundary point relative to another in the same tree: -1 before, 0 equal, 1 after. */
-function position(nodeA: Node, offsetA: number, nodeB: Node, offsetB: number): -1 | 0 | 1 {
-  if (nodeA === nodeB) return offsetA === offsetB ? 0 : offsetA < offsetB ? -1 : 1
-  const relation = nodeB.compareDocumentPosition(nodeA)
-  if (relation & DOCUMENT_POSITION_FOLLOWING) {
-    return position(nodeB, offsetB, nodeA, offsetA) === -1 ? 1 : -1
-  }
-  if (relation & DOCUMENT_POSITION_CONTAINS) {
-    let child = nodeB
-    for (let parent = child.parentNode; parent !== nodeA; parent = child.parentNode) {
-      if (parent === null) throw new Error("The node is not under the ancestor it is compared with")
-      child = parent
-    }
-    if (indexOfNode(child) < offsetA) return 1
-  }
-  return -1
-}
-
 function startPosition(bounds: RangeBoundaries, node: Node, offset: number): -1 | 0 | 1 {
-  return position(node, offset, bounds.startNode, bounds.startOffset)
+  return comparePoints(node, offset, bounds.startNode, bounds.startOffset)
 }
 
 function endPosition(bounds: RangeBoundaries, node: Node, offset: number): -1 | 0 | 1 {
-  return position(node, offset, bounds.endNode, bounds.endOffset)
+  return comparePoints(node, offset, bounds.endNode, bounds.endOffset)
 }
 
 /** "Contained": the node is in the range's tree and lies wholly between its two boundary points. */
@@ -147,10 +109,17 @@ function appendContainedText(node: Node, into: string[]): void {
 }
 
 /** An empty fragment of the window `node` belongs to; the document's, which has no window of its own, for a node that is not in one. */
-function createFragmentFor(node: Node): DocumentFragment {
+export function createFragmentFor(node: Node): DocumentFragment {
   const binding = node[DOM_BINDING]() as Partial<ParentBinding & TextBinding>
   if (binding.createFragment !== undefined) return binding.createFragment()
   return (runtimeDocument() as unknown as { createDocumentFragment(): DocumentFragment }).createDocumentFragment()
+}
+
+/** A Text node of the window `node` belongs to, holding `data`, in no tree yet. */
+export function createTextFor(node: Node, data: string): Text {
+  const binding = node[DOM_BINDING]() as Partial<ParentBinding & TextBinding>
+  if (binding.createText !== undefined) return binding.createText(data)
+  return (runtimeDocument() as unknown as { createTextNode(data: string): Text }).createTextNode(data)
 }
 
 /** The children of the common ancestor that hold one end of the range but not the other. */
@@ -414,45 +383,72 @@ class RangeClass extends AbstractRangeClass {
     return commonAncestor(this.#bounds)
   }
 
+  /**
+   * Runs one of the range's own changes, then tells the `Selection` holding this range (`onAdjust`)
+   * if it moved a boundary point, as a tree change does: a range the selection holds is the selection.
+   */
+  #changing<T>(change: () => T): T {
+    const bounds = this.#bounds
+    if (bounds.onAdjust === undefined) return change()
+    const startNode = bounds.startNode
+    const startOffset = bounds.startOffset
+    const endNode = bounds.endNode
+    const endOffset = bounds.endOffset
+    try {
+      return change()
+    } finally {
+      if (
+        bounds.startNode !== startNode ||
+        bounds.startOffset !== startOffset ||
+        bounds.endNode !== endNode ||
+        bounds.endOffset !== endOffset
+      ) {
+        bounds.onAdjust?.()
+      }
+    }
+  }
+
   setStart(node: Node, offset: number): void {
     assertNode(node, "setStart", "Range")
-    setBoundary(this.#bounds, node, offset >>> 0, true)
+    this.#changing(() => setBoundary(this.#bounds, node, offset >>> 0, true))
   }
 
   setEnd(node: Node, offset: number): void {
     assertNode(node, "setEnd", "Range")
-    setBoundary(this.#bounds, node, offset >>> 0, false)
+    this.#changing(() => setBoundary(this.#bounds, node, offset >>> 0, false))
   }
 
   setStartBefore(node: Node): void {
     assertNode(node, "setStartBefore", "Range")
-    setBoundary(this.#bounds, parentOrThrow(node), indexOfNode(node), true)
+    this.#changing(() => setBoundary(this.#bounds, parentOrThrow(node), indexOfNode(node), true))
   }
 
   setStartAfter(node: Node): void {
     assertNode(node, "setStartAfter", "Range")
-    setBoundary(this.#bounds, parentOrThrow(node), indexOfNode(node) + 1, true)
+    this.#changing(() => setBoundary(this.#bounds, parentOrThrow(node), indexOfNode(node) + 1, true))
   }
 
   setEndBefore(node: Node): void {
     assertNode(node, "setEndBefore", "Range")
-    setBoundary(this.#bounds, parentOrThrow(node), indexOfNode(node), false)
+    this.#changing(() => setBoundary(this.#bounds, parentOrThrow(node), indexOfNode(node), false))
   }
 
   setEndAfter(node: Node): void {
     assertNode(node, "setEndAfter", "Range")
-    setBoundary(this.#bounds, parentOrThrow(node), indexOfNode(node) + 1, false)
+    this.#changing(() => setBoundary(this.#bounds, parentOrThrow(node), indexOfNode(node) + 1, false))
   }
 
   collapse(toStart: boolean = false): void {
     const bounds = this.#bounds
-    if (toStart) {
-      bounds.endNode = bounds.startNode
-      bounds.endOffset = bounds.startOffset
-    } else {
-      bounds.startNode = bounds.endNode
-      bounds.startOffset = bounds.endOffset
-    }
+    this.#changing(() => {
+      if (toStart) {
+        bounds.endNode = bounds.startNode
+        bounds.endOffset = bounds.startOffset
+      } else {
+        bounds.startNode = bounds.endNode
+        bounds.startOffset = bounds.endOffset
+      }
+    })
   }
 
   selectNode(node: Node): void {
@@ -460,19 +456,23 @@ class RangeClass extends AbstractRangeClass {
     const parent = parentOrThrow(node)
     const index = indexOfNode(node)
     const bounds = this.#bounds
-    bounds.startNode = parent
-    bounds.startOffset = index
-    bounds.endNode = parent
-    bounds.endOffset = index + 1
+    this.#changing(() => {
+      bounds.startNode = parent
+      bounds.startOffset = index
+      bounds.endNode = parent
+      bounds.endOffset = index + 1
+    })
   }
 
   selectNodeContents(node: Node): void {
     assertNode(node, "selectNodeContents", "Range")
     const bounds = this.#bounds
-    bounds.startNode = node
-    bounds.startOffset = 0
-    bounds.endNode = node
-    bounds.endOffset = nodeLength(node)
+    this.#changing(() => {
+      bounds.startNode = node
+      bounds.startOffset = 0
+      bounds.endNode = node
+      bounds.endOffset = nodeLength(node)
+    })
   }
 
   cloneRange(): Range {
@@ -502,7 +502,7 @@ class RangeClass extends AbstractRangeClass {
     if (rootOf(own.startNode) !== rootOf(source.startNode)) throw wrongDocumentError()
     const useOwnStart = method === START_TO_START || method === END_TO_START
     const useSourceStart = method === START_TO_START || method === START_TO_END
-    return position(
+    return comparePoints(
       useOwnStart ? own.startNode : own.endNode,
       useOwnStart ? own.startOffset : own.endOffset,
       useSourceStart ? source.startNode : source.endNode,
@@ -552,6 +552,10 @@ class RangeClass extends AbstractRangeClass {
   }
 
   deleteContents(): void {
+    this.#changing(() => this.#deleteContents())
+  }
+
+  #deleteContents(): void {
     const bounds = this.#bounds
     if (bounds.startNode === bounds.endNode && bounds.startOffset === bounds.endOffset) return
     const startNode = bounds.startNode
@@ -589,6 +593,10 @@ class RangeClass extends AbstractRangeClass {
 
   insertNode(node: Node): void {
     assertNode(node, "insertNode", "Range")
+    this.#changing(() => this.#insertNode(node))
+  }
+
+  #insertNode(node: Node): void {
     const bounds = this.#bounds
     const startNode = bounds.startNode
     const startIsText = startNode.nodeType === TEXT_NODE
@@ -614,7 +622,7 @@ class RangeClass extends AbstractRangeClass {
   }
 
   extractContents(): DocumentFragment {
-    return extractContentsOf(this.#bounds)
+    return this.#changing(() => extractContentsOf(this.#bounds))
   }
 
   /** Wraps what the range covers in `newParent`, emptied first: the contents are extracted into it, and it takes their place. */
@@ -649,6 +657,11 @@ class RangeClass extends AbstractRangeClass {
     if (start.nodeType === ELEMENT_NODE) return start as Element
     return start.parentElement
   }
+}
+
+/** What the `Selection` needs of the `Range` it holds: its boundary points, where it sets `onAdjust` to hear of every change to the range. */
+export function boundariesOf(range: Range): RangeBoundaries {
+  return range[BOUNDS]()
 }
 
 type RangeClassSet = {

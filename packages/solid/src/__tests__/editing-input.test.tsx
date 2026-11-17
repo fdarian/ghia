@@ -146,4 +146,24 @@ describe.skipIf(!hasNativeTestRenderer)("Solid typing into an editing host", () 
       "compositionend:你:",
     ])
   })
+
+  it("Backspace and Delete next to a contentEditable=\"false\" element remove it whole", () => {
+    const root = createTestRoot()
+    cleanups.push(() => root.unmount())
+    root.render(() => (
+      <div contentEditable style={{ width: 200, height: 40 }}>
+        <span>ab</span>
+        <b contentEditable="false">tag</b>
+        <span>cd</span>
+      </div>
+    ))
+    const host = document.body!.querySelector("[contenteditable]") as HTMLElement
+    host.focus()
+    const selection = document.getSelection()
+    selection.collapse(host.lastElementChild!.firstChild!, 0)
+    root.renderer.simulateKeystrokes("Backspace")
+    expect(host.querySelector("b")).toBeNull()
+    expect(host.textContent).toBe("abcd")
+    expect([selection.anchorNode, selection.anchorOffset, selection.type]).toEqual([host, 1, "Caret"])
+  })
 })

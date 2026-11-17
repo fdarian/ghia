@@ -9,11 +9,12 @@
  * a `Range` pays a counter check per tree change. A range is held weakly: one that nothing refers
  * to is collected and stops being adjusted.
  *
- * This module reads nodes only through their public members and imports nothing at run time, so
- * `nodes.ts` and the adapters can call it.
+ * This module reads nodes only through `tree-order.ts`, which uses nothing of `nodes.ts` while it
+ * loads, so `nodes.ts` and the adapters can call it.
  */
 
 import type { Node } from "./nodes.js"
+import { isInclusiveDescendantBelow } from "./tree-order.js"
 
 /** What a `Range` is: two boundary points, which the steps below move. */
 export type RangeBoundaries = {
@@ -22,8 +23,8 @@ export type RangeBoundaries = {
   endNode: Node
   endOffset: number
   /**
-   * Called after a tree or data change moved a boundary point of this range, so its owner (the
-   * `Selection`) can tell. A range's own methods do not call it.
+   * Called after a tree or data change, or one of the range's own methods, moved a boundary point
+   * of this range, so its owner (the `Selection`) can tell.
    */
   onAdjust?: () => void
 }
@@ -88,22 +89,20 @@ function forEachRange(visit: (range: RangeBoundaries) => void): void {
   }
 }
 
-function isInclusiveDescendant(node: Node, ancestor: Node): boolean {
-  for (let current: Node | null = node; current !== null; current = current.parentNode) {
-    if (current === ancestor) return true
-  }
-  return false
-}
-
 /** Call before `child`, the child of `parent` at `index`, is taken out of it. */
 export function liveRangesBeforeRemove(parent: Node, child: Node, index: number): void {
   if (registry.count === 0) return
   forEachRange((range) => {
-    if (isInclusiveDescendant(range.startNode, child)) {
+    // A boundary point is inside `child` only when walking up from its node meets `child` before `parent`;
+    // a range whose node is `parent`, or one shared by both ends, needs one walk or none.
+    const sameNode = range.startNode === range.endNode
+    const startInside = range.startNode !== parent && isInclusiveDescendantBelow(range.startNode, child, parent)
+    const endInside = sameNode ? startInside : range.endNode !== parent && isInclusiveDescendantBelow(range.endNode, child, parent)
+    if (startInside) {
       range.startNode = parent
       range.startOffset = index
     }
-    if (isInclusiveDescendant(range.endNode, child)) {
+    if (endInside) {
       range.endNode = parent
       range.endOffset = index
     }

@@ -16,7 +16,7 @@ import {
 } from "./dispatch.js"
 import type { Element } from "../dom/nodes.js"
 import { paintedSelectionTookOver } from "../dom/selection.js"
-import { isSingleGrapheme } from "../dom/selection-movement.js"
+import { isSingleGrapheme } from "../dom/text-segmentation.js"
 import { editingHostOf } from "../editing/host.js"
 import { focusedNode, runEditingInput } from "../editing/input.js"
 import { scrollKeyName } from "../scroll.js"

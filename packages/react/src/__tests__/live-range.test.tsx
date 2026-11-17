@@ -95,4 +95,28 @@ describeNative("live Range in React", () => {
     expect(range.startOffset).toBe(0)
     expect(range.toString()).toBe("ell")
   })
+
+  it("the selection's own Range follows a keyed insert, keeps its identity and moves the selection when changed", () => {
+    const setItems = stateful(["a", "b", "c"], (items) => (
+      <ul>
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    ))
+    const list = document.body!.firstElementChild!
+    const selection = document.getSelection()
+    try {
+      selection.setBaseAndExtent(list, 1, list, 2)
+      const range = selection.getRangeAt(0)
+      setItems(["x", "a", "b", "c"])
+      expect(selection.getRangeAt(0)).toBe(range)
+      expect([selection.anchorOffset, selection.focusOffset]).toEqual([2, 3])
+      range.setEnd(list, 4)
+      expect(selection.focusOffset).toBe(4)
+      expect(selection.toString()).toBe("bc")
+    } finally {
+      selection.collapse(null)
+    }
+  })
 })
