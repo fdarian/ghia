@@ -33,7 +33,10 @@ import {
   writtenInputValue,
   queueCharacterDataMutation,
   bumpTreeVersion,
+  hasLiveRanges,
   hasMutationObservers,
+  liveRangesAfterInsert,
+  liveRangesBeforeRemove,
   queueChildListMutation,
   recordAttributeChanges,
   ROOT_ELEMENT_TYPES,
@@ -954,6 +957,7 @@ function removeFromParent(node: HostNode): void {
   const parent = node.parent
   if (!parent) return
   const index = parent.childList.indexOf(node)
+  if (index >= 0 && parent.kind === "element" && hasLiveRanges()) liveRangesBeforeRemove(parent, node, index)
   if (index >= 0) parent.childList.splice(index, 1)
   node.parent = null
   if (index >= 0 && parent.kind === "element") {
@@ -983,6 +987,7 @@ export function insertHostNode(
   parent.childList.splice(index, 0, node)
   node.parent = parent
   bumpTreeVersion()
+  if (hasLiveRanges()) liveRangesAfterInsert(parent, index, 1)
   if (hasMutationObservers()) {
     queueChildListMutation(parent, [node], [], parent.childList[index - 1] ?? null, parent.childList[index + 1] ?? null)
   }

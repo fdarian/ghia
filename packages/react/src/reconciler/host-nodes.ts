@@ -16,7 +16,10 @@ import {
   HOST_BINDING,
   HTMLElement,
   bumpTreeVersion,
+  hasLiveRanges,
   hasMutationObservers,
+  liveRangesAfterInsert,
+  liveRangesBeforeRemove,
   queueChildListMutation,
   readBoundingClientRect,
   splitMotionStyle,
@@ -399,6 +402,7 @@ export function linkChild(parent: HostNode, child: HostNode, before?: HostNode):
   siblings.splice(index, 0, child)
   stateFor(child).parent = parent
   bumpTreeVersion()
+  if (hasLiveRanges()) liveRangesAfterInsert(parent, index, 1)
   if (hasMutationObservers()) {
     queueChildListMutation(parent, [child], [], siblings[index - 1] ?? null, siblings[index + 1] ?? null)
   }
@@ -410,6 +414,7 @@ export function unlinkChild(child: HostNode): void {
   if (parent === null) return
   const siblings = stateFor(parent).children
   const index = siblings.indexOf(child)
+  if (index >= 0 && hasLiveRanges()) liveRangesBeforeRemove(parent, child, index)
   if (index >= 0) siblings.splice(index, 1)
   state.parent = null
   if (index >= 0) {
