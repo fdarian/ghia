@@ -30,6 +30,8 @@ use crate::layout::display;
 use crate::retained_tree::{RetainedElement, RetainedTree};
 use crate::style::StyleDesc;
 
+use crate::editing::positions::{SourceMap, TextSource};
+
 use super::white_space::{self, Emit, Tail, WhiteSpace};
 
 /// CSS white space: space, tab, line feed, carriage return, form feed. A
@@ -213,6 +215,9 @@ pub struct Piece {
     /// `range` is the U+FFFC of the empty inline box that is the last of `boxes`, see
     /// [`super::empty_box`]. It is not text and has no element.
     pub placeholder: bool,
+    /// The `#text` node the piece is the text of, and where the characters of its data went:
+    /// what a DOM position is looked up by ([`crate::editing::positions`]).
+    pub text: Option<crate::editing::positions::TextSource>,
 }
 
 /// A run of inline content, painted as one string.
@@ -346,7 +351,12 @@ impl Builder {
         self.text.pop();
         let len = self.text.len();
         for piece in &mut self.pieces {
-            piece.range.end = piece.range.end.min(len);
+            if piece.range.end > len {
+                if let Some(source) = &mut piece.text {
+                    source.map.drop_last_space();
+                }
+                piece.range.end = len;
+            }
         }
         self.pieces.retain(|piece| !piece.range.is_empty());
         for (_, range) in &mut self.boxes {
@@ -355,7 +365,8 @@ impl Builder {
         }
     }
 
-    fn push_text(&mut self, content: &str, boxes: &[u64]) {
+    /// `node` is the `#text` node `content` is the data of, which a DOM position is looked up by.
+    fn push_text(&mut self, content: &str, boxes: &[u64], node: Option<u64>) {
         if content.is_empty() {
             return;
         }
@@ -363,8 +374,14 @@ impl Builder {
         self.only_whitespace &= is_blank(content);
         let mode = self.mode();
         let mut start = self.text.len();
+        let mut source = node.map(|node| TextSource { node, map: SourceMap::default() });
+        // Where the character is in the data, in UTF-16 code units.
+        let mut offset = 0;
         let mut chars = content.chars().peekable();
         while let Some(c) = chars.next() {
+            let at = offset;
+            let units = c.len_utf16();
+            offset += units;
             let c = match c {
                 '\r' if chars.peek() == Some(&'\n') => continue,
                 '\r' => '\n',
@@ -372,11 +389,26 @@ impl Builder {
             };
             match white_space::step(&mut self.tail, c, mode) {
                 Emit::Nothing => {}
-                Emit::Char(c) => self.text.push(c),
+                Emit::Char(c) => {
+                    if let Some(source) = &mut source {
+                        source.map.keep(at, units, self.text.len(), c.len_utf8());
+                    }
+                    self.text.push(c);
+                }
                 Emit::Break { trim } => {
                     if trim {
+                        // The space that goes is this node's own when it came after `start`, and
+                        // an earlier piece's otherwise.
+                        if self.text.len() > start {
+                            if let Some(source) = &mut source {
+                                source.map.drop_last_space();
+                            }
+                        }
                         self.pop();
                         start = start.min(self.text.len());
+                    }
+                    if let Some(source) = &mut source {
+                        source.map.keep(at, units, self.text.len(), 1);
                     }
                     self.text.push('\n');
                 }
@@ -388,6 +420,7 @@ impl Builder {
                 boxes: boxes.to_vec(),
                 atomic: None,
                 placeholder: false,
+                text: source,
             });
         }
     }
@@ -408,6 +441,7 @@ impl Builder {
             boxes: boxes.to_vec(),
             atomic: None,
             placeholder: false,
+            text: None,
         });
     }
 
@@ -424,6 +458,7 @@ impl Builder {
             boxes: boxes.to_vec(),
             atomic: None,
             placeholder: false,
+            text: None,
         });
     }
 
@@ -440,6 +475,7 @@ impl Builder {
             boxes: boxes.to_vec(),
             atomic: Some(element.id),
             placeholder: false,
+            text: None,
         });
     }
 
@@ -456,6 +492,7 @@ impl Builder {
             boxes: chain.to_vec(),
             atomic: None,
             placeholder: true,
+            text: None,
         });
     }
 
@@ -467,7 +504,7 @@ impl Builder {
     ) {
         if is_raw_text(element) {
             if let Some(content) = element.content.as_deref() {
-                self.push_text(content, chain);
+                self.push_text(content, chain, Some(element.id));
             }
             return;
         }
@@ -491,7 +528,7 @@ impl Builder {
             _ => {}
         }
         if let Some(content) = element.content.as_deref() {
-            self.push_text(content, chain);
+            self.push_text(content, chain, None);
         }
         for child in element
             .children
@@ -623,7 +660,7 @@ pub(crate) fn plan_flow(
     let mut paragraph = Builder::new(container.id, white_space::computed(tree, container), items);
     paragraph.index = *index;
     if let Some(content) = content {
-        paragraph.push_text(content, &[]);
+        paragraph.push_text(content, &[], None);
     }
     for (child, at) in children
         .iter()
@@ -638,7 +675,7 @@ pub(crate) fn plan_flow(
             paragraph.at.get_or_insert(at);
             paragraph.anchor.get_or_insert(child.id);
             if let Some(content) = child.content.as_deref() {
-                paragraph.within(&contents, |paragraph, chain| paragraph.push_text(content, chain));
+                paragraph.within(&contents, |paragraph, chain| paragraph.push_text(content, chain, Some(child.id)));
             }
         } else if !items && is_inline_box(tree, child) {
             paragraph.at.get_or_insert(at);
@@ -661,7 +698,7 @@ pub(crate) fn plan_flow(
 pub fn own_text(tree: &RetainedTree, element: &RetainedElement) -> Option<String> {
     let content = element.content.as_deref()?;
     let mut paragraph = Builder::new(element.id, white_space::computed(tree, element), false);
-    paragraph.push_text(content, &[]);
+    paragraph.push_text(content, &[], None);
     let mut out = Vec::new();
     paragraph.finish(&mut out);
     match out.pop() {
@@ -686,7 +723,7 @@ pub fn leaf_run(tree: &RetainedTree, parent: &RetainedElement, leaves: &[u64]) -
     let mut paragraph = Builder::new(parent.id, white_space::computed(tree, parent), false);
     for leaf in leaves.iter().filter_map(|id| tree.elements.get(id)) {
         if let Some(content) = leaf.content.as_deref() {
-            paragraph.within(&[leaf], |paragraph, chain| paragraph.push_text(content, chain));
+            paragraph.within(&[leaf], |paragraph, chain| paragraph.push_text(content, chain, None));
         }
     }
     let mut out = Vec::new();

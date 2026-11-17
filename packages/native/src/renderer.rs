@@ -119,7 +119,7 @@ pub(crate) fn dimension_u32(value: f64, label: &str) -> Result<u32> {
     raw_dimension_u32(value, label).map_err(Error::from_reason)
 }
 
-fn raw_element_id(id: f64) -> std::result::Result<u64, String> {
+pub(crate) fn raw_element_id(id: f64) -> std::result::Result<u64, String> {
     if !id.is_finite() || id < 0.0 || id.fract() != 0.0 || id > 9_007_199_254_740_991.0 {
         return Err(format!("Invalid element id: {id}"));
     }
@@ -1888,6 +1888,19 @@ impl GpuixRenderer {
     #[cfg(target_os = "macos")]
     fn paint_pending_changes(&self) -> Result<Option<gpui::WindowId>> {
         self.with_initialized_window(|window, cx| window.paint_if_dirty(cx))
+    }
+
+    /// Runs a read of the painted text after the window painted what changed. `None` before `init`.
+    #[cfg(target_os = "macos")]
+    fn read_painted_dom<R>(&self, read: impl FnOnce(&crate::editing::Reads<'_>) -> std::result::Result<R, String>) -> Result<Option<R>> {
+        let Some(window) = self.paint_pending_changes()? else { return Ok(None) };
+        let tree = self.tree.lock().unwrap();
+        read(&crate::editing::Reads { tree: &tree, window }).map(Some).map_err(Error::from_reason)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn read_painted_dom<R>(&self, _read: impl FnOnce(&crate::editing::Reads<'_>) -> std::result::Result<R, String>) -> Result<Option<R>> {
+        Err(Error::from_reason("Unsupported operating system"))
     }
 
     #[cfg(target_os = "macos")]
@@ -4742,6 +4755,40 @@ impl GpuixRenderer {
 
         #[cfg(not(target_os = "macos"))]
         Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// The rects of the text between two DOM positions: the content area of the font for each line
+    /// the range covers, in window coordinates, or none when the text did not paint. Both ends are
+    /// `#text` nodes of one paragraph.
+    #[napi]
+    pub fn get_text_range_rects(
+        &self,
+        start_node_id: f64,
+        start_offset: f64,
+        end_node_id: f64,
+        end_offset: f64,
+    ) -> Result<Vec<crate::editing::geometry::TextRect>> {
+        self.read_painted_dom(|reads| reads.text_range_rects(start_node_id, start_offset, end_node_id, end_offset))
+            .map(Option::unwrap_or_default)
+    }
+
+    /// The DOM position at a window point, in the text under it or nearest to it, or null.
+    #[napi]
+    pub fn caret_position_from_point(&self, x: f64, y: f64) -> Result<Option<crate::editing::geometry::CaretPoint>> {
+        self.read_painted_dom(|reads| reads.caret_position_from_point(x, y)).map(Option::flatten)
+    }
+
+    /// A DOM position moved along the lines of the painted text (`lineUp`, `lineDown`, `lineStart`,
+    /// `lineEnd`), keeping `goalX` for a move up or down; null where there is no line to go to.
+    #[napi]
+    pub fn move_caret_visually(
+        &self,
+        node_id: f64,
+        offset: f64,
+        op: String,
+        goal_x: Option<f64>,
+    ) -> Result<Option<crate::editing::geometry::CaretPoint>> {
+        self.read_painted_dom(|reads| reads.move_caret_visually(node_id, offset, &op, goal_x)).map(Option::flatten)
     }
 
     /// Press space-separated keys in Playwright's `keyboard.press` grammar

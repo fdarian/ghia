@@ -1324,6 +1324,23 @@ impl TestGpuixRenderer {
 
     // ── Test-specific methods ────────────────────────────────────────
 
+    /// Runs a read of the painted text once the window painted what changed. Inside a handler of a
+    /// simulated input the paint is a pass that swaps no frame, which leaves the registries of the
+    /// text it painted.
+    fn read_painted_dom<R>(&self, read: impl FnOnce(&crate::editing::Reads<'_>) -> std::result::Result<R, String>) -> Result<R> {
+        let unflushed = take_unflushed();
+        if unflushed != Dirty::Clean {
+            self.flush_for(unflushed)?;
+        }
+        let window = window_call(|window, cx| {
+            crate::renderer::settle_pending_layout(window, cx);
+            window.paint_if_dirty(cx);
+            window.window_handle().window_id()
+        })?;
+        let tree = self.tree.lock().unwrap();
+        read(&crate::editing::Reads { tree: &tree, window }).map_err(Error::from_reason)
+    }
+
     /// [`Self::flush`] for the changes of a bounds read that was waiting on mutations.
     fn flush_for(&self, dirty: Dirty) -> Result<()> {
         // From a sync event handler this only marks the view dirty: the frame
@@ -2023,6 +2040,36 @@ impl TestGpuixRenderer {
             .into_iter()
             .map(Into::into)
             .collect())
+    }
+
+    /// The rects of the text between two DOM positions, see the live renderer's.
+    #[napi]
+    pub fn get_text_range_rects(
+        &self,
+        start_node_id: f64,
+        start_offset: f64,
+        end_node_id: f64,
+        end_offset: f64,
+    ) -> Result<Vec<crate::editing::geometry::TextRect>> {
+        self.read_painted_dom(|reads| reads.text_range_rects(start_node_id, start_offset, end_node_id, end_offset))
+    }
+
+    /// The DOM position at a window point, see the live renderer's.
+    #[napi]
+    pub fn caret_position_from_point(&self, x: f64, y: f64) -> Result<Option<crate::editing::geometry::CaretPoint>> {
+        self.read_painted_dom(|reads| reads.caret_position_from_point(x, y))
+    }
+
+    /// A DOM position moved along the lines of the painted text, see the live renderer's.
+    #[napi]
+    pub fn move_caret_visually(
+        &self,
+        node_id: f64,
+        offset: f64,
+        op: String,
+        goal_x: Option<f64>,
+    ) -> Result<Option<crate::editing::geometry::CaretPoint>> {
+        self.read_painted_dom(|reads| reads.move_caret_visually(node_id, offset, &op, goal_x))
     }
 
     /// Drag-select from one point to another: mouse down, move, up.

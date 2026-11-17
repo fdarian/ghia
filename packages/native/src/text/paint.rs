@@ -48,11 +48,11 @@ pub type SharedSelection = Arc<Mutex<SelectionState>>;
 
 /// One painted text element, registered per frame in paint order.
 #[derive(Clone)]
-struct RegEntry {
-    key: Arc<str>,
-    doc: selection::DocPos,
-    text: SharedString,
-    layout: TextLayout,
+pub(crate) struct RegEntry {
+    pub(crate) key: Arc<str>,
+    pub(crate) doc: selection::DocPos,
+    pub(crate) text: SharedString,
+    pub(crate) layout: TextLayout,
     /// See [`selection::RegisteredText::group`].
     group: Option<u64>,
     /// See [`selection::RegisteredText::line`].
@@ -60,7 +60,7 @@ struct RegEntry {
     /// See [`selection::RegisteredText::cell`].
     cell: Option<selection::TableCell>,
     /// From the space `layout` is in to the window: a press hits the text where it is drawn.
-    to_window: TransformationMatrix,
+    pub(crate) to_window: TransformationMatrix,
 }
 
 impl RegEntry {
@@ -1126,6 +1126,27 @@ fn registry_point(
         };
         Some(RegistryHit { entry: ei, index, local })
     })
+}
+
+/// The text of the last painted frame that `key` names (`selection_key`), if it painted.
+pub(crate) fn painted_text_by_key(window: WindowId, key: &str) -> Option<RegEntry> {
+    with_frame(window, |frame| frame.registry().iter().find(|entry| &*entry.key == key).cloned())
+}
+
+/// Every text of the last painted frame, in document order.
+pub(crate) fn painted_texts_in_document_order(window: WindowId) -> Vec<RegEntry> {
+    with_frame(window, |frame| {
+        let entries = frame.registry();
+        let docs: Vec<&selection::DocPos> = entries.iter().map(|entry| &entry.doc).collect();
+        selection::document_order(&docs).into_iter().map(|ix| entries[ix].clone()).collect()
+    })
+}
+
+/// The text a window position lands in, as [`registry_point`] finds it, with the position in the
+/// space of its layout.
+pub(crate) fn painted_text_at(window: WindowId, position: gpui::Point<gpui::Pixels>) -> Option<(RegEntry, gpui::Point<gpui::Pixels>)> {
+    let hit = registry_point(window, position)?;
+    with_frame(window, |frame| frame.registry().get(hit.entry).cloned()).map(|entry| (entry, hit.local))
 }
 
 /// Like [`registry_point`], but only when the pointer shares a text's vertical

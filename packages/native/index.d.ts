@@ -618,6 +618,19 @@ export declare class GpuixRenderer {
    */
   getPaintedHighlights(): Array<HighlightMatch>
   /**
+   * The rects of the text between two DOM positions: the content area of the font for each line
+   * the range covers, in window coordinates, or none when the text did not paint. Both ends are
+   * `#text` nodes of one paragraph.
+   */
+  getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): Array<TextRect>
+  /** The DOM position at a window point, in the text under it or nearest to it, or null. */
+  caretPositionFromPoint(x: number, y: number): CaretPoint | null
+  /**
+   * A DOM position moved along the lines of the painted text (`lineUp`, `lineDown`, `lineStart`,
+   * `lineEnd`), keeping `goalX` for a move up or down; null where there is no line to go to.
+   */
+  moveCaretVisually(nodeId: number, offset: number, op: string, goalX?: number | undefined | null): CaretPoint | null
+  /**
    * Press space-separated keys in Playwright's `keyboard.press` grammar
    * (`"Enter"`, `"Shift+Tab"`, `"Meta+a"`, `"a"`, `"Space"`) through the
    * focused element's input pipeline, each as a keydown then a keyup.
@@ -1155,6 +1168,12 @@ export declare class TestGpuixRenderer {
    * so a soft-wrapped match is provably two boxes.
    */
   getPaintedHighlights(): Array<HighlightMatch>
+  /** The rects of the text between two DOM positions, see the live renderer's. */
+  getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): Array<TextRect>
+  /** The DOM position at a window point, see the live renderer's. */
+  caretPositionFromPoint(x: number, y: number): CaretPoint | null
+  /** A DOM position moved along the lines of the painted text, see the live renderer's. */
+  moveCaretVisually(nodeId: number, offset: number, op: string, goalX?: number | undefined | null): CaretPoint | null
   /**
    * Drag-select from one point to another: mouse down, move, up.
    *
@@ -1700,6 +1719,18 @@ export interface BuildCounters {
    * once.
    */
   retainReasons: string
+}
+
+/** A DOM position, with where its caret is. */
+export interface CaretPoint {
+  /** The `#text` node. */
+  nodeId: number
+  /** The element that holds the paragraph of the node, from which JS finds the node. */
+  containerId: number
+  /** UTF-16 code units into the node's data. */
+  offset: number
+  /** Window x of the caret. For a move up or down, the x the caret is kept at. */
+  x: number
 }
 
 /**
@@ -2775,6 +2806,14 @@ export interface SyncDispatchResult {
   propagationStopped: boolean
   /** The `dropEffect` a `dragover` ended with. */
   dropEffect?: string
+}
+
+/** A rect in window coordinates. */
+export interface TextRect {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 /** `selectionStart`, `selectionEnd` and `selectionDirection` of a text control. */
