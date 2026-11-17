@@ -232,9 +232,10 @@ describeNative("content outside a clip", () => {
       const shown = refs.get("skipped").getBoundingClientRect()
       expect(shown.y).toBeGreaterThanOrEqual(0)
       expect(shown.y + shown.height).toBeLessThanOrEqual(CLIP.height)
-      // Focus the scroller's way back too.
+      // `first` is skipped now, as far above the clip as `skipped` was below it.
       renderer.simulateKeystrokes("Shift+Tab")
       expect(focused()).toBe("first")
+      expect(refs.get("scroller").scrollTop).toBe(0)
     } finally {
       unmount()
     }
@@ -312,7 +313,6 @@ describeNative("content outside a clip", () => {
     const entries: boolean[] = []
     const { renderer, skippedPerFrame, refs, unmount } = setup((ref) => (
       <div ref={ref("scroller")} style={{ ...CLIP, overflow: "auto" }}>
-        {/* Past the clip and the overscan of the rows a scroll can move. */}
         <div style={{ width: 150, height: SCROLLER_RECORDS_TO + 50, flexShrink: 0 }} />
         <div ref={ref("target")} style={{ width: 150, height: 30, flexShrink: 0 }} />
       </div>
