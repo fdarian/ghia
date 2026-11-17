@@ -438,9 +438,10 @@ struct Record {
     lift_run: bool,
     /// The element or something in it is lifted out of it, which a recording is not moved with.
     lifts: bool,
-    /// Something in it lifts out of it, past it to the context around (`Node::lifts_out`): the
-    /// part of `lifts` that is not its own `lift_z`.
-    lifts_out: bool,
+    /// A replay that moves it would skip the relevance watch of the element or one below it, because
+    /// the element lifts itself (`Node::lifts_watched`). Not `Node::lifts_out`: what an element hands to the
+    /// context around it is moved with it (gpui keeps a stub and a regional cell of each).
+    lifts_watched: bool,
     /// The element or something in it carries the relevance watch, `Below::watched` for the parent.
     watches: bool,
     /// What `Below::holes` added up to when it was built: what the lifted elements in it, however
@@ -740,7 +741,7 @@ struct Node {
     /// [`Retain::forced_host`].
     forced_host: bool,
     /// The element carries the relevance watch (`layout::content_visibility::watch`), see
-    /// [`Retain::watches_relevance`] and [`Node::lifts_out`].
+    /// [`Retain::watches_relevance`] and [`Node::lifts_watched`].
     watches_relevance: bool,
     /// An element above it is a forced host: it is built as the content of one.
     under_forced: bool,
@@ -761,20 +762,27 @@ impl Node {
     /// root that lifts itself and forms a context is recorded and moved whole, as gpui records
     /// it (`Retained::lift_z` with `Retained::relocatable`).
     ///
-    /// The exception is an element that carries the relevance watch, or has one below it: its own `lift_z`
-    /// counts. A replay that moves it skips the prepaint listener of the watch, which remembers its size and
-    /// answers whether it is near the viewport, and moving it is when that answer changes. What is below a
-    /// root that lifts itself was never moved with it until its own lift stopped keeping it in place, and it
-    /// is not moved now; a root that does not lift was always moved with what is below it.
+    /// What is handed to the context around the element is moved with a recording of it (gpui paints each box in
+    /// the region of the recording and hands it over, moved), so a replay is no reason to refuse it; see
+    /// [`Self::lifts_watched`] for what is, and [`Self::hands_lifts_out`] for what a patch declines.
     fn lifts_out(&self, below: &Below) -> bool {
-        (self.lift_z.is_some() && (self.watches_relevance || below.watched)) || self.hands_lifts_out(below)
+        self.lifts_watched(below) || self.hands_lifts_out(below)
+    }
+
+    /// Whether the element lifts itself and carries the relevance watch, or has one below it. A replay that
+    /// moves it skips the prepaint listener of the watch, which remembers its size and answers whether it is
+    /// near the viewport, and moving it is when that answer changes. What is below a root that lifts itself was
+    /// never moved with it until its own lift stopped keeping it in place, and it is not moved now; a root that
+    /// does not lift was always moved with what is below it.
+    fn lifts_watched(&self, below: &Below) -> bool {
+        self.lift_z.is_some() && (self.watches_relevance || below.watched)
     }
 
     /// Whether something below is handed to a stacking context around the element, which a patch of the element
     /// as one piece does not repeat (gpui declines it, `PatchDecline::Lifts`). The element's own lift is not this:
     /// gpui patches a lifted root in the place its context orders it, and what is lifted below a root that forms a
-    /// context goes into that context, inside the patch. Not [`Self::lifts_out`], whose relevance clause is for
-    /// the relocation of a replay: a patch prepaints the watch itself.
+    /// context goes into that context, inside the patch. A recording that is moved takes these along, so it is
+    /// not part of [`Self::lifts_watched`]: a patch prepaints the watch itself.
     fn hands_lifts_out(&self, below: &Below) -> bool {
         !self.forms_context && below.lifts
     }
@@ -826,7 +834,7 @@ struct Below {
     /// Something below is lifted out of the elements between it and here.
     lifts: bool,
     /// Something below carries the relevance watch, however far down: a replay that moves the element moves it too, and
-    /// skips its listener (see [`Node::lifts_out`]).
+    /// skips its listener (see [`Node::lifts_watched`]).
     watched: bool,
     /// The tokens of the lifted elements below that this one's recording holds a hole or a
     /// fragment for.
@@ -3089,7 +3097,7 @@ impl Retain {
                     Some(wrapped) if self.layout_only => wrapped,
                     _ => node
                         .scroller
-                        .filter(|scroller| scroller.holds(node.id) && !record.lifts_out)
+                        .filter(|scroller| scroller.holds(node.id) && !record.lifts_watched)
                         .map(|scroller| scroller.overscan),
                 };
                 let planned = overscan.is_some() && moved && record.seasoned;
@@ -3130,7 +3138,7 @@ impl Retain {
     /// to be moved, and frames are not resting from planning on it.
     fn relocates(&self, node: &Node, record: Option<&Record>) -> bool {
         !self.relocation.resting
-            && record.is_some_and(|record| !record.lifts_out)
+            && record.is_some_and(|record| !record.lifts_watched)
             && node.scroller.is_some_and(|scroller| scroller.holds(node.id))
     }
 
@@ -3202,7 +3210,7 @@ impl Retain {
         // a build that is not asked to move it does not. A pass that only lays out follows the wrap.
         if !self.layout_only
             && record.wrapped.is_some_and(|overscan| overscan.is_some())
-            && !(node.scroller.is_some_and(|scroller| scroller.holds(node.id)) && !record.lifts_out)
+            && !(node.scroller.is_some_and(|scroller| scroller.holds(node.id)) && !record.lifts_watched)
         {
             return Err(Kept::Unmoved);
         }
@@ -3264,12 +3272,13 @@ impl Retain {
         // frame after a patch of a row builds it (the record the patch kept is of the build before the edit), and it has
         // to be a recorded root again for the next edit of the row to be a patch.
         let lifts_out = node.lifts_out(own);
+        let lifts_watched = node.lifts_watched(own);
         // Any root that a scroller moved is recorded where it is built when `skippable` would move that recording, as
         // it moves the one a frame that moved nothing leaves: the frame after is a replay, not a build late in prepaint
         // to make the recording this one did not ask for. What gpui cannot move (a box too big for a root, a lift out
         // of the root, a stretch that does not plan on moves) is built and left unrecorded, since nothing would use it.
         let moves_with_scroller = !self.relocation.resting
-            && !lifts_out
+            && !lifts_watched
             && node.scroller.is_some_and(|scroller| scroller.fits(node.id) != Some(false));
         let moved = node.moved
             && !moves_with_scroller
@@ -3293,7 +3302,7 @@ impl Retain {
         let lifts = node.lift_z.is_some() || lifts_out;
         let overscan = node
             .scroller
-            .filter(|scroller| !lifts_out && scroller.fits(node.id) != Some(false))
+            .filter(|scroller| !lifts_watched && scroller.fits(node.id) != Some(false))
             .map(|scroller| scroller.overscan);
         Some(Recording {
             token: own.token,
@@ -3486,7 +3495,7 @@ impl Retain {
     }
 
     /// The element being built carries the relevance watch, which asks whether it is near the viewport
-    /// when it is prepainted: a replay that moves it does not run that, see [`Node::lifts_out`].
+    /// when it is prepainted: a replay that moves it does not run that, see [`Node::lifts_watched`].
     pub(crate) fn watches_relevance(&mut self) {
         if let Some(node) = self.top() {
             node.watches_relevance = true;
@@ -3801,13 +3810,14 @@ impl Retain {
             let unit_clear = node.exclusion.is_none() && own.excluded.is_none() && !escaped_below;
             let lifts_out = node.lifts_out(&own);
             let lifts = node.lift_z.is_some() || lifts_out;
+            let lifts_watched = node.lifts_watched(&own);
             let clean = own.changed.is_none() && !own.changed_below;
             let parent = (node.parent != NO_PARENT).then_some(node.parent as usize);
             self.moved[at] = parent.is_some_and(|parent| self.moved[parent] || self.below[parent].scrolled);
             // A root under a scroller that gpui can record to move is skipped by a frame that finds
             // the scroller moved. One that it cannot is built when it does.
             let holds = eligible
-                && !lifts_out
+                && !lifts_watched
                 && node.skipped.is_none()
                 && node.scroller.is_some_and(|scroller| scroller.holds(node.id));
             let relocates = holds && !self.relocation.resting;
@@ -3902,7 +3912,7 @@ impl Retain {
                     forms_context: node.forms_context,
                     lift_run: node.lift_run,
                     lifts,
-                    lifts_out,
+                    lifts_watched,
                     watches: node.watches_relevance || own.watched,
                     holes,
                     size: own.size,
