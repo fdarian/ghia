@@ -438,10 +438,11 @@ struct Record {
     lift_run: bool,
     /// The element or something in it is lifted out of it, which a recording is not moved with.
     lifts: bool,
-    /// A replay that moves it would skip the relevance watch of the element or one below it, because
-    /// the element lifts itself (`Node::lifts_watched`). Not `Node::lifts_out`: what an element hands to the
-    /// context around it is moved with it (gpui keeps a stub and a regional cell of each).
-    lifts_watched: bool,
+    /// gpui is not asked to move a recording of it (`Node::blocks_move`).
+    blocks_move: bool,
+    /// Something it hands to the context around it is a retained root of its own (a hole in the
+    /// recording, `Below::lifted_roots`).
+    lifted_roots: bool,
     /// The element or something in it carries the relevance watch, `Below::watched` for the parent.
     watches: bool,
     /// What `Below::holes` added up to when it was built: what the lifted elements in it, however
@@ -778,6 +779,13 @@ impl Node {
         self.lift_z.is_some() && (self.watches_relevance || below.watched)
     }
 
+    /// Whether a recording of the element is not asked to be moved by a scroller. gpui moves the boxes it hands to the
+    /// context around it when each is a plain box recorded in the region of the recording (a regional cell), and refuses a
+    /// recording that hands over a hole, a lifted retained root, so that is what keeps a root in place besides the watch.
+    fn blocks_move(&self, below: &Below) -> bool {
+        self.lifts_watched(below) || (self.hands_lifts_out(below) && below.lifted_roots)
+    }
+
     /// Whether something below is handed to a stacking context around the element, which a patch of the element
     /// as one piece does not repeat (gpui declines it, `PatchDecline::Lifts`). The element's own lift is not this:
     /// gpui patches a lifted root in the place its context orders it, and what is lifted below a root that forms a
@@ -833,6 +841,9 @@ struct Below {
     excluded: Option<Exclusion>,
     /// Something below is lifted out of the elements between it and here.
     lifts: bool,
+    /// Something below is handed to the context around the elements between it and here as a retained root of its own
+    /// with a `lift_z`: a hole in their recordings, which gpui does not move.
+    lifted_roots: bool,
     /// Something below carries the relevance watch, however far down: a replay that moves the element moves it too, and
     /// skips its listener (see [`Node::lifts_watched`]).
     watched: bool,
@@ -3097,7 +3108,7 @@ impl Retain {
                     Some(wrapped) if self.layout_only => wrapped,
                     _ => node
                         .scroller
-                        .filter(|scroller| scroller.holds(node.id) && !record.lifts_watched)
+                        .filter(|scroller| scroller.holds(node.id) && !record.blocks_move)
                         .map(|scroller| scroller.overscan),
                 };
                 let planned = overscan.is_some() && moved && record.seasoned;
@@ -3138,7 +3149,7 @@ impl Retain {
     /// to be moved, and frames are not resting from planning on it.
     fn relocates(&self, node: &Node, record: Option<&Record>) -> bool {
         !self.relocation.resting
-            && record.is_some_and(|record| !record.lifts_watched)
+            && record.is_some_and(|record| !record.blocks_move)
             && node.scroller.is_some_and(|scroller| scroller.holds(node.id))
     }
 
@@ -3210,7 +3221,7 @@ impl Retain {
         // a build that is not asked to move it does not. A pass that only lays out follows the wrap.
         if !self.layout_only
             && record.wrapped.is_some_and(|overscan| overscan.is_some())
-            && !(node.scroller.is_some_and(|scroller| scroller.holds(node.id)) && !record.lifts_watched)
+            && !(node.scroller.is_some_and(|scroller| scroller.holds(node.id)) && !record.blocks_move)
         {
             return Err(Kept::Unmoved);
         }
@@ -3272,13 +3283,13 @@ impl Retain {
         // frame after a patch of a row builds it (the record the patch kept is of the build before the edit), and it has
         // to be a recorded root again for the next edit of the row to be a patch.
         let lifts_out = node.lifts_out(own);
-        let lifts_watched = node.lifts_watched(own);
+        let blocks_move = node.blocks_move(own);
         // Any root that a scroller moved is recorded where it is built when `skippable` would move that recording, as
         // it moves the one a frame that moved nothing leaves: the frame after is a replay, not a build late in prepaint
         // to make the recording this one did not ask for. What gpui cannot move (a box too big for a root, a lift out
         // of the root, a stretch that does not plan on moves) is built and left unrecorded, since nothing would use it.
         let moves_with_scroller = !self.relocation.resting
-            && !lifts_watched
+            && !blocks_move
             && node.scroller.is_some_and(|scroller| scroller.fits(node.id) != Some(false));
         let moved = node.moved
             && !moves_with_scroller
@@ -3302,7 +3313,7 @@ impl Retain {
         let lifts = node.lift_z.is_some() || lifts_out;
         let overscan = node
             .scroller
-            .filter(|scroller| !lifts_watched && scroller.fits(node.id) != Some(false))
+            .filter(|scroller| !blocks_move && scroller.fits(node.id) != Some(false))
             .map(|scroller| scroller.overscan);
         Some(Recording {
             token: own.token,
@@ -3335,7 +3346,10 @@ impl Retain {
         let (escapes, epoch, token, holes, watches) = match (&node.skipped, self.records.get(&node.id)) {
             // Its children were never entered, so `own.lifts` is empty: what they lift is what its
             // last build folded, which is `Record::lifts`, and the same goes for the watch.
-            (Some(_), Some(record)) => (record.lifts, record.epoch, record.token, record.holes, record.watches),
+            (Some(_), Some(record)) => {
+                own.lifted_roots = record.lifted_roots;
+                (record.lifts, record.epoch, record.token, record.holes, record.watches)
+            }
             (Some(_), None) => unreachable!("an element is skipped by the record of its last build"),
             (None, before) => {
                 let escapes = node.lift_z.is_some() || node.lifts_out(&own);
@@ -3388,7 +3402,10 @@ impl Retain {
         if node.parent == NO_PARENT {
             return;
         }
+        // A lifted element that is a root of its own is handed over as a hole, and one that is not as a plain box.
+        let lifted_root = node.lift_z.is_some() && (node.skipped.is_some() || self.recording_as(at, node.box_root, false).is_some());
         let parent = &mut self.below[node.parent as usize];
+        parent.lifted_roots |= lifted_root || (!node.forms_context && own.lifted_roots);
         parent.changed_below |= own.changed.is_some() || own.changed_below;
         parent.lifts |= escapes;
         parent.watched |= watches;
@@ -3810,14 +3827,14 @@ impl Retain {
             let unit_clear = node.exclusion.is_none() && own.excluded.is_none() && !escaped_below;
             let lifts_out = node.lifts_out(&own);
             let lifts = node.lift_z.is_some() || lifts_out;
-            let lifts_watched = node.lifts_watched(&own);
+            let blocks_move = node.blocks_move(&own);
             let clean = own.changed.is_none() && !own.changed_below;
             let parent = (node.parent != NO_PARENT).then_some(node.parent as usize);
             self.moved[at] = parent.is_some_and(|parent| self.moved[parent] || self.below[parent].scrolled);
             // A root under a scroller that gpui can record to move is skipped by a frame that finds
             // the scroller moved. One that it cannot is built when it does.
             let holds = eligible
-                && !lifts_watched
+                && !blocks_move
                 && node.skipped.is_none()
                 && node.scroller.is_some_and(|scroller| scroller.holds(node.id));
             let relocates = holds && !self.relocation.resting;
@@ -3912,7 +3929,8 @@ impl Retain {
                     forms_context: node.forms_context,
                     lift_run: node.lift_run,
                     lifts,
-                    lifts_watched,
+                    blocks_move,
+                    lifted_roots: own.lifted_roots,
                     watches: node.watches_relevance || own.watched,
                     holes,
                     size: own.size,
