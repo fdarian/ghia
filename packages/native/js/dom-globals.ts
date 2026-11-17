@@ -27,6 +27,7 @@ import { NodeFilter, TreeWalker } from "./dom/tree-walker.js"
 import { Selection } from "./dom/selection.js"
 import { EVENT_CLASSES } from "./events/classes.js"
 import { replaceStandInDocumentElements, standInDocumentElements } from "./dom/stand-in-document.js"
+import { CaretPosition } from "./editing/caret-position.js"
 import { document, installStandInDocument, window } from "./events/window-target.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
 import { isWebBuild } from "./web-build.js"
@@ -72,6 +73,7 @@ const DOM_CLASSES = {
   AbstractRange,
   StaticRange,
   Range,
+  CaretPosition,
   MutationObserver,
   MutationRecord,
   DOMRect,

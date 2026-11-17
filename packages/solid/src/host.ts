@@ -784,6 +784,11 @@ class TextDomBinding implements TextBinding {
     return this.text.text
   }
 
+  get native(): TextBinding["native"] {
+    const text = this.text
+    return text.root && text.mounted ? { renderer: text.root.nativeRenderer, id: text.nativeId } : undefined
+  }
+
   setData(data: string): void {
     replaceHostText(this.text, data)
   }

@@ -22,6 +22,8 @@ import {
   type MotionValuePlayback,
   type PatchCounters,
   type WebAnimationEffectInfo,
+  type CaretPoint,
+  type TextRect,
   type WebAnimationInfo,
   type WebAnimationKeyframeInfo,
   type WebAnimationTimingUpdate,
@@ -494,6 +496,9 @@ interface NativeTestRendererApi
   getSelectedText(): string | null
   getPaintedText(): string[]
   getPaintedHighlights(): HighlightMatch[]
+  getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): TextRect[]
+  caretPositionFromPoint(x: number, y: number): CaretPoint | null
+  moveCaretVisually(nodeId: number, offset: number, op: string, goalX?: number | null): CaretPoint | null
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
@@ -2253,6 +2258,18 @@ export class TestRenderer implements NativeRenderer {
    *  draw one box per visual row, so each entry carries its `rects`. */
   getPaintedHighlights(): HighlightMatch[] {
     return this.native.getPaintedHighlights()
+  }
+
+  getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): TextRect[] {
+    return this.native.getTextRangeRects(startNodeId, startOffset, endNodeId, endOffset)
+  }
+
+  caretPositionFromPoint(x: number, y: number): CaretPoint | null {
+    return this.native.caretPositionFromPoint(x, y)
+  }
+
+  moveCaretVisually(nodeId: number, offset: number, op: string, goalX?: number | null): CaretPoint | null {
+    return this.native.moveCaretVisually(nodeId, offset, op, goalX)
   }
 
   /** Syntax-cache counters as `[hits, misses, documents]`. */

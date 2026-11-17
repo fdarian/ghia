@@ -3,12 +3,13 @@
  * A `Range` is live: `live-ranges.ts` moves its boundary points when the tree or a node's data
  * changes. A `StaticRange` is a plain pair of boundary points.
  *
- * `createContextualFragment` and `expand` are not here. `getBoundingClientRect` and `getClientRects` answer with the box of the element the start
- * container is, or is in, not the box of the selected text: see deviations.md.
+ * `createContextualFragment` and `expand` are not here. The rects of `getBoundingClientRect` and
+ * `getClientRects` are in `range-geometry.ts`.
  */
 
 import { namedError } from "../named-error.js"
 import { DOMRectList, DOMRect } from "./dom-rect.js"
+import { rangeBoundingClientRect, rangeClientRects } from "./range-geometry.js"
 import { registerLiveRange, type RangeBoundaries } from "./live-ranges.js"
 import {
   CharacterData,
@@ -16,7 +17,6 @@ import {
   Node,
   runtimeDocument,
   type DocumentFragment,
-  type Element,
   type ParentBinding,
   type Text,
   type TextBinding,
@@ -25,7 +25,6 @@ import { cloneNode } from "./clone.js"
 import { comparePoints, indexOfNode, isInclusiveAncestor, nodeLength, rootOf } from "./tree-order.js"
 import { assertCanInsert, replaceChildren } from "./tree-mutation.js"
 
-const ELEMENT_NODE = 1
 const TEXT_NODE = 3
 const DOCUMENT_NODE = 9
 const DOCUMENT_FRAGMENT_NODE = 11
@@ -643,19 +642,11 @@ class RangeClass extends AbstractRangeClass {
   }
 
   getBoundingClientRect(): DOMRect {
-    const element = this.#startElement()
-    return element === null ? new DOMRect() : (element as unknown as { getBoundingClientRect(): DOMRect }).getBoundingClientRect()
+    return rangeBoundingClientRect(this.#bounds)
   }
 
   getClientRects(): DOMRectList {
-    const element = this.#startElement()
-    return element === null ? new DOMRectList() : element.getClientRects()
-  }
-
-  #startElement(): Element | null {
-    const start = this.#bounds.startNode
-    if (start.nodeType === ELEMENT_NODE) return start as Element
-    return start.parentElement
+    return rangeClientRects(this.#bounds)
   }
 }
 

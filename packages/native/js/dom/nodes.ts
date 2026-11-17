@@ -87,6 +87,8 @@ export type ElementBinding = ParentBinding & StyleBinding & {
 
 export type TextBinding = NodeBinding & {
   readonly data: string
+  /** The renderer and id the text node is known by while it is mounted: where the painted text is read. */
+  readonly native?: { readonly renderer: NativeRenderer; readonly id: number } | undefined
   /** Replaces the text, and tells native and `MutationObserver` as a framework's own update does. */
   setData(data: string): void
   /** A text node of the window that owns this one, in no tree yet. */

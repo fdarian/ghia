@@ -4,8 +4,8 @@
  * (grapheme cluster) or a word of it.
  *
  * It has no layout, so the line of a text and the visual order of bidirectional text are unknown:
- * `left` and `right` read as `backward` and `forward`, and `line`, `paragraph` and the other
- * granularities are not here (see deviations.md). A block element or a `<br>` between two Text
+ * `left` and `right` read as `backward` and `forward`. Moves by line are native's (`editing/line-movement.ts`),
+ * and `paragraph` and `sentence` are not here (see deviations.md). A block element or a `<br>` between two Text
  * nodes reads as one `\n` that is not in any node, so a caret takes one step over a paragraph break
  * and none over the edge of an inline element. A `contenteditable="false"` element inside an editing
  * host is one atomic stop of one character, whatever it holds: a caret steps over it whole.

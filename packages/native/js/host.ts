@@ -4,10 +4,12 @@ import type {
   DebugFrameOverlayStats,
   EdgeInsets,
   ElementBounds,
+  CaretPoint,
   EventPayload,
   GpuixRenderer,
   HighlightMatch,
   PathPromptOptions,
+  TextRect,
   WindowInsets as NativeWindowInsets,
 } from "../index.js"
 import type { DomEvent, RootEvent } from "./events/dispatch.js"
@@ -25,12 +27,14 @@ import type { MotionValue } from "./motion-value.js"
 import type { MotionGestureName } from "./motion-variants.js"
 
 export type {
+  CaretPoint,
   DebugFrameOverlayStats,
   EdgeInsets,
   ElementBounds,
   HighlightMatch,
   NativeWindowInsets,
   PathPromptOptions,
+  TextRect,
 }
 
 export * from "./events/listeners.js"
@@ -45,6 +49,7 @@ export * from "./dom/element-types.js"
 export type { DomElementOf, RefElementOf } from "./dom/dom-element-of.js"
 export * from "./dom/mutation-observer.js"
 export * from "./dom/range.js"
+export * from "./editing/caret-position.js"
 export { hasLiveRanges, liveRangesAfterInsert, liveRangesBeforeRemove, liveRangesReplaceData } from "./dom/live-ranges.js"
 export { bumpTreeVersion } from "./dom/tree-version.js"
 export * from "./dom/attribute-names.js"
@@ -2931,6 +2936,9 @@ export type NativeRenderer = MutationHost &
       | "getSelectedText"
       | "clearSelection"
       | "getPaintedHighlights"
+      | "getTextRangeRects"
+      | "caretPositionFromPoint"
+      | "moveCaretVisually"
       | "getWindowSize"
       | "getWindowInsets"
       | "setWindowTitle"
