@@ -5,6 +5,7 @@
 //! (the pure half, with the lookup of a node's paragraph); [`geometry`] reads the last painted frame
 //! for the rects, hit tests and line moves JS asks for.
 
+pub mod caret;
 pub mod geometry;
 pub mod node_selection;
 pub mod positions;
@@ -35,8 +36,8 @@ impl Reads<'_> {
         geometry::text_range_rects(self.tree, self.window, dom_point(start_node, start_offset)?, dom_point(end_node, end_offset)?)
     }
 
-    /// What the last frame washed for the node selection. Test renderer only.
-    pub(crate) fn painted_node_selection(&self) -> Vec<node_selection::PaintedWash> {
+    /// What the last frame washed and put the caret at for the node selection. Test renderer only.
+    pub(crate) fn painted_node_selection(&self) -> node_selection::PaintedNodeSelection {
         node_selection::painted(self.window)
     }
 

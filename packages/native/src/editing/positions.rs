@@ -155,6 +155,18 @@ pub fn byte_of(paragraph: &Paragraph, node: u64, offset: usize) -> Option<usize>
     Some(source.map.byte_at(&paragraph.text, &piece.range, offset))
 }
 
+/// The bytes of the paragraph that the child `node` of a container takes: a text's, an atomic inline's
+/// or an inline box's (a line break is one). `None` when the paragraph does not hold it.
+pub fn extent_of(paragraph: &Paragraph, node: u64) -> Option<Range<usize>> {
+    if let Some((piece, _)) = text_pieces(paragraph).find(|(_, source)| source.node == node) {
+        return Some(piece.range.clone());
+    }
+    if let Some((_, piece)) = paragraph.atomics().find(|(id, _)| *id == node) {
+        return Some(piece.range.clone());
+    }
+    paragraph.boxes.iter().find(|(id, _)| *id == node).map(|(_, range)| range.clone())
+}
+
 /// The DOM position of `byte` of the paragraph text. A byte in something that is not text, a line
 /// break or an atomic inline, is the end of the text before it, or the start of the one after it
 /// when none is. `None` when the paragraph has no text node.

@@ -1171,10 +1171,10 @@ export declare class TestGpuixRenderer {
   /** The rects of the text between two DOM positions, see the live renderer's. */
   getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): Array<TextRect>
   /**
-   * What the last frame washed for the node selection (`setNodeSelection`): one entry for each washed
-   * paragraph, with the bytes and the boxes. Test renderer only.
+   * What the last frame drew for the node selection (`setNodeSelection`): one wash for each washed
+   * paragraph, with the bytes and the boxes, and the caret. Test renderer only.
    */
-  getPaintedNodeSelection(): Array<PaintedWash>
+  getPaintedNodeSelection(): PaintedNodeSelection
   /** The DOM position at a window point, see the live renderer's. */
   caretPositionFromPoint(x: number, y: number): CaretPoint | null
   /** A DOM position moved along the lines of the painted text, see the live renderer's. */
@@ -2592,6 +2592,26 @@ export interface ObservationClip {
   y: number
   width: number
   height: number
+}
+
+/** The caret of an editing host as the last painted frame drew it. */
+export interface PaintedNodeCaret {
+  /** The paragraph that holds it, as `container:index`; empty for the caret of an empty line, which has no paragraph. */
+  key: string
+  /** Where it is, in window coordinates. */
+  rect: TextRect
+  /** Whether it is in the phase of its blink that has a colour; it is painted in no colour in the other. */
+  lit: boolean
+}
+
+/** What the last painted frame drew for the node selection: the wash and the caret. */
+export interface PaintedNodeSelection {
+  washes: Array<PaintedWash>
+  /**
+   * `None` when no paragraph painted a caret: the selection is not collapsed, its host has no focus or the
+   * window is not key.
+   */
+  caret?: PaintedNodeCaret
 }
 
 /** One paragraph's node-selection wash as the last painted frame drew it. */

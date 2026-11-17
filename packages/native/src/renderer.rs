@@ -6386,6 +6386,8 @@ pub(crate) struct GpuixView {
     pub(crate) retain: crate::retain::Retain,
     /// What the retained roots wrote into the registries the last time they were built.
     pub(crate) tapes: crate::tape::Tapes,
+    /// The caret of the editing host the node selection is in, see `editing::caret`.
+    pub(crate) editing_caret: Rc<crate::editing::caret::EditingCaret>,
     /// Where the pointer is and what it is pressing.
     /// Shared with the window's mouse-down listener, which dispatches a press
     /// without reaching the view.
@@ -7408,6 +7410,7 @@ impl GpuixView {
                 retain
             },
             tapes: Default::default(),
+            editing_caret: crate::editing::caret::EditingCaret::new(Theme::dark().caret),
             pointer: Rc::new(RefCell::new(crate::events::state::PointerState::with_requests(
                 pointer_requests,
             ))),
@@ -8175,6 +8178,8 @@ pub(crate) struct BuildCtx<'a> {
     pub retain: &'a mut crate::retain::Retain,
     /// See `GpuixView::tapes`.
     pub tapes: &'a crate::tape::Tapes,
+    /// See `GpuixView::editing_caret`.
+    pub editing_caret: Rc<crate::editing::caret::EditingCaret>,
 }
 
 impl BuildCtx<'_> {
@@ -9073,6 +9078,12 @@ impl GpuixView {
         }
     }
 
+    /// Whether the caret of the node selection is painted: its editing host has focus and the window is key.
+    pub(crate) fn editing_caret_shown(&self, window: &gpui::Window) -> bool {
+        let tree = self.tree.lock().unwrap();
+        crate::editing::caret::is_shown(&tree, &self.focus_handles, window)
+    }
+
     pub(crate) fn focused_element_id(&self, window: &gpui::Window) -> Option<u64> {
         self.focus_handles
             .iter()
@@ -9444,6 +9455,7 @@ impl GpuixView {
             scroller: start.scroller,
             retain: &mut self.retain,
             tapes: &self.tapes,
+            editing_caret: self.editing_caret.clone(),
         }
     }
 
@@ -9939,6 +9951,7 @@ impl GpuixView {
             .copied()
             .collect();
         let value_bindings = self.bindings_of(self.motion_value_key(&tree, window));
+        let caret_shown = crate::editing::caret::is_shown(&tree, &self.focus_handles, window);
         let sources = crate::retain::Sources {
             tree: &tree,
             hovered: pointer.chains().0,
@@ -9956,6 +9969,7 @@ impl GpuixView {
             dormant: &|id| dormancy.holds(id),
             clock_due: &|id| {
                 self.custom_registry.clock_due(id)
+                    || self.editing_caret.due(id, caret_shown)
                     || match value_bindings {
                         Some(index) => self.motion_values.element_due(index, id),
                         None => motion_value_due(&self.motion_values, &tree, id),
@@ -10542,6 +10556,8 @@ impl gpui::Render for GpuixView {
         if !window.is_layout_pass() {
             self.tapes.begin_rows();
         }
+        let caret_shown = crate::editing::caret::is_shown(&tree, &self.focus_handles, window);
+        self.editing_caret.sync(window.window_handle().window_id(), tree.node_selection.generation(), caret_shown, cx.background_executor().now());
         self.retain.begin_frame(crate::retain::Sources {
             tree: &tree,
             hovered: pointer.chains().0,
@@ -10559,6 +10575,7 @@ impl gpui::Render for GpuixView {
             dormant: &|id| dormancy.holds(id),
             clock_due: &|id| {
                 self.custom_registry.clock_due(id)
+                    || self.editing_caret.due(id, caret_shown)
                     || match value_bindings {
                         Some(index) => self.motion_values.element_due(index, id),
                         None => motion_value_due(&self.motion_values, &tree, id),
@@ -13276,7 +13293,17 @@ fn build_plan(
             }
             crate::text::inline::Child::EmptyLine => {
                 placements.push(Placement { rank: 0, document: at });
-                content_elements.push(gpui::div().into_any_element());
+                let caret = crate::editing::caret::held_by_empty_line(&ctx.editing_caret, ctx.tree, ctx.focus_handles, element.id, plan, index, window);
+                content_elements.push(match caret {
+                    Some(caret) => {
+                        ctx.retain.blinks();
+                        if caret.shown {
+                            caret.state.keep_blinking(window, cx);
+                        }
+                        crate::editing::caret::empty_line(caret)
+                    }
+                    None => gpui::div().into_any_element(),
+                });
             }
             crate::text::inline::Child::AnonymousCell(_) | crate::text::inline::Child::AnonymousTable(_) => {
                 unreachable!("handled before")
@@ -13433,7 +13460,15 @@ fn paragraph_content(
         )
     };
     let node_wash: Vec<std::ops::Range<usize>> = ctx.tree.node_selection.wash_range(paragraph).into_iter().collect();
-    ctx.retain.digest(|| format!("{} {:?} {node_wash:?}", paragraph.text, styles.runs));
+    let caret = crate::editing::caret::held_by(&ctx.editing_caret, ctx.tree, ctx.focus_handles, paragraph, window);
+    if let Some(caret) = &caret {
+        // Held shown or not: what makes it due is the focus coming or going, as well as the clock.
+        ctx.retain.blinks();
+        if caret.shown {
+            caret.state.keep_blinking(window, cx);
+        }
+    }
+    ctx.retain.digest(|| format!("{} {:?} {node_wash:?} {:?}", paragraph.text, styles.runs, caret.as_ref().map(|caret| (caret.byte, caret.shown))));
     // A box in the paragraph, or the paragraph being inline content of a box, puts the texts around
     // and inside the boxes on one line for copy.
     let line = ctx
@@ -13516,6 +13551,7 @@ fn paragraph_content(
                 .map(crate::text::HighlightSource::Resolved),
             run_styles: styles.runs,
             node_wash,
+            caret,
             opacity_groups: styles.groups,
             aligned_boxes,
             atomics,

@@ -63,6 +63,8 @@ pub(crate) struct RegEntry {
     pub(crate) to_window: TransformationMatrix,
     /// The bytes the node selection washed, which a replay of the text puts back with it.
     pub(crate) node_wash: Vec<Range<usize>>,
+    /// The caret of the editing host that this paragraph painted, in the space of `layout`.
+    pub(crate) caret: Option<Bounds<gpui::Pixels>>,
 }
 
 impl RegEntry {
@@ -384,6 +386,7 @@ pub(crate) fn same_text_apart_from_transform(
         && left.line == right.line
         && left.cell == right.cell
         && left.node_wash == right.node_wash
+        && left.caret == right.caret
 }
 
 /// Whether two [`log_painted_text`] writes log the same text.
@@ -448,8 +451,9 @@ fn describe_text(entry: &RegEntry, doc: &selection::DocPos, with_matrix: bool, m
     let bounds = Bounds::new(bounds.origin + moved, bounds.size);
     let matrix = if with_matrix { format!(" {:?}", entry.to_window) } else { String::new() };
     let node_wash = if entry.node_wash.is_empty() { String::new() } else { format!(" node wash {:?}", entry.node_wash) };
+    let caret = entry.caret.map_or_else(String::new, |caret| format!(" caret {caret:?}"));
     format!(
-        "text {} {:?} {:?} {:?} {:?} {:?} {:?}{node_wash}{matrix}",
+        "text {} {:?} {:?} {:?} {:?} {:?} {:?}{node_wash}{caret}{matrix}",
         entry.key,
         doc,
         entry.text,
@@ -486,9 +490,12 @@ pub fn painted_highlights(window: WindowId) -> Vec<PaintedHighlight> {
     with_frame(window, |frame| frame.highlights.clone())
 }
 
-/// The paragraphs of `window`'s last frame that the node selection washed, with the bytes of each. Test-facing.
+/// The paragraphs of `window`'s last frame that the node selection washed or put its caret in, with the
+/// bytes of each. Test-facing.
 pub(crate) fn node_washed(window: WindowId) -> Vec<RegEntry> {
-    with_frame(window, |frame| frame.registry().iter().filter(|entry| !entry.node_wash.is_empty()).cloned().collect())
+    with_frame(window, |frame| {
+        frame.registry().iter().filter(|entry| !entry.node_wash.is_empty() || entry.caret.is_some()).cloned().collect()
+    })
 }
 
 /// Byte offset to UTF-16 code-unit offset, so the log speaks JS's units.
@@ -576,6 +583,8 @@ pub struct SelectableText {
     /// like the painted selection. It lives in the tree and not in `selection`, so a change to it
     /// invalidates the paragraph and not the frame.
     pub node_wash: Vec<Range<usize>>,
+    /// The caret of an editing host that is in this paragraph, painted over the wash.
+    pub caret: Option<crate::editing::caret::CaretPaint>,
     /// Paints additional quads under the glyphs before the selection wash:
     /// inline-code pills, word-diff highlights. Receives the laid-out text so
     /// it can turn byte ranges into rects with [`range_rects`].
@@ -652,6 +661,7 @@ impl SelectableText {
             selection,
             wash_color,
             node_wash: Vec::new(),
+            caret: None,
             extra_wash: None,
             links: Vec::new(),
             on_link: None,
@@ -689,6 +699,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         selection,
         wash_color,
         node_wash,
+        caret,
         extra_wash,
         links,
         on_link,
@@ -851,6 +862,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                     ));
                 }
             }
+            let painted_caret = caret.as_ref().and_then(|caret| caret.paint(&layout, window, cx.background_executor().now()));
             if selectable {
                 let entry = RegEntry {
                     key: key.clone(),
@@ -862,6 +874,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                     cell,
                     to_window: window.transform(),
                     node_wash,
+                    caret: painted_caret,
                 };
                 crate::tape::write_placed(
                     Kind::Text,
@@ -1663,6 +1676,7 @@ mod tests {
                 cell: None,
                 to_window: TransformationMatrix::unit(),
                 node_wash: Vec::new(),
+                caret: None,
             });
             frame.highlights.push(PaintedHighlight {
                 element_id: 1,

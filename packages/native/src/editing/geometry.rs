@@ -78,7 +78,7 @@ fn from_window(entry: &RegEntry, window: Point<Pixels>) -> Option<Point<Pixels>>
 }
 
 /// The window box of the rect `local` of the layout of `entry`: the smallest that holds its corners.
-fn window_rect(entry: &RegEntry, local: Bounds<Pixels>) -> Option<TextRect> {
+pub(crate) fn window_rect(entry: &RegEntry, local: Bounds<Pixels>) -> Option<TextRect> {
     let corners = [local.origin, local.top_right(), local.bottom_left(), local.bottom_right()];
     let mut min = point(f64::MAX, f64::MAX);
     let mut max = point(f64::MIN, f64::MIN);

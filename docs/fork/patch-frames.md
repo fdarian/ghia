@@ -255,6 +255,17 @@ A loop beside a focused or unfocused `input`, a `textarea` or an input out of th
 with every tick patched. At 13k elements 7.4 to 0.34 ms; at 1306, 1.16 to 0.34 ms. The blink is a patched frame that builds the input
 alone.
 
+### An editing host's caret is a tick
+
+The caret of a focused `contenteditable` (a collapsed node selection, [editing.md](editing.md#painting-the-caret)) blinks as an `<input>`'s does, and is the same kind of tick, with no custom element behind it: the paragraph that holds the caret is the unit.
+
+- **The holder notes `Retain::blinks`.** `paragraph_content` (and the empty-line arm of `build_plan`, for `<p><br></p>`) calls it for the container whenever it holds the caret, shown or not, so the container is `Dynamic::Blink` and, with nothing else running on it, `paints_only`: a unit of its own, whose tick builds it and what is in it and nothing around it.
+- **`Sources::clock_due` asks the editing caret.** `EditingCaret::due(id, shown)` is true for the container that painted the caret last when the blink changed phase since (the timer sets it, the paint clears it), or when it painted the caret shown or hidden and the caret is the other now: focus coming or going and the window going key reach a paragraph that no change touched, which `Retain::between_changes` would otherwise leave as it was painted.
+- **The caret is painted in both phases** (in no colour while it is off), so a patch has the operations of the recording; while it is not shown no quad is painted, and the frame that shows it is built whole.
+- **A caret nobody can see asks for none.** The task that waits for the end of the phase is armed by the build of the holder, only while the caret is shown (the host has focus, the window is key), and dropped whenever the selection changes. A caret scrolled out of view still ticks: a patch of one paragraph, not a frame.
+
+Test: `editing-caret.test.tsx` "blinks in patched frames that build the paragraph that holds the caret and nothing else".
+
 ### A loop under a positioned or translucent ancestor, or on an absolute element (#75)
 
 A colour or stroke loop on a text or an `<svg>` under a `position: relative`, `absolute` or `opacity < 1` wrapper drew every tick

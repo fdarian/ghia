@@ -2054,10 +2054,10 @@ impl TestGpuixRenderer {
         self.read_painted_dom(|reads| reads.text_range_rects(start_node_id, start_offset, end_node_id, end_offset))
     }
 
-    /// What the last frame washed for the node selection (`setNodeSelection`): one entry for each washed
-    /// paragraph, with the bytes and the boxes. Test renderer only.
+    /// What the last frame drew for the node selection (`setNodeSelection`): one wash for each washed
+    /// paragraph, with the bytes and the boxes, and the caret. Test renderer only.
     #[napi]
-    pub fn get_painted_node_selection(&self) -> Result<Vec<crate::editing::node_selection::PaintedWash>> {
+    pub fn get_painted_node_selection(&self) -> Result<crate::editing::node_selection::PaintedNodeSelection> {
         self.read_painted_dom(|reads| Ok(reads.painted_node_selection()))
     }
 

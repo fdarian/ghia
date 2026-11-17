@@ -18,6 +18,7 @@ mod attributes;
 mod automation;
 mod background_images;
 pub mod batch;
+mod caret;
 mod color;
 mod css;
 mod custom_elements;

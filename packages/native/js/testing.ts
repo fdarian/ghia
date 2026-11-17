@@ -23,7 +23,7 @@ import {
   type PatchCounters,
   type WebAnimationEffectInfo,
   type CaretPoint,
-  type PaintedWash,
+  type PaintedNodeSelection,
   type TextRect,
   type WebAnimationInfo,
   type WebAnimationKeyframeInfo,
@@ -497,7 +497,7 @@ interface NativeTestRendererApi
   getSelectedText(): string | null
   getPaintedText(): string[]
   getPaintedHighlights(): HighlightMatch[]
-  getPaintedNodeSelection(): PaintedWash[]
+  getPaintedNodeSelection(): PaintedNodeSelection
   getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): TextRect[]
   caretPositionFromPoint(x: number, y: number): CaretPoint | null
   moveCaretVisually(nodeId: number, offset: number, op: string, goalX?: number | null): CaretPoint | null
@@ -2263,11 +2263,13 @@ export class TestRenderer implements NativeRenderer {
   }
 
   /**
-   * What the last frame washed for the node selection (`getSelection()` over nodes): one entry for each
-   * washed paragraph, with the washed text as UTF-16 offsets into the paragraph and a box for each line.
-   * It reads what the frame painted, so a wash that did not follow a change shows here as it does on screen.
+   * What the last frame drew for the node selection (`getSelection()` over nodes): `washes` has one entry for
+   * each washed paragraph, with the washed text as UTF-16 offsets into the paragraph and a box for each line,
+   * and `caret` the caret of the editing host (its box in window coordinates, and whether it is in the lit
+   * phase of its blink) or nothing when none was painted. It reads what the frame painted, so a wash or a caret
+   * that did not follow a change shows here as it does on screen.
    */
-  getPaintedNodeSelection(): PaintedWash[] {
+  getPaintedNodeSelection(): PaintedNodeSelection {
     return this.native.getPaintedNodeSelection()
   }
 

@@ -13,7 +13,7 @@ use gpui::WindowId;
 use napi_derive::napi;
 use rustc_hash::FxHashSet;
 
-use super::geometry::{wash_rects, TextRect};
+use super::geometry::{wash_rects, window_rect, TextRect};
 use super::positions::{self, DomPoint};
 use crate::retained_tree::RetainedTree;
 use crate::text::inline::{is_raw_text, Paragraph};
@@ -58,6 +58,15 @@ struct Painted {
 pub struct NodeSelection {
     selection: Option<Selection>,
     painted: Painted,
+    /// Counts the changes of the selection JS sent, for what restarts with each (the blink of the caret).
+    generation: u64,
+}
+
+/// The caret of a collapsed selection in an editing host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Caret {
+    pub host: u64,
+    pub at: Boundary,
 }
 
 impl NodeSelection {
@@ -74,6 +83,27 @@ impl NodeSelection {
 
     pub fn is_collapsed(&self) -> bool {
         self.painted.span.is_none()
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// The caret: the selection is collapsed and inside an editing host.
+    pub fn caret(&self) -> Option<Caret> {
+        let selection = self.selection.as_ref()?;
+        (selection.anchor == selection.focus).then_some(())?;
+        Some(Caret { host: selection.host?, at: selection.focus })
+    }
+
+    /// Where in `paragraph` the caret is, if this is the paragraph that paints it.
+    pub fn caret_byte(&self, tree: &RetainedTree, paragraph: &Paragraph) -> Option<usize> {
+        let caret = self.caret()?;
+        let node = tree.elements.get(&caret.at.node)?;
+        if is_raw_text(node) {
+            return positions::byte_of(paragraph, node.id, caret.at.offset);
+        }
+        element_boundary_byte(tree, paragraph, node, caret.at.offset)
     }
 
     pub fn is_set(&self) -> bool {
@@ -94,12 +124,35 @@ pub struct PaintedWash {
     pub rects: Vec<TextRect>,
 }
 
-/// What the last painted frame washed for the node selection, in paint order: read from the texts the
-/// frame registered, so a replay that kept a stale wash shows here as it does on screen.
-pub fn painted(window: WindowId) -> Vec<PaintedWash> {
+/// The caret of an editing host as the last painted frame drew it.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct PaintedNodeCaret {
+    /// The paragraph that holds it, as `container:index`; empty for the caret of an empty line, which has no paragraph.
+    pub key: String,
+    /// Where it is, in window coordinates.
+    pub rect: TextRect,
+    /// Whether it is in the phase of its blink that has a colour; it is painted in no colour in the other.
+    pub lit: bool,
+}
+
+/// What the last painted frame drew for the node selection: the wash and the caret.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct PaintedNodeSelection {
+    pub washes: Vec<PaintedWash>,
+    /// `None` when no paragraph painted a caret: the selection is not collapsed, its host has no focus or the
+    /// window is not key.
+    pub caret: Option<PaintedNodeCaret>,
+}
+
+/// What the last painted frame drew for the node selection, in paint order: read from the texts the
+/// frame registered, so a replay that kept a stale wash or caret shows here as it does on screen.
+pub fn painted(window: WindowId) -> PaintedNodeSelection {
     let utf16 = |text: &str, byte: usize| text[..byte.min(text.len())].encode_utf16().count() as f64;
-    crate::text::paint::node_washed(window)
-        .into_iter()
+    let entries = crate::text::paint::node_washed(window);
+    let washes = entries
+        .iter()
         .flat_map(|entry| {
             entry
                 .node_wash
@@ -108,11 +161,51 @@ pub fn painted(window: WindowId) -> Vec<PaintedWash> {
                     key: entry.key.to_string(),
                     start: utf16(&entry.text, range.start),
                     end: utf16(&entry.text, range.end),
-                    rects: wash_rects(&entry, range),
+                    rects: wash_rects(entry, range),
                 })
                 .collect::<Vec<_>>()
         })
-        .collect()
+        .collect();
+    let lit = super::caret::painted_lit(window);
+    let caret = entries
+        .iter()
+        .find_map(|entry| Some(PaintedNodeCaret { key: entry.key.to_string(), rect: window_rect(entry, entry.caret?)?, lit: lit? }))
+        .or_else(|| {
+            let line = super::caret::painted_empty_line(window)?;
+            let number = |value: gpui::Pixels| f64::from(f32::from(value));
+            let rect = TextRect { x: number(line.origin.x), y: number(line.origin.y), width: number(line.size.width), height: number(line.size.height) };
+            Some(PaintedNodeCaret { key: String::new(), rect, lit: lit? })
+        });
+    PaintedNodeSelection { washes, caret }
+}
+
+/// Whether `child` is inline content that some paragraph of its parent paints.
+fn is_inline_content(tree: &RetainedTree, child: &crate::retained_tree::RetainedElement) -> bool {
+    is_raw_text(child) || crate::text::inline::is_atomic(child) || crate::text::inline::is_part_of_paragraph(tree, child)
+}
+
+/// Where in `paragraph` the boundary before child `index` of `element` is. An element has no text of its
+/// own to put a caret in, so it is where the content next to it is: the start of the child after the
+/// boundary, else the end of the one before, else (an empty inline box) the box itself. A boundary next to
+/// a block, or in an element that holds no inline content, is in no paragraph.
+fn element_boundary_byte(tree: &RetainedTree, paragraph: &Paragraph, element: &crate::retained_tree::RetainedElement, index: usize) -> Option<usize> {
+    use crate::layout::box_generation::is_display_none;
+    let visible = |id: &u64| tree.elements.get(id).filter(|child| !is_display_none(child));
+    let index = index.min(element.children.len());
+    if let Some(after) = element.children[index..].iter().find_map(visible) {
+        if is_inline_content(tree, after) {
+            return positions::extent_of(paragraph, after.id).map(|extent| extent.start);
+        }
+    }
+    if let Some(before) = element.children[..index].iter().rev().find_map(visible) {
+        if is_inline_content(tree, before) {
+            return positions::extent_of(paragraph, before.id).map(|extent| extent.end);
+        }
+    }
+    if element.id != paragraph.container && element.children.iter().all(|id| visible(id).is_none()) {
+        return positions::extent_of(paragraph, element.id).map(|extent| extent.start);
+    }
+    None
 }
 
 /// The path of child indices from the top of the tree to `node`.
@@ -274,6 +367,9 @@ fn update(tree: &mut RetainedTree, state: &mut NodeSelection) {
 /// `setNodeSelection`: the selection JS holds in this tree's root, or `None` when it left it.
 pub fn set(tree: &mut RetainedTree, selection: Option<Selection>) {
     let mut state = std::mem::take(&mut tree.node_selection);
+    if state.selection != selection {
+        state.generation += 1;
+    }
     state.selection = selection;
     update(tree, &mut state);
     tree.node_selection = state;
@@ -486,5 +582,92 @@ mod tests {
         f.select((11, 1), (999, 0));
         assert!(f.covered().is_empty());
         assert_eq!(f.wash(10), None);
+    }
+
+    impl Fixture {
+        fn caret_at(&mut self, node: u64, offset: usize) {
+            let at = Boundary { node, offset };
+            set(&mut self.tree, Some(Selection { anchor: at, focus: at, host: Some(1) }));
+        }
+
+        /// The byte of the caret in the first paragraph the container plans, if it is there.
+        fn caret(&self, container: u64) -> Option<usize> {
+            let planned = crate::text::plan_cache::planned(&self.tree, &self.tree.elements[&container]);
+            positions::paragraphs_of(&planned).into_iter().find_map(|paragraph| self.tree.node_selection.caret_byte(&self.tree, paragraph))
+        }
+    }
+
+    #[test]
+    fn a_collapsed_selection_in_a_host_is_a_caret_in_the_paragraph_of_its_text() {
+        let mut f = Fixture::paragraphs(&["abcdef", "other"]);
+        f.caret_at(21, 3);
+        assert_eq!(f.caret(10), None);
+        assert_eq!(f.caret(20), Some(3));
+        assert!(f.tree.node_selection.caret().is_some());
+    }
+
+    #[test]
+    fn a_selection_that_is_not_collapsed_or_has_no_host_is_no_caret() {
+        let mut f = Fixture::paragraphs(&["abcdef"]);
+        f.select((11, 1), (11, 1));
+        assert!(f.tree.node_selection.caret().is_none(), "JS sends no host for a selection outside one");
+        f.select((11, 1), (11, 3));
+        assert!(f.tree.node_selection.caret().is_none());
+        f.caret_at(11, 2);
+        f.clear();
+        assert!(f.tree.node_selection.caret().is_none());
+    }
+
+    #[test]
+    fn a_caret_at_an_element_is_where_the_content_next_to_it_is() {
+        let mut f = Fixture::new();
+        f.add(1, 10, "div").text(10, 11, "ab").add(10, 12, "br").add(10, 13, "br").text(10, 14, "cd");
+        // `ab\n\ncd`: before the first line break, between the two, before "cd", at the end.
+        f.caret_at(10, 0);
+        assert_eq!(f.caret(10), Some(0));
+        f.caret_at(10, 1);
+        assert_eq!(f.caret(10), Some(2));
+        f.caret_at(10, 2);
+        assert_eq!(f.caret(10), Some(3));
+        f.caret_at(10, 3);
+        assert_eq!(f.caret(10), Some(4));
+        f.caret_at(10, 4);
+        assert_eq!(f.caret(10), Some(6));
+    }
+
+    #[test]
+    fn a_caret_in_an_element_with_no_inline_content_is_in_no_paragraph() {
+        let mut f = Fixture::new();
+        f.add(1, 10, "div");
+        f.add(1, 20, "div").text(20, 21, "text");
+        f.caret_at(10, 0);
+        assert_eq!(f.caret(10), None);
+        assert_eq!(f.caret(1), None);
+        // Next to a block: the end of the inline content before it is not the caret's either, the block is.
+        f.caret_at(1, 1);
+        assert_eq!(f.caret(1), None);
+    }
+
+    #[test]
+    fn a_caret_in_an_inline_box_is_in_the_paragraph_around_it() {
+        let mut f = Fixture::new();
+        f.add(1, 10, "div").text(10, 11, "ab").add(10, 12, "span").text(12, 13, "cd");
+        f.caret_at(12, 0);
+        assert_eq!(f.caret(10), Some(2));
+        f.caret_at(12, 1);
+        assert_eq!(f.caret(10), Some(4));
+    }
+
+    #[test]
+    fn only_a_change_of_the_selection_restarts_the_clock() {
+        let mut f = Fixture::paragraphs(&["abcdef"]);
+        f.caret_at(11, 1);
+        let first = f.tree.node_selection.generation();
+        f.caret_at(11, 1);
+        assert_eq!(f.tree.node_selection.generation(), first);
+        f.caret_at(11, 2);
+        assert_eq!(f.tree.node_selection.generation(), first + 1);
+        f.clear();
+        assert_eq!(f.tree.node_selection.generation(), first + 2);
     }
 }

@@ -69,10 +69,10 @@ describeNative("the wash of a node selection (React)", () => {
   describe("what is washed", () => {
     it("washes exactly the selected text across two paragraphs and a wrapped line", async () => {
       const { texts, renderer, left, top } = mount(["aaaa bbbb cccc dddd", "second line", "third"], 10 * COLUMN + 0.5)
-      expect(renderer.getPaintedNodeSelection()).toEqual([])
+      expect(renderer.getPaintedNodeSelection().washes).toEqual([])
       document.getSelection().setBaseAndExtent(texts[0]!, 5, texts[1]!, 6)
       await shown(renderer)
-      const washes = renderer.getPaintedNodeSelection()
+      const washes = renderer.getPaintedNodeSelection().washes
       expect(washes.map((wash) => [wash.start, wash.end])).toEqual([
         [5, 19],
         [0, 6],
@@ -97,7 +97,7 @@ describeNative("the wash of a node selection (React)", () => {
       const { texts, renderer } = mount(["first line", "second line"])
       document.getSelection().setBaseAndExtent(texts[1]!, 3, texts[0]!, 2)
       await shown(renderer)
-      expect(renderer.getPaintedNodeSelection().map((wash) => [wash.start, wash.end])).toEqual([
+      expect(renderer.getPaintedNodeSelection().washes.map((wash) => [wash.start, wash.end])).toEqual([
         [2, 10],
         [0, 3],
       ])
@@ -108,7 +108,7 @@ describeNative("the wash of a node selection (React)", () => {
       const selection = document.getSelection()
       selection.selectAllChildren(host)
       await shown(renderer)
-      expect(renderer.getPaintedNodeSelection().map((wash) => [wash.start, wash.end])).toEqual([
+      expect(renderer.getPaintedNodeSelection().washes.map((wash) => [wash.start, wash.end])).toEqual([
         [0, 3],
         [0, 3],
         [0, 5],
@@ -116,7 +116,7 @@ describeNative("the wash of a node selection (React)", () => {
       ])
       selection.setBaseAndExtent(host, 1, host, 3)
       await shown(renderer)
-      expect(renderer.getPaintedNodeSelection().map((wash) => [wash.start, wash.end])).toEqual([
+      expect(renderer.getPaintedNodeSelection().washes.map((wash) => [wash.start, wash.end])).toEqual([
         [0, 3],
         [0, 5],
       ])
@@ -127,31 +127,31 @@ describeNative("the wash of a node selection (React)", () => {
       const selection = document.getSelection()
       selection.collapse(texts[0]!, 3)
       await shown(renderer)
-      expect(renderer.getPaintedNodeSelection()).toEqual([])
+      expect(renderer.getPaintedNodeSelection().washes).toEqual([])
       selection.setBaseAndExtent(texts[0]!, 1, texts[1]!, 4)
       await shown(renderer)
-      expect(renderer.getPaintedNodeSelection()).toHaveLength(2)
+      expect(renderer.getPaintedNodeSelection().washes).toHaveLength(2)
       selection.collapse(texts[1]!, 4)
       await shown(renderer)
-      expect(renderer.getPaintedNodeSelection()).toEqual([])
+      expect(renderer.getPaintedNodeSelection().washes).toEqual([])
       selection.setBaseAndExtent(texts[0]!, 1, texts[1]!, 4)
       await shown(renderer)
       selection.removeAllRanges()
       await shown(renderer)
-      expect(renderer.getPaintedNodeSelection()).toEqual([])
+      expect(renderer.getPaintedNodeSelection().washes).toEqual([])
     })
 
     it("follows an edit of the text it selects, in the same frame as the edit", async () => {
       const { host, texts, renderer } = mount(["first line", "second line"])
       document.getSelection().setBaseAndExtent(texts[0]!, 2, texts[1]!, 3)
       await shown(renderer)
-      expect(renderer.getPaintedNodeSelection().map((wash) => [wash.start, wash.end])).toEqual([
+      expect(renderer.getPaintedNodeSelection().washes.map((wash) => [wash.start, wash.end])).toEqual([
         [2, 10],
         [0, 3],
       ])
       ;(host.firstElementChild!.firstChild as Text).appendData(", longer")
       await shown(renderer)
-      expect(renderer.getPaintedNodeSelection().map((wash) => [wash.start, wash.end])).toEqual([
+      expect(renderer.getPaintedNodeSelection().washes.map((wash) => [wash.start, wash.end])).toEqual([
         [2, 18],
         [0, 3],
       ])
@@ -165,7 +165,7 @@ describeNative("the wash of a node selection (React)", () => {
       added.textContent = "between"
       host.insertBefore(added, host.children[1]!)
       await shown(renderer)
-      expect(renderer.getPaintedNodeSelection().map((wash) => [wash.start, wash.end])).toEqual([
+      expect(renderer.getPaintedNodeSelection().washes.map((wash) => [wash.start, wash.end])).toEqual([
         [1, 5],
         [0, 7],
         [0, 2],
@@ -186,7 +186,7 @@ describeNative("the wash of a node selection (React)", () => {
       return {
         built: after.elementsBuilt - before.elementsBuilt,
         skipped: after.elementsSkipped - before.elementsSkipped,
-        washed: renderer.getPaintedNodeSelection().map((wash) => [wash.start, wash.end]),
+        washed: renderer.getPaintedNodeSelection().washes.map((wash) => [wash.start, wash.end]),
       }
     }
 
@@ -271,7 +271,7 @@ describeNative("the wash of a node selection (React)", () => {
       const text = host.firstChild!.firstChild as Text
       selection.setBaseAndExtent(text, 2, text, 8)
       await shown(renderer)
-      expect(renderer.getPaintedNodeSelection()).toHaveLength(1)
+      expect(renderer.getPaintedNodeSelection().washes).toHaveLength(1)
       expect(renderer.getSelectedText()).toBeNull()
 
       expect(renderer.dragSelect(21, 30, 500, 30)).toBe("outside the host")
@@ -280,12 +280,12 @@ describeNative("the wash of a node selection (React)", () => {
       expect(selection.type).toBe("Range")
       expect(selection.anchorNode).toBeNull()
       expect(renderer.getSelectedText()).toBe("outside the host")
-      expect(renderer.getPaintedNodeSelection()).toEqual([])
+      expect(renderer.getPaintedNodeSelection().washes).toEqual([])
 
       selection.setBaseAndExtent(text, 0, text, 6)
       await shown(renderer)
       expect(renderer.getSelectedText()).toBeNull()
-      expect(renderer.getPaintedNodeSelection().map((wash) => [wash.start, wash.end])).toEqual([[0, 6]])
+      expect(renderer.getPaintedNodeSelection().washes.map((wash) => [wash.start, wash.end])).toEqual([[0, 6]])
     })
   })
 })
