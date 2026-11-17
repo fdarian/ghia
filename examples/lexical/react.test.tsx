@@ -1,4 +1,3 @@
-import { writeFileSync } from 'node:fs'
 import type { ReactNode } from 'react'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { LexicalComposer } from '@lexical/react/LexicalComposer'
@@ -14,12 +13,6 @@ import {
   $getRoot,
   CAN_USE_BEFORE_INPUT,
   CAN_USE_DOM,
-  IS_ANDROID,
-  IS_APPLE,
-  IS_CHROME,
-  IS_FIREFOX,
-  IS_IOS,
-  IS_SAFARI,
   type LexicalEditor,
 } from 'lexical'
 import { createTestRoot, hasNativeTestRenderer } from '@ghia/react/testing'
@@ -28,20 +21,9 @@ import { settle } from '../base-ui/harness'
 // Real Lexical (LexicalComposer, RichTextPlugin, ContentEditable, HistoryPlugin, OnChangePlugin) running unchanged on
 // Ghia's contenteditable support. Runs on the plugins an app's Vite config has, which `vitest.config.ts` cannot share:
 // the `ghia()` environment inlines safe-mdx's browser-only dependencies, which the other examples' tests would trip on.
-// `react-report.json` records what the run observed; the assertions are the test.
+//
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
-
-type Json = Record<string, unknown>
-const report: Json = {}
-const note = (key: string, value: unknown): void => {
-  report[key] = value
-}
-
-const errorText = (error: unknown): Json => {
-  if (!(error instanceof Error)) return { thrown: String(error) }
-  return { name: error.name, message: error.message, stack: (error.stack ?? '').split('\n').slice(0, 10) }
-}
 
 const uncaught: unknown[] = []
 const changes: unknown[] = []
@@ -110,7 +92,6 @@ describeNative('Lexical (React bindings) on Ghia', () => {
       await settle(root)
     }
   }
-  const snapshot = (): Json => ({ lexical: paragraphs(), painted: root.renderer.getPaintedText(), dom: rootElement().textContent })
 
   beforeAll(async () => {
     // The Element prototype only exists once an element does; a throwaway root supplies one so Lexical's
@@ -137,7 +118,6 @@ describeNative('Lexical (React bindings) on Ghia', () => {
 
   afterAll(() => {
     root.unmount()
-    writeFileSync(new URL('./react-report.json', import.meta.url), JSON.stringify(report, null, 2))
   })
 
   it('1. mounts without an error and paints "Hello Lexical"', () => {
@@ -150,23 +130,10 @@ describeNative('Lexical (React bindings) on Ghia', () => {
     expect('getTargetRanges' in new InputEvent('input')).toBe(true)
     expect(CAN_USE_BEFORE_INPUT).toBe(true)
     expect(beforeInputTargets.includes(rootElement())).toBe(true)
-    note('1.mount', {
-      painted: root.renderer.getPaintedText(),
-      lexicalText: lexicalText(),
-      CAN_USE_BEFORE_INPUT,
-      beforeInputListenerOnRoot: beforeInputTargets.includes(rootElement()),
-      rootAttributes: Object.fromEntries(rootElement().getAttributeNames().map((name) => [name, rootElement().getAttribute(name)])),
-    })
   })
 
-  it('9. records navigator and the Lexical environment flags', () => {
-    note('9.environment', {
-      userAgent: navigator.userAgent,
-      platform: navigator.platform,
-      maxTouchPoints: navigator.maxTouchPoints,
-      // As Lexical.dev.js computes them from the two strings above (testPlatform / testUserAgent, :59-113).
-      flags: { CAN_USE_DOM, CAN_USE_BEFORE_INPUT, IS_APPLE, IS_SAFARI, IS_CHROME, IS_FIREFOX, IS_IOS, IS_ANDROID },
-    })
+  it('9. exposes the DOM the Lexical environment flags read', () => {
+    expect(CAN_USE_DOM).toBe(true)
     expect(typeof navigator.userAgent).toBe('string')
     expect(typeof navigator.platform).toBe('string')
   })
@@ -186,11 +153,9 @@ describeNative('Lexical (React bindings) on Ghia', () => {
     selection.setBaseAndExtent(textNode, 5, textNode, 5)
     await nextTask()
     await settle(root)
-    note('3.selectionAfterSet', { anchorOffset: selection.anchorOffset, anchorIsText: selection.anchorNode === textNode, type: selection.type })
     await press('a b c')
     await nextTask()
     await settle(root)
-    note('3.type-abc', { ...snapshot(), onChangeCalls: changes.length - changesBefore })
     expect(lexicalText()).toBe('Helloabc Lexical')
     expect(painted()).toContain('Helloabc Lexical')
     expect(changes.length).toBeGreaterThan(changesBefore)
@@ -201,7 +166,6 @@ describeNative('Lexical (React bindings) on Ghia', () => {
     await press('Backspace')
     await nextTask()
     await settle(root)
-    note('4.backspace', snapshot())
     expect(lexicalText()).toBe('Helloab Lexical')
     expect(painted()).toContain('Helloab Lexical')
   })
@@ -210,7 +174,6 @@ describeNative('Lexical (React bindings) on Ghia', () => {
     await press('Enter')
     await nextTask()
     await settle(root)
-    note('5.enter', { ...snapshot(), paragraphElements: rootElement().querySelectorAll('p').length })
     expect(paragraphs().length).toBe(2)
     expect(rootElement().querySelectorAll('p').length).toBe(2)
     const text = painted()
@@ -218,40 +181,40 @@ describeNative('Lexical (React bindings) on Ghia', () => {
     expect(text).toContain(' Lexical')
   })
 
-  it('6. undo through HistoryPlugin (recorded, not required)', async () => {
-    const before = snapshot()
-    let error: unknown
-    try {
-      root.renderer.simulateKeystrokes('ControlOrMeta+z')
-      await nextTask()
-      await settle(root)
-    } catch (thrown) {
-      error = thrown
-    }
-    note('6.undo', { before, after: snapshot(), threw: error === undefined ? null : errorText(error) })
-    expect(error).toBeUndefined()
+  it('6. undo through HistoryPlugin takes the Enter back', async () => {
+    expect(paragraphs()).toEqual(['Helloab', ' Lexical'])
+    root.renderer.simulateKeystrokes('ControlOrMeta+z')
+    await nextTask()
+    await settle(root)
+    expect(paragraphs()).toEqual(['Helloab Lexical'])
+    expect(rootElement().textContent).toBe('Helloab Lexical')
+    expect(painted()).toContain('Helloab Lexical')
+    expect(uncaught).toEqual([])
   })
 
-  it('7. a click on the editable does not throw and the editor still updates', async () => {
+  it('7. a click on the editable is harmless: the selection stays where it was put and typing goes there', async () => {
+    // Put the caret at the start explicitly, so nothing depends on where an earlier step left it.
+    const textNode = rootElement().querySelector('span')?.firstChild
+    if (textNode === null || textNode === undefined) throw new Error('no text node under the editable root')
+    const selection = getSelection()
+    if (selection === null) throw new Error('getSelection() returned null')
+    selection.setBaseAndExtent(textNode, 0, textNode, 0)
+    await nextTask()
+    await settle(root)
+    const first = paragraphs()[0]
     const box = rootElement().getBoundingClientRect()
-    let error: unknown
-    try {
-      root.renderer.nativeSimulateMouseDown(box.x + 10, box.y + 8)
-      root.renderer.nativeSimulateMouseUp(box.x + 10, box.y + 8)
-      await nextTask()
-      await settle(root)
-    } catch (thrown) {
-      error = thrown
-    }
-    expect(error).toBeUndefined()
+    root.renderer.nativeSimulateMouseDown(box.x + 10, box.y + 8)
+    root.renderer.nativeSimulateMouseUp(box.x + 10, box.y + 8)
+    await nextTask()
+    await settle(root)
     expect(uncaught).toEqual([])
-    const before = lexicalText()
+    // A click in an editing host does not move the node selection yet (deviations.md), so it still sits at the start.
+    expect([selection.anchorNode === textNode, selection.anchorOffset, selection.isCollapsed]).toEqual([true, 0, true])
+    expect(document.activeElement === rootElement()).toBe(true)
     await press('z')
     await nextTask()
     await settle(root)
-    note('7.click', { threw: error === undefined ? null : errorText(error), before, after: snapshot(), activeIsRoot: document.activeElement === rootElement() })
-    expect(lexicalText()).not.toBe(before)
-    expect(lexicalText()).toContain('z')
+    expect(paragraphs()[0]).toBe(`z${first}`)
   })
 
   it('8. editor.update replacing the content paints "Updated"', async () => {
@@ -263,7 +226,6 @@ describeNative('Lexical (React bindings) on Ghia', () => {
     })
     await nextTask()
     await settle(root)
-    note('8.update', { ...snapshot(), onChangeCalls: changes.length - changesBefore })
     expect(lexicalText()).toBe('Updated')
     expect(painted()).toContain('Updated')
     expect(changes.length).toBeGreaterThan(changesBefore)

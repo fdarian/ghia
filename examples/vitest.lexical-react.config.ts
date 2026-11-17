@@ -7,7 +7,7 @@ applyMacCpuThrottleFromEnv()
 
 // The Lexical React spike runs on the plugins an app's Vite config has (`vite.config.mts`): `ghia()` inlines
 // every dependency, resolves them with the browser conditions and installs the DOM globals; `react()` aliases the
-// `react-dom` that `@floating-ui/react-dom` and Base UI import to `@ghia/react`'s. It cannot share `vitest.config.ts`:
+// `react-dom` that the libraries import to `@ghia/react`'s. It cannot share `vitest.config.ts`:
 // the plugin's environment inlines safe-mdx's browser-only dependencies, which the other examples' tests would trip on.
 export default defineConfig({
   plugins: [ghia(), react()],

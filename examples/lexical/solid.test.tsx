@@ -1,5 +1,4 @@
 import { createRoot, onMount } from 'solid-js'
-import { writeFileSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   $createParagraphNode,
@@ -8,12 +7,6 @@ import {
   CAN_USE_BEFORE_INPUT,
   CAN_USE_DOM,
   createEditor,
-  IS_ANDROID,
-  IS_APPLE,
-  IS_CHROME,
-  IS_FIREFOX,
-  IS_IOS,
-  IS_SAFARI,
   type LexicalEditor,
 } from 'lexical'
 import { registerRichText } from '@lexical/rich-text'
@@ -21,22 +14,10 @@ import { createEmptyHistoryState, registerHistory } from '@lexical/history'
 import { createTestRoot, hasNativeTestRenderer } from '@ghia/solid/testing'
 
 // Vanilla Lexical (createEditor, registerRichText, registerHistory, setRootElement) inside a @ghia/solid component,
-// running unchanged on Ghia's contenteditable support. `solid-report.json` records what the run observed; the
-// assertions are the test. The editor lives across the steps, so this file mounts its own root instead of using
+// running unchanged on Ghia's contenteditable support. The editor lives across the steps, so this file mounts its own root instead of using
 // `../solid-harness`, whose `mount` is unmounted after every test.
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
-
-type Json = Record<string, unknown>
-const report: Json = {}
-const note = (key: string, value: unknown): void => {
-  report[key] = value
-}
-
-const errorText = (error: unknown): Json => {
-  if (!(error instanceof Error)) return { thrown: String(error) }
-  return { name: error.name, message: error.message, stack: (error.stack ?? '').split('\n').slice(0, 10) }
-}
 
 describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
   const uncaught: unknown[] = []
@@ -65,7 +46,6 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
   }
   const paragraphs = (): string[] => editor.getEditorState().read(() => $getRoot().getChildren().map((child) => child.getTextContent()))
   const lexicalText = (): string => editor.getEditorState().read(() => $getRoot().getTextContent())
-  const snapshot = (): Json => ({ lexical: paragraphs(), painted: root.renderer.getPaintedText(), dom: element.textContent })
 
   beforeAll(async () => {
     root = createTestRoot({ width: 640, height: 480, onUncaughtError: (error: unknown) => uncaught.push(error) })
@@ -117,7 +97,6 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
     for (const cleanup of unregister.reverse()) cleanup()
     disposeUi?.()
     root?.unmount()
-    writeFileSync(new URL('./solid-report.json', import.meta.url), JSON.stringify(report, null, 2))
   })
 
   it('1. mounts without an error and paints "Hello Solid"', () => {
@@ -131,23 +110,10 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
     expect('getTargetRanges' in new InputEvent('input')).toBe(true)
     expect(CAN_USE_BEFORE_INPUT).toBe(true)
     expect(beforeInputTargets.includes(element)).toBe(true)
-    note('1.mount', {
-      painted: root.renderer.getPaintedText(),
-      lexicalText: lexicalText(),
-      CAN_USE_BEFORE_INPUT,
-      beforeInputListenerOnRoot: beforeInputTargets.includes(element),
-      rootAttributes: Object.fromEntries(element.getAttributeNames().map((name) => [name, element.getAttribute(name)])),
-    })
   })
 
-  it('9. records navigator and the Lexical environment flags', () => {
-    note('9.environment', {
-      userAgent: navigator.userAgent,
-      platform: navigator.platform,
-      maxTouchPoints: navigator.maxTouchPoints,
-      // As Lexical.dev.js computes them from the two strings above (testPlatform / testUserAgent, :59-113).
-      flags: { CAN_USE_DOM, CAN_USE_BEFORE_INPUT, IS_APPLE, IS_SAFARI, IS_CHROME, IS_FIREFOX, IS_IOS, IS_ANDROID },
-    })
+  it('9. exposes the DOM the Lexical environment flags read', () => {
+    expect(CAN_USE_DOM).toBe(true)
     expect(typeof navigator.userAgent).toBe('string')
     expect(typeof navigator.platform).toBe('string')
   })
@@ -166,10 +132,8 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
     const updatesBefore = updates.length
     selection.setBaseAndExtent(textNode, 5, textNode, 5)
     await settle()
-    note('3.selectionAfterSet', { anchorOffset: selection.anchorOffset, anchorIsText: selection.anchorNode === textNode, type: selection.type })
     await press('a b c')
     await settle()
-    note('3.type-abc', { ...snapshot(), updateListenerCalls: updates.length - updatesBefore })
     expect(lexicalText()).toBe('Helloabc Solid')
     expect(painted()).toContain('Helloabc Solid')
     expect(updates.length).toBeGreaterThan(updatesBefore)
@@ -179,7 +143,6 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
   it('4. Backspace removes one character from Lexical state and paint', async () => {
     await press('Backspace')
     await settle()
-    note('4.backspace', snapshot())
     expect(lexicalText()).toBe('Helloab Solid')
     expect(painted()).toContain('Helloab Solid')
   })
@@ -187,7 +150,6 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
   it('5. Enter adds a paragraph', async () => {
     await press('Enter')
     await settle()
-    note('5.enter', { ...snapshot(), paragraphElements: element.querySelectorAll('p').length })
     expect(paragraphs().length).toBe(2)
     expect(element.querySelectorAll('p').length).toBe(2)
     const text = painted()
@@ -195,37 +157,36 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
     expect(text).toContain(' Solid')
   })
 
-  it('6. undo through registerHistory (recorded, not required)', async () => {
-    const before = snapshot()
-    let error: unknown
-    try {
-      root.renderer.simulateKeystrokes('ControlOrMeta+z')
-      await settle()
-    } catch (thrown) {
-      error = thrown
-    }
-    note('6.undo', { before, after: snapshot(), threw: error === undefined ? null : errorText(error) })
-    expect(error).toBeUndefined()
+  it('6. undo through registerHistory takes the Enter back', async () => {
+    expect(paragraphs()).toEqual(['Helloab', ' Solid'])
+    root.renderer.simulateKeystrokes('ControlOrMeta+z')
+    await settle()
+    expect(paragraphs()).toEqual(['Helloab Solid'])
+    expect(element.textContent).toBe('Helloab Solid')
+    expect(painted()).toContain('Helloab Solid')
+    expect(uncaught).toEqual([])
   })
 
-  it('7. a click on the editable does not throw and the editor still updates', async () => {
+  it('7. a click on the editable is harmless: the selection stays where it was put and typing goes there', async () => {
+    // Put the caret at the start explicitly, so nothing depends on where an earlier step left it.
+    const textNode = element.querySelector('span')?.firstChild
+    if (textNode === null || textNode === undefined) throw new Error('no text node under the editable root')
+    const selection = getSelection()
+    if (selection === null) throw new Error('getSelection() returned null')
+    selection.setBaseAndExtent(textNode, 0, textNode, 0)
+    await settle()
+    const first = paragraphs()[0]
     const box = element.getBoundingClientRect()
-    let error: unknown
-    try {
-      root.renderer.nativeSimulateMouseDown(box.x + 10, box.y + 8)
-      root.renderer.nativeSimulateMouseUp(box.x + 10, box.y + 8)
-      await settle()
-    } catch (thrown) {
-      error = thrown
-    }
-    expect(error).toBeUndefined()
+    root.renderer.nativeSimulateMouseDown(box.x + 10, box.y + 8)
+    root.renderer.nativeSimulateMouseUp(box.x + 10, box.y + 8)
+    await settle()
     expect(uncaught).toEqual([])
-    const before = lexicalText()
+    // A click in an editing host does not move the node selection yet (deviations.md), so it still sits at the start.
+    expect([selection.anchorNode === textNode, selection.anchorOffset, selection.isCollapsed]).toEqual([true, 0, true])
+    expect(document.activeElement === element).toBe(true)
     await press('z')
     await settle()
-    note('7.click', { threw: error === undefined ? null : errorText(error), before, after: snapshot(), activeIsRoot: document.activeElement === element })
-    expect(lexicalText()).not.toBe(before)
-    expect(lexicalText()).toContain('z')
+    expect(paragraphs()[0]).toBe(`z${first}`)
   })
 
   it('8. editor.update replacing the content paints "Updated"', async () => {
@@ -236,7 +197,6 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
       $getRoot().clear().append(paragraph)
     })
     await settle()
-    note('8.update', { ...snapshot(), updateListenerCalls: updates.length - updatesBefore })
     expect(lexicalText()).toBe('Updated')
     expect(painted()).toContain('Updated')
     expect(updates.length).toBeGreaterThan(updatesBefore)
