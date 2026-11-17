@@ -99,6 +99,8 @@ the press, and `press_outcome` (pure, per platform) decides.
 - **The resync after a paint** (a layout that moved under a still pointer) is deferred until the draw has swapped frames,
   because `window_control_area_at` reads the rendered frame. A bar that appears under the pointer is a region from its
   first frame, and hover leaves once.
+  Not after a frame that only a scroll caused: a scroll marks the hover dirty and it follows when the scroll ends
+  ([scroll.md](scroll.md#the-hover-under-a-still-pointer)).
 
 ### What the page sees
 

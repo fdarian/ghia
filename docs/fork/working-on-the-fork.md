@@ -277,9 +277,11 @@ See [patch-frames.md](patch-frames.md).
   the pass stamps) and `Origin` (`range_now`) are what makes a replay a step per root: a path that copies states or visits
   nested roots per element undoes it. `patch_tests.rs` and the retained fuzz under the verifier are the check.
 - **zed `elements/retained.rs` (`record_prepaint`, `paint_subtree`, `prepaint_skipped`) and `window/patch.rs` (`patch_blocker`, `Frame::relocated`):**
-  a relocatable root keeps its `PatchUnit` while its recording is plain but for its own scene, and registers it only at the place it was
-  recorded (`delta` zero and the key equal); anything that puts the recording elsewhere has to note it as relocated, and a patch of
-  such a root makes the recordings stale for the scroll translate. `PaintOperation::differs_from` compares the fields of the kinds it
+  a relocatable root keeps its `PatchUnit` while its recording is plain but for its own scene, and registers it at the place it was
+  recorded (`delta` zero and the key equal) and at a place a replay put it, when its recording is in a region of its own under the mask it was
+  recorded under and holds no scroller of its own that the user scrolls or that is scrolled (`ScrollerRecord::blocks_moved_patch`; an `overflow: hidden` box at offset zero holds none): the state a scroll translate leaves it in, where a patch paints in the region, puts the result `delta` away and rewrites
+  the recording, so the translate after it moves what the patch painted. Anything else that puts the recording elsewhere has to note it as
+  relocated, and a patch that leaves such a recording as it was makes the recordings stale for the scroll translate. `PaintOperation::differs_from` compares the fields of the kinds it
   lists (`fields_equal`) before it formats, and says "differs" with no formatting when one of them does (a quad that a hover gave another background: 34 fallbacks in 18 crossings, all of them quads): a new field of `Quad` or `MonochromeSprite` has to be in it, or an operation that differs only there reads as the same. `hover_patch_tests.rs`, and the scene test that changes each field alone.
 - **gpuix anchors (`Retain::begin_anchor`, `end_anchor`, `anchor_repainted`, `RetainedTree::structure_attributed`, `pending_structure`, `TapeStore::replace_recorded`, `Layered::replace`):**
   a change the tree names no element for (a new mutation that takes a revision without `mark_changed`) moves `patch_barrier`, and one that

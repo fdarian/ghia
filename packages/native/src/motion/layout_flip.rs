@@ -661,6 +661,11 @@ impl LayoutFlips {
         store.ticking && revision != store.painted_revision && store.flips.values().any(|flip| flip.config.is_some())
     }
 
+    /// Whether a box is gliding as of its last step: its track is dropped on the step that finds it done.
+    pub(crate) fn gliding(&self) -> bool {
+        self.0.borrow().flips.values().any(|flip| flip.track.is_some())
+    }
+
     /// The events the glides raised since the last call.
     pub(crate) fn take_events(&self) -> Vec<LayoutEvent> {
         std::mem::take(&mut self.0.borrow_mut().events)

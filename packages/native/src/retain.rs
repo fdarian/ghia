@@ -2385,10 +2385,12 @@ impl Retain {
                 return *scan;
             }
         }
-        let mut hovers = element.style.as_ref().is_some_and(|style| {
-            self.hover_scans.of_one(style, crate::events::hover_paint::paint_hover_of).settled(tree, id)
-        });
-        let lifts_itself = crate::events::hover_paint::may_lift_in_any_state(element, colors, lengths);
+        let hover_paints = element
+            .style
+            .as_ref()
+            .map(|style| self.hover_scans.of_one(style, crate::events::hover_paint::paint_hover_of));
+        let mut hovers = hover_paints.is_some_and(|paints| paints.settled(tree, id));
+        let lifts_itself = crate::events::hover_paint::may_lift_in_any_state(element, hover_paints, colors, lengths);
         let mut lifted_below = false;
         let mut unfit = element
             .style
@@ -2410,7 +2412,7 @@ impl Retain {
         // Something that lifts is in the context of the element if it forms one: certain only if it does in every
         // state it is built in, so an element that might form one is judged as one that does not.
         let forms_context =
-            lifted_below && crate::events::hover_paint::forms_context_in_every_state(element, colors, lengths);
+            lifted_below && crate::events::hover_paint::forms_context_in_every_state(element, hover_paints, colors, lengths);
         let lifts_out = lifted_below && !forms_context;
         let lifts = lifts_itself || lifts_out;
         let scanned = if size > PATCH_ROOT_MAX_ELEMENTS {
@@ -2856,7 +2858,14 @@ impl Retain {
         let covered = |id: u64| !relaid.is_empty() && self.relayout_holding(sources.tree, id).is_some_and(|holder| relaid.contains(&holder));
         for &id in &sources.hover_paint {
             if !covered(id) {
-                touched.insert(self.root_holding(sources.tree, id).ok_or(Unpatchable::Hover(id))?);
+                match self.root_holding(sources.tree, id) {
+                    Some(root) => {
+                        touched.insert(root);
+                    }
+                    // The hover follows a scroll late, so the element it leaves is often a row the scroll took out of the frame.
+                    None if self.in_row_out_of_frame(sources.tree, id) => {}
+                    None => return Err(Unpatchable::Hover(id)),
+                }
             }
         }
         for id in sources.tree.pending_restyles_in_frame() {
@@ -3254,7 +3263,17 @@ impl Retain {
         // A box root that a scroller moved is recorded where it is built, as `skippable` takes the record of one: the
         // frame after a patch of a row builds it (the record the patch kept is of the build before the edit), and it has
         // to be a recorded root again for the next edit of the row to be a patch.
-        let moved = node.moved && !(box_root && (candidate || self.relocates(node, self.records.get(&node.id))));
+        let lifts_out = node.lifts_out(own);
+        // Any root that a scroller moved is recorded where it is built when `skippable` would move that recording, as
+        // it moves the one a frame that moved nothing leaves: the frame after is a replay, not a build late in prepaint
+        // to make the recording this one did not ask for. What gpui cannot move (a box too big for a root, a lift out
+        // of the root, a stretch that does not plan on moves) is built and left unrecorded, since nothing would use it.
+        let moves_with_scroller = !self.relocation.resting
+            && !lifts_out
+            && node.scroller.is_some_and(|scroller| scroller.fits(node.id) != Some(false));
+        let moved = node.moved
+            && !moves_with_scroller
+            && !(box_root && (candidate || self.relocates(node, self.records.get(&node.id))));
         if !(node.records || candidate) || node.absent || moved || own.dynamic || node.vol.dynamic != 0 {
             return None;
         }
@@ -3271,7 +3290,6 @@ impl Retain {
         if node.scroller.is_some_and(|scroller| scroller.too_big(node.id)) {
             return None;
         }
-        let lifts_out = node.lifts_out(own);
         let lifts = node.lift_z.is_some() || lifts_out;
         let overscan = node
             .scroller
@@ -7416,6 +7434,31 @@ mod tests {
 
         page.retain.forget_left_rows(&[3], &page.tree);
         assert_eq!(page.preview(&[], false), Ok(vec![]), "a row that left the frame is not one that is built");
+    }
+
+    #[test]
+    fn a_hover_that_leaves_a_row_the_frame_does_not_hold_needs_no_unit_and_one_in_a_row_it_holds_with_no_root_is_a_frame_built_whole() {
+        let mut page = Units::new();
+        page.tree = tree_of(&[
+            (1, None, "div", None),
+            (2, Some(1), "virtual-list", None),
+            (3, Some(2), "div", None),
+            (4, Some(2), "div", None),
+            (6, Some(3), "div", None),
+            (7, Some(4), "div", None),
+        ]);
+        let shape = page.list_frame(false);
+        // The list builds the row 3 and not the row 4: a scroll took it out, and the hover that follows it leaves it late.
+        page.row(shape, 3, |page| page.leaf(6));
+        let env = crate::renderer::FrameEnv::for_test(page.inherited.clone(), EnterKey(Key::default()), web_time::Instant::now());
+        page.retain.add_patch_root(Unit { id: 3, env });
+
+        page.hover_paint = vec![7, 6];
+        assert_eq!(page.preview(&[], false), Ok(vec![3]), "the row that is not built has nothing to repaint; the one built is repainted");
+
+        page.retain.plan.patch_root_ids.clear();
+        page.retain.plan.patch_roots = Default::default();
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Hover(6)), "a row that is built and no root holds is a frame built whole");
     }
 
     fn restyled(json: &str) -> Arc<crate::style::StyleDesc> {

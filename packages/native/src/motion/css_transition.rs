@@ -1714,6 +1714,8 @@ pub(crate) struct CssTransitions {
     /// The pass being built is a layout pass a read forced, not a frame that is drawn.
     layout_only: bool,
     active: bool,
+    /// A transition that wants frames is on a property that moves a box or a line of text.
+    layout_active: bool,
     /// See `CssAnimations::dormant`.
     dormant: HashSet<u64>,
     /// See `CssAnimations::held`.
@@ -1731,6 +1733,7 @@ pub(crate) struct Rewind {
     dom_events: usize,
     api_events: usize,
     active: bool,
+    layout_active: bool,
     running_dormant: bool,
 }
 
@@ -1742,6 +1745,7 @@ impl CssTransitions {
             dom_events: self.events.dom.len(),
             api_events: self.events.api.len(),
             active: self.active,
+            layout_active: self.layout_active,
             running_dormant: self.running_dormant.contains(&id),
         }
     }
@@ -1769,6 +1773,7 @@ impl CssTransitions {
         self.events.dom.truncate(point.dom_events);
         self.events.api.truncate(point.api_events);
         self.active = point.active;
+        self.layout_active = point.layout_active;
         if point.running_dormant {
             self.running_dormant.insert(point.id);
         } else {
@@ -1879,11 +1884,11 @@ impl CssTransitions {
             &mut self.events,
         );
         if !self.dormant.contains(&id) {
-            self.active |= state
-                .running
-                .values()
-                .chain(state.disowned.iter().map(|(_, running)| running))
-                .any(|running| running.clock.wants_frame(now, running.end_time()));
+            let running = state.running.iter().chain(state.disowned.iter().map(|(key, running)| (key, running)));
+            for (key, running) in running.filter(|(_, running)| running.clock.wants_frame(now, running.end_time())) {
+                self.active = true;
+                self.layout_active |= key.changes_layout();
+            }
         }
         let values = state.values(now);
         self.note_running(id);
@@ -2239,6 +2244,11 @@ impl CssTransitions {
     /// window needs another frame.
     pub(crate) fn take_active(&mut self) -> bool {
         std::mem::take(&mut self.active)
+    }
+
+    /// [`Self::take_active`] for the transitions of properties that move a box or a line of text.
+    pub(crate) fn take_layout_active(&mut self) -> bool {
+        std::mem::take(&mut self.layout_active)
     }
 }
 
@@ -2618,6 +2628,27 @@ mod tests {
         assert!(!clock.transitions.take_active());
         assert_eq!(width_of(&clock.frame(1200, &target)), 100.0);
         assert!(clock.events().is_empty(), "a finished transition does not restart");
+    }
+
+    #[test]
+    fn only_a_transition_of_a_property_that_moves_a_box_asks_for_layout_frames() {
+        let colored = |color: &str, transition: &str| {
+            style(&format!(r#"{{ "backgroundColor": "{color}", "opacity": 1, "transition": "{transition}" }}"#))
+        };
+        let mut clock = Clock::new();
+        clock.frame(0, &colored("#ff0000", "background-color 1s linear"));
+        clock.frame(100, &colored("#0000ff", "background-color 1s linear"));
+        clock.frame(200, &colored("#0000ff", "background-color 1s linear"));
+        assert!(clock.transitions.take_active());
+        assert!(!clock.transitions.take_layout_active(), "a color moves nothing");
+
+        let mut clock = Clock::new();
+        clock.frame(0, &sized(0.0, "width 1s linear"));
+        clock.frame(100, &sized(100.0, "width 1s linear"));
+        clock.frame(200, &sized(100.0, "width 1s linear"));
+        assert!(clock.transitions.take_active());
+        assert!(clock.transitions.take_layout_active());
+        assert!(!clock.transitions.take_layout_active(), "taken");
     }
 
     #[test]

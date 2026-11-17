@@ -489,7 +489,6 @@ fn dispatch_at(
         .iter()
         .map(|hit| hit.id)
         .find(|id| tree.elements.contains_key(id));
-    state.observe(&sample.hits);
     let chain_mismatch = geometric.is_some_and(|target| {
         let chain: Vec<u64> = sample
             .hits
@@ -499,9 +498,12 @@ fn dispatch_at(
             .collect();
         !chain_follows_path(&chain, &event_path(tree, target))
     });
+    // A wheel tick does not move the hover, so the chain it sees is not the one the hover has: the hover that
+    // follows a scroll (`hover_after_scroll`) is told from the chain of the last input that did move it.
     if let PointerAction::Wheel(tick) = sample.action {
         return dispatch_wheel(state, tree, sample, tick, geometric, chain_mismatch);
     }
+    state.observe(&sample.hits);
     if state.requests.take_drag_cancel() {
         state.element_drag = None;
     }
@@ -987,28 +989,6 @@ pub(super) fn update_hover(state: &mut PointerState, emitter: &mut Emitter, new_
     };
     state.hovered = change.new_path;
     restyle
-}
-
-/// Whether moving the hover from the chain of `before` to the one of `after`, the topmost elements
-/// under the pointer, would need a frame built whole, as `update_hover` says: an element restyled by
-/// more than paint, or a pointer boundary event that someone listens for. The scroll-only frames ask
-/// it of the hit chain a scroll would leave under a pointer that has not moved. A hover that only
-/// paints is not a reason to draw the page again: the tick after the translate patches the rows it
-/// touches where the translate left them. A target that holds the pointer (capture, lock) is the
-/// target before and after.
-pub(crate) fn hover_would_matter(
-    state: &PointerState,
-    tree: &RetainedTree,
-    before: Option<u64>,
-    after: Option<u64>,
-) -> bool {
-    let pinned = pinned_target(state, tree);
-    let hovered = pinned
-        .or(before)
-        .map(|target| event_path(tree, target))
-        .unwrap_or_default();
-    HoverChange::between(tree, &hovered, pinned.or(after))
-        .is_some_and(|change| change.restyle(tree, &hovered) == Restyle::Whole || change.emits(tree, &state.requests))
 }
 
 /// A button changing while another is held is no new pointer contact: DOM
@@ -2014,74 +1994,6 @@ mod tests {
         assert!(!dispatch(&mut state, &tree, &mv(chain_of(&[1]))).restyle);
     }
 
-    /// Asks `hover_would_matter` for a move to `target`, then moves there, and says whether the move did
-    /// restyle or emit. The two have to agree for every move.
-    fn matters_as_a_move_does(state: &mut PointerState, tree: &RetainedTree, chain: &[u64]) -> bool {
-        let asked = hover_would_matter(state, tree, state.hovered.first().copied(), chain.first().copied());
-        let output = dispatch(state, tree, &mv(chain_of(chain)));
-        assert_eq!(asked, output.restyle || !output.events.is_empty(), "moving to {chain:?}: {:?} restyle {}", names(&output), output.restyle);
-        asked
-    }
-
-    #[test]
-    fn a_hover_change_with_no_style_and_no_listener_does_not_matter() {
-        let tree = tree(&[(1, "click")]);
-        let mut state = PointerState::default();
-        for chain in [&[3, 2, 1][..], &[4, 1], &[2, 1], &[1], &[3, 2, 1]] {
-            assert!(!matters_as_a_move_does(&mut state, &tree, chain), "{chain:?}");
-        }
-    }
-
-    #[test]
-    fn a_hover_change_that_restyles_or_reaches_a_listener_matters() {
-        let hover: StyleDesc = serde_json::from_str(r#"{"hover":{"opacity":0.5}}"#).unwrap();
-        let has_hover: StyleDesc = serde_json::from_str(r#"{"hasHover":{"opacity":0.5}}"#).unwrap();
-        let styled = |id: u64, style: &StyleDesc| {
-            let mut styled = tree(&[]);
-            styled.set_style_desc(id, style.clone());
-            styled
-        };
-
-        // A hover style on the element entered, and none on the one the pointer returns to.
-        let on_child = styled(3, &hover);
-        let mut state = PointerState::default();
-        assert!(matters_as_a_move_does(&mut state, &on_child, &[3, 2, 1]));
-        assert!(!matters_as_a_move_does(&mut state, &on_child, &[3, 2, 1]), "nothing changed");
-        assert!(matters_as_a_move_does(&mut state, &on_child, &[4, 1]), "and left");
-        assert!(!matters_as_a_move_does(&mut state, &on_child, &[2, 1]));
-
-        // :has(:hover) on the ancestor, when a descendant of it gains the pointer.
-        let on_parent = styled(2, &has_hover);
-        let mut state = PointerState::default();
-        assert!(matters_as_a_move_does(&mut state, &on_parent, &[3, 2, 1]));
-        assert!(matters_as_a_move_does(&mut state, &on_parent, &[2, 1]));
-        assert!(!matters_as_a_move_does(&mut state, &on_parent, &[4, 1]));
-
-        // A boundary event type, on the element, on an ancestor that hears it bubble, and on window.
-        for (listening, event_type, matters) in [
-            (3, "pointerenter", true),
-            (3, "mouseleave", true),
-            (1, "pointerover", true),
-            (1, "pointerenter", false),
-            (4, "pointerout", true),
-            (2, "click", false),
-        ] {
-            let listened = tree(&[(listening, event_type)]);
-            let tree = &listened;
-            let mut state = PointerState::default();
-            dispatch(&mut state, tree, &mv(chain_of(&[1])));
-            let mut asked = false;
-            for chain in [&[3, 2, 1][..], &[4, 1], &[3, 2, 1], &[1]] {
-                asked |= matters_as_a_move_does(&mut state, tree, chain);
-            }
-            assert_eq!(asked, matters, "{listening} listens for {event_type}");
-        }
-        let plain = tree(&[]);
-        let mut state = PointerState::default();
-        state.requests.set_window_events(vec!["pointerover".to_string()]);
-        assert!(matters_as_a_move_does(&mut state, &plain, &[4, 1]));
-    }
-
     /// What moving the hover to the chain `to` (target first) does to style, from the chain `from`.
     fn restyle_of(tree: &RetainedTree, from: &[u64], to: &[u64]) -> Restyle {
         let change = HoverChange::between(tree, from, to.first().copied()).expect("the chains differ");
@@ -2206,37 +2118,6 @@ mod tests {
         styled_with(&mut tree, &[(2, r##"{"active":{"opacity":0.5}}"##)]);
         let pressed = dispatch(&mut state, &tree, &down(0, 1, chain_of(&[3, 2, 1])));
         assert!(pressed.restyle && pressed.paint.is_empty(), "a press restyles by itself");
-    }
-
-    #[test]
-    fn a_hover_that_only_paints_does_not_matter_to_a_scroll_unless_a_listener_hears_it() {
-        let paints = r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee"}}"##;
-        let mut painted = tree(&[]);
-        styled_with(&mut painted, &[(3, paints)]);
-        let mut state = PointerState::default();
-        assert!(!matters_as_a_move_does(&mut state, &painted, &[3, 2, 1]), "the row is repainted by the tick after the translate");
-        assert!(!matters_as_a_move_does(&mut state, &painted, &[4, 1]), "and again when it is left");
-
-        let mut heard = tree(&[(3, "pointerenter")]);
-        styled_with(&mut heard, &[(3, paints)]);
-        let mut state = PointerState::default();
-        assert!(matters_as_a_move_does(&mut state, &heard, &[3, 2, 1]), "a script may answer the event");
-
-        let mut whole = tree(&[]);
-        styled_with(&mut whole, &[(3, r##"{"hover":{"width":4}}"##)]);
-        let mut state = PointerState::default();
-        assert!(matters_as_a_move_does(&mut state, &whole, &[3, 2, 1]), "a hover that is more than paint is a frame built whole");
-    }
-
-    #[test]
-    fn a_pinned_target_keeps_the_hover_whatever_is_under_the_pointer() {
-        let hover: StyleDesc = serde_json::from_str(r#"{"hover":{"opacity":0.5}}"#).unwrap();
-        let mut tree = tree(&[]);
-        tree.set_style_desc(3, hover);
-        let mut state = PointerState::default();
-        assert!(hover_would_matter(&state, &tree, Some(4), Some(3)));
-        state.explicit = Some(4);
-        assert!(!hover_would_matter(&state, &tree, Some(4), Some(3)), "what is under a captured pointer is not hovered");
     }
 
     #[test]
@@ -3470,6 +3351,16 @@ mod tests {
         assert_eq!((payload.offset_x, payload.offset_y), (Some(5.0), Some(10.0)));
         assert_eq!(payload.buttons, Some(0));
         assert!(payload.modifiers.is_some());
+    }
+
+    #[test]
+    fn a_wheel_does_not_change_the_chain_the_hover_observed() {
+        let tree = tree(&[]);
+        let mut state = PointerState::default();
+        dispatch(&mut state, &tree, &mv(chain_of(&[3, 2, 1])));
+        dispatch(&mut state, &tree, &wheel((0.0, 40.0), chain_of(&[4, 1])));
+        assert_eq!(*state.observed().borrow(), Some(vec![3, 2, 1]), "the hover is still on the first row");
+        assert!(state.is_hovered(3));
     }
 
     #[test]

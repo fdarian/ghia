@@ -291,6 +291,35 @@ thread_local! {
     /// same napi calls can reach it without a window update.
     static SMOOTH_BY_DEFAULT: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
     static ANIMATIONS: RefCell<HashMap<u64, Animation>> = RefCell::new(HashMap::new());
+    /// What code wrote to the scrollers of each window since its hover last took it, see [`take_writes`].
+    static WRITES: RefCell<HashMap<gpui::WindowId, Writes>> = RefCell::new(HashMap::new());
+}
+
+/// The scrolls code made in a window that the hover under a still pointer has not heard of yet
+/// (`events/hover_after_scroll.rs`): a scroller moved at once, or began a smooth scroll.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Writes {
+    pub instant: bool,
+    pub smooth: bool,
+}
+
+/// Records that code scrolled a scroller of `window`: every scroll a script, a key, a bar or a
+/// `scrollIntoView` makes ends here, so the hover follows it as it follows `scrollTo`.
+pub(crate) fn note_write(window: gpui::WindowId, smooth: bool) {
+    WRITES.with(|writes| {
+        let mut writes = writes.borrow_mut();
+        let written = writes.entry(window).or_default();
+        if smooth {
+            written.smooth = true;
+        } else {
+            written.instant = true;
+        }
+    });
+}
+
+/// What was written to the scrollers of `window` since the last call.
+pub(crate) fn take_writes(window: gpui::WindowId) -> Writes {
+    WRITES.with(|writes| writes.borrow_mut().remove(&window)).unwrap_or_default()
 }
 
 /// Call before building a frame, so a scroller that was removed does not keep `scrollBehavior:
@@ -386,10 +415,32 @@ pub(crate) fn list_position(state: &gpui::ListState) -> [f64; 2] {
 
 /// Scrolls a virtual list to `target` (an offset: zero, then negative) rounded to a device pixel
 /// and held to the range of the last layout. Returns whether it moved.
-pub(crate) fn scroll_list_to(state: &gpui::ListState, target: gpui::Point<gpui::Pixels>) -> bool {
+pub(crate) fn scroll_list_to(window: gpui::WindowId, state: &gpui::ListState, target: gpui::Point<gpui::Pixels>) -> bool {
     let before = state.scroll_px_offset_for_scrollbar();
     state.set_offset_from_scrollbar(snapped_offset(target, state.scale_factor()));
-    state.scroll_px_offset_for_scrollbar() != before
+    let moved = state.scroll_px_offset_for_scrollbar() != before;
+    if moved {
+        note_write(window, false);
+    }
+    moved
+}
+
+/// Moves a virtual list to the offset of a thumb or a click on its track, which is not rounded to a device pixel
+/// as a write of code is. Returns whether it moved.
+pub(crate) fn scroll_list_by_bar(window: gpui::WindowId, state: &gpui::ListState, offset: gpui::Point<gpui::Pixels>) -> bool {
+    let before = state.scroll_px_offset_for_scrollbar();
+    state.set_offset_from_scrollbar(offset);
+    let moved = state.scroll_px_offset_for_scrollbar() != before;
+    if moved {
+        note_write(window, false);
+    }
+    moved
+}
+
+/// Scrolls a virtual list to a row (`ListState::scroll_to`), which lays out later: it is a write now.
+pub(crate) fn scroll_list_to_row(window: gpui::WindowId, state: &gpui::ListState, offset: gpui::ListOffset) {
+    state.scroll_to(offset);
+    note_write(window, false);
 }
 
 /// Moves a scroller to `target` (an offset: zero, then negative), instantly or by a smooth
@@ -403,13 +454,14 @@ pub(crate) fn scroll_list_to(state: &gpui::ListState, target: gpui::Point<gpui::
 /// that comes next (see `scroll_write`), and a scroller that shrinks later is clamped by the layout
 /// that shrank it.
 pub(crate) fn scroll_to(
+    window: gpui::WindowId,
     id: u64,
     handle: &gpui::ScrollHandle,
     target: gpui::Point<gpui::Pixels>,
     behavior: Behavior,
 ) -> bool {
     let target = clamp_offset(snapped_offset(target, handle.scale_factor()), handle.max_offset());
-    move_to(id, handle, target, behavior)
+    move_to(window, id, handle, target, behavior)
 }
 
 /// Ends the smooth scroll of `id` in flight, which any other write to it does.
@@ -418,6 +470,7 @@ pub(crate) fn end_smooth_scroll(id: u64) {
 }
 
 fn move_to(
+    window: gpui::WindowId,
     id: u64,
     handle: &gpui::ScrollHandle,
     target: gpui::Point<gpui::Pixels>,
@@ -427,7 +480,9 @@ fn move_to(
     if target == handle.offset() {
         return false;
     }
-    if !is_smooth(id, behavior) {
+    let smooth = is_smooth(id, behavior);
+    note_write(window, smooth);
+    if !smooth {
         handle.set_offset(target);
         return true;
     }
@@ -435,6 +490,7 @@ fn move_to(
         animations.borrow_mut().insert(
             id,
             Animation {
+                window,
                 handle: handle.clone(),
                 from: handle.offset(),
                 to: target,
@@ -448,6 +504,8 @@ fn move_to(
 }
 
 struct Animation {
+    /// The window of the scroller, whose hover follows when this ends.
+    window: gpui::WindowId,
     handle: gpui::ScrollHandle,
     from: gpui::Point<gpui::Pixels>,
     to: gpui::Point<gpui::Pixels>,
@@ -469,6 +527,11 @@ const SMOOTH_CURVE: [f64; 4] = [0.4, 0.0, 0.2, 1.0];
 /// Whether a smooth scroll has frames to run.
 pub(crate) fn animating() -> bool {
     ANIMATIONS.with(|animations| !animations.borrow().is_empty())
+}
+
+/// Whether a smooth scroll of a scroller of `window` has frames to run.
+pub(crate) fn animating_in(window: gpui::WindowId) -> bool {
+    ANIMATIONS.with(|animations| animations.borrow().values().any(|animation| animation.window == window))
 }
 
 /// Advances the smooth scrolls to `now`. True while one still has frames to run.
@@ -695,12 +758,13 @@ impl KeyScroll {
 
 /// Scrolls the first of `scrollers` (innermost first) that can move the way `key` asks.
 pub(crate) fn scroll_by_key<'a>(
+    window: gpui::WindowId,
     scrollers: impl IntoIterator<Item = (u64, &'a gpui::ScrollHandle)>,
     key: KeyScroll,
 ) -> bool {
     for (id, handle) in scrollers {
         if let Some(target) = key.target(handle) {
-            scroll_to(id, handle, target, Behavior::Auto);
+            scroll_to(window, id, handle, target, Behavior::Auto);
             return true;
         }
     }
@@ -755,6 +819,7 @@ impl Rect {
 /// `options` ask, and moves `target` to where that leaves it, for the next container out. False
 /// if the container could not move.
 pub(crate) fn scroll_into_view(
+    window: gpui::WindowId,
     id: u64,
     handle: &gpui::ScrollHandle,
     target: &mut Rect,
@@ -797,7 +862,7 @@ pub(crate) fn scroll_into_view(
     }
     target.x += f32::from(next.x - offset.x);
     target.y += f32::from(next.y - offset.y);
-    scroll_to(id, handle, next, options.behavior);
+    scroll_to(window, id, handle, next, options.behavior);
     true
 }
 
@@ -814,11 +879,11 @@ pub(crate) fn scroll_in_its_space(
     let space = crate::automation::get_bounds(window_id, id)?;
     if !space.is_transformed() {
         let mut target = window_box;
-        *scrolled |= scroll_into_view(id, handle, &mut target, options);
+        *scrolled |= scroll_into_view(window_id, id, handle, &mut target, options);
         return Some(target);
     }
     let mut target = window_box.through(&space.to_window.inverse()?)?;
-    *scrolled |= scroll_into_view(id, handle, &mut target, options);
+    *scrolled |= scroll_into_view(window_id, id, handle, &mut target, options);
     target.through(&space.to_window)
 }
 
@@ -845,6 +910,27 @@ pub(crate) fn virtual_list_offset(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writes_are_told_to_the_window_they_were_made_in_once() {
+        let (first, second) = (gpui::WindowId::from(1), gpui::WindowId::from(2));
+        note_write(first, false);
+        note_write(first, true);
+        assert_eq!(take_writes(second), Writes::default());
+        assert_eq!(take_writes(first), Writes { instant: true, smooth: true });
+        assert_eq!(take_writes(first), Writes::default());
+    }
+
+    #[test]
+    fn a_smooth_scroll_belongs_to_its_window() {
+        let (first, second) = (gpui::WindowId::from(1), gpui::WindowId::from(2));
+        let handle = gpui::ScrollHandle::new();
+        assert!(move_to(first, 77, &handle, gpui_offset(0.0, 100.0), Behavior::Smooth));
+        assert!(animating() && animating_in(first) && !animating_in(second));
+        assert_eq!(take_writes(first), Writes { instant: false, smooth: true });
+        end_smooth_scroll(77);
+        assert!(!animating_in(first));
+    }
 
     fn turn(degrees: f32) -> gpui::TransformationMatrix {
         let (sin, cos) = degrees.to_radians().sin_cos();
