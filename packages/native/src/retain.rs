@@ -2385,10 +2385,12 @@ impl Retain {
                 return *scan;
             }
         }
-        let mut hovers = element.style.as_ref().is_some_and(|style| {
-            self.hover_scans.of_one(style, crate::events::hover_paint::paint_hover_of).settled(tree, id)
-        });
-        let lifts_itself = crate::events::hover_paint::may_lift_in_any_state(element, colors, lengths);
+        let hover_paints = element
+            .style
+            .as_ref()
+            .map(|style| self.hover_scans.of_one(style, crate::events::hover_paint::paint_hover_of));
+        let mut hovers = hover_paints.is_some_and(|paints| paints.settled(tree, id));
+        let lifts_itself = crate::events::hover_paint::may_lift_in_any_state(element, hover_paints, colors, lengths);
         let mut lifted_below = false;
         let mut unfit = element
             .style
@@ -2410,7 +2412,7 @@ impl Retain {
         // Something that lifts is in the context of the element if it forms one: certain only if it does in every
         // state it is built in, so an element that might form one is judged as one that does not.
         let forms_context =
-            lifted_below && crate::events::hover_paint::forms_context_in_every_state(element, colors, lengths);
+            lifted_below && crate::events::hover_paint::forms_context_in_every_state(element, hover_paints, colors, lengths);
         let lifts_out = lifted_below && !forms_context;
         let lifts = lifts_itself || lifts_out;
         let scanned = if size > PATCH_ROOT_MAX_ELEMENTS {
