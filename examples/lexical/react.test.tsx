@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs'
-import { Component, type ReactNode } from 'react'
-import { afterAll, describe, expect, it } from 'vitest'
+import type { ReactNode } from 'react'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { LexicalComposer } from '@lexical/react/LexicalComposer'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin'
@@ -8,9 +8,27 @@ import { ContentEditable } from '@lexical/react/LexicalContentEditable'
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary'
 import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin'
 import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin'
-import { $createParagraphNode, $createTextNode, $getRoot, CAN_USE_BEFORE_INPUT, CAN_USE_DOM, IS_APPLE, type LexicalEditor } from 'lexical'
+import {
+  $createParagraphNode,
+  $createTextNode,
+  $getRoot,
+  CAN_USE_BEFORE_INPUT,
+  CAN_USE_DOM,
+  IS_ANDROID,
+  IS_APPLE,
+  IS_CHROME,
+  IS_FIREFOX,
+  IS_IOS,
+  IS_SAFARI,
+  type LexicalEditor,
+} from 'lexical'
 import { createTestRoot, hasNativeTestRenderer } from '@ghia/react/testing'
 import { settle } from '../base-ui/harness'
+
+// Real Lexical (LexicalComposer, RichTextPlugin, ContentEditable, HistoryPlugin, OnChangePlugin) running unchanged on
+// Ghia's contenteditable support. Runs on the plugins an app's Vite config has, which `vitest.config.ts` cannot share:
+// the `ghia()` environment inlines safe-mdx's browser-only dependencies, which the other examples' tests would trip on.
+// `react-report.json` records what the run observed; the assertions are the test.
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -18,267 +36,14 @@ type Json = Record<string, unknown>
 const report: Json = {}
 const note = (key: string, value: unknown): void => {
   report[key] = value
-  console.log(`[lexical-react] ${key}: ${JSON.stringify(value, null, 1)}`)
 }
 
 const errorText = (error: unknown): Json => {
   if (!(error instanceof Error)) return { thrown: String(error) }
-  return {
-    name: error.name,
-    message: error.message,
-    stack: (error.stack ?? '').split('\n').slice(0, 14),
-  }
+  return { name: error.name, message: error.message, stack: (error.stack ?? '').split('\n').slice(0, 10) }
 }
 
-// --------------------------------------------------------------------------------------------------------------
-// Probes. Everything here observes; nothing patches behaviour (a wrapper calls straight through).
-// --------------------------------------------------------------------------------------------------------------
-
-const lexicalFrame = (stack: string | undefined): string | undefined =>
-  (stack ?? '').split('\n').find((line) => /node_modules\/(\.pnpm\/[^/]+\/node_modules\/)?(@?lexical)/.test(line))?.trim()
-
-const registrations: Json[] = []
-const invocations: Json[] = []
-const observes: Json[] = []
-const observerCallbacks: Json[] = []
-const selectionCalls: Json[] = []
-const missingReads = new Map<string, { count: number; firstLexicalFrame?: string }>()
-const undefinedGetters = new Map<string, { count: number; firstLexicalFrame?: string }>()
-const throwingMembers = new Map<string, { count: number; message: string; firstLexicalFrame?: string }>()
-const usedMembers = new Map<string, number>()
-
-function describeTarget(target: unknown): string {
-  if (target === document) return 'document'
-  if (target === globalThis || (typeof window !== 'undefined' && target === window)) return 'window'
-  const element = target as Element
-  if (element !== null && typeof element === 'object' && 'localName' in element) {
-    const marks = ['data-lexical-editor', 'contenteditable', 'role'].filter((name) => element.hasAttribute?.(name))
-    return `<${element.localName}${marks.map((name) => ` ${name}`).join('')}>`
-  }
-  return Object.prototype.toString.call(target)
-}
-
-function bump<T extends { count: number }>(map: Map<string, T>, key: string, make: () => T): void {
-  const existing = map.get(key)
-  if (existing === undefined) map.set(key, make())
-  else existing.count += 1
-}
-
-const patchedOwners = new Set<object>()
-const wrappers = new WeakMap<object, EventListenerOrEventListenerObject>()
-let installed = false
-const restore: Array<() => void> = []
-
-function ownerOf(start: object, key: string): object | undefined {
-  for (let current: object | null = start; current !== null; current = Object.getPrototypeOf(current)) {
-    if (Object.prototype.hasOwnProperty.call(current, key)) return current
-  }
-  return undefined
-}
-
-function patchEventTarget(start: object, label: string): void {
-  const owner = ownerOf(start, 'addEventListener')
-  if (owner === undefined || patchedOwners.has(owner)) return
-  patchedOwners.add(owner)
-  const add = (owner as EventTarget).addEventListener
-  const remove = (owner as EventTarget).removeEventListener
-  ;(owner as EventTarget).addEventListener = function (this: unknown, type: string, listener: EventListenerOrEventListenerObject | null, options?: unknown) {
-    if (listener === null || typeof listener !== 'object' && typeof listener !== 'function') return add.call(this, type, listener, options as never)
-    const stack = new Error().stack
-    const fromLexical = lexicalFrame(stack) !== undefined
-    registrations.push({ target: describeTarget(this), owner: label, type, options: options ?? null, fromLexical, frame: lexicalFrame(stack) ?? null })
-    const wrapper: EventListener = (event) => {
-      const entry: Json = { target: describeTarget(this), type, eventType: event.type, fromLexical }
-      invocations.push(entry)
-      try {
-        if (typeof listener === 'function') return listener.call(this, event)
-        return listener.handleEvent(event)
-      } catch (error) {
-        entry.threw = errorText(error)
-        throw error
-      }
-    }
-    wrappers.set(listener, wrapper)
-    return add.call(this, type, wrapper, options as never)
-  } as never
-  ;(owner as EventTarget).removeEventListener = function (this: unknown, type: string, listener: EventListenerOrEventListenerObject | null, options?: unknown) {
-    const wrapper = listener === null ? listener : (wrappers.get(listener) ?? listener)
-    return remove.call(this, type, wrapper, options as never)
-  } as never
-  restore.push(() => {
-    ;(owner as EventTarget).addEventListener = add
-    ;(owner as EventTarget).removeEventListener = remove
-  })
-}
-
-/** Wraps every accessor and method on `proto` so reads that return undefined, and calls that throw, are recorded. */
-function instrumentMembers(proto: object, label: string): void {
-  for (const key of Object.getOwnPropertyNames(proto)) {
-    if (key === 'constructor' || key === 'addEventListener' || key === 'removeEventListener') continue
-    const descriptor = Object.getOwnPropertyDescriptor(proto, key)
-    if (descriptor === undefined || !descriptor.configurable) continue
-    const name = `${label}.${key}`
-    if (descriptor.get !== undefined) {
-      const getter = descriptor.get
-      Object.defineProperty(proto, key, {
-        ...descriptor,
-        get(this: unknown) {
-          let value: unknown
-          try {
-            value = getter.call(this)
-          } catch (error) {
-            const stack = new Error().stack
-            bump(throwingMembers, name, () => ({ count: 1, message: String(error), firstLexicalFrame: lexicalFrame(stack) }))
-            throw error
-          }
-          if (value === undefined) {
-            const stack = new Error().stack
-            const frame = lexicalFrame(stack)
-            if (frame !== undefined) bump(undefinedGetters, name, () => ({ count: 1, firstLexicalFrame: frame }))
-          }
-          return value
-        },
-      })
-    } else if (typeof descriptor.value === 'function') {
-      const method = descriptor.value as (...args: unknown[]) => unknown
-      Object.defineProperty(proto, key, {
-        ...descriptor,
-        value: function (this: unknown, ...args: unknown[]) {
-          const stack = new Error().stack
-          const frame = lexicalFrame(stack)
-          if (frame !== undefined) usedMembers.set(name, (usedMembers.get(name) ?? 0) + 1)
-          try {
-            return method.apply(this, args)
-          } catch (error) {
-            bump(throwingMembers, name, () => ({ count: 1, message: String(error), firstLexicalFrame: frame }))
-            throw error
-          }
-        },
-      })
-    }
-  }
-  restore.push(() => {
-    // Members are left wrapped for the rest of the file; the wrappers pass straight through.
-  })
-}
-
-/**
- * Members a DOM object does not have are not found on any prototype, so the lookup ends at the last prototype before
- * Object.prototype. A Proxy placed there as that prototype's prototype sees exactly those misses.
- */
-function installMissingReadTrap(sample: object, label: string): void {
-  let top: object = sample
-  for (let next = Object.getPrototypeOf(top); next !== null && next !== Object.prototype; next = Object.getPrototypeOf(next)) top = next
-  if (Object.getPrototypeOf(top) !== Object.prototype) return
-  const trap = new Proxy(Object.prototype, {
-    get(target, key, receiver) {
-      if (typeof key === 'string' && !(key in target)) {
-        const stack = new Error().stack
-        const frame = lexicalFrame(stack)
-        if (frame !== undefined) bump(missingReads, `${label}.${key}`, () => ({ count: 1, firstLexicalFrame: frame }))
-      }
-      return Reflect.get(target, key, receiver)
-    },
-    has(target, key) {
-      return Reflect.has(target, key)
-    },
-  })
-  Object.setPrototypeOf(top, trap)
-}
-
-function install(sample: HTMLElement): void {
-  if (installed) return
-  installed = true
-
-  patchEventTarget(sample, 'element')
-  patchEventTarget(document, 'document')
-  patchEventTarget(globalThis, 'globalThis')
-  if (typeof window !== 'undefined') patchEventTarget(window, 'window')
-
-  for (const name of ['getSelection'] as const) {
-    for (const host of [window, document] as Array<Record<string, unknown>>) {
-      const original = host[name] as (() => Selection | null) | undefined
-      if (typeof original !== 'function') {
-        selectionCalls.push({ host: host === (document as unknown) ? 'document' : 'window', missing: true })
-        continue
-      }
-      host[name] = function (this: unknown) {
-        const stack = new Error().stack
-        const result = original.call(this)
-        selectionCalls.push({ host: host === (document as unknown) ? 'document' : 'window', returned: result === null ? 'null' : 'Selection', fromLexical: lexicalFrame(stack) !== undefined })
-        return result
-      }
-    }
-  }
-
-  const MO = (globalThis as Json).MutationObserver as typeof MutationObserver | undefined
-  if (MO !== undefined) {
-    const observe = MO.prototype.observe
-    MO.prototype.observe = function (this: MutationObserver, target: Node, options?: MutationObserverInit) {
-      observes.push({ target: describeTarget(target), options: options ?? null, fromLexical: lexicalFrame(new Error().stack) !== undefined })
-      return observe.call(this, target, options)
-    }
-    class ProbedMutationObserver extends MO {
-      constructor(callback: MutationCallback) {
-        super((records, observer) => {
-          observerCallbacks.push({ records: records.length, types: records.map((record) => record.type) })
-          return callback(records, observer)
-        })
-      }
-    }
-    ;(globalThis as Json).MutationObserver = ProbedMutationObserver
-    if (typeof window !== 'undefined' && (window as unknown) !== globalThis) (window as unknown as Json).MutationObserver = ProbedMutationObserver
-  }
-
-  const text = document.createTextNode('x')
-  const selection = document.getSelection?.()
-  installMissingReadTrap(sample, 'Element')
-  installMissingReadTrap(text, 'Text')
-  installMissingReadTrap(document, 'Document')
-  for (const proto of protoChain(sample)) instrumentMembers(proto, `Element(${proto.constructor.name})`)
-  for (const proto of protoChain(text)) instrumentMembers(proto, `Text(${proto.constructor.name})`)
-  for (const proto of protoChain(document)) instrumentMembers(proto, `Document(${proto.constructor.name})`)
-  if (selection !== null && selection !== undefined) {
-    installMissingReadTrap(selection, 'Selection')
-    for (const proto of protoChain(selection)) instrumentMembers(proto, `Selection(${proto.constructor.name})`)
-  }
-}
-
-function protoChain(object: object): object[] {
-  const chain: object[] = []
-  for (let current = Object.getPrototypeOf(object); current !== null && current !== Object.prototype; current = Object.getPrototypeOf(current)) chain.push(current)
-  return chain
-}
-
-function resetProbes(): void {
-  for (const list of [registrations, invocations, observes, observerCallbacks, selectionCalls]) list.length = 0
-  for (const map of [missingReads, undefinedGetters, throwingMembers, usedMembers] as Array<Map<string, unknown>>) map.clear()
-}
-
-const sortedEntries = <V,>(map: Map<string, V>): Json =>
-  Object.fromEntries([...map.entries()].sort(([a], [b]) => a.localeCompare(b)))
-
-function probeSnapshot(): Json {
-  return {
-    registrations: registrations.map((r) => ({ ...r })),
-    mutationObserverObserve: [...observes],
-    mutationObserverCallbacks: observerCallbacks.length,
-    getSelectionCalls: selectionCalls.length,
-    getSelectionSample: selectionCalls.slice(0, 5),
-    missingReads: sortedEntries(missingReads),
-    undefinedGetters: sortedEntries(undefinedGetters),
-    throwingMembers: sortedEntries(throwingMembers),
-    domMembersCalledByLexical: sortedEntries(new Map([...usedMembers.entries()].map(([k, v]) => [k, { count: v }]))),
-  }
-}
-
-// --------------------------------------------------------------------------------------------------------------
-// The app
-// --------------------------------------------------------------------------------------------------------------
-
-type Variant = { history: boolean; onChange: boolean; richText: boolean }
-const FULL: Variant = { history: true, onChange: true, richText: true }
-
+const uncaught: unknown[] = []
 const changes: unknown[] = []
 let editor: LexicalEditor | undefined
 
@@ -288,17 +53,16 @@ function CaptureEditor(): null {
 }
 
 function seed(): void {
-  const root = $getRoot()
   const paragraph = $createParagraphNode()
   paragraph.append($createTextNode('Hello Lexical'))
-  root.append(paragraph)
+  $getRoot().append(paragraph)
 }
 
-function SpikeApp(props: { variant: Variant }): ReactNode {
+function App(): ReactNode {
   return (
     <LexicalComposer
       initialConfig={{
-        namespace: 'spike',
+        namespace: 'lexical-react',
         onError: (error: Error) => {
           throw error
         },
@@ -306,358 +70,202 @@ function SpikeApp(props: { variant: Variant }): ReactNode {
       }}
     >
       <CaptureEditor />
-      {props.variant.richText ? (
-        <RichTextPlugin contentEditable={<ContentEditable />} ErrorBoundary={LexicalErrorBoundary} />
-      ) : (
-        <ContentEditable />
-      )}
-      {props.variant.history ? <HistoryPlugin /> : null}
-      {props.variant.onChange ? (
-        <OnChangePlugin
-          onChange={(state) => {
-            changes.push(state.toJSON())
-          }}
-        />
-      ) : null}
+      <RichTextPlugin contentEditable={<ContentEditable />} ErrorBoundary={LexicalErrorBoundary} />
+      <HistoryPlugin />
+      <OnChangePlugin onChange={(state) => changes.push(state.toJSON())} />
     </LexicalComposer>
   )
 }
 
-class Catcher extends Component<{ children: ReactNode }, { error: unknown }> {
-  state = { error: undefined as unknown }
-  static getDerivedStateFromError(error: unknown) {
-    return { error }
-  }
-  componentDidCatch(error: unknown) {
-    caught.push(error)
-  }
-  render() {
-    return this.state.error === undefined ? this.props.children : null
-  }
-}
-const caught: unknown[] = []
-const uncaught: unknown[] = []
-
-type Session = { root: ReturnType<typeof createTestRoot>; renderer: ReturnType<typeof createTestRoot>['renderer'] }
-
-function mountVariant(variant: Variant): { session: Session; syncError?: Json } {
-  const root = createTestRoot({ width: 640, height: 480, onUncaughtError: (error: unknown) => uncaught.push(error) })
-  const session: Session = { root, renderer: root.renderer }
-  try {
-    root.render(
-      <Catcher>
-        <SpikeApp variant={variant} />
-      </Catcher>,
-    )
-  } catch (error) {
-    return { session, syncError: errorText(error) }
-  }
-  return { session }
+function lexicalEditor(): LexicalEditor {
+  if (editor === undefined) throw new Error('the Lexical editor was never captured')
+  return editor
 }
 
-type HostNode = { tag?: string; text?: string; attrs?: Record<string, string>; children?: HostNode[] }
-
-function walk(node: Node, depth = 0): HostNode {
-  if (node.nodeType === 3) return { text: node.textContent ?? undefined }
-  const element = node as HTMLElement
-  const attrs: Record<string, string> = {}
-  for (const name of element.getAttributeNames()) attrs[name] = element.getAttribute(name) ?? ''
-  return { tag: element.localName, attrs, children: Array.from(element.childNodes).map((child) => walk(child, depth + 1)) }
+function rootElement(): HTMLElement {
+  const root = lexicalEditor().getRootElement()
+  if (root === null) throw new Error('the editor has no root element')
+  return root
 }
 
-/** Lexical's own root element; the document may also hold the leftovers of earlier roots, so a selector can find a stale one. */
-function editableRoot(): HTMLElement | null {
-  return (editor?.getRootElement() as HTMLElement | null | undefined) ?? document.querySelector<HTMLElement>('[data-lexical-editor]')
+/** Lexical's text, one paragraph per entry. */
+function paragraphs(): string[] {
+  return lexicalEditor()
+    .getEditorState()
+    .read(() => $getRoot().getChildren().map((child) => child.getTextContent()))
 }
 
-function documentEditableCount(): number {
-  return document.querySelectorAll('[data-lexical-editor]').length
+function lexicalText(): string {
+  return lexicalEditor().getEditorState().read(() => $getRoot().getTextContent())
 }
-
-function lexicalText(): string | { error: string } {
-  if (editor === undefined) return { error: 'editor never captured' }
-  return editor.getEditorState().read(() => $getRoot().getTextContent())
-}
-
-function paintedOrError(session: Session): unknown {
-  try {
-    return session.renderer.getPaintedText()
-  } catch (error) {
-    return errorText(error)
-  }
-}
-
-let main: Session | undefined
-const sessions: Session[] = []
-
-afterAll(() => {
-  for (const session of sessions) {
-    try {
-      session.root.unmount()
-    } catch {
-      // unmount after a failed mount is part of what the probes may break
-    }
-  }
-  writeFileSync(new URL('./react-report.json', import.meta.url), JSON.stringify(report, null, 2))
-})
 
 describeNative('Lexical (React bindings) on Ghia', () => {
-  it('1. mount: does it throw', async () => {
-    // Install before the first Lexical render; document.createElement needs a mounted root, so a throwaway one supplies
-    // the element, text and Selection whose prototype chains get instrumented.
-    const probeRoot = createTestRoot({ width: 100, height: 100 })
-    probeRoot.render(<div id="probe-sample">x</div>)
-    install(document.querySelector<HTMLElement>('#probe-sample') as HTMLElement)
-    probeRoot.unmount()
-    resetProbes()
-    const result = mountVariant(FULL)
-    main = result.session
-    sessions.push(result.session)
-    await settle(result.session).catch((error) => {
-      uncaught.push(error)
-    })
+  let root: ReturnType<typeof createTestRoot>
+  const beforeInputTargets: unknown[] = []
+  const nextTask = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+  const painted = (): string => root.renderer.getPaintedText().join('\n')
+  const press = async (keys: string): Promise<void> => {
+    for (const key of keys.split(' ')) {
+      root.renderer.simulateKeystrokes(key)
+      await settle(root)
+    }
+  }
+  const snapshot = (): Json => ({ lexical: paragraphs(), painted: root.renderer.getPaintedText(), dom: rootElement().textContent })
+
+  beforeAll(async () => {
+    // The Element prototype only exists once an element does; a throwaway root supplies one so Lexical's
+    // `addEventListener` calls can be observed from its first render on.
+    const sample = createTestRoot({ width: 100, height: 100 })
+    sample.render(<div id="listener-sample">x</div>)
+    const element = document.querySelector('#listener-sample') as HTMLElement
+    let owner: object | null = element
+    while (owner !== null && !Object.prototype.hasOwnProperty.call(owner, 'addEventListener')) owner = Object.getPrototypeOf(owner)
+    if (owner === null) throw new Error('addEventListener is not on the element prototype chain')
+    const add = (owner as EventTarget).addEventListener
+    ;(owner as EventTarget).addEventListener = function (this: unknown, type: string, ...rest: [never, never]) {
+      if (type === 'beforeinput') beforeInputTargets.push(this)
+      return add.call(this as EventTarget, type, ...rest)
+    } as never
+    sample.unmount()
+
+    root = createTestRoot({ width: 640, height: 480, onUncaughtError: (error: unknown) => uncaught.push(error) })
+    root.render(<App />)
+    await settle(root)
+    await nextTask()
+    await settle(root)
+  })
+
+  afterAll(() => {
+    root.unmount()
+    writeFileSync(new URL('./react-report.json', import.meta.url), JSON.stringify(report, null, 2))
+  })
+
+  it('1. mounts without an error and paints "Hello Lexical"', () => {
+    expect(uncaught).toEqual([])
+    expect(lexicalText()).toBe('Hello Lexical')
+    expect(painted()).toContain('Hello Lexical')
+    expect(rootElement().isContentEditable).toBe(true)
+    expect(rootElement().querySelectorAll('p').length).toBe(1)
+    // Lexical's CAN_USE_BEFORE_INPUT is this expression, evaluated when the module loads.
+    expect('getTargetRanges' in new InputEvent('input')).toBe(true)
+    expect(CAN_USE_BEFORE_INPUT).toBe(true)
+    expect(beforeInputTargets.includes(rootElement())).toBe(true)
     note('1.mount', {
-      syncError: result.syncError ?? null,
-      errorBoundaryCaught: caught.map(errorText),
-      uncaught: uncaught.map(errorText),
-      editorCaptured: editor !== undefined,
-      editorRootElement: editor?.getRootElement() ? describeTarget(editor.getRootElement()) : null,
+      painted: root.renderer.getPaintedText(),
       lexicalText: lexicalText(),
+      CAN_USE_BEFORE_INPUT,
+      beforeInputListenerOnRoot: beforeInputTargets.includes(rootElement()),
+      rootAttributes: Object.fromEntries(rootElement().getAttributeNames().map((name) => [name, rootElement().getAttribute(name)])),
     })
   })
 
-  it('2. painted text and the tree Lexical built', async () => {
-    if (main === undefined) throw new Error('no session')
-    // The variants unmounted their own roots; the editor handle belongs to the last one, so recapture from main.
-    const rootElement = editableRoot()
-    note('2.tree', {
-      painted: paintedOrError(main),
-      editableRootFound: rootElement !== null,
-      tree: rootElement === null ? null : walk(rootElement),
-      documentBody: walk(document.body),
-      isContentEditable: rootElement?.isContentEditable ?? null,
-      contentEditableProp: rootElement?.contentEditable ?? null,
+  it('9. records navigator and the Lexical environment flags', () => {
+    note('9.environment', {
+      userAgent: navigator.userAgent,
+      platform: navigator.platform,
+      maxTouchPoints: navigator.maxTouchPoints,
+      // As Lexical.dev.js computes them from the two strings above (testPlatform / testUserAgent, :59-113).
+      flags: { CAN_USE_DOM, CAN_USE_BEFORE_INPUT, IS_APPLE, IS_SAFARI, IS_CHROME, IS_FIREFOX, IS_IOS, IS_ANDROID },
     })
+    expect(typeof navigator.userAgent).toBe('string')
+    expect(typeof navigator.platform).toBe('string')
   })
 
-  it('3. DOM probes: listeners, selection, observers, undefined/throwing members', async () => {
-    note('3.probes', probeSnapshot())
-    const view = editor?.getRootElement()?.ownerDocument?.defaultView
-    note('3.liveRootElement', { documentEditableCount: documentEditableCount(), rootIsConnected: editor?.getRootElement()?.isConnected ?? null, rootNativeIdViaNative: (editor?.getRootElement() as unknown as { native?: { id: number } } | null)?.native?.id ?? null, selectionPrototypeMembers: (() => { const sel = document.getSelection(); return sel === null ? null : protoChain(sel).flatMap((proto) => Object.getOwnPropertyNames(proto)) })() })
-    note('3.lexicalEnvironmentFlags', { CAN_USE_DOM, CAN_USE_BEFORE_INPUT, IS_APPLE, inputEventInWindow: 'InputEvent' in window, typeofInputEvent: typeof (globalThis as Json).InputEvent, typeofRange: typeof (globalThis as Json).Range, typeofDocumentCreateRange: typeof (document as unknown as Json).createRange, typeofExecCommand: typeof (document as unknown as Json).execCommand })
-    note('3.ownerDocumentDefaultView', {
-      ownerDocumentIsDocument: editor?.getRootElement()?.ownerDocument === document,
-      defaultViewIsWindow: view === (typeof window === 'undefined' ? undefined : window),
-      defaultViewIsGlobalThis: view === globalThis,
-      defaultViewType: typeof view,
-    })
+  it('2. root.focus() makes the root the active element', async () => {
+    rootElement().focus()
+    await settle(root)
+    expect(document.activeElement === rootElement()).toBe(true)
   })
 
-  it('1b. mount variants to localise a throw', async () => {
-    const variants: Record<string, Variant> = {
-      'no HistoryPlugin': { history: false, onChange: true, richText: true },
-      'no OnChangePlugin': { history: true, onChange: false, richText: true },
-      'no RichTextPlugin (bare ContentEditable)': { history: false, onChange: false, richText: false },
-      'RichText only': { history: false, onChange: false, richText: true },
-    }
-    const results: Json = {}
-    for (const [name, variant] of Object.entries(variants)) {
-      caught.length = 0
-      uncaught.length = 0
-      const mounted = mountVariant(variant)
-      try {
-        await settle(mounted.session)
-      } catch (error) {
-        uncaught.push(error)
-      }
-      results[name] = {
-        syncError: mounted.syncError ? (mounted.syncError.message as string) : null,
-        caught: caught.map((e) => String((e as Error).message)),
-        uncaught: uncaught.map((e) => String((e as Error).message)),
-        painted: paintedOrError(mounted.session),
-        hasEditableRoot: editableRoot() !== null,
-      }
-      try {
-        mounted.session.root.unmount()
-      } catch (error) {
-        ;(results[name] as Json).unmountError = String(error)
-      }
-    }
-    note('1b.variants', results)
-    // restore the full-variant editor handle for the later probes
-    caught.length = 0
-    uncaught.length = 0
+  it('3. typing "abc" at a caret inside "Hello" reaches Lexical state and paint', async () => {
+    const textNode = rootElement().querySelector('span')?.firstChild
+    if (textNode === null || textNode === undefined) throw new Error('no text node under the editable root')
+    const selection = getSelection()
+    if (selection === null) throw new Error('getSelection() returned null')
+    const changesBefore = changes.length
+    selection.setBaseAndExtent(textNode, 5, textNode, 5)
+    await nextTask()
+    await settle(root)
+    note('3.selectionAfterSet', { anchorOffset: selection.anchorOffset, anchorIsText: selection.anchorNode === textNode, type: selection.type })
+    await press('a b c')
+    await nextTask()
+    await settle(root)
+    note('3.type-abc', { ...snapshot(), onChangeCalls: changes.length - changesBefore })
+    expect(lexicalText()).toBe('Helloabc Lexical')
+    expect(painted()).toContain('Helloabc Lexical')
+    expect(changes.length).toBeGreaterThan(changesBefore)
+    expect(uncaught).toEqual([])
   })
-})
 
-// The steps below run on a fresh mount of the full app so the earlier variants cannot interfere.
-describeNative('Lexical input and updates', () => {
-  let session: Session
+  it('4. Backspace removes one character from Lexical state and paint', async () => {
+    await press('Backspace')
+    await nextTask()
+    await settle(root)
+    note('4.backspace', snapshot())
+    expect(lexicalText()).toBe('Helloab Lexical')
+    expect(painted()).toContain('Helloab Lexical')
+  })
 
-  const eventLog = (from: number): Json[] => invocations.slice(from)
+  it('5. Enter adds a paragraph', async () => {
+    await press('Enter')
+    await nextTask()
+    await settle(root)
+    note('5.enter', { ...snapshot(), paragraphElements: rootElement().querySelectorAll('p').length })
+    expect(paragraphs().length).toBe(2)
+    expect(rootElement().querySelectorAll('p').length).toBe(2)
+    const text = painted()
+    expect(text).toContain('Helloab')
+    expect(text).toContain(' Lexical')
+  })
 
-  const snapshot = (): Json => ({ lexicalText: lexicalText(), painted: paintedOrError(session), activeElement: describeTarget(document.activeElement) })
-
-  const step = async (label: string, action: () => void | Promise<void>): Promise<void> => {
-    const from = invocations.length
+  it('6. undo through HistoryPlugin (recorded, not required)', async () => {
     const before = snapshot()
     let error: unknown
     try {
-      await action()
-      await settle(session)
-    } catch (caughtError) {
-      error = caughtError
+      root.renderer.simulateKeystrokes('ControlOrMeta+z')
+      await nextTask()
+      await settle(root)
+    } catch (thrown) {
+      error = thrown
     }
-    const reached = eventLog(from)
-    const tally: Record<string, number> = {}
-    for (const entry of reached) tally[`${entry.target}:${entry.eventType}`] = (tally[`${entry.target}:${entry.eventType}`] ?? 0) + 1
-    note(label, { error: error === undefined ? null : errorText(error), before, after: snapshot(), eventsReachedLexical: tally, listenerThrows: reached.filter((e) => e.threw).map((e) => ({ target: e.target, eventType: e.eventType, message: (e.threw as Json).message, frames: ((e.threw as Json).stack as string[]).slice(1, 6) })) })
-  }
-
-  it('prepare: fresh mount', async () => {
-    // Only one root at a time: the test document is shared, so a second live root's listeners would also fire.
-    main?.root.unmount()
-    sessions.splice(sessions.indexOf(main as Session), 1)
-    caught.length = 0
-    uncaught.length = 0
-    changes.length = 0
-    resetProbes()
-    const mounted = mountVariant(FULL)
-    session = mounted.session
-    sessions.push(session)
-    await settle(session)
-    note('prepare', { syncError: mounted.syncError ?? null, hasEditableRoot: editableRoot() !== null, registrationsAfterMount: registrations.length, changesAfterMount: changes.length })
+    note('6.undo', { before, after: snapshot(), threw: error === undefined ? null : errorText(error) })
+    expect(error).toBeUndefined()
   })
 
-  it('4a. focus the editable', async () => {
-    const root = editableRoot()
-    if (root === null) throw new Error('no editable root element')
-    note('4a.rootIdentity', { documentEditableCount: documentEditableCount(), rootIsConnected: root.isConnected, hasNativeBinding: (root as unknown as { native?: unknown }).native !== undefined })
-    await step('4a.focus', () => root.focus())
-    note('4a.focusOutcome', { rootIsActive: document.activeElement === root, tabIndex: root.tabIndex })
-  })
-
-  it('4b. type "abc"', async () => {
-    await step('4b.type-abc', () => {
-      for (const key of ['a', 'b', 'c']) session.renderer.simulateKeystrokes(key)
-    })
-  })
-
-  it('4c. Enter then Backspace', async () => {
-    await step('4c.enter', () => session.renderer.simulateKeystrokes('Enter'))
-    await step('4c.backspace', () => session.renderer.simulateKeystrokes('Backspace'))
-  })
-
-  it('4d. composition commit', async () => {
-    const root = editableRoot()
-    if (root === null) throw new Error('no editable root element')
-    const id = (root as unknown as { native?: { id: number }; nativeId?: number }).native?.id ?? (root as unknown as { nativeId?: number }).nativeId
-    await step('4d.composition', () => {
-      if (id === undefined) throw new Error('root element has no native id')
-      session.renderer.simulateComposition(id, [
-        { key: 'n', action: 'mark', text: 'に' },
-        { key: 'Enter', action: 'commit', text: '日' },
-      ])
-    })
-  })
-
-  it('4e. direct selectionchange-driving: select text and read the Selection', async () => {
-    const root = editableRoot()
-    if (root === null) throw new Error('no editable root element')
-    const selection = document.getSelection()
-    let outcome: Json
+  it('7. a click on the editable does not throw and the editor still updates', async () => {
+    const box = rootElement().getBoundingClientRect()
+    let error: unknown
     try {
-      const textNode = root.querySelector('span')?.firstChild
-      if (textNode === null || textNode === undefined) throw new Error('no text node under the editable')
-      selection?.setBaseAndExtent(textNode, 1, textNode, 3)
-      outcome = { type: selection?.type, anchorOffset: selection?.anchorOffset, focusOffset: selection?.focusOffset, text: selection?.toString() }
-    } catch (error) {
-      outcome = errorText(error) as Json
+      root.renderer.nativeSimulateMouseDown(box.x + 10, box.y + 8)
+      root.renderer.nativeSimulateMouseUp(box.x + 10, box.y + 8)
+      await nextTask()
+      await settle(root)
+    } catch (thrown) {
+      error = thrown
     }
-    await step('4e.selection-set', () => undefined)
-    note('4e.selectionOutcome', outcome)
+    expect(error).toBeUndefined()
+    expect(uncaught).toEqual([])
+    const before = lexicalText()
+    await press('z')
+    await nextTask()
+    await settle(root)
+    note('7.click', { threw: error === undefined ? null : errorText(error), before, after: snapshot(), activeIsRoot: document.activeElement === rootElement() })
+    expect(lexicalText()).not.toBe(before)
+    expect(lexicalText()).toContain('z')
   })
 
-  it('5. editor.update replaces the content', async () => {
-    if (editor === undefined) throw new Error('no editor')
+  it('8. editor.update replacing the content paints "Updated"', async () => {
     const changesBefore = changes.length
-    let updateError: unknown
-    try {
-      editor.update(() => {
-        const root = $getRoot()
-        root.clear()
-        const paragraph = $createParagraphNode()
-        paragraph.append($createTextNode('Updated'))
-        root.append(paragraph)
-      })
-    } catch (error) {
-      updateError = error
-    }
-    await settle(session)
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    await settle(session)
-    const rootElement = editableRoot()
-    note('5.update', {
-      updateError: updateError === undefined ? null : errorText(updateError),
-      uncaught: uncaught.map(errorText),
-      lexicalText: lexicalText(),
-      painted: paintedOrError(session),
-      paintedShowsUpdated: JSON.stringify(paintedOrError(session)).includes('Updated'),
-      onChangeFired: changes.length > changesBefore,
-      changesTotal: changes.length,
-      domTextOfRoot: rootElement?.textContent ?? null,
-      documentEditableCount: documentEditableCount(),
-      bodyText: document.body.textContent,
+    lexicalEditor().update(() => {
+      const paragraph = $createParagraphNode()
+      paragraph.append($createTextNode('Updated'))
+      $getRoot().clear().append(paragraph)
     })
-  })
-
-  it('prepare 2: fresh mount for the focusable variant', async () => {
-    session.root.unmount()
-    sessions.splice(sessions.indexOf(session), 1)
-    caught.length = 0
-    uncaught.length = 0
-    const mounted = mountVariant(FULL)
-    session = mounted.session
-    sessions.push(session)
-    await settle(session)
-    note('prepare2', { syncError: mounted.syncError ?? null, documentEditableCount: documentEditableCount() })
-  })
-
-  it('4f. same input with the root made focusable (tabIndex=0, an app-side change) and a click', async () => {
-    const root = editableRoot()
-    if (root === null) throw new Error('no editable root element')
-    root.tabIndex = 0
-    await step('4f.focus-with-tabindex', () => root.focus())
-    note('4f.focusOutcome', { rootIsActive: document.activeElement === root })
-    await step('4f.type-abc', () => {
-      for (const key of ['a', 'b', 'c']) session.renderer.simulateKeystrokes(key)
-    })
-    await step('4f.enter', () => session.renderer.simulateKeystrokes('Enter'))
-    await step('4f.backspace', () => session.renderer.simulateKeystrokes('Backspace'))
-    const id = (root as unknown as { nativeId?: number }).nativeId
-    if (id !== undefined) {
-      await step('4f.composition', () =>
-        session.renderer.simulateComposition(id, [
-          { key: 'n', action: 'mark', text: 'に' },
-          { key: 'Enter', action: 'commit', text: '日' },
-        ]),
-      )
-    }
-    const box = root.getBoundingClientRect()
-    await step('4f.click', () => {
-      session.renderer.nativeSimulateMouseDown(box.x + 10, box.y + box.height / 2)
-      session.renderer.nativeSimulateMouseUp(box.x + 10, box.y + box.height / 2)
-    })
-    await step('4f.type-after-click', () => session.renderer.simulateKeystrokes('z'))
-  })
-
-  it('final probes after interaction', () => {
-    note('final.probes', probeSnapshot())
-    note('final.invocationTotals', invocations.reduce<Record<string, number>>((acc, entry) => {
-      const key = `${entry.target}:${entry.eventType}`
-      acc[key] = (acc[key] ?? 0) + 1
-      return acc
-    }, {}))
-    expect(true).toBe(true)
+    await nextTask()
+    await settle(root)
+    note('8.update', { ...snapshot(), onChangeCalls: changes.length - changesBefore })
+    expect(lexicalText()).toBe('Updated')
+    expect(painted()).toContain('Updated')
+    expect(changes.length).toBeGreaterThan(changesBefore)
   })
 })

@@ -1,701 +1,113 @@
 {
-  "addEventListenerOwners": {
-    "element": "HostElement",
-    "elementIsDocumentOwner": false
-  },
-  "1-bare": {
-    "errors": [],
-    "editorText": "Hello Solid",
+  "1.mount": {
     "painted": [
       "Hello Solid"
     ],
-    "updatesFired": 2
+    "lexicalText": "Hello Solid",
+    "CAN_USE_BEFORE_INPUT": true,
+    "beforeInputListenerOnRoot": true,
+    "rootAttributes": {
+      "testid": "editor",
+      "contenteditable": "true",
+      "data-lexical-editor": "true",
+      "style": "display: block; width: 400px; height: 120px; user-select: text; white-space: pre-wrap; word-break: break-word;"
+    }
   },
-  "1-richText": {
-    "errors": [],
-    "editorText": "Hello Solid",
-    "painted": [
-      "Hello Solid"
+  "9.environment": {
+    "userAgent": "Node.js/26",
+    "platform": "MacIntel",
+    "flags": {
+      "CAN_USE_DOM": true,
+      "CAN_USE_BEFORE_INPUT": true,
+      "IS_APPLE": true,
+      "IS_SAFARI": false,
+      "IS_CHROME": false,
+      "IS_FIREFOX": false,
+      "IS_IOS": false,
+      "IS_ANDROID": false
+    }
+  },
+  "3.selectionAfterSet": {
+    "anchorOffset": 5,
+    "anchorIsText": true,
+    "type": "Caret"
+  },
+  "3.type-abc": {
+    "lexical": [
+      "Helloabc Solid"
     ],
-    "updatesFired": 2
-  },
-  "1-history": {
-    "errors": [],
-    "editorText": "Hello Solid",
     "painted": [
-      "Hello Solid"
+      "Helloabc Solid"
     ],
-    "updatesFired": 2
+    "dom": "Helloabc Solid",
+    "updateListenerCalls": 4
   },
-  "1-full": {
-    "errors": [],
-    "editorText": "Hello Solid",
+  "4.backspace": {
+    "lexical": [
+      "Helloab Solid"
+    ],
     "painted": [
-      "Hello Solid"
+      "Helloab Solid"
     ],
-    "updatesFired": 2
+    "dom": "Helloab Solid"
   },
-  "1b-noseed": {
-    "errors": [],
-    "editorText": "",
-    "painted": [],
-    "updatesFired": 1
-  },
-  "2-tree": {
+  "5.enter": {
+    "lexical": [
+      "Helloab",
+      " Solid"
+    ],
     "painted": [
-      "Hello Solid"
+      "Helloab",
+      " Solid"
     ],
-    "root": {
-      "nodeName": "DIV",
-      "nodeType": 1,
-      "attributesProperty": "undefined",
-      "getAttributeNames": [
-        "testid",
-        "contenteditable",
-        "data-lexical-editor",
-        "style"
+    "dom": "Helloab Solid",
+    "paragraphElements": 2
+  },
+  "6.undo": {
+    "before": {
+      "lexical": [
+        "Helloab",
+        " Solid"
       ],
-      "knownAttributes": {
-        "contenteditable": "",
-        "data-lexical-editor": "true",
-        "style": "display: block; width: 400px; height: 120px; user-select: text; white-space: pre-wrap; word-break: break-word;"
-      },
-      "className": "",
-      "styleCssText": "display: block; width: 400px; height: 120px; user-select: text; white-space: pre-wrap; word-break: break-word;",
-      "contentEditable": "undefined",
-      "isContentEditable": false,
-      "tabIndex": -1,
-      "dataset": {
-        "lexicalEditor": "true"
-      },
-      "outerHTML": "undefined",
-      "children": [
-        {
-          "nodeName": "P",
-          "nodeType": 1,
-          "attributesProperty": "undefined",
-          "getAttributeNames": [],
-          "knownAttributes": {},
-          "className": "",
-          "styleCssText": "",
-          "contentEditable": "undefined",
-          "isContentEditable": false,
-          "tabIndex": -1,
-          "dataset": {},
-          "outerHTML": "undefined",
-          "children": [
-            {
-              "nodeName": "SPAN",
-              "nodeType": 1,
-              "attributesProperty": "undefined",
-              "getAttributeNames": [
-                "data-lexical-text"
-              ],
-              "knownAttributes": {
-                "data-lexical-text": "true"
-              },
-              "className": "",
-              "styleCssText": "",
-              "contentEditable": "undefined",
-              "isContentEditable": false,
-              "tabIndex": -1,
-              "dataset": {
-                "lexicalText": "true"
-              },
-              "outerHTML": "undefined",
-              "children": [
-                {
-                  "nodeName": "#text",
-                  "nodeType": 3,
-                  "text": "Hello Solid",
-                  "children": []
-                }
-              ]
-            }
-          ]
-        }
-      ]
+      "painted": [
+        "Helloab",
+        " Solid"
+      ],
+      "dom": "Helloab Solid"
     },
-    "rootProps": {
-      "isContentEditable": false,
-      "hasLexicalEditorExpando": true
+    "after": {
+      "lexical": [
+        "Helloab Solid"
+      ],
+      "painted": [
+        "Helloab Solid"
+      ],
+      "dom": "Helloab Solid"
     },
-    "errors": []
+    "threw": null
   },
-  "3-instrumentation": {
-    "errors": [],
-    "listeners": [
-      {
-        "target": "window",
-        "type": "textInput",
-        "options": true
-      },
-      {
-        "target": "document",
-        "type": "selectionchange"
-      },
-      {
-        "target": "root",
-        "type": "blur"
-      },
-      {
-        "target": "root",
-        "type": "click"
-      },
-      {
-        "target": "root",
-        "type": "compositionend"
-      },
-      {
-        "target": "root",
-        "type": "compositionstart"
-      },
-      {
-        "target": "root",
-        "type": "copy"
-      },
-      {
-        "target": "root",
-        "type": "cut"
-      },
-      {
-        "target": "root",
-        "type": "dragend"
-      },
-      {
-        "target": "root",
-        "type": "dragover"
-      },
-      {
-        "target": "root",
-        "type": "dragstart"
-      },
-      {
-        "target": "root",
-        "type": "drop"
-      },
-      {
-        "target": "root",
-        "type": "focus"
-      },
-      {
-        "target": "root",
-        "type": "input"
-      },
-      {
-        "target": "root",
-        "type": "keydown"
-      },
-      {
-        "target": "root",
-        "type": "paste"
-      },
-      {
-        "target": "root",
-        "type": "pointerdown"
-      },
-      {
-        "target": "document",
-        "type": "pointercancel",
-        "options": true
-      },
-      {
-        "target": "document",
-        "type": "pointermove",
-        "options": true
-      },
-      {
-        "target": "document",
-        "type": "pointerup",
-        "options": true
-      },
-      {
-        "target": "window",
-        "type": "blur"
-      },
-      {
-        "target": "root",
-        "type": "contextmenu"
-      },
-      {
-        "target": "root",
-        "type": "dragstart"
-      },
-      {
-        "target": "root",
-        "type": "keydown"
-      },
-      {
-        "target": "root",
-        "type": "mousedown"
-      },
-      {
-        "target": "root",
-        "type": "pointerdown",
-        "options": true
-      }
-    ],
-    "getSelectionCalls": [
-      "window",
-      "document",
-      "window",
-      "document",
-      "window",
-      "document"
-    ],
-    "mutationObserve": [
-      "DIV {\"characterData\":true,\"childList\":true,\"subtree\":true}",
-      "DIV {\"characterData\":true,\"childList\":true,\"subtree\":true}",
-      "DIV {\"characterData\":true,\"childList\":true,\"subtree\":true}",
-      "DIV {\"characterData\":true,\"childList\":true,\"subtree\":true}"
-    ],
-    "undefinedReads": {
-      "selection.getComposedRanges": 9,
-      "root.__lexicalEventHandles": 1,
-      "window.event": 1,
-      "selection.anchorNode": 3,
-      "selection.focusNode": 3,
-      "selection.anchorOffset": 3,
-      "selection.focusOffset": 3,
-      "root.__lexicalLineBreak": 1
+  "7.click": {
+    "threw": null,
+    "before": "Helloab Solid",
+    "after": {
+      "lexical": [
+        "Helloabz Solid"
+      ],
+      "painted": [
+        "Helloabz Solid"
+      ],
+      "dom": "Helloabz Solid"
     },
-    "throwingReads": {}
+    "activeIsRoot": true
   },
-  "4-input": {
-    "steps": {
-      "initial": {
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "domText": "Hello Solid",
-        "updatesFired": 2
-      },
-      "focus": {
-        "eventsReachingLexical": {},
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "domText": "Hello Solid",
-        "updatesFired": 2
-      },
-      "type a": {
-        "eventsReachingLexical": {},
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "domText": "Hello Solid",
-        "updatesFired": 2
-      },
-      "type b": {
-        "eventsReachingLexical": {},
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "domText": "Hello Solid",
-        "updatesFired": 2
-      },
-      "type c": {
-        "eventsReachingLexical": {},
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "domText": "Hello Solid",
-        "updatesFired": 2
-      },
-      "Enter": {
-        "eventsReachingLexical": {},
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "domText": "Hello Solid",
-        "updatesFired": 2
-      },
-      "Backspace": {
-        "eventsReachingLexical": {},
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "domText": "Hello Solid",
-        "updatesFired": 2
-      },
-      "composition mark+commit:error": {
-        "name": "Error",
-        "message": "No text input is focused, so there is nothing for the input method to compose in",
-        "frames": [
-          "at TestRenderer.simulateComposition (/Users/farreldarian/code/fdarian/ghia-worktrees/lexical/packages/native/js/testing.ts:974:19)",
-          "at action (/Users/farreldarian/code/fdarian/ghia-worktrees/lexical/examples/lexical/solid.test.tsx:423:31)",
-          "at step (/Users/farreldarian/code/fdarian/ghia-worktrees/lexical/examples/lexical/solid.test.tsx:402:17)",
-          "at /Users/farreldarian/code/fdarian/ghia-worktrees/lexical/examples/lexical/solid.test.tsx:421:13",
-          "at async file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
-        ]
-      },
-      "composition mark+commit": {
-        "eventsReachingLexical": {},
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "domText": "Hello Solid",
-        "updatesFired": 2
-      }
-    },
-    "errors": [],
-    "allInvoked": 0
-  },
-  "3b-members": {
-    "selection": {
-      "anchorNode": "MISSING",
-      "anchorOffset": "MISSING",
-      "focusNode": "MISSING",
-      "focusOffset": "MISSING",
-      "isCollapsed": "boolean",
-      "rangeCount": "number",
-      "type": "string",
-      "direction": "MISSING",
-      "getRangeAt": "MISSING",
-      "addRange": "MISSING",
-      "removeRange": "MISSING",
-      "removeAllRanges": "function",
-      "setBaseAndExtent": "MISSING",
-      "collapse": "MISSING",
-      "extend": "MISSING",
-      "modify": "MISSING",
-      "getComposedRanges": "MISSING",
-      "containsNode": "MISSING",
-      "selectAllChildren": "MISSING",
-      "toString": "function"
-    },
-    "document": {
-      "createRange": "MISSING",
-      "createTreeWalker": "function",
-      "execCommand": "MISSING",
-      "caretRangeFromPoint": "MISSING",
-      "caretPositionFromPoint": "MISSING",
-      "elementFromPoint": "function",
-      "activeElement": "object",
-      "defaultView": "object",
-      "createElement": "function",
-      "createTextNode": "function",
-      "createDocumentFragment": "MISSING",
-      "getSelection": "function",
-      "body": "object",
-      "documentElement": "object",
-      "queryCommandSupported": "MISSING",
-      "hasFocus": "MISSING",
-      "adoptedStyleSheets": "object",
-      "readyState": "MISSING"
-    },
-    "window": {
-      "Range": "MISSING",
-      "Selection": "function",
-      "InputEvent": "function",
-      "KeyboardEvent": "function",
-      "CompositionEvent": "function",
-      "ClipboardEvent": "MISSING",
-      "DragEvent": "function",
-      "DataTransfer": "MISSING",
-      "DOMParser": "MISSING",
-      "Node": "function",
-      "Text": "function",
-      "HTMLElement": "function",
-      "Element": "function",
-      "MutationObserver": "function",
-      "getComputedStyle": "function",
-      "navigator": "object",
-      "queueMicrotask": "function",
-      "requestAnimationFrame": "function",
-      "getSelection": "function",
-      "event": "MISSING",
-      "Event": "function",
-      "FocusEvent": "function",
-      "PointerEvent": "function"
-    },
-    "element": {
-      "isContentEditable": "boolean",
-      "contentEditable": "MISSING",
-      "getRootNode": "function",
-      "getBoundingClientRect": "function",
-      "closest": "function",
-      "matches": "function",
-      "attributes": "MISSING",
-      "getAttributeNames": "function",
-      "outerHTML": "MISSING",
-      "innerText": "MISSING",
-      "normalize": "MISSING",
-      "compareDocumentPosition": "function",
-      "isConnected": "boolean",
-      "ownerDocument": "object",
-      "scrollIntoView": "function",
-      "attachShadow": "MISSING",
-      "spellcheck": "MISSING",
-      "setAttribute": "function",
-      "removeAttribute": "function",
-      "dataset": "object",
-      "parentElement": "object",
-      "previousSibling": "object",
-      "nextSibling": "object",
-      "firstChild": "object",
-      "lastChild": "object",
-      "append": "function",
-      "replaceChildren": "function",
-      "insertBefore": "function",
-      "removeChild": "function",
-      "replaceChild": "function",
-      "cloneNode": "function",
-      "contains": "function",
-      "style": "object",
-      "classList": "object",
-      "className": "string",
-      "dir": "MISSING"
-    },
-    "textNode": {
-      "nodeValue": "string",
-      "textContent": "string",
-      "data": "string",
-      "splitText": "MISSING",
-      "length": "number",
-      "getRootNode": "function",
-      "compareDocumentPosition": "function",
-      "isConnected": "boolean",
-      "parentNode": "object",
-      "ownerDocument": "object",
-      "normalize": "MISSING",
-      "cloneNode": "function"
-    },
-    "constructors": {
-      "Range": "undefined",
-      "InputEvent": "function",
-      "KeyboardEvent": "function",
-      "CompositionEvent": "function",
-      "ClipboardEvent": "undefined",
-      "DataTransfer": "undefined"
-    },
-    "createRangeCall": "MISSING",
-    "isContentEditableRead": false
-  },
-  "4b-tabindex": {
-    "steps": {
-      "focus": {
-        "eventsReachingLexical": {
-          "root:focus": 1
-        },
-        "activeElement": "DIV",
-        "activeIsRoot": true,
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "domText": "Hello Solid",
-        "updatesFired": 2,
-        "newErrors": []
-      },
-      "type a": {
-        "eventsReachingLexical": {
-          "root:keydown": 2
-        },
-        "activeElement": "DIV",
-        "activeIsRoot": true,
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "domText": "Hello Solid",
-        "updatesFired": 2,
-        "newErrors": []
-      },
-      "Enter": {
-        "eventsReachingLexical": {
-          "root:keydown": 2
-        },
-        "activeElement": "DIV",
-        "activeIsRoot": true,
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "domText": "Hello Solid",
-        "updatesFired": 2,
-        "newErrors": []
-      },
-      "Backspace": {
-        "eventsReachingLexical": {
-          "root:keydown": 2
-        },
-        "activeElement": "DIV",
-        "activeIsRoot": true,
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "domText": "Hello Solid",
-        "updatesFired": 2,
-        "newErrors": []
-      },
-      "composition mark+commit:error": {
-        "name": "Error",
-        "message": "No text input is focused, so there is nothing for the input method to compose in",
-        "frames": [
-          "at TestRenderer.simulateComposition (/Users/farreldarian/code/fdarian/ghia-worktrees/lexical/packages/native/js/testing.ts:974:19)",
-          "at action (/Users/farreldarian/code/fdarian/ghia-worktrees/lexical/examples/lexical/solid.test.tsx:528:31)",
-          "at step (/Users/farreldarian/code/fdarian/ghia-worktrees/lexical/examples/lexical/solid.test.tsx:501:17)",
-          "at /Users/farreldarian/code/fdarian/ghia-worktrees/lexical/examples/lexical/solid.test.tsx:526:13",
-          "at async file:///Users/farreldarian/Library/pnpm/store/v11/links/@vitest/runner/4.1.12/723116f097175711fc00c1ef169d834b4cfdd93dd7ab9e98f626796c86760cbc/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
-        ]
-      },
-      "composition mark+commit": {
-        "eventsReachingLexical": {
-          "root:keydown": 2
-        },
-        "activeElement": "DIV",
-        "activeIsRoot": true,
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "domText": "Hello Solid",
-        "updatesFired": 2,
-        "newErrors": []
-      }
-    },
-    "errors": []
-  },
-  "4c-synthetic": {
-    "steps": {
-      "selectionchange on document": {
-        "dispatchReturned": true,
-        "defaultPrevented": false,
-        "eventsReachingLexical": {
-          "document:selectionchange": 1
-        },
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "newErrors": []
-      },
-      "focus on root": {
-        "dispatchReturned": true,
-        "defaultPrevented": false,
-        "eventsReachingLexical": {
-          "root:focus": 1
-        },
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "newErrors": []
-      },
-      "keydown a": {
-        "dispatchReturned": true,
-        "defaultPrevented": false,
-        "eventsReachingLexical": {
-          "root:keydown": 2
-        },
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "newErrors": []
-      },
-      "keydown Enter": {
-        "dispatchReturned": true,
-        "defaultPrevented": false,
-        "eventsReachingLexical": {
-          "root:keydown": 2
-        },
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "newErrors": []
-      },
-      "beforeinput insertText": {
-        "dispatchReturned": true,
-        "defaultPrevented": false,
-        "eventsReachingLexical": {},
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "newErrors": []
-      },
-      "input": {
-        "dispatchReturned": true,
-        "defaultPrevented": false,
-        "eventsReachingLexical": {
-          "root:input": 1
-        },
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "newErrors": []
-      },
-      "compositionstart": {
-        "dispatchReturned": true,
-        "defaultPrevented": false,
-        "eventsReachingLexical": {
-          "root:compositionstart": 1
-        },
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "newErrors": []
-      },
-      "compositionend": {
-        "dispatchReturned": true,
-        "defaultPrevented": false,
-        "eventsReachingLexical": {
-          "root:compositionend": 1
-        },
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "newErrors": []
-      },
-      "pointerdown on root": {
-        "dispatchReturned": true,
-        "defaultPrevented": false,
-        "eventsReachingLexical": {
-          "root:pointerdown": 2
-        },
-        "editorText": "Hello Solid",
-        "painted": [
-          "Hello Solid"
-        ],
-        "newErrors": []
-      }
-    },
-    "constructors": {
-      "InputEvent": "function",
-      "KeyboardEvent": "function",
-      "CompositionEvent": "function",
-      "FocusEvent": "function",
-      "PointerEvent": "function"
-    },
-    "errors": []
-  },
-  "5-update": {
-    "paintedBefore": [
-      "Hello Solid"
-    ],
-    "updatesBefore": 2,
-    "paintedAfter": [
+  "8.update": {
+    "lexical": [
       "Updated"
     ],
-    "editorText": "Updated",
-    "domText": "Updated",
-    "updateListenerFiredAgain": true,
-    "updatesAfter": 3,
-    "errors": []
+    "painted": [
+      "Updated"
+    ],
+    "dom": "Updated",
+    "updateListenerCalls": 1
   }
 }
