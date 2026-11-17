@@ -1455,6 +1455,13 @@ impl RetainedTree {
         self.mark_changed_detail(id, false, Dirty::Layout);
     }
 
+    /// [`Self::mark_render_changed`] for a change that no root of a patch follows: it is a barrier, so a patch
+    /// of the frame before declines (`Unpatchable::Edited`) and the frame is built whole, through retention.
+    pub(crate) fn mark_render_changed_unfollowed(&mut self, id: u64) {
+        self.mark_render_changed(id);
+        self.patch_barrier = self.next_revision.wrapping_sub(1).max(1);
+    }
+
     /// [`Self::mark_render_changed`] for a style change that only paints: the window is not asked to
     /// lay out again. A `strict` one is also what a patch frame follows: the element is noted for it,
     /// and the revision is no barrier.

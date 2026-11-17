@@ -14467,7 +14467,7 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
 
     // After the last change to the tree: the paragraphs a selection reaches are the ones that are there now.
     match node_selection {
-        Some(selection) => crate::editing::node_selection::set(tree, selection),
+        Some(selection) => crate::editing::node_selection::set(tree, selection, reshaped),
         None if reshaped => crate::editing::node_selection::refresh(tree),
         None => {}
     }

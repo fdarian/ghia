@@ -350,7 +350,10 @@ fn changed_containers(before: &Painted, after: &Painted) -> Vec<u64> {
     changed
 }
 
-fn update(tree: &mut RetainedTree, state: &mut NodeSelection) {
+/// `follow` is whether a patch of the box root that holds a paragraph may follow the change: it may when the
+/// batch that moved the selection also changed the text or the tree (typing: the edit and the caret are one
+/// relayout), and does not for a selection that moved alone, which is a frame built whole.
+fn update(tree: &mut RetainedTree, state: &mut NodeSelection, follow: bool) {
     let next = state.selection.as_ref().map(|selection| paint_of(tree, selection)).unwrap_or_default();
     if next == state.painted {
         return;
@@ -359,19 +362,24 @@ fn update(tree: &mut RetainedTree, state: &mut NodeSelection) {
     state.painted = next;
     for id in changed {
         if tree.elements.contains_key(&id) {
-            tree.mark_render_changed(id);
+            if follow {
+                tree.mark_render_changed(id);
+            } else {
+                tree.mark_render_changed_unfollowed(id);
+            }
         }
     }
 }
 
-/// `setNodeSelection`: the selection JS holds in this tree's root, or `None` when it left it.
-pub fn set(tree: &mut RetainedTree, selection: Option<Selection>) {
+/// `setNodeSelection`: the selection JS holds in this tree's root, or `None` when it left it. `edited` is whether
+/// the same batch changed the text or the shape of the tree.
+pub fn set(tree: &mut RetainedTree, selection: Option<Selection>, edited: bool) {
     let mut state = std::mem::take(&mut tree.node_selection);
     if state.selection != selection {
         state.generation += 1;
     }
     state.selection = selection;
-    update(tree, &mut state);
+    update(tree, &mut state, edited);
     tree.node_selection = state;
 }
 
@@ -382,7 +390,7 @@ pub fn refresh(tree: &mut RetainedTree) {
         return;
     }
     let mut state = std::mem::take(&mut tree.node_selection);
-    update(tree, &mut state);
+    update(tree, &mut state, true);
     tree.node_selection = state;
 }
 
@@ -431,11 +439,12 @@ mod tests {
                     focus: Boundary { node: focus.0, offset: focus.1 },
                     host: None,
                 }),
+                false,
             );
         }
 
         fn clear(&mut self) {
-            set(&mut self.tree, None);
+            set(&mut self.tree, None, false);
         }
 
         fn covered(&self) -> Vec<u64> {
@@ -587,7 +596,7 @@ mod tests {
     impl Fixture {
         fn caret_at(&mut self, node: u64, offset: usize) {
             let at = Boundary { node, offset };
-            set(&mut self.tree, Some(Selection { anchor: at, focus: at, host: Some(1) }));
+            set(&mut self.tree, Some(Selection { anchor: at, focus: at, host: Some(1) }), false);
         }
 
         /// The byte of the caret in the first paragraph the container plans, if it is there.
