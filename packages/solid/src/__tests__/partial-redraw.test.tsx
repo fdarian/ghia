@@ -15,6 +15,8 @@ import { createTestRoot } from "../testing.js"
 import type { TestRenderer } from "../testing.js"
 
 const TIMEOUT = 120_000
+// Under the retention verifier a replaying frame is built whole, so a wheel is never a translate (testing.md, "The retention verifier").
+const verifying = process.env.GPUIX_RETAIN_VERIFY !== undefined
 const COUNT = 200
 const ROW = 40
 const TICK_MS = 1000 / 120
@@ -146,7 +148,9 @@ describe("partial redraw", () => {
         drive(renderer, check)
         expect(compared).toBeGreaterThan(40)
         expect(renderer.getPatchCounters().patchedFrames).toBeGreaterThan(0)
-        expect(renderer.getPatchCounters().scrollPatch.shifted, "the wheel translates were drawn with a shift").toBeGreaterThan(0)
+        if (!verifying) {
+          expect(renderer.getPatchCounters().scrollPatch.shifted, "the wheel translates were drawn with a shift").toBeGreaterThan(0)
+        }
       } finally {
         app.unmount()
       }
@@ -154,7 +158,7 @@ describe("partial redraw", () => {
     TIMEOUT,
   )
 
-  it(
+  it.skipIf(verifying)(
     "copies the pixels of a list that a wheel translate keeps and draws the rest, through rows that come in and a scrollbar thumb that moves",
     () => {
       const app = open()
