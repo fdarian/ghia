@@ -3,7 +3,8 @@
 //   settings  a mostly static settings dialog (Settings.tsx, ~200 elements) mounted and unmounted through a <Show> toggle.
 // One step is: write the signal (Solid + host objects + the mount ops, synchronously), a microtask (finishRemovals, the end of the wire
 // batch and `applyBatch`, which the queue schedules itself), then one `drawFrame()`. Stamps are the process's ri_instructions
-// (every thread, as in profile-keys.tsx) read between the phases, so JIT and GC helper threads show up in the mean.
+// (every thread, as in profile-keys.tsx) read between the phases, so JIT and GC helper threads show up in the mean. Each stamp is paired with a `performance.now()` wall-clock stamp, which
+// gives the same phases in milliseconds: work moved to another thread leaves the instruction count and shortens the wall time.
 //
 // Phases of a step (the stamps are in `step`):
 //   js       signal write -> first createElement op of the mount: Solid's graph and component code, host objects, the old subtree's disposal
@@ -34,7 +35,7 @@
 //   PER_STEP=1           prints every step's total
 //   PRE_GC=1             Bun.gc(true) before the measured steps
 //   HOLD_MS=0            waits before the measured steps
-//   JSON=1               prints the results as JSON on the last line
+//   JSON=1               prints the results as JSON on the last line (`results` in instructions, `resultsMs` in milliseconds, with the p90)
 //   A11Y=1               the accessibility tree is active (off by default, as with no assistive technology running)
 //   COUNTERS=1           adds, per kind of step, the mean per step of every build, layout, frame-work, retained and patch counter that moved
 //                        (declines/unpatchable by reason): what the frame of the step did (patch or whole, elements built, lines shaped, ...)
@@ -100,6 +101,12 @@ const median = (values: number[]) => {
 const mean = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length
 const readOverhead = median(Array.from({ length: 500 }, () => -readInstructions() + readInstructions()))
 const M = (value: number, digits = 3) => (value / 1e6).toFixed(digits)
+const percentile90 = (values: number[]) => {
+  const sorted = [...values].sort((a, b) => a - b)
+  const value = sorted[Math.ceil(sorted.length * 0.9) - 1]
+  if (value === undefined) throw new Error("p90 of no values")
+  return value
+}
 
 const root = createTestRoot({ width: 1280, height: 800, appearance: "light" })
 const renderer = root.renderer
@@ -182,9 +189,12 @@ function findQueue(): Queue {
 }
 
 let stampFirstOp = 0
+let wallFirstOp = 0
 let sawFirstOp = false
 let stampApplyStart = 0
 let stampApplyEnd = 0
+let wallApplyStart = 0
+let wallApplyEnd = 0
 let batchCalls = 0
 let currentOps: Record<string, number> = {}
 let currentBytes = 0
@@ -197,6 +207,7 @@ if (INSTRUMENT || COUNT) {
     if (!sawFirstOp) {
       sawFirstOp = true
       stampFirstOp = readInstructions()
+      wallFirstOp = performance.now()
     }
     createElement(id, type)
   }
@@ -211,8 +222,10 @@ if (INSTRUMENT || COUNT) {
       return applyBatch(bytes)
     }
     stampApplyStart = readInstructions()
+    wallApplyStart = performance.now()
     const result = applyBatch(bytes)
     stampApplyEnd = readInstructions()
+    wallApplyEnd = performance.now()
     return result
   }
 }
@@ -251,8 +264,7 @@ const countersByKind = new Map<string, { total: Snapshot; steps: number }>()
 
 // ── one step ────────────────────────────────────────────────────────────────────
 
-type Sample = {
-  kind: string
+type Phases = {
   total: number
   js: number
   ops: number
@@ -260,6 +272,14 @@ type Sample = {
   apply: number
   post: number
   frame: number
+}
+/** The phases in instructions, and in milliseconds under `wall`. */
+type Sample = Phases & { kind: string; wall: Phases }
+
+type Stamp = { instructions: number; wall: number }
+function stamp(): Stamp {
+  const instructions = readInstructions()
+  return { instructions, wall: performance.now() }
 }
 
 /** A named frame for `cpuprof-attr.mjs`: the samples under it are phases js and ops. */
@@ -271,13 +291,13 @@ async function step(kind: string, write: () => void): Promise<Sample> {
   sawFirstOp = false
   stampApplyStart = stampApplyEnd = 0
   const countersBefore = COUNTERS ? snapshot() : undefined
-  const s0 = readInstructions()
+  const s0 = stamp()
   profilePhaseJsAndOps(write)
-  const s1 = readInstructions()
+  const s1 = stamp()
   await Promise.resolve()
-  const s2 = readInstructions()
+  const s2 = stamp()
   renderer.drawFrame()
-  const s3 = readInstructions()
+  const s3 = stamp()
   if (countersBefore) {
     const entry = countersByKind.get(kind) ?? { total: {}, steps: 0 }
     addDelta(entry.total, countersBefore, snapshot())
@@ -294,19 +314,31 @@ async function step(kind: string, write: () => void): Promise<Sample> {
   return sample
 }
 
-function sampleOf(kind: string, s0: number, s1: number, s2: number, s3: number): Sample {
-  if (!INSTRUMENT || COUNT || MODE === "scroll") return { kind, total: s3 - s0 - readOverhead, js: 0, ops: 0, prep: 0, apply: 0, post: 0, frame: 0 }
+function sampleOf(kind: string, s0: Stamp, s1: Stamp, s2: Stamp, s3: Stamp): Sample {
+  if (!INSTRUMENT || COUNT || MODE === "scroll") {
+    const none = { js: 0, ops: 0, prep: 0, apply: 0, post: 0, frame: 0 }
+    return { kind, total: s3.instructions - s0.instructions - readOverhead, ...none, wall: { total: s3.wall - s0.wall, ...none } }
+  }
   if (stampApplyStart === 0) throw new Error(`step ${kind} applied no batch`)
   const mounted = sawFirstOp
   return {
     kind,
-    total: s3 - s0 - 3 * readOverhead,
-    js: (mounted ? stampFirstOp - s0 : s1 - s0) - readOverhead,
-    ops: mounted ? s1 - stampFirstOp - readOverhead : 0,
-    prep: stampApplyStart - s1 - readOverhead,
+    total: s3.instructions - s0.instructions - 3 * readOverhead,
+    js: (mounted ? stampFirstOp - s0.instructions : s1.instructions - s0.instructions) - readOverhead,
+    ops: mounted ? s1.instructions - stampFirstOp - readOverhead : 0,
+    prep: stampApplyStart - s1.instructions - readOverhead,
     apply: stampApplyEnd - stampApplyStart - readOverhead,
-    post: s2 - stampApplyEnd - readOverhead,
-    frame: s3 - s2 - readOverhead,
+    post: s2.instructions - stampApplyEnd - readOverhead,
+    frame: s3.instructions - s2.instructions - readOverhead,
+    wall: {
+      total: s3.wall - s0.wall,
+      js: (mounted ? wallFirstOp - s0.wall : s1.wall - s0.wall),
+      ops: mounted ? s1.wall - wallFirstOp : 0,
+      prep: wallApplyStart - s1.wall,
+      apply: wallApplyEnd - wallApplyStart,
+      post: s2.wall - wallApplyEnd,
+      frame: s3.wall - s2.wall,
+    },
   }
 }
 
@@ -427,22 +459,39 @@ if (process.env.MARK === "1") console.error("=== measured end")
 console.log(`fixture ${FIXTURE} mode ${MODE}: ${K} measured rounds (${stepsPerRound} step kind(s)) after ${WARMUP} warmup, instrument ${INSTRUMENT}, read overhead ${readOverhead.toFixed(0)}, pid ${process.pid}`)
 type PhaseStats = Record<string, { mean: number; median: number }>
 const results: Record<string, PhaseStats> = {}
+type WallStats = Record<string, { mean: number; median: number; p90: number }>
+const resultsMs: Record<string, WallStats> = {}
 const phases = INSTRUMENT ? ["js", "ops", "prep", "apply", "post", "frame", "total"] : ["total"]
 for (const [kind] of plan) {
   const own = samples.filter((sample) => sample.kind === kind)
   const stats: PhaseStats = {}
   results[kind] = stats
+  const wallStats: WallStats = {}
+  resultsMs[kind] = wallStats
   const cells: string[] = []
+  const wallCells: string[] = []
   for (const phase of phases) {
     const values = own.map((sample) => sample[phase as keyof Sample] as number)
     stats[phase] = { mean: mean(values), median: median(values) }
     cells.push(`${phase} ${M(mean(values))} (med ${M(median(values))})`)
+    const wallValues = own.map((sample) => sample.wall[phase as keyof Phases])
+    wallStats[phase] = { mean: mean(wallValues), median: median(wallValues), p90: percentile90(wallValues) }
+    wallCells.push(`${phase} ${mean(wallValues).toFixed(3)}`)
   }
   console.log(`  ${kind.padEnd(8)} M instr per step, mean: ${cells.join(" | ")}`)
+  const wallTotal = wallStats.total
+  if (wallTotal === undefined) throw new Error("no wall total")
+  if (INSTRUMENT) {
+    const wallFrame = wallStats.frame
+    if (wallFrame === undefined) throw new Error("no wall frame")
+    console.log(`  ${kind.padEnd(8)} ms per step, mean: ${wallCells.join(" | ")} (med frame ${wallFrame.median.toFixed(3)}, med total ${wallTotal.median.toFixed(3)}, p90 frame ${wallFrame.p90.toFixed(3)})`)
+  } else {
+    console.log(`  ${kind.padEnd(8)} ms per step, mean total ${wallTotal.mean.toFixed(3)} (med ${wallTotal.median.toFixed(3)}, p90 ${wallTotal.p90.toFixed(3)})`)
+  }
   if (PER_STEP) console.log(`    totals (M): ${own.map((sample) => M(sample.total, 2)).join(" ")}`)
 }
 for (const [kind, entry] of countersByKind) printCounters(kind, entry.total, entry.steps)
 console.log(`  process instructions over the measured steps: ${M(instructionsAll, 1)}M (${M(instructionsAll / samples.length)}M per step, incl. the stamps and the awaits)`)
-if (process.env.JSON === "1") console.log(JSON.stringify({ fixture: FIXTURE, mode: MODE, k: K, warmup: WARMUP, instrument: INSTRUMENT, results }))
+if (process.env.JSON === "1") console.log(JSON.stringify({ fixture: FIXTURE, mode: MODE, k: K, warmup: WARMUP, instrument: INSTRUMENT, results, resultsMs }))
 root.unmount()
 process.exit(0)
