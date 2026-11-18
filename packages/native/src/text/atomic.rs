@@ -237,7 +237,7 @@ pub fn is_scroll_block(tree: &RetainedTree, parent: &crate::retained_tree::Retai
             && !items
             && matches!(
                 crate::layout::display::inner(element.display().as_deref()),
-                None | Some("block" | "flow-root" | "list-item")
+                None | Some("block" | "flow-root")
             )
     };
     lays_out_blocks(parent) && lays_out_blocks(child) && tree.overflow_of(child).y.has_offset()

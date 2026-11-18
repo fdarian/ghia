@@ -1164,6 +1164,29 @@ export interface StyleDesc {
    *  a tab, `whiteSpace: "break-spaces"` or `lineClamp`, or where a word is wider
    *  than its line. */
   textWrapStyle?: "auto" | "balance" | "pretty" | "stable"
+  /** CSS `list-style`, inherited, the shorthand of `listStyleType` and `listStylePosition`:
+   *  a type, a position, or both in either order (`"none"`, `"inside"`, `"square inside"`). What it
+   *  leaves out is the longhand's initial value (`"disc"`, `"outside"`). A longhand declared on the
+   *  same element wins over it. An image (`url(...)`) is left out, and any other word is an
+   *  invalid value. */
+  listStyle?: string
+  /** CSS `list-style-type`, inherited, `"disc"` by default (`"decimal"` on an `<ol>`): the marker
+   *  of a `display: "list-item"` box (`<li>`). `"lower-latin"` and `"upper-latin"` are
+   *  `"lower-alpha"` and `"upper-alpha"`. A string or `symbols()` is an invalid value. */
+  listStyleType?:
+    | "disc"
+    | "circle"
+    | "square"
+    | "decimal"
+    | "lower-alpha"
+    | "upper-alpha"
+    | "lower-latin"
+    | "upper-latin"
+    | "lower-roman"
+    | "upper-roman"
+    | "none"
+  /** CSS `list-style-position`, inherited, `"outside"` by default. */
+  listStylePosition?: "outside" | "inside"
   textOverflow?: "ellipsis" | "ellipsis-start"
   lineClamp?: number
   /** CSS `text-decoration`: lines, a style, a colour and a thickness in any order,

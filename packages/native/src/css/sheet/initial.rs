@@ -83,6 +83,8 @@ fn table() -> Vec<(String, &'static str)> {
         ("textDecorationThickness", "\"auto\""),
         ("textBoxTrim", "\"none\""),
         ("textBoxEdge", "\"auto\""),
+        ("listStyleType", "\"disc\""),
+        ("listStylePosition", "\"outside\""),
         ("backgroundColor", "\"transparent\""),
         ("backgroundImage", "\"none\""),
         ("backgroundSize", "\"auto\""),

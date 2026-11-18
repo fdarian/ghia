@@ -1071,6 +1071,13 @@ pub struct StyleDesc {
     /// CSS `text-wrap-style`: `balance` and `pretty` choose among the breaks that
     /// make no more lines than greedy wrapping. Inherited. Only a container sets it.
     pub text_wrap_style: Option<crate::css::text_wrap::TextWrapStyle>,
+    /// CSS `list-style`, the shorthand of `list_style_type` and `list_style_position`.
+    /// Inherited. A longhand declared on the same element wins. The image is not supported.
+    pub list_style: Option<crate::css::list_style::ListStyle>,
+    /// CSS `list-style-type`: the marker of a `display: list-item` box. Inherited, `disc` by default.
+    pub list_style_type: Option<crate::css::list_style::ListStyleType>,
+    /// CSS `list-style-position`. Inherited, `outside` by default.
+    pub list_style_position: Option<crate::css::list_style::ListStylePosition>,
     pub text_overflow: Option<String>,
     /// CSS `vertical-align`. Not inherited. A table cell reads it.
     pub vertical_align: Option<crate::css::vertical_align::VerticalAlign>,
