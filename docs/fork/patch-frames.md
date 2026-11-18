@@ -268,6 +268,16 @@ The caret of a focused `contenteditable` (a collapsed node selection, [editing.m
 
 Test: `editing-caret.test.tsx` "blinks in patched frames that build the paragraph that holds the caret and nothing else".
 
+### Typing in an editing host
+
+A character typed into a `contenteditable` is one `setText` and the `setNodeSelection` in one batch, and a patch follows it when a box root holds the paragraph (the edit and the caret are one relayout, [editing.md](editing.md#painting-the-node-selection)). Measured by `editing-keystroke.test.tsx` with 50 paragraphs, per character: a host of a definite size that scrolls is one relayout patch that lays out 2 nodes and builds 51 elements, the host and every paragraph, because a patch builds its root flat and a paragraph, as tall as its text, is no box root of its own (so the build is linear in the paragraphs: 101 at 100). An auto-height host with no box root above it is a frame built whole (no patch is tried: the frame shown has no anchor or box root to follow the change, by a reading of `RetainedTree::structure_attributed`), which retention keeps to 5 built and 49 skipped; with a box of a definite size above it the same edit is a relayout patch of that box (52 built).
+
+- **The patch builds more than the frame built whole.** Where a box root holds the host, a keystroke builds all of it (51) where the frame built whole it would have avoided builds 5; the frame built whole replays 49 roots instead. Which costs less has not been measured. Making the patch skip the paragraphs a root holds would be a change to how a root is built, not to this test.
+- **A key into a host that is itself a scroller is a verifier mismatch on its first typed character** ("a patched frame differs from the frame built whole ... did not record the root"), for the keydown and the platform's text input, and not for `simulateEditingInput` or an input method's commit alone, in the same host. A plain re-render of the same scroller is clean. Not diagnosed.
+- **`simulateKeystrokes` draws the keydown's patch whole** in the keyup it sends in the same call: any simulated input draws the window as it ends, whatever is pending. A live window draws once per display link, so the keydown, its frame and the keyup are three steps there, as the test sends them.
+
+Test: `editing-keystroke.test.tsx`.
+
 ### A loop under a positioned or translucent ancestor, or on an absolute element (#75)
 
 A colour or stroke loop on a text or an `<svg>` under a `position: relative`, `absolute` or `opacity < 1` wrapper drew every tick
