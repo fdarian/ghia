@@ -2114,6 +2114,14 @@ export interface EventPayload {
    */
   path?: Array<number>
   /**
+   * The range an `editinput` replaces, as DOM positions: `[startNode, startOffset, endNode,
+   * endOffset]`, node ids and UTF-16 offsets into the data of the `#text` nodes. Absent when the
+   * edit goes where the selection is. `input_type` is the kind of edit (`insert`, `mark`, `unmark`)
+   * and `data` its text.
+   * Populated for: editinput, the text input of an editing host (`editing/input_handler.rs`).
+   */
+  editRange?: Array<number>
+  /**
    * Id of the other element of a boundary or focus event (JS makes it
    * `event.relatedTarget`, the element itself, or `null` when absent).
    * Populated for: mouseover, mouseout, mouseenter, mouseleave and the pointer equivalents,
@@ -2840,6 +2848,8 @@ export interface Size {
 export interface SyncDispatchResult {
   defaultPrevented: boolean
   propagationStopped: boolean
+  /** See `DispatchOutcome::handled`. */
+  handled?: boolean
   /** The `dropEffect` a `dragover` ended with. */
   dropEffect?: string
 }

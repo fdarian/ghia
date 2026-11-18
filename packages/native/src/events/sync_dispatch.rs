@@ -42,6 +42,10 @@ use crate::renderer::{EventCallback, GpuixView};
 pub(crate) struct DispatchOutcome {
     pub default_prevented: bool,
     pub propagation_stopped: bool,
+    /// JS did what the event's default does, so native must not do it too: an editing host's keydown
+    /// that made an edit stops the key before the platform types it as text. Not `default_prevented`,
+    /// which is the page's verdict on the event.
+    pub handled: bool,
     /// What a `dragover` handler chose for the drop, when one ran.
     pub drag_operation: Option<gpui::DragOperation>,
 }
@@ -333,6 +337,8 @@ mod backend {
     pub struct SyncDispatchResult {
         pub default_prevented: bool,
         pub propagation_stopped: bool,
+        /// See `DispatchOutcome::handled`.
+        pub handled: Option<bool>,
         /// The `dropEffect` a `dragover` ended with.
         pub drop_effect: Option<String>,
     }
@@ -452,6 +458,7 @@ mod backend {
             Ok(DispatchOutcome {
                 default_prevented: result.default_prevented,
                 propagation_stopped: result.propagation_stopped,
+                handled: result.handled.unwrap_or(false),
                 drag_operation,
             })
         });
@@ -551,6 +558,7 @@ mod backend {
                     Ok(drag_operation) => DispatchOutcome {
                         default_prevented: flag(&result, "defaultPrevented"),
                         propagation_stopped: flag(&result, "propagationStopped"),
+                        handled: flag(&result, "handled"),
                         drag_operation,
                     },
                     Err(message) => {

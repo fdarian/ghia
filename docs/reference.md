@@ -5277,7 +5277,7 @@ node selection's focus, and only while it is `document.activeElement`.
 
 | Step | Event |
 |---|---|
-| 1 | `keydown` (the key's default action runs only if no handler called `preventDefault()`) |
+| 1 | `keydown` (the key's default action runs only if no handler called `preventDefault()`; an editing host hears it whether or not a listener is on its path) |
 | 2 | `beforeinput`: an `InputEvent` that bubbles, is cancelable (except for `insertCompositionText`) and is composed, aimed at the host |
 | 3 | the change to the DOM: text goes through `insertData`, `deleteContents` and `insertNode`, so a `MutationObserver` records `characterData`, and live ranges and the selection move |
 | 4 | `input`: an `InputEvent` that bubbles, is not cancelable, with the same `inputType`, `data` and `isComposing` |
@@ -5290,17 +5290,24 @@ A composition runs `compositionstart`, `beforeinput` (`insertCompositionText`, `
 for an event that has none. `beforeinput` carries the one range the edit will affect: the caret or the selection for `insertText`, the
 marked text for `insertCompositionText`, and the characters a Backspace or Delete removes. `input` has none.
 
+**Text comes from the platform's text input, not from `keydown`.** A focused editing host registers the window's input handler, so what the
+keyboard types is what the platform gives it, once, after the `keydown`: a character, a dead key's result, an emoji from the picker, text
+from dictation. It runs `beforeinput` (`insertText`; `insertReplacementText` when the platform names a non-empty range to replace),
+the change and `input`. A `keydown` that was prevented gives no text. Nothing the page does on `keydown` has to repeat it. An input
+method's composition is not carried out yet: see [deviations.md](./fork/deviations.md#events-and-input).
+
 A `keydown` that was not prevented, with no Ctrl, Alt or Cmd, on a focused editing host (not an `<input>` or `<textarea>` inside it) makes:
 
 | Key | `inputType` | `data` |
 |---|---|---|
-| One printable character (one grapheme) | `insertText` | the key |
 | Enter, Shift+Enter | `insertParagraph`, `insertLineBreak` | `null` |
 | Backspace, Delete | `deleteContentBackward`, `deleteContentForward` | `null` |
 
+The platform does not type these keys as text as well: Enter makes no line feed in the text.
+
 A selected range is replaced or deleted whole; a caret deletes one grapheme, into the neighbouring Text of the host when it sits at the edge of
 its own, or the whole `contenteditable="false"` element it is next to (one stop, whatever it holds). Text typed over a selection that spans two blocks goes into the block the selection began in. The caret ends after the inserted text, or at the deletion. `insertParagraph` and `insertLineBreak` fire `beforeinput` and change
-nothing. The text of an edit comes from `keydown`'s `key`, and the other `inputType`s do nothing: see
+nothing. The other `inputType`s do nothing: see
 [deviations.md](./fork/deviations.md#events-and-input). Tab and Escape keep their usual actions. The scroll keys (arrows, Page Up and Down, Home, End, Space) do not scroll the page while an editing host or an element inside one has focus, as with a focused `<input>`.
 ### Listeners and DOM members on an element
 

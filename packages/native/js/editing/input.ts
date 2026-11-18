@@ -157,6 +157,7 @@ export function runEditingInput(inputType: string, data: string | null, options:
   let removesIsland = false
   switch (inputType) {
     case "insertText":
+    case "insertReplacementText":
       range = target.range
       break
     case "insertCompositionText":
@@ -182,6 +183,7 @@ export function runEditingInput(inputType: string, data: string | null, options:
   let caret: Point
   switch (inputType) {
     case "insertText":
+    case "insertReplacementText":
     case "insertCompositionText": {
       if (data === null) throw new Error(`${inputType} needs its text`)
       // After the deletion the range sits at the common parent when it spanned two blocks; the caret belongs where the text began.

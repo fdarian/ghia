@@ -152,12 +152,16 @@ fn key_payload(
     let path = {
         let tree = tree.lock().unwrap();
         // A focused element that is gone from the tree has no path to report.
+        // Typing in an editing host is a default JS runs on the keydown, so it hears the key with no
+        // listener on the path.
+        let edits = focused.is_some_and(|id| crate::html::editing::is_editable(&tree, id));
         focused
             .filter(|id| tree.elements.contains_key(id))
             .map(|id| path_to_root(&tree, id))
             .or_else(|| body_path(&tree))
             .filter(|path| {
                 window_listens
+                    || edits
                     || path.iter().any(|id| {
                         tree.elements.get(id).is_some_and(|element| {
                             let events = element.events();
@@ -246,7 +250,7 @@ pub(crate) fn install_key_down(
         if event.keystroke.key == "escape" && pointer.borrow().element_drag_active() {
             return;
         }
-        let prevented = key_payload(
+        let outcome = key_payload(
             &routing,
             &tree,
             window,
@@ -258,7 +262,8 @@ pub(crate) fn install_key_down(
             event.is_composing,
         )
         .map(|payload| sync_dispatch::emit(window, cx, &callback, payload))
-        .is_some_and(|outcome| outcome.default_prevented);
+        .unwrap_or_default();
+        let (prevented, handled) = (outcome.default_prevented, outcome.handled);
         // The JS Tab default replaces gpui's focus move, so gpui must only be
         // kept from it when that default is going to run. Otherwise Ctrl+Tab and
         // a Tab with nobody attached would do nothing at all.
@@ -266,7 +271,8 @@ pub(crate) fn install_key_down(
         let tab_default_runs = event.keystroke.key == "tab"
             && !(modifiers.control || modifiers.alt || modifiers.platform)
             && routing.js_root_attached();
-        if prevented || tab_default_runs {
+        // An edit JS made for the key is the key's text: the platform must not type it again.
+        if prevented || handled || tab_default_runs {
             cx.stop_propagation();
         }
         key_activation::key_down(&activation, &event.keystroke, event.is_held, prevented, window, cx);

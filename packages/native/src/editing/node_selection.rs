@@ -109,6 +109,18 @@ impl NodeSelection {
     pub fn is_set(&self) -> bool {
         self.selection.is_some()
     }
+
+    /// What JS sent, with the ends as the user made them.
+    pub fn selection(&self) -> Option<Selection> {
+        self.selection
+    }
+
+    /// The first and the last text position the selection reaches, in document order; `None` while it is
+    /// collapsed or reaches no text. The last offset is `usize::MAX` where the selection ends at an
+    /// element and so takes all of the text before it.
+    pub fn reach(&self) -> Option<(DomPoint, DomPoint)> {
+        self.painted.span.as_ref().map(|span| (span.start, span.end))
+    }
 }
 
 /// One paragraph's node-selection wash as the last painted frame drew it.
@@ -223,21 +235,21 @@ fn path_of(tree: &RetainedTree, node: u64) -> Option<Vec<usize>> {
 
 /// Where a boundary is in tree order: the path of the node, then the offset. An element boundary
 /// `(parent, i)` is before the child `i`, so it sorts before every position in that child.
-fn order_key(tree: &RetainedTree, boundary: Boundary) -> Option<Vec<usize>> {
+pub(super) fn order_key(tree: &RetainedTree, boundary: Boundary) -> Option<Vec<usize>> {
     let mut key = path_of(tree, boundary.node)?;
     key.push(boundary.offset);
     Some(key)
 }
 
 /// A walk over the `#text` nodes of the tree in order, from a boundary on.
-struct Walk<'a> {
+pub(super) struct Walk<'a> {
     tree: &'a RetainedTree,
     /// The elements being walked, outermost first, with the index of the child to visit next.
     stack: Vec<(u64, usize)>,
 }
 
 impl<'a> Walk<'a> {
-    fn from(tree: &'a RetainedTree, boundary: Boundary) -> Option<Self> {
+    pub(super) fn from(tree: &'a RetainedTree, boundary: Boundary) -> Option<Self> {
         let node = tree.elements.get(&boundary.node)?;
         let index_in = |parent: u64, child: u64| tree.elements.get(&parent)?.children.iter().position(|sibling| *sibling == child);
         let mut stack = Vec::new();
@@ -259,7 +271,7 @@ impl<'a> Walk<'a> {
     }
 
     /// The next text, unless the walk is at `stop`, an element boundary.
-    fn next_text(&mut self, stop: Option<Boundary>) -> Option<u64> {
+    pub(super) fn next_text(&mut self, stop: Option<Boundary>) -> Option<u64> {
         loop {
             let (element, next) = *self.stack.last()?;
             if stop.is_some_and(|stop| stop.node == element && stop.offset == next) {

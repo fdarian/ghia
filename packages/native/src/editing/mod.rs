@@ -3,12 +3,15 @@
 //!
 //! [`positions`] maps between `Text.data` offsets and the bytes of the paragraph text that is painted
 //! (the pure half, with the lookup of a node's paragraph); [`geometry`] reads the last painted frame
-//! for the rects, hit tests and line moves JS asks for.
+//! for the rects, hit tests and line moves JS asks for; [`snapshot`] and [`input_handler`] are the text
+//! the platform's text input sees and what it does with typed text.
 
 pub mod caret;
 pub mod geometry;
+pub mod input_handler;
 pub mod node_selection;
 pub mod positions;
+pub mod snapshot;
 
 use gpui::WindowId;
 

@@ -8180,6 +8180,9 @@ pub(crate) struct BuildCtx<'a> {
     pub tapes: &'a crate::tape::Tapes,
     /// See `GpuixView::editing_caret`.
     pub editing_caret: Rc<crate::editing::caret::EditingCaret>,
+    /// The tree `tree` was read from, for the text input of an editing host, which asks it again
+    /// when the platform does.
+    pub shared_tree: Arc<Mutex<RetainedTree>>,
 }
 
 impl BuildCtx<'_> {
@@ -9456,6 +9459,7 @@ impl GpuixView {
             retain: &mut self.retain,
             tapes: &self.tapes,
             editing_caret: self.editing_caret.clone(),
+            shared_tree: self.tree.clone(),
         }
     }
 
@@ -12887,6 +12891,14 @@ pub(crate) fn build_host_container(
     if element.element_type == "nativeview" && !skipped {
         content.insert(0, nativeview_layer(element, style, ctx));
         placements.insert(0, Placement { rank: 0, document: 0 });
+    }
+    if !skipped {
+        if let Some(input) =
+            crate::editing::input_handler::layer(&ctx.shared_tree, ctx.tree, element.id, ctx.focus_handles, ctx.event_callback, window)
+        {
+            content.push(input);
+            placements.push(Placement { rank: 0, document: u32::MAX });
+        }
     }
     host.extend(content);
     if placements.iter().any(|placement| placement.rank != 0) {

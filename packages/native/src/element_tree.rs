@@ -231,6 +231,13 @@ pub struct EventPayload {
     /// handled at `element_id` only.
     pub path: Option<Vec<f64>>,
 
+    /// The range an `editinput` replaces, as DOM positions: `[startNode, startOffset, endNode,
+    /// endOffset]`, node ids and UTF-16 offsets into the data of the `#text` nodes. Absent when the
+    /// edit goes where the selection is. `input_type` is the kind of edit (`insert`, `mark`, `unmark`)
+    /// and `data` its text.
+    /// Populated for: editinput, the text input of an editing host (`editing/input_handler.rs`).
+    pub edit_range: Option<Vec<f64>>,
+
     /// Id of the other element of a boundary or focus event (JS makes it
     /// `event.relatedTarget`, the element itself, or `null` when absent).
     /// Populated for: mouseover, mouseout, mouseenter, mouseleave and the pointer equivalents,
@@ -402,6 +409,7 @@ impl Default for EventPayload {
             submitter_id: None,
             target: None,
             path: None,
+            edit_range: None,
             related_target: None,
             client_x: None,
             client_y: None,
