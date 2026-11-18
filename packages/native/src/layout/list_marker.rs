@@ -11,13 +11,15 @@
 //! once, at the end of the batch, as `flush_styles` does for the sheets.
 //!
 //! The UA rules of Chrome that need an element's place are here too: a list inside a list has no
-//! block margin, and a `ul` is a `circle` inside one list and a `square` inside two or more
+//! block margin (a `dl` is one too), and a `ul` is a `circle` inside one list and a `square` inside two or more
 //! (`html::tags::NESTED_LISTS`). They are the user agent layer of the element, so an author value
 //! is over them, and the element is styled again when it comes into or goes out of a list.
 //!
 //! `menu` and `dir` are not tags here, `counter-reset`, `counter-increment`, `@counter-style` and
 //! `::marker` are not supported, and an item counts in the list of its parent element, not of the
 //! nearest `ul` or `ol` above it ([deviations](../../../../docs/fork/deviations.md)).
+
+use std::cell::{Cell, RefCell};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -87,42 +89,32 @@ fn ordinals_of_children(tree: &RetainedTree, parent_id: u64) -> FxHashMap<u64, i
     ordinals
 }
 
-/// The ordinals of the list items of the parents asked about, each parent counted once, so the
-/// markers of a list of N items cost N and not N times N. Made for one build.
-#[derive(Default)]
-pub(crate) struct Ordinals {
-    by_parent: FxHashMap<u64, FxHashMap<u64, i64>>,
-}
-
-impl Ordinals {
-    fn of(&mut self, tree: &RetainedTree, id: u64) -> Option<i64> {
-        let Some(parent) = tree.elements.get(&id)?.parent else {
-            return Some(1);
-        };
-        self.by_parent.entry(parent).or_insert_with(|| ordinals_of_children(tree, parent)).get(&id).copied()
-    }
-}
-
 /// The marker of the element `id`: `None` unless its `display` is `list-item` and its
 /// `list-style-type` is not `none`.
-pub(crate) fn marker_of(tree: &RetainedTree, ordinals: &mut Ordinals, id: u64) -> Option<Marker> {
+pub(crate) fn marker_of(tree: &RetainedTree, id: u64) -> Option<Marker> {
     if !is_list_item(tree.elements.get(&id)?) {
         return None;
     }
     let list_type = tree.list_style_type_of(id);
-    let ordinal = if list_type.is_ordinal() { ordinals.of(tree, id)? } else { 0 };
+    let ordinal = if list_type.is_ordinal() { tree.list_markers.ordinal_of(tree, id)? } else { 0 };
     Some(Marker { list_type, text: list_type.marker_text(ordinal)?, position: tree.list_style_position_of(id) })
 }
 
 /// What the tree has noted since the last flush.
 #[derive(Default)]
 pub(crate) struct ListMarkers {
-    /// How many `ul` and `ol` there are: with none, nothing about a place in a list needs reading.
+    /// How many `ul`, `ol` and `dl` there are: with none, nothing about a place in a list needs reading.
     lists: usize,
     /// Elements that were put somewhere or taken out of it, whose lists inside are styled by the
     /// lists they now are in.
     moved: Vec<u64>,
     reordered: Vec<Reorder>,
+    /// The ordinals of the items of each parent, counted once however many items are built from
+    /// them, in however many builds. A note that renumbers the items of a parent drops its entry
+    /// (`note_reorder`), which is the only thing the numbers read that changes.
+    ordinals: RefCell<FxHashMap<u64, FxHashMap<u64, i64>>>,
+    /// How many children were looked at to count ordinals and to find what a batch renumbered.
+    scanned: Cell<usize>,
 }
 
 /// The items of `parent` after `after` (all of them for `None`) are numbered again.
@@ -146,24 +138,42 @@ impl ListMarkers {
     fn is_empty(&self) -> bool {
         self.moved.is_empty() && self.reordered.is_empty()
     }
+
+    /// The ordinal of the list item `id` among the children of its parent.
+    fn ordinal_of(&self, tree: &RetainedTree, id: u64) -> Option<i64> {
+        let Some(parent) = tree.elements.get(&id)?.parent else {
+            return Some(1);
+        };
+        let mut ordinals = self.ordinals.borrow_mut();
+        let of_parent = ordinals.entry(parent).or_insert_with(|| {
+            self.scanned.set(self.scanned.get() + tree.elements[&parent].children.len());
+            ordinals_of_children(tree, parent)
+        });
+        of_parent.get(&id).copied()
+    }
+
+    pub(crate) fn forget_ordinals(&self, parent: u64) {
+        self.ordinals.borrow_mut().remove(&parent);
+    }
 }
 
 impl RetainedTree {
-    /// How many `ul` and `ol` are above `id`, counted to two: all that the user agent style reads.
-    pub(crate) fn lists_above(&self, id: u64) -> usize {
-        let mut count = 0;
+    /// The lists above `id`: all that the user agent style of a list reads.
+    pub(crate) fn lists_above(&self, id: u64) -> crate::html::ListsAbove {
+        let mut above = crate::html::ListsAbove::default();
         let mut current = self.elements.get(&id).and_then(|element| element.parent);
         while let Some(parent_id) = current {
             let Some(parent) = self.elements.get(&parent_id) else { break };
             if crate::html::is_list(&parent.element_type) {
-                count += 1;
-                if count == 2 {
+                above.any = true;
+                above.marked += usize::from(parent.element_type != "dl");
+                if above.marked == 2 {
                     break;
                 }
             }
             current = parent.parent;
         }
-        count
+        above
     }
 
     /// The `list-style-type` of `id`: the nearest one an element declares, itself first.
@@ -189,6 +199,7 @@ impl RetainedTree {
     }
 
     fn note_reorder(&mut self, parent: u64, after: Option<u64>, membership: bool) {
+        self.list_markers.forget_ordinals(parent);
         self.list_markers.reordered.push(Reorder { parent, after, membership });
     }
 
@@ -252,7 +263,8 @@ impl RetainedTree {
     /// The `list-style-type` or `list-style-position` that `id` declares changed: the items below it
     /// that inherit it show another marker.
     pub(crate) fn list_style_changed(&mut self, id: u64) {
-        let mut pending: Vec<u64> = self.elements.get(&id).map(|element| element.children.clone()).unwrap_or_default();
+        let Some(element) = self.elements.get(&id) else { return };
+        let mut pending: Vec<u64> = element.children.clone();
         while let Some(current) = pending.pop() {
             let Some(element) = self.elements.get(&current) else { continue };
             pending.extend(element.children.iter().copied());
@@ -302,23 +314,44 @@ impl RetainedTree {
         }
     }
 
+    /// Marks the items after the first place each parent's notes say renumbered. A parent is read
+    /// once however many notes it has, so mounting a list of N items costs N and not N times N.
     fn mark_reordered_items(&mut self, reordered: Vec<Reorder>) {
-        let mut from: FxHashMap<u64, usize> = FxHashMap::default();
+        struct Notes {
+            /// A note that counts every item again, or stands after one that left.
+            from_the_start: bool,
+            after: FxHashSet<u64>,
+        }
+        let mut by_parent: FxHashMap<u64, Notes> = FxHashMap::default();
         for note in reordered {
             let Some(parent) = self.elements.get(&note.parent) else { continue };
             let counts_down_from_the_end = note.membership && is_reversed(parent) && declared_start(parent).is_none();
-            let start = match note.after {
+            let notes = by_parent.entry(note.parent).or_insert_with(|| Notes { from_the_start: false, after: FxHashSet::default() });
+            match note.after {
                 Some(after) if !counts_down_from_the_end => {
-                    parent.children.iter().rposition(|id| *id == after).map_or(0, |at| at + 1)
+                    notes.after.insert(after);
                 }
-                _ => 0,
-            };
-            let first = from.entry(note.parent).or_insert(start);
-            *first = (*first).min(start);
+                _ => notes.from_the_start = true,
+            }
         }
-        for (parent_id, start) in from {
+        for (parent_id, notes) in by_parent {
             let Some(parent) = self.elements.get(&parent_id) else { continue };
-            let renumbered: Vec<u64> = parent.children[start.min(parent.children.len())..]
+            self.list_markers.scanned.set(self.list_markers.scanned.get() + parent.children.len());
+            let start = if notes.from_the_start {
+                0
+            } else {
+                let mut first = None;
+                let mut found = 0;
+                for (at, id) in parent.children.iter().enumerate() {
+                    if notes.after.contains(id) {
+                        found += 1;
+                        first.get_or_insert(at + 1);
+                    }
+                }
+                // An item that is no longer there leaves nothing to count from.
+                if found < notes.after.len() { 0 } else { first.unwrap_or(0) }
+            };
+            let renumbered: Vec<u64> = parent.children[start..]
                 .iter()
                 .copied()
                 .filter(|id| {
@@ -388,8 +421,7 @@ mod tests {
         }
 
         fn texts(&self, ids: &[u64]) -> Vec<Option<String>> {
-            let mut ordinals = Ordinals::default();
-            ids.iter().map(|id| marker_of(&self.tree, &mut ordinals, *id).map(|marker| marker.text)).collect()
+            ids.iter().map(|id| marker_of(&self.tree, *id).map(|marker| marker.text)).collect()
         }
 
         fn revisions(&self, ids: &[u64]) -> Vec<u64> {
@@ -532,16 +564,49 @@ mod tests {
     }
 
     #[test]
-    fn the_ordinals_of_a_list_are_counted_once() {
+    fn the_ordinals_of_a_list_are_counted_once_by_every_build() {
         let mut doc = Doc::new();
         let (list, items) = doc.list("ol", 200);
-        let mut ordinals = Ordinals::default();
+        doc.frame();
+        let before = doc.tree.list_markers.scanned.get();
+        // Each item is built as a root of its own, with a build of its own.
         for item in &items {
-            assert!(marker_of(&doc.tree, &mut ordinals, *item).is_some());
+            assert!(marker_of(&doc.tree, *item).is_some());
         }
-        assert_eq!(ordinals.by_parent.len(), 1);
-        assert_eq!(ordinals.by_parent[&list].len(), 200);
-        assert_eq!(ordinals.by_parent[&list][&items[199]], 200);
+        assert_eq!(doc.tree.list_markers.scanned.get() - before, 200);
+        assert_eq!(doc.tree.list_markers.ordinals.borrow()[&list][&items[199]], 200);
+        let mut texts = doc.texts(&items);
+        assert_eq!(doc.tree.list_markers.scanned.get() - before, 200);
+        assert_eq!(texts.pop().unwrap().as_deref(), Some("200. "));
+
+        doc.prop(items[0], "value", serde_json::json!(5));
+        assert_eq!(doc.texts(&items[199..])[0].as_deref(), Some("204. "));
+        assert_eq!(doc.tree.list_markers.scanned.get() - before, 400);
+    }
+
+    #[test]
+    fn mounting_a_list_reads_each_item_a_constant_number_of_times() {
+        let mut doc = Doc::new();
+        let list = doc.element("ol", ROOT);
+        for _ in 0..10_000 {
+            doc.element("li", list);
+        }
+        doc.tree.flush_styles();
+        assert!(doc.tree.list_markers.scanned.get() <= 2 * 10_000, "scanned {}", doc.tree.list_markers.scanned.get());
+        let items = doc.tree.elements[&list].children.clone();
+        let before = doc.tree.list_markers.scanned.get();
+        for item in &items {
+            marker_of(&doc.tree, *item).unwrap();
+        }
+        assert_eq!(doc.tree.list_markers.scanned.get() - before, 10_000);
+        // And the same for appending to a list that was drawn.
+        doc.frame();
+        let before = doc.tree.list_markers.scanned.get();
+        for _ in 0..1_000 {
+            doc.element("li", list);
+        }
+        doc.tree.flush_styles();
+        assert!(doc.tree.list_markers.scanned.get() - before <= 2 * 11_000);
     }
 
     #[test]
@@ -565,6 +630,29 @@ mod tests {
         assert_eq!(doc.texts(&[middle_item]), texts(&["\u{25E6} "]));
         let square_item = doc.element("li", inner);
         assert_eq!(doc.texts(&[square_item]), texts(&["\u{25AA} "]));
+    }
+
+    #[test]
+    fn a_dl_takes_the_block_margin_off_a_list_inside_it_and_goes_without_one_inside_a_list() {
+        let mut doc = Doc::new();
+        let (_, items) = doc.list("ul", 1);
+        let dl_in_list = doc.element("dl", items[0]);
+        let dl = doc.element("dl", ROOT);
+        let dd = doc.element("dd", dl);
+        let ul_in_dl = doc.element("ul", dd);
+        let ol_in_dl = doc.element("ol", dd);
+        let ul_in_dl_in_ul = {
+            let list_item = doc.element("li", ul_in_dl);
+            doc.element("ul", list_item)
+        };
+        doc.frame();
+        assert!(!doc.has_block_margin(dl_in_list));
+        assert!(doc.has_block_margin(dl));
+        assert!(!doc.has_block_margin(ul_in_dl));
+        assert!(!doc.has_block_margin(ol_in_dl));
+        assert_eq!(doc.lists_above_style(ul_in_dl).list_style_type, Some(ListStyleType::Disc), "a dl is no list for the marker");
+        assert_eq!(doc.lists_above_style(ol_in_dl).list_style_type, Some(ListStyleType::Decimal));
+        assert_eq!(doc.lists_above_style(ul_in_dl_in_ul).list_style_type, Some(ListStyleType::Circle));
     }
 
     #[test]

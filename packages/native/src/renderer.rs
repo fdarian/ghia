@@ -8144,8 +8144,6 @@ impl GpuixView {
 /// `cx` stay separate parameters: they are `&mut` and gpui reborrows them.
 pub(crate) struct BuildCtx<'a> {
     pub tree: &'a RetainedTree,
-    /// The ordinals of the list items built so far, each parent counted once.
-    pub list_ordinals: crate::layout::list_marker::Ordinals,
     /// The list item being built whose `inside` marker takes room at the start of its first
     /// paragraph, and the room it takes once its element is laid out.
     pub inside_marker: Option<(u64, std::rc::Rc<std::cell::Cell<gpui::Pixels>>)>,
@@ -9489,7 +9487,6 @@ impl GpuixView {
     ) -> BuildCtx<'a> {
         BuildCtx {
             tree,
-            list_ordinals: Default::default(),
             inside_marker: None,
             fonts,
             event_callback: callback,

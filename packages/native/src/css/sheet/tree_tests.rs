@@ -3175,8 +3175,7 @@ fn list_style_properties_in_a_sheet_reach_the_items_that_inherit_them() {
     );
     doc.flush();
     doc.frame();
-    let mut ordinals = crate::layout::list_marker::Ordinals::default();
-    let markers: Vec<_> = items.iter().map(|id| crate::layout::list_marker::marker_of(&doc.tree, &mut ordinals, *id)).collect();
+    let markers: Vec<_> = items.iter().map(|id| crate::layout::list_marker::marker_of(&doc.tree, *id)).collect();
     assert_eq!(markers[0].as_ref().map(|marker| marker.text.as_str()), Some("a. "));
     assert_eq!(markers[1], None, "none");
     assert_eq!(doc.tree.list_style_position_of(items[1]), ListStylePosition::Inside);

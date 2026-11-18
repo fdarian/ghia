@@ -101,12 +101,15 @@ pub(super) const TAGS: &[(&str, &str)] = &[
     ("col", r#"{"display":"table-column"}"#),
 ];
 
-/// Chrome's `:is(ol, ul) :is(ol, ul)` rules, which a tag's own style cannot say: a list inside a list
-/// (at any depth, not only a child) has no block margin, and a `ul` inside one list is a `circle`,
-/// inside two or more a `square`. `html::nested_list_style` picks the entry by the number of lists
-/// above. `ol` keeps `decimal`; `menu` and `dir` are not tags here.
+/// Chrome's rules for a list inside a list, which a tag's own style cannot say: a `ul`, `ol` or `dl`
+/// inside any of them (at any depth, not only a child) has no block margin, and a `ul` inside one
+/// `ul` or `ol` is a `circle`, inside two or more a `square`. `html::nested_list_style` picks the entry
+/// by what is above. An `ol` keeps `decimal` and a `ul` in a `dl` `disc`; `menu` and `dir` are not
+/// tags here.
 pub(super) const NESTED_LISTS: &[(&str, &str)] = &[
+    ("ul in dl", r#"{"display":"block","marginTop":0,"marginBottom":0,"paddingInline":"40px 0","listStyleType":"disc"}"#),
     ("ul in 1", r#"{"display":"block","marginTop":0,"marginBottom":0,"paddingInline":"40px 0","listStyleType":"circle"}"#),
     ("ul in 2", r#"{"display":"block","marginTop":0,"marginBottom":0,"paddingInline":"40px 0","listStyleType":"square"}"#),
-    ("ol in 1", r#"{"display":"block","marginTop":0,"marginBottom":0,"paddingInline":"40px 0","listStyleType":"decimal"}"#),
+    ("ol in list", r#"{"display":"block","marginTop":0,"marginBottom":0,"paddingInline":"40px 0","listStyleType":"decimal"}"#),
+    ("dl in list", r#"{"display":"block","marginTop":0,"marginBottom":0}"#),
 ];

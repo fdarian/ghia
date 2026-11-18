@@ -77,7 +77,7 @@ pub(crate) struct Built {
 
 /// The marker of the item `element` for the build `ctx`, and the ink it reaches past the item.
 pub(crate) fn build(element: &RetainedElement, style: Option<&StyleDesc>, ctx: &mut BuildCtx) -> Option<Built> {
-    let marker = super::list_marker::marker_of(ctx.tree, &mut ctx.list_ordinals, element.id)?;
+    let marker = super::list_marker::marker_of(ctx.tree, element.id)?;
     // The marker is drawn in the colour of the text style the item gives it.
     ctx.inherited.colors.note_read();
     let font_size = ctx.inherited.lengths.font_size as f32;

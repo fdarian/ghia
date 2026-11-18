@@ -1605,6 +1605,7 @@ impl RetainedTree {
         if let Some(element) = self.elements.remove(&id) {
             self.removals += 1;
             self.list_markers.element_destroyed(&element.element_type);
+            self.list_markers.forget_ordinals(id);
             self.detached_from.remove(&id);
             self.motion_ids.remove(&id);
             self.image_ids.remove(&id);
@@ -1913,8 +1914,8 @@ impl RetainedTree {
             None => element.own_style.clone().map(InternedStyle::into_arc),
         };
         let universal = self.universal.as_ref().filter(|_| element.takes_universal_style());
-        let lists_above = if crate::html::is_list(&element.element_type) { self.lists_above(id) } else { 0 };
-        let tag_style = crate::html::ua_style_of(element, lists_above);
+        let above = if crate::html::is_list(&element.element_type) { self.lists_above(id) } else { Default::default() };
+        let tag_style = crate::html::ua_style_of(element, above);
         let user_agent = crate::html::popover::user_agent(element, tag_style.as_ref()).or(tag_style);
         let effective = match (self.styles.layered.base(universal, user_agent.as_ref()), declared) {
             (Some(base), Some(declared)) => Some(self.styles.layered.effective(&base, &declared)),
