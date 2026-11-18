@@ -13325,10 +13325,7 @@ fn build_plan(
                 let line = matches!(child, crate::text::inline::Child::BlankLine).then(crate::editing::caret::blank_line);
                 content_elements.push(match caret {
                     Some(caret) => {
-                        ctx.retain.blinks();
-                        if caret.shown {
-                            caret.state.keep_blinking(window, cx);
-                        }
+                        caret.follow_clock(&mut ctx.retain, window, cx);
                         crate::editing::caret::empty_line(caret, line)
                     }
                     None => line.unwrap_or_else(|| gpui::div().into_any_element()),
@@ -13491,11 +13488,7 @@ fn paragraph_content(
     let node_wash: Vec<std::ops::Range<usize>> = ctx.tree.node_selection.wash_range(paragraph).into_iter().collect();
     let caret = crate::editing::caret::held_by(&ctx.editing_caret, ctx.tree, ctx.focus_handles, paragraph, window);
     if let Some(caret) = &caret {
-        // Held shown or not: what makes it due is the focus coming or going, as well as the clock.
-        ctx.retain.blinks();
-        if caret.shown {
-            caret.state.keep_blinking(window, cx);
-        }
+        caret.follow_clock(&mut ctx.retain, window, cx);
     }
     ctx.retain.digest(|| format!("{} {:?} {node_wash:?} {:?}", paragraph.text, styles.runs, caret.as_ref().map(|caret| (caret.byte, caret.shown))));
     // A box in the paragraph, or the paragraph being inline content of a box, puts the texts around

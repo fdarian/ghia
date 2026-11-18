@@ -13,13 +13,16 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use gpui::{
-    canvas, div, fill, point, px, size, transparent_black, AnyElement, Bounds, Context, FocusHandle, Hsla, IntoElement, ParentElement, Pixels, SharedString, Styled, Task,
+    canvas, div, fill, point, px, transparent_black, AnyElement, Bounds, Context, FocusHandle, Hsla, IntoElement, ParentElement, Pixels, SharedString, Styled, Task,
     TextLayout, Window, WindowId,
 };
 use web_time::Instant;
 
+use super::geometry::window_box;
+use crate::automation::window_point_from;
 use crate::caret::{caret_rect, caret_visible, until_phase_change, CARET_WIDTH};
 use crate::renderer::GpuixView;
+use crate::retain::Retain;
 use crate::retained_tree::RetainedTree;
 use crate::text::inline::{Child, Paragraph};
 
@@ -153,6 +156,16 @@ pub struct CaretPaint {
 }
 
 impl CaretPaint {
+    /// Notes on the container being built that the caret blinks in it and, while it is shown, keeps the
+    /// clock running. Held shown or not: what makes it due is the focus coming or going, as well as the
+    /// clock.
+    pub fn follow_clock(&self, retain: &mut Retain, window: &Window, cx: &mut Context<GpuixView>) {
+        retain.blinks();
+        if self.shown {
+            self.state.keep_blinking(window, cx);
+        }
+    }
+
     /// Paints the caret at `byte` of `layout`, as tall as its row, in no colour while it is off. Returns
     /// where it is, in the space of the layout.
     pub fn paint(&self, layout: &TextLayout, window: &mut Window, now: Instant) -> Option<Bounds<Pixels>> {
@@ -282,13 +295,8 @@ impl CaretPaint {
         let lit = caret_visible(self.state.elapsed_ms(now));
         window.paint_quad(fill(rect, if lit { self.state.color } else { transparent_black() }));
         let matrix = window.transform();
-        let corners = [rect.origin, rect.top_right(), rect.bottom_left(), rect.bottom_right()]
-            .map(|corner| crate::automation::window_point_from(&matrix, corner));
-        let Some(corners) = corners.into_iter().collect::<Option<Vec<_>>>() else { return };
-        let min = point(corners.iter().map(|c| c.x).fold(Pixels::MAX, Pixels::min), corners.iter().map(|c| c.y).fold(Pixels::MAX, Pixels::min));
-        let max = point(corners.iter().map(|c| c.x).fold(Pixels::MIN, Pixels::max), corners.iter().map(|c| c.y).fold(Pixels::MIN, Pixels::max));
-        let rect = Bounds::new(min, size(max.x - min.x, max.y - min.y));
-        EMPTY_LINE.with(|painted| painted.borrow_mut().insert(id, rect));
+        let Some(rect) = window_box(rect, |corner| window_point_from(&matrix, corner)) else { return };
+        EMPTY_LINE.with(|painted| painted.borrow_mut().insert(id, rect.bounds()));
         note_lit(id, Some(lit));
     }
 }
