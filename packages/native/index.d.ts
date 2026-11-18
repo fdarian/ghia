@@ -1065,7 +1065,8 @@ export declare class TestGpuixRenderer {
   /**
    * Chooses the Edit menu item named `"copy"`, `"cut"`, `"paste"` or `"selectAll"`, as the
    * menu bar does: the action is dispatched on the window only if `App::is_action_available`
-   * finds a listener for it (the menu greys the item out otherwise). Returns whether the item was enabled.
+   * finds a listener for it (the menu greys the item out otherwise). Returns whether the item was enabled:
+   * the app-level listeners of `events/clipboard.rs` make the four always available.
    */
   simulateMenuAction(name: string): boolean
   /** Dispatch one keyup (one press in the `simulate_keystrokes` grammar). */
