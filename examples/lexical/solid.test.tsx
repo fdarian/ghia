@@ -219,7 +219,8 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
       root.renderer.simulateComposition(id, [marked])
       await nextTask()
       await settle()
-      expect(element.textContent).toBe(`Updated${marked.text}`)
+      // Lexical keeps zero-width spaces around the text of a composition.
+      expect(element.textContent?.replaceAll('\u200b', '')).toBe(`Updated${marked.text}`)
     }
     root.renderer.simulateComposition(id, [{ key: 'Enter', action: 'commit', text: 'かな' }])
     await nextTask()

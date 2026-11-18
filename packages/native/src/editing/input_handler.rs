@@ -21,7 +21,9 @@
 //!
 //! What it sends is the `editinput` event: `inputType` is the kind (`insert`, `mark`, `unmark`), `data`
 //! the text and `editRange` the replacement range as `[startNode, startOffset, endNode, endOffset]` DOM
-//! positions, when the platform gave one.
+//! positions (the platform's, else the marked text of a composition that runs), `isComposing` whether one
+//! did, and `editSelection` where the selection goes in the text of a `mark`. The marked text itself is
+//! [`super::composition`]'s; a queued edit (no JS on the stack) leaves it as it was when the platform asked.
 
 use std::collections::HashMap;
 use std::ops::Range;

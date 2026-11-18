@@ -287,14 +287,15 @@ export function endEditingComposition(host: Element): void {
  * One step of an input method's composition: Chrome's order is `compositionstart`, `beforeinput`,
  * `compositionupdate`, the change, `input`, and at the end `compositionend`. Marking no text is the
  * input method canceling the composition: the marked text goes, and `compositionend` has no data.
- * Returns false when no editing host holds the selection and focus.
+ * Returns false when no editing host holds the selection and focus, or when an `unmark` finds no composition.
  */
 export function runEditingComposition(step: EditingCompositionStep, options: EditingCompositionOptions = {}): boolean {
   let target = editingTarget()
   if (target === null) return false
   const running = compositions.get(target.host)
   if (step.action === "unmark") {
-    if (running !== undefined) endComposition(running, running.marked.toString())
+    if (running === undefined) return false
+    endComposition(running, running.marked.toString())
     return true
   }
   const replacing = options.replacing

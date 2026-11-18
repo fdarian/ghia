@@ -16,6 +16,7 @@ import { DOM_BINDING, type Element, type Node, type Text, type TextBinding } fro
 import { Range } from "../dom/range.js"
 import { getSelection } from "../dom/selection.js"
 import type { NativeRenderer } from "../host.js"
+import { isEditingHost } from "./host.js"
 import { endEditingComposition, runEditingComposition, runEditingInput } from "./input.js"
 
 export const EDIT_INPUT_EVENT = "editinput"
@@ -111,4 +112,13 @@ export function runNativeEditInput(event: EventPayload, host: Element, renderer:
       throw new Error(`An editinput of kind ${String(event.inputType)} is not one this version knows`)
   }
   flushPendingMutations(renderer)
+}
+
+/**
+ * A host that loses focus ends the composition it has (`compositionend`, before `blur`), as Chrome
+ * does: native ended the platform's side when focus left, and Lexical and its like wait for the event.
+ */
+export function endCompositionOnBlur(element: object | undefined): void {
+  if (element === undefined) return
+  if (isEditingHost(element as Element)) endEditingComposition(element as Element)
 }
