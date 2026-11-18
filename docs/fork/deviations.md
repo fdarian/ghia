@@ -184,7 +184,7 @@ An HTML tag ([docs/reference.md](../reference.md#html-tags)) is the user agent s
   - Hiragino Sans named as the family kerns `キス` -60 where Chrome has -50.
   - No vertical text.
 - **Legacy kerning through `kerx`.** A font that kerns through a `kern` table is found by its missing GPOS table; an AAT font with `kerx` has none either, and HarfBuzz splits its pairs the same way (untested here).
-- **Generic family keywords.** The CSS keywords `system-ui` and `sans-serif` are not font families here.
+- **Font family lists.** `font-family` is a list ([text.md](text.md#font-family-lists)): the first installed family draws and the installed ones after it are the fallbacks GPUI's platform text system consults glyph by glyph. After the list a glyph goes to GPUI's fallback face and CoreText's own cascade, where Chrome goes to its own system fallback for the script, so a glyph no listed family has can come from another font. A list in which nothing is installed draws in GPUI's fallback face (Helvetica on a stock Mac; IBM Plex Sans or Lilex when an app registers them), where Chrome draws its standard font (Times). `ui-serif`, `ui-sans-serif`, `ui-monospace`, `ui-rounded`, `emoji` and `fangsong` are plain family names, as in Chrome, which has no such keywords.
 - **Text box trim.** A lone `cap` or `ex` edge is `cap text` or `ex text` as the spec says, where Chrome currently rejects it. The trim does not pass through anonymous table cells, the `text` edge uses the line strut's metrics, and `text-box-trim` uses the primary font's metrics, not those of the fonts a `normal` line falls back to.
 - **Font smoothing.**
   - `none`, which Safari has, is an invalid value here, as are all but the three Chrome's macOS build draws.
