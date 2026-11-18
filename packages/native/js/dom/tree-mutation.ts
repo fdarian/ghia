@@ -7,10 +7,12 @@
  * the DOM's and live here. A `DocumentFragment` is inserted as its children, in order.
  */
 
+import { inertDocumentOf } from "./html/inert-marker.js"
 import { DOM_BINDING, Element, Node, type NodeBinding, type ParentBinding } from "./nodes.js"
 
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
+const COMMENT_NODE = 8
 const DOCUMENT_NODE = 9
 const DOCUMENT_FRAGMENT_NODE = 11
 
@@ -48,16 +50,35 @@ function assertNode(value: unknown, method: string, owner: string, position: num
   }
 }
 
+/**
+ * A browser adopts a node into the document it is inserted in. A node of a parsed document and a
+ * node of a window are built from different classes, so neither can be moved into the other.
+ */
+function assertSameDocument(parent: Node, node: Node): void {
+  const members = node.nodeType === DOCUMENT_FRAGMENT_NODE ? node[DOM_BINDING]().children : [node]
+  const expected = inertDocumentOf(parent)
+  for (const member of members) {
+    if (inertDocumentOf(member) === expected) continue
+    throw new DOMException(
+      "The node belongs to another document: a node of a parsed document (DOMParser) cannot be inserted into a window's tree or another parsed document. Set innerHTML or insertAdjacentHTML to import markup into a window.",
+      "WrongDocumentError"
+    )
+  }
+}
+
 /** The DOM's "ensure pre-insertion validity", for the node types that exist here. */
 export function assertCanInsert(parent: Node, node: Node, before: Node | null): ParentBinding {
   const binding = parentBindingOf(parent)
+  assertSameDocument(parent, node)
   if (node.nodeType === DOCUMENT_FRAGMENT_NODE) {
     // The fragment is never inserted itself: its children are, and they are what has to be in this window.
     for (const child of node[DOM_BINDING]().children) binding.assertSameWindow(child)
   } else {
     binding.assertSameWindow(node)
   }
-  if (node.nodeType !== ELEMENT_NODE && node.nodeType !== TEXT_NODE && node.nodeType !== DOCUMENT_FRAGMENT_NODE) {
+  // A parsed document has comments; a window's tree has no node for one.
+  const isComment = node.nodeType === COMMENT_NODE && inertDocumentOf(parent) !== undefined
+  if (node.nodeType !== ELEMENT_NODE && node.nodeType !== TEXT_NODE && node.nodeType !== DOCUMENT_FRAGMENT_NODE && !isComment) {
     throw hierarchyRequestError(`Nodes of type '${node.nodeName}' may not be inserted inside nodes of type '${parent.nodeName}'`)
   }
   if (node.contains(parent)) {
@@ -77,7 +98,10 @@ export function assertCanInsert(parent: Node, node: Node, before: Node | null): 
  */
 function takeNodes(parent: Node, nodes: readonly Node[]): void {
   const binding = parentBindingOf(parent)
-  for (const node of nodes) binding.assertSameWindow(node)
+  for (const node of nodes) {
+    assertSameDocument(parent, node)
+    binding.assertSameWindow(node)
+  }
   if (nodes.length > 1) for (const node of nodes) detach(node)
   for (const node of nodes) assertCanInsert(parent, node, null)
 }
@@ -261,4 +285,17 @@ export function insertAdjacentText(element: Node, where: string, data: string): 
   const place = adjacentPlace(element, where)
   if (place === null) return
   insertNode(place.parent, parentBindingOf(place.parent).createText(String(data)), place.before)
+}
+
+/**
+ * `insertAdjacentHTML`'s place: the node `where` names, as `insertAdjacentElement` finds it, and
+ * the node `build` makes for it. `build` gets the parent the markup is parsed in, and is not
+ * called when there is no place (`beforebegin` of a node with no parent).
+ */
+export function insertAdjacentNode(element: Node, where: string, build: (parent: Node) => Node): void {
+  const place = adjacentPlace(element, where)
+  if (place === null) {
+    throw new DOMException("The element has no parent", "NoModificationAllowedError")
+  }
+  insertNode(place.parent, build(place.parent), place.before)
 }

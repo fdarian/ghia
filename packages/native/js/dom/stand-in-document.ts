@@ -14,7 +14,7 @@
 import { createElementMethods } from "../host-runtime.js"
 import { readBoundingClientRect } from "../bounds.js"
 import { createDetachedRenderer } from "../detached-renderer.js"
-import { defineDomMembers, type DomElement } from "../dom-members.js"
+import { defineDomMembers, type DomElement, type DomElementBinding } from "../dom-members.js"
 import { ElementListeners } from "../events/element-listeners.js"
 import { defineScrollMembers } from "../scroll.js"
 import type { StyleDesc } from "../host.js"
@@ -57,12 +57,6 @@ class StandInElement extends HTMLElement {
     return this.binding
   }
 
-  focus(): void {}
-  blur(): void {}
-
-  getBoundingClientRect() {
-    return readBoundingClientRect(detachedRenderer(), 0)
-  }
 }
 
 class StandInBinding implements ElementBinding {
@@ -128,9 +122,27 @@ function detachedRenderer(): ReturnType<typeof createDetachedRenderer> {
   return gone
 }
 
+/**
+ * The members of an element that has no window: the DOM members, the scroll members and the pointer-capture and animation
+ * methods, which answer through the detached renderer. Shared with the elements of a parsed document (`html/inert-nodes.ts`).
+ */
+export function defineDetachedElementMembers<This extends object>(target: object, bind: (self: This) => DomElementBinding): void {
+  defineDomMembers(target, bind)
+  defineScrollMembers(target, () => ({ renderer: detachedRenderer(), id: 0 }))
+  const methods = createElementMethods(detachedRenderer(), 0)
+  Object.defineProperties(target, {
+    focus: { value: () => {}, writable: true, configurable: true },
+    blur: { value: () => {}, writable: true, configurable: true },
+    getBoundingClientRect: { value: () => readBoundingClientRect(detachedRenderer(), 0), writable: true, configurable: true },
+  })
+  for (const name of ["setPointerCapture", "releasePointerCapture", "hasPointerCapture", "click", "requestPointerLock", "getAnimations", "animate"] as const) {
+    Object.defineProperty(target, name, { value: methods[name], writable: true, configurable: true })
+  }
+}
+
 /** Members are defined on first use: this module is loaded by the document's own, which `dom-members` loads too. */
 function create(document: Node): StandIns {
-  defineDomMembers(StandInElement.prototype, (element: StandInElement) => ({
+  defineDetachedElementMembers(StandInElement.prototype, (element: StandInElement) => ({
     listeners: element.listeners,
     get connected() {
       return !element.replaced
@@ -143,11 +155,6 @@ function create(document: Node): StandIns {
       return element.liveStyle
     },
   }))
-  defineScrollMembers(StandInElement.prototype, () => ({ renderer: detachedRenderer(), id: 0 }))
-  const methods = createElementMethods(detachedRenderer(), 0)
-  for (const name of ["setPointerCapture", "releasePointerCapture", "hasPointerCapture", "click", "requestPointerLock", "getAnimations", "animate"] as const) {
-    Object.defineProperty(StandInElement.prototype, name, { value: methods[name], writable: true, configurable: true })
-  }
   const html = new StandInElement(ROOT_ELEMENT_TYPES.html)
   const head = new StandInElement(ROOT_ELEMENT_TYPES.head)
   const body = new StandInElement(ROOT_ELEMENT_TYPES.body)

@@ -97,8 +97,12 @@ export type TextBinding = NodeBinding & {
   createFragment(): DocumentFragment
 }
 
+export const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml"
+export const SVG_NAMESPACE = "http://www.w3.org/2000/svg"
+
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
+const COMMENT_NODE = 8
 const DOCUMENT_NODE = 9
 const DOCUMENT_FRAGMENT_NODE = 11
 
@@ -495,6 +499,14 @@ abstract class ElementClass extends NodeClass {
 
   declare removeAttribute: (name: string) => void
 
+  /**
+   * The markup of the children, and of the element itself, and the setters that parse markup in the
+   * context of the element. Defined on the prototype by `dom-globals`: see `html/members.ts`.
+   */
+  declare innerHTML: string
+  declare outerHTML: string
+  declare insertAdjacentHTML: (where: string, markup: string) => void
+
   /** Dispatches an event an app built at the element. The adapters' DOM members (`defineDomMembers`) define it on their prototypes. */
   declare dispatchEvent: (event: Event) => boolean
 
@@ -525,6 +537,11 @@ abstract class ElementClass extends NodeClass {
 
   get localName(): string {
     return this[DOM_BINDING]().type
+  }
+
+  /** The XML namespace: the SVG one for an SVG element, the HTML one for any other. */
+  get namespaceURI(): string {
+    return this instanceof shared.SVGElement ? SVG_NAMESPACE : HTML_NAMESPACE
   }
 
   /** The `id` prop, "" when the element has none. The native handle is `nativeId`. */
@@ -609,7 +626,7 @@ abstract class ElementClass extends NodeClass {
 
   get textContent(): string {
     let text = ""
-    for (const child of this[DOM_BINDING]().children) text += child.textContent ?? ""
+    for (const child of this[DOM_BINDING]().children) if (child.nodeType !== COMMENT_NODE) text += child.textContent ?? ""
     return text
   }
 
@@ -840,7 +857,7 @@ abstract class DocumentFragmentClass extends NodeClass {
 
   get textContent(): string {
     let text = ""
-    for (const child of this[DOM_BINDING]().children) text += child.textContent ?? ""
+    for (const child of this[DOM_BINDING]().children) if (child.nodeType !== COMMENT_NODE) text += child.textContent ?? ""
     return text
   }
 
