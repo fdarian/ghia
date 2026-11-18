@@ -65,7 +65,8 @@ impl ListStyleType {
         !matches!(self, Self::Disc | Self::Circle | Self::Square | Self::None)
     }
 
-    /// The marker as Chrome generates it: the symbol or the counter with its suffix, and a space.
+    /// The marker as Chrome generates it: the symbol or the counter with its suffix, and a space. A symbol is
+    /// what the marker reads out and measures by: Chrome paints it as a shape (`layout::list_marker_paint`).
     /// `None` for `none`. The counter of a type that cannot show it (roman past 3999, alphabetic
     /// below 1) is shown as `decimal` does.
     pub(crate) fn marker_text(self, ordinal: i64) -> Option<String> {

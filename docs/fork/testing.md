@@ -222,7 +222,7 @@ Test files are in `packages/react/src/__tests__/` unless a path says otherwise. 
 | | `cjk-spacing` (+x2) | `cjk-spacing.test.tsx` |
 | | `text-wrap-spans` | `text-wrap-spans.test.tsx` |
 | Glyphs and decorations | `glyph-origin` | `glyph-origin.test.tsx` |
-| | `list-markers` (+x2; the ink of the marker of 224 list items in 68 cases, and where the text of an `inside` item starts, read off a screenshot; `list-markers-cases.json` is the markup both sides read) | `list-markers.test.tsx` (React and Solid) |
+| | `list-markers` (+x2; the ink of the marker of 322 list items in 68 cases, and where the text of an `inside` item starts, read off a screenshot; `list-markers-cases.json` is the markup both sides read) | `list-markers.test.tsx` (React and Solid) |
 | | `font-smoothing` | `font-smoothing.test.tsx`, `font-optical-size.test.tsx` |
 | | `text-decoration` | `text-decoration-oracle.test.tsx` |
 | | `text-decoration-lines` | `text-decoration-lines.test.tsx` (React and Solid) |
