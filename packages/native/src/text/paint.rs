@@ -621,6 +621,10 @@ pub struct SelectableText {
     /// The margin, border and padding of the paragraph's inline boxes along the
     /// line, see [`super::inline_insets`].
     pub inline_insets: Option<std::rc::Rc<super::inline_insets::InsetSpec>>,
+    /// The room the `inside` marker of a list item takes before the first glyph, which the marker's
+    /// element sets when it is laid out, ahead of this text. The marker is no inline box of the
+    /// paragraph: it leaves the text, the offsets of a selection and a search as they are.
+    pub leading_marker: Option<std::rc::Rc<std::cell::Cell<gpui::Pixels>>>,
     /// The inline boxes of a paragraph that can take focus, in tree order, see
     /// [`super::inline_focus`].
     pub inline_focus: Vec<super::inline_focus::FocusableBox>,
@@ -676,6 +680,7 @@ impl SelectableText {
             inline_cursors: Vec::new(),
             inline_regions: Vec::new(),
             inline_insets: None,
+            leading_marker: None,
             inline_focus: Vec::new(),
             inline_decorations: Vec::new(),
             opacity_groups: Vec::new(),
@@ -684,6 +689,29 @@ impl SelectableText {
             cull_outset: None,
         }
     }
+}
+
+/// The insets a text is laid out with: its boxes' space, and the room of a list marker before the first glyph, with the key
+/// the layout caches them by. The marker's room is a function of its kind, which is in the key of the build, and of the font.
+fn insets_of(
+    spec: Option<std::rc::Rc<super::inline_insets::InsetSpec>>,
+    marker: Option<std::rc::Rc<std::cell::Cell<gpui::Pixels>>>,
+    text_len: usize,
+) -> Option<(u64, impl Fn(Option<gpui::Pixels>) -> Vec<gpui::TextInset> + 'static)> {
+    if spec.is_none() && marker.is_none() {
+        return None;
+    }
+    let key = spec.as_ref().map_or(0, |spec| spec.text_key()) ^ u64::from(marker.is_some());
+    Some((key, move |width: Option<gpui::Pixels>| {
+        let mut insets = Vec::new();
+        if let Some(marker) = &marker {
+            insets.push(gpui::TextInset { range: 0..text_len, leading: marker.get(), trailing: gpui::Pixels::ZERO });
+        }
+        if let Some(spec) = &spec {
+            insets.extend(spec.at(width).text());
+        }
+        insets
+    }))
 }
 
 /// A selectable text element: `StyledText` with a canvas underlay that paints
@@ -714,6 +742,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         inline_cursors,
         inline_regions,
         inline_insets,
+        leading_marker,
         inline_focus,
         inline_decorations,
         opacity_groups,
@@ -734,8 +763,8 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
             Some(runs) => StyledText::new(text.clone()).with_runs(runs),
             None => StyledText::new(text.clone()),
         };
-        let styled = match inline_insets {
-            Some(spec) => styled.with_insets_for_width(spec.text_key(), move |width| spec.at(width).text()),
+        let styled = match insets_of(inline_insets, leading_marker, text.len()) {
+            Some((key, insets)) => styled.with_insets_for_width(key, insets),
             None => styled,
         }
         .with_text_box_trim(text_box_trim);
@@ -743,8 +772,8 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     } else {
         let inline = super::paragraph::InlineText::new(text.clone(), run_styles)
             .with_boxes(aligned_boxes, atomics);
-        let inline = match inline_insets {
-            Some(spec) => inline.with_insets_for_width(spec.text_key(), move |width| spec.at(width).text()),
+        let inline = match insets_of(inline_insets, leading_marker, text.len()) {
+            Some((key, insets)) => inline.with_insets_for_width(key, insets),
             None => inline,
         }
         .with_text_box_trim(text_box_trim);

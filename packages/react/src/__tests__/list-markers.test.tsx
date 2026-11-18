@@ -32,6 +32,7 @@ interface Item {
   position: string
   ink: Box | null
   area: number
+  textLeft: number | null
 }
 
 interface Oracle {
@@ -104,6 +105,17 @@ function inkBox(pixels: Pixels, region: Box, color: number[]): { box: Box | null
   return { box, area }
 }
 
+/** The first column with black ink of the rows of `region`, as `list-markers-oracle.py` reads it. */
+function textLeft(pixels: Pixels, region: Box): number | null {
+  for (let x = region[0]; x < region[2]; x++) {
+    for (let y = region[1]; y < region[3]; y++) {
+      const pixel = pixels.at(x, y).slice(0, 3)
+      if (255 - Math.min(...pixel) > THRESHOLD && Math.max(...pixel) - Math.min(...pixel) < 40) return x
+    }
+  }
+  return null
+}
+
 function colorOf(css: string): number[] {
   return [...css.matchAll(/\d+/g)].slice(0, 3).map((match) => Number(match[0]))
 }
@@ -122,6 +134,7 @@ function regionOf(item: Item, scale: number): Box {
 interface Painted {
   boxes: Box[]
   inks: { box: Box | null; area: number }[]
+  textLefts: (number | null)[]
 }
 
 function paint(testCase: { html: string; h: number; style: string }, items: Item[], scale: 1 | 2, name: string): Painted {
@@ -160,7 +173,11 @@ function paint(testCase: { html: string; h: number; style: string }, items: Item
       return [box.x, box.y, box.width, box.height] as Box
     })
     const inks = items.map((item) => inkBox(pixels, regionOf(item, scale), colorOf(item.color)))
-    return { boxes, inks }
+    const textLefts = items.map((item) => {
+      const [x, y, width] = [item.box[0], item.text[1], item.box[2]]
+      return textLeft(pixels, [Math.round(x * scale), Math.round(y * scale), Math.round((x + width) * scale), Math.round((y + item.text[3]) * scale)])
+    })
+    return { boxes, inks, textLefts }
   } finally {
     root.unmount()
   }
@@ -192,6 +209,8 @@ describeNative("the marker of a list item, against Chrome", () => {
                 `${scale} ${testCase.name} #${at} area ${area} ${item.area} ghia ${JSON.stringify(ink)} chrome ${JSON.stringify(item.ink)} d ${JSON.stringify(item.ink && ink ? item.ink.map((edge, side) => ink[side]! - edge) : null)} box ${boxOff}\n`
               )
             }
+            const left = painted.textLefts[at]
+            if (left !== item.textLeft) problems.push(`item ${at} text starts at column ${left}, Chrome's at ${item.textLeft}`)
             worst[testCase.name] = Math.max(worst[testCase.name] ?? 0, off)
             if (item.ink && Math.abs(area - item.area) > AREA_TOLERANCE * item.area) {
               problems.push(`item ${at} paints ${area} pixels of ink, Chrome ${item.area}`)

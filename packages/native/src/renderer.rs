@@ -8146,6 +8146,9 @@ pub(crate) struct BuildCtx<'a> {
     pub tree: &'a RetainedTree,
     /// The ordinals of the list items built so far, each parent counted once.
     pub list_ordinals: crate::layout::list_marker::Ordinals,
+    /// The list item being built whose `inside` marker takes room at the start of its first
+    /// paragraph, and the room it takes once its element is laid out.
+    pub inside_marker: Option<(u64, std::rc::Rc<std::cell::Cell<gpui::Pixels>>)>,
     /// The fonts of the App the build is for, which `font-family` lists resolve against.
     pub fonts: Fonts,
     pub event_callback: &'a Option<EventCallback>,
@@ -9487,6 +9490,7 @@ impl GpuixView {
         BuildCtx {
             tree,
             list_ordinals: Default::default(),
+            inside_marker: None,
             fonts,
             event_callback: callback,
             activation,
@@ -12905,6 +12909,11 @@ pub(crate) fn build_host_container(
     // and focus events come from `GpuixView::observe_focus`. The wheel is a window-level
     // input like the pointer's (`events::listeners`).
 
+    let list_marker = if skipped { None } else { crate::layout::list_marker_paint::build(element, style, ctx) };
+    let outer_inside_marker = std::mem::replace(
+        &mut ctx.inside_marker,
+        list_marker.as_ref().and_then(|marker| marker.advance.clone().map(|advance| (element.id, advance))),
+    );
     #[cfg_attr(target_family = "wasm", allow(unused_mut))]
     let (mut content, mut placements, containing_heights) = if skipped {
         // The trim passed down is meant for what is built below.
@@ -12913,13 +12922,13 @@ pub(crate) fn build_host_container(
     } else {
         build_content(element, planned.as_ref().map_or(&[], |planned| &planned.children), ctx, window, cx)
     };
+    ctx.inside_marker = outer_inside_marker;
     if collapsed_table {
         let key = crate::layout::table_grid::BoxKey::Element(element.id);
         settle_collapsed_borders(ctx, key, used_from, window);
         el = crate::layout::table::repainted(el, &ctx.collapsed, key);
     }
     ctx.scroller = outer_scroller;
-    let list_marker = if skipped { None } else { crate::layout::list_marker_paint::build(element, style, ctx) };
     crate::text::atomic::report_containing_height(el, containing_heights);
     let focus_folded = style.map(|style| {
         ctx.focus_styles
@@ -13671,6 +13680,11 @@ fn paragraph_content(
             inline_cursors,
             inline_regions,
             inline_insets: insets.takes_space_along_the_line().then(|| insets.clone()),
+            leading_marker: ctx
+                .inside_marker
+                .as_ref()
+                .filter(|(item, _)| *item == paragraph.container && paragraph.index == 0)
+                .map(|(_, advance)| advance.clone()),
             cull_outset,
             ..crate::text::SelectableText::new(
                 paragraph.container,

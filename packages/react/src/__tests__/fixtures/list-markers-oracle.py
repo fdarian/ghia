@@ -5,7 +5,8 @@ item's own colour, in the rows of the first line of its text and in the columns 
 left edge (`outside`) or to its text (`inside`). A pixel is ink when it is more than 64 off white in some channel and
 its colour is near the item's by direction (the text is black and the other items' markers are the other hue).
 The box is [left, top, right, bottom] in device pixels of the screenshot, relative to the band, or null for no ink;
-the area is the number of ink pixels, which tells one digit from another where their boxes are the same."""
+the area is the number of ink pixels, which tells one digit from another where their boxes are the same; textLeft is the
+column of the first black ink of the item's first line, which is where an `inside` marker leaves the text."""
 import json
 import re
 import struct
@@ -82,6 +83,17 @@ def ink_box(rows, channels, x0, x1, y0, y1, color):
     return box, area
 
 
+def text_left(rows, channels, x0, x1, y0, y1):
+    """The first device pixel column with black ink (grey, more than 64 off white) of the rows, or None."""
+    for x in range(x0, x1):
+        for y in range(y0, y1):
+            line = rows[y]
+            pixel = [line[x * channels + k] for k in range(3)]
+            if 255 - min(pixel) > THRESHOLD and max(pixel) - min(pixel) < 40:
+                return x
+    return None
+
+
 def main():
     layout = json.load(open(sys.argv[1]))
     shot, scale, out = sys.argv[2], int(sys.argv[3]), sys.argv[4]
@@ -101,7 +113,9 @@ def main():
             ink, area = ink_box(rows, channels, x0, x1, y0, y1, color)
             if ink is not None:
                 ink = [ink[0] - origin_x, ink[1] - origin_y, ink[2] - origin_x, ink[3] - origin_y]
-            items.append({**item, 'ink': ink, 'area': area})
+            # The first glyph of the line: where the text starts after an `inside` marker.
+            left = text_left(rows, channels, round((case['left'] + box[0]) * scale), round((case['left'] + box[0] + box[2]) * scale), y0, y1)
+            items.append({**item, 'ink': ink, 'area': area, 'textLeft': None if left is None else left - origin_x})
         result['cases'].append({'name': case['name'], 'items': items})
     json.dump(result, open(out, 'w'), separators=(',', ':'))
 
