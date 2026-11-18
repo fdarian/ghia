@@ -262,12 +262,20 @@ impl Drop for VisualTestState {
         // (`pumpNativeEvents` of the next renderer) does not find the block with no app to run it.
         #[cfg(target_os = "macos")]
         {
+            // SAFETY: napi calls run on the main thread, and the test platform has made
+            // NSApplication.
+            //
+            // Spin the run loop once before the window is removed: the layer's pending
+            // `displayLayer:` (the window's frame request) runs in a Core Animation commit,
+            // and one that ran after the removal would find no window and log
+            // `window not found`.
+            unsafe { crate::native_event::run_main_queue() };
+            self.cx.run_until_parked();
             self.cx
                 .update_window(self.window, |_, window, _| window.remove_window())
                 .ok();
             self.cx.run_until_parked();
-            // SAFETY: napi calls run on the main thread, and the test platform has made
-            // NSApplication.
+            // SAFETY: as above.
             unsafe { crate::native_event::run_main_queue() };
         }
     }
@@ -296,11 +304,7 @@ fn dispose_test_state(owner: Option<u64>) -> Result<()> {
         }
         Ok(borrow.take())
     })?;
-    // The window's callbacks log that their window is gone while it closes, which is expected.
-    let level = log::max_level();
-    log::set_max_level(log::LevelFilter::Off);
     drop(state);
-    log::set_max_level(level);
     Ok(())
 }
 
@@ -1002,8 +1006,9 @@ impl TestGpuixRenderer {
 
     /// One call of the pump a live window's `tick()` runs (`gpui_macos::pump_app_nonblocking`),
     /// then the test context until it is parked: with `setYieldAfterKeyEvent(true)`, the default,
-    /// it ends after the first key event it sends. `tick()` is not that pump: it hands every queued
-    /// event to the window. Draws nothing.
+    /// it ends around the first key event it reaches (before it when an event or a step came
+    /// first, else after it). `tick()` is not that pump: it hands every queued event to the
+    /// window. Draws nothing.
     #[napi]
     pub fn pump_native_events(&self) -> Result<()> {
         #[cfg(target_os = "macos")]

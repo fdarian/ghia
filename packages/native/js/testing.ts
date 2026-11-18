@@ -877,8 +877,8 @@ export class TestRenderer implements NativeRenderer {
     this.native.postNativeKeys(text)
   }
 
-  /** One call of the pump a live window's `tick()` runs. It ends after the first key event it
-   *  sends (`setYieldAfterKeyEvent`, on by default), so queued keys take one call each, with a
+  /** One call of the pump a live window's `tick()` runs. It ends around the first key event it
+   *  reaches (`setYieldAfterKeyEvent`, on by default), so queued keys take one call each, with a
    *  turn of the event loop between them for the app's microtasks, as the frame loop gives a
    *  live window. Then hands the events the handlers queued to JS, as `tick()` does. */
   pumpNativeEvents(): void {

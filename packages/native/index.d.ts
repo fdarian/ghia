@@ -817,8 +817,9 @@ export declare class TestGpuixRenderer {
   /**
    * One call of the pump a live window's `tick()` runs (`gpui_macos::pump_app_nonblocking`),
    * then the test context until it is parked: with `setYieldAfterKeyEvent(true)`, the default,
-   * it ends after the first key event it sends. `tick()` is not that pump: it hands every queued
-   * event to the window. Draws nothing.
+   * it ends around the first key event it reaches (before it when an event or a step came
+   * first, else after it). `tick()` is not that pump: it hands every queued event to the
+   * window. Draws nothing.
    */
   pumpNativeEvents(): void
   /** Whether the last `pumpNativeEvents` left a key event queued or ended after sending one. */

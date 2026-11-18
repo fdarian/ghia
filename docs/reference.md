@@ -1651,6 +1651,14 @@ arms no timer. Each tick drains only ready AppKit events and Core Foundation
 sources, then returns without blocking JavaScript I/O. Wakes coalesce while
 JavaScript is busy, and work that arrived meanwhile wakes the next tick. Input
 wakes JavaScript as it arrives, once per batch of events, not at the next vsync.
+A key event (`keydown`, `keyup`, a modifier change) is the exception: it gets a
+tick of its own, with the events or the frame step before it ending their tick
+first, so each key has a microtask checkpoint on both sides, as a browser gives
+each key task ([frames-and-wakes.md](fork/frames-and-wakes.md#one-key-event-per-pump)).
+The tick that ended for a key wakes the loop again at once, and `renderer.keyEventPending()`
+reports it; with `frameMs` set, the timer path ticks again on the next turn of the
+event loop in that case instead of waiting out `frameMs`. Mouse events queued
+together are still handled in one tick.
 
 A visible window that is not the key window animates at the display rate. A
 window that is occluded or minimised gets no frames; animations keep time and
@@ -10764,6 +10772,28 @@ render(<div style={{ width: '100%', height: '100%' }} onMouseMove={() => moved++
 const loop = startFrameLoop(renderer) // no timer: an idle window is not ticked
 renderer.postNativeEvent('mouseMove', 100, 100) // wakes the loop, which ticks, and runs onMouseMove
 loop.stop()
+```
+
+To test what the live pump does with several keys, the test renderer has three more
+calls (macOS only). `postNativeKeys(text)` queues a `keyDown` and a `keyUp` for each
+character of `text` in AppKit's queue for the test window, all before the next pump;
+it takes lowercase ASCII letters and spaces and throws on anything else.
+`pumpNativeEvents()` is one call of the pump a live window's `tick()` runs
+(`pump_app_nonblocking`), then the handlers' queued events: with
+`setYieldAfterKeyEvent(true)`, the default, it ends around the first key it reaches, so
+queued keys take one call each and the test runs the microtask checkpoint between calls
+(`await` a turn of the event loop), as the frame loop does for a live window.
+`setYieldAfterKeyEvent(false)` makes one call send every queued event, as before.
+`keyEventPending()` is true when the last `pumpNativeEvents()` left a key queued or ended
+after sending one; the live renderer has the same method for its last `tick()`. `tick()`
+itself is not that pump: it hands every queued event to the window at once.
+
+```ts
+renderer.postNativeKeys('abc')
+do {
+  renderer.pumpNativeEvents()
+  await new Promise((resolve) => setImmediate(resolve)) // the app's microtasks run here
+} while (renderer.keyEventPending())
 ```
 
 ### Testing native elements
