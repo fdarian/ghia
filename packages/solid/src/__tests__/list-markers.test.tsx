@@ -185,3 +185,70 @@ describe.skipIf(!hasNativeTestRenderer)("the members that number a list in Solid
     }
   })
 })
+
+describe.skipIf(!hasNativeTestRenderer)("an inside marker follows the list in Solid", () => {
+  /** An inside list of `texts` drawn by code, after `change` has run on it; the screenshot's bytes. */
+  async function drawn(texts: string[], style: Record<string, string>, change?: (list: Element, items: Element[]) => void): Promise<Buffer> {
+    const app = createTestRoot({ width: 300, height: 300 })
+    try {
+      let host!: Element
+      app.render(() => (
+        <div
+          ref={(element) => (host = element as unknown as Element)}
+          style={{ width: 300, height: 300, "background-color": "#ffffff", color: "#000000", "font-size": 16, "line-height": "24px", "font-family": "Helvetica" }}
+        />
+      ))
+      const list = document.createElement("ol") as unknown as HTMLElement
+      Object.assign(list.style, { color: "#ff0000", "list-style-position": "inside", ...style })
+      const items = texts.map((text) => {
+        const item = document.createElement("li") as unknown as Element
+        const span = document.createElement("span") as unknown as HTMLElement
+        span.style.color = "#000000"
+        span.textContent = text
+        item.appendChild(span as unknown as Node)
+        list.appendChild(item as unknown as Node)
+        return item
+      })
+      host.appendChild(list as unknown as Node)
+      await Promise.resolve()
+      await Promise.resolve()
+      app.renderer.flush()
+      app.renderer.dispatchNativeEvents()
+      if (change) {
+        change(list as unknown as Element, items)
+        await Promise.resolve()
+        await Promise.resolve()
+        app.renderer.flush()
+        app.renderer.dispatchNativeEvents()
+      }
+      const file = path.join(shots, `inside-${Math.random().toString(36).slice(2)}.png`)
+      app.renderer.captureScreenshot(file)
+      return fs.readFileSync(file)
+    } finally {
+      app.unmount()
+    }
+  }
+
+  it("an item that becomes the tenth moves its text for the wider number", async () => {
+    const nine = ["a", "b", "c", "d", "e", "f", "g", "h", "i"]
+    const fresh = await drawn([...nine.slice(0, 8), "x", "i"], {})
+    const changed = await drawn(nine, {}, (list, items) => {
+      const item = document.createElement("li") as unknown as Element
+      const span = document.createElement("span") as unknown as HTMLElement
+      span.style.color = "#000000"
+      span.textContent = "x"
+      item.appendChild(span as unknown as Node)
+      list.insertBefore(item as unknown as Node, items[8] as unknown as Node)
+    })
+    expect(changed.equals(fresh)).toBe(true)
+  })
+
+  it("an inside list that changes from discs to numbers moves its text", async () => {
+    const texts = ["a", "b", "c"]
+    const fresh = await drawn(texts, { "list-style-type": "decimal" })
+    const changed = await drawn(texts, { "list-style-type": "disc" }, (list) => {
+      ;(list as unknown as HTMLElement).style.setProperty("list-style-type", "decimal")
+    })
+    expect(changed.equals(fresh)).toBe(true)
+  })
+})

@@ -8146,7 +8146,7 @@ pub(crate) struct BuildCtx<'a> {
     pub tree: &'a RetainedTree,
     /// The list item being built whose `inside` marker takes room at the start of its first
     /// paragraph, and the room it takes once its element is laid out.
-    pub inside_marker: Option<(u64, std::rc::Rc<std::cell::Cell<gpui::Pixels>>)>,
+    pub inside_marker: Option<(u64, crate::layout::list_marker_paint::Room)>,
     /// The fonts of the App the build is for, which `font-family` lists resolve against.
     pub fonts: Fonts,
     pub event_callback: &'a Option<EventCallback>,
@@ -12909,7 +12909,7 @@ pub(crate) fn build_host_container(
     let list_marker = if skipped { None } else { crate::layout::list_marker_paint::build(element, style, ctx) };
     let outer_inside_marker = std::mem::replace(
         &mut ctx.inside_marker,
-        list_marker.as_ref().and_then(|marker| marker.advance.clone().map(|advance| (element.id, advance))),
+        list_marker.as_ref().and_then(|marker| marker.inside.clone().map(|room| (element.id, room))),
     );
     #[cfg_attr(target_family = "wasm", allow(unused_mut))]
     let (mut content, mut placements, containing_heights) = if skipped {

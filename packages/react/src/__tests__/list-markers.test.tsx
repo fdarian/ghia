@@ -266,6 +266,16 @@ const CHANGES: [string, Scene, Scene][] = [
   ["an item gets a `value`", { items: ["a", "b", "c"] }, { items: ["a", "b", "c"], valueOf: { b: 20 } }],
   ["the type changes", { items: ["a", "b", "c"] }, { items: ["a", "b", "c"], style: { listStyleType: "upper-roman" } }],
   ["the position changes", { items: ["a", "b"] }, { items: ["a", "b"], style: { listStylePosition: "inside" } }],
+  [
+    "an inside item becomes the tenth, and its text moves for the wider number",
+    { items: ["a", "b", "c", "d", "e", "f", "g", "h", "i"], style: { listStylePosition: "inside" } },
+    { items: ["a", "b", "c", "d", "e", "f", "g", "h", "x", "i"], style: { listStylePosition: "inside" } },
+  ],
+  [
+    "an inside list changes from discs to numbers",
+    { items: ["a", "b", "c"], style: { listStylePosition: "inside", listStyleType: "disc" } },
+    { items: ["a", "b", "c"], style: { listStylePosition: "inside", listStyleType: "decimal" } },
+  ],
 ]
 
 describeNative("list markers follow the list", () => {

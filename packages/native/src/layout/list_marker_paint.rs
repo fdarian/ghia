@@ -15,6 +15,7 @@
 //! the item's font, and an outside one ends where the item's border box starts.
 
 use std::cell::Cell;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::rc::Rc;
 
 use gpui::Refineable as _;
@@ -65,14 +66,23 @@ pub(crate) fn inside_symbol_advance(ascent: i32, font_size: i32) -> i32 {
     symbol_width(Symbol::of(ascent).shape) - 1 + font_size
 }
 
+/// What an `inside` marker shares with the first paragraph of its item.
+#[derive(Clone)]
+pub(crate) struct Room {
+    /// The inline size the marker takes at the start of the first line, which its element sets when
+    /// it is laid out (the font is the one the text style has then).
+    pub advance: Rc<Cell<Pixels>>,
+    /// Stands for what `advance` comes to in a font: the paragraph is laid out with it, and layout keeps
+    /// the measure of a text by its key and not by the advance, which is only known after the build.
+    pub width_key: u64,
+}
+
 /// What an item builds for its marker.
 pub(crate) struct Built {
     pub element: AnyElement,
     /// Everything the marker is drawn from that the retention verifier compares.
     pub key: String,
-    /// For an `inside` marker, the inline size it takes at the start of the first line of the item,
-    /// which its element sets when it is laid out (the font is the one the text style has then).
-    pub advance: Option<Rc<Cell<Pixels>>>,
+    pub inside: Option<Room>,
 }
 
 /// The marker of the item `element` for the build `ctx`, and the ink it reaches past the item.
@@ -86,9 +96,14 @@ pub(crate) fn build(element: &RetainedElement, style: Option<&StyleDesc>, ctx: &
         crate::css::border::used_widths(style, &ctx.inherited.colors, &ctx.inherited.lengths)[3]
     });
     let key = format!("{:?} {:?} {:?} {}", marker.list_type, marker.position, border_left, marker.text);
-    let advance = (marker.position == ListStylePosition::Inside).then(|| Rc::new(Cell::new(Pixels::ZERO)));
+    let inside = (marker.position == ListStylePosition::Inside).then(|| {
+        let mut hasher = DefaultHasher::new();
+        format!("{:?}", marker.list_type).hash(&mut hasher);
+        marker.text.hash(&mut hasher);
+        Room { advance: Rc::new(Cell::new(Pixels::ZERO)), width_key: hasher.finish() }
+    });
     let outside = marker.position == ListStylePosition::Outside;
-    let mut canvas = MarkerElement { marker, border_left, advance: advance.clone(), style: StyleRefinement::default() }
+    let mut canvas = MarkerElement { marker, border_left, advance: inside.as_ref().map(|room| room.advance.clone()), style: StyleRefinement::default() }
         .absolute()
         .unlifted()
         .w(px(0.0))
@@ -97,7 +112,7 @@ pub(crate) fn build(element: &RetainedElement, style: Option<&StyleDesc>, ctx: &
         // The padding box of the item and not its content box, which the border box is measured from.
         canvas = canvas.left(px(0.0));
     }
-    Some(Built { element: canvas.into_any_element(), key, advance })
+    Some(Built { element: canvas.into_any_element(), key, inside })
 }
 
 /// The element of a marker: of no size, put where an absolute box with no inset on the block axis is

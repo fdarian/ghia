@@ -19,6 +19,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -624,7 +625,7 @@ pub struct SelectableText {
     /// The room the `inside` marker of a list item takes before the first glyph, which the marker's
     /// element sets when it is laid out, ahead of this text. The marker is no inline box of the
     /// paragraph: it leaves the text, the offsets of a selection and a search as they are.
-    pub leading_marker: Option<std::rc::Rc<std::cell::Cell<gpui::Pixels>>>,
+    pub leading_marker: Option<crate::layout::list_marker_paint::Room>,
     /// The inline boxes of a paragraph that can take focus, in tree order, see
     /// [`super::inline_focus`].
     pub inline_focus: Vec<super::inline_focus::FocusableBox>,
@@ -692,20 +693,24 @@ impl SelectableText {
 }
 
 /// The insets a text is laid out with: its boxes' space, and the room of a list marker before the first glyph, with the key
-/// the layout caches them by. The marker's room is a function of its kind, which is in the key of the build, and of the font.
+/// the layout caches them by. The marker's room is a function of its kind and text, which the key has, and of the font, which
+/// the key of the measure has from the runs.
 fn insets_of(
     spec: Option<std::rc::Rc<super::inline_insets::InsetSpec>>,
-    marker: Option<std::rc::Rc<std::cell::Cell<gpui::Pixels>>>,
+    marker: Option<crate::layout::list_marker_paint::Room>,
     text_len: usize,
 ) -> Option<(u64, impl Fn(Option<gpui::Pixels>) -> Vec<gpui::TextInset> + 'static)> {
     if spec.is_none() && marker.is_none() {
         return None;
     }
-    let key = spec.as_ref().map_or(0, |spec| spec.text_key()) ^ u64::from(marker.is_some());
+    let mut hasher = DefaultHasher::new();
+    spec.as_ref().map(|spec| spec.text_key()).hash(&mut hasher);
+    marker.as_ref().map(|room| room.width_key).hash(&mut hasher);
+    let key = hasher.finish();
     Some((key, move |width: Option<gpui::Pixels>| {
         let mut insets = Vec::new();
         if let Some(marker) = &marker {
-            insets.push(gpui::TextInset { range: 0..text_len, leading: marker.get(), trailing: gpui::Pixels::ZERO });
+            insets.push(gpui::TextInset { range: 0..text_len, leading: marker.advance.get(), trailing: gpui::Pixels::ZERO });
         }
         if let Some(spec) = &spec {
             insets.extend(spec.at(width).text());
