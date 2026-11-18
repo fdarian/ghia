@@ -1149,18 +1149,45 @@ pub fn parse_modifiers(modifiers: Option<&str>) -> Modifiers {
     parsed
 }
 
-/// Presses a space-separated sequence in Playwright's `keyboard.press` grammar
-/// (`"Shift+Tab"`, `"Meta+a"`, `"Enter"`): keydown, then keyup, for each. Typed
-/// characters reach the focused input like real typing. Every press is parsed
-/// before the first is sent.
+/// One event of `keystroke_steps`: the keydown or the keyup of a press.
+pub(crate) enum KeyStep {
+    Down(Press),
+    Up(Press),
+}
+
+impl KeyStep {
+    pub(crate) fn dispatch(self, window: &mut Window, cx: &mut App) {
+        match self {
+            KeyStep::Down(press) => send_key_down(window, cx, press, false),
+            KeyStep::Up(press) => send_key_up(window, cx, press),
+        }
+    }
+}
+
+/// The events of a space-separated sequence in Playwright's `keyboard.press` grammar
+/// (`"Shift+Tab"`, `"Meta+a"`, `"Enter"`): a keydown, then a keyup, for each press. Every press is
+/// parsed before the first is sent.
+///
+/// A caller that dispatches each step in an update of its own gets what the platform gives: the
+/// events a keydown defers (the editor's `input`) reach JS before the keyup. In one update they
+/// come after the whole sequence.
+pub(crate) fn keystroke_steps(keystrokes: &str) -> Result<Vec<KeyStep>, String> {
+    Ok(crate::events::key_names::parse_presses(keystrokes)?
+        .into_iter()
+        .flat_map(|press| [KeyStep::Down(press.clone()), KeyStep::Up(press)])
+        .collect())
+}
+
+/// Presses `keystrokes` (see `keystroke_steps`) in one update, which is all a window on another
+/// thread can be asked for.
+#[cfg(not(target_os = "macos"))]
 pub fn dispatch_keystrokes(
     window: &mut Window,
     cx: &mut App,
     keystrokes: &str,
 ) -> Result<(), String> {
-    for press in crate::events::key_names::parse_presses(keystrokes)? {
-        send_key_down(window, cx, press.clone(), false);
-        send_key_up(window, cx, press);
+    for step in keystroke_steps(keystrokes)? {
+        step.dispatch(window, cx);
     }
     Ok(())
 }

@@ -1077,8 +1077,8 @@ export class TestRenderer implements NativeRenderer {
         step.action,
         step.action === "unmark" ? undefined : step.text
       )
-      // The edit's events are queued behind the keydown, and a browser fires
-      // them before the keyup.
+      // The edit's events were delivered inside the call, as a browser fires them before the keyup;
+      // this drains what is still queued (selection changes, focus).
       this.dispatchNativeEvents()
       this.native.simulateKeyUp(step.key)
       this.dispatchNativeEvents()

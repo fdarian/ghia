@@ -675,6 +675,11 @@ drew.
   link starts then. A third test starts a `requestAnimationFrame` loop of 5 frames from the key handler and asks that no
   two callbacks run less than 3 ms apart (half a 120 Hz period less clock slack), which a link step queued behind the
   eager frame would break.
+- react `events.test.tsx` "the frame of a key that types into an input" posts 10 keys to a focused controlled `<input>` whose
+  `onInput` sets the value, and asks that `input` runs in the same tick as the `keydown` (the editor's events are delivered
+  synchronously, see [events-and-input.md](events-and-input.md#synchronous-dispatch)) and that each key after the first
+  paints exactly one frame: the eager frame already holds what `input` rendered. Queued, `input` came a tick later and a
+  second frame painted its change.
 - zed `gpui_macos` `tests/pump_window_updates.rs` (`harness = false`): 100 mouse moves posted to a window through
   `pump_app_nonblocking` make 100 `NSApplicationDidUpdateNotification`, not 260 as with a `updateWindows` call in the pump.
 - zed `gpui_macos` `run_loop_wake` lib (1: the set is found twice alike, is not the main queue's port and has members)

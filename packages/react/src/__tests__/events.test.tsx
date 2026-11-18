@@ -358,6 +358,110 @@ describe("frame loop", () => {
     )
   })
 
+  // The text editor's `input` is delivered after the edit and its lease, in the tick that dispatched
+  // the key, so the eager frame of that tick contains what the handler rendered: one paint per key.
+  // Through the callback queue `input` came a tick later and a second frame painted what it changed.
+  describe.skipIf(process.platform !== "darwin")("the frame of a key that types into an input", () => {
+    type TypedKey = {
+      keyDownTick: number | null
+      inputTick: number | null
+      painted: number
+    }
+    type TypedReport = { windowVisible: boolean; keys: TypedKey[] }
+    const keyCount = 10
+
+    const runTypingScript = (): TypedReport => {
+      const rendererPath = fileURLToPath(new URL("../reconciler/renderer.ts", import.meta.url))
+      const reconcilerPath = fileURLToPath(new URL("../reconciler/reconciler.js", import.meta.url))
+      const script = [
+        'import React, { useState } from "react"',
+        `import { createRenderer, render } from ${JSON.stringify(rendererPath)}`,
+        `import { flushSync } from ${JSON.stringify(reconcilerPath)}`,
+        'import { startFrameLoop } from "@ghia/native/runtime"',
+        "const renderer = createRenderer()",
+        "renderer.init({ focus: false })",
+        "let wakes = 0",
+        "let tickNumber = 0",
+        "let keyDownTick = null",
+        "let inputTick = null",
+        "const App = () => {",
+        '  const [text, setText] = useState("")',
+        '  return React.createElement("div", { style: { width: "100%", height: "100%" } },',
+        '    React.createElement("input", {',
+        "      autoFocus: true,",
+        "      value: text,",
+        "      style: { width: 200, height: 30 },",
+        "      onKeyDown: () => { keyDownTick = tickNumber },",
+        "      onInput: (event) => { inputTick = tickNumber; flushSync(() => setText(event.target.value)) },",
+        "    }),",
+        "    React.createElement(\"div\", null, `typed ${text.length}`),",
+        "  )",
+        "}",
+        "render(React.createElement(App), { renderer })",
+        "startFrameLoop({",
+        "  requiresTick: () => renderer.requiresTick(),",
+        "  tick: () => { tickNumber++; return renderer.tick() },",
+        "  setFrameWakeCallback: (callback) => renderer.setFrameWakeCallback(callback && (() => {",
+        "    wakes++",
+        "    callback()",
+        "  })),",
+        "})",
+        "const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))",
+        "const quietFor = async (quietMs, atLeastMs) => {",
+        "  const startedAt = performance.now()",
+        "  let seen = -1",
+        "  let changedAt = startedAt",
+        "  for (;;) {",
+        "    const now = performance.now()",
+        "    const key = renderer.getPaintedFrameCount() + wakes",
+        "    if (key !== seen) { seen = key; changedAt = now }",
+        "    if (now - changedAt >= quietMs && now - startedAt >= atLeastMs) return",
+        '    if (now - startedAt > 20000) throw new Error("the window did not settle in 20 s")',
+        "    await sleep(20)",
+        "  }",
+        "}",
+        "await quietFor(800, 7000)",
+        "const windowVisible = renderer.isWindowVisible()",
+        "const size = renderer.getWindowSize()",
+        "const keys = []",
+        "for (let key = 0; key < " + keyCount + "; key++) {",
+        "  await quietFor(300, 300)",
+        "  const paintedBefore = renderer.getPaintedFrameCount()",
+        "  keyDownTick = null",
+        "  inputTick = null",
+        '  renderer.postNativeEvent("keyDown", size.width / 2, size.height / 2)',
+        "  await sleep(250)",
+        "  keys.push({ keyDownTick, inputTick, painted: renderer.getPaintedFrameCount() - paintedBefore })",
+        "}",
+        "console.log(JSON.stringify({ windowVisible, keys }))",
+        "process.exit(0)",
+      ].join("\n")
+      const env = { ...process.env }
+      delete env.GPUIX_INPUT_FRAME_OFF
+      const result = spawnSync("bun", ["-e", script], { encoding: "utf8", timeout: 90_000, env })
+      expect(result.status, result.stderr || result.error?.message).toBe(0)
+      return JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "")
+    }
+
+    it(
+      "runs input in the keydown's tick and paints one frame for the key",
+      (context) => {
+        const report = runTypingScript()
+        console.log(`typing frames: ${JSON.stringify(report)}`)
+        if (!report.windowVisible) context.skip("the window is occluded, so no display link can start")
+        for (const key of report.keys) {
+          expect(key.keyDownTick).not.toBeNull()
+          expect(key.inputTick).toBe(key.keyDownTick)
+        }
+        // The first key's tick is cold: it paints twice with the eager frame as well.
+        for (const key of report.keys.slice(1)) {
+          expect(key.painted).toBe(1)
+        }
+      },
+      120_000,
+    )
+  })
+
   // AppKit begins a Core Animation transaction for every event it sends, and from macOS 26 its
   // update cycle commits one that begins before the next frame boundary from a timer at that
   // boundary: a second wake of JS for the event, unless the tick commits it. The moves come at

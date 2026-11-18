@@ -4895,10 +4895,14 @@ impl GpuixRenderer {
     #[napi]
     pub fn simulate_keystrokes(&self, keystrokes: String) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
-            crate::automation::dispatch_keystrokes(window, cx, &keystrokes)
-        })?
-        .map_err(Error::from_reason);
+        {
+            // An update per event, as AppKit sends them: what a keydown defers (the editor's `input`)
+            // is delivered before the keyup, not after the whole sequence.
+            for step in crate::automation::keystroke_steps(&keystrokes).map_err(Error::from_reason)? {
+                update_window_without_view(move |window, cx| step.dispatch(window, cx))?;
+            }
+            return Ok(());
+        }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.dispatch_key_input(KeyInput::Keystrokes(keystrokes));
@@ -6898,6 +6902,33 @@ fn is_within(tree: &crate::retained_tree::RetainedTree, id: u64, ancestor: u64) 
     false
 }
 
+/// The payload of a DOM event that bubbles and cannot be cancelled, aimed at `id`, or `None` when
+/// neither the element nor an ancestor listens for it.
+pub(crate) fn bubbling_event_payload(
+    tree: &crate::retained_tree::RetainedTree,
+    id: u64,
+    event_type: &str,
+    build: impl FnOnce(&mut EventPayload),
+) -> Option<EventPayload> {
+    if !crate::events::path::path_listens(tree, id, event_type) {
+        return None;
+    }
+    let mut payload = EventPayload {
+        element_id: id as f64,
+        event_type: event_type.to_string(),
+        target: Some(id as f64),
+        path: Some(
+            crate::events::path::event_path(tree, id)
+                .into_iter()
+                .map(|id| id as f64)
+                .collect(),
+        ),
+        ..Default::default()
+    };
+    build(&mut payload);
+    Some(payload)
+}
+
 /// Emits a DOM event that bubbles and cannot be cancelled, aimed at `id`, when
 /// the element or an ancestor listens for it.
 pub(crate) fn emit_bubbling_event(
@@ -6907,19 +6938,12 @@ pub(crate) fn emit_bubbling_event(
     event_type: &str,
     build: impl FnOnce(&mut EventPayload),
 ) {
-    if !crate::events::path::path_listens(tree, id, event_type) {
+    let (Some(callback), Some(payload)) =
+        (callback, bubbling_event_payload(tree, id, event_type, build))
+    else {
         return;
-    }
-    emit_event_full(callback, id, event_type, |payload| {
-        payload.target = Some(id as f64);
-        payload.path = Some(
-            crate::events::path::event_path(tree, id)
-                .into_iter()
-                .map(|id| id as f64)
-                .collect(),
-        );
-        build(payload);
-    });
+    };
+    callback(payload);
 }
 
 pub(crate) fn emit_transition_events(

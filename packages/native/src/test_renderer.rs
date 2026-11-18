@@ -1590,7 +1590,15 @@ impl TestGpuixRenderer {
     /// An unknown name is an error and nothing is pressed.
     #[napi]
     pub fn simulate_keystrokes(&self, keystrokes: String) -> Result<()> {
-        self.key_input(|window, cx| crate::automation::dispatch_keystrokes(window, cx, &keystrokes))
+        // An update per event, as the platform sends them: what a keydown defers (the editor's `input`)
+        // is delivered before the keyup, not after the whole sequence.
+        for step in crate::automation::keystroke_steps(&keystrokes).map_err(Error::from_reason)? {
+            self.key_input(|window, cx| {
+                step.dispatch(window, cx);
+                Ok(())
+            })?;
+        }
+        Ok(())
     }
 
     /// Dispatch one keydown (one press in the `simulate_keystrokes` grammar)
