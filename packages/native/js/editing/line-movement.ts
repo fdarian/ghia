@@ -7,6 +7,7 @@
  */
 
 import type { Node } from "../dom/nodes.js"
+import { isInclusiveAncestor } from "../dom/tree-order.js"
 import { moveCaretVisually, textEdge, textPointOf } from "./geometry.js"
 
 const ELEMENT_NODE = 1
@@ -16,13 +17,6 @@ export interface MovedPosition {
   offset: number
   /** The window x a following move up or down keeps, or `null` when this move starts a new run. */
   goalX: number | null
-}
-
-function isInclusiveDescendant(node: Node, ancestor: Node): boolean {
-  for (let current: Node | null = node; current !== null; current = current.parentNode) {
-    if (current === ancestor) return true
-  }
-  return false
 }
 
 /**
@@ -35,7 +29,7 @@ export function moveByLine(scope: Node, node: Node, offset: number, down: boolea
   const from = textPointOf(node, offset)
   if (from === null) return moveFromEmptyLine(scope, node, offset, down, goalX)
   const target = moveCaretVisually(from, down ? "lineDown" : "lineUp", goalX)
-  if (target !== null && isInclusiveDescendant(target.node, scope)) {
+  if (target !== null && isInclusiveAncestor(scope, target.node)) {
     return { node: target.node, offset: target.offset, goalX: target.x }
   }
   const edge = textEdge(scope, down ? "end" : "start")
@@ -50,7 +44,7 @@ export function moveByLine(scope: Node, node: Node, offset: number, down: boolea
 function moveFromEmptyLine(scope: Node, node: Node, offset: number, down: boolean, goalX: number | null): MovedPosition | null {
   if (node.nodeType !== ELEMENT_NODE) return null
   const target = moveCaretVisually({ node, offset }, down ? "lineDown" : "lineUp", goalX)
-  if (target === null || !isInclusiveDescendant(target.node, scope)) return null
+  if (target === null || !isInclusiveAncestor(scope, target.node)) return null
   return { node: target.node, offset: target.offset, goalX: target.x }
 }
 

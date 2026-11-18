@@ -16,6 +16,7 @@ import { DOM_BINDING, type Element, type Node, type Text, type TextBinding } fro
 import { Range } from "../dom/range.js"
 import { getSelection } from "../dom/selection.js"
 import type { NativeRenderer } from "../host.js"
+import { textById } from "./geometry.js"
 import { isEditingHost } from "./host.js"
 import { endEditingComposition, runEditingComposition, runEditingInput } from "./input.js"
 
@@ -27,18 +28,6 @@ const TEXT_NODE = 3
 interface TextPoint {
   node: Text
   offset: number
-}
-
-export function textById(root: Node, id: number): Text | null {
-  for (const child of root.childNodes) {
-    if (child.nodeType === TEXT_NODE) {
-      if ((child[DOM_BINDING]() as TextBinding).native?.id === id) return child as Text
-    } else if (child.nodeType === ELEMENT_NODE) {
-      const found = textById(child, id)
-      if (found !== null) return found
-    }
-  }
-  return null
 }
 
 function pointIn(host: Element, id: number, offset: number): TextPoint {

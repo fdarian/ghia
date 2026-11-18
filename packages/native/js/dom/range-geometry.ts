@@ -6,20 +6,13 @@
  */
 
 import { textRects } from "../editing/geometry.js"
-import { comparePoints } from "./tree-order.js"
+import { comparePoints, isInclusiveAncestor } from "./tree-order.js"
 import { DOMRect, DOMRectList } from "./dom-rect.js"
 import type { RangeBoundaries } from "./live-ranges.js"
 import type { Element, Node, Text } from "./nodes.js"
 
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
-
-function isInclusiveAncestor(ancestor: Node, node: Node): boolean {
-  for (let current: Node | null = node; current !== null; current = current.parentNode) {
-    if (current === ancestor) return true
-  }
-  return false
-}
 
 function commonAncestor(left: Node, right: Node): Node {
   let ancestor = left
@@ -33,31 +26,30 @@ function commonAncestor(left: Node, right: Node): Node {
 
 export function rangeClientRects(bounds: RangeBoundaries): DOMRectList {
   const rects = new DOMRectList()
-  const { startNode, startOffset, endNode, endOffset } = bounds
-  if (startNode.nodeType === TEXT_NODE && startNode === endNode) {
-    rects.push(...textRects(startNode as Text, startOffset, endOffset))
+  if (bounds.startNode.nodeType === TEXT_NODE && bounds.startNode === bounds.endNode) {
+    rects.push(...textRects(bounds.startNode as Text, bounds.startOffset, bounds.endOffset))
     return rects
   }
   const visit = (parent: Node, parentSelected: boolean): void => {
     const children = parent.childNodes
     for (let index = 0; index < children.length; index++) {
-      if (comparePoints(parent, index + 1, startNode, startOffset) <= 0) continue
-      if (comparePoints(parent, index, endNode, endOffset) >= 0) break
+      if (comparePoints(parent, index + 1, bounds.startNode, bounds.startOffset) <= 0) continue
+      if (comparePoints(parent, index, bounds.endNode, bounds.endOffset) >= 0) break
       const child = children[index]!
       if (child.nodeType === TEXT_NODE) {
         const text = child as Text
-        const from = text === startNode ? startOffset : 0
-        const to = text === endNode ? endOffset : text.data.length
+        const from = text === bounds.startNode ? bounds.startOffset : 0
+        const to = text === bounds.endNode ? bounds.endOffset : text.data.length
         if (from < to) rects.push(...textRects(text, from, to))
       } else if (child.nodeType === ELEMENT_NODE) {
         const selected =
-          comparePoints(parent, index, startNode, startOffset) >= 0 && comparePoints(parent, index + 1, endNode, endOffset) <= 0
+          comparePoints(parent, index, bounds.startNode, bounds.startOffset) >= 0 && comparePoints(parent, index + 1, bounds.endNode, bounds.endOffset) <= 0
         if (selected && !parentSelected) rects.push(...(child as Element).getClientRects())
         visit(child, parentSelected || selected)
       }
     }
   }
-  visit(commonAncestor(startNode, endNode), false)
+  visit(commonAncestor(bounds.startNode, bounds.endNode), false)
   return rects
 }
 

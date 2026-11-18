@@ -116,12 +116,13 @@ export function textRects(node: Text, start: number, end: number): DOMRect[] {
   return read(native.id, start, native.id, end).map((rect) => new DOMRect(rect.x, rect.y, rect.width, rect.height))
 }
 
-function descendantText(root: Node, id: number): Text | null {
+/** The Text node under `root` that native knows as `id`, or `null`. */
+export function textById(root: Node, id: number): Text | null {
   for (const child of root.childNodes) {
     if (isText(child)) {
       if (nativeOf(child)?.id === id) return child
     } else if (child.nodeType === ELEMENT_NODE) {
-      const found = descendantText(child, id)
+      const found = textById(child, id)
       if (found !== null) return found
     }
   }
@@ -149,7 +150,7 @@ export function setElementLookup(lookup: ElementLookup): void {
 
 function targetOf(renderer: NativeRenderer, caret: NativeCaret): CaretTarget {
   const container = elementLookup?.(renderer, caret.containerId) as Element | undefined
-  const node = container === undefined ? null : descendantText(container, caret.nodeId)
+  const node = container === undefined ? null : textById(container, caret.nodeId)
   if (node === null) {
     throw new Error(`Text node ${caret.nodeId} is painted by element ${caret.containerId}, which has no such text`)
   }

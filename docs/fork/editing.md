@@ -25,7 +25,7 @@ An element's own `contenteditable` is `true` (an empty text too), `false` or `pl
 
 ## Ranges
 
-`js/dom/range.ts` has `AbstractRange`, `StaticRange` and `Range` with the standard's boundary-point algorithms (`js/dom/tree-order.ts` for the position of two nodes). `getBoundingClientRect` and `getClientRects` of a `Range` are interim: they give the start container's element rect.
+`js/dom/range.ts` has `AbstractRange`, `StaticRange` and `Range` with the standard's boundary-point algorithms (`js/dom/tree-order.ts` for the position of two nodes). `getClientRects` and `getBoundingClientRect` of a `Range` are exact (`js/dom/range-geometry.ts`): the rect of each line fragment of the text the range selects, read from the painted text (`textRects`), and the border boxes of the elements it selects whole.
 
 A `Range` is live: a change to the tree moves its boundary points as the standard says. `js/dom/live-ranges.ts` holds the ranges weakly and implements the steps: `liveRangesBeforeRemove(parent, child, index)` before a child leaves, `liveRangesAfterInsert(parent, index, count)` after children arrive, `liveRangesReplaceData(node, offset, count, addedLength)` for a text change, and `liveRangesSplitText`. Each returns at once while no range exists (`hasLiveRanges()`), so a page that never makes one pays a counter check per tree change.
 
@@ -45,7 +45,7 @@ The DOM-path setters are the other half of the rule: React `setDomTextData` (`do
 
 ## The node selection
 
-`js/dom/selection.ts` is the one `Selection` of the app, and it is one of two things: a live `Range` over the DOM (after `collapse`, `setBaseAndExtent`, `addRange`, `modify` or the caret of an editing host) or the painted-text selection a drag makes. They never exist together: selecting nodes clears the painted text and the drag drops the range. The range the selection owns is registered as a live range, and a boundary moved by a tree or data change makes it dispatch `selectionchange` (one per task, only while a listener exists). `Selection.modify` and the deletion keys read text through `js/dom/selection-movement.ts` and `text-segmentation.ts`: grapheme and word steps over the Text nodes around a point, a block edge or `<br>` as one step, a `contenteditable="false"` element as one atomic stop. It has no layout, so `line` and the other layout granularities throw.
+`js/dom/selection.ts` is the one `Selection` of the app, and it is one of two things: a live `Range` over the DOM (after `collapse`, `setBaseAndExtent`, `addRange`, `modify` or the caret of an editing host) or the painted-text selection a drag makes. They never exist together: selecting nodes clears the painted text and the drag drops the range. The range the selection owns is registered as a live range, and a boundary moved by a tree or data change makes it dispatch `selectionchange` (one per task, only while a listener exists). `Selection.modify` and the deletion keys read text through `js/dom/selection-movement.ts` and `text-segmentation.ts`: grapheme and word steps over the Text nodes around a point, a block edge or `<br>` as one step, a `contenteditable="false"` element as one atomic stop. `line`, `lineboundary` and `documentboundary` ask native for the painted lines (`js/editing/line-movement.ts`); `sentence`, `paragraph` and their boundaries throw `NotSupportedError`.
 
 **The caret goes in at focus.** A caret is placed at the start of an editing host, unless the selection is already inside it, whenever focus moves into the host:
 

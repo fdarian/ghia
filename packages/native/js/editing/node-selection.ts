@@ -43,6 +43,20 @@ function nativeOf(node: Node): { renderer: NativeRenderer; id: number } | undefi
   return (node[DOM_BINDING]() as ElementBinding | TextBinding).native
 }
 
+/** The wire's `hostId` for a selection that is not the caret of an editing host. */
+const NO_HOST = 0
+
+/** The id of the editing host the caret `focusNode` is in, `NO_HOST` for a selection that is not one. */
+function hostIdOf(selection: ReturnType<typeof getSelection>, focusNode: Node): number {
+  if (!selection.isCollapsed) return NO_HOST
+  const host = editingHostOf(focusNode)
+  if (host === null) return NO_HOST
+  const hostNative = nativeOf(host)
+  // The host is above a node that is mounted, so it is mounted too.
+  if (hostNative === undefined) throw new Error("The editing host of a mounted node is not mounted")
+  return hostNative.id
+}
+
 /** The selection as the root `renderer` is to hold it: both ends in it, or `null`. */
 function wantedBy(renderer: NativeRenderer): WireNodeSelection | null {
   if (!holdsNodeSelection()) return null
@@ -55,13 +69,12 @@ function wantedBy(renderer: NativeRenderer): WireNodeSelection | null {
   if (anchor === undefined || focus === undefined || anchor.renderer !== renderer || focus.renderer !== renderer) {
     return null
   }
-  const host = selection.isCollapsed ? editingHostOf(focusNode) : null
   return {
     anchorId: anchor.id,
     anchorOffset: selection.anchorOffset,
     focusId: focus.id,
     focusOffset: selection.focusOffset,
-    hostId: host === null ? 0 : (nativeOf(host)?.id ?? 0),
+    hostId: hostIdOf(selection, focusNode),
   }
 }
 
@@ -80,7 +93,7 @@ export function takeNodeSelectionWrite(renderer: NativeRenderer): WireNodeSelect
   if (known === undefined && !holdsNodeSelection()) return undefined
   const wanted = wantedBy(renderer)
   const key = keyOf(wanted)
-  if ((known ?? "") === key) return undefined
+  if (known === undefined ? key === "" : known === key) return undefined
   if (wanted === null) {
     state.keys.delete(renderer)
     for (const holder of state.holders) {

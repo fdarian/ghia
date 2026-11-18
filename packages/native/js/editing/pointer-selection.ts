@@ -20,8 +20,8 @@ import { getSelection, holdsNodeSelection } from "../dom/selection.js"
 import { wordAt } from "../dom/text-segmentation.js"
 import { comparePoints, isInclusiveAncestor } from "../dom/tree-order.js"
 import type { NativeRenderer } from "../host.js"
+import { textById } from "./geometry.js"
 import { editingHostOf, ownContentEditable } from "./host.js"
-import { textById } from "./native-input.js"
 
 export const EDIT_POINTER_EVENT = "editpointer"
 
