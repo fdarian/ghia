@@ -230,6 +230,21 @@ describe.skipIf(!hasNativeTestRenderer)("the clipboard commands (Solid)", () => 
     })
   })
 
+  describe("a focused input that is not a text editor", () => {
+    it.each(["checkbox", "radio", "range"])("a %s input is an ordinary element to Cmd+V and Cmd+C: the events fire at it", (type) => {
+      const root = mount(() => <input type={type as "checkbox"} style={{ width: 40, height: 30 }} />)
+      const input = document.body!.querySelector("input") as HTMLInputElement
+      input.focus()
+      expect(document.activeElement).toBe(input)
+      const pastes = copyEvents(document, "paste")
+      const copies = copyEvents(document, "copy")
+      root.renderer.simulateKeystrokes("ControlOrMeta+v")
+      root.renderer.simulateKeystrokes("ControlOrMeta+c")
+      expect(pastes.map((event) => event.target)).toEqual([input])
+      expect(copies.map((event) => event.target)).toEqual([input])
+    })
+  })
+
   describe("paste and cut", () => {
     it("paste fires with the clipboard's types readable, and a canceled one is done", () => {
       const { renderer, host, one } = page()

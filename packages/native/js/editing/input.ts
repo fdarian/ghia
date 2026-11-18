@@ -13,6 +13,7 @@
  */
 
 import type { DataTransfer } from "../dom/data-transfer.js"
+import { normalizedInputType } from "../dom/input-type.js"
 import { parseHtmlDocument } from "../dom/html/parse.js"
 import { Node, type Element, type Text } from "../dom/nodes.js"
 import { createTextFor, Range, StaticRange } from "../dom/range.js"
@@ -25,7 +26,8 @@ import { moveToLineBoundary } from "./line-movement.js"
 
 const TEXT_NODE = 3
 const ELEMENT_NODE = 1
-const TEXT_CONTROLS: ReadonlySet<string> = new Set(["input", "textarea"])
+/** The `type`s an `<input>` is not edited as text for (`InputType::edits_text`, `custom_elements/input_rules.rs`): any other keyword, `button` and `date` included, is a text editor natively. */
+const NON_TEXT_INPUT_TYPES: ReadonlySet<string> = new Set(["checkbox", "radio", "hidden", "range"])
 
 export interface EditingInputOptions {
   isComposing?: boolean
@@ -62,9 +64,15 @@ export function focusedNode(): Node {
   return active
 }
 
-/** An `<input>` or `<textarea>`, which edit themselves and take the clipboard commands themselves. */
+/**
+ * A `<textarea>`, or an `<input>` native edits as text, which edit themselves and take the clipboard
+ * commands themselves. A checkbox, radio or range input is an ordinary element to the clipboard.
+ */
 export function isTextControl(node: Node): boolean {
-  return node.nodeType === ELEMENT_NODE && TEXT_CONTROLS.has((node as Element).localName)
+  if (node.nodeType !== ELEMENT_NODE) return false
+  const element = node as Element
+  if (element.localName === "textarea") return true
+  return element.localName === "input" && !NON_TEXT_INPUT_TYPES.has(normalizedInputType(element.getAttribute("type")))
 }
 
 /** The editing host that has focus, or `null` when focus is elsewhere or on an `<input>` or `<textarea>` (which edit themselves). */
