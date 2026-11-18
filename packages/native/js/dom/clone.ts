@@ -6,11 +6,13 @@
  */
 
 import { isNotAttribute } from "./attribute-names.js"
+import { inertDocumentOf } from "./html/inert-marker.js"
 import { carryStyleMarks, styleAttributeText } from "./css-style-declaration.js"
 import { DOM_BINDING, type DocumentFragment, type Element, type ElementBinding, type Node, type ParentBinding, type TextBinding } from "./nodes.js"
 
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
+const COMMENT_NODE = 8
 const DOCUMENT_FRAGMENT_NODE = 11
 
 type PrimitiveProp = string | number | boolean
@@ -34,12 +36,22 @@ function cloneElement(source: Element, deep: boolean): Element {
   if (deep) {
     for (const child of binding.children) cloneBinding.insertBefore(cloneNode(child, true), null)
   }
+  // A template's content is not among its children, and only a parsed document's templates have any. A shallow clone keeps it empty.
+  const content = Reflect.get(source, "templateContent") as DocumentFragment | undefined
+  if (content !== undefined) Reflect.set(clone, "templateContent", cloneFragment(content, deep))
   return clone
 }
 
 function cloneText(source: Node): Node {
   const binding: TextBinding = source[DOM_BINDING]() as TextBinding
   return binding.createText(binding.data)
+}
+
+/** A comment exists only in a parsed document (a window's tree has no node for one), so its clone is made by that document. */
+function cloneComment(source: Node): Node {
+  const document = inertDocumentOf(source) as { createComment(data: string): Node } | undefined
+  if (document === undefined) throw new Error("A comment that is not in a parsed document")
+  return document.createComment((source[DOM_BINDING]() as TextBinding).data)
 }
 
 function cloneFragment(source: DocumentFragment, deep: boolean): Node {
@@ -58,6 +70,8 @@ export function cloneNode(source: Node, deep: boolean): Node {
       return cloneElement(source as Element, deep)
     case TEXT_NODE:
       return cloneText(source)
+    case COMMENT_NODE:
+      return cloneComment(source)
     case DOCUMENT_FRAGMENT_NODE:
       return cloneFragment(source as DocumentFragment, deep)
     default:

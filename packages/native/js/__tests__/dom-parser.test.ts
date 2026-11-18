@@ -159,6 +159,21 @@ describe("DOMParser", () => {
     expect(first.body.textContent).toBe("toneone")
   })
 
+  it("clones its comments and the content of its templates", () => {
+    const doc = parse("<p>a<!--x--></p><template><b>t</b><!--y--></template>")
+    const clone = doc.body.cloneNode(true) as HTMLElement
+    expect(shape(clone)).toBe('body(p("a" <!--x-->) template)')
+    const template = clone.querySelector("template") as HTMLTemplateElement
+    expect(template).not.toBe(doc.querySelector("template"))
+    expect(shape(template.content)).toBe('#document-fragment(b("t") <!--y-->)')
+    expect(template.content.ownerDocument).toBe(doc)
+    const comment = (doc.body.firstChild as Node).lastChild as Comment
+    const copy = comment.cloneNode() as Comment
+    expect([copy.data, copy.ownerDocument, copy.parentNode]).toEqual(["x", doc, null])
+    expect(shape((doc.querySelector("template") as HTMLTemplateElement).cloneNode(false) as Node)).toBe("template")
+    expect(((doc.querySelector("template") as HTMLTemplateElement).cloneNode(false) as HTMLTemplateElement).content.childNodes).toHaveLength(0)
+  })
+
   it("makes nodes of its own", () => {
     const doc = parse("")
     const div = doc.createElement("DIV")
