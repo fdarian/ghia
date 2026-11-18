@@ -87,6 +87,7 @@ describe.skipIf(!hasNativeTestRenderer)("the marker of a list item in Solid, aga
                   "line-height": "24px",
                   "font-family": "Helvetica",
                   overflow: "hidden",
+                  ...Object.fromEntries(testCase.style.split(";").filter(Boolean).map((declaration) => declaration.split(":") as [string, string])),
                 }}
               />
             ))

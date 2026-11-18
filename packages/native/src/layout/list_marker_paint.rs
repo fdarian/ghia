@@ -75,6 +75,10 @@ pub(crate) struct Room {
     /// Stands for what `advance` comes to in a font: the paragraph is laid out with it, and layout keeps
     /// the measure of a text by its key and not by the advance, which is only known after the build.
     pub width_key: u64,
+    /// Where the first row of the paragraph starts in the window, which the paragraph sets when it is
+    /// prepainted, ahead of the paint of the marker: alignment moves the marker with the text, as it
+    /// moves the room the marker takes at the start of the row. `None` until then.
+    pub first_row: Rc<Cell<Option<Pixels>>>,
 }
 
 /// What an item builds for its marker.
@@ -100,10 +104,10 @@ pub(crate) fn build(element: &RetainedElement, style: Option<&StyleDesc>, ctx: &
         let mut hasher = DefaultHasher::new();
         format!("{:?}", marker.list_type).hash(&mut hasher);
         marker.text.hash(&mut hasher);
-        Room { advance: Rc::new(Cell::new(Pixels::ZERO)), width_key: hasher.finish() }
+        Room { advance: Rc::new(Cell::new(Pixels::ZERO)), width_key: hasher.finish(), first_row: Rc::new(Cell::new(None)) }
     });
     let outside = marker.position == ListStylePosition::Outside;
-    let mut canvas = MarkerElement { marker, border_left, advance: inside.as_ref().map(|room| room.advance.clone()), style: StyleRefinement::default() }
+    let mut canvas = MarkerElement { marker, border_left, room: inside.clone(), style: StyleRefinement::default() }
         .absolute()
         .unlifted()
         .w(px(0.0))
@@ -120,7 +124,7 @@ pub(crate) fn build(element: &RetainedElement, style: Option<&StyleDesc>, ctx: &
 struct MarkerElement {
     marker: Marker,
     border_left: Pixels,
-    advance: Option<Rc<Cell<Pixels>>>,
+    room: Option<Room>,
     style: StyleRefinement,
 }
 
@@ -140,6 +144,7 @@ impl IntoElement for MarkerElement {
 
 /// The metrics of the text style of the item, as the marker reads them.
 struct Metrics {
+    style: gpui::TextStyle,
     scale: f32,
     font_size: Pixels,
     line_height: Pixels,
@@ -147,7 +152,7 @@ struct Metrics {
 }
 
 impl Metrics {
-    fn of(window: &Window) -> (gpui::TextStyle, Self) {
+    fn of(window: &Window) -> Self {
         let style = window.text_style();
         let scale = window.scale_factor();
         let rem = window.rem_size();
@@ -155,7 +160,7 @@ impl Metrics {
         let text_system = window.text_system();
         let line_height = text_system.line_height(&style, rem, scale);
         let line_box = text_system.line_box(text_system.resolve_font(&style.font()), font_size, scale);
-        (style, Self { scale, font_size, line_height, line_box })
+        Self { style, scale, font_size, line_height, line_box }
     }
 
     /// The rounded ascent of the font in device pixels, which Blink sizes a symbol from.
@@ -165,21 +170,33 @@ impl Metrics {
 }
 
 /// The inline size an `inside` marker takes, in the item's font.
-fn inside_advance(marker: &Marker, style: &gpui::TextStyle, metrics: &Metrics, window: &Window) -> Pixels {
+fn inside_advance(marker: &Marker, metrics: &Metrics, window: &Window) -> Pixels {
     match marker.list_type {
         ListStyleType::Disc | ListStyleType::Circle | ListStyleType::Square => {
             let font_size_device = (f32::from(metrics.font_size) * metrics.scale).round() as i32;
             px(inside_symbol_advance(metrics.ascent_device(), font_size_device) as f32 / metrics.scale)
         }
-        _ => shape(marker, style, metrics, window).width(),
+        _ => shape(marker, metrics, window).width(),
     }
 }
 
-fn shape(marker: &Marker, style: &gpui::TextStyle, metrics: &Metrics, window: &Window) -> gpui::ShapedLine {
-    let mut run = style.to_run(marker.text.len());
+/// The features of the marker: Chrome's `::marker` rule has `font-variant-numeric: tabular-nums`, so
+/// the digits of a counter keep one width in a font that has proportional ones. A `tnum` the item
+/// sets itself is left as it is.
+fn tabular(inherited: &gpui::FontFeatures) -> gpui::FontFeatures {
+    let mut features: Vec<(String, u32)> = inherited.tag_value_list().iter().filter(|(tag, _)| tag != "pnum").cloned().collect();
+    if !features.iter().any(|(tag, _)| tag == "tnum") {
+        features.push(("tnum".to_owned(), 1));
+    }
+    gpui::FontFeatures(std::sync::Arc::new(features))
+}
+
+fn shape(marker: &Marker, metrics: &Metrics, window: &Window) -> gpui::ShapedLine {
+    let mut run = metrics.style.to_run(marker.text.len());
     run.underline = None;
     run.strikethrough = None;
     run.overline = None;
+    run.font.features = tabular(&run.font.features);
     window.text_system().shape_line(marker.text.clone().into(), metrics.font_size, &[run], None)
 }
 
@@ -210,9 +227,9 @@ impl Element for MarkerElement {
         window: &mut Window,
         cx: &mut gpui::App,
     ) -> (LayoutId, Style) {
-        if let Some(advance) = &self.advance {
-            let (style, metrics) = Metrics::of(window);
-            advance.set(inside_advance(&self.marker, &style, &metrics, window));
+        if let Some(room) = &self.room {
+            let metrics = Metrics::of(window);
+            room.advance.set(inside_advance(&self.marker, &metrics, window));
         }
         let mut style = Style::default();
         style.refine(&self.style);
@@ -240,19 +257,29 @@ impl Element for MarkerElement {
         window: &mut Window,
         cx: &mut gpui::App,
     ) {
-        style.paint(bounds, window, cx, |window, cx| paint(&self.marker, self.border_left, bounds, window, cx));
+        let first_row = self.room.as_ref().and_then(|room| room.first_row.get());
+        style.paint(bounds, window, cx, |window, cx| paint(&self.marker, self.border_left, first_row, bounds, window, cx));
     }
 }
 
-fn paint(marker: &Marker, border_left: Pixels, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut gpui::App) {
+fn paint(
+    marker: &Marker,
+    border_left: Pixels,
+    first_row: Option<Pixels>,
+    bounds: Bounds<Pixels>,
+    window: &mut Window,
+    cx: &mut gpui::App,
+) {
     if window.visibility() != gpui::Visibility::Visible {
         return;
     }
-    let (style, metrics) = Metrics::of(window);
+    let metrics = Metrics::of(window);
+    let style = &metrics.style;
     let scale = metrics.scale;
-    let (above, _) = metrics.line_box.extent(metrics.line_height, scale);
+    let above = metrics.line_box.extent(metrics.line_height, scale).0;
     let outside = marker.position == ListStylePosition::Outside;
-    let edge = if outside { bounds.origin.x - border_left } else { bounds.origin.x };
+    // An inside marker starts the first row of the text, wherever its alignment puts it.
+    let edge = if outside { bounds.origin.x - border_left } else { first_row.unwrap_or(bounds.origin.x) };
 
     match marker.list_type {
         ListStyleType::Disc | ListStyleType::Circle | ListStyleType::Square => {
@@ -293,10 +320,11 @@ fn paint(marker: &Marker, border_left: Pixels, bounds: Bounds<Pixels>, window: &
             }
         }
         _ => {
-            let line = shape(marker, &style, &metrics, window);
+            let line = shape(marker, &metrics, window);
             let origin = point(if outside { edge - line.width() } else { edge }, bounds.origin.y);
-            // The line is laid out by the line box model of the item; a failed paint has no better answer than none.
-            let _ = line.paint(origin, metrics.line_height, TextAlign::Left, None, window, cx);
+            if let Err(error) = line.paint(origin, metrics.line_height, TextAlign::Left, None, window, cx) {
+                log::error!("a list marker did not paint: {error}");
+            }
         }
     }
 }

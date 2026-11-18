@@ -408,6 +408,54 @@
    "html": "<ul><li style=\"color:#0a0\"><span>green</span></li></ul>",
    "h": 80,
    "style": ""
+  },
+  {
+   "name": "ul inside text-align center",
+   "html": "<ul style=\"list-style-position:inside;text-align:center\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li></ul>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "ol inside text-align right",
+   "html": "<ol style=\"list-style-position:inside;text-align:right\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li></ol>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "ol inside text-align end",
+   "html": "<ol style=\"list-style-position:inside;text-align:end\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li></ol>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "ol alpha inside text-align center",
+   "html": "<ol style=\"list-style-position:inside;text-align:center;list-style-type:lower-alpha\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li></ol>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "ul inside text-align center wraps",
+   "html": "<ul style=\"list-style-position:inside;text-align:center;width:160px\"><li><span>a long item of text that wraps onto more lines</span></li></ul>",
+   "h": 190,
+   "style": ""
+  },
+  {
+   "name": "ol inside text-align right wraps",
+   "html": "<ol style=\"list-style-position:inside;text-align:right;width:160px\"><li><span>a long item of text that wraps onto more lines</span></li></ol>",
+   "h": 190,
+   "style": ""
+  },
+  {
+   "name": "ol system-ui proportional digits",
+   "html": "<ol><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li><li><span>item 12</span></li></ol>",
+   "h": 340,
+   "style": "font-family:system-ui"
+  },
+  {
+   "name": "ol inside system-ui proportional digits",
+   "html": "<ol style=\"list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li><li><span>item 12</span></li></ol>",
+   "h": 340,
+   "style": "font-family:system-ui"
   }
  ]
 }

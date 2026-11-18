@@ -763,6 +763,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         "a text has either explicit runs or inline run styles"
     );
     let has_atomics = !atomics.is_empty();
+    let first_row = leading_marker.as_ref().map(|room| room.first_row.clone());
     let (layout, glyphs) = if run_styles.is_empty() {
         let styled = match runs {
             Some(runs) => StyledText::new(text.clone()).with_runs(runs),
@@ -785,6 +786,11 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         (inline.layout().clone(), Glyphs::Paragraph(inline))
     };
     super::atomic::note(element_id, &layout);
+    // The marker that comes before this text paints where its first row starts, which alignment moves.
+    let settled: Option<Box<dyn FnOnce()>> = first_row.map(|first_row| {
+        let layout = layout.clone();
+        Box::new(move || first_row.set(Some(layout.bounds().origin.x + layout.align_offset_at(0)))) as Box<dyn FnOnce()>
+    });
 
     let behind: Vec<_> = inline_decorations
         .iter()
@@ -940,7 +946,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     );
 
     if alone && super::leaf::enabled() {
-        return super::leaf::TextLeaf::new(glyphs, prepaint, paint, cull_outset).into_any_element();
+        return super::leaf::TextLeaf::new(glyphs, prepaint, paint, cull_outset, settled).into_any_element();
     }
     let mut underlay = canvas(move |_, window, _| prepaint(window), move |_, _, window, cx| paint(window, cx))
         .keeps_no_position();
@@ -957,12 +963,18 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     wrapper_in_place
         .child(underlay)
         .child(glyphs.into_any())
+        .children(settled.map(settle_after_glyphs))
         .children(decorations)
         .children(groups)
         .children(cursor_hitboxes)
         .children(region_hitboxes)
         .children(super::inline_focus::anchors(inline_focus));
     wrapper.into_any_element()
+}
+
+/// An element of no size that runs `settled` when it is prepainted, which in a text's wrapper is after the glyphs.
+fn settle_after_glyphs(settled: Box<dyn FnOnce()>) -> impl IntoElement {
+    canvas(move |_, _, _| settled(), |_, _, _, _| {}).keeps_no_position().absolute().unlifted().w(px(0.0)).h(px(0.0))
 }
 
 /// Paints every opacity group of a paragraph, after its glyphs and rings: CSS paints a box with
