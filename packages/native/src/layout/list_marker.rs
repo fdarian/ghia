@@ -27,6 +27,7 @@ use crate::retained_tree::{RetainedElement, RetainedTree};
 /// The marker of one item, as text and where it goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Marker {
+    pub list_type: ListStyleType,
     pub text: String,
     pub position: ListStylePosition,
 }
@@ -110,7 +111,7 @@ pub(crate) fn marker_of(tree: &RetainedTree, ordinals: &mut Ordinals, id: u64) -
     }
     let list_type = tree.list_style_type_of(id);
     let ordinal = if list_type.is_ordinal() { ordinals.of(tree, id)? } else { 0 };
-    Some(Marker { text: list_type.marker_text(ordinal)?, position: tree.list_style_position_of(id) })
+    Some(Marker { list_type, text: list_type.marker_text(ordinal)?, position: tree.list_style_position_of(id) })
 }
 
 /// What the tree has noted since the last flush.

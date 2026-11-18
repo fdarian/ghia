@@ -14,6 +14,8 @@ import type {
   HostRef,
   HtmlAnchorProps,
   HtmlButtonProps,
+  HtmlListItemProps,
+  HtmlOrderedListProps,
   HtmlTag,
   ImgInstance,
   ImgProps,
@@ -97,6 +99,8 @@ export namespace JSX {
   interface IntrinsicElements extends HtmlTagElements {
     a: Host<Props & HtmlAnchorProps, "a">
     button: Host<Props & HtmlButtonProps, "button">
+    li: Host<Props & HtmlListItemProps, "li">
+    ol: Host<Props & HtmlOrderedListProps, "ol">
     div: Host<Props, "div">
     text: Host<SvgTextProps, "text">
     span: Host<Props, "span">

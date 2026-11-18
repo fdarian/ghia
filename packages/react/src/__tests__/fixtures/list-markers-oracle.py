@@ -4,7 +4,8 @@ For every `li` of the page's answer (list-markers-oracle.html) the ink box of it
 item's own colour, in the rows of the first line of its text and in the columns from 90 CSS px before its box to its
 left edge (`outside`) or to its text (`inside`). A pixel is ink when it is more than 64 off white in some channel and
 its colour is near the item's by direction (the text is black and the other items' markers are the other hue).
-The box is [left, top, right, bottom] in device pixels of the screenshot, relative to the band, or null for no ink."""
+The box is [left, top, right, bottom] in device pixels of the screenshot, relative to the band, or null for no ink;
+the area is the number of ink pixels, which tells one digit from another where their boxes are the same."""
 import json
 import re
 import struct
@@ -62,10 +63,11 @@ def read_png(path):
 
 
 def ink_box(rows, channels, x0, x1, y0, y1, color):
-    """The device pixel box of the ink of `color` in the region, or None."""
+    """The device pixel box of the ink of `color` in the region and how many pixels it has, or (None, 0)."""
     want = [255 - c for c in color]
     norm = sum(w * w for w in want) ** 0.5
     box = None
+    area = 0
     for y in range(y0, y1):
         line = rows[y]
         for x in range(x0, x1):
@@ -75,8 +77,9 @@ def ink_box(rows, channels, x0, x1, y0, y1, color):
             length = sum(g * g for g in got) ** 0.5
             if sum(g * w for g, w in zip(got, want)) / (length * norm) < 0.9:
                 continue
+            area += 1
             box = [x, y, x + 1, y + 1] if box is None else [min(box[0], x), min(box[1], y), max(box[2], x + 1), max(box[3], y + 1)]
-    return box
+    return box, area
 
 
 def main():
@@ -95,10 +98,10 @@ def main():
             x1 = round((case['left'] + (text[0] if item['position'] == 'inside' else box[0])) * scale)
             y0 = round((case['top'] + text[1]) * scale)
             y1 = round((case['top'] + text[1] + text[3]) * scale)
-            ink = ink_box(rows, channels, x0, x1, y0, y1, color)
+            ink, area = ink_box(rows, channels, x0, x1, y0, y1, color)
             if ink is not None:
                 ink = [ink[0] - origin_x, ink[1] - origin_y, ink[2] - origin_x, ink[3] - origin_y]
-            items.append({**item, 'ink': ink})
+            items.append({**item, 'ink': ink, 'area': area})
         result['cases'].append({'name': case['name'], 'items': items})
     json.dump(result, open(out, 'w'), separators=(',', ':'))
 

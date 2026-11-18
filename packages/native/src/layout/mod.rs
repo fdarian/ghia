@@ -15,6 +15,7 @@ pub(crate) mod display;
 pub mod grid;
 pub mod grid_values;
 pub(crate) mod list_marker;
+pub(crate) mod list_marker_paint;
 pub(crate) mod order;
 #[cfg(test)]
 mod row_root_tests;

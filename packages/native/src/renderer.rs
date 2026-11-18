@@ -8144,6 +8144,8 @@ impl GpuixView {
 /// `cx` stay separate parameters: they are `&mut` and gpui reborrows them.
 pub(crate) struct BuildCtx<'a> {
     pub tree: &'a RetainedTree,
+    /// The ordinals of the list items built so far, each parent counted once.
+    pub list_ordinals: crate::layout::list_marker::Ordinals,
     /// The fonts of the App the build is for, which `font-family` lists resolve against.
     pub fonts: Fonts,
     pub event_callback: &'a Option<EventCallback>,
@@ -9484,6 +9486,7 @@ impl GpuixView {
     ) -> BuildCtx<'a> {
         BuildCtx {
             tree,
+            list_ordinals: Default::default(),
             fonts,
             event_callback: callback,
             activation,
@@ -12916,6 +12919,7 @@ pub(crate) fn build_host_container(
         el = crate::layout::table::repainted(el, &ctx.collapsed, key);
     }
     ctx.scroller = outer_scroller;
+    let list_marker = if skipped { None } else { crate::layout::list_marker_paint::build(element, style, ctx) };
     crate::text::atomic::report_containing_height(el, containing_heights);
     let focus_folded = style.map(|style| {
         ctx.focus_styles
@@ -12961,12 +12965,13 @@ pub(crate) fn build_host_container(
             .map(|(_, placement)| *placement)
             .collect();
         format!(
-            "{:?} {} {:?} {:?} {:?}",
+            "{:?} {} {:?} {:?} {:?} {:?}",
             host.style(),
             content.len() - absent_children.len(),
             present.iter().map(|placement| placement.rank).collect::<Vec<_>>(),
             Placement::document_order(&present),
-            resolved
+            resolved,
+            list_marker.as_ref().map(|marker| &marker.key)
         )
     });
     // After the digest above, which the indices of the absent children are of the content without it.
@@ -12974,6 +12979,10 @@ pub(crate) fn build_host_container(
     #[cfg(not(target_family = "wasm"))]
     if element.element_type == "nativeview" && !skipped {
         content.insert(0, nativeview_layer(element, style, ctx));
+        placements.insert(0, Placement { rank: 0, document: 0 });
+    }
+    if let Some(marker) = list_marker {
+        content.insert(0, marker.element);
         placements.insert(0, Placement { rank: 0, document: 0 });
     }
     if !skipped {
