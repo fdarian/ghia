@@ -944,8 +944,10 @@ The **Edit menu** runs the same commands as the keys: the key window handles a
 key equivalent before the menu does, so `⌘C` still reaches the page's `keydown`
 first (a `preventDefault` there cancels the command, as in Chrome), then the
 focused `<input>`, then the page's [`copy` event](#clipboard-events). The menu
-fires for a click, and for a key nothing handled. Its items are enabled whenever
-the window is key.
+fires for a click, and for a key nothing handled. The four items are always
+enabled, with a selection or not and with focus anywhere: a command with nothing
+to do (a copy of nothing, a paste into a page with no editing host) fires its
+event and then does nothing, as the key does.
 
 Use **`render()`**, not `createRenderer()`, in the app entry. A full reload
 under `ghia dev` re-runs the whole entry on save. `createRenderer()` plus `init()` would then
@@ -10780,7 +10782,7 @@ a `code` (`"Space"`, `"KeyA"`, `"Digit1"`, `"ShiftLeft"`, `"NumpadEnter"`,
 case-sensitive, and one that is not a key throws before anything is pressed:
 GPUI's own syntax (`"enter"`, `"cmd-shift-p"`) is not accepted.
 
-`simulateMenuAction('copy' | 'cut' | 'paste' | 'selectAll')` on the test renderer chooses that Edit menu item as the menu bar does: it returns `false` and does nothing when the item would be greyed out, and otherwise runs the same command as the key ([clipboard events](#clipboard-events)).
+`simulateMenuAction('copy' | 'cut' | 'paste' | 'selectAll')` on the test renderer chooses that Edit menu item as the menu bar does and runs the same command as the key ([clipboard events](#clipboard-events)). It returns whether the item was enabled, which the four always are, so it is `true`; an item name that is not one of the four throws.
 
 ```ts
 renderer.simulateKeystrokes('Shift+Tab')              // one press

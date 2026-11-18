@@ -955,8 +955,9 @@ export class TestRenderer implements NativeRenderer {
   }
 
   /** Chooses an Edit menu item (`"copy"`, `"cut"`, `"paste"` or `"selectAll"`) as the menu bar does,
-   *  for the focus the window has now. Returns false, and does nothing, when the item would be
-   *  greyed out (no listener for its action on the focus path or the window's root). */
+   *  for the focus the window has now. Returns whether the item was enabled, which these four
+   *  always are (the app-level listeners in `src/events/clipboard.rs` make them available with
+   *  nothing focused too), so it is `true`; a name that is not one of the four throws. */
   simulateMenuAction(name: "copy" | "cut" | "paste" | "selectAll"): boolean {
     flushPendingMutations(this)
     this.native.flushIfDirty()

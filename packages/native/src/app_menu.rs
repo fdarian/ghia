@@ -14,8 +14,9 @@
 //! the keybinding and its action), and AppKit offers it to the menu only when
 //! the window answers NO. So the menu carrying cmd-c does not take the keystroke
 //! from the page or from a focused `<input>`; it fires when the key was not
-//! handled, and for a click, and an item is enabled when its action has a
-//! listener on the focus path or on the window's root element.
+//! handled, and for a click. The four items are always enabled: the app-level
+//! listeners in `events/clipboard.rs` (`init`) count for `App::is_action_available`
+//! on every window, whatever has focus, so the menu never greys them out.
 
 use gpui::{App, Menu, MenuItem, SystemMenuType};
 
