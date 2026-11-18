@@ -1391,13 +1391,31 @@ nothing from it later.
 
 **The default of `copy`.** Not cancelled, with a node selection that is not collapsed: `text/plain` is
 `getSelection().toString()` and `text/html` is `<meta charset='utf-8'>` and the markup of `range.cloneContents()`. With no
-node selection, text a drag selected in the page is copied as plain text. The defaults of `cut` (copy, then delete with
-`beforeinput` `deleteByCut`) and `paste` (insert with `beforeinput` `insertFromPaste`) are not done yet: an editing host's
-Cut and Paste do nothing unless a handler cancels the event and does it itself. `<input>` and `<textarea>` copy and paste on
-their own, with no clipboard event ([deviations.md](fork/deviations.md#events-and-input)).
+node selection, text a drag selected in the page is copied as plain text.
+
+**The default of `cut`.** Not cancelled, in an editing host with a range selected: the range is copied as for `copy`, then
+`beforeinput` (`inputType: 'deleteByCut'`, cancelable, `getTargetRanges()` the selection, `data` and `dataTransfer` null),
+the range is deleted, and `input`. A handler that cancels the `beforeinput` keeps the text, and the clipboard still has the
+copy. With a caret, or outside an editing host, nothing happens after the event.
+
+**The default of `paste`.** Not cancelled, in an editing host that holds the selection: `beforeinput`
+(`inputType: 'insertFromPaste'`, cancelable, `data` null, `getTargetRanges()` the selection, `dataTransfer` a read-only
+`DataTransfer` with the clipboard's items), then the range is replaced by the `text/plain` string (or the text of
+`text/html` when there is none), with a `<br>` for each line break, then `input` with the same `dataTransfer`. Outside an
+editing host nothing is inserted. A page that wants the markup reads `clipboardData` in `paste` and cancels it
+([deviations.md](fork/deviations.md#events-and-input)). `<input>` and `<textarea>` copy and paste on their own, with no
+clipboard event ([deviations.md](fork/deviations.md#events-and-input)).
 
 **Select All** (Cmd+A, and the Edit menu's) selects the contents of the focused editing host (a `keydown` default there, as
 before) and, with focus elsewhere, the contents of `body`.
+
+**`document.execCommand(name)`.** `'copy'`, `'cut'` and `'selectAll'` run the command at once, as the keys do, so the `copy`
+or `cut` event fires before the call returns (the way Lexical copies a node selection: a temporary `copy` listener, then
+`execCommand('copy')`). They return true when done, and false when an `<input>` or `<textarea>` has focus or a `copy` has
+nothing to copy. `'paste'` returns false and does nothing, as in Chrome without the clipboard-read permission; every other
+command returns false ([deviations.md](fork/deviations.md#events-and-input)). `queryCommandSupported` is true for those four
+and `queryCommandEnabled` is true for `copy` with a range selected, `cut` with a range selected in an editing host, and
+`selectAll`.
 
 #### DataTransfer
 
