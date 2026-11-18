@@ -4,7 +4,7 @@
  * control took the command, and this fires the DOM clipboard event ("fire a clipboard event" in the
  * Clipboard API) and, if nothing canceled it, does what Chrome does. It answers whether it did the
  * command: a copy that is not handled falls back to the painted-text selection, which only native
- * holds.
+ * holds. Cut and paste have no such fallback and are always handled.
  *
  * It is not a DOM event itself: no listener hears it.
  */
@@ -18,8 +18,10 @@ import { document } from "../events/window-target.js"
 import type { ClipboardData } from "../../index.js"
 import { flushPendingMutations } from "../bounds.js"
 import type { NativeRenderer } from "../host.js"
+import { mountedRenderer } from "../mounted-renderer.js"
+import { setDocumentCommands } from "./document-commands.js"
 import { editingHostOf } from "./host.js"
-import { focusedNode, isTextControl } from "./input.js"
+import { editingSelectionKind, focusedNode, isTextControl, runEditingInput } from "./input.js"
 
 export const CLIPBOARD_COMMAND_EVENT = "clipboardcommand"
 
@@ -131,26 +133,41 @@ function runCopy(clipboard: ClipboardAccess): boolean {
   return copyNodeSelection(clipboard)
 }
 
+/**
+ * Chrome's default cut: in an editing host, a range is copied and then deleted (`beforeinput`
+ * `deleteByCut`, so the clipboard has it even when a listener cancels the deletion). Anywhere else, or
+ * with a caret, Chrome does nothing, so this is handled and has no painted-text fallback.
+ */
 function runCut(clipboard: ClipboardAccess): boolean {
   if (fireWritable("cut", clipboard)) return true
-  // TODO(clipboard-defaults): Chrome copies the selection and deletes it with `beforeinput` `deleteByCut`, in an editable context.
-  return false
+  if (editingSelectionKind() !== "range") return true
+  copyNodeSelection(clipboard)
+  runEditingInput("deleteByCut", null)
+  return true
 }
 
-function runPaste(clipboard: ClipboardAccess): boolean {
+/** A fresh store of the clipboard's items in the mode `beforeinput` of a paste has: read-only. */
+function clipboardData(clipboard: ClipboardAccess, mode: "readonly" | "protected"): DataTransfer {
   const data = new DataTransfer()
   const control = dataTransferControl(data)
   for (const entry of clipboard.readClipboard()) data.setData(entry.type, entry.data)
-  control.mode = "readonly"
+  control.mode = mode
+  return data
+}
+
+/** Chrome's default paste: the text of the clipboard goes into an editing host at the selection, and anywhere else nothing does. */
+function runPaste(clipboard: ClipboardAccess): boolean {
+  const data = clipboardData(clipboard, "readonly")
   let canceled: boolean
   try {
     canceled = fire("paste", eventTarget(), data)
   } finally {
-    control.mode = "protected"
+    dataTransferControl(data).mode = "protected"
   }
   if (canceled) return true
-  // TODO(clipboard-defaults): Chrome inserts the text with `beforeinput` `insertFromPaste`, in an editable context.
-  return false
+  if (editingSelectionKind() === "none") return true
+  runEditingInput("insertFromPaste", null, { dataTransfer: clipboardData(clipboard, "readonly") })
+  return true
 }
 
 /** Cmd+A: the focused editing host's contents, or the page's when none has focus. */
@@ -188,3 +205,43 @@ export function runClipboardCommand(command: ClipboardCommand, renderer: NativeR
   flushPendingMutations(renderer)
   return handled
 }
+
+const EXEC_COMMANDS: Readonly<Record<string, ClipboardCommand | undefined>> = {
+  copy: "copy",
+  cut: "cut",
+  selectall: "selectAll",
+}
+
+function documentCommandOf(name: string): ClipboardCommand | undefined {
+  return EXEC_COMMANDS[name.toLowerCase()]
+}
+
+/**
+ * `document.execCommand("copy")` and `("cut")` run the clipboard command at once, so the `copy` or
+ * `cut` event fires inside the call, as Chrome fires it during a user gesture; user activation is not
+ * tracked. `"paste"` does nothing, as in Chrome without the clipboard-read permission.
+ */
+setDocumentCommands({
+  exec(name) {
+    const command = documentCommandOf(name)
+    if (command === undefined) return false
+    const renderer = mountedRenderer()
+    if (renderer === undefined) throw new Error(`document.execCommand("${name}") needs a mounted GPUIX root. Call it after render().`)
+    return runClipboardCommand(command, renderer)
+  },
+  supported(name) {
+    return documentCommandOf(name) !== undefined || name.toLowerCase() === "paste"
+  },
+  enabled(name) {
+    switch (name.toLowerCase()) {
+      case "copy":
+        return holdsNodeSelection() && !getSelection().isCollapsed
+      case "cut":
+        return editingSelectionKind() === "range"
+      case "selectall":
+        return true
+      default:
+        return false
+    }
+  },
+})

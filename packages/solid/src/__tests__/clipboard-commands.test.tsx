@@ -257,6 +257,250 @@ describe.skipIf(!hasNativeTestRenderer)("the clipboard commands (Solid)", () => 
     })
   })
 
+  /** Records, in order, the `cut` or `paste` event and the `beforeinput` and `input` events of an edit on `host`. */
+  const editLog = (host: HTMLElement, types: string[]) => {
+    const log: Array<Record<string, unknown>> = []
+    for (const type of types) {
+      const listener = (event: Event) => {
+        const entry: Record<string, unknown> = { type }
+        if (event instanceof InputEvent) {
+          entry.inputType = event.inputType
+          entry.data = event.data
+          entry.cancelable = event.cancelable
+          entry.transfer = event.dataTransfer === null ? null : (event.dataTransfer as DataTransfer).getData("text/plain")
+          entry.ranges = event.getTargetRanges().map((range) => [range.startContainer, range.startOffset, range.endContainer, range.endOffset])
+        }
+        log.push(entry)
+      }
+      host.addEventListener(type, listener)
+      cleanups.push(() => host.removeEventListener(type, listener))
+    }
+    return log
+  }
+
+  describe("cut in an editing host", () => {
+    it("copies the range, then beforeinput deleteByCut, the deletion and input", () => {
+      const { renderer, host, one } = page()
+      host.focus()
+      document.getSelection().setBaseAndExtent(one, 0, one, 3)
+      const log = editLog(host, ["cut", "beforeinput", "input"])
+      renderer.simulateKeystrokes("ControlOrMeta+x")
+      expect(log).toEqual([
+        { type: "cut" },
+        { type: "beforeinput", inputType: "deleteByCut", data: null, cancelable: true, transfer: null, ranges: [[one, 0, one, 3]] },
+        { type: "input", inputType: "deleteByCut", data: null, cancelable: false, transfer: null, ranges: [] },
+      ])
+      expect(one.data).toBe(" two")
+      expect(renderer.readClipboard()[0]).toEqual({ type: "text/plain", data: "one" })
+      const selection = document.getSelection()
+      expect([selection.anchorNode, selection.anchorOffset, selection.isCollapsed]).toEqual([one, 0, true])
+    })
+
+    it("writes the clipboard before the beforeinput, so a canceled deletion keeps the text and the clipboard has it", () => {
+      const { renderer, host, one } = page()
+      host.focus()
+      document.getSelection().setBaseAndExtent(one, 4, one, 7)
+      let atBeforeInput: unknown
+      host.addEventListener("beforeinput", (event) => {
+        atBeforeInput = renderer.readClipboard()[0]
+        event.preventDefault()
+      })
+      const log = editLog(host, ["input"])
+      renderer.simulateKeystrokes("ControlOrMeta+x")
+      expect(atBeforeInput).toEqual({ type: "text/plain", data: "two" })
+      expect(one.data).toBe("one two")
+      expect(log).toEqual([])
+    })
+
+    it("deletes a range across paragraphs the way Backspace over it does", () => {
+      const { renderer, host, one, three } = page()
+      host.focus()
+      document.getSelection().setBaseAndExtent(one, 4, three, 5)
+      renderer.simulateKeystrokes("ControlOrMeta+x")
+      expect(renderer.readClipboard()[0]).toEqual({ type: "text/plain", data: "twothree" })
+      expect(host.textContent).toBe("one  four")
+    })
+
+    it("does nothing but fire cut for a caret, and for a selection outside an editing host", () => {
+      const { renderer, host, one, plain } = page()
+      renderer.writeClipboard([{ type: "text/plain", data: "before" }])
+      const cuts = copyEvents(document, "cut")
+      const log = editLog(host, ["beforeinput"])
+      host.focus()
+      document.getSelection().collapse(one, 2)
+      renderer.simulateKeystrokes("ControlOrMeta+x")
+      const text = plain.firstChild!
+      document.getSelection().setBaseAndExtent(text, 0, text, 5)
+      renderer.simulateKeystrokes("ControlOrMeta+x")
+      expect(cuts).toHaveLength(2)
+      expect(log).toEqual([])
+      expect(one.data).toBe("one two")
+      expect(text.textContent).toBe("plain text")
+      expect(renderer.readClipboard()).toEqual([{ type: "text/plain", data: "before" }])
+    })
+  })
+
+  describe("paste in an editing host", () => {
+    const clipboardText = (renderer: { writeClipboard(items: Array<{ type: string; data: string }>): void }, text: string) =>
+      renderer.writeClipboard([{ type: "text/plain", data: text }])
+
+    it("beforeinput insertFromPaste carries the clipboard and the range, then the text goes in and input fires", () => {
+      const { renderer, host, one } = page()
+      clipboardText(renderer, "XY")
+      host.focus()
+      document.getSelection().collapse(one, 3)
+      const log = editLog(host, ["paste", "beforeinput", "input"])
+      let transfer!: DataTransfer
+      host.addEventListener("beforeinput", (event) => {
+        transfer = (event as InputEvent).dataTransfer as DataTransfer
+        transfer.setData("text/plain", "ignored")
+      })
+      renderer.simulateKeystrokes("ControlOrMeta+v")
+      expect(log).toEqual([
+        { type: "paste" },
+        { type: "beforeinput", inputType: "insertFromPaste", data: null, cancelable: true, transfer: "XY", ranges: [[one, 3, one, 3]] },
+        { type: "input", inputType: "insertFromPaste", data: null, cancelable: false, transfer: "XY", ranges: [] },
+      ])
+      expect(transfer.types).toEqual(["text/plain"])
+      expect(one.data).toBe("oneXY two")
+      const selection = document.getSelection()
+      expect([selection.anchorNode, selection.anchorOffset, selection.isCollapsed]).toEqual([one, 5, true])
+    })
+
+    it("replaces a range", () => {
+      const { renderer, host, one } = page()
+      clipboardText(renderer, "2")
+      host.focus()
+      document.getSelection().setBaseAndExtent(one, 4, one, 7)
+      const log = editLog(host, ["beforeinput"])
+      renderer.simulateKeystrokes("ControlOrMeta+v")
+      expect(log[0]!.ranges).toEqual([[one, 4, one, 7]])
+      expect(one.data).toBe("one 2")
+    })
+
+    it("puts a <br> at each line break", () => {
+      const { renderer, host, one } = page()
+      clipboardText(renderer, "a\nb\r\nc")
+      host.focus()
+      document.getSelection().collapse(one, 3)
+      renderer.simulateKeystrokes("ControlOrMeta+v")
+      expect(host.querySelector("p")!.innerHTML).toBe("onea<br>b<br>c two")
+      const selection = document.getSelection()
+      expect(selection.anchorNode!.textContent).toBe("c two")
+      expect(selection.anchorOffset).toBe(1)
+    })
+
+    it("inserts the text of text/html when there is no text/plain", () => {
+      const { renderer, host, one } = page()
+      renderer.writeClipboard([{ type: "text/html", data: "<b>bold</b> and <i>italic</i>" }])
+      host.focus()
+      document.getSelection().collapse(one, 0)
+      renderer.simulateKeystrokes("ControlOrMeta+v")
+      expect(one.data).toBe("bold and italicone two")
+    })
+
+    it("a paste canceled at the paste event inserts nothing and fires no beforeinput", () => {
+      const { renderer, host, one } = page()
+      clipboardText(renderer, "XY")
+      host.focus()
+      document.getSelection().collapse(one, 3)
+      host.addEventListener("paste", (event) => event.preventDefault())
+      const log = editLog(host, ["beforeinput", "input"])
+      renderer.simulateKeystrokes("ControlOrMeta+v")
+      expect(log).toEqual([])
+      expect(one.data).toBe("one two")
+    })
+
+    it("a paste canceled at beforeinput inserts nothing and fires no input", () => {
+      const { renderer, host, one } = page()
+      clipboardText(renderer, "XY")
+      host.focus()
+      document.getSelection().collapse(one, 3)
+      host.addEventListener("beforeinput", (event) => event.preventDefault())
+      const log = editLog(host, ["input"])
+      renderer.simulateKeystrokes("ControlOrMeta+v")
+      expect(log).toEqual([])
+      expect(one.data).toBe("one two")
+    })
+
+    it("into a non-editable element fires only the paste event", () => {
+      const { renderer, host, plain } = page()
+      clipboardText(renderer, "XY")
+      const text = plain.firstChild!
+      document.getSelection().collapse(text, 2)
+      const pastes = copyEvents(document, "paste")
+      const log = editLog(host, ["beforeinput", "input"])
+      renderer.simulateKeystrokes("ControlOrMeta+v")
+      expect(pastes).toHaveLength(1)
+      expect(log).toEqual([])
+      expect(text.textContent).toBe("plain text")
+    })
+  })
+
+  describe("document.execCommand", () => {
+    it("copy fires the copy event inside the call: Lexical's temporary listener for a node selection", () => {
+      const { renderer, plain } = page()
+      const span = document.createElement("span")
+      span.textContent = "node"
+      plain.appendChild(span)
+      cleanups.push(() => span.remove())
+      document.getSelection().setBaseAndExtent(span, 0, span, 1)
+      let ran = false
+      const listener = (event: Event) => {
+        ran = true
+        event.preventDefault()
+        ;(event as ClipboardEvent).clipboardData!.setData("application/x-lexical-editor", "{}")
+        ;(event as ClipboardEvent).clipboardData!.setData("text/plain", "from lexical")
+      }
+      document.addEventListener("copy", listener, { capture: true })
+      let result: boolean
+      try {
+        result = document.execCommand("copy")
+        expect(ran).toBe(true)
+      } finally {
+        document.removeEventListener("copy", listener, { capture: true })
+      }
+      expect(result).toBe(true)
+      expect(renderer.readClipboard()).toEqual([
+        { type: "application/x-lexical-editor", data: "{}" },
+        { type: "text/plain", data: "from lexical" },
+      ])
+    })
+
+    it("copy and cut do what the keys do, and paste returns false and does nothing", () => {
+      const { renderer, host, one } = page()
+      host.focus()
+      document.getSelection().setBaseAndExtent(one, 0, one, 3)
+      expect(document.execCommand("copy")).toBe(true)
+      expect(renderer.readClipboard()[0]).toEqual({ type: "text/plain", data: "one" })
+      expect(document.execCommand("cut")).toBe(true)
+      expect(one.data).toBe(" two")
+      const pastes = copyEvents(document, "paste")
+      expect(document.execCommand("paste")).toBe(false)
+      expect(pastes).toEqual([])
+      expect(one.data).toBe(" two")
+    })
+
+    it("selectAll selects, and other commands are not supported", () => {
+      const { host } = page()
+      host.focus()
+      expect(document.execCommand("selectAll")).toBe(true)
+      expect(document.getSelection().toString()).toBe("one twothree four")
+      expect(document.execCommand("bold")).toBe(false)
+      expect(document.execCommand("insertText", false, "x")).toBe(false)
+    })
+
+    it("queryCommandSupported and queryCommandEnabled", () => {
+      const { host, one } = page()
+      expect(["copy", "cut", "paste", "selectAll", "bold"].map((name) => document.queryCommandSupported(name))).toEqual([true, true, true, true, false])
+      host.focus()
+      document.getSelection().collapse(one, 2)
+      expect(["copy", "cut", "paste", "selectAll"].map((name) => document.queryCommandEnabled(name))).toEqual([false, false, false, true])
+      document.getSelection().setBaseAndExtent(one, 0, one, 3)
+      expect(["copy", "cut", "paste", "selectAll"].map((name) => document.queryCommandEnabled(name))).toEqual([true, true, false, true])
+    })
+  })
+
   describe("the Edit menu", () => {
     it("Copy runs the same command, and is enabled with nothing focused", () => {
       const { renderer, plain } = page()

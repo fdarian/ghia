@@ -7,9 +7,13 @@
  * edit that would join two blocks or remove a `<br>` (a Backspace over a block edge, a word deletion
  * that reaches into the block before) fires `beforeinput` and changes nothing, and text typed over a selection that spans two blocks goes
  * into the block it began in without joining them; an emptied Text node stays in the tree. A
- * Backspace or Delete next to a `contenteditable="false"` element removes it whole.
+ * Backspace or Delete next to a `contenteditable="false"` element removes it whole. A cut deletes the
+ * selection as a Backspace over a selection does, and a paste inserts the text of the clipboard, a
+ * `<br>` for each line break.
  */
 
+import type { DataTransfer } from "../dom/data-transfer.js"
+import { parseHtmlDocument } from "../dom/html/parse.js"
 import { Node, type Element, type Text } from "../dom/nodes.js"
 import { createTextFor, Range, StaticRange } from "../dom/range.js"
 import { getSelection, holdsNodeSelection } from "../dom/selection.js"
@@ -29,6 +33,8 @@ export interface EditingInputOptions {
   replacing?: Range
   /** Runs after an uncanceled `beforeinput` and before the DOM changes: where `compositionupdate` goes. */
   beforeChange?: () => void
+  /** What an `insertFromPaste` inserts, and the `dataTransfer` of its events: a read-only store holding the clipboard. */
+  dataTransfer?: DataTransfer
 }
 
 export interface EditingInputResult {
@@ -66,6 +72,13 @@ export function focusedEditingHost(): Element | null {
   if (host === null) return null
   if (isTextControl(focused)) return null
   return host
+}
+
+/** Whether an editing host that has focus holds the selection, and if so whether it is a caret or a range. */
+export function editingSelectionKind(): "none" | "caret" | "range" {
+  const target = editingTarget()
+  if (target === null) return "none"
+  return target.range.collapsed ? "caret" : "range"
 }
 
 function editingTarget(): EditingTarget | null {
@@ -183,11 +196,57 @@ function insertAt(container: Node, offset: number, text: string): { start: Point
   return { start: { node: created, offset: 0 }, end: { node: created, offset: text.length } }
 }
 
-function dispatchInput(host: Element, type: "beforeinput" | "input", inputType: string, data: string | null, isComposing: boolean, targets: StaticRange[]): boolean {
+/** The text a paste inserts: `text/plain`, else the text content of `text/html`. */
+function pastedText(data: DataTransfer): string {
+  if (data.types.includes("text/plain")) return data.getData("text/plain")
+  if (!data.types.includes("text/html")) return ""
+  const body = parseHtmlDocument(data.getData("text/html")).body
+  const text = body === null ? null : body.textContent
+  if (text === null) throw new Error("A parsed HTML document has no body")
+  return text
+}
+
+/** A `<br>` at the point, which goes after it: a Text there is split when the point is inside it. */
+function insertBreak(at: Point): Point {
+  let parent: Node
+  let reference: Node | null
+  if (isText(at.node)) {
+    parent = at.node.parentNode!
+    if (at.offset === 0) reference = at.node
+    else if (at.offset >= at.node.data.length) reference = at.node.nextSibling
+    else reference = at.node.splitText(at.offset)
+  } else {
+    parent = at.node
+    reference = at.node.childNodes[at.offset] ?? null
+  }
+  const lineBreak = document.createElement("br") as unknown as Node
+  parent.insertBefore(lineBreak, reference)
+  return { node: parent, offset: [...parent.childNodes].indexOf(lineBreak) + 1 }
+}
+
+/** `text` at the point, a `<br>` for each line break; the end of what went in. */
+function insertLines(at: Point, text: string): Point {
+  let end = at
+  text.split(/\r\n|\r|\n/).forEach((line, index) => {
+    if (index > 0) end = insertBreak(end)
+    if (line !== "") end = insertAt(end.node, end.offset, line).end
+  })
+  return end
+}
+
+function dispatchInput(
+  host: Element,
+  type: "beforeinput" | "input",
+  inputType: string,
+  data: string | null,
+  isComposing: boolean,
+  targets: StaticRange[],
+  dataTransfer: DataTransfer | null = null
+): boolean {
   // Chrome's `beforeinput` of a composition cannot be canceled: the input method has already changed what it shows.
   const cancelable = type === "beforeinput" && inputType !== "insertCompositionText"
   return host.dispatchEvent(
-    new InputEvent(type, { bubbles: true, cancelable, composed: true, inputType, data, isComposing, targetRanges: targets })
+    new InputEvent(type, { bubbles: true, cancelable, composed: true, inputType, data, isComposing, dataTransfer, targetRanges: targets })
   )
 }
 
@@ -207,6 +266,8 @@ export function runEditingInput(inputType: string, data: string | null, options:
   switch (inputType) {
     case "insertText":
     case "insertReplacementText":
+    case "insertFromPaste":
+    case "deleteByCut":
       range = target.range
       break
     case "insertCompositionText":
@@ -228,8 +289,9 @@ export function runEditingInput(inputType: string, data: string | null, options:
       range = target.range
   }
 
+  const dataTransfer = options.dataTransfer ?? null
   const targets = [staticRangeOf(range)]
-  if (!dispatchInput(host, "beforeinput", inputType, data, isComposing, targets)) {
+  if (!dispatchInput(host, "beforeinput", inputType, data, isComposing, targets, dataTransfer)) {
     return { handled: true, canceled: true, changed: false }
   }
   options.beforeChange?.()
@@ -253,13 +315,23 @@ export function runEditingInput(inputType: string, data: string | null, options:
       caret = inserted.end
       break
     }
+    case "insertFromPaste": {
+      if (dataTransfer === null) throw new Error("insertFromPaste needs its dataTransfer")
+      const startNode = range.startContainer
+      const startOffset = range.startOffset
+      range.deleteContents()
+      const at = isText(startNode) ? { node: startNode, offset: startOffset } : { node: range.startContainer, offset: range.startOffset }
+      caret = insertLines(at, pastedText(dataTransfer))
+      break
+    }
+    case "deleteByCut":
     case "deleteContentBackward":
     case "deleteContentForward":
     case "deleteWordBackward":
     case "deleteWordForward":
     case "deleteSoftLineBackward":
     case "deleteSoftLineForward": {
-      if (joinsBlocks || (!removesIsland && range.toString() === "")) return { handled: true, canceled: false, changed: false }
+      if (joinsBlocks || (!removesIsland && inputType !== "deleteByCut" && range.toString() === "")) return { handled: true, canceled: false, changed: false }
       // deleteContents leaves a range over several nodes at their parent; the caret belongs where the removed text began.
       const startNode = range.startContainer
       const startOffset = range.startOffset
@@ -271,7 +343,7 @@ export function runEditingInput(inputType: string, data: string | null, options:
       return { handled: true, canceled: false, changed: false }
   }
   getSelection().collapse(caret.node, caret.offset)
-  dispatchInput(host, "input", inputType, data, isComposing, [])
+  dispatchInput(host, "input", inputType, data, isComposing, [], dataTransfer)
   return { handled: true, canceled: false, changed: true }
 }
 

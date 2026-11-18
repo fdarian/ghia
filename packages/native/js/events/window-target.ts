@@ -5,6 +5,7 @@ import { Document, DOM_BINDING, registerDocument, type DocumentFragment, type HT
 import { getAdoptedStyleSheets, replaceAdoptedStyleSheets, type CSSStyleSheet } from "../css/index.js"
 import { Range } from "../dom/range.js"
 import { createCaretPosition, type CaretPosition } from "../editing/caret-position.js"
+import { documentCommands } from "../editing/document-commands.js"
 import { caretFromPoint, setElementLookup } from "../editing/geometry.js"
 import { getSelection, holdsNodeSelection, setSelectionHooks, type Selection } from "../dom/selection.js"
 import { bumpTreeVersion } from "../dom/tree-version.js"
@@ -314,6 +315,22 @@ export class GpuixDocument<Element = unknown> extends Document {
 
   [DOM_BINDING](): NodeBinding {
     return DOCUMENT_BINDING
+  }
+
+  /**
+   * Runs `copy`, `cut` or `selectAll` as the Edit menu does, and returns whether it did; `paste`
+   * and every other command return false and do nothing (docs/fork/deviations.md).
+   */
+  execCommand(commandId: string, _showUI?: boolean, _value?: string): boolean {
+    return documentCommands().exec(String(commandId))
+  }
+
+  queryCommandSupported(commandId: string): boolean {
+    return documentCommands().supported(String(commandId))
+  }
+
+  queryCommandEnabled(commandId: string): boolean {
+    return documentCommands().enabled(String(commandId))
   }
 
   /** The constructed sheets that apply to every window of the app, in order; later ones win. */
