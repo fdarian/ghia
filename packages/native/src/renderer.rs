@@ -946,7 +946,7 @@ enum MouseInput {
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum KeyInput {
-    Keystrokes(String),
+    Keystrokes(Vec<crate::automation::KeyStep>),
     Down { keystroke: String, is_held: bool },
     Up(String),
 }
@@ -1547,19 +1547,33 @@ async fn run_ui_commands(
                 result
             }
             UiCommand::DispatchKey { input, response } => {
-                let result = gpui::AnyWindowHandle::from(window)
-                    .update(cx, move |_view, window, cx| match input {
-                        KeyInput::Keystrokes(keystrokes) => {
-                            crate::automation::dispatch_keystrokes(window, cx, &keystrokes)
+                let handle = gpui::AnyWindowHandle::from(window);
+                let result = match input {
+                    // An update per step, as the platform sends the events: what a keydown defers
+                    // (the editor's `input`) is delivered before the keyup, not after the sequence.
+                    KeyInput::Keystrokes(steps) => {
+                        let mut result = Ok(());
+                        for step in steps {
+                            result = handle.update(cx, move |_view, window, cx| {
+                                step.dispatch(window, cx)
+                            });
+                            if result.is_err() {
+                                break;
+                            }
                         }
-                        KeyInput::Down { keystroke, is_held } => {
+                        result
+                    }
+                    KeyInput::Down { keystroke, is_held } => handle
+                        .update(cx, move |_view, window, cx| {
                             crate::automation::dispatch_key_down(window, cx, &keystroke, is_held)
-                        }
-                        KeyInput::Up(keystroke) => {
+                        })
+                        .and_then(|result| result.map_err(anyhow::Error::msg)),
+                    KeyInput::Up(keystroke) => handle
+                        .update(cx, move |_view, window, cx| {
                             crate::automation::dispatch_key_up(window, cx, &keystroke)
-                        }
-                    })
-                    .and_then(|result| result.map_err(anyhow::Error::msg));
+                        })
+                        .and_then(|result| result.map_err(anyhow::Error::msg)),
+                };
                 response
                     .send(
                         result
@@ -4905,7 +4919,9 @@ impl GpuixRenderer {
         }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.dispatch_key_input(KeyInput::Keystrokes(keystrokes));
+        return self.dispatch_key_input(KeyInput::Keystrokes(
+            crate::automation::keystroke_steps(&keystrokes).map_err(Error::from_reason)?,
+        ));
 
         #[cfg(not(any(
             target_os = "macos",
