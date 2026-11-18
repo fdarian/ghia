@@ -2193,7 +2193,7 @@ impl GpuixRenderer {
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
         // Key handlers run JS, and each key needs its own microtask checkpoint: see
         // docs/fork/frames-and-wakes.md.
-        gpui_macos::MacPlatform::set_yield_after_key_event(true);
+        platform.set_yield_after_key_event(true);
 
         let tree = self.tree.clone();
         let callback = self.event_callback_for_view();
@@ -2560,6 +2560,27 @@ impl GpuixRenderer {
     #[napi]
     pub fn is_initialized(&self) -> bool {
         *self.initialized.lock().unwrap()
+    }
+
+    /// Whether the last `tick()` left a key event queued or ended after sending one, so the
+    /// frame loop has to tick again at once instead of waiting for a wake or its timer. Only a
+    /// macOS window yields per key event; everything else answers false.
+    #[napi]
+    pub fn key_event_pending(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            MAC_PLATFORM.with(|platform| {
+                platform
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|platform| platform.key_event_pending())
+            })
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
     }
 
     /// Registers the function native calls synchronously for events whose

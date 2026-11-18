@@ -11,6 +11,7 @@ use objc::{class, msg_send, sel, sel_impl, Encode, Encoding};
 
 type Id = *mut Object;
 
+const NS_UTF8_STRING_ENCODING: u64 = 4;
 const KEY_DOWN: u64 = 10;
 const KEY_UP: u64 = 11;
 const LEFT_MOUSE_DOWN: u64 = 1;
@@ -208,7 +209,7 @@ pub(crate) unsafe fn post_keys(ns_view: Id, text: &str) -> Result<()> {
         .map(|character| {
             ansi_key_code(character).ok_or_else(|| {
                 Error::from_reason(format!(
-                    "postNativeKeys takes letters and spaces, got {character:?}"
+                    "postNativeKeys takes lowercase ASCII letters and spaces, got {character:?}"
                 ))
             })
         })
@@ -221,8 +222,13 @@ pub(crate) unsafe fn post_keys(ns_view: Id, text: &str) -> Result<()> {
         let app: Id = msg_send![class!(NSApplication), sharedApplication];
         for (character, key_code) in text.chars().zip(key_codes) {
             let mut utf8 = [0u8; 4];
-            let characters: Id = msg_send![class!(NSString),
-                stringWithUTF8String: character.encode_utf8(&mut utf8).as_ptr()];
+            let encoded: &str = character.encode_utf8(&mut utf8);
+            let characters: Id = msg_send![class!(NSString), alloc];
+            let characters: Id = msg_send![characters,
+                initWithBytes: encoded.as_ptr()
+                length: encoded.len()
+                encoding: NS_UTF8_STRING_ENCODING];
+            let characters: Id = msg_send![characters, autorelease];
             for event_type in [KEY_DOWN, KEY_UP] {
                 let event: Id = msg_send![class!(NSEvent),
                     keyEventWithType: event_type

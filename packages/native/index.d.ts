@@ -53,6 +53,12 @@ export declare class GpuixRenderer {
   tick(): boolean
   isInitialized(): boolean
   /**
+   * Whether the last `tick()` left a key event queued or ended after sending one, so the
+   * frame loop has to tick again at once instead of waiting for a wake or its timer. Only a
+   * macOS window yields per key event; everything else answers false.
+   */
+  keyEventPending(): boolean
+  /**
    * Registers the function native calls synchronously for events whose
    * default JS can cancel: `keydown`, `keyup`. It takes the `EventPayload`
    * and returns `{ defaultPrevented, propagationStopped }`. Pass `null` to
@@ -815,10 +821,12 @@ export declare class TestGpuixRenderer {
    * event to the window. Draws nothing.
    */
   pumpNativeEvents(): void
+  /** Whether the last `pumpNativeEvents` left a key event queued or ended after sending one. */
+  keyEventPending(): boolean
   /**
-   * Whether the pump ends after a key event so that JS runs a microtask checkpoint per key
-   * (`MacPlatform::set_yield_after_key_event`). On by default, as in a live window; a process
-   * setting, shared by every renderer in it.
+   * Whether the pump gives each key event a pump of its own so that JS runs a microtask
+   * checkpoint on both sides of it (`MacPlatform::set_yield_after_key_event`). On by default, as
+   * in a live window; a setting of this renderer.
    */
   setYieldAfterKeyEvent(yieldAfter: boolean): void
   /**

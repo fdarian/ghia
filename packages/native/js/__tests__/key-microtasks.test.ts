@@ -81,4 +81,16 @@ describeNative("a key event and the microtask checkpoint", () => {
       "microtask c",
     ])
   })
+
+  it("reports a key left queued or just sent, so the frame loop ticks again at once", async () => {
+    renderer.setYieldAfterKeyEvent(true)
+    renderer.postNativeKeys("a")
+    renderer.pumpNativeEvents()
+    expect(renderer.keyEventPending()).toBe(true)
+    renderer.pumpNativeEvents()
+    expect(renderer.keyEventPending()).toBe(true)
+    await nextTask()
+    renderer.pumpNativeEvents()
+    expect(renderer.keyEventPending()).toBe(false)
+  })
 })

@@ -272,6 +272,7 @@ interface NativeTestRendererApi
   postNativeKeys(text: string): void
   pumpNativeEvents(): void
   setYieldAfterKeyEvent(yieldAfter: boolean): void
+  keyEventPending(): boolean
   simulateKeystrokes(keystrokes: string): void
   setSyncEventHandler(handler: ((event: EventPayload) => SyncDispatchResult) | null): void
   dispose(): void
@@ -886,9 +887,15 @@ export class TestRenderer implements NativeRenderer {
     this.dispatchNativeEvents()
   }
 
-  /** Whether the pump ends after a key event (see `pumpNativeEvents`). A setting of the process. */
+  /** Whether the pump ends after a key event (see `pumpNativeEvents`). A setting of this renderer. */
   setYieldAfterKeyEvent(yieldAfter: boolean): void {
     this.native.setYieldAfterKeyEvent(yieldAfter)
+  }
+
+  /** Whether the last `pumpNativeEvents` left a key queued or ended after sending one: the
+   *  live frame loop ticks again at once then. */
+  keyEventPending(): boolean {
+    return this.native.keyEventPending()
   }
 
   // ── Native end-to-end simulation ────────────────────────────────

@@ -237,6 +237,7 @@ function calls(r, ids) {
     setTextLeafEnabled: () => r.setTextLeafEnabled(true),
     setStyleCache: () => r.setStyleCache("on"),
     getRegistrySlots: () => r.getRegistrySlots(),
+    keyEventPending: () => r.keyEventPending(),
     setRetainLift: () => r.setRetainLift(["svg"]),
     setRetainPlanning: () => r.setRetainPlanning(true),
     setRetainEnabled: () => r.setRetainEnabled(true),

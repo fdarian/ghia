@@ -664,6 +664,12 @@ pub struct TestGpuixRenderer {
     /// on, so input AppKit receives for the test window wakes an idle frame loop.
     #[cfg(target_os = "macos")]
     frame_wake: crate::renderer::FrameWake,
+    /// Whether `pumpNativeEvents` gives each key event a pump of its own, as a live window does.
+    #[cfg(target_os = "macos")]
+    yield_after_key_event: std::sync::atomic::AtomicBool,
+    /// Whether the last `pumpNativeEvents` left a key queued or ended after sending one.
+    #[cfg(target_os = "macos")]
+    key_event_pending: std::sync::atomic::AtomicBool,
 }
 
 impl TestGpuixRenderer {
@@ -767,9 +773,6 @@ impl TestGpuixRenderer {
         let window_actions = crate::events::app_region::SimulatedWindowActions::default();
         let window_actions_clone = window_actions.clone();
 
-        // As in a live window; only `pumpNativeEvents` runs the pump this applies to.
-        #[cfg(target_os = "macos")]
-        gpui_macos::MacPlatform::set_yield_after_key_event(true);
         let platform = gpui_platform::current_offscreen_platform();
         let mut cx = gpui::VisualTestAppContext::new(platform);
         cx.update(|cx| {
@@ -879,6 +882,10 @@ impl TestGpuixRenderer {
             held_buttons: Mutex::new([false; 3]),
             #[cfg(target_os = "macos")]
             frame_wake: Default::default(),
+            #[cfg(target_os = "macos")]
+            yield_after_key_event: std::sync::atomic::AtomicBool::new(true),
+            #[cfg(target_os = "macos")]
+            key_event_pending: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -1002,9 +1009,16 @@ impl TestGpuixRenderer {
         #[cfg(target_os = "macos")]
         {
             let result = with_test_state(|cx, _window, _view| {
+                let yield_after_key = self
+                    .yield_after_key_event
+                    .load(std::sync::atomic::Ordering::Relaxed);
                 // SAFETY: napi calls run on the main thread, and the test platform has made
                 // NSApplication.
-                unsafe { gpui_macos::pump_app_nonblocking() };
+                let outcome = objc::rc::autoreleasepool(|| unsafe {
+                    gpui_macos::pump_app_nonblocking(yield_after_key)
+                });
+                self.key_event_pending
+                    .store(outcome.yielded_to_key, std::sync::atomic::Ordering::Relaxed);
                 cx.run_until_parked();
                 Ok(())
             });
@@ -1016,14 +1030,29 @@ impl TestGpuixRenderer {
         Err(Error::from_reason("pumpNativeEvents needs macOS"))
     }
 
-    /// Whether the pump ends after a key event so that JS runs a microtask checkpoint per key
-    /// (`MacPlatform::set_yield_after_key_event`). On by default, as in a live window; a process
-    /// setting, shared by every renderer in it.
+    /// Whether the last `pumpNativeEvents` left a key event queued or ended after sending one.
+    #[napi]
+    pub fn key_event_pending(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.key_event_pending.load(std::sync::atomic::Ordering::Relaxed)
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
+    /// Whether the pump gives each key event a pump of its own so that JS runs a microtask
+    /// checkpoint on both sides of it (`MacPlatform::set_yield_after_key_event`). On by default, as
+    /// in a live window; a setting of this renderer.
     #[napi]
     pub fn set_yield_after_key_event(&self, yield_after: bool) -> Result<()> {
         #[cfg(target_os = "macos")]
         {
-            gpui_macos::MacPlatform::set_yield_after_key_event(yield_after);
+            self.yield_after_key_event
+                .store(yield_after, std::sync::atomic::Ordering::Relaxed);
             Ok(())
         }
 
