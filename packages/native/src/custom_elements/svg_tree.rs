@@ -489,7 +489,8 @@ fn escape_into(value: &str, xml: &mut String) {
 fn attributes(node: &Node, colors: &ColorContext) -> Vec<(&'static str, String)> {
     let mut written: Vec<(&'static str, String)> = Vec::new();
     for (prop, attribute) in ATTRIBUTES {
-        if let Some(text) = node.props.get(*prop).and_then(attribute_text) {
+        // Solid and the DOM write the attribute itself (`stroke-width`), React the camelCase prop.
+        if let Some(text) = node.props.get(*prop).or_else(|| node.props.get(*attribute)).and_then(attribute_text) {
             let text = if COLOUR_ATTRIBUTES.contains(attribute) {
                 resolve_paint(text, colors)
             } else {
@@ -506,7 +507,7 @@ fn attributes(node: &Node, colors: &ColorContext) -> Vec<(&'static str, String)>
         }
     }
     for key in node.props.keys() {
-        let known = key == MARKER_SHORTHAND || ATTRIBUTES.iter().any(|(prop, _)| prop == key);
+        let known = key == MARKER_SHORTHAND || ATTRIBUTES.iter().any(|(prop, attribute)| prop == key || attribute == key);
         let host = HOST_PROPS.contains(&key.as_str()) || key == "testId" || key == "autoFocus";
         if !known && !host {
             log::warn!("<{}> has no SVG attribute for the prop {key:?}", node.tag);
@@ -791,6 +792,24 @@ mod tests {
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" width=\"24\">\
              <path d=\"M0 0L10 10\" fill-opacity=\"0.5\" stroke-width=\"2\" stroke-linecap=\"round\" \
              stroke-dasharray=\"4 2\" transform=\"rotate(45 12 12)\"/></svg>"
+        );
+    }
+
+    #[test]
+    fn the_kebab_case_attribute_names_solid_writes_are_attributes_too() {
+        let svg = props(&[("viewBox", "0 0 24 24".into()), ("width", 24.into())]);
+        let path = props(&[
+            ("d", "M0 0L10 10".into()),
+            ("stroke-width", 2.into()),
+            ("stroke-linecap", "round".into()),
+            ("fill-opacity", 0.5.into()),
+            ("strokeWidth", 3.into()),
+        ]);
+        let xml = serialize(&node("svg", &svg, vec![node("path", &path, vec![])]));
+        assert_eq!(
+            xml,
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" width=\"24\">\
+             <path d=\"M0 0L10 10\" fill-opacity=\"0.5\" stroke-width=\"3\" stroke-linecap=\"round\"/></svg>"
         );
     }
 

@@ -7385,7 +7385,8 @@ so they take no layout or paint `style` and no pointer events. Their `style` tak
 ```
 
 Props are camelCase, as in React DOM, and are written as kebab-case SVG
-attributes (`strokeWidth` becomes `stroke-width`). `transform` is an SVG
+attributes (`strokeWidth` becomes `stroke-width`); the attribute names themselves (`stroke-width`, `fill-rule`), as Solid and the DOM
+write them, are read too, and the camelCase prop wins where both are given. `transform` is an SVG
 transform list passed through as a string, and `strokeDasharray` takes a
 number, a list or a string. `width` and `height` size the element unless
 `style` sets its own; `viewBox` is the coordinate system the children draw in.
