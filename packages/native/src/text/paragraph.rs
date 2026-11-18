@@ -301,7 +301,7 @@ pub fn styles(
                 style.font_style = Some(font_style);
             }
             if let Some(family) = declared.font_family.as_ref() {
-                style.family = Some(SharedString::from(family.clone()));
+                style.family = Some(crate::text::font_family::resolve(family));
             }
             let (next, features) = font_state.descend(
                 declared.font_variant_numeric.as_deref(),
