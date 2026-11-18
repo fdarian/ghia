@@ -10,7 +10,7 @@
 
 import { flushPendingMutations } from "../bounds.js"
 import { DOMRect } from "../dom/dom-rect.js"
-import { DOM_BINDING, type Element, type Node, type Text, type TextBinding } from "../dom/nodes.js"
+import { DOM_BINDING, type Element, type ElementBinding, type Node, type Text, type TextBinding } from "../dom/nodes.js"
 import type { NativeRenderer } from "../host.js"
 import { mountedRenderer } from "../mounted-renderer.js"
 
@@ -25,6 +25,13 @@ export interface TextPoint {
 
 /** A position in a Text node with where its caret is: the x is in window coordinates. */
 export interface CaretTarget extends TextPoint {
+  x: number
+}
+
+/** A position in any node, with where its caret is: a Text node, or an element that is an empty line. */
+export interface LineTarget {
+  node: Node
+  offset: number
   x: number
 }
 
@@ -167,14 +174,25 @@ export type CaretMove = "lineUp" | "lineDown" | "lineStart" | "lineEnd"
  * `point` moved along the lines of the painted text. `goalX` is the window x that a run of moves up
  * and down keeps; it is the caret's own when `null`. `null` when there is no line to go to, and when
  * the text did not paint.
+ *
+ * `point` is in a Text node or, for an empty line (`<p><br></p>`, which paints no text), in the element
+ * that is the line: native says which elements are, and has no line to move from for any other. The
+ * target is in an empty line the same way when the line is where the move goes.
  */
-export function moveCaretVisually(point: TextPoint, move: CaretMove, goalX: number | null): CaretTarget | null {
-  const native = nativeOf(point.node)
+export function moveCaretVisually(point: { node: Node; offset: number }, move: CaretMove, goalX: number | null): LineTarget | null {
+  const native = isText(point.node) ? nativeOf(point.node) : (point.node[DOM_BINDING]() as ElementBinding).native
   if (native === undefined) return null
   const read = requireMethod(native.renderer, "moveCaretVisually", "Selection.modify")
   flushPendingMutations(native.renderer)
   const caret = read(native.id, point.offset, move, goalX)
-  return caret === null ? null : targetOf(native.renderer, caret)
+  if (caret === null) return null
+  // Native names an empty line by its block, as the text and the container of the position.
+  if (caret.nodeId === caret.containerId) {
+    const block = elementLookup?.(native.renderer, caret.containerId) as Element | undefined
+    if (block === undefined) throw new Error(`Element ${caret.containerId} is an empty line, which is not in the document`)
+    return { node: block, offset: caret.offset, x: caret.x }
+  }
+  return targetOf(native.renderer, caret)
 }
 
 /** The caret rect of a position in a Text node (no width, the height of the font there), or `null` when it did not paint. */

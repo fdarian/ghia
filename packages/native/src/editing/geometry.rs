@@ -7,8 +7,8 @@
 use napi_derive::napi;
 use gpui::{point, px, size, Bounds, Pixels, Point, TextLayout, TextRow, WindowId};
 
-use crate::automation::{window_point_from, window_point_in};
-use crate::retained_tree::RetainedTree;
+use crate::automation::{window_point_from, window_point_in, ElementBounds};
+use crate::retained_tree::{RetainedElement, RetainedTree};
 use crate::text::inline_bounds;
 use crate::text::inline::{is_raw_text, Child};
 use crate::text::paint::{self, RegEntry};
@@ -318,39 +318,80 @@ struct BlankLine {
     nearness: (f32, f32),
 }
 
-/// The blocks in `host` that are one empty line (a plan of nothing but a [`Child::BlankLine`]) and
-/// editable, and the one nearest the window point. Found in the tree and measured by the box the last
-/// frame recorded for the block (the content box: the line is all of it), which a replayed frame keeps
-/// right, where a registry of paint would have to be replayed too.
-fn nearest_blank_line(tree: &RetainedTree, window: WindowId, host: u64, x: f64, y: f64) -> Option<BlankLine> {
-    let mut best: Option<BlankLine> = None;
+/// An editable block that is one empty line, with the box the last frame recorded for it.
+struct BlankBlock {
+    id: u64,
+    bounds: ElementBounds,
+}
+
+impl BlankBlock {
+    /// The content box, `(left, top, right, bottom)`, in the space of the block: the line is all of it.
+    fn content_box(&self) -> (f64, f64, f64, f64) {
+        let bounds = &self.bounds;
+        (
+            bounds.x + bounds.client_left + bounds.padding_left,
+            bounds.y + bounds.client_top + bounds.padding_top,
+            bounds.x + bounds.width - bounds.border_right - bounds.padding_right,
+            bounds.y + bounds.height - bounds.border_bottom - bounds.padding_bottom,
+        )
+    }
+
+    /// The window x of the start of the line, where its caret is.
+    fn start_x(&self) -> Option<Pixels> {
+        let (left, top, _, bottom) = self.content_box();
+        Some(window_point_from(&self.bounds.to_window, point(px(left as f32), px(((top + bottom) / 2.0) as f32)))?.x)
+    }
+
+    /// The position in an empty line: `(block, 0)`, the one that holds a caret there
+    /// ([`super::caret::held_by_empty_line`]), at the window x `x`.
+    fn caret_point(&self, x: Pixels) -> CaretPoint {
+        CaretPoint { node_id: self.id as f64, container_id: self.id as f64, offset: 0.0, x: number(x) }
+    }
+}
+
+/// Whether the element is an editable block of nothing but an empty line (a plan of one
+/// [`Child::BlankLine`]).
+fn is_blank_line(tree: &RetainedTree, element: &RetainedElement) -> bool {
+    let children = || element.children.iter().filter_map(|child| tree.elements.get(child));
+    // A line feed is what an empty line is made of, so a block with none has no need of a plan.
+    let has_line_feed = children().any(|child| if is_raw_text(child) { child.content.as_deref().is_some_and(|text| text.contains('\n')) } else { child.element_type == "br" });
+    has_line_feed
+        && crate::html::editing::is_editable(tree, element.id)
+        && matches!(plan_cache::planned(tree, element).children.as_slice(), [(Child::BlankLine, _)])
+}
+
+/// The blocks in `host` that are one empty line and editable, in document order, with the box the last
+/// frame recorded for each (the one a replayed frame keeps right, where a registry of paint would have to
+/// be replayed too). A block that is culled has none and is left out.
+fn blank_lines(tree: &RetainedTree, window: WindowId, host: u64) -> Vec<BlankBlock> {
+    let mut found = Vec::new();
     let mut pending = vec![host];
     while let Some(id) = pending.pop() {
         let Some(element) = tree.elements.get(&id) else { continue };
-        let children = || element.children.iter().filter_map(|child| tree.elements.get(child));
-        pending.extend(children().filter(|child| !is_raw_text(child)).map(|child| child.id).rev());
-        // A line feed is what an empty line is made of, so a block with none has no need of a plan.
-        let has_line_feed = children().any(|child| if is_raw_text(child) { child.content.as_deref().is_some_and(|text| text.contains('\n')) } else { child.element_type == "br" });
-        if !has_line_feed || !crate::html::editing::is_editable(tree, id) {
+        pending.extend(element.children.iter().filter_map(|child| tree.elements.get(child)).filter(|child| !is_raw_text(child)).map(|child| child.id).rev());
+        if !is_blank_line(tree, element) {
             continue;
         }
-        let planned = plan_cache::planned(tree, element);
-        if !matches!(planned.children.as_slice(), [(Child::BlankLine, _)]) {
-            continue;
+        if let Some(bounds) = crate::automation::get_bounds(window, id).filter(|bounds| !bounds.culled) {
+            found.push(BlankBlock { id, bounds });
         }
-        let Some(bounds) = crate::automation::get_bounds(window, id).filter(|bounds| !bounds.culled) else { continue };
-        let Some((local_x, local_y)) = bounds.to_local(x, y) else { continue };
-        let left = bounds.x + bounds.client_left + bounds.padding_left;
-        let top = bounds.y + bounds.client_top + bounds.padding_top;
-        let right = bounds.x + bounds.width - bounds.border_right - bounds.padding_right;
-        let bottom = bounds.y + bounds.height - bounds.border_bottom - bounds.padding_bottom;
+    }
+    found
+}
+
+/// The empty line of `host` nearest the window point, by the box of its block.
+fn nearest_blank_line(tree: &RetainedTree, window: WindowId, host: u64, x: f64, y: f64) -> Option<BlankLine> {
+    let mut best: Option<BlankLine> = None;
+    for block in blank_lines(tree, window, host) {
+        let Some((local_x, local_y)) = block.bounds.to_local(x, y) else { continue };
+        let (left, top, right, bottom) = block.content_box();
         let outside = |value: f64, low: f64, high: f64| if value < low { low - value } else if value > high { value - high } else { 0.0 };
         let nearness = (outside(local_y, top, bottom) as f32, outside(local_x, left, right) as f32);
         if best.as_ref().is_some_and(|best| nearness > best.nearness) {
             continue;
         }
-        let Some(line_start) = window_point_from(&bounds.to_window, point(px(left as f32), px(((top + bottom) / 2.0) as f32))) else { continue };
-        best = Some(BlankLine { point: CaretPoint { node_id: id as f64, container_id: id as f64, offset: 0.0, x: number(line_start.x) }, nearness });
+        let Some(line_start) = block.start_x() else { continue };
+        best = Some(BlankLine { point: block.caret_point(line_start), nearness });
     }
     best
 }
@@ -379,6 +420,12 @@ pub fn move_caret_visually(
     op: LineMove,
     goal_x: Option<f64>,
 ) -> Result<Option<CaretPoint>, String> {
+    if let Some(element) = tree.elements.get(&from.node).filter(|element| !is_raw_text(element) && is_blank_line(tree, element)) {
+        return Ok(match op {
+            LineMove::Up | LineMove::Down => move_from_blank_line(tree, window, element.id, op == LineMove::Up, goal_x),
+            LineMove::Start | LineMove::End => None,
+        });
+    }
     let Some(located) = positions::locate(tree, from.node) else {
         return Ok(None);
     };
@@ -416,19 +463,91 @@ pub fn move_caret_visually(
                 return Ok(caret_point(&entry, &located, target, Bias::After, caret_at(layout, text, target).ok_or_else(unreadable)?.x)
                     .map(|point| CaretPoint { x: number(goal), ..point }));
             }
-            Ok(neighbor_line(tree, window, &entry.key, op == LineMove::Up, goal))
+            Ok(neighbor_line(tree, window, Origin::Text(&entry.key), op == LineMove::Up, goal))
         }
     }
 }
 
-/// The caret on the first line of the paragraph after `key`, or the last of the one before it, at the
-/// window x `goal`.
-fn neighbor_line(tree: &RetainedTree, window: WindowId, key: &str, backwards: bool, goal: Pixels) -> Option<CaretPoint> {
+/// The line a move up or down leaves.
+enum Origin<'a> {
+    /// The painted text of the registry key.
+    Text(&'a str),
+    /// The empty line of the block.
+    Blank(u64),
+}
+
+/// A line of an editing host in the order a caret meets them: the rows of its painted texts, and its
+/// empty lines, which paint no text and so are not among them.
+enum Line<T, B> {
+    Text(T),
+    Blank(B),
+}
+
+/// `texts` and `blanks` in the order of the document. Each is given with its place in the tree (`None` for
+/// a text that has none, which keeps its own place); a blank goes before the first text that is after it.
+fn interleave<T, B>(texts: Vec<(T, Option<usize>)>, blanks: Vec<(B, usize)>) -> Vec<Line<T, B>> {
+    let mut lines = Vec::with_capacity(texts.len() + blanks.len());
+    let mut blanks = blanks.into_iter().peekable();
+    for (text, at) in texts {
+        if let Some(at) = at {
+            while let Some((blank, _)) = blanks.next_if(|(_, blank_at)| *blank_at < at) {
+                lines.push(Line::Blank(blank));
+            }
+        }
+        lines.push(Line::Text(text));
+    }
+    lines.extend(blanks.map(|(blank, _)| Line::Blank(blank)));
+    lines
+}
+
+/// The editing host that holds `id`, if it is in one.
+fn editing_host_of(tree: &RetainedTree, id: u64) -> Option<u64> {
+    std::iter::successors(Some(id), |id| tree.elements.get(id).and_then(|element| element.parent))
+        .find(|id| crate::html::editing::is_editing_host(tree, *id))
+}
+
+/// A caret in the empty line `block` moved up or down: the line it starts the run at is the start of
+/// its own, and the move is `None` where there is no line to go to.
+fn move_from_blank_line(tree: &RetainedTree, window: WindowId, block: u64, backwards: bool, goal_x: Option<f64>) -> Option<CaretPoint> {
+    let goal = match goal_x {
+        Some(goal) => pixels(goal),
+        None => BlankBlock { id: block, bounds: crate::automation::get_bounds(window, block).filter(|bounds| !bounds.culled)? }.start_x()?,
+    };
+    neighbor_line(tree, window, Origin::Blank(block), backwards, goal)
+}
+
+/// The caret on the first line of the line after `origin`, or the last of the one before it, at the
+/// window x `goal`. An empty line is one line, at the window x `goal` too.
+fn neighbor_line(tree: &RetainedTree, window: WindowId, origin: Origin, backwards: bool, goal: Pixels) -> Option<CaretPoint> {
     let entries = paint::painted_texts_in_document_order(window);
-    let here = entries.iter().position(|entry| &*entry.key == key)?;
-    let candidates: Box<dyn Iterator<Item = &RegEntry>> =
-        if backwards { Box::new(entries[..here].iter().rev()) } else { Box::new(entries[here + 1..].iter()) };
-    for entry in candidates {
+    let host = match origin {
+        Origin::Text(key) => positions::container_of_key(key).and_then(|container| editing_host_of(tree, container)),
+        Origin::Blank(id) => editing_host_of(tree, id),
+    };
+    let blanks = host.map(|host| blank_lines(tree, window, host)).unwrap_or_default();
+    let lines = if blanks.is_empty() {
+        entries.into_iter().map(Line::Text).collect()
+    } else {
+        let order: std::collections::HashMap<u64, usize> = tree.document_order(None).into_iter().enumerate().map(|(at, id)| (id, at)).collect();
+        let texts = entries.into_iter().map(|entry| {
+            let at = positions::container_of_key(&entry.key).and_then(|container| order.get(&container).copied());
+            (entry, at)
+        });
+        let blanks = blanks.into_iter().filter_map(|block| order.get(&block.id).copied().map(|at| (block, at)));
+        interleave(texts.collect(), blanks.collect())
+    };
+    let here = lines.iter().position(|line| match (line, &origin) {
+        (Line::Text(entry), Origin::Text(key)) => &*entry.key == *key,
+        (Line::Blank(block), Origin::Blank(id)) => block.id == *id,
+        _ => false,
+    })?;
+    let candidates: Box<dyn Iterator<Item = &Line<RegEntry, BlankBlock>>> =
+        if backwards { Box::new(lines[..here].iter().rev()) } else { Box::new(lines[here + 1..].iter()) };
+    for line in candidates {
+        let entry = match line {
+            Line::Blank(block) => return Some(block.caret_point(goal)),
+            Line::Text(entry) => entry,
+        };
         let Some(located) = positions::locate_key(tree, &entry.key) else { continue };
         let layout = &entry.layout;
         let text: &str = &entry.text;
@@ -443,4 +562,39 @@ fn neighbor_line(tree: &RetainedTree, window: WindowId, key: &str, backwards: bo
         return Some(CaretPoint { x: number(goal), ..found });
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn order(lines: Vec<Line<&'static str, &'static str>>) -> Vec<&'static str> {
+        lines.into_iter().map(|line| match line { Line::Text(text) => text, Line::Blank(blank) => blank }).collect()
+    }
+
+    #[test]
+    fn an_empty_line_sits_between_the_texts_around_it_in_the_tree() {
+        let texts = vec![("first", Some(3)), ("long", Some(9)), ("last", Some(12))];
+        assert_eq!(order(interleave(texts, vec![("blank", 6)])), ["first", "blank", "long", "last"]);
+    }
+
+    #[test]
+    fn an_empty_line_before_every_text_leads_and_one_after_every_text_trails() {
+        let texts = || vec![("first", Some(3)), ("last", Some(9))];
+        assert_eq!(order(interleave(texts(), vec![("lead", 1)])), ["lead", "first", "last"]);
+        assert_eq!(order(interleave(texts(), vec![("trail", 20)])), ["first", "last", "trail"]);
+    }
+
+    #[test]
+    fn empty_lines_in_a_row_keep_their_order_and_a_host_of_nothing_else_has_only_them() {
+        let texts = vec![("first", Some(3)), ("last", Some(20))];
+        assert_eq!(order(interleave(texts, vec![("a", 5), ("b", 7), ("c", 30)])), ["first", "a", "b", "last", "c"]);
+        assert_eq!(order(interleave(Vec::new(), vec![("a", 5), ("b", 7)])), ["a", "b"]);
+    }
+
+    #[test]
+    fn a_text_with_no_place_in_the_tree_keeps_its_own() {
+        let texts = vec![("first", Some(3)), ("loose", None), ("last", Some(9))];
+        assert_eq!(order(interleave(texts, vec![("blank", 6)])), ["first", "loose", "blank", "last"]);
+    }
 }
