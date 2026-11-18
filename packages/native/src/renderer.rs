@@ -6388,6 +6388,8 @@ pub(crate) struct GpuixView {
     pub(crate) tapes: crate::tape::Tapes,
     /// The caret of the editing host the node selection is in, see `editing::caret`.
     pub(crate) editing_caret: Rc<crate::editing::caret::EditingCaret>,
+    /// The press in an editing host that is down, see `editing::pointer`.
+    pub(crate) editing_pointer: Rc<crate::editing::pointer::EditingPointerState>,
     /// Where the pointer is and what it is pressing.
     /// Shared with the window's mouse-down listener, which dispatches a press
     /// without reaching the view.
@@ -7411,6 +7413,7 @@ impl GpuixView {
             },
             tapes: Default::default(),
             editing_caret: crate::editing::caret::EditingCaret::new(Theme::dark().caret),
+            editing_pointer: Default::default(),
             pointer: Rc::new(RefCell::new(crate::events::state::PointerState::with_requests(
                 pointer_requests,
             ))),
@@ -10698,6 +10701,7 @@ impl gpui::Render for GpuixView {
             use gpui::prelude::*;
             let drag_move_view = cx.weak_entity();
             let drag_end_view = drag_move_view.clone();
+            let editing_pointer = crate::editing::pointer::EditingPointer::new(self.editing_pointer.clone(), tree_arc.clone(), callback.clone());
             let mut root = gpui::div()
                 .size_full()
                 .on_modifiers_changed(crate::events::keyboard::note_modifiers(self.routing.clone()))
@@ -10714,6 +10718,7 @@ impl gpui::Render for GpuixView {
                         activation: activation.clone(),
                         window_actions: self.simulated_window_actions.clone(),
                         resync_by_frame: self.resync_by_frame,
+                        editing: editing_pointer.clone(),
                     },
                     self.pointer.borrow().observed(),
                     self.hover_after_scroll.clone(),
@@ -10726,6 +10731,7 @@ impl gpui::Render for GpuixView {
                 ))
                 .child(selection_frame_reset(
                     self.selection.clone(),
+                    editing_pointer,
                     move |window, position, app| {
                         // This listener can run inside an update of GpuixView (an
                         // accessibility activation does). A nested update panics, so wait.

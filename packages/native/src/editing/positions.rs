@@ -237,6 +237,11 @@ pub fn locate(tree: &RetainedTree, node: u64) -> Option<Located> {
     holds(parent, tree, node)
 }
 
+/// The container a registry key `container:index` names.
+pub fn container_of_key(key: &str) -> Option<u64> {
+    key.split_once(':')?.0.parse().ok()
+}
+
 /// The paragraph the registry key `container:index` names (`Paragraph::key`), or `None` for a key of
 /// text that is not a DOM paragraph.
 pub fn locate_key(tree: &RetainedTree, key: &str) -> Option<Located> {
@@ -298,6 +303,13 @@ mod tests {
                 (back.node == node).then_some((offset, byte, back.offset))
             })
             .collect()
+    }
+
+    #[test]
+    fn a_registry_key_names_its_container() {
+        assert_eq!(container_of_key("12:3"), Some(12));
+        assert_eq!(container_of_key("12"), None);
+        assert_eq!(container_of_key("a:3"), None);
     }
 
     #[test]

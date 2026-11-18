@@ -280,7 +280,23 @@ fn caret_point(entry: &RegEntry, located: &positions::Located, byte: usize, bias
 
 /// The position at the window point, in the text that is under it or nearest to it.
 pub fn caret_position_from_point(tree: &RetainedTree, window: WindowId, x: f64, y: f64) -> Option<CaretPoint> {
-    let (entry, local) = paint::painted_text_at(window, point(pixels(x), pixels(y)))?;
+    caret_position_among(tree, window, x, y, &|_| true)
+}
+
+/// [`caret_position_from_point`] among the paragraphs of the editable text of the editing host `host`,
+/// which is where a press or a drag in it puts the caret: text in a `contenteditable="false"` island
+/// is not a place for it, and a point outside the host is the nearest place inside.
+pub fn caret_position_in_host(tree: &RetainedTree, window: WindowId, host: u64, x: f64, y: f64) -> Option<CaretPoint> {
+    caret_position_among(tree, window, x, y, &|entry| {
+        positions::container_of_key(&entry.key).is_some_and(|container| {
+            crate::html::editing::is_editable(tree, container)
+                && std::iter::successors(Some(container), |id| tree.elements.get(id).and_then(|element| element.parent)).any(|id| id == host)
+        })
+    })
+}
+
+fn caret_position_among(tree: &RetainedTree, window: WindowId, x: f64, y: f64, allow: &dyn Fn(&RegEntry) -> bool) -> Option<CaretPoint> {
+    let (entry, local) = paint::painted_text_at_among(window, point(pixels(x), pixels(y)), allow)?;
     let located = positions::locate_key(tree, &entry.key)?;
     let text: &str = &entry.text;
     let row = row_at(&entry.layout, text, local.y.clamp(entry.layout.bounds().top(), entry.layout.bounds().bottom() - px(0.5)))?;

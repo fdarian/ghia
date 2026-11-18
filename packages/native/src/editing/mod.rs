@@ -4,13 +4,15 @@
 //! [`positions`] maps between `Text.data` offsets and the bytes of the paragraph text that is painted
 //! (the pure half, with the lookup of a node's paragraph); [`geometry`] reads the last painted frame
 //! for the rects, hit tests and line moves JS asks for; [`snapshot`] and [`input_handler`] are the text
-//! the platform's text input sees, what it does with typed text and [`composition`], the text an input method has marked.
+//! the platform's text input sees, what it does with typed text and [`composition`], the text an input method has marked;
+//! [`pointer`] finds the position under a press or a drag in a host and hands it to JS.
 
 pub mod caret;
 pub mod composition;
 pub mod geometry;
 pub mod input_handler;
 pub mod node_selection;
+pub mod pointer;
 pub mod positions;
 pub mod snapshot;
 

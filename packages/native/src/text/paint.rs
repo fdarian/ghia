@@ -268,6 +268,7 @@ fn frame_reset(window: WindowId) {
 /// in paint order.
 pub fn selection_frame_reset(
     selection: SharedSelection,
+    editing: crate::editing::pointer::EditingPointer,
     on_drag_move: impl Fn(WindowId, gpui::Point<gpui::Pixels>, &mut gpui::App) + 'static,
     on_drag_end: impl Fn(&mut gpui::App) + 'static,
 ) -> impl IntoElement {
@@ -281,7 +282,7 @@ pub fn selection_frame_reset(
             super::inline_hit::frame_reset(id);
             register_copy_listener(window, &selection);
             register_down_listener(window, &selection);
-            register_drag_listeners(window, &selection, on_drag_move, on_drag_end);
+            register_drag_listeners(window, &selection, editing.clone(), on_drag_move, on_drag_end);
         },
     )
     .absolute()
@@ -1113,12 +1114,25 @@ fn registry_point(
     window: WindowId,
     position: gpui::Point<gpui::Pixels>,
 ) -> Option<RegistryHit> {
+    registry_point_among(window, position, &|_| true)
+}
+
+/// [`registry_point`] over the texts `allow` lets through. `allow` runs while the frame is borrowed,
+/// so it must not read the painted frame.
+fn registry_point_among(
+    window: WindowId,
+    position: gpui::Point<gpui::Pixels>,
+    allow: &dyn Fn(&RegEntry) -> bool,
+) -> Option<RegistryHit> {
     with_frame(window, |frame| {
         let reg = frame.registry();
         let mut contained: Option<(usize, gpui::Point<gpui::Pixels>)> = None;
         let mut nearest: Option<(usize, gpui::Point<gpui::Pixels>, (f32, f32))> = None;
 
         for (ei, entry) in reg.iter().enumerate() {
+            if !allow(entry) {
+                continue;
+            }
             let Some(local) = entry.local(position) else {
                 continue;
             };
@@ -1174,10 +1188,14 @@ pub(crate) fn painted_texts_in_document_order(window: WindowId) -> Vec<RegEntry>
     })
 }
 
-/// The text a window position lands in, as [`registry_point`] finds it, with the position in the
-/// space of its layout.
-pub(crate) fn painted_text_at(window: WindowId, position: gpui::Point<gpui::Pixels>) -> Option<(RegEntry, gpui::Point<gpui::Pixels>)> {
-    let hit = registry_point(window, position)?;
+/// The text a window position lands in, as [`registry_point`] finds it among the texts `allow` lets
+/// through (which must not read the painted frame), with the position in the space of its layout.
+pub(crate) fn painted_text_at_among(
+    window: WindowId,
+    position: gpui::Point<gpui::Pixels>,
+    allow: &dyn Fn(&RegEntry) -> bool,
+) -> Option<(RegEntry, gpui::Point<gpui::Pixels>)> {
+    let hit = registry_point_among(window, position, allow)?;
     with_frame(window, |frame| frame.registry().get(hit.entry).cloned()).map(|entry| (entry, hit.local))
 }
 
@@ -1304,13 +1322,19 @@ fn register_down_listener(window: &mut Window, selection: &SharedSelection) {
 fn register_drag_listeners(
     window: &mut Window,
     selection: &SharedSelection,
+    editing: crate::editing::pointer::EditingPointer,
     on_drag_move: impl Fn(WindowId, gpui::Point<gpui::Pixels>, &mut gpui::App) + 'static,
     on_drag_end: impl Fn(&mut gpui::App) + 'static,
 ) {
     use gpui::{DispatchPhase, MouseButton, MouseMoveEvent, MouseUpEvent};
 
     let move_selection = selection.clone();
+    let move_editing = editing.clone();
     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+        // A drag that began in an editing host is the host's: it never reaches the painted selection.
+        if phase == DispatchPhase::Bubble && move_editing.moved(event, window, cx) {
+            return;
+        }
         if phase != DispatchPhase::Bubble || !event.dragging() {
             return;
         }
@@ -1327,8 +1351,11 @@ fn register_drag_listeners(
     });
 
     let up_selection = selection.clone();
-    window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, cx| {
+    window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
         if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+            return;
+        }
+        if editing.released(window, cx) {
             return;
         }
         let mut selection = up_selection.lock();

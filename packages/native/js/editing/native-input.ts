@@ -29,7 +29,7 @@ interface TextPoint {
   offset: number
 }
 
-function textById(root: Node, id: number): Text | null {
+export function textById(root: Node, id: number): Text | null {
   for (const child of root.childNodes) {
     if (child.nodeType === TEXT_NODE) {
       if ((child[DOM_BINDING]() as TextBinding).native?.id === id) return child as Text

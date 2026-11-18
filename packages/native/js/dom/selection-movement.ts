@@ -117,7 +117,7 @@ function flatten(scope: Node, islands: boolean): Flat {
 }
 
 /** The nearest block holding `node` (or `node` itself, a block), below `scope`; `scope` when none does. */
-function enclosingBlock(node: Node, scope: Node): Node {
+export function enclosingBlock(node: Node, scope: Node): Node {
   for (let current: Node | null = node; current !== null && current !== scope; current = current.parentNode) {
     if (isBlock(current)) return current
   }

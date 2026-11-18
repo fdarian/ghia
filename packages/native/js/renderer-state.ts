@@ -5,6 +5,7 @@ import { createDragDispatcher } from "./events/drag.js"
 import { focusElementById, placeCaretOnFocusIn } from "./focus.js"
 import type { Element } from "./dom/nodes.js"
 import { EDIT_INPUT_EVENT, endCompositionOnBlur, runNativeEditInput } from "./editing/native-input.js"
+import { EDIT_POINTER_EVENT, runEditingPointer } from "./editing/pointer-selection.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
 import { popoversOfRendererGone } from "./dom/popover.js"
 import { elementOf, GpuixEventTarget, noteFocusEvent } from "./events/window-target.js"
@@ -259,6 +260,23 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
     }
   }
 
+  /**
+   * A press, drag or release of the primary button in an editing host. The selection it makes is the
+   * state the next event of the same press reads, so it runs before this returns, like an edit.
+   */
+  const runNativePointer = (root: ActiveRoot, received: EventPayload) => {
+    let ran = false
+    const run = () => {
+      ran = true
+      runEditingPointer(received, root.elementById(received.elementId) as Element | undefined, renderer)
+    }
+    if (root.handlers.schedule) root.handlers.schedule(run)
+    else run()
+    if (!ran) {
+      throw new Error("The schedule handler did not run the pointer event before returning. The selection of a press is read by the next event, so schedule must call it synchronously.")
+    }
+  }
+
   /** The callbacks run as a handler does, so the framework flushes what they changed before the frame builds. */
   const runFrameCallbacks = (event: EventPayload) => {
     if (event.timelineTime === undefined) {
@@ -356,6 +374,10 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         runNativeInput(root, received)
         return true
       }
+      if (received.eventType === EDIT_POINTER_EVENT) {
+        runNativePointer(root, received)
+        return true
+      }
       if (received.eventType === "focusin") {
         noteFocusEvent(renderer)
         placeCaretOnFocusIn(elementOf(renderer, received.elementId))
@@ -385,6 +407,10 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       const root = active
       if (received.eventType === EDIT_INPUT_EVENT) {
         if (root) runNativeInput(root, received)
+        return { defaultPrevented: false, propagationStopped: false }
+      }
+      if (received.eventType === EDIT_POINTER_EVENT) {
+        if (root) runNativePointer(root, received)
         return { defaultPrevented: false, propagationStopped: false }
       }
       if (received.eventType === "focusin") {
