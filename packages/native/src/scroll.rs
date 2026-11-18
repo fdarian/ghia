@@ -723,6 +723,18 @@ impl KeyScroll {
         })
     }
 
+    /// Whether a focused editable still scrolls for `key`. Chrome on macOS binds Home, End, Page Up
+    /// and Page Down to `scrollToBeginningOfDocument:` and friends, which scroll the nearest scroller
+    /// under the caret; arrows and Space are editing keys, and with Shift Page Up and Down extend the
+    /// selection instead.
+    pub(crate) fn scrolls_under_editable(key: &str, shift: bool) -> bool {
+        match key {
+            "home" | "end" => true,
+            "pageup" | "pagedown" => !shift,
+            _ => false,
+        }
+    }
+
     /// Where `handle` would scroll to, or `None` if it cannot move that way.
     fn target(self, handle: &gpui::ScrollHandle) -> Option<gpui::Point<gpui::Pixels>> {
         let offset = handle.offset();
@@ -910,6 +922,18 @@ pub(crate) fn virtual_list_offset(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_focused_editable_keeps_the_arrows_and_space_and_scrolls_for_the_document_keys() {
+        for key in ["up", "down", "left", "right", "space"] {
+            assert!(!KeyScroll::scrolls_under_editable(key, false), "{key}");
+            assert!(!KeyScroll::scrolls_under_editable(key, true), "shift {key}");
+        }
+        for key in ["home", "end", "pageup", "pagedown"] {
+            assert!(KeyScroll::scrolls_under_editable(key, false), "{key}");
+        }
+        assert!(!KeyScroll::scrolls_under_editable("pagedown", true), "Shift+Page Down extends the selection");
+    }
 
     #[test]
     fn writes_are_told_to_the_window_they_were_made_in_once() {

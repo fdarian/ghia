@@ -67,7 +67,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid contentEditable nesting", () => {
     }
   })
 
-  it("leaves the keys of the page alone while focus is in an editing host", () => {
+  it("leaves the editing keys alone while focus is in an editing host and still scrolls for Home, End and Page Up and Down, as Chrome does", () => {
     let host!: HostElement
     let button!: HostElement
     const app = createTestRoot({ width: 300, height: 200 })
@@ -87,8 +87,23 @@ describe.skipIf(!hasNativeTestRenderer)("Solid contentEditable nesting", () => {
 
       host.focus()
       expect(document.activeElement === host).toBe(true)
-      for (const key of ["down", "pagedown", "end", "space"]) app.renderer.scrollByKey(key, false)
-      expect(app.renderer.getScrollOffset(scroller)).toEqual([0, 0])
+      for (const key of ["up", "down", "left", "right", "space"]) app.renderer.scrollByKey(key, false)
+      app.renderer.scrollByKey("space", true)
+      app.renderer.scrollByKey("pagedown", true)
+      app.renderer.scrollByKey("pageup", true)
+      expect(app.renderer.getScrollOffset(scroller), "arrows, Space and Shift+Page keys are editing keys").toEqual([0, 0])
+
+      app.renderer.scrollByKey("pagedown", false)
+      const paged = app.renderer.getScrollOffset(scroller)[1]
+      expect(paged, "Page Down scrolls the nearest scroller").toBeGreaterThan(0)
+      app.renderer.scrollByKey("end", false)
+      const end = app.renderer.getScrollOffset(scroller)[1]
+      expect(end, "End scrolls to the end").toBeGreaterThan(paged)
+      app.renderer.scrollByKey("pageup", false)
+      expect(app.renderer.getScrollOffset(scroller)[1], "Page Up scrolls back").toBeLessThan(end)
+      app.renderer.scrollByKey("home", false)
+      expect(app.renderer.getScrollOffset(scroller), "Home scrolls to the start").toEqual([0, 0])
+      expect(document.activeElement === host, "the focus stays").toBe(true)
     } finally {
       app.unmount()
     }
