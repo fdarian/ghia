@@ -13,6 +13,7 @@
 
 import {
   AnimationEvent,
+  ClipboardEvent,
   CompositionEvent,
   DragEvent,
   FocusEvent,
@@ -86,6 +87,7 @@ const SPECS: ReadonlyMap<string, TypeSpec> = new Map([
     { cls: CompositionEvent, modifiers: false, pointer: false },
     ["compositionstart", "compositionupdate", "compositionend"]
   ),
+  ...typesOf({ cls: ClipboardEvent, modifiers: false, pointer: false }, ["copy", "cut", "paste"]),
   ...typesOf(
     { cls: TransitionEvent, modifiers: false, pointer: false },
     ["transitionrun", "transitionstart", "transitionend", "transitioncancel"]
@@ -97,7 +99,7 @@ const SPECS: ReadonlyMap<string, TypeSpec> = new Map([
 ])
 
 /** The members the DOM's classes give an event that native does not send. */
-const DEFAULTS: ReadonlyMap<EventClass, Record<string, unknown>> = new Map([
+const DEFAULTS: ReadonlyMap<EventClass, Record<string, unknown>> = new Map<EventClass, Record<string, unknown>>([
   // The DOM's `view` of a trusted event is the window.
   [UIEvent, { view: globalThis, detail: 0 }],
   [PointerEvent, {
@@ -114,6 +116,7 @@ const DEFAULTS: ReadonlyMap<EventClass, Record<string, unknown>> = new Map([
   [MouseEvent, { screenX: 0, screenY: 0 }],
   [WheelEvent, { deltaZ: 0 }],
   [DragEvent, { dataTransfer: null }],
+  [ClipboardEvent, { clipboardData: null }],
   [KeyboardEvent, { location: 0, charCode: 0 }],
 ])
 

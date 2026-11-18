@@ -7,6 +7,7 @@
  * without the runtime's constructor: see `delivered-events.ts`.
  */
 
+import type { DataTransfer } from "../dom/data-transfer.js"
 import type { StaticRange } from "../dom/range.js"
 
 /** The four modifiers of `EventModifierInit`, plus the ones no platform reports to Ghia. */
@@ -352,6 +353,19 @@ export class CompositionEvent extends UIEvent {
   }
 }
 
+export interface ClipboardEventInit extends EventInit {
+  clipboardData?: DataTransfer | null
+}
+
+export class ClipboardEvent extends Event {
+  readonly clipboardData: DataTransfer | null
+
+  constructor(type: string, init: ClipboardEventInit = {}) {
+    super(type, init)
+    this.clipboardData = init.clipboardData ?? null
+  }
+}
+
 export interface TransitionEventInit extends EventInit {
   propertyName?: string
   elapsedTime?: number
@@ -401,6 +415,7 @@ export const EVENT_CLASSES = {
   FocusEvent,
   InputEvent,
   CompositionEvent,
+  ClipboardEvent,
   TransitionEvent,
   AnimationEvent,
 }

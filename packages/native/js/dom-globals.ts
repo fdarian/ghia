@@ -16,6 +16,7 @@ import {
 } from "./dom/nodes.js"
 import { DOMTokenList } from "./dom/class-list.js"
 import { ValidityState } from "./dom/constraint-validation.js"
+import { DataTransfer, DataTransferItem, DataTransferItemList } from "./dom/data-transfer.js"
 import { CSSStyleDeclaration } from "./dom/css-style-declaration.js"
 import { DOMRect, DOMRectReadOnly } from "./dom/dom-rect.js"
 import { HTMLCollection, NodeList } from "./dom/html-collection.js"
@@ -79,6 +80,9 @@ const DOM_CLASSES = {
   DOMRect,
   DOMRectReadOnly,
   ToggleEvent,
+  DataTransfer,
+  DataTransferItem,
+  DataTransferItemList,
   KeyframeEffect,
   Animation,
   CSSAnimation,

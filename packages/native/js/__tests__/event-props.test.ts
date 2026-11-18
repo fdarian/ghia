@@ -73,6 +73,18 @@ describe("EVENT_PROPS", () => {
     expect(eventIsCancelable(type)).toBe(false)
   })
 
+  it.each([
+    ["onCopy", "copy"],
+    ["onCut", "cut"],
+    ["onPaste", "paste"],
+  ])("%s listens for %s, has a capture twin, bubbles and can be cancelled", (prop, type) => {
+    expect(EVENT_TYPE_BY_PROP.get(prop)).toBe(type)
+    expect(EVENT_TYPE_BY_PROP.get(`${prop}Capture`)).toBe(captureHandlerKey(type))
+    expect(DOM_DISPATCHED_EVENT_TYPES.has(type)).toBe(true)
+    expect(eventBubbles(type)).toBe(true)
+    expect(eventIsCancelable(type)).toBe(true)
+  })
+
   it("onContentVisibilityAutoStateChange listens for the DOM type, has a capture twin, bubbles and can be cancelled", () => {
     const type = "contentvisibilityautostatechange"
     expect(EVENT_TYPE_BY_PROP.get("onContentVisibilityAutoStateChange")).toBe(type)

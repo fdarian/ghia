@@ -15,6 +15,7 @@ import type {
 import type { DomEvent, RootEvent } from "./events/dispatch.js"
 import type {
   AnimationEventProps,
+  ClipboardEventProps,
   CompositionEventProps,
   ContentVisibilityEventProps,
   HostChangeEvent,
@@ -1772,7 +1773,8 @@ export interface HostProps
     PointerEventProps,
     AnimationEventProps,
     ContentVisibilityEventProps,
-    CompositionEventProps {
+    CompositionEventProps,
+    ClipboardEventProps {
   style?: StyleDesc
 
   // Pointer, mouse and drag events, with `on…Capture` twins: see PointerEventProps.
