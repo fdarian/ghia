@@ -1378,10 +1378,12 @@ builds one, `clipboardData` is a [`DataTransfer`](#datatransfer) or `null`, and 
 `element.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }))`.
 
 **When they fire.** Cmd+C, Cmd+X and Cmd+V and the Edit menu's Cut, Copy and Paste fire `copy`, `cut` and `paste`, after
-the `keydown` (which can cancel the command) and unless an `<input>` or `<textarea>` has focus. They fire in every
+the `keydown` (which can cancel the command) and unless a `<textarea>`, or an `<input>` that edits text, has focus (a
+checkbox, radio, range or hidden `<input>` is an ordinary element to them). They fire in every
 context: `copy` fires in a read-only editing host and in text that is not editable, with or without a selection. The
-target is the focused element when it is, or is inside, an editing host; else the element that holds the focus end of the
-selection; else the focused element, which is `body` when nothing has focus. They bubble and are `composed`.
+target is the element that holds the start of the selection (Chrome's `FindEventTargetFrom`: the paragraph a forward
+selection begins in, and the element a script selected, as Lexical does for a node selection, even while an editing host has
+focus); with no selection, the focused element, which is `body` when nothing has focus. They bubble and are `composed`.
 
 **`clipboardData`.** For `copy` and `cut` it is a `DataTransfer` in read/write mode: a handler that calls `preventDefault()`
 makes the clipboard hold exactly what it put in (`setData`, `items.add`; the string items, in order), and a handler that
@@ -1391,20 +1393,23 @@ is read-only and holds the clipboard's types (`text/plain`, `text/html`, `text/u
 [`readClipboard`](#typed-clipboard) returns them). After the event it is protected, so a handler that kept it reads
 nothing from it later.
 
-**The default of `copy`.** Not cancelled, with a node selection that is not collapsed: `text/plain` is
-`getSelection().toString()` and `text/html` is `<meta charset='utf-8'>` and the markup of `range.cloneContents()`. With no
+**The default of `copy`.** Not cancelled, with a node selection that is not collapsed: `text/plain` is the range's
+rendered text as Chrome copies it (the [`innerText`](#markup-domparser-innerhtml-outerhtml) algorithm over the range: a line
+break between blocks, two between paragraphs, one at a `<br>`; `getSelection().toString()` has none) and `text/html` is `<meta charset='utf-8'>` and the markup of `range.cloneContents()`. With no
 node selection, text a drag selected in the page is copied as plain text.
 
 **The default of `cut`.** Not cancelled, in an editing host with a range selected: the range is copied as for `copy`, then
 `beforeinput` (`inputType: 'deleteByCut'`, cancelable, `getTargetRanges()` the selection, `data` and `dataTransfer` null),
 the range is deleted, and `input`. A handler that cancels the `beforeinput` keeps the text, and the clipboard still has the
-copy. With a caret, or outside an editing host, nothing happens after the event.
+copy. With a caret, or outside an editing host, nothing happens after the event. A cut that `document.execCommand('cut')`
+makes fires no `beforeinput` (Input Events does not fire it for `execCommand`) and the same `input`.
 
 **The default of `paste`.** Not cancelled, in an editing host that holds the selection: `beforeinput`
 (`inputType: 'insertFromPaste'`, cancelable, `data` null, `getTargetRanges()` the selection, `dataTransfer` a read-only
 `DataTransfer` with the clipboard's items), then the range is replaced by the `text/plain` string (or the text of
 `text/html` when there is none), with a `<br>` for each line break, then `input` with the same `dataTransfer`. Outside an
-editing host nothing is inserted. A page that wants the markup reads `clipboardData` in `paste` and cancels it
+editing host nothing is inserted, and a clipboard with neither `text/plain` nor `text/html` changes nothing after the
+`paste` event: no `beforeinput`, no deletion of the selection, no `input`. A page that wants the markup reads `clipboardData` in `paste` and cancels it
 ([deviations.md](fork/deviations.md#events-and-input)). `<input>` and `<textarea>` copy and paste on their own, with no
 clipboard event ([deviations.md](fork/deviations.md#events-and-input)).
 
@@ -1414,7 +1419,8 @@ before) and, with focus elsewhere, the contents of `body`.
 **`document.execCommand(name)`.** `'copy'`, `'cut'` and `'selectAll'` run the command at once, as the keys do, so the `copy`
 or `cut` event fires before the call returns (the way Lexical copies a node selection: a temporary `copy` listener, then
 `execCommand('copy')`). They return true when done, and false when an `<input>` or `<textarea>` has focus or a `copy` has
-nothing to copy. `'paste'` returns false and does nothing, as in Chrome without the clipboard-read permission; every other
+nothing to copy, and any call made while another runs (from the `copy` event it fired) returns false and does nothing, as
+Chrome's does. `'paste'` returns false and does nothing, as in Chrome without the clipboard-read permission; every other
 command returns false ([deviations.md](fork/deviations.md#events-and-input)). `queryCommandSupported` is true for those four
 and `queryCommandEnabled` is true for `copy` with a range selected, `cut` with a range selected in an editing host, and
 `selectAll`.
@@ -5579,6 +5585,7 @@ HTML is parsed and written by [parse5](https://github.com/inikulin/parse5), the 
 | `el.innerHTML = markup` | Parses the markup in the context of the element (`<tr>` stays in a `<tbody>` and is dropped in a `<div>`) and replaces the children with new nodes of the element's own document, so they are drawn when it is in a window. `null` is `""`. The whole markup is made before any child changes: markup with an element Ghia does not draw (`<marquee>`, `<font>`, `<meta>`, `<template>`) throws `NotSupportedError` and the element is left as it was. Comments are left out. |
 | `el.outerHTML = markup` | The same for the element itself, in the context of its parent (a `<body>` for a parent that is a fragment): it replaces the element. Nothing happens for an element with no parent; a parent that is the document throws `NoModificationAllowedError`. |
 | `el.insertAdjacentHTML(where, markup)` | `beforebegin`, `afterbegin`, `beforeend`, `afterend` in any letter case (`SyntaxError` for another position, `NoModificationAllowedError` for `beforebegin` and `afterend` on an element with no parent). |
+| `el.innerText` | The text as a browser renders it (CSSOM View's rendered text collection): a block (`div`, `p`, `li`, headings, `pre`, `table` and the like) is a line break on each side and a `<p>` two, a `<br>` a line feed, the white space of text collapses (kept in `<pre>`, `<textarea>` and an inline `white-space: pre`), the cells of a row are tab separated and the rows line separated, and the breaks at either end are dropped. Elements that are `script`, `style`, `template`, `head`, `title`, `noscript`, `hidden` or have an inline `display: none` give nothing, and an element that is itself one of those gives its `textContent`. Which element is a block or hidden comes from its tag and its `hidden` and `style` attributes, not from the CSS cascade ([deviations.md](fork/deviations.md#events-and-input)). Assigning it replaces the children with text and a `<br>` for each line break. |
 
 A parsed document is **inert**: it is never rendered, reaches no native renderer and is not found by `document`. Its nodes have `isConnected` `false`, `getRootNode()` gives the parsed document and `ownerDocument` is it, and nothing in them is a batch to a renderer. A node moves inside its own parsed document only: inserting one into a window's tree or another parsed document throws `WrongDocumentError`. To bring markup into a window, set `innerHTML` or call `insertAdjacentHTML` with its text (`el.innerHTML = parsed.body.innerHTML`). The other limits are in [deviations](./fork/deviations.md#dom-building-from-code).
 
