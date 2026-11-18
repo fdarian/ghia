@@ -10759,6 +10759,8 @@ a `code` (`"Space"`, `"KeyA"`, `"Digit1"`, `"ShiftLeft"`, `"NumpadEnter"`,
 case-sensitive, and one that is not a key throws before anything is pressed:
 GPUI's own syntax (`"enter"`, `"cmd-shift-p"`) is not accepted.
 
+`simulateMenuAction('copy' | 'cut' | 'paste' | 'selectAll')` on the test renderer chooses that Edit menu item as the menu bar does: it returns `false` and does nothing when the item would be greyed out, and otherwise runs the same command as the key ([clipboard events](#clipboard-events)).
+
 ```ts
 renderer.simulateKeystrokes('Shift+Tab')              // one press
 renderer.nativeSimulateKeystrokes(id, 'h i Enter')    // a sequence, spaces between presses
