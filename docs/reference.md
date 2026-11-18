@@ -7000,9 +7000,10 @@ Markup written for the web works: `<p>`, `<h1>`, `<ul>`, `<strong>`, `<button>`,
 
 | Tags | Default display | What they get |
 |---|---|---|
-| `p`, `section`, `nav`, `header`, `footer`, `main`, `article`, `aside`, `figcaption`, `details`, `summary`, `dt`, `li`, `legend` | `block` | `p` has `1em` margin above and below; `legend` has `2px` inline padding |
+| `p`, `section`, `nav`, `header`, `footer`, `main`, `article`, `aside`, `figcaption`, `details`, `summary`, `dt`, `legend` | `block` | `p` has `1em` margin above and below; `legend` has `2px` inline padding |
 | `h1` to `h6` | `block` | Chrome's sizes (`2em` to `0.67em`), bold, and the margins that go with them; role `heading` with `aria-level` 1 to 6 |
-| `ul`, `ol` | `block` | `1em` block margins and `40px` of start padding; role `list` (`li` is `listitem`) |
+| `ul`, `ol` | `block` | `1em` block margins (none inside another list) and `40px` of start padding; `list-style-type` `disc` (`circle` in a list, `square` in two) and `decimal`; role `list` |
+| `li` | `list-item` | role `listitem`; see [Lists](#lists) |
 | `dl`, `dd` | `block` | `dl` has `1em` block margins; `dd` has a `40px` start margin; `dl`, `dt` and `dd` are a description list, a term and a definition |
 | `figure`, `blockquote` | `block` | `1em` block margins and `40px` inline margins; roles `figure` and `blockquote` |
 | `pre` | `block` | `white-space: pre`, `1em` block margins, `Menlo` at the inherited size |
@@ -7053,13 +7054,21 @@ A `<button>` paints Chrome's default button look: a `2px` outset border, `#efefe
 
 An `<a>` with an `href` has the `link` role and is a tab stop; Enter clicks it once per press (a held key does not repeat the click), and with Shift, Ctrl, Alt or Cmd held the click carries them in `event.modifiers`, as in Chrome. An `<a>` without one is neither. Ghia has no navigation, so an `<a href>` fires `click` and stops: it is not underlined or blue, and it opens nothing. Handle the click, and style the link yourself. An inline `<a>` has no accessibility node (no inline box has one), and only an `<a>` with `display: block` or `inline-block` is a `link` in the accessibility tree.
 
+### Lists
+
+`display: "list-item"` is a `block` box that also has a marker (`li` is one). `listStyleType` (`"disc"` (default), `"circle"`, `"square"`, `"decimal"`, `"lower-alpha"`, `"upper-alpha"`, `"lower-latin"`, `"upper-latin"`, `"lower-roman"`, `"upper-roman"`, `"none"`) and `listStylePosition` (`"outside"` (default), `"inside"`) are inherited, and `listStyle` is the inherited shorthand of the two: a type, a position, or both in either order (`"none"`, `"inside"`, `"square inside"`); what it leaves out is the longhand's initial value, and the one written later wins on the same element. A value CSS does not have drops the declaration. An image in `listStyle` (`url(...)`) is ignored and `listStyleImage`, a string or `symbols()` for the type are not supported.
+
+The marker is as Chrome makes it: `•`, `◦` or `▪` and a space, or the counter and `. ` (`"1. "`, `"a. "`, `"iv. "`). `lower-alpha` counts `a` to `z`, then `aa`; the roman types stop at 3999 and a number a type cannot show (roman above 3999, alphabetic below 1) is shown as `decimal`. The counter is the list-item counter of the item's parent element: the first item has `start` of an `<ol>` (default 1), each next one counts on (down with `reversed`, which starts at the number of items), and a `value` on an `<li>` sets the count there, the items after it continuing from it. An element that is not `display: list-item` has no marker and does not count. A `<ul>` inside one list is a `circle` and inside two or more a `square`, at any depth, and a list inside a list has no block margin, as in Chrome's user agent style; what you set on the list is over them.
+
+The markers are painted in the next commit: until then the box has none.
+
 ### HTML tag deviations
 
 What differs from Chrome is listed once in [deviations.md](./fork/deviations.md#html-tags) and not repeated here. A tag is the user agent style of one tag, and a rule that needs the element's place or its attributes cannot be one, so:
 
-- `a` has no link colour or underline (`a:any-link` needs the `href` attribute), and `ul ul` is not a smaller-margin list. Write the style you want.
+- `a` has no link colour or underline (`a:any-link` needs the `href` attribute), Write the style you want.
 - `dialog` is always `display: none`: `open` is not forwarded. Set `display: "block"` yourself to show one.
-- `li` has no marker, `q` has no quotes, `legend` does not sit on the fieldset's border, `details` has no open state, `abbr[title]` has no dotted underline and a nested `h1` is not smaller.
+- `li` has no marker yet, `q` has no quotes, `legend` does not sit on the fieldset's border, `details` has no open state, `abbr[title]` has no dotted underline and a nested `h1` is not smaller.
 - `pre`, `kbd` and `samp` use `Menlo` at the inherited size, not the generic `monospace` at `13px`.
 - `<fieldset disabled>` does not disable its controls (see [Form control state](#form-control-state-disabled-enabled)).
 - `th` is always a column header (`scope` is not forwarded).
@@ -9289,7 +9298,7 @@ way, overflow included.
 
 **Containment:** `contentVisibility` (`"visible"` (default) | `"auto"` | `"hidden"`) skips the content of an element and `containIntrinsicSize` (`none`, a length or `auto <length>` per axis; longhands `containIntrinsicWidth`, `containIntrinsicHeight`, `containIntrinsicInlineSize`, `containIntrinsicBlockSize`) sizes it while it is skipped — see [Skipping content with `contentVisibility`](#skipping-content-with-contentvisibility). Neither inherits.
 
-**Text:** `fontSize`, `fontFamily`, `fontWeight`, `fontStyle` (`"normal"` | `"italic"` | `"oblique"`, inherited), `WebkitFontSmoothing` (`"auto"` | `"antialiased"` | `"subpixel-antialiased"`, inherited; see below), `textAlign` (`"start"` | `"end"` | `"left"` | `"right"` | `"center"`, inherited), `direction` (`"ltr"` | `"rtl"`, inherited; see [Direction](#direction)), `lineHeight` (a number multiplies the font size, a string is a length, see [Lengths](#lengths)), `whiteSpace` (`"normal"` | `"nowrap"` | `"pre"` | `"pre-wrap"` | `"pre-line"` | `"break-spaces"`, inherited), `tabSize` (a number of spaces or a length such as `"40px"`, inherited, default 8; see [White space](#white-space)), `wordBreak` (`"normal"` | `"break-all"` | `"keep-all"` | `"break-word"`, inherited) and `overflowWrap` (`"normal"` | `"break-word"` | `"anywhere"`, inherited; see [Breaking words](#breaking-words)), `textOverflow`, `lineClamp`, `textDecoration` (`"underline line-through"`, `"underline wavy red"`...), `textDecorationLine`, `textDecorationStyle`, `textDecorationColor`, `textDecorationThickness`, `textUnderlineOffset` (see [Inline text](#inline-text)), `textWrap`, `textWrapMode` and `textWrapStyle` (see [Balanced and pretty lines](#balanced-and-pretty-lines)), `textBox`, `textBoxTrim` and `textBoxEdge` (see [Trimming text boxes](#trimming-text-boxes))
+**Text:** `fontSize`, `fontFamily`, `fontWeight`, `fontStyle` (`"normal"` | `"italic"` | `"oblique"`, inherited), `WebkitFontSmoothing` (`"auto"` | `"antialiased"` | `"subpixel-antialiased"`, inherited; see below), `textAlign` (`"start"` | `"end"` | `"left"` | `"right"` | `"center"`, inherited), `direction` (`"ltr"` | `"rtl"`, inherited; see [Direction](#direction)), `lineHeight` (a number multiplies the font size, a string is a length, see [Lengths](#lengths)), `whiteSpace` (`"normal"` | `"nowrap"` | `"pre"` | `"pre-wrap"` | `"pre-line"` | `"break-spaces"`, inherited), `tabSize` (a number of spaces or a length such as `"40px"`, inherited, default 8; see [White space](#white-space)), `wordBreak` (`"normal"` | `"break-all"` | `"keep-all"` | `"break-word"`, inherited) and `overflowWrap` (`"normal"` | `"break-word"` | `"anywhere"`, inherited; see [Breaking words](#breaking-words)), `textOverflow`, `lineClamp`, `textDecoration` (`"underline line-through"`, `"underline wavy red"`...), `textDecorationLine`, `textDecorationStyle`, `textDecorationColor`, `textDecorationThickness`, `textUnderlineOffset` (see [Inline text](#inline-text)), `textWrap`, `textWrapMode` and `textWrapStyle` (see [Balanced and pretty lines](#balanced-and-pretty-lines)), `textBox`, `textBoxTrim` and `textBoxEdge` (see [Trimming text boxes](#trimming-text-boxes)), `listStyle`, `listStyleType` and `listStylePosition` (inherited; see [Lists](#lists))
 
 `fontVariantNumeric` (`"tabular-nums"`, `"proportional-nums"`, `"lining-nums"`, `"oldstyle-nums"`, `"slashed-zero"`, `"diagonal-fractions"`, `"stacked-fractions"`, `"ordinal"`, `"normal"`, one keyword per group, combined with spaces) and `fontFeatureSettings` (`'"tnum" 1, "liga" 0'`) turn OpenType features on or off. Both inherit, and a descendant that sets one keeps the other. When both name a feature, `fontFeatureSettings` wins. The font needs the feature, and neither prop is available inside `hover`, `active` or `focusVisible`.
 

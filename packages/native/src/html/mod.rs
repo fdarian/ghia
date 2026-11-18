@@ -33,6 +33,37 @@ fn styles() -> &'static FxHashMap<&'static str, Arc<StyleDesc>> {
     })
 }
 
+fn nested_list_styles() -> &'static FxHashMap<&'static str, Arc<StyleDesc>> {
+    static STYLES: OnceLock<FxHashMap<&'static str, Arc<StyleDesc>>> = OnceLock::new();
+    STYLES.get_or_init(|| {
+        tags::NESTED_LISTS
+            .iter()
+            .map(|(name, json)| {
+                let style = crate::retained_tree::parse_style(json.as_bytes())
+                    .unwrap_or_else(|error| panic!("the user agent style of {name} is invalid: {error}"));
+                (*name, Arc::new(style))
+            })
+            .collect()
+    })
+}
+
+/// A `<ul>` or `<ol>`, the tags whose user agent style depends on the lists around them.
+pub(crate) fn is_list(element_type: &str) -> bool {
+    matches!(element_type, "ul" | "ol")
+}
+
+/// The style of a list below `lists_above` lists, which Chrome gives by a descendant selector.
+fn nested_list_style(element_type: &str, lists_above: usize) -> Option<Arc<StyleDesc>> {
+    let name = match (element_type, lists_above) {
+        (_, 0) => return None,
+        ("ul", 1) => "ul in 1",
+        ("ul", _) => "ul in 2",
+        ("ol", _) => "ol in 1",
+        _ => return None,
+    };
+    nested_list_styles().get(name).cloned()
+}
+
 /// What `<wbr>` puts in the text of its paragraph: a zero width space, where a line may break. It is
 /// not read out.
 pub const BREAK_OPPORTUNITY: char = '\u{200B}';
@@ -77,9 +108,10 @@ fn displayed_as_none(base: Option<Arc<StyleDesc>>) -> Arc<StyleDesc> {
 /// The user agent style of `element`: its tag's, and for an `<input>` its `type`'s, since Chrome's `html.css`
 /// has a rule for each (a checkbox and a radio are small `inline-block` boxes with a margin, a hidden input
 /// is not displayed). A text field has none. An element with the `hidden` attribute is `display: none` over
-/// that, whatever its tag.
-pub fn ua_style_of(element: &crate::retained_tree::RetainedElement) -> Option<Arc<StyleDesc>> {
-    let tag_style = ua_style_of_tag_and_type(element);
+/// that, whatever its tag. `lists_above` is how many `<ul>` and `<ol>` elements are ancestors (a list
+/// does not read more than two).
+pub fn ua_style_of(element: &crate::retained_tree::RetainedElement, lists_above: usize) -> Option<Arc<StyleDesc>> {
+    let tag_style = nested_list_style(&element.element_type, lists_above).or_else(|| ua_style_of_tag_and_type(element));
     if element.hidden_attribute() {
         return Some(displayed_as_none(tag_style));
     }

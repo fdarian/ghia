@@ -1,10 +1,10 @@
 //! The user agent style of each HTML tag, from Chrome's `html.css`: one JSON style a tag, parsed
 //! with the path every `setStyle` goes through.
 //!
-//! What a per-tag layer cannot say stays out: a rule that needs the element's place (`ul ul`) or
-//! its attributes (`a:any-link`, `details[open]`), the markers of `li`, the quotes of `q`, and the
-//! generic family `monospace` with its 13px size (`pre`, `kbd` and `samp` take `Menlo` at the
-//! size they inherit).
+//! What a per-tag layer cannot say stays out: a rule that needs the element's attributes
+//! (`a:any-link`, `details[open]`), the quotes of `q`, and the generic family `monospace` with its
+//! 13px size (`pre`, `kbd` and `samp` take `Menlo` at the size they inherit). The rules that need
+//! an element's place are the lists inside lists, which [`NESTED_LISTS`] has.
 
 pub(super) const TAGS: &[(&str, &str)] = &[
     // The root of every window. Not Chrome's: `html` and `body` fill the window, because the box above the root is
@@ -19,9 +19,9 @@ pub(super) const TAGS: &[(&str, &str)] = &[
     ("h4", r#"{"display":"block","fontWeight":700,"marginTop":"1.33em","marginBottom":"1.33em"}"#),
     ("h5", r#"{"display":"block","fontSize":"0.83em","fontWeight":700,"marginTop":"1.67em","marginBottom":"1.67em"}"#),
     ("h6", r#"{"display":"block","fontSize":"0.67em","fontWeight":700,"marginTop":"2.33em","marginBottom":"2.33em"}"#),
-    ("ul", r#"{"display":"block","marginTop":"1em","marginBottom":"1em","paddingInline":"40px 0"}"#),
-    ("ol", r#"{"display":"block","marginTop":"1em","marginBottom":"1em","paddingInline":"40px 0"}"#),
-    ("li", r#"{"display":"block"}"#),
+    ("ul", r#"{"display":"block","marginTop":"1em","marginBottom":"1em","paddingInline":"40px 0","listStyleType":"disc"}"#),
+    ("ol", r#"{"display":"block","marginTop":"1em","marginBottom":"1em","paddingInline":"40px 0","listStyleType":"decimal"}"#),
+    ("li", r#"{"display":"list-item"}"#),
     ("dl", r#"{"display":"block","marginTop":"1em","marginBottom":"1em"}"#),
     ("dt", r#"{"display":"block"}"#),
     ("dd", r#"{"display":"block","marginInline":"40px 0"}"#),
@@ -99,4 +99,14 @@ pub(super) const TAGS: &[(&str, &str)] = &[
     ("caption", r#"{"display":"table-caption","textAlign":"center"}"#),
     ("colgroup", r#"{"display":"table-column-group"}"#),
     ("col", r#"{"display":"table-column"}"#),
+];
+
+/// Chrome's `:is(ol, ul) :is(ol, ul)` rules, which a tag's own style cannot say: a list inside a list
+/// (at any depth, not only a child) has no block margin, and a `ul` inside one list is a `circle`,
+/// inside two or more a `square`. `html::nested_list_style` picks the entry by the number of lists
+/// above. `ol` keeps `decimal`; `menu` and `dir` are not tags here.
+pub(super) const NESTED_LISTS: &[(&str, &str)] = &[
+    ("ul in 1", r#"{"display":"block","marginTop":0,"marginBottom":0,"paddingInline":"40px 0","listStyleType":"circle"}"#),
+    ("ul in 2", r#"{"display":"block","marginTop":0,"marginBottom":0,"paddingInline":"40px 0","listStyleType":"square"}"#),
+    ("ol in 1", r#"{"display":"block","marginTop":0,"marginBottom":0,"paddingInline":"40px 0","listStyleType":"decimal"}"#),
 ];

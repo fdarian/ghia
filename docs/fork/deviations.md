@@ -105,7 +105,7 @@ An HTML tag ([docs/reference.md](../reference.md#html-tags)) is the user agent s
 **Styles Chrome has by selector**
 
 - **`a` has no link styling.** No blue, no underline: Chrome's rule is `a:any-link`, which needs the `href` attribute, and a tag's style cannot read one. Style the link yourself.
-- **Nested lists.** `ul ul`, `ol ul` and the like keep the margins of the outer list: Chrome zeroes the block margins of a nested list with a descendant selector. Set `margin` on the nested list.
+- **Lists.** A `ul` or `ol` inside another list has no block margin, and a `ul` is a `circle` inside one and a `square` inside two or more, as in Chrome (`html/tags.rs` `NESTED_LISTS`, chosen by `lists_above`; the list is styled again when it is put in or taken out of a list). `menu` and `dir` are not tags, so they get none of it. `list-style-image`, a string or `symbols()` as a type, `counter-reset`, `counter-increment`, `@counter-style` and `::marker` are not supported, and an item counts in the list of its parent element, not of the nearest `ul` or `ol` above it. `list-style-type: initial` on an item takes the parent's type, like any inherited property ([CSS-wide keywords](#stylesheets)).
 - **A nested `h1` is not smaller** inside `article`, `aside`, `nav` or `section`, which Chrome does with a descendant selector.
 - **`dialog` is `display: none` without `open`**, always: `open` is not forwarded, so a tag style cannot say `dialog[open]`. Set `display` yourself to show one.
 - **`details` has no open state** and `summary` no marker, and `abbr[title]` has no dotted underline (an attribute selector).

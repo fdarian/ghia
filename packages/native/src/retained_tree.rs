@@ -806,6 +806,10 @@ struct StyleChange {
     regrouped: bool,
     text_reprocessed: bool,
     focusability_changed: bool,
+    /// The element became or stopped being a `display: list-item`.
+    list_item: bool,
+    /// What the element declares of `list-style-type` and `list-style-position` changed.
+    list_style: bool,
 }
 
 impl StyleChange {
@@ -815,6 +819,22 @@ impl StyleChange {
         self.regrouped |= other.regrouped;
         self.text_reprocessed |= other.text_reprocessed;
         self.focusability_changed |= other.focusability_changed;
+        self.list_item |= other.list_item;
+        self.list_style |= other.list_style;
+    }
+}
+
+fn is_list_item_style(style: Option<&StyleDesc>) -> bool {
+    style.is_some_and(|style| style.display.as_deref() == Some("list-item"))
+}
+
+/// What a style declares of the marker, which the items below inherit.
+fn declared_list_style(
+    style: Option<&StyleDesc>,
+) -> (Option<crate::css::list_style::ListStyleType>, Option<crate::css::list_style::ListStylePosition>) {
+    match style {
+        Some(style) => (crate::css::list_style::declared_type(style), crate::css::list_style::declared_position(style)),
+        None => (None, None),
     }
 }
 
@@ -947,6 +967,8 @@ pub struct RetainedTree {
     fresh: std::cell::RefCell<rustc_hash::FxHashSet<u64>>,
     /// The document's stylesheets and what has to be matched against them again.
     pub(crate) sheets: crate::css::sheet::StyleSheets,
+    /// What list markers wait for the end of the batch to be marked with (`layout::list_marker`).
+    pub(crate) list_markers: crate::layout::list_marker::ListMarkers,
     /// The attribute names the elements hold, one allocation each however many elements use it.
     pub(crate) attribute_names: crate::attributes::AttributeNames,
     /// What each built element was painted with, for the walks that read the tree.
@@ -1035,6 +1057,7 @@ impl RetainedTree {
             relations: RelationRegistry::default(),
             styles: StyleTable::default(),
             sheets: Default::default(),
+            list_markers: Default::default(),
             attribute_names: Default::default(),
             resolved: Default::default(),
             fresh: Default::default(),
@@ -1278,6 +1301,7 @@ impl RetainedTree {
 
     pub fn create_element(&mut self, id: u64, element_type: String) {
         let is_style = element_type == "style";
+        self.list_markers.element_created(&element_type);
         self.relations.created(id, &element_type);
         self.anchored_count += usize::from(element_type == "anchored");
         if element_type == "img" {
@@ -1530,6 +1554,7 @@ impl RetainedTree {
     /// Unlinks from the parent before removing, then marks the parent chain
     /// changed so caches cannot serve text that is no longer in the tree.
     pub fn destroy_element(&mut self, id: u64) -> Vec<u64> {
+        self.list_unlinking(id);
         if self.sheets.enabled {
             self.sheets_unlinking(id);
         }
@@ -1579,6 +1604,7 @@ impl RetainedTree {
     fn destroy_element_recursive(&mut self, id: u64, destroyed: &mut Vec<u64>) {
         if let Some(element) = self.elements.remove(&id) {
             self.removals += 1;
+            self.list_markers.element_destroyed(&element.element_type);
             self.detached_from.remove(&id);
             self.motion_ids.remove(&id);
             self.image_ids.remove(&id);
@@ -1617,6 +1643,7 @@ impl RetainedTree {
         let Some(parent_id) = self.elements.get(&id).and_then(|element| element.parent) else {
             return;
         };
+        self.list_unlinking(id);
         if self.sheets.enabled {
             self.sheets_unlinking(id);
         }
@@ -1665,6 +1692,7 @@ impl RetainedTree {
     }
 
     pub fn append_child(&mut self, parent_id: u64, child_id: u64) {
+        self.list_unlinking(child_id);
         if self.sheets.enabled {
             self.sheets_unlinking(child_id);
         }
@@ -1688,6 +1716,7 @@ impl RetainedTree {
         if self.sheets.enabled {
             self.sheets_linked(child_id);
         }
+        self.list_linked(child_id);
         if self.inert_count > 0 || self.visibility_count > 0 || self.editable_count > 0 {
             self.track_focusable_subtree(child_id);
         }
@@ -1702,6 +1731,7 @@ impl RetainedTree {
     }
 
     pub fn insert_before(&mut self, parent_id: u64, child_id: u64, before_id: u64) {
+        self.list_unlinking(child_id);
         if self.sheets.enabled {
             self.sheets_unlinking(child_id);
         }
@@ -1730,6 +1760,7 @@ impl RetainedTree {
         if self.sheets.enabled {
             self.sheets_linked(child_id);
         }
+        self.list_linked(child_id);
         if self.inert_count > 0 || self.visibility_count > 0 || self.editable_count > 0 {
             self.track_focusable_subtree(child_id);
         }
@@ -1754,6 +1785,17 @@ impl RetainedTree {
     /// The end of a frame's build. What it built has been seen with its style, so a change to it
     /// can start a transition (`assign_style`). An element outside the document was not built, and
     /// stays one whose style has never been seen however many batches pass.
+    /// Whether no frame has drawn `id` yet.
+    pub(crate) fn is_fresh(&self, id: u64) -> bool {
+        self.fresh.borrow().contains(&id)
+    }
+
+    /// Styles `id` again, for a layer that depends on where it is (the user agent style of a list).
+    pub(crate) fn restyle_list(&mut self, id: u64) {
+        let change = self.refresh_effective_style(id, false);
+        self.settle_style_change(id, change);
+    }
+
     pub(crate) fn note_frame_built(&self) {
         let mut fresh = self.fresh.borrow_mut();
         if fresh.is_empty() {
@@ -1871,7 +1913,8 @@ impl RetainedTree {
             None => element.own_style.clone().map(InternedStyle::into_arc),
         };
         let universal = self.universal.as_ref().filter(|_| element.takes_universal_style());
-        let tag_style = crate::html::ua_style_of(element);
+        let lists_above = if crate::html::is_list(&element.element_type) { self.lists_above(id) } else { 0 };
+        let tag_style = crate::html::ua_style_of(element, lists_above);
         let user_agent = crate::html::popover::user_agent(element, tag_style.as_ref()).or(tag_style);
         let effective = match (self.styles.layered.base(universal, user_agent.as_ref()), declared) {
             (Some(base), Some(declared)) => Some(self.styles.layered.effective(&base, &declared)),
@@ -1909,6 +1952,8 @@ impl RetainedTree {
         if paints_only && element.style.as_deref().zip(style.as_deref()).is_some_and(|(old, new)| old.touches_transform(new)) {
             self.relevance.note_transform_write(id);
         }
+        let list_item = is_list_item_style(element.style.as_deref()) != is_list_item_style(style.as_deref());
+        let list_style = declared_list_style(element.style.as_deref()) != declared_list_style(style.as_deref());
         let was_declared = element.declared_hidden();
         let was_display_none = styles_display_none(element);
         let was_contents = crate::layout::contents::is_display_contents(element);
@@ -1972,12 +2017,20 @@ impl RetainedTree {
             regrouped,
             text_reprocessed,
             focusability_changed,
+            list_item,
+            list_style,
         }
     }
 
     fn settle_style_change(&mut self, id: u64, change: StyleChange) {
         if change.focusability_changed {
             self.track_focusable_subtree(id);
+        }
+        if change.list_item {
+            self.list_item_changed(id);
+        }
+        if change.list_style {
+            self.list_style_changed(id);
         }
         if change.text_reprocessed {
             // `white-space` is inherited and decides what text is left of a
@@ -2068,6 +2121,8 @@ impl RetainedTree {
         let mut changed = false;
         let is_input_type = is_input && key == "type";
         let is_hidden_attribute = key == "hidden";
+        let is_list_value = key == "value";
+        let is_list_counting = key == "start" || key == "reversed";
         let is_input_group = is_input && matches!(key.as_str(), "type" | "name");
         let is_highlight = key == "highlight";
         let is_motion = key == "motion";
@@ -2173,6 +2228,12 @@ impl RetainedTree {
             if is_input_type {
                 self.range_type_changed(id);
             }
+        }
+        if is_list_value {
+            self.list_value_changed(id);
+        }
+        if is_list_counting {
+            self.list_counting_changed(id);
         }
         if is_form_control {
             if self.elements.get(&id).is_some_and(|element| element.control_disabled().is_some()) {

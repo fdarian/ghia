@@ -24,18 +24,13 @@ const PAGE = { position: "absolute", left: 0, top: 0, width: 400, fontFamily: "G
 /** GpuixTestSquare has no space, so a space is the fallback font's: 5 px wide in Chrome and 5.55 in gpuix. */
 const toleranceOf = (html: string) => 0.06 + 0.6 * (html.replace(/<[^>]*>/g, "").match(/ /g)?.length ?? 0)
 
-/** `ul ul { margin-block: 0 }` is a selector on where the list is, which a style per tag cannot say: the nested list says it itself. */
-const SPELLED_OUT: Record<string, (html: string) => string> = {
-  "nested lists": (html) => html.replace('<ul id="inner">', '<ul id="inner" style="margin-top:0;margin-bottom:0">'),
-}
-
 describeNative("HTML tags against Chrome", () => {
   for (const [name, source] of Object.entries(ORACLE)) {
     it(name, () => {
       const { render, renderer, unmount } = createTestRoot({ width: 800, height: 600 })
       try {
         renderer.registerFont(SQUARE_FONT)
-        render(<div style={PAGE}>{tagsOf((SPELLED_OUT[name] ?? ((html) => html))(source.html))}</div>)
+        render(<div style={PAGE}>{tagsOf(source.html)}</div>)
         expectBoxes(renderer, source.boxes, toleranceOf(source.html))
       } finally {
         unmount()
