@@ -501,6 +501,16 @@ fn update_window_without_view<R>(
     })
 }
 
+/// Whether the window `init` made is still open: a step of a key sequence can close it (Cmd+w).
+#[cfg(target_os = "macos")]
+fn gpui_window_is_open() -> Result<bool> {
+    let window = GPUI_WINDOW
+        .with(|window| *window.borrow())
+        .ok_or_else(|| Error::from_reason("GPUI window is not initialized"))?;
+    let window = gpui::AnyWindowHandle::from(window);
+    update_app(move |cx| cx.windows().contains(&window))
+}
+
 #[cfg(target_os = "macos")]
 /// Runs `update` against the app alone. From inside a sync handler the app is
 /// already borrowed by the input being dispatched, so it uses that one.
@@ -4912,8 +4922,20 @@ impl GpuixRenderer {
         {
             // An update per event, as AppKit sends them: what a keydown defers (the editor's `input`)
             // is delivered before the keyup, not after the whole sequence.
-            for step in crate::automation::keystroke_steps(&keystrokes).map_err(Error::from_reason)? {
-                update_window_without_view(move |window, cx| step.dispatch(window, cx))?;
+            for (index, step) in crate::automation::keystroke_steps(&keystrokes)
+                .map_err(Error::from_reason)?
+                .into_iter()
+                .enumerate()
+            {
+                let result = update_window_without_view(move |window, cx| step.dispatch(window, cx));
+                if let Err(error) = result {
+                    // A step that closed the window (Cmd+w) leaves nothing for the next to press.
+                    // The first step has no step before it to have closed the window.
+                    if index > 0 && !gpui_window_is_open()? {
+                        return Ok(());
+                    }
+                    return Err(error);
+                }
             }
             return Ok(());
         }
