@@ -6,7 +6,7 @@ import stylex from "@stylexjs/unplugin"
 
 // Both frameworks compile .tsx, and they cannot both claim a file: Solid takes examples/solid,
 // React takes every other example. They share one `ghia` environment, so the split is by file.
-const solidFiles = `${import.meta.dirname}/solid/**`
+const solidFiles = [`${import.meta.dirname}/solid/**`, /\/lexical\/[^/]*\.solid\.tsx$/]
 
 /** `import icon from "./icon.svg" with { type: "text" }` is what Bun reads; Vite reads `?raw`. */
 function textImports(): Plugin {
@@ -61,7 +61,7 @@ export default defineConfig({
     textImports(),
     stylexPlugin,
     stylexCss(),
-    react({ exclude: [/\/node_modules\//, solidFiles] }),
+    react({ exclude: [/\/node_modules\//, ...solidFiles] }),
     solid({ include: solidFiles }),
   ],
 })

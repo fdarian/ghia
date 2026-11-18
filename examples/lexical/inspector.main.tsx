@@ -1,5 +1,5 @@
 import { render } from '@ghia/react'
-import { EditorApp } from './editor'
+import { EditorApp } from './inspector'
 
 render(<EditorApp />, {
   title: 'Lexical on Ghia',

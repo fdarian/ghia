@@ -1,9 +1,9 @@
 /**
- * Drives the Lexical editor example (lexical/editor.tsx) through the automation client, in a window that never takes
+ * Drives the Lexical editor example (lexical/inspector.tsx) through the automation client, in a window that never takes
  * the keyboard (`GPUIX_BACKGROUND=1`, `focus: false`), and screenshots every step into lexical/screens/ (gitignored,
  * 2x on a Retina display). It asserts on the editor state JSON and the selection the app prints beside the editor.
  *
- *   cd examples && bun lexical/editor.automation.ts
+ *   cd examples && bun lexical/inspector.automation.ts
  *
  * The automation protocol has no composition, so the IME step is reported as SKIP: try it by hand (README.md).
  */
@@ -11,7 +11,7 @@
 import path from "path"
 import { fileURLToPath } from "url"
 import { launch, type App } from "@ghia/react/automation"
-import { FIRST_PARAGRAPH, LAST_PARAGRAPH, LONG_PARAGRAPH } from "./editor"
+import { FIRST_PARAGRAPH, LAST_PARAGRAPH, LONG_PARAGRAPH } from "./inspector"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const examples = path.resolve(here, "..")
@@ -58,7 +58,7 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 const app: App = await launch({
   command: "bun",
   // ghia dev has to run under Bun, and the .bin shim starts Node.
-  args: [path.join(examples, "..", "packages", "ghia", "dist", "cli.js"), "dev", "lexical/editor.main.tsx"],
+  args: [path.join(examples, "..", "packages", "ghia", "dist", "cli.js"), "dev", "lexical/inspector.main.tsx"],
   cwd: examples,
   env: { GPUIX_BACKGROUND: "1" },
 })

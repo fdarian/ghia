@@ -212,10 +212,19 @@ importers:
       '@lexical/history':
         specifier: 0.53.0
         version: 0.53.0(typescript@5.9.3)
+      '@lexical/link':
+        specifier: 0.53.0
+        version: 0.53.0(typescript@5.9.3)
+      '@lexical/list':
+        specifier: 0.53.0
+        version: 0.53.0(typescript@5.9.3)
       '@lexical/react':
         specifier: 0.53.0
         version: 0.53.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3)(yjs@13.6.33)
       '@lexical/rich-text':
+        specifier: 0.53.0
+        version: 0.53.0(typescript@5.9.3)
+      '@lexical/selection':
         specifier: 0.53.0
         version: 0.53.0(typescript@5.9.3)
       '@lexical/utils':
