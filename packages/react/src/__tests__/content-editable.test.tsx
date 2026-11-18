@@ -105,4 +105,39 @@ describeNative("contentEditable", () => {
       root.unmount()
     }
   })
+
+  it("takes focus when code sets the selection inside it, as Chrome does, and leaves a selection that stays in it alone", () => {
+    let one: PublicInstance | null = null
+    let two: PublicInstance | null = null
+    let other: PublicInstance | null = null
+    const root = createTestRoot()
+    root.render(
+      <div style={{ width: 300, height: 200 }}>
+        <div ref={(element) => { one = element }} contentEditable style={size}>first</div>
+        <div ref={(element) => { two = element }} contentEditable style={size}>second</div>
+        <button ref={(element) => { other = element }} style={size}>other</button>
+      </div>
+    )
+    try {
+      const selection = document.getSelection()
+      selection.collapse(one!.firstChild, 2)
+      expect(document.activeElement === one).toBe(true)
+      selection.collapse(two!.firstChild, 3)
+      expect(document.activeElement === two).toBe(true)
+      other!.focus()
+      selection.collapse(two!.firstChild, 1)
+      expect(document.activeElement === other, "a selection that moves inside the host it is in does not ask for focus").toBe(true)
+      selection.setBaseAndExtent(one!.firstChild!, 0, one!.firstChild!, 5)
+      expect(document.activeElement === one).toBe(true)
+      selection.removeAllRanges()
+      other!.focus()
+      const range = document.createRange()
+      range.setStart(two!.firstChild!, 0)
+      range.collapse(true)
+      selection.addRange(range)
+      expect(document.activeElement === two).toBe(true)
+    } finally {
+      root.unmount()
+    }
+  })
 })

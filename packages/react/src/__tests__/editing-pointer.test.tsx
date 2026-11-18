@@ -362,6 +362,7 @@ describeNative("the pointer in an editing host (React)", () => {
       const { host, texts, click, at, state } = mount(["hello world", "second line"])
       host.addEventListener("mousedown", (event) => event.preventDefault())
       document.getSelection().collapse(texts()[1]!, 2)
+      host.blur()
       click(at(0, 4))
       expect(state()).toEqual([texts()[1], 2, texts()[1], 2])
       expect(document.activeElement).not.toBe(host)

@@ -5780,6 +5780,9 @@ answers everything from it, with no mounted root needed. Otherwise it is the
 [text selection](#text-selection) of the window that mounted last, the spans of painted text a
 drag selects, which are not nodes. The two never exist together: selecting nodes clears the
 painted text, and a drag that paints text drops the node range.
+A selection that code sets inside an editing host that does not hold focus focuses the host, as in
+Chrome (`editor.focus()` in Lexical is a selection update and no `focus()` call). Only a selection
+that comes into the host asks: one that moves inside the host it is already in does not.
 
 | Member | |
 |---|---|

@@ -22,6 +22,8 @@ export interface SelectionHooks {
   dispatch(): void
   /** The selection began or stopped holding a node range: native's painted-selection events are wanted while it does. */
   heldChanged(): void
+  /** The selection was set inside `host`, an editing host: Chrome focuses it unless focus is already inside it. */
+  focusHost(host: Element): void
 }
 
 type Direction = "forwards" | "backwards"
@@ -207,11 +209,13 @@ abstract class SelectionClass {
     if (this.#range !== null) return
     if (!inDocument(range.startContainer)) return
     this.#clearPainted()
+    const before = this.#focusHost()
     this.#hold(range)
     this.#shared = true
     this.#direction = "forwards"
     this.#hooks?.heldChanged()
     this.#queueChange()
+    this.#focusIfEnteredHost(before)
   }
 
   removeRange(range: Range): void {
@@ -438,9 +442,11 @@ abstract class SelectionClass {
     startOffset: number,
     endNode: Node,
     endOffset: number,
-    direction: Direction
+    direction: Direction,
+    focusesHost: boolean = true
   ): void {
     this.#goalX = null
+    const before = this.#focusHost()
     const held = this.#range !== null
     const current = this.#range === null ? null : boundariesOf(this.#range)
     const changed =
@@ -464,6 +470,25 @@ abstract class SelectionClass {
     this.#direction = direction
     if (!held) this.#hooks?.heldChanged()
     if (changed) this.#queueChange()
+    if (focusesHost) this.#focusIfEnteredHost(before)
+  }
+
+  /** The editing host the selection's focus is in, if any. */
+  #focusHost(): Element | null {
+    const own = this.#own
+    if (own === null) return null
+    return editingHostOf(this.#direction === "forwards" ? own.bounds.endNode : own.bounds.startNode)
+  }
+
+  /**
+   * Blink's `SetFocusedNodeIfNeeded`: a selection that code sets inside an editing host focuses it, which is how Lexical's
+   * `editor.focus()` (a selection update and no `focus()` call) moves focus into the editor. Only a selection that comes
+   * into a host asks: a caret that moves inside the host it is in (every typed character sets one) is a query of the
+   * window's focus the edit does not need.
+   */
+  #focusIfEnteredHost(before: Element | null): void {
+    const host = this.#focusHost()
+    if (host !== null && host !== before) this.#hooks?.focusHost(host)
   }
 
   /** Makes `range` the selection's range, which tells the selection of every change to it; the range it had stops doing so. */
@@ -537,7 +562,8 @@ abstract class SelectionClass {
     }
     const text = firstTextIn(host)
     const node: Node = text === null ? host : text
-    this.#assign(node, 0, node, 0, "forwards")
+    // The host is taking focus: this is the caret `focus()` places, which must not ask for focus again.
+    this.#assign(node, 0, node, 0, "forwards", false)
   }
 }
 

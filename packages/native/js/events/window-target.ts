@@ -620,6 +620,11 @@ setSelectionHooks({
     document.dispatchEvent(new Event("selectionchange"))
   },
   heldChanged: notifyTypeSubscribers,
+  focusHost: (host) => {
+    const active = document.activeElement
+    if (active !== null && host.contains(active)) return
+    host.focus({ preventScroll: true })
+  },
 })
 
 /**

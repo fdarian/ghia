@@ -178,15 +178,17 @@ describeNative("the caret of an editing host (React)", () => {
       const selection = document.getSelection()
       selection.collapse(texts[0]!, 2)
       await shown(renderer)
-      expect(renderer.getPaintedNodeSelection().caret, "no focus").toBeUndefined()
-      host.focus()
-      renderer.dispatchNativeEvents()
-      await shown(renderer)
+      // Setting a selection inside an editing host focuses it, as in Chrome.
+      expect(document.activeElement).toBe(host)
       expect(renderer.getPaintedNodeSelection().caret, "focus").toBeDefined()
       host.blur()
       renderer.dispatchNativeEvents()
       await shown(renderer)
       expect(renderer.getPaintedNodeSelection().caret, "blur").toBeUndefined()
+      host.focus()
+      renderer.dispatchNativeEvents()
+      await shown(renderer)
+      expect(renderer.getPaintedNodeSelection().caret, "focus again").toBeDefined()
     })
 
     it("is hidden while the window is not key", async () => {
@@ -269,6 +271,8 @@ describeNative("the caret of an editing host (React)", () => {
     it("asks for no frame while the host has no focus or the window is not key", async () => {
       const { host, texts, renderer } = mount(["first line"])
       document.getSelection().collapse(texts[0]!, 2)
+      host.blur()
+      renderer.dispatchNativeEvents()
       await shown(renderer)
       const idle = renderer.getPaintedFrameCount()
       renderer.advanceTime(BLINK)
