@@ -17,9 +17,8 @@ import { createTestRoot, hasNativeTestRenderer } from "../testing"
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 const verifying = process.env.GPUIX_RETAIN_VERIFY !== undefined
-// A key into a host that is itself a scroller, as a patch, is a frame the verifier finds differing from the one built whole ("did
-// not record the root") on its first typed character, which `simulateEditingInput` and the input method's commit in the same
-// host do not (patch-frames.md, "An editing host is typed into"). The other fixtures run under it.
+// A patched key into a host that is itself a scroller differs under the verifier (patch-frames.md, "Typing in an editing host"); the
+// fixtures that are not that patch run under it.
 const unlessVerifying = it.skipIf(verifying)
 // Under the retention verifier a frame builds everything it compares, and with retention or patching off no frame is a patch: the
 // counts mean nothing there, and the tests still type, so the verifier compares every frame they draw.
@@ -33,6 +32,9 @@ const exactCounts = !(
 const PARAGRAPHS = 50
 const EDITED = 25
 const LINE = 20
+// How far below the top of the 300 px scroller the caret is: in its view, and clear of it.
+const CARET_IN_VIEW_BELOW_TOP = 100
+const CARET_OUT_OF_VIEW_BELOW_TOP = 500
 const KEYS = 5
 const TEXT = { fontSize: 16, lineHeight: `${LINE}px`, fontFamily: "Menlo" } as const
 const lines = Array.from({ length: PARAGRAPHS }, (_, index) => `paragraph number ${String(index).padStart(2, "0")}`)
@@ -84,7 +86,7 @@ describeNative("one typed character (React)", () => {
   })
 
   /** Opens the fixture with the caret in the edited paragraph, types one character as the warm-up, and hands back a typist. */
-  async function open(element: React.ReactElement, scrollerSelector?: string): Promise<Typing> {
+  async function open(element: React.ReactElement, scroller?: "caret in view" | "caret out of view"): Promise<Typing> {
     const root = createTestRoot({ width: 600, height: 1300 })
     cleanups.push(() => root.unmount())
     root.render(<div style={{ padding: 20 }}>{element}</div>)
@@ -104,11 +106,20 @@ describeNative("one typed character (React)", () => {
       const text = paragraph.firstChild!.nodeType === 3 ? paragraph.firstChild! : paragraph.firstChild!.firstChild!
       document.getSelection().collapse(text, COLUMN)
     }
-    if (scrollerSelector !== undefined) {
-      // A caret out of view is not what typing does: the editor shows it.
-      const scroller = document.body!.querySelector(scrollerSelector) as HTMLElement
-      scroller.scrollTop = EDITED * LINE - 100
+    // Where the caret is in the host is what the fixtures differ by; the scroll offset comes from the edited paragraph's real box, not a
+    // guess at the stride (a <p> has margins, so it is not LINE).
+    const scrollSoCaretIs = (below: number) => {
+      const paragraph = host.children[EDITED]!.getBoundingClientRect()
+      host.scrollTop += paragraph.top - host.getBoundingClientRect().top - below
     }
+    // Set before the host's first frame, as a page that restores its scroll position does; scrolled after, the same offset is a frame
+    // built whole (see the case that uses it).
+    if (scroller === "caret out of view") scrollSoCaretIs(CARET_OUT_OF_VIEW_BELOW_TOP)
+    for (let frame = 0; frame < 3; frame++) {
+      await settle()
+      renderer.drawFrame()
+    }
+    if (scroller === "caret in view") scrollSoCaretIs(CARET_IN_VIEW_BELOW_TOP)
     for (let frame = 0; frame < 3; frame++) {
       await settle()
       renderer.drawFrame()
@@ -151,6 +162,12 @@ describeNative("one typed character (React)", () => {
     }
 
     await type()
+    if (scroller !== undefined) {
+      const caret = renderer.getPaintedNodeSelection().caret!.rect
+      const view = host.getBoundingClientRect()
+      const inView = caret.y >= view.top && caret.y + caret.height <= view.bottom
+      expect(inView, `the caret (y ${caret.y}) is ${scroller} of the host (${view.top}..${view.bottom})`).toBe(scroller === "caret in view")
+    }
     return { renderer, host, batches, type }
   }
 
@@ -184,18 +201,33 @@ describeNative("one typed character (React)", () => {
 
   const HOST_SENDS = [["setText", "setNodeSelection"]]
 
-  describe("in an editing host with a box root above its paragraphs", () => {
-    // The edited <p> and its text are laid out; the other 49 paragraphs keep the nodes of the persistent layout. A patch builds its root
-    // flat, and the paragraphs are no roots of their own (a paragraph is as tall as its text), so the root and all 50 are built.
+  describe("in an editing host that is a scroller, caret in view", () => {
+    // The blinking caret's paragraph is dynamic, so the scroller host is no anchor (`end_anchor` refuses on `own.dynamic`) and no patch
+    // is tried: a frame built whole, where retention builds the host, the edited paragraph, its text and what holds them, and replays the
+    // other 49. 2 nodes laid out are the edited paragraph and its text. The relayout patch this would otherwise be measures 1.7 to 2.1x
+    // slower at this size (patch-frames.md, "Typing in an editing host").
     for (const [name, render] of [["<p>text</p>", plain], ["<p><span>text</span></p>", wrapped]] as const) {
-      unlessVerifying(`${name} in a host of a fixed size that scrolls is one relayout patch`, async () => {
-        const typing = await open(<div contentEditable style={FIXED_HOST}>{paragraphs(render)}</div>, "[contenteditable]")
-        await typesAndCosts(typing, { patched: true, nodesLaidOut: 2, elementsBuilt: PARAGRAPHS + 1, elementsSkipped: 0 }, HOST_SENDS)
+      it(`${name} is a frame built whole that builds the edited paragraph alone`, async () => {
+        const typing = await open(<div contentEditable style={FIXED_HOST}>{paragraphs(render)}</div>, "caret in view")
+        await typesAndCosts(typing, { patched: false, nodesLaidOut: 2, elementsBuilt: 5, elementsSkipped: PARAGRAPHS - 1 }, HOST_SENDS)
         if (exactCounts) expect(typing.batches.at(-1)![0], "the text the paragraph has now").toEqual(["setText", expect.any(Number), typedLine])
       })
     }
 
-    it("an auto-height host in a box of a definite size is the same patch, built from that box", async () => {
+    // The one fixture that patches a scroller host, and not what a user does: the scroll offset is set before the host's first frame, so
+    // the caret's paragraph is culled when the frame built whole records the host, nothing in it runs, and the host is an anchor (one
+    // relayout patch that builds the host flat: the host and its 50 paragraphs). The same offset applied after the first frames, which
+    // is what a wheel does, is the frame built whole above (measured). Under the verifier that patch differs from the frame built whole
+    // ("did not record the root") on its first typed character, which `simulateEditingInput` and the input method's commit do not
+    // (patch-frames.md, "Typing in an editing host").
+    unlessVerifying("a host scrolled before its first frame, caret out of view, is one relayout patch that builds the host flat", async () => {
+      const typing = await open(<div contentEditable style={FIXED_HOST}>{paragraphs(plain)}</div>, "caret out of view")
+      await typesAndCosts(typing, { patched: true, nodesLaidOut: 2, elementsBuilt: PARAGRAPHS + 1, elementsSkipped: 0 }, HOST_SENDS)
+    })
+  })
+
+  describe("in an editing host of auto height in a box of a definite size", () => {
+    it("is a relayout patch of that box", async () => {
       const typing = await open(
         <div style={{ width: 440, height: 1200 }}>
           <div contentEditable style={AUTO_HOST}>{paragraphs(plain)}</div>
@@ -223,8 +255,9 @@ describeNative("one typed character (React)", () => {
     })
   })
 
+  // On the only fixture that patches, to show the call draws that patch whole.
   unlessVerifying("simulateKeystrokes draws the frame its keydown asked for in the call, whole", async () => {
-    const typing = await open(<div contentEditable style={FIXED_HOST}>{paragraphs(plain)}</div>, "[contenteditable]")
+    const typing = await open(<div contentEditable style={FIXED_HOST}>{paragraphs(plain)}</div>, "caret out of view")
     for (let key = 0; key < KEYS; key++) {
       const patch = typing.renderer.getPatchCounters()
       const painted = typing.renderer.getPaintedFrameCount()
