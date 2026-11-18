@@ -1,4 +1,5 @@
 import type { EventPayload } from "../../index.js"
+import type { FocusableElement } from "../focus.js"
 import type { Animation } from "../web-animations.js"
 import { isElementType, isSvgElementType } from "../dom/element-types.js"
 import { Document, DOM_BINDING, registerDocument, type DocumentFragment, type HTMLElement, type Node, type NodeBinding, type Text } from "../dom/nodes.js"
@@ -192,6 +193,8 @@ type ElementSourceEntry = {
   windowGone: boolean
   /** Order in which the roots last heard a focus event; higher is more recent. */
   focusedAt: number
+  /** The element the last `focusin` named, until its `focusout`: what `document.activeElement` answers without asking native. */
+  focused: object | null
 }
 
 /**
@@ -621,9 +624,10 @@ setSelectionHooks({
   },
   heldChanged: notifyTypeSubscribers,
   focusHost: (host) => {
-    const active = document.activeElement
-    if (active !== null && host.contains(active)) return
-    host.focus({ preventScroll: true })
+    for (const entry of elementSources.values()) {
+      if (!entry.windowGone && entry.focused !== null && host.contains(entry.focused as Node)) return
+    }
+    ;(host as unknown as FocusableElement).focus({ preventScroll: true })
   },
 })
 
@@ -655,6 +659,7 @@ export function installElementSource(
     },
     windowGone: false,
     focusedAt: 0,
+    focused: null,
   }
   const firstRoot = elementSources.size === 0
   elementSources.set(renderer, entry)
@@ -709,6 +714,17 @@ setElementLookup(elementOf)
 export function noteFocusEvent(owner: object): void {
   const entry = elementSources.get(owner)
   if (entry) entry.focusedAt = ++focusClock
+}
+
+/**
+ * @internal Follows the focus events native reports, so a question of "is focus inside this element" (the selection
+ * entering an editing host asks it on every change) is a read of JS state and no native query.
+ */
+export function trackFocusedElement(owner: object, eventType: "focusin" | "focusout", element: object | undefined): void {
+  const entry = elementSources.get(owner)
+  if (entry === undefined) return
+  if (eventType === "focusin") entry.focused = element ?? null
+  else if (entry.focused === element) entry.focused = null
 }
 
 /**

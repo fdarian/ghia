@@ -705,6 +705,32 @@ describe("node Selection", () => {
     })
   })
 
+  describe("a parsed document", () => {
+    it("is not the window's: its nodes are ignored by every method that names them", () => {
+      const parsed = new DOMParser().parseFromString("<p>parsed</p>", "text/html")
+      const paragraph = parsed.body.firstChild as unknown as Node
+      const text = paragraph.firstChild as Node
+      const own = tx("own")
+      selection.collapse(n(own), 1)
+
+      selection.collapse(text, 1)
+      selection.setBaseAndExtent(text, 0, text, 2)
+      selection.selectAllChildren(paragraph)
+      selection.extend(text, 3)
+      const range = new Range()
+      range.selectNodeContents(paragraph)
+      selection.removeAllRanges()
+      selection.addRange(range)
+
+      expect(selection.rangeCount).toBe(0)
+      expect(selection.containsNode(text)).toBe(false)
+
+      selection.collapse(n(own), 1)
+      selection.collapse(text, 1)
+      expect([selection.anchorNode, selection.anchorOffset]).toEqual([n(own), 1])
+    })
+  })
+
   describe("modify", () => {
     function at(node: FakeTx, offset: number): void {
       selection.collapse(n(node), offset)

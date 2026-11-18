@@ -103,7 +103,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid contentEditable", () => {
     }
   })
 
-  it("takes focus when code sets the selection inside it, as Chrome does, and leaves a selection that stays in it alone", () => {
+  it("takes focus when code sets the selection inside it, as Chrome does, and takes it back after a button took it while the selection stayed in the host", () => {
     let one!: HostElement
     let two!: HostElement
     let other!: HostElement
@@ -122,8 +122,11 @@ describe.skipIf(!hasNativeTestRenderer)("Solid contentEditable", () => {
       selection.collapse(two.firstChild, 3)
       expect(document.activeElement === two).toBe(true)
       other.focus()
+      expect(document.activeElement === other).toBe(true)
       selection.collapse(two.firstChild, 1)
-      expect(document.activeElement === other, "a selection that moves inside the host it is in does not ask for focus").toBe(true)
+      expect(document.activeElement === two, "the selection is set again in the host it was in, and focus is outside it").toBe(true)
+      selection.setBaseAndExtent(two.firstChild!, 0, two.firstChild!, 2)
+      expect(document.activeElement === two).toBe(true)
       selection.setBaseAndExtent(one.firstChild!, 0, one.firstChild!, 5)
       expect(document.activeElement === one).toBe(true)
       selection.removeAllRanges()
@@ -133,6 +136,30 @@ describe.skipIf(!hasNativeTestRenderer)("Solid contentEditable", () => {
       range.collapse(true)
       selection.addRange(range)
       expect(document.activeElement === two).toBe(true)
+    } finally {
+      app.unmount()
+    }
+  })
+
+  it("takes focus back when the selection lands on other nodes of the host it was already in", () => {
+    let host!: HostElement
+    let button!: HostElement
+    const app = createTestRoot()
+    app.render(() => (
+      <div style={{ width: 300, height: 200 }}>
+        <div ref={host} contentEditable style={size}><span>one</span><span>two</span></div>
+        <button ref={button} style={size}>bold</button>
+      </div>
+    ))
+    try {
+      const selection = document.getSelection()
+      const first = host.firstChild!.firstChild!
+      const second = host.lastChild!.firstChild!
+      selection.setBaseAndExtent(first, 0, first, 3)
+      button.focus()
+      expect(document.activeElement === button).toBe(true)
+      selection.setBaseAndExtent(second, 0, second, 3)
+      expect(document.activeElement === host).toBe(true)
     } finally {
       app.unmount()
     }

@@ -3,14 +3,13 @@ import { mountedRenderer } from "../mounted-renderer.js"
 import { namedError } from "../named-error.js"
 import type { NativeRenderer } from "../host.js"
 import type { RangeBoundaries } from "./live-ranges.js"
-import { Node, type Element, type Text } from "./nodes.js"
+import { inRuntimeDocument, Node, type Element, type Text } from "./nodes.js"
 import { boundariesOf, Range, StaticRange } from "./range.js"
 import { moveByLine, moveToDocumentBoundary, moveToLineBoundary, type MovedPosition } from "../editing/line-movement.js"
 import { movePoint } from "./selection-movement.js"
 import type { MovementGranularity } from "./text-segmentation.js"
 import { childCount, comparePoints, isInclusiveAncestor, nodeLength } from "./tree-order.js"
 
-const DOCUMENT_NODE = 9
 const DOCUMENT_TYPE_NODE = 10
 const TEXT_NODE = 3
 
@@ -69,9 +68,8 @@ function selectedText(member: string): string | null {
 }
 
 
-function inDocument(node: Node): boolean {
-  return node.getRootNode().nodeType === DOCUMENT_NODE
-}
+/** The standard has a selection ignore a node whose root is not its document, so a `DOMParser` document's nodes cannot be selected. */
+const inDocument = inRuntimeDocument
 
 function assertNodeArgument(value: unknown, method: string, position: number): asserts value is Node {
   if (!(value instanceof Node)) {
@@ -209,13 +207,12 @@ abstract class SelectionClass {
     if (this.#range !== null) return
     if (!inDocument(range.startContainer)) return
     this.#clearPainted()
-    const before = this.#focusHost()
     this.#hold(range)
     this.#shared = true
     this.#direction = "forwards"
     this.#hooks?.heldChanged()
     this.#queueChange()
-    this.#focusIfEnteredHost(before)
+    this.#focusHostOfSelection()
   }
 
   removeRange(range: Range): void {
@@ -446,7 +443,6 @@ abstract class SelectionClass {
     focusesHost: boolean = true
   ): void {
     this.#goalX = null
-    const before = this.#focusHost()
     const held = this.#range !== null
     const current = this.#range === null ? null : boundariesOf(this.#range)
     const changed =
@@ -470,7 +466,7 @@ abstract class SelectionClass {
     this.#direction = direction
     if (!held) this.#hooks?.heldChanged()
     if (changed) this.#queueChange()
-    if (focusesHost) this.#focusIfEnteredHost(before)
+    if (focusesHost) this.#focusHostOfSelection()
   }
 
   /** The editing host the selection's focus is in, if any. */
@@ -481,14 +477,14 @@ abstract class SelectionClass {
   }
 
   /**
-   * Blink's `SetFocusedNodeIfNeeded`: a selection that code sets inside an editing host focuses it, which is how Lexical's
-   * `editor.focus()` (a selection update and no `focus()` call) moves focus into the editor. Only a selection that comes
-   * into a host asks: a caret that moves inside the host it is in (every typed character sets one) is a query of the
-   * window's focus the edit does not need.
+   * Blink's `SetFocusedNodeIfNeeded`: a selection that code sets inside an editing host focuses it unless focus is already
+   * inside, which is how Lexical's `editor.focus()` (a selection update and no `focus()` call) moves focus into the editor,
+   * and how a selection Lexical re-sets after a toolbar button took focus takes it back. The hook answers from the focus
+   * events JS has heard, so asking on every change (every typed character sets a selection) costs no native query.
    */
-  #focusIfEnteredHost(before: Element | null): void {
+  #focusHostOfSelection(): void {
     const host = this.#focusHost()
-    if (host !== null && host !== before) this.#hooks?.focusHost(host)
+    if (host !== null) this.#hooks?.focusHost(host)
   }
 
   /** Makes `range` the selection's range, which tells the selection of every change to it; the range it had stops doing so. */

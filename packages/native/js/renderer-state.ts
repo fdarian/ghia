@@ -9,7 +9,7 @@ import { EDIT_INPUT_EVENT, endCompositionOnBlur, runNativeEditInput } from "./ed
 import { EDIT_POINTER_EVENT, runEditingPointer } from "./editing/pointer-selection.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
 import { popoversOfRendererGone } from "./dom/popover.js"
-import { elementOf, GpuixEventTarget, noteFocusEvent } from "./events/window-target.js"
+import { elementOf, GpuixEventTarget, noteFocusEvent, trackFocusedElement } from "./events/window-target.js"
 import { mountedRenderers, notifyMountedRenderer } from "./mounted-renderer.js"
 import { deliverObservation } from "./observers.js"
 import type {
@@ -406,7 +406,11 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       }
       if (received.eventType === "focusin") {
         noteFocusEvent(renderer)
-        placeCaretOnFocusIn(elementOf(renderer, received.elementId))
+        const focused = elementOf(renderer, received.elementId)
+        trackFocusedElement(renderer, "focusin", focused)
+        placeCaretOnFocusIn(focused)
+      } else if (received.eventType === "focusout") {
+        trackFocusedElement(renderer, "focusout", elementOf(renderer, received.elementId))
       } else if (received.eventType === "blur") {
         endCompositionOnBlur(elementOf(renderer, received.elementId))
       }
@@ -445,7 +449,11 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       }
       if (received.eventType === "focusin") {
         noteFocusEvent(renderer)
-        placeCaretOnFocusIn(elementOf(renderer, received.elementId))
+        const focused = elementOf(renderer, received.elementId)
+        trackFocusedElement(renderer, "focusin", focused)
+        placeCaretOnFocusIn(focused)
+      } else if (received.eventType === "focusout") {
+        trackFocusedElement(renderer, "focusout", elementOf(renderer, received.elementId))
       } else if (received.eventType === "blur") {
         endCompositionOnBlur(elementOf(renderer, received.elementId))
       }

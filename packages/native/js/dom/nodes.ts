@@ -139,6 +139,11 @@ export function runtimeDocument(): Document {
   return document
 }
 
+/** @internal Whether `node` is in the app's document: a node of a `DOMParser` document, or a detached tree, is not. */
+export function inRuntimeDocument(node: Node): boolean {
+  return node.getRootNode() === documentState.document
+}
+
 /** @internal Where `node` is among its parent's children: the "index" of the DOM standard. The node has a parent. */
 export function indexOfNode(node: Node): number {
   const parent = node.parentNode
