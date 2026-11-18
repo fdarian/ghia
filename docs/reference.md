@@ -5575,7 +5575,7 @@ Code that is not the framework (a library such as `@dnd-kit/dom`) changes the tr
 
 #### Markup: `DOMParser`, `innerHTML`, `outerHTML`
 
-HTML is parsed and written by [parse5](https://github.com/inikulin/parse5), the spec-compliant parser Node tools use, over Ghia's own DOM nodes: there is no second tree. The members are installed with the other DOM globals (not on the browser build, which keeps the browser's).
+HTML is parsed and written by [parse5](https://github.com/inikulin/parse5), the spec-compliant parser Node tools use, over Ghia's own DOM nodes: there is no second tree. The parser is loaded on the first use of one of these members, so an app that never parses markup does not pay for it at startup. The members are installed with the other DOM globals (not on the browser build, which keeps the browser's).
 
 | Member | |
 |---|---|
