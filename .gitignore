@@ -20,3 +20,4 @@ examples/AppIcon.icns
 tmp-icons/
 # What the perf gate measured: the per-file parts and counts.json, which CI uploads as an artifact.
 examples/perf-gate/.measured/
+examples/lexical/screens/
