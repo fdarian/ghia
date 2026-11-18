@@ -8,6 +8,8 @@ export default defineConfig({
 	dts: true,
 	sourcemap: true,
 	clean: true,
+	// A free `require` has to survive to dist/, which the bundler rewrites: see the file.
+	copy: [{ from: "js/dom/html/parse5{.web.js,.js,.d.ts}", to: "dist/dom/html" }],
 	fixedExtension: false,
 	outDir: "dist",
 	tsconfig: "tsconfig.json",

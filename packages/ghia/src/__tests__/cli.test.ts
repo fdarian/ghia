@@ -428,6 +428,16 @@ export default defineConfig({ plugins: [ghia({ entry: "main.ts", compile: { outf
   )
 
   test(
+    "the HTML parser, which loads on first use, is in the binary",
+    async () => {
+      await runToExit(["bun", CLI, "build", "html.ts"], appDir)
+      const output = await runToExit([copyBinaryToEmptyDir(join(appDir, "dist", "app"))], emptyDir)
+      expect(lines(output, "PARSED ")).toEqual(["<p>a<b>b</b></p>"])
+    },
+    COMPILE_TIMEOUT_MS
+  )
+
+  test(
     "without the loader plugin the binary cannot find the addon",
     async () => {
       await runToExit(["bun", CLI, "build", "--no-compile"], serverDir)
