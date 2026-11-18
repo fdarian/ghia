@@ -13,14 +13,18 @@ import {
   $getRoot,
   $getSelection,
   $isRangeSelection,
+  $selectAll,
   CAN_USE_BEFORE_INPUT,
   CAN_USE_DOM,
   type ElementNode,
   type LexicalEditor,
   type TextNode,
 } from 'lexical'
+import { ListItemNode, ListNode, INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND } from '@lexical/list'
+import { ListPlugin } from '@lexical/react/LexicalListPlugin'
 import { createTestRoot, hasNativeTestRenderer } from '@ghia/react/testing'
 import { settle } from '../base-ui/harness'
+import { markerInk, markerPixels, readScreenshot } from './screenshot'
 
 // Real Lexical (LexicalComposer, RichTextPlugin, ContentEditable, HistoryPlugin, OnChangePlugin) running unchanged on
 // Ghia's contenteditable support. Runs on the plugins an app's Vite config has, which `vitest.config.ts` cannot share:
@@ -607,6 +611,93 @@ describeNative('Lexical (React bindings) clipboard between two editors on Ghia',
     await idle()
     expect(blocks(b)).toEqual(['two '])
     expect(blocks(a)).toEqual(['one three'])
+    expect(uncaught).toEqual([])
+  })
+})
+
+// Lists made through Lexical's own commands paint the marker of each item: Lexical writes `<ul>` and `<ol>` with
+// `<li value="n">`, and the number or bullet is Ghia's, not Lexical's.
+let listEditor: LexicalEditor | undefined
+
+function CaptureListEditor(): null {
+  ;[listEditor] = useLexicalComposerContext()
+  return null
+}
+
+function seedItems(): void {
+  for (const text of ['first', 'second', 'third']) $getRoot().append($createParagraphNode().append($createTextNode(text)))
+}
+
+function ListApp(): ReactNode {
+  return (
+    <LexicalComposer
+      initialConfig={{
+        namespace: 'lexical-react-lists',
+        nodes: [ListNode, ListItemNode],
+        onError: (error: Error) => {
+          throw error
+        },
+        editorState: seedItems,
+      }}
+    >
+      <CaptureListEditor />
+      <RichTextPlugin
+        contentEditable={<ContentEditable style={{ display: 'block', width: 400, minHeight: 40, backgroundColor: '#ffffff', color: '#000000' }} />}
+        ErrorBoundary={LexicalErrorBoundary}
+      />
+      <ListPlugin />
+    </LexicalComposer>
+  )
+}
+
+describeNative('Lexical (React bindings) lists on Ghia', () => {
+  let window: ReturnType<typeof createTestRoot>
+  const nextTask = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+  const idle = async (): Promise<void> => {
+    await nextTask()
+    await settle(window)
+    await nextTask()
+    await settle(window)
+  }
+
+  beforeAll(async () => {
+    window = createTestRoot({ width: 480, height: 320, onUncaughtError: (error: unknown) => uncaught.push(error) })
+    window.render(<ListApp />)
+    await idle()
+  })
+
+  afterAll(() => {
+    window.unmount()
+  })
+
+  const items = (): HTMLElement[] => [...(listEditor!.getRootElement() as HTMLElement).querySelectorAll('li')] as HTMLElement[]
+  const markers = (name: string): { ink: number[]; shapes: string[] } => {
+    const file = `${import.meta.dirname}/screens/lists-react-${name}.png`
+    window.renderer.captureScreenshot(file)
+    const shot = readScreenshot(file)
+    const scale = shot.width / window.renderer.getWindowSize().width
+    const boxes = items().map((item) => item.getBoundingClientRect())
+    return { ink: boxes.map((box) => markerInk(shot, scale, box)), shapes: boxes.map((box) => markerPixels(shot, scale, box)) }
+  }
+
+  it('paints no marker for a paragraph, a bullet for each item of an unordered list and its number for each of an ordered one', async () => {
+    expect(items().length).toBe(0)
+    listEditor!.update(() => $selectAll())
+    await idle()
+    listEditor!.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined)
+    await idle()
+    expect(items().length).toBe(3)
+    const bulleted = markers('bulleted')
+    expect(bulleted.ink.every((ink) => ink > 0), `a bullet in front of every item: ${bulleted.ink}`).toBe(true)
+    expect(new Set(bulleted.shapes).size, 'every bullet is the same').toBe(1)
+
+    listEditor!.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined)
+    await idle()
+    expect(items().length).toBe(3)
+    const numbered = markers('numbered')
+    expect(numbered.ink.every((ink) => ink > 0), `a number in front of every item: ${numbered.ink}`).toBe(true)
+    expect(new Set(numbered.shapes).size, 'every number is another').toBe(3)
+    expect(numbered.shapes).not.toEqual(bulleted.shapes)
     expect(uncaught).toEqual([])
   })
 })

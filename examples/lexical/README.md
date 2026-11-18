@@ -39,14 +39,13 @@ bun lexical/inspector.automation.ts      # the bare editor: clicks, drags, Optio
 Each opens its own window in the background (`GPUIX_BACKGROUND=1`, no focus taken), drives it through the automation API and prints a
 PASS or FAIL line per step. `apps.automation.ts` types a sentence, selects a word with Option+Shift+Left, checks that the floating toolbar is
 visible, above the word and 5px left of it, presses Bold in it (a `<strong>`), undoes and redoes, makes a bulleted list and puts a link on a word.
-The protocol has no `eval`, so it reads the painted tree (tags, text, bounds). Screenshots go to `lexical/screens/` (gitignored, 2x on a Retina display).
+The protocol has no `eval`, so it reads the painted tree (tags, text, bounds), and the screenshot for the markers of the list items (a bullet or a number is no element: it is ink in front of the item). Screenshots go to `lexical/screens/` (gitignored, 2x on a Retina display).
 
 ## Known gaps on Ghia
 
 - **`<code>` is Ghia's syntax-highlighted block,** not the inline HTML element. Lexical renders the Code format as `<code>`, so text
   formatted as code draws as an empty block until that is resolved. The Code button is there as on the web; the seeded document
   leaves it out.
-- **`li` has no marker** ([deviations](../../docs/fork/deviations.md#html-tags)), so bulleted and numbered lists draw without their bullets and numbers.
 
 The automation protocol cannot do these, so they are for you to try by hand:
 

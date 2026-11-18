@@ -13,6 +13,7 @@
 import path from "path"
 import { fileURLToPath } from "url"
 import { launch, type App } from "@ghia/react/automation"
+import { markerInk, readScreenshot } from "./screenshot"
 
 const flavor = process.argv[2]
 if (flavor !== "react" && flavor !== "solid") throw new Error("usage: bun lexical/apps.automation.ts react|solid")
@@ -157,6 +158,15 @@ async function shot(name: string): Promise<string> {
   return file
 }
 
+/** The ink in front of each list item that `from` on, read off a screenshot: what its marker (a bullet or a number) paints. */
+async function markers(file: string, from = 0): Promise<number[]> {
+  const shot = readScreenshot(file)
+  const window = (await tree()).bounds
+  assert(window !== undefined, "the window has bounds")
+  const scale = shot.width / window!.width
+  return (await elements("li")).slice(from).map((entry) => markerInk(shot, scale, entry.node.bounds!))
+}
+
 const SENTENCE = "Ghia draws this sentence natively"
 
 try {
@@ -170,7 +180,8 @@ try {
     assert((await elements("li")).length === 6, "six list items")
     assert((await elements("a")).length === 1, "one link")
     assert((await elements("strong")).length >= 1, "bold text is a <strong>")
-    await shot("1-seeded")
+    const inks = await markers(await shot("1-seeded"))
+    assert(inks.every((ink) => ink > 0), `a bullet or a number in front of each of the six list items: ${inks}`)
   })
 
   await step("type a sentence in the last paragraph", async () => {
@@ -223,6 +234,8 @@ try {
     const items = await until("two new list items", () => elements("li"), (value) => value.length === 8)
     equalTexts(items.slice(6).map((entry) => entry.text), ["alpha", "beta"])
     assert((await elements("ul")).length === 2, "a second <ul>")
+    const inks = await markers(await shot("3-new-list"), 6)
+    assert(inks.every((ink) => ink > 0), `a bullet in front of each new item: ${inks}`)
   })
 
   await step("a link on the selected word", async () => {
