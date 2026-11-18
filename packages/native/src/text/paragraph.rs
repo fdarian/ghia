@@ -50,6 +50,8 @@ pub struct RunStyle {
     pub weight: Option<FontWeight>,
     pub font_style: Option<gpui::FontStyle>,
     pub family: Option<SharedString>,
+    /// The families after `family` that a glyph it lacks is looked for in, set with it.
+    pub fallbacks: Option<gpui::FontFallbacks>,
     pub features: Option<gpui::FontFeatures>,
     pub variations: Option<gpui::FontVariations>,
     pub font_smoothing: Option<gpui::FontSmoothing>,
@@ -180,7 +182,7 @@ pub struct BoxStyle {
 /// children inherit them. `states` says which states apply to a box, so that its `hover`, `active`,
 /// `focus`, `focusWithin` and `focusVisible` styles are folded into the run it paints.
 /// `motion` holds the boxes whose colours a transition or an animation moves.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub fn run_styles(
     tree: &RetainedTree,
     paragraph: &Paragraph,
@@ -198,6 +200,7 @@ pub fn run_styles(
         lengths,
         font_state,
         underline_offset,
+        &crate::text::font_family::Fonts::for_tests(),
         states,
         motion,
     )
@@ -236,6 +239,7 @@ pub fn styles(
     lengths: &LengthContext,
     font_state: &FontFeatureState,
     underline_offset: &TextUnderlineOffset,
+    fonts: &crate::text::font_family::Fonts,
     states: &dyn Fn(u64, &StyleDesc) -> PointerStates,
     motion: &InlineStyles,
 ) -> Styles {
@@ -301,7 +305,9 @@ pub fn styles(
                 style.font_style = Some(font_style);
             }
             if let Some(family) = declared.font_family.as_ref() {
-                style.family = Some(crate::text::font_family::resolve(family));
+                let resolved = fonts.resolve(family);
+                style.family = Some(resolved.family);
+                style.fallbacks = Some(resolved.fallbacks);
             }
             let (next, features) = font_state.descend(
                 declared.font_variant_numeric.as_deref(),
@@ -630,6 +636,7 @@ impl InlineText {
         }
         if let Some(family) = &style.family {
             run.font.family = family.clone();
+            run.font.fallbacks = style.fallbacks.clone();
         }
         if let Some(features) = &style.features {
             run.font.features = features.clone();
@@ -999,7 +1006,7 @@ mod tests {
             &ColorContext::root(Scheme::Light),
             &container_lengths(),
             &FontFeatureState::default(),
-                &Default::default(),
+            &Default::default(),
             &|_, _| PointerStates::default(),
             &InlineStyles::default(),
         );
@@ -1613,6 +1620,7 @@ mod tests {
             &container_lengths(),
             &FontFeatureState::default(),
             &Default::default(),
+            &crate::text::font_family::Fonts::for_tests(),
             &|_, _| PointerStates::default(),
             &InlineStyles::default(),
         )

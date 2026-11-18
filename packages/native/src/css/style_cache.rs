@@ -1,6 +1,6 @@
 //! What `renderer::apply_styles` makes of a declared style, kept for the next element built from it.
 //!
-//! The step reads three things: the style, the colours the element has and its lengths. An interned
+//! The step reads four things: the style, the colours the element has, its lengths and the fonts. An interned
 //! style is one `Arc` however many elements carry it (`StyleTable::intern`) and is not changed once
 //! it is shared, so the address of the `Arc` names its content, and a build of the rows of a list
 //! applies a handful of distinct styles over and over. The step is the largest part of what
@@ -11,6 +11,9 @@
 //! Only a style that resolution kept as the element's own `Arc` is cached. One that a container
 //! query, a state, a transition, a motion, an animation, an overlay or the inherited text
 //! decoration made is a fresh value, and has no identity to be found by.
+//!
+//! The step resolves the `font-family` list against the fonts of an App, so an entry is kept per App and per set of
+//! installed fonts (`Fonts::stamp`).
 //!
 //! The step also reads the colour the element inherits (`currentColor`), which a retained
 //! element reports to the subtree around it (`color::reads`). A replay says the read again.
@@ -25,6 +28,7 @@ use rustc_hash::FxHashMap;
 use super::length::LengthContext;
 use crate::color::{ColorContext, ColorReads};
 use crate::style::StyleDesc;
+use crate::text::font_family::{Fonts, Stamp};
 
 /// The most styles kept. A cache that reaches it drops the entries of styles nothing holds any more,
 /// and then all of them.
@@ -69,6 +73,7 @@ pub(crate) fn set_mode(mode: Mode) {
 struct Context {
     colors: ColorContext,
     lengths: LengthContext,
+    fonts: Stamp,
     reads: ColorReads,
     refinement: StyleRefinement,
 }
@@ -103,12 +108,12 @@ impl Cache {
         entry.contexts.push(context);
     }
 
-    fn find(&self, style: &StyleDesc, colors: &ColorContext, lengths: &LengthContext) -> Option<&Context> {
+    fn find(&self, style: &StyleDesc, colors: &ColorContext, lengths: &LengthContext, fonts: Stamp) -> Option<&Context> {
         self.entries
             .get(&(style as *const StyleDesc as usize))?
             .contexts
             .iter()
-            .find(|context| context.colors == *colors && context.lengths == *lengths)
+            .find(|context| context.colors == *colors && context.lengths == *lengths && context.fonts == fonts)
     }
 }
 
@@ -125,10 +130,10 @@ impl Styled for Sink<'_> {
     }
 }
 
-fn computed(style: &StyleDesc, colors: &ColorContext, lengths: &LengthContext) -> (StyleRefinement, ColorReads) {
+fn computed(style: &StyleDesc, colors: &ColorContext, lengths: &LengthContext, fonts: &Fonts) -> (StyleRefinement, ColorReads) {
     let mut refinement = StyleRefinement::default();
     let (_, reads) = colors.watch_reads(|| {
-        crate::renderer::apply_styles(Sink(&mut refinement), style, colors, lengths);
+        crate::renderer::apply_styles(Sink(&mut refinement), style, colors, lengths, fonts);
     });
     (refinement, reads)
 }
@@ -145,6 +150,7 @@ pub(crate) fn apply<E: Styled>(
     style: &StyleDesc,
     colors: &ColorContext,
     lengths: &LengthContext,
+    fonts: &Fonts,
 ) -> E {
     let mode = mode();
     // A declaration that reads custom properties is applied from what they say at the element, which
@@ -153,12 +159,13 @@ pub(crate) fn apply<E: Styled>(
         mode != Mode::Off && std::ptr::eq(Arc::as_ptr(shared), style) && style.var_declarations.is_none()
     });
     let Some(shared) = shared else {
-        return crate::renderer::apply_styles(el, style, colors, lengths);
+        return crate::renderer::apply_styles(el, style, colors, lengths, fonts);
     };
+    let stamp = fonts.stamp();
     let replayed = CACHE.with_borrow(|cache| {
-        let kept = cache.find(style, colors, lengths)?;
+        let kept = cache.find(style, colors, lengths, stamp)?;
         if mode == Mode::Verify {
-            let (fresh, reads) = computed(style, colors, lengths);
+            let (fresh, reads) = computed(style, colors, lengths, fonts);
             assert!(
                 fresh == kept.refinement && reads == kept.reads,
                 "the style cache kept a style that is applied differently now\n kept {:?} ({:?})\n now  {:?} ({:?})\n for {style:?}",
@@ -180,10 +187,10 @@ pub(crate) fn apply<E: Styled>(
     }
     crate::perf_counters::style_applied(false);
     // The read the step noted is the element's own, as if the step had run on it.
-    let (refinement, reads) = computed(style, colors, lengths);
+    let (refinement, reads) = computed(style, colors, lengths, fonts);
     el.style().refine(&refinement);
     if reads != ColorReads::Other {
-        CACHE.with_borrow_mut(|cache| cache.insert(shared, Context { colors: *colors, lengths: *lengths, reads, refinement }));
+        CACHE.with_borrow_mut(|cache| cache.insert(shared, Context { colors: *colors, lengths: *lengths, fonts: stamp, reads, refinement }));
     }
     el
 }
@@ -196,9 +203,9 @@ mod tests {
         Arc::new(serde_json::from_str(json).unwrap())
     }
 
-    fn applied(shared: &Arc<StyleDesc>, colors: &ColorContext, lengths: &LengthContext) -> StyleRefinement {
+    fn applied(shared: &Arc<StyleDesc>, colors: &ColorContext, lengths: &LengthContext, fonts: &Fonts) -> StyleRefinement {
         let mut refinement = StyleRefinement::default();
-        apply(Sink(&mut refinement), Some(shared), shared, colors, lengths);
+        apply(Sink(&mut refinement), Some(shared), shared, colors, lengths, fonts);
         refinement
     }
 
@@ -208,14 +215,18 @@ mod tests {
         let shared = style(r#"{"width":"2em","backgroundColor":"currentColor","border":"1px solid red"}"#);
         let colors = ColorContext::root(crate::color::Scheme::Light);
         let small = LengthContext::initial(800.0, 600.0);
-        let kept = applied(&shared, &colors, &small);
+        let fonts = Fonts::for_tests();
+        let kept = applied(&shared, &colors, &small, &fonts);
         let before = crate::perf_counters::snapshot();
-        assert_eq!(applied(&shared, &colors, &small), kept);
+        assert_eq!(applied(&shared, &colors, &small, &fonts), kept);
         let replayed = crate::perf_counters::snapshot();
         assert_eq!(replayed.style_applies_replayed, before.style_applies_replayed + 1);
-        let _ = applied(&shared, &colors, &LengthContext::initial(400.0, 600.0));
+        let _ = applied(&shared, &colors, &LengthContext::initial(400.0, 600.0), &fonts);
         let after = crate::perf_counters::snapshot();
         assert_eq!(after.style_applies_computed, replayed.style_applies_computed + 1, "another viewport is another context");
+        let _ = applied(&shared, &colors, &small, &Fonts::for_tests());
+        let other_app = crate::perf_counters::snapshot();
+        assert_eq!(other_app.style_applies_computed, after.style_applies_computed + 1, "another App resolves font-family against its own fonts");
     }
 
     #[test]
@@ -228,7 +239,7 @@ mod tests {
         let before = crate::perf_counters::snapshot();
         for _ in 0..2 {
             let mut refinement = StyleRefinement::default();
-            apply(Sink(&mut refinement), Some(&shared), &other, &colors, &lengths);
+            apply(Sink(&mut refinement), Some(&shared), &other, &colors, &lengths, &Fonts::for_tests());
         }
         let after = crate::perf_counters::snapshot();
         assert_eq!(after.style_applies_replayed, before.style_applies_replayed);
@@ -241,7 +252,8 @@ mod tests {
         let kept = style(r#"{"width":1}"#);
         let colors = ColorContext::root(crate::color::Scheme::Light);
         let lengths = LengthContext::initial(800.0, 600.0);
-        let context = |reads| Context { colors, lengths, reads, refinement: StyleRefinement::default() };
+        let fonts = Fonts::for_tests().stamp();
+        let context = |reads| Context { colors, lengths, fonts, reads, refinement: StyleRefinement::default() };
         cache.insert(&kept, context(ColorReads::None));
         for _ in 0..LIMIT - 1 {
             cache.insert(&style(r#"{"height":1}"#), context(ColorReads::None));
@@ -249,6 +261,6 @@ mod tests {
         assert_eq!(cache.entries.len(), LIMIT);
         cache.insert(&style(r#"{"height":2}"#), context(ColorReads::None));
         assert_eq!(cache.entries.len(), 2, "the styles that were dropped are gone, the one still held stays");
-        assert!(cache.find(&kept, &colors, &lengths).is_some());
+        assert!(cache.find(&kept, &colors, &lengths, fonts).is_some());
     }
 }

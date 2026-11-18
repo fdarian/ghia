@@ -807,9 +807,10 @@ pub(crate) fn apply_focus_within<E: gpui::Styled>(
     style: Option<&crate::style::StyleDesc>,
     colors: &crate::color::ColorContext,
     lengths: &crate::css::length::LengthContext,
+    fonts: &crate::text::font_family::Fonts,
     focus: &crate::focus::FocusStyles,
 ) -> E {
-    apply_focus_variants(el, id, false, style, colors, lengths, focus)
+    apply_focus_variants(el, id, false, style, colors, lengths, fonts, focus)
 }
 
 /// The focus variants of `style` that apply to `id`, weakest first: `focus`, `focusWithin`,
@@ -823,6 +824,7 @@ fn apply_focus_variants<E: gpui::Styled>(
     style: Option<&crate::style::StyleDesc>,
     colors: &crate::color::ColorContext,
     lengths: &crate::css::length::LengthContext,
+    fonts: &crate::text::font_family::Fonts,
     focus: &crate::focus::FocusStyles,
 ) -> E {
     let Some(base) = style else { return el };
@@ -834,6 +836,7 @@ fn apply_focus_variants<E: gpui::Styled>(
             declared,
             &colors.for_state(declared),
             &lengths.for_state(declared.font_size.as_ref()),
+            fonts,
         );
         let folded = crate::events::state_styles::overlay(&beneath, declared);
         el = crate::layout::stacking::apply_folded_lift(el, &folded, colors, lengths);
@@ -855,9 +858,10 @@ pub(crate) fn apply_focus_styles<E: gpui::Styled>(
     style: Option<&crate::style::StyleDesc>,
     colors: &crate::color::ColorContext,
     lengths: &crate::css::length::LengthContext,
+    fonts: &crate::text::font_family::Fonts,
     focus: &crate::focus::FocusStyles,
 ) -> E {
-    let el = apply_focus_variants(el, id, true, style, colors, lengths, focus);
+    let el = apply_focus_variants(el, id, true, style, colors, lengths, fonts, focus);
     let opted_out = style.and_then(|style| style.keyboard_focus_dim) == Some(false);
     match focus.dim_path.as_deref() {
         // Opacity applies to the subtree, so the focused element's own

@@ -417,6 +417,7 @@ mod tests {
                 &LengthContext::initial(800.0, 600.0),
                 &FontFeatureState::default(),
                 &Default::default(),
+                &crate::text::font_family::Fonts::for_tests(),
                 &|_, _| PointerStates::default(),
                 styles,
             )
