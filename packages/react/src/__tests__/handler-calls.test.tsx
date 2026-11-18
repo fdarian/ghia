@@ -67,8 +67,10 @@ const NOT_CALLABLE_FROM_A_HANDLER = new Set([
   "nativeSimulateMouseMove",
   "nativeSimulateMouseUp",
   "nativeSimulateScrollWheel",
-  // Both enter the test state, which the handler's own native call holds: they throw "cannot run inside an event handler".
+  // All of them enter the test state, which the handler's own native call holds: they throw "cannot run inside an event handler".
   "postNativeEvent",
+  "postNativeKeys",
+  "pumpNativeEvents",
   "tick",
 ])
 
@@ -251,6 +253,7 @@ function calls(r, ids) {
     setWindowTitle: () => r.setWindowTitle("handler-calls"),
     setWindowMediaChange: () => r.setWindowMediaChange(false),
     setWindowSelectionChange: () => r.setWindowSelectionChange(false, 1),
+    setYieldAfterKeyEvent: () => r.setYieldAfterKeyEvent(true),
     simulateEditingComposition: () => {
       placeCaretInEditor()
       r.simulateEditingComposition([{ action: "mark", text: "a" }, { action: "unmark" }])
