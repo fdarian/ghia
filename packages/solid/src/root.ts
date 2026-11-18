@@ -82,20 +82,6 @@ export function createRoot(
       }
     })
   })
-  const container = new HostRoot({
-    mutations,
-    nativeRenderer: renderer,
-    eventHandlers,
-    allocateId: () => ++state.ids.nextElementId,
-  })
-  mutations.setElementSource({
-    forEachElement(visit) {
-      for (const node of container.elements.values()) visit(node.nativeId, node.elementType, node.props)
-    },
-    rememberAttributes(id, attributes) {
-      container.elements.get(id)?.sent.rememberAttributes(attributes)
-    },
-  })
   let binding: RendererRootBinding | undefined
   let stopWindowEventListeners: (() => void) | undefined
   let selectionChange: ReturnType<typeof syncWindowSelectionChange> | undefined
@@ -171,7 +157,29 @@ export function createRoot(
     binding = undefined
   }
 
+  // Before `<html>` is queued: a root the renderer refuses (it has one) must leave nothing in its queue, which
+  // `flushPendingMutations` would send over the live root's tree. `container` is read lazily by everything above.
   attach()
+  let container: HostRoot
+  try {
+    container = new HostRoot({
+      mutations,
+      nativeRenderer: renderer,
+      eventHandlers,
+      allocateId: () => ++state.ids.nextElementId,
+    })
+  } catch (error) {
+    detach()
+    throw error
+  }
+  mutations.setElementSource({
+    forEachElement(visit) {
+      for (const node of container.elements.values()) visit(node.nativeId, node.elementType, node.props)
+    },
+    rememberAttributes(id, attributes) {
+      container.elements.get(id)?.sent.rememberAttributes(attributes)
+    },
+  })
   const unregister = registerRoot(() => root.unmount())
   // The release and the batch are separate steps: a throw in the first must not skip the second.
   const flush = () => {
