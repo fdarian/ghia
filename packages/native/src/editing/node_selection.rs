@@ -52,6 +52,9 @@ struct Painted {
     /// The two boundaries as sent, each with the container that holds it. An end that moves changes
     /// the paint of the paragraph it left and the one it came to, and of no other.
     ends: Vec<(Boundary, u64)>,
+    /// The editing host the selection is the caret of. The paragraph that holds the caret paints it, so a
+    /// host that comes or goes under the same boundaries changes that paragraph's paint.
+    host: Option<u64>,
 }
 
 #[derive(Debug, Default)]
@@ -302,6 +305,10 @@ fn container_of(tree: &RetainedTree, boundary: Boundary) -> Option<u64> {
 }
 
 fn paint_of(tree: &RetainedTree, selection: &Selection) -> Painted {
+    Painted { host: selection.host, ..paint_span(tree, selection) }
+}
+
+fn paint_span(tree: &RetainedTree, selection: &Selection) -> Painted {
     let ends: Vec<(Boundary, u64)> = [selection.anchor, selection.focus]
         .into_iter()
         .filter_map(|boundary| Some((boundary, container_of(tree, boundary)?)))
@@ -341,14 +348,20 @@ fn paint_of(tree: &RetainedTree, selection: &Selection) -> Painted {
         DomPoint { node: first, offset: 0 }
     };
     let end_point = if end_text { DomPoint { node: end.node, offset: end.offset } } else { DomPoint { node: last, offset: usize::MAX } };
-    Painted { span: Some(Span { start: start_point, end: end_point }), covered, ends }
+    Painted { span: Some(Span { start: start_point, end: end_point }), covered, ends, host: None }
 }
 
 /// The containers whose paint differs between two states: those of paragraphs covered by one and not
-/// the other, and those that hold a boundary that only one of them has.
+/// the other, and those that hold a boundary that only one of them has. When the host differs, every
+/// container that holds an end of either: the caret is in one of them.
 fn changed_containers(before: &Painted, after: &Painted) -> Vec<u64> {
+    let host_changed = before.host != after.host;
     let only_in = |from: &Painted, other: &Painted| {
-        from.ends.iter().filter(|end| !other.ends.contains(end)).map(|(_, container)| *container).collect::<Vec<_>>()
+        from.ends
+            .iter()
+            .filter(|end| host_changed || !other.ends.contains(end))
+            .map(|(_, container)| *container)
+            .collect::<Vec<_>>()
     };
     let mut changed: Vec<u64> = before
         .covered
@@ -569,6 +582,23 @@ mod tests {
         let revisions: Vec<u64> = [10, 20].iter().map(|id| f.revision(*id)).collect();
         f.select((11, 1), (21, 2));
         assert_eq!([10, 20].iter().map(|id| f.revision(*id)).collect::<Vec<_>>(), revisions);
+    }
+
+    #[test]
+    fn a_host_that_changes_under_the_same_boundaries_marks_the_paragraph_of_the_caret() {
+        let mut f = Fixture::paragraphs(&["aaaa", "bbbb"]);
+        f.caret_at(11, 1);
+        let caret = f.revision(10);
+        let other = f.revision(20);
+        // The host stops being editable and JS resends the boundaries with no host: the caret is gone.
+        set(
+            &mut f.tree,
+            Some(Selection { anchor: Boundary { node: 11, offset: 1 }, focus: Boundary { node: 11, offset: 1 }, host: None }),
+            false,
+        );
+        assert!(f.tree.node_selection.caret().is_none());
+        assert_ne!(f.revision(10), caret, "the paragraph that painted the caret has to repaint without it");
+        assert_eq!(f.revision(20), other);
     }
 
     #[test]
