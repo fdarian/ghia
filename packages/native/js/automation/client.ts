@@ -798,9 +798,10 @@ export function liveRendererAsTest(
     await nextLoopTurn()
   }
   // A sequence is pressed one key at a time, with the loop turning after each, as separate key events
-  // from the OS arrive. Native hands every key of one call to JS inside that call, where no microtask
-  // runs between two keys, and an editor that commits its update in a microtask (Lexical) would take
-  // the second key before the first one was applied.
+  // from the OS arrive. `simulateKeystrokes` dispatches directly, not through AppKit's queue, so the
+  // pump that ends after each key does not apply: native hands every key of one call to JS inside that
+  // call, where no microtask runs between two keys, and an editor that commits its update in a
+  // microtask (Lexical) would take the second key before the first one was applied.
   const press = async (keys: string): Promise<void> => {
     if (!renderer.simulateKeystrokes) {
       throw new AutomationError("Unsupported", "keystrokes are not live yet")

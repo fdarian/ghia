@@ -269,6 +269,9 @@ interface NativeTestRendererApi
   requiresTick(): boolean
   tick(): boolean
   postNativeEvent(kind: string, x?: number | null, y?: number | null): void
+  postNativeKeys(text: string): void
+  pumpNativeEvents(): void
+  setYieldAfterKeyEvent(yieldAfter: boolean): void
   simulateKeystrokes(keystrokes: string): void
   setSyncEventHandler(handler: ((event: EventPayload) => SyncDispatchResult) | null): void
   dispose(): void
@@ -864,6 +867,28 @@ export class TestRenderer implements NativeRenderer {
    *  made key nor shown, and nothing reaches the OS. `tick()` delivers the event. */
   postNativeEvent(kind: string, x?: number, y?: number): void {
     this.native.postNativeEvent(kind, x, y)
+  }
+
+  /** Queues a `keyDown` and a `keyUp` for each letter or space of `text` in AppKit's queue for
+   *  the test window (`-[NSApp postEvent:atStart:NO]`), all of them before the next pump. Not
+   *  delivered by `tick()` one key at a time: `pumpNativeEvents()` is the live window's pump. */
+  postNativeKeys(text: string): void {
+    this.native.postNativeKeys(text)
+  }
+
+  /** One call of the pump a live window's `tick()` runs. It ends after the first key event it
+   *  sends (`setYieldAfterKeyEvent`, on by default), so queued keys take one call each, with a
+   *  turn of the event loop between them for the app's microtasks, as the frame loop gives a
+   *  live window. Then hands the events the handlers queued to JS, as `tick()` does. */
+  pumpNativeEvents(): void {
+    invalidateComputedStyles()
+    this.native.pumpNativeEvents()
+    this.dispatchNativeEvents()
+  }
+
+  /** Whether the pump ends after a key event (see `pumpNativeEvents`). A setting of the process. */
+  setYieldAfterKeyEvent(yieldAfter: boolean): void {
+    this.native.setYieldAfterKeyEvent(yieldAfter)
   }
 
   // ── Native end-to-end simulation ────────────────────────────────

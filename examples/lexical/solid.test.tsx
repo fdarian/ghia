@@ -374,4 +374,35 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
     expect(paragraphs()).toEqual(['one two', 'X', 'three four', ''])
     expect(uncaught).toEqual([])
   })
+
+  it('15. keys that AppKit queues before one tick each get their own microtask checkpoint: Lexical commits every one', async () => {
+    editor.update(() => {
+      const paragraph = $createParagraphNode()
+      paragraph.append($createTextNode('Hello'))
+      $getRoot().clear().append(paragraph)
+    })
+    await nextTask()
+    await settle()
+    const first = element.querySelector('span')?.firstChild
+    if (first === null || first === undefined) throw new Error('no text node under the editable root')
+    const selection = getSelection()
+    if (selection === null) throw new Error('getSelection() returned null')
+    selection.setBaseAndExtent(first, 5, first, 5)
+    await nextTask()
+    await settle()
+    // Three letters, each a keyDown and a keyUp, are in AppKit's queue before the first pump, as when a slow frame
+    // or key repeat leaves several waiting. A pump sends one key event and the loop turns before the next.
+    root.renderer.postNativeKeys('abc')
+    // A keyDown and a keyUp for each of the three letters, and one pump more.
+    for (let pump = 0; pump < 7; pump++) {
+      root.renderer.pumpNativeEvents()
+      await nextTask()
+    }
+    await settle()
+    expect(lexicalText()).toBe('Helloabc')
+    expect(paragraphs()).toEqual(['Helloabc'])
+    expect(element.textContent).toBe('Helloabc')
+    expect(painted()).toContain('Helloabc')
+    expect(uncaught).toEqual([])
+  })
 })

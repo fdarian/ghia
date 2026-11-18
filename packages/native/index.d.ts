@@ -803,6 +803,25 @@ export declare class TestGpuixRenderer {
    */
   postNativeEvent(kind: string, x?: number | undefined | null, y?: number | undefined | null): void
   /**
+   * Queues a `keyDown` and a `keyUp` for each letter or space of `text` in AppKit's queue for
+   * the test window (`-[NSApp postEvent:atStart:NO]`, from this thread), so every key is
+   * waiting before the next `pumpNativeEvents`. The window is neither key nor on screen.
+   */
+  postNativeKeys(text: string): void
+  /**
+   * One call of the pump a live window's `tick()` runs (`gpui_macos::pump_app_nonblocking`),
+   * then the test context until it is parked: with `setYieldAfterKeyEvent(true)`, the default,
+   * it ends after the first key event it sends. `tick()` is not that pump: it hands every queued
+   * event to the window. Draws nothing.
+   */
+  pumpNativeEvents(): void
+  /**
+   * Whether the pump ends after a key event so that JS runs a microtask checkpoint per key
+   * (`MacPlatform::set_yield_after_key_event`). On by default, as in a live window; a process
+   * setting, shared by every renderer in it.
+   */
+  setYieldAfterKeyEvent(yieldAfter: boolean): void
+  /**
    * Registers the function native calls synchronously for `keydown` and
    * `keyup`; see `GpuixRenderer::setSyncEventHandler`. Without one, those
    * events are queued for `drainEvents` like every other.

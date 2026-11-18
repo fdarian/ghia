@@ -257,6 +257,19 @@ impl Drop for VisualTestState {
             .update_window(self.window, |_, window, _| window.refresh())
             .ok();
         self.cx.run_until_parked();
+        // Dropping a macOS window queues its close on the main dispatch queue, and that close
+        // updates the app: closed here, while the app lives, a later pump of the run loop
+        // (`pumpNativeEvents` of the next renderer) does not find the block with no app to run it.
+        #[cfg(target_os = "macos")]
+        {
+            self.cx
+                .update_window(self.window, |_, window, _| window.remove_window())
+                .ok();
+            self.cx.run_until_parked();
+            // SAFETY: napi calls run on the main thread, and the test platform has made
+            // NSApplication.
+            unsafe { crate::native_event::run_main_queue() };
+        }
     }
 }
 
@@ -283,7 +296,11 @@ fn dispose_test_state(owner: Option<u64>) -> Result<()> {
         }
         Ok(borrow.take())
     })?;
+    // The window's callbacks log that their window is gone while it closes, which is expected.
+    let level = log::max_level();
+    log::set_max_level(log::LevelFilter::Off);
     drop(state);
+    log::set_max_level(level);
     Ok(())
 }
 
@@ -750,6 +767,9 @@ impl TestGpuixRenderer {
         let window_actions = crate::events::app_region::SimulatedWindowActions::default();
         let window_actions_clone = window_actions.clone();
 
+        // As in a live window; only `pumpNativeEvents` runs the pump this applies to.
+        #[cfg(target_os = "macos")]
+        gpui_macos::MacPlatform::set_yield_after_key_event(true);
         let platform = gpui_platform::current_offscreen_platform();
         let mut cx = gpui::VisualTestAppContext::new(platform);
         cx.update(|cx| {
@@ -947,6 +967,70 @@ impl TestGpuixRenderer {
         {
             let _ = (kind, x, y);
             Err(Error::from_reason("postNativeEvent needs macOS"))
+        }
+    }
+
+    /// Queues a `keyDown` and a `keyUp` for each letter or space of `text` in AppKit's queue for
+    /// the test window (`-[NSApp postEvent:atStart:NO]`, from this thread), so every key is
+    /// waiting before the next `pumpNativeEvents`. The window is neither key nor on screen.
+    #[napi]
+    pub fn post_native_keys(&self, text: String) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            let ns_view = with_test_state(|cx, window, _view| {
+                cx.update_window(window, |_, window, _| appkit::ns_view(window))
+                    .map_err(|error| Error::from_reason(error.to_string()))?
+            })?;
+            // SAFETY: the view is the live content view of the test window, and napi calls run
+            // on the main thread.
+            unsafe { crate::native_event::post_keys(ns_view, &text) }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = text;
+            Err(Error::from_reason("postNativeKeys needs macOS"))
+        }
+    }
+
+    /// One call of the pump a live window's `tick()` runs (`gpui_macos::pump_app_nonblocking`),
+    /// then the test context until it is parked: with `setYieldAfterKeyEvent(true)`, the default,
+    /// it ends after the first key event it sends. `tick()` is not that pump: it hands every queued
+    /// event to the window. Draws nothing.
+    #[napi]
+    pub fn pump_native_events(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            let result = with_test_state(|cx, _window, _view| {
+                // SAFETY: napi calls run on the main thread, and the test platform has made
+                // NSApplication.
+                unsafe { gpui_macos::pump_app_nonblocking() };
+                cx.run_until_parked();
+                Ok(())
+            });
+            self.frame_wake.tick_finished();
+            result
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason("pumpNativeEvents needs macOS"))
+    }
+
+    /// Whether the pump ends after a key event so that JS runs a microtask checkpoint per key
+    /// (`MacPlatform::set_yield_after_key_event`). On by default, as in a live window; a process
+    /// setting, shared by every renderer in it.
+    #[napi]
+    pub fn set_yield_after_key_event(&self, yield_after: bool) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            gpui_macos::MacPlatform::set_yield_after_key_event(yield_after);
+            Ok(())
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = yield_after;
+            Err(Error::from_reason("setYieldAfterKeyEvent needs macOS"))
         }
     }
 

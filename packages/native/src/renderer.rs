@@ -2191,6 +2191,9 @@ impl GpuixRenderer {
         let displays = crate::screen::all_displays()?;
 
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
+        // Key handlers run JS, and each key needs its own microtask checkpoint: see
+        // docs/fork/frames-and-wakes.md.
+        gpui_macos::MacPlatform::set_yield_after_key_event(true);
 
         let tree = self.tree.clone();
         let callback = self.event_callback_for_view();
