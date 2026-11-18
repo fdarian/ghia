@@ -328,4 +328,50 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
     expect(painted()).toContain('X')
     expect(uncaught).toEqual([])
   })
+
+  it('14. ArrowDown and ArrowUp stop in empty paragraphs, a trailing one included: Lexical\'s selection is that paragraph and typing lands in it', async () => {
+    editor.update(() => {
+      const paragraph = (text: string) => {
+        const node = $createParagraphNode()
+        if (text !== '') node.append($createTextNode(text))
+        return node
+      }
+      $getRoot().clear().append(paragraph('one two'), paragraph(''), paragraph('three four'), paragraph(''))
+    })
+    await nextTask()
+    await settle()
+    const first = element.querySelector('span')?.firstChild
+    if (first === null || first === undefined) throw new Error('no text node under the editable root')
+    const selection = getSelection()
+    if (selection === null) throw new Error('getSelection() returned null')
+    selection.setBaseAndExtent(first, 4, first, 4)
+    await nextTask()
+    await settle()
+    const paragraphIndex = (): number | null =>
+      editor.getEditorState().read(() => {
+        const lexical = $getSelection()
+        if (!$isRangeSelection(lexical) || !lexical.isCollapsed()) return null
+        return $getRoot().getChildren().findIndex((child) => child.getKey() === lexical.anchor.getNode().getTopLevelElementOrThrow().getKey())
+      })
+    const visit = async (keys: string, expected: number): Promise<void> => {
+      await press(keys)
+      await nextTask()
+      await settle()
+      expect(paragraphIndex()).toBe(expected)
+    }
+    await visit('ArrowDown', 1)
+    expect(editor.getEditorState().read(() => ($getSelection() as { anchor: { offset: number } }).anchor.offset)).toBe(0)
+    await visit('ArrowDown', 2)
+    await visit('ArrowDown', 3)
+    await visit('ArrowDown', 3)
+    await visit('ArrowUp', 2)
+    await visit('ArrowUp', 1)
+    await visit('ArrowUp', 0)
+    await visit('ArrowDown', 1)
+    await press('X')
+    await nextTask()
+    await settle()
+    expect(paragraphs()).toEqual(['one two', 'X', 'three four', ''])
+    expect(uncaught).toEqual([])
+  })
 })

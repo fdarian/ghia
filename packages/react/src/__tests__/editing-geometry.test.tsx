@@ -52,6 +52,21 @@ describeNative("DOM positions and painted text (React)", () => {
     return { ...mounted, text: mounted.host.firstChild as Text }
   }
 
+  /** Paragraphs, where `null` is an empty one (`<div><br></div>`). */
+  function linesWithEmpty(...lines: Array<string | null>) {
+    const mounted = mount(
+      <div style={{ padding: 20, ...TEXT }}>
+        <div contentEditable style={{ width: 400 }}>
+          {lines.map((line, index) => (
+            <div key={index}>{line === null ? <br /> : line}</div>
+          ))}
+        </div>
+      </div>
+    )
+    const blocks = [...mounted.host.children] as HTMLElement[]
+    return { ...mounted, blocks, texts: blocks.map((block) => (block.firstChild?.nodeType === 3 ? (block.firstChild as Text) : null)) }
+  }
+
   function paragraphs(...lines: string[]) {
     const mounted = mount(
       <div style={{ padding: 20, ...TEXT }}>
@@ -209,6 +224,75 @@ describeNative("DOM positions and painted text (React)", () => {
       expect([selection.focusNode, selection.focusOffset]).toEqual([texts[0], 9])
       const caret = document.caretPositionFromPoint(left + 9 * COLUMN + 1, 28)
       expect(caret?.offset).toBe(9)
+    })
+
+    describe("an empty paragraph", () => {
+      const focus = () => [selection.focusNode, selection.focusOffset]
+      const selection = document.getSelection()
+
+      it("is one line: Down stops in it with the caret before its line break, and Down and Up leave it at the column", () => {
+        const { blocks, texts } = linesWithEmpty("the first line", null, "the long third line", "last")
+        selection.collapse(texts[0]!, 9)
+        selection.modify("move", "forward", "line")
+        expect(focus()).toEqual([blocks[1], 0])
+        selection.modify("move", "forward", "line")
+        expect(focus()).toEqual([texts[2], 9])
+        selection.modify("move", "backward", "line")
+        expect(focus()).toEqual([blocks[1], 0])
+        selection.modify("move", "backward", "line")
+        expect(focus()).toEqual([texts[0], 9])
+      })
+
+      it("keeps the column through several empty paragraphs in a row", () => {
+        const { blocks, texts } = linesWithEmpty("the first line", null, null, "the third line")
+        selection.collapse(texts[0]!, 7)
+        selection.modify("move", "forward", "line")
+        expect(focus()).toEqual([blocks[1], 0])
+        selection.modify("move", "forward", "line")
+        expect(focus()).toEqual([blocks[2], 0])
+        selection.modify("move", "forward", "line")
+        expect(focus()).toEqual([texts[3], 7])
+      })
+
+      it("is reached going down when it is the last paragraph, and is the end of the host's lines", () => {
+        const { blocks, texts } = linesWithEmpty("first", "last", null)
+        selection.collapse(texts[1]!, 2)
+        selection.modify("move", "forward", "line")
+        expect(focus()).toEqual([blocks[2], 0])
+        selection.modify("move", "forward", "line")
+        expect(focus()).toEqual([blocks[2], 0])
+        selection.modify("move", "backward", "line")
+        expect(focus()).toEqual([texts[1], 2])
+      })
+
+      it("is reached going up when it is the first paragraph, and is the start of the host's lines", () => {
+        const { blocks, texts } = linesWithEmpty(null, "first", "second")
+        selection.collapse(texts[1]!, 3)
+        selection.modify("move", "backward", "line")
+        expect(focus()).toEqual([blocks[0], 0])
+        selection.modify("move", "backward", "line")
+        expect(focus()).toEqual([blocks[0], 0])
+        selection.modify("move", "forward", "line")
+        expect(focus()).toEqual([texts[1], 3])
+      })
+
+      it("extends a selection into it and out of it", () => {
+        const { blocks, texts } = linesWithEmpty("one", null, "three")
+        selection.collapse(texts[0]!, 2)
+        selection.modify("extend", "forward", "line")
+        expect([selection.anchorNode, selection.anchorOffset, selection.focusNode, selection.focusOffset]).toEqual([texts[0], 2, blocks[1], 0])
+        selection.modify("extend", "forward", "line")
+        expect([selection.anchorNode, selection.anchorOffset, selection.focusNode, selection.focusOffset]).toEqual([texts[0], 2, texts[2], 2])
+      })
+
+      it("is the only line of a host that has nothing else, which has none to move to", () => {
+        const { blocks } = linesWithEmpty(null)
+        selection.collapse(blocks[0]!, 0)
+        selection.modify("move", "forward", "line")
+        expect(focus()).toEqual([blocks[0], 0])
+        selection.modify("move", "backward", "line")
+        expect(focus()).toEqual([blocks[0], 0])
+      })
     })
 
     it("forgets the column once the selection changes another way", () => {

@@ -91,6 +91,30 @@ describe.skipIf(!hasNativeTestRenderer)("Solid DOM positions and painted text", 
     expect([selection.focusNode, selection.focusOffset]).toEqual([texts[0], 9])
   })
 
+  it("moves through an empty paragraph by line: a line of its own, with the caret before its line break, and the ends of the host included", () => {
+    const mounted = mountHost(
+      () => [<div>the first line</div>, <div><br /></div>, <div>the long third line</div>, <div><br /></div>],
+      400
+    )
+    const [first, empty, third, trailing] = [...mounted.host.children] as HTMLElement[]
+    const selection = document.getSelection()
+    const focus = () => [selection.focusNode, selection.focusOffset]
+    selection.collapse(first!.firstChild, 9)
+    selection.modify("move", "forward", "line")
+    expect(focus()).toEqual([empty, 0])
+    selection.modify("move", "forward", "line")
+    expect(focus()).toEqual([third!.firstChild, 9])
+    selection.modify("move", "forward", "line")
+    expect(focus()).toEqual([trailing, 0])
+    selection.modify("move", "forward", "line")
+    expect(focus()).toEqual([trailing, 0])
+    selection.modify("move", "backward", "line")
+    selection.modify("move", "backward", "line")
+    expect(focus()).toEqual([empty, 0])
+    selection.modify("move", "backward", "line")
+    expect(focus()).toEqual([first!.firstChild, 9])
+  })
+
   it("goes to the ends of the painted row for lineboundary", () => {
     const { text } = wrapped()
     const selection = document.getSelection()

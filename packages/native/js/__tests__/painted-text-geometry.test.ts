@@ -276,14 +276,60 @@ describe("painted text geometry (JS half)", () => {
       expect(page.kids).toHaveLength(2)
     })
 
-    it("does nothing at a position with no text next to it", () => {
+    it("does nothing at a position with no text next to it that native knows no line for", () => {
       const host = el(window, "div", el(window, "p"))
       host.props.contenteditable = "true"
       mounted(host)
       selection.collapse(n(host.kids[0]!), 0)
       selection.modify("move", "forward", "line")
       expect([selection.focusNode, selection.focusOffset]).toEqual([n(host.kids[0]!), 0])
-      expect(window.moveCalls).toEqual([])
+      expect(window.moveCalls).toEqual([{ nodeId: host.kids[0]!.id, offset: 0, op: "lineDown", goalX: null }])
+    })
+
+    describe("an empty line", () => {
+      function withEmpty() {
+        const first = tx(window, "first line")
+        const last = tx(window, "last line")
+        const empty = el(window, "p", el(window, "br"))
+        const host = el(window, "div", el(window, "p", first), empty, el(window, "p", last))
+        host.props.contenteditable = "true"
+        mounted(host)
+        const emptyAt = (x: number): CaretPoint => ({ nodeId: empty.id, containerId: empty.id, offset: 0, x })
+        return { first, last, empty, host, emptyAt }
+      }
+
+      it("is where native puts the caret in the block, and the block is asked about by its own id going on from it", () => {
+        const { first, last, empty, emptyAt } = withEmpty()
+        const results = [emptyAt(40), at(last, 4, 40)]
+        window.move = () => results.shift() ?? null
+        selection.collapse(n(first), 4)
+        selection.modify("move", "forward", "line")
+        expect([selection.focusNode, selection.focusOffset]).toEqual([n(empty), 0])
+        selection.modify("move", "forward", "line")
+        expect([selection.focusNode, selection.focusOffset]).toEqual([n(last), 4])
+        expect(window.moveCalls).toEqual([
+          { nodeId: first.id, offset: 4, op: "lineDown", goalX: null },
+          { nodeId: empty.id, offset: 0, op: "lineDown", goalX: 40 },
+        ])
+      })
+
+      it("has no edge of the host's text to fall back to: with no line left the caret stays", () => {
+        const { empty } = withEmpty()
+        selection.collapse(n(empty), 0)
+        selection.modify("move", "backward", "line")
+        expect([selection.focusNode, selection.focusOffset]).toEqual([n(empty), 0])
+        expect(window.moveCalls).toEqual([{ nodeId: empty.id, offset: 0, op: "lineUp", goalX: null }])
+      })
+
+      it("is none to go to when the line native finds is outside the editing host", () => {
+        const { empty, host } = withEmpty()
+        const outside = tx(window, "outside")
+        mounted(el(window, "section", host, el(window, "p", outside)))
+        window.move = () => at(outside, 3, 10)
+        selection.collapse(n(empty), 0)
+        selection.modify("move", "forward", "line")
+        expect([selection.focusNode, selection.focusOffset]).toEqual([n(empty), 0])
+      })
     })
   })
 
