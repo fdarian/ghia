@@ -21,11 +21,14 @@ import type { NativeRenderer } from "../host.js"
 import { mountedRenderer } from "../mounted-renderer.js"
 import { setDocumentCommands } from "./document-commands.js"
 import { editingHostOf } from "./host.js"
-import { editingSelectionKind, focusedNode, isTextControl, runEditingInput } from "./input.js"
+import { editingSelectionKind, focusedNode, isTextControl, pastedText, runEditingInput } from "./input.js"
 
 export const CLIPBOARD_COMMAND_EVENT = "clipboardcommand"
 
 export type ClipboardCommand = "copy" | "cut" | "paste" | "selectAll"
+
+/** What asked for the command: the key or the Edit menu, or a `document.execCommand` call. */
+export type ClipboardCommandSource = "user" | "exec"
 
 const ELEMENT_NODE = 1
 
@@ -136,13 +139,14 @@ function runCopy(clipboard: ClipboardAccess): boolean {
 /**
  * Chrome's default cut: in an editing host, a range is copied and then deleted (`beforeinput`
  * `deleteByCut`, so the clipboard has it even when a listener cancels the deletion). Anywhere else, or
- * with a caret, Chrome does nothing, so this is handled and has no painted-text fallback.
+ * with a caret, Chrome does nothing, so this is handled and has no painted-text fallback. A cut that
+ * `execCommand` asked for fires no `beforeinput` (Input Events: it is not a user's edit), only `input`.
  */
-function runCut(clipboard: ClipboardAccess): boolean {
+function runCut(clipboard: ClipboardAccess, source: ClipboardCommandSource): boolean {
   if (fireWritable("cut", clipboard)) return true
   if (editingSelectionKind() !== "range") return true
   copyNodeSelection(clipboard)
-  runEditingInput("deleteByCut", null)
+  runEditingInput("deleteByCut", null, { beforeInput: source === "user" })
   return true
 }
 
@@ -155,7 +159,10 @@ function clipboardData(clipboard: ClipboardAccess, mode: "readonly" | "protected
   return data
 }
 
-/** Chrome's default paste: the text of the clipboard goes into an editing host at the selection, and anywhere else nothing does. */
+/**
+ * Chrome's default paste: the text of the clipboard goes into an editing host at the selection, and
+ * anywhere else nothing does. A clipboard with no text changes nothing, and fires no `beforeinput`.
+ */
 function runPaste(clipboard: ClipboardAccess): boolean {
   const data = clipboardData(clipboard, "readonly")
   let canceled: boolean
@@ -166,7 +173,9 @@ function runPaste(clipboard: ClipboardAccess): boolean {
   }
   if (canceled) return true
   if (editingSelectionKind() === "none") return true
-  runEditingInput("insertFromPaste", null, { dataTransfer: clipboardData(clipboard, "readonly") })
+  const items = clipboardData(clipboard, "readonly")
+  if (pastedText(items) === null) return true
+  runEditingInput("insertFromPaste", null, { dataTransfer: items })
   return true
 }
 
@@ -184,7 +193,7 @@ function runSelectAll(): boolean {
  * when an `<input>` or `<textarea>` has focus: it handles the command itself, and fires no
  * clipboard event (docs/fork/deviations.md).
  */
-export function runClipboardCommand(command: ClipboardCommand, renderer: NativeRenderer): boolean {
+export function runClipboardCommand(command: ClipboardCommand, renderer: NativeRenderer, source: ClipboardCommandSource = "user"): boolean {
   if (isTextControl(focusedNode())) return false
   const clipboard = clipboardOf(renderer)
   let handled: boolean
@@ -193,7 +202,7 @@ export function runClipboardCommand(command: ClipboardCommand, renderer: NativeR
       handled = runCopy(clipboard)
       break
     case "cut":
-      handled = runCut(clipboard)
+      handled = runCut(clipboard, source)
       break
     case "paste":
       handled = runPaste(clipboard)
@@ -227,7 +236,7 @@ setDocumentCommands({
     if (command === undefined) return false
     const renderer = mountedRenderer()
     if (renderer === undefined) throw new Error(`document.execCommand("${name}") needs a mounted GPUIX root. Call it after render().`)
-    return runClipboardCommand(command, renderer)
+    return runClipboardCommand(command, renderer, "exec")
   },
   supported(name) {
     return documentCommandOf(name) !== undefined || name.toLowerCase() === "paste"

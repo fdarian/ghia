@@ -35,6 +35,8 @@ export interface EditingInputOptions {
   beforeChange?: () => void
   /** What an `insertFromPaste` inserts, and the `dataTransfer` of its events: a read-only store holding the clipboard. */
   dataTransfer?: DataTransfer
+  /** Whether `beforeinput` fires: not for an edit `document.execCommand` makes. Default true. */
+  beforeInput?: boolean
 }
 
 export interface EditingInputResult {
@@ -196,10 +198,10 @@ function insertAt(container: Node, offset: number, text: string): { start: Point
   return { start: { node: created, offset: 0 }, end: { node: created, offset: text.length } }
 }
 
-/** The text a paste inserts: `text/plain`, else the text content of `text/html`. */
-function pastedText(data: DataTransfer): string {
+/** The text a paste inserts: `text/plain`, else the text content of `text/html`, and `null` when the clipboard has neither. */
+export function pastedText(data: DataTransfer): string | null {
   if (data.types.includes("text/plain")) return data.getData("text/plain")
-  if (!data.types.includes("text/html")) return ""
+  if (!data.types.includes("text/html")) return null
   const body = parseHtmlDocument(data.getData("text/html")).body
   const text = body === null ? null : body.textContent
   if (text === null) throw new Error("A parsed HTML document has no body")
@@ -291,7 +293,7 @@ export function runEditingInput(inputType: string, data: string | null, options:
 
   const dataTransfer = options.dataTransfer ?? null
   const targets = [staticRangeOf(range)]
-  if (!dispatchInput(host, "beforeinput", inputType, data, isComposing, targets, dataTransfer)) {
+  if (options.beforeInput !== false && !dispatchInput(host, "beforeinput", inputType, data, isComposing, targets, dataTransfer)) {
     return { handled: true, canceled: true, changed: false }
   }
   options.beforeChange?.()
@@ -321,7 +323,9 @@ export function runEditingInput(inputType: string, data: string | null, options:
       const startOffset = range.startOffset
       range.deleteContents()
       const at = isText(startNode) ? { node: startNode, offset: startOffset } : { node: range.startContainer, offset: range.startOffset }
-      caret = insertLines(at, pastedText(dataTransfer))
+      const text = pastedText(dataTransfer)
+      if (text === null) throw new Error("insertFromPaste needs a clipboard with text; the caller checks with pastedText first")
+      caret = insertLines(at, text)
       break
     }
     case "deleteByCut":

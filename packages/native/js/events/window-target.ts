@@ -320,12 +320,21 @@ export class GpuixDocument<Element = unknown> extends Document {
     return DOCUMENT_BINDING
   }
 
+  private executingCommand = false
+
   /**
    * Runs `copy`, `cut` or `selectAll` as the Edit menu does, and returns whether it did; `paste`
-   * and every other command return false and do nothing (docs/fork/deviations.md).
+   * and every other command return false and do nothing (docs/fork/deviations.md). A call made while
+   * another runs (from the `copy` event it fires) returns false and does nothing, as Chrome's does.
    */
   execCommand(commandId: string, _showUI?: boolean, _value?: string): boolean {
-    return documentCommands().exec(String(commandId))
+    if (this.executingCommand) return false
+    this.executingCommand = true
+    try {
+      return documentCommands().exec(String(commandId))
+    } finally {
+      this.executingCommand = false
+    }
   }
 
   queryCommandSupported(commandId: string): boolean {

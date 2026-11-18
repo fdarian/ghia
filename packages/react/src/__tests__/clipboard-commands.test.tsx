@@ -428,6 +428,21 @@ describeNative("the clipboard commands (React)", () => {
       expect(one.data).toBe("bold and italicone two")
     })
 
+    it("a clipboard with no text changes nothing and fires no beforeinput, delete or input", () => {
+      const { renderer, host, one } = page()
+      renderer.writeClipboard([{ type: "application/x-foo", data: "foo" }])
+      host.focus()
+      document.getSelection().setBaseAndExtent(one, 0, one, 3)
+      const pastes = copyEvents(document, "paste")
+      const log = editLog(host, ["beforeinput", "input"])
+      renderer.simulateKeystrokes("ControlOrMeta+v")
+      expect(pastes).toHaveLength(1)
+      expect(log).toEqual([])
+      expect(one.data).toBe("one two")
+      const selection = document.getSelection()
+      expect([selection.anchorNode, selection.anchorOffset, selection.focusOffset]).toEqual([one, 0, 3])
+    })
+
     it("a paste canceled at the paste event inserts nothing and fires no beforeinput", () => {
       const { renderer, host, one } = page()
       clipboardText(renderer, "XY")
@@ -494,6 +509,40 @@ describeNative("the clipboard commands (React)", () => {
         { type: "application/x-lexical-editor", data: "{}" },
         { type: "text/plain", data: "from lexical" },
       ])
+    })
+
+    it("a call made from the event of another returns false, so the event fires once", () => {
+      const { renderer, host, one } = page()
+      host.focus()
+      document.getSelection().setBaseAndExtent(one, 0, one, 3)
+      const inner: boolean[] = []
+      const seen = copyEvents(document)
+      const listener = () => {
+        inner.push(document.execCommand("copy"))
+      }
+      document.addEventListener("copy", listener)
+      cleanups.push(() => document.removeEventListener("copy", listener))
+      expect(document.execCommand("copy")).toBe(true)
+      expect(inner).toEqual([false])
+      expect(seen).toHaveLength(1)
+      expect(renderer.readClipboard()[0]).toEqual({ type: "text/plain", data: "one" })
+      // The guard is released afterwards.
+      expect(document.execCommand("copy")).toBe(true)
+      expect(inner).toEqual([false, false])
+    })
+
+    it("cut fires input deleteByCut and no beforeinput, as a key's cut fires both", () => {
+      const { renderer, host, one } = page()
+      host.focus()
+      document.getSelection().setBaseAndExtent(one, 0, one, 3)
+      const log = editLog(host, ["cut", "beforeinput", "input"])
+      expect(document.execCommand("cut")).toBe(true)
+      expect(log).toEqual([
+        { type: "cut" },
+        { type: "input", inputType: "deleteByCut", data: null, cancelable: false, transfer: null, ranges: [] },
+      ])
+      expect(one.data).toBe(" two")
+      expect(renderer.readClipboard()[0]).toEqual({ type: "text/plain", data: "one" })
     })
 
     it("copy and cut do what the keys do, and paste returns false and does nothing", () => {
