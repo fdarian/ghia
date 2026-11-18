@@ -1,0 +1,413 @@
+{
+ "css": "span{color:#000}li{color:#f00}li li{color:#00f}li li li{color:#f00}li li li li{color:#00f}.nested{list-style-type:none}",
+ "cases": [
+  {
+   "name": "ul disc",
+   "html": "<ul style=\"list-style-type:disc\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li></ul>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "ul circle",
+   "html": "<ul style=\"list-style-type:circle\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li></ul>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "ul square",
+   "html": "<ul style=\"list-style-type:square\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li></ul>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "ul default",
+   "html": "<ul><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li></ul>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "ol decimal 1-12",
+   "html": "<ol><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li><li><span>item 12</span></li></ol>",
+   "h": 340,
+   "style": ""
+  },
+  {
+   "name": "ol start 5",
+   "html": "<ol start=\"5\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li></ol>",
+   "h": 160,
+   "style": ""
+  },
+  {
+   "name": "ol start 9 crossing two digits",
+   "html": "<ol start=\"8\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li></ol>",
+   "h": 160,
+   "style": ""
+  },
+  {
+   "name": "ol reversed",
+   "html": "<ol reversed><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li></ol>",
+   "h": 160,
+   "style": ""
+  },
+  {
+   "name": "ol reversed start 3",
+   "html": "<ol reversed start=\"3\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li></ol>",
+   "h": 160,
+   "style": ""
+  },
+  {
+   "name": "ol li value 10 mid-list",
+   "html": "<ol><li><span>one</span></li><li value=\"10\"><span>ten</span></li><li><span>eleven</span></li><li value=\"3\"><span>three</span></li><li><span>four</span></li></ol>",
+   "h": 190,
+   "style": ""
+  },
+  {
+   "name": "lower-alpha 1-28",
+   "html": "<ol style=\"list-style-type:lower-alpha\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li><li><span>item 12</span></li><li><span>item 13</span></li><li><span>item 14</span></li><li><span>item 15</span></li><li><span>item 16</span></li><li><span>item 17</span></li><li><span>item 18</span></li><li><span>item 19</span></li><li><span>item 20</span></li><li><span>item 21</span></li><li><span>item 22</span></li><li><span>item 23</span></li><li><span>item 24</span></li><li><span>item 25</span></li><li><span>item 26</span></li><li><span>item 27</span></li><li><span>item 28</span></li></ol>",
+   "h": 770,
+   "style": ""
+  },
+  {
+   "name": "upper-roman 1-12",
+   "html": "<ol style=\"list-style-type:upper-roman\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li><li><span>item 12</span></li></ol>",
+   "h": 340,
+   "style": ""
+  },
+  {
+   "name": "lower-roman 1-12",
+   "html": "<ol style=\"list-style-type:lower-roman\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li><li><span>item 12</span></li></ol>",
+   "h": 340,
+   "style": ""
+  },
+  {
+   "name": "upper-alpha 1-4",
+   "html": "<ol style=\"list-style-type:upper-alpha\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li></ol>",
+   "h": 160,
+   "style": ""
+  },
+  {
+   "name": "ol lower-latin",
+   "html": "<ol style=\"list-style-type:lower-latin\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li></ol>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "ul disc outside",
+   "html": "<ul style=\"list-style-position:outside\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li></ul>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "ul square outside",
+   "html": "<ul style=\"list-style-type:square;list-style-position:outside\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 100,
+   "style": ""
+  },
+  {
+   "name": "ol outside",
+   "html": "<ol style=\"list-style-position:outside\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li></ol>",
+   "h": 320,
+   "style": ""
+  },
+  {
+   "name": "ol alpha outside",
+   "html": "<ol style=\"list-style:lower-alpha outside\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li></ol>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "ul disc inside",
+   "html": "<ul style=\"list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li></ul>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "ul square inside",
+   "html": "<ul style=\"list-style-type:square;list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 100,
+   "style": ""
+  },
+  {
+   "name": "ol inside",
+   "html": "<ol style=\"list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li></ol>",
+   "h": 320,
+   "style": ""
+  },
+  {
+   "name": "ol alpha inside",
+   "html": "<ol style=\"list-style:lower-alpha inside\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li></ol>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "inside wraps",
+   "html": "<ul style=\"list-style-position:inside;width:160px\"><li><span>a long item of text that wraps onto more lines</span></li></ul>",
+   "h": 190,
+   "style": ""
+  },
+  {
+   "name": "outside wraps",
+   "html": "<ul style=\"width:160px\"><li><span>a long item of text that wraps onto more lines</span></li></ul>",
+   "h": 190,
+   "style": ""
+  },
+  {
+   "name": "nested ul",
+   "html": "<ul><li><span>a</span><ul><li><span>b</span><ul><li><span>c</span><ul><li><span>d</span></li></ul></li></ul></li><li><span>b2</span></li></ul></li><li><span>a2</span></li></ul>",
+   "h": 260,
+   "style": ""
+  },
+  {
+   "name": "ol in ul",
+   "html": "<ul><li><span>a</span><ol><li><span>b</span></li><li><span>b2</span><ul><li><span>c</span></li></ul></li></ol></li></ul>",
+   "h": 220,
+   "style": ""
+  },
+  {
+   "name": "ul in ol",
+   "html": "<ol><li><span>a</span><ul><li><span>b</span></li></ul></li><li><span>a2</span></li></ol>",
+   "h": 190,
+   "style": ""
+  },
+  {
+   "name": "li first child p",
+   "html": "<ul><li><p><span>paragraph</span></p></li><li><p><span>two</span></p><p><span>three</span></p></li></ul>",
+   "h": 220,
+   "style": ""
+  },
+  {
+   "name": "ol li first child p",
+   "html": "<ol><li><p><span>paragraph</span></p></li><li><span>plain</span></li></ol>",
+   "h": 190,
+   "style": ""
+  },
+  {
+   "name": "li first child nested list",
+   "html": "<ul><li><ul><li><span>inner</span></li></ul><span>after</span></li><li><ol><li><span>inner ol</span></li></ol></li></ul>",
+   "h": 220,
+   "style": ""
+  },
+  {
+   "name": "li first child nested ol",
+   "html": "<ol><li><ol><li><span>inner</span></li></ol></li><li><span>two</span></li></ol>",
+   "h": 190,
+   "style": ""
+  },
+  {
+   "name": "ul font 12px/normal",
+   "html": "<ul style=\"font-size:12px;line-height:normal\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ol font 12px/normal",
+   "html": "<ol style=\"font-size:12px;line-height:normal\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li></ol>",
+   "h": 600,
+   "style": ""
+  },
+  {
+   "name": "ul font 12px/20px",
+   "html": "<ul style=\"font-size:12px;line-height:20px\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ol font 12px/20px",
+   "html": "<ol style=\"font-size:12px;line-height:20px\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li></ol>",
+   "h": 600,
+   "style": ""
+  },
+  {
+   "name": "ul font 20px/normal",
+   "html": "<ul style=\"font-size:20px;line-height:normal\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ol font 20px/normal",
+   "html": "<ol style=\"font-size:20px;line-height:normal\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li></ol>",
+   "h": 600,
+   "style": ""
+  },
+  {
+   "name": "ul font 32px/48px",
+   "html": "<ul style=\"font-size:32px;line-height:48px\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ol font 32px/48px",
+   "html": "<ol style=\"font-size:32px;line-height:48px\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li></ol>",
+   "h": 600,
+   "style": ""
+  },
+  {
+   "name": "ul font 32px/1",
+   "html": "<ul style=\"font-size:32px;line-height:1\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ol font 32px/1",
+   "html": "<ol style=\"font-size:32px;line-height:1\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li></ol>",
+   "h": 600,
+   "style": ""
+  },
+  {
+   "name": "ul font 14px/2.2",
+   "html": "<ul style=\"font-size:14px;line-height:2.2\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ol font 14px/2.2",
+   "html": "<ol style=\"font-size:14px;line-height:2.2\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li></ol>",
+   "h": 600,
+   "style": ""
+  },
+  {
+   "name": "ul font 24px/24px",
+   "html": "<ul style=\"font-size:24px;line-height:24px\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ol font 24px/24px",
+   "html": "<ol style=\"font-size:24px;line-height:24px\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li></ol>",
+   "h": 600,
+   "style": ""
+  },
+  {
+   "name": "ul font 9px/9px",
+   "html": "<ul style=\"font-size:9px;line-height:9px\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ol font 9px/9px",
+   "html": "<ol style=\"font-size:9px;line-height:9px\"><li><span>item 1</span></li><li><span>item 2</span></li><li><span>item 3</span></li><li><span>item 4</span></li><li><span>item 5</span></li><li><span>item 6</span></li><li><span>item 7</span></li><li><span>item 8</span></li><li><span>item 9</span></li><li><span>item 10</span></li><li><span>item 11</span></li></ol>",
+   "h": 600,
+   "style": ""
+  },
+  {
+   "name": "ul inside font 9px",
+   "html": "<ul style=\"font-size:9px;line-height:1.5;list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ol inside font 9px",
+   "html": "<ol style=\"font-size:9px;line-height:1.5;list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li></ol>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ul inside font 12px",
+   "html": "<ul style=\"font-size:12px;line-height:1.5;list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ol inside font 12px",
+   "html": "<ol style=\"font-size:12px;line-height:1.5;list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li></ol>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ul inside font 14px",
+   "html": "<ul style=\"font-size:14px;line-height:1.5;list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ol inside font 14px",
+   "html": "<ol style=\"font-size:14px;line-height:1.5;list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li></ol>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ul inside font 20px",
+   "html": "<ul style=\"font-size:20px;line-height:1.5;list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ol inside font 20px",
+   "html": "<ol style=\"font-size:20px;line-height:1.5;list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li></ol>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ul inside font 24px",
+   "html": "<ul style=\"font-size:24px;line-height:1.5;list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ol inside font 24px",
+   "html": "<ol style=\"font-size:24px;line-height:1.5;list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li></ol>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ul inside font 32px",
+   "html": "<ul style=\"font-size:32px;line-height:1.5;list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li></ul>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "ol inside font 32px",
+   "html": "<ol style=\"font-size:32px;line-height:1.5;list-style-position:inside\"><li><span>item 1</span></li><li><span>item 2</span></li></ol>",
+   "h": 150,
+   "style": ""
+  },
+  {
+   "name": "list-style none",
+   "html": "<ul style=\"list-style:none\"><li><span>item 1</span></li><li><span>item 2</span></li></ul><ol style=\"list-style-type:none\"><li><span>item 1</span></li><li><span>item 2</span></li></ol>",
+   "h": 200,
+   "style": ""
+  },
+  {
+   "name": "li list-style-type none among others",
+   "html": "<ul><li><span>a</span></li><li style=\"list-style-type:none\"><span>none</span></li><li><span>c</span></li></ul>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "li type override",
+   "html": "<ul><li style=\"list-style-type:square\"><span>sq</span></li><li style=\"list-style-type:decimal\"><span>dec</span></li><li style=\"list-style-type:lower-roman\"><span>rom</span></li></ul>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "lexical like",
+   "html": "<ul class=\"ul\"><li value=\"1\" class=\"li\"><span>first</span></li><li class=\"li nested\"><ul class=\"ul\"><li value=\"1\" class=\"li\"><span>nested one</span></li><li value=\"2\" class=\"li\"><span>nested two</span></li></ul></li><li value=\"2\" class=\"li\"><span>second</span></li></ul><ol class=\"ol\"><li value=\"1\" class=\"li\"><span>first</span></li><li class=\"li nested\"><ol class=\"ol\"><li value=\"1\" class=\"li\"><span>nested one</span></li><li value=\"2\" class=\"li\"><span>nested two</span></li></ol></li><li value=\"2\" class=\"li\"><span>second</span></li></ol>",
+   "h": 360,
+   "style": ""
+  },
+  {
+   "name": "lexical like start",
+   "html": "<ol class=\"ol\" start=\"4\"><li value=\"4\" class=\"li\"><span>four</span></li><li value=\"5\" class=\"li\"><span>five</span></li></ol>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "li padding and border",
+   "html": "<ul><li style=\"padding-left:12px;border-left:3px solid #ccc\"><span>padded</span></li><li style=\"margin-left:20px\"><span>margin</span></li></ul>",
+   "h": 130,
+   "style": ""
+  },
+  {
+   "name": "ol li padding",
+   "html": "<ol><li style=\"padding-left:12px\"><span>padded</span></li></ol>",
+   "h": 100,
+   "style": ""
+  },
+  {
+   "name": "color from li",
+   "html": "<ul><li style=\"color:#0a0\"><span>green</span></li></ul>",
+   "h": 80,
+   "style": ""
+  }
+ ]
+}

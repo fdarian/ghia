@@ -1,0 +1,73 @@
+<!doctype html>
+<!--
+  Oracle for list-markers.test.tsx: where headless Chrome puts the marker of a list item. Every case of
+  list-markers-cases.json (a stack of lists, read by this page and by the test) is a band of its own, the bands in columns. A marker is not an
+  element and Chrome gives scripts no box for it, so it is measured by its ink: the sheet of the cases colours every `li`
+  by its depth (red, blue, red, ...) and its text black, so the marker of an item is the pixels of the item's colour in a
+  region that this page's answer fixes (list-markers-oracle.sh reads them off a screenshot at device scale 1 and 2).
+  This page writes, per `li` in document order: its box and the first line box of its text (the Range of the first text
+  node with text in it), relative to the band, its computed colour, `list-style-type` and `list-style-position`.
+-->
+<html><head><meta charset="utf-8"><style id="sheet"></style><style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{width:2240px;background:#fff}
+.band{position:absolute;width:640px;padding-left:100px;background:#fff;color:#000;font:16px/24px Helvetica;overflow:hidden}
+</style></head><body>
+<script>
+// Synchronous, so that a screenshot taken at load has the page (a fetch resolves after it).
+const request = new XMLHttpRequest();
+request.open('GET', 'list-markers-cases.json', false);
+request.send();
+{
+  const doc = JSON.parse(request.responseText);
+  document.getElementById('sheet').textContent = doc.css;
+  const COLUMN = 6500;
+  let top = 10, left = 0, tallest = 0;
+  const bands = doc.cases.map((c) => {
+    const band = document.createElement('div');
+    band.className = 'band';
+    if (top + c.h > COLUMN) {
+      left += 740;
+      top = 10;
+    }
+    band.style.cssText = `left:${left}px;top:${top}px;height:${c.h}px;${c.style}`;
+    band.innerHTML = c.html;
+    document.body.append(band);
+    top += c.h + 10;
+    tallest = Math.max(tallest, top);
+    return band;
+  });
+  const firstText = (el) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.data.trim()) return n;
+    return null;
+  };
+  const result = doc.cases.map((c, i) => {
+    const band = bands[i];
+    const origin = band.getBoundingClientRect();
+    const rel = (r) => [r.x - origin.x, r.y - origin.y, r.width, r.height];
+    return {
+      name: c.name,
+      left: origin.x,
+      top: origin.y,
+      items: [...band.querySelectorAll('li')].map((li) => {
+        const text = firstText(li);
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const style = getComputedStyle(li);
+        return {
+          box: rel(li.getBoundingClientRect()),
+          text: rel(range.getClientRects()[0]),
+          color: style.color,
+          type: style.listStyleType,
+          position: style.listStylePosition,
+          display: style.display,
+        };
+      }),
+    };
+  });
+  document.body.dataset.oracle = JSON.stringify({ width: left + 740, height: tallest, cases: result });
+}
+</script>
+</body></html>
