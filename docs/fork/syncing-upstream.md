@@ -418,6 +418,13 @@ each entry or applies it again.
   (`splice_patch_tests.rs`) count the element states a frame accesses and gave their plain divs a hover style so that they have
   some. A sync that replaces `div.rs` has to keep `state_id` and its three call sites.
 
+### The pump ends after a key event when the embedder asks (zed `gpui_macos/src/platform.rs`: `MacPlatform::set_yield_after_key_event`, `drain_events`, `pump_app_nonblocking`; zed branch `claude/pump-yields-per-key`, `8e5e88eee6`)
+
+- **Decision.** An embedding change for what Ghia cannot do without. Owner OK'd 2026-11-18, fork-only. Opt-in with an unchanged default: a static in `gpui_macos` that is off unless the embedder sets it, so GPUI's own `[NSApplication run]` loop, the `Platform::run` path and any other embedder see the pump as upstream wrote it.
+- **What it changes.** With it on, `drain_events` returns after the `sendEvent:` of a key event (`NSEventTypeKeyDown`, `KeyUp`, `FlagsChanged`), and `pump_app_nonblocking` then posts the block it already posts to have the embedder pump again and returns without running the run loop's sources. The step accounting is as before: a pump that ran a step returns true, and none runs a second one. Mouse and other events are drained together as before. Ghia turns it on in `GpuixRenderer::init` and in the test renderer's constructor. See [frames-and-wakes.md](frames-and-wakes.md#one-key-event-per-pump).
+- **Considerations.** The pump used to send up to 256 events in one call, and the handlers of a key run JS inside it, where the engine runs no microtask until the call returns, so every key but the first of a batch was handled before the app's microtasks for the one before. A JS-side fix does not exist (the queue cannot be drained from inside a call on every runtime, and doing it under an arbitrary caller re-enters that caller). The cost is an extra tick per key event, so a keyDown and a keyUp are two ticks, and a pump that stops short of the sources (they run in the next one). The key's own events are not split further: a key is one `sendEvent:` and AppKit's `keyDown:` and `insertText:` of it run in it.
+- **Reasoning.** Lexical, and any library that commits in a microtask or a `MutationObserver` delivery, loses keys 2 and 3 of a batch (a slow frame, key repeat) otherwise; a browser runs a checkpoint after every task, so this is the DOM behaviour (AGENTS.md: "behave like the DOM"). Opt-in keeps the change a small, upstreamable one that alters no other embedder.
+
 ## Procedure
 
 1. Fetch the upstreams: `git fetch upstream` in the repo root and in `zed/`, and `git fetch zed-industries main` in `zed/`.

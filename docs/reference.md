@@ -10664,7 +10664,7 @@ synchronous `simulateKeystrokes` on the test renderer runs every key inside one
 call, where no microtask runs between two keys, and an editor that commits its
 update in a microtask (Lexical) loses all but the first of "m i d" typed that
 way ([deviations.md](fork/deviations.md#events-and-input)): give it one call
-per key and `await` between them. A sequence whose later press is not a key has
+per key and `await` between them. Keys from the keyboard are not affected: the frame loop's pump ends after each key event and the next tick takes the next key, so each has its own microtask checkpoint ([frames-and-wakes.md](fork/frames-and-wakes.md#one-key-event-per-pump)). A sequence whose later press is not a key has
 pressed the ones before it by then, where the test renderer pressed none.
 `nativeSimulateModifiersChanged("shift")` reports the held modifiers changing, the
 way the platform does for a modifier pressed or released on its own (a `Shift`
