@@ -1175,6 +1175,17 @@ export declare class TestGpuixRenderer {
    * paragraph, with the bytes and the boxes, and the caret. Test renderer only.
    */
   getPaintedNodeSelection(): PaintedNodeSelection
+  /**
+   * Where the input method of the focused editing host `host_id` is told the characters `start..end`
+   * are (the rect it positions its candidate window by), in window coordinates; null when it is told
+   * nothing. Test renderer only.
+   */
+  getInputMethodBounds(hostId: number, start: number, end: number): TextRect | null
+  /**
+   * The character offset the input method of the editing host `host_id` is told for a window point,
+   * null where it names none. Test renderer only.
+   */
+  getInputMethodIndexAt(hostId: number, x: number, y: number): number | null
   /** The DOM position at a window point, see the live renderer's. */
   caretPositionFromPoint(x: number, y: number): CaretPoint | null
   /** A DOM position moved along the lines of the painted text, see the live renderer's. */
@@ -2121,6 +2132,13 @@ export interface EventPayload {
    * Populated for: editinput, the text input of an editing host (`editing/input_handler.rs`).
    */
   editRange?: Array<number>
+  /**
+   * Where the selection goes in the text an `editinput` of kind `mark` puts in: `[start, end]` in UTF-16
+   * code units from the start of that text. Absent: at its end. `is_composing` is whether the platform's
+   * composition was running when the edit was asked for.
+   * Populated for: editinput, the text input of an editing host (`editing/input_handler.rs`).
+   */
+  editSelection?: Array<number>
   /**
    * Id of the other element of a boundary or focus event (JS makes it
    * `event.relatedTarget`, the element itself, or `null` when absent).

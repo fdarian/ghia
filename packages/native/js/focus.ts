@@ -1,6 +1,7 @@
 import { HOST_BINDING, flushPendingMutations, type ObservableElement } from "./bounds.js"
 import { placeCaretInEditingHost } from "./dom/selection.js"
 import { isEditingHost } from "./editing/host.js"
+import { endEditingComposition } from "./editing/input.js"
 import type { Element } from "./dom/nodes.js"
 import type { NativeRenderer } from "./host.js"
 
@@ -49,6 +50,15 @@ export function placeCaretOnFocusIn(element: object | undefined): void {
   // The root dropped the element between the focus change and this event.
   if (element === undefined) return
   if (isEditingHost(element as Element)) placeCaretInEditingHost(element as Element)
+}
+
+/**
+ * A host that loses focus ends the composition it has (`compositionend`, before `blur`), as Chrome
+ * does: native ended the platform's side when focus left, and Lexical and its like wait for the event.
+ */
+export function endCompositionOnBlur(element: object | undefined): void {
+  if (element === undefined) return
+  if (isEditingHost(element as Element)) endEditingComposition(element as Element)
 }
 
 /**

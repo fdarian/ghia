@@ -499,6 +499,8 @@ interface NativeTestRendererApi
   getPaintedHighlights(): HighlightMatch[]
   getPaintedNodeSelection(): PaintedNodeSelection
   getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): TextRect[]
+  getInputMethodBounds(hostId: number, start: number, end: number): TextRect | null
+  getInputMethodIndexAt(hostId: number, x: number, y: number): number | null
   caretPositionFromPoint(x: number, y: number): CaretPoint | null
   moveCaretVisually(nodeId: number, offset: number, op: string, goalX?: number | null): CaretPoint | null
   getSyntaxCacheStats(): number[]
@@ -906,6 +908,8 @@ export class TestRenderer implements NativeRenderer {
    *  Unlike `nativeSimulateKeystrokes`, this focuses nothing first, which is
    *  the only way to test that `autoFocus` (or a click) actually moved focus. */
   simulateKeystrokes(keystrokes: string): void {
+    // What a script changed since the last flush (the selection a key's text goes to) is native's before the key is.
+    flushPendingMutations(this)
     this.native.flushIfDirty()
     // Events already queued reach JS before a key does, as on a live window.
     // Delivered after it, they would undo what the key's own synchronous focus
@@ -1002,19 +1006,23 @@ export class TestRenderer implements NativeRenderer {
     this.dispatchNativeEvents()
   }
 
-  /** Focus a text input, then run an input method composition in it, one step
-   *  per key. Each step is what macOS does for a key the input method takes: a
-   *  `keydown` with `key` `"Process"`, the composition events and the `change`
-   *  of the edit, then the `keyup` of that key. A text input is the only element
-   *  that composes, so `elementId` must be one.
-   *  @param elementId - the `<input>` or `<textarea>` to compose in
+  /** Focus a text input or an editing host (`contenteditable`), then run an input method
+   *  composition in it, one step per key. Each step is what macOS does for a key the input
+   *  method takes: a `keydown` with `key` `"Process"`, the composition events and the edit
+   *  (`change` of an input, `beforeinput` and `input` of a host), then the `keyup` of that key.
+   *  Composing needs the platform's text input, which only these two have: a host that is
+   *  focused with the selection in it, or none of it is reached.
+   *  @param elementId - the `<input>`, `<textarea>` or editing host to compose in
    *  @param steps - the keys the input method consumes, in order */
   simulateComposition(elementId: number, steps: readonly CompositionStep[]): void {
+    flushPendingMutations(this)
     this.native.flushIfDirty()
     this.native.focusElement(elementId)
     // Focus events are queued but a key is delivered synchronously: let the
     // focus handlers run first, as in a browser.
     this.dispatchNativeEvents()
+    // The text input of an editing host is registered by the frame that paints it focused.
+    this.native.flushIfDirty()
     for (const step of steps) {
       this.native.simulateImeKeyDown(
         step.key,
@@ -2275,6 +2283,20 @@ export class TestRenderer implements NativeRenderer {
 
   getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): TextRect[] {
     return this.native.getTextRangeRects(startNodeId, startOffset, endNodeId, endOffset)
+  }
+
+  /**
+   * Where the platform's input method is told the characters `start..end` (UTF-16 offsets into the text of
+   * the paragraphs the selection reaches) of the editing host `hostId` are, in window coordinates: the rect
+   * it positions its candidate window by. `null` when the host tells it nothing.
+   */
+  getInputMethodBounds(hostId: number, start: number, end: number): TextRect | null {
+    return this.native.getInputMethodBounds(hostId, start, end)
+  }
+
+  /** The character offset the platform's input method is told for a window point, `null` outside the text it knows. */
+  getInputMethodIndexAtPoint(hostId: number, x: number, y: number): number | null {
+    return this.native.getInputMethodIndexAt(hostId, x, y)
   }
 
   caretPositionFromPoint(x: number, y: number): CaretPoint | null {

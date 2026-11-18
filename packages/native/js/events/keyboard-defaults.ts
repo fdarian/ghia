@@ -176,6 +176,8 @@ function editingInputOf(key: string | undefined, shift: boolean): string | undef
 
 /** Whether the key was an edit of an editing host: native then keeps the platform from typing it. */
 function editInEditingHost(event: DomEvent): boolean {
+  // A key the input method is composing with is the input method's: what it does with the key is the edit.
+  if (event.isComposing) return false
   const inputType = editingInputOf(event.key, Boolean(event.modifiers?.shift))
   if (inputType === undefined) return false
   const focused = focusedNode()

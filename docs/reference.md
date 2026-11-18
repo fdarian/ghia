@@ -5293,8 +5293,17 @@ marked text for `insertCompositionText`, and the characters a Backspace or Delet
 **Text comes from the platform's text input, not from `keydown`.** A focused editing host registers the window's input handler, so what the
 keyboard types is what the platform gives it, once, after the `keydown`: a character, a dead key's result, an emoji from the picker, text
 from dictation. It runs `beforeinput` (`insertText`; `insertReplacementText` when the platform names a non-empty range to replace),
-the change and `input`. A `keydown` that was prevented gives no text. Nothing the page does on `keydown` has to repeat it. An input
-method's composition is not carried out yet: see [deviations.md](./fork/deviations.md#events-and-input).
+the change and `input`. A `keydown` that was prevented gives no text. Nothing the page does on `keydown` has to repeat it.
+
+**An input method's composition runs in an editing host.** The platform marks text (`setMarkedText`) and the host fires `compositionstart` the first
+time, then for each change `beforeinput` (`insertCompositionText`, `isComposing` true, not cancelable), `compositionupdate`, the change and `input`;
+the key that commits it replaces the marked text with the final text (the same four events when it differs) and fires `compositionend` with the
+committed text, and the caret ends after it. A dead key (Option+E, then E) is a composition of one character, `´` then `é`. `unmark` ends it with
+`compositionend` and keeps the text; marking no text cancels it, the text goes and `compositionend` has no data. The keys an input method takes
+are `keydown`s with `key` `"Process"`, and `isComposing` is true on the events after the first. The composition ends, with `compositionend`,
+when the host loses focus (before `blur`) and when the next edit finds that the selection has left the marked text. The platform is told where the
+marked text is on screen, for its candidate window, and which character a point is on, in the paragraphs the selection reaches. What is not
+there yet is under [deviations.md](./fork/deviations.md#events-and-input).
 
 A `keydown` that was not prevented, with no Ctrl, Alt or Cmd, on a focused editing host (not an `<input>` or `<textarea>` inside it) makes:
 
@@ -10633,14 +10642,16 @@ way the platform does for a modifier pressed or released on its own (a `Shift`
 press sends a key event instead); Shift on its own counts as a key for
 `:focus-visible`, Ctrl, Alt and Meta do not.
 
-`simulateComposition(id, steps)` focuses an `<input>` or `<textarea>` and runs an
-input method composition in it, one step per key the input method takes. A step
+`simulateComposition(id, steps)` focuses an `<input>`, a `<textarea>` or an editing host and runs an
+input method composition in it, one step per key the input method takes. In a host the selection has to be
+in it first, and the steps go through the platform's text input as AppKit's would. A step
 is `{ key, action: 'mark', text }` (the composition becomes `text`),
 `{ key, action: 'commit', text }` (it ends with `text`) or
 `{ key, action: 'unmark' }` (it ends with the text it has). Each step sends the
 `"Process"` `keydown`, the composition events and the `change` of the edit, then
-the `keyup` of that key, as in [Input method composition](#input-method-composition).
-It throws when `id` is not a focusable text input.
+the `keyup` of that key, as in [Input method composition](#input-method-composition)
+and [Editing hosts](#editing-hosts). It throws when `id` is not a focusable text input or
+editing host.
 
 ```ts
 renderer.simulateComposition(id, [
@@ -10652,10 +10663,13 @@ renderer.simulateComposition(id, [
 
 `simulateEditingInput(inputType, data?)` makes one edit of the focused editing host, without a key: `beforeinput`, the change
 unless a listener canceled it, then `input` (see [Editing hosts](#editing-hosts)). `simulateEditingComposition(steps)` runs a
-composition in it with the same step shapes as `simulateComposition` (`{ action: 'mark', text }`, `{ action: 'commit', text }`,
+composition in it, with no platform text input (so what the platform is told is not exercised), with the same step shapes as `simulateComposition` (`{ action: 'mark', text }`, `{ action: 'commit', text }`,
 `{ action: 'unmark' }`; a `key` is accepted and ignored, and no key events are sent): `mark` replaces the marked text with `text`,
 `commit` does so with the final text if it differs and then fires `compositionend`, and `unmark` is `compositionend` alone. Both
-run synchronously and throw when no editing host holds focus and the selection.
+run synchronously and throw when no editing host holds focus and the selection. `getInputMethodBounds(hostId, start, end)` and
+`getInputMethodIndexAtPoint(hostId, x, y)` read what the platform's input method is told about a focused host: the window rect of the
+characters `start..end` (UTF-16 offsets into the text of the paragraphs the selection reaches, `null` where there is none), and the offset of
+the character at a point.
 
 ```ts
 host.focus()

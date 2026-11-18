@@ -226,6 +226,14 @@ export type EditingCompositionStep =
   /** The composition ends with the text it has. */
   | { action: "unmark" }
 
+/** What the platform's input method adds to a step: it names the text it replaces and where the caret goes. */
+export interface EditingCompositionOptions {
+  /** The text the step replaces, in place of the marked text (or the selection, when no composition runs). */
+  replacing?: Range
+  /** Where the selection goes in the text of a `mark`, as UTF-16 offsets from its start: its end when absent. */
+  selected?: readonly [number, number]
+}
+
 interface Composition {
   host: Element
   marked: Range
@@ -253,28 +261,69 @@ function replaceMarked(active: Composition, text: string): EditingInputResult {
   })
 }
 
+function endComposition(active: Composition, data: string): void {
+  compositions.delete(active.host)
+  dispatchComposition(active.host, "compositionend", data)
+}
+
+/** The text of `marked` is `offset` units in: the selection goes there, in the text the composition put in. */
+function selectInMarked(marked: Range, selected: readonly [number, number]): void {
+  const node = marked.startContainer
+  if (!isText(node)) return
+  const at = (offset: number) => Math.min(marked.startOffset + offset, node.data.length)
+  getSelection().setBaseAndExtent(node, at(selected[0]), node, at(selected[1]))
+}
+
+/**
+ * Ends the composition of `host` with the text it has, as `compositionend`: the host lost focus, or the
+ * input method began another composition when this one had been dropped. Nothing happens when none runs.
+ */
+export function endEditingComposition(host: Element): void {
+  const running = compositions.get(host)
+  if (running !== undefined) endComposition(running, running.marked.toString())
+}
+
 /**
  * One step of an input method's composition: Chrome's order is `compositionstart`, `beforeinput`,
- * `compositionupdate`, the change, `input`, and at the end `compositionend`. Returns false when
- * no editing host holds the selection and focus.
+ * `compositionupdate`, the change, `input`, and at the end `compositionend`. Marking no text is the
+ * input method canceling the composition: the marked text goes, and `compositionend` has no data.
+ * Returns false when no editing host holds the selection and focus.
  */
-export function runEditingComposition(step: EditingCompositionStep): boolean {
-  const target = editingTarget()
+export function runEditingComposition(step: EditingCompositionStep, options: EditingCompositionOptions = {}): boolean {
+  let target = editingTarget()
   if (target === null) return false
+  const running = compositions.get(target.host)
   if (step.action === "unmark") {
-    const ended = compositions.get(target.host)
-    if (ended === undefined) return false
-    compositions.delete(target.host)
-    dispatchComposition(ended.host, "compositionend", ended.marked.toString())
+    if (running !== undefined) endComposition(running, running.marked.toString())
     return true
   }
-  const active = compositions.get(target.host) ?? startComposition(target)
+  const replacing = options.replacing
+  if (replacing !== undefined) {
+    if (running !== undefined) {
+      running.marked.setStart(replacing.startContainer, replacing.startOffset)
+      running.marked.setEnd(replacing.endContainer, replacing.endOffset)
+    } else {
+      getSelection().setBaseAndExtent(replacing.startContainer, replacing.startOffset, replacing.endContainer, replacing.endOffset)
+      target = editingTarget()
+      if (target === null) return false
+    }
+  }
+  if (step.action === "mark" && step.text === "") {
+    if (running !== undefined) {
+      replaceMarked(running, "")
+      endComposition(running, "")
+    }
+    return true
+  }
+  const active = running ?? startComposition(target)
   if (step.action === "mark") {
-    replaceMarked(active, step.text)
+    const result = replaceMarked(active, step.text)
+    if (result.changed && options.selected !== undefined) selectInMarked(active.marked, options.selected)
     return true
   }
   if (active.marked.toString() !== step.text) replaceMarked(active, step.text)
-  compositions.delete(target.host)
-  dispatchComposition(active.host, "compositionend", step.text)
+  // The caret is after what was committed, wherever in the marked text the input method had put it.
+  if (active.marked.endContainer.isConnected) getSelection().collapse(active.marked.endContainer, active.marked.endOffset)
+  endComposition(active, step.text)
   return true
 }

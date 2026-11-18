@@ -962,6 +962,8 @@ pub struct RetainedTree {
     keyboard_focus_dim: bool,
     /// The selection of nodes JS holds in this root, see [`crate::editing::node_selection`].
     pub(crate) node_selection: crate::editing::node_selection::NodeSelection,
+    /// The text an input method has marked in an editing host, see [`crate::editing::composition`].
+    pub(crate) composition: crate::editing::composition::Composition,
     next_revision: u64,
     /// Whether a paint-only restyle is classified for a patch frame (`StyleChange::strict`). The
     /// view says so (`GpuixView::sync_commit_patching`): patching on and the retention planning.
@@ -1041,6 +1043,7 @@ impl RetainedTree {
             root_id: None,
             keyboard_focus_dim: true,
             node_selection: Default::default(),
+            composition: Default::default(),
             next_revision: 1,
             commit_patching: false,
             patch_barrier: 0,

@@ -238,6 +238,12 @@ pub struct EventPayload {
     /// Populated for: editinput, the text input of an editing host (`editing/input_handler.rs`).
     pub edit_range: Option<Vec<f64>>,
 
+    /// Where the selection goes in the text an `editinput` of kind `mark` puts in: `[start, end]` in UTF-16
+    /// code units from the start of that text. Absent: at its end. `is_composing` is whether the platform's
+    /// composition was running when the edit was asked for.
+    /// Populated for: editinput, the text input of an editing host (`editing/input_handler.rs`).
+    pub edit_selection: Option<Vec<f64>>,
+
     /// Id of the other element of a boundary or focus event (JS makes it
     /// `event.relatedTarget`, the element itself, or `null` when absent).
     /// Populated for: mouseover, mouseout, mouseenter, mouseleave and the pointer equivalents,
@@ -410,6 +416,7 @@ impl Default for EventPayload {
             target: None,
             path: None,
             edit_range: None,
+            edit_selection: None,
             related_target: None,
             client_x: None,
             client_y: None,

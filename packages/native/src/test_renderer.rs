@@ -2061,6 +2061,21 @@ impl TestGpuixRenderer {
         self.read_painted_dom(|reads| Ok(reads.painted_node_selection()))
     }
 
+    /// Where the input method of the focused editing host `host_id` is told the characters `start..end`
+    /// are (the rect it positions its candidate window by), in window coordinates; null when it is told
+    /// nothing. Test renderer only.
+    #[napi]
+    pub fn get_input_method_bounds(&self, host_id: f64, start: f64, end: f64) -> Result<Option<crate::editing::geometry::TextRect>> {
+        self.read_painted_dom(|reads| reads.input_method_bounds(host_id, start, end))
+    }
+
+    /// The character offset the input method of the editing host `host_id` is told for a window point,
+    /// null where it names none. Test renderer only.
+    #[napi]
+    pub fn get_input_method_index_at(&self, host_id: f64, x: f64, y: f64) -> Result<Option<f64>> {
+        self.read_painted_dom(|reads| reads.input_method_index_at(host_id, x, y))
+    }
+
     /// The DOM position at a window point, see the live renderer's.
     #[napi]
     pub fn caret_position_from_point(&self, x: f64, y: f64) -> Result<Option<crate::editing::geometry::CaretPoint>> {

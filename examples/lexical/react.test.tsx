@@ -230,4 +230,37 @@ describeNative('Lexical (React bindings) on Ghia', () => {
     expect(painted()).toContain('Updated')
     expect(changes.length).toBeGreaterThan(changesBefore)
   })
+
+  it('10. an input method composes: Lexical gets the committed text once, and the DOM and Lexical agree after every step', async () => {
+    const textNode = rootElement().querySelector('span')?.firstChild
+    if (textNode === null || textNode === undefined) throw new Error('no text node under the editable root')
+    const selection = getSelection()
+    if (selection === null) throw new Error('getSelection() returned null')
+    selection.setBaseAndExtent(textNode, 7, textNode, 7)
+    await nextTask()
+    await settle(root)
+    const id = root.renderer.getFocusedElementId()
+    if (id === null) throw new Error('the editable root has no focus')
+    const events: string[] = []
+    for (const type of ['compositionstart', 'compositionend']) rootElement().addEventListener(type, () => events.push(type))
+    const step = (key: string, text: string) => ({ key, action: 'mark' as const, text })
+    for (const marked of [step('k', 'k'), step('a', 'か'), step('n', 'かn'), step('a', 'かな')]) {
+      root.renderer.simulateComposition(id, [marked])
+      await nextTask()
+      await settle(root)
+      expect(rootElement().textContent).toBe(`Updated${marked.text}`)
+    }
+    root.renderer.simulateComposition(id, [{ key: 'Enter', action: 'commit', text: 'かな' }])
+    await nextTask()
+    await settle(root)
+    expect(events).toEqual(['compositionstart', 'compositionend'])
+    expect(paragraphs()).toEqual(['Updatedかな'])
+    expect(rootElement().textContent).toBe('Updatedかな')
+    expect(painted()).toContain('Updatedかな')
+    await press('!')
+    await nextTask()
+    await settle(root)
+    expect(paragraphs()).toEqual(['Updatedかな!'])
+    expect(uncaught).toEqual([])
+  })
 })

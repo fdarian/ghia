@@ -2,7 +2,7 @@ import type { EventPayload } from "../index.js"
 import { addFrameSource, runAnimationFrame } from "./animation-frame.js"
 import { reportUncaught, type DomDispatchResult } from "./events/dispatch.js"
 import { createDragDispatcher } from "./events/drag.js"
-import { focusElementById, placeCaretOnFocusIn } from "./focus.js"
+import { endCompositionOnBlur, focusElementById, placeCaretOnFocusIn } from "./focus.js"
 import type { Element } from "./dom/nodes.js"
 import { EDIT_INPUT_EVENT, runNativeEditInput } from "./editing/native-input.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
@@ -359,6 +359,8 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       if (received.eventType === "focusin") {
         noteFocusEvent(renderer)
         placeCaretOnFocusIn(elementOf(renderer, received.elementId))
+      } else if (received.eventType === "blur") {
+        endCompositionOnBlur(elementOf(renderer, received.elementId))
       }
       const event = shapeScrollEvent(normalizeEventType(received))
       if (deliverObservation(renderer, event)) return true
@@ -388,6 +390,8 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       if (received.eventType === "focusin") {
         noteFocusEvent(renderer)
         placeCaretOnFocusIn(elementOf(renderer, received.elementId))
+      } else if (received.eventType === "blur") {
+        endCompositionOnBlur(elementOf(renderer, received.elementId))
       }
       const event = shapeScrollEvent(normalizeEventType(received))
       if (!root || !handlesEvent(root, event)) {

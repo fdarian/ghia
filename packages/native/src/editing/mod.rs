@@ -4,9 +4,10 @@
 //! [`positions`] maps between `Text.data` offsets and the bytes of the paragraph text that is painted
 //! (the pure half, with the lookup of a node's paragraph); [`geometry`] reads the last painted frame
 //! for the rects, hit tests and line moves JS asks for; [`snapshot`] and [`input_handler`] are the text
-//! the platform's text input sees and what it does with typed text.
+//! the platform's text input sees, what it does with typed text and [`composition`], the text an input method has marked.
 
 pub mod caret;
+pub mod composition;
 pub mod geometry;
 pub mod input_handler;
 pub mod node_selection;
@@ -26,6 +27,13 @@ pub(crate) struct Reads<'a> {
     pub window: WindowId,
 }
 
+fn offset(value: f64) -> Result<usize, String> {
+    if !(value >= 0.0 && value.fract() == 0.0) {
+        return Err(format!("{value} is not an offset in the text of an editing host"));
+    }
+    Ok(value as usize)
+}
+
 fn dom_point(node_id: f64, offset: f64) -> Result<DomPoint, String> {
     let node = crate::renderer::raw_element_id(node_id)?;
     if !(offset >= 0.0 && offset.fract() == 0.0) {
@@ -42,6 +50,25 @@ impl Reads<'_> {
     /// What the last frame washed and put the caret at for the node selection. Test renderer only.
     pub(crate) fn painted_node_selection(&self) -> node_selection::PaintedNodeSelection {
         node_selection::painted(self.window)
+    }
+
+    /// Where the platform's input method would be told the characters `start..end` of the text input of `host` are.
+    /// Test renderer only.
+    pub(crate) fn input_method_bounds(&self, host: f64, start: f64, end: f64) -> Result<Option<TextRect>, String> {
+        let host = crate::renderer::raw_element_id(host)?;
+        let snapshot = snapshot::Snapshot::of(self.tree, host);
+        let range = offset(start)?..offset(end)?;
+        let bounds = input_handler::range_bounds(self.tree, self.window, snapshot.as_ref(), &range);
+        let number = |value: gpui::Pixels| f64::from(f32::from(value));
+        Ok(bounds.map(|bounds| TextRect { x: number(bounds.origin.x), y: number(bounds.origin.y), width: number(bounds.size.width), height: number(bounds.size.height) }))
+    }
+
+    /// The character offset the platform's input method would be told for a window point. Test renderer only.
+    pub(crate) fn input_method_index_at(&self, host: f64, x: f64, y: f64) -> Result<Option<f64>, String> {
+        let host = crate::renderer::raw_element_id(host)?;
+        let Some(snapshot) = snapshot::Snapshot::of(self.tree, host) else { return Ok(None) };
+        let at = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
+        Ok(input_handler::index_at_point(self.tree, self.window, &snapshot, at).map(|index| index as f64))
     }
 
     pub(crate) fn caret_position_from_point(&self, x: f64, y: f64) -> Result<Option<CaretPoint>, String> {
