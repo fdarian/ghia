@@ -2833,6 +2833,11 @@ export interface ScrollPatchCounters {
   /** The rows those frames took out of the frame. */
   rowsRemoved: number
   /**
+   * The presentations whose damage carried a shift, not the copies made: a platform may draw such a frame whole
+   * (a window that is not opaque, a composed window, a target that is not valid, a shift that does not fit the target).
+   */
+  shifted: number
+  /**
    * How the virtual lists of the window found the size of the rows they measured, summed over the
    * lists that are mounted: by building and laying the row out, or from the size its style declares
    * (`list_sizes`). A list that is made again counts from zero.

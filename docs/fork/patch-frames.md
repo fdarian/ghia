@@ -795,8 +795,8 @@ keeps what builds it again.
     `may_lift` says so, when it forms a context as declared (a `transform-style: preserve-3d`, a Motion transform key or a mask border forms one and
     lifts at `z-index` 0 without `may_lift` naming it) or when something other than a hover that paints only might restyle it (`hover_paint::may_lift_in_any_state`).
     A root is refused too often, never too seldom; the build re-decides with the real flags. `Recording::patch_root` and `Record::patch_root` then ask `Node::hands_lifts_out` (`!forms_context && below.lifts`),
-    the same without the relevance-watch clause of `Node::lifts_out`, which is for the relocation of a replay: a patch prepaints the
-    watch itself. A lifted row that forms no context and holds a lifted child, and an element above a lifted row, are not patch roots;
+    the clause that a relocation does not share (`Node::blocks_move` is the one a relocation asks: the relevance watch, and a hole among what the root hands out; a
+    recording that is moved takes plain boxes along): a patch prepaints the watch itself. A lifted row that forms no context and holds a lifted child, and an element above a lifted row, are not patch roots;
   - nothing in it has a **size an intrinsic keyword gives** (`min-content`, `fit-content`, ...): its box is measured under another
     style and asked for again, and a retained root that holds one is laid out again by every frame unless the box is a root of its own
     (`retained-intrinsic.test.tsx`);
@@ -1214,6 +1214,8 @@ count and the translate off. The pixels, boxes and hits are the same either way 
 With the test window's pretend screen reader on (`A11Y` unset) `A11y` holds for all 720 and none is eligible; the rest is the same. Instructions per tick (whole `drawFrame` plus input, two runs each back to back): 11.83M and 11.82M on, 11.58M and 11.63M with `GPUIX_SCROLL_PATCH_OFF=1`: the recording and the classification cost about 0.2M a tick (1.9%), the hit tests of the hover included.
 
 ### The translate
+
+A translate's damage is a shift of the list's pixels (what the platform copies) and the residual it draws, not the list's rectangle: [partial redraw](paint-and-transforms.md#partial-redraw).
 
 `Window::apply_scroll_patch` runs right after the classification, at the top of `Window::draw`, for a frame the classifier called eligible.
 It works from the runs of the frame shown, not from its operations moved by the offset: a row of the list was recorded in a region
