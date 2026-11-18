@@ -476,11 +476,12 @@ impl FocusState {
         let is_text_control = tree
             .elements
             .get(&focused)
-            .is_some_and(crate::custom_elements::input_choice::is_text_editor);
+            .is_some_and(crate::custom_elements::input_choice::is_text_editor)
+            || crate::html::editing::is_editing_host(tree, focused);
         let visible = self.is_visible(Some(focused), tree);
         FocusStyles {
             // Typing is keyboard input too, and dimming the window while someone
-            // types is noise.
+            // types is noise. A `contenteditable` host is a text field as well.
             dim_path: (visible && keyboard_focus_dim && !is_text_control).then(|| within.clone()),
             visible: visible.then_some(focused),
             within,

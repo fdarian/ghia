@@ -1772,14 +1772,16 @@ describeNative("motion", () => {
 describeNative("focus styles", () => {
   // One renderer per scene, so each capture is the frame after the input
   // that decided focus-visible (a keyboard Tab or a mouse press).
-  function scene({ focusVisible, otherStyle, field, keyboardFocusDim }: { focusVisible?: object; otherStyle?: object; field?: boolean; keyboardFocusDim?: boolean } = {}) {
+  function scene({ focusVisible, otherStyle, field, editable, keyboardFocusDim }: { focusVisible?: object; otherStyle?: object; field?: boolean; editable?: boolean; keyboardFocusDim?: boolean } = {}) {
     const root = createTestRoot({ width: 240, height: 120, keyboardFocusDim })
     const targetStyle = { width: 80, height: 40, borderRadius: 8, backgroundColor: "#303030", focusVisible }
     root.render(
       <div style={{ display: "flex", gap: 24, padding: 32, width: "100%", height: "100%", backgroundColor: "#101010" }}>
         {field
           ? <input testId="target" style={targetStyle} />
-          : <div tabIndex={0} testId="target" style={targetStyle} />}
+          : editable
+            ? <div contentEditable suppressContentEditableWarning testId="target" style={targetStyle} />
+            : <div tabIndex={0} testId="target" style={targetStyle} />}
         <div tabIndex={0} testId="other" style={{ width: 40, height: 40, backgroundColor: "#505050", ...otherStyle }} />
       </div>
     )
@@ -1828,5 +1830,12 @@ describeNative("focus styles", () => {
     expect(fieldKeyboard.png.equals(fieldMouse.png)).toBe(true)
     if (!isCI) expect(keyboard.png.equals(idle.png)).toBe(false)
     if (!isCI) expect(ringed.png.equals(keyboard.png)).toBe(true)
+  })
+
+  it("a focused contenteditable host is a text field: it dims nothing", () => {
+    const hostMouse = run("host-mouse", "click", { editable: true })
+    const hostKeyboard = run("host-keyboard", "tab", { editable: true })
+    expect([hostMouse.focused, hostKeyboard.focused]).toEqual(["target", "target"])
+    expect(hostKeyboard.png.equals(hostMouse.png)).toBe(true)
   })
 })

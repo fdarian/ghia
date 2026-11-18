@@ -181,6 +181,10 @@ A `TextRun` carries one underline, strikethrough and overline plus extra lines o
 
 `fontVariationSettings` is a comma list of `"tag" number`, inherited, on elements, spans (per run) and inputs, like `fontFeatureSettings`. On a variable font `fontWeight` sets `wght` as Chrome's font matching does, so 650 is its own weight and 600 is 600; a `wght` in the settings wins. Runs of one family with different variations keep their own face (zed `Font` and `TextStyle` carry the axes). macOS only.
 
+### Font family lists
+
+`fontFamily` is a CSS list. GPUI takes one family and answers one it cannot load with its own fallback stack (a bundled sans with no bold), so `text/font_family.rs` picks the family from the list before it reaches GPUI: the first one that resolves to a face other than what a family that does not exist resolves to, with `system-ui`, `-apple-system`, `BlinkMacSystemFont` and `ui-sans-serif` mapped to `.SystemUIFont`, `sans-serif` to Helvetica, `serif` and `ui-serif` to Times, and `monospace` and `ui-monospace` to Menlo (what Chrome draws on macOS). A single plain name is passed on untouched. The answer is cached by list text and dropped when a font is registered. `GpuixView::render` hands over the text system, because styles are applied only while a window renders. Test: `font-family-list.test.tsx`. A family that is the fallback face itself reads as not installed, so a list naming it moves on to the next entry.
+
 ### Features
 
 Font features need a font that has them, as in a browser. The macOS system font has `smcp`, `frac`, `tnum` and `pnum` but no `zero` or `onum`, so those paint like the default there; Avenir Next and Baskerville have `smcp` and `onum`.

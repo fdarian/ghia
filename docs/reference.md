@@ -9370,7 +9370,7 @@ way, overflow included.
 
 `WebkitFontSmoothing` (`"auto"` | `"antialiased"` | `"subpixel-antialiased"`) is CSS `-webkit-font-smoothing` as Chrome has it on macOS. `"antialiased"` draws glyphs as plain coverage, the same ink for dark text and for light text, which is what a web page sets on `body` to keep its type from looking heavy; `"auto"` (the default) is CoreGraphics' font smoothing, which thickens the strokes, light text most, made into a mask for the colour of the text as Chrome does (the system's "font smoothing" preference still turns it off). On macOS `antialiased` and `auto` have the ink of Chrome's `antialiased` and `auto` (equal to 0.2 % for black on white and white on black, 0.7 % for a grey on a near black, measured on Inter at 14 and 24 px, at scale 1 and 2); `auto` has 9-17 % more ink than `antialiased` for dark text and 22-42 % more for light text. `"subpixel-antialiased"` is `"auto"`, as on current macOS, which draws no subpixel text. It inherits, works on a `<span>` (per run), on inputs and through `display: contents`, and can be set in `hover`, `active` and `focusVisible`. A value CSS does not have is ignored, as an invalid declaration is: the element keeps what it inherits. It does not animate. It is the first vendor-prefixed key, written as React writes it, with a capital `W`.
 
-`fontFamily` resolves installed fonts. To use your own, pass the files in the `fonts` window option or call [`registerFont()`](#custom-fonts). On macOS a variable font follows `fontWeight` and `fontVariationSettings` along its axes; elsewhere it renders its default instance, so use one static file per weight. The family name must match the font's family name exactly.
+`fontFamily` resolves installed fonts, and is a CSS list: the first family that is installed draws (`-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif`), with quotes allowed around a name. `system-ui`, `-apple-system`, `BlinkMacSystemFont` and `ui-sans-serif` are the system UI font, `sans-serif` is Helvetica, `serif` is Times and `monospace` is Menlo, as in Chrome on macOS. A list with nothing installed in it draws in Ghia's bundled fallback face. To use your own, pass the files in the `fonts` window option or call [`registerFont()`](#custom-fonts). On macOS a variable font follows `fontWeight` and `fontVariationSettings` along its axes; elsewhere it renders its default instance, so use one static file per weight. The family name must match the font's family name exactly.
 
 **Selection:** `userSelect` (`"text"` | `"none"`), `selectionColor` — both inherit down the tree
 
@@ -9882,7 +9882,7 @@ Tab  ► [ Save ]  (dim New)  (dim Search)  (dim input)
 - It follows `:focus-visible`, so it lasts while that control stays focused,
   and ends when focus moves to a control that does not match (a mouse press on
   another control, for example). Moving the mouse does not end it
-- A focused `<input>` or `<textarea>` dims nothing: typing is keyboard input
+- A focused `<input>`, `<textarea>` or `contenteditable` host dims nothing: typing is keyboard input
   too, and the caret already shows focus
 - The focused element's ancestors never dim, because opacity covers the subtree
 - `focusVisible` and the dim are **independent**. An element with a ring from
