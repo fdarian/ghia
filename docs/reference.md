@@ -9768,8 +9768,8 @@ order, `focus` weakest and `focusVisible` strongest, after the pointer states.
 `:focus-visible` follows Chrome's heuristic, which keeps two facts for the whole
 window instead of asking the element focus left:
 
-- A text field (`<input>`, `<textarea>`) always matches while focused, mouse or
-  keyboard
+- A text field (`<input>`, `<textarea>`) or a `contenteditable` host always matches
+  while focused, mouse or keyboard
 - Any other element matches, unless the last focus a mouse press gave an element
   is still the last one and no key has gone down since
 - A mouse press whose `mousedown` is not cancelled and that moves focus (to an
