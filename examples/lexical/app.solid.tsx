@@ -123,7 +123,7 @@ export function EditorApp(): JSX.Element {
   }
 
   const place = (): void => {
-    if (floating === undefined) return
+    if (floating === undefined || !floating.isConnected) return
     const rect = selectionRect(input)
     if (rect === null) hideFloating(floating)
     else positionFloating(rect, floating, scroller)
@@ -287,7 +287,15 @@ export function EditorApp(): JSX.Element {
       </div>
       <Show when={floatingFormat()}>
         {(current) => (
-          <div ref={floating} class="floating" role="toolbar" aria-label="Text formatting" testId="floating-toolbar">
+          <div
+            ref={(element) => {
+              floating = element
+              onCleanup(() => {
+                floating = undefined
+              })
+            }}
+            class="floating"
+            role="toolbar" aria-label="Text formatting" testId="floating-toolbar">
             <For each={TEXT_FORMATS}>
               {(entry) => (
                 <ToolbarButton

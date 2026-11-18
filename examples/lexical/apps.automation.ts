@@ -238,6 +238,19 @@ try {
     await shot("3-list-and-link")
   })
 
+  await step("clicking into the editor elsewhere hides the floating toolbar", async () => {
+    await keys("Alt+Shift+ArrowLeft")
+    await until("the floating toolbar", toolbarBounds, () => true)
+    const first = (await elements("p"))[0].node
+    assert(first.bounds !== undefined, "the first paragraph has bounds")
+    await app.mouse.click({ x: first.bounds!.x + 20, y: first.bounds!.y + first.bounds!.height / 2 })
+    await until("the toolbar gone", () => app.getByTestId("floating-toolbar").count(), (count) => count === 0)
+    // The handler that placed the toolbar still runs after it is gone: the editor takes a key and the toolbar stays away.
+    await keys("ArrowRight")
+    assert((await app.getByTestId("floating-toolbar").count()) === 0, "the toolbar came back")
+    await shot("4-toolbar-hidden")
+  })
+
   console.log(`[automation] ${flavor}: done, ${failures} failure(s)`)
 } finally {
   await app.close()

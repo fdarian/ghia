@@ -1,7 +1,7 @@
 # Lexical example
 
 Two small rich-text editors, the same document and the same look, written the way one writes them for Chrome: real `lexical` 0.53,
-CSS in a stylesheet (`editor.css`), no Ghia-specific code. They run on Ghia's [editing hosts](../../docs/fork/editing.md).
+CSS in a stylesheet (`editor.css`); the apps are plain web code apart from the `testId` props the automation check finds elements by. They run on Ghia's [editing hosts](../../docs/fork/editing.md).
 
 | | Entry | Lexical API |
 |---|---|---|
