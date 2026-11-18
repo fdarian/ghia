@@ -10657,7 +10657,15 @@ names a `code` (`"KeyA"`, `"NumpadEnter"`) reports exactly that `code`, and for
 a character key the US character on it (`"a"`, `"A"` with Shift), whatever
 layout the machine has; a press that names a key (`"a"`, `"Enter"`) derives
 `code` from it for a US QWERTY layout. The browser (wasm) automation path
-passes the names through to the page without checking them.
+passes the names through to the page without checking them. The live automation
+client (`keystrokes`, `press()`) presses a sequence one key at a time with a turn
+of the event loop after each, as separate key events from the OS arrive; a
+synchronous `simulateKeystrokes` on the test renderer runs every key inside one
+call, where no microtask runs between two keys, and an editor that commits its
+update in a microtask (Lexical) loses all but the first of "m i d" typed that
+way ([deviations.md](fork/deviations.md#events-and-input)): give it one call
+per key and `await` between them. A sequence whose later press is not a key has
+pressed the ones before it by then, where the test renderer pressed none.
 `nativeSimulateModifiersChanged("shift")` reports the held modifiers changing, the
 way the platform does for a modifier pressed or released on its own (a `Shift`
 press sends a key event instead); Shift on its own counts as a key for

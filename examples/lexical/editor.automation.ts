@@ -191,8 +191,9 @@ async function placeCaret(startsWith: string, offset: number): Promise<{ x: numb
 }
 
 /**
- * One automation call per press, with the loop turning between them, as separate key events from the OS arrive.
- * A whole sequence in one call is a burst no keyboard sends.
+ * One automation call per press, so `LEXICAL_TIMING` reports each key. (The client presses a sequence one key at a time
+ * with the loop turning between them as well; Lexical commits in a microtask, so a sequence in one synchronous call,
+ * as the test renderer's `simulateKeystrokes` makes it, would lose keys.)
  */
 async function keys(presses: string): Promise<void> {
   for (const press of presses.split(" ")) {
