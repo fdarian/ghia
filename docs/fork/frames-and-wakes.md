@@ -146,6 +146,7 @@ AppKit events are only drained inside `tick()`, and a 100 ms fallback timer tick
   next frame is not drawn unpaced. A link that is already running is never listed, so continuous input keeps vsync
   pacing. A tick whose pump ran a link step (`pump_events_reporting_step().link_stepped`) skips the call and leaves the list for the next tick: that step was the frame, and a second would draw twice. `GPUIX_INPUT_FRAME_OFF=1` (read once) leaves the first step to the vsync. The step is not an inline draw and
   not a tick from the wake callback, and `pending` is still cleared only by `tick_finished`, after it (#56).
+  A window whose link was started between ticks draws on gpui's pre-dispatch draw of the key and again in the eager step: the same total number of draws, moved earlier. It is the cold-first-key case the tests exclude.
 
 **Measured** (75 Hz display, one-text window, live window with the release addon):
 
