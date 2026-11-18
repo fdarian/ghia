@@ -113,7 +113,7 @@ export function createRoot(
       }
     })
   })
-  gpuixContainer = installDocumentElements({
+  const documentless: Omit<Container, "html" | "head" | "body"> = {
     nativeRenderer: renderer,
     renderer: batchedRenderer,
     ids,
@@ -127,7 +127,22 @@ export function createRoot(
     windowAppearanceEventId: 0,
     onEvent: rootEventHandlers.onEvent,
     onUncaughtError,
-  })
+  }
+  // Before `<html>` is queued: a root refused here (a renderer has one) must leave nothing in its queue,
+  // which `flushPendingMutations` would send over the live root's tree.
+  // The flush stands in for the microtask checkpoint a browser runs before it renders.
+  attachRoot(
+    renderer,
+    documentless as Container,
+    (run) => flushSync(run),
+    (event) => restoreControlledState(gpuixContainer, event)
+  )
+  try {
+    gpuixContainer = installDocumentElements(documentless)
+  } catch (error) {
+    detachRoot(renderer, documentless as Container)
+    throw error
+  }
   batchedRenderer.setElementSource({
     forEachElement(visit) {
       for (const instance of gpuixContainer.instances.values()) {
@@ -135,13 +150,6 @@ export function createRoot(
       }
     },
   })
-  // The flush stands in for the microtask checkpoint a browser runs before it renders.
-  attachRoot(
-    renderer,
-    gpuixContainer,
-    (run) => flushSync(run),
-    (event) => restoreControlledState(gpuixContainer, event)
-  )
   // Sent on every root, so a remount without the option restores the default.
   batchedRenderer.setKeyboardFocusDim(rootEventHandlers.keyboardFocusDim !== false)
   const windowKeyEventId = gpuixContainer.windowKeyEventId
