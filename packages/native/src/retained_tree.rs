@@ -2500,7 +2500,15 @@ impl RetainedTree {
         if opens_frame {
             walk.frames.pop();
         }
-        let own = (!clipped && !none && !hidden && own_box.is_some_and(|bounds| inside(&bounds, true, true))).then_some(id);
+        // The marker of a list item is where the item is hit, though it is outside its box.
+        let marker_hit = || {
+            (walk.painted_box)(crate::layout::list_marker_paint::marker_box_id(id)).is_some_and(|bounds| inside(&bounds, true, true))
+        };
+        let own = (!clipped
+            && !none
+            && !hidden
+            && (own_box.is_some_and(|bounds| inside(&bounds, true, true)) || (element.display().as_deref() == Some("list-item") && marker_hit())))
+        .then_some(id);
         match own_context {
             Some(own_context) => own_context.paint_order(own, in_flow),
             None => own.into_iter().chain(in_flow).collect(),

@@ -21,10 +21,11 @@ use std::rc::Rc;
 use gpui::Refineable as _;
 
 use gpui::{
-    point, px, size, AnyElement, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement, LayoutId, Pixels,
-    Style, StyleRefinement, Styled, TextAlign, Window,
+    point, px, size, AnyElement, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement, LayoutId, LayoutInsets,
+    Pixels, Style, StyleRefinement, Styled, TextAlign, TransformationMatrix, Window,
 };
 
+use crate::automation::{record_bounds, LaidOut};
 use crate::css::list_style::{ListStylePosition, ListStyleType};
 use crate::renderer::BuildCtx;
 use crate::retained_tree::RetainedElement;
@@ -36,8 +37,7 @@ use super::list_marker::Marker;
 /// ascent of the font (`kCMarkerPaddingPx` and one more for the ink that starts a pixel in).
 const OUTSIDE_SYMBOL_GAP: i32 = 8;
 
-/// The width Blink gives the space of a symbol marker, in device pixels, with the ascent
-/// `offset` (two thirds of it): the size of the shape and two.
+/// The width Blink gives a symbol marker, in device pixels: the size of the shape and two.
 fn symbol_width(shape: i32) -> i32 {
     shape + 2
 }
@@ -81,6 +81,51 @@ pub(crate) struct Room {
     pub first_row: Rc<Cell<Option<Pixels>>>,
 }
 
+/// Set in the id under which the box of the `outside` marker of an item is recorded with the painted boxes
+/// of the window, beside the item's own: `elementsFromPoint` finds the item where its marker is.
+const MARKER_BOX: u64 = 1 << 63;
+
+/// The id of the box of the marker of the item `item`.
+pub(crate) fn marker_box_id(item: u64) -> u64 {
+    item | MARKER_BOX
+}
+
+/// The item a box recorded under `id` belongs to: the element itself, or the one whose marker it is.
+pub(crate) fn item_of_box(id: u64) -> u64 {
+    id & !MARKER_BOX
+}
+
+fn record_box(item: u64, hit_box: Bounds<Pixels>, to_window: TransformationMatrix, window: &Window) {
+    let laid_out = LaidOut::of_box(hit_box, window.scale_factor()).through(to_window);
+    record_bounds(window.window_handle().window_id(), marker_box_id(item), laid_out, hit_box.origin, LayoutInsets::default());
+}
+
+/// The device pixel a symbol's shape starts at: from the edge of the item, which an `outside` one is put
+/// before by its offset and the gap Blink leaves.
+fn symbol_left(edge: Pixels, scale: f32, symbol: &Symbol, outside: bool) -> i32 {
+    (f32::from(edge) * scale).round() as i32 + if outside { 1 - symbol.offset - OUTSIDE_SYMBOL_GAP } else { 0 }
+}
+
+/// The box of an `outside` marker, which Chrome hit tests: a symbol's is its width a pixel either side of the
+/// shape, a counter's is its text and the space after it, ending at the border box of the item, both on the
+/// first line.
+fn outside_box(marker: &Marker, border_left: Pixels, bounds: Bounds<Pixels>, window: &Window) -> Bounds<Pixels> {
+    let metrics = Metrics::of(window);
+    let edge = bounds.origin.x - border_left;
+    let line = |left: Pixels, width: Pixels| Bounds::new(point(left, bounds.origin.y), size(width, metrics.line_height));
+    match marker.list_type {
+        ListStyleType::Disc | ListStyleType::Circle | ListStyleType::Square => {
+            let symbol = Symbol::of(metrics.ascent_device());
+            let device = |value: i32| px(value as f32 / metrics.scale);
+            line(device(symbol_left(edge, metrics.scale, &symbol, true) - 1), device(symbol_width(symbol.shape)))
+        }
+        _ => {
+            let width = shape(marker, &metrics, window).width();
+            line(edge - width, width)
+        }
+    }
+}
+
 /// What an item builds for its marker.
 pub(crate) struct Built {
     pub element: AnyElement,
@@ -91,7 +136,7 @@ pub(crate) struct Built {
 
 /// The marker of the item `element` for the build `ctx`, and the ink it reaches past the item.
 pub(crate) fn build(element: &RetainedElement, style: Option<&StyleDesc>, ctx: &mut BuildCtx) -> Option<Built> {
-    let marker = super::list_marker::marker_of(ctx.tree, element.id)?;
+    let marker = super::list_marker::marker_of(ctx.tree, element.id, ctx.inherited.list_style)?;
     // The marker is drawn in the colour of the text style the item gives it.
     ctx.inherited.colors.note_read();
     let font_size = ctx.inherited.lengths.font_size as f32;
@@ -107,7 +152,14 @@ pub(crate) fn build(element: &RetainedElement, style: Option<&StyleDesc>, ctx: &
         Room { advance: Rc::new(Cell::new(Pixels::ZERO)), width_key: hasher.finish(), first_row: Rc::new(Cell::new(None)) }
     });
     let outside = marker.position == ListStylePosition::Outside;
-    let mut canvas = MarkerElement { marker, border_left, room: inside.clone(), style: StyleRefinement::default() }
+    let mut canvas = MarkerElement {
+        marker,
+        border_left,
+        room: inside.clone(),
+        hit: !ctx.inherited.pointer_events_none,
+        item: element.id,
+        style: StyleRefinement::default(),
+    }
         .absolute()
         .unlifted()
         .w(px(0.0))
@@ -125,6 +177,10 @@ struct MarkerElement {
     marker: Marker,
     border_left: Pixels,
     room: Option<Room>,
+    /// Whether the pointer can land on an `outside` marker, which is then the item's own: Chrome's
+    /// `elementFromPoint` over the bullet is the `li`, a click there is its click and `li:hover` applies.
+    hit: bool,
+    item: u64,
     style: StyleRefinement,
 }
 
@@ -202,7 +258,7 @@ fn shape(marker: &Marker, metrics: &Metrics, window: &Window) -> gpui::ShapedLin
 
 impl Element for MarkerElement {
     type RequestLayoutState = Style;
-    type PrepaintState = ();
+    type PrepaintState = Option<Bounds<Pixels>>;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -240,11 +296,23 @@ impl Element for MarkerElement {
         &mut self,
         _id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
-        _bounds: Bounds<Pixels>,
+        bounds: Bounds<Pixels>,
         _request_layout: &mut Style,
-        _window: &mut Window,
+        window: &mut Window,
         _cx: &mut gpui::App,
-    ) {
+    ) -> Option<Bounds<Pixels>> {
+        if !self.hit || self.marker.position != ListStylePosition::Outside || window.visibility() != gpui::Visibility::Visible {
+            return None;
+        }
+        // The marker has no id of its own, so the hitbox is the item's: the dispatcher takes the host id of the nearest
+        // element above it, and the item's own hitbox is its parent, which bounds the offset of the event.
+        let hit_box = outside_box(&self.marker, self.border_left, bounds, window);
+        window.insert_hitbox(hit_box, gpui::HitboxBehavior::Normal);
+        if window.is_layout_pass() {
+            let (item, to_window) = (self.item, window.transform());
+            window.publish_layout(move |window, _| record_box(item, hit_box, to_window, window));
+        }
+        Some(hit_box)
     }
 
     fn paint(
@@ -253,10 +321,13 @@ impl Element for MarkerElement {
         _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         style: &mut Style,
-        _prepaint: &mut (),
+        prepaint: &mut Option<Bounds<Pixels>>,
         window: &mut Window,
         cx: &mut gpui::App,
     ) {
+        if let Some(hit_box) = *prepaint {
+            record_box(self.item, hit_box, window.transform(), window);
+        }
         let first_row = self.room.as_ref().and_then(|room| room.first_row.get());
         style.paint(bounds, window, cx, |window, cx| paint(&self.marker, self.border_left, first_row, bounds, window, cx));
     }
@@ -286,7 +357,7 @@ fn paint(
             let symbol = Symbol::of(metrics.ascent_device());
             let half_leading = (f32::from(above - metrics.line_box.ascent) * scale).round() as i32;
             let top = (f32::from(bounds.origin.y) * scale).round() as i32 + half_leading + symbol.top;
-            let left = (f32::from(edge) * scale).round() as i32 + if outside { 1 - symbol.offset - OUTSIDE_SYMBOL_GAP } else { 0 };
+            let left = symbol_left(edge, scale, &symbol, outside);
             let device = |value: f32| px(value / scale);
             let square = Bounds::new(
                 point(device(left as f32), device(top as f32)),

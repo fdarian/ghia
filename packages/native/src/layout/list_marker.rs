@@ -23,7 +23,7 @@ use std::cell::{Cell, RefCell};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::css::list_style::{self, ListStylePosition, ListStyleType};
+use crate::css::list_style::{self, ListStyleInherited, ListStylePosition, ListStyleType};
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
 /// The marker of one item, as text and where it goes.
@@ -89,15 +89,20 @@ fn ordinals_of_children(tree: &RetainedTree, parent_id: u64) -> FxHashMap<u64, i
     ordinals
 }
 
-/// The marker of the element `id`: `None` unless its `display` is `list-item` and its
-/// `list-style-type` is not `none`.
-pub(crate) fn marker_of(tree: &RetainedTree, id: u64) -> Option<Marker> {
+/// The marker of the element `id` whose `list-style` is `style`: `None` unless its `display` is
+/// `list-item` and its `list-style-type` is not `none`.
+pub(crate) fn marker_of(tree: &RetainedTree, id: u64, style: ListStyleInherited) -> Option<Marker> {
     if !is_list_item(tree.elements.get(&id)?) {
         return None;
     }
-    let list_type = tree.list_style_type_of(id);
-    let ordinal = if list_type.is_ordinal() { tree.list_markers.ordinal_of(tree, id)? } else { 0 };
-    Some(Marker { list_type, text: list_type.marker_text(ordinal)?, position: tree.list_style_position_of(id) })
+    let ordinal = if style.list_type.is_ordinal() { tree.list_markers.ordinal_of(tree, id)? } else { 0 };
+    Some(Marker { list_type: style.list_type, text: style.list_type.marker_text(ordinal)?, position: style.position })
+}
+
+/// [`marker_of`] with the style the tree holds, which has no state style in it.
+#[cfg(test)]
+pub(crate) fn marker_in_tree(tree: &RetainedTree, id: u64) -> Option<Marker> {
+    marker_of(tree, id, ListStyleInherited { list_type: tree.list_style_type_of(id), position: tree.list_style_position_of(id) })
 }
 
 /// What the tree has noted since the last flush.
@@ -182,6 +187,7 @@ impl RetainedTree {
     }
 
     /// The `list-style-position` of `id`, found as the type is.
+    #[cfg(test)]
     pub(crate) fn list_style_position_of(&self, id: u64) -> ListStylePosition {
         self.nearest(id, list_style::declared_position).unwrap_or(ListStylePosition::Outside)
     }
@@ -421,7 +427,7 @@ mod tests {
         }
 
         fn texts(&self, ids: &[u64]) -> Vec<Option<String>> {
-            ids.iter().map(|id| marker_of(&self.tree, *id).map(|marker| marker.text)).collect()
+            ids.iter().map(|id| marker_in_tree(&self.tree, *id).map(|marker| marker.text)).collect()
         }
 
         fn revisions(&self, ids: &[u64]) -> Vec<u64> {
@@ -571,7 +577,7 @@ mod tests {
         let before = doc.tree.list_markers.scanned.get();
         // Each item is built as a root of its own, with a build of its own.
         for item in &items {
-            assert!(marker_of(&doc.tree, *item).is_some());
+            assert!(marker_in_tree(&doc.tree, *item).is_some());
         }
         assert_eq!(doc.tree.list_markers.scanned.get() - before, 200);
         assert_eq!(doc.tree.list_markers.ordinals.borrow()[&list][&items[199]], 200);
@@ -596,7 +602,7 @@ mod tests {
         let items = doc.tree.elements[&list].children.clone();
         let before = doc.tree.list_markers.scanned.get();
         for item in &items {
-            marker_of(&doc.tree, *item).unwrap();
+            marker_in_tree(&doc.tree, *item).unwrap();
         }
         assert_eq!(doc.tree.list_markers.scanned.get() - before, 10_000);
         // And the same for appending to a list that was drawn.

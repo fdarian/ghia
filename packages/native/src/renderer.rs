@@ -8474,6 +8474,8 @@ pub(crate) struct Inherited {
     pub table: crate::css::table::TableInherited,
     /// `direction` and `text-align`, which resolves against it.
     pub direction: crate::css::direction::Inherited,
+    /// `list-style-type` and `list-style-position`, which a list item's marker is made from.
+    pub list_style: crate::css::list_style::ListStyleInherited,
     /// The row and cell of a table the element is in, for copied text.
     pub table_row: Option<u64>,
     pub table_cell: Option<crate::text::selection::TableCell>,
@@ -8576,6 +8578,7 @@ impl Inherited {
             interpolate_size: Default::default(),
             table: Default::default(),
             direction: Default::default(),
+            list_style: Default::default(),
             table_row: None,
             table_cell: None,
             container: crate::motion::containing::Container::WINDOW,
@@ -8709,6 +8712,7 @@ impl Inherited {
             self.interpolate_size = interpolate_size;
         }
         self.table = self.table.descend(style, &self.lengths);
+        self.list_style = self.list_style.descend(style);
         self
     }
 }
@@ -10522,7 +10526,9 @@ impl gpui::Render for GpuixView {
         let destroyed = tree.removals() != self.swept_at;
         if destroyed {
             self.tapes.retain(|id| tree.elements.contains_key(&id));
-            crate::automation::retain_bounds(window.window_handle().window_id(), |id| tree.elements.contains_key(&id));
+            crate::automation::retain_bounds(window.window_handle().window_id(), |id| {
+                tree.elements.contains_key(&crate::layout::list_marker_paint::item_of_box(id))
+            });
         }
         self.paint_statics.prune(|id| tree.elements.contains_key(&id));
         // Pruned by listener, not existence: dropping `onLayout` and adding it

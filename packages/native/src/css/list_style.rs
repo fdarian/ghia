@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 /// `list-style-type`. `lower-latin` and `upper-latin` are the same counter styles as
 /// `lower-alpha` and `upper-alpha`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", try_from = "String")]
 pub enum ListStyleType {
     Disc,
@@ -85,7 +85,7 @@ impl ListStyleType {
 }
 
 /// `list-style-position`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", try_from = "String")]
 pub enum ListStylePosition {
     Outside,
@@ -183,6 +183,30 @@ pub(crate) fn declared_type(style: &crate::style::StyleDesc) -> Option<ListStyle
 /// The `list-style-position` an element declares: the longhand, else the shorthand's.
 pub(crate) fn declared_position(style: &crate::style::StyleDesc) -> Option<ListStylePosition> {
     style.list_style_position.or(style.list_style.map(|shorthand| shorthand.position))
+}
+
+/// The `list-style-type` and `list-style-position` an element has, its own over what it inherits, as the
+/// build sees them: with the state styles (`:hover`, `hover: {}`) folded in, which the tree's styles are not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ListStyleInherited {
+    pub list_type: ListStyleType,
+    pub position: ListStylePosition,
+}
+
+impl Default for ListStyleInherited {
+    fn default() -> Self {
+        Self { list_type: ListStyleType::Disc, position: ListStylePosition::Outside }
+    }
+}
+
+impl ListStyleInherited {
+    /// What the children of an element styled by `style` inherit.
+    pub(crate) fn descend(self, style: &crate::style::StyleDesc) -> Self {
+        Self {
+            list_type: declared_type(style).unwrap_or(self.list_type),
+            position: declared_position(style).unwrap_or(self.position),
+        }
+    }
 }
 
 /// The CSS `alphabetic` system: `a`, ..., `z`, `aa`, `ab`, ..., with no zero. It has no
@@ -313,6 +337,18 @@ mod tests {
             assert_eq!((style.list_style, style.list_style_type, style.list_style_position), (None, None, None), "{}", String::from_utf8_lossy(json));
             assert_eq!(style.opacity, Some(0.5));
         }
+    }
+
+    #[test]
+    fn a_style_is_laid_over_what_is_inherited_one_property_at_a_time() {
+        let parent = ListStyleInherited::default();
+        let square: crate::style::StyleDesc = serde_json::from_str(r#"{"listStyleType": "square"}"#).unwrap();
+        let inside: crate::style::StyleDesc = serde_json::from_str(r#"{"listStylePosition": "inside"}"#).unwrap();
+        let below_square = parent.descend(&square);
+        assert_eq!(below_square, ListStyleInherited { list_type: ListStyleType::Square, position: ListStylePosition::Outside });
+        let below_both = below_square.descend(&inside);
+        assert_eq!(below_both, ListStyleInherited { list_type: ListStyleType::Square, position: ListStylePosition::Inside });
+        assert_eq!(below_both.descend(&crate::style::StyleDesc::default()), below_both);
     }
 
     #[test]

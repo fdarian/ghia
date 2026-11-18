@@ -128,6 +128,7 @@ fn inherited_fingerprint(inherited: &Inherited) -> u64 {
     fp.hash(&inherited.computed_variations);
     inherited.font_state.fingerprint(&mut fp);
     inherited.direction.fingerprint(&mut fp);
+    fp.hash(&inherited.list_style);
     fp.hash(&inherited.interpolate_size);
     fp.f64(inherited.table.spacing.horizontal);
     fp.f64(inherited.table.spacing.vertical);
