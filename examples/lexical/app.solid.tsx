@@ -15,7 +15,6 @@ import {
   HISTORY_MERGE_TAG,
   REDO_COMMAND,
   UNDO_COMMAND,
-  $isRootTextContentEmpty,
   type LexicalEditor,
   type TextFormatType,
 } from 'lexical'
@@ -179,7 +178,9 @@ export function EditorApp(): JSX.Element {
         update.editorState.read(() => {
           const next = $readFormat()
           if (next !== null) setFormat(next)
-          setEmpty($isRootTextContentEmpty(editor.isComposing(), true))
+          const root = $getRoot()
+          const first = root.getFirstChild()
+          setEmpty(root.getChildrenSize() === 0 || (root.getChildrenSize() === 1 && first !== null && first.isEmpty()))
         })
         updateFloating()
       }),
